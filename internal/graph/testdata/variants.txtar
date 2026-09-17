@@ -1,0 +1,37 @@
+One package with an in-package test file and an external test file, so a load
+with tests returns three variants that type-check catalog.go independently.
+
+-- go.mod --
+module example.com/variants
+
+go 1.27.1
+-- catalog.go --
+package variants
+
+func normalize(name string) string { return name }
+
+func Resolve(name string) string { return normalize(name) }
+-- catalog_test.go --
+package variants
+
+import "testing"
+
+func TestNormalize(t *testing.T) {
+	if normalize("x") != "x" {
+		t.Fatal("normalize changed x")
+	}
+}
+-- external_test.go --
+package variants_test
+
+import (
+	"testing"
+
+	"example.com/variants"
+)
+
+func TestResolve(t *testing.T) {
+	if variants.Resolve("x") != "x" {
+		t.Fatal("Resolve changed x")
+	}
+}

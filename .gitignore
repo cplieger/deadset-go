@@ -1,4 +1,6 @@
 # Binaries
+/deadset-go
+cmd/deadset-go/deadset-go
 *.exe
 *.exe~
 *.dll
@@ -10,6 +12,10 @@
 
 # Output of go coverage
 *.out
+
+# pgregory.net/rapid writes a counterexample here on a failing property; it is a
+# run artifact, never a reviewed fixture, unlike a committed testdata/fuzz corpus
+testdata/rapid/
 
 # Go workspace
 go.work
