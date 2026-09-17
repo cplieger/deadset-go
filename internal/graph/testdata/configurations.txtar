@@ -1,0 +1,23 @@
+One package whose two build-constrained files select on the operating system,
+so two configurations of one tree load different file sets.
+
+-- go.mod --
+module example.com/configured
+
+go 1.27.1
+-- catalog.go --
+package configured
+
+func Resolve(name string) string { return render(name) }
+-- render_linux.go --
+//go:build linux
+
+package configured
+
+func render(name string) string { return "linux:" + name }
+-- render_windows.go --
+//go:build windows
+
+package configured
+
+func render(name string) string { return "windows:" + name }

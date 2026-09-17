@@ -1,0 +1,15 @@
+One file whose declarations follow non-ASCII text on their own line: an
+astral character, a two-byte character, and both together.
+
+-- go.mod --
+module example.com/columns
+
+go 1.27.1
+-- columns.go --
+package columns
+
+var Emoji = "🎉"; var AfterEmoji = 2
+var Accent = "é"; var AfterAccent = 3
+var Both = "🎉é"; var AfterBoth = 4
+
+type Ünused struct{ Fïeld int }

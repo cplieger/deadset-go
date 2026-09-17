@@ -1,0 +1,82 @@
+One module holding one declaration of every symbol kind a Go analysis
+enumerates, across two packages and three files.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- catalog.go --
+package app
+
+import "errors"
+
+// Fetcher declares one exported and one unexported method.
+type Fetcher interface {
+	Fetch(id string) (string, error)
+	fetchInternal() error
+}
+
+// Catalog holds a map, an anonymous struct behind a slice, and a blank field.
+type Catalog struct {
+	entries map[string]string
+	Tools   []struct{ Name string }
+	_       int
+}
+
+// Buffered embeds Catalog by pointer, so the field is named Catalog.
+type Buffered struct {
+	*Catalog
+}
+
+// Alias names Catalog again.
+type Alias = Catalog
+
+type Tier int
+
+const Exact Tier = 1
+
+var ErrNotFound = errors.New("not found")
+
+var _ = ErrNotFound
+
+func Resolve(name string) string { return name }
+
+func normalize(name string) string { return name }
+
+func (c *Catalog) ResolveAlias(name string) string { return c.entries[name] }
+
+func (c Catalog) Size() int { return len(c.entries) }
+
+func Best[T comparable](want T, have []T) bool {
+	for _, candidate := range have {
+		if candidate == want {
+			return true
+		}
+	}
+	return false
+}
+
+func init() {}
+-- tier.go --
+package app
+
+// String names one tier.
+func (t Tier) String() string {
+	if t == Exact {
+		return "exact"
+	}
+	return "other"
+}
+-- internal/queue/queue.go --
+package queue
+
+// List holds values of one type.
+type List[T any] struct {
+	items []T
+}
+
+// Push appends v.
+func (l *List[T]) Push(v T) { l.items = append(l.items, v) }
+
+// Contains declares a type parameter of its own.
+func (l *List[T]) Contains[U comparable](v U) bool { return len(l.items) == 0 && any(v) == nil }
