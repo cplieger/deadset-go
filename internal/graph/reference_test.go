@@ -252,14 +252,49 @@ func TestReferencesSplitsReadsFromWrites(t *testing.T) {
 		{name: "two_value_assignment_reads_the_field", from: "Swap", to: "Counter.total", kind: RefRead, want: 1},
 		{name: "two_value_assignment_writes_the_variable", from: "Swap", to: "count", kind: RefWrite, want: 1},
 		{name: "two_value_assignment_reads_the_variable", from: "Swap", to: "count", kind: RefRead, want: 1},
-		// An index expression and an indirection write through a value they
-		// read, so the field indexed and the collection keyed stay reads.
-		{name: "indexed_field_is_read", from: "Element", to: "Counter.names", kind: RefRead, want: 1},
-		{name: "indexed_field_is_not_written", from: "Element", to: "Counter.names", kind: RefWrite, want: 0},
-		{name: "keyed_collection_is_read", from: "Entry", to: "index", kind: RefRead, want: 1},
-		{name: "keyed_collection_is_not_written", from: "Entry", to: "index", kind: RefWrite, want: 0},
+		// A store through an index or a key writes the collection: a slice or a
+		// map a package only ever stores into holds nothing anything reads.
+		{name: "indexed_collection_is_written", from: "Element", to: "Counter.names", kind: RefWrite, want: 1},
+		{name: "indexed_collection_is_not_read", from: "Element", to: "Counter.names", kind: RefRead, want: 0},
+		{name: "keyed_collection_is_written", from: "Entry", to: "index", kind: RefWrite, want: 1},
+		{name: "keyed_collection_is_not_read", from: "Entry", to: "index", kind: RefRead, want: 0},
+		{name: "delete_writes_the_collection", from: "Remove", to: "entries", kind: RefWrite, want: 1},
+		{name: "delete_does_not_read_the_collection", from: "Remove", to: "entries", kind: RefRead, want: 0},
+		// An indirection writes through a value it reads: the pointer is read to
+		// find the pointee, which is not a declaration.
 		{name: "pointer_written_through_is_read", from: "Indirect", to: "slot", kind: RefRead, want: 1},
 		{name: "pointer_written_through_is_not_written", from: "Indirect", to: "slot", kind: RefWrite, want: 0},
+		// A field a struct literal keys is an initialising store, whatever the
+		// literal spells of its own type; a key of a map literal names no field
+		// and is a read of what it does name.
+		{name: "literal_field_key_writes_the_field", from: "Keyed", to: "Record.label", kind: RefWrite, want: 1},
+		{name: "literal_field_key_does_not_read_the_field", from: "Keyed", to: "Record.label", kind: RefRead, want: 0},
+		{name: "literal_field_value_reads_what_it_names", from: "Keyed", to: "high", kind: RefRead, want: 1},
+		{name: "elided_literal_field_key_writes_the_field", from: "Elided", to: "Record.label", kind: RefWrite, want: 1},
+		{name: "map_literal_key_is_read", from: "Mapped", to: "high", kind: RefRead, want: 1},
+		{name: "map_literal_key_is_not_written", from: "Mapped", to: "high", kind: RefWrite, want: 0},
+		// The read inside the append-back idiom is how the store is written, so
+		// both identifiers write; an append landing elsewhere reads its first
+		// argument.
+		{name: "append_back_writes_at_both_identifiers", from: "Grow", to: "queue", kind: RefWrite, want: 2},
+		{name: "append_back_records_no_read", from: "Grow", to: "queue", kind: RefRead, want: 0},
+		{name: "append_landing_elsewhere_reads_its_argument", from: "Spare", to: "queue", kind: RefRead, want: 1},
+		{name: "append_landing_elsewhere_writes_its_target", from: "Spare", to: "spare", kind: RefWrite, want: 1},
+		// The idiom is matched on the name chain both sides are written as, so an
+		// append back to a field writes it twice, and an append whose sides name
+		// two different fields or two different values reads the one it appends
+		// from.
+		{name: "append_back_to_a_field_writes_it_at_both_selectors", from: "Fill", to: "Counter.names", kind: RefWrite, want: 2},
+		{name: "append_back_to_a_field_records_no_read", from: "Fill", to: "Counter.names", kind: RefRead, want: 0},
+		{name: "append_between_two_fields_writes_the_one_it_lands_in", from: "Crossed", to: "Bucket.spare", kind: RefWrite, want: 1},
+		{name: "append_between_two_fields_reads_the_one_it_appends_from", from: "Crossed", to: "Bucket.names", kind: RefRead, want: 1},
+		{name: "append_between_two_fields_does_not_write_the_one_it_appends_from", from: "Crossed", to: "Bucket.names", kind: RefWrite, want: 0},
+		{name: "append_between_two_values_writes_the_field_it_lands_in", from: "Mismatched", to: "Bucket.names", kind: RefWrite, want: 1},
+		{name: "append_between_two_values_reads_the_field_it_appends_from", from: "Mismatched", to: "Counter.names", kind: RefRead, want: 1},
+		// A compound assignment through a key writes the collection and records no
+		// read, the way the plain compound assignment above does.
+		{name: "compound_assignment_through_a_key_writes_the_collection", from: "Accumulate", to: "tally", kind: RefWrite, want: 1},
+		{name: "compound_assignment_through_a_key_records_no_read", from: "Accumulate", to: "tally", kind: RefRead, want: 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

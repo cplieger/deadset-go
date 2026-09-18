@@ -20,12 +20,18 @@ type RefKind uint8
 // The ways one declaration uses another.
 const (
 	RefRead       RefKind = iota // every use no other kind names; an operand of & is a read
-	RefWrite                     // the left side of =, the operand of ++, -- or an op=
+	RefWrite                     // a store into the target: the left side of =, the operand of ++, -- or an op=, a field a composite literal keys, a collection an index, a key or delete stores into, and both sides of the append-back idiom
 	RefCall                      // the callee of a call
 	RefTypeUse                   // a type in a type position
 	RefConversion                // T(x)
 	RefEmbed                     // an embedded field or an embedded interface
 	RefAssert                    // x.(T), or a type in a type-switch case
+)
+
+// The language's own functions whose call stores into the value they are given.
+const (
+	appendBuiltin = "append"
+	deleteBuiltin = "delete"
 )
 
 var refKindNames = [...]string{
@@ -403,6 +409,9 @@ func (p *referencePass) inspectExcept(node ast.Node, encl SymbolID, skip ast.Nod
 			for _, target := range n.Lhs {
 				p.markWrite(target)
 			}
+			p.markAppendBack(n)
+		case *ast.CompositeLit:
+			p.markFieldKeys(n)
 		case *ast.IncDecStmt:
 			p.markWrite(n.X)
 		case *ast.RangeStmt:
@@ -416,6 +425,7 @@ func (p *referencePass) inspectExcept(node ast.Node, encl SymbolID, skip ast.Nod
 			p.markCaseAsserts(n)
 		case *ast.CallExpr:
 			p.markCallee(n.Fun)
+			p.markDelete(n)
 		}
 		return true
 	})
@@ -493,15 +503,107 @@ func (p *referencePass) kindOf(id *ast.Ident, obj types.Object) RefKind {
 }
 
 // markWrite records the identifier one assignment target writes. A selector
-// writes its member, while an index expression and an indirection write through
-// a value they read, so neither marks the identifier under it.
+// writes its member, and an index expression writes the collection it stores
+// into, because a slice or a map a package only ever stores into holds nothing
+// anything reads. An indirection writes through a value it reads: the pointer's
+// own value is read to find the pointee, and the pointee is not a declaration.
 func (p *referencePass) markWrite(target ast.Expr) {
 	switch t := ast.Unparen(target).(type) {
 	case *ast.Ident:
 		p.kinds[t.Pos()] = RefWrite
 	case *ast.SelectorExpr:
 		p.kinds[t.Sel.Pos()] = RefWrite
+	case *ast.IndexExpr:
+		p.markWrite(t.X)
 	}
+}
+
+// markFieldKeys records the fields one composite literal writes. A keyed field
+// of a struct literal is an initialising store, and a field a package only ever
+// sets in a literal holds nothing anything reads. A key of a map, an array or a
+// slice literal names no field and keeps the kind what it names decides.
+func (p *referencePass) markFieldKeys(lit *ast.CompositeLit) {
+	held := p.info.Types[lit].Type
+	if held == nil {
+		return
+	}
+	if _, ok := structAt(held); !ok {
+		return
+	}
+	for _, element := range lit.Elts {
+		keyed, ok := element.(*ast.KeyValueExpr)
+		if !ok {
+			continue
+		}
+		if key, ok := ast.Unparen(keyed.Key).(*ast.Ident); ok {
+			p.kinds[key.Pos()] = RefWrite
+		}
+	}
+}
+
+// markDelete records the collection one delete stores into. Removing an entry
+// changes what the map holds, the same way an assignment through a key does.
+func (p *referencePass) markDelete(call *ast.CallExpr) {
+	if len(call.Args) == 0 || !p.builtin(call.Fun, deleteBuiltin) {
+		return
+	}
+	p.markWrite(call.Args[0])
+}
+
+// markAppendBack records the store the append-back idiom performs. In
+// x = append(x, v...) and in c.f = append(c.f, v...) the read inside the call is
+// how the store is written rather than a use of what the collection holds, so
+// both sides write it. An append whose result lands anywhere else, c.f included,
+// reads its first argument.
+//
+// The two sides are matched by the name chain they are written as, which is what
+// the language resolves them by: the call is evaluated in the scope the
+// assignment is written in, so one spelling names one collection there.
+func (p *referencePass) markAppendBack(s *ast.AssignStmt) {
+	if len(s.Lhs) != 1 || len(s.Rhs) != 1 {
+		return
+	}
+	call, ok := ast.Unparen(s.Rhs[0]).(*ast.CallExpr)
+	if !ok || len(call.Args) == 0 || !p.builtin(call.Fun, appendBuiltin) {
+		return
+	}
+	target := spelling(s.Lhs[0])
+	first := ast.Unparen(call.Args[0])
+	if target == "" || spelling(first) != target {
+		return
+	}
+	switch f := first.(type) {
+	case *ast.Ident:
+		p.kinds[f.Pos()] = RefWrite
+	case *ast.SelectorExpr:
+		p.kinds[f.Sel.Pos()] = RefWrite
+	}
+}
+
+// spelling returns the name chain one identifier or one selector over
+// identifiers is written as, and the empty string for anything else, so two
+// expressions agree only where the source spells them the same.
+func spelling(e ast.Expr) string {
+	switch t := ast.Unparen(e).(type) {
+	case *ast.Ident:
+		return t.Name
+	case *ast.SelectorExpr:
+		if held := spelling(t.X); held != "" {
+			return held + "." + t.Sel.Name
+		}
+	}
+	return ""
+}
+
+// builtin reports whether one call names the language's own function of that
+// name, so a declaration shadowing the name is not mistaken for it.
+func (p *referencePass) builtin(fun ast.Expr, name string) bool {
+	id, ok := ast.Unparen(fun).(*ast.Ident)
+	if !ok {
+		return false
+	}
+	declared, ok := p.info.Uses[id].(*types.Builtin)
+	return ok && declared.Name() == name
 }
 
 // markAssert records the identifier that names an asserted type. A composite

@@ -98,6 +98,15 @@ const (
 	BySize     Sort = "size"
 )
 
+// Cascade is how much of a dead component a rendering names.
+type Cascade string
+
+// The cascade renderings.
+const (
+	CascadeRoots Cascade = "roots"
+	CascadeFull  Cascade = "full"
+)
+
 // Config is the resolved configuration: the closed key list of the Contract's
 // configuration schema, decoded, with every default applied. Field order is the
 // schema's key order, which is the order Print writes.
@@ -169,6 +178,7 @@ type Exemptions struct {
 type Reporters struct {
 	Formats     []Format `json:"formats"`
 	Sort        Sort     `json:"sort"`
+	Cascade     Cascade  `json:"cascade"`
 	MaxFindings int      `json:"max_findings"`
 	FailOn      Severity `json:"fail_on"`
 }
@@ -205,6 +215,7 @@ func Default() Config {
 		Reporters: Reporters{
 			Formats:     []Format{Text},
 			Sort:        ByPosition,
+			Cascade:     CascadeRoots,
 			MaxFindings: 0,
 			FailOn:      Deny,
 		},

@@ -225,6 +225,30 @@ func parentRef(byRef map[string]Symbol, s Symbol) string {
 	return ""
 }
 
+func TestSymbolsGivesEveryDeclarationOfAPackageWithATestVariantItsOwnContainer(t *testing.T) {
+	byRef := namedByRef(symbolsOf(t, "receivers.txtar"))
+
+	// The method is enumerated once and resolved again by the test variant, which
+	// appends nothing, so a receiver kept against the symbol appended last names
+	// the declaration the walk reached next instead of the method.
+	cases := map[string]string{
+		"go://example.com/receivers#Catalog.Resolve": "go://example.com/receivers#Catalog",
+		"go://example.com/receivers#Normalize":       "go://example.com/receivers#",
+		"go://example.com/receivers#TestResolve":     "go://example.com/receivers#",
+	}
+	for ref, want := range cases {
+		t.Run(ref, func(t *testing.T) {
+			got, held := byRef[ref]
+			if !held {
+				t.Fatalf("Symbols(receivers.txtar) holds no symbol whose reference is %s", ref)
+			}
+			if parent := parentRef(byRef, got); parent != want {
+				t.Errorf("Symbols(receivers.txtar)[%s] parent = %q, want %q", ref, parent, want)
+			}
+		})
+	}
+}
+
 func TestSymbolsCountsTheBlankDeclarations(t *testing.T) {
 	var blanks []string
 	for _, s := range symbolsOf(t, "every-kind.txtar") {

@@ -56,6 +56,7 @@ func settingGenerators() map[string]*rapid.Generator[any] {
 			config.Text, config.JSON, config.GitHub, config.SARIF, config.Template,
 		}), 1, 3),
 		"reporters.sort":         enumOf(config.ByPosition, config.BySize),
+		"reporters.cascade":      enumOf(config.CascadeRoots, config.CascadeFull),
 		"reporters.max_findings": rapid.IntRange(0, 1000).AsAny(),
 		"reporters.fail_on":      enumOf(config.Allow, config.Warn, config.Deny),
 		"ts.test_files":          arrayOfDistinct(rapid.StringMatching(`^\*\*/\*\.[a-z]{2,4}$`), 1, 2),

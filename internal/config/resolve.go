@@ -70,6 +70,7 @@ type docExemptions struct {
 type docReporters struct {
 	Formats     *[]Format `json:"formats"`
 	Sort        *Sort     `json:"sort"`
+	Cascade     *Cascade  `json:"cascade"`
 	MaxFindings *int      `json:"max_findings"`
 	FailOn      *Severity `json:"fail_on"`
 }
@@ -289,6 +290,8 @@ func resolveReporters(cfg *Config, p Provenance, sources []source) {
 		func(d *doc) *[]Format { return d.Reporters.Formats })
 	resolveSetting(&cfg.Reporters.Sort, "reporters.sort", p, sources,
 		func(d *doc) *Sort { return d.Reporters.Sort })
+	resolveSetting(&cfg.Reporters.Cascade, "reporters.cascade", p, sources,
+		func(d *doc) *Cascade { return d.Reporters.Cascade })
 	resolveSetting(&cfg.Reporters.MaxFindings, "reporters.max_findings", p, sources,
 		func(d *doc) *int { return d.Reporters.MaxFindings })
 	resolveSetting(&cfg.Reporters.FailOn, "reporters.fail_on", p, sources,
@@ -452,6 +455,7 @@ func validateReporters(r *docReporters, label string) *Error {
 	refusal := firstError(
 		arrayOf(label, "reporters.formats", r.Formats, 1, Text, JSON, GitHub, SARIF, Template),
 		enum(label, "reporters.sort", r.Sort, ByPosition, BySize),
+		enum(label, "reporters.cascade", r.Cascade, CascadeRoots, CascadeFull),
 		enum(label, "reporters.fail_on", r.FailOn, Allow, Warn, Deny),
 	)
 	if refusal != nil {
@@ -482,9 +486,9 @@ func validateSeverity(severity map[string]Severity, label string) *Error {
 			return unimplementedSeverityKey(label, path,
 				"a severity key is one issue-kind code or one two-digit family prefix")
 		}
-		if fixed := fixedByContract(code); fixed != "" {
+		if fixed := fixedByContract(code); len(fixed) > 0 {
 			return unimplementedSeverityKey(label, path,
-				fmt.Sprintf("the Contract fixes the severity of %s, which this key names", fixed))
+				fmt.Sprintf("the Contract fixes the severity of %s, which this key names", spellCodes(fixed)))
 		}
 		value := severity[code]
 		if refusal := enum(label, path, &value, Allow, Warn, Deny); refusal != nil {
@@ -504,16 +508,29 @@ func unimplementedSeverityKey(label, path, reason string) *Error {
 	}
 }
 
-// fixedByContract returns the code whose severity the Contract fixes that one
-// severity key names, either as the code or as its family prefix, and the empty
-// string when the key names none.
-func fixedByContract(code string) string {
-	for _, fixed := range fixedSeverityCodes() {
-		if code == fixed || (len(code) == 4 && strings.HasPrefix(fixed, code)) {
-			return fixed
+// fixedByContract returns every code whose severity the Contract fixes that one
+// severity key names, in ascending code order: the code itself, or every code of
+// the family its two-digit prefix names. It returns none when the key names none.
+// A family key covers every such code, so the refusal names them all rather than
+// the first one found.
+func fixedByContract(code string) []string {
+	var fixed []string
+	for _, candidate := range fixedSeverityCodes() {
+		if code == candidate || (len(code) == 4 && strings.HasPrefix(candidate, code)) {
+			fixed = append(fixed, candidate)
 		}
 	}
-	return ""
+	slices.Sort(fixed)
+	return fixed
+}
+
+// spellCodes lists the codes a refusal names: one code on its own, and several
+// separated by commas with the last joined by and.
+func spellCodes(codes []string) string {
+	if len(codes) < 2 {
+		return strings.Join(codes, "")
+	}
+	return strings.Join(codes[:len(codes)-1], ", ") + " and " + codes[len(codes)-1]
 }
 
 // firstError returns the first refusal a list of checks produced.

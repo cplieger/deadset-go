@@ -265,7 +265,7 @@ func (e *enumeration) append(d *declaration) (SymbolID, error) {
 	}
 	named := d.kind != KindPackage && d.kind != KindFile
 	blank := named && own == "_"
-	id := SymbolID(fmt.Sprintf("%s:%d:%d", position.Filename, position.Line, position.Column))
+	id := e.pos.symbolID(position)
 
 	// A package may hold any number of blank declarations, so the name identifies
 	// none of them and the declaration takes its container's reference.
@@ -372,11 +372,15 @@ func (e *enumeration) walkFunc(p *packages.Package, d *ast.FuncDecl, pkgID Symbo
 		decl.parent = ""
 	}
 
+	before := len(e.symbols)
 	id, err := e.append(&decl)
 	if err != nil {
 		return err
 	}
-	if owner != "" {
+	// A second variant of the package resolves this site to the symbol the first
+	// variant contributed and appends nothing, so recording a receiver then would
+	// name whichever symbol was appended last.
+	if owner != "" && len(e.symbols) > before {
 		e.pending = append(e.pending, receiverOwner{index: len(e.symbols) - 1, owner: owner})
 	}
 	return e.walkTypeParams(d.Type.TypeParams, &decl, id)
