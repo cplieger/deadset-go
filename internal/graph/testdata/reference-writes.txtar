@@ -1,9 +1,13 @@
 One module holding every position the read and write split turns on: a plain
 assignment, a compound assignment, an increment, an address-of, a plain use, a
 range assignment, a two-value assignment, a write to a field through a selector,
-a write to an element through an index, and a write through an indirection. Every
-subject is declared at package level, because a local carries no symbol and so no
-reference at all.
+a store into a collection through an index and through a key, a write through an
+indirection, a field a composite literal keys, a field a literal whose type the
+language supplies keys, a key of a map literal, a delete, the append-back idiom,
+an append whose result lands elsewhere, an append back to a field, an append
+between two fields of one value, an append between the fields of two values, and a
+compound assignment through a key. Every subject is declared at package level,
+because a local carries no symbol and so no reference at all.
 
 -- go.mod --
 module example.com/writes
@@ -66,3 +70,67 @@ func Loop(names []string) {
 	for count = range names {
 	}
 }
+
+// Tier is what the map literal below is keyed by.
+type Tier int
+
+// high keys a map literal, which reads it.
+const high Tier = 1
+
+// Record holds fields a composite literal writes.
+type Record struct {
+	label string
+	tier  Tier
+}
+
+// queue is a collection the append-back idiom stores into.
+var queue []string
+
+// spare holds the result of an append over another collection.
+var spare []string
+
+// entries is a collection an entry is removed from.
+var entries = map[string]int{}
+
+// Keyed writes both fields a struct literal keys.
+func Keyed(label string) Record { return Record{label: label, tier: high} }
+
+// Elided writes a field through a literal whose type the language supplies.
+func Elided() []Record { return []Record{{label: "elided"}} }
+
+// Mapped reads the constant a map literal is keyed by, which names no field.
+func Mapped() map[Tier]int { return map[Tier]int{high: 2} }
+
+// Remove writes the collection an entry is removed from.
+func Remove(key string) { delete(entries, key) }
+
+// Grow writes queue at both of the idiom's identifiers.
+func Grow(name string) { queue = append(queue, name) }
+
+// Spare writes spare and reads queue, because the result lands in another
+// collection.
+func Spare() { spare = append(queue, "spare") }
+
+// Fill appends to a field, which writes it at both of the idiom's selectors
+// because the spelling agrees on both sides.
+func Fill(c *Counter, name string) { c.names = append(c.names, name) }
+
+// Bucket holds the field an append lands in and the field it appends from.
+type Bucket struct {
+	names []string
+	spare []string
+}
+
+// tally is a collection a compound assignment through a key stores into.
+var tally = map[string]int{}
+
+// Crossed appends one field of a value into another field of it, which the idiom
+// leaves as a read of the field appended from.
+func Crossed(b *Bucket, name string) { b.spare = append(b.names, name) }
+
+// Mismatched appends one value's field into another value's, which the idiom
+// leaves as a read of the field appended from.
+func Mismatched(c *Counter, b *Bucket, name string) { b.names = append(c.names, name) }
+
+// Accumulate writes tally through a key and records no read of it.
+func Accumulate(key string, n int) { tally[key] += n }

@@ -283,7 +283,7 @@ func printRoots(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		}
 	}
 	for _, unmatched := range set.unmatched {
-		fmt.Fprintf(stderr, "%s: roots.patterns names nothing: %s\n", unmatchedRoot, unmatched.Pattern)
+		fmt.Fprintf(stderr, "%s: roots.patterns names nothing: %s\n", unmatchedRoot, unmatched.Source)
 	}
 	if len(set.unmatched) > 0 {
 		return exitFindings

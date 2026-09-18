@@ -317,7 +317,7 @@ func TestRootsMatchesAConfiguredStringAgainstASymbolReference(t *testing.T) {
 			}
 			var wantUnmatched []Unmatched
 			if len(test.want) == 0 {
-				wantUnmatched = []Unmatched{{Pattern: test.pattern}}
+				wantUnmatched = []Unmatched{{Source: test.pattern}}
 			}
 			if !slices.Equal(d.unmatched, wantUnmatched) {
 				t.Errorf("Roots(root-patterns.txtar, %q) unmatched = %v, want %v", test.pattern, d.unmatched, wantUnmatched)
@@ -343,8 +343,8 @@ func TestRootsReportsEveryUnmatchedStringOnceInTheConfigurationsOrder(t *testing
 	d := detect(t, "root-patterns.txtar", RootOptions{Patterns: patterns})
 
 	want := []Unmatched{
-		{Pattern: "go://example.com/patterns#Zeta"},
-		{Pattern: "go://example.com/patterns#Absent*"},
+		{Source: "go://example.com/patterns#Zeta"},
+		{Source: "go://example.com/patterns#Absent*"},
 	}
 	if !slices.Equal(d.unmatched, want) {
 		t.Errorf("Roots(root-patterns.txtar, %v) unmatched = %v, want %v", patterns, d.unmatched, want)
@@ -371,10 +371,42 @@ func TestRootsOrderIsTheSameOnEveryCall(t *testing.T) {
 	if !slices.Equal(first, second) {
 		t.Errorf("Roots returned a different order on the second call\n--- first\n%v\n+++ second\n%v", first, second)
 	}
+	order := rootOrder(symbols)
 	for i := 1; i < len(first); i++ {
-		if compareRoots(first[i-1], first[i]) >= 0 {
+		if order(first[i-1], first[i]) >= 0 {
 			t.Fatalf("Roots order is not strictly increasing at %d: %+v then %+v", i, first[i-1], first[i])
 		}
+	}
+}
+
+func TestRootsOrdersBySiteRatherThanBySymbolIdentifier(t *testing.T) {
+	d := detect(t, "roots.txtar", RootOptions{PublishedAPI: true})
+
+	sites := make(map[SymbolID]Symbol, len(d.symbols))
+	for _, s := range d.symbols {
+		sites[s.ID] = s
+	}
+
+	// A symbol identifier spells its line in decimal, so the identifier order and
+	// the file order disagree wherever one root's line shares a leading digit
+	// with a shorter line of the same file. The fixture holds such a pair, and
+	// without it this test would pass under either order.
+	inverted := false
+	for i := 1; i < len(d.roots); i++ {
+		before, after := sites[d.roots[i-1].ID], sites[d.roots[i].ID]
+		if before.Pos.Filename == after.Pos.Filename && before.Pos.Line < after.Pos.Line &&
+			string(after.ID) < string(before.ID) {
+			inverted = true
+		}
+		if before.Pos.Filename > after.Pos.Filename ||
+			(before.Pos.Filename == after.Pos.Filename && before.Pos.Line > after.Pos.Line) {
+			t.Errorf("Roots(roots.txtar) returned %s at %s:%d before %s at %s:%d, want the order the sites read in",
+				before.Name, before.Pos.Filename, before.Pos.Line,
+				after.Name, after.Pos.Filename, after.Pos.Line)
+		}
+	}
+	if !inverted {
+		t.Fatal("roots.txtar holds no two roots of one file whose identifier order differs from their line order, so this test cannot fail")
 	}
 }
 

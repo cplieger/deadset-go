@@ -67,6 +67,15 @@ func (p *positions) render(pos token.Pos) (token.Position, error) {
 	return q, nil
 }
 
+// symbolID spells the identifier of the declaration written at one rendered
+// position: the target-relative path, the line and the column, joined by
+// colons. Every pass that resolves an object to a declaration renders the
+// object's position and looks the identifier up, so the form is written here and
+// nowhere else.
+func (*positions) symbolID(q token.Position) SymbolID {
+	return SymbolID(fmt.Sprintf("%s:%d:%d", q.Filename, q.Line, q.Column))
+}
+
 // relative returns name relative to the target root with forward slashes, and an
 // empty string when name is not under the root.
 func (p *positions) relative(name string) string {

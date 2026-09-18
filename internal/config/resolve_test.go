@@ -271,10 +271,16 @@ func TestResolveRefusesAnUnimplementedKey(t *testing.T) {
 			names:      []string{`"severity.DS1703"`, "fixes the severity of DS1703"},
 		},
 		{
+			name:       "the_other_severity_code_the_contract_fixes",
+			repository: `{"target": {"kind": "application"}, "severity": {"DS1704": "warn"}}`,
+			key:        "severity.DS1704",
+			names:      []string{`"severity.DS1704"`, "fixes the severity of DS1704"},
+		},
+		{
 			name:       "a_severity_family_prefix_holding_a_fixed_code",
 			repository: `{"target": {"kind": "application"}, "severity": {"DS17": "allow"}}`,
 			key:        "severity.DS17",
-			names:      []string{`"severity.DS17"`, "fixes the severity of DS1703"},
+			names:      []string{`"severity.DS17"`, "fixes the severity of DS1703 and DS1704"},
 		},
 	}
 
@@ -294,6 +300,43 @@ func TestResolveRefusesAnUnimplementedKey(t *testing.T) {
 				t.Errorf("Resolve(%s) named %q, want %q", tc.name, refusal.Key, tc.key)
 			}
 			assertMessageNames(t, tc.name, refusal, tc.names)
+		})
+	}
+}
+
+func TestResolveNamesEveryFixedCodeASeverityKeyCovers(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		repository string
+		want       string
+	}{
+		{
+			name:       "a_family_prefix_names_every_fixed_code_of_that_family",
+			repository: `{"target": {"kind": "application"}, "severity": {"DS17": "allow"}}`,
+			want: `deadset.json: key "severity.DS17" is not implemented: ` +
+				"the Contract fixes the severity of DS1703 and DS1704, which this key names",
+		},
+		{
+			name:       "a_code_names_that_code_alone",
+			repository: `{"target": {"kind": "application"}, "severity": {"DS1704": "warn"}}`,
+			want: `deadset.json: key "severity.DS1704" is not implemented: ` +
+				"the Contract fixes the severity of DS1704, which this key names",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, _, err := config.Resolve(labelled("", tc.repository, "", nil))
+			if err == nil {
+				t.Fatalf("Resolve(%s) = no error, want the key refused", tc.repository)
+			}
+			if got := err.Error(); got != tc.want {
+				t.Errorf("Resolve(%s) = %q, want %q", tc.repository, got, tc.want)
+			}
 		})
 	}
 }
@@ -454,6 +497,11 @@ func TestResolveRefusesAMalformedDocument(t *testing.T) {
 			name:       "an_empty_format_list",
 			repository: `{"target": {"kind": "library"}, "reporters": {"formats": []}}`,
 			key:        "reporters.formats",
+		},
+		{
+			name:       "a_cascade_rendering_outside_the_closed_set",
+			repository: `{"target": {"kind": "library"}, "reporters": {"cascade": "members"}}`,
+			key:        "reporters.cascade",
 		},
 		{
 			name:       "a_negative_finding_cap",

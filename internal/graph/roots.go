@@ -72,15 +72,17 @@ type RootOptions struct {
 	PublishedAPI bool     // the target is a library, so its published API is rooted
 }
 
-// Unmatched is a configured root or pattern that names no symbol.
+// Unmatched is a configured root or pattern that names no symbol. Source is the
+// configured string, spelled as Root.Source spells the one that did name a
+// symbol.
 type Unmatched struct {
-	Pattern string
+	Source string
 }
 
 // Roots returns every root of one configuration, and every configured string
 // that named no symbol in the order the configuration lists them.
 //
-// The order is by symbol, then kind, then configured string, and a symbol that is
+// The order is by site, then kind, then configured string, and a symbol that is
 // a root for more than one reason appears once per reason, so a report can name
 // every reason one symbol is live. A root makes its symbol live under
 // reachability and plays no part in reference counting. Roots reaches the
@@ -115,18 +117,28 @@ func Roots(r *load.Result, targetRoot string, read ReadFile, symbols []Symbol, o
 	}
 	unmatched := d.configured(symbols, opts.Patterns)
 
-	return slices.SortedFunc(maps.Keys(d.found), compareRoots), unmatched, nil
+	return slices.SortedFunc(maps.Keys(d.found), rootOrder(symbols)), unmatched, nil
 }
 
-// compareRoots is the total order Roots returns its result in. Two roots of one
-// symbol are ordered by kind, and two configured roots of one symbol and kind by
-// the string that named each.
-func compareRoots(a, b Root) int {
-	return cmp.Or(
-		cmp.Compare(a.ID, b.ID),
-		cmp.Compare(a.Kind, b.Kind),
-		cmp.Compare(a.Source, b.Source),
-	)
+// rootOrder is the total order Roots returns its result in: the site of the
+// symbol each root names, then the kind, then the configured string. It is the
+// order the enumeration and the reference pass return their own results in, so a
+// root set reads in file order beside them.
+//
+// Two roots of one symbol are ordered by kind, and two configured roots of one
+// symbol and kind by the string that named each.
+func rootOrder(symbols []Symbol) func(a, b Root) int {
+	sites := make(map[SymbolID]Symbol, len(symbols))
+	for i := range symbols {
+		sites[symbols[i].ID] = symbols[i]
+	}
+	return func(a, b Root) int {
+		return cmp.Or(
+			bySite(sites[a.ID], sites[b.ID]),
+			cmp.Compare(a.Kind, b.Kind),
+			cmp.Compare(a.Source, b.Source),
+		)
+	}
 }
 
 // rootDetection accumulates the roots of one loaded configuration.
@@ -335,7 +347,7 @@ func (d *rootDetection) configured(symbols []Symbol, patterns []string) []Unmatc
 			matched = true
 		}
 		if !matched {
-			unmatched = append(unmatched, Unmatched{Pattern: pattern})
+			unmatched = append(unmatched, Unmatched{Source: pattern})
 		}
 	}
 	return unmatched

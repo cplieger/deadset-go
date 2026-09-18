@@ -1,0 +1,97 @@
+One module whose packages hold, each on its own, a case the sweep answers: the
+two relations disagreeing over one chain, a published entry point nothing
+references, a cycle, one declaration reaching three further dead ones, a dead
+type and a dead interface with their members, and a test of dead code beside a
+test of live code.
+
+-- go.mod --
+module example.com/sweep
+
+go 1.27.1
+-- api.go --
+package sweep
+
+// Published is exported, and nothing inside the module references it.
+func Published() string { return reached() }
+
+func reached() string { return "reached" }
+
+// unreferenced is referenced by nothing and references the declaration below it,
+// which is what the two relations answer differently.
+func unreferenced() string { return referencedByDeadCode() }
+
+func referencedByDeadCode() string { return "referenced by dead code" }
+-- cycle/cycle.go --
+package cycle
+
+func alpha() string { return beta() }
+
+func beta() string { return alpha() }
+-- cascade/cascade.go --
+package cascade
+
+// head is referenced by nothing and reaches three further dead declarations.
+func head() string {
+	return first()
+}
+
+func first() string {
+	return second()
+}
+
+func second() string {
+	return third()
+}
+
+func third() string {
+	return "third"
+}
+-- members/members.go --
+package members
+
+type box struct {
+	lid  int
+	side int
+}
+
+func (b box) open() int { return b.lid }
+
+type fetcher interface {
+	fetch() error
+	shut() error
+}
+-- subject/subject.go --
+package subject
+
+// live is referenced by production code and by a test.
+func live() int { return 3 }
+
+var kept = live()
+
+var _ = kept
+
+// deadOne and deadTwo are referenced by tests alone.
+func deadOne() int { return 1 }
+
+func deadTwo() int { return 2 }
+-- subject/subject_test.go --
+package subject
+
+import "testing"
+
+// TestDeadOnly references dead production declarations alone.
+func TestDeadOnly(t *testing.T) {
+	if deadOne()+deadTwo() != 3 {
+		t.Errorf("deadOne() + deadTwo() = %d, want 3", deadOne()+deadTwo())
+	}
+}
+
+// TestLive references a live production declaration as well as a dead one.
+func TestLive(t *testing.T) {
+	if live() != 3 {
+		t.Errorf("live() = %d, want 3", live())
+	}
+	if deadOne() != 1 {
+		t.Errorf("deadOne() = %d, want 1", deadOne())
+	}
+}

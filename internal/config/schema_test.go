@@ -310,20 +310,21 @@ func TestFixedByContract(t *testing.T) {
 	tests := []struct {
 		name string
 		code string
-		want string
+		want []string
 	}{
-		{name: "the_fixed_code_itself", code: "DS1703", want: "DS1703"},
-		{name: "the_family_prefix_holding_it", code: "DS17", want: "DS1703"},
-		{name: "a_sibling_code_of_that_family", code: "DS1701", want: ""},
-		{name: "another_family_prefix", code: "DS18", want: ""},
-		{name: "another_code", code: "DS1101", want: ""},
+		{name: "the_fixed_code_itself", code: "DS1703", want: []string{"DS1703"}},
+		{name: "the_other_fixed_code", code: "DS1704", want: []string{"DS1704"}},
+		{name: "the_family_prefix_holding_both", code: "DS17", want: []string{"DS1703", "DS1704"}},
+		{name: "a_sibling_code_of_that_family", code: "DS1701", want: nil},
+		{name: "another_family_prefix", code: "DS18", want: nil},
+		{name: "another_code", code: "DS1101", want: nil},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := fixedByContract(tc.code); got != tc.want {
+			if got := fixedByContract(tc.code); !slices.Equal(got, tc.want) {
 				t.Errorf("fixedByContract(%q) = %q, want %q", tc.code, got, tc.want)
 			}
 		})

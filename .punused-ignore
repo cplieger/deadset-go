@@ -54,3 +54,18 @@ function References
 # yet because no setting inside it has an implementation; the field must exist
 # for a document that carries the section to resolve rather than be refused.
 field Go is unused
+
+# --- The sweep, which no verb runs yet.
+#
+# These are the stages the analysis verb calls once it lands: the graph is
+# indexed from the enumeration, the reference set and the root set, swept once per
+# mode, and each dead component is listed at the depth the run asks for, with the
+# two spellings a report and a message carry. Only the tests call them today, and
+# the correct resolution is that call site rather than an unexport, because the
+# sweep is a stage of the same package the enumeration and the roots are stages
+# of.
+function New
+method (*Graph).Sweep
+method (*Component).List
+method (Relation).String
+method (Cascade).String

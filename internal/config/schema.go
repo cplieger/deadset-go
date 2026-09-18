@@ -27,7 +27,7 @@ var contractVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 // fixedSeverityCodes are the codes whose severity the Contract fixes. A severity
 // key naming one, or a family prefix whose range holds one, is an unimplemented
 // key rather than a setting.
-func fixedSeverityCodes() []string { return []string{"DS1703"} }
+func fixedSeverityCodes() []string { return []string{"DS1703", "DS1704"} }
 
 // keyKind classifies one node of the closed key list.
 type keyKind uint8
@@ -90,6 +90,7 @@ func schemaRoot() keyNode {
 		"reporters": {kind: keySection, members: map[string]keyNode{
 			"formats":      {kind: keyLeaf},
 			"sort":         {kind: keyLeaf},
+			"cascade":      {kind: keyLeaf},
 			"max_findings": {kind: keyLeaf},
 			"fail_on":      {kind: keyLeaf},
 		}},

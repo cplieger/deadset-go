@@ -1,0 +1,34 @@
+One package holding a method and an in-package test file, so a load with tests
+returns two variants that type-check catalog.go independently, with a
+package-level function declared after the method. The second variant resolves the
+method to the symbol the first variant contributed and appends nothing, so a
+receiver recorded against the last symbol appended lands on the function.
+
+-- go.mod --
+module example.com/receivers
+
+go 1.27.1
+-- catalog.go --
+package receivers
+
+// Catalog holds the entries the method resolves.
+type Catalog struct {
+	entries map[string]string
+}
+
+// Resolve returns what one name holds.
+func (c *Catalog) Resolve(name string) string { return c.entries[name] }
+
+// Normalize is declared after the method, and its container is the package.
+func Normalize(name string) string { return name }
+-- catalog_test.go --
+package receivers
+
+import "testing"
+
+func TestResolve(t *testing.T) {
+	c := &Catalog{entries: map[string]string{"x": "y"}}
+	if c.Resolve("x") != "y" {
+		t.Fatal("Resolve did not return y")
+	}
+}
