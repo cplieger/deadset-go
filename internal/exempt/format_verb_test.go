@@ -48,6 +48,78 @@ func TestFormatVerbContractRetainsTheMethodEveryVerbFamilyCalls(t *testing.T) {
 	}
 }
 
+// facilityRefs spells the references of one type's members in the facilities
+// fixture.
+func facilityRefs(typeName string, members ...string) []string {
+	return qualify("example.com/facilities", typeName, members...)
+}
+
+func TestFormatVerbContractRetainsTheMethodEveryFacilityCalls(t *testing.T) {
+	in := inputOf(t, "format-verb-facilities.txtar", Options{})
+	refs := retainedRefs(t, in, FormatVerbContractDetector)
+
+	for _, test := range []struct {
+		facility string
+		typeName string
+		want     []string
+	}{
+		{facility: "a print function of the logging package", typeName: "LogPrinted", want: facilityRefs("LogPrinted", "String")},
+		{facility: "a fatal function of the logging package", typeName: "FatalPrinted", want: facilityRefs("FatalPrinted", "String")},
+		{facility: "a method of the logging package's logger", typeName: "LoggerPrinted", want: facilityRefs("LoggerPrinted", "String")},
+		{facility: "a log method of the concrete testing type", typeName: "TestLogged", want: facilityRefs("TestLogged", "String")},
+		{facility: "the same method through the testing interface", typeName: "InterfaceLogged", want: facilityRefs("InterfaceLogged", "String")},
+		{facility: "a logging function of the structured-logging package", typeName: "Structured", want: facilityRefs("Structured", "String")},
+		{facility: "a method of the structured logger", typeName: "LoggerStructured", want: facilityRefs("LoggerStructured", "String")},
+		{facility: "an attribute constructor", typeName: "Attributed", want: facilityRefs("Attributed", "String")},
+		{facility: "a wrapper two forwards from the formatting package", typeName: "Forwarded", want: facilityRefs("Forwarded", "String")},
+		{facility: "a wrapper carrying no format string", typeName: "Listed", want: facilityRefs("Listed", "String")},
+		{facility: "a wrapper whose format string its caller does not write", typeName: "Fixed", want: facilityRefs("Fixed", "String")},
+	} {
+		t.Run(strings.ReplaceAll(test.facility, " ", "_"), func(t *testing.T) {
+			got := membersOf(refs, test.typeName)
+			if !slices.Equal(got, test.want) {
+				t.Errorf("FormatVerbContractDetector(format-verb-facilities.txtar) retained, for %s reaching %s,\ngot  %v\nwant %v",
+					test.typeName, test.facility, got, test.want)
+			}
+		})
+	}
+}
+
+func TestFormatVerbContractNamesTheFacilityThatFormatted(t *testing.T) {
+	in := inputOf(t, "format-verb-facilities.txtar", Options{})
+	refs := make(map[graph.SymbolID]string, len(in.Symbols))
+	for i := range in.Symbols {
+		refs[in.Symbols[i].ID] = in.Symbols[i].Ref
+	}
+
+	type record struct{ ref, site, detail string }
+	var got []record
+	for _, e := range retained(t, in, FormatVerbContractDetector) {
+		got = append(got, record{ref: refs[e.ID], site: e.Site.String(), detail: e.Detail})
+	}
+
+	// A verb-less facility records the call it was formatted by and no verb, and a
+	// wrapper is named as the function of the analysed program that it is.
+	want := []record{
+		{"go://example.com/facilities#LogPrinted.String", "log_package.go:33:48", "formatted by log.Printf under %s"},
+		{"go://example.com/facilities#FatalPrinted.String", "log_package.go:36:50", "formatted by log.Fatalf under %q"},
+		{"go://example.com/facilities#LoggerPrinted.String", "log_package.go:39:62", "formatted by (*log.Logger).Println"},
+		{"go://example.com/facilities#Structured.String", "slog_calls.go:33:66", "formatted by log/slog.Info"},
+		{"go://example.com/facilities#LoggerStructured.String", "slog_calls.go:36:88", "formatted by (*log/slog.Logger).Warn"},
+		{"go://example.com/facilities#Attributed.String", "slog_calls.go:39:70", "formatted by log/slog.Any"},
+		{"go://example.com/facilities#TestLogged.String", "testing_methods.go:25:62", "formatted by (*testing.common).Logf under %v"},
+		{"go://example.com/facilities#InterfaceLogged.String", "testing_methods.go:28:69", "formatted by (testing.TB).Log"},
+		{"go://example.com/facilities#Forwarded.String", "wrappers.go:50:62", "formatted by example.com/facilities.logf under %s"},
+		{"go://example.com/facilities#Listed.String", "wrappers.go:53:52", "formatted by example.com/facilities.logAll"},
+		{"go://example.com/facilities#Fixed.String", "wrappers.go:57:52", "formatted by example.com/facilities.logFixed"},
+	}
+	slices.SortFunc(got, func(a, b record) int { return strings.Compare(a.site, b.site) })
+	slices.SortFunc(want, func(a, b record) int { return strings.Compare(a.site, b.site) })
+	if !slices.Equal(got, want) {
+		t.Errorf("FormatVerbContractDetector(format-verb-facilities.txtar) recorded\ngot  %+v\nwant %+v", got, want)
+	}
+}
+
 func TestFormatVerbContractRetainsNothingWhereNoVerbAsksForAString(t *testing.T) {
 	in := inputOf(t, "format-verb-quiet.txtar", Options{})
 	if got := retainedRefs(t, in, FormatVerbContractDetector); len(got) > 0 {

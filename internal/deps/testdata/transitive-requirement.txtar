@@ -1,0 +1,45 @@
+A requirement the module file does not mark indirect whose module provides only a
+package another module's package imports. No package of the target imports it.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+
+require (
+	example.com/leaf v1.0.0
+	example.com/mid v1.0.0
+)
+
+replace example.com/leaf => ./leaf
+
+replace example.com/mid => ./mid
+-- app.go --
+package app
+
+import "example.com/mid"
+
+// Run returns the answer the middle module renders.
+func Run() int { return mid.Answer() }
+-- mid/go.mod --
+module example.com/mid
+
+go 1.27.1
+
+require example.com/leaf v1.0.0
+-- mid/mid.go --
+package mid
+
+import "example.com/leaf"
+
+// Answer returns the leaf module's answer.
+func Answer() int { return leaf.Answer() }
+-- leaf/go.mod --
+module example.com/leaf
+
+go 1.27.1
+-- leaf/leaf.go --
+package leaf
+
+// Answer returns a number.
+func Answer() int { return 7 }

@@ -69,6 +69,11 @@ type Options struct {
 	// and a name outside the vocabulary disables nothing.
 	Disabled []Class
 
+	// TemplateDelimiters are the action delimiters the template class parses
+	// with. Both empty asks for the delimiters the template grammar itself
+	// defaults to, which is what a project that sets none renders with.
+	TemplateDelimiters Delimiters
+
 	// TemplateDirs are the directories the template class scans, relative to the
 	// target root. With none configured that class retains nothing.
 	TemplateDirs []string
@@ -77,6 +82,13 @@ type Options struct {
 	// class retains nothing and each finding in such a file is marked as one no
 	// mechanical edit may act on.
 	IncludeGenerated bool
+}
+
+// Delimiters are the pair that opens and closes an action of a template, as the
+// project that renders the templates sets it.
+type Delimiters struct {
+	Left  string
+	Right string
 }
 
 // Input is what every class reads: one loaded configuration, the declarations

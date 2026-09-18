@@ -58,6 +58,11 @@ func (k RootKind) String() string {
 type Root struct {
 	ID     SymbolID
 	Source string // the configured string that named it, empty for a detected class
+
+	// Config is the place in the matrix of the build configuration the root was
+	// detected in. One detection fills none of it, because a detection is of one
+	// configuration; [Merge] is what fills it.
+	Config int
 	Kind   RootKind
 }
 

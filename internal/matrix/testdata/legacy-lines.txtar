@@ -1,0 +1,34 @@
+The legacy build-line spelling, on one file that separates it from the package
+clause with a blank line and on one that does not. Only the first carries a
+constraint, so only its operating system is an atom.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- app.go --
+package app
+
+// Name is the platform the build selected.
+func Name() string { return "app" }
+-- legacy.go --
+// +build openbsd
+
+package app
+
+// Legacy reports whether the legacy path is in.
+func Legacy() bool { return true }
+-- misplaced.go --
+// +build netbsd
+package app
+
+// Misplaced reports whether the misplaced path is in.
+func Misplaced() bool { return true }
+-- combined.go --
+// +build openbsd
+// +build arm64
+
+package app
+
+// Combined reports whether both conditions hold.
+func Combined() bool { return true }

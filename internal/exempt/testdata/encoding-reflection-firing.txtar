@@ -1,6 +1,6 @@
 One package whose types reach every destination the encoding-reflection class
 names: reflection, the three standard encoders, both template packages, a
-database scan target, a sort interface and a log-value interface. Each type
+database scan target, a sort interface and a structured-logging call. Each type
 declares one exported method, one unexported method, one exported tagged field,
 one exported untagged field and one unexported tagged field, so the retained set
 distinguishes the four. Two further files carry the cases the class rules on: a
@@ -223,19 +223,19 @@ func (p SortPayload) hidden() int { return p.Extra }
 
 // SortNames converts a value to the interface.
 func SortNames(p SortPayload) { sort.Sort(p) }
--- logvalue.go --
+-- logging.go --
 package flow
 
 import "log/slog"
 
-// LogPayload is converted to the log-value interface.
+// LogPayload is an operand of a structured-logging call.
 type LogPayload struct {
 	Name   string `log:"name"`
 	Extra  int
 	secret string `log:"secret"`
 }
 
-// LogValue is what the interface requires.
+// LogValue is what the handler calls where it finds it.
 func (p LogPayload) LogValue() slog.Value { return slog.StringValue(p.Name) }
 
 // Describe is exported.
@@ -243,7 +243,8 @@ func (p LogPayload) Describe() string { return p.Name }
 
 func (p LogPayload) hidden() int { return p.Extra }
 
-var _ slog.LogValuer = LogPayload{}
+// LogPayloadValue hands a value to a logging call.
+func LogPayloadValue(p LogPayload) { slog.Info("payload", "value", p) }
 -- containers.go --
 package flow
 

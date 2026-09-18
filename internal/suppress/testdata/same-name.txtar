@@ -1,0 +1,39 @@
+Three declarations named Helper: a function of the target's own package, a method
+of another file of that package, and a function of a nested package. An entry
+names one of them by code, symbol and path together, so the other two are out of
+its reach.
+
+-- go.mod --
+module example.com/samename
+
+go 1.27.1
+-- catalog.go --
+package samename
+
+// Helper is the package-level function.
+//
+//deadset:ignore DS1001 -- read once whatever the number of variants
+func Helper() string { return "catalog" }
+-- other.go --
+package samename
+
+// Queue holds what a run has not reached yet.
+type Queue struct{}
+
+// Helper is a method of Queue, declared in another file under the same name.
+func (q Queue) Helper() string { return "other" }
+-- queue/queue.go --
+package queue
+
+// Helper is a function of another package, under the same name.
+func Helper() string { return "queue" }
+-- variants_test.go --
+package samename
+
+import "testing"
+
+func TestHelper(t *testing.T) {
+	if Helper() == "" {
+		t.Fatal("Helper returned nothing")
+	}
+}

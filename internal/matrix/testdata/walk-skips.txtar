@@ -1,0 +1,48 @@
+Every path the toolchain builds nothing from, each naming a platform no
+configuration of this tree should ever carry: a nested module, the two reserved
+directory names, a directory whose name opens with a full stop and one whose
+name opens with an underscore, and a file whose name opens with an underscore.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- app.go --
+package app
+
+// Name is the platform the build selected.
+func Name() string { return "app" }
+-- tool/go.mod --
+module example.com/tool
+
+go 1.27.0
+-- tool/tool_windows.go --
+package tool
+
+// Run runs the tool.
+func Run() {}
+-- testdata/input_darwin.go --
+package input
+
+// Value is the fixture's value.
+const Value = 1
+-- vendor/example.com/dep/dep_freebsd.go --
+package dep
+
+// Value is the dependency's value.
+const Value = 2
+-- .hidden/hidden_netbsd.go --
+package hidden
+
+// Value is the hidden value.
+const Value = 3
+-- _ignored/ignored_openbsd.go --
+package ignored
+
+// Value is the ignored value.
+const Value = 4
+-- _solaris.go --
+package app
+
+// Ignored is never compiled.
+const Ignored = true

@@ -1,0 +1,60 @@
+One package whose two constrained files select on the operating system, holding
+the cases a matrix answers differently: a declaration one platform uses and the
+other does not, a declaration one platform alone holds, a declaration no platform
+uses, a declaration only unreachable code on one platform names, one reference
+every platform sees at one position, and a dead type whose method one platform
+alone declares.
+
+-- go.mod --
+module example.com/matrix
+
+go 1.27.1
+-- shared.go --
+package matrix
+
+// Resolve is the package's published entry point, and nothing inside the module
+// references it.
+func Resolve(name string) string { return render(name) }
+
+// usedOnWindowsOnly is referenced from the file the windows configuration
+// selects, by a declaration the entry point reaches, so it is live there and dead
+// under linux.
+func usedOnWindowsOnly() string { return "windows" }
+
+// deadEverywhere is referenced under no configuration.
+func deadEverywhere() string { return "dead everywhere" }
+
+// referencedByDeadCodeOnWindows is referenced by a windows declaration nothing
+// reaches, and by nothing at all under linux.
+func referencedByDeadCodeOnWindows() string { return "referenced by dead code" }
+
+// deadCallerEverywhere is referenced under no configuration and makes the one
+// reference every configuration sees, at one position in a file every
+// configuration compiles.
+func deadCallerEverywhere() string { return countedOnce() }
+
+func countedOnce() string { return "counted once" }
+
+// box is referenced by nothing under linux and by its own method under windows,
+// which is the configuration that declares the method.
+type box struct{}
+
+-- render_linux.go --
+//go:build linux
+
+package matrix
+
+func render(name string) string { return "linux:" + name }
+
+-- render_windows.go --
+//go:build windows
+
+package matrix
+
+func render(name string) string { return usedOnWindowsOnly() + ":" + name }
+
+// windowsOnlyDeadCaller is declared under the windows configuration alone and is
+// referenced by nothing.
+func windowsOnlyDeadCaller() string { return referencedByDeadCodeOnWindows() }
+
+func (b box) shut() int { return 1 }

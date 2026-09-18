@@ -65,9 +65,14 @@ type Reference struct {
 
 	// Pos is the referencing identifier's rendered position: Filename is
 	// target-relative with forward slashes and Column counts UTF-16 code units.
-	Pos  token.Position
-	Kind RefKind
-	Test bool // the referencing file is a test file
+	Pos token.Position
+
+	// Config is the place in the matrix of the build configuration the reference
+	// was seen in. One walk fills none of it, because a walk is of one
+	// configuration; [Merge] is what fills it.
+	Config int
+	Kind   RefKind
+	Test   bool // the referencing file is a test file
 }
 
 // References walks every loaded package of one configuration once and returns

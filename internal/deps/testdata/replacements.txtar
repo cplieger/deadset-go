@@ -1,0 +1,48 @@
+Three replace directives: one over a module no build list holds, one over a module
+the target imports, and one over the module a tool directive's package belongs to.
+Beside them an exclude directive and the tool directive itself, neither of which is
+ever reported.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+
+require (
+	example.com/gen v1.0.0
+	example.com/used v1.0.0
+)
+
+exclude example.com/used v1.1.0
+
+replace example.com/absent v1.0.0 => example.com/other v1.0.0
+
+replace example.com/used => ./used
+
+replace example.com/gen => ./gen
+
+tool example.com/gen/cmd/gen
+-- app.go --
+package app
+
+import "example.com/used"
+
+// Greet returns the greeting the used module renders.
+func Greet() string { return used.Hello() }
+-- used/go.mod --
+module example.com/used
+
+go 1.27.1
+-- used/used.go --
+package used
+
+// Hello returns a greeting.
+func Hello() string { return "hello" }
+-- gen/go.mod --
+module example.com/gen
+
+go 1.27.1
+-- gen/cmd/gen/main.go --
+package main
+
+func main() {}

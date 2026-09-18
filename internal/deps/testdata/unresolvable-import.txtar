@@ -1,0 +1,28 @@
+A file importing a package no module provides, inside a module the module file
+does require, which is a compile error and so a load that fails rather than a
+dependency answer.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+
+require example.com/lib v1.0.0
+
+replace example.com/lib => ./lib
+-- app.go --
+package app
+
+import "example.com/lib/absent"
+
+// Run calls a package the module does not hold.
+func Run() string { return absent.Name() }
+-- lib/go.mod --
+module example.com/lib
+
+go 1.27.1
+-- lib/lib.go --
+package lib
+
+// Hello returns a greeting.
+func Hello() string { return "hello" }

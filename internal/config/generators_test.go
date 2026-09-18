@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"encoding/json"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -49,9 +50,15 @@ func settingGenerators() map[string]*rapid.Generator[any] {
 		"analysis.configurations":  rapid.SliceOfN(configurationEntry(), 0, 3).AsAny(),
 		"analysis.matrix.complete": rapid.Bool().AsAny(),
 		"analysis.template_dirs":   arrayOfDistinct(rapid.StringMatching(`^[a-z]{1,8}(/[a-z]{1,8})?$`), 0, 2),
-		"consumers.complete":       rapid.Bool().AsAny(),
-		"roots.patterns":           arrayOfDistinct(symbolReference(), 0, 2),
-		"exemptions.disabled":      arrayOfDistinct(rapid.StringMatching(`^[a-z][a-z0-9-]{0,10}$`), 0, 2),
+		"analysis.template_delimiters": rapid.Custom(func(t *rapid.T) map[string]any {
+			return map[string]any{
+				"left":  rapid.SampledFrom([]string{"{{", "[[", "<%", "{%"}).Draw(t, "the left delimiter"),
+				"right": rapid.SampledFrom([]string{"}}", "]]", "%>", "%}"}).Draw(t, "the right delimiter"),
+			}
+		}).AsAny(),
+		"consumers.complete":  rapid.Bool().AsAny(),
+		"roots.patterns":      arrayOfDistinct(symbolReference(), 0, 2),
+		"exemptions.disabled": arrayOfDistinct(rapid.StringMatching(`^[a-z][a-z0-9-]{0,10}$`), 0, 2),
 		"reporters.formats": arrayOfDistinct(rapid.SampledFrom([]config.Format{
 			config.Text, config.JSON, config.GitHub, config.SARIF, config.Template,
 		}), 1, 3),
@@ -84,21 +91,21 @@ func symbolReference() *rapid.Generator[string] {
 	return rapid.StringMatching(`^(go|ts)://example\.(com|test)/[a-z]{1,4}#([A-Z][A-Za-z]{0,4}|\*)(\.([A-Za-z]{1,4}|\*))?$`)
 }
 
-// severityKeys draws the keys of a generated severity object: distinct issue-kind
-// codes and two-digit family prefixes, none of them naming a kind whose severity
-// the Contract fixes, which would be an unimplemented key rather than a setting.
-func severityKeys(fixed []string) *rapid.Generator[[]string] {
-	key := rapid.StringMatching(`^DS[0-9]{2}([0-9]{2})?$`).Filter(func(key string) bool {
-		return !namesFixedSeverity(key, fixed)
-	})
-	return rapid.SliceOfNDistinct(key, 0, 3, rapid.ID[string])
+// familyKeyLength is the length of a severity key naming a whole family: the
+// prefix and two digits, where a code carries four.
+const familyKeyLength = 4
+
+// severityKeys draws the keys of a generated severity object: distinct keys drawn
+// from the ones a configuration may set.
+func severityKeys(settable []string) *rapid.Generator[[]string] {
+	return rapid.SliceOfNDistinct(rapid.SampledFrom(settable), 0, 3, rapid.ID[string])
 }
 
 // namesFixedSeverity reports whether one severity key names a kind whose severity
 // the Contract fixes, either as the code or as the family prefix holding it.
 func namesFixedSeverity(key string, fixed []string) bool {
 	for _, code := range fixed {
-		if key == code || (len(key) == 4 && strings.HasPrefix(code, key)) {
+		if key == code || (len(key) == familyKeyLength && strings.HasPrefix(code, key)) {
 			return true
 		}
 	}
@@ -119,10 +126,11 @@ func provenanceEntry() *rapid.Generator[string] {
 	)
 }
 
-// fixedSeverityCodes returns the codes whose severity the Contract fixes, read
-// from the Contract rather than restated, so a Contract that fixes another code
-// narrows the generator with it.
-func fixedSeverityCodes(t *testing.T) []string {
+// contractKinds returns the codes of the issue kinds the Contract publishes as
+// live and the codes among them whose severity it fixes, both in ascending order,
+// read from the Contract rather than restated so a kind the Contract adds or fixes
+// moves the generator with it.
+func contractKinds(t *testing.T) (live, fixed []string) {
 	t.Helper()
 
 	data, err := spec.Contract.ReadFile("contract/kinds.json")
@@ -138,15 +146,108 @@ func fixedSeverityCodes(t *testing.T) []string {
 	if err := json.Unmarshal(data, &document); err != nil {
 		t.Fatalf("decode contract/kinds.json: %v", err)
 	}
-	var fixed []string
 	for _, kind := range document.Kinds {
+		live = append(live, kind.Code)
 		if kind.Fixed {
 			fixed = append(fixed, kind.Code)
 		}
 	}
+	slices.Sort(live)
 	slices.Sort(fixed)
-	if len(fixed) == 0 {
-		t.Fatal("contract/kinds.json fixes no severity, so the generator's filter pins nothing")
+	if len(live) == 0 || len(fixed) == 0 {
+		t.Fatalf("contract/kinds.json publishes %d live kinds and fixes %d, want some of each",
+			len(live), len(fixed))
 	}
-	return fixed
+	return live, fixed
+}
+
+// settableSeverityKeys returns every key a severity object may set: one live
+// issue-kind code, or one two-digit family prefix naming at least one live kind,
+// with every key naming a kind whose severity the Contract fixes left out, because
+// such a key is an unimplemented key rather than a setting.
+func settableSeverityKeys(t *testing.T) []string {
+	t.Helper()
+
+	live, fixed := contractKinds(t)
+	keys := make([]string, 0, len(live))
+	for _, code := range live {
+		for _, key := range []string{code, code[:familyKeyLength]} {
+			if !slices.Contains(keys, key) && !namesFixedSeverity(key, fixed) {
+				keys = append(keys, key)
+			}
+		}
+	}
+	slices.Sort(keys)
+	return keys
+}
+
+// schemaSettings returns the dotted path of every setting the Contract's
+// configuration schema declares, in ascending order: a value, an array, and an
+// object carrying a default of its own, which is one setting a source supplies
+// whole. A section holds no value, and an object whose member names a pattern
+// declares resolves per member rather than as one setting.
+func schemaSettings(t *testing.T) []string {
+	t.Helper()
+
+	var paths []string
+	collectSchemaSettings(t, configSchema(t), "", &paths)
+	if len(paths) == 0 {
+		t.Fatal("config.schema.json declares no setting, so this test pins nothing")
+	}
+	slices.Sort(paths)
+	return paths
+}
+
+// collectSchemaSettings appends the path of every setting at or below one
+// declaration.
+func collectSchemaSettings(t *testing.T, declaration map[string]any, at string, into *[]string) {
+	t.Helper()
+
+	if _, open := declaration["patternProperties"]; open {
+		return
+	}
+	properties, holds := declaration["properties"]
+	if !holds {
+		if at != "" {
+			*into = append(*into, at)
+		}
+		return
+	}
+	if _, carries := declaration["default"]; carries && at != "" {
+		*into = append(*into, at)
+		return
+	}
+	declared, isObject := properties.(map[string]any)
+	if !isObject {
+		t.Fatalf("config.schema.json: %s: properties is %T, want an object", at, properties)
+	}
+	for name, member := range declared {
+		asObject, isObject := member.(map[string]any)
+		if !isObject {
+			t.Fatalf("config.schema.json: %s: %s is %T, want an object", at, name, member)
+		}
+		path := name
+		if at != "" {
+			path = at + "." + name
+		}
+		collectSchemaSettings(t, asObject, path, into)
+	}
+}
+
+func TestSettingGeneratorsNameEveryDeclaredSetting(t *testing.T) {
+	t.Parallel()
+
+	// Without this the round-trip property ranges over the settings a generator
+	// happened to be written for, so a key the Contract adds resolves, prints and
+	// reads back untested.
+	want := schemaSettings(t)
+	got := slices.Sorted(maps.Keys(settingGenerators()))
+	if !slices.Equal(got, want) {
+		t.Errorf("settingGenerators() names %v, want the settings config.schema.json declares %v", got, want)
+	}
+	for _, path := range got {
+		if !config.DeclaresSetting(path) {
+			t.Errorf("settingGenerators() names %q, want every key to be a setting DeclaresSetting resolves", path)
+		}
+	}
 }

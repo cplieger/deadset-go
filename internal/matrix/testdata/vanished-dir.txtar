@@ -1,0 +1,20 @@
+A directory whose only file one platform selects. Under any other configuration
+the directory holds no package at all, so a load reports nothing for it and the
+atom it names is visible only by reading the tree.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- app.go --
+package app
+
+// Name is the platform the build selected.
+func Name() string { return "app" }
+-- absent/only.go --
+//go:build plan9
+
+package absent
+
+// Root is the platform's own root directory.
+const Root = "/"

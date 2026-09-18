@@ -1,0 +1,145 @@
+One module whose types an encoder reaches through the members of the value it is
+given: a field two struct levels below the argument, a field typed as the empty
+interface and one typed as a named interface, an embedded field, the field of a
+generic type instantiated at the call, and a type that holds a value of itself.
+Each type declares one exported tagged field, one exported untagged field and one
+unexported untagged field, so the retained set states which of the three the class
+keeps.
+
+-- go.mod --
+module example.com/reach
+
+go 1.27.1
+-- nested.go --
+package reach
+
+import "encoding/json"
+
+// Root is the argument of the encoder.
+type Root struct {
+	Mid     Middle `json:"mid"`
+	Opaque  any    `json:"opaque"`
+	Printer Printer
+	secret  string
+}
+
+// Describe is exported.
+func (r Root) Describe() string { return r.secret }
+
+// Middle is one struct level below the argument.
+type Middle struct {
+	Leaf  Leaf `json:"leaf"`
+	Count int
+}
+
+// Leaf is two struct levels below the argument.
+type Leaf struct {
+	Label  string `json:"label"`
+	Extra  int
+	secret string
+}
+
+// Describe is exported.
+func (l Leaf) Describe() string { return l.Label }
+
+func (l Leaf) hidden() string { return l.secret }
+
+// EncodeRoot hands the argument to the encoder.
+func EncodeRoot(r Root) ([]byte, error) { return json.Marshal(r) }
+-- opaque.go --
+package reach
+
+// Printer is the type of a field of the argument, and what an encoder reads there
+// is the value the field carries rather than this declaration.
+type Printer interface {
+	Print() string
+}
+
+// Opaque is a value the program puts in the field typed as the empty interface.
+type Opaque struct {
+	Label  string `json:"label"`
+	Extra  int
+	secret string
+}
+
+// Describe is exported.
+func (o Opaque) Describe() string { return o.Label }
+
+// Printed is a value the program puts in the field typed as the interface.
+type Printed struct {
+	Label  string `json:"label"`
+	Extra  int
+	secret string
+}
+
+// Print is what the interface requires.
+func (p Printed) Print() string { return p.Label }
+
+// NewRoot builds an argument whose two interface-typed fields carry a value.
+func NewRoot() Root {
+	return Root{Opaque: Opaque{Label: "o"}, Printer: Printed{Label: "p"}}
+}
+-- embedded.go --
+package reach
+
+import "encoding/json"
+
+// Wrapper carries an embedded field, which an encoder reads as the fields of the
+// type embedded.
+type Wrapper struct {
+	Embedded
+	Count int
+}
+
+// Embedded is the type of the embedded field.
+type Embedded struct {
+	Tag    string `json:"tag"`
+	Extra  int
+	secret string
+}
+
+// Mark is exported and declared by the embedded type.
+func (e Embedded) Mark() string { return e.Tag }
+
+// EncodeWrapper hands a value carrying an embedded field to the encoder.
+func EncodeWrapper(w Wrapper) ([]byte, error) { return json.Marshal(w) }
+-- generic.go --
+package reach
+
+import "encoding/json"
+
+// Box carries one value of the type it is instantiated at.
+type Box[T any] struct {
+	V     T `json:"v"`
+	Count int
+}
+
+// Boxed is the type the call instantiates the box at.
+type Boxed struct {
+	Label  string `json:"label"`
+	Extra  int
+	secret string
+}
+
+// Describe is exported.
+func (b Boxed) Describe() string { return b.Label }
+
+// EncodeBox hands an instantiated box to the encoder.
+func EncodeBox(b Box[Boxed]) ([]byte, error) { return json.Marshal(b) }
+-- recursive.go --
+package reach
+
+import "encoding/json"
+
+// Node holds a value of its own type, so the walk meets it a second time.
+type Node struct {
+	Next   *Node  `json:"next"`
+	Label  string `json:"label"`
+	secret string
+}
+
+// Describe is exported.
+func (n Node) Describe() string { return n.Label }
+
+// EncodeNode hands a value that holds itself to the encoder.
+func EncodeNode(n Node) ([]byte, error) { return json.Marshal(n) }

@@ -41,7 +41,11 @@ func TestTemplateFieldDetector(t *testing.T) {
 		if err != nil {
 			t.Fatalf("TemplateFieldDetector(template-field.txtar, dirs=[templates]) error: %v", err)
 		}
+		// The file written with delimiters of the project's own names nothing
+		// here, because at the grammar's own delimiters it holds no action.
 		want := []string{
+			"Note.Title template-field templates/chain.tmpl:1:19 named by {{(index . 0).Title}}",
+			"Page.Title template-field templates/chain.tmpl:1:19 named by {{(index . 0).Title}}",
 			"Note.Title template-field templates/page.tmpl:1:8 named by {{.Title}}",
 			"Page.Title template-field templates/page.tmpl:1:8 named by {{.Title}}",
 			"Page.Byline template-field templates/page.tmpl:3:9 named by {{$p.Byline}}",
@@ -50,6 +54,22 @@ func TestTemplateFieldDetector(t *testing.T) {
 		}
 		if rows := retainedRows(t, &in, got); !slices.Equal(rows, want) {
 			t.Errorf("TemplateFieldDetector(template-field.txtar, dirs=[templates]) = %q, want %q", rows, want)
+		}
+	})
+
+	t.Run("configured delimiters retain what the file written with them names", func(t *testing.T) {
+		in := *base
+		in.Options = Options{TemplateDirs: []string{"templates"}, TemplateDelimiters: Delimiters{Left: "[[", Right: "]]"}}
+
+		got, err := TemplateFieldDetector(&in)
+		if err != nil {
+			t.Fatalf("TemplateFieldDetector(template-field.txtar, delimiters=[[ ]]) error: %v", err)
+		}
+		// The delimiters are the project's, so the files written with the
+		// grammar's own hold no action and the clause reads as the file writes it.
+		want := []string{"Draft.Subtitle template-field templates/custom.tmpl:1:11 named by [[.Subtitle]]"}
+		if rows := retainedRows(t, &in, got); !slices.Equal(rows, want) {
+			t.Errorf("TemplateFieldDetector(template-field.txtar, delimiters=[[ ]]) = %q, want %q", rows, want)
 		}
 	})
 

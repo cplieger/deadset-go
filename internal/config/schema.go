@@ -24,24 +24,25 @@ var exemptionClassPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 //nolint:gocritic // regexpSimplify: the pattern is the schema's own spelling, pinned equal to it
 var contractVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 
-// fixedSeverityCodes are the codes whose severity the Contract fixes. A severity
-// key naming one, or a family prefix whose range holds one, is an unimplemented
-// key rather than a setting.
-func fixedSeverityCodes() []string { return []string{"DS1703", "DS1704"} }
-
 // keyKind classifies one node of the closed key list.
 type keyKind uint8
 
 const (
 	// keyLeaf is a setting: a scalar, or an array of scalars.
 	keyLeaf keyKind = iota
-	// keySection is an object whose member names the key list declares.
+	// keySection is an object whose member names the key list declares and which
+	// holds no value of its own.
 	keySection
 	// keyMap is an object whose member names the key list leaves open, its
 	// values scalars: the severity and provenance objects.
 	keyMap
 	// keyList is an array whose entries are objects with declared members.
 	keyList
+	// keyObject is one setting written as an object: its member names are
+	// declared, the whole object carries the setting's documented default, and a
+	// source supplies it whole. The delimiter pair is the one the key list
+	// declares.
+	keyObject
 )
 
 // keyNode is one node of the closed key list. members holds a section's declared
@@ -76,6 +77,10 @@ func schemaRoot() keyNode {
 				"complete": {kind: keyLeaf},
 			}},
 			"template_dirs": {kind: keyLeaf},
+			"template_delimiters": {kind: keyObject, members: map[string]keyNode{
+				"left":  {kind: keyLeaf},
+				"right": {kind: keyLeaf},
+			}},
 		}},
 		"consumers": {kind: keySection, members: map[string]keyNode{
 			"complete": {kind: keyLeaf},
@@ -107,7 +112,7 @@ func schemaRoot() keyNode {
 // object, and any member below a setting, resolves to a leaf, so the walk
 // descends far enough to find a repeated member at any depth.
 func (n keyNode) member(name string) (keyNode, bool) {
-	if n.kind == keySection || n.kind == keyList {
+	if n.kind == keySection || n.kind == keyList || n.kind == keyObject {
 		child, declared := n.members[name]
 		return child, declared
 	}
@@ -139,8 +144,9 @@ func collectKeys(node keyNode, at string, keys *[]string) {
 }
 
 // settingPaths returns the dotted path of every setting that holds one value, in
-// ascending order. A list is one setting, its entries not addressable on their
-// own, and the severity object is not among them: it resolves per code.
+// ascending order. A list and a setting written as an object are each one setting,
+// their members not addressable on their own, and the severity object is not among
+// them: it resolves per code.
 func settingPaths() []string {
 	var paths []string
 	collectSettings(schemaRoot(), "", &paths)
@@ -148,11 +154,13 @@ func settingPaths() []string {
 	return paths
 }
 
-// collectSettings appends the dotted path of every setting below node.
+// collectSettings appends the dotted path of every setting below node. A setting
+// written as an object is one setting and its members are not reached, the same
+// way a list's entries are not.
 func collectSettings(node keyNode, at string, paths *[]string) {
 	for name, child := range node.members {
 		path := joinKey(at, name)
-		if child.kind == keyLeaf || child.kind == keyList {
+		if child.kind == keyLeaf || child.kind == keyList || child.kind == keyObject {
 			*paths = append(*paths, path)
 			continue
 		}
@@ -319,7 +327,7 @@ func nestFlags(data []byte, label string) ([]byte, *Error) {
 	}
 	nested := make(map[string]any, len(flat))
 	for _, path := range slices.Sorted(maps.Keys(flat)) {
-		if !isFlagSetting(path) {
+		if !DeclaresSetting(path) {
 			return nil, unimplementedKey(label, path)
 		}
 		if err := nest(nested, strings.Split(path, "."), flat[path], label); err != nil {
@@ -339,14 +347,24 @@ func checkFlagDuplicates(data []byte, label string) *Error {
 	return walkValue(dec, "", keyNode{kind: keyMap}, label)
 }
 
-// isFlagSetting reports whether one dotted path names a setting a flag supplies:
-// a setting of the closed key list, or one code of the severity object.
-func isFlagSetting(path string) bool {
+// DeclaresSetting reports whether one dotted path names a setting a source may
+// supply: a setting of the closed key list, or one code of the severity object,
+// whose member names the key list leaves open. It is the predicate a command maps
+// its own flag names through, so a flag that would be refused as an unimplemented
+// key is a failing test rather than a flag nothing reads.
+//
+// A section holds no value of its own, so "analysis" is false. A setting written
+// as an object is supplied whole, so "analysis.template_delimiters" is true and
+// "analysis.template_delimiters.left" is false. A severity code is a declared
+// setting whatever it names, so "severity.DS9999" is true here and refused by
+// resolution: this answers the shape of a path, and resolution answers the
+// vocabulary.
+func DeclaresSetting(path string) bool {
 	if slices.Contains(settingPaths(), path) {
 		return true
 	}
 	section, code, found := strings.Cut(path, ".")
-	return found && section == "severity" && code != "" && !strings.Contains(code, ".")
+	return found && section == severitySection && code != "" && !strings.Contains(code, ".")
 }
 
 // nest writes one value into the nested document at the path its segments name.

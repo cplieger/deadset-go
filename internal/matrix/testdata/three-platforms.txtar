@@ -1,0 +1,37 @@
+Three operating-system atoms and one architecture atom, declared three
+different ways: one by a file name, two by build expressions, and the
+architecture by a file name again. The file that is not Go source names a
+fourth operating system, which nothing reads.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- app.go --
+package app
+
+// Name is the platform the build selected.
+func Name() string { return name }
+-- listen_linux.go --
+package app
+
+const name = "linux"
+-- notes_plan9.go.txt --
+this file is not Go source and is read by nothing
+-- windows.go --
+//go:build windows
+
+package app
+
+const name = "windows"
+-- darwin.go --
+//go:build darwin
+
+package app
+
+const name = "darwin"
+-- vector_arm64.go --
+package app
+
+// Wide reports whether the wide vector path is in.
+func Wide() bool { return true }

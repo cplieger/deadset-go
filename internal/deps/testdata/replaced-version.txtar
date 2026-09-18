@@ -1,0 +1,22 @@
+A replace directive naming a version of a module the target imports, replaced by
+another version of the same module, so that the build list is read for a
+replacement that is a module rather than a directory.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+
+require golang.org/x/mod v0.40.0
+
+replace golang.org/x/mod v0.40.0 => golang.org/x/mod v0.41.0
+-- go.sum --
+golang.org/x/mod v0.41.0 h1:qJmnOUb4YB+FsEuM3HcWucdZASCPGhsX6uljO6pog0c=
+golang.org/x/mod v0.41.0/go.mod h1:Ek9pY8RKWXwsWvd3rQiHYtMqkjSUV+s1Rj7j4H5Ur6o=
+-- app.go --
+package app
+
+import "golang.org/x/mod/semver"
+
+// Newer reports whether version a sorts after version b.
+func Newer(a, b string) bool { return semver.Compare(a, b) > 0 }

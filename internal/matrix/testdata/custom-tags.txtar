@@ -1,0 +1,35 @@
+Two tags that are neither an operating system nor an architecture, one of them
+on a test file, plus a release tag and an operating-system class, which the
+toolchain answers from its own environment and which derive nothing.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- app.go --
+package app
+
+// Name is the platform the build selected.
+func Name() string { return "app" }
+-- bridge.go --
+//go:build cgo
+
+package app
+
+// Bridged reports whether the bridge is in.
+func Bridged() bool { return true }
+-- app_integration_test.go --
+//go:build integration
+
+package app
+
+import "testing"
+
+func TestIntegration(t *testing.T) { _ = Name() }
+-- modern.go --
+//go:build go1.21 && unix
+
+package app
+
+// Modern reports whether the modern path is in.
+func Modern() bool { return true }

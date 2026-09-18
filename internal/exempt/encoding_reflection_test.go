@@ -65,7 +65,7 @@ func flowRefs(typeName string, members ...string) []string {
 	return qualify("example.com/flow", typeName, members...)
 }
 
-func TestEncodingReflectionRetainsTheExportedMethodsAndTheTaggedFieldsOfEveryDestination(t *testing.T) {
+func TestEncodingReflectionRetainsTheExportedMembersAndTheTaggedFieldsOfEveryDestination(t *testing.T) {
 	in := inputOf(t, "encoding-reflection-firing.txtar", Options{})
 	refs := retainedRefs(t, in, EncodingReflectionDetector)
 
@@ -77,42 +77,42 @@ func TestEncodingReflectionRetainsTheExportedMethodsAndTheTaggedFieldsOfEveryDes
 		{
 			destination: "encoding/json",
 			typeName:    "JSONPayload",
-			want:        flowRefs("JSONPayload", "Describe", "Name", "secret"),
+			want:        flowRefs("JSONPayload", "Describe", "Extra", "Name", "secret"),
 		},
 		{
 			destination: "encoding/xml",
 			typeName:    "XMLPayload",
-			want:        flowRefs("XMLPayload", "Describe", "Name", "secret"),
+			want:        flowRefs("XMLPayload", "Describe", "Extra", "Name", "secret"),
 		},
 		{
 			destination: "encoding/gob",
 			typeName:    "GobPayload",
-			want:        flowRefs("GobPayload", "Describe", "Name", "secret"),
+			want:        flowRefs("GobPayload", "Describe", "Extra", "Name", "secret"),
 		},
 		{
 			destination: "text/template",
 			typeName:    "TextPayload",
-			want:        flowRefs("TextPayload", "Describe", "Name", "secret"),
+			want:        flowRefs("TextPayload", "Describe", "Extra", "Name", "secret"),
 		},
 		{
 			destination: "html/template",
 			typeName:    "HTMLPayload",
-			want:        flowRefs("HTMLPayload", "Describe", "Name", "secret"),
+			want:        flowRefs("HTMLPayload", "Describe", "Extra", "Name", "secret"),
 		},
 		{
 			destination: "reflect",
 			typeName:    "ReflectPayload",
-			want:        flowRefs("ReflectPayload", "Describe", "Name", "secret"),
+			want:        flowRefs("ReflectPayload", "Describe", "Extra", "Name", "secret"),
 		},
 		{
 			destination: "the scan target of one row",
 			typeName:    "SQLPayload",
-			want:        flowRefs("SQLPayload", "Describe", "Name", "secret"),
+			want:        flowRefs("SQLPayload", "Describe", "Extra", "Name", "secret"),
 		},
 		{
 			destination: "the scan target of a row set",
 			typeName:    "RowsPayload",
-			want:        flowRefs("RowsPayload", "Describe", "Name", "secret"),
+			want:        flowRefs("RowsPayload", "Describe", "Extra", "Name", "secret"),
 		},
 		{
 			destination: "a scan argument that is a value rather than a pointer",
@@ -122,27 +122,27 @@ func TestEncodingReflectionRetainsTheExportedMethodsAndTheTaggedFieldsOfEveryDes
 		{
 			destination: "sort.Interface",
 			typeName:    "SortPayload",
-			want:        flowRefs("SortPayload", "Describe", "Len", "Less", "Names", "Swap", "secret"),
+			want:        flowRefs("SortPayload", "Describe", "Extra", "Len", "Less", "Names", "Swap", "secret"),
 		},
 		{
-			destination: "slog.LogValuer",
+			destination: "a structured-logging call",
 			typeName:    "LogPayload",
-			want:        flowRefs("LogPayload", "Describe", "LogValue", "Name", "secret"),
+			want:        flowRefs("LogPayload", "Describe", "Extra", "LogValue", "Name", "secret"),
 		},
 		{
 			destination: "a map of slices of pointers",
 			typeName:    "Deep",
-			want:        flowRefs("Deep", "Describe", "Inner", "Name", "secret"),
+			want:        flowRefs("Deep", "Describe", "Extra", "Inner", "Name", "secret"),
 		},
 		{
 			destination: "the writer of a template execution",
 			typeName:    "Sink",
-			want:        flowRefs("Sink", "Buffer", "Write"),
+			want:        flowRefs("Sink", "Buffer", "Extra", "Write"),
 		},
 		{
-			destination: "the type of a field of a type an encoder reaches",
+			destination: "the field of a type an encoder reaches",
 			typeName:    "Inner",
-			want:        nil,
+			want:        flowRefs("Inner", "Describe", "Label"),
 		},
 	} {
 		t.Run(strings.ReplaceAll(test.destination, " ", "_"), func(t *testing.T) {
@@ -150,6 +150,81 @@ func TestEncodingReflectionRetainsTheExportedMethodsAndTheTaggedFieldsOfEveryDes
 			if !slices.Equal(got, test.want) {
 				t.Errorf("EncodingReflectionDetector(encoding-reflection-firing.txtar) retained, for %s reaching %s,\ngot  %v\nwant %v",
 					test.typeName, test.destination, got, test.want)
+			}
+		})
+	}
+}
+
+// reachRefs spells the references of one type's members in the reach fixture.
+func reachRefs(typeName string, members ...string) []string {
+	return qualify("example.com/reach", typeName, members...)
+}
+
+func TestEncodingReflectionReachesTheTypesTheMembersOfAnArgumentCarry(t *testing.T) {
+	in := inputOf(t, "encoding-reflection-reach.txtar", Options{})
+	refs := retainedRefs(t, in, EncodingReflectionDetector)
+
+	for _, test := range []struct {
+		reached  string
+		typeName string
+		want     []string
+	}{
+		{
+			reached:  "the argument of the encoder",
+			typeName: "Root",
+			want:     reachRefs("Root", "Describe", "Mid", "Opaque", "Printer"),
+		},
+		{
+			reached:  "one struct level below the argument",
+			typeName: "Middle",
+			want:     reachRefs("Middle", "Count", "Leaf"),
+		},
+		{
+			reached:  "two struct levels below the argument",
+			typeName: "Leaf",
+			want:     reachRefs("Leaf", "Describe", "Extra", "Label"),
+		},
+		{
+			reached:  "the value a field typed as the empty interface carries",
+			typeName: "Opaque",
+			want:     nil,
+		},
+		{
+			reached:  "the value a field typed as an interface carries",
+			typeName: "Printed",
+			want:     nil,
+		},
+		{
+			reached:  "an argument carrying an embedded field",
+			typeName: "Wrapper",
+			want:     reachRefs("Wrapper", "Count", "Embedded"),
+		},
+		{
+			reached:  "the type embedded in an argument",
+			typeName: "Embedded",
+			want:     reachRefs("Embedded", "Extra", "Mark", "Tag"),
+		},
+		{
+			reached:  "a generic argument",
+			typeName: "Box",
+			want:     reachRefs("Box", "Count", "V"),
+		},
+		{
+			reached:  "the type a generic argument is instantiated at",
+			typeName: "Boxed",
+			want:     reachRefs("Boxed", "Describe", "Extra", "Label"),
+		},
+		{
+			reached:  "a type that holds a value of itself",
+			typeName: "Node",
+			want:     reachRefs("Node", "Describe", "Label", "Next"),
+		},
+	} {
+		t.Run(strings.ReplaceAll(test.reached, " ", "_"), func(t *testing.T) {
+			got := membersOf(refs, test.typeName)
+			if !slices.Equal(got, test.want) {
+				t.Errorf("EncodingReflectionDetector(encoding-reflection-reach.txtar) retained, for %s reaching %s,\ngot  %v\nwant %v",
+					test.typeName, test.reached, got, test.want)
 			}
 		})
 	}
@@ -181,12 +256,14 @@ func TestEncodingReflectionNamesTheClassTheDestinationAndTheSite(t *testing.T) {
 
 	want := []record{
 		{"go://example.com/flow#JSONPayload.Name", "encoding-reflection", "json.go:18:70", "passed to encoding/json.Marshal"},
+		{"go://example.com/flow#JSONPayload.Extra", "encoding-reflection", "json.go:18:70", "passed to encoding/json.Marshal"},
 		{"go://example.com/flow#JSONPayload.secret", "encoding-reflection", "json.go:18:70", "passed to encoding/json.Marshal"},
 		{"go://example.com/flow#JSONPayload.Describe", "encoding-reflection", "json.go:18:70", "passed to encoding/json.Marshal"},
-		{"go://example.com/flow#LogPayload.LogValue", "encoding-reflection", "logvalue.go:20:24", "converted to log/slog.LogValuer"},
-		{"go://example.com/flow#LogPayload.Describe", "encoding-reflection", "logvalue.go:20:24", "converted to log/slog.LogValuer"},
-		{"go://example.com/flow#LogPayload.Name", "encoding-reflection", "logvalue.go:20:24", "converted to log/slog.LogValuer"},
-		{"go://example.com/flow#LogPayload.secret", "encoding-reflection", "logvalue.go:20:24", "converted to log/slog.LogValuer"},
+		{"go://example.com/flow#LogPayload.LogValue", "encoding-reflection", "logging.go:21:68", "passed to log/slog.Info"},
+		{"go://example.com/flow#LogPayload.Describe", "encoding-reflection", "logging.go:21:68", "passed to log/slog.Info"},
+		{"go://example.com/flow#LogPayload.Name", "encoding-reflection", "logging.go:21:68", "passed to log/slog.Info"},
+		{"go://example.com/flow#LogPayload.Extra", "encoding-reflection", "logging.go:21:68", "passed to log/slog.Info"},
+		{"go://example.com/flow#LogPayload.secret", "encoding-reflection", "logging.go:21:68", "passed to log/slog.Info"},
 	}
 	slices.SortFunc(got, func(a, b record) int { return strings.Compare(a.ref+a.site, b.ref+b.site) })
 	slices.SortFunc(want, func(a, b record) int { return strings.Compare(a.ref+a.site, b.ref+b.site) })

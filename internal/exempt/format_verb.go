@@ -11,12 +11,16 @@ import (
 	"github.com/cplieger/deadset-go/internal/graph"
 )
 
-// The package that formats a value, and the two methods it reaches through an
-// interface when a verb asks for a string.
+// The packages whose functions format a value with the formatting machinery, and
+// the two methods that machinery reaches through an interface when a verb asks for
+// a string.
 const (
-	formatPackage = "fmt"
-	stringMethod  = "String"
-	errorMethod   = "Error"
+	formatPackage  = "fmt"
+	logPackage     = "log"
+	testingPackage = "testing"
+	slogPackage    = "log/slog"
+	stringMethod   = "String"
+	errorMethod    = "Error"
 )
 
 // stringVerbs are the verbs a string operand is valid under, and so the verbs
@@ -32,35 +36,118 @@ const (
 // and its width.
 const formatFlags = "+-# 0"
 
-// printFunctions are the print, format and error-construction functions of the
+// verbless is the format position of a form that carries no format string, whose
+// every operand is formatted as if under the default verb.
+const verbless = -1
+
+// formatFunctions are the print, format and error-construction functions of the
 // formatting package, each with the position of its format string and of its first
 // operand. The scanning functions read values rather than format them, and the
 // remaining function of the package formats a verb rather than an operand, so
 // neither is here.
-var printFunctions = map[string]printSignature{
-	"Append":   {format: -1, operands: 1},
+var formatFunctions = map[string]printSignature{
+	"Append":   {format: verbless, operands: 1},
 	"Appendf":  {format: 1, operands: 2},
-	"Appendln": {format: -1, operands: 1},
+	"Appendln": {format: verbless, operands: 1},
 	"Errorf":   {format: 0, operands: 1, wraps: true},
-	"Fprint":   {format: -1, operands: 1},
+	"Fprint":   {format: verbless, operands: 1},
 	"Fprintf":  {format: 1, operands: 2},
-	"Fprintln": {format: -1, operands: 1},
-	"Print":    {format: -1, operands: 0},
+	"Fprintln": {format: verbless, operands: 1},
+	"Print":    {format: verbless, operands: 0},
 	"Printf":   {format: 0, operands: 1},
-	"Println":  {format: -1, operands: 0},
-	"Sprint":   {format: -1, operands: 0},
+	"Println":  {format: verbless, operands: 0},
+	"Sprint":   {format: verbless, operands: 0},
 	"Sprintf":  {format: 0, operands: 1},
-	"Sprintln": {format: -1, operands: 0},
+	"Sprintln": {format: verbless, operands: 0},
+}
+
+// logFunctions are the print, fatal and panic functions of the logging package,
+// which are also the methods of its logger: a method call carries no receiver
+// among its arguments, so one entry answers both forms.
+var logFunctions = map[string]printSignature{
+	"Fatal":   {format: verbless, operands: 0},
+	"Fatalf":  {format: 0, operands: 1},
+	"Fatalln": {format: verbless, operands: 0},
+	"Panic":   {format: verbless, operands: 0},
+	"Panicf":  {format: 0, operands: 1},
+	"Panicln": {format: verbless, operands: 0},
+	"Print":   {format: verbless, operands: 0},
+	"Printf":  {format: 0, operands: 1},
+	"Println": {format: verbless, operands: 0},
+}
+
+// testingFunctions are the log, error, fatal and skip methods a test reports
+// through. The methods are declared once for every testing type, on the type they
+// all embed and on the interface over them, so a call on a test, a benchmark or a
+// fuzz target names one of two objects of this package and both carry the name this
+// table is keyed by.
+var testingFunctions = map[string]printSignature{
+	"Error":  {format: verbless, operands: 0},
+	"Errorf": {format: 0, operands: 1},
+	"Fatal":  {format: verbless, operands: 0},
+	"Fatalf": {format: 0, operands: 1},
+	"Log":    {format: verbless, operands: 0},
+	"Logf":   {format: 0, operands: 1},
+	"Skip":   {format: verbless, operands: 0},
+	"Skipf":  {format: 0, operands: 1},
+}
+
+// slogFunctions are the logging functions of the structured-logging package, the
+// methods of its logger, which carry the same names and the same operand positions,
+// and the attribute constructors whose value is typed as any. There is no format
+// string: every argument after the message, the level and the context is an
+// operand, and the handler may render it with the formatting machinery.
+//
+// It is the one declaration of that set, because a value reaching one of these
+// calls reaches this class and the encoding class both: the encoding class reads
+// this table to know its own destinations.
+var slogFunctions = map[string]printSignature{
+	"Any":          {format: verbless, operands: 1},
+	"Debug":        {format: verbless, operands: 1},
+	"DebugContext": {format: verbless, operands: 2},
+	"Error":        {format: verbless, operands: 1},
+	"ErrorContext": {format: verbless, operands: 2},
+	"Group":        {format: verbless, operands: 1},
+	"Info":         {format: verbless, operands: 1},
+	"InfoContext":  {format: verbless, operands: 2},
+	"Log":          {format: verbless, operands: 3},
+	"LogAttrs":     {format: verbless, operands: 3},
+	"Warn":         {format: verbless, operands: 1},
+	"WarnContext":  {format: verbless, operands: 2},
 }
 
 // printSignature is where one formatting function carries its format string and
-// its operands, and whether it wraps an error. A format of -1 names a form that
-// carries no format string, whose every operand is formatted as if under the
-// default verb.
+// its operands, and whether it wraps an error.
 type printSignature struct {
 	format   int
 	operands int
 	wraps    bool
+}
+
+// declaredPrintFunction returns where fn carries its format string and its
+// operands, and reports whether fn is one of the functions the standard library
+// declares to format its operands. A method's receiver is no argument of the call,
+// so a package's functions and the methods of its logger share one entry.
+func declaredPrintFunction(fn *types.Func) (printSignature, bool) {
+	pkg := fn.Pkg()
+	if pkg == nil {
+		return printSignature{}, false
+	}
+	var table map[string]printSignature
+	switch pkg.Path() {
+	case formatPackage:
+		table = formatFunctions
+	case logPackage:
+		table = logFunctions
+	case testingPackage:
+		table = testingFunctions
+	case slogPackage:
+		table = slogFunctions
+	default:
+		return printSignature{}, false
+	}
+	sig, formats := table[fn.Name()]
+	return sig, formats
 }
 
 // formatScan is what one format string says about the operands of its call: the
@@ -80,21 +167,28 @@ type operand struct {
 }
 
 // FormatVerbContractDetector records the format-verb-contract class: a type whose
-// values reach a formatting verb valid for a string operand keeps its String and
-// Error methods, because the formatting package calls them through an interface
-// and no static reference exists.
+// values reach a facility that formats its operands with the formatting machinery
+// keeps its String and Error methods, because the facility calls them through an
+// interface and no static reference exists.
+//
+// The facilities are the print, format and error-construction functions of the
+// formatting package, the print, fatal and panic functions of the logging package
+// and the same methods of its logger, the log, error, fatal and skip methods of a
+// testing type, the logging functions of the structured-logging package with the
+// methods of its logger and its attribute constructors, and the functions of the
+// analysed program that forward their own variadic operands to any of those.
 //
 // Three rules the class applies where the case is not spelled out. A format string
 // the call computes rather than writes is read as binding every operand, which
 // retains more than the call can reach and never less. A method is retained only
 // in the form a verb calls, taking no argument and returning one string, so a
 // method of another shape that shares the name is not. And an operand reaches
-// through a pointer, a slice, an array, a map, a channel and a type argument,
-// because the formatting package formats the elements of a value it is given and
-// asks each of them for its string in turn; the reach stops at each defined type,
-// so the members of a type a retained type is built from are not retained.
+// through a pointer, a slice, an array and a map, because the machinery formats
+// the elements of a value it is given and asks each of them for its string in
+// turn; the reach stops at each defined type, so the members of a type a retained
+// type is built from are not retained.
 func FormatVerbContractDetector(in *Input) ([]graph.Exemption, error) {
-	f := &formatFlow{kept: newRetention(in, FormatVerbContract)}
+	f := &formatFlow{kept: newRetention(in, FormatVerbContract), wrappers: forwardingWrappers(in)}
 	if err := f.walkCalls(); err != nil {
 		return nil, err
 	}
@@ -103,12 +197,16 @@ func FormatVerbContractDetector(in *Input) ([]graph.Exemption, error) {
 
 // formatFlow accumulates the class over one loaded configuration.
 type formatFlow struct {
-	kept *retention
+	kept     *retention
+	wrappers printWrappers
 }
 
 // walkCalls records every value a formatting call asks for a string.
 func (f *formatFlow) walkCalls() error {
-	for _, p := range targetPackages(f.kept.in.Result.Packages) {
+	for _, p := range sortedPackages(f.kept.in.Result.Packages) {
+		if p.TypesInfo == nil {
+			continue
+		}
 		for _, file := range p.Syntax {
 			if err := f.walkFile(p.TypesInfo, file); err != nil {
 				return err
@@ -127,15 +225,233 @@ func (f *formatFlow) walkFile(info *types.Info, file *ast.File) error {
 			return failed == nil
 		}
 		fn, isFunc := resolveObject(info, call.Fun).(*types.Func)
-		if !isFunc || fn.Pkg() == nil || fn.Pkg().Path() != formatPackage {
+		if !isFunc {
 			return true
 		}
-		if sig, formats := printFunctions[fn.Name()]; formats {
+		if sig, formats := f.printFunction(fn); formats {
 			failed = f.call(info, call, fn, sig)
 		}
 		return failed == nil
 	})
 	return failed
+}
+
+// printFunction returns where fn carries its format string and its operands, and
+// reports whether fn formats its operands at all: either the standard library
+// declares it to, or the analysed program forwards its operands to one that does.
+func (f *formatFlow) printFunction(fn *types.Func) (printSignature, bool) {
+	if sig, formats := declaredPrintFunction(fn); formats {
+		return sig, true
+	}
+	sig, forwards := f.wrappers[fn.Pos()]
+	return sig, forwards
+}
+
+// printWrappers are the functions of the analysed program that format their
+// operands by forwarding them, each keyed by the position its declaration is
+// written at, which is the one position every package variant that type-checks the
+// declaration shares.
+type printWrappers map[token.Pos]printSignature
+
+// forwardingWrappers returns the functions of the loaded configuration that format
+// their operands by passing them on: a function whose final parameter is a variadic
+// list of any, and whose body hands that whole list to a function that formats its
+// operands, formats its own. Such a function is then itself something a further
+// function can forward to, so the set grows until no function joins it, which is
+// what makes a wrapper of a wrapper carry the same rule as the one it calls.
+//
+// A wrapper's callers write the format string when the wrapper passes a parameter
+// of its own to the format position of the call it forwards to; otherwise the
+// wrapper formats every operand as the verb-less forms do.
+func forwardingWrappers(in *Input) printWrappers {
+	candidates := variadicWrappers(in)
+	found := make(printWrappers, len(candidates))
+	for joined := true; joined; {
+		joined = false
+		for i := range candidates {
+			if _, held := found[candidates[i].pos]; held {
+				continue
+			}
+			sig, forwards := candidates[i].signature(found)
+			if !forwards {
+				continue
+			}
+			found[candidates[i].pos] = sig
+			joined = true
+		}
+	}
+	return found
+}
+
+// variadicWrapper is one function of the analysed program that may format its
+// operands by forwarding them: where its own operands start, and every call that
+// hands them on.
+type variadicWrapper struct {
+	forwards []forwardedCall
+	pos      token.Pos
+	operands int
+}
+
+// forwardedCall is one call that passes a function's whole variadic operand list to
+// another function, with the parameter of the forwarding function each argument
+// names, so that a format string the forwarding function was given is recognised
+// where the call puts it.
+type forwardedCall struct {
+	to        *types.Func
+	fromParam []int
+}
+
+// signature returns where the wrapper carries its format string and its operands,
+// and reports whether any call it makes formats them. The first call that does
+// decides, in the order the body writes them.
+func (w *variadicWrapper) signature(found printWrappers) (printSignature, bool) {
+	for _, call := range w.forwards {
+		inner, formats := declaredPrintFunction(call.to)
+		if !formats {
+			inner, formats = found[call.to.Pos()]
+		}
+		if !formats {
+			continue
+		}
+		format := verbless
+		if inner.format >= 0 && inner.format < len(call.fromParam) {
+			format = call.fromParam[inner.format]
+		}
+		return printSignature{format: format, operands: w.operands, wraps: inner.wraps}, true
+	}
+	return printSignature{}, false
+}
+
+// variadicWrappers returns every function of the loaded configuration whose final
+// parameter is a variadic list of any, with the calls that pass that list on, in one
+// order so that two runs over one load read the same set. A function literal is not
+// one: nothing names it, so no call to it resolves to a function this class can
+// recognise.
+func variadicWrappers(in *Input) []variadicWrapper {
+	var found []variadicWrapper
+	for _, p := range sortedPackages(in.Result.Packages) {
+		if p.TypesInfo == nil {
+			continue
+		}
+		for _, file := range sortedFiles(p, in.Result.Fset) {
+			found = append(found, fileWrappers(p.TypesInfo, file)...)
+		}
+	}
+	return found
+}
+
+// fileWrappers returns the candidates one source file declares, in the order the
+// file writes them.
+func fileWrappers(info *types.Info, file *ast.File) []variadicWrapper {
+	var found []variadicWrapper
+	for _, decl := range file.Decls {
+		fd, declares := decl.(*ast.FuncDecl)
+		if !declares || fd.Body == nil {
+			continue
+		}
+		if w, forwards := variadicOperands(info, fd); forwards {
+			found = append(found, w)
+		}
+	}
+	return found
+}
+
+// variadicOperands reports whether one declaration takes a variadic list of any as
+// its final parameter and hands that whole list to another function, and returns
+// the calls that do. A call that passes the list element by element, or passes a
+// list of its own, is not one: what the rule reads is the operands of the
+// declaration's own caller reaching a formatting facility unchanged.
+func variadicOperands(info *types.Info, fd *ast.FuncDecl) (variadicWrapper, bool) {
+	fn, declares := info.Defs[fd.Name].(*types.Func)
+	if !declares {
+		return variadicWrapper{}, false
+	}
+	sig := fn.Signature()
+	params := sig.Params()
+	if !sig.Variadic() || params.Len() == 0 {
+		return variadicWrapper{}, false
+	}
+	list, isSlice := params.At(params.Len() - 1).Type().(*types.Slice)
+	if !isSlice || !isAnyType(list.Elem()) {
+		return variadicWrapper{}, false
+	}
+
+	w := variadicWrapper{pos: fn.Pos(), operands: params.Len() - 1}
+	operands := params.At(params.Len() - 1)
+	strung := stringParameters(params)
+	ast.Inspect(fd.Body, func(n ast.Node) bool {
+		call, isCall := n.(*ast.CallExpr)
+		if !isCall || !forwardsOperands(info, call, operands) {
+			return true
+		}
+		if to, isFunc := resolveObject(info, call.Fun).(*types.Func); isFunc {
+			w.forwards = append(w.forwards, forwardedCall{to: to, fromParam: parametersNamed(info, call.Args, strung)})
+		}
+		return true
+	})
+	return w, len(w.forwards) > 0
+}
+
+// isAnyType reports whether t is the empty interface, which is the element type of
+// the operand list a formatting facility takes.
+func isAnyType(t types.Type) bool {
+	iface, isInterface := types.Unalias(t).Underlying().(*types.Interface)
+	return isInterface && iface.Empty()
+}
+
+// stringParameters indexes the parameters of one signature that are typed as a
+// string by their position, which is where a format string a caller writes arrives.
+func stringParameters(params *types.Tuple) map[*types.Var]int {
+	strung := make(map[*types.Var]int, params.Len())
+	for i := range params.Len() {
+		p := params.At(i)
+		if types.Identical(p.Type(), types.Typ[types.String]) {
+			strung[p] = i
+		}
+	}
+	return strung
+}
+
+// forwardsOperands reports whether one call passes operands, and nothing else, as
+// the list its final argument spreads.
+func forwardsOperands(info *types.Info, call *ast.CallExpr, operands *types.Var) bool {
+	if !call.Ellipsis.IsValid() || len(call.Args) == 0 {
+		return false
+	}
+	spread, isIdent := ast.Unparen(call.Args[len(call.Args)-1]).(*ast.Ident)
+	if !isIdent {
+		return false
+	}
+	return info.Uses[spread] == operands
+}
+
+// parametersNamed returns, for each argument of one call, the string parameter of
+// the forwarding function the argument names, or verbless where it names none. An
+// argument that builds on such a parameter names it, because the verbs the caller
+// wrote are in what it built.
+func parametersNamed(info *types.Info, args []ast.Expr, strung map[*types.Var]int) []int {
+	named := make([]int, len(args))
+	for i, arg := range args {
+		named[i] = verbless
+		ast.Inspect(arg, func(n ast.Node) bool {
+			if named[i] != verbless {
+				return false
+			}
+			id, isIdent := n.(*ast.Ident)
+			if !isIdent {
+				return true
+			}
+			p, isVar := info.Uses[id].(*types.Var)
+			if !isVar {
+				return true
+			}
+			if at, holds := strung[p]; holds {
+				named[i] = at
+			}
+			return true
+		})
+	}
+	return named
 }
 
 // call records the operands of one formatting call that a string verb binds.

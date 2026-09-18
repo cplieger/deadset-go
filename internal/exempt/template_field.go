@@ -34,13 +34,15 @@ var ErrTemplateDir = errors.New("exempt: template directory")
 // none configured it scans nothing and retains nothing.
 //
 // Every file under a configured directory is read, whatever its name, and parsed
-// with the action grammar text/template and html/template share, at the default
-// delimiters. A field reference names the identifiers of its own chain, so
-// {{ .Page.Title }} names both Page and Title, and a variable's chain names every
-// identifier after the variable. A file the grammar cannot parse names nothing
-// and is skipped: an unparsable file is not a template the project renders, and a
-// run that refused it would fail on a fixture or a partial that is not the
-// analyzer's business.
+// with the action grammar text/template and html/template share, at the
+// delimiters the configuration sets and at the grammar's own where it sets none.
+// A field reference names the identifiers of its own chain, so {{ .Page.Title }}
+// names both Page and Title; a variable's chain names every identifier after the
+// variable; and a chain on the result of a parenthesized pipeline or of a call
+// names every identifier of the chain, whatever the pipeline itself names. A file
+// the grammar cannot parse names nothing and is skipped: an unparsable file is not
+// a template the project renders, and a run that refused it would fail on a
+// fixture or a partial that is not the analyzer's business.
 func TemplateFieldDetector(in *Input) ([]graph.Exemption, error) {
 	dirs := templateDirs(in.Options.TemplateDirs)
 	if len(dirs) == 0 {
@@ -49,7 +51,7 @@ func TemplateFieldDetector(in *Input) ([]graph.Exemption, error) {
 
 	var refs []reference
 	for _, dir := range dirs {
-		found, err := scanTemplateDir(in.Root, dir)
+		found, err := scanTemplateDir(in.Root, dir, in.Options.TemplateDelimiters)
 		if err != nil {
 			return nil, err
 		}
@@ -108,10 +110,10 @@ type reference struct {
 }
 
 // scanTemplateDir returns every identifier the templates under one
-// target-relative directory name. The directory is opened as a root, so a
-// symbolic link is not followed out of it and a path in the configuration cannot
-// name a file the target does not hold.
-func scanTemplateDir(root, dir string) ([]reference, error) {
+// target-relative directory name, parsed at delims. The directory is opened as a
+// root, so a symbolic link is not followed out of it and a path in the
+// configuration cannot name a file the target does not hold.
+func scanTemplateDir(root, dir string, delims Delimiters) ([]reference, error) {
 	if !filepath.IsLocal(filepath.FromSlash(dir)) {
 		return nil, fmt.Errorf("%w %s: outside the target root", ErrTemplateDir, dir)
 	}
@@ -134,7 +136,7 @@ func scanTemplateDir(root, dir string) ([]reference, error) {
 		if err != nil {
 			return err
 		}
-		refs = append(refs, templateFileRefs(path.Join(dir, name), src)...)
+		refs = append(refs, templateFileRefs(path.Join(dir, name), src, delims)...)
 		return nil
 	}
 	if err := fs.WalkDir(files, ".", walk); err != nil {
@@ -147,11 +149,11 @@ func scanTemplateDir(root, dir string) ([]reference, error) {
 // name, in the order the file writes them. The parse carries no function map and
 // skips the function check, because the project's own functions are unknown here
 // and whether a name is a function decides nothing the scan reads.
-func templateFileRefs(name string, src []byte) []reference {
+func templateFileRefs(name string, src []byte, delims Delimiters) []reference {
 	tree := parse.New(name)
 	tree.Mode = parse.SkipFuncCheck
 	set := make(map[string]*parse.Tree)
-	if _, err := tree.Parse(string(src), "", "", set); err != nil {
+	if _, err := tree.Parse(string(src), delims.Left, delims.Right, set); err != nil {
 		return nil
 	}
 
@@ -163,91 +165,131 @@ func templateFileRefs(name string, src []byte) []reference {
 	}
 	slices.Sort(defined)
 
-	var refs []reference
+	s := &templateScan{file: name, src: src, delims: delims}
 	for _, d := range defined {
 		if t := set[d]; t != nil {
-			walkTemplate(t.Root, "", name, src, &refs)
+			s.walk(t.Root, "")
 		}
 	}
-	slices.SortFunc(refs, func(a, b reference) int {
+	slices.SortFunc(s.refs, func(a, b reference) int {
 		if c := a.site.Offset - b.site.Offset; c != 0 {
 			return c
 		}
 		return strings.Compare(a.name, b.name)
 	})
-	return refs
+	return s.refs
 }
 
-// walkTemplate collects the identifiers the nodes under n name. action is the
-// text of the pipeline the walk is inside, which is what a maintainer reads at
-// the site: a reference inside a branch or a template action carries its own
-// pipeline's text rather than the whole clause.
-func walkTemplate(n parse.Node, action, file string, src []byte, refs *[]reference) {
+// templateScan accumulates the identifiers the actions of one template file name,
+// with what a site of that file is rendered from and the delimiters the file's
+// actions are written with.
+type templateScan struct {
+	file   string
+	src    []byte
+	delims Delimiters
+	refs   []reference
+}
+
+// walk collects the identifiers the nodes under n name. action is the text of the
+// pipeline the walk is inside, which is what a maintainer reads at the site: a
+// reference inside a branch or a template action carries its own pipeline's text
+// rather than the whole clause.
+func (s *templateScan) walk(n parse.Node, action string) {
 	switch n := n.(type) {
 	case *parse.ListNode:
 		if n != nil {
-			walkNodes(n.Nodes, action, file, src, refs)
+			s.walkNodes(n.Nodes, action)
 		}
 	case *parse.PipeNode:
-		walkPipe(n, file, src, refs)
+		s.walkPipe(n)
 	case *parse.CommandNode:
-		walkNodes(n.Args, action, file, src, refs)
+		s.walkNodes(n.Args, action)
 	case *parse.ActionNode:
-		walkTemplate(n.Pipe, action, file, src, refs)
+		s.walk(n.Pipe, action)
 	case *parse.TemplateNode:
-		walkTemplate(n.Pipe, action, file, src, refs)
+		s.walk(n.Pipe, action)
 	case *parse.IfNode:
-		walkBranch(&n.BranchNode, action, file, src, refs)
+		s.walkBranch(&n.BranchNode, action)
 	case *parse.RangeNode:
-		walkBranch(&n.BranchNode, action, file, src, refs)
+		s.walkBranch(&n.BranchNode, action)
 	case *parse.WithNode:
-		walkBranch(&n.BranchNode, action, file, src, refs)
+		s.walkBranch(&n.BranchNode, action)
 	case *parse.FieldNode:
-		addRefs(n.Ident, int(n.Position()), action, file, src, refs)
+		s.addRefs(n.Ident, int(n.Position()), action)
 	case *parse.VariableNode:
 		// The first identifier is the variable's own name and the rest is the
 		// field chain read from it, so a variable with no chain names nothing.
-		addRefs(n.Ident[1:], int(n.Position()), action, file, src, refs)
+		s.addRefs(n.Ident[1:], int(n.Position()), action)
+	case *parse.ChainNode:
+		// A chain reads its fields from what the term before it produced, which
+		// is a parenthesized pipeline or a call: the term names what it names,
+		// and every identifier of the chain is a reference of its own.
+		s.walk(n.Node, action)
+		s.addRefs(n.Field, int(n.Position()), action)
 	}
 }
 
 // walkNodes collects the identifiers a sequence of nodes names.
-func walkNodes(nodes []parse.Node, action, file string, src []byte, refs *[]reference) {
+func (s *templateScan) walkNodes(nodes []parse.Node, action string) {
 	for _, n := range nodes {
-		walkTemplate(n, action, file, src, refs)
+		s.walk(n, action)
 	}
 }
 
 // walkPipe collects the identifiers one pipeline names. The pipeline's own text
-// is the action text every site under it records, and a declaration names the
-// variable it introduces rather than a field, so only the commands are walked.
-func walkPipe(p *parse.PipeNode, file string, src []byte, refs *[]reference) {
+// between the file's delimiters is the action text every site under it records,
+// and a declaration names the variable it introduces rather than a field, so only
+// the commands are walked.
+func (s *templateScan) walkPipe(p *parse.PipeNode) {
 	if p == nil {
 		return
 	}
-	action := "{{" + p.String() + "}}"
+	action := s.leftDelim() + p.String() + s.rightDelim()
 	for _, c := range p.Cmds {
-		walkTemplate(c, action, file, src, refs)
+		s.walk(c, action)
 	}
 }
 
 // walkBranch collects the identifiers one branch action names, in its pipeline
 // and in both its bodies.
-func walkBranch(b *parse.BranchNode, action, file string, src []byte, refs *[]reference) {
-	walkTemplate(b.Pipe, action, file, src, refs)
-	walkTemplate(b.List, action, file, src, refs)
-	walkTemplate(b.ElseList, action, file, src, refs)
+func (s *templateScan) walkBranch(b *parse.BranchNode, action string) {
+	s.walk(b.Pipe, action)
+	s.walk(b.List, action)
+	s.walk(b.ElseList, action)
 }
 
 // addRefs records one reference per identifier of a chain, each at the position
 // the chain starts, which is the position the grammar gives a field chain
 // whatever its length: the site is where the reference is written, and a chain
 // carries one.
-func addRefs(idents []string, at int, action, file string, src []byte, refs *[]reference) {
-	site := templatePosition(file, src, at)
+func (s *templateScan) addRefs(idents []string, at int, action string) {
+	site := templatePosition(s.file, s.src, at)
 	for _, name := range idents {
-		*refs = append(*refs, reference{name: name, action: action, site: site})
+		s.refs = append(s.refs, reference{name: name, action: action, site: site})
 	}
+}
+
+// The delimiters the template grammar opens and closes an action with where the
+// project configures none.
+const (
+	defaultLeftDelim  = "{{"
+	defaultRightDelim = "}}"
+)
+
+// leftDelim is what an action of the scanned file opens with.
+func (s *templateScan) leftDelim() string {
+	if s.delims.Left == "" {
+		return defaultLeftDelim
+	}
+	return s.delims.Left
+}
+
+// rightDelim is what an action of the scanned file closes with.
+func (s *templateScan) rightDelim() string {
+	if s.delims.Right == "" {
+		return defaultRightDelim
+	}
+	return s.delims.Right
 }
 
 // templatePosition renders one byte offset in a template file as the position a

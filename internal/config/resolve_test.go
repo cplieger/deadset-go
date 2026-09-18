@@ -3,6 +3,7 @@ package config_test
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -281,6 +282,36 @@ func TestResolveRefusesAnUnimplementedKey(t *testing.T) {
 			repository: `{"target": {"kind": "application"}, "severity": {"DS17": "allow"}}`,
 			key:        "severity.DS17",
 			names:      []string{`"severity.DS17"`, "fixes the severity of DS1703 and DS1704"},
+		},
+		{
+			name:       "a_severity_code_no_live_kind_carries",
+			repository: `{"target": {"kind": "application"}, "severity": {"DS2999": "allow"}}`,
+			key:        "severity.DS2999",
+			names:      []string{`"severity.DS2999"`, "no issue kind this analyzer ships carries the code DS2999"},
+		},
+		{
+			name:       "a_severity_code_of_a_live_family_that_no_kind_carries",
+			repository: `{"target": {"kind": "application"}, "severity": {"DS1899": "warn"}}`,
+			key:        "severity.DS1899",
+			names:      []string{`"severity.DS1899"`, "no issue kind this analyzer ships carries the code DS1899"},
+		},
+		{
+			name:       "a_retired_severity_code",
+			repository: `{"target": {"kind": "application"}, "severity": {"DS1402": "warn"}}`,
+			key:        "severity.DS1402",
+			names:      []string{`"severity.DS1402"`, "no issue kind this analyzer ships carries the code DS1402"},
+		},
+		{
+			name:       "a_severity_family_prefix_no_range_declares",
+			repository: `{"target": {"kind": "application"}, "severity": {"DS29": "allow"}}`,
+			key:        "severity.DS29",
+			names:      []string{`"severity.DS29"`, "no issue kind this analyzer ships carries a code of the family DS29"},
+		},
+		{
+			name:       "a_severity_family_prefix_whose_range_is_retired",
+			repository: `{"target": {"kind": "application"}, "severity": {"DS14": "allow"}}`,
+			key:        "severity.DS14",
+			names:      []string{`"severity.DS14"`, "no issue kind this analyzer ships carries a code of the family DS14"},
 		},
 	}
 
@@ -568,6 +599,186 @@ func TestResolveRefusesAMalformedDocument(t *testing.T) {
 			assertMessageNames(t, tc.name, refusal, []string{"deadset.json"})
 		})
 	}
+}
+
+// enumeratedSetting is one setting the Contract's configuration schema declares a
+// closed set of values for: the dotted path a document writes a value at, the
+// malformed value it writes there, and the path the refusal names, which for the
+// severity object is the member rather than the object.
+type enumeratedSetting struct {
+	value any
+	at    string
+	names string
+}
+
+// valueOutsideEveryClosedSet is a value no closed set of the configuration schema
+// declares, so writing it at an enumerated setting is refused wherever that setting
+// is.
+const valueOutsideEveryClosedSet = "no-such-value"
+
+// openObjectSamples names, per open object of the configuration schema, one member
+// name matching the pattern that object declares, which is how a document reaches
+// the enumerated value inside one. The derivation fails on an open object with no
+// sample rather than passing over it.
+func openObjectSamples() map[string]string {
+	return map[string]string{"severity": "DS1101"}
+}
+
+// enumeratedSettings returns every setting the Contract's configuration schema
+// declares a closed set of values for, derived from the schema's own enums so a
+// closed set the Contract adds is exercised without a test edit.
+func enumeratedSettings(t *testing.T) []enumeratedSetting {
+	t.Helper()
+
+	var found []enumeratedSetting
+	collectEnums(t, configSchema(t), "", &found)
+	if len(found) == 0 {
+		t.Fatal("config.schema.json declares no closed set of values, so this test asserts nothing")
+	}
+	return found
+}
+
+// collectEnums appends one case per closed set declared at or below one
+// declaration: at the value itself, at an array's entries, or at the value of an
+// open object's member.
+func collectEnums(t *testing.T, declaration map[string]any, at string, into *[]enumeratedSetting) {
+	t.Helper()
+
+	if _, held := declaration["enum"]; held && at != "" {
+		*into = append(*into, enumeratedSetting{at: at, value: valueOutsideEveryClosedSet, names: at})
+	}
+	if entry, isObject := declaration["items"].(map[string]any); isObject {
+		if _, held := entry["enum"]; held {
+			*into = append(*into, enumeratedSetting{
+				at:    at,
+				value: []any{valueOutsideEveryClosedSet},
+				names: at,
+			})
+		}
+		if members, holds := entry["properties"]; holds {
+			collectEnumsUnderList(t, at, members)
+		}
+	}
+	for name, member := range declaredMembers(t, declaration, "properties", at) {
+		collectEnums(t, member, joinTestKey(at, name), into)
+	}
+	for pattern, member := range declaredMembers(t, declaration, "patternProperties", at) {
+		if _, held := member["enum"]; !held {
+			continue
+		}
+		sample, named := openObjectSamples()[at]
+		if !named {
+			t.Fatalf("config.schema.json: %s declares a closed set under the pattern %s and this test names no member of it",
+				at, pattern)
+		}
+		*into = append(*into, enumeratedSetting{
+			at:    joinTestKey(at, sample),
+			value: valueOutsideEveryClosedSet,
+			names: joinTestKey(at, sample),
+		})
+	}
+}
+
+// collectEnumsUnderList fails on a closed set declared inside one entry of a list,
+// which this derivation builds no document for, so such a set is refused here
+// rather than passed over.
+func collectEnumsUnderList(t *testing.T, at string, members any) {
+	t.Helper()
+
+	for name, member := range declaredMembers(t, map[string]any{"properties": members}, "properties", at) {
+		_, direct := member["enum"]
+		entry, isObject := member["items"].(map[string]any)
+		_, perEntry := entry["enum"]
+		if direct || (isObject && perEntry) {
+			t.Fatalf("config.schema.json: %s[].%s declares a closed set and this test builds no document naming one entry of a list",
+				at, name)
+		}
+	}
+}
+
+// declaredMembers returns the members one keyword of a declaration declares, empty
+// where it declares none.
+func declaredMembers(t *testing.T, declaration map[string]any, keyword, at string) map[string]map[string]any {
+	t.Helper()
+
+	held, carries := declaration[keyword]
+	if !carries {
+		return nil
+	}
+	declared, isObject := held.(map[string]any)
+	if !isObject {
+		t.Fatalf("config.schema.json: %s: %s is %T, want an object", at, keyword, held)
+	}
+	members := make(map[string]map[string]any, len(declared))
+	for name, member := range declared {
+		asObject, isObject := member.(map[string]any)
+		if !isObject {
+			t.Fatalf("config.schema.json: %s: %s.%s is %T, want an object", at, keyword, name, member)
+		}
+		members[name] = asObject
+	}
+	return members
+}
+
+// joinTestKey spells the dotted path of one member of the value at at.
+func joinTestKey(at, name string) string {
+	if at == "" {
+		return name
+	}
+	return at + "." + name
+}
+
+func TestResolveRefusesEveryEnumeratedSettingsMalformedValue(t *testing.T) {
+	t.Parallel()
+
+	found := enumeratedSettings(t)
+	// The settings the schema enumerates today. A closed set the Contract adds
+	// joins the table above without a test edit; one this derivation stops
+	// reaching fails here.
+	for _, want := range []string{
+		"target.kind", "analysis.languages", "analysis.min_confidence", "analysis.generated_files",
+		"analysis.consumer_tests", "severity.DS1101", "reporters.formats", "reporters.sort",
+		"reporters.cascade", "reporters.fail_on",
+	} {
+		if !slices.ContainsFunc(found, func(setting enumeratedSetting) bool { return setting.names == want }) {
+			t.Errorf("enumeratedSettings() = %v, want it to name %q", names(found), want)
+		}
+	}
+
+	for _, setting := range found {
+		t.Run(setting.names, func(t *testing.T) {
+			t.Parallel()
+
+			document := map[string]any{"target": map[string]any{"kind": string(config.Library)}}
+			nestInto(t, document, setting.at, setting.value)
+
+			_, _, err := config.Resolve(labelled("", string(encodeDocument(t, document)), "", nil))
+			var refusal *config.Error
+			if !errors.As(err, &refusal) {
+				t.Fatalf("Resolve(%s = %v) = error %v, want a *config.Error", setting.at, setting.value, err)
+			}
+			if refusal.Kind != config.KindMalformed {
+				t.Errorf("Resolve(%s = %v) = kind %v, want %v",
+					setting.at, setting.value, refusal.Kind, config.KindMalformed)
+			}
+			if refusal.Key != setting.names {
+				t.Errorf("Resolve(%s = %v) named %q, want %q",
+					setting.at, setting.value, refusal.Key, setting.names)
+			}
+			assertMessageNames(t, setting.names, refusal, []string{valueOutsideEveryClosedSet})
+		})
+	}
+}
+
+// names lists the settings one derivation found, for a failure to name what it
+// holds.
+func names(settings []enumeratedSetting) []string {
+	found := make([]string, 0, len(settings))
+	for _, setting := range settings {
+		found = append(found, setting.names)
+	}
+	slices.Sort(found)
+	return found
 }
 
 func TestResolveIgnoresProvenanceOnInput(t *testing.T) {

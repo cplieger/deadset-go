@@ -90,12 +90,20 @@ func (c *Component) List(mode Cascade) Listing {
 	return l
 }
 
-// components groups the dead symbols into strongly connected components, orders
-// the components so that each precedes every component it reaches, and computes
-// what falls with each.
-func (s *sweep) components() []Component {
-	g := s.g
-	at, adj := s.deadSubgraph()
+// componentsOf groups the symbols dead marks into strongly connected components,
+// orders the components so that each precedes every component it reaches, and
+// computes what falls with each. Both arguments carry one flag per symbol of the
+// graph, in the graph's own order: which symbols are dead, and which of those a
+// sweep admitted by the test-of-dead-code rule.
+//
+// The dead set arrives rather than being read from a sweep, because over a matrix
+// of build configurations the set is the intersection of what several sweeps
+// answered while the edges are this graph's, which is every configuration's: a
+// report lists one dead component once, and a reference under any configuration is
+// a reference, so a member or an edge one configuration alone holds belongs to the
+// one component the same as any other.
+func (g *Graph) componentsOf(dead, testOfDeadCode []bool) []Component {
+	at, adj := g.deadSubgraph(dead, testOfDeadCode)
 	if len(at) == 0 {
 		return nil
 	}
@@ -110,7 +118,7 @@ func (s *sweep) components() []Component {
 		for _, member := range members[c] {
 			// A dead member of a dead container is never a root: the container
 			// is the site the deletion starts at and the member falls with it.
-			contained := g.parent[at[member]] != outside && s.dead[g.parent[at[member]]]
+			contained := g.parent[at[member]] != outside && dead[g.parent[at[member]]]
 			if !predecessor[member] && !contained {
 				component.Roots = append(component.Roots, g.symbols[at[member]].ID)
 			}
@@ -149,12 +157,11 @@ func (g *Graph) identify(at, positions []int) []SymbolID {
 // counts. Only an edge between two dead symbols is here, a reference a test file
 // made comes from a test declaration, and a dead test declaration's references are
 // the cascade the run is asked for: what falls with it when it is deleted.
-func (s *sweep) deadSubgraph() (at []int, adj [][]int) {
-	g := s.g
+func (g *Graph) deadSubgraph(dead, testOfDeadCode []bool) (at []int, adj [][]int) {
 	position := make([]int, len(g.symbols))
 	for i := range g.symbols {
 		position[i] = outside
-		if s.dead[i] {
+		if dead[i] {
 			position[i] = len(at)
 			at = append(at, i)
 		}
@@ -162,8 +169,8 @@ func (s *sweep) deadSubgraph() (at []int, adj [][]int) {
 
 	adj = make([][]int, len(at))
 	for from, i := range at {
-		s.referenceEdges(adj, position, from, i)
-		if p := g.parent[i]; p != outside && s.dead[p] {
+		g.referenceEdges(adj, position, from, i, testOfDeadCode)
+		if p := g.parent[i]; p != outside && dead[p] {
 			adj[from] = append(adj[from], position[p])
 			adj[position[p]] = append(adj[position[p]], from)
 		}
@@ -174,14 +181,14 @@ func (s *sweep) deadSubgraph() (at []int, adj [][]int) {
 // referenceEdges adds the references the dead symbol at one position makes to
 // other dead symbols, and the edge back from every production declaration an
 // admitted test references.
-func (s *sweep) referenceEdges(adj [][]int, position []int, from, at int) {
-	for _, e := range s.g.out[at] {
+func (g *Graph) referenceEdges(adj [][]int, position []int, from, at int, testOfDeadCode []bool) {
+	for _, e := range g.out[at] {
 		to := position[e.to]
 		if to == outside {
 			continue
 		}
 		adj[from] = append(adj[from], to)
-		if s.testOfDeadCode[at] && !s.g.test[e.to] && s.g.subject[e.to] {
+		if testOfDeadCode[at] && !g.test[e.to] && g.subject[e.to] {
 			adj[to] = append(adj[to], from)
 		}
 	}

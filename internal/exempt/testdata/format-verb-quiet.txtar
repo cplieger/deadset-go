@@ -1,9 +1,10 @@
 One package whose types declare the method a verb would call and never reach a
 verb that calls it: a numeric verb, the default verb under the sharp flag, which
 asks for a Go-syntax representation instead, a scanning function of the same
-package, the function of the package that formats a verb rather than an operand, a
-method of another package that formats, and an operand an explicit index steps
-over. The class records nothing here.
+package, the function of the package that formats a verb rather than an operand, an
+operand an explicit index steps over, a function of the package that takes a
+variadic list of any and never passes it on, and a pair that pass such a list to
+each other and to nothing that formats. The class records nothing here.
 
 -- go.mod --
 module example.com/verbs
@@ -81,25 +82,43 @@ func (v Formatted) Total() int { return len(v.Name) }
 func (v Formatted) Format(s fmt.State, verb rune) {
 	_, _ = s.Write([]byte(fmt.FormatString(s, verb)))
 }
--- other_package.go --
+-- not_forwarded.go --
 package verbs
 
-import (
-	"log/slog"
-	"strings"
-)
+// Counted reaches a function of this package that takes a variadic list of any and
+// never passes it on.
+type Counted struct{ Name string }
 
-// Elsewhere reaches a function of another package that formats.
-type Elsewhere struct{ Name string }
-
-// String is the method this call does not reach.
-func (v Elsewhere) String() string { return v.Name }
+// String is the method nothing here calls.
+func (v Counted) String() string { return v.Name }
 
 // Total is exported and of another shape.
-func (v Elsewhere) Total() int { return len(v.Name) }
+func (v Counted) Total() int { return len(v.Name) }
 
-// LogElsewhere hands a value to a logger rather than to a formatting verb.
-func LogElsewhere(l *slog.Logger, v Elsewhere) { l.Info(strings.ToLower(v.Name), "value", v) }
+// Collected reaches a pair of functions that pass such a list on to each other and
+// to nothing that formats.
+type Collected struct{ Name string }
+
+// String is the method nothing here calls.
+func (v Collected) String() string { return v.Name }
+
+// Total is exported and of another shape.
+func (v Collected) Total() int { return len(v.Name) }
+
+// count reads how many operands it was given and formats none of them.
+func count(args ...any) int { return len(args) }
+
+// collect passes its operands to a function that formats none of them.
+func collect(args ...any) []any { return join(args...) }
+
+// join keeps the operands it is given.
+func join(parts ...any) []any { return parts }
+
+// CountOperands hands a value to the function that counts its operands.
+func CountOperands(v Counted) int { return count(v) }
+
+// CollectOperands hands a value to the pair that keep their operands.
+func CollectOperands(v Collected) []any { return collect(v) }
 -- indexed.go --
 package verbs
 

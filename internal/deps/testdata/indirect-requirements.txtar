@@ -1,0 +1,55 @@
+Two requirements the module file marks indirect, neither of which provides a
+package the target imports, beside one direct requirement it does import. Nothing
+but the indirect mark keeps the two out of the population.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+
+require example.com/used v1.0.0
+
+require (
+	example.com/first v1.0.0 // indirect
+	example.com/second v1.0.0 // indirect
+)
+
+replace example.com/first => ./first
+
+replace example.com/second => ./second
+
+replace example.com/used => ./used
+-- app.go --
+package app
+
+import "example.com/used"
+
+// Greet returns the greeting the used module renders.
+func Greet() string { return used.Hello() }
+-- used/go.mod --
+module example.com/used
+
+go 1.27.1
+-- used/used.go --
+package used
+
+// Hello returns a greeting.
+func Hello() string { return "hello" }
+-- first/go.mod --
+module example.com/first
+
+go 1.27.1
+-- first/first.go --
+package first
+
+// Nothing does nothing.
+func Nothing() {}
+-- second/go.mod --
+module example.com/second
+
+go 1.27.1
+-- second/second.go --
+package second
+
+// Nothing does nothing.
+func Nothing() {}

@@ -1,0 +1,180 @@
+One package whose types reach a facility other than the formatting package: the
+print and fatal functions of the logging package, the methods of its logger, the
+log methods of a testing type through the concrete type and through the interface
+over it, the logging functions of the structured-logging package with the methods
+of its logger and an attribute constructor, and three functions of the package
+itself that forward their own variadic operands to a formatting function, one of
+them through a second wrapper. Each type declares the method a facility calls and
+one exported method of another shape, so the retained set holds the first alone.
+
+-- go.mod --
+module example.com/facilities
+
+go 1.27.1
+-- log_package.go --
+package facilities
+
+import "log"
+
+// LogPrinted reaches a print function of the logging package.
+type LogPrinted struct{ Name string }
+
+// String is what the function calls.
+func (v LogPrinted) String() string { return v.Name }
+
+// Count is exported and of another shape.
+func (v LogPrinted) Count() int { return len(v.Name) }
+
+// FatalPrinted reaches a fatal function of the same package.
+type FatalPrinted struct{ Name string }
+
+// String is what the function calls.
+func (v FatalPrinted) String() string { return v.Name }
+
+// Count is exported and of another shape.
+func (v FatalPrinted) Count() int { return len(v.Name) }
+
+// LoggerPrinted reaches a method of the package's logger.
+type LoggerPrinted struct{ Name string }
+
+// String is what the method calls.
+func (v LoggerPrinted) String() string { return v.Name }
+
+// Count is exported and of another shape.
+func (v LoggerPrinted) Count() int { return len(v.Name) }
+
+// PrintLog formats under the string verb.
+func PrintLog(v LogPrinted) { log.Printf("%s", v) }
+
+// FatalLog formats under the quoted verb and does not return.
+func FatalLog(v FatalPrinted) { log.Fatalf("%q", v) }
+
+// PrintLogger formats without a verb, through a logger.
+func PrintLogger(l *log.Logger, v LoggerPrinted) { l.Println(v) }
+-- testing_methods.go --
+package facilities
+
+import "testing"
+
+// TestLogged reaches a log method through the concrete testing type.
+type TestLogged struct{ Name string }
+
+// String is what the method calls.
+func (v TestLogged) String() string { return v.Name }
+
+// Count is exported and of another shape.
+func (v TestLogged) Count() int { return len(v.Name) }
+
+// InterfaceLogged reaches the same method through the interface over the testing
+// types.
+type InterfaceLogged struct{ Name string }
+
+// String is what the method calls.
+func (v InterfaceLogged) String() string { return v.Name }
+
+// Count is exported and of another shape.
+func (v InterfaceLogged) Count() int { return len(v.Name) }
+
+// LogUnderTest formats under the default verb, on the concrete type.
+func LogUnderTest(t *testing.T, v TestLogged) { t.Logf("%v", v) }
+
+// LogThroughInterface formats without a verb, through the interface.
+func LogThroughInterface(tb testing.TB, v InterfaceLogged) { tb.Log(v) }
+-- slog_calls.go --
+package facilities
+
+import "log/slog"
+
+// Structured reaches a logging function of the structured-logging package.
+type Structured struct{ Name string }
+
+// String is what a handler calls.
+func (v Structured) String() string { return v.Name }
+
+// Count is exported and of another shape.
+func (v Structured) Count() int { return len(v.Name) }
+
+// LoggerStructured reaches a method of that package's logger.
+type LoggerStructured struct{ Name string }
+
+// String is what a handler calls.
+func (v LoggerStructured) String() string { return v.Name }
+
+// Count is exported and of another shape.
+func (v LoggerStructured) Count() int { return len(v.Name) }
+
+// Attributed reaches an attribute constructor whose value is typed as any.
+type Attributed struct{ Name string }
+
+// String is what a handler calls.
+func (v Attributed) String() string { return v.Name }
+
+// Count is exported and of another shape.
+func (v Attributed) Count() int { return len(v.Name) }
+
+// LogStructured hands a value to a logging function.
+func LogStructured(v Structured) { slog.Info("message", "value", v) }
+
+// LogThroughLogger hands a value to a method of the logger.
+func LogThroughLogger(l *slog.Logger, v LoggerStructured) { l.Warn("message", "value", v) }
+
+// LogAttribute hands a value to an attribute constructor.
+func LogAttribute(v Attributed) slog.Attr { return slog.Any("value", v) }
+-- wrappers.go --
+package facilities
+
+import "fmt"
+
+// Forwarded reaches a function of this package that forwards its operands under
+// the format string its caller writes.
+type Forwarded struct{ Name string }
+
+// String is what the verb calls.
+func (v Forwarded) String() string { return v.Name }
+
+// Count is exported and of another shape.
+func (v Forwarded) Count() int { return len(v.Name) }
+
+// Listed reaches a function that forwards its operands under no format string.
+type Listed struct{ Name string }
+
+// String is what the form calls.
+func (v Listed) String() string { return v.Name }
+
+// Count is exported and of another shape.
+func (v Listed) Count() int { return len(v.Name) }
+
+// Fixed reaches a function that forwards its operands under a format string of
+// its own, which its callers do not write.
+type Fixed struct{ Name string }
+
+// String is what the form calls.
+func (v Fixed) String() string { return v.Name }
+
+// Count is exported and of another shape.
+func (v Fixed) Count() int { return len(v.Name) }
+
+// logf forwards its operands to a second wrapper, under the format string it was
+// given.
+func logf(format string, args ...any) string { return warnf(format, args...) }
+
+// warnf forwards its operands to the formatting package, under a format string it
+// builds on the one it was given.
+func warnf(format string, args ...any) string { return fmt.Sprintf("warn: "+format, args...) }
+
+// logAll forwards its operands to a form that carries no format string.
+func logAll(args ...any) string { return fmt.Sprint(args...) }
+
+// logFixed forwards its operands under a format string of its own.
+func logFixed(args ...any) string { return fmt.Sprintf("%d", args...) }
+
+// RenderForwarded formats under the string verb, two wrappers from the formatting
+// package.
+func RenderForwarded(v Forwarded) string { return logf("%s", v) }
+
+// RenderListed formats without a verb, through a wrapper.
+func RenderListed(v Listed) string { return logAll(v) }
+
+// RenderFixed formats through a wrapper whose format string the call does not
+// write.
+func RenderFixed(v Fixed) string { return logFixed(v) }
