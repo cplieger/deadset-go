@@ -1,0 +1,31 @@
+One module whose two packages carry references a configured root or a pattern
+can name: two functions, a type with a member of each kind, a blank declaration
+that borrows the package's reference, and a nested package.
+
+-- go.mod --
+module example.com/patterns
+
+go 1.27.1
+-- catalog.go --
+package patterns
+
+// Alpha is named by an exact configured root.
+func Alpha() string { return "alpha" }
+
+// Beta is named by no configured root.
+func Beta() string { return "beta" }
+
+// Box carries one field and one method.
+type Box struct {
+	Lid int
+}
+
+// Open reports the lid.
+func (b Box) Open() int { return b.Lid }
+
+var _ = Beta()
+-- inner/inner.go --
+package inner
+
+// Gamma sits one path element below the module root.
+func Gamma() string { return "gamma" }

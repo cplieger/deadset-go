@@ -1,0 +1,169 @@
+One module holding, for each detected root class, a declaration the class roots
+and a declaration that carries everything about it except what makes it a root.
+
+-- go.mod --
+module example.com/roots
+
+go 1.27.1
+-- api.go --
+package roots
+
+import (
+	"errors"
+	"testing"
+)
+
+// Published is an exported function of an importable package.
+func Published() string { return unpublished() }
+
+func unpublished() string { return "" }
+
+// Catalog carries an exported and an unexported field.
+type Catalog struct {
+	Name string
+	size int
+}
+
+// Resolve is an exported method of an exported type.
+func (c *Catalog) Resolve() string { return c.Name }
+
+func (c *Catalog) fill() { c.size = len(c.Name) }
+
+type catalog struct{ Name string }
+
+// Resolve is an exported method of an unexported type.
+func (c *catalog) Resolve() string { return c.Name }
+
+// Fetcher declares one exported and one unexported method.
+type Fetcher interface {
+	Fetch() error
+	fetch() error
+}
+
+// Best declares a type parameter, which a caller supplies by position.
+func Best[T comparable](want, have T) bool { return want == have }
+
+// Sentinel is an exported variable.
+var Sentinel = errors.New("sentinel")
+
+var _ = Sentinel
+
+// Named holds what the blank declaration above it holds.
+var Named = Sentinel
+
+func init() {}
+
+// TestOutsideATestFile carries a test function's name and signature in a file the
+// package itself compiles.
+func TestOutsideATestFile(t *testing.T) { _ = t }
+-- linkname.go --
+package roots
+
+import _ "unsafe"
+
+// pushed is reachable through its object symbol name from another package.
+//
+//go:linkname pushed
+func pushed() {}
+
+//go:linkname aliased example.com/other.f
+func aliased() {}
+
+//go:linkname counted
+var counted int
+
+func notLinked() {}
+-- unsafeless.go --
+package roots
+
+// The directive below is not enabled: the file does not import "unsafe".
+
+//go:linkname unsafeless
+func unsafeless() {}
+-- api_test.go --
+package roots
+
+import (
+	"fmt"
+	"testing"
+)
+
+func TestMain(m *testing.M) { m.Run() }
+
+func TestPublished(t *testing.T) {
+	if got := Published(); got != "" {
+		t.Errorf("Published() = %q, want %q", got, "")
+	}
+}
+
+func BenchmarkPublished(b *testing.B) {
+	for b.Loop() {
+		_ = Published()
+	}
+}
+
+func FuzzPublished(f *testing.F) {
+	f.Add("")
+	f.Fuzz(func(t *testing.T, in string) { _ = in })
+}
+
+func ExampleWithOutput() {
+	fmt.Println("published")
+	// Output: published
+}
+
+func ExampleWithoutOutput() { _ = Published() }
+
+// ExampleTakesAnArgument carries the family prefix and not the signature.
+func ExampleTakesAnArgument(size int) { _ = size }
+
+// TestingLower carries the signature and not the prefix: the rune after Test is
+// lower case.
+func TestingLower(t *testing.T) { _ = t }
+
+// HelperExported carries the signature and no family prefix at all.
+func HelperExported(t *testing.T) { _ = t }
+-- external_test.go --
+package roots_test
+
+import (
+	"testing"
+
+	"example.com/roots"
+)
+
+func TestExternal(t *testing.T) { _ = roots.Published() }
+
+// ExportedFromAnExternalTestPackage is exported from a package nothing imports.
+func ExportedFromAnExternalTestPackage() {}
+-- cgoexport/bridge.go --
+package cgoexport
+
+import "C"
+
+//export Bridge
+func Bridge() {}
+-- cgoexport/plain.go --
+package cgoexport
+
+// The directive below is not a cgo export: the file does not import "C".
+
+//export Plain
+func Plain() {}
+-- cmd/app/main.go --
+package main
+
+func main() {}
+
+// Exported is exported from a package nothing can import.
+func Exported() {}
+-- notmain/notmain.go --
+package notmain
+
+// main carries the entry point's name in a package that has no entry point.
+func main() {}
+-- internal/hidden/hidden.go --
+package hidden
+
+// Exported is exported from a package only this module can import.
+func Exported() {}

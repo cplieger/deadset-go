@@ -81,8 +81,9 @@ func HostConfiguration() Configuration {
 // Every package's Errors is walked, dependencies and test variants included, and
 // a non-empty set returns a *[Error] carrying all of them together with a zero
 // Result, so nothing downstream can compute a finding from a partial load. Load
-// makes no network request, writes no cache, and loads with cgo disabled
-// whatever the environment says, so it needs no C toolchain.
+// makes no network request, writes no cache, and pins the toolchain settings that
+// decide what loads whatever the environment says, so it needs no C toolchain and
+// no caller has to neutralise its own environment first.
 func Load(ctx context.Context, doc scope.Document, c Configuration) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, fmt.Errorf("load %s: %w", c.ID, err)
@@ -104,11 +105,16 @@ func Load(ctx context.Context, doc scope.Document, c Configuration) (Result, err
 
 	fset := token.NewFileSet()
 	cfg := &packages.Config{
-		Mode:       loadMode,
-		Context:    ctx,
-		Tests:      true,
-		Dir:        target,
-		Env:        append(os.Environ(), "CGO_ENABLED=0", "GOOS="+c.OS, "GOARCH="+c.Arch),
+		Mode:    loadMode,
+		Context: ctx,
+		Tests:   true,
+		Dir:     target,
+		// os/exec keeps the last value of a repeated key, so these win over the
+		// inherited environment. An ambient go.work or GOFLAGS reaches the child
+		// toolchain and changes which packages and which files load, which would
+		// make one target's result depend on where the run was started.
+		Env: append(os.Environ(),
+			"CGO_ENABLED=0", "GOOS="+c.OS, "GOARCH="+c.Arch, "GOWORK=off", "GOFLAGS="),
 		BuildFlags: buildFlags(c.Tags),
 		Fset:       fset,
 	}
