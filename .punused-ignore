@@ -24,31 +24,28 @@ function Undefined
 # --- Methods a standard interface calls, never a caller by name.
 #
 # `Error()` on both error types satisfies `error`, and production code returns
-# them as `error`; `String()` on the two kind enumerations satisfies
-# `fmt.Stringer` and is what renders a kind in a message and in a report. No
-# call site exists for a reference search to find in either case, because the
-# runtime dispatches through the interface. Removing one would not fail the
-# build, it would silently change what a diagnostic prints, which is why each is
-# pinned by a test of its rendered output.
+# them as `error`; `String()` on the kind enumerations satisfies `fmt.Stringer`
+# and is what renders a kind in a message and in a report. No call site exists
+# for a reference search to find in either case, because the runtime dispatches
+# through the interface. Removing one would not fail the build, it would silently
+# change what a diagnostic prints, which is why each is pinned by a test of its
+# rendered output.
 method (*Error).Error
 method (ErrorKind).String
 method (SymbolKind).String
+method (RefKind).String
 
-# --- The stages the analysis verb will call, exercised by tests until it lands.
+# --- The stages no verb calls yet, exercised by tests until one does.
 #
-# The loader, the scope reader and the symbol enumerator are complete and
-# verified, and the command currently serves only the two verbs that report
-# configuration and capability. The verb that runs an analysis is what wires
-# these into a production path; until it exists, every caller is a test. Each is
-# named in the plan for that verb, and the correct resolution is that call site
-# rather than an unexport: the packages are separate so that one stage's failure
-# cannot break another's compile, and a stage's entry point is its package's
-# surface.
-function Load
-function HostConfiguration
+# `print-roots` wires the loader, the scope of a directory, the enumeration and
+# the root detection into a production path, so those stages have callers. Two do
+# not: no verb takes a scope document, so nothing calls the reader that decodes
+# one, and no verb consumes a reference set. Each is named in the plan for the
+# verb that lands it, and the correct resolution is that call site rather than an
+# unexport: the packages are separate so that one stage's failure cannot break
+# another's compile, and a stage's entry point is its package's surface.
 function Read
-function ForDir
-function Symbols
+function References
 
 # --- The per-analyzer configuration section.
 #

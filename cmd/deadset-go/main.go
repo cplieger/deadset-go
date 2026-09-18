@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -11,11 +12,15 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"strings"
 
 	"github.com/cplieger/deadset-go/internal/config"
+	"github.com/cplieger/deadset-go/internal/graph"
+	"github.com/cplieger/deadset-go/internal/load"
+	"github.com/cplieger/deadset-go/internal/scope"
 )
 
 // version is this analyzer's own version. It moves independently of the Contract
@@ -25,14 +30,19 @@ const version = "0.1.0-dev"
 // name is this analyzer's name wherever a document names a product.
 const name = "deadset-go"
 
-// The exit codes contract/exit-codes.json names. The two verdict codes, findings
-// and pending, belong to a verb that returns a verdict about a report, and no
-// such verb is served yet.
+// The exit codes contract/exit-codes.json names. The pending verdict belongs to a
+// verb that returns a verdict about a merged report, and no such verb is served
+// yet.
 const (
-	exitClean   = 0
-	exitUsage   = 2
-	exitFailure = 3
+	exitClean    = 0
+	exitFindings = 1
+	exitUsage    = 2
+	exitFailure  = 3
 )
+
+// unmatchedRoot is the issue kind contract/kinds.json gives a configured root or
+// root pattern that names no symbol.
+const unmatchedRoot = "DS1704"
 
 // repositoryDocument is the repository configuration's name at the target root.
 const repositoryDocument = "deadset.json"
@@ -75,14 +85,23 @@ const usage = "usage: deadset-go <analyze|explain|print-config|print-roots|print
 
 const printConfigUsage = "usage: deadset-go print-config [--target=DIR] [--config=FILE] [--central=FILE] [--min-confidence=CLASS]"
 
+const printRootsUsage = "usage: deadset-go print-roots [--target=DIR] [--config=FILE] [--central=FILE] [--min-confidence=CLASS]"
+
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	// An interrupt reaches the toolchain a load spawns through the context, so a
+	// cancelled run stops rather than waiting for the packages it asked for. The
+	// exit path runs no deferred function, so the signal handler is released here.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
+	stop()
+	os.Exit(code)
 }
 
-// run executes one invocation and returns its exit code: 0 for a served verb, 2
-// for a usage error, a requested source edit or a configuration this analyzer
-// refuses, 3 for a failure that produced no answer.
-func run(args []string, stdout, stderr io.Writer) int {
+// run executes one invocation and returns its exit code: 0 for a served verb that
+// found nothing to report, 1 for a finding, 2 for a usage error, a requested
+// source edit or a configuration this analyzer refuses, 3 for a failure that
+// produced no answer.
+func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if flagName, ok := sourceEditFlag(args); ok {
 		fmt.Fprintf(stderr, "deadset-go: %s is not supported: deadset-go reports and never edits a source file\n", flagName)
 		fmt.Fprintln(stderr, usage)
@@ -104,7 +123,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return describe(set.Args()[1:], stdout, stderr)
 	case "print-config":
 		return printConfig(set.Args()[1:], stdout, stderr)
-	case "analyze", "explain", "print-roots", "print-retained":
+	case "print-roots":
+		return printRoots(ctx, set.Args()[1:], stdout, stderr)
+	case "analyze", "explain", "print-retained":
 		fmt.Fprintf(stderr, "deadset-go: %s is not implemented in this version\n", verb)
 		set.Usage()
 		return exitUsage
@@ -162,12 +183,22 @@ func describe(args []string, stdout, stderr io.Writer) int {
 	return exitClean
 }
 
-// printConfig resolves the configuration documents and writes the resolved
-// configuration, with the provenance of every setting, to stdout.
-func printConfig(args []string, stdout, stderr io.Writer) int {
-	set := flag.NewFlagSet("deadset-go print-config", flag.ContinueOnError)
+// resolution is what one invocation resolved to: the configuration, the
+// provenance of every setting, and the target root the documents were read from.
+type resolution struct {
+	provenance config.Provenance
+	target     string
+	config     config.Config
+}
+
+// resolve parses the flags a verb that reads a configuration takes and resolves
+// the documents they name. The returned code is exitClean when the resolution
+// succeeded, and otherwise the code the verb returns with the message already
+// printed.
+func resolve(verb, verbUsage string, args []string, stderr io.Writer) (resolved resolution, code int) {
+	set := flag.NewFlagSet("deadset-go "+verb, flag.ContinueOnError)
 	set.SetOutput(stderr)
-	set.Usage = func() { fmt.Fprintln(stderr, printConfigUsage) }
+	set.Usage = func() { fmt.Fprintln(stderr, verbUsage) }
 	target := set.String("target", ".", "the target root, which holds the repository configuration")
 	repository := set.String("config", "", "the repository configuration, in place of "+repositoryDocument+" at the target root")
 	central := set.String("central", "", "the central configuration")
@@ -175,36 +206,136 @@ func printConfig(args []string, stdout, stderr io.Writer) int {
 		set.String(flagName, "", setting.description)
 	}
 	if err := set.Parse(args); err != nil {
-		return exitUsage
+		return resolution{}, exitUsage
 	}
 	if set.NArg() != 0 {
-		fmt.Fprintf(stderr, "deadset-go: print-config takes no argument, got %q\n", set.Arg(0))
+		fmt.Fprintf(stderr, "deadset-go: %s takes no argument, got %q\n", verb, set.Arg(0))
 		set.Usage()
-		return exitUsage
+		return resolution{}, exitUsage
 	}
 
 	inputs, err := configInputs(*target, *repository, *central, set)
 	if err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
 		set.Usage()
-		return exitUsage
+		return resolution{}, exitUsage
 	}
 
-	resolved, provenance, err := config.Resolve(inputs)
+	resolvedConfig, provenance, err := config.Resolve(inputs)
 	if err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
 		code := exitCodeFor(err)
 		if code == exitUsage {
 			set.Usage()
 		}
+		return resolution{}, code
+	}
+	return resolution{provenance: provenance, target: *target, config: resolvedConfig}, exitClean
+}
+
+// printConfig resolves the configuration documents and writes the resolved
+// configuration, with the provenance of every setting, to stdout.
+func printConfig(args []string, stdout, stderr io.Writer) int {
+	resolved, code := resolve("print-config", printConfigUsage, args, stderr)
+	if code != exitClean {
 		return code
 	}
 
-	if err := config.Print(stdout, resolved, provenance); err != nil {
+	if err := config.Print(stdout, resolved.config, resolved.provenance); err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
 		return exitFailure
 	}
 	return exitClean
+}
+
+// rootSet is one configuration's root set: every root in the order the detection
+// returns them, the reference of every symbol a root names, and every configured
+// string that named no symbol.
+type rootSet struct {
+	refs      map[graph.SymbolID]string
+	roots     []graph.Root
+	unmatched []graph.Unmatched
+}
+
+// printRoots writes the root set of the host build configuration to stdout, one
+// root per line: the symbol's reference, why it is a root, and the configured
+// string that named it where one did, separated by tabs. The shape is this
+// command's own rather than a Contract format, so that sort and cut read it.
+//
+// A configured string that names no symbol is reported on stderr by its issue
+// kind, after every root this run did find, and fails the run.
+func printRoots(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	resolved, code := resolve("print-roots", printRootsUsage, args, stderr)
+	if code != exitClean {
+		return code
+	}
+
+	set, err := rootsOf(ctx, &resolved)
+	if err != nil {
+		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
+		return exitCodeFor(err)
+	}
+
+	for _, root := range set.roots {
+		if _, err := fmt.Fprintln(stdout, rootLine(set.refs[root.ID], root)); err != nil {
+			fmt.Fprintf(stderr, "deadset-go: print-roots: %v\n", err)
+			return exitFailure
+		}
+	}
+	for _, unmatched := range set.unmatched {
+		fmt.Fprintf(stderr, "%s: roots.patterns names nothing: %s\n", unmatchedRoot, unmatched.Pattern)
+	}
+	if len(set.unmatched) > 0 {
+		return exitFindings
+	}
+	return exitClean
+}
+
+// rootsOf resolves the root set of one configuration: the scope of the target,
+// the load of the host build configuration, the enumeration and the detection, in
+// the order the analysis runs them.
+//
+// A library target's published API is a root and an application's is not, which
+// is the one setting of the configuration this composition root converts for the
+// detection; the patterns pass through as the configuration lists them.
+func rootsOf(ctx context.Context, resolved *resolution) (rootSet, error) {
+	document, err := scope.ForDir(resolved.target)
+	if err != nil {
+		return rootSet{}, err
+	}
+	result, err := load.Load(ctx, document, load.HostConfiguration())
+	if err != nil {
+		return rootSet{}, err
+	}
+
+	targetRoot := document.Target.Path
+	symbols, err := graph.Symbols(&result, targetRoot, os.ReadFile)
+	if err != nil {
+		return rootSet{}, err
+	}
+	roots, unmatched, err := graph.Roots(&result, targetRoot, os.ReadFile, symbols, graph.RootOptions{
+		Patterns:     resolved.config.Roots.Patterns,
+		PublishedAPI: resolved.config.Target.Kind == config.Library,
+	})
+	if err != nil {
+		return rootSet{}, err
+	}
+
+	refs := make(map[graph.SymbolID]string, len(symbols))
+	for i := range symbols {
+		refs[symbols[i].ID] = symbols[i].Ref
+	}
+	return rootSet{refs: refs, roots: roots, unmatched: unmatched}, nil
+}
+
+// rootLine renders one root, leaving the third field off a detected class, which
+// no configured string named.
+func rootLine(ref string, root graph.Root) string {
+	line := ref + "\t" + root.Kind.String()
+	if root.Source == "" {
+		return line
+	}
+	return line + "\t" + root.Source
 }
 
 // configInputs reads the configuration documents one invocation names. The

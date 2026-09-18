@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"maps"
@@ -113,7 +114,7 @@ func TestExitCodesEqualTheContract(t *testing.T) {
 		}
 	}
 
-	wired := map[string]int{"clean": exitClean, "usage": exitUsage, "failure": exitFailure}
+	wired := map[string]int{"clean": exitClean, "findings": exitFindings, "usage": exitUsage, "failure": exitFailure}
 	for name, got := range wired {
 		if want := codes[name]; got != want {
 			t.Errorf("the code this command returns for %q is %d, want %d as contract/exit-codes.json names it", name, got, want)
@@ -222,10 +223,16 @@ func TestRun(t *testing.T) {
 			wantStderr: []string{"explain is not implemented in this version"},
 		},
 		{
-			name:       "print_roots_is_not_implemented",
-			args:       []string{"print-roots"},
+			name:       "print_roots_takes_no_argument",
+			args:       []string{"print-roots", "."},
 			wantCode:   exitUsage,
-			wantStderr: []string{"print-roots is not implemented in this version"},
+			wantStderr: []string{`print-roots takes no argument, got "."`, "usage: deadset-go print-roots"},
+		},
+		{
+			name:       "print_roots_refuses_an_undefined_flag",
+			args:       []string{"print-roots", "--roots=go://example.com/app#Catalog"},
+			wantCode:   exitUsage,
+			wantStderr: []string{"flag provided but not defined", "usage: deadset-go print-roots"},
 		},
 		{
 			name:       "print_retained_is_not_implemented",
@@ -258,7 +265,7 @@ func TestRun(t *testing.T) {
 			t.Parallel()
 
 			var stdout, stderr bytes.Buffer
-			if got := run(tc.args, &stdout, &stderr); got != tc.wantCode {
+			if got := run(t.Context(), tc.args, &stdout, &stderr); got != tc.wantCode {
 				t.Errorf("run(%q) = %d, want %d\nstdout: %q\nstderr: %q", tc.args, got, tc.wantCode, stdout.String(), stderr.String())
 			}
 			for _, want := range tc.wantStdout {
@@ -287,7 +294,7 @@ func TestDescribeNamesTheContractItImplements(t *testing.T) {
 	contractVersion, schemaVersions := contractVersions(t)
 
 	var stdout, stderr bytes.Buffer
-	if got := run([]string{"describe"}, &stdout, &stderr); got != exitClean {
+	if got := run(t.Context(), []string{"describe"}, &stdout, &stderr); got != exitClean {
 		t.Fatalf("run(describe) = %d, want %d\nstderr: %q", got, exitClean, stderr.String())
 	}
 	if stderr.Len() != 0 {
@@ -384,7 +391,7 @@ func TestPrintConfigNamesTheSourceOfEverySetting(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-config", "--target=" + dir, "--central=" + central, "--min-confidence=certain"}
-	if got := run(args, &stdout, &stderr); got != exitClean {
+	if got := run(t.Context(), args, &stdout, &stderr); got != exitClean {
 		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, exitClean, stderr.String())
 	}
 	if stderr.Len() != 0 {
@@ -427,7 +434,7 @@ func TestPrintConfigOutputReadBackResolvesToTheSameConfiguration(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-config", "--target=" + dir}
-	if got := run(args, &stdout, &stderr); got != exitClean {
+	if got := run(t.Context(), args, &stdout, &stderr); got != exitClean {
 		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, exitClean, stderr.String())
 	}
 	first := decodePrinted(t, stdout.Bytes())
@@ -437,7 +444,7 @@ func TestPrintConfigOutputReadBackResolvesToTheSameConfiguration(t *testing.T) {
 	readBack := writeDocument(t, t.TempDir(), "deadset.json", stdout.String())
 	var again, stderrAgain bytes.Buffer
 	argsAgain := []string{"print-config", "--target=" + filepath.Dir(readBack)}
-	if got := run(argsAgain, &again, &stderrAgain); got != exitClean {
+	if got := run(t.Context(), argsAgain, &again, &stderrAgain); got != exitClean {
 		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", argsAgain, got, exitClean, stderrAgain.String())
 	}
 	second := decodePrinted(t, again.Bytes())
@@ -514,7 +521,7 @@ func TestPrintConfigRefusals(t *testing.T) {
 			}
 
 			var stdout, stderr bytes.Buffer
-			if got := run(args, &stdout, &stderr); got != tc.wantCode {
+			if got := run(t.Context(), args, &stdout, &stderr); got != tc.wantCode {
 				t.Errorf("run(%q) = %d, want %d\nstderr: %q", args, got, tc.wantCode, stderr.String())
 			}
 			if stdout.Len() != 0 {
@@ -539,7 +546,7 @@ func TestPrintConfigRefusesADocumentOverTheSizeBound(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-config", "--target=" + dir}
-	if got := run(args, &stdout, &stderr); got != exitUsage {
+	if got := run(t.Context(), args, &stdout, &stderr); got != exitUsage {
 		t.Errorf("run(%q) = %d, want %d for a document over the size bound", args, got, exitUsage)
 	}
 	if stdout.Len() != 0 {
@@ -561,7 +568,7 @@ func TestPrintConfigReadsTheDocumentTheInvocationNames(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-config", "--target=" + dir, "--config=" + named}
-	if got := run(args, &stdout, &stderr); got != exitClean {
+	if got := run(t.Context(), args, &stdout, &stderr); got != exitClean {
 		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, exitClean, stderr.String())
 	}
 
@@ -709,5 +716,243 @@ func TestSettingFlagsSupplyASchemaKey(t *testing.T) {
 				t.Errorf("settingFlags[%q].path = %q, want a key contract/config.schema.json declares: %q declares %v", flagName, setting.path, resolved, members)
 			}
 		})
+	}
+}
+
+// contractKind reads one issue kind contract/kinds.json publishes.
+func contractKind(t *testing.T, code string) map[string]any {
+	t.Helper()
+
+	body, err := spec.Contract.ReadFile("contract/kinds.json")
+	if err != nil {
+		t.Fatalf("Setup: read contract/kinds.json: %v", err)
+	}
+	var document struct {
+		Kinds []map[string]any `json:"kinds"`
+	}
+	if err := json.Unmarshal(body, &document); err != nil {
+		t.Fatalf("Setup: decode contract/kinds.json: %v", err)
+	}
+
+	for _, kind := range document.Kinds {
+		if kind["code"] == code {
+			return kind
+		}
+	}
+	t.Fatalf("Setup: contract/kinds.json declares no kind %s", code)
+	return nil
+}
+
+func TestUnmatchedRootNamesTheKindTheContractPublishes(t *testing.T) {
+	t.Parallel()
+
+	kind := contractKind(t, unmatchedRoot)
+	if got, want := kind["name"], "unmatched-root"; got != want {
+		t.Errorf("contract/kinds.json names %s %q, want %q: the code this command prints is that kind", unmatchedRoot, got, want)
+	}
+	// The run fails on the finding because the kind's default severity is the
+	// failing one, which is what makes the exit code this verb returns correct.
+	if got, want := kind["default_severity"], string(config.Deny); got != want {
+		t.Errorf("contract/kinds.json gives %s default severity %q, want %q", unmatchedRoot, got, want)
+	}
+	if got := kind["default_enabled"]; got != true {
+		t.Errorf("contract/kinds.json has %s default_enabled %v, want true", unmatchedRoot, got)
+	}
+}
+
+// writeModule writes one fixture module into a temporary directory and returns
+// the directory, which is a target print-roots resolves and loads.
+func writeModule(t *testing.T, files map[string]string) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	for base, body := range files {
+		writeDocument(t, dir, base, body)
+	}
+	return dir
+}
+
+// applicationModule writes the fixture the root verb is driven against: a main
+// package declaring an entry point, an initializer, an exported function and a
+// test function, with document as its repository configuration. The entry point
+// is declared before the initializer, so the printed order is the declaration
+// order rather than the alphabetical one.
+func applicationModule(t *testing.T, document string) string {
+	t.Helper()
+
+	return writeModule(t, map[string]string{
+		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
+		"app.go": "package main\n\nfunc main() {}\n\nfunc init() {}\n\n" +
+			"// Helper is exported, and an application publishes nothing.\nfunc Helper() string { return \"\" }\n",
+		"app_test.go":      "package main\n\nimport \"testing\"\n\nfunc TestHelper(t *testing.T) { _ = Helper() }\n",
+		repositoryDocument: document,
+	})
+}
+
+func TestPrintRootsNamesEveryRootAndWhyItIsOne(t *testing.T) {
+	t.Parallel()
+
+	dir := applicationModule(t, `{"target": {"kind": "application"}, "roots": {"patterns": ["go://example.com/app#Helper"]}}`)
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"print-roots", "--target=" + dir}
+	if got := run(t.Context(), args, &stdout, &stderr); got != exitClean {
+		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, exitClean, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("run(%q) stderr = %q, want empty", args, stderr.String())
+	}
+
+	want := "go://example.com/app#main\tmain\n" +
+		"go://example.com/app#init\tinit\n" +
+		"go://example.com/app#Helper\tconfigured\tgo://example.com/app#Helper\n" +
+		"go://example.com/app#TestHelper\ttest\n"
+	if got := stdout.String(); got != want {
+		t.Errorf("run(%q) stdout =\n%s\nwant\n%s", args, got, want)
+	}
+}
+
+func TestPrintRootsRootsThePublishedAPIOfALibraryTarget(t *testing.T) {
+	t.Parallel()
+
+	dir := writeModule(t, map[string]string{
+		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
+		"app.go": "package app\n\n// Helper is exported, so a library publishes it.\n" +
+			"func Helper() string { return helper() }\n\nfunc helper() string { return \"\" }\n",
+	})
+	documents := t.TempDir()
+
+	tests := []struct {
+		name string
+		kind config.TargetKind
+		want string
+	}{
+		{
+			name: "a_library_publishes_the_exported_declarations_of_an_importable_package",
+			kind: config.Library,
+			want: "go://example.com/app#Helper\tpublished-api\n",
+		},
+		{
+			name: "an_application_publishes_nothing_and_has_no_root_at_all_here",
+			kind: config.Application,
+			want: "",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			document := writeDocument(t, documents, string(tc.kind)+".json", `{"target": {"kind": "`+string(tc.kind)+`"}}`)
+			var stdout, stderr bytes.Buffer
+			args := []string{"print-roots", "--target=" + dir, "--config=" + document}
+			if got := run(t.Context(), args, &stdout, &stderr); got != exitClean {
+				t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, exitClean, stderr.String())
+			}
+			if got := stdout.String(); got != tc.want {
+				t.Errorf("run(%q) stdout = %q, want %q", args, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPrintRootsReportsEveryConfiguredStringThatNamesNothing(t *testing.T) {
+	t.Parallel()
+
+	dir := applicationModule(t, `{"target": {"kind": "application"}, "roots": {"patterns": ["go://example.com/app#Absent", "go://example.com/app#Help*"]}}`)
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"print-roots", "--target=" + dir}
+	if got := run(t.Context(), args, &stdout, &stderr); got != exitFindings {
+		t.Fatalf("run(%q) = %d, want %d for a configured string that names nothing\nstderr: %q", args, got, exitFindings, stderr.String())
+	}
+
+	// The roots the run did find are printed: the unmatched string is a finding
+	// about the configuration, not a failure that leaves the set unknown.
+	wantStdout := "go://example.com/app#main\tmain\n" +
+		"go://example.com/app#init\tinit\n" +
+		"go://example.com/app#Helper\tpattern\tgo://example.com/app#Help*\n" +
+		"go://example.com/app#TestHelper\ttest\n"
+	if got := stdout.String(); got != wantStdout {
+		t.Errorf("run(%q) stdout =\n%s\nwant\n%s", args, got, wantStdout)
+	}
+	wantStderr := unmatchedRoot + ": roots.patterns names nothing: go://example.com/app#Absent\n"
+	if got := stderr.String(); got != wantStderr {
+		t.Errorf("run(%q) stderr = %q, want %q", args, got, wantStderr)
+	}
+}
+
+func TestPrintRootsFailures(t *testing.T) {
+	t.Parallel()
+
+	codes := contractExitCodes(t)
+
+	tests := []struct {
+		name       string
+		files      map[string]string
+		target     string
+		wantStderr []string
+	}{
+		{
+			name: "a_target_that_does_not_type_check",
+			files: map[string]string{
+				"go.mod":           "module example.com/app\n\ngo 1.27.1\n",
+				"app.go":           "package main\n\nfunc main() {\n\tvar n int = \"one\"\n\t_ = n\n}\n",
+				repositoryDocument: `{"target": {"kind": "application"}}`,
+			},
+			wantStderr: []string{"1 error", "app.go:4:14", "cannot use"},
+		},
+		{
+			name:       "a_target_the_filesystem_does_not_hold",
+			files:      map[string]string{repositoryDocument: `{"target": {"kind": "application"}}`},
+			target:     "absent",
+			wantStderr: []string{"scope: target", "absent", "no such file or directory"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := writeModule(t, tc.files)
+			target := dir
+			if tc.target != "" {
+				target = filepath.Join(dir, tc.target)
+			}
+
+			var stdout, stderr bytes.Buffer
+			args := []string{"print-roots", "--target=" + target, "--config=" + filepath.Join(dir, repositoryDocument)}
+			if got := run(t.Context(), args, &stdout, &stderr); got != codes["failure"] {
+				t.Errorf("run(%q) = %d, want %d\nstderr: %q", args, got, codes["failure"], stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Errorf("run(%q) stdout = %q, want empty: a run that produced no root set prints none", args, stdout.String())
+			}
+			for _, want := range tc.wantStderr {
+				if !strings.Contains(stderr.String(), want) {
+					t.Errorf("run(%q) stderr = %q, want it to contain %q", args, stderr.String(), want)
+				}
+			}
+		})
+	}
+}
+
+func TestPrintRootsStopsWhenTheRunIsCancelled(t *testing.T) {
+	t.Parallel()
+
+	dir := applicationModule(t, `{"target": {"kind": "application"}}`)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"print-roots", "--target=" + dir}
+	if got := run(ctx, args, &stdout, &stderr); got != exitFailure {
+		t.Errorf("run(a cancelled run, %q) = %d, want %d\nstderr: %q", args, got, exitFailure, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("run(a cancelled run, %q) stdout = %q, want empty", args, stdout.String())
+	}
+	if want := context.Canceled.Error(); !strings.Contains(stderr.String(), want) {
+		t.Errorf("run(a cancelled run, %q) stderr = %q, want it to contain %q", args, stderr.String(), want)
 	}
 }

@@ -1,0 +1,68 @@
+One module holding every position the read and write split turns on: a plain
+assignment, a compound assignment, an increment, an address-of, a plain use, a
+range assignment, a two-value assignment, a write to a field through a selector,
+a write to an element through an index, and a write through an indirection. Every
+subject is declared at package level, because a local carries no symbol and so no
+reference at all.
+
+-- go.mod --
+module example.com/writes
+
+go 1.27.1
+-- counter.go --
+package writes
+
+// Counter holds the fields the writes reach.
+type Counter struct {
+	total int
+	names []string
+}
+
+// count is written and read at package level.
+var count int
+
+// index is a collection only ever written into through a key.
+var index = map[string]int{}
+
+// slot is a pointer only ever written through.
+var slot *int
+
+// shared is a value whose field is written through a selector.
+var shared Counter
+
+// Assign writes count and reads it back.
+func Assign(n int) int {
+	count = n
+	return count
+}
+
+// Compound writes count and records no read of its own.
+func Compound(n int) { count += n }
+
+// Increment writes count.
+func Increment() { count++ }
+
+// Address reads count through its address, because an address that escapes is a
+// read of the value's identity.
+func Address() *int { return &count }
+
+// Selector writes a field of a package-level value, which reads the value.
+func Selector(n int) { shared.total = n }
+
+// Element writes an element through an index, which reads the field indexed.
+func Element(c *Counter, i int, name string) { c.names[i] = name }
+
+// Indirect writes through a package-level pointer, which reads the pointer.
+func Indirect(n int) { *slot = n }
+
+// Entry writes an element of a package-level collection, which reads it.
+func Entry(key string, n int) { index[key] = n }
+
+// Swap writes and reads both sides of a two-value assignment.
+func Swap(c *Counter) { c.total, count = count, c.total }
+
+// Loop writes count as the key of a range.
+func Loop(names []string) {
+	for count = range names {
+	}
+}

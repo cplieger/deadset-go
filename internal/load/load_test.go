@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -237,6 +238,94 @@ func TestLoadOmitsADirectoryNoFileOfWhichIsSelected(t *testing.T) {
 	}
 	if pkg := findPackage(got, "example.com/vanished"); pkg == nil {
 		t.Errorf("Load(testdata/vanished) reported no example.com/vanished package, ids = %v", packageIDs(got))
+	}
+}
+
+// copyFixture copies the testdata module named by dir into dst.
+func copyFixture(t *testing.T, dir, dst string) {
+	t.Helper()
+	if err := os.MkdirAll(dst, 0o750); err != nil {
+		t.Fatalf("Setup: create %s: %v", dst, err)
+	}
+	entries, err := os.ReadDir(filepath.Join("testdata", dir))
+	if err != nil {
+		t.Fatalf("Setup: read testdata/%s: %v", dir, err)
+	}
+	for _, e := range entries {
+		body, err := os.ReadFile(filepath.Join("testdata", dir, e.Name()))
+		if err != nil {
+			t.Fatalf("Setup: read testdata/%s/%s: %v", dir, e.Name(), err)
+		}
+		if err := os.WriteFile(filepath.Join(dst, e.Name()), body, 0o600); err != nil {
+			t.Fatalf("Setup: write %s: %v", filepath.Join(dst, e.Name()), err)
+		}
+	}
+}
+
+func TestLoadPinsGoworkOffAgainstAnAmbientWorkspace(t *testing.T) {
+	// These two tests stage the ambient settings the pin answers, so they are the
+	// tests in the package that do not neutralise them first.
+	t.Setenv("GOWORK", "")
+
+	root := t.TempDir()
+	module := filepath.Join(root, "module")
+	copyFixture(t, "constraint", module)
+	workspace := filepath.Join(root, "go.work")
+	if err := os.WriteFile(workspace, []byte("go 1.27.1\n\nuse ./absent\n"), 0o600); err != nil {
+		t.Fatalf("Setup: write %s: %v", workspace, err)
+	}
+	doc, err := scope.ForDir(module)
+	if err != nil {
+		t.Fatalf("Setup: scope.ForDir(%s) = _, %v, want no error", module, err)
+	}
+
+	got, err := Load(t.Context(), doc, HostConfiguration())
+	if err != nil {
+		t.Fatalf("Load(a module under a go.work naming an absent module) = _, %v, want no error", err)
+	}
+	if pkg := findPackage(got, "example.com/constraint"); pkg == nil {
+		t.Errorf("Load() reported no example.com/constraint package, ids = %v", packageIDs(got))
+	}
+}
+
+func TestLoadPinsGoflagsEmptyAgainstAnAmbientTagList(t *testing.T) {
+	t.Setenv("GOWORK", "off")
+	t.Setenv("GOFLAGS", "-tags=plan9")
+
+	got, err := Load(t.Context(), fixtureScope(t, "constraint"), HostConfiguration())
+	if err != nil {
+		t.Fatalf("Load(testdata/constraint) = _, %v, want no error", err)
+	}
+
+	pkg := findPackage(got, "example.com/constraint")
+	if pkg == nil {
+		t.Fatalf("Load() reported no example.com/constraint package, ids = %v", packageIDs(got))
+	}
+	if compiled := baseNames(pkg.GoFiles); slices.Contains(compiled, "unselected.go") {
+		t.Errorf("GoFiles = %v, want it not to contain unselected.go: an ambient tag list selects no file", compiled)
+	}
+	if ignored := baseNames(pkg.IgnoredFiles); !slices.Contains(ignored, "unselected.go") {
+		t.Errorf("IgnoredFiles = %v, want it to contain unselected.go", ignored)
+	}
+}
+
+func TestLoadSelectsTheFileAConfiguredTagNames(t *testing.T) {
+	stableToolchain(t)
+	c := HostConfiguration()
+	c.ID += "-plan9"
+	c.Tags = []string{"plan9"}
+
+	got, err := Load(t.Context(), fixtureScope(t, "constraint"), c)
+	if err != nil {
+		t.Fatalf("Load(testdata/constraint, %s) = _, %v, want no error", c.ID, err)
+	}
+
+	pkg := findPackage(got, "example.com/constraint")
+	if pkg == nil {
+		t.Fatalf("Load() reported no example.com/constraint package, ids = %v", packageIDs(got))
+	}
+	if compiled := baseNames(pkg.GoFiles); !slices.Contains(compiled, "unselected.go") {
+		t.Errorf("GoFiles = %v, want it to contain unselected.go: the configuration names the tag that selects it", compiled)
 	}
 }
 

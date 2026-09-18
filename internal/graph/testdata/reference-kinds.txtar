@@ -1,0 +1,102 @@
+One module whose declarations reach every reference kind: a method selector, a
+promoted field selector and a promoted method selector through embedded fields, a
+type-switch case, a type assertion, a conversion, a call that names itself, an
+embedded interface beside a type-set element, and a declaration nothing
+references at all.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- catalog.go --
+package app
+
+// Fetcher declares one method.
+type Fetcher interface {
+	Fetch(id string) error
+}
+
+// Reader embeds Fetcher, which is an embed from Reader itself because an
+// embedded interface declares nothing.
+type Reader interface {
+	Fetcher
+	Read() Tier
+}
+
+// Stored is a type set of two named types, whose members are type uses rather
+// than embedded fields.
+type Stored interface {
+	Catalog | Buffered
+}
+
+// Tier names one tier.
+type Tier int
+
+// Exact is the tier a lookup requires.
+const Exact Tier = 1
+
+// Catalog holds one field, whose type is a reference from the field.
+type Catalog struct {
+	entries map[string]Tier
+	pair    struct{ low, high Tier }
+}
+
+// Buffered embeds Catalog by pointer and Fetcher by name.
+type Buffered struct {
+	*Catalog
+	Fetcher
+}
+
+// lonely is declared and referenced nowhere.
+var lonely Tier
+
+// Size counts the entries of the receiver, which is a selector on a field.
+func (c *Catalog) Size() Tier { return Tier(len(c.entries)) }
+
+// Promoted reaches a promoted field and a promoted method through the fields
+// Buffered embeds.
+func Promoted(b Buffered, id string) (Tier, error) {
+	held := b.entries[id]
+	if err := b.Fetch(id); err != nil {
+		return held, err
+	}
+	return held + b.pair.low, nil
+}
+
+// Depth names itself, which is a reference from its own declaration and not from
+// its declaring identifier.
+func Depth(n Tier) Tier {
+	if n <= 0 {
+		return Exact
+	}
+	return Depth(n - 1)
+}
+
+// Classify names Catalog and Fetcher in type-switch cases and Tier in a
+// conversion.
+func Classify(v any) Tier {
+	switch t := v.(type) {
+	case *Catalog:
+		return t.Size()
+	case Fetcher:
+		_ = t
+		return Exact
+	}
+	return Tier(0)
+}
+
+// Assert names Catalog in a type assertion.
+func Assert(v any) *Catalog { return v.(*Catalog) }
+
+// Constrained declares one type parameter whose constraint is a reference from
+// the parameter.
+func Constrained[F Fetcher](f F) error { return f.Fetch("") }
+
+// Pair declares two parameters against one constraint, which is a reference from
+// each of them.
+func Pair[A, B Fetcher](a A, b B) error {
+	if err := a.Fetch(""); err != nil {
+		return err
+	}
+	return b.Fetch("")
+}

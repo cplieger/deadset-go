@@ -1,0 +1,3 @@
+Resolve	normalize	call	false	catalog.go:5:43
+TestNormalize	normalize	call	true	catalog_test.go:6:5
+TestResolve	Resolve	call	true	external_test.go:10:14
