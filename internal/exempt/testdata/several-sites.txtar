@@ -1,0 +1,54 @@
+One type converted to one interface at five sites across two files, and to a
+second interface at one of them, so the union carries one record per symbol,
+class and reason rather than one per site.
+
+-- go.mod --
+module example.com/sites
+
+go 1.27.0
+-- a.go --
+// Package sites converts one type to one interface at several sites.
+package sites
+
+import "io"
+
+// Sink answers Write and Close.
+type Sink struct{ n int }
+
+// Write counts what it is given.
+func (s *Sink) Write(p []byte) (int, error) {
+	s.n += len(p)
+	return len(p), nil
+}
+
+// Close answers the closing half of io.WriteCloser.
+func (s *Sink) Close() error { return nil }
+
+// Returned converts a Sink into a result typed as a writer, which is the first
+// conversion of the fixture by file and line.
+func Returned(s *Sink) io.Writer { return s }
+
+// Assigned converts a Sink into a variable typed as a writer.
+func Assigned(s *Sink) io.Writer {
+	var w io.Writer = s
+	return w
+}
+
+// Both converts a Sink into a position typed as a writer and a closer.
+func Both(s *Sink) io.WriteCloser { return s }
+-- b.go --
+package sites
+
+import "io"
+
+// A satisfaction assertion is a conversion of its own.
+var _ io.Writer = (*Sink)(nil)
+
+// Stored converts a Sink into an element of a writer-typed container.
+func Stored(s *Sink) []io.Writer { return []io.Writer{s} }
+
+// Passed converts a Sink into an argument typed as a writer.
+func Passed(s *Sink) bool { return accept(s) }
+
+// accept takes a writer.
+func accept(w io.Writer) bool { return w != nil }

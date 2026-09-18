@@ -16,8 +16,8 @@ var ErrSource = errors.New("graph: source unavailable")
 // relative to the target root with the solidus as separator on every platform,
 // and a column counting UTF-16 code units.
 //
-// Containment and the relative path are decided lexically, so a root spelled
-// through a symbolic link does not match the paths the toolchain reported.
+// The path is made relative lexically, so a root spelled through a symbolic link
+// does not match the paths the toolchain reported and nothing under it renders.
 type positions struct {
 	fset *token.FileSet
 	read ReadFile
@@ -35,12 +35,6 @@ func newPositions(fset *token.FileSet, root string, read ReadFile) *positions {
 		rel:  make(map[string]string),
 		src:  make(map[string][]byte),
 	}
-}
-
-// inside reports whether the file holding pos is under the target root.
-func (p *positions) inside(pos token.Pos) bool {
-	q := p.fset.Position(pos)
-	return q.IsValid() && p.relative(q.Filename) != ""
 }
 
 // base returns the file name of the file holding pos, without its directory.

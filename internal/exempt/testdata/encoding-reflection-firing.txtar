@@ -1,0 +1,297 @@
+One package whose types reach every destination the encoding-reflection class
+names: reflection, the three standard encoders, both template packages, a
+database scan target, a sort interface and a log-value interface. Each type
+declares one exported method, one unexported method, one exported tagged field,
+one exported untagged field and one unexported tagged field, so the retained set
+distinguishes the four. Two further files carry the cases the class rules on: a
+value reached through a map of slices of pointers, and the writer of a template
+execution.
+
+-- go.mod --
+module example.com/flow
+
+go 1.27.1
+-- json.go --
+package flow
+
+import "encoding/json"
+
+// JSONPayload reaches the JSON encoder.
+type JSONPayload struct {
+	Name   string `json:"name"`
+	Extra  int
+	secret string `json:"secret"`
+}
+
+// Describe is exported.
+func (p JSONPayload) Describe() string { return p.Name }
+
+func (p JSONPayload) hidden() int { return p.Extra }
+
+// EncodeJSON hands a value to the encoder.
+func EncodeJSON(p JSONPayload) ([]byte, error) { return json.Marshal(p) }
+-- xml.go --
+package flow
+
+import "encoding/xml"
+
+// XMLPayload reaches the XML encoder.
+type XMLPayload struct {
+	Name   string `xml:"name"`
+	Extra  int
+	secret string `xml:"secret"`
+}
+
+// Describe is exported.
+func (p XMLPayload) Describe() string { return p.Name }
+
+func (p XMLPayload) hidden() int { return p.Extra }
+
+// EncodeXML hands a value to the encoder.
+func EncodeXML(p XMLPayload) ([]byte, error) { return xml.Marshal(p) }
+-- gob.go --
+package flow
+
+import (
+	"encoding/gob"
+	"io"
+)
+
+// GobPayload reaches the gob encoder.
+type GobPayload struct {
+	Name   string `gob:"name"`
+	Extra  int
+	secret string `gob:"secret"`
+}
+
+// Describe is exported.
+func (p GobPayload) Describe() string { return p.Name }
+
+func (p GobPayload) hidden() int { return p.Extra }
+
+// EncodeGob hands a value to the encoder through a method of the package.
+func EncodeGob(w io.Writer, p GobPayload) error { return gob.NewEncoder(w).Encode(p) }
+-- text_template.go --
+package flow
+
+import (
+	"io"
+	"text/template"
+)
+
+// TextPayload reaches the text template engine.
+type TextPayload struct {
+	Name   string `template:"name"`
+	Extra  int
+	secret string `template:"secret"`
+}
+
+// Describe is exported.
+func (p TextPayload) Describe() string { return p.Name }
+
+func (p TextPayload) hidden() int { return p.Extra }
+
+// RenderText hands a value to the engine.
+func RenderText(t *template.Template, p TextPayload) error { return t.Execute(io.Discard, p) }
+-- html_template.go --
+package flow
+
+import (
+	"html/template"
+	"io"
+)
+
+// HTMLPayload reaches the HTML template engine.
+type HTMLPayload struct {
+	Name   string `template:"name"`
+	Extra  int
+	secret string `template:"secret"`
+}
+
+// Describe is exported.
+func (p HTMLPayload) Describe() string { return p.Name }
+
+func (p HTMLPayload) hidden() int { return p.Extra }
+
+// RenderHTML hands a value to the engine.
+func RenderHTML(t *template.Template, p HTMLPayload) error { return t.Execute(io.Discard, p) }
+-- reflection.go --
+package flow
+
+import "reflect"
+
+// ReflectPayload reaches reflection.
+type ReflectPayload struct {
+	Name   string `reflect:"name"`
+	Extra  int
+	secret string `reflect:"secret"`
+}
+
+// Describe is exported.
+func (p ReflectPayload) Describe() string { return p.Name }
+
+func (p ReflectPayload) hidden() int { return p.Extra }
+
+// Inspect hands a value to reflection.
+func Inspect(p ReflectPayload) string { return reflect.ValueOf(p).Kind().String() }
+-- sql.go --
+package flow
+
+import "database/sql"
+
+// SQLPayload is a scan target.
+type SQLPayload struct {
+	Name   string `db:"name"`
+	Extra  int
+	secret string `db:"secret"`
+}
+
+// Describe is exported.
+func (p SQLPayload) Describe() string { return p.Name }
+
+func (p SQLPayload) hidden() int { return p.Extra }
+
+// ScanRow hands a pointer to the scan of one row.
+func ScanRow(row *sql.Row) (SQLPayload, error) {
+	var p SQLPayload
+	err := row.Scan(&p)
+	return p, err
+}
+
+// RowsPayload is the scan target of a row set.
+type RowsPayload struct {
+	Name   string `db:"name"`
+	Extra  int
+	secret string `db:"secret"`
+}
+
+// Describe is exported.
+func (p RowsPayload) Describe() string { return p.Name }
+
+func (p RowsPayload) hidden() int { return p.Extra }
+
+// ScanRows hands a pointer to the scan of a row set.
+func ScanRows(rows *sql.Rows) (RowsPayload, error) {
+	var p RowsPayload
+	err := rows.Scan(&p)
+	return p, err
+}
+
+// ValuePayload reaches the scan as a value rather than as a pointer.
+type ValuePayload struct {
+	Name   string `db:"name"`
+	Extra  int
+	secret string `db:"secret"`
+}
+
+// Describe is exported.
+func (p ValuePayload) Describe() string { return p.Name }
+
+func (p ValuePayload) hidden() int { return p.Extra }
+
+// ScanValue hands the scan a pointer to no defined type, and a value that is no
+// pointer, neither of which the class reads.
+func ScanValue(row *sql.Row, p ValuePayload) error {
+	var name string
+	return row.Scan(&name, p)
+}
+-- sorting.go --
+package flow
+
+import "sort"
+
+// SortPayload is converted to the sort interface.
+type SortPayload struct {
+	Names  []string `sort:"names"`
+	Extra  int
+	secret string `sort:"secret"`
+}
+
+// Len is one of the three the interface requires.
+func (p SortPayload) Len() int { return len(p.Names) }
+
+// Less is one of the three the interface requires.
+func (p SortPayload) Less(i, j int) bool { return p.Names[i] < p.Names[j] }
+
+// Swap is one of the three the interface requires.
+func (p SortPayload) Swap(i, j int) { p.Names[i], p.Names[j] = p.Names[j], p.Names[i] }
+
+// Describe is exported.
+func (p SortPayload) Describe() string { return p.Names[0] }
+
+func (p SortPayload) hidden() int { return p.Extra }
+
+// SortNames converts a value to the interface.
+func SortNames(p SortPayload) { sort.Sort(p) }
+-- logvalue.go --
+package flow
+
+import "log/slog"
+
+// LogPayload is converted to the log-value interface.
+type LogPayload struct {
+	Name   string `log:"name"`
+	Extra  int
+	secret string `log:"secret"`
+}
+
+// LogValue is what the interface requires.
+func (p LogPayload) LogValue() slog.Value { return slog.StringValue(p.Name) }
+
+// Describe is exported.
+func (p LogPayload) Describe() string { return p.Name }
+
+func (p LogPayload) hidden() int { return p.Extra }
+
+var _ slog.LogValuer = LogPayload{}
+-- containers.go --
+package flow
+
+import "encoding/json"
+
+// Deep is reached through a map of slices of pointers.
+type Deep struct {
+	Name   string `json:"name"`
+	Extra  int
+	secret string `json:"secret"`
+	Inner  Inner  `json:"inner"`
+}
+
+// Describe is exported.
+func (d Deep) Describe() string { return d.Name }
+
+func (d Deep) hidden() int { return d.Extra }
+
+// Inner is the type of a field of a type the encoder reaches, and the reach
+// stops before it.
+type Inner struct {
+	Label string `json:"label"`
+}
+
+// Describe is exported.
+func (i Inner) Describe() string { return i.Label }
+
+// EncodeDeep hands a container to the encoder.
+func EncodeDeep(m map[string][]*Deep) ([]byte, error) { return json.Marshal(m) }
+-- writer.go --
+package flow
+
+import "text/template"
+
+// Sink is the writer of a template execution, which is an argument of a function
+// of the package like any other.
+type Sink struct {
+	Buffer []byte `sink:"buffer"`
+	Extra  int
+}
+
+// Write is what the execution needs of it.
+func (s *Sink) Write(p []byte) (int, error) {
+	s.Buffer = append(s.Buffer, p...)
+	return len(p), nil
+}
+
+func (s *Sink) hidden() int { return s.Extra }
+
+// RenderInto hands the writer to the engine.
+func RenderInto(t *template.Template, s *Sink) error { return t.Execute(s, nil) }

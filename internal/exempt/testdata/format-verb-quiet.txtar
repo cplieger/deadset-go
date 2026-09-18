@@ -1,0 +1,119 @@
+One package whose types declare the method a verb would call and never reach a
+verb that calls it: a numeric verb, the default verb under the sharp flag, which
+asks for a Go-syntax representation instead, a scanning function of the same
+package, the function of the package that formats a verb rather than an operand, a
+method of another package that formats, and an operand an explicit index steps
+over. The class records nothing here.
+
+-- go.mod --
+module example.com/verbs
+
+go 1.27.1
+-- numeric.go --
+package verbs
+
+import "fmt"
+
+// Numeric reaches a verb that formats a number.
+type Numeric struct{ Count int }
+
+// String is the method no verb here calls.
+func (v Numeric) String() string { return "n" }
+
+// Total is exported and of another shape.
+func (v Numeric) Total() int { return v.Count }
+
+// RenderNumeric formats the value itself under verbs that ask for no string.
+func RenderNumeric(v Numeric) string { return fmt.Sprintf("%d %t %T %p", v, v, v, &v) }
+-- sharp.go --
+package verbs
+
+import "fmt"
+
+// Sharp reaches the default verb under the sharp flag.
+type Sharp struct{ Name string }
+
+// String is the method the sharp flag does not reach.
+func (v Sharp) String() string { return v.Name }
+
+// Total is exported and of another shape.
+func (v Sharp) Total() int { return len(v.Name) }
+
+// RenderSharp formats under the sharp flag.
+func RenderSharp(v Sharp) string { return fmt.Sprintf("%#v", v) }
+-- scanned.go --
+package verbs
+
+import (
+	"fmt"
+	"io"
+)
+
+// Scanned reaches a scanning function, which reads rather than formats.
+type Scanned struct{ Name string }
+
+// String is the method no scan calls.
+func (v Scanned) String() string { return v.Name }
+
+// Total is exported and of another shape.
+func (v Scanned) Total() int { return len(v.Name) }
+
+// ScanName reads into a field.
+func ScanName(r io.Reader, v *Scanned) error {
+	_, err := fmt.Fscanf(r, "%s", &v.Name)
+	return err
+}
+-- verb_formatting.go --
+package verbs
+
+import "fmt"
+
+// Formatted reaches the function that formats a verb rather than an operand.
+type Formatted struct{ Name string }
+
+// String is the method that function does not call.
+func (v Formatted) String() string { return v.Name }
+
+// Total is exported and of another shape.
+func (v Formatted) Total() int { return len(v.Name) }
+
+// Format renders the verb of a state, and the operand of that call is the state.
+func (v Formatted) Format(s fmt.State, verb rune) {
+	_, _ = s.Write([]byte(fmt.FormatString(s, verb)))
+}
+-- other_package.go --
+package verbs
+
+import (
+	"log/slog"
+	"strings"
+)
+
+// Elsewhere reaches a function of another package that formats.
+type Elsewhere struct{ Name string }
+
+// String is the method this call does not reach.
+func (v Elsewhere) String() string { return v.Name }
+
+// Total is exported and of another shape.
+func (v Elsewhere) Total() int { return len(v.Name) }
+
+// LogElsewhere hands a value to a logger rather than to a formatting verb.
+func LogElsewhere(l *slog.Logger, v Elsewhere) { l.Info(strings.ToLower(v.Name), "value", v) }
+-- indexed.go --
+package verbs
+
+import "fmt"
+
+// Stepped is the operand an explicit index steps over, and the format consumes no
+// other, so nothing renders it.
+type Stepped struct{ Name string }
+
+// String is the method no verb here calls.
+func (v Stepped) String() string { return v.Name }
+
+// Total is exported and of another shape.
+func (v Stepped) Total() int { return len(v.Name) }
+
+// RenderStepped formats the second operand under a numeric verb.
+func RenderStepped(stepped Stepped, n int) string { return fmt.Sprintf("%[2]d", stepped, n) }

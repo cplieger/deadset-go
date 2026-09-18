@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/internal/config"
+	"github.com/cplieger/deadset-go/internal/exempt"
 	"github.com/cplieger/deadset-go/internal/load"
 	spec "github.com/cplieger/deadset-spec"
 )
@@ -143,6 +145,7 @@ func TestExitCodeForMapsEveryWiredFailure(t *testing.T) {
 		{name: "an_unimplemented_key_is_a_usage_error", err: &config.Error{Kind: config.KindUnimplementedKey, Key: "reporters.fail_under", Message: "not implemented"}, want: codes["usage"]},
 		{name: "a_missing_target_kind_is_a_usage_error", err: &config.Error{Kind: config.KindMissingTargetKind, Key: "target.kind", Message: "not set"}, want: codes["usage"]},
 		{name: "a_wrapped_refusal_is_a_usage_error", err: errors.Join(errors.New("resolve"), &config.Error{Kind: config.KindMalformed, Message: "malformed"}), want: codes["usage"]},
+		{name: "a_configured_template_directory_the_target_does_not_hold_is_a_usage_error", err: fmt.Errorf("exempt: %s: %w: absent", exempt.TemplateField, exempt.ErrTemplateDir), want: codes["usage"]},
 		{name: "a_load_failure_is_a_failure", err: loadFailure, want: codes["failure"]},
 		{name: "a_source_that_names_no_file_or_flag_is_a_failure", err: config.ErrNoSourceLabel, want: codes["failure"]},
 		{name: "an_unclassified_error_is_a_failure", err: errors.New("write the resolved configuration"), want: codes["failure"]},
@@ -235,10 +238,10 @@ func TestRun(t *testing.T) {
 			wantStderr: []string{"flag provided but not defined", "usage: deadset-go print-roots"},
 		},
 		{
-			name:       "print_retained_is_not_implemented",
-			args:       []string{"print-retained"},
+			name:       "print_retained_takes_no_argument",
+			args:       []string{"print-retained", "."},
 			wantCode:   exitUsage,
-			wantStderr: []string{"print-retained is not implemented in this version"},
+			wantStderr: []string{`print-retained takes no argument, got "."`, "usage: deadset-go print-retained"},
 		},
 		{
 			name:       "describe_takes_no_argument",
@@ -954,5 +957,196 @@ func TestPrintRootsStopsWhenTheRunIsCancelled(t *testing.T) {
 	}
 	if want := context.Canceled.Error(); !strings.Contains(stderr.String(), want) {
 		t.Errorf("run(a cancelled run, %q) stderr = %q, want it to contain %q", args, stderr.String(), want)
+	}
+}
+
+// exemptedModule writes the fixture the retained verb is driven against: a main
+// package holding one method reached only through an interface the program
+// converts to, and one reached only by a formatting verb, so one exemption class
+// retains each and no identifier of the module names either. The two declarations
+// are written in the order the retained record reads them.
+func exemptedModule(t *testing.T, document string) string {
+	t.Helper()
+
+	return writeModule(t, map[string]string{
+		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
+		"app.go": "package main\n\nimport (\n\t\"fmt\"\n\t\"io\"\n\t\"os\"\n)\n\n" +
+			"// Sink counts the bytes written to it.\ntype Sink struct{ written int }\n\n" +
+			"// Write is what io.Writer requires, and nothing calls it by name.\n" +
+			"func (s *Sink) Write(p []byte) (int, error) {\n\ts.written += len(p)\n\treturn len(p), nil\n}\n\n" +
+			"// Tier is a level the program prints.\ntype Tier int\n\n" +
+			"// String is what a formatting verb calls, and nothing calls it by name.\n" +
+			"func (t Tier) String() string { return \"tier\" }\n\n" +
+			"func main() {\n\tvar sink Sink\n\tif _, err := io.Copy(&sink, os.Stdin); err != nil {\n\t\treturn\n\t}\n" +
+			"\tfmt.Println(Tier(1))\n}\n",
+		repositoryDocument: document,
+	})
+}
+
+func TestPrintRetainedNamesEverySymbolAnExemptionHeldBackAndTheClassThatHeldIt(t *testing.T) {
+	t.Parallel()
+
+	dir := exemptedModule(t, `{"target": {"kind": "application"}}`)
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"print-retained", "--target=" + dir}
+	if got := run(t.Context(), args, &stdout, &stderr); got != exitClean {
+		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, exitClean, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("run(%q) stderr = %q, want empty", args, stderr.String())
+	}
+
+	want := "go://example.com/app#Sink.Write\tinterface-satisfaction\tapp.go:26:23\tsatisfies io.Writer\n" +
+		"go://example.com/app#Tier.String\tformat-verb-contract\tapp.go:29:14\tformatted by fmt.Println\n"
+	if got := stdout.String(); got != want {
+		t.Errorf("run(%q) stdout =\n%s\nwant\n%s", args, got, want)
+	}
+}
+
+func TestPrintRetainedDropsTheClassTheConfigurationDisables(t *testing.T) {
+	t.Parallel()
+
+	dir := exemptedModule(t, `{"target": {"kind": "application"}, "exemptions": {"disabled": ["format-verb-contract"]}}`)
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"print-retained", "--target=" + dir}
+	if got := run(t.Context(), args, &stdout, &stderr); got != exitClean {
+		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, exitClean, stderr.String())
+	}
+
+	// The disabled class retains nothing, so its symbol is a reported candidate
+	// rather than a retained one and its line is gone; the class that still runs
+	// holds its own symbol back exactly as before.
+	want := "go://example.com/app#Sink.Write\tinterface-satisfaction\tapp.go:26:23\tsatisfies io.Writer\n"
+	if got := stdout.String(); got != want {
+		t.Errorf("run(%q) stdout =\n%s\nwant\n%s", args, got, want)
+	}
+}
+
+func TestPrintRetainedRefusesAClassNameOutsideTheVocabulary(t *testing.T) {
+	t.Parallel()
+
+	dir := exemptedModule(t, `{"target": {"kind": "application"}, "exemptions": {"disabled": ["interface-satisfation"]}}`)
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"print-retained", "--target=" + dir}
+	if got := run(t.Context(), args, &stdout, &stderr); got != exitUsage {
+		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, exitUsage, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("run(%q) stdout = %q, want empty: a refused configuration computes no exemption", args, stdout.String())
+	}
+	for _, want := range []string{`"interface-satisfation" is not an exemption class`, "interface-satisfaction", "reflective-lookup"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("run(%q) stderr = %q, want it to contain %q", args, stderr.String(), want)
+		}
+	}
+}
+
+func TestPrintRetainedReportsEveryConfiguredStringThatNamesNothing(t *testing.T) {
+	t.Parallel()
+
+	dir := exemptedModule(t, `{"target": {"kind": "application"}, "roots": {"patterns": ["go://example.com/app#Absent"]}}`)
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"print-retained", "--target=" + dir}
+	if got := run(t.Context(), args, &stdout, &stderr); got != exitFindings {
+		t.Fatalf("run(%q) = %d, want %d for a configured root that names nothing\nstderr: %q", args, got, exitFindings, stderr.String())
+	}
+
+	// The root set is what the sweep decided the candidates against, so a root
+	// that names nothing is reported here as the root verb reports it, after the
+	// retained set the run did compute.
+	if got, want := stdout.String(), "go://example.com/app#Sink.Write"; !strings.Contains(got, want) {
+		t.Errorf("run(%q) stdout =\n%s\nwant it to contain %q", args, got, want)
+	}
+	wantStderr := unmatchedRoot + ": roots.patterns names nothing: go://example.com/app#Absent\n"
+	if got := stderr.String(); got != wantStderr {
+		t.Errorf("run(%q) stderr = %q, want %q", args, got, wantStderr)
+	}
+}
+
+func TestDetectorsNameEveryClassOfTheVocabulary(t *testing.T) {
+	t.Parallel()
+
+	// A class the table does not hold retains nothing, and nothing else refuses
+	// the run: the configuration that disables such a class is still accepted,
+	// because the vocabulary is what a class name is checked against, and the
+	// symbols the class would have held back are reported as candidates instead.
+	// So the table is the only place the vocabulary is wired through, and a class
+	// added to it without a row here is an exemption the analyzer never computes.
+	classes := exempt.Classes()
+	for _, class := range classes {
+		if detectors[class] == nil {
+			t.Errorf("detectors[%q] = nil, want the detection of every class exempt.Classes() names", class)
+		}
+	}
+	if len(detectors) != len(classes) {
+		t.Errorf("detectors names %d classes, want the %d of the vocabulary: %v", len(detectors), len(classes), classes)
+	}
+}
+
+// testedModule writes a fixture the retained verb is driven against that has test
+// files: the main package of exemptedModule, an in-package test file and an
+// external test package, each converting a type of its own to an interface no
+// identifier of the module names the method through. A load with tests
+// synthesizes a test binary for such a module, whose one file lies in the build
+// cache, so this is the fixture that answers whether the analysis reasons about a
+// module with tests at all.
+func testedModule(t *testing.T, document string) string {
+	t.Helper()
+
+	return writeModule(t, map[string]string{
+		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
+		"app.go": "package main\n\nimport (\n\t\"fmt\"\n\t\"io\"\n\t\"os\"\n)\n\n" +
+			"// Sink counts the bytes written to it.\ntype Sink struct{ written int }\n\n" +
+			"// Write is what io.Writer requires, and nothing calls it by name.\n" +
+			"func (s *Sink) Write(p []byte) (int, error) {\n\ts.written += len(p)\n\treturn len(p), nil\n}\n\n" +
+			"// Tier is a level the program prints.\ntype Tier int\n\n" +
+			"// String is what a formatting verb calls, and nothing calls it by name.\n" +
+			"func (t Tier) String() string { return \"tier\" }\n\n" +
+			"func main() {\n\tvar sink Sink\n\tif _, err := io.Copy(&sink, os.Stdin); err != nil {\n\t\treturn\n\t}\n" +
+			"\tfmt.Println(Tier(1))\n}\n",
+		"app_test.go": "package main\n\nimport (\n\t\"io\"\n\t\"strings\"\n\t\"testing\"\n)\n\n" +
+			"// probe counts the bytes a test writes to it.\ntype probe struct{ written int }\n\n" +
+			"// Write is what io.Writer requires, and no test calls it by name.\n" +
+			"func (p *probe) Write(b []byte) (int, error) {\n\tp.written += len(b)\n\treturn len(b), nil\n}\n\n" +
+			"func TestSink(t *testing.T) {\n\tvar p probe\n\tif _, err := io.Copy(&p, strings.NewReader(\"x\")); err != nil {\n\t\tt.Fatal(err)\n\t}\n" +
+			"\tif p.written != 1 {\n\t\tt.Errorf(\"probe recorded %d bytes, want 1\", p.written)\n\t}\n}\n",
+		"app_ext_test.go": "package main_test\n\nimport (\n\t\"io\"\n\t\"strings\"\n\t\"testing\"\n)\n\n" +
+			"// tally counts the bytes an external test writes to it.\ntype tally struct{ written int }\n\n" +
+			"// Write is what io.Writer requires, and no test calls it by name.\n" +
+			"func (t *tally) Write(b []byte) (int, error) {\n\tt.written += len(b)\n\treturn len(b), nil\n}\n\n" +
+			"func TestTally(t *testing.T) {\n\tvar w tally\n\tif _, err := io.Copy(&w, strings.NewReader(\"xy\")); err != nil {\n\t\tt.Fatal(err)\n\t}\n" +
+			"\tif w.written != 2 {\n\t\tt.Errorf(\"tally recorded %d bytes, want 2\", w.written)\n\t}\n}\n",
+		repositoryDocument: document,
+	})
+}
+
+func TestPrintRetainedOverAModuleThatHasTestFiles(t *testing.T) {
+	t.Parallel()
+
+	dir := testedModule(t, `{"target": {"kind": "application"}}`)
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"print-retained", "--target=" + dir}
+	if got := run(t.Context(), args, &stdout, &stderr); got != exitClean {
+		t.Fatalf("run(%q) over a module with test files = %d, want %d\nstderr: %q", args, got, exitClean, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("run(%q) stderr = %q, want empty", args, stderr.String())
+	}
+
+	// A method declared in a test file is held back by the same class as one
+	// declared in production, and the external test package is its own package in
+	// the reference the line carries. The order is the site's: the production file
+	// first, then the external test file, then the in-package one.
+	want := "go://example.com/app#Sink.Write\tinterface-satisfaction\tapp.go:26:23\tsatisfies io.Writer\n" +
+		"go://example.com/app#Tier.String\tformat-verb-contract\tapp.go:29:14\tformatted by fmt.Println\n" +
+		"go://example.com/app_test#tally.Write\tinterface-satisfaction\tapp_ext_test.go:20:23\tsatisfies io.Writer\n" +
+		"go://example.com/app#probe.Write\tinterface-satisfaction\tapp_test.go:20:23\tsatisfies io.Writer\n"
+	if got := stdout.String(); got != want {
+		t.Errorf("run(%q) stdout =\n%s\nwant\n%s", args, got, want)
 	}
 }

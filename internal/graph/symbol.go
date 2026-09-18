@@ -27,9 +27,9 @@ var (
 	// reader the enumeration needs.
 	ErrIncompleteLoad = errors.New("graph: incomplete load result")
 
-	// ErrNoTargetPackage reports a load whose every file lies outside the target
-	// root, which leaves nothing to enumerate.
-	ErrNoTargetPackage = errors.New("graph: no loaded file is inside the target root")
+	// ErrNoTargetPackage reports a load carrying no package the enumeration can
+	// walk, which leaves the target without a declaration to reason about.
+	ErrNoTargetPackage = errors.New("graph: the load carries no package to enumerate")
 )
 
 // SymbolKind names what a symbol is. String is the spelling a report and a
@@ -105,8 +105,9 @@ type ReadFile func(name string) ([]byte, error)
 
 // Symbols enumerates every declaration of one loaded configuration, one Symbol
 // per source site whatever the number of package variants that type-check the
-// site. Only a file under targetRoot declares a symbol, and every position is
-// relative to that root. The order is by rendered position and then by Ref, so
+// site. Every position is rendered relative to targetRoot, and a file that root
+// does not hold ends the enumeration with [ErrSource] rather than being passed
+// over. The order is by rendered position and then by Ref, so
 // two calls over one result return the same slice. Symbols reaches the
 // filesystem only through read.
 func Symbols(r *load.Result, targetRoot string, read ReadFile) ([]Symbol, error) {
@@ -165,18 +166,19 @@ type variantGroup struct {
 	pkgs    []*packages.Package
 }
 
-// groupVariants gathers the loaded packages by import path, keeping only the
-// files inside the target root, and orders the groups and the variants inside
-// each so one configuration is walked in one order. The anchor is the file whose
-// name sorts first across every variant, so the position of the package itself
-// does not depend on which variant reached it.
+// groupVariants gathers the loaded packages by import path, and orders the groups
+// and the variants inside each so one configuration is walked in one order. A
+// package the type checker did not check and a package with no syntax tree carry
+// no declaration and are left out. The anchor is the file whose name sorts first
+// across every variant, so the position of the package itself does not depend on
+// which variant reached it.
 func groupVariants(pkgs []*packages.Package, pos *positions) []variantGroup {
 	byPath := make(map[string]*variantGroup)
 	for _, p := range pkgs {
 		if p.PkgPath == "" || p.TypesInfo == nil {
 			continue
 		}
-		files := filesInside(p, pos)
+		files := syntaxFiles(p, pos)
 		if len(files) == 0 {
 			continue
 		}
@@ -202,15 +204,10 @@ func groupVariants(pkgs []*packages.Package, pos *positions) []variantGroup {
 	return groups
 }
 
-// filesInside returns the package's syntax trees whose file is under the target
-// root, ordered by file name.
-func filesInside(p *packages.Package, pos *positions) []*ast.File {
-	files := make([]*ast.File, 0, len(p.Syntax))
-	for _, f := range p.Syntax {
-		if pos.inside(f.FileStart) {
-			files = append(files, f)
-		}
-	}
+// syntaxFiles returns the package's syntax trees ordered by file name, so one
+// configuration is walked in one order whatever order the load reported.
+func syntaxFiles(p *packages.Package, pos *positions) []*ast.File {
+	files := slices.Clone(p.Syntax)
 	slices.SortFunc(files, func(a, b *ast.File) int {
 		return strings.Compare(pos.base(a.FileStart), pos.base(b.FileStart))
 	})
@@ -305,7 +302,7 @@ func (e *enumeration) walkPackage(g variantGroup) error {
 		return err
 	}
 	for _, p := range g.pkgs {
-		for _, f := range filesInside(p, e.pos) {
+		for _, f := range syntaxFiles(p, e.pos) {
 			if err := e.walkFile(p, f, pkgID); err != nil {
 				return err
 			}

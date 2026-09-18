@@ -1,6 +1,6 @@
-// Package clean type-checks under every configuration and carries a test, so a
-// load of it reports the plain package, its in-package test variant and the
-// synthesized test binary.
+// Package clean type-checks under every configuration and carries an in-package
+// and an external test file, so a load of it reports the plain package and both
+// test variants.
 package clean
 
 // Answer is referenced from the in-package test and from nowhere else.

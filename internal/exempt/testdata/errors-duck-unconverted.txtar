@@ -1,0 +1,31 @@
+The same error type declaring the same methods, with no site at which a value of
+it reaches a position typed as error: every function that produces one returns the
+concrete type, so the type never enters the conversion set.
+
+-- go.mod --
+module example.com/errorsduck
+
+go 1.27.1
+-- fault.go --
+package errorsduck
+
+// fault declares the three forms errors.Is, errors.As and errors.Unwrap reach,
+// and no value of it ever reaches a position typed as error.
+type fault struct {
+	cause error
+	code  int
+}
+
+func (f *fault) Error() string { return "fault" }
+
+func (f *fault) Is(target error) bool { return target == f.cause }
+
+func (f *fault) As(target any) bool { return target != nil && f.code != 0 }
+
+func (f *fault) Unwrap() error { return f.cause }
+
+// newFault returns the concrete type.
+func newFault(code int) *fault { return &fault{code: code} }
+
+// Message reads a value of the concrete type.
+func Message(code int) string { return newFault(code).Error() }

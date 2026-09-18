@@ -2,6 +2,7 @@ package graph
 
 import (
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -220,9 +221,27 @@ func retainedMethod(t *testing.T) *graphBuilder {
 	return b
 }
 
+// retainedBy names every exemption of one sweep's retained record: the symbol
+// held back and the class that held it.
+func (b *graphBuilder) retainedBy(r Result) []string {
+	found := make([]string, 0, len(r.Retained))
+	for _, e := range r.Retained {
+		found = append(found, b.named[e.ID]+" "+e.Class)
+	}
+	return found
+}
+
+// exemption is one exemption on a declared symbol, carrying a class spelling and
+// no site, which is what a class deriving its evidence from a type relation
+// records.
+func (b *graphBuilder) exemption(name, class string) Exemption {
+	b.sink.Helper()
+	return Exemption{ID: b.id(name), Class: class}
+}
+
 func TestSweepReportsNoExemptSymbolAndHoldsWhatItReferencesLive(t *testing.T) {
 	b := retainedMethod(t)
-	r := b.graph().Sweep(Mode{Exempt: []SymbolID{b.id("String")}})
+	r := b.graph().Sweep(Mode{Exempt: []Exemption{b.exemption("String", "format-verb-contract")}})
 
 	// An exemption seeds reachability the way a mark does, because the retained
 	// method is live by a mechanism the analysis cannot see and the helper its
@@ -233,6 +252,135 @@ func TestSweepReportsNoExemptSymbolAndHoldsWhatItReferencesLive(t *testing.T) {
 	}
 	if set := r.LiveUnder[b.id("helper")]; !set.Has(Reachability) {
 		t.Errorf("Sweep().LiveUnder[helper] holds %v, want it to hold %s", set, Reachability)
+	}
+	// The record holds the exemption that held a symbol back and nothing else:
+	// the helper is live, and no exemption names it, so a maintainer reading the
+	// record is not told the helper was retained.
+	want := []string{"String format-verb-contract"}
+	if got := b.retainedBy(r); !slices.Equal(got, want) {
+		t.Errorf("Sweep with the retained method exempt recorded %v as retained, want %v", got, want)
+	}
+}
+
+func TestSweepRecordsEveryExemptionThatHeldASymbolBackAndNoOther(t *testing.T) {
+	b := newGraphBuilder(t).add("entry", "unreferenced", "alsoUnreferenced")
+	b.root("entry", RootMain)
+	r := b.graph().Sweep(Mode{Exempt: []Exemption{
+		b.exemption("alsoUnreferenced", "enum-group"),
+		b.exemption("entry", "generated-file"),
+		b.exemption("unreferenced", "format-verb-contract"),
+		b.exemption("unreferenced", "generated-file"),
+	}})
+
+	// The entry point is live under both relations whatever any exemption says, so
+	// its exemption held nothing back and the record leaves it out; the two
+	// declarations nothing references were candidates, so every exemption naming
+	// one is in the record. The record reads in the order the inventory holds the
+	// symbols, and two classes holding one symbol both stand, so an explanation
+	// of that symbol names both.
+	want := []string{
+		"unreferenced format-verb-contract",
+		"unreferenced generated-file",
+		"alsoUnreferenced enum-group",
+	}
+	if got := b.retainedBy(r); !slices.Equal(got, want) {
+		t.Errorf("Sweep over three exempt declarations recorded %v as retained, want %v", got, want)
+	}
+	if got := b.candidates(r); len(got) != 0 {
+		t.Errorf("Sweep over three exempt declarations returned %v, want no candidate", got)
+	}
+}
+
+func TestSweepRecordsNoExemptionNamingASymbolTheInventoryDoesNotHold(t *testing.T) {
+	b := newGraphBuilder(t).add("unreferenced")
+	r := b.graph().Sweep(Mode{Exempt: []Exemption{
+		{ID: SymbolID("absent.go:1:1"), Class: "reflective-lookup"},
+	}})
+
+	// A class that resolved a name to a declaration outside the inventory holds
+	// nothing back, so the record is empty and the declaration nothing references
+	// is still reported.
+	if got := b.retainedBy(r); len(got) != 0 {
+		t.Errorf("Sweep over an exemption naming no symbol recorded %v as retained, want none", got)
+	}
+	if want := []string{"unreferenced reference-counting"}; !slices.Equal(b.candidates(r), want) {
+		t.Errorf("Sweep over an exemption naming no symbol returned %v, want %v", b.candidates(r), want)
+	}
+}
+
+// retainedTestDeclaration is the graph a production sweep answers differently
+// once an exemption retains a test declaration: the retained declaration, the
+// production declaration only it references, and the declaration below that one,
+// which carries a production reference and so can only be reported under
+// reachability.
+func retainedTestDeclaration(t *testing.T) *graphBuilder {
+	t.Helper()
+	b := newGraphBuilder(t).add("calledByTheTest", "belowIt").addTest("Hook")
+	b.ref("Hook", "calledByTheTest")
+	b.ref("calledByTheTest", "belowIt")
+	return b
+}
+
+func TestSweepUnderProductionModeSeedsAnExemptTestDeclaration(t *testing.T) {
+	b := retainedTestDeclaration(t)
+	r := b.graph().Sweep(Mode{
+		Production: true,
+		Exempt:     []Exemption{b.exemption("Hook", "linkname-cgo-asm-plugin")},
+	})
+
+	// The exemption stands for a caller the analysis cannot see, so the retained
+	// test declaration seeds the closure of a production sweep and the production
+	// declarations it reaches run. The declaration it references directly is still
+	// counted on its production references, which are none, so it stays the
+	// test-only population; the one below it carries a production reference and is
+	// live under both relations rather than reported as a cascade.
+	want := []verdict{{name: "calledByTheTest", relation: ReferenceCounting, testRefs: 1}}
+	if got := b.verdicts(r); !slices.Equal(got, want) {
+		t.Errorf("Sweep under production mode with the test declaration exempt returned %+v, want %+v", got, want)
+	}
+	for _, name := range []string{"Hook", "calledByTheTest", "belowIt"} {
+		if set := r.LiveUnder[b.id(name)]; !set.Has(Reachability) {
+			t.Errorf("Sweep().LiveUnder[%s] holds %v, want it to hold %s", name, set, Reachability)
+		}
+	}
+}
+
+func TestSweepUnderProductionModeKeepsNothingATestFileRootReferences(t *testing.T) {
+	b := retainedTestDeclaration(t)
+	b.root("Hook", RootBlank)
+	r := b.graph().Sweep(Mode{Production: true})
+
+	// A blank declaration in a test file is a root of a kind a production sweep
+	// keeps, so it is live and seeds the closure; what it references it references
+	// from a test file, and the mode counts none of those, so the closure stops
+	// there and the declaration below is reported under reachability. A mark and
+	// an exemption are the only things that widen a production closure, because
+	// they stand for a mechanism outside the analysis rather than for a caller the
+	// mode has already decided not to count.
+	want := []verdict{
+		{name: "calledByTheTest", relation: ReferenceCounting, testRefs: 1},
+		{name: "belowIt", relation: Reachability, productionRefs: 1},
+		{name: "Hook", relation: ReferenceCounting, testOfDeadCode: true},
+	}
+	if got := b.verdicts(r); !slices.Equal(got, want) {
+		t.Errorf("Sweep under production mode over a blank root in a test file returned %+v, want %+v", got, want)
+	}
+}
+
+func TestSweepUnderProductionModeWithoutTheExemptionReachesNothingTheTestReferences(t *testing.T) {
+	b := retainedTestDeclaration(t)
+	r := b.graph().Sweep(Mode{Production: true})
+
+	// The same graph with nothing retaining the test declaration: no seed reaches
+	// it, so the declaration below the one it calls is dead under reachability and
+	// reported, which is the finding the exemption exists to withdraw.
+	want := []verdict{
+		{name: "calledByTheTest", relation: ReferenceCounting, testRefs: 1},
+		{name: "belowIt", relation: Reachability, productionRefs: 1},
+		{name: "Hook", relation: ReferenceCounting, testOfDeadCode: true},
+	}
+	if got := b.verdicts(r); !slices.Equal(got, want) {
+		t.Errorf("Sweep under production mode over the same graph returned %+v, want %+v", got, want)
 	}
 }
 
@@ -262,6 +410,68 @@ func TestSweepUnderProductionModeReadsTheReferencingFileAndNotTheTargets(t *test
 	}
 }
 
+func TestThePassesOverAModuleThatHasTestFiles(t *testing.T) {
+	const pkg = "go://example.com/tested#"
+	s := sweepOf(t, "tested-module.txtar", RootOptions{PublishedAPI: true})
+
+	t.Run("every test function is a root", func(t *testing.T) {
+		var found []string
+		for _, root := range s.roots {
+			if root.Kind == RootTest {
+				found = append(found, s.byID[root.ID].Ref)
+			}
+		}
+		slices.Sort(found)
+		want := []string{
+			"go://example.com/tested#TestNormalize",
+			"go://example.com/tested_test#TestResolve",
+		}
+		if !slices.Equal(found, want) {
+			t.Errorf("Roots(tested-module.txtar) named %v under %s, want %v", found, RootTest, want)
+		}
+	})
+
+	t.Run("a reference a test file makes carries the test flag", func(t *testing.T) {
+		// Both test files reference a declaration of the production file, and the
+		// production file references one declaration of its own, so the flag
+		// separates the two populations rather than standing for the whole set.
+		byName := make(map[string][]bool)
+		for _, ref := range s.refs {
+			name := s.name(ref.To, pkg)
+			byName[name] = append(byName[name], ref.Test)
+		}
+		cases := map[string][]bool{
+			"Resolve":   {true},
+			"normalize": {false, true},
+		}
+		for name, want := range cases {
+			if got := byName[name]; !slices.Equal(got, want) {
+				t.Errorf("References(tested-module.txtar) to %s carried Test %v, want %v", name, got, want)
+			}
+		}
+	})
+
+	t.Run("every symbol renders under the target root", func(t *testing.T) {
+		for _, symbol := range s.symbols {
+			path := symbol.Pos.Filename
+			if filepath.IsAbs(path) || !filepath.IsLocal(filepath.FromSlash(path)) {
+				t.Errorf("Symbols(tested-module.txtar)[%s].Pos.Filename = %q, want a path under the target root",
+					symbol.ID, path)
+			}
+		}
+	})
+
+	t.Run("the sweep reports the declaration nothing references", func(t *testing.T) {
+		// The published entry point and the declaration it reaches are live, the
+		// test functions are roots, and the one declaration no file names is the
+		// whole candidate set.
+		want := []string{"orphan reference-counting"}
+		if got := s.candidatesUnder(pkg, s.graph.Sweep(Mode{})); !slices.Equal(got, want) {
+			t.Errorf("Sweep(tested-module.txtar) reported %v under %s, want %v", got, pkg, want)
+		}
+	})
+}
+
 func TestRelationStringNamesEveryRelation(t *testing.T) {
 	cases := []struct {
 		relation Relation
@@ -287,6 +497,8 @@ type swept struct {
 	byID    map[SymbolID]Symbol
 	byRef   map[string]SymbolID
 	symbols []Symbol
+	refs    []Reference
+	roots   []Root
 }
 
 // sweepOf extracts one archive, loads it for one configuration and runs the three
@@ -315,6 +527,8 @@ func sweepOf(t *testing.T, archive string, opts RootOptions) *swept {
 		byID:    make(map[SymbolID]Symbol, len(symbols)),
 		byRef:   make(map[string]SymbolID, len(symbols)),
 		symbols: symbols,
+		refs:    refs,
+		roots:   roots,
 	}
 	for _, symbol := range symbols {
 		s.byID[symbol.ID] = symbol

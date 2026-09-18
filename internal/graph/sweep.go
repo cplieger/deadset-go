@@ -1,6 +1,9 @@
 package graph
 
-import "strconv"
+import (
+	"go/token"
+	"strconv"
+)
 
 // Relation names the liveness relation that decided a symbol. String returns the
 // spelling a report carries.
@@ -42,6 +45,21 @@ func (s RelationSet) Has(r Relation) bool { return s&(1<<r) != 0 }
 // with returns the set holding r as well.
 func (s RelationSet) with(r Relation) RelationSet { return s | 1<<r }
 
+// Exemption is one symbol an exemption class holds back, and why.
+//
+// Class is the spelling the vocabulary gives the class. Site is where the
+// evidence was found, rendered the way every other position of the graph is:
+// target-relative with the solidus as separator, and a column counting UTF-16
+// code units. A class whose evidence is a type relation rather than a source
+// site leaves Site and Detail empty; a class whose evidence is a text match
+// records both, because they are what a maintainer goes and looks at.
+type Exemption struct {
+	ID     SymbolID
+	Class  string
+	Detail string         // one short clause naming the evidence
+	Site   token.Position // last, so the counted fields of a position end the value
+}
+
 // Mode is what one sweep counts.
 type Mode struct {
 	// Marked are the symbols a matched suppression names. A mark makes its
@@ -50,16 +68,27 @@ type Mode struct {
 	// a candidate.
 	Marked []SymbolID
 
-	// Exempt are the symbols an exemption class retains. They are never
-	// candidates, whatever either relation says, and each seeds reachability for
-	// the same reason a mark does: the symbol is live by a mechanism the analysis
-	// cannot see, so what it references is live too.
-	Exempt []SymbolID
+	// Exempt are the exemptions an exemption class computed, one per symbol and
+	// class. An exempt symbol is never a candidate, whatever either relation
+	// says, and each seeds reachability for the same reason a mark does: the
+	// symbol is live by a mechanism the analysis cannot see, so what it
+	// references is live too. Two exemptions of one symbol both stand, so an
+	// explanation names every class that held it.
+	Exempt []Exemption
 
-	// Production drops every reference a test file made from both relations and
-	// leaves the test roots out of the reachability seed. A test root stays live
-	// all the same, so a test function is never a candidate of a production
+	// Production drops every reference a test file made from the reference count
+	// and leaves the test roots out of the reachability seed. A test root stays
+	// live all the same, so a test function is never a candidate of a production
 	// sweep and nothing it alone reaches is live.
+	//
+	// A mark and an exemption are the exception, and they are the only one: each
+	// seeds a production sweep whatever file declares the symbol, and the closure
+	// from that seed follows every reference it finds. A mechanism the analysis
+	// cannot see is what holds the symbol live, so the references it makes are
+	// uses that mechanism makes, and a symbol below a retained test declaration
+	// is not dead code. The symbol the retained declaration references directly
+	// is still counted on its production references alone, which is what leaves a
+	// symbol only tests reference reported whatever retains the test.
 	Production bool
 }
 
@@ -98,22 +127,48 @@ type Result struct {
 	// Components are the dead components, roots first: each precedes every
 	// component it reaches.
 	Components []Component
+
+	// Retained are the exemptions that held back a symbol this sweep would
+	// otherwise have reported, in the order the inventory holds the symbols they
+	// name, and in the order Mode.Exempt gave them for one symbol. An exemption
+	// on a symbol some relation holds live anyway is not here, because nothing
+	// was held back; it is still in Mode.Exempt, which is what an explanation of
+	// one symbol reads. An exemption naming no symbol of the inventory is here
+	// under no circumstances.
+	Retained []Exemption
 }
 
 // Sweep answers which symbols of one graph are dead under one mode, which
-// relation found each, and which dead component each belongs to.
+// relation found each, which dead component each belongs to, and which
+// exemptions held a symbol back.
 //
 // The order of the work is the order the answers depend on: the marks and the
 // called roots are live before either relation runs, reference counting and
 // reachability are then computed over the whole graph, the candidate set is the
 // symbols at least one relation does not hold live, the tests of dead code join
 // that set, and the components are computed over the set that results.
+//
+// Which exemptions took effect is decided by sweeping twice, because the sweep is
+// what makes them take effect: the second sweep drops the exemptions from both
+// the seed and the candidate removal, and its candidate set is what the run would
+// have reported without them. A mode carrying no exemption sweeps once.
 func (g *Graph) Sweep(m Mode) Result {
+	r := g.sweep(m).result()
+	if len(m.Exempt) == 0 {
+		return r
+	}
+	r.Retained = g.sweep(Mode{Marked: m.Marked, Production: m.Production}).retained(m.Exempt)
+	return r
+}
+
+// sweep runs every pass of one mode over the graph, in the order the answers
+// depend on.
+func (g *Graph) sweep(m Mode) *sweep {
 	s := &sweep{
 		g:              g,
 		mode:           m,
 		marked:         g.positions(m.Marked),
-		exempt:         g.positions(m.Exempt),
+		exempt:         g.exempted(m.Exempt),
 		called:         make([]bool, len(g.symbols)),
 		live:           make([]RelationSet, len(g.symbols)),
 		dead:           make([]bool, len(g.symbols)),
@@ -124,7 +179,7 @@ func (g *Graph) Sweep(m Mode) Result {
 	s.reachability()
 	s.decide()
 	s.admitTestsOfDeadCode()
-	return s.result()
+	return s
 }
 
 // positions returns one flag per symbol, set for each symbol the identifiers
@@ -139,6 +194,17 @@ func (g *Graph) positions(ids []SymbolID) []bool {
 	return flags
 }
 
+// exempted returns one flag per symbol, set for each symbol an exemption names.
+// Two exemptions of one symbol set one flag: the sweep reads whether a symbol is
+// held back, and which classes held it is the retained record's answer.
+func (g *Graph) exempted(exempt []Exemption) []bool {
+	ids := make([]SymbolID, 0, len(exempt))
+	for _, e := range exempt {
+		ids = append(ids, e.ID)
+	}
+	return g.positions(ids)
+}
+
 // sweep is one sweep's state over one graph.
 type sweep struct {
 	g              *Graph
@@ -149,6 +215,26 @@ type sweep struct {
 	dead           []bool
 	testOfDeadCode []bool
 	mode           Mode
+}
+
+// retained lists the exemptions that name a symbol this sweep judged a candidate,
+// which is what a sweep without them answers, in the order the inventory holds
+// those symbols.
+func (s *sweep) retained(exempt []Exemption) []Exemption {
+	held := make(map[SymbolID][]Exemption)
+	for _, e := range exempt {
+		if at := s.g.at(e.ID); at != outside && s.dead[at] {
+			held[e.ID] = append(held[e.ID], e)
+		}
+	}
+	if len(held) == 0 {
+		return nil
+	}
+	found := make([]Exemption, 0, len(exempt))
+	for i := range s.g.symbols {
+		found = append(found, held[s.g.symbols[i].ID]...)
+	}
+	return found
 }
 
 // callers keeps every root that names a caller the analysis cannot see in the
@@ -178,12 +264,20 @@ func (s *sweep) referenceCounting() {
 	}
 }
 
-// reachability holds a symbol live when the seed reaches it through the
-// references the mode counts, and holds every caller live whether or not the seed
-// reaches it.
+// reachability holds a symbol live when a seed reaches it, and holds every caller
+// live whether or not a seed reaches it.
+//
+// There are two seeds because they reach through different reference sets. A
+// symbol a mark or an exemption holds is live by a mechanism the analysis cannot
+// see, so every reference it makes is one that mechanism makes and no mode
+// withholds it; a root reaches through the references the mode counts. The held
+// seed runs first, which is what makes the wider rule transitive: a symbol its
+// closure reached is already expanded under that rule by the time the roots reach
+// it.
 func (s *sweep) reachability() {
-	reached, queue := s.seed()
-	s.walk(reached, queue)
+	reached := make([]bool, len(s.g.symbols))
+	s.walk(reached, s.heldSeed(reached), true)
+	s.walk(reached, s.rootSeed(reached), false)
 	for i := range s.g.symbols {
 		if reached[i] || s.called[i] {
 			s.live[i] = s.live[i].with(Reachability)
@@ -191,20 +285,26 @@ func (s *sweep) reachability() {
 	}
 }
 
-// seed is where the closure starts: every mark and every exemption, because a
-// symbol either retains is live by a mechanism the analysis cannot see and keeps
-// what it references alive, and every root, except that a production sweep leaves
-// the test roots out. A test function is run by the test binary and is not a
-// candidate, and nothing it alone reaches is live.
-func (s *sweep) seed() (reached []bool, queue []int) {
-	reached = make([]bool, len(s.g.symbols))
-	queue = make([]int, 0, len(s.g.symbols))
+// heldSeed is every mark and every exemption, because a symbol either holds is
+// live by a mechanism the analysis cannot see and keeps what it references alive.
+// A production sweep withdraws neither, so an exempt test declaration seeds one as
+// well.
+func (s *sweep) heldSeed(reached []bool) []int {
+	queue := make([]int, 0, len(s.g.symbols))
 	for i := range s.g.symbols {
 		if s.marked[i] || s.exempt[i] {
 			reached[i] = true
 			queue = append(queue, i)
 		}
 	}
+	return queue
+}
+
+// rootSeed is every root, except that a production sweep leaves the test roots
+// out. A test function is run by the test binary and is not a candidate, and
+// nothing it alone reaches is live.
+func (s *sweep) rootSeed(reached []bool) []int {
+	queue := make([]int, 0, len(s.g.rooted))
 	for _, r := range s.g.rooted {
 		if (s.mode.Production && r.kind == RootTest) || reached[r.at] {
 			continue
@@ -212,17 +312,19 @@ func (s *sweep) seed() (reached []bool, queue []int) {
 		reached[r.at] = true
 		queue = append(queue, r.at)
 	}
-	return reached, queue
+	return queue
 }
 
-// walk follows the references the mode counts out of every symbol the seed
-// reached, and out of every symbol those reach.
-func (s *sweep) walk(reached []bool, queue []int) {
+// walk follows the references out of every symbol of one seed, and out of every
+// symbol those reach. A production sweep drops the references a test file made,
+// except out of the held seed's closure, where every reference is a use the
+// holding mechanism makes.
+func (s *sweep) walk(reached []bool, queue []int, held bool) {
 	for len(queue) > 0 {
 		at := queue[len(queue)-1]
 		queue = queue[:len(queue)-1]
 		for _, e := range s.g.out[at] {
-			if (s.mode.Production && e.test) || reached[e.to] {
+			if reached[e.to] || (!held && s.mode.Production && e.test) {
 				continue
 			}
 			reached[e.to] = true

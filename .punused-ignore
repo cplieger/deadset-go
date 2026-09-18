@@ -38,14 +38,14 @@ method (RefKind).String
 # --- The stages no verb calls yet, exercised by tests until one does.
 #
 # `print-roots` wires the loader, the scope of a directory, the enumeration and
-# the root detection into a production path, so those stages have callers. Two do
-# not: no verb takes a scope document, so nothing calls the reader that decodes
-# one, and no verb consumes a reference set. Each is named in the plan for the
-# verb that lands it, and the correct resolution is that call site rather than an
-# unexport: the packages are separate so that one stage's failure cannot break
-# another's compile, and a stage's entry point is its package's surface.
+# the root detection into a production path, and `print-retained` wires the
+# reference pass, the resolver, the exemption classes and the sweep, so those
+# stages have callers. One does not: no verb takes a scope document, so nothing
+# calls the reader that decodes one. It is named in the plan for the verb that
+# lands it, and the correct resolution is that call site rather than an unexport:
+# the packages are separate so that one stage's failure cannot break another's
+# compile, and a stage's entry point is its package's surface.
 function Read
-function References
 
 # --- The per-analyzer configuration section.
 #
@@ -55,17 +55,15 @@ function References
 # for a document that carries the section to resolve rather than be refused.
 field Go is unused
 
-# --- The sweep, which no verb runs yet.
+# --- What the sweep answers and no verb reports yet.
 #
-# These are the stages the analysis verb calls once it lands: the graph is
-# indexed from the enumeration, the reference set and the root set, swept once per
-# mode, and each dead component is listed at the depth the run asks for, with the
-# two spellings a report and a message carry. Only the tests call them today, and
-# the correct resolution is that call site rather than an unexport, because the
-# sweep is a stage of the same package the enumeration and the roots are stages
-# of.
-function New
-method (*Graph).Sweep
+# `print-retained` indexes the graph from the enumeration, the reference set and
+# the root set and sweeps it, so the index and the sweep have callers. What no
+# verb reads yet is a dead component: the listing at the depth the run asks for,
+# and the two spellings a report and a message carry for a relation and a cascade.
+# Only the tests call them today, and the correct resolution is the reporting verb
+# rather than an unexport, because each is a stage of the same package the
+# enumeration and the roots are stages of.
 method (*Component).List
 method (Relation).String
 method (Cascade).String

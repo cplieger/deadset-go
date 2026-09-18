@@ -1,0 +1,49 @@
+A module with a test file, which is what makes the load return a test variant of
+the package. Both files convert a type of their own to an interface, so a class
+records a site in each.
+
+-- go.mod --
+module example.com/tested
+
+go 1.27.0
+-- app.go --
+// Package tested converts a type to an interface, and its test converts one of
+// its own.
+package tested
+
+import "io"
+
+// Sink answers Write.
+type Sink struct{}
+
+// Write counts what it is given.
+func (Sink) Write(p []byte) (int, error) { return len(p), nil }
+
+// Writer returns a Sink through a result typed as a writer.
+func Writer() io.Writer { return Sink{} }
+-- app_test.go --
+package tested
+
+import (
+	"io"
+	"testing"
+)
+
+// recorder answers Write in the test's own file.
+type recorder struct{ n int }
+
+// Write counts what it is given.
+func (r *recorder) Write(p []byte) (int, error) {
+	r.n += len(p)
+	return len(p), nil
+}
+
+func TestWriterAndRecorderBothWrite(t *testing.T) {
+	var w io.Writer = &recorder{}
+	if _, err := w.Write([]byte("a")); err != nil {
+		t.Fatalf("recorder.Write error: %v", err)
+	}
+	if _, err := Writer().Write([]byte("b")); err != nil {
+		t.Fatalf("Writer().Write error: %v", err)
+	}
+}

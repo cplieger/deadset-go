@@ -2,6 +2,7 @@ package graph
 
 import (
 	"fmt"
+	"go/token"
 	"maps"
 	"slices"
 	"strings"
@@ -26,17 +27,31 @@ type drawnRoot struct {
 	kind RootKind
 }
 
+// drawnClasses are the class spellings a draw places on an exemption. They are
+// not the vocabulary's: the sweep carries a class through and never reads one, so
+// a draw of two arbitrary spellings is what pins that it stays opaque.
+func drawnClasses() []string { return []string{"alpha-class", "beta-class"} }
+
+// drawnExemption is one exemption a draw places on one declaration.
+type drawnExemption struct {
+	class string
+	at    int
+}
+
 // drawnGraph is one graph a draw produced: a number of package-level
-// declarations, the references between them and the roots.
+// declarations, the references between them, the roots and the exemptions.
 type drawnGraph struct {
 	edges   [][2]int
 	roots   []drawnRoot
+	exempt  []drawnExemption
 	symbols int
 }
 
 // drawnGraphs draws a graph of one to eight declarations, up to twelve references
-// between them and up to three roots, each root's kind drawn on its own so the
-// published API is exercised beside the kinds that name a caller.
+// between them, up to three roots and up to four exemptions. Each root's kind is
+// drawn on its own so the published API is exercised beside the kinds that name a
+// caller, and each exemption's class on its own so two exemptions can hold one
+// declaration.
 func drawnGraphs() *rapid.Generator[drawnGraph] {
 	return rapid.Custom(func(t *rapid.T) drawnGraph {
 		count := rapid.IntRange(1, 8).Draw(t, "the number of declarations")
@@ -52,7 +67,13 @@ func drawnGraphs() *rapid.Generator[drawnGraph] {
 				kind: rapid.SampledFrom(rootKinds()).Draw(t, "the root's kind"),
 			}
 		}), 0, 3).Draw(t, "the roots")
-		return drawnGraph{symbols: count, edges: edges, roots: roots}
+		exempt := rapid.SliceOfN(rapid.Custom(func(t *rapid.T) drawnExemption {
+			return drawnExemption{
+				at:    rapid.IntRange(0, count-1).Draw(t, "the exempt declaration"),
+				class: rapid.SampledFrom(drawnClasses()).Draw(t, "the exemption's class"),
+			}
+		}), 0, 4).Draw(t, "the exemptions")
+		return drawnGraph{symbols: count, edges: edges, roots: roots, exempt: exempt}
 	})
 }
 
@@ -86,6 +107,30 @@ func (d drawnGraph) build(t *rapid.T, added []drawnRoot) *graphBuilder {
 	return b
 }
 
+// mode is the sweep's input for one drawn graph: the drawn exemptions, each
+// naming the declaration it holds, the class that holds it and a site of its own,
+// so two exemptions of one declaration are two entries.
+func (d drawnGraph) mode(b *graphBuilder) Mode {
+	exempt := make([]Exemption, 0, len(d.exempt))
+	for i, e := range d.exempt {
+		exempt = append(exempt, Exemption{
+			ID:    b.id(drawn(e.at)),
+			Class: e.class,
+			Site:  token.Position{Filename: handFile, Line: i + 1, Column: 1},
+		})
+	}
+	return Mode{Exempt: exempt}
+}
+
+// exemptNames names every declaration a draw placed an exemption on.
+func (d drawnGraph) exemptNames() map[string]bool {
+	names := make(map[string]bool, len(d.exempt))
+	for _, e := range d.exempt {
+		names[drawn(e.at)] = true
+	}
+	return names
+}
+
 // liveness answers both relations the slow way: reference counting by counting
 // the references made to each declaration, and reachability by repeating one pass
 // over the reference list until the pass adds nothing.
@@ -109,6 +154,14 @@ func (d drawnGraph) liveness(added []drawnRoot) (referenced, counted, reached ma
 			counted[drawn(r.at)] = true
 		}
 	}
+	// An exemption seeds the closure, because the symbol it holds is live by a
+	// mechanism the analysis cannot see and what it references runs. It does not
+	// join the counted set: nothing in the graph references the held symbol, so
+	// reference counting does not hold it live and an explanation of it reads the
+	// retained record rather than the relations.
+	for name := range d.exemptNames() {
+		reached[name] = true
+	}
 	for changed := true; changed; {
 		changed = false
 		for _, e := range edges {
@@ -123,8 +176,9 @@ func (d drawnGraph) liveness(added []drawnRoot) (referenced, counted, reached ma
 
 // Property dead-code-suite/P7: every candidate records the liveness relation that
 // found it, reference counting where the references made to the symbol are none
-// and reachability otherwise, and a root changes no reference-counting verdict
-// except on the symbol it names.
+// and reachability otherwise; an exemption seeds the closure, so no symbol an
+// exempt declaration reaches is reported under reachability; and a root changes no
+// reference-counting verdict except on the symbol it names.
 //
 // The graph is built by hand rather than loaded, so a draw costs no package load
 // and shrinks to the one declaration that carries a failure.
@@ -135,12 +189,13 @@ func TestProperty07TheRelationRecordedIsTheOneThatFoundTheCandidate(t *testing.T
 	rapid.Check(t, func(t *rapid.T) {
 		d := drawnGraphs().Draw(t, "the graph")
 		b := d.build(t, nil)
-		r := b.graph().Sweep(Mode{})
+		r := b.graph().Sweep(d.mode(b))
 
 		referenced, counted, reached := d.liveness(nil)
+		exempt := d.exemptNames()
 		want := []string{}
 		for _, name := range b.names(namesOf(b.symbols)) {
-			if counted[name] && reached[name] {
+			if exempt[name] || (counted[name] && reached[name]) {
 				continue
 			}
 			relation := Reachability
@@ -174,7 +229,7 @@ func TestProperty07TheRelationRecordedIsTheOneThatFoundTheCandidate(t *testing.T
 			kind: rapid.SampledFrom(rootKinds()).Draw(t, "the added root's kind"),
 		}
 		second := d.build(t, []drawnRoot{added})
-		after := second.graph().Sweep(Mode{})
+		after := second.graph().Sweep(d.mode(second))
 		for _, name := range b.names(namesOf(b.symbols)) {
 			before := r.LiveUnder[b.id(name)].Has(ReferenceCounting)
 			now := after.LiveUnder[second.id(name)].Has(ReferenceCounting)
@@ -209,6 +264,9 @@ func describeDrawn(d drawnGraph) string {
 	}
 	for _, r := range d.roots {
 		fmt.Fprintf(&b, "root %s %s\n", drawn(r.at), r.kind)
+	}
+	for _, e := range d.exempt {
+		fmt.Fprintf(&b, "exemption %s %s\n", drawn(e.at), e.class)
 	}
 	return b.String()
 }

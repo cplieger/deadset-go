@@ -1,0 +1,32 @@
+Two types answering the method set of one interface, one of which reaches an
+interface-typed position and one of which does not.
+
+-- go.mod --
+module example.com/conservative
+
+go 1.27.0
+-- counters.go --
+// Package conservative holds two types answering one interface's method set,
+// only one of which reaches an interface-typed position.
+package conservative
+
+// Counter reports a count.
+type Counter interface{ Count() int }
+
+// Converted reaches a Counter position.
+type Converted struct{ n int }
+
+// Count answers Counter.
+func (c Converted) Count() int { return c.n }
+
+// Unconverted answers Counter's method set and reaches no Counter position.
+type Unconverted struct{ n int }
+
+// Count answers Counter.
+func (u Unconverted) Count() int { return u.n }
+
+// Total reads a count through the interface.
+func Total(c Counter) int { return c.Count() }
+
+// Sum passes a Converted into a Counter parameter.
+func Sum() int { return Total(Converted{n: 2}) }

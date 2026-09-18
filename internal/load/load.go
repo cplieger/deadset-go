@@ -32,6 +32,13 @@ const loadMode = packages.NeedName | packages.NeedFiles | packages.NeedCompiledG
 // loadPattern matches every package of the target directory's module tree.
 const loadPattern = "./..."
 
+// The spelling of the test binary a test load synthesizes: a main package whose
+// import path is the tested package's path with this suffix.
+const (
+	testBinarySuffix = ".test"
+	mainPackageName  = "main"
+)
+
 var (
 	// ErrConfiguration reports a configuration missing its identifier, its
 	// operating system or its architecture.
@@ -55,8 +62,12 @@ type Configuration struct {
 // Result is one configuration's loaded packages.
 type Result struct {
 	Configuration Configuration
-	Packages      []*packages.Package // the target's packages, test variants included
-	Fset          *token.FileSet      // one FileSet for the whole configuration
+
+	// Packages holds the target's packages and the test variants that
+	// type-check their files again, and never a synthesized test binary, so
+	// every file a stage of the analysis meets is a file of the target.
+	Packages []*packages.Package
+	Fset     *token.FileSet // one FileSet for the whole configuration
 
 	// ExcludedByCgo holds the target-relative paths, forward slashes, of the
 	// files the toolchain ignored solely because they import "C". References
@@ -78,9 +89,10 @@ func HostConfiguration() Configuration {
 
 // Load resolves configuration c of doc's target. Cancelling ctx stops the load.
 //
-// Every package's Errors is walked, dependencies and test variants included, and
-// a non-empty set returns a *[Error] carrying all of them together with a zero
-// Result, so nothing downstream can compute a finding from a partial load. Load
+// Every package's Errors is walked, dependencies, test variants and synthesized
+// test binaries included, and a non-empty set returns a *[Error] carrying all of
+// them together with a zero Result, so nothing downstream can compute a finding
+// from a partial load. The test binaries are then dropped from the Result. Load
 // makes no network request, writes no cache, and pins the toolchain settings that
 // decide what loads whatever the environment says, so it needs no C toolchain and
 // no caller has to neutralise its own environment first.
@@ -127,6 +139,7 @@ func Load(ctx context.Context, doc scope.Document, c Configuration) (Result, err
 		return Result{}, &Error{Configuration: c.ID, Diagnostics: diagnostics}
 	}
 
+	pkgs = withoutTestBinaries(pkgs)
 	excluded, err := excludedByCgo(target, pkgs, c)
 	if err != nil {
 		return Result{}, fmt.Errorf("load %s: %w", c.ID, err)
@@ -138,6 +151,30 @@ func Load(ctx context.Context, doc scope.Document, c Configuration) (Result, err
 		Fset:          fset,
 		ExcludedByCgo: excluded,
 	}, nil
+}
+
+// withoutTestBinaries returns every package of a test load except the test
+// binaries the toolchain synthesizes, keeping the order the load reported.
+//
+// A test binary is a main package the toolchain writes for a tested package
+// rather than a package of the target: its one file is generated into the build
+// cache, it declares nothing the target wrote, and the test functions it calls
+// are reached by the rules that make a test function a root.
+func withoutTestBinaries(pkgs []*packages.Package) []*packages.Package {
+	binaries := make(map[string]bool)
+	for _, p := range pkgs {
+		if p.ForTest != "" {
+			binaries[p.ForTest+testBinarySuffix] = true
+		}
+	}
+	kept := make([]*packages.Package, 0, len(pkgs))
+	for _, p := range pkgs {
+		if p.Name == mainPackageName && binaries[p.PkgPath] {
+			continue
+		}
+		kept = append(kept, p)
+	}
+	return kept
 }
 
 // buildFlags renders a configuration's tags as the toolchain flag that selects
