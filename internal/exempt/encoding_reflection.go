@@ -6,7 +6,6 @@ import (
 	"go/token"
 	"go/types"
 	"slices"
-	"strings"
 
 	"github.com/cplieger/deadset-go/internal/graph"
 	"golang.org/x/tools/go/packages"
@@ -27,7 +26,6 @@ var destinationPackages = []string{
 // destinationInterfaces are the interfaces a conversion into which reaches the
 // class, each named by its package path and its name.
 var destinationInterfaces = [...]struct{ pkg, name string }{
-	{"log/slog", "LogValuer"},
 	{"sort", "Interface"},
 }
 
@@ -42,19 +40,21 @@ const (
 
 // EncodingReflectionDetector records the encoding-reflection class: a type whose
 // values reach reflection, a standard encoder, a template engine, a database scan
-// target, a sort interface or a log-value interface keeps its exported methods
-// and every field of it that carries a struct tag, because that consumer names
-// them by string and the reference graph holds no edge to them.
+// target, a sort interface or a structured-logging call keeps its exported
+// methods, its exported fields and every field of it that carries a struct tag,
+// because that consumer names them by string and the reference graph holds no
+// edge to them.
 //
 // Three rules the class applies where the case is not spelled out. Every argument
 // of a function or method of a destination package flows, the writer of a
 // template execution included, because what is named is the argument position and
 // not the parameter's meaning. A value reaches through a pointer, a slice, an
-// array, a map, a channel and a type argument, and the reach stops at each
-// defined type it finds: the members of that type are retained, and the members
-// of the types those members are built from are not. A method is retained when
-// the defined type declares it, so a method promoted from an embedded type is
-// retained only where the embedded type flows in as well.
+// array and a map, and from every type so reached through the fields of that type
+// again, until no further type joins, because an encoder walks the whole value and
+// not only its outermost type; the walk stops at an interface-typed field, whose
+// dynamic type the analysis does not see. A method is retained when the defined
+// type declares it, so a method promoted from an embedded type is retained where
+// the embedded type is reached, which the field walk does.
 func EncodingReflectionDetector(in *Input) ([]graph.Exemption, error) {
 	f := &encodingFlow{
 		kept:    newRetention(in, EncodingReflection),
@@ -92,7 +92,10 @@ type destination struct {
 
 // walkCalls records every value a call hands to a destination package.
 func (f *encodingFlow) walkCalls() error {
-	for _, p := range targetPackages(f.kept.in.Result.Packages) {
+	for _, p := range sortedPackages(f.kept.in.Result.Packages) {
+		if p.TypesInfo == nil {
+			continue
+		}
 		for _, file := range p.Syntax {
 			if err := f.walkFile(p.TypesInfo, file); err != nil {
 				return err
@@ -168,16 +171,16 @@ func (f *encodingFlow) walkConversions() error {
 	return nil
 }
 
-// retain records what every defined type a value of t carries keeps: the exported
-// methods the type declares, and every field of it that carries a struct tag,
-// whether that field is exported or not, because what is named is the tag and not
-// the visibility.
+// retain records what every defined type an encoder walking a value of t reads
+// keeps: the exported methods the type declares, its exported fields, and every
+// field of it that carries a struct tag, whether that field is exported or not,
+// because a tagged field is named by its tag and not by its visibility.
 func (f *encodingFlow) retain(t types.Type, at token.Pos, detail string) error {
 	site, err := f.kept.site(at)
 	if err != nil {
 		return err
 	}
-	for _, named := range namedTypesReached(t) {
+	for _, named := range encoderReach(t) {
 		origin := named.Origin()
 		for m := range origin.Methods() {
 			if m.Exported() {
@@ -189,7 +192,7 @@ func (f *encodingFlow) retain(t types.Type, at token.Pos, detail string) error {
 			continue
 		}
 		for i := range st.NumFields() {
-			if st.Tag(i) != "" {
+			if st.Field(i).Exported() || st.Tag(i) != "" {
 				f.kept.record(st.Field(i), site, detail)
 			}
 		}
@@ -208,6 +211,12 @@ func encodingDestination(fn *types.Func) (destination, bool) {
 	}
 	if pkg.Path() == sqlPackage && fn.Name() == sqlScanMethod && scansARow(fn) {
 		return destination{detail: "scanned by " + fn.FullName(), pointers: true}, true
+	}
+	// A structured-logging call hands its operands to a handler, which may render
+	// one by its members, so the set of those calls is the one the formatting
+	// class reads and this class shares it.
+	if _, logs := slogFunctions[fn.Name()]; pkg.Path() == slogPackage && logs {
+		return destination{detail: "passed to " + fn.FullName()}, true
 	}
 	return destination{}, false
 }
@@ -268,8 +277,10 @@ func matchInterface(targets []interfaceTarget, iface *types.Interface) (string, 
 }
 
 // namedTypesReached returns every defined type a value of t is composed of,
-// reaching through a pointer, a slice, an array, a map, a channel and a type
-// argument, and stopping at each defined type it finds.
+// reaching through a pointer, a slice, an array and a map key or value, and
+// stopping at each defined type it finds. A channel is not one of them: nothing
+// reads the value a channel carries out of the value it is a member of, and the
+// standard encoders refuse a channel outright.
 func namedTypesReached(t types.Type) []*types.Named {
 	var found []*types.Named
 	seen := make(map[types.Type]bool)
@@ -284,9 +295,6 @@ func namedTypesReached(t types.Type) []*types.Named {
 		switch u := types.Unalias(cur).(type) {
 		case *types.Named:
 			found = append(found, u)
-			for arg := range u.TypeArgs().Types() {
-				stack = append(stack, arg)
-			}
 		case *types.Pointer:
 			stack = append(stack, u.Elem())
 		case *types.Slice:
@@ -295,25 +303,67 @@ func namedTypesReached(t types.Type) []*types.Named {
 			stack = append(stack, u.Elem())
 		case *types.Map:
 			stack = append(stack, u.Key(), u.Elem())
-		case *types.Chan:
-			stack = append(stack, u.Elem())
 		}
 	}
 	return found
 }
 
-// targetPackages returns the loaded packages that carry both type information and
-// syntax, in one order, so two runs over one load walk the same files in the same
-// sequence.
-func targetPackages(pkgs []*packages.Package) []*packages.Package {
-	ordered := make([]*packages.Package, 0, len(pkgs))
-	for _, p := range pkgs {
-		if p.TypesInfo != nil && len(p.Syntax) > 0 {
-			ordered = append(ordered, p)
+// encoderReach returns every defined type an encoder walking a value of t reads:
+// the types the value is composed of, then the types the members of each of those
+// are composed of, until no further type joins. A type reached by several paths
+// joins once, and a generic type instantiated twice joins once per instantiation,
+// because the members of the two carry different types.
+func encoderReach(t types.Type) []*types.Named {
+	found := namedTypesReached(t)
+	seen := make(map[string]bool, len(found))
+	for _, named := range found {
+		seen[types.TypeString(named, nil)] = true
+	}
+	for at := 0; at < len(found); at++ {
+		for _, next := range membersReached(found[at]) {
+			key := types.TypeString(next, nil)
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			found = append(found, next)
 		}
 	}
-	slices.SortFunc(ordered, func(a, b *packages.Package) int { return strings.Compare(a.ID, b.ID) })
-	return ordered
+	return found
+}
+
+// membersReached returns the defined types the members of one reached type are
+// composed of: the types of its fields, an embedded field among them, or the
+// elements of what it is built from where it is no struct. A member typed as an
+// interface is where the walk stops, because the dynamic type an encoder would
+// read there is not in the type information.
+func membersReached(named *types.Named) []*types.Named {
+	st, isStruct := named.Underlying().(*types.Struct)
+	if !isStruct {
+		return concreteTypes(namedTypesReached(named.Underlying()))
+	}
+	var found []*types.Named
+	for field := range st.Fields() {
+		if types.IsInterface(field.Type()) {
+			continue
+		}
+		found = append(found, concreteTypes(namedTypesReached(field.Type()))...)
+	}
+	return found
+}
+
+// concreteTypes keeps the defined types whose values carry members of their own,
+// dropping the ones declared as an interface: what the value behind an interface is
+// the analysis does not see, so a member reached through one is where the walk
+// stops.
+func concreteTypes(reached []*types.Named) []*types.Named {
+	kept := reached[:0]
+	for _, named := range reached {
+		if !types.IsInterface(named) {
+			kept = append(kept, named)
+		}
+	}
+	return kept
 }
 
 // retention accumulates one class's exemptions. A class records a symbol the run

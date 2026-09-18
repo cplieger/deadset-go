@@ -1,0 +1,18 @@
+Two packages of one module and no dependency at all, with the declaration that uses
+the second package the only user of anything outside its own package.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- app.go --
+package app
+
+import "example.com/app/inner"
+
+func only() string { return inner.Name() }
+-- inner/inner.go --
+package inner
+
+// Name returns the package's name.
+func Name() string { return "inner" }

@@ -25,14 +25,23 @@ func contractDocument(t *testing.T, name string) map[string]any {
 }
 
 // schemaNode builds one node of the closed key list from the Contract's
-// configuration schema: an object declaring members is a section, an object
+// configuration schema: an object declaring members is a section, one that also
+// declares a default of its own is a setting written as an object, an object
 // leaving its member names to a pattern is an open object, an array of objects is
 // a list, and everything else holds one value.
+//
+// A default is what tells the two objects apart, and it is the schema's own
+// statement of the difference: a section holds no value, so it declares no
+// default, while a setting declares the value a source supplying none resolves to.
 func schemaNode(t *testing.T, at string, declaration map[string]any) keyNode {
 	t.Helper()
 
 	if properties, held := declaration["properties"]; held {
-		return keyNode{kind: keySection, members: schemaMembers(t, at, properties)}
+		node := keyNode{kind: keySection, members: schemaMembers(t, at, properties)}
+		if _, carries := declaration["default"]; carries {
+			node.kind = keyObject
+		}
+		return node
 	}
 	if _, held := declaration["patternProperties"]; held {
 		return keyNode{kind: keyMap}
@@ -84,36 +93,6 @@ func TestContractVersionEqualsTheContract(t *testing.T) {
 	}
 	if ContractVersion != want {
 		t.Errorf("ContractVersion = %q, want contract.json's %q", ContractVersion, want)
-	}
-}
-
-func TestFixedSeverityCodesEqualTheContract(t *testing.T) {
-	t.Parallel()
-
-	kinds, isList := contractDocument(t, "kinds.json")["kinds"].([]any)
-	if !isList {
-		t.Fatalf("kinds.json: kinds is not a list")
-	}
-	var want []string
-	for _, entry := range kinds {
-		kind, isObject := entry.(map[string]any)
-		if !isObject {
-			t.Fatalf("kinds.json: a kind is %T, want an object", entry)
-		}
-		if fixed, isBool := kind["fixed"].(bool); isBool && fixed {
-			code, isString := kind["code"].(string)
-			if !isString {
-				t.Fatalf("kinds.json: a fixed kind has no code")
-			}
-			want = append(want, code)
-		}
-	}
-	slices.Sort(want)
-
-	got := fixedSeverityCodes()
-	slices.Sort(got)
-	if !slices.Equal(got, want) {
-		t.Errorf("fixedSeverityCodes() = %v, want the codes kinds.json fixes %v", got, want)
 	}
 }
 
@@ -232,20 +211,63 @@ func TestDeclaredKeysCoverEverySetting(t *testing.T) {
 	for _, want := range []string{
 		"target.kind", "analysis.matrix.complete", "severity", "provenance", "go",
 		"analysis.configurations", "analysis.configurations[].id",
+		"analysis.template_delimiters", "analysis.template_delimiters.left",
 	} {
 		if !slices.Contains(keys, want) {
 			t.Errorf("declaredKeys() = %v, want it to contain %q", keys, want)
 		}
 	}
-	for _, unwanted := range []string{"severity", "analysis.configurations[].id", "analysis.matrix"} {
+	for _, unwanted := range []string{
+		"severity", "analysis.configurations[].id", "analysis.matrix",
+		"analysis.template_delimiters.left", "analysis.template_delimiters.right",
+	} {
 		if slices.Contains(settingPaths(), unwanted) {
 			t.Errorf("settingPaths() = %v, want it to omit %q, which holds no value of its own",
 				settingPaths(), unwanted)
 		}
 	}
-	if !slices.Contains(settingPaths(), "analysis.configurations") {
-		t.Errorf("settingPaths() = %v, want it to contain %q, which one flag supplies whole",
-			settingPaths(), "analysis.configurations")
+	for _, want := range []string{"analysis.configurations", "analysis.template_delimiters"} {
+		if !slices.Contains(settingPaths(), want) {
+			t.Errorf("settingPaths() = %v, want it to contain %q, which one source supplies whole",
+				settingPaths(), want)
+		}
+	}
+}
+
+func TestDeclaresSetting(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{name: "a_setting_at_the_root", path: "contract_version", want: true},
+		{name: "a_setting_inside_a_section", path: "analysis.min_confidence", want: true},
+		{name: "a_setting_inside_a_nested_section", path: "analysis.matrix.complete", want: true},
+		{name: "a_list_is_one_setting", path: "analysis.configurations", want: true},
+		{name: "one_entry_of_a_list_is_not", path: "analysis.configurations[0].id", want: false},
+		{name: "a_setting_written_as_an_object", path: "analysis.template_delimiters", want: true},
+		{name: "one_member_of_that_object_is_not", path: "analysis.template_delimiters.left", want: false},
+		{name: "a_section_is_not_a_setting", path: "analysis", want: false},
+		{name: "a_section_declaring_no_member_is_not", path: "go", want: false},
+		{name: "the_severity_object_is_not_a_setting", path: "severity", want: false},
+		{name: "one_code_of_the_severity_object_is", path: "severity.DS1101", want: true},
+		{name: "a_code_naming_no_live_kind_is_still_a_declared_setting", path: "severity.DS9999", want: true},
+		{name: "a_path_below_a_severity_code_is_not", path: "severity.DS1101.warn", want: false},
+		{name: "the_severity_object_with_an_empty_code_is_not", path: "severity.", want: false},
+		{name: "a_near_miss_of_a_setting_is_not", path: "analysis.min_confidences", want: false},
+		{name: "the_empty_path_is_not", path: "", want: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := DeclaresSetting(tc.path); got != tc.want {
+				t.Errorf("DeclaresSetting(%q) = %t, want %t", tc.path, got, tc.want)
+			}
+		})
 	}
 }
 

@@ -1,0 +1,12 @@
+One package carrying a comment in the namespace whose directive name the grammar
+does not define, which ends the read before any record or refusal exists.
+
+-- go.mod --
+module example.com/malformed
+
+go 1.27.1
+-- catalog.go --
+package malformed
+
+//deadset:disable DS1001 -- a directive name the grammar does not define
+func Resolve(name string) string { return name }

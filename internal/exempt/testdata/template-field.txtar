@@ -1,5 +1,6 @@
 One module whose templates name a field and a method, with the same field name
-declared on a second type and a nested template directory.
+declared on a second type, a nested template directory, a chain on the result of a
+call, and one file written with delimiters of the project's own.
 
 -- go.mod --
 module example.com/templates
@@ -30,5 +31,9 @@ type Draft struct {
 <h1>{{ .Title }}</h1>
 {{ $p := . }}
 <p>{{ $p.Byline }}</p>
+-- templates/chain.tmpl --
+<h2>{{ (index . 0).Title }}</h2>
+-- templates/custom.tmpl --
+<aside>[[ .Subtitle ]]</aside>
 -- templates/partial/footer.tmpl --
 <footer>{{ .Title }}</footer>

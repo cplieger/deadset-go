@@ -1,0 +1,77 @@
+One package whose comments cover every placement the grammar decides: a
+directive on the line above a declaration of each shape, and a directive on every
+other line, which binds nothing. Each directive carries its case as its reason, so
+a test names a case rather than a line number.
+
+-- go.mod --
+module example.com/directives
+
+go 1.27.1
+-- catalog.go --
+package directives
+
+//deadset:ignore DS1001 -- above the function
+func Resolve(name string) string { return normalize(name) }
+
+//deadset:ignore DS1001 -- two lines above the function, with a blank line between
+
+func Normalize(name string) string { return name }
+
+// Aliases returns the names an entry answers to.
+//
+//deadset:ignore DS1001 -- at the end of the doc comment, where a formatter puts it
+func Aliases() []string { return nil }
+
+//deadset:ignore DS1001 -- above the doc comment, which is not a token of the declaration
+// Entries returns every entry.
+func Entries() []string { return nil }
+
+// Catalog answers what an alias stands for.
+type Catalog struct {
+	//deadset:ignore DS1301 -- above the field
+	entries []string
+}
+
+//deadset:ignore DS1001,DS1101 -- two codes above the method
+func (c *Catalog) Reset() { c.entries = nil }
+
+// Fetcher fetches one entry.
+type Fetcher interface {
+	//deadset:ignore DS1201 -- above the interface method
+	Fetch(name string) string
+}
+
+//deadset:ignore DS1001 -- above the line that opens the group
+var (
+	//deadset:ignore DS1002 -- above the group's first specification
+	limit = 10
+
+	//deadset:ignore DS1002 -- above a specification declaring two names
+	first, second = 1, 2
+)
+
+//	deadset:ignore DS1002 -- the tab spelling, above the constant
+const bound = 7
+
+// deadset:ignore DS1001 -- the space spelling, above the generic function
+func Best[T any](values []T) T { return values[0] }
+
+func Trailing() int { return limit } //deadset:ignore DS1001 -- on the declaration's own line
+
+func Below() int { return first + second + bound }
+//deadset:ignore DS1001 -- on the line directly below a declaration
+
+//nolint:unused // another namespace, which this grammar reads as nothing at all
+
+func normalize(name string) string {
+	//deadset:ignore DS1801 -- above a local, which the inventory holds no declaration for
+	local := name
+	return local
+}
+
+//deadset:ignore DS1001
+func NoReason() bool { return Trailing() > Below() }
+
+-- aa_header.go --
+//deadset:ignore DS1502 -- above the package clause, which no declaration of the language begins at
+package directives

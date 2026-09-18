@@ -25,27 +25,41 @@ function Undefined
 #
 # `Error()` on both error types satisfies `error`, and production code returns
 # them as `error`; `String()` on the kind enumerations satisfies `fmt.Stringer`
-# and is what renders a kind in a message and in a report. No call site exists
-# for a reference search to find in either case, because the runtime dispatches
+# and is what renders a kind in a message and in a report; `Unwrap()` is what
+# `errors.Is` and `errors.As` call to walk a chain. No call site exists for a
+# reference search to find in either case, because the runtime dispatches
 # through the interface. Removing one would not fail the build, it would silently
-# change what a diagnostic prints, which is why each is pinned by a test of its
-# rendered output.
+# change what a diagnostic prints or which errors match, which is why each is
+# pinned by a test of its rendered output or of the match.
 method (*Error).Error
 method (ErrorKind).String
 method (SymbolKind).String
 method (RefKind).String
+method (Mechanism).String
+method (*MalformedError).Unwrap
 
 # --- The stages no verb calls yet, exercised by tests until one does.
 #
-# `print-roots` wires the loader, the scope of a directory, the enumeration and
-# the root detection into a production path, and `print-retained` wires the
-# reference pass, the resolver, the exemption classes and the sweep, so those
-# stages have callers. One does not: no verb takes a scope document, so nothing
-# calls the reader that decodes one. It is named in the plan for the verb that
-# lands it, and the correct resolution is that call site rather than an unexport:
-# the packages are separate so that one stage's failure cannot break another's
-# compile, and a stage's entry point is its package's surface.
+# `print-roots` wires the loader, the matrix, the scope of a directory, the
+# enumeration, the reference pass and the root detection into a production path,
+# and `print-retained` adds the resolver, the exemption classes and the sweep of
+# the matrix, so those stages have callers. These do not: no verb takes a scope
+# document, none reports a finding, and none reads a suppression or a dependency
+# directive, so the reader that decodes a scope document, the severity a kind
+# reports at, the configurations a bitset holds, the two suppression readers and
+# the four dependency answers have only their tests. Each is named in the plan for
+# the verb that lands it, and the correct resolution is that call site rather than
+# an unexport: the packages are separate so that one stage's failure cannot break
+# another's compile, and a stage's entry point is its package's surface.
 function Read
+method (*Config).EffectiveSeverity
+method (ConfigSet).Indexes
+function Inline
+function IgnoreFile
+function ModuleFile
+function UnusedRequirements
+function NoopReplacements
+function LastUses
 
 # --- The per-analyzer configuration section.
 #

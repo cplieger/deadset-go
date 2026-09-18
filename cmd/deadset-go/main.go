@@ -16,12 +16,14 @@ import (
 	"os/signal"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/cplieger/deadset-go/internal/config"
 	"github.com/cplieger/deadset-go/internal/exempt"
 	"github.com/cplieger/deadset-go/internal/graph"
 	"github.com/cplieger/deadset-go/internal/load"
+	"github.com/cplieger/deadset-go/internal/matrix"
 	"github.com/cplieger/deadset-go/internal/scope"
 )
 
@@ -272,30 +274,41 @@ var detectors = map[exempt.Class]exempt.Detector{
 	exempt.ReflectiveLookup:      exempt.ReflectiveLookupDetector,
 }
 
-// stages is what the load of one configuration produced: the loaded packages, the
-// target root every position is rendered against, the inventory, the reference of
-// every symbol in it, the root set, and every configured string that named no
-// symbol.
+// configured is one configuration of the matrix: what it loaded and the
+// declarations enumerated from it, which is what a stage reading one
+// configuration's types rather than the matrix's inventory reads.
+type configured struct {
+	symbols []graph.Symbol
+	result  load.Result
+}
+
+// stages is what the matrix produced: the configurations analyzed, one load and
+// one enumeration each, the merged inventory every configuration contributed to,
+// the target root every position is rendered against, the reference of every
+// symbol of that inventory, and every configured string that named no symbol in
+// any configuration.
 type stages struct {
-	refs      map[graph.SymbolID]string
-	root      string
-	symbols   []graph.Symbol
-	roots     []graph.Root
-	unmatched []graph.Unmatched
-	result    load.Result
+	refs           map[graph.SymbolID]string
+	root           string
+	configurations []string
+	per            []configured
+	unmatched      []graph.Unmatched
+	merged         graph.Merged
 }
 
-// rootSet is one configuration's root set: every root in the order the detection
-// returns them, the reference of every symbol a root names, and every configured
-// string that named no symbol.
+// rootSet is the matrix's root set: every root any configuration detected, each
+// naming the configuration it was detected in, the reference of every symbol a
+// root names, the configurations analyzed, and every configured string that named
+// no symbol in any of them.
 type rootSet struct {
-	refs      map[graph.SymbolID]string
-	roots     []graph.Root
-	unmatched []graph.Unmatched
+	refs           map[graph.SymbolID]string
+	configurations []string
+	roots          []graph.Root
+	unmatched      []graph.Unmatched
 }
 
-// retainedSet is one configuration's retained set: every exemption that held back
-// a symbol the sweep would otherwise have reported, the reference of every symbol
+// retainedSet is the matrix's retained set: every exemption that held back a
+// symbol the sweep would otherwise have reported, the reference of every symbol
 // one names, and every configured string that named no symbol.
 type retainedSet struct {
 	refs      map[graph.SymbolID]string
@@ -303,13 +316,16 @@ type retainedSet struct {
 	unmatched []graph.Unmatched
 }
 
-// printRoots writes the root set of the host build configuration to stdout, one
-// root per line: the symbol's reference, why it is a root, and the configured
-// string that named it where one did, separated by tabs. The shape is this
-// command's own rather than a Contract format, so that sort and cut read it.
+// printRoots writes the root set of every configuration of the matrix to stdout,
+// one root per line: the symbol's reference, why it is a root, and the configured
+// string that named it where one did, separated by tabs. A matrix of more than one
+// configuration adds the configurations that detected the root as a fourth field,
+// with the third one present and empty where no configured string named it, so
+// every line of one run holds the same fields. The shape is this command's own
+// rather than a Contract format, so that sort and cut read it.
 //
-// A configured string that names no symbol is reported on stderr by its issue
-// kind, after every root this run did find, and fails the run.
+// A configured string that names no symbol in any configuration is reported on
+// stderr by its issue kind, after every root this run did find, and fails the run.
 func printRoots(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	resolved, code := resolve("print-roots", printRootsUsage, args, stderr)
 	if code != exitClean {
@@ -322,8 +338,8 @@ func printRoots(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return exitCodeFor(err)
 	}
 
-	for _, root := range set.roots {
-		if _, err := fmt.Fprintln(stdout, rootLine(set.refs[root.ID], root)); err != nil {
+	for _, line := range rootLines(set.refs, set.roots, set.configurations) {
+		if _, err := fmt.Fprintln(stdout, line); err != nil {
 			fmt.Fprintf(stderr, "deadset-go: print-roots: %v\n", err)
 			return exitFailure
 		}
@@ -337,72 +353,169 @@ func printRoots(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	return exitClean
 }
 
-// rootsOf resolves the root set of one configuration.
+// rootsOf resolves the root set of the matrix.
 func rootsOf(ctx context.Context, resolved *resolution) (rootSet, error) {
 	loaded, err := stagesOf(ctx, resolved)
 	if err != nil {
 		return rootSet{}, err
 	}
-	return rootSet{refs: loaded.refs, roots: loaded.roots, unmatched: loaded.unmatched}, nil
+	return rootSet{
+		refs:           loaded.refs,
+		configurations: loaded.configurations,
+		roots:          loaded.merged.Roots,
+		unmatched:      loaded.unmatched,
+	}, nil
 }
 
 // stagesOf runs the stages every verb that reads the target runs: the scope of the
-// target, the load of the host build configuration, the enumeration and the root
-// detection, in the order the analysis runs them.
+// target, the matrix the configuration names or the target tree implies, one load
+// per configuration of it, then the enumeration, the reference pass and the root
+// detection per configuration, merged into the one inventory the sweep answers
+// over. A configuration that does not load fails the run with nothing computed
+// from the others, because an intersection missing a configuration reports what
+// that configuration uses.
 //
 // A library target's published API is a root and an application's is not, which
 // is the one setting of the configuration this composition root converts for the
 // detection; the patterns pass through as the configuration lists them.
+//
+// A configured string is unmatched when no configuration matched it: a pattern
+// that names a symbol one platform declares names something, so intersecting the
+// unmatched sets is what keeps a matrix from reporting a root pattern as naming
+// nothing because another platform lacks the file.
 func stagesOf(ctx context.Context, resolved *resolution) (stages, error) {
 	document, err := scope.ForDir(resolved.target)
 	if err != nil {
 		return stages{}, err
 	}
-	result, err := load.Load(ctx, document, load.HostConfiguration())
+	configurations, err := matrixOf(&resolved.config, document.Target.Path)
+	if err != nil {
+		return stages{}, err
+	}
+	results, err := load.All(ctx, document, configurations)
 	if err != nil {
 		return stages{}, err
 	}
 
 	targetRoot := document.Target.Path
-	symbols, err := graph.Symbols(&result, targetRoot, os.ReadFile)
-	if err != nil {
-		return stages{}, err
-	}
-	roots, unmatched, err := graph.Roots(&result, targetRoot, os.ReadFile, symbols, graph.RootOptions{
+	rootOptions := graph.RootOptions{
 		Patterns:     resolved.config.Roots.Patterns,
 		PublishedAPI: resolved.config.Target.Kind == config.Library,
-	})
+	}
+	per := make([]configured, len(results))
+	passes := make([]graph.Configured, len(results))
+	unmatched := make([][]graph.Unmatched, len(results))
+	for i := range results {
+		if per[i], passes[i], unmatched[i], err = passesOf(&results[i], targetRoot, rootOptions); err != nil {
+			return stages{}, err
+		}
+	}
+
+	merged, err := graph.Merge(passes)
 	if err != nil {
 		return stages{}, err
 	}
-
-	refs := make(map[graph.SymbolID]string, len(symbols))
-	for i := range symbols {
-		refs[symbols[i].ID] = symbols[i].Ref
+	refs := make(map[graph.SymbolID]string, len(merged.Symbols))
+	for i := range merged.Symbols {
+		refs[merged.Symbols[i].ID] = merged.Symbols[i].Ref
 	}
 	return stages{
-		refs:      refs,
-		root:      targetRoot,
-		symbols:   symbols,
-		roots:     roots,
-		unmatched: unmatched,
-		result:    result,
+		refs:           refs,
+		root:           targetRoot,
+		configurations: identifiers(configurations),
+		per:            per,
+		unmatched:      unmatchedEverywhere(unmatched),
+		merged:         merged,
 	}, nil
 }
 
-// printRetained writes the retained set of the host build configuration to stdout,
-// one line per symbol an exemption held back: the symbol's reference, then the
-// class that held it, the site the evidence was found at and the clause naming
-// that evidence, repeated for every further class that held the same symbol, all
-// separated by tabs. The shape is this command's own rather than a Contract
-// format, so that sort and cut read it, and a class recording no site leaves that
-// field empty rather than printing a placeholder position.
+// passesOf runs the three passes over one loaded configuration.
+func passesOf(result *load.Result, targetRoot string, rootOptions graph.RootOptions) (configured, graph.Configured, []graph.Unmatched, error) {
+	symbols, err := graph.Symbols(result, targetRoot, os.ReadFile)
+	if err != nil {
+		return configured{}, graph.Configured{}, nil, err
+	}
+	references, _, err := graph.References(result, targetRoot, os.ReadFile, symbols)
+	if err != nil {
+		return configured{}, graph.Configured{}, nil, err
+	}
+	roots, unmatched, err := graph.Roots(result, targetRoot, os.ReadFile, symbols, rootOptions)
+	if err != nil {
+		return configured{}, graph.Configured{}, nil, err
+	}
+	return configured{symbols: symbols, result: *result},
+		graph.Configured{Symbols: symbols, References: references, Roots: roots},
+		unmatched, nil
+}
+
+// matrixOf resolves the build matrix one run analyzes: the configurations the
+// configuration lists, or the matrix the target tree implies where it lists none.
 //
-// A configuration that retains nothing prints nothing and is a clean answer: no
-// symbol was held back, which is what a run over a target with no exemption looks
-// like. A configured string that names no symbol is reported on stderr by its
-// issue kind, as the root verb reports it, because the root set is what the sweep
-// decided the candidates against.
+// A derived matrix is the atoms the tree names plus the host, never the product of
+// them, and it is incomplete by definition, which is why nothing here sets
+// analysis.matrix.complete: completeness is the configuration's own assertion.
+func matrixOf(cfg *config.Config, targetRoot string) ([]load.Configuration, error) {
+	if len(cfg.Analysis.Configurations) > 0 {
+		configurations := make([]load.Configuration, len(cfg.Analysis.Configurations))
+		for i, c := range cfg.Analysis.Configurations {
+			configurations[i] = load.Configuration{ID: c.ID, OS: c.OS, Arch: c.Arch, Tags: c.Tags}
+		}
+		return configurations, nil
+	}
+	derived, err := matrix.Derive(targetRoot)
+	if err != nil {
+		return nil, err
+	}
+	return derived.Configurations, nil
+}
+
+// identifiers lists the identifier of every configuration of the matrix, in the
+// order the matrix keys them by, which is the order every configuration index
+// reaches this command in.
+func identifiers(configurations []load.Configuration) []string {
+	named := make([]string, len(configurations))
+	for i, c := range configurations {
+		named[i] = c.ID
+	}
+	return named
+}
+
+// unmatchedEverywhere returns the configured strings no configuration matched, in
+// the order the first configuration lists them.
+func unmatchedEverywhere(per [][]graph.Unmatched) []graph.Unmatched {
+	if len(per) == 0 {
+		return nil
+	}
+	count := make(map[string]int)
+	for _, one := range per {
+		for _, unmatched := range one {
+			count[unmatched.Source]++
+		}
+	}
+	everywhere := make([]graph.Unmatched, 0, len(per[0]))
+	for _, unmatched := range per[0] {
+		if count[unmatched.Source] == len(per) {
+			everywhere = append(everywhere, unmatched)
+		}
+	}
+	return everywhere
+}
+
+// printRetained writes the retained set of the matrix to stdout, one line per
+// symbol an exemption held back under any configuration: the symbol's reference,
+// then the class that held it, the site the evidence was found at and the clause
+// naming that evidence, repeated for every further class that held the same
+// symbol, all separated by tabs. One symbol, class and clause is one line whatever
+// the number of configurations that retained it, so the line does not name a
+// configuration. The shape is this command's own rather than a Contract format, so
+// that sort and cut read it, and a class recording no site leaves that field empty
+// rather than printing a placeholder position.
+//
+// A matrix that retains nothing prints nothing and is a clean answer: no symbol was
+// held back, which is what a run over a target with no exemption looks like. A
+// configured string that names no symbol is reported on stderr by its issue kind,
+// as the root verb reports it, because the root set is what the sweep decided the
+// candidates against.
 func printRetained(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	resolved, code := resolve("print-retained", printRetainedUsage, args, stderr)
 	if code != exitClean {
@@ -415,7 +528,7 @@ func printRetained(ctx context.Context, args []string, stdout, stderr io.Writer)
 		return exitUsage
 	}
 
-	set, err := retainedOf(ctx, &resolved, options)
+	set, err := retainedOf(ctx, &resolved, &options)
 	if err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
 		return exitCodeFor(err)
@@ -436,42 +549,53 @@ func printRetained(ctx context.Context, args []string, stdout, stderr io.Writer)
 	return exitClean
 }
 
-// retainedOf resolves the retained set of one configuration: the stages the root
-// verb runs, then the reference pass, the exemption classes and the sweep, in the
-// order the analysis runs them.
+// retainedOf resolves the retained set of the matrix: the stages the root verb
+// runs, then the exemption classes per configuration and one sweep of the matrix,
+// in the order the analysis runs them.
+//
+// The classes read one configuration's own types, so they run once per
+// configuration and the mode carries the union of what they found: an exemption is
+// evidence of a use the analysis cannot see, and a use under one configuration is a
+// use. One symbol, class and detail computed under more than one configuration is
+// one retained record, which is what the sweep of the matrix deduplicates.
 //
 // The sweep counts every reference, a test file's included: which symbols a
 // production sweep would report is a question about the findings rather than about
 // what an exemption held back, and a symbol held back under one mode is held back
 // under the other.
-func retainedOf(ctx context.Context, resolved *resolution, options exempt.Options) (retainedSet, error) {
+func retainedOf(ctx context.Context, resolved *resolution, options *exempt.Options) (retainedSet, error) {
 	loaded, err := stagesOf(ctx, resolved)
 	if err != nil {
 		return retainedSet{}, err
 	}
 
-	references, _, err := graph.References(&loaded.result, loaded.root, os.ReadFile, loaded.symbols)
-	if err != nil {
-		return retainedSet{}, err
-	}
-	resolver, err := graph.NewResolver(&loaded.result, loaded.root, os.ReadFile, loaded.symbols)
-	if err != nil {
-		return retainedSet{}, err
-	}
-	exemptions, err := exempt.Compute(&exempt.Input{
-		Result:  &loaded.result,
-		Resolve: resolver,
-		Symbols: loaded.symbols,
-		Root:    loaded.root,
-		Read:    os.ReadFile,
-		Options: options,
-	}, detectors)
-	if err != nil {
-		return retainedSet{}, err
+	var exemptions []graph.Exemption
+	for i := range loaded.per {
+		computed, err := exemptionsOf(&loaded.per[i], loaded.root, options)
+		if err != nil {
+			return retainedSet{}, err
+		}
+		exemptions = append(exemptions, computed...)
 	}
 
-	swept := graph.New(loaded.symbols, references, loaded.roots).Sweep(graph.Mode{Exempt: exemptions})
+	swept := graph.NewMatrix(&loaded.merged).Sweep(graph.Mode{Exempt: exemptions})
 	return retainedSet{refs: loaded.refs, retained: swept.Retained, unmatched: loaded.unmatched}, nil
+}
+
+// exemptionsOf computes the exemptions of one configuration.
+func exemptionsOf(one *configured, targetRoot string, options *exempt.Options) ([]graph.Exemption, error) {
+	resolver, err := graph.NewResolver(&one.result, targetRoot, os.ReadFile, one.symbols)
+	if err != nil {
+		return nil, err
+	}
+	return exempt.Compute(&exempt.Input{
+		Result:  &one.result,
+		Resolve: resolver,
+		Symbols: one.symbols,
+		Root:    targetRoot,
+		Read:    os.ReadFile,
+		Options: *options,
+	}, detectors)
 }
 
 // exemptOptions converts the settings the exemption classes read into the value
@@ -493,7 +617,11 @@ func exemptOptions(cfg *config.Config) (exempt.Options, error) {
 		disabled = append(disabled, class)
 	}
 	return exempt.Options{
-		Disabled:         disabled,
+		Disabled: disabled,
+		TemplateDelimiters: exempt.Delimiters{
+			Left:  cfg.Analysis.TemplateDelimiters.Left,
+			Right: cfg.Analysis.TemplateDelimiters.Right,
+		},
 		TemplateDirs:     cfg.Analysis.TemplateDirs,
 		IncludeGenerated: cfg.Analysis.GeneratedFiles == config.IncludeGenerated,
 	}, nil
@@ -532,14 +660,66 @@ func evidenceSite(site token.Position) string {
 	return site.String()
 }
 
-// rootLine renders one root, leaving the third field off a detected class, which
-// no configured string named.
-func rootLine(ref string, root graph.Root) string {
+// rootLines renders one line per root the matrix holds, in the order the merge
+// returns them, which is the first configuration's own order followed by what each
+// later configuration alone detected.
+//
+// One root two configurations detect is one line naming both, keyed by the symbol,
+// the class and the configured string: a file several configurations compile
+// declares one root, and a report of the matrix names it once. The configurations
+// are printed only where the matrix holds more than one, so a run over a single
+// configuration prints the root set of that configuration and nothing besides.
+func rootLines(refs map[graph.SymbolID]string, roots []graph.Root, configurations []string) []string {
+	at := make(map[rootKey]int, len(roots))
+	lines := make([]string, 0, len(roots))
+	detected := make([][]string, 0, len(roots))
+	for _, root := range roots {
+		key := rootKey{id: root.ID, source: root.Source, kind: root.Kind}
+		held, seen := at[key]
+		if !seen {
+			held = len(lines)
+			at[key] = held
+			lines = append(lines, rootLine(refs[root.ID], root, len(configurations) > 1))
+			detected = append(detected, nil)
+		}
+		detected[held] = append(detected[held], configurationName(configurations, root.Config))
+	}
+	if len(configurations) < 2 {
+		return lines
+	}
+	for i := range lines {
+		lines[i] += "\t" + strings.Join(detected[i], " ")
+	}
+	return lines
+}
+
+// rootKey is what makes two roots of a matrix one root: the symbol, the class that
+// made it one and the configured string that named it, so a symbol that is a root
+// for two reasons keeps one line per reason.
+type rootKey struct {
+	id     graph.SymbolID
+	source string
+	kind   graph.RootKind
+}
+
+// rootLine renders one root. The configured string is left off a detected class,
+// which no configured string named, unless a field follows it.
+func rootLine(ref string, root graph.Root, sourceField bool) string {
 	line := ref + "\t" + root.Kind.String()
-	if root.Source == "" {
+	if root.Source == "" && !sourceField {
 		return line
 	}
 	return line + "\t" + root.Source
+}
+
+// configurationName names one configuration of the matrix. A configuration outside
+// it is named by its place, which is what a root carrying an index the matrix does
+// not hold would print, rather than an empty field that reads as no configuration.
+func configurationName(configurations []string, at int) string {
+	if at < 0 || at >= len(configurations) {
+		return strconv.Itoa(at)
+	}
+	return configurations[at]
 }
 
 // configInputs reads the configuration documents one invocation names. The
@@ -626,12 +806,21 @@ func applyFlagSettings(set *flag.FlagSet, inputs *config.Inputs) error {
 //
 // A configured template directory the scan cannot read is a refusal of the second
 // kind: the document resolved, and what it names does not exist, which a stage
-// rather than the decode is the first to find out.
+// rather than the decode is the first to find out. A matrix holding no
+// configuration, or more than the merge can key one of, is the same kind again: the
+// documents resolved, and the matrix they name is one no run can analyze.
+//
+// A configuration that fails to load is not one of those: the matrix is analyzable
+// and one of its configurations did not load, so the run is a failure that produced
+// no answer, and the load's own error names the configuration.
 func exitCodeFor(err error) int {
 	if _, refusal := errors.AsType[*config.Error](err); refusal {
 		return exitUsage
 	}
 	if errors.Is(err, exempt.ErrTemplateDir) {
+		return exitUsage
+	}
+	if errors.Is(err, load.ErrNoConfiguration) || errors.Is(err, graph.ErrMatrix) {
 		return exitUsage
 	}
 	return exitFailure

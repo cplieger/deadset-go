@@ -29,9 +29,9 @@ const severityPrefix = "severity."
 // The target kind is drawn for at least one source, because a resolved
 // configuration carrying none is refused rather than resolved, which is the
 // subject of another test.
-func drawSources(t *rapid.T, fixed []string) (map[config.Source]map[string]any, []string) {
+func drawSources(t *rapid.T, settable []string) (map[config.Source]map[string]any, []string) {
 	generators := settingGenerators()
-	for _, key := range severityKeys(fixed).Draw(t, "the severity keys") {
+	for _, key := range severityKeys(settable).Draw(t, "the severity keys") {
 		generators[severityPrefix+key] = severityValue()
 	}
 	paths := slices.Sorted(maps.Keys(generators))
@@ -114,8 +114,16 @@ func nestedDocument(t *rapid.T, values, extra map[string]any) []byte {
 	return encodeDocument(t, document)
 }
 
+// fataler is how a helper a test and a property both call reports a failure of its
+// own. Neither *testing.T nor *rapid.T satisfies the other's interface, and these
+// two methods are all such a helper needs.
+type fataler interface {
+	Fatalf(format string, args ...any)
+	Helper()
+}
+
 // nestInto writes one value into a document at the path its dotted segments name.
-func nestInto(t *rapid.T, into map[string]any, path string, value any) {
+func nestInto(t fataler, into map[string]any, path string, value any) {
 	t.Helper()
 
 	segments := strings.Split(path, ".")
@@ -134,8 +142,8 @@ func nestInto(t *rapid.T, into map[string]any, path string, value any) {
 	into[segments[len(segments)-1]] = value
 }
 
-// encodeDocument renders one generated document.
-func encodeDocument(t *rapid.T, document map[string]any) []byte {
+// encodeDocument renders one document a test or a property built.
+func encodeDocument(t fataler, document map[string]any) []byte {
 	t.Helper()
 
 	data, err := json.Marshal(document)
@@ -208,10 +216,10 @@ func TestPropertyConfigurationResolutionRoundTrips(t *testing.T) {
 	t.Parallel()
 
 	defaults := schemaDefaults(t)
-	fixed := fixedSeverityCodes(t)
+	settable := settableSeverityKeys(t)
 
 	rapid.Check(t, func(t *rapid.T) {
-		drawn, paths := drawSources(t, fixed)
+		drawn, paths := drawSources(t, settable)
 
 		in := inputsOf(t, drawn, nil)
 		cfg, provenance, err := config.Resolve(in)

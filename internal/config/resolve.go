@@ -42,13 +42,14 @@ type docTarget struct {
 }
 
 type docAnalysis struct {
-	Languages      *[]Language      `json:"languages"`
-	MinConfidence  *Confidence      `json:"min_confidence"`
-	GeneratedFiles *GeneratedFiles  `json:"generated_files"`
-	ConsumerTests  *ConsumerTests   `json:"consumer_tests"`
-	Configurations *[]Configuration `json:"configurations"`
-	Matrix         *docMatrix       `json:"matrix"`
-	TemplateDirs   *[]string        `json:"template_dirs"`
+	Languages          *[]Language         `json:"languages"`
+	MinConfidence      *Confidence         `json:"min_confidence"`
+	GeneratedFiles     *GeneratedFiles     `json:"generated_files"`
+	ConsumerTests      *ConsumerTests      `json:"consumer_tests"`
+	Configurations     *[]Configuration    `json:"configurations"`
+	Matrix             *docMatrix          `json:"matrix"`
+	TemplateDirs       *[]string           `json:"template_dirs"`
+	TemplateDelimiters *TemplateDelimiters `json:"template_delimiters"`
 }
 
 type docMatrix struct {
@@ -277,6 +278,8 @@ func resolveAnalysis(cfg *Config, p Provenance, sources []source) {
 		func(d *doc) *bool { return d.Analysis.Matrix.Complete })
 	resolveSetting(&cfg.Analysis.TemplateDirs, "analysis.template_dirs", p, sources,
 		func(d *doc) *[]string { return d.Analysis.TemplateDirs })
+	resolveSetting(&cfg.Analysis.TemplateDelimiters, "analysis.template_delimiters", p, sources,
+		func(d *doc) *TemplateDelimiters { return d.Analysis.TemplateDelimiters })
 	for index := range cfg.Analysis.Configurations {
 		if cfg.Analysis.Configurations[index].Tags == nil {
 			cfg.Analysis.Configurations[index].Tags = []string{}
@@ -318,7 +321,7 @@ func resolveSeverity(cfg *Config, p Provenance, sources []source) {
 	}
 	cfg.Severity = make(map[string]Severity, len(codes))
 	for _, code := range slices.Sorted(maps.Keys(codes)) {
-		path := "severity." + code
+		path := severitySection + "." + code
 		for _, s := range sources {
 			value, held := s.document.Severity[code]
 			if !held {
@@ -332,10 +335,10 @@ func resolveSeverity(cfg *Config, p Provenance, sources []source) {
 	if len(codes) > 0 {
 		return
 	}
-	p["severity"] = Origin{Source: SourceDefault}
+	p[severitySection] = Origin{Source: SourceDefault}
 	for _, s := range sources {
 		if s.document.Severity != nil {
-			p["severity"] = s.origin("severity")
+			p[severitySection] = s.origin(severitySection)
 			return
 		}
 	}
@@ -409,6 +412,21 @@ func validateAnalysis(a *docAnalysis, label string) *Error {
 		enum(label, "analysis.consumer_tests", a.ConsumerTests, TestReference, ProductionReference),
 		validateConfigurations(a.Configurations, label),
 		arrayOf(label, "analysis.template_dirs", a.TemplateDirs, 0),
+		validateDelimiters(a.TemplateDelimiters, label),
+	)
+}
+
+// validateDelimiters checks the action delimiter pair: once a document names the
+// object both members are required, because a pair carrying one member names no
+// delimiters at all, so the refusal names the member the document left out rather
+// than pairing the one it named with a default.
+func validateDelimiters(delimiters *TemplateDelimiters, label string) *Error {
+	if delimiters == nil {
+		return nil
+	}
+	return firstError(
+		required(label, "analysis.template_delimiters.left", delimiters.Left),
+		required(label, "analysis.template_delimiters.right", delimiters.Right),
 	)
 }
 
@@ -481,7 +499,7 @@ func validateTS(t *docTS, label string) *Error {
 // rather than a setting.
 func validateSeverity(severity map[string]Severity, label string) *Error {
 	for _, code := range slices.Sorted(maps.Keys(severity)) {
-		path := "severity." + code
+		path := severitySection + "." + code
 		if !severityKeyPattern.MatchString(code) {
 			return unimplementedSeverityKey(label, path,
 				"a severity key is one issue-kind code or one two-digit family prefix")
@@ -490,12 +508,24 @@ func validateSeverity(severity map[string]Severity, label string) *Error {
 			return unimplementedSeverityKey(label, path,
 				fmt.Sprintf("the Contract fixes the severity of %s, which this key names", spellCodes(fixed)))
 		}
+		if !namesLiveKind(code) {
+			return unimplementedSeverityKey(label, path, noLiveKind(code))
+		}
 		value := severity[code]
 		if refusal := enum(label, path, &value, Allow, Warn, Deny); refusal != nil {
 			return refusal
 		}
 	}
 	return nil
+}
+
+// noLiveKind says why a well-formed severity key that names no issue kind this
+// analyzer ships is not a setting, naming the code or the family the key spells.
+func noLiveKind(code string) string {
+	if len(code) == familyKeyLength {
+		return "no issue kind this analyzer ships carries a code of the family " + code
+	}
+	return "no issue kind this analyzer ships carries the code " + code
 }
 
 // unimplementedSeverityKey refuses one severity key, naming why the key is not a

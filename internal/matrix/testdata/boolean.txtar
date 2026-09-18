@@ -1,0 +1,19 @@
+A Boolean constraint whose two atoms are both the host's, so the atoms derive
+no configuration that satisfies it.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- app.go --
+package app
+
+// Name is the platform the build selected.
+func Name() string { return "app" }
+-- guard.go --
+//go:build linux && !amd64
+
+package app
+
+// Narrow reports whether the narrow path is in.
+func Narrow() bool { return true }

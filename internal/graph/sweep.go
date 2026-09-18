@@ -104,6 +104,12 @@ type Candidate struct {
 	ProductionRefs int
 	TestRefs       int
 
+	// Configs is the set of build configurations the candidate is dead in, which
+	// over a matrix is every configuration it exists in and over one
+	// configuration's graph is empty, because such a graph is not keyed by a
+	// matrix. It is what a finding names the configurations it holds under from.
+	Configs ConfigSet
+
 	Relation Relation
 
 	// TestOfDeadCode reports a test declaration admitted by the rule rather than
@@ -410,6 +416,6 @@ func (s *sweep) result() Result {
 			TestOfDeadCode: s.testOfDeadCode[i],
 		})
 	}
-	r.Components = s.components()
+	r.Components = s.g.componentsOf(s.dead, s.testOfDeadCode)
 	return r
 }

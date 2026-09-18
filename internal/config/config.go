@@ -13,10 +13,17 @@ import (
 
 // ContractVersion is the Contract version this package implements. It is the
 // resolved value of contract_version when no source supplies one.
-const ContractVersion = "1.0.0"
+const ContractVersion = "1.1.0"
 
 // defaultTestFiles is the documented default of ts.test_files.
 const defaultTestFiles = "**/*.test.{ts,tsx,mts,cts}"
+
+// The documented default of analysis.template_delimiters: the template grammar's
+// own action delimiters.
+const (
+	defaultLeftDelimiter  = "{{"
+	defaultRightDelimiter = "}}"
+)
 
 // TargetKind is whether the target is an application, whose every caller is in
 // the analyzed graph, or a library, whose published API has callers outside it.
@@ -141,6 +148,18 @@ type Analysis struct {
 	Configurations []Configuration `json:"configurations"`
 	Matrix         Matrix          `json:"matrix"`
 	TemplateDirs   []string        `json:"template_dirs"`
+
+	TemplateDelimiters TemplateDelimiters `json:"template_delimiters"`
+}
+
+// TemplateDelimiters is the pair of action delimiters a template is parsed with:
+// Left opens an action and Right closes it. Both members are required once a
+// document names the object, so the pair is one setting rather than two: a
+// higher-ranked source replaces both members together and a resolved
+// configuration carries one provenance entry for it.
+type TemplateDelimiters struct {
+	Left  string `json:"left"`
+	Right string `json:"right"`
 }
 
 // Configuration is one entry of the build matrix: a configuration the target
@@ -207,6 +226,10 @@ func Default() Config {
 			Configurations: []Configuration{},
 			Matrix:         Matrix{Complete: false},
 			TemplateDirs:   []string{},
+			TemplateDelimiters: TemplateDelimiters{
+				Left:  defaultLeftDelimiter,
+				Right: defaultRightDelimiter,
+			},
 		},
 		Consumers:  Consumers{Complete: false},
 		Roots:      Roots{Patterns: []string{}},

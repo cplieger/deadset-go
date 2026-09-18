@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -17,6 +16,7 @@ import (
 
 	"github.com/cplieger/deadset-go/internal/config"
 	"github.com/cplieger/deadset-go/internal/exempt"
+	"github.com/cplieger/deadset-go/internal/graph"
 	"github.com/cplieger/deadset-go/internal/load"
 	spec "github.com/cplieger/deadset-spec"
 )
@@ -146,6 +146,8 @@ func TestExitCodeForMapsEveryWiredFailure(t *testing.T) {
 		{name: "a_missing_target_kind_is_a_usage_error", err: &config.Error{Kind: config.KindMissingTargetKind, Key: "target.kind", Message: "not set"}, want: codes["usage"]},
 		{name: "a_wrapped_refusal_is_a_usage_error", err: errors.Join(errors.New("resolve"), &config.Error{Kind: config.KindMalformed, Message: "malformed"}), want: codes["usage"]},
 		{name: "a_configured_template_directory_the_target_does_not_hold_is_a_usage_error", err: fmt.Errorf("exempt: %s: %w: absent", exempt.TemplateField, exempt.ErrTemplateDir), want: codes["usage"]},
+		{name: "a_matrix_holding_no_configuration_is_a_usage_error", err: fmt.Errorf("%w: %s", load.ErrNoConfiguration, "/src/app"), want: codes["usage"]},
+		{name: "a_matrix_the_merge_cannot_key_a_configuration_of_is_a_usage_error", err: fmt.Errorf("%w: %d configurations, at most 64", graph.ErrMatrix, 65), want: codes["usage"]},
 		{name: "a_load_failure_is_a_failure", err: loadFailure, want: codes["failure"]},
 		{name: "a_source_that_names_no_file_or_flag_is_a_failure", err: config.ErrNoSourceLabel, want: codes["failure"]},
 		{name: "an_unclassified_error_is_a_failure", err: errors.New("write the resolved configuration"), want: codes["failure"]},
@@ -616,90 +618,6 @@ func TestSourceEditFlag(t *testing.T) {
 	}
 }
 
-// configSchema decodes the Contract's configuration schema, the closed key list
-// every setting a flag supplies is a key of.
-func configSchema(t *testing.T) map[string]any {
-	t.Helper()
-
-	body, err := spec.Contract.ReadFile("contract/config.schema.json")
-	if err != nil {
-		t.Fatalf("Setup: read contract/config.schema.json: %v", err)
-	}
-	var document map[string]any
-	if err := json.Unmarshal(body, &document); err != nil {
-		t.Fatalf("Setup: decode contract/config.schema.json: %v", err)
-	}
-	return document
-}
-
-// schemaObject reads one declaration of the schema as the object a declaration is.
-func schemaObject(t *testing.T, at string, declaration any) map[string]any {
-	t.Helper()
-
-	object, isObject := declaration.(map[string]any)
-	if !isObject {
-		t.Fatalf("Setup: contract/config.schema.json declares %s as %T, want an object", at, declaration)
-	}
-	return object
-}
-
-// schemaMember resolves one member name against one declaration: the members that
-// declaration names, then the patterns it declares where the member names are
-// open. It returns the member's own declaration.
-func schemaMember(t *testing.T, at string, declaration map[string]any, name string) (map[string]any, bool) {
-	t.Helper()
-
-	properties, _ := declaration["properties"].(map[string]any)
-	if member, declared := properties[name]; declared {
-		return schemaObject(t, joinSchemaKey(at, name), member), true
-	}
-	patterns, _ := declaration["patternProperties"].(map[string]any)
-	for pattern, member := range patterns {
-		matched, err := regexp.MatchString(pattern, name)
-		if err != nil {
-			t.Fatalf("Setup: compile the pattern %q contract/config.schema.json declares at %s: %v", pattern, at, err)
-		}
-		if matched {
-			return schemaObject(t, joinSchemaKey(at, name), member), true
-		}
-	}
-	return nil, false
-}
-
-// schemaMembers lists the member names one declaration declares, in ascending
-// order, so a failure names what the schema holds where a path left it.
-func schemaMembers(declaration map[string]any) []string {
-	properties, _ := declaration["properties"].(map[string]any)
-	patterns, _ := declaration["patternProperties"].(map[string]any)
-	return append(slices.Sorted(maps.Keys(properties)), slices.Sorted(maps.Keys(patterns))...)
-}
-
-// joinSchemaKey spells the dotted path of one member of the value at at.
-func joinSchemaKey(at, name string) string {
-	if at == "" {
-		return name
-	}
-	return at + "." + name
-}
-
-// schemaDeclares reports whether one dotted setting path names a key the Contract's
-// configuration schema declares. Where it does not, it also returns the prefix that
-// did resolve and the members that prefix declares.
-func schemaDeclares(t *testing.T, path string) (resolved string, members []string, declared bool) {
-	t.Helper()
-
-	at := configSchema(t)
-	segments := strings.Split(path, ".")
-	for index, name := range segments {
-		member, isDeclared := schemaMember(t, strings.Join(segments[:index], "."), at, name)
-		if !isDeclared {
-			return strings.Join(segments[:index], "."), schemaMembers(at), false
-		}
-		at = member
-	}
-	return path, nil, true
-}
-
 func TestSettingFlagsSupplyASchemaKey(t *testing.T) {
 	t.Parallel()
 
@@ -714,9 +632,13 @@ func TestSettingFlagsSupplyASchemaKey(t *testing.T) {
 		t.Run(flagName, func(t *testing.T) {
 			t.Parallel()
 
-			resolved, members, declared := schemaDeclares(t, setting.path)
-			if !declared {
-				t.Errorf("settingFlags[%q].path = %q, want a key contract/config.schema.json declares: %q declares %v", flagName, setting.path, resolved, members)
+			// config.DeclaresSetting answers over the same schema this command
+			// resolves a document against, and that schema is pinned equal to
+			// contract/config.schema.json key by key in internal/config, so a flag
+			// naming something the Contract does not declare fails here.
+			if !config.DeclaresSetting(setting.path) {
+				t.Errorf("settingFlags[%q].path = %q, want a setting contract/config.schema.json declares",
+					flagName, setting.path)
 			}
 		})
 	}
@@ -770,6 +692,11 @@ func writeModule(t *testing.T, files map[string]string) string {
 
 	dir := t.TempDir()
 	for base, body := range files {
+		if parent := filepath.Dir(base); parent != "." {
+			if err := os.MkdirAll(filepath.Join(dir, parent), 0o750); err != nil {
+				t.Fatalf("Setup: create %s: %v", filepath.Join(dir, parent), err)
+			}
+		}
 		writeDocument(t, dir, base, body)
 	}
 	return dir
@@ -1146,6 +1073,212 @@ func TestPrintRetainedOverAModuleThatHasTestFiles(t *testing.T) {
 		"go://example.com/app#Tier.String\tformat-verb-contract\tapp.go:29:14\tformatted by fmt.Println\n" +
 		"go://example.com/app_test#tally.Write\tinterface-satisfaction\tapp_ext_test.go:20:23\tsatisfies io.Writer\n" +
 		"go://example.com/app#probe.Write\tinterface-satisfaction\tapp_test.go:20:23\tsatisfies io.Writer\n"
+	if got := stdout.String(); got != want {
+		t.Errorf("run(%q) stdout =\n%s\nwant\n%s", args, got, want)
+	}
+}
+
+// platformModule writes the fixture the matrix is driven against: a library whose
+// exported surface differs by operating system, so one configuration of the matrix
+// declares a root the other one does not and the union names both. The Windows
+// file's body is windows, which a test that wants that configuration to fail to
+// load replaces with one that does not type-check.
+func platformModule(t *testing.T, document, windows string) string {
+	t.Helper()
+
+	return writeModule(t, map[string]string{
+		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
+		"app.go": "package app\n\n// Helper names the platform this build serves.\n" +
+			"func Helper() string { return platform() }\n",
+		"platform_linux.go":   "package app\n\nfunc platform() string { return \"linux\" }\n",
+		"platform_windows.go": "package app\n\nfunc platform() string { return " + windows + " }\n\n" + "// Elevated is declared on Windows alone.\nfunc Elevated() bool { return false }\n",
+		repositoryDocument:    document,
+	})
+}
+
+// twoConfigurations is the repository configuration naming a matrix of the two
+// operating systems the platform fixture builds under.
+const twoConfigurations = `{"target": {"kind": "library"}, "analysis": {"configurations": [` +
+	`{"id": "linux-amd64", "os": "linux", "arch": "amd64", "tags": []},` +
+	`{"id": "windows-amd64", "os": "windows", "arch": "amd64", "tags": []}]}}`
+
+func TestPrintRootsOverAMatrixLoadsEveryConfigurationAndNamesThemPerRoot(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		document string
+		want     string
+	}{
+		{
+			// Nothing is configured, so the matrix is the one the tree implies: the
+			// host, and one configuration per operating system its file names carry.
+			// The second line is the evidence that the Windows configuration was
+			// loaded, since nothing declares Elevated but the file that
+			// configuration alone compiles. The third field is the configured string,
+			// empty for a detected class, and the fourth the configurations that
+			// detected the root.
+			name:     "the_matrix_the_target_tree_implies",
+			document: `{"target": {"kind": "library"}}`,
+			want: "go://example.com/app#Helper\tpublished-api\t\tlinux-amd64 windows-amd64\n" +
+				"go://example.com/app#Elevated\tpublished-api\t\twindows-amd64\n",
+		},
+		{
+			// The configuration names one configuration, which is not the host and is
+			// not what derivation would answer, so it is the matrix and derivation
+			// runs at all. One configuration prints no configuration field.
+			name: "the_matrix_the_configuration_names_in_place_of_it",
+			document: `{"target": {"kind": "library"}, "analysis": {"configurations": [` +
+				`{"id": "windows-amd64", "os": "windows", "arch": "amd64", "tags": []}]}}`,
+			want: "go://example.com/app#Helper\tpublished-api\n" +
+				"go://example.com/app#Elevated\tpublished-api\n",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := platformModule(t, tc.document, `"windows"`)
+
+			var stdout, stderr bytes.Buffer
+			args := []string{"print-roots", "--target=" + dir}
+			if got := run(t.Context(), args, &stdout, &stderr); got != exitClean {
+				t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, exitClean, stderr.String())
+			}
+			if stderr.Len() != 0 {
+				t.Errorf("run(%q) stderr = %q, want empty", args, stderr.String())
+			}
+			if got := stdout.String(); got != tc.want {
+				t.Errorf("run(%q) stdout =\n%s\nwant\n%s", args, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPrintRootsFailsWhenOneConfigurationOfTheMatrixDoesNotLoad(t *testing.T) {
+	t.Parallel()
+
+	// The Windows file returns an integer where the signature says string, so the
+	// first configuration of the matrix loads and the second does not.
+	dir := platformModule(t, twoConfigurations, "1")
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"print-roots", "--target=" + dir}
+	if got := run(t.Context(), args, &stdout, &stderr); got != exitFailure {
+		t.Fatalf("run(%q) over a matrix whose second configuration does not load = %d, want %d\nstderr: %q",
+			args, got, exitFailure, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("run(%q) stdout = %q, want empty: a matrix missing a configuration has no intersection to print", args, stdout.String())
+	}
+	for _, want := range []string{"windows-amd64", "platform_windows.go:3:33", "cannot use 1"} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("run(%q) stderr = %q, want it to contain %q", args, stderr.String(), want)
+		}
+	}
+	// The configuration that did load is not named, because the run failed on the
+	// one that did not and reports that one.
+	if got := stderr.String(); strings.Contains(got, "linux-amd64") {
+		t.Errorf("run(%q) stderr = %q, want it to name the configuration that failed and no other", args, got)
+	}
+}
+
+func TestPrintRetainedReadsTheDelimitersTheConfigurationSets(t *testing.T) {
+	t.Parallel()
+
+	// The template names the field with delimiters of the project's own, so the
+	// class retains the field only if the configured pair reached it.
+	dir := writeModule(t, map[string]string{
+		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
+		"app.go": "package main\n\n// Page is what a template renders.\ntype Page struct {\n" +
+			"\t// Subtitle is named by a template and by no identifier of this module.\n\tSubtitle string\n}\n\n" +
+			"func main() { _ = Page{} }\n",
+		"templates/page.tmpl": "<aside>[[ .Subtitle ]]</aside>\n",
+		repositoryDocument: `{"target": {"kind": "application"}, "analysis": {"template_dirs": ["templates"],` +
+			` "template_delimiters": {"left": "[[", "right": "]]"}}}`,
+	})
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"print-retained", "--target=" + dir}
+	if got := run(t.Context(), args, &stdout, &stderr); got != exitClean {
+		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, exitClean, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("run(%q) stderr = %q, want empty", args, stderr.String())
+	}
+
+	want := "go://example.com/app#Page.Subtitle\ttemplate-field\ttemplates/page.tmpl:1:11\tnamed by [[.Subtitle]]\n"
+	if got := stdout.String(); got != want {
+		t.Errorf("run(%q) stdout =\n%s\nwant\n%s", args, got, want)
+	}
+}
+
+func TestPrintRootsReportsNoConfiguredStringOneConfigurationOfTheMatrixMatched(t *testing.T) {
+	t.Parallel()
+
+	// Elevated is declared in the Windows file alone, so the pattern that names it
+	// matches nothing under the first configuration and something under the second.
+	dir := platformModule(t, `{"target": {"kind": "application"}, "roots": {"patterns":`+
+		` ["go://example.com/app#Elevated", "go://example.com/app#Absent"]}, "analysis": {"configurations": [`+
+		`{"id": "linux-amd64", "os": "linux", "arch": "amd64", "tags": []},`+
+		`{"id": "windows-amd64", "os": "windows", "arch": "amd64", "tags": []}]}}`, `"windows"`)
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"print-roots", "--target=" + dir}
+	if got := run(t.Context(), args, &stdout, &stderr); got != exitFindings {
+		t.Fatalf("run(%q) = %d, want %d for the one configured string no configuration matched\nstderr: %q",
+			args, got, exitFindings, stderr.String())
+	}
+
+	want := "go://example.com/app#Elevated\tconfigured\tgo://example.com/app#Elevated\twindows-amd64\n"
+	if got := stdout.String(); got != want {
+		t.Errorf("run(%q) stdout =\n%s\nwant\n%s", args, got, want)
+	}
+	wantStderr := unmatchedRoot + ": roots.patterns names nothing: go://example.com/app#Absent\n"
+	if got := stderr.String(); got != wantStderr {
+		t.Errorf("run(%q) stderr = %q, want %q: a string one configuration matched names something", args, got, wantStderr)
+	}
+}
+
+// platformExemptedModule writes the fixture the retained union is driven against: a
+// main package whose Windows file alone declares a type a formatting verb reaches,
+// so one exemption class retains a symbol the other configuration does not hold.
+func platformExemptedModule(t *testing.T, document string) string {
+	t.Helper()
+
+	return writeModule(t, map[string]string{
+		"go.mod":            "module example.com/app\n\ngo 1.27.1\n",
+		"app.go":            "package main\n\nfunc main() { _ = platform() }\n",
+		"platform_linux.go": "package main\n\nfunc platform() string { return \"linux\" }\n",
+		"platform_windows.go": "package main\n\nimport \"fmt\"\n\n" +
+			"// Tier is a level this build prints.\ntype Tier int\n\n" +
+			"// String is what a formatting verb calls, and nothing calls it by name.\n" +
+			"func (t Tier) String() string { return \"tier\" }\n\n" +
+			"func platform() string {\n\tfmt.Println(Tier(1))\n\treturn \"windows\"\n}\n",
+		repositoryDocument: document,
+	})
+}
+
+func TestPrintRetainedOverAMatrixNamesWhatAnyConfigurationRetained(t *testing.T) {
+	t.Parallel()
+
+	dir := platformExemptedModule(t, `{"target": {"kind": "application"}, "analysis": {"configurations": [`+
+		`{"id": "linux-amd64", "os": "linux", "arch": "amd64", "tags": []},`+
+		`{"id": "windows-amd64", "os": "windows", "arch": "amd64", "tags": []}]}}`)
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"print-retained", "--target=" + dir}
+	if got := run(t.Context(), args, &stdout, &stderr); got != exitClean {
+		t.Fatalf("run(%q) over a matrix of two configurations = %d, want %d\nstderr: %q", args, got, exitClean, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("run(%q) stderr = %q, want empty", args, stderr.String())
+	}
+
+	// The record exists under the second configuration alone, so it is here only
+	// because the classes ran over every configuration of the matrix.
+	want := "go://example.com/app#Tier.String\tformat-verb-contract\tplatform_windows.go:12:14\tformatted by fmt.Println\n"
 	if got := stdout.String(); got != want {
 		t.Errorf("run(%q) stdout =\n%s\nwant\n%s", args, got, want)
 	}

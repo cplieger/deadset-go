@@ -1,0 +1,57 @@
+Two direct requirements, one imported by a package of the target and one imported
+by an external test package of the target, so that a requirement only a test
+variant needs is not reported.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+
+require (
+	example.com/fixture v1.0.0
+	example.com/used v1.0.0
+)
+
+replace example.com/fixture => ./fixture
+
+replace example.com/used => ./used
+-- app.go --
+package app
+
+import "example.com/used"
+
+// Greet returns the greeting the used module renders.
+func Greet() string { return used.Hello() }
+-- app_ext_test.go --
+package app_test
+
+import (
+	"testing"
+
+	"example.com/app"
+	"example.com/fixture"
+)
+
+func TestGreetRendersTheFixtureGreeting(t *testing.T) {
+	if got := app.Greet(); got != fixture.Greeting() {
+		t.Errorf("Greet() = %q, want %q", got, fixture.Greeting())
+	}
+}
+-- used/go.mod --
+module example.com/used
+
+go 1.27.1
+-- used/used.go --
+package used
+
+// Hello returns a greeting.
+func Hello() string { return "hello" }
+-- fixture/go.mod --
+module example.com/fixture
+
+go 1.27.1
+-- fixture/fixture.go --
+package fixture
+
+// Greeting returns the greeting a test expects.
+func Greeting() string { return "hello" }

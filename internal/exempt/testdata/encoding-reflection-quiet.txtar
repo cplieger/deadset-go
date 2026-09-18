@@ -1,7 +1,9 @@
 The same eleven types as the firing archive, declared the same way, each reaching
 a function or a method of a package the class does not name instead of its
 destination. Nothing in this archive flows into reflection, an encoder, a template
-engine, a scan or either interface, so the class records nothing.
+engine, a scan, the sort interface or a logging call, and the one type converted to
+the log-value interface reaches the class by that conversion no more than the
+others, so the class records nothing.
 
 -- go.mod --
 module example.com/flow
@@ -206,7 +208,8 @@ import (
 	"sync"
 )
 
-// LogPayload is never converted to the log-value interface, although it could be.
+// LogPayload is converted to the log-value interface, which no destination of the
+// class is: what a handler reads of such a value is what the method returns.
 type LogPayload struct {
 	Name   string `log:"name"`
 	Extra  int
@@ -223,6 +226,8 @@ func (p LogPayload) hidden() int { return p.Extra }
 
 // StoreLog hands a value to an unrelated package.
 func StoreLog(m *sync.Map, p LogPayload) { m.Store("log", p) }
+
+var _ slog.LogValuer = LogPayload{}
 -- containers.go --
 package flow
 

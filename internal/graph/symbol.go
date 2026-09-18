@@ -90,8 +90,13 @@ type Symbol struct {
 
 	// Pos is rendered: Filename is target-relative with forward slashes and
 	// Column counts UTF-16 code units rather than the bytes Go reports.
-	Pos      token.Position
-	EndLine  int
+	Pos     token.Position
+	EndLine int
+
+	// Configs is the set of build configurations the declaration exists in. One
+	// enumeration fills none of it, because a load is of one configuration and
+	// the set is a fact about the matrix; [Merge] is what fills it.
+	Configs  ConfigSet
 	Kind     SymbolKind
 	Exported bool
 	Blank    bool // declared with the blank identifier

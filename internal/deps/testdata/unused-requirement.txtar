@@ -1,0 +1,42 @@
+Two direct requirements, one of which provides a package the target imports and
+one of which provides nothing the target imports. Both modules are directories of
+the fixture, so the module graph resolves without a network.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+
+require (
+	example.com/unused v1.0.0
+	example.com/used v1.0.0
+)
+
+replace example.com/unused => ./unused
+
+replace example.com/used => ./used
+-- app.go --
+package app
+
+import "example.com/used"
+
+// Greet returns the greeting the used module renders.
+func Greet() string { return used.Hello() }
+-- used/go.mod --
+module example.com/used
+
+go 1.27.1
+-- used/used.go --
+package used
+
+// Hello returns a greeting.
+func Hello() string { return "hello" }
+-- unused/go.mod --
+module example.com/unused
+
+go 1.27.1
+-- unused/unused.go --
+package unused
+
+// Nothing does nothing.
+func Nothing() {}

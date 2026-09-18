@@ -1,0 +1,83 @@
+Four modules and the declarations that use them: one a single function uses, one
+two functions share, one a named struct field alone uses, and one an embedded field
+alone uses. Every declaration of the target is unreferenced, so each is a deletion
+candidate.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+
+require (
+	example.com/embedded v1.0.0
+	example.com/field v1.0.0
+	example.com/shared v1.0.0
+	example.com/solo v1.0.0
+)
+
+replace example.com/embedded => ./embedded
+
+replace example.com/field => ./field
+
+replace example.com/shared => ./shared
+
+replace example.com/solo => ./solo
+-- app.go --
+package app
+
+import (
+	"example.com/embedded"
+	"example.com/field"
+	"example.com/shared"
+	"example.com/solo"
+)
+
+func onlySolo() string { return solo.Name() }
+
+func firstShared() string { return shared.Name() }
+
+func secondShared() string { return shared.Name() }
+
+type holder struct {
+	thing field.Thing
+}
+
+type embedder struct {
+	embedded.Thing
+}
+-- solo/go.mod --
+module example.com/solo
+
+go 1.27.1
+-- solo/solo.go --
+package solo
+
+// Name returns the module's name.
+func Name() string { return "solo" }
+-- shared/go.mod --
+module example.com/shared
+
+go 1.27.1
+-- shared/shared.go --
+package shared
+
+// Name returns the module's name.
+func Name() string { return "shared" }
+-- field/go.mod --
+module example.com/field
+
+go 1.27.1
+-- field/field.go --
+package field
+
+// Thing is what a struct field holds.
+type Thing struct{}
+-- embedded/go.mod --
+module example.com/embedded
+
+go 1.27.1
+-- embedded/embedded.go --
+package embedded
+
+// Thing is what a struct embeds.
+type Thing struct{}
