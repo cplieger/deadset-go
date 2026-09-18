@@ -1,0 +1,179 @@
+One instance of every syntactic shape at which a value of a concrete type
+reaches a position typed as an interface, beside the shapes that look like one
+and are not.
+
+-- go.mod --
+module example.com/shapes
+
+go 1.27.0
+-- shapes.go --
+// Package shapes holds one instance of every shape at which a value reaches an
+// interface-typed position.
+package shapes
+
+// Counter reports a count.
+type Counter interface{ Count() int }
+
+// Holder answers Counter on its value method set.
+type Holder struct{ n int }
+
+// Count answers Counter.
+func (h Holder) Count() int { return h.n }
+
+// Pointed answers Counter on its pointer method set only.
+type Pointed struct{ n int }
+
+// Count answers Counter.
+func (p *Pointed) Count() int { return p.n }
+
+// Box carries a field of interface type.
+type Box struct {
+	C    Counter
+	Next *Box
+}
+
+// Take takes one interface parameter.
+func Take(c Counter) int { return c.Count() }
+
+// Pair takes two interface parameters.
+func Pair(a, b Counter) int { return a.Count() + b.Count() }
+
+// Spread takes a variadic interface parameter.
+func Spread(cs ...Counter) int { return len(cs) }
+
+// Mixed takes a concrete parameter before an interface one.
+func Mixed(n int, c Counter) int { return n + c.Count() }
+
+// Tail takes a concrete parameter before a variadic interface one.
+func Tail(prefix string, cs ...Counter) int { return len(prefix) + len(cs) }
+
+// Two returns two concrete values.
+func Two() (Holder, Holder) { return Holder{}, Holder{} }
+
+// The satisfaction assertions, one per method set, and the untyped nil that
+// asserts nothing about a method set at all.
+var (
+	_ Counter = (*Pointed)(nil)
+	_ Counter = Holder{}
+	_ Counter = nil
+)
+
+// Assigned is an interface-typed variable with an initial value.
+var Assigned Counter = Holder{n: 1}
+
+// Result returns a value into an interface result.
+func Result() Counter { return Holder{n: 2} }
+
+// ResultPair returns one multi-valued operand into two interface results.
+func ResultPair() (Counter, Counter) { return Two() }
+
+// Arguments reaches a parameter, a variadic parameter, a spread slice and two
+// parameters filled from one call.
+func Arguments() int {
+	var h Holder
+	p := &Pointed{}
+	total := Take(h) + Take(p)
+	total += Spread(h, p)
+	held := []Counter{h}
+	total += Spread(held...)
+	total += Pair(Two())
+	total += Mixed(1, h)
+	total += Tail("p", h, p)
+	return total
+}
+
+// Conversions reaches an interface by an explicit conversion, and an empty
+// interface by one, which retains nothing because an empty interface requires no
+// method.
+func Conversions() (Counter, any) {
+	var h Holder
+	return Counter(h), any(h)
+}
+
+// Assignments assigns into a variable, a field, a slice element, a map value and
+// a dereferenced pointer, each of interface type.
+func Assignments() Counter {
+	var h Holder
+	p := &Pointed{}
+
+	var c Counter = h
+	c = p
+
+	box := Box{C: h}
+	box.C = p
+	positional := Box{h, nil}
+
+	held := make([]Counter, 1)
+	held[0] = h
+	keyed := map[string]Counter{}
+	keyed["k"] = p
+	delete(keyed, "k")
+
+	target := new(Counter)
+	*target = h
+
+	_ = positional
+	_ = held
+	return c
+}
+
+// Containers stores elements into a slice, an array, a map key and value, an
+// elided inner slice, a channel and an appended slice, each of interface type.
+func Containers() int {
+	var h Holder
+	p := &Pointed{}
+
+	held := []Counter{h, p}
+	array := [2]Counter{0: h, 1: p}
+	keyed := map[Counter]Counter{h: p}
+	nested := [][]Counter{{h}}
+
+	ch := make(chan Counter, 1)
+	ch <- h
+
+	held = append(held, h)
+
+	return len(held) + len(array) + len(keyed) + len(nested) + len(ch)
+}
+
+// Ranged assigns the value a range clause yields into an existing variable of
+// interface type, and the key of a map whose key type is concrete.
+func Ranged() int {
+	var h Holder
+	var c Counter
+	total := 0
+	for _, c = range []Holder{h} {
+		total += c.Count()
+	}
+	for c = range map[Holder]int{h: 1} {
+		total += c.Count()
+	}
+	return total
+}
+
+// Deferred reaches a parameter from a deferred call, a spawned call and a
+// function literal's result.
+func Deferred() Counter {
+	var h Holder
+	p := &Pointed{}
+	defer Take(h)
+	go Take(p)
+	literal := func() Counter { return h }
+	return literal()
+}
+
+// NotConversions holds the shapes that take a value out of an interface or
+// compare one, none of which puts a value in.
+func NotConversions(c Counter) bool {
+	if v, ok := c.(Holder); ok {
+		_ = v
+	}
+	switch c.(type) {
+	case Holder:
+	case *Pointed:
+	}
+	var h Holder
+	declared := h
+	_ = declared
+	return c == Counter(h)
+}

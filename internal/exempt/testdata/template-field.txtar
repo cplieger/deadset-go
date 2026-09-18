@@ -1,0 +1,34 @@
+One module whose templates name a field and a method, with the same field name
+declared on a second type and a nested template directory.
+
+-- go.mod --
+module example.com/templates
+
+go 1.27.1
+-- page.go --
+package templates
+
+// Page is what a template renders.
+type Page struct {
+	Title string
+	body  string
+}
+
+// Byline renders the page's byline.
+func (p Page) Byline() string { return p.body }
+
+// Note carries the same field name on another type.
+type Note struct {
+	Title string
+}
+
+// Draft carries a field no template names.
+type Draft struct {
+	Subtitle string
+}
+-- templates/page.tmpl --
+<h1>{{ .Title }}</h1>
+{{ $p := . }}
+<p>{{ $p.Byline }}</p>
+-- templates/partial/footer.tmpl --
+<footer>{{ .Title }}</footer>

@@ -1,0 +1,29 @@
+One const block that names iota nowhere, over a type that does declare a String
+method. The type carries the method the class fires on and the block is not a
+group, so nothing is retained and the member nothing names stays a candidate.
+
+-- go.mod --
+module example.com/enumnoiota
+
+go 1.27.1
+-- size.go --
+package enumnoiota
+
+// Size is a defined type whose constants are written out one by one.
+type Size int
+
+const (
+	SizeSmall Size = 1
+	SizeLarge Size = 2
+)
+
+// String spells one size.
+func (s Size) String() string {
+	if s == SizeSmall {
+		return "small"
+	}
+	return "large"
+}
+
+// Describe renders a size without naming a member.
+func Describe(s Size) string { return s.String() }

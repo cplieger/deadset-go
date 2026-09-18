@@ -1,0 +1,21 @@
+One package holding a type, a method and a package-level function, so the input
+every class reads carries a loaded configuration, an inventory, a resolver that
+maps a type-checked object back to a declaration, and a readable source tree.
+
+-- go.mod --
+module example.com/framework
+
+go 1.27.1
+-- catalog.go --
+package framework
+
+// Catalog holds the entries the method reads.
+type Catalog struct {
+	entries map[string]string
+}
+
+// Resolve returns what one name holds.
+func (c *Catalog) Resolve(name string) string { return c.entries[name] }
+
+// Normalize is a package-level function, whose container is the package.
+func Normalize(name string) string { return name }

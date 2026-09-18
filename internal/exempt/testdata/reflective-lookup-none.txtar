@@ -1,0 +1,31 @@
+One module declaring the members a lookup would name, whose only lookups are a
+reflective one given a name it computes and a map helper spelled Lookup.
+
+-- go.mod --
+module example.com/nolookup
+
+go 1.27.1
+-- server.go --
+package nolookup
+
+import "reflect"
+
+// Server carries a member a lookup would name.
+type Server struct {
+	Token string
+}
+
+// Reload is named by nothing a lookup resolves.
+func (s *Server) Reload() {}
+
+// Dispatch reaches nothing by name.
+func Dispatch(s *Server, name string) {
+	_ = reflect.ValueOf(s).MethodByName(name)
+	_ = registry{}.Lookup("Reload")
+}
+
+// registry resolves a key it holds itself.
+type registry map[string]string
+
+// Lookup returns the value one key holds.
+func (r registry) Lookup(key string) string { return r[key] }

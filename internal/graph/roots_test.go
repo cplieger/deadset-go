@@ -496,31 +496,6 @@ func TestMatchRefOnRunesRatherThanBytes(t *testing.T) {
 	}
 }
 
-func TestLinknameLocalReadsTheDirectivesLocalName(t *testing.T) {
-	cases := map[string]struct {
-		text   string
-		want   string
-		wantOK bool
-	}{
-		"one argument":                {text: "//go:linkname pushed", want: "pushed", wantOK: true},
-		"two arguments":               {text: "//go:linkname pulled example.com/other.f", want: "pulled", wantOK: true},
-		"the standard library's form": {text: "//go:linknamestd pushed", want: "pushed", wantOK: true},
-		"three arguments":             {text: "//go:linkname a b c"},
-		"no argument":                 {text: "//go:linkname"},
-		"another directive":           {text: "//go:embed catalog.json"},
-		"a space before the name":     {text: "// go:linkname pushed"},
-		"prose naming the directive":  {text: "// The //go:linkname directive names a symbol."},
-	}
-	for name, test := range cases {
-		t.Run(name, func(t *testing.T) {
-			got, ok := linknameLocal(test.text)
-			if got != test.want || ok != test.wantOK {
-				t.Errorf("linknameLocal(%q) = %q, %t, want %q, %t", test.text, got, ok, test.want, test.wantOK)
-			}
-		})
-	}
-}
-
 func TestCgoExportedReadsTheDirectiveOverTheFunctionItNames(t *testing.T) {
 	const source = `package bridge
 

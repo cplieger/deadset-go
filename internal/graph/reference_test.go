@@ -449,6 +449,21 @@ func TestReferencesRefusesAnIncompleteRequest(t *testing.T) {
 	}
 }
 
+func TestReferencesReportsAFileTheTargetRootDoesNotHold(t *testing.T) {
+	result, root, file := outsideRoot(t)
+
+	refs, rules, err := References(result, root, readOutsideRootSource, nil)
+	if !errors.Is(err, ErrSource) {
+		t.Fatalf("References(a file outside the root) error = %v, want one satisfying errors.Is(err, %v)", err, ErrSource)
+	}
+	if !strings.Contains(err.Error(), file) {
+		t.Errorf("References(a file outside the root) error = %v, want it to name %s", err, file)
+	}
+	if refs != nil || rules != nil {
+		t.Errorf("References(a file outside the root) returned %d references and %d rules, want none", len(refs), len(rules))
+	}
+}
+
 func TestReferencesReportsAnUnreadableSource(t *testing.T) {
 	dir := extract(t, "reference-kinds.txtar")
 	result, root := loadDir(t, dir, "linux", "amd64")

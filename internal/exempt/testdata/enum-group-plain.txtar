@@ -1,0 +1,22 @@
+One iota group whose type declares no conversion method, whose values no
+conversion produces and which no decoder writes, with one member named by nothing.
+That member is a candidate of the sweep, which is what the class exists not to
+retain.
+
+-- go.mod --
+module example.com/enumplain
+
+go 1.27.1
+-- mode.go --
+package enumplain
+
+// Mode is the enumerated type, and every value of it is named in the source.
+type Mode int
+
+const (
+	ModeRead Mode = iota
+	ModeWrite
+)
+
+// Use names one member, and nothing names the other.
+func Use() Mode { return ModeRead }

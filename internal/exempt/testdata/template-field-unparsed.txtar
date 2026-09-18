@@ -1,0 +1,18 @@
+One module whose template directory holds a file the action grammar cannot parse
+beside one it can.
+
+-- go.mod --
+module example.com/unparsed
+
+go 1.27.1
+-- page.go --
+package unparsed
+
+// Page is what a template renders.
+type Page struct {
+	Title string
+}
+-- templates/broken.tmpl --
+<h1>{{ .Title </h1>
+-- templates/good.tmpl --
+<h1>{{ .Title }}</h1>

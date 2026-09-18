@@ -107,18 +107,40 @@ func TestBuildFlags(t *testing.T) {
 	}
 }
 
-func TestLoadReportsThePackageItsTestVariantAndTheTestBinary(t *testing.T) {
+func TestLoadDropsTheSynthesizedTestMain(t *testing.T) {
 	stableToolchain(t)
 	got := loadFixture(t, "clean")
 
+	// The fixture carries an in-package and an external test file, so a test load
+	// of it reports the plain package and both variants, and the toolchain
+	// synthesizes the test binary the result must not carry.
 	want := []string{
 		"example.com/clean",
 		"example.com/clean [example.com/clean.test]",
-		"example.com/clean.test",
+		"example.com/clean_test [example.com/clean.test]",
 	}
 	if ids := packageIDs(got); !slices.Equal(ids, want) {
 		t.Errorf("Load(testdata/clean) package ids = %v, want %v", ids, want)
 	}
+
+	root, err := filepath.Abs(filepath.Join("testdata", "clean"))
+	if err != nil {
+		t.Fatalf("Setup: absolute path of testdata/clean: %v", err)
+	}
+	for _, p := range got.Packages {
+		for _, file := range slices.Concat(p.GoFiles, p.CompiledGoFiles) {
+			if rel, err := filepath.Rel(root, file); err != nil || !filepath.IsLocal(rel) {
+				t.Errorf("Load(testdata/clean) package %s compiles %s, want every file under %s",
+					p.ID, file, root)
+			}
+		}
+	}
+}
+
+func TestLoadReportsTheConfigurationAndOneFileSet(t *testing.T) {
+	stableToolchain(t)
+	got := loadFixture(t, "clean")
+
 	if got.Fset == nil {
 		t.Error("Load(testdata/clean).Fset = nil, want one FileSet for the configuration")
 	}

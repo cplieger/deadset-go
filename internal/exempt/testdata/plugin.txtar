@@ -1,0 +1,38 @@
+A main package declaring no main function, which is a plugin, and a main package
+declaring one, which is a program. The plugin's test file and its exported type
+are not symbols a host resolves by name.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- plug.go --
+package main
+
+// Handler is a symbol a host resolves by name.
+var Handler = handle
+
+// Greet is another symbol a host resolves by name.
+func Greet() string { return "hello" }
+
+// Config is a type, which no host resolves by name.
+type Config struct{}
+
+func handle() string { return Greet() }
+-- plug_test.go --
+package main
+
+import "testing"
+
+func TestGreet(t *testing.T) {
+	if Greet() == "" {
+		t.Errorf("Greet() = %q, want a greeting", "")
+	}
+}
+-- cmd/app/main.go --
+package main
+
+// Run is exported, and this package is a program, so nothing retains it.
+func Run() {}
+
+func main() { Run() }

@@ -1,0 +1,48 @@
+A method whose receiver type reaches no interface-typed position, beside an
+exported function nothing references. Neither is retained.
+
+-- go.mod --
+module example.com/target
+
+go 1.27.0
+-- sink.go --
+// Package target holds a method no conversion reaches and an exported function
+// nothing references.
+package target
+
+import (
+	"errors"
+	"io"
+)
+
+// Sink counts the bytes written to it.
+type Sink struct {
+	total int
+}
+
+// Write records the length of p and reports it as written. No call site names it
+// and no conversion reaches it.
+func (s *Sink) Write(p []byte) (int, error) {
+	s.total += len(p)
+	return len(p), nil
+}
+
+// Drain reads r to its end and reports the number of bytes it took. It reaches
+// Sink without putting one into an interface.
+func Drain(r io.Reader) (int, error) {
+	var s Sink
+	buffer := make([]byte, 32)
+	for {
+		n, err := r.Read(buffer)
+		s.total += n
+		if errors.Is(err, io.EOF) {
+			return s.total, nil
+		}
+		if err != nil {
+			return 0, err
+		}
+	}
+}
+
+// DeadExport is exported and no loaded module references it.
+func DeadExport() {}

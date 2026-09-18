@@ -1,0 +1,262 @@
+One package whose types reach a formatting verb valid for a string operand, one
+type per verb family and one per form the class rules on: the verb-less forms, an
+explicit argument index, a format string the call computes, operands spread from a
+slice, an operand past the format's last verb, the wrapping verb of the
+error-construction function, and the elements of a container. Each type declares
+the method a verb calls, one exported method of another shape and one unexported
+method, so the retained set holds the first alone.
+
+-- go.mod --
+module example.com/verbs
+
+go 1.27.1
+-- default_verb.go --
+package verbs
+
+import "fmt"
+
+// VerbV reaches the default verb.
+type VerbV struct{ Name string }
+
+// String is what the verb calls.
+func (v VerbV) String() string { return v.Name }
+
+// Count is exported and of another shape.
+func (v VerbV) Count() int { return len(v.Name) }
+
+func (v VerbV) hidden() string { return v.Name }
+
+// RenderV formats under the default verb.
+func RenderV(v VerbV) string { return fmt.Sprintf("%v", v) }
+-- string_verb.go --
+package verbs
+
+import "fmt"
+
+// VerbS reaches the string verb.
+type VerbS struct{ Name string }
+
+// String is what the verb calls.
+func (v VerbS) String() string { return v.Name }
+
+// Count is exported and of another shape.
+func (v VerbS) Count() int { return len(v.Name) }
+
+func (v VerbS) hidden() string { return v.Name }
+
+// RenderS formats under the string verb, through a pointer.
+func RenderS(v *VerbS) string { return fmt.Sprintf("%s", v) }
+-- quoted_verb.go --
+package verbs
+
+import "fmt"
+
+// VerbQ reaches the quoted verb.
+type VerbQ struct{ Name string }
+
+// String is what the verb calls.
+func (v VerbQ) String() string { return v.Name }
+
+// Count is exported and of another shape.
+func (v VerbQ) Count() int { return len(v.Name) }
+
+func (v VerbQ) hidden() string { return v.Name }
+
+// RenderQ formats under the quoted verb, with a width and a precision.
+func RenderQ(v VerbQ) string { return fmt.Sprintf("%-8.4q", v) }
+-- hex_verbs.go --
+package verbs
+
+import (
+	"fmt"
+	"io"
+)
+
+// VerbX reaches the lower-case hexadecimal verb.
+type VerbX struct{ Name string }
+
+// String is what the verb calls.
+func (v VerbX) String() string { return v.Name }
+
+// Count is exported and of another shape.
+func (v VerbX) Count() int { return len(v.Name) }
+
+func (v VerbX) hidden() string { return v.Name }
+
+// VerbUpperX reaches the upper-case hexadecimal verb.
+type VerbUpperX struct{ Name string }
+
+// String is what the verb calls.
+func (v VerbUpperX) String() string { return v.Name }
+
+// Count is exported and of another shape.
+func (v VerbUpperX) Count() int { return len(v.Name) }
+
+func (v VerbUpperX) hidden() string { return v.Name }
+
+// RenderX formats under the lower-case verb.
+func RenderX(w io.Writer, v VerbX) (int, error) { return fmt.Fprintf(w, "%x", v) }
+
+// RenderUpperX formats under the upper-case verb, into a byte slice.
+func RenderUpperX(b []byte, v VerbUpperX) []byte { return fmt.Appendf(b, "%X", v) }
+-- bare_forms.go --
+package verbs
+
+import (
+	"fmt"
+	"io"
+)
+
+// BarePrint reaches a form that carries no format string.
+type BarePrint struct{ Name string }
+
+// String is what the form calls.
+func (v BarePrint) String() string { return v.Name }
+
+// Count is exported and of another shape.
+func (v BarePrint) Count() int { return len(v.Name) }
+
+func (v BarePrint) hidden() string { return v.Name }
+
+// BarePrintln reaches the other form that carries no format string.
+type BarePrintln struct{ Name string }
+
+// String is what the form calls.
+func (v BarePrintln) String() string { return v.Name }
+
+// Count is exported and of another shape.
+func (v BarePrintln) Count() int { return len(v.Name) }
+
+func (v BarePrintln) hidden() string { return v.Name }
+
+// RenderBare formats without a verb.
+func RenderBare(v BarePrint) string { return fmt.Sprint(v) }
+
+// RenderBareLine formats without a verb, into a writer.
+func RenderBareLine(w io.Writer, v BarePrintln) (int, error) { return fmt.Fprintln(w, v) }
+-- indexed.go --
+package verbs
+
+import "fmt"
+
+// IndexChosen is the operand an explicit index selects.
+type IndexChosen struct{ Name string }
+
+// String is what the verb calls.
+func (v IndexChosen) String() string { return v.Name }
+
+// Count is exported and of another shape.
+func (v IndexChosen) Count() int { return len(v.Name) }
+
+// IndexSkipped is the operand the index steps over, and no verb reaches it.
+type IndexSkipped struct{ Name string }
+
+// String is the method no verb calls here.
+func (v IndexSkipped) String() string { return v.Name }
+
+// Count is exported and of another shape.
+func (v IndexSkipped) Count() int { return len(v.Name) }
+
+// RenderIndexed formats the second operand and never the first.
+func RenderIndexed(skipped IndexSkipped, chosen IndexChosen) string {
+	return fmt.Sprintf("%[2]s", skipped, chosen)
+}
+-- computed.go --
+package verbs
+
+import "fmt"
+
+// Computed reaches a format string the call computes.
+type Computed struct{ Name string }
+
+// String is what a verb of that format may call.
+func (v Computed) String() string { return v.Name }
+
+// Count is exported and of another shape.
+func (v Computed) Count() int { return len(v.Name) }
+
+func (v Computed) hidden() string { return v.Name }
+
+// RenderComputed formats under a layout the call is given.
+func RenderComputed(layout string, v Computed) string { return fmt.Sprintf(layout, v) }
+-- spread.go --
+package verbs
+
+import "fmt"
+
+// Spread is a slice type whose values are spread across the operands.
+type Spread []any
+
+// String is the method the spread leaves unread at the site.
+func (s Spread) String() string { return fmt.Sprint(len(s)) }
+
+// Count is exported and of another shape.
+func (s Spread) Count() int { return len(s) }
+
+// RenderSpread spreads its operands under a numeric verb.
+func RenderSpread(s Spread) string { return fmt.Sprintf("%d", s...) }
+-- surplus.go --
+package verbs
+
+import "fmt"
+
+// Surplus is an operand past the format's last verb.
+type Surplus struct{ Name string }
+
+// String is what the package calls when it renders the surplus.
+func (v Surplus) String() string { return v.Name }
+
+// Count is exported and of another shape.
+func (v Surplus) Count() int { return len(v.Name) }
+
+// RenderSurplus passes one operand more than the format consumes.
+func RenderSurplus(n int, v Surplus) string { return fmt.Sprintf("%d", n, v) }
+-- wrapped.go --
+package verbs
+
+import "fmt"
+
+// Wrapped reaches the wrapping verb of the error-construction function.
+type Wrapped struct{ Name string }
+
+// Error is what the verb calls.
+func (v Wrapped) Error() string { return v.Name }
+
+// Count is exported and of another shape.
+func (v Wrapped) Count() int { return len(v.Name) }
+
+func (v Wrapped) hidden() string { return v.Name }
+
+// WrapError constructs an error around one.
+func WrapError(v Wrapped) error { return fmt.Errorf("context: %w", v) }
+-- elements.go --
+package verbs
+
+import "fmt"
+
+// Element is reached as an element of a container the package formats.
+type Element struct{ Name string }
+
+// String is what the verb calls on each element.
+func (v Element) String() string { return v.Name }
+
+// Count is exported and of another shape.
+func (v Element) Count() int { return len(v.Name) }
+
+func (v Element) hidden() string { return v.Name }
+
+// RenderElements formats a container of elements.
+func RenderElements(values []Element) string { return fmt.Sprintf("%v", values) }
+-- shaped.go --
+package verbs
+
+import "fmt"
+
+// Shaped declares a method of the retained name in a shape no verb calls.
+type Shaped struct{ Name string }
+
+// String takes an argument, so the formatting package never reaches it.
+func (v Shaped) String(sep string) string { return sep + v.Name }
+
+// RenderShaped formats a value whose method no verb can call.
+func RenderShaped(v Shaped) string { return fmt.Sprintf("%v", v) }

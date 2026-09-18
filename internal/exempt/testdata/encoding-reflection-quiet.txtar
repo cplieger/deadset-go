@@ -1,0 +1,274 @@
+The same eleven types as the firing archive, declared the same way, each reaching
+a function or a method of a package the class does not name instead of its
+destination. Nothing in this archive flows into reflection, an encoder, a template
+engine, a scan or either interface, so the class records nothing.
+
+-- go.mod --
+module example.com/flow
+
+go 1.27.1
+-- json.go --
+package flow
+
+import "sync"
+
+// JSONPayload reaches no encoder.
+type JSONPayload struct {
+	Name   string `json:"name"`
+	Extra  int
+	secret string `json:"secret"`
+}
+
+// Describe is exported.
+func (p JSONPayload) Describe() string { return p.Name }
+
+func (p JSONPayload) hidden() int { return p.Extra }
+
+// StoreJSON hands a value to an unrelated package.
+func StoreJSON(m *sync.Map, p JSONPayload) { m.Store("json", p) }
+-- xml.go --
+package flow
+
+import "sync"
+
+// XMLPayload reaches no encoder.
+type XMLPayload struct {
+	Name   string `xml:"name"`
+	Extra  int
+	secret string `xml:"secret"`
+}
+
+// Describe is exported.
+func (p XMLPayload) Describe() string { return p.Name }
+
+func (p XMLPayload) hidden() int { return p.Extra }
+
+// StoreXML hands a value to an unrelated package.
+func StoreXML(m *sync.Map, p XMLPayload) { m.Store("xml", p) }
+-- gob.go --
+package flow
+
+import "sync"
+
+// GobPayload reaches no encoder.
+type GobPayload struct {
+	Name   string `gob:"name"`
+	Extra  int
+	secret string `gob:"secret"`
+}
+
+// Describe is exported.
+func (p GobPayload) Describe() string { return p.Name }
+
+func (p GobPayload) hidden() int { return p.Extra }
+
+// StoreGob hands a value to an unrelated package.
+func StoreGob(m *sync.Map, p GobPayload) { m.Store("gob", p) }
+-- text_template.go --
+package flow
+
+import "sync"
+
+// TextPayload reaches no engine.
+type TextPayload struct {
+	Name   string `template:"name"`
+	Extra  int
+	secret string `template:"secret"`
+}
+
+// Describe is exported.
+func (p TextPayload) Describe() string { return p.Name }
+
+func (p TextPayload) hidden() int { return p.Extra }
+
+// StoreText hands a value to an unrelated package.
+func StoreText(m *sync.Map, p TextPayload) { m.Store("text", p) }
+-- html_template.go --
+package flow
+
+import "sync"
+
+// HTMLPayload reaches no engine.
+type HTMLPayload struct {
+	Name   string `template:"name"`
+	Extra  int
+	secret string `template:"secret"`
+}
+
+// Describe is exported.
+func (p HTMLPayload) Describe() string { return p.Name }
+
+func (p HTMLPayload) hidden() int { return p.Extra }
+
+// StoreHTML hands a value to an unrelated package.
+func StoreHTML(m *sync.Map, p HTMLPayload) { m.Store("html", p) }
+-- reflection.go --
+package flow
+
+import "sync"
+
+// ReflectPayload reaches no reflection.
+type ReflectPayload struct {
+	Name   string `reflect:"name"`
+	Extra  int
+	secret string `reflect:"secret"`
+}
+
+// Describe is exported.
+func (p ReflectPayload) Describe() string { return p.Name }
+
+func (p ReflectPayload) hidden() int { return p.Extra }
+
+// StoreReflect hands a value to an unrelated package.
+func StoreReflect(m *sync.Map, p ReflectPayload) { m.Store("reflect", p) }
+-- sql.go --
+package flow
+
+import "sync"
+
+// SQLPayload is no scan target.
+type SQLPayload struct {
+	Name   string `db:"name"`
+	Extra  int
+	secret string `db:"secret"`
+}
+
+// Describe is exported.
+func (p SQLPayload) Describe() string { return p.Name }
+
+func (p SQLPayload) hidden() int { return p.Extra }
+
+// StoreSQL hands a pointer to an unrelated package.
+func StoreSQL(m *sync.Map, p *SQLPayload) { m.Store("sql", p) }
+
+// RowsPayload is the scan target of no row set.
+type RowsPayload struct {
+	Name   string `db:"name"`
+	Extra  int
+	secret string `db:"secret"`
+}
+
+// Describe is exported.
+func (p RowsPayload) Describe() string { return p.Name }
+
+func (p RowsPayload) hidden() int { return p.Extra }
+
+// StoreRows hands a pointer to an unrelated package.
+func StoreRows(m *sync.Map, p *RowsPayload) { m.Store("rows", p) }
+
+// ValuePayload reaches no scan.
+type ValuePayload struct {
+	Name   string `db:"name"`
+	Extra  int
+	secret string `db:"secret"`
+}
+
+// Describe is exported.
+func (p ValuePayload) Describe() string { return p.Name }
+
+func (p ValuePayload) hidden() int { return p.Extra }
+
+// StoreValue hands a value to an unrelated package.
+func StoreValue(m *sync.Map, p ValuePayload) { m.Store("value", p) }
+-- sorting.go --
+package flow
+
+import "sync"
+
+// SortPayload is never converted to the sort interface, although it could be.
+type SortPayload struct {
+	Names  []string `sort:"names"`
+	Extra  int
+	secret string `sort:"secret"`
+}
+
+// Len is one of the three the interface requires.
+func (p SortPayload) Len() int { return len(p.Names) }
+
+// Less is one of the three the interface requires.
+func (p SortPayload) Less(i, j int) bool { return p.Names[i] < p.Names[j] }
+
+// Swap is one of the three the interface requires.
+func (p SortPayload) Swap(i, j int) { p.Names[i], p.Names[j] = p.Names[j], p.Names[i] }
+
+// Describe is exported.
+func (p SortPayload) Describe() string { return p.Names[0] }
+
+func (p SortPayload) hidden() int { return p.Extra }
+
+// StoreSort hands a value to an unrelated package.
+func StoreSort(m *sync.Map, p SortPayload) { m.Store("sort", p) }
+-- logvalue.go --
+package flow
+
+import (
+	"log/slog"
+	"sync"
+)
+
+// LogPayload is never converted to the log-value interface, although it could be.
+type LogPayload struct {
+	Name   string `log:"name"`
+	Extra  int
+	secret string `log:"secret"`
+}
+
+// LogValue is what the interface requires.
+func (p LogPayload) LogValue() slog.Value { return slog.StringValue(p.Name) }
+
+// Describe is exported.
+func (p LogPayload) Describe() string { return p.Name }
+
+func (p LogPayload) hidden() int { return p.Extra }
+
+// StoreLog hands a value to an unrelated package.
+func StoreLog(m *sync.Map, p LogPayload) { m.Store("log", p) }
+-- containers.go --
+package flow
+
+import "sync"
+
+// Deep reaches no encoder.
+type Deep struct {
+	Name   string `json:"name"`
+	Extra  int
+	secret string `json:"secret"`
+	Inner  Inner  `json:"inner"`
+}
+
+// Describe is exported.
+func (d Deep) Describe() string { return d.Name }
+
+func (d Deep) hidden() int { return d.Extra }
+
+// Inner is the type of a field of Deep.
+type Inner struct {
+	Label string `json:"label"`
+}
+
+// Describe is exported.
+func (i Inner) Describe() string { return i.Label }
+
+// StoreDeep hands a container to an unrelated package.
+func StoreDeep(m *sync.Map, values map[string][]*Deep) { m.Store("deep", values) }
+-- writer.go --
+package flow
+
+import "sync"
+
+// Sink is the writer of no template execution.
+type Sink struct {
+	Buffer []byte `sink:"buffer"`
+	Extra  int
+}
+
+// Write is what an execution would need of it.
+func (s *Sink) Write(p []byte) (int, error) {
+	s.Buffer = append(s.Buffer, p...)
+	return len(p), nil
+}
+
+func (s *Sink) hidden() int { return s.Extra }
+
+// StoreSink hands the writer to an unrelated package.
+func StoreSink(m *sync.Map, s *Sink) { m.Store("sink", s) }

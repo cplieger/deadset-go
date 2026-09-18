@@ -1,0 +1,34 @@
+Both directions of the linkname directive, a directive whose qualified name names
+nothing of this module, and a directive in a file that does not import "unsafe",
+which the toolchain does not enable.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- app.go --
+package app
+
+import _ "unsafe"
+
+//go:linkname pushed
+func pushed() {}
+
+//go:linkname pulled example.com/app/sub.Value
+var pulled int
+
+//go:linkname absent example.com/app/sub.Missing
+var absent int
+-- plain.go --
+package app
+
+//go:linkname notEnabled
+func notEnabled() {}
+-- sub/sub.go --
+package sub
+
+// Value is the symbol a directive of the root package joins a name to.
+var Value int
+
+// Other is not named by any directive.
+var Other int

@@ -4,6 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"go/types"
 	"os"
 	"path/filepath"
 	"slices"
@@ -12,6 +16,7 @@ import (
 
 	"github.com/cplieger/deadset-go/internal/load"
 	"github.com/cplieger/deadset-go/internal/scope"
+	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/txtar"
 )
 
@@ -68,6 +73,38 @@ func loadDir(t *testing.T, dir, goos, goarch string) (*load.Result, string) {
 	t.Helper()
 	return loadDirUnder(t.Context(), t, dir, load.Configuration{ID: goos + "-" + goarch, OS: goos, Arch: goarch})
 }
+
+// outsideRootSource is the one file the result built by outsideRoot compiles.
+const outsideRootSource = "package app\n\nfunc Answer() int { return 7 }\n"
+
+// outsideRoot is a load result whose one package compiles a file the target root
+// does not hold, and the root and the file's path. No load produces one: a
+// misplaced file is what a pass must refuse rather than pass over, so the result
+// is built by hand.
+func outsideRoot(t *testing.T) (*load.Result, string, string) {
+	t.Helper()
+
+	file := filepath.Join(t.TempDir(), "app.go")
+	fset := token.NewFileSet()
+	parsed, err := parser.ParseFile(fset, file, outsideRootSource, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatalf("Setup: parse %s: %v", file, err)
+	}
+	pkg := &packages.Package{
+		ID:              "example.com/app",
+		PkgPath:         "example.com/app",
+		Name:            "app",
+		GoFiles:         []string{file},
+		CompiledGoFiles: []string{file},
+		Syntax:          []*ast.File{parsed},
+		TypesInfo:       &types.Info{},
+	}
+	return &load.Result{Packages: []*packages.Package{pkg}, Fset: fset}, t.TempDir(), file
+}
+
+// readOutsideRootSource answers every read with the source outsideRoot parsed, so
+// a refusal comes from the position and never from the reader.
+func readOutsideRootSource(string) ([]byte, error) { return []byte(outsideRootSource), nil }
 
 // symbolsOf extracts one archive, loads it for the host configuration and
 // enumerates it.
@@ -371,7 +408,13 @@ func TestSymbolsRefusesAnIncompleteRequest(t *testing.T) {
 		{name: "no result", result: nil, root: root, read: os.ReadFile, wantErr: ErrIncompleteLoad},
 		{name: "no file set", result: &load.Result{Packages: result.Packages}, root: root, read: os.ReadFile, wantErr: ErrIncompleteLoad},
 		{name: "no reader", result: result, root: root, read: nil, wantErr: ErrIncompleteLoad},
-		{name: "root outside the load", result: result, root: t.TempDir(), read: os.ReadFile, wantErr: ErrNoTargetPackage},
+		{
+			name:    "a load that carries no syntax tree",
+			result:  &load.Result{Fset: result.Fset, Packages: []*packages.Package{{PkgPath: "example.com/app", TypesInfo: &types.Info{}}}},
+			root:    root,
+			read:    os.ReadFile,
+			wantErr: ErrNoTargetPackage,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -383,6 +426,21 @@ func TestSymbolsRefusesAnIncompleteRequest(t *testing.T) {
 				t.Errorf("Symbols(%s) returned %d symbols, want none", tc.name, len(got))
 			}
 		})
+	}
+}
+
+func TestSymbolsReportsAFileTheTargetRootDoesNotHold(t *testing.T) {
+	result, root, file := outsideRoot(t)
+
+	got, err := Symbols(result, root, readOutsideRootSource)
+	if !errors.Is(err, ErrSource) {
+		t.Fatalf("Symbols(a file outside the root) error = %v, want one satisfying errors.Is(err, %v)", err, ErrSource)
+	}
+	if !strings.Contains(err.Error(), file) {
+		t.Errorf("Symbols(a file outside the root) error = %v, want it to name %s", err, file)
+	}
+	if got != nil {
+		t.Errorf("Symbols(a file outside the root) returned %d symbols, want none", len(got))
 	}
 }
 

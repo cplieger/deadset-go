@@ -1,0 +1,77 @@
+Three error types, each returned into a result typed as error, so each enters the
+conversion set with error as the interface: one declaring the three single-form
+methods, one declaring Unwrap in its slice form, and one whose Is method carries a
+signature the standard helpers never call. A fourth type declares one of the forms
+and reaches an interface that is not error.
+
+-- go.mod --
+module example.com/errorsduck
+
+go 1.27.1
+-- fault.go --
+package errorsduck
+
+// fault declares the three forms errors.Is, errors.As and errors.Unwrap reach on
+// one type, and nothing in the module calls any of them.
+type fault struct {
+	cause error
+	code  int
+}
+
+func (f *fault) Error() string { return "fault" }
+
+func (f *fault) Is(target error) bool { return target == f.cause }
+
+func (f *fault) As(target any) bool { return target != nil && f.code != 0 }
+
+func (f *fault) Unwrap() error { return f.cause }
+
+// Fail returns a value of fault at a position typed as error.
+func Fail(cause error) error { return &fault{cause: cause, code: 1} }
+-- joined.go --
+package errorsduck
+
+// joined declares Unwrap in the form that reports several wrapped errors.
+type joined struct {
+	parts []error
+}
+
+func (j *joined) Error() string { return "joined" }
+
+func (j *joined) Unwrap() []error { return j.parts }
+
+// FailAll returns a value of joined at a position typed as error.
+func FailAll(parts []error) error { return &joined{parts: parts} }
+-- strict.go --
+package errorsduck
+
+// strict declares a method named Is whose parameter is a name rather than an
+// error, so no standard helper can ever call it.
+type strict struct {
+	name string
+}
+
+func (s *strict) Error() string { return "strict" }
+
+func (s *strict) Is(name string) bool { return name == s.name }
+
+// FailStrict returns a value of strict at a position typed as error.
+func FailStrict(name string) error { return &strict{name: name} }
+
+-- token.go --
+package errorsduck
+
+import "fmt"
+
+// token declares one of the four forms and no Error method, so it can never be
+// reached as an error, and the only interface it reaches is fmt.Stringer.
+type token struct {
+	name string
+}
+
+func (t *token) String() string { return t.name }
+
+func (t *token) Is(target error) bool { return target == nil }
+
+// Name renders a token through the interface it does reach.
+func Name(name string) fmt.Stringer { return &token{name: name} }

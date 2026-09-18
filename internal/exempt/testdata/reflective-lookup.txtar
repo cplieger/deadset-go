@@ -1,0 +1,53 @@
+One module that names a method by literal and by constant at a reflective lookup,
+names one by variable, looks a plugin symbol up, and holds a map helper spelled
+Lookup.
+
+-- go.mod --
+module example.com/lookup
+
+go 1.27.1
+-- server.go --
+package lookup
+
+import (
+	"plugin"
+	"reflect"
+)
+
+// Server carries the members the lookups name.
+type Server struct {
+	Token  string
+	secret string
+}
+
+// Reload is named by a string literal.
+func (s *Server) Reload() {}
+
+// Refresh is named by a constant.
+func (s *Server) Refresh() {}
+
+// Restart is named by a variable, which names nothing.
+func (s *Server) Restart() {}
+
+// Handler is a package-level function a plugin lookup names.
+func Handler() {}
+
+const refresh = "Refresh"
+
+// Dispatch reaches the members by name.
+func Dispatch(s *Server, name string) {
+	v := reflect.ValueOf(s)
+	_ = v.MethodByName("Reload")
+	_ = v.MethodByName(refresh)
+	_ = v.MethodByName(name + "Reload")
+	_, _ = reflect.TypeOf(s).MethodByName("Reload")
+
+	value := reflect.ValueOf(*s)
+	_ = value.FieldByName("Token")
+	_ = value.FieldByName("secret")
+}
+
+// Load reaches a plugin symbol by name.
+func Load(p *plugin.Plugin) {
+	_, _ = p.Lookup("Handler")
+}

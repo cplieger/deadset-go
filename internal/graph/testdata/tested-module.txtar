@@ -1,0 +1,47 @@
+One library module with a production file, an in-package test file and an
+external test file, so the four passes run over every kind of file a tested
+module holds: one declaration the tests alone reach, one the production code
+reaches, and one nothing references at all.
+
+-- go.mod --
+module example.com/tested
+
+go 1.27.1
+-- catalog.go --
+package tested
+
+import "strings"
+
+// Resolve is the module's published entry point, called from the external test
+// file and from no production file.
+func Resolve(name string) string { return normalize(name) }
+
+// normalize is called from Resolve and from the in-package test file.
+func normalize(name string) string { return strings.TrimSpace(name) }
+
+// orphan is referenced by no file of the module.
+func orphan(name string) string { return name + "!" }
+-- catalog_test.go --
+package tested
+
+import "testing"
+
+func TestNormalize(t *testing.T) {
+	if got := normalize("  x  "); got != "x" {
+		t.Errorf("normalize(%q) = %q, want %q", "  x  ", got, "x")
+	}
+}
+-- external_test.go --
+package tested_test
+
+import (
+	"testing"
+
+	"example.com/tested"
+)
+
+func TestResolve(t *testing.T) {
+	if got := tested.Resolve(" x "); got != "x" {
+		t.Errorf("Resolve(%q) = %q, want %q", " x ", got, "x")
+	}
+}

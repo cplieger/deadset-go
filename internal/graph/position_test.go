@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"golang.org/x/tools/go/packages"
 )
 
 func TestPositionsColumnCountsUTF16CodeUnits(t *testing.T) {
@@ -164,33 +162,6 @@ func TestSymbolsKeepsOneDeclarationPerSourceSiteAcrossVariants(t *testing.T) {
 	for _, ref := range wantRefs {
 		if _, ok := byRef[ref]; !ok {
 			t.Errorf("Symbols(variants.txtar) holds no %s", ref)
-		}
-	}
-}
-
-func TestSymbolsEnumeratesNoPackageOutsideTheTarget(t *testing.T) {
-	dir := extract(t, "variants.txtar")
-	result, root := loadDir(t, dir, "linux", "amd64")
-
-	// The toolchain synthesizes a main package for the test binary, whose one
-	// file lives in the build cache rather than under the target.
-	var synthesized *packages.Package
-	for _, p := range result.Packages {
-		if strings.HasSuffix(p.PkgPath, ".test") {
-			synthesized = p
-		}
-	}
-	if synthesized == nil {
-		t.Fatal("load(variants.txtar) returned no synthesized test main, so this test no longer exercises the exclusion it exists for")
-	}
-
-	symbols, err := Symbols(result, root, os.ReadFile)
-	if err != nil {
-		t.Fatalf("Symbols(variants.txtar) error: %v", err)
-	}
-	for _, s := range symbols {
-		if s.PkgPath == synthesized.PkgPath {
-			t.Errorf("Symbols(variants.txtar) enumerated %s from the synthesized package %s, want none", s.ID, synthesized.PkgPath)
 		}
 	}
 }

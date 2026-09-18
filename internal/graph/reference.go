@@ -84,6 +84,11 @@ type Reference struct {
 // Every reference a test file makes carries Test, which is the flag a caller
 // filters on to count production references alone. References itself counts
 // both.
+//
+// A reference names a declaration of a package this configuration loaded, so a
+// use of another module's declaration and of a name the language itself declares
+// is no reference. A file targetRoot does not hold ends the walk with [ErrSource]
+// rather than being passed over.
 func References(r *load.Result, targetRoot string, read ReadFile, symbols []Symbol) ([]Reference, []TestFileRule, error) {
 	p, err := newReferencePass(r, targetRoot, read, symbols)
 	if err != nil {
@@ -140,6 +145,7 @@ type referencePass struct {
 	kinds     map[token.Pos]RefKind  // the kind a parent node fixes for an identifier below it
 	callees   map[token.Pos]bool     // the identifiers a call expression names as its callee
 	reached   map[string]int         // per source file, the variants that compile it
+	declaring map[string]bool        // the import paths of the packages this walk enumerates
 	err       error
 	refs      []Reference
 	testFiles int
@@ -174,9 +180,14 @@ func newReferencePass(r *load.Result, targetRoot string, read ReadFile, symbols 
 // walk visits every file of every variant, in one order, and returns the first
 // failure the walk met.
 func (p *referencePass) walk(pkgs []*packages.Package) error {
-	for _, g := range groupVariants(pkgs, p.pos) {
+	groups := groupVariants(pkgs, p.pos)
+	p.declaring = make(map[string]bool, len(groups))
+	for _, g := range groups {
+		p.declaring[g.pkgPath] = true
+	}
+	for _, g := range groups {
 		for _, pkg := range g.pkgs {
-			for _, f := range filesInside(pkg, p.pos) {
+			for _, f := range syntaxFiles(pkg, p.pos) {
 				if err := p.walkFile(pkg, f); err != nil {
 					return err
 				}
@@ -438,7 +449,7 @@ func (p *referencePass) record(id *ast.Ident, encl SymbolID) {
 	if obj == nil {
 		return
 	}
-	to, ok := p.symbolAt(obj.Pos())
+	to, ok := p.symbolOf(obj)
 	if !ok {
 		return
 	}
@@ -465,7 +476,7 @@ func (p *referencePass) reachThrough(e *ast.SelectorExpr, encl SymbolID) {
 			return
 		}
 		field := st.Field(i)
-		if to, ok := p.symbolAt(field.Pos()); ok {
+		if to, ok := p.symbolOf(field); ok {
 			p.add(encl, to, e.Sel.Pos(), RefRead)
 		}
 		held = field.Type()
@@ -658,16 +669,23 @@ func (p *referencePass) add(from, to SymbolID, pos token.Pos, kind RefKind) {
 	p.refs = append(p.refs, Reference{From: from, To: to, Pos: position, Kind: kind, Test: p.test})
 }
 
-// symbolAt resolves one position to the symbol declared there, resolving each
-// position once. A position outside the target root, an invalid position and a
-// position no symbol declares all resolve to nothing.
+// symbolOf resolves the declaration of one object a walked file names. Only a
+// package this walk enumerates declares a symbol of the target, so an object of
+// another module, an object of a package outside the scope and a name the
+// language itself declares resolve to nothing without a position being read.
+func (p *referencePass) symbolOf(obj types.Object) (SymbolID, bool) {
+	if obj.Pkg() == nil || !p.declaring[obj.Pkg().Path()] {
+		return "", false
+	}
+	return p.symbolAt(obj.Pos())
+}
+
+// symbolAt resolves one position of the target to the symbol declared there,
+// resolving each position once. A position no symbol declares resolves to
+// nothing; a position that does not render fails the walk.
 func (p *referencePass) symbolAt(pos token.Pos) (SymbolID, bool) {
 	if id, ok := p.ids[pos]; ok {
 		return id, id != ""
-	}
-	if !p.pos.inside(pos) {
-		p.ids[pos] = ""
-		return "", false
 	}
 	position, err := p.pos.render(pos)
 	if err != nil {

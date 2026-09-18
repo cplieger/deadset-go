@@ -9,6 +9,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"go/token"
 	"io"
 	"io/fs"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/internal/config"
+	"github.com/cplieger/deadset-go/internal/exempt"
 	"github.com/cplieger/deadset-go/internal/graph"
 	"github.com/cplieger/deadset-go/internal/load"
 	"github.com/cplieger/deadset-go/internal/scope"
@@ -87,6 +89,8 @@ const printConfigUsage = "usage: deadset-go print-config [--target=DIR] [--confi
 
 const printRootsUsage = "usage: deadset-go print-roots [--target=DIR] [--config=FILE] [--central=FILE] [--min-confidence=CLASS]"
 
+const printRetainedUsage = "usage: deadset-go print-retained [--target=DIR] [--config=FILE] [--central=FILE] [--min-confidence=CLASS]"
+
 func main() {
 	// An interrupt reaches the toolchain a load spawns through the context, so a
 	// cancelled run stops rather than waiting for the packages it asked for. The
@@ -125,7 +129,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return printConfig(set.Args()[1:], stdout, stderr)
 	case "print-roots":
 		return printRoots(ctx, set.Args()[1:], stdout, stderr)
-	case "analyze", "explain", "print-retained":
+	case "print-retained":
+		return printRetained(ctx, set.Args()[1:], stdout, stderr)
+	case "analyze", "explain":
 		fmt.Fprintf(stderr, "deadset-go: %s is not implemented in this version\n", verb)
 		set.Usage()
 		return exitUsage
@@ -248,12 +254,52 @@ func printConfig(args []string, stdout, stderr io.Writer) int {
 	return exitClean
 }
 
+// detectors is the exemption classes this analyzer computes, each mapped to its
+// detection, in vocabulary order. The framework names no class, so the table is
+// assembled here, where every other stage of the analysis is assembled, and it
+// names every class the vocabulary declares: a class the table does not hold
+// retains nothing, so a class missing from it is an exemption the analyzer stops
+// computing without anything refusing the configuration that disables it.
+var detectors = map[exempt.Class]exempt.Detector{
+	exempt.InterfaceSatisfaction: exempt.InterfaceSatisfactionDetector,
+	exempt.EncodingReflection:    exempt.EncodingReflectionDetector,
+	exempt.FormatVerbContract:    exempt.FormatVerbContractDetector,
+	exempt.ErrorsDuckTyping:      exempt.ErrorsDuckTypingDetector,
+	exempt.EnumGroup:             exempt.EnumGroupDetector,
+	exempt.GeneratedFile:         exempt.GeneratedFileDetector,
+	exempt.LinknameCgoAsmPlugin:  exempt.LinknameCgoAsmPluginDetector,
+	exempt.TemplateField:         exempt.TemplateFieldDetector,
+	exempt.ReflectiveLookup:      exempt.ReflectiveLookupDetector,
+}
+
+// stages is what the load of one configuration produced: the loaded packages, the
+// target root every position is rendered against, the inventory, the reference of
+// every symbol in it, the root set, and every configured string that named no
+// symbol.
+type stages struct {
+	refs      map[graph.SymbolID]string
+	root      string
+	symbols   []graph.Symbol
+	roots     []graph.Root
+	unmatched []graph.Unmatched
+	result    load.Result
+}
+
 // rootSet is one configuration's root set: every root in the order the detection
 // returns them, the reference of every symbol a root names, and every configured
 // string that named no symbol.
 type rootSet struct {
 	refs      map[graph.SymbolID]string
 	roots     []graph.Root
+	unmatched []graph.Unmatched
+}
+
+// retainedSet is one configuration's retained set: every exemption that held back
+// a symbol the sweep would otherwise have reported, the reference of every symbol
+// one names, and every configured string that named no symbol.
+type retainedSet struct {
+	refs      map[graph.SymbolID]string
+	retained  []graph.Exemption
 	unmatched []graph.Unmatched
 }
 
@@ -291,41 +337,199 @@ func printRoots(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	return exitClean
 }
 
-// rootsOf resolves the root set of one configuration: the scope of the target,
-// the load of the host build configuration, the enumeration and the detection, in
-// the order the analysis runs them.
+// rootsOf resolves the root set of one configuration.
+func rootsOf(ctx context.Context, resolved *resolution) (rootSet, error) {
+	loaded, err := stagesOf(ctx, resolved)
+	if err != nil {
+		return rootSet{}, err
+	}
+	return rootSet{refs: loaded.refs, roots: loaded.roots, unmatched: loaded.unmatched}, nil
+}
+
+// stagesOf runs the stages every verb that reads the target runs: the scope of the
+// target, the load of the host build configuration, the enumeration and the root
+// detection, in the order the analysis runs them.
 //
 // A library target's published API is a root and an application's is not, which
 // is the one setting of the configuration this composition root converts for the
 // detection; the patterns pass through as the configuration lists them.
-func rootsOf(ctx context.Context, resolved *resolution) (rootSet, error) {
+func stagesOf(ctx context.Context, resolved *resolution) (stages, error) {
 	document, err := scope.ForDir(resolved.target)
 	if err != nil {
-		return rootSet{}, err
+		return stages{}, err
 	}
 	result, err := load.Load(ctx, document, load.HostConfiguration())
 	if err != nil {
-		return rootSet{}, err
+		return stages{}, err
 	}
 
 	targetRoot := document.Target.Path
 	symbols, err := graph.Symbols(&result, targetRoot, os.ReadFile)
 	if err != nil {
-		return rootSet{}, err
+		return stages{}, err
 	}
 	roots, unmatched, err := graph.Roots(&result, targetRoot, os.ReadFile, symbols, graph.RootOptions{
 		Patterns:     resolved.config.Roots.Patterns,
 		PublishedAPI: resolved.config.Target.Kind == config.Library,
 	})
 	if err != nil {
-		return rootSet{}, err
+		return stages{}, err
 	}
 
 	refs := make(map[graph.SymbolID]string, len(symbols))
 	for i := range symbols {
 		refs[symbols[i].ID] = symbols[i].Ref
 	}
-	return rootSet{refs: refs, roots: roots, unmatched: unmatched}, nil
+	return stages{
+		refs:      refs,
+		root:      targetRoot,
+		symbols:   symbols,
+		roots:     roots,
+		unmatched: unmatched,
+		result:    result,
+	}, nil
+}
+
+// printRetained writes the retained set of the host build configuration to stdout,
+// one line per symbol an exemption held back: the symbol's reference, then the
+// class that held it, the site the evidence was found at and the clause naming
+// that evidence, repeated for every further class that held the same symbol, all
+// separated by tabs. The shape is this command's own rather than a Contract
+// format, so that sort and cut read it, and a class recording no site leaves that
+// field empty rather than printing a placeholder position.
+//
+// A configuration that retains nothing prints nothing and is a clean answer: no
+// symbol was held back, which is what a run over a target with no exemption looks
+// like. A configured string that names no symbol is reported on stderr by its
+// issue kind, as the root verb reports it, because the root set is what the sweep
+// decided the candidates against.
+func printRetained(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	resolved, code := resolve("print-retained", printRetainedUsage, args, stderr)
+	if code != exitClean {
+		return code
+	}
+
+	options, err := exemptOptions(&resolved.config)
+	if err != nil {
+		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
+		return exitUsage
+	}
+
+	set, err := retainedOf(ctx, &resolved, options)
+	if err != nil {
+		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
+		return exitCodeFor(err)
+	}
+
+	for _, line := range retainedLines(set.refs, set.retained) {
+		if _, err := fmt.Fprintln(stdout, line); err != nil {
+			fmt.Fprintf(stderr, "deadset-go: print-retained: %v\n", err)
+			return exitFailure
+		}
+	}
+	for _, unmatched := range set.unmatched {
+		fmt.Fprintf(stderr, "%s: roots.patterns names nothing: %s\n", unmatchedRoot, unmatched.Source)
+	}
+	if len(set.unmatched) > 0 {
+		return exitFindings
+	}
+	return exitClean
+}
+
+// retainedOf resolves the retained set of one configuration: the stages the root
+// verb runs, then the reference pass, the exemption classes and the sweep, in the
+// order the analysis runs them.
+//
+// The sweep counts every reference, a test file's included: which symbols a
+// production sweep would report is a question about the findings rather than about
+// what an exemption held back, and a symbol held back under one mode is held back
+// under the other.
+func retainedOf(ctx context.Context, resolved *resolution, options exempt.Options) (retainedSet, error) {
+	loaded, err := stagesOf(ctx, resolved)
+	if err != nil {
+		return retainedSet{}, err
+	}
+
+	references, _, err := graph.References(&loaded.result, loaded.root, os.ReadFile, loaded.symbols)
+	if err != nil {
+		return retainedSet{}, err
+	}
+	resolver, err := graph.NewResolver(&loaded.result, loaded.root, os.ReadFile, loaded.symbols)
+	if err != nil {
+		return retainedSet{}, err
+	}
+	exemptions, err := exempt.Compute(&exempt.Input{
+		Result:  &loaded.result,
+		Resolve: resolver,
+		Symbols: loaded.symbols,
+		Root:    loaded.root,
+		Read:    os.ReadFile,
+		Options: options,
+	}, detectors)
+	if err != nil {
+		return retainedSet{}, err
+	}
+
+	swept := graph.New(loaded.symbols, references, loaded.roots).Sweep(graph.Mode{Exempt: exemptions})
+	return retainedSet{refs: loaded.refs, retained: swept.Retained, unmatched: loaded.unmatched}, nil
+}
+
+// exemptOptions converts the settings the exemption classes read into the value
+// they read them from, which is the whole of the configuration that reaches a
+// class.
+//
+// A name outside the vocabulary is a configuration naming a class that does not
+// exist, and it is refused rather than ignored: a maintainer who misspelled a
+// class would otherwise be told nothing and keep the exemption they meant to
+// switch off.
+func exemptOptions(cfg *config.Config) (exempt.Options, error) {
+	known := exempt.Classes()
+	disabled := make([]exempt.Class, 0, len(cfg.Exemptions.Disabled))
+	for _, name := range cfg.Exemptions.Disabled {
+		class := exempt.Class(name)
+		if !slices.Contains(known, class) {
+			return exempt.Options{}, fmt.Errorf("exemptions.disabled: %q is not an exemption class: the classes are %s", name, classNames(known))
+		}
+		disabled = append(disabled, class)
+	}
+	return exempt.Options{
+		Disabled:         disabled,
+		TemplateDirs:     cfg.Analysis.TemplateDirs,
+		IncludeGenerated: cfg.Analysis.GeneratedFiles == config.IncludeGenerated,
+	}, nil
+}
+
+// classNames renders a class list for a message, in the order it was given.
+func classNames(classes []exempt.Class) string {
+	names := make([]string, len(classes))
+	for i, class := range classes {
+		names[i] = string(class)
+	}
+	return strings.Join(names, ", ")
+}
+
+// retainedLines renders one line per retained symbol, reading the record in its
+// own order: it groups a symbol's classes adjacently, so one pass over it emits
+// one line per symbol and nothing is re-sorted.
+func retainedLines(refs map[graph.SymbolID]string, retained []graph.Exemption) []string {
+	var lines []string
+	for i, held := range retained {
+		if i == 0 || held.ID != retained[i-1].ID {
+			lines = append(lines, refs[held.ID])
+		}
+		lines[len(lines)-1] += "\t" + held.Class + "\t" + evidenceSite(held.Site) + "\t" + held.Detail
+	}
+	return lines
+}
+
+// evidenceSite renders the position an exemption recorded, and renders a class
+// that recorded none as nothing: an empty field is what says no site exists, where
+// a position's own spelling of an empty value would read as a file named "-".
+func evidenceSite(site token.Position) string {
+	if site.Filename == "" {
+		return ""
+	}
+	return site.String()
 }
 
 // rootLine renders one root, leaving the third field off a detected class, which
@@ -419,8 +623,15 @@ func applyFlagSettings(set *flag.FlagSet, inputs *config.Inputs) error {
 // exitCodeFor maps an error to the exit code contract/exit-codes.json gives it: a
 // configuration this analyzer refuses is a usage error, and anything that stopped
 // the run before a verdict existed, a load failure among them, is a failure.
+//
+// A configured template directory the scan cannot read is a refusal of the second
+// kind: the document resolved, and what it names does not exist, which a stage
+// rather than the decode is the first to find out.
 func exitCodeFor(err error) int {
 	if _, refusal := errors.AsType[*config.Error](err); refusal {
+		return exitUsage
+	}
+	if errors.Is(err, exempt.ErrTemplateDir) {
 		return exitUsage
 	}
 	return exitFailure

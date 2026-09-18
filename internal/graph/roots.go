@@ -177,7 +177,7 @@ func (d *rootDetection) walk(r *load.Result) error {
 	for _, g := range groupVariants(r.Packages, d.pos) {
 		d.classify(g)
 		for _, p := range g.pkgs {
-			for _, f := range filesInside(p, d.pos) {
+			for _, f := range syntaxFiles(p, d.pos) {
 				if err := d.walkFile(p, f); err != nil {
 					return err
 				}
@@ -250,7 +250,7 @@ func (d *rootDetection) linknames(p *packages.Package, f *ast.File) error {
 	}
 	for _, group := range f.Comments {
 		for _, c := range group.List {
-			local, ok := linknameLocal(c.Text)
+			local, _, ok := LinknameDirective(c.Text)
 			if !ok {
 				continue
 			}
@@ -365,10 +365,6 @@ const (
 	exportDirective = "//export "
 )
 
-// linknameDirectives are the two spellings of one directive: both name a local
-// symbol the linker joins to a name outside the package.
-var linknameDirectives = [...]string{"//go:linkname", "//go:linknamestd"}
-
 // testFamilies are the name prefixes the toolchain runs from a test file, each
 // with the testing type its function takes a pointer to. TestMain takes M, and
 // the toolchain runs it as an ordinary test when it takes T instead.
@@ -387,17 +383,6 @@ func importsPath(f *ast.File, quoted string) bool {
 		}
 	}
 	return false
-}
-
-// linknameLocal returns the local name a //go:linkname directive names. The
-// second argument is optional: without it the directive marks the local symbol as
-// one another package may reach by its object symbol name.
-func linknameLocal(text string) (string, bool) {
-	fields := strings.Fields(text)
-	if len(fields) < 2 || len(fields) > 3 || !slices.Contains(linknameDirectives[:], fields[0]) {
-		return "", false
-	}
-	return fields[1], true
 }
 
 // cgoExported reports whether fn carries the //export directive that gives C a

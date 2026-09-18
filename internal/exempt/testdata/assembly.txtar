@@ -1,0 +1,47 @@
+One assembly file naming a function of its own package, once at the start of a
+line and once as a file-local symbol under an indent, beside four near misses: a
+commented directive, a name qualified by another package, a name no declaration of
+the package carries, and a definition that is not a TEXT directive.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- add.go --
+package app
+
+func add(x, y int) int
+
+// Sum adds through the assembly routine.
+func Sum(x, y int) int { return add(x, y) }
+-- names.go --
+package app
+
+func fileLocal()
+
+func commented() {}
+
+func other() {}
+
+var data int
+-- add_amd64.s --
+#include "textflag.h"
+
+// TEXT ·commented(SB), NOSPLIT, $0-24
+TEXT ·add(SB), NOSPLIT, $0-24
+	MOVQ x+0(FP), AX
+	MOVQ y+8(FP), BX
+	ADDQ BX, AX
+	MOVQ AX, ret+16(FP)
+	RET
+
+	TEXT ·fileLocal<>(SB), NOSPLIT, $0
+	RET
+
+TEXT example·other(SB), NOSPLIT, $0
+	RET
+
+TEXT ·missing(SB), NOSPLIT, $0
+	RET
+
+GLOBL ·data(SB), RODATA, $8

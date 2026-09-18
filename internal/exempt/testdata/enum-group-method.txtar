@@ -1,0 +1,30 @@
+One iota group whose type declares a String method, with two of its three members
+named by nothing. The second and third specifications carry no value expression
+and repeat the first, which is what makes them members of the group.
+
+-- go.mod --
+module example.com/enummethod
+
+go 1.27.1
+-- tier.go --
+package enummethod
+
+// Tier is the enumerated type, and its String method spells a value as text.
+type Tier int
+
+const (
+	TierLow Tier = iota
+	TierMid
+	TierHigh
+)
+
+// String spells one tier.
+func (t Tier) String() string {
+	if t == TierLow {
+		return "low"
+	}
+	return "other"
+}
+
+// Describe renders a tier without naming a member.
+func Describe(t Tier) string { return t.String() }

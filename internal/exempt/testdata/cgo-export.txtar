@@ -1,0 +1,23 @@
+A function exported to C in a file importing "C". The load compiles with cgo
+disabled, so the file is not among the syntax the class walks and is recorded as a
+declared limit of the run.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- app.go --
+package app
+
+// Size is what the package publishes.
+func Size() int { return 0 }
+-- export.go --
+package app
+
+/*
+#include <stdlib.h>
+*/
+import "C"
+
+//export Exported
+func Exported() {}
