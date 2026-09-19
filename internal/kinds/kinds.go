@@ -157,12 +157,14 @@ type Finding struct {
 	Confidence Class
 	Relation   graph.Relation
 
-	// Live reports that the subject of this finding is a declaration the sweep
-	// judged live, so no liveness relation decided it and a report carries none:
-	// the narrowing kinds, the unused-satisfaction-assertion kind and the
-	// write-only kind all claim something about a live declaration. Relation then
-	// holds the relation a reader of a document that still requires the member
-	// reads, and a reporter writing a document that does not omits the member.
+	// Live reports that no liveness relation decided this finding, so a report
+	// carries none. Two subjects answer that way: a declaration the sweep judged
+	// live, which the narrowing kinds, the unused-satisfaction-assertion kind and
+	// the write-only kind all claim something about, and a subject that is no
+	// declaration of the inventory at all, which a relation over declarations has
+	// nothing to say about. Relation then holds the relation a reader of a document
+	// that still requires the member reads, and a reporter writing a document that
+	// does not omits the member.
 	Live bool
 
 	TestOnly        bool
@@ -248,9 +250,13 @@ type Input struct {
 	Deps *deps.File
 
 	// Derived is the matrix the derivation answered, and nil where the
-	// configuration named the build configurations itself. A kind that claims
-	// something about every configuration of a target reads it, because a derived
-	// matrix is not every configuration the target builds.
+	// configuration named the build configurations itself.
+	//
+	// No kind reads it: the kind that claims something about every configuration
+	// of a target gates on the configuration listing them and declaring the set
+	// complete, and reads the files each configuration ignored. What the run
+	// derived is what the report's declared gaps name, so the field carries the
+	// derivation to the envelope and no further.
 	Derived *matrix.Derived
 
 	// Unmatched is every configured root the roots pass matched nothing with,
@@ -346,7 +352,7 @@ func Compute(in *Input, emitters map[string]Emitter) (Result, error) {
 	if err := checkTable(emitters); err != nil {
 		return Result{}, err
 	}
-	reported := make(map[graph.SymbolID]string)
+	reported := newSubjects()
 	var findings []Finding
 	for _, row := range kindsOfCatalog() {
 		emit, runs := in.emitterOf(&row, emitters)
@@ -361,7 +367,7 @@ func Compute(in *Input, emitters map[string]Emitter) (Result, error) {
 	}
 
 	kept, omitted := in.abovePar(findings)
-	slices.SortStableFunc(kept, compare)
+	slices.SortStableFunc(kept, Compare)
 	return Result{Findings: kept, OmittedBelowMinConfidence: omitted}, nil
 }
 
@@ -381,7 +387,7 @@ func (in *Input) emitterOf(row *catalog.Row, emitters map[string]Emitter) (Emitt
 
 // runKind runs one kind's emitter and completes every finding it returned, in the
 // order the emitter returned them.
-func (in *Input) runKind(emit Emitter, row *catalog.Row, reported map[graph.SymbolID]string) ([]Finding, error) {
+func (in *Input) runKind(emit Emitter, row *catalog.Row, reported *subjects) ([]Finding, error) {
 	produced, err := emit(in)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s: %w", ErrEmitter, row.Code, err)
@@ -393,7 +399,6 @@ func (in *Input) runKind(emit Emitter, row *catalog.Row, reported map[graph.Symb
 			return nil, err
 		}
 		in.complete(&found, row)
-		reported[found.id] = found.Code
 		completed = append(completed, found)
 	}
 	return completed, nil
@@ -412,12 +417,50 @@ func checkTable(emitters map[string]Emitter) error {
 	return nil
 }
 
-// resolve identifies the declaration one finding is about and refuses what the
+// subjects is what one pass has already reported about, so that a second finding
+// about one subject is refused: the declarations of the inventory by identifier, and
+// the subjects that are no declaration by reference.
+type subjects struct {
+	declared   map[graph.SymbolID]string
+	referenced map[string]string
+}
+
+// newSubjects prepares the record of one pass.
+func newSubjects() *subjects {
+	return &subjects{
+		declared:   make(map[graph.SymbolID]string),
+		referenced: make(map[string]string),
+	}
+}
+
+// referenceKeyed are the subject kinds a finding is completed against its
+// reference under, because the analysis enumerates declarations and none of these
+// is one: a source file no configuration compiled, a module requirement and a
+// directive of the module file.
+//
+// A suppression record and a configured root are not among them. Two records for
+// one symbol are two subjects written at two sites, so a reference does not
+// identify one of them, and the kinds that report those complete their own
+// findings.
+var referenceKeyed = map[string]bool{
+	symbolKinds[graph.KindFile]: true,
+	dependencySubject:           true,
+	directiveSubject:            true,
+}
+
+// resolve identifies the subject one finding is about and refuses what the
 // Contract cannot carry: a code that is not the emitter's own, a message that is
-// not one sentence a consumer can extend, a finding about no declaration of the
-// inventory, a second finding about one declaration, and a finding about a symbol
-// an exemption retained.
-func (in *Input) resolve(found *Finding, code string, reported map[graph.SymbolID]string) error {
+// not one sentence a consumer can extend, a second finding about one subject, a
+// finding about a symbol an exemption retained, and a finding about a declaration
+// the inventory does not hold.
+//
+// A declaration is identified by the identifier the emitter named or by the one its
+// reference resolves to. A subject that is no declaration is identified by its
+// reference alone, under the rule referenceKeyed states, so a finding about a file
+// the toolchain ignored or about a line of the module file is completed like every
+// other; a finding about anything else the inventory cannot answer for is a defect
+// in the emitter and is refused.
+func (in *Input) resolve(found *Finding, code string, reported *subjects) error {
 	if found.Code != code {
 		return fmt.Errorf("%w: the %s emitter returned a %s finding", ErrEmitter, code, found.Code)
 	}
@@ -428,10 +471,9 @@ func (in *Input) resolve(found *Finding, code string, reported map[graph.SymbolI
 		found.id = in.index().byRef[found.Symbol.Ref]
 	}
 	if found.id == "" {
-		return fmt.Errorf("%w: %s names no declaration of the inventory: %q",
-			ErrEmitter, found.Code, found.Symbol.Ref)
+		return in.admit(found, reported)
 	}
-	if first, twice := reported[found.id]; twice {
+	if first, twice := reported.declared[found.id]; twice {
 		return fmt.Errorf("%w: %s reports %s, which %s already reports",
 			ErrEmitter, found.Code, found.Symbol.Ref, first)
 	}
@@ -439,6 +481,27 @@ func (in *Input) resolve(found *Finding, code string, reported map[graph.SymbolI
 		return fmt.Errorf("%w: %s reports %s, which an exemption retained",
 			ErrEmitter, found.Code, found.Symbol.Ref)
 	}
+	reported.declared[found.id] = found.Code
+	return nil
+}
+
+// admit identifies a finding the inventory holds no declaration for, which is a
+// finding about a subject that is not one: it is keyed by its reference, and a
+// finding about any other kind of subject is refused as the emitter defect it is.
+func (in *Input) admit(found *Finding, reported *subjects) error {
+	if !referenceKeyed[found.Symbol.Kind] {
+		return fmt.Errorf("%w: %s names no declaration of the inventory: %q",
+			ErrEmitter, found.Code, found.Symbol.Ref)
+	}
+	if found.Symbol.Ref == "" {
+		return fmt.Errorf("%w: %s reports a %s and names no reference",
+			ErrEmitter, found.Code, found.Symbol.Kind)
+	}
+	if first, twice := reported.referenced[found.Symbol.Ref]; twice {
+		return fmt.Errorf("%w: %s reports %s, which %s already reports",
+			ErrEmitter, found.Code, found.Symbol.Ref, first)
+	}
+	reported.referenced[found.Symbol.Ref] = found.Code
 	return nil
 }
 
@@ -471,6 +534,14 @@ func checkMessage(found *Finding) error {
 // The liveness relation is the candidate's, and a finding about a declaration the
 // sweep judged live carries none: the relation is what decided a candidate, so a
 // kind whose subject is live has nothing to name there.
+//
+// A subject that is no declaration of the inventory is completed the same way and
+// answers the degenerate value at each step: certain, because a subject with no
+// visibility has no question about its callers; a component of its own, because
+// nothing falls with it; and no relation, because none decided it. The build
+// configurations are the one member such a kind sets itself, since what a module
+// requirement or an uncompiled file holds under is the kind's claim rather than the
+// configurations a declaration exists in.
 func (in *Input) complete(found *Finding, row *catalog.Row) {
 	held := in.index()
 	found.Kind = row.Name
@@ -485,7 +556,9 @@ func (in *Input) complete(found *Finding, row *catalog.Row) {
 	if found.ConsumersLoaded == nil {
 		found.ConsumersLoaded = []string{}
 	}
-	found.Configurations = in.configurationsOf(found.id)
+	if found.Configurations == nil {
+		found.Configurations = in.configurationsOf(found.id)
+	}
 	found.Generated = in.generated(found.Position.Path)
 	if found.Generated {
 		found.Fixability = generatedFixability
@@ -530,13 +603,16 @@ func (in *Input) abovePar(findings []Finding) (kept []Finding, omitted int) {
 	return kept, omitted
 }
 
-// compare orders two findings by the canonical key: the path, the line, the
+// Compare orders two findings by the canonical key: the path, the line, the
 // column, the code and the symbol reference. The analyzer name is the key's last
 // component and is one analyzer's own in its own report, so it decides nothing
 // here.
 //
+// It is exported because the key is one fact with one owner: a reporter that orders
+// findings calls this rather than comparing the five components again.
+//
 //nolint:gocritic // hugeParam: the standard library's sort takes the element type by value
-func compare(a, b Finding) int {
+func Compare(a, b Finding) int {
 	return cmp.Or(
 		cmp.Compare(a.Position.Path, b.Position.Path),
 		cmp.Compare(a.Position.Line, b.Position.Line),

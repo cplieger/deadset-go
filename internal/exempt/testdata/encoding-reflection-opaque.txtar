@@ -1,0 +1,206 @@
+Nine types, each handed to a different kind of callee. One goes to a parameter typed
+as the empty interface of a method of a package the load did not read, and one goes to
+the same method as a pointer. One goes to a function of the target that hands its own
+such parameter to that method, and one to a function that hands its parameter to that
+function in turn. One goes to a function of the target that hands its parameter to an
+encoder the class names. One goes to a function of the target whose parameter is typed
+as the value's own type, which crosses no boundary. One goes to a type parameter of a
+function of a package the load did not read, which the caller instantiates with the
+value's own type, so nothing about it is lost. One goes to a parameter typed as an
+interface that declares a method, which is a conversion the conversion set records.
+One is an operand of the formatting package, whose destinations the format-verb class
+names.
+
+-- go.mod --
+module example.com/opaque
+
+go 1.27.0
+-- crossing.go --
+package opaque
+
+import "sync"
+
+// Crossing reaches a method whose body the analysis does not hold.
+type Crossing struct {
+	Name   string `json:"name"`
+	Extra  int
+	secret string `json:"secret"`
+	Inner  Nested `json:"inner"`
+}
+
+// Describe is exported, so a consumer that resolves a method by name may call it.
+func (c Crossing) Describe() string { return c.Name }
+
+func (c Crossing) hidden() int { return c.Extra }
+
+// Nested is the type of a field of Crossing.
+type Nested struct {
+	Label  string `json:"label"`
+	hidden int
+}
+
+// Title is exported.
+func (n Nested) Title() string { return n.Label }
+
+// Hand puts a value where the analysis cannot follow it.
+func Hand(m *sync.Map, c Crossing) { m.Store("crossing", c) }
+-- wrapped.go --
+package opaque
+
+import "sync"
+
+// Wrapped reaches the same method through a function of the target.
+type Wrapped struct {
+	Name   string `json:"name"`
+	Extra  int
+	secret string `json:"secret"`
+}
+
+// Describe is exported.
+func (w Wrapped) Describe() string { return w.Name }
+
+// respond hands its own interface-typed parameter to a method the analysis does not
+// hold the body of.
+func respond(m *sync.Map, v any) { m.Store("respond", v) }
+
+// HandWrapped puts a value through the wrapper.
+func HandWrapped(m *sync.Map, w Wrapped) { respond(m, w) }
+-- chained.go --
+package opaque
+
+import "sync"
+
+// Chained reaches the same method through two functions of the target.
+type Chained struct {
+	Name   string `json:"name"`
+	Extra  int
+	secret string `json:"secret"`
+}
+
+// Describe is exported.
+func (c Chained) Describe() string { return c.Name }
+
+// relay hands its own interface-typed parameter to a wrapper.
+func relay(m *sync.Map, v any) { respond(m, v) }
+
+// HandChained puts a value through both wrappers.
+func HandChained(m *sync.Map, c Chained) { relay(m, c) }
+-- encoded.go --
+package opaque
+
+import "encoding/json"
+
+// Encoded reaches an encoder the class names, through a function of the target.
+type Encoded struct {
+	Name   string `json:"name"`
+	Extra  int
+	secret string `json:"secret"`
+}
+
+// Describe is exported.
+func (e Encoded) Describe() string { return e.Name }
+
+// keep hands its own interface-typed parameter to an encoder.
+func keep(v any) ([]byte, error) { return json.Marshal(v) }
+
+// HandEncoded puts a value through the encoding wrapper.
+func HandEncoded(e Encoded) ([]byte, error) { return keep(e) }
+-- concrete.go --
+package opaque
+
+// Concrete reaches a function of the target typed as the value's own type.
+type Concrete struct {
+	Name   string `json:"name"`
+	Extra  int
+	secret string `json:"secret"`
+}
+
+// Describe is exported.
+func (c Concrete) Describe() string { return c.Name }
+
+// held is where a value typed as its own type goes.
+var held Concrete
+
+// hold takes the value as the type it is, so nothing about it is lost.
+func hold(c Concrete) { held = c }
+
+// HandConcrete puts a value where its type is still known.
+func HandConcrete(c Concrete) { hold(c) }
+-- printed.go --
+package opaque
+
+import "fmt"
+
+// Printed is an operand of the formatting package.
+type Printed struct {
+	Name   string `json:"name"`
+	Extra  int
+	secret string `json:"secret"`
+}
+
+// String is what a verb asks a formatted operand for.
+func (p Printed) String() string { return p.Name }
+
+// Describe is exported.
+func (p Printed) Describe() string { return p.Name }
+
+// HandPrinted formats a value.
+func HandPrinted(p Printed) { fmt.Println(p) }
+-- pointed.go --
+package opaque
+
+import "sync"
+
+// Pointed reaches the same method as a pointer.
+type Pointed struct {
+	Name   string `json:"name"`
+	Extra  int
+	secret string `json:"secret"`
+}
+
+// Describe is exported.
+func (p *Pointed) Describe() string { return p.Name }
+
+// HandPointed puts a pointer where the analysis cannot follow it.
+func HandPointed(m *sync.Map, p *Pointed) { m.Store("pointed", p) }
+-- sought.go --
+package opaque
+
+import "slices"
+
+// Sought reaches a type parameter rather than an interface.
+type Sought struct {
+	Name   string `json:"name"`
+	Extra  int
+	secret string `json:"secret"`
+}
+
+// Describe is exported.
+func (s Sought) Describe() string { return s.Name }
+
+// HandSought searches for a value among its own kind, which keeps its type.
+func HandSought(all []Sought, s Sought) int { return slices.Index(all, s) }
+-- copied.go --
+package opaque
+
+import "io"
+
+// Copied reaches a parameter typed as an interface that declares a method.
+type Copied struct {
+	Name   string `json:"name"`
+	Extra  int
+	secret string `json:"secret"`
+}
+
+// Write is what the interface requires.
+func (c *Copied) Write(p []byte) (int, error) {
+	c.Extra += len(p)
+	return len(p), nil
+}
+
+// Describe is exported.
+func (c *Copied) Describe() string { return c.Name }
+
+// HandCopied hands the value to a parameter whose interface declares one method, so
+// what the callee can reach through it is that method.
+func HandCopied(c *Copied, r io.Reader) (int64, error) { return io.Copy(c, r) }

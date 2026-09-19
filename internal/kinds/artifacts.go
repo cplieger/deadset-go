@@ -146,9 +146,12 @@ func neverBuilt(in *Input) ([]ignoredFile, error) {
 		if cgo[relative] {
 			continue
 		}
-		file, err := readIgnored(path, relative, ignored[path])
+		file, reported, err := readIgnored(path, relative, ignored[path])
 		if err != nil {
 			return nil, err
+		}
+		if !reported {
+			continue
 		}
 		files = append(files, file)
 	}
@@ -262,26 +265,37 @@ func relativeToSlash(base, path string) string {
 	return filepath.ToSlash(relative)
 }
 
-// readIgnored reads one ignored file: the constraint that excluded it and the
-// number of lines it spans.
+// readIgnored reads one ignored file, the constraint that excluded it and the
+// number of lines it spans, and reports whether the file is a subject of the kind
+// at all.
+//
+// A file the ignore tag constrains is not one. That tag is the toolchain's own
+// convention for a file run by hand rather than built, so a file carrying it is
+// built by hand by definition and no declaration about the matrix says otherwise. A
+// file any other custom tag excluded is a subject, because a matrix the
+// configuration declares complete asserts that the listed configurations are every
+// one the target builds and a tag the project builds by hand belongs in the list.
 //
 // A file no constraint decides is an error rather than a finding with nothing to
 // name: every file of this population was ignored by the toolchain, so one whose
 // constraint cannot be read is a file this rule does not understand, and the run
 // says so instead of reporting a subject with no reason.
-func readIgnored(path, relative, pkgPath string) (ignoredFile, error) {
+func readIgnored(path, relative, pkgPath string) (ignoredFile, bool, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return ignoredFile{}, fmt.Errorf("read the ignored file %s: %w", relative, err)
+		return ignoredFile{}, false, fmt.Errorf("read the ignored file %s: %w", relative, err)
 	}
 	base := filepath.Base(path)
 	expression, err := fileConstraint(path, base, content)
 	if err != nil {
-		return ignoredFile{}, fmt.Errorf("read the build constraint of %s: %w", relative, err)
+		return ignoredFile{}, false, fmt.Errorf("read the build constraint of %s: %w", relative, err)
 	}
 	if expression == nil {
-		return ignoredFile{}, fmt.Errorf("%w: %s declares no build constraint and no configuration built it",
+		return ignoredFile{}, false, fmt.Errorf("%w: %s declares no build constraint and no configuration built it",
 			ErrEmitter, relative)
+	}
+	if builtByHand(expression) {
+		return ignoredFile{}, false, nil
 	}
 	return ignoredFile{
 		path:       relative,
@@ -289,7 +303,23 @@ func readIgnored(path, relative, pkgPath string) (ignoredFile, error) {
 		pkgPath:    pkgPath,
 		constraint: expression.String(),
 		lines:      max(1, strings.Count(string(content), "\n")+1),
-	}, nil
+	}, true, nil
+}
+
+// ignoreTag is the tag the toolchain's convention for a file run by hand
+// constrains it on, which no build sets.
+const ignoreTag = "ignore"
+
+// builtByHand reports whether one constraint states the ignore tag among the
+// conditions it puts side by side, which is a file the toolchain never builds under
+// any configuration because it is meant to be run.
+func builtByHand(expression constraint.Expr) bool {
+	for _, condition := range conditions(expression) {
+		if tag, named := condition.(*constraint.TagExpr); named && tag.Tag == ignoreTag {
+			return true
+		}
+	}
+	return false
 }
 
 // fileConstraint is the one build constraint a file carries: what its name implies

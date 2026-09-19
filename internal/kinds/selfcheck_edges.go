@@ -96,16 +96,3 @@ func Evaluate(in *Input, findings []Finding) ([]Finding, []Evaluation) {
 	})
 	return kept, evaluations
 }
-
-// Pending is how many pending findings a set of evaluations holds, which is how
-// many of them are dead. A report holding one is not an answer on its own, so the
-// run that wrote it names this count.
-func Pending(evaluations []Evaluation) int {
-	pending := 0
-	for i := range evaluations {
-		if evaluations[i].State == StateDead {
-			pending++
-		}
-	}
-	return pending
-}

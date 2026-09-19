@@ -292,9 +292,6 @@ func TestAnythingTheConfigurationNamesThatMatchesNothingIsReported(t *testing.T)
 					asNamed(evaluations)[i])
 			}
 		}
-		if got := Pending(evaluations); got != 0 {
-			t.Errorf("Pending() = %d, want 0: an absent side holds no pending finding", got)
-		}
 		if !slices.IsSortedFunc(evaluations, func(a, b Evaluation) int {
 			return strings.Compare(a.Edge, b.Edge)
 		}) {

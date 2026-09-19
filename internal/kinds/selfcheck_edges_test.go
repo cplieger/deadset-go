@@ -70,9 +70,6 @@ func TestEvaluatePublishesOneRecordPerOwnSideWithItsState(t *testing.T) {
 	if got := asNamed(evaluations); !slices.Equal(got, want) {
 		t.Errorf("Evaluate() published %+v, want %+v", got, want)
 	}
-	if got := Pending(evaluations); got != 1 {
-		t.Errorf("Pending() = %d, want 1: the report holds one pending finding", got)
-	}
 	if slices.Contains(namesUnder(kept, unreachableExportCode), "Event") {
 		t.Errorf("Evaluate() left the finding about Event reported, want it published inside the evaluation alone: %v",
 			summary(kept))
@@ -164,17 +161,5 @@ func TestEvaluateWithNoDeclaredEdgeChangesNothing(t *testing.T) {
 	if !slices.Equal(codesOf(kept), codesOf(result.Findings)) {
 		t.Errorf("Evaluate() over a target with no edges document kept %v, want %v",
 			codesOf(kept), codesOf(result.Findings))
-	}
-}
-
-func TestPendingCountsTheDeadEvaluationsAlone(t *testing.T) {
-	evaluations := []Evaluation{
-		{Edge: "a", State: StateLive},
-		{Edge: "b", State: StateDead, Finding: &Finding{Code: unreachableExportCode}},
-		{Edge: "c", State: StateAbsent},
-		{Edge: "d", State: StateDead, Finding: &Finding{Code: unusedUnexportedCode}},
-	}
-	if got := Pending(evaluations); got != 2 {
-		t.Errorf("Pending(%d evaluations, two of them dead) = %d, want 2", len(evaluations), got)
 	}
 }

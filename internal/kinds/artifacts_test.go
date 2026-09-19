@@ -1,6 +1,7 @@
 package kinds
 
 import (
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -154,6 +155,30 @@ func TestFileNeverBuiltReportsNothingWhereTheCompleteMatrixIsOneTheRunDerived(t 
 
 	if found := emitted(t, "FileNeverBuilt", FileNeverBuilt, in); len(found) > 0 {
 		t.Errorf("FileNeverBuilt(a target declaring complete a matrix it lists no configuration of) reports %v, want nothing: the declaration asserts that the listed configurations are every one the target builds, and a configuration listing none declares it of a derived matrix",
+			summary(found))
+	}
+}
+
+func TestFileNeverBuiltReportsNoFileTheIgnoreTagConstrains(t *testing.T) {
+	t.Parallel()
+
+	in := inputOf(t, "artifacts-never-built.txtar", completeMatrixConfig(), Consumers{},
+		twoConfigurations()...)
+
+	ignored := false
+	for _, one := range in.Per {
+		for _, p := range one.Result.Packages {
+			ignored = ignored || slices.ContainsFunc(p.IgnoredFiles, func(path string) bool {
+				return filepath.Base(path) == "generate.go"
+			})
+		}
+	}
+	if !ignored {
+		t.Fatal("no load of the fixture ignored generate.go, so this test pins nothing")
+	}
+	found := emitted(t, "FileNeverBuilt", FileNeverBuilt, in)
+	if slices.ContainsFunc(found, func(one Finding) bool { return one.Symbol.Name == "generate.go" }) {
+		t.Errorf("FileNeverBuilt reports %v, want no finding about generate.go: the ignore tag is the convention for a file run by hand, so no configuration builds one by design",
 			summary(found))
 	}
 }

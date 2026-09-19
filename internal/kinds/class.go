@@ -45,6 +45,10 @@ func (c Class) lower(other Class) Class {
 
 // ClassOf is the reachability class of one declaration under this run.
 //
+// A subject the inventory holds no declaration for is certain: a source file, a
+// module requirement and a directive of the module file have no visibility, so
+// there is no question about callers the analysis cannot see.
+//
 // An unexported declaration is certain, because every reference to it is inside
 // the module the analysis loaded. An exported one in a package nothing outside can
 // import is certain for the same reason: a main package, an external test package
