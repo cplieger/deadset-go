@@ -21,6 +21,29 @@ import (
 	spec "github.com/cplieger/deadset-spec"
 )
 
+// TestMain creates the directory the shared fixture modules are written under, runs
+// the package's tests, and removes it.
+//
+// The directory cannot belong to a test: a fixture module is declared by several of
+// them and written once, so it outlives whichever one declared it first.
+func TestMain(m *testing.M) {
+	os.Exit(runTests(m))
+}
+
+// runTests is TestMain's body, written so that the removal of the fixture directory
+// runs before the exit.
+func runTests(m *testing.M) int {
+	base, err := os.MkdirTemp("", "deadset-fixtures")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "create the fixture directory: %v\n", err)
+		return 1
+	}
+	defer func() { _ = os.RemoveAll(base) }()
+
+	fixtureBase = base
+	return m.Run()
+}
+
 // exitCode is one row of contract/exit-codes.json.
 type exitCode struct {
 	Name string `json:"name"`

@@ -36,6 +36,21 @@ func corpusAnswered() *corpusRecord {
 	}
 }
 
+// reportOfArchive is the envelope of one run over the module one archive declares,
+// assembled once per archive: several tests read one report of the suppression fixture,
+// and one assembly of a fixture module costs about a second under the race detector.
+//
+// A test whose target is a directory it built itself calls reportOfDir instead.
+func reportOfArchive(t *testing.T, files map[string]string) report.Envelope {
+	t.Helper()
+
+	// A report names the target relative to the directory the run was invoked from
+	// and can name no path outside it, so a run over a fixture is invoked from the
+	// fixture. Every test that calls this is therefore sequential.
+	t.Chdir(sharedModule(t, files))
+	return cachedEnvelope(t.Context(), t, files)
+}
+
 // reportOfDir is the envelope of one run over dir, which is what every test below
 // reads: the resolution a verb would build, the exemption options it would convert,
 // and the assembly itself.
@@ -61,15 +76,17 @@ func reportOfDir(t *testing.T, dir string) report.Envelope {
 	return envelope
 }
 
-// suppressedModule is the fixture the suppression tests are driven against: the
-// findings fixture with an ignore document naming two of its dead declarations, one
-// that matches a finding of the run and one that names a declaration nothing
-// declares.
-func suppressedModule(t *testing.T) string {
-	t.Helper()
-
-	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
-	writeDocument(t, dir, "deadset-ignore.json", `{
+// suppressedArchive is the fixture the suppression tests are driven against: the
+// findings archive under one repository configuration, with an ignore document naming
+// two of its dead declarations, one that matches a finding of the run and one that
+// names a declaration nothing declares.
+//
+// The ignore document is part of the archive rather than written into the fixture
+// afterwards, so that the archive names the whole of what the run reads and every test
+// declaring it reads one analysis.
+func suppressedArchive(document string) map[string]string {
+	files := findingsArchive(document)
+	files["deadset-ignore.json"] = `{
   "description": "One entry in effect and one that matches no current finding.",
   "ignore": [
     {
@@ -86,12 +103,12 @@ func suppressedModule(t *testing.T) string {
     }
   ]
 }
-`)
-	return dir
+`
+	return files
 }
 
 func TestReportOfSuppressesTheFindingAnIgnoreEntryBindsAndCountsIt(t *testing.T) {
-	envelope := reportOfDir(t, suppressedModule(t))
+	envelope := reportOfArchive(t, suppressedArchive(`{"target": {"kind": "application"}}`))
 
 	// The entry bound a declaration the sweep would otherwise have reported, so
 	// the mark seeded the sweep and no finding names that declaration.
@@ -113,7 +130,7 @@ func TestReportOfSuppressesTheFindingAnIgnoreEntryBindsAndCountsIt(t *testing.T)
 }
 
 func TestReportOfCarriesTheStaleEntryAsItsOwnRecord(t *testing.T) {
-	envelope := reportOfDir(t, suppressedModule(t))
+	envelope := reportOfArchive(t, suppressedArchive(`{"target": {"kind": "application"}}`))
 
 	if len(envelope.StaleSuppressions) != 1 {
 		t.Fatalf("the report holds %d stale suppressions, want 1: the entry naming a declaration nothing declares",
@@ -230,8 +247,7 @@ func TestReportOfReportsAConfiguredRootThatNamesNothing(t *testing.T) {
 }
 
 func TestReportOfNamesEveryMemberTheContractRequiresOfTheRun(t *testing.T) {
-	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
-	envelope := reportOfDir(t, dir)
+	envelope := reportOfArchive(t, findingsArchive(`{"target": {"kind": "application"}}`))
 
 	contractVersion, schemaVersions := contractVersions(t)
 	switch {
@@ -347,7 +363,7 @@ func TestReportOfRoundTripsThroughTheJSONDocumentItWrites(t *testing.T) {
 }
 
 func TestReportOfWritesEveryTextLineThePublishedExpressionDefines(t *testing.T) {
-	envelope := reportOfDir(t, suppressedModule(t))
+	envelope := reportOfArchive(t, suppressedArchive(`{"target": {"kind": "application"}}`))
 
 	var written bytes.Buffer
 	if err := report.Text(&written, &envelope, report.Options{}); err != nil {
