@@ -460,29 +460,13 @@ func staleSuppressionOf(found *kinds.Finding) (StaleSuppression, error) {
 // order puts every array of the envelope in the order the Contract fixes for it,
 // so two runs over an unchanged tree write the same bytes.
 func (e *Envelope) order() {
-	slices.SortStableFunc(e.Findings, compareFindings)
+	slices.SortStableFunc(e.Findings, kinds.Compare)
 	slices.SortStableFunc(e.StaleSuppressions, compareStaleSuppressions)
 	slices.SortStableFunc(e.DeclaredGaps, compareDeclaredGaps)
 	slices.SortStableFunc(e.EdgeEvaluations, compareEvaluations)
 	slices.SortFunc(e.Configurations, func(a, b Configuration) int { return cmp.Compare(a.ID, b.ID) })
 	slices.SortFunc(e.Consumers.Loaded, func(a, b LoadedConsumer) int { return cmp.Compare(a.ID, b.ID) })
 	slices.SortFunc(e.Consumers.Unavailable, func(a, b UnavailableConsumer) int { return cmp.Compare(a.ID, b.ID) })
-}
-
-// compareFindings orders two findings by the canonical key: the path, the line,
-// the column, the code and the symbol reference. The key's last component is the
-// name of the analyzer whose report carried the record, which is this analyzer's
-// own for every record of its own report and so decides nothing here.
-//
-//nolint:gocritic // hugeParam: the standard library's sort takes the element type by value
-func compareFindings(a, b kinds.Finding) int {
-	return cmp.Or(
-		cmp.Compare(a.Position.Path, b.Position.Path),
-		cmp.Compare(a.Position.Line, b.Position.Line),
-		cmp.Compare(a.Position.Column, b.Position.Column),
-		cmp.Compare(a.Code, b.Code),
-		cmp.Compare(a.Symbol.Ref, b.Symbol.Ref),
-	)
 }
 
 // compareStaleSuppressions orders two stale suppressions by the canonical key,
@@ -602,14 +586,14 @@ func testFileRules(rules []graph.TestFileRule) []graph.TestFileRule {
 // is any value the configuration does not admit.
 func Sort(e *Envelope, by config.Sort) {
 	if by != config.BySize {
-		slices.SortStableFunc(e.Findings, compareFindings)
+		slices.SortStableFunc(e.Findings, kinds.Compare)
 		return
 	}
 	slices.SortStableFunc(e.Findings, func(a, b kinds.Finding) int {
 		return cmp.Or(
 			cmp.Compare(b.Component.DeletableLines, a.Component.DeletableLines),
 			cmp.Compare(b.Symbol.SizeLines, a.Symbol.SizeLines),
-			compareFindings(a, b),
+			kinds.Compare(a, b),
 		)
 	})
 }

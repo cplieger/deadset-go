@@ -154,13 +154,13 @@ func renderedByProperty(t *rapid.T, name string, e *Envelope) string {
 // orderOf is the comparison one configured order is sorted by.
 func orderOf(by config.Sort) func(a, b kinds.Finding) int {
 	if by != config.BySize {
-		return compareFindings
+		return kinds.Compare
 	}
 	return func(a, b kinds.Finding) int {
 		if held := compareSizes(&a, &b); held != 0 {
 			return held
 		}
-		return compareFindings(a, b)
+		return kinds.Compare(a, b)
 	}
 }
 
@@ -176,7 +176,7 @@ func compareSizes(a, b *kinds.Finding) int {
 // sameFinding reports whether two findings are one record, compared by everything the
 // order reads and everything a rendering writes of it.
 func sameFinding(a, b kinds.Finding) bool {
-	return compareFindings(a, b) == 0 &&
+	return kinds.Compare(a, b) == 0 &&
 		a.Severity == b.Severity &&
 		a.Component == b.Component &&
 		a.Symbol == b.Symbol

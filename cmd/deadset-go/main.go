@@ -72,6 +72,13 @@ var schemaVersionsAccepted = []string{"2.0.0"}
 type settingFlag struct {
 	path        string
 	description string
+
+	// number says the setting's declared type is a number, so the document this
+	// flag supplies carries the value as a JSON number. Every other setting a flag
+	// of this command supplies is declared as a string, and a document that wrote
+	// a number as a string would be refused by the same decode a file goes
+	// through.
+	number bool
 }
 
 // settingFlags maps a flag name to the setting it supplies, so one entry per flag
@@ -87,6 +94,23 @@ var settingFlags = map[string]settingFlag{
 	"min-confidence": {
 		path:        "analysis.min_confidence",
 		description: "the lowest reachability class a finding is reported at",
+	},
+	"sort": {
+		path:        "reporters.sort",
+		description: "the order findings are rendered in",
+	},
+	"cascade": {
+		path:        "reporters.cascade",
+		description: "how much of a dead component a rendering names",
+	},
+	"max-findings": {
+		path:        "reporters.max_findings",
+		description: "the greatest number of findings a rendering prints, with the rest counted as omitted",
+		number:      true,
+	},
+	"fail-on": {
+		path:        "reporters.fail_on",
+		description: "the lowest severity that fails the run",
 	},
 }
 
@@ -138,10 +162,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return printRoots(ctx, set.Args()[1:], stdout, stderr)
 	case "print-retained":
 		return printRetained(ctx, set.Args()[1:], stdout, stderr)
-	case "analyze", "explain":
-		fmt.Fprintf(stderr, "deadset-go: %s is not implemented in this version\n", verb)
-		set.Usage()
-		return exitUsage
+	case "analyze":
+		return analyze(ctx, set.Args()[1:], stderr)
+	case "explain":
+		return explain(ctx, set.Args()[1:], stdout, stderr)
 	case "":
 		set.Usage()
 		return exitUsage
@@ -197,53 +221,93 @@ func describe(args []string, stdout, stderr io.Writer) int {
 }
 
 // resolution is what one invocation resolved to: the configuration, the
-// provenance of every setting, and the target root the documents were read from.
+// provenance of every setting, the target root the documents were read from, and
+// the scope document the invocation named, which is empty for a verb that names
+// none.
 type resolution struct {
 	provenance config.Provenance
 	target     string
+	scope      string
 	config     config.Config
 }
 
-// resolve parses the flags a verb that reads a configuration takes and resolves
-// the documents they name. The returned code is exitClean when the resolution
-// succeeded, and otherwise the code the verb returns with the message already
-// printed.
-func resolve(verb, verbUsage string, args []string, stderr io.Writer) (resolved resolution, code int) {
+// configuredFlags are the flags every verb that reads a configuration registers,
+// and the values they parsed into.
+type configuredFlags struct {
+	set        *flag.FlagSet
+	target     *string
+	repository *string
+	central    *string
+
+	// scope is the scope document the invocation named, and is nil for a verb that
+	// registers no flag for one: the scope of a run the print verbs report is the
+	// workspace that governs the target, and a flag naming a document belongs to
+	// the verbs whose answer a declared consumer set changes.
+	scope *string
+}
+
+// configuredFlagSet registers the flags every verb that reads a configuration
+// takes: the target root, the two configuration documents, one flag per setting the
+// command line supplies, and the scope document where the verb reads one.
+func configuredFlagSet(verb, verbUsage string, stderr io.Writer, scoped bool) configuredFlags {
 	set := flag.NewFlagSet("deadset-go "+verb, flag.ContinueOnError)
 	set.SetOutput(stderr)
 	set.Usage = func() { fmt.Fprintln(stderr, verbUsage) }
-	target := set.String("target", ".", "the target root, which holds the repository configuration")
-	repository := set.String("config", "", "the repository configuration, in place of "+repositoryDocument+" at the target root")
-	central := set.String("central", "", "the central configuration")
+	held := configuredFlags{
+		set:        set,
+		target:     set.String("target", ".", "the target root, which holds the repository configuration"),
+		repository: set.String("config", "", "the repository configuration, in place of "+repositoryDocument+" at the target root"),
+		central:    set.String("central", "", "the central configuration"),
+	}
+	if scoped {
+		held.scope = set.String("scope", "", "the scope document naming the target and its declared consumers")
+	}
 	for flagName, setting := range settingFlags {
 		set.String(flagName, "", setting.description)
 	}
-	if err := set.Parse(args); err != nil {
-		return resolution{}, exitUsage
-	}
-	if set.NArg() != 0 {
-		fmt.Fprintf(stderr, "deadset-go: %s takes no argument, got %q\n", verb, set.Arg(0))
-		set.Usage()
-		return resolution{}, exitUsage
-	}
+	return held
+}
 
-	inputs, err := configInputs(*target, *repository, *central, set)
+// resolution reads the configuration documents the parsed flags name and resolves
+// them. The returned code is exitClean when the resolution succeeded, and otherwise
+// the code the verb returns with the message already printed.
+func (f *configuredFlags) resolution(stderr io.Writer) (resolved resolution, code int) {
+	inputs, err := configInputs(*f.target, *f.repository, *f.central, f.set)
 	if err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
-		set.Usage()
+		f.set.Usage()
 		return resolution{}, exitUsage
 	}
 
 	resolvedConfig, provenance, err := config.Resolve(inputs)
 	if err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
-		code := exitCodeFor(err)
-		if code == exitUsage {
-			set.Usage()
+		refusal := exitCodeFor(err)
+		if refusal == exitUsage {
+			f.set.Usage()
 		}
-		return resolution{}, code
+		return resolution{}, refusal
 	}
-	return resolution{provenance: provenance, target: *target, config: resolvedConfig}, exitClean
+	document := ""
+	if f.scope != nil {
+		document = *f.scope
+	}
+	return resolution{provenance: provenance, target: *f.target, scope: document, config: resolvedConfig}, exitClean
+}
+
+// resolve parses the flags a verb that reads a configuration and takes no argument
+// takes, and resolves the documents they name.
+func resolve(verb, verbUsage string, args []string, stderr io.Writer) (resolved resolution, code int) {
+	flags := configuredFlagSet(verb, verbUsage, stderr, false)
+	if err := flags.set.Parse(args); err != nil {
+		return resolution{}, exitUsage
+	}
+	if flags.set.NArg() != 0 {
+		fmt.Fprintf(stderr, "deadset-go: %s takes no argument, got %q\n", verb, flags.set.Arg(0))
+		flags.set.Usage()
+		return resolution{}, exitUsage
+	}
+	return flags.resolution(stderr)
 }
 
 // printConfig resolves the configuration documents and writes the resolved
@@ -298,6 +362,7 @@ var emitters = map[string]kinds.Emitter{
 	"DS1101": kinds.UnnecessaryExport,
 	"DS1102": kinds.UnnecessaryExposure,
 	"DS1103": kinds.UnreachableExport,
+	"DS1501": kinds.FileNeverBuilt,
 	"DS1502": kinds.FileNeverImported,
 	"DS1201": kinds.UnusedInterface,
 	"DS1203": kinds.UncalledInterfaceMethod,
@@ -305,6 +370,8 @@ var emitters = map[string]kinds.Emitter{
 	"DS1301": kinds.WriteOnlySymbol,
 	"DS1302": kinds.UnusedEnumMember,
 	"DS1303": kinds.UnusedTypeParameter,
+	"DS1601": kinds.UnusedDependency,
+	"DS1605": kinds.UnusedReplace,
 }
 
 // configured is one configuration of the matrix: what it loaded and the
@@ -441,11 +508,11 @@ func rootsOf(ctx context.Context, resolved *resolution) (rootSet, error) {
 // unmatched sets is what keeps a matrix from reporting a root pattern as naming
 // nothing because another platform lacks the file.
 func stagesOf(ctx context.Context, resolved *resolution) (stages, error) {
-	// No verb names a scope document, so the scope of a run is the workspace that
-	// governs the target where one lists it and the target alone otherwise. The
-	// flag that supplies a document belongs to the verb that reports a finding,
-	// which is where a declared consumer set decides what a report says.
-	document, err := scope.Resolve(ctx, resolved.target, "")
+	// The scope of a run is the document the invocation named, and the workspace
+	// that governs the target where it named none, and the target alone where no
+	// workspace lists it. Only the verbs whose answer a declared consumer set
+	// changes register the flag, so the print verbs reach this with no document.
+	document, err := scope.Resolve(ctx, resolved.target, resolved.scope)
 	if err != nil {
 		return stages{}, err
 	}
@@ -806,8 +873,12 @@ func exemptionsOf(one *configured, targetRoot string, options *exempt.Options) (
 
 // findingSet is what one findings pass produced: the findings a report publishes
 // with the count the minimum confidence excluded, one evaluation per declared
-// cross-language edge side of this language, the two suppression counts a summary
-// prints, and every configured string that named no symbol in any configuration.
+// cross-language edge side of this language, and the two suppression counts a
+// summary prints.
+//
+// Every configured string that named no symbol is not among them, and is read from
+// the stages: the pass reports one under its own kind, so a second list of them
+// beside the findings would be one nothing reads.
 //
 // The findings of the emitters table come first, in the canonical order, and the
 // self-check findings follow in the order their records were read. The canonical
@@ -819,7 +890,12 @@ type findingSet struct {
 	// importing C and the rules by which a file was classified as a test file.
 	loaded stages
 
-	unmatched    []graph.Unmatched
+	// swept is the production sweep the findings were computed over, which is what
+	// an explanation of one symbol reads: which exemptions held a symbol back,
+	// which relations hold it live and which dead component it falls with are the
+	// sweep's answers rather than the report's.
+	swept graph.Result
+
 	evaluations  []kinds.Evaluation
 	result       kinds.Result
 	suppressions report.Suppressions
@@ -880,7 +956,7 @@ func findingsOf(ctx context.Context, resolved *resolution, options *exempt.Optio
 
 	inEffect, reasons := kinds.Totals(in)
 	return findingSet{
-		unmatched:    analyzed.stages.unmatched,
+		swept:        analyzed.swept,
 		evaluations:  evaluations,
 		result:       computed,
 		suppressions: report.Suppressions{InEffect: inEffect, ReasonsRecorded: reasons},
@@ -1324,16 +1400,25 @@ func readDocument(path string, optional bool) ([]byte, error) {
 // configuration document keyed by dotted setting path, and the flag that supplied
 // each, which is what a resolved configuration's provenance names.
 func applyFlagSettings(set *flag.FlagSet, inputs *config.Inputs) error {
-	settings := make(map[string]string)
+	settings := make(map[string]json.RawMessage)
 	labels := make(map[string]string)
+	var refused error
 	set.Visit(func(f *flag.Flag) {
 		setting, ok := settingFlags[f.Name]
 		if !ok {
 			return
 		}
-		settings[setting.path] = f.Value.String()
+		encoded, err := settingValue(&setting, f.Value.String())
+		if err != nil {
+			refused = errors.Join(refused, fmt.Errorf("--%s: %w", f.Name, err))
+			return
+		}
+		settings[setting.path] = encoded
 		labels[setting.path] = "--" + f.Name
 	})
+	if refused != nil {
+		return refused
+	}
 	if len(settings) == 0 {
 		return nil
 	}
@@ -1345,6 +1430,20 @@ func applyFlagSettings(set *flag.FlagSet, inputs *config.Inputs) error {
 	inputs.Flags = document
 	inputs.FlagLabels = labels
 	return nil
+}
+
+// settingValue is one flag's value as the JSON the setting's declared type
+// requires, so the document a flag supplies decodes the way the same setting
+// written in a configuration file does.
+func settingValue(setting *settingFlag, value string) (json.RawMessage, error) {
+	if !setting.number {
+		return json.Marshal(value)
+	}
+	held, err := strconv.Atoi(value)
+	if err != nil {
+		return nil, fmt.Errorf("%s is a number, and %q is not one", setting.path, value)
+	}
+	return json.Marshal(held)
 }
 
 // exitCodeFor maps an error to the exit code contract/exit-codes.json gives it: a

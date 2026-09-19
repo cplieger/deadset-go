@@ -1,11 +1,15 @@
 package exempt
 
 import (
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/cplieger/deadset-go/internal/graph"
+	spec "github.com/cplieger/deadset-spec"
 )
 
 // retained runs one detector and returns what it recorded.
@@ -278,5 +282,172 @@ func TestEncodingReflectionNamesTheClassTheDestinationAndTheSite(t *testing.T) {
 	slices.SortFunc(want, func(a, b record) int { return strings.Compare(a.ref+a.site, b.ref+b.site) })
 	if !slices.Equal(got, want) {
 		t.Errorf("EncodingReflectionDetector(encoding-reflection-firing.txtar) recorded, for the two types,\ngot  %+v\nwant %+v", got, want)
+	}
+}
+
+// opaqueRefs spells the references of one type's members in the opaque fixture.
+func opaqueRefs(typeName string, members ...string) []string {
+	return qualify("example.com/opaque", typeName, members...)
+}
+
+// A value that crosses out of the analysed program through a parameter typed as the
+// empty interface flows with the full retained set, because the callee's body is not
+// in the program, the parameter keeps nothing of the value's type, and whatever the
+// callee does with it reads its fields and may call its exported methods. A function
+// of the target that hands such a parameter on is a destination of its own, to a
+// fixpoint. A parameter typed as the value's own type is not one at all, and neither
+// is one typed as an interface that declares a method: that is a conversion the
+// conversion set records, and the methods the interface requires are what
+// interface-satisfaction retains.
+func TestEncodingReflectionRetainsWhatCrossesOutOfTheProgram(t *testing.T) {
+	in := inputOf(t, "encoding-reflection-opaque.txtar", Options{})
+	refs := retainedRefs(t, in, EncodingReflectionDetector)
+
+	for _, test := range []struct {
+		crossing string
+		typeName string
+		want     []string
+	}{
+		{
+			crossing: "a parameter typed as an interface that declares a method",
+			typeName: "Copied",
+			want:     nil,
+		},
+		{
+			crossing: "a method of a package the load did not read",
+			typeName: "Crossing",
+			want:     opaqueRefs("Crossing", "Describe", "Extra", "Inner", "Name", "secret"),
+		},
+		{
+			crossing: "a type the crossing value's fields reach",
+			typeName: "Nested",
+			want:     opaqueRefs("Nested", "Label", "Title"),
+		},
+		{
+			crossing: "a function of the target that hands its own erased parameter to such a method",
+			typeName: "Wrapped",
+			want:     opaqueRefs("Wrapped", "Describe", "Extra", "Name", "secret"),
+		},
+		{
+			crossing: "the same method as a pointer",
+			typeName: "Pointed",
+			want:     opaqueRefs("Pointed", "Describe", "Extra", "Name", "secret"),
+		},
+		{
+			crossing: "a type parameter of a function of a package the load did not read",
+			typeName: "Sought",
+			want:     nil,
+		},
+		{
+			crossing: "a function of the target that hands its parameter to such a function",
+			typeName: "Chained",
+			want:     opaqueRefs("Chained", "Describe", "Extra", "Name", "secret"),
+		},
+		{
+			crossing: "a function of the target that hands its parameter to an encoder",
+			typeName: "Encoded",
+			want:     opaqueRefs("Encoded", "Describe", "Extra", "Name", "secret"),
+		},
+		{
+			crossing: "a function of the target typed as the value's own type",
+			typeName: "Concrete",
+			want:     nil,
+		},
+		{
+			crossing: "the formatting package, whose destinations another class names",
+			typeName: "Printed",
+			want:     nil,
+		},
+	} {
+		t.Run(strings.ReplaceAll(test.crossing, " ", "_"), func(t *testing.T) {
+			got := membersOf(refs, test.typeName)
+			if !slices.Equal(got, test.want) {
+				t.Errorf("EncodingReflectionDetector(encoding-reflection-opaque.txtar) retained, for %s crossing into %s,\ngot  %v\nwant %v",
+					test.typeName, test.crossing, got, test.want)
+			}
+		})
+	}
+}
+
+// The detail names the callee the value was handed to, which is the immediate one:
+// a wrapper's caller reads the wrapper's name at its own call, the way the
+// format-verb class names the print wrapper it found.
+func TestEncodingReflectionNamesTheCalleeAValueCrossedInto(t *testing.T) {
+	in := inputOf(t, "encoding-reflection-opaque.txtar", Options{})
+	refs := make(map[graph.SymbolID]string, len(in.Symbols))
+	for i := range in.Symbols {
+		refs[in.Symbols[i].ID] = in.Symbols[i].Ref
+	}
+
+	got := make(map[string]string)
+	for _, e := range retained(t, in, EncodingReflectionDetector) {
+		if ref, held := refs[e.ID]; held {
+			got[ref] = e.Detail
+		}
+	}
+	for ref, want := range map[string]string{
+		"go://example.com/opaque#Crossing.Name": "passed to (*sync.Map).Store",
+		"go://example.com/opaque#Nested.Label":  "passed to (*sync.Map).Store",
+		"go://example.com/opaque#Wrapped.Name":  "passed to example.com/opaque.respond",
+		"go://example.com/opaque#Chained.Name":  "passed to example.com/opaque.relay",
+		"go://example.com/opaque#Encoded.Name":  "passed to example.com/opaque.keep",
+	} {
+		if got[ref] != want {
+			t.Errorf("EncodingReflectionDetector(encoding-reflection-opaque.txtar) records %s with detail %q, want %q",
+				ref, got[ref], want)
+		}
+	}
+}
+
+// A value the formatting package formats is recorded once, by the class whose
+// destination table names that package. The two classes would otherwise spell one
+// fact two ways, and two spellings of a detail are two records.
+func TestFormatVerbContractAloneRecordsAnOperandOfTheFormattingPackage(t *testing.T) {
+	in := inputOf(t, "encoding-reflection-opaque.txtar", Options{})
+
+	formatted := membersOf(retainedRefs(t, in, FormatVerbContractDetector), "Printed")
+	if want := opaqueRefs("Printed", "String"); !slices.Equal(formatted, want) {
+		t.Errorf("FormatVerbContractDetector(encoding-reflection-opaque.txtar) retained %v for Printed, want %v",
+			formatted, want)
+	}
+	if encoded := membersOf(retainedRefs(t, in, EncodingReflectionDetector), "Printed"); len(encoded) > 0 {
+		t.Errorf("EncodingReflectionDetector(encoding-reflection-opaque.txtar) retained %v for Printed, want nothing: the formatting package is a destination the format-verb class names",
+			encoded)
+	}
+}
+
+// The mechanism text of the class, as the Contract states it for this language. The
+// class implements this text; a pin bump that moves it must be read against the
+// destination table before this literal moves with it.
+const encodingReflectionMechanismSHA256 = "ad4704f48ee508553e96916e0091e4b3f82f2794546512b861887d624e946236"
+
+func TestEncodingReflectionImplementsTheContractsMechanismText(t *testing.T) {
+	body, err := spec.Contract.ReadFile("contract/exemptions.json")
+	if err != nil {
+		t.Fatalf("Setup: read contract/exemptions.json from the contract: %v", err)
+	}
+	var document struct {
+		Exemptions []struct {
+			Class     string            `json:"class"`
+			Mechanism map[string]string `json:"mechanism"`
+		} `json:"exemptions"`
+	}
+	if err := json.Unmarshal(body, &document); err != nil {
+		t.Fatalf("Setup: decode contract/exemptions.json: %v", err)
+	}
+	stated := ""
+	for _, one := range document.Exemptions {
+		if one.Class == string(EncodingReflection) {
+			stated = one.Mechanism["go"]
+		}
+	}
+	if stated == "" {
+		t.Fatalf("Setup: contract/exemptions.json states no Go mechanism for %s, so this test pins nothing",
+			EncodingReflection)
+	}
+	sum := fmt.Sprintf("%x", sha256.Sum256([]byte(stated)))
+	if sum != encodingReflectionMechanismSHA256 {
+		t.Errorf("the Contract's mechanism text moved; re-read it against encoding_reflection.go's destination table before updating this literal.\nsha256 %s, want %s\ntext:\n%s",
+			sum, encodingReflectionMechanismSHA256, stated)
 	}
 }

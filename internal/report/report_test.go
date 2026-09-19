@@ -153,7 +153,7 @@ func TestBuildOrdersEveryArray(t *testing.T) {
 	if !slices.Equal(got, wantFindings) {
 		t.Errorf("Build().Findings paths = %v, want %v", got, wantFindings)
 	}
-	if !slices.IsSortedFunc(envelope.Findings, compareFindings) {
+	if !slices.IsSortedFunc(envelope.Findings, kinds.Compare) {
 		t.Error("Build().Findings is not in the canonical order")
 	}
 	if !slices.IsSortedFunc(envelope.StaleSuppressions, compareStaleSuppressions) {

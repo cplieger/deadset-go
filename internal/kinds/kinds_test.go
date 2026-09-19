@@ -159,6 +159,9 @@ func differences(got, want Finding) string {
 	if got.Relation != want.Relation {
 		add("Relation", got.Relation, want.Relation)
 	}
+	if got.Live != want.Live {
+		add("Live", got.Live, want.Live)
+	}
 	if got.TestOnly != want.TestOnly {
 		add("TestOnly", got.TestOnly, want.TestOnly)
 	}
@@ -529,5 +532,111 @@ func TestEveryKindOfDeclarationMapsOntoTheContractsSubjectVocabulary(t *testing.
 			t.Errorf("a %s declaration maps onto no subject kind of %s, so a finding about one carries none",
 				kind, schemaPath)
 		}
+	}
+}
+
+// The subject of a finding whose kind the inventory cannot hold a declaration for,
+// which is a direct requirement of the target's module file.
+const (
+	requirementRef  = "go://example.com/app#golang.org/x/text:require"
+	requirementName = "golang.org/x/text"
+)
+
+// requirementFinding is the finding the unused-dependency emitter reports about one
+// requirement: a subject the inventory holds no declaration for, named by its
+// reference, with the build configurations the kind claims it under.
+func requirementFinding() Finding {
+	return Finding{
+		Code:     unusedDependencyCode,
+		Position: Position{Path: "go.mod", Line: 7, Column: 2, EndLine: 7},
+		Symbol: Subject{
+			Ref:       requirementRef,
+			Kind:      dependencySubject,
+			Name:      requirementName,
+			SizeLines: 1,
+		},
+		Configurations: []string{"linux-amd64", "linux-arm64"},
+		Message:        "no package of the target imports a package this required module provides",
+		Details:        Details{DependencyClass: requireSection},
+	}
+}
+
+func TestComputeCompletesAFindingWhoseSubjectIsNoDeclarationOfTheInventory(t *testing.T) {
+	in := handInput(applicationConfig())
+
+	result := computed(t, in, map[string]Emitter{unusedDependencyCode: emitterOf(requirementFinding())})
+
+	if len(result.Findings) != 1 {
+		t.Fatalf("Compute(%s over a requirement) returned %d findings, want 1: %v",
+			unusedDependencyCode, len(result.Findings), summary(result.Findings))
+	}
+	reported := requirementFinding()
+	want := Finding{
+		Code:            unusedDependencyCode,
+		Kind:            "unused-dependency",
+		Language:        "go",
+		Position:        reported.Position,
+		Symbol:          reported.Symbol,
+		Class:           Certain,
+		Confidence:      Certain,
+		Relation:        graph.ReferenceCounting,
+		Live:            true,
+		Component:       Component{ID: "deadset-go/c-2", Root: true, SymbolCount: 1},
+		RetainedBy:      []string{},
+		Configurations:  []string{"linux-amd64", "linux-arm64"},
+		ConsumersLoaded: []string{},
+		Fixability:      "manual",
+		Severity:        config.Deny,
+		Message:         reported.Message,
+	}
+	if diff := differences(result.Findings[0], want); diff != "" {
+		t.Errorf("Compute(%s over a requirement) filled the finding as\n%s", unusedDependencyCode, diff)
+	}
+}
+
+func TestComputeRefusesTwoFindingsAboutOneSubjectThatIsNoDeclaration(t *testing.T) {
+	in := handInput(applicationConfig())
+	twice := requirementFinding()
+
+	_, err := Compute(in, map[string]Emitter{unusedDependencyCode: emitterOf(twice, twice)})
+	if !errors.Is(err, ErrEmitter) {
+		t.Errorf("Compute(%s reporting one requirement twice) = %v, want an ErrEmitter refusal: %s is reported twice",
+			unusedDependencyCode, err, requirementRef)
+	}
+}
+
+func TestComputeRefusesAFindingAboutADeclarationKindTheInventoryDoesNotHold(t *testing.T) {
+	for kind, subject := range map[string]string{
+		"a function":    symbolKinds[graph.KindFunc],
+		"a field":       symbolKinds[graph.KindField],
+		"a suppression": suppressionSubject,
+		"no kind":       "",
+	} {
+		t.Run(kind, func(t *testing.T) {
+			in := handInput(applicationConfig())
+			reported := Finding{
+				Code:    unusedExportedCode,
+				Symbol:  Subject{Ref: "go://example.com/app#Absent", Kind: subject, Name: "Absent", SizeLines: 1},
+				Message: "the declaration has no reference in the target",
+			}
+
+			_, err := Compute(in, map[string]Emitter{unusedExportedCode: emitterOf(reported)})
+			if !errors.Is(err, ErrEmitter) {
+				t.Errorf("Compute(%s subject the inventory does not hold) = %v, want an ErrEmitter refusal",
+					kind, err)
+			}
+		})
+	}
+}
+
+func TestComputeRefusesAFindingAboutANonDeclarationThatNamesNoReference(t *testing.T) {
+	in := handInput(applicationConfig())
+	unnamed := requirementFinding()
+	unnamed.Symbol.Ref = ""
+
+	_, err := Compute(in, map[string]Emitter{unusedDependencyCode: emitterOf(unnamed)})
+	if !errors.Is(err, ErrEmitter) {
+		t.Errorf("Compute(%s naming no reference) = %v, want an ErrEmitter refusal: a %s is identified by its reference",
+			unusedDependencyCode, err, dependencySubject)
 	}
 }

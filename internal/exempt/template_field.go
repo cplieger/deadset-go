@@ -12,7 +12,6 @@ import (
 	"slices"
 	"strings"
 	"text/template/parse"
-	"unicode/utf16"
 
 	"github.com/cplieger/deadset-go/internal/graph"
 )
@@ -301,15 +300,12 @@ func templatePosition(file string, src []byte, at int) token.Position {
 	line := 1 + strings.Count(string(before), "\n")
 	start := strings.LastIndexByte(string(before), '\n') + 1
 
-	column := 1
-	for _, r := range string(src[start:at]) {
-		if units := utf16.RuneLen(r); units > 0 {
-			column += units
-			continue
-		}
-		column++
+	return token.Position{
+		Filename: file,
+		Offset:   at,
+		Line:     line,
+		Column:   graph.Column(src[start:], at-start),
 	}
-	return token.Position{Filename: file, Offset: at, Line: line, Column: column}
 }
 
 // member is one declaration of the inventory a name reaches.

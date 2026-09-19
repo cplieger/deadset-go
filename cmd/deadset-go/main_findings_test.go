@@ -20,26 +20,18 @@ import (
 // the table's test says which kinds the table is silent about instead of allowing a
 // kind to go missing unnoticed.
 //
-// Two of the groups have a rule all the same, for one reason: the framework
-// identifies a finding by the declaration of the inventory it names, and none of
-// these kinds has a declaration for a subject.
+// The self-check group has a rule all the same: the framework identifies a finding by
+// the declaration of the inventory it names, and a suppression record and a configured
+// string are not declarations.
 //
 // DS1701 to DS1704 are answered by the rules the findings pass calls directly,
 // after the table has run: a suppression record and a configured string are not
 // declarations, so each of those rules completes its own findings and registering
 // one would fail every run.
 //
-// DS1501, DS1601 and DS1605 have a rule this analyzer does not run at all. Their
-// subjects are a file no configuration built, a module requirement and a module
-// directive, and the framework refuses a finding naming any of the three, so the
-// table cannot hold them and nothing calls them until the framework admits a
-// subject that is not a declaration.
-//
 // DS1705 is the merge's, which is another product, and the DS18xx group has no rule
 // in this version.
 var goKindsWithoutEmitter = []string{
-	"DS1501",           // a file no configuration built
-	"DS1601", "DS1605", // the dependency kinds
 	"DS1701", "DS1702", "DS1703", "DS1704", // the self-checks the pass calls directly
 	"DS1705",                                                   // the stale cross-language edge, which the merge answers
 	"DS1801", "DS1802", "DS1803", "DS1805", "DS1807", "DS1809", // the intra-function group
@@ -153,8 +145,9 @@ func TestFindingsOfReportsEveryDeadDeclarationOfAModuleOnceAndInTheCanonicalOrde
 		t.Errorf("findingsOf() omitted %d findings below the minimum confidence, want 0: the default configuration sets none",
 			set.result.OmittedBelowMinConfidence)
 	}
-	if len(set.unmatched) != 0 {
-		t.Errorf("findingsOf() reported %d configured strings as naming nothing, want 0: the fixture configures no root pattern", len(set.unmatched))
+	if len(set.loaded.unmatched) != 0 {
+		t.Errorf("findingsOf() reported %d configured strings as naming nothing, want 0: the fixture configures no root pattern",
+			len(set.loaded.unmatched))
 	}
 
 	// One symbol is reported once, which is what the framework refuses to break

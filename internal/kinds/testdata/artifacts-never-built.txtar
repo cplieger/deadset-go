@@ -1,8 +1,8 @@
-A target holding four files neither configuration of its matrix compiles: one the
+A target holding five files neither configuration of its matrix compiles: one the
 build expression it declares excludes, one the platform its file name names
 excludes, one that states the same platform in both its name and its build
-expression, and one the toolchain ignored because it reaches C. One further file one
-configuration of the two compiles.
+expression, one the toolchain ignored because it reaches C, and one constrained on
+the ignore tag. One further file one configuration of the two compiles.
 
 -- go.mod --
 module example.com/app
@@ -44,6 +44,13 @@ package app
 // Stated is compiled for one system the matrix does not name, stated twice: by the
 // name of the file that declares it and by the build expression the file carries.
 func Stated() int { return 12 }
+-- generate.go --
+//go:build ignore
+
+package main
+
+// main is run by hand rather than built, which is what the ignore tag declares.
+func main() { println("generated") }
 -- bridge.go --
 package app
 

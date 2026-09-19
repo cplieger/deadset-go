@@ -1,9 +1,11 @@
-The same eleven types as the firing archive, declared the same way, each reaching
-a function or a method of a package the class does not name instead of its
-destination. Nothing in this archive flows into reflection, an encoder, a template
-engine, a scan, the sort interface or a logging call, and the one type converted to
-the log-value interface reaches the class by that conversion no more than the
-others, so the class records nothing.
+The same eleven types as the firing archive, declared the same way, each handed to a
+declaration of the target whose parameter is typed as the value's own type instead of
+to its destination. Nothing in this archive flows into reflection, an encoder, a
+template engine, a scan, the sort interface or a logging call, nothing crosses out of
+the analysis through a parameter typed as an interface, and the one type converted to
+the log-value interface reaches the class by that conversion no more than the others,
+so the class records nothing. One value reaches a parameter typed as an interface
+carrying a map of pointers, which is no struct value and no pointer to one.
 
 -- go.mod --
 module example.com/flow
@@ -11,8 +13,6 @@ module example.com/flow
 go 1.27.1
 -- json.go --
 package flow
-
-import "sync"
 
 // JSONPayload reaches no encoder.
 type JSONPayload struct {
@@ -26,12 +26,13 @@ func (p JSONPayload) Describe() string { return p.Name }
 
 func (p JSONPayload) hidden() int { return p.Extra }
 
-// StoreJSON hands a value to an unrelated package.
-func StoreJSON(m *sync.Map, p JSONPayload) { m.Store("json", p) }
+// StoreJSON hands a value to a declaration of the target typed as the value's own type.
+func StoreJSON(p JSONPayload) { keptJSONPayload = p }
+
+// keptJSONPayload is where the value goes, which crosses no boundary of the analysis.
+var keptJSONPayload JSONPayload
 -- xml.go --
 package flow
-
-import "sync"
 
 // XMLPayload reaches no encoder.
 type XMLPayload struct {
@@ -45,12 +46,13 @@ func (p XMLPayload) Describe() string { return p.Name }
 
 func (p XMLPayload) hidden() int { return p.Extra }
 
-// StoreXML hands a value to an unrelated package.
-func StoreXML(m *sync.Map, p XMLPayload) { m.Store("xml", p) }
+// StoreXML hands a value to a declaration of the target typed as the value's own type.
+func StoreXML(p XMLPayload) { keptXMLPayload = p }
+
+// keptXMLPayload is where the value goes, which crosses no boundary of the analysis.
+var keptXMLPayload XMLPayload
 -- gob.go --
 package flow
-
-import "sync"
 
 // GobPayload reaches no encoder.
 type GobPayload struct {
@@ -64,12 +66,13 @@ func (p GobPayload) Describe() string { return p.Name }
 
 func (p GobPayload) hidden() int { return p.Extra }
 
-// StoreGob hands a value to an unrelated package.
-func StoreGob(m *sync.Map, p GobPayload) { m.Store("gob", p) }
+// StoreGob hands a value to a declaration of the target typed as the value's own type.
+func StoreGob(p GobPayload) { keptGobPayload = p }
+
+// keptGobPayload is where the value goes, which crosses no boundary of the analysis.
+var keptGobPayload GobPayload
 -- text_template.go --
 package flow
-
-import "sync"
 
 // TextPayload reaches no engine.
 type TextPayload struct {
@@ -83,12 +86,13 @@ func (p TextPayload) Describe() string { return p.Name }
 
 func (p TextPayload) hidden() int { return p.Extra }
 
-// StoreText hands a value to an unrelated package.
-func StoreText(m *sync.Map, p TextPayload) { m.Store("text", p) }
+// StoreText hands a value to a declaration of the target typed as the value's own type.
+func StoreText(p TextPayload) { keptTextPayload = p }
+
+// keptTextPayload is where the value goes, which crosses no boundary of the analysis.
+var keptTextPayload TextPayload
 -- html_template.go --
 package flow
-
-import "sync"
 
 // HTMLPayload reaches no engine.
 type HTMLPayload struct {
@@ -102,12 +106,13 @@ func (p HTMLPayload) Describe() string { return p.Name }
 
 func (p HTMLPayload) hidden() int { return p.Extra }
 
-// StoreHTML hands a value to an unrelated package.
-func StoreHTML(m *sync.Map, p HTMLPayload) { m.Store("html", p) }
+// StoreHTML hands a value to a declaration of the target typed as the value's own type.
+func StoreHTML(p HTMLPayload) { keptHTMLPayload = p }
+
+// keptHTMLPayload is where the value goes, which crosses no boundary of the analysis.
+var keptHTMLPayload HTMLPayload
 -- reflection.go --
 package flow
-
-import "sync"
 
 // ReflectPayload reaches no reflection.
 type ReflectPayload struct {
@@ -121,12 +126,13 @@ func (p ReflectPayload) Describe() string { return p.Name }
 
 func (p ReflectPayload) hidden() int { return p.Extra }
 
-// StoreReflect hands a value to an unrelated package.
-func StoreReflect(m *sync.Map, p ReflectPayload) { m.Store("reflect", p) }
+// StoreReflect hands a value to a declaration of the target typed as the value's own type.
+func StoreReflect(p ReflectPayload) { keptReflectPayload = p }
+
+// keptReflectPayload is where the value goes, which crosses no boundary of the analysis.
+var keptReflectPayload ReflectPayload
 -- sql.go --
 package flow
-
-import "sync"
 
 // SQLPayload is no scan target.
 type SQLPayload struct {
@@ -140,8 +146,11 @@ func (p SQLPayload) Describe() string { return p.Name }
 
 func (p SQLPayload) hidden() int { return p.Extra }
 
-// StoreSQL hands a pointer to an unrelated package.
-func StoreSQL(m *sync.Map, p *SQLPayload) { m.Store("sql", p) }
+// StoreSQL hands a pointer to a declaration of the target typed as the value's own type.
+func StoreSQL(p *SQLPayload) { keptSQLPayload = p }
+
+// keptSQLPayload is where the value goes, which crosses no boundary of the analysis.
+var keptSQLPayload *SQLPayload
 
 // RowsPayload is the scan target of no row set.
 type RowsPayload struct {
@@ -155,8 +164,11 @@ func (p RowsPayload) Describe() string { return p.Name }
 
 func (p RowsPayload) hidden() int { return p.Extra }
 
-// StoreRows hands a pointer to an unrelated package.
-func StoreRows(m *sync.Map, p *RowsPayload) { m.Store("rows", p) }
+// StoreRows hands a pointer to a declaration of the target typed as the value's own type.
+func StoreRows(p *RowsPayload) { keptRowsPayload = p }
+
+// keptRowsPayload is where the value goes, which crosses no boundary of the analysis.
+var keptRowsPayload *RowsPayload
 
 // ValuePayload reaches no scan.
 type ValuePayload struct {
@@ -170,12 +182,13 @@ func (p ValuePayload) Describe() string { return p.Name }
 
 func (p ValuePayload) hidden() int { return p.Extra }
 
-// StoreValue hands a value to an unrelated package.
-func StoreValue(m *sync.Map, p ValuePayload) { m.Store("value", p) }
+// StoreValue hands a value to a declaration of the target typed as the value's own type.
+func StoreValue(p ValuePayload) { keptValuePayload = p }
+
+// keptValuePayload is where the value goes, which crosses no boundary of the analysis.
+var keptValuePayload ValuePayload
 -- sorting.go --
 package flow
-
-import "sync"
 
 // SortPayload is never converted to the sort interface, although it could be.
 type SortPayload struct {
@@ -198,15 +211,15 @@ func (p SortPayload) Describe() string { return p.Names[0] }
 
 func (p SortPayload) hidden() int { return p.Extra }
 
-// StoreSort hands a value to an unrelated package.
-func StoreSort(m *sync.Map, p SortPayload) { m.Store("sort", p) }
+// StoreSort hands a value to a declaration of the target typed as the value's own type.
+func StoreSort(p SortPayload) { keptSortPayload = p }
+
+// keptSortPayload is where the value goes, which crosses no boundary of the analysis.
+var keptSortPayload SortPayload
 -- logvalue.go --
 package flow
 
-import (
-	"log/slog"
-	"sync"
-)
+import "log/slog"
 
 // LogPayload is converted to the log-value interface, which no destination of the
 // class is: what a handler reads of such a value is what the method returns.
@@ -224,8 +237,11 @@ func (p LogPayload) Describe() string { return p.Name }
 
 func (p LogPayload) hidden() int { return p.Extra }
 
-// StoreLog hands a value to an unrelated package.
-func StoreLog(m *sync.Map, p LogPayload) { m.Store("log", p) }
+// StoreLog hands a value to a declaration of the target typed as the value's own type.
+func StoreLog(p LogPayload) { keptLogPayload = p }
+
+// keptLogPayload is where the value goes, which crosses no boundary of the analysis.
+var keptLogPayload LogPayload
 
 var _ slog.LogValuer = LogPayload{}
 -- containers.go --
@@ -259,8 +275,6 @@ func StoreDeep(m *sync.Map, values map[string][]*Deep) { m.Store("deep", values)
 -- writer.go --
 package flow
 
-import "sync"
-
 // Sink is the writer of no template execution.
 type Sink struct {
 	Buffer []byte `sink:"buffer"`
@@ -275,5 +289,8 @@ func (s *Sink) Write(p []byte) (int, error) {
 
 func (s *Sink) hidden() int { return s.Extra }
 
-// StoreSink hands the writer to an unrelated package.
-func StoreSink(m *sync.Map, s *Sink) { m.Store("sink", s) }
+// StoreSink hands the writer to a declaration of the target typed as its own type.
+func StoreSink(s *Sink) { keptSink = s }
+
+// keptSink is where the writer goes, which crosses no boundary of the analysis.
+var keptSink *Sink
