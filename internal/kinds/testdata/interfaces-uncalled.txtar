@@ -1,0 +1,45 @@
+An interface one function takes as a parameter type, declaring three methods: one
+the program calls on the concrete type and never through the interface, one the
+function calls through the interface, and one the function selects through the
+interface as a value without calling it.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- main.go --
+package main
+
+// Store holds one value.
+type Store interface {
+	Put(v string) error
+	Flush() error
+	Load() string
+}
+
+type disk struct{ held string }
+
+func (d *disk) Put(v string) error {
+	d.held = v
+	return nil
+}
+
+func (d *disk) Flush() error { return nil }
+
+func (d *disk) Load() string { return d.held }
+
+func read(s Store) string {
+	flush := s.Flush
+	if flush() != nil {
+		return ""
+	}
+	return s.Load()
+}
+
+func main() {
+	d := &disk{}
+	if d.Put("v") != nil {
+		return
+	}
+	println(read(d))
+}

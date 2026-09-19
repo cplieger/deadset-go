@@ -1,0 +1,37 @@
+An interface no symbol names as a type, with two concrete implementations, one of
+them on a pointer receiver. Both implementations are live, because the entry point
+calls their methods on the concrete values.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- main.go --
+package main
+
+// Reader reads a line and closes, and nothing names it as a type.
+type Reader interface {
+	Read() string
+	Close() error
+}
+
+type file struct{ name string }
+
+func (f file) Read() string { return f.name }
+
+func (f file) Close() error { return nil }
+
+type socket struct{ addr string }
+
+func (s *socket) Read() string { return s.addr }
+
+func (s *socket) Close() error { return nil }
+
+func main() {
+	f := file{name: "a"}
+	s := &socket{addr: "b"}
+	if f.Close() != nil || s.Close() != nil {
+		return
+	}
+	println(f.Read(), s.Read())
+}

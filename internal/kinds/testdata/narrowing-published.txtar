@@ -1,0 +1,85 @@
+A library whose four packages carry one shape each. A published package exports a
+function its own package alone references and another that one other package of the
+module references; an internal package and a main package repeat the first shape;
+three exported functions nothing references sit in the main package, in an external
+test package and under the internal tree, one under the internal tree is referenced
+from a test file alone, and one is referenced from the dead declaration alone.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- catalog/do.go --
+package catalog
+
+import "example.com/app/internal/store"
+
+// Do reads the helper and the store.
+func Do() int {
+	return Helper() + store.Open()
+}
+-- catalog/helper.go --
+package catalog
+
+// Helper is referenced inside its own package alone.
+func Helper() int { return 2 }
+
+// Shared is referenced from another package of the module.
+func Shared() int { return 3 }
+-- catalog/ext_test.go --
+package catalog_test
+
+// UnusedInTest is referenced by nothing.
+func UnusedInTest() int { return 4 }
+-- svc/use.go --
+package svc
+
+import "example.com/app/catalog"
+
+// Use reads the shared declaration.
+func Use() int { return catalog.Shared() }
+-- internal/store/open.go --
+package store
+
+// Open reads the helper.
+func Open() int { return Helper() }
+
+// UnusedInternal is referenced by nothing.
+func UnusedInternal() int { return Forgotten() + 5 }
+
+// Forgotten is referenced from one declaration, which is itself dead.
+func Forgotten() int { return 10 }
+-- internal/store/probe.go --
+package store
+
+// Probe is referenced from a test file alone.
+func Probe() int { return 9 }
+-- internal/store/probe_test.go --
+package store
+
+import "testing"
+
+func TestProbe(t *testing.T) {
+	if Probe() != 9 {
+		t.Errorf("Probe() = %d, want 9", Probe())
+	}
+}
+-- internal/store/helper.go --
+package store
+
+// Helper is referenced inside its own package alone.
+func Helper() int { return 6 }
+-- cmd/app/main.go --
+package main
+
+func main() {
+	_ = Run()
+}
+
+// Unused is referenced by nothing.
+func Unused() int { return 7 }
+-- cmd/app/run.go --
+package main
+
+// Run is referenced inside its own package alone.
+func Run() int { return 8 }

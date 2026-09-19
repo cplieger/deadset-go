@@ -1,0 +1,29 @@
+A struct marshalled as JSON by a function nothing calls: the sweep finds every
+field of it dead under reachability, and the encoding-reflection class retains the
+exported one, which is the shape that puts a written declaration in the retained
+record rather than in the candidate set.
+
+-- go.mod --
+module example.com/wire
+
+go 1.27.1
+-- main.go --
+package main
+
+import "encoding/json"
+
+// answer is written out as JSON, which reads every exported field of it.
+type answer struct {
+	Status string `json:"status"`
+	note   string
+}
+
+// reply sets both fields and marshals the answer. Nothing calls it.
+func reply() ([]byte, error) {
+	a := answer{}
+	a.Status = "ok"
+	a.note = "unread"
+	return json.Marshal(a)
+}
+
+func main() {}

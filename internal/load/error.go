@@ -17,19 +17,29 @@ type Diagnostic struct {
 // returns one produced no analyzable package set, so no finding list follows it.
 type Error struct {
 	Configuration string
-	Diagnostics   []Diagnostic
+
+	// Module names the consumer the diagnostics came from, as the scope named it,
+	// and is empty for the target. A run loads the target and every declared
+	// consumer, so which module did not type-check is what a reader needs first.
+	Module string
+
+	Diagnostics []Diagnostic
 }
 
-// Error renders the configuration, the number of diagnostics, and every
-// diagnostic on its own line, so a caller that prints the error prints the whole
-// list.
+// Error renders the configuration, the consumer where one is named, the number of
+// diagnostics, and every diagnostic on its own line, so a caller that prints the
+// error prints the whole list.
 func (e *Error) Error() string {
 	var b strings.Builder
 	noun := "errors"
 	if len(e.Diagnostics) == 1 {
 		noun = "error"
 	}
-	fmt.Fprintf(&b, "load %s: %d %s", e.Configuration, len(e.Diagnostics), noun)
+	fmt.Fprintf(&b, "load %s: ", e.Configuration)
+	if e.Module != "" {
+		fmt.Fprintf(&b, "consumer %s: ", e.Module)
+	}
+	fmt.Fprintf(&b, "%d %s", len(e.Diagnostics), noun)
 	for _, d := range e.Diagnostics {
 		b.WriteString("\n  ")
 		if d.Position != "" {

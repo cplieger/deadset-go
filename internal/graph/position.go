@@ -1,10 +1,12 @@
 package graph
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"go/token"
 	"path/filepath"
+	"strings"
 	"unicode/utf16"
 )
 
@@ -96,16 +98,48 @@ func (p *positions) column(q token.Position) (int, error) {
 		return 0, fmt.Errorf("%w: %s:%d:%d is outside the file's %d bytes",
 			ErrSource, q.Filename, q.Line, q.Column, len(src))
 	}
+	return Column(src[start:], q.Offset-start), nil
+}
 
+// Column is the column of the byte at offset of line, counting UTF-16 code units
+// from one. It is the column every position of a report carries: SARIF counts
+// columns in UTF-16 code units, the Language Server Protocol counts them that way
+// by default, and Go counts bytes, so the conversion reads the bytes before the
+// offset on the line.
+//
+// The line may run past the offset, so a whole file's remainder is a line here as
+// far as the count is concerned. An offset past the line counts the whole of it
+// and a negative one counts nothing, which are the two answers a caller can read
+// without a second bound check. Every position the toolchain reports falls on a
+// rune boundary; an offset inside a rune counts each byte of the cut rune as the
+// replacement character one byte decodes to.
+func Column(line []byte, offset int) int {
+	offset = min(max(offset, 0), len(line))
 	column := 1
-	for _, r := range string(src[start:q.Offset]) {
+	for _, r := range string(line[:offset]) {
 		if units := utf16.RuneLen(r); units > 0 {
 			column += units
 			continue
 		}
+		// A rune no UTF-16 encoding holds is one code unit, the replacement
+		// character the encoder would write for it.
 		column++
 	}
-	return column, nil
+	return column
+}
+
+// ByPosition orders two rendered positions by file, line and column, which is the
+// order the inventory reads in and the order every set of a run is reported in. It
+// is the whole of the graph's position order: a comparator that ranks records
+// carrying a position calls this rather than comparing the three fields again.
+func ByPosition(a, b token.Position) int {
+	if c := strings.Compare(a.Filename, b.Filename); c != 0 {
+		return c
+	}
+	if c := cmp.Compare(a.Line, b.Line); c != 0 {
+		return c
+	}
+	return cmp.Compare(a.Column, b.Column)
 }
 
 // source returns one file's bytes, reading it at most once.

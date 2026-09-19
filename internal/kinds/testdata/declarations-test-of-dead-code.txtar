@@ -1,0 +1,47 @@
+A target with two tests: one whose every target declaration is dead, and one that
+reaches a live declaration as well.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- catalog/catalog.go --
+package catalog
+
+// DeadOne has no production reference.
+func DeadOne() int { return 1 }
+
+// DeadTwo has no production reference.
+func DeadTwo() int { return 2 }
+
+// Live is referenced from the command.
+func Live() int { return 3 }
+-- catalog/catalog_test.go --
+package catalog
+
+import "testing"
+
+func TestDeadOnly(t *testing.T) {
+	assertSum(t, DeadOne()+DeadTwo(), 3)
+}
+
+func TestMixed(t *testing.T) {
+	assertSum(t, DeadOne()+Live(), 4)
+}
+
+// assertSum is a helper the tests share, declared in a test file and referenced
+// from test files alone.
+func assertSum(t *testing.T, got, want int) {
+	t.Helper()
+	if got != want {
+		t.Errorf("the sum of the declarations is %d, want %d", got, want)
+	}
+}
+-- main.go --
+package main
+
+import "example.com/app/catalog"
+
+func main() {
+	println(catalog.Live())
+}

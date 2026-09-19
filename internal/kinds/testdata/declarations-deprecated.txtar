@@ -1,0 +1,48 @@
+A target carrying two declarations marked deprecated: one nothing references, and
+one the command still calls.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- catalog/catalog.go --
+package catalog
+
+// Old resolved an alias the way the first release did.
+//
+// Deprecated: nothing references it; Fresh does the same work.
+func Old() int { return 1 }
+
+// Kept resolves an alias.
+//
+// Deprecated: Fresh does the same work, and the command still calls this one.
+func Kept() int { return 2 }
+
+// Stale is deprecated in a grouped declaration.
+//
+// Deprecated: nothing sets it.
+var (
+	Stale    = 3
+	StaleToo = 4
+)
+
+// Fresh resolves an alias.
+func Fresh() int { return 5 }
+
+// Counter carries a deprecated field nothing reads.
+type Counter struct {
+	// Live is read from the command.
+	Live int
+
+	// Deprecated: nothing reads it.
+	Old int
+}
+-- main.go --
+package main
+
+import "example.com/app/catalog"
+
+func main() {
+	c := catalog.Counter{Live: 1}
+	println(catalog.Kept(), catalog.Fresh(), c.Live)
+}

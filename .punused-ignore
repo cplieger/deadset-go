@@ -13,13 +13,19 @@
 # load and analyze. They are deliberately unreferenced: the fixtures exist to be
 # read by a package loader, not called, and two of them are deliberately
 # ill-formed (a type mismatch and an undefined identifier) so the fail-closed
-# error walk has something to walk. Go's own tooling ignores a `testdata`
-# directory; this scan does not, so the fixtures surface here as findings.
-# Deleting any of them would break the test that names it.
+# error walk has something to walk. The three in the consumed target are the
+# declarations a loaded consumer references, so the module that declares them
+# names none of them itself, which is the shape the consumer load is about. Go's
+# own tooling ignores a `testdata` directory; this scan does not, so the fixtures
+# surface here as findings. Deleting any of them would break the test that names
+# it.
 function Selected
 function Answer
 function Mismatch
 function Undefined
+function Used is unused
+function UsedByConsumerTest
+function Unused is unused
 
 # --- Methods a standard interface calls, never a caller by name.
 #
@@ -33,27 +39,22 @@ function Undefined
 # pinned by a test of its rendered output or of the match.
 method (*Error).Error
 method (ErrorKind).String
-method (SymbolKind).String
 method (RefKind).String
 method (Mechanism).String
 method (*MalformedError).Unwrap
 
 # --- The stages no verb calls yet, exercised by tests until one does.
 #
-# `print-roots` wires the loader, the matrix, the scope of a directory, the
-# enumeration, the reference pass and the root detection into a production path,
-# and `print-retained` adds the resolver, the exemption classes and the sweep of
-# the matrix, so those stages have callers. These do not: no verb takes a scope
-# document, none reports a finding, and none reads a suppression or a dependency
-# directive, so the reader that decodes a scope document, the severity a kind
-# reports at, the configurations a bitset holds, the two suppression readers and
-# the four dependency answers have only their tests. Each is named in the plan for
-# the verb that lands it, and the correct resolution is that call site rather than
-# an unexport: the packages are separate so that one stage's failure cannot break
+# `print-roots` wires the loader, the matrix, the scope of a run, the enumeration,
+# the reference pass and the root detection into a production path; `print-retained`
+# adds the resolver, the exemption classes and the sweep of the matrix; and the
+# findings pass adds every issue kind's rule and the vocabulary it runs them in the
+# order of. So those stages have callers. These do not: no verb reads a suppression
+# or a dependency directive yet, so the two suppression readers and the four
+# dependency answers have only their tests. Each is named in the plan for the verb
+# that lands it, and the correct resolution is that call site rather than an
+# unexport: the packages are separate so that one stage's failure cannot break
 # another's compile, and a stage's entry point is its package's surface.
-function Read
-method (*Config).EffectiveSeverity
-method (ConfigSet).Indexes
 function Inline
 function IgnoreFile
 function ModuleFile
@@ -69,15 +70,31 @@ function LastUses
 # for a document that carries the section to resolve rather than be refused.
 field Go is unused
 
+# --- The details members no kind fills yet.
+#
+# A finding's details object mirrors the published schema field for field, so one
+# marshalling writes a conforming document and a kind sets only its own members.
+# Each of these belongs to a kind this version of the analyzer has no rule for: the
+# exclusion that kept a file out of the build, the class of an unused dependency,
+# the replacement a module directive names, and the dependency whose last use a
+# deletion removes. Each is filled by the kind that lands, which is why the member
+# waits rather than arriving with it.
+field ExcludedBy
+field DependencyClass
+field Replacement
+field RemovesLastUseOf
+
 # --- What the sweep answers and no verb reports yet.
 #
 # `print-retained` indexes the graph from the enumeration, the reference set and
 # the root set and sweeps it, so the index and the sweep have callers. What no
 # verb reads yet is a dead component: the listing at the depth the run asks for,
-# and the two spellings a report and a message carry for a relation and a cascade.
-# Only the tests call them today, and the correct resolution is the reporting verb
-# rather than an unexport, because each is a stage of the same package the
-# enumeration and the roots are stages of.
+# the two spellings a report and a message carry for a relation and a cascade, and
+# which consumers reference one symbol, which the graph records per symbol against
+# the day a finding names them one by one. Only the tests call them today, and the
+# correct resolution is the reporting verb rather than an unexport, because each is
+# a stage of the same package the enumeration and the roots are stages of.
 method (*Component).List
 method (Relation).String
 method (Cascade).String
+method (*Graph).ConsumersOf

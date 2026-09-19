@@ -1,0 +1,25 @@
+An interface one function takes as a parameter type, with one implementation, and a
+method the function calls through the interface. A satisfaction assertion names the
+interface as well, so the assertion is not the only thing that does.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- main.go --
+package main
+
+// Reader reads a line.
+type Reader interface {
+	Read() string
+}
+
+type file struct{}
+
+func (file) Read() string { return "ok" }
+
+var _ Reader = file{}
+
+func first(r Reader) string { return r.Read() }
+
+func main() { println(first(file{})) }

@@ -399,14 +399,14 @@ func TestLoadRefusals(t *testing.T) {
 			config:  Configuration{ID: "linux-amd64", OS: "linux"},
 			wantErr: ErrConfiguration,
 		},
-		"declared consumer": {
+		"declared consumer absent from the filesystem": {
 			doc: func(t *testing.T) scope.Document {
 				doc := fixtureScope(t, "clean")
-				doc.Consumers = []scope.Module{{Role: scope.RoleConsumer, Path: "/nowhere"}}
+				doc.Consumers = []scope.Module{{Path: absent}}
 				return doc
 			},
 			config:  HostConfiguration(),
-			wantErr: ErrConsumersUnimplemented,
+			wantErr: ErrConsumer,
 		},
 		"target with no path": {
 			doc:     func(*testing.T) scope.Document { return scope.Document{} },
@@ -415,7 +415,7 @@ func TestLoadRefusals(t *testing.T) {
 		},
 		"absent target": {
 			doc: func(*testing.T) scope.Document {
-				return scope.Document{Target: scope.Module{Role: scope.RoleTarget, Path: absent}}
+				return scope.Document{Target: scope.Module{Path: absent}}
 			},
 			config:  HostConfiguration(),
 			wantErr: fs.ErrNotExist,

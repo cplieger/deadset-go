@@ -44,11 +44,13 @@ var (
 	// operating system or its architecture.
 	ErrConfiguration = errors.New("load: incomplete configuration")
 
-	// ErrConsumersUnimplemented reports a scope document declaring consumers.
-	// Loading them is not implemented, and a run that counted no reference from
-	// a declared consumer would report symbols those consumers use, so the load
-	// refuses the document instead of loading the target alone.
-	ErrConsumersUnimplemented = errors.New("load: consumer loading is unimplemented")
+	// ErrConsumer reports a declared consumer whose references a configuration
+	// cannot count: a path absent from the filesystem, a module whose identity
+	// disagrees with the scope, or one whose own module graph resolves the target
+	// somewhere other than the target's own directory. Each is refused rather
+	// than passed over, because a run that counted no reference from a declared
+	// consumer would report the symbols that consumer uses.
+	ErrConsumer = errors.New("load: unusable consumer")
 )
 
 // Configuration is one build configuration of the matrix.
@@ -67,7 +69,15 @@ type Result struct {
 	// type-check their files again, and never a synthesized test binary, so
 	// every file a stage of the analysis meets is a file of the target.
 	Packages []*packages.Package
-	Fset     *token.FileSet // one FileSet for the whole configuration
+
+	// Consumers holds one entry per declared consumer, in the order the scope
+	// declares them. A consumer's packages are kept apart from the target's
+	// because the two answer different questions: the declarations a run reports
+	// on are the target's alone, while the references it counts come from every
+	// module it loaded.
+	Consumers []Consumer
+
+	Fset *token.FileSet // one FileSet for the whole configuration
 
 	// ExcludedByCgo holds the target-relative paths, forward slashes, of the
 	// files the toolchain ignored solely because they import "C". References
@@ -87,7 +97,8 @@ func HostConfiguration() Configuration {
 	}
 }
 
-// Load resolves configuration c of doc's target. Cancelling ctx stops the load.
+// Load resolves configuration c of doc's target and of every consumer doc
+// declares. Cancelling ctx stops the load.
 //
 // Every package's Errors is walked, dependencies, test variants and synthesized
 // test binaries included, and a non-empty set returns a *[Error] carrying all of
@@ -96,15 +107,19 @@ func HostConfiguration() Configuration {
 // makes no network request, writes no cache, and pins the toolchain settings that
 // decide what loads whatever the environment says, so it needs no C toolchain and
 // no caller has to neutralise its own environment first.
+//
+// A declared consumer is loaded from its own directory, as the module it is, and
+// a consumer that cannot be loaded or whose references cannot be counted against
+// this target returns [ErrConsumer] with a zero Result. One module's packages are
+// loaded once per configuration whatever the number of other modules that import
+// it, so the file set is shared and a declaration of the target renders to one
+// position whichever module's load reached it.
 func Load(ctx context.Context, doc scope.Document, c Configuration) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, fmt.Errorf("load %s: %w", c.ID, err)
 	}
 	if c.ID == "" || c.OS == "" || c.Arch == "" {
 		return Result{}, fmt.Errorf("%w: id=%q os=%q arch=%q", ErrConfiguration, c.ID, c.OS, c.Arch)
-	}
-	if len(doc.Consumers) > 0 {
-		return Result{}, fmt.Errorf("%w: %s", ErrConsumersUnimplemented, doc.Consumers[0].Path)
 	}
 
 	target := doc.Target.Path
@@ -116,25 +131,12 @@ func Load(ctx context.Context, doc scope.Document, c Configuration) (Result, err
 	}
 
 	fset := token.NewFileSet()
-	cfg := &packages.Config{
-		Mode:    loadMode,
-		Context: ctx,
-		Tests:   true,
-		Dir:     target,
-		// os/exec keeps the last value of a repeated key, so these win over the
-		// inherited environment. An ambient go.work or GOFLAGS reaches the child
-		// toolchain and changes which packages and which files load, which would
-		// make one target's result depend on where the run was started.
-		Env: append(os.Environ(),
-			"CGO_ENABLED=0", "GOOS="+c.OS, "GOARCH="+c.Arch, "GOWORK=off", "GOFLAGS="),
-		BuildFlags: buildFlags(c.Tags),
-		Fset:       fset,
-	}
-	pkgs, err := packages.Load(cfg, loadPattern)
+	// The target's own module file decides the target's versions, so its load
+	// never reads a workspace, the ambient one included.
+	pkgs, err := loadPackages(ctx, fset, target, c, workspaceOff)
 	if err != nil {
 		return Result{}, fmt.Errorf("load %s: %s: %w", c.ID, target, err)
 	}
-
 	if diagnostics := collect(pkgs); len(diagnostics) > 0 {
 		return Result{}, &Error{Configuration: c.ID, Diagnostics: diagnostics}
 	}
@@ -145,12 +147,43 @@ func Load(ctx context.Context, doc scope.Document, c Configuration) (Result, err
 		return Result{}, fmt.Errorf("load %s: %w", c.ID, err)
 	}
 
+	consumers, err := loadConsumers(ctx, fset, &doc, c, pkgs)
+	if err != nil {
+		return Result{}, err
+	}
+
 	return Result{
 		Configuration: c,
 		Packages:      pkgs,
+		Consumers:     consumers,
 		Fset:          fset,
 		ExcludedByCgo: excluded,
 	}, nil
+}
+
+// loadPackages resolves every package of the module rooted at dir under
+// configuration c, with workspace as the child toolchain's GOWORK setting.
+//
+// os/exec keeps the last value of a repeated key, so the settings pinned here win
+// over the inherited environment. An ambient go.work or GOFLAGS reaches the child
+// toolchain and changes which packages and which files load, which would make one
+// module's result depend on where the run was started, and GOPROXY=off is what
+// makes the analysis's no-network rule the toolchain's rule too: a module the
+// local cache does not hold ends the load with the toolchain's own message
+// instead of being fetched.
+func loadPackages(ctx context.Context, fset *token.FileSet, dir string, c Configuration, workspace string) ([]*packages.Package, error) {
+	cfg := &packages.Config{
+		Mode:    loadMode,
+		Context: ctx,
+		Tests:   true,
+		Dir:     dir,
+		Env: append(os.Environ(),
+			"CGO_ENABLED=0", "GOOS="+c.OS, "GOARCH="+c.Arch,
+			"GOWORK="+workspace, "GOFLAGS=", "GOPROXY=off"),
+		BuildFlags: buildFlags(c.Tags),
+		Fset:       fset,
+	}
+	return packages.Load(cfg, loadPattern)
 }
 
 // withoutTestBinaries returns every package of a test load except the test

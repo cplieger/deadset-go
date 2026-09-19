@@ -1,0 +1,55 @@
+Four declarations of a package anything can import, each the subject of a kind
+outside the unused-declaration group: an interface nothing names as a type, a method
+of a live interface no call site invokes through it, a member of an enumerated type
+nothing names, and the type parameter of a live exported function that neither its
+signature nor its body names. Every one of them is exported and none is in a main
+package or an internal tree, so the unused-exported kind would take all four if the
+kinds did not agree on which code reports what.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- main.go --
+package main
+
+import "example.com/app/api"
+
+func main() {
+	var store api.Store = api.Filesystem{}
+	println(store.Read(), api.Convert[int](1))
+}
+-- api/api.go --
+package api
+
+// Reader is an interface nothing names as a type.
+type Reader interface {
+	Read() string
+}
+
+// Store is named as a type, and Flush is never invoked through it.
+type Store interface {
+	Read() string
+	Flush() error
+}
+
+// Filesystem implements Store.
+type Filesystem struct{}
+
+// Read answers the contents.
+func (Filesystem) Read() string { return "" }
+
+// Flush writes what is held.
+func (Filesystem) Flush() error { return nil }
+
+// Level is how loudly the package reports, and nothing names Quiet.
+type Level int
+
+// The levels, of which only Loud is named.
+const (
+	Loud Level = iota
+	Quiet
+)
+
+// Convert names its type parameter in neither its signature nor its body.
+func Convert[T any](n int) int { return n + int(Loud) }

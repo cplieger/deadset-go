@@ -1,7 +1,8 @@
-// Package scope reads the scope document: the module a run analyzes and the
-// consumers whose references count against it. A scope document names paths on
-// the local filesystem; reading one makes no network request and resolves no
-// module.
+// Package scope resolves what a run loads: the module it analyzes and the
+// consumers whose references count against it. The scope comes from a scope
+// document on disk or from a workspace file that lists the target among its
+// modules, and from nowhere else. Every path it names is a path on the local
+// filesystem, and resolving one makes no network request and fetches no module.
 package scope
 
 import (
@@ -32,10 +33,6 @@ var (
 	// in the document gives it.
 	ErrRole = errors.New("scope: invalid role")
 
-	// ErrUnimplemented reports a declared key the reader refuses rather than
-	// ignores.
-	ErrUnimplemented = errors.New("scope: unimplemented key")
-
 	// ErrTooLarge reports a document above the size bound.
 	ErrTooLarge = errors.New("scope: document too large")
 
@@ -47,17 +44,28 @@ var (
 )
 
 // Module is one module the run loads: the target or a declared consumer.
+//
+// The role a document declares for a module is not carried here, because the
+// resolved scope holds exactly one target and a list of consumers, so a module's
+// role is where it sits. What a document declares is read and refused where it
+// contradicts that position, which is the only place the declaration can be wrong.
 type Module struct {
 	// ID is the module path. A document may state it; otherwise it stays empty
 	// until a load reports the module the path belongs to.
 	ID   string
-	Role string // RoleTarget or RoleConsumer
 	Path string // an absolute filesystem path
 }
 
 // Document is the resolved scope: exactly one target and zero or more
 // consumers, every path absolute.
 type Document struct {
+	// Workspace is the absolute path of the workspace file whose build list a
+	// consumer's load resolves the target through, and is empty when the scope
+	// names none. A consumer reaches the target's own directory through its
+	// module file or through a workspace, and which of the two a scope offers is
+	// the scope's to declare.
+	Workspace string
+
 	Target    Module
 	Consumers []Module
 }
@@ -70,8 +78,7 @@ type wireModule struct {
 }
 
 // wireDocument is the closed key list of a scope document. Every key the format
-// declares appears here, so an undeclared key is a decode error and a declared
-// key the reader does not implement is refused by name.
+// declares appears here, so an undeclared key is a decode error.
 type wireDocument struct {
 	Target    wireModule   `json:"target"`
 	Workspace string       `json:"workspace"`
@@ -82,10 +89,10 @@ type wireDocument struct {
 // is an error, trailing content after the document is an error, and a relative
 // path inside the document resolves against the document's own directory.
 //
-// Read returns [ErrNoTarget], [ErrRole], [ErrUnimplemented], [ErrTooLarge] or
-// [ErrTrailingContent] for a document it refuses, an error satisfying
-// errors.Is(err, fs.ErrNotExist) when the document is absent, and a
-// *json.SyntaxError or *json.UnmarshalTypeError for one it cannot decode.
+// Read returns [ErrNoTarget], [ErrRole], [ErrTooLarge] or [ErrTrailingContent]
+// for a document it refuses, an error satisfying errors.Is(err, fs.ErrNotExist)
+// when the document is absent, and a *json.SyntaxError or
+// *json.UnmarshalTypeError for one it cannot decode.
 func Read(path string) (Document, error) {
 	body, err := readBounded(path)
 	if err != nil {
@@ -105,22 +112,32 @@ func Read(path string) (Document, error) {
 	return resolve(&wire, filepath.Dir(path))
 }
 
-// ForDir is the scope of a run given no scope document: dir is the target and
-// nothing else is loaded. It returns an error naming dir when dir is not an
-// existing directory.
+// ForDir is the scope of a run given no scope document and no workspace: dir is
+// the target and nothing else is loaded. It returns an error naming dir when dir
+// is not an existing directory.
 func ForDir(dir string) (Document, error) {
+	abs, err := existingDir(dir)
+	if err != nil {
+		return Document{}, err
+	}
+	return Document{Target: Module{Path: abs}}, nil
+}
+
+// existingDir returns dir as an absolute path, and an error naming it when it is
+// not an existing directory.
+func existingDir(dir string) (string, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
-		return Document{}, fmt.Errorf("scope: resolve %s: %w", dir, err)
+		return "", fmt.Errorf("scope: resolve %s: %w", dir, err)
 	}
 	info, err := os.Stat(abs)
 	if err != nil {
-		return Document{}, fmt.Errorf("scope: target %s: %w", abs, err)
+		return "", fmt.Errorf("scope: target %s: %w", abs, err)
 	}
 	if !info.IsDir() {
-		return Document{}, fmt.Errorf("scope: target %s: %w", abs, errNotDirectory)
+		return "", fmt.Errorf("scope: target %s: %w", abs, errNotDirectory)
 	}
-	return Document{Target: Module{Role: RoleTarget, Path: abs}}, nil
+	return abs, nil
 }
 
 // readBounded returns the document's bytes, refusing one above the size bound
@@ -145,9 +162,6 @@ func readBounded(path string) ([]byte, error) {
 
 // resolve turns a decoded document into a Document with absolute paths.
 func resolve(wire *wireDocument, base string) (Document, error) {
-	if wire.Workspace != "" {
-		return Document{}, fmt.Errorf("%w: workspace", ErrUnimplemented)
-	}
 	if wire.Target.Path == "" {
 		return Document{}, ErrNoTarget
 	}
@@ -160,6 +174,14 @@ func resolve(wire *wireDocument, base string) (Document, error) {
 		return Document{}, err
 	}
 	doc := Document{Target: target}
+
+	if wire.Workspace != "" {
+		workspace := wire.Workspace
+		if !filepath.IsAbs(workspace) {
+			workspace = filepath.Join(base, workspace)
+		}
+		doc.Workspace = filepath.Clean(workspace)
+	}
 
 	for _, w := range wire.Consumers {
 		if w.Role != "" && w.Role != RoleConsumer {
@@ -174,7 +196,8 @@ func resolve(wire *wireDocument, base string) (Document, error) {
 	return doc, nil
 }
 
-// resolveModule resolves one decoded module against base and stamps it with role.
+// resolveModule resolves one decoded module against base, naming role in the
+// refusal of a module that declares no path.
 func resolveModule(w wireModule, role, base string) (Module, error) {
 	if w.Path == "" {
 		return Module{}, fmt.Errorf("scope: %s declares an empty path", role)
@@ -187,5 +210,5 @@ func resolveModule(w wireModule, role, base string) (Module, error) {
 	if err != nil {
 		return Module{}, fmt.Errorf("scope: resolve %s: %w", w.Path, err)
 	}
-	return Module{ID: w.ID, Role: role, Path: abs}, nil
+	return Module{ID: w.ID, Path: abs}, nil
 }
