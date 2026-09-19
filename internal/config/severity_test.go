@@ -27,27 +27,18 @@ func publishedKinds(t *testing.T) []catalog.Row {
 	return rows
 }
 
-func TestLiveKindsReadTheVocabularysDefaults(t *testing.T) {
+func TestLiveKindReadsTheVocabularysDefaults(t *testing.T) {
 	t.Parallel()
 
-	want := publishedKinds(t)
-	got := liveKinds()
-	if len(got) != len(want) {
-		t.Fatalf("liveKinds() holds %d kinds, want the %d the vocabulary publishes as live",
-			len(got), len(want))
-	}
-	for index := range want {
-		expected := kind{
-			code:     want[index].Code,
-			severity: Severity(want[index].DefaultSeverity),
-			enabled:  want[index].DefaultEnabled,
+	for _, row := range publishedKinds(t) {
+		want := kind{
+			code:     row.Code,
+			severity: Severity(row.DefaultSeverity),
+			enabled:  row.DefaultEnabled,
 		}
-		if got[index] != expected {
-			t.Errorf("liveKinds()[%d] = %+v, want the vocabulary's %+v", index, got[index], expected)
-		}
-		held, live := liveKind(want[index].Code)
-		if !live || held != expected {
-			t.Errorf("liveKind(%q) = %+v, %t, want %+v, true", want[index].Code, held, live, expected)
+		held, live := liveKind(row.Code)
+		if !live || held != want {
+			t.Errorf("liveKind(%q) = %+v, %t, want %+v, true", row.Code, held, live, want)
 		}
 	}
 }
@@ -142,13 +133,13 @@ func TestEffectiveSeverity(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name            string
-		severity        map[string]Severity
-		code            string
-		of              TargetKind
-		want            Severity
-		complete        bool
-		consumersLoaded bool
+		name               string
+		severity           map[string]Severity
+		code               string
+		of                 TargetKind
+		want               Severity
+		complete           bool
+		consumersAllLoaded bool
 	}{
 		{
 			name: "a_kind_no_source_names_takes_the_contract_default",
@@ -205,11 +196,11 @@ func TestEffectiveSeverity(t *testing.T) {
 		},
 		{
 			name: "a_library_whose_every_declared_consumer_loaded",
-			of:   Library, complete: true, consumersLoaded: true, code: "DS1001", want: Deny,
+			of:   Library, complete: true, consumersAllLoaded: true, code: "DS1001", want: Deny,
 		},
 		{
 			name: "a_library_that_loaded_consumers_it_never_declared_complete",
-			of:   Library, consumersLoaded: true, code: "DS1001", want: Allow,
+			of:   Library, consumersAllLoaded: true, code: "DS1001", want: Deny,
 		},
 		{
 			name:     "a_library_naming_the_kind_outranks_the_library_default",
@@ -243,9 +234,9 @@ func TestEffectiveSeverity(t *testing.T) {
 			t.Parallel()
 
 			cfg := configFor(tc.of, tc.complete, tc.severity)
-			if got := cfg.EffectiveSeverity(tc.code, tc.consumersLoaded); got != tc.want {
+			if got := cfg.EffectiveSeverity(tc.code, tc.consumersAllLoaded); got != tc.want {
 				t.Errorf("EffectiveSeverity(%q, %t) with target kind %q, severity %v and consumers.complete %t = %q, want %q",
-					tc.code, tc.consumersLoaded, tc.of, tc.severity, tc.complete, got, tc.want)
+					tc.code, tc.consumersAllLoaded, tc.of, tc.severity, tc.complete, got, tc.want)
 			}
 		})
 	}

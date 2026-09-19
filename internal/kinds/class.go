@@ -93,9 +93,13 @@ func (in *Input) ClassOf(id graph.SymbolID) Class {
 // says about the set being complete: the class is what the analysis loaded rather
 // than what the configuration asserts.
 func (in *Input) everyConsumerLoaded() bool {
-	if len(in.Consumers.Declared) == 0 {
-		return false
-	}
+	return len(in.Consumers.Declared) > 0 && in.everyDeclaredLoaded()
+}
+
+// everyDeclaredLoaded reports whether the load resolved every consumer the scope
+// declared, which is vacuously true of a scope that declared none. It is the one
+// reading of the loaded set the three consumer facts of this file share.
+func (in *Input) everyDeclaredLoaded() bool {
 	for _, declared := range in.Consumers.Declared {
 		if !slices.Contains(in.Consumers.Loaded, declared) {
 			return false
@@ -116,20 +120,28 @@ func (in *Input) importable(pkgPath string) bool {
 
 // consumersLoaded reports whether the configuration declares the consumer set
 // complete and every consumer the run declared loaded, which is the closed world the
-// narrowing kinds need and the fact the severity map reads.
+// narrowing kinds need: narrowing a published declaration says no consumer outside
+// the set exists, and only the declaration supplies that.
 //
-// It is not the reachability class's rule: a published surface whose declared
-// consumers all loaded is as known as an application's whether or not the set is
-// declared complete, while narrowing a published declaration needs the assertion
-// that no consumer outside the set exists.
+// It is neither the severity map's fact nor the reachability class's rule.
+// [Input.consumersAllLoaded] is what the severity map reads, and a published surface
+// whose declared consumers all loaded is as known as an application's whether or not
+// the set is declared complete, which is what the class is about.
 func (in *Input) consumersLoaded() bool {
-	if !in.Consumers.Complete {
-		return false
-	}
-	for _, declared := range in.Consumers.Declared {
-		if !slices.Contains(in.Consumers.Loaded, declared) {
-			return false
-		}
-	}
-	return true
+	return in.Consumers.Complete && in.everyDeclaredLoaded()
+}
+
+// consumersAllLoaded reports whether the run holds consumer information and loaded
+// every consumer it declared, which is the fact the severity map reads: the
+// unreferenced-exported kind reports over a library's published API where the run
+// loaded every consumer the scope declared, and reports nothing where the run holds
+// no consumer information at all.
+//
+// A configuration declaring the set complete while declaring no consumer holds
+// consumer information, because it says the library has no consumer. Completeness is
+// otherwise not read here: a consumer set the run loaded whole leaves no caller the
+// analysis cannot see, whether or not the configuration also asserts that none
+// exists outside it.
+func (in *Input) consumersAllLoaded() bool {
+	return in.everyDeclaredLoaded() && (in.Consumers.Complete || len(in.Consumers.Declared) > 0)
 }

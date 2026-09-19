@@ -185,7 +185,7 @@ func (in *Input) dormant(mark *suppress.Record) bool {
 	if !live {
 		return false
 	}
-	if in.Config.EffectiveSeverity(mark.Code, in.consumersLoaded()) == config.Allow {
+	if in.Config.EffectiveSeverity(mark.Code, in.consumersAllLoaded()) == config.Allow {
 		return true
 	}
 	least := Class(in.Config.Analysis.MinConfidence)

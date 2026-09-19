@@ -1,6 +1,7 @@
 package kinds
 
 import (
+	"go/token"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -438,11 +439,58 @@ func TestUnusedReplaceReportsTheDirectiveOverAModuleTheBuildListDoesNotHold(t *t
 	if one.Symbol.Kind != directiveSubject {
 		t.Errorf("UnusedReplace().Symbol.Kind = %q, want %q", one.Symbol.Kind, directiveSubject)
 	}
-	if want := "example.com/other@v1.2.3"; one.Details.Replacement != want {
-		t.Errorf("UnusedReplace().Details.Replacement = %q, want %q", one.Details.Replacement, want)
-	}
 	if one.Position.Path != "go.mod" || one.Position.Line != 20 {
 		t.Errorf("UnusedReplace().Position = %+v, want line 20 of go.mod", one.Position)
+	}
+}
+
+// The reference of a replace directive and the member naming what the directive
+// redirects to are two spellings of one module, and each is the spelling of the
+// document that reads it. A reference joins a version to a path with an at sign,
+// because two directives over one module at two versions are two subjects. The
+// member spells the target as the module file writes it, the version after a space,
+// and a target that is a directory carries no version at all.
+func TestUnusedReplaceSpellsAReferenceAndAReplacementEachItsOwnWay(t *testing.T) {
+	t.Parallel()
+
+	in := withModuleFile(t, "artifacts-dependency.txtar", applicationConfig(), twoConfigurations()...)
+	in.Deps.Replaces = append(in.Deps.Replaces, deps.Replacement{
+		Old:  deps.Module{Path: "example.com/vanished"},
+		New:  deps.Module{Path: "../vendored"},
+		Site: token.Position{Filename: "go.mod", Line: 30, Column: 1},
+	})
+
+	found := emitted(t, "UnusedReplace", unusedReplaceCode, UnusedReplace, in)
+	spelled := make(map[string]string, len(found))
+	for _, one := range found {
+		spelled[one.Symbol.Ref] = one.Details.Replacement
+	}
+	for _, tc := range []struct {
+		name        string
+		ref         string
+		replacement string
+	}{
+		{
+			name:        "a_module_target_the_directive_gives_a_version",
+			ref:         "go://example.com/app#example.com/absent@v1.0.0:replace",
+			replacement: "example.com/other v1.2.3",
+		},
+		{
+			name:        "a_directory_target_no_directive_gives_a_version",
+			ref:         "go://example.com/app#example.com/vanished:replace",
+			replacement: "../vendored",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, reported := spelled[tc.ref]
+			if !reported {
+				t.Fatalf("UnusedReplace reports %v, want a finding at %s", summary(found), tc.ref)
+			}
+			if got != tc.replacement {
+				t.Errorf("UnusedReplace() at %s has Details.Replacement = %q, want %q",
+					tc.ref, got, tc.replacement)
+			}
+		})
 	}
 }
 

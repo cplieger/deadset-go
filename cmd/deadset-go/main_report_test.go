@@ -259,8 +259,8 @@ func TestReportOfNamesEveryMemberTheContractRequiresOfTheRun(t *testing.T) {
 		t.Errorf("the report names contract version %q, want the pinned Contract's %q", envelope.ContractVersion, contractVersion)
 	case envelope.Analyzer.Name != name:
 		t.Errorf("the report names analyzer %q, want %q", envelope.Analyzer.Name, name)
-	case envelope.Analyzer.Version != version:
-		t.Errorf("the report names analyzer version %q, want %q", envelope.Analyzer.Version, version)
+	case envelope.Analyzer.Version != version():
+		t.Errorf("the report names analyzer version %q, want %q", envelope.Analyzer.Version, version())
 	case !slices.Equal(envelope.Analyzer.SchemaVersionsAccepted, schemaVersionsAccepted):
 		t.Errorf("the report accepts schema versions %v, want %v",
 			envelope.Analyzer.SchemaVersionsAccepted, schemaVersionsAccepted)

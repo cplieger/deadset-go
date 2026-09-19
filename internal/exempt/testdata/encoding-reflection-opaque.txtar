@@ -2,8 +2,11 @@ Nine types, each handed to a different kind of callee. One goes to a parameter t
 as the empty interface of a method of a package the load did not read, and one goes to
 the same method as a pointer. One goes to a function of the target that hands its own
 such parameter to that method, and one to a function that hands its parameter to that
-function in turn. One goes to a function of the target that hands its parameter to an
-encoder the class names. One goes to a function of the target whose parameter is typed
+function in turn. Each of those three keeps its exported methods as well as its fields,
+because the method behind them is one the analysis does not hold. One goes to a
+function of the target that hands its parameter to an encoder the class names, and an
+encoder reads fields and calls no method, so that one's method is retained by nothing.
+One goes to a function of the target whose parameter is typed
 as the value's own type, which crosses no boundary. One goes to a type parameter of a
 function of a package the load did not read, which the caller instantiates with the
 value's own type, so nothing about it is lost. One goes to a parameter typed as an

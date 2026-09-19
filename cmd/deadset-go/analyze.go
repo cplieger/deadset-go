@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -43,19 +41,6 @@ const (
 
 // documentMode is the mode every document this verb writes carries.
 const documentMode = 0o644
-
-// corpusVersion is the version of the Conformance Corpus this analyzer answers,
-// which is the corpus version the Contract's corpus publishes. It is stated rather
-// than read, because no document of the Contract is read at run time, and a test
-// pins it equal to the published value.
-const corpusVersion = "1.1.0"
-
-// corpusResult is this analyzer's result over that corpus. No run of the corpus has
-// recorded one, and the Contract admits a pass and a fail and no third value, so the
-// value stated is the one a reader refuses the report for: a merge admits a report
-// whose result is a pass and no other, and a report claiming a pass this analyzer has
-// not earned is the one failure nothing downstream can catch.
-const corpusResult = "fail"
 
 // rendering is one rendering of a report: the reporter that writes it, and the
 // suffix the file it is written to carries.
@@ -150,7 +135,12 @@ func analyze(ctx context.Context, args []string, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
 		return exitUsage
 	}
-	envelope, err := reportOf(ctx, &resolved, &options, corpusAnswer())
+	answered, err := corpusAnswer()
+	if err != nil {
+		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
+		return exitFailure
+	}
+	envelope, err := reportOf(ctx, &resolved, &options, answered)
 	if err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
 		return exitCodeFor(err)
@@ -289,7 +279,7 @@ func (a *invocation) write(e *report.Envelope, recorded []suppress.Recorded, tar
 		return nil
 	}
 	return writeAtomically(a.baselineWrite, func(w io.Writer) error {
-		return suppress.WriteBaseline(w, recorded, suppress.Provenance{Analyzer: name, Version: version})
+		return suppress.WriteBaseline(w, recorded, suppress.Provenance{Analyzer: name, Version: version()})
 	})
 }
 
@@ -365,24 +355,6 @@ func recordedFindings(findings []kinds.Finding) []suppress.Recorded {
 		}
 	}
 	return rows
-}
-
-// corpusAnswer is what this analyzer states about itself in every report it writes:
-// its result over the Conformance Corpus, and every capability it declines.
-//
-// The digest the Contract requires is the digest of the results document the corpus
-// runner wrote, and this release has no such document, so what is named is the
-// digest of no bytes. A run of the corpus replaces all three values and supplies the
-// declared gaps, which are rows of the same document.
-func corpusAnswer() *corpusRecord {
-	digest := sha256.Sum256(nil)
-	return &corpusRecord{
-		conformance: report.Conformance{
-			CorpusVersion: corpusVersion,
-			Result:        corpusResult,
-			Digest:        "sha256:" + hex.EncodeToString(digest[:]),
-		},
-	}
 }
 
 // counted renders a count with its noun, so a message reads for one record as well

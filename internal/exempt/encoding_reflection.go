@@ -109,7 +109,11 @@ const (
 // set. A function of the program that hands one of its own such parameters to that
 // call, or to any other destination of the class, is a destination for its callers'
 // arguments in turn, to a fixpoint, so a wrapper of a wrapper carries the rule of the
-// call it forwards to.
+// call it forwards to. A wrapper retains what its destination retains rather than the
+// full set, because its body is in the program: a value handed to a wrapper that
+// encodes it keeps the fields an encoder reads and no method, one handed to a wrapper
+// that renders it through a template keeps its methods too, and a wrapper with two
+// destinations retains the union.
 //
 // The empty interface is the one parameter type this rule reads, because it is the
 // one an interface conversion answers nothing for: a value handed to any other
@@ -150,12 +154,15 @@ type encodingFlow struct {
 }
 
 // namedDestinationParameter reports whether one parameter of one function is a
-// destination this class names by itself, which every parameter of one is: what a
-// destination call names is the argument position and not the parameter's meaning.
-// It is the base case the boundary's forwarding fixpoint starts from.
-func namedDestinationParameter(fn *types.Func, _ int) bool {
-	_, named := encodingDestination(fn)
-	return named
+// destination this class names by itself, which every parameter of one is (what a
+// destination call names is the argument position and not the parameter's meaning),
+// and what that destination reads of the value it is given. It is the base case the
+// boundary's forwarding fixpoint starts from, so a wrapper that hands its own
+// parameter to an encoder carries the encoder's set and one that hands it to a
+// template engine carries the engine's.
+func namedDestinationParameter(fn *types.Func, _ int) (methods, named bool) {
+	d, found := encodingDestination(fn)
+	return d.methods, found
 }
 
 // interfaceTarget is one interface the class treats as a destination, resolved
@@ -217,16 +224,19 @@ func (f *encodingFlow) walkFile(info *types.Info, file *ast.File) error {
 // crossingArguments records the struct values one call carries out of the analysed
 // program, which the boundary's crossing test decides argument by argument.
 //
-// The retained set is the full one, methods included, since the callee's body decides
-// what it reads and the analysis does not hold it, and the detail names the immediate
-// callee: a wrapper's caller reads the wrapper's name at its own call.
+// What is retained is what reads the value where it arrives. A callee the program does
+// not hold retains the full set, methods included, because its body decides what it
+// reads and the analysis does not have it; a wrapper the program does hold retains what
+// its own destination retains, so a value handed to a wrapper that encodes it keeps its
+// fields and not its methods. The detail names the immediate callee either way: a
+// wrapper's caller reads the wrapper's name at its own call.
 func (f *encodingFlow) crossingArguments(info *types.Info, call *ast.CallExpr) error {
 	for i, arg := range call.Args {
-		callee, crosses := f.edge.crossing(info, call, i)
+		out, crosses := f.edge.crossing(info, call, i)
 		if !crosses {
 			continue
 		}
-		d := destination{detail: "passed to " + callee.FullName(), methods: true}
+		d := destination{detail: "passed to " + out.callee.FullName(), methods: out.methods}
 		if err := f.retain(info.TypeOf(arg), arg.Pos(), d); err != nil {
 			return err
 		}

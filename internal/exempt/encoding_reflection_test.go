@@ -346,7 +346,7 @@ func TestEncodingReflectionRetainsWhatCrossesOutOfTheProgram(t *testing.T) {
 		{
 			crossing: "a function of the target that hands its parameter to an encoder",
 			typeName: "Encoded",
-			want:     opaqueRefs("Encoded", "Describe", "Extra", "Name", "secret"),
+			want:     opaqueRefs("Encoded", "Extra", "Name", "secret"),
 		},
 		{
 			crossing: "a function of the target typed as the value's own type",

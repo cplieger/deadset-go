@@ -1,0 +1,169 @@
+{
+  "corpus_version": "1.1.0",
+  "product": {
+    "name": "deadset-go",
+    "version": "0.0.0-devel",
+    "language": "go"
+  },
+  "result": "pass",
+  "totals": {
+    "fixtures": 4,
+    "pass": 3,
+    "gap": 1,
+    "fail": 0
+  },
+  "fixtures": [
+    {
+      "fixture": "configuration-matrix-intersection",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "shared",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "unusedEverywhere",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "configurations": [
+              "linux-amd64",
+              "linux-arm64"
+            ]
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "unusedOnArm64",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "configurations": [
+              "linux-arm64"
+            ]
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "wide",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "interface-satisfaction-conversion",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "DeadExport",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "SatisfiesWriter",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "interface-satisfaction"
+            ]
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "unused-exported-consumer",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "DeadExport",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "UsedByConsumer",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "unused-requirement-noop-replace",
+      "result": "gap",
+      "expectations": [
+        {
+          "symbol": "NoopReplace",
+          "result": "gap",
+          "capability": "DS1605",
+          "actual": {
+            "report": "DS1605",
+            "symbol_kind": "module-directive",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": false,
+            "stale": true
+          },
+          "message": "the report phase agrees and the suppression phase does not: suppressed is false and stale is true"
+        },
+        {
+          "symbol": "UnusedRequirement",
+          "result": "gap",
+          "capability": "DS1601",
+          "actual": {
+            "report": "DS1601",
+            "symbol_kind": "dependency",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": false,
+            "stale": true
+          },
+          "message": "the report phase agrees and the suppression phase does not: suppressed is false and stale is true"
+        }
+      ],
+      "unexpected": []
+    }
+  ]
+}

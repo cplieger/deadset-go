@@ -3,7 +3,14 @@ declares three functions the target calls: one that hands its own parameter type
 the empty interface to an encoder it constructs, one that hands such a parameter to
 the encoding package's own marshalling function, and one that hands it to the second
 of those in turn. Each is a wrapper of the program rather than a callee the analysis
-cannot read, so a target value handed to one reaches the encoder through it.
+cannot read, so a target value handed to one reaches the encoder through it, and an
+encoder reads fields and calls no method: a method of such a value is retained by
+nothing.
+
+Two more wrappers reach further. One hands its parameter to a template engine, which
+selects a method by the same syntax it selects a field with, so a value handed to it
+keeps its exported methods as well. One hands its parameter to an encoder and then to
+the rendering wrapper, so what it reads is the union of the two.
 
 Two more consumer functions are not wrappers: one takes a parameter typed as the
 empty interface and hands it to nothing, and one takes a concrete parameter. A target
@@ -65,6 +72,27 @@ type Chained struct {
 // Describe is exported.
 func (c Chained) Describe() string { return c.Name }
 
+// Rendered reaches a template engine through the consumer's rendering wrapper.
+type Rendered struct {
+	Name   string `json:"name"`
+	Extra  int
+	secret string `json:"secret"`
+}
+
+// Describe is exported, and a template engine selects a method by name.
+func (r Rendered) Describe() string { return r.Name }
+
+// Unioned reaches an encoder and a template engine through one wrapper of the
+// consumer.
+type Unioned struct {
+	Name   string `json:"name"`
+	Extra  int
+	secret string `json:"secret"`
+}
+
+// Describe is exported.
+func (u Unioned) Describe() string { return u.Name }
+
 // Counted reaches a parameter of the consumer typed as the empty interface that the
 // consumer hands to nothing.
 type Counted struct {
@@ -94,6 +122,12 @@ func HandMarshalled(m Marshalled) ([]byte, error) { return httpwire.MarshalWire(
 
 // HandChained hands a value through both of the consumer's wrappers.
 func HandChained(c Chained) ([]byte, error) { return httpwire.Emit(c) }
+
+// HandRendered hands a value to the consumer's rendering wrapper.
+func HandRendered(w io.Writer, r Rendered) error { return httpwire.Render(w, r) }
+
+// HandUnioned hands a value to the consumer's wrapper that both encodes and renders.
+func HandUnioned(w io.Writer, u Unioned) error { return httpwire.Both(w, u) }
 
 // HandCounted hands a value where the consumer keeps it to itself.
 func HandCounted(c Counted) int { return httpwire.Count(c) }
@@ -142,6 +176,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"text/template"
 )
 
 // WriteJSON hands its own parameter typed as the empty interface to an encoder.
@@ -164,6 +199,22 @@ func Count(v any) int {
 
 // Tag takes a concrete parameter, so no value crosses into it.
 func Tag(name string) string { return "name=" + name }
+
+// Render hands its own parameter typed as the empty interface to a template engine,
+// which selects a method by the same syntax it selects a field with.
+func Render(w io.Writer, v any) error {
+	return template.Must(template.New("wire").Parse("{{.Name}}")).Execute(w, v)
+}
+
+// Both hands its own parameter to the rendering wrapper and then to an encoder, so
+// what is read of a value it is given is the union of what those two read and not
+// whichever it hands the value to last.
+func Both(w io.Writer, v any) error {
+	if err := Render(w, v); err != nil {
+		return err
+	}
+	return json.NewEncoder(w).Encode(v)
+}
 
 // Logf hands its own variadic operands to the formatting package, which makes it a
 // print wrapper of the program.
