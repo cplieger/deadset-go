@@ -205,10 +205,12 @@ func retainedMethods(in *Input, held []graph.Exemption) map[string]bool {
 // satisfy.
 //
 // The subject is what the type checker answers about one real program, so each
-// iteration writes the drawn program to a module of its own and loads it. That
-// costs about one second under the race detector, which is why the drawn shapes
-// are small: at most three interfaces, three types and the conversions between
-// them.
+// iteration writes the drawn program to a module of its own and loads it. What the
+// draw renders is what keeps that affordable: one file, no import and no test file,
+// so the toolchain type-checks the drawn declarations and nothing else rather than
+// synthesizing a test binary whose closure it checks on every load. The drawn
+// shapes are small for the same reason: at most three interfaces, three types and
+// the conversions between them.
 //
 // This runs at rapid's default of 100 checks; -rapid.checks raises it for a deeper
 // local run.

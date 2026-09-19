@@ -8,8 +8,13 @@ import (
 	spec "github.com/cplieger/deadset-spec"
 )
 
-// kindsPath is the vocabulary document this package's table is pinned equal to.
-const kindsPath = "contract/kinds.json"
+// kindsPath is the vocabulary document this package's table is pinned equal to, and
+// language is the one language this analyzer reports, which is the arm of a row's
+// overlap the table carries.
+const (
+	kindsPath = "contract/kinds.json"
+	language  = "go"
+)
 
 // vocabulary is the part of the vocabulary document this package carries: the live
 // rows, the retired codes, and the value sets a row's members are drawn from.
@@ -19,14 +24,15 @@ type vocabulary struct {
 	ReachabilityClasses []string `json:"reachability_classes"`
 	Fixabilities        []string `json:"fixabilities"`
 	Kinds               []struct {
-		Code            string   `json:"code"`
-		Name            string   `json:"name"`
-		Languages       []string `json:"languages"`
-		DefaultSeverity string   `json:"default_severity"`
-		MaxClass        string   `json:"max_class"`
-		Fixability      string   `json:"fixability"`
-		DefaultEnabled  bool     `json:"default_enabled"`
-		Fixed           bool     `json:"fixed"`
+		Code            string              `json:"code"`
+		Name            string              `json:"name"`
+		Languages       []string            `json:"languages"`
+		DefaultSeverity string              `json:"default_severity"`
+		MaxClass        string              `json:"max_class"`
+		Fixability      string              `json:"fixability"`
+		Overlap         map[string][]string `json:"overlap"`
+		DefaultEnabled  bool                `json:"default_enabled"`
+		Fixed           bool                `json:"fixed"`
 	} `json:"kinds"`
 	Retired []struct {
 		Code string `json:"code"`
@@ -69,14 +75,15 @@ func TestKindsIsTheVocabularysLiveRowsInItsOrder(t *testing.T) {
 			DefaultSeverity: row.DefaultSeverity,
 			MaxClass:        row.MaxClass,
 			Fixability:      row.Fixability,
+			Overlap:         row.Overlap[language],
 			DefaultEnabled:  row.DefaultEnabled,
 			Fixed:           row.Fixed,
 		}
 		if got.Code != want.Code || got.Name != want.Name ||
 			!slices.Equal(got.Languages, want.Languages) ||
 			got.DefaultSeverity != want.DefaultSeverity || got.MaxClass != want.MaxClass ||
-			got.Fixability != want.Fixability || got.DefaultEnabled != want.DefaultEnabled ||
-			got.Fixed != want.Fixed {
+			got.Fixability != want.Fixability || !slices.Equal(got.Overlap, want.Overlap) ||
+			got.DefaultEnabled != want.DefaultEnabled || got.Fixed != want.Fixed {
 			t.Errorf("Kinds()[%d] = %+v, want %+v, the row %s publishes", i, got, want, kindsPath)
 		}
 	}

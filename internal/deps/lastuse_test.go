@@ -85,7 +85,7 @@ func lastUsesOf(t *testing.T, archive string) (map[graph.SymbolID][]string, map[
 	if err != nil {
 		t.Fatalf("Setup: graph.Roots(%s): %v", archive, err)
 	}
-	candidates := graph.New(symbols, refs, roots).Sweep(graph.Mode{}).Candidates
+	candidates := graph.New(symbols, refs, roots).Sweep(graph.SweepInput{}).Candidates
 	if len(candidates) == 0 {
 		t.Fatalf("Setup: Sweep(%s) returned no candidate, so the join has nothing to answer over", archive)
 	}

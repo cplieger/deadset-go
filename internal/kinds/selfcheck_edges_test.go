@@ -104,6 +104,35 @@ func TestEvaluateCarriesTheFindingTheAnalyzerWouldHaveReported(t *testing.T) {
 	}
 }
 
+func TestEvaluatePublishesTheFindingAboutTheDeclarationAnEdgeNamesAndNeverAPartOfIt(t *testing.T) {
+	in := edged(t, "selfcheck-edges.txtar", applicationConfig())
+	result := computed(t, in, map[string]Emitter{unreachableExportCode: UnreachableExport})
+	const declaring = "go://example.com/selfcheckedges#"
+
+	// A part of the declaration one edge names, reported beside the declaration's own
+	// finding. The edge stands for a consumer of the declaration, so what moves into
+	// the evaluation is the finding about the declaration; the part's is about the
+	// part and stays reported whatever the paired side answers.
+	part := findingAt(unusedParameterCode, Subject{
+		Ref:       declaring + "Event",
+		Kind:      parameterSubject,
+		Name:      "label",
+		SizeLines: 1,
+	}, Position{Path: "main.go", Line: 4, Column: 20, EndLine: 4},
+		"parameter label is never read in the body")
+
+	kept, evaluations := Evaluate(in, append(result.Findings, part))
+
+	pending := evaluations[0].Finding
+	if pending == nil || pending.Code != unreachableExportCode {
+		t.Fatalf("Evaluate() published %+v, want the finding about the declaration", asNamed(evaluations))
+	}
+	if !slices.Contains(codesOf(kept), unusedParameterCode) {
+		t.Errorf("Evaluate() moved the finding about a part of Event into the evaluation, want it kept: %v",
+			summary(kept))
+	}
+}
+
 func TestEvaluatePublishesANarrowingCandidateWhoseOnlyOutsideReferenceIsAnEdge(t *testing.T) {
 	in := edged(t, "selfcheck-edges.txtar", applicationConfig())
 	result := computed(t, in, map[string]Emitter{unnecessaryExportCode: UnnecessaryExport})

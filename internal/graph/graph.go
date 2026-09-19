@@ -33,8 +33,8 @@ type calls struct {
 	// their module paths sort.
 	by []string
 
-	production bool
-	test       bool
+	fromProductionFile bool
+	fromTestFile       bool
 }
 
 // rooted is one root the inventory holds, at the position of the symbol it names.
@@ -129,9 +129,9 @@ func (g *Graph) add(r *Reference) {
 	if r.Consumer != "" {
 		if r.Test {
 			g.made[to].consumerTest++
-			g.consumed[to].test = true
+			g.consumed[to].fromTestFile = true
 		} else {
-			g.consumed[to].production = true
+			g.consumed[to].fromProductionFile = true
 		}
 		if !slices.Contains(g.consumed[to].by, r.Consumer) {
 			g.consumed[to].by = append(g.consumed[to].by, r.Consumer)
@@ -155,7 +155,7 @@ func (g *Graph) at(id SymbolID) int {
 // symbol at at. A production sweep counts none that a test file made, except the
 // ones a loaded consumer's test files made where the mode classifies those as
 // production references.
-func (g *Graph) references(at int, m *Mode) int {
+func (g *Graph) references(at int, m Mode) int {
 	c := g.made[at]
 	if !m.Production {
 		return c.production + c.test
@@ -171,7 +171,7 @@ func (g *Graph) references(at int, m *Mode) int {
 // test file is a test reference, and a production reference where the mode says so.
 // A kind reads both numbers, so the split is the mode's classification rather than
 // the mode's filter.
-func (g *Graph) counted(at int, m *Mode) (production, test int) {
+func (g *Graph) counted(at int, m Mode) (production, test int) {
 	c := g.made[at]
 	if m.ConsumerTestsProduction {
 		return c.production + c.consumerTest, c.test - c.consumerTest
@@ -198,12 +198,12 @@ func (g *Graph) ConsumersOf(id SymbolID) []string {
 // consumedIn reports whether a loaded consumer's reference to the symbol at at is
 // one the given mode counts, which is what makes the symbol called from outside the
 // target.
-func (g *Graph) consumedIn(at int, m *Mode) bool {
+func (g *Graph) consumedIn(at int, m Mode) bool {
 	c := g.consumed[at]
 	switch {
-	case c.production:
+	case c.fromProductionFile:
 		return true
-	case !c.test:
+	case !c.fromTestFile:
 		return false
 	case !m.Production:
 		return true

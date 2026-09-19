@@ -86,7 +86,7 @@ func sweepWith(t *testing.T, in *Input, subject string, held []graph.Exemption) 
 	if err != nil {
 		t.Fatalf("Setup: graph.Roots(%s): %v", subject, err)
 	}
-	return graph.New(in.Symbols, references, roots).Sweep(graph.Mode{Exempt: held})
+	return graph.New(in.Symbols, references, roots).Sweep(graph.SweepInput{Exempt: held})
 }
 
 // candidateOf returns the candidate one sweep reported for a symbol.

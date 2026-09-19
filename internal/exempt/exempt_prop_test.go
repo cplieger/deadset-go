@@ -45,14 +45,14 @@ type drawnRetention struct {
 
 // drawnSet is one symbol set with exemptions planted across it: the declarations,
 // the references between them, the roots, what each class retains, the classes
-// disabled and the mode swept.
+// disabled and the mode the classes compute and the sweep counts under.
 type drawnSet struct {
 	declarations []drawnDeclaration
 	edges        [][2]int
 	roots        []drawnRoot
 	retentions   []drawnRetention
 	disabled     []Class
-	production   bool
+	mode         graph.Mode
 }
 
 // drawnSets draws one to eight declarations, up to twelve references between them,
@@ -94,7 +94,9 @@ func drawnSets() *rapid.Generator[drawnSet] {
 			roots:        roots,
 			retentions:   retentions,
 			disabled:     disabled,
-			production:   rapid.Bool().Draw(t, "the sweep counts production references alone"),
+			mode: graph.Mode{
+				Production: rapid.Bool().Draw(t, "the sweep counts production references alone"),
+			},
 		}
 	})
 }
@@ -187,7 +189,7 @@ func (d drawnSet) describeDrawn() string {
 	for _, r := range d.retentions {
 		fmt.Fprintf(&out, "retention %s %s\n", drawnName(r.at), r.class)
 	}
-	fmt.Fprintf(&out, "disabled %v\nproduction %t\n", d.disabled, d.production)
+	fmt.Fprintf(&out, "disabled %v\nproduction %t\n", d.disabled, d.mode.Production)
 	return out.String()
 }
 
@@ -223,12 +225,12 @@ func heldBack(union []graph.Exemption, reported map[graph.SymbolID]bool) map[str
 
 // sweptWith computes the union of the classes the table holds under one set of
 // disabled classes, sweeps the graph with it, and returns both.
-func sweptWith(t *rapid.T, g *graph.Graph, table map[Class]Detector, disabled []Class, production bool) ([]graph.Exemption, graph.Result) {
-	union, err := Compute(&Input{Options: Options{Disabled: disabled}}, table)
+func sweptWith(t *rapid.T, g *graph.Graph, table map[Class]Detector, disabled []Class, mode graph.Mode) ([]graph.Exemption, graph.Result) {
+	union, err := Compute(&Input{Options: Options{Disabled: disabled}, Mode: mode}, table)
 	if err != nil {
 		t.Fatalf("Compute over the drawn retentions error: %v", err)
 	}
-	return union, g.Sweep(graph.Mode{Exempt: union, Production: production})
+	return union, g.Sweep(graph.SweepInput{Exempt: union, Mode: mode})
 }
 
 // Property dead-code-suite/P4: the reported set and the retained set are
@@ -253,7 +255,7 @@ func TestProperty04TheReportedSetAndTheRetainedSetAreDisjoint(t *testing.T) {
 		g, ids := d.graphOf()
 		table := d.detectors(ids)
 
-		union, r := sweptWith(t, g, table, d.disabled, d.production)
+		union, r := sweptWith(t, g, table, d.disabled, d.mode)
 		reported := candidateSet(r)
 
 		// A class the draw disabled retains nothing, which is what makes the
@@ -276,7 +278,7 @@ func TestProperty04TheReportedSetAndTheRetainedSetAreDisjoint(t *testing.T) {
 		// The retained record holds exactly the exemptions that held a symbol
 		// back, each with its class, so print-retained answers why a symbol is
 		// absent from the report and never claims a live symbol was held.
-		_, bare := sweptWith(t, g, nil, nil, d.production)
+		_, bare := sweptWith(t, g, nil, nil, d.mode)
 		want := heldBack(union, candidateSet(bare))
 		if got := retainedRecord(r); !maps.Equal(got, want) {
 			t.Fatalf("Sweep recorded %v as retained, want %v\n%s",
@@ -286,7 +288,7 @@ func TestProperty04TheReportedSetAndTheRetainedSetAreDisjoint(t *testing.T) {
 		// Disabling a class can only grow the reported set: an exemption withdrawn
 		// stops holding its own symbol back and stops seeding the closure, and
 		// neither withdrawal makes anything live.
-		_, enabled := sweptWith(t, g, table, nil, d.production)
+		_, enabled := sweptWith(t, g, table, nil, d.mode)
 		for id := range candidateSet(enabled) {
 			if !reported[id] {
 				t.Fatalf("disabling %v withdrew the report of %s, want the reported set to only grow\n%s",

@@ -60,30 +60,15 @@ type Exemption struct {
 	Site   token.Position // last, so the counted fields of a position end the value
 }
 
-// Mode is what one sweep counts.
+// Mode is the run's reference mode: which of the references the graph holds a
+// sweep counts, and how a reference a loaded consumer's test file made is
+// classified.
+//
+// It is one value: the composition root decides it once per run and hands it to
+// every stage that reads the mode, the exemption classes and the kinds included, so
+// that no stage of a run derives the mode again and no two stages of one run can
+// answer about different reference sets.
 type Mode struct {
-	// Marked are the symbols a matched suppression names. A mark makes its
-	// symbol live under both relations before either runs, and seeds
-	// reachability, so nothing the marked symbol alone references cascades into
-	// a candidate.
-	Marked []SymbolID
-
-	// Exempt are the exemptions an exemption class computed, one per symbol and
-	// class. An exempt symbol is never a candidate, whatever either relation
-	// says, and each seeds reachability for the same reason a mark does: the
-	// symbol is live by a mechanism the analysis cannot see, so what it
-	// references is live too. Two exemptions of one symbol both stand, so an
-	// explanation names every class that held it.
-	Exempt []Exemption
-
-	// ConsumerTestsProduction classifies a reference from a loaded consumer's test
-	// file as a production reference rather than as the test reference it is by
-	// default. It is a classification and not a filter, so it decides the split a
-	// candidate reports as well as what a production sweep counts: a symbol only a
-	// consumer's tests reach is test-only use by default and referenced code under
-	// this mode.
-	ConsumerTestsProduction bool
-
 	// Production drops every reference a test file made from the reference count
 	// and leaves the test roots out of the reachability seed. A test root stays
 	// live all the same, so a test function is never a candidate of a production
@@ -98,6 +83,36 @@ type Mode struct {
 	// is still counted on its production references alone, which is what leaves a
 	// symbol only tests reference reported whatever retains the test.
 	Production bool
+
+	// ConsumerTestsProduction classifies a reference from a loaded consumer's test
+	// file as a production reference rather than as the test reference it is by
+	// default. It is a classification and not a filter, so it decides the split a
+	// candidate reports as well as what a production sweep counts: a symbol only a
+	// consumer's tests reach is test-only use by default and referenced code under
+	// this mode.
+	ConsumerTestsProduction bool
+}
+
+// SweepInput is what one sweep runs over besides the graph: the symbols a
+// mechanism outside the reference graph holds live, and the mode.
+type SweepInput struct {
+	// Marked are the symbols a matched suppression names. A mark makes its
+	// symbol live under both relations before either runs, and seeds
+	// reachability, so nothing the marked symbol alone references cascades into
+	// a candidate.
+	Marked []SymbolID
+
+	// Exempt are the exemptions an exemption class computed, one per symbol and
+	// class. An exempt symbol is never a candidate, whatever either relation
+	// says, and each seeds reachability for the same reason a mark does: the
+	// symbol is live by a mechanism the analysis cannot see, so what it
+	// references is live too. Two exemptions of one symbol both stand, so an
+	// explanation names every class that held it.
+	Exempt []Exemption
+
+	// Mode is the run's reference mode, which the composition root decided once
+	// for every stage of the run.
+	Mode Mode
 }
 
 // Candidate is one dead symbol, the relation that found it, and the reference
@@ -146,11 +161,11 @@ type Result struct {
 
 	// Retained are the exemptions that held back a symbol this sweep would
 	// otherwise have reported, in the order the inventory holds the symbols they
-	// name, and in the order Mode.Exempt gave them for one symbol. An exemption
-	// on a symbol some relation holds live anyway is not here, because nothing
-	// was held back; it is still in Mode.Exempt, which is what an explanation of
-	// one symbol reads. An exemption naming no symbol of the inventory is here
-	// under no circumstances.
+	// name, and in the order SweepInput.Exempt gave them for one symbol. An
+	// exemption on a symbol some relation holds live anyway is not here, because
+	// nothing was held back; it is still in SweepInput.Exempt, which is what an
+	// explanation of one symbol reads. An exemption naming no symbol of the
+	// inventory is here under no circumstances.
 	Retained []Exemption
 
 	// Suppressed lists the marks that held a symbol back: the sweep runs once
@@ -167,23 +182,23 @@ type Result struct {
 	Suppressed []SymbolID
 }
 
-// withoutExemptions is the mode with the exemptions withdrawn and everything else
+// withoutExemptions is the input with the exemptions withdrawn and everything else
 // as the run gave it, which is what the sweep that answers which exemptions took
 // effect runs under.
-func (m Mode) withoutExemptions() Mode {
-	m.Exempt = nil
-	return m
+func (in SweepInput) withoutExemptions() SweepInput {
+	in.Exempt = nil
+	return in
 }
 
-// withoutMarks is the mode with the marks withdrawn and everything else as the run
+// withoutMarks is the input with the marks withdrawn and everything else as the run
 // gave it, which is what the sweep that answers which marks took effect runs
 // under.
-func (m Mode) withoutMarks() Mode {
-	m.Marked = nil
-	return m
+func (in SweepInput) withoutMarks() SweepInput {
+	in.Marked = nil
+	return in
 }
 
-// Sweep answers which symbols of one graph are dead under one mode, which
+// Sweep answers which symbols of one graph are dead under the input's mode, which
 // relation found each, which dead component each belongs to, and which
 // exemptions held a symbol back.
 //
@@ -200,33 +215,33 @@ func (m Mode) withoutMarks() Mode {
 //
 // Which exemptions took effect, and which marks did, is decided by sweeping
 // again, because the sweep is what makes each take effect: a further sweep drops
-// the one under question and keeps everything else the mode carries, and its
-// candidate set is what the run would have reported without it. A mode carrying no
-// exemption and no mark sweeps once.
+// the one under question and keeps everything else the input carries, and its
+// candidate set is what the run would have reported without it. An input carrying
+// no exemption and no mark sweeps once.
 //
 // The two questions are symmetric and are answered by two passes rather than one,
 // because withdrawing both at once would credit an exemption with holding back a
 // symbol a mark held back and the other way about. Neither pass is the run's
 // answer: the candidates, the components and the relations are the first sweep's.
-func (g *Graph) Sweep(m Mode) Result {
-	r := g.sweep(m).result()
-	if len(m.Exempt) > 0 {
-		r.Retained = g.sweep(m.withoutExemptions()).retained(m.Exempt)
+func (g *Graph) Sweep(in SweepInput) Result {
+	r := g.sweep(in).result()
+	if len(in.Exempt) > 0 {
+		r.Retained = g.sweep(in.withoutExemptions()).retained(in.Exempt)
 	}
-	if len(m.Marked) > 0 {
-		r.Suppressed = g.sweep(m.withoutMarks()).suppressed(m.Marked)
+	if len(in.Marked) > 0 {
+		r.Suppressed = g.sweep(in.withoutMarks()).suppressed(in.Marked)
 	}
 	return r
 }
 
-// sweep runs every pass of one mode over the graph, in the order the answers
+// sweep runs every pass of one input over the graph, in the order the answers
 // depend on.
-func (g *Graph) sweep(m Mode) *sweep {
+func (g *Graph) sweep(in SweepInput) *sweep {
 	s := &sweep{
 		g:              g,
-		mode:           m,
-		marked:         g.positions(m.Marked),
-		exempt:         g.exempted(m.Exempt),
+		in:             in,
+		marked:         g.positions(in.Marked),
+		exempt:         g.exempted(in.Exempt),
 		called:         make([]bool, len(g.symbols)),
 		live:           make([]RelationSet, len(g.symbols)),
 		dead:           make([]bool, len(g.symbols)),
@@ -272,7 +287,7 @@ type sweep struct {
 	live           []RelationSet
 	dead           []bool
 	testOfDeadCode []bool
-	mode           Mode
+	in             SweepInput
 }
 
 // retained lists the exemptions that name a symbol this sweep judged a candidate,
@@ -346,7 +361,7 @@ func (s *sweep) callers() {
 		}
 	}
 	for i := range s.g.symbols {
-		if s.g.consumedIn(i, &s.mode) {
+		if s.g.consumedIn(i, s.in.Mode) {
 			s.called[i] = true
 		}
 	}
@@ -356,7 +371,7 @@ func (s *sweep) callers() {
 // reference to it, and holds every mark and every caller live before it counts.
 func (s *sweep) referenceCounting() {
 	for i := range s.g.symbols {
-		if s.marked[i] || s.called[i] || s.g.references(i, &s.mode) > 0 {
+		if s.marked[i] || s.called[i] || s.g.references(i, s.in.Mode) > 0 {
 			s.live[i] = s.live[i].with(ReferenceCounting)
 		}
 	}
@@ -410,14 +425,14 @@ func (s *sweep) heldSeed(reached []bool) []int {
 func (s *sweep) callerSeed(reached []bool) []int {
 	queue := make([]int, 0, len(s.g.rooted))
 	for _, r := range s.g.rooted {
-		if (s.mode.Production && r.kind == RootTest) || reached[r.at] {
+		if (s.in.Mode.Production && r.kind == RootTest) || reached[r.at] {
 			continue
 		}
 		reached[r.at] = true
 		queue = append(queue, r.at)
 	}
 	for i := range s.g.symbols {
-		if reached[i] || !s.g.consumedIn(i, &s.mode) {
+		if reached[i] || !s.g.consumedIn(i, s.in.Mode) {
 			continue
 		}
 		reached[i] = true
@@ -435,7 +450,7 @@ func (s *sweep) walk(reached []bool, queue []int, held bool) {
 		at := queue[len(queue)-1]
 		queue = queue[:len(queue)-1]
 		for _, e := range s.g.out[at] {
-			if reached[e.to] || (!held && s.mode.Production && e.test) {
+			if reached[e.to] || (!held && s.in.Mode.Production && e.test) {
 				continue
 			}
 			reached[e.to] = true
@@ -510,10 +525,10 @@ func (s *sweep) result() Result {
 			continue
 		}
 		relation := Reachability
-		if s.g.references(i, &s.mode) == 0 {
+		if s.g.references(i, s.in.Mode) == 0 {
 			relation = ReferenceCounting
 		}
-		production, test := s.g.counted(i, &s.mode)
+		production, test := s.g.counted(i, s.in.Mode)
 		r.Candidates = append(r.Candidates, Candidate{
 			ID:             s.g.symbols[i].ID,
 			ProductionRefs: production,

@@ -1,0 +1,116 @@
+One module whose packages each hold a file the toolchain ignores solely for
+importing "C": one whose file calls a Go helper nothing else calls, one whose file
+calls nothing, one whose file names a C type in a Go signature, one whose file
+carries a Go type error of its own, and one whose file imports a package no
+compiled file of the module imports.
+
+-- go.mod --
+module example.com/cgo
+
+go 1.27.1
+-- called/app.go --
+package called
+
+// helper is called from the file importing "C" and from nowhere else.
+func helper() int { return 1 }
+
+// Selected is compiled under every configuration.
+func Selected() int { return 2 }
+-- called/bridge.go --
+package called
+
+// viaC is reached from C by the directive above its declaration, and it calls the
+// helper, so the helper carries a reference.
+
+/*
+#include <stdlib.h>
+*/
+import "C"
+
+//export viaC
+func viaC() int { return int(C.abs(-1)) + helper() }
+-- uncalled/app.go --
+package uncalled
+
+// helper is called by no file of the module, the one importing "C" included.
+func helper() int { return 1 }
+
+// Selected is compiled under every configuration.
+func Selected() int { return 2 }
+-- uncalled/bridge.go --
+package uncalled
+
+// viaC is reached from C the same way and calls nothing of the package.
+
+/*
+#include <stdlib.h>
+*/
+import "C"
+
+//export viaC
+func viaC() int { return int(C.abs(-1)) }
+-- ctype/app.go --
+package ctype
+
+// Selected is compiled under every configuration.
+func Selected() int { return 2 }
+-- ctype/bridge.go --
+package ctype
+
+/*
+#include <stdlib.h>
+#include <string.h>
+*/
+import "C"
+
+// Holder names a C type in the type of a field.
+type Holder struct {
+	Text  *C.char
+	Count int
+}
+
+// viaCType names a C type in its parameter and in its result, so the declaration
+// is a symbol whose signature holds types the analysis cannot see into.
+func viaCType(text *C.char) *C.char {
+	held := Holder{Text: text, Count: int(C.strlen(text))}
+	return held.Text
+}
+-- broken/app.go --
+package broken
+
+// helper is called from the file that falls back and from nowhere else.
+func helper() int { return 1 }
+
+// Selected is compiled under every configuration.
+func Selected() int { return 2 }
+-- broken/bridge.go --
+package broken
+
+/*
+#include <stdlib.h>
+*/
+import "C"
+
+// wrongType is a Go type error, so this file falls back to exclusion.
+var wrongType int = "not an int"
+
+// viaC calls the helper from a file whose references are dropped.
+func viaC() int { return int(C.abs(-1)) + helper() }
+-- lone/app.go --
+package lone
+
+// Selected is compiled under every configuration and imports nothing.
+func Selected() int { return 2 }
+-- lone/bridge.go --
+package lone
+
+/*
+#include <stdlib.h>
+*/
+import "C"
+
+import "strings"
+
+// viaC names a package of the standard library no compiled file of the module
+// imports.
+func viaC(name string) string { return strings.TrimSpace(name) + string(rune(C.abs(-1))) }

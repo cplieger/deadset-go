@@ -175,7 +175,35 @@ func writeModule(t failureSink, base string, generated []generatedPackage) strin
 	return dir
 }
 
-// loadedModules is the number of module-and-configuration pairs the property is
+// rowName names one row of the table for what it covers: the declaration shapes
+// its packages carry, the arrangement of test files that decides how many variants
+// the toolchain returns, and the seed that produced it, which is what re-runs the
+// row on its own.
+func rowName(seed int, drawn []drawnPackage) string {
+	shapes := make(map[string]bool)
+	inPackage, external := false, false
+	for _, p := range drawn {
+		for _, declared := range p.files {
+			for _, d := range declared {
+				shapes[d.shape] = true
+			}
+		}
+		inPackage = inPackage || p.inPackage
+		external = external || p.external
+	}
+	variants := "no-test-file"
+	switch {
+	case inPackage && external:
+		variants = "in-package-and-external"
+	case inPackage:
+		variants = "in-package"
+	case external:
+		variants = "external"
+	}
+	return fmt.Sprintf("seed%02d-%s-%s", seed, strings.Join(slices.Sorted(maps.Keys(shapes)), "-"), variants)
+}
+
+// loadedModules is the number of module-and-configuration pairs the table is
 // stated over.
 //
 // One load of a generated module costs about a second under the race detector: a
@@ -194,15 +222,21 @@ const loadedModules = 16
 type loadedModule struct {
 	result    *load.Result
 	root      string
+	name      string
 	generated []generatedPackage
 	config    load.Configuration
 }
 
-// loadedGeneratedModules generates the modules the property draws from and loads each
-// of them once, under one configuration each so that every configuration is loaded.
+// loadedGeneratedModules generates the modules the property is stated over and
+// loads each of them once, under one configuration each so that every
+// configuration is loaded.
 //
-// The modules are the fixed examples of the package generator, one per seed, so the
-// set is the same on every run and a failure names a seed a re-run reproduces.
+// The modules are the fixed examples of the package generator, one per seed, so
+// the set is the same on every run and a failure names a row a re-run reproduces.
+// The generator's own space is not enumerable, being every arrangement of one to
+// three packages of one to three files of one to four declarations at six shapes
+// and two visibilities, with two kinds of test file present or absent; the pool
+// drawn from it is, and the pool is what the table holds.
 func loadedGeneratedModules(t *testing.T) []*loadedModule {
 	t.Helper()
 
@@ -217,7 +251,13 @@ func loadedGeneratedModules(t *testing.T) []*loadedModule {
 		}
 		c := built[seed%len(built)]
 		result, root := loadDirUnder(t.Context(), t, writeModule(t, base, generated), c)
-		held[seed] = &loadedModule{result: result, root: root, generated: generated, config: c}
+		held[seed] = &loadedModule{
+			result:    result,
+			root:      root,
+			name:      rowName(seed, drawn),
+			generated: generated,
+			config:    c,
+		}
 	}
 	return held
 }
@@ -226,24 +266,27 @@ func loadedGeneratedModules(t *testing.T) []*loadedModule {
 // any number of package variants of one source file, each declaration appears
 // exactly once in the symbol graph.
 //
-// The enumeration takes one configuration's load, so an iteration draws one of the
-// loads the property was stated over.
-//
-// This runs at rapid's default of 100 checks; -rapid.checks raises it for a
-// deeper local run.
+// The property is a table rather than a sampled check. The enumeration takes one
+// configuration's load, so an iteration cannot draw anything cheaper than a load;
+// what the generator's space is sampled for is therefore the pool of modules,
+// which is fixed and small, and a sampled draw over a fixed pool asserts the same
+// rows a table does while loading nothing more. Each row is one module of the pool
+// under one configuration, named for the declaration shapes and the variant
+// arrangement it carries, and every row of the pool is asserted.
 func TestProperty01OneDeclarationPerSourceSite(t *testing.T) {
-	loaded := loadedGeneratedModules(t)
-
-	rapid.Check(t, func(t *rapid.T) {
-		seed := rapid.IntRange(0, loadedModules-1).Draw(t, "the generated module's seed")
-		checkOneDeclarationPerSourceSite(t, loaded[seed])
-	})
+	for _, one := range loadedGeneratedModules(t) {
+		t.Run(one.name, func(t *testing.T) {
+			checkOneDeclarationPerSourceSite(t, one)
+		})
+	}
 }
 
 // checkOneDeclarationPerSourceSite is the property's own body over one load: the
 // premise about the variants the toolchain returned, then the enumeration and what it
 // holds per source site, per file and per package.
-func checkOneDeclarationPerSourceSite(t *rapid.T, one *loadedModule) {
+func checkOneDeclarationPerSourceSite(t failureSink, one *loadedModule) {
+	t.Helper()
+
 	// The premise: an in-package test file makes the toolchain return a
 	// variant that type-checks the production files a second time.
 	variants := make(map[string]int)

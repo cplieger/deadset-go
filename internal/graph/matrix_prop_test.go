@@ -123,19 +123,19 @@ func TestProperty11MatrixIntersectionReportsOnlyWhatIsDeadEverywhere(t *testing.
 	rapid.Check(t, func(t *rapid.T) {
 		d := drawnMatrices().Draw(t, "the matrix")
 		b := d.build(t)
-		mode := d.graph.mode(b)
+		in := d.graph.input(b)
 		per := b.configured(d.configs, d.in)
 
 		merged, err := Merge(per)
 		if err != nil {
 			t.Fatalf("Merge over %d configurations = _, %v, want no error", d.configs, err)
 		}
-		r := NewMatrix(&merged).Sweep(mode)
+		r := NewMatrix(&merged).Sweep(in)
 
 		oracle := make([]map[SymbolID]Candidate, d.configs)
 		for config := range d.configs {
 			one := per[config]
-			answer := New(one.Symbols, one.References, one.Roots).Sweep(mode)
+			answer := New(one.Symbols, one.References, one.Roots).Sweep(in)
 			oracle[config] = make(map[SymbolID]Candidate, len(answer.Candidates))
 			for _, c := range answer.Candidates {
 				oracle[config][c.ID] = c

@@ -179,7 +179,7 @@ func TestSweepHoldsWhatAConsumerReferencesLiveAndReportsTheRest(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			result, root := loadTwoModules(t, dir, test.consumers...)
 			symbols, refs, roots := passes(t, result, root)
-			r := New(symbols, refs, roots).Sweep(Mode{})
+			r := New(symbols, refs, roots).Sweep(SweepInput{})
 
 			if got := candidateNames(named(symbols), r); !slices.Equal(got, test.want) {
 				t.Errorf("Sweep(consumers %v) reported %v, want %v", test.consumers, got, test.want)
@@ -192,7 +192,7 @@ func TestSweepHoldsAConsumersCallLiveUnderBothRelations(t *testing.T) {
 	b := newGraphBuilder(t).add("called", "helper", "dead")
 	b.ref("called", "helper")
 	b.refFromConsumer(handConsumer, "called", false)
-	r := b.graph().Sweep(Mode{})
+	r := b.graph().Sweep(SweepInput{})
 
 	// A consumer's call is an actual caller outside the target, so it holds its
 	// symbol live under both relations and seeds the closure from it, exactly as a
@@ -212,7 +212,7 @@ func TestSweepSeedsNothingFromAnOutsideReferenceNoConsumerMade(t *testing.T) {
 	b := newGraphBuilder(t).add("referenced", "helper")
 	b.ref("referenced", "helper")
 	b.refFromOutside("referenced")
-	r := b.graph().Sweep(Mode{})
+	r := b.graph().Sweep(SweepInput{})
 
 	// A reference from a declaration the inventory does not hold and no consumer
 	// made counts, so the symbol is live under reference counting; it names no
@@ -261,7 +261,7 @@ func TestSweepClassifiesAConsumersTestReferenceByTheMode(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			b := newGraphBuilder(t).add("called")
 			b.refFromConsumer(handConsumer, "called", true)
-			r := b.graph().Sweep(test.mode)
+			r := b.graph().Sweep(SweepInput{Mode: test.mode})
 
 			if got := b.candidates(r); !slices.Equal(got, test.want) {
 				t.Errorf("Sweep(%+v) reported %v, want %v", test.mode, got, test.want)
@@ -287,7 +287,7 @@ func TestSweepCountsEachConsumersReferenceOfOneSymbol(t *testing.T) {
 	if got := g.made[g.at(b.id("called"))].production; got != 2 {
 		t.Errorf("the graph counts %d production references to called, want 2", got)
 	}
-	if got := b.candidates(g.Sweep(Mode{})); len(got) != 0 {
+	if got := b.candidates(g.Sweep(SweepInput{})); len(got) != 0 {
 		t.Errorf("Sweep reported %v, want nothing", got)
 	}
 }
@@ -302,7 +302,7 @@ func TestReferencesAndSweepOverTheCorpusConsumerFixture(t *testing.T) {
 	symbols, refs, roots := passes(t, result, root)
 	names := named(symbols)
 
-	r := New(symbols, refs, roots).Sweep(Mode{})
+	r := New(symbols, refs, roots).Sweep(SweepInput{})
 
 	// The fixture's expectation: the export nothing references is reported under
 	// reference counting, and the export the consumer references is not reported at
@@ -336,7 +336,7 @@ func TestReferencesAndSweepOverATargetOnlyDocumentAreUnchanged(t *testing.T) {
 	dir := extract(t, "tested-module.txtar")
 	result, root := loadDir(t, dir, "linux", "amd64")
 	symbols, refs, _ := passes(t, result, root)
-	got := renderRun(symbols, refs, New(symbols, refs, nil).Sweep(Mode{Production: true}))
+	got := renderRun(symbols, refs, New(symbols, refs, nil).Sweep(SweepInput{Mode: Mode{Production: true}}))
 	golden := filepath.Join("testdata", "target-only.golden")
 
 	if os.Getenv("UPDATE_GOLDEN") == "1" {

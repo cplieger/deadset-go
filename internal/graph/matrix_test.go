@@ -216,7 +216,7 @@ func TestMergeNamesTheConfigurationsEachDeclarationExistsIn(t *testing.T) {
 
 func TestMatrixSweepReportsOnlyWhatIsDeadUnderEveryConfigurationItExistsIn(t *testing.T) {
 	x := matrixOf(t, "matrix.txtar", RootOptions{PublishedAPI: true}, linuxAmd64(), windowsAmd64())
-	r := x.matrix.Sweep(Mode{})
+	r := x.matrix.Sweep(SweepInput{})
 
 	// usedOnWindowsOnly is the case the matrix exists for: dead under linux,
 	// live under windows, and so reported under neither. windowsOnlyDeadCaller
@@ -243,7 +243,7 @@ func TestMatrixSweepReportsOnlyWhatIsDeadUnderEveryConfigurationItExistsIn(t *te
 
 func TestMatrixSweepGroupsOneComponentOverEveryConfigurationsEdges(t *testing.T) {
 	x := matrixOf(t, "matrix.txtar", RootOptions{PublishedAPI: true}, linuxAmd64(), windowsAmd64())
-	r := x.matrix.Sweep(Mode{})
+	r := x.matrix.Sweep(SweepInput{})
 
 	// The type and the method are one component although only one configuration
 	// declares the method, because a report lists a dead component once and an
@@ -266,7 +266,7 @@ func TestMatrixSweepGroupsOneComponentOverEveryConfigurationsEdges(t *testing.T)
 
 func TestMatrixSweepHoldsASymbolLiveUnderTheRelationsOfEveryConfiguration(t *testing.T) {
 	x := matrixOf(t, "matrix.txtar", RootOptions{PublishedAPI: true}, linuxAmd64(), windowsAmd64())
-	r := x.matrix.Sweep(Mode{})
+	r := x.matrix.Sweep(SweepInput{})
 
 	// One configuration holds the declaration live under both relations and the
 	// other holds it live under neither, so the record of why it is live is the
@@ -282,13 +282,13 @@ func TestMatrixSweepHoldsASymbolLiveUnderTheRelationsOfEveryConfiguration(t *tes
 func TestMatrixOverOneConfigurationAnswersWhatTheGraphOfThatConfigurationAnswers(t *testing.T) {
 	dir := extract(t, "sweep.txtar")
 	one := configuredOf(t, dir, linuxAmd64(), RootOptions{PublishedAPI: true})
-	direct := New(one.Symbols, one.References, one.Roots).Sweep(Mode{})
+	direct := New(one.Symbols, one.References, one.Roots).Sweep(SweepInput{})
 
 	merged, err := Merge([]Configured{one})
 	if err != nil {
 		t.Fatalf("Merge(sweep.txtar) = _, %v, want no error", err)
 	}
-	got := NewMatrix(&merged).Sweep(Mode{})
+	got := NewMatrix(&merged).Sweep(SweepInput{})
 
 	// A matrix of one configuration is the graph of that configuration, so every
 	// answer agrees with the one a single load produces; the candidate's set of
@@ -346,7 +346,7 @@ func TestMatrixSweepUnionsTheExemptionsEveryConfigurationRetained(t *testing.T) 
 		b.exemption("onlyFirst", "beta-class"),
 		b.exemption("onlySecond", "beta-class"),
 	}
-	r := NewMatrix(&merged).Sweep(Mode{Exempt: exempt})
+	r := NewMatrix(&merged).Sweep(SweepInput{Exempt: exempt})
 
 	// Every exemption held back a declaration under the configuration that holds
 	// it, so every one is retained; the duplicate is one record, and a
@@ -387,7 +387,7 @@ func TestMatrixSweepUnionsTheMarksEveryConfigurationSuppressed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Merge = _, %v, want no error", err)
 	}
-	r := NewMatrix(&merged).Sweep(Mode{Marked: []SymbolID{
+	r := NewMatrix(&merged).Sweep(SweepInput{Marked: []SymbolID{
 		b.id("heldBackOnTheSecond"),
 		b.id("liveEverywhere"),
 		b.id("heldBackOnTheFirst"),
@@ -611,7 +611,7 @@ func TestNewMatrixAnalyzesNoDeclarationOfNoConfigurationOfTheMatrix(t *testing.T
 	// A declaration that exists in no configuration of the matrix is not
 	// analyzed. Reporting it would be the vacuous truth that it is dead in every
 	// configuration it exists in, over no configuration at all.
-	if r := NewMatrix(&merged).Sweep(Mode{}); len(r.Candidates) != 0 {
+	if r := NewMatrix(&merged).Sweep(SweepInput{}); len(r.Candidates) != 0 {
 		t.Errorf("Sweep over a matrix whose one declaration names no configuration of it reported %d candidates, want 0",
 			len(r.Candidates))
 	}

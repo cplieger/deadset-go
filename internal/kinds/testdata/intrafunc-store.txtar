@@ -1,0 +1,44 @@
+A function that overwrites a local before anything reads it, a function whose last
+store nothing reads, a function every store of which a read reaches, and a function
+whose local a closure reads after the store.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+// overwritten stores twice and the first store reaches no read.
+func overwritten() int {
+	count := 1
+	count = 2
+	return count
+}
+
+// trailing stores after its last read.
+func trailing() int {
+	count := 1
+	total := count
+	count = 2
+	return total
+}
+
+// threaded reads every store it makes, so nothing reports one.
+func threaded() int {
+	count := 1
+	count = count + 2
+	return count
+}
+
+// captured hands its local to a closure, which reads it where no graph orders the
+// call, so nothing reports a store to it.
+func captured() func() int {
+	count := 1
+	count = 2
+	return func() int { return count }
+}
+
+func main() {
+	println(overwritten(), trailing(), threaded(), captured()())
+}

@@ -419,7 +419,7 @@ func TestFormatVerbContractAloneRecordsAnOperandOfTheFormattingPackage(t *testin
 // The mechanism text of the class, as the Contract states it for this language. The
 // class implements this text; a pin bump that moves it must be read against the
 // destination table before this literal moves with it.
-const encodingReflectionMechanismSHA256 = "ad4704f48ee508553e96916e0091e4b3f82f2794546512b861887d624e946236"
+const encodingReflectionMechanismSHA256 = "d31a6053bf460ab76f08190db5a3d13bdca3af17f7df488add83a3736e83ab1d"
 
 func TestEncodingReflectionImplementsTheContractsMechanismText(t *testing.T) {
 	body, err := spec.Contract.ReadFile("contract/exemptions.json")

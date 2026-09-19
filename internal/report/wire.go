@@ -151,13 +151,28 @@ type wirePositioned struct {
 
 // wireDetails is one finding's per-kind members, in the schema's member order.
 type wireDetails struct {
-	NarrowerVisibility string           `json:"narrower_visibility,omitempty"`
-	Implementations    []wirePositioned `json:"implementations,omitempty"`
-	WritePositions     []wirePosition   `json:"write_positions,omitempty"`
-	ExcludedBy         string           `json:"excluded_by,omitempty"`
-	DependencyClass    string           `json:"dependency_class,omitempty"`
-	Replacement        string           `json:"replacement,omitempty"`
-	RemovesLastUseOf   []string         `json:"removes_last_use_of,omitempty"`
+	NarrowerVisibility string            `json:"narrower_visibility,omitempty"`
+	Implementations    []wirePositioned  `json:"implementations,omitempty"`
+	WritePositions     []wirePosition    `json:"write_positions,omitempty"`
+	ExcludedBy         string            `json:"excluded_by,omitempty"`
+	DependencyClass    string            `json:"dependency_class,omitempty"`
+	Replacement        string            `json:"replacement,omitempty"`
+	Mechanism          string            `json:"mechanism,omitempty"`
+	Entry              *wireDetailsEntry `json:"entry,omitempty"`
+	Overlap            []string          `json:"overlap,omitempty"`
+	RemovesLastUseOf   []string          `json:"removes_last_use_of,omitempty"`
+}
+
+// wireDetailsEntry is the suppression record a finding about one reports, where a
+// member the record lacks is absent rather than empty: that absence is what the
+// reason-free and the unscoped kinds report, and the schema admits no empty spelling
+// of either member. The array of stale records writes the same four keys with the
+// path and the reason required, which is why it has a shape of its own.
+type wireDetailsEntry struct {
+	Code   string `json:"code"`
+	Symbol string `json:"symbol,omitempty"`
+	Path   string `json:"path,omitempty"`
+	Reason string `json:"reason,omitempty"`
 }
 
 //nolint:govet // fieldalignment: the field order is the schema's member order, which the document writes
@@ -356,11 +371,12 @@ func wireFindingOf(found *kinds.Finding) wireFinding {
 }
 
 // relationWritten is the liveness relation one finding's document names, and no
-// spelling at all for a finding about a live subject: the sweep judged that subject
-// live, so no relation decided it and the member is absent rather than a relation a
-// reader would take for the one that did.
+// spelling at all for a finding the Contract carries no relation on: the subject is
+// one no relation over declarations answers for, or a declaration the sweep judged
+// live, so the member is absent rather than a relation a reader would take for the
+// one that decided the finding.
 func relationWritten(found *kinds.Finding) string {
-	if found.Live {
+	if kinds.LivenessAbsent(found) {
 		return ""
 	}
 	return found.Relation.String()
@@ -379,7 +395,17 @@ func wireDetailsOf(details *kinds.Details) wireDetails {
 		ExcludedBy:         details.ExcludedBy,
 		DependencyClass:    details.DependencyClass,
 		Replacement:        details.Replacement,
+		Mechanism:          details.Mechanism,
+		Overlap:            slices.Clone(details.Overlap),
 		RemovesLastUseOf:   slices.Clone(details.RemovesLastUseOf),
+	}
+	if details.Entry != nil {
+		held.Entry = &wireDetailsEntry{
+			Code:   details.Entry.Code,
+			Symbol: details.Entry.Symbol,
+			Path:   details.Entry.Path,
+			Reason: details.Entry.Reason,
+		}
 	}
 	for _, one := range details.Implementations {
 		held.Implementations = append(held.Implementations,
@@ -534,7 +560,17 @@ func (w *wireDetails) details() kinds.Details {
 		ExcludedBy:         w.ExcludedBy,
 		DependencyClass:    w.DependencyClass,
 		Replacement:        w.Replacement,
+		Mechanism:          w.Mechanism,
+		Overlap:            slices.Clone(w.Overlap),
 		RemovesLastUseOf:   slices.Clone(w.RemovesLastUseOf),
+	}
+	if w.Entry != nil {
+		held.Entry = &kinds.Entry{
+			Code:   w.Entry.Code,
+			Symbol: w.Entry.Symbol,
+			Path:   w.Entry.Path,
+			Reason: w.Entry.Reason,
+		}
 	}
 	for _, one := range w.Implementations {
 		held.Implementations = append(held.Implementations,

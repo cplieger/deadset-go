@@ -246,20 +246,20 @@ func distinct(refs []Reference) []Reference {
 // which exemptions and which marks held a symbol back.
 //
 // One sweep runs per configuration, over that configuration's own graph and under
-// the mode given, and the answers are combined. A symbol is a candidate when
+// the input given, and the answers are combined. A symbol is a candidate when
 // every configuration it exists in judged it one: a configuration it does not
 // exist in says nothing about it, and one reference under one configuration is a
 // reference, so a platform guard the other platform uses is not reported. The
 // candidate names the configurations it exists in, which are the ones the finding
 // holds under.
 //
-// The mode is the run's, not one configuration's: a suppression names a
-// declaration whatever platform compiles it, and Mode.Exempt is the union of what
-// the exemption classes computed under each configuration, because an exemption is
-// evidence of a use the analysis cannot see and a use under one configuration is a
-// use. A duplicate, being one symbol, class and detail computed under more than
-// one configuration, is one retained record, at the site of the first entry the
-// mode lists.
+// The input is the run's, not one configuration's: a suppression names a
+// declaration whatever platform compiles it, and SweepInput.Exempt is the union of
+// what the exemption classes computed under each configuration, because an
+// exemption is evidence of a use the analysis cannot see and a use under one
+// configuration is a use. A duplicate, being one symbol, class and detail computed
+// under more than one configuration, is one retained record, at the site of the
+// first entry the input lists.
 //
 // A consumer's reference is a reference of the configuration it was seen in, so a
 // consumer that compiles its call on one platform alone holds the symbol live
@@ -271,12 +271,12 @@ func distinct(refs []Reference) []Reference {
 // it is dead, while an exemption or a mark that held a symbol back under any
 // configuration is in effect, because a suppression needed on one platform is not
 // stale.
-func (x *Matrix) Sweep(m Mode) Result {
+func (x *Matrix) Sweep(in SweepInput) Result {
 	per := make([]Result, len(x.per))
 	held := make([]map[SymbolID]Candidate, len(x.per))
 	r := Result{LiveUnder: make(map[SymbolID]RelationSet)}
 	for config, g := range x.per {
-		per[config] = g.Sweep(m)
+		per[config] = g.Sweep(in)
 		held[config] = make(map[SymbolID]Candidate, len(per[config].Candidates))
 		for _, c := range per[config].Candidates {
 			held[config][c.ID] = c
@@ -292,7 +292,7 @@ func (x *Matrix) Sweep(m Mode) Result {
 	dead := make([]bool, len(x.merged.Symbols))
 	testOfDeadCode := make([]bool, len(x.merged.Symbols))
 	for i := range x.merged.Symbols {
-		c, candidate := x.intersect(&x.merged.Symbols[i], held, &m)
+		c, candidate := x.intersect(&x.merged.Symbols[i], held, in.Mode)
 		if !candidate {
 			continue
 		}
@@ -302,7 +302,7 @@ func (x *Matrix) Sweep(m Mode) Result {
 	}
 
 	r.Components = x.union.componentsOf(dead, testOfDeadCode)
-	r.Retained = x.retained(m.Exempt, per)
+	r.Retained = x.retained(in.Exempt, per)
 	r.Suppressed = x.suppressed(per)
 	return r
 }
@@ -320,7 +320,7 @@ func (x *Matrix) Sweep(m Mode) Result {
 // are the matrix's totals, one per reference rather than one per configuration
 // that saw it, so a kind reading them reads how many references the declaration
 // carries.
-func (x *Matrix) intersect(s *Symbol, held []map[SymbolID]Candidate, m *Mode) (Candidate, bool) {
+func (x *Matrix) intersect(s *Symbol, held []map[SymbolID]Candidate, m Mode) (Candidate, bool) {
 	c := Candidate{ID: s.ID, Relation: ReferenceCounting, Configs: 0, TestOfDeadCode: true}
 	for config := range x.merged.Configurations {
 		if !s.Configs.Has(config) {

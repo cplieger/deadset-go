@@ -35,8 +35,9 @@ const (
 // spells, the languages the kind applies to, whether it reports unless a
 // configuration disables it, the severity a configuration naming neither the code
 // nor its family resolves to, the highest reachability class a finding of the kind
-// may carry as its confidence, what a mechanical edit may do with the finding, and
-// whether the default and the severity are fixed against configuration.
+// may carry as its confidence, what a mechanical edit may do with the finding, the
+// external rules that report the same kind, and whether the default and the severity
+// are fixed against configuration.
 type Row struct {
 	Code            string
 	Name            string
@@ -44,8 +45,16 @@ type Row struct {
 	MaxClass        string
 	Fixability      string
 	Languages       []string
-	DefaultEnabled  bool
-	Fixed           bool
+
+	// Overlap is the external linters and rules that report the same kind in the
+	// language this analyzer reports, as the vocabulary lists them for it, and is
+	// empty for a kind the vocabulary lists none for. A finding carries the list so
+	// that a project already running one of them silences whichever side it
+	// prefers.
+	Overlap []string
+
+	DefaultEnabled bool
+	Fixed          bool
 }
 
 // clone returns a row that shares nothing with the table, so a caller reading one
@@ -53,6 +62,7 @@ type Row struct {
 func (r *Row) clone() Row {
 	held := *r
 	held.Languages = slices.Clone(r.Languages)
+	held.Overlap = slices.Clone(r.Overlap)
 	return held
 }
 
@@ -84,12 +94,12 @@ func rows() []Row {
 		{Code: "DS1703", Name: "stale-suppression", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixNone, DefaultEnabled: true, Fixed: true},
 		{Code: "DS1704", Name: "unmatched-root", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixNone, DefaultEnabled: true, Fixed: true},
 		{Code: "DS1705", Name: "stale-cross-language-edge", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixNone, DefaultEnabled: true},
-		{Code: "DS1801", Name: "unused-parameter", Languages: []string{"go", "ts"}, DefaultSeverity: severityWarn, MaxClass: classCertain, Fixability: fixManual, DefaultEnabled: true},
-		{Code: "DS1802", Name: "unused-receiver", Languages: []string{"go"}, DefaultSeverity: severityWarn, MaxClass: classCertain, Fixability: fixDeletable, DefaultEnabled: true},
-		{Code: "DS1803", Name: "unused-result", Languages: []string{"go", "ts"}, DefaultSeverity: severityWarn, MaxClass: classCertain, Fixability: fixManual, DefaultEnabled: true},
-		{Code: "DS1805", Name: "unreachable-statement", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, DefaultEnabled: true},
-		{Code: "DS1807", Name: "dead-store", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, DefaultEnabled: true},
-		{Code: "DS1809", Name: "unreachable-case", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, DefaultEnabled: true},
+		{Code: "DS1801", Name: "unused-parameter", Languages: []string{"go", "ts"}, DefaultSeverity: severityWarn, MaxClass: classCertain, Fixability: fixManual, Overlap: []string{"revive unused-parameter", "gopls unusedparams", "unparam"}, DefaultEnabled: true},
+		{Code: "DS1802", Name: "unused-receiver", Languages: []string{"go"}, DefaultSeverity: severityWarn, MaxClass: classCertain, Fixability: fixDeletable, Overlap: []string{"revive unused-receiver"}, DefaultEnabled: true},
+		{Code: "DS1803", Name: "unused-result", Languages: []string{"go", "ts"}, DefaultSeverity: severityWarn, MaxClass: classCertain, Fixability: fixManual, Overlap: []string{"unparam"}, DefaultEnabled: true},
+		{Code: "DS1805", Name: "unreachable-statement", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, Overlap: []string{"go vet unreachable"}, DefaultEnabled: true},
+		{Code: "DS1807", Name: "dead-store", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, Overlap: []string{"ineffassign", "wastedassign", "staticcheck SA4006"}, DefaultEnabled: true},
+		{Code: "DS1809", Name: "unreachable-case", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, Overlap: []string{"staticcheck SA4020"}, DefaultEnabled: true},
 	}
 }
 

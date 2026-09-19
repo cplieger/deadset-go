@@ -9,7 +9,7 @@ func TestComponentsGroupACycleAndReportEveryMemberAsARoot(t *testing.T) {
 	b := newGraphBuilder(t).add("alpha", "beta")
 	b.ref("alpha", "beta")
 	b.ref("beta", "alpha")
-	r := b.graph().Sweep(Mode{})
+	r := b.graph().Sweep(SweepInput{})
 
 	// Each holds the other live under reference counting and no root reaches
 	// either, so both are candidates under reachability and the cycle is one
@@ -41,7 +41,7 @@ func cascadeChain(t *testing.T) *graphBuilder {
 
 func TestComponentsFallSetCoversWhatOnlyTheComponentReaches(t *testing.T) {
 	b := cascadeChain(t)
-	got := b.groups(b.graph().Sweep(Mode{}))
+	got := b.groups(b.graph().Sweep(SweepInput{}))
 
 	// The count and the line total a report names at the root cover everything
 	// the deletion removes, which is the component's own members plus every dead
@@ -62,7 +62,7 @@ func TestComponentsFallSetLeavesOutASymbolTwoComponentsReach(t *testing.T) {
 	b := newGraphBuilder(t).add("leftRoot", "rightRoot", "shared")
 	b.ref("leftRoot", "shared")
 	b.ref("rightRoot", "shared")
-	got := b.groups(b.graph().Sweep(Mode{}))
+	got := b.groups(b.graph().Sweep(SweepInput{}))
 
 	// Deleting either root leaves the other reaching the shared declaration, so
 	// it falls with neither and its own component is what reports it.
@@ -86,7 +86,7 @@ func TestComponentsPlaceADeadMemberInsideItsDeadContainer(t *testing.T) {
 	b.declare(handSymbol{name: "fetch", kind: KindInterfaceMethod, parent: "fetcher"})
 	b.ref("open", "box")
 	b.ref("open", "lid")
-	got := b.groups(b.graph().Sweep(Mode{}))
+	got := b.groups(b.graph().Sweep(SweepInput{}))
 
 	// A dead type's fields and methods and a dead interface's methods are members
 	// of the container's component rather than components of their own, and the
@@ -106,7 +106,7 @@ func TestComponentsOrderPlacesEachComponentBeforeTheOnesItReaches(t *testing.T) 
 	// returns is the one the references decide rather than the one the sites do.
 	b := newGraphBuilder(t).add("tail", "head")
 	b.ref("head", "tail")
-	got := b.groups(b.graph().Sweep(Mode{}))
+	got := b.groups(b.graph().Sweep(SweepInput{}))
 
 	// The components read from the root down while each component's own symbol
 	// sets stay ordered by site, so what falls with the root reads in file order.
@@ -124,7 +124,7 @@ func TestComponentsOrderIsTheSameOnEveryCall(t *testing.T) {
 	b.ref("third", "head")
 	g := b.graph()
 
-	first, second := g.Sweep(Mode{}), g.Sweep(Mode{})
+	first, second := g.Sweep(SweepInput{}), g.Sweep(SweepInput{})
 	if got, want := b.groups(first), b.groups(second); !slices.Equal(got, want) {
 		t.Errorf("Sweep returned a different order on the second call\n--- first\n%+v\n+++ second\n%+v", got, want)
 	}
@@ -145,7 +145,7 @@ func TestComponentListNamesEveryMemberOnlyWhereTheModeIsFull(t *testing.T) {
 	b := newGraphBuilder(t)
 	b.declare(handSymbol{name: "box", kind: KindType, lines: 2})
 	b.declare(handSymbol{name: "lid", kind: KindField, parent: "box"})
-	components := b.graph().Sweep(Mode{}).Components
+	components := b.graph().Sweep(SweepInput{}).Components
 	if len(components) != 1 {
 		t.Fatalf("Sweep over a dead type and its field returned %d components, want 1", len(components))
 	}

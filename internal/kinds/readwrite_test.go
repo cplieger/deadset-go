@@ -11,7 +11,7 @@ import (
 
 func TestWriteOnlySymbolNamesEveryWritePositionOfAVariableNothingReads(t *testing.T) {
 	in := inputOf(t, "readwrite-writeonly.txtar", applicationConfig(), Consumers{})
-	in.Production = false
+	in.Mode.Production = false
 
 	found := computed(t, in, map[string]Emitter{writeOnlyCode: WriteOnlySymbol}).Findings
 	if names := namesUnder(found, writeOnlyCode); !slices.Equal(names, []string{"tally"}) {
@@ -42,7 +42,7 @@ func TestWriteOnlySymbolCountsATestReadAsNoReadUnderProductionModeAlone(t *testi
 	for _, production := range []bool{false, true} {
 		t.Run("production="+strconv.FormatBool(production), func(t *testing.T) {
 			in := inputOf(t, "readwrite-writeonly.txtar", applicationConfig(), Consumers{})
-			in.Production = production
+			in.Mode.Production = production
 			found := computed(t, in, map[string]Emitter{writeOnlyCode: WriteOnlySymbol}).Findings
 
 			want := []string{"tally"}

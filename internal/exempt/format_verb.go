@@ -5,6 +5,7 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -188,7 +189,8 @@ type operand struct {
 // turn; the reach stops at each defined type, so the members of a type a retained
 // type is built from are not retained.
 func FormatVerbContractDetector(in *Input) ([]graph.Exemption, error) {
-	f := &formatFlow{kept: newRetention(in, FormatVerbContract), wrappers: forwardingWrappers(in)}
+	sites := newDeclarationSites(in.Result.Fset)
+	f := &formatFlow{kept: newRetention(in, FormatVerbContract), sites: sites, wrappers: forwardingWrappers(in, sites)}
 	if err := f.walkCalls(); err != nil {
 		return nil, err
 	}
@@ -198,6 +200,7 @@ func FormatVerbContractDetector(in *Input) ([]graph.Exemption, error) {
 // formatFlow accumulates the class over one loaded configuration.
 type formatFlow struct {
 	kept     *retention
+	sites    *declarationSites
 	wrappers printWrappers
 }
 
@@ -243,15 +246,14 @@ func (f *formatFlow) printFunction(fn *types.Func) (printSignature, bool) {
 	if sig, formats := declaredPrintFunction(fn); formats {
 		return sig, true
 	}
-	sig, forwards := f.wrappers[fn.Pos()]
+	sig, forwards := f.wrappers[f.sites.of(fn)]
 	return sig, forwards
 }
 
 // printWrappers are the functions of the analysed program that format their
-// operands by forwarding them, each keyed by the position its declaration is
-// written at, which is the one position every package variant that type-checks the
-// declaration shares.
-type printWrappers map[token.Pos]printSignature
+// operands by forwarding them, each kept under the position its declaration is
+// written at.
+type printWrappers map[token.Position]printSignature
 
 // forwardingWrappers returns the functions of the loaded configuration that format
 // their operands by passing them on: a function whose final parameter is a variadic
@@ -263,20 +265,20 @@ type printWrappers map[token.Pos]printSignature
 // A wrapper's callers write the format string when the wrapper passes a parameter
 // of its own to the format position of the call it forwards to; otherwise the
 // wrapper formats every operand as the verb-less forms do.
-func forwardingWrappers(in *Input) printWrappers {
-	candidates := variadicWrappers(in)
+func forwardingWrappers(in *Input, sites *declarationSites) printWrappers {
+	candidates := variadicWrappers(in, sites)
 	found := make(printWrappers, len(candidates))
 	for joined := true; joined; {
 		joined = false
 		for i := range candidates {
-			if _, held := found[candidates[i].pos]; held {
+			if _, held := found[candidates[i].at]; held {
 				continue
 			}
-			sig, forwards := candidates[i].signature(found)
+			sig, forwards := candidates[i].signature(sites, found)
 			if !forwards {
 				continue
 			}
-			found[candidates[i].pos] = sig
+			found[candidates[i].at] = sig
 			joined = true
 		}
 	}
@@ -288,7 +290,7 @@ func forwardingWrappers(in *Input) printWrappers {
 // hands them on.
 type variadicWrapper struct {
 	forwards []forwardedCall
-	pos      token.Pos
+	at       token.Position
 	operands int
 }
 
@@ -304,11 +306,11 @@ type forwardedCall struct {
 // signature returns where the wrapper carries its format string and its operands,
 // and reports whether any call it makes formats them. The first call that does
 // decides, in the order the body writes them.
-func (w *variadicWrapper) signature(found printWrappers) (printSignature, bool) {
+func (w *variadicWrapper) signature(sites *declarationSites, found printWrappers) (printSignature, bool) {
 	for _, call := range w.forwards {
 		inner, formats := declaredPrintFunction(call.to)
 		if !formats {
-			inner, formats = found[call.to.Pos()]
+			inner, formats = found[sites.of(call.to)]
 		}
 		if !formats {
 			continue
@@ -322,34 +324,17 @@ func (w *variadicWrapper) signature(found printWrappers) (printSignature, bool) 
 	return printSignature{}, false
 }
 
-// variadicWrappers returns every function of the loaded configuration whose final
-// parameter is a variadic list of any, with the calls that pass that list on, in one
-// order so that two runs over one load read the same set. A function literal is not
-// one: nothing names it, so no call to it resolves to a function this class can
-// recognise.
-func variadicWrappers(in *Input) []variadicWrapper {
+// variadicWrappers returns every function of the analysed program whose final
+// parameter is a variadic list of any, with the calls that pass that list on. It
+// reads the program's own declarations through the one enumeration the boundary
+// holds, so a loaded consumer's print wrapper is found exactly as the target's is.
+func variadicWrappers(in *Input, sites *declarationSites) []variadicWrapper {
 	var found []variadicWrapper
-	for _, p := range sortedPackages(in.Result.Packages) {
-		if p.TypesInfo == nil {
+	for _, declared := range programFunctions(in) {
+		if declared.decl.Body == nil {
 			continue
 		}
-		for _, file := range sortedFiles(p, in.Result.Fset) {
-			found = append(found, fileWrappers(p.TypesInfo, file)...)
-		}
-	}
-	return found
-}
-
-// fileWrappers returns the candidates one source file declares, in the order the
-// file writes them.
-func fileWrappers(info *types.Info, file *ast.File) []variadicWrapper {
-	var found []variadicWrapper
-	for _, decl := range file.Decls {
-		fd, declares := decl.(*ast.FuncDecl)
-		if !declares || fd.Body == nil {
-			continue
-		}
-		if w, forwards := variadicOperands(info, fd); forwards {
+		if w, forwards := variadicOperands(sites, declared); forwards {
 			found = append(found, w)
 		}
 	}
@@ -361,25 +346,26 @@ func fileWrappers(info *types.Info, file *ast.File) []variadicWrapper {
 // the calls that do. A call that passes the list element by element, or passes a
 // list of its own, is not one: what the rule reads is the operands of the
 // declaration's own caller reaching a formatting facility unchanged.
-func variadicOperands(info *types.Info, fd *ast.FuncDecl) (variadicWrapper, bool) {
-	fn, declares := info.Defs[fd.Name].(*types.Func)
-	if !declares {
-		return variadicWrapper{}, false
-	}
-	sig := fn.Signature()
+//
+// The final parameter's type is read through the boundary's own test for a parameter
+// that keeps nothing of the value it is given, which is where this package decides
+// what the empty interface is.
+func variadicOperands(sites *declarationSites, declared programFunction) (variadicWrapper, bool) {
+	sig := declared.fn.Signature()
 	params := sig.Params()
 	if !sig.Variadic() || params.Len() == 0 {
 		return variadicWrapper{}, false
 	}
-	list, isSlice := params.At(params.Len() - 1).Type().(*types.Slice)
-	if !isSlice || !isAnyType(list.Elem()) {
+	last := params.Len() - 1
+	if !slices.Contains(erasedParameters(sig), last) {
 		return variadicWrapper{}, false
 	}
 
-	w := variadicWrapper{pos: fn.Pos(), operands: params.Len() - 1}
-	operands := params.At(params.Len() - 1)
+	w := variadicWrapper{at: sites.of(declared.fn), operands: last}
+	operands := params.At(last)
 	strung := stringParameters(params)
-	ast.Inspect(fd.Body, func(n ast.Node) bool {
+	info := declared.info
+	ast.Inspect(declared.decl.Body, func(n ast.Node) bool {
 		call, isCall := n.(*ast.CallExpr)
 		if !isCall || !forwardsOperands(info, call, operands) {
 			return true
@@ -390,13 +376,6 @@ func variadicOperands(info *types.Info, fd *ast.FuncDecl) (variadicWrapper, bool
 		return true
 	})
 	return w, len(w.forwards) > 0
-}
-
-// isAnyType reports whether t is the empty interface, which is the element type of
-// the operand list a formatting facility takes.
-func isAnyType(t types.Type) bool {
-	iface, isInterface := types.Unalias(t).Underlying().(*types.Interface)
-	return isInterface && iface.Empty()
 }
 
 // stringParameters indexes the parameters of one signature that are typed as a

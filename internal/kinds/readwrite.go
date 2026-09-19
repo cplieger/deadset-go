@@ -57,7 +57,7 @@ func WriteOnlySymbol(in *Input) ([]Finding, error) {
 	for _, exemption := range in.Exempt {
 		exempted[exemption.ID] = true
 	}
-	counted := writesAndReads(in, in.Production)
+	counted := writesAndReads(in)
 
 	var found []Finding
 	for i := range in.Merged.Symbols {
@@ -183,19 +183,19 @@ type uses struct {
 	test       int
 }
 
-// writesAndReads divides every reference the mode counts by whether it stores
-// into its target. A production mode counts no reference a test file made, which
-// is what leaves a declaration read only from a test reported and makes the
+// writesAndReads divides every reference the run's mode counts by whether it
+// stores into its target. A production mode counts no reference a test file made,
+// which is what leaves a declaration read only from a test reported and makes the
 // written positions the production writes alone.
 //
 // One write position is kept once however many build configurations saw it: the
 // merged reference set holds one reference per configuration it was seen in, and
 // the deletion set the finding names is a set of positions in the source.
-func writesAndReads(in *Input, production bool) map[graph.SymbolID]*uses {
+func writesAndReads(in *Input) map[graph.SymbolID]*uses {
 	counted := make(map[graph.SymbolID]*uses)
 	for i := range in.Merged.References {
 		r := &in.Merged.References[i]
-		if production && r.Test {
+		if in.Mode.Production && r.Test {
 			continue
 		}
 		held := counted[r.To]

@@ -38,15 +38,36 @@ const configurationDocument = "deadset.json"
 // about a line of one.
 const documentPosition = 1
 
-// SuppressionRefusals reports every suppression the grammar refused with a finding
-// of its own rather than with an exit: one carrying no reason, and an entry or a row
-// naming a symbol and no path.
+// SuppressionsWithoutReason reports every suppression the grammar refused for
+// carrying no reason, at any of the three mechanisms.
 //
-// The subject is the suppression as written, so the finding carries the mechanism
-// and the record with a field empty exactly where the suppression lacks it. A
-// refusal binds nothing, so nothing was suppressed and the finding the suppression
-// was meant to cover stays reported beside this one.
-func SuppressionRefusals(in *Input) ([]Finding, error) {
+// The subject is the suppression as written, so the finding carries the mechanism and
+// the record with a field empty exactly where the suppression lacks it. A refusal
+// binds nothing, so nothing was suppressed and the finding the suppression was meant
+// to cover stays reported beside this one.
+//
+// A directive naming several codes and carrying no reason is one finding per code, at
+// the one position the directive is written on, because each code is a record of its
+// own and a reader is told which of them is now unsuppressed.
+func SuppressionsWithoutReason(in *Input) ([]Finding, error) {
+	return in.refused(suppressionWithoutReasonCode)
+}
+
+// UnscopedEntries reports every ignore-file entry and baseline row the grammar
+// refused for naming a symbol and no path, which is an instruction that would mask a
+// match anywhere in the project.
+//
+// An entry lacking both its reason and its path is reported here and under the
+// reason-free kind both, at one position: the two rules are separate checks over the
+// same record, so a maintainer who supplies the missing reason still sees the missing
+// path.
+func UnscopedEntries(in *Input) ([]Finding, error) {
+	return in.refused(unscopedEntryCode)
+}
+
+// refused is the findings of one refusal kind: the refusals the readers reported
+// under its code, in the order they read them.
+func (in *Input) refused(code string) ([]Finding, error) {
 	if in == nil || in.Config == nil {
 		return nil, nil
 	}
@@ -57,11 +78,11 @@ func SuppressionRefusals(in *Input) ([]Finding, error) {
 		if err != nil {
 			return nil, err
 		}
-		one, err := in.selfCheck(refused.Reported, suppressionSubject,
-			in.suppressionRef(refused.Symbol, refused.Path), refused.Site, message)
-		if err != nil {
-			return nil, err
+		if refused.Reported != code {
+			continue
 		}
+		one := selfCheck(refused.Reported, suppressionSubject,
+			in.suppressionRef(refused.Symbol, refused.Path), refused.Site, message)
 		one.Details.Mechanism = refused.Mechanism.String()
 		one.Details.Entry = &Entry{
 			Code:   refused.Code,
@@ -196,12 +217,9 @@ func (in *Input) collapsed(stale []*suppress.Record) ([]Finding, error) {
 	for _, site := range order {
 		records := at[site]
 		first := records[0]
-		one, err := in.selfCheck(staleSuppressionCode, suppressionSubject,
+		one := selfCheck(staleSuppressionCode, suppressionSubject,
 			in.suppressionRef(first.Symbol, first.Path), first.Site,
 			written(first.Mechanism)+" for "+spellCodes(codesAt(records))+" matches no current finding")
-		if err != nil {
-			return nil, err
-		}
 		one.Details.Mechanism = first.Mechanism.String()
 		one.Details.Entry = &Entry{
 			Code:   first.Code,
@@ -241,13 +259,9 @@ func UnmatchedRoots(in *Input) ([]Finding, error) {
 		if strings.ContainsAny(unmatched.Source, "*?") {
 			message = "configured root pattern matches no symbol of the inventory"
 		}
-		one, err := in.selfCheck(unmatchedRootCode, rootSubject, unmatched.Source,
+		found = append(found, selfCheck(unmatchedRootCode, rootSubject, unmatched.Source,
 			token.Position{Filename: configurationDocument, Line: documentPosition, Column: documentPosition},
-			message)
-		if err != nil {
-			return nil, err
-		}
-		found = append(found, one)
+			message))
 	}
 	return found, nil
 }
@@ -282,67 +296,24 @@ func Totals(in *Input) (inEffect, reasons int) {
 	return inEffect, len(sites)
 }
 
-// selfCheck is one finding of a self-check kind, complete.
+// selfCheck starts one finding of a self-check kind: a row of a document, which the
+// framework completes like every other finding.
 //
-// The framework's own completion is not available to these kinds and could not
-// answer for them: it keys every field on the declaration a finding is about, and
-// the subject here is a suppression record or a configured string, which is not a
-// declaration of the inventory at all. So the degenerate values the Contract fixes
-// for a finding no analysis produced are written here: the class and the confidence
-// are certain, no liveness relation decided the subject, the subject belongs to a
-// one-member root component with no deletable line, no exemption retained it, it
-// holds under no build configuration in particular, and nothing mechanical acts on
-// it.
-func (in *Input) selfCheck(code, subject, ref string, site token.Position, message string) (Finding, error) {
-	row, live := catalog.Kind(code)
-	if !live {
-		return Finding{}, fmt.Errorf("%w: a self-check finding names %s, which is no live kind", ErrEmitter, code)
-	}
-	one := Finding{
-		Code:     code,
-		Kind:     row.Name,
-		Language: language,
-		Position: Position{
-			Path:    site.Filename,
-			Line:    site.Line,
-			Column:  site.Column,
-			EndLine: site.Line,
-		},
-		Symbol: Subject{
-			Ref:       ref,
-			Kind:      subject,
-			Name:      ref,
-			SizeLines: 1,
-		},
-		Class:      Certain,
-		Confidence: Certain,
-		// The subject is not a declaration, so no relation decided it and a report
-		// carries none. Relation holds the value the Contract fixes for the finding
-		// no analysis produced, which a document that still requires the member
-		// reads.
-		Live:            true,
-		Relation:        graph.ReferenceCounting,
-		Component:       in.index().componentOf(""),
-		RetainedBy:      []string{},
-		Configurations:  []string{},
-		ConsumersLoaded: loadedNames(in),
-		Fixability:      row.Fixability,
-		Severity:        in.Config.EffectiveSeverity(code, in.consumersLoaded()),
-		Message:         message,
-	}
-	if err := checkMessage(&one); err != nil {
-		return Finding{}, err
-	}
-	return one, nil
-}
-
-// loadedNames is the consumers the run loaded, as every finding carries them.
-func loadedNames(in *Input) []string {
-	loaded := slices.Clone(in.Consumers.Loaded)
-	if loaded == nil {
-		return []string{}
-	}
-	return loaded
+// The subject is the record as the document writes it, and the position is the
+// record's own site. A record spans no range, so it ends on the line it starts on and
+// its size is that one line.
+func selfCheck(code, subject, ref string, site token.Position, message string) Finding {
+	return findingAt(code, Subject{
+		Ref:       ref,
+		Kind:      subject,
+		Name:      ref,
+		SizeLines: 1,
+	}, Position{
+		Path:    site.Filename,
+		Line:    site.Line,
+		Column:  site.Column,
+		EndLine: site.Line,
+	}, message)
 }
 
 // suppressionRef is the reference a finding about one suppression carries: the

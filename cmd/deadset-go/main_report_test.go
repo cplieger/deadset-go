@@ -474,25 +474,51 @@ func findingCodes(findings []kinds.Finding) []string {
 	return codes
 }
 
-// livenessAbsentCodes is the closed list of codes contract/finding.schema.json
-// forbids a liveness relation under, read from the branch of the schema that states
-// the rule, so the test compares the analyzer against the Contract's own list
-// rather than against a copy of it.
-func livenessAbsentCodes(t *testing.T) []string {
+// livenessAbsent is what contract/finding.schema.json forbids a liveness relation
+// on: the subject kinds of a finding about something that is not a declaration, and
+// the codes whose subject the analysis holds live. A finding matching either half
+// carries no relation and every other finding carries one.
+type livenessAbsent struct {
+	subjectKinds []string
+	codes        []string
+}
+
+// forbids reports whether the schema forbids the relation on a finding about one
+// subject kind under one code, which is the rule read from the schema rather than a
+// copy of it.
+func (a *livenessAbsent) forbids(subjectKind, code string) bool {
+	return slices.Contains(a.subjectKinds, subjectKind) || slices.Contains(a.codes, code)
+}
+
+// livenessAbsentRule reads both halves of the rule from the branch of the schema
+// that states it, so the test compares the analyzer against the Contract's own
+// condition rather than against a copy of it.
+func livenessAbsentRule(t *testing.T) livenessAbsent {
 	t.Helper()
 
 	body, err := spec.Contract.ReadFile("contract/finding.schema.json")
 	if err != nil {
 		t.Fatalf("Setup: read contract/finding.schema.json: %v", err)
 	}
+	type condition struct {
+		Properties struct {
+			Code struct {
+				Enum []string `json:"enum"`
+			} `json:"code"`
+			Symbol struct {
+				Properties struct {
+					Kind struct {
+						Enum []string `json:"enum"`
+					} `json:"kind"`
+				} `json:"properties"`
+			} `json:"symbol"`
+		} `json:"properties"`
+	}
 	var document struct {
 		AllOf []struct {
 			If struct {
-				Properties struct {
-					Code struct {
-						Enum []string `json:"enum"`
-					} `json:"code"`
-				} `json:"properties"`
+				condition
+				AnyOf []condition `json:"anyOf"`
 			} `json:"if"`
 			Then struct {
 				Not struct {
@@ -506,12 +532,23 @@ func livenessAbsentCodes(t *testing.T) []string {
 	}
 
 	for _, branch := range document.AllOf {
-		if slices.Contains(branch.Then.Not.Required, "liveness_relation") {
-			return branch.If.Properties.Code.Enum
+		if !slices.Contains(branch.Then.Not.Required, "liveness_relation") {
+			continue
 		}
+		var rule livenessAbsent
+		// The condition is an alternation of one arm per half of the rule, and a
+		// branch stating one half alone spells that arm inline.
+		for _, arm := range append(branch.If.AnyOf, branch.If.condition) {
+			rule.codes = append(rule.codes, arm.Properties.Code.Enum...)
+			rule.subjectKinds = append(rule.subjectKinds, arm.Properties.Symbol.Properties.Kind.Enum...)
+		}
+		if len(rule.codes) == 0 && len(rule.subjectKinds) == 0 {
+			t.Fatalf("Setup: contract/finding.schema.json forbids liveness_relation under no code and no subject kind, so this test pins nothing")
+		}
+		return rule
 	}
 	t.Fatalf("Setup: contract/finding.schema.json states no branch forbidding liveness_relation")
-	return nil
+	return livenessAbsent{}
 }
 
 // livenessModule is the fixture the liveness-relation agreement is measured over: a
@@ -575,25 +612,31 @@ func livenessWritten(t *testing.T, envelope *report.Envelope) map[string]bool {
 	return carried
 }
 
-func TestReportOfOmitsTheLivenessRelationOnExactlyTheCodesTheContractNames(t *testing.T) {
+func TestReportOfOmitsTheLivenessRelationWhereTheContractForbidsIt(t *testing.T) {
 	envelope := reportOfDir(t, livenessModule(t))
 
-	absent := livenessAbsentCodes(t)
+	rule := livenessAbsentRule(t)
 	written := livenessWritten(t, &envelope)
 
-	// Neither half of the rule is measured by a finding list that holds only one of
-	// them, so the fixture's population is checked before the rule is.
-	var listed, other int
+	// No arm of the rule is measured by a finding list that holds none of its
+	// subjects, so the fixture's population is checked before the rule is: a finding
+	// whose subject is not a declaration, a finding under a code of the list, and a
+	// finding a relation decided.
+	var byKind, byCode, decided int
 	for i := range envelope.Findings {
-		if slices.Contains(absent, envelope.Findings[i].Code) {
-			listed++
-			continue
+		found := &envelope.Findings[i]
+		switch {
+		case slices.Contains(rule.subjectKinds, found.Symbol.Kind):
+			byKind++
+		case slices.Contains(rule.codes, found.Code):
+			byCode++
+		default:
+			decided++
 		}
-		other++
 	}
-	if listed == 0 || other == 0 {
-		t.Fatalf("the run reports %d findings under the Contract's closed list and %d outside it, want at least one of each: %v",
-			listed, other, findingCodes(envelope.Findings))
+	if byKind == 0 || byCode == 0 || decided == 0 {
+		t.Fatalf("the run reports %d findings whose subject is not a declaration, %d under the Contract's code list and %d a relation decided, want at least one of each: %v",
+			byKind, byCode, decided, findingCodes(envelope.Findings))
 	}
 
 	for i := range envelope.Findings {
@@ -602,35 +645,18 @@ func TestReportOfOmitsTheLivenessRelationOnExactlyTheCodesTheContractNames(t *te
 
 		// The document says what the finding holds: the member is written exactly
 		// where a relation decided the subject.
-		if got, want := written[key], !found.Live; got != want {
+		if got, want := written[key], !kinds.LivenessAbsent(found); got != want {
 			t.Errorf("the document carries a liveness relation for %s about %s: %v, want %v",
 				found.Code, found.Symbol.Ref, got, want)
 		}
 
-		// Every kind of the emitters table reports a declaration of the inventory,
-		// which is the subject the Contract's closed list is written about, and the
-		// two agree code for code.
-		if _, registered := emitters[found.Code]; registered {
-			if want := slices.Contains(absent, found.Code); found.Live != want {
-				t.Errorf("the run holds %s about %s live: %v, want %v: the Contract's closed list is %v",
-					found.Code, found.Symbol.Ref, found.Live, want, absent)
-			}
-			continue
-		}
-
-		// A kind the pass calls directly reports a subject that is no declaration at
-		// all -- a suppression record, a configured string -- so no relation decided
-		// it and the run writes none, while the Contract requires the member under
-		// every code its list does not name. The disagreement is the list's: it is
-		// written about declarations and has no arm for a subject that is not one.
-		// Whichever side moves, this is where it is read.
-		switch {
-		case slices.Contains(absent, found.Code):
-			t.Errorf("the Contract's closed list now names %s, which reports a %s: the run omits the relation for it already, so the list and the run agree and this case is spent",
-				found.Code, found.Symbol.Kind)
-		case !found.Live:
-			t.Errorf("the run holds %s about the %s %s dead, want no relation: nothing swept a subject that is not a declaration",
-				found.Code, found.Symbol.Kind, found.Symbol.Ref)
+		// The analyzer and the Contract answer the same question about every finding
+		// the run produced: the one predicate the analyzer answers it with holds
+		// exactly where the schema forbids the relation, under either arm of the rule.
+		if got, want := kinds.LivenessAbsent(found), rule.forbids(found.Symbol.Kind, found.Code); got != want {
+			t.Errorf("kinds.LivenessAbsent(%s about the %s %s) = %v, want %v: the Contract forbids the relation on the subject kinds %v and the codes %v",
+				found.Code, found.Symbol.Kind, found.Symbol.Ref, got, want,
+				rule.subjectKinds, rule.codes)
 		}
 	}
 }

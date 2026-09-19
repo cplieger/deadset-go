@@ -65,7 +65,7 @@ const language = config.GoLanguage
 
 // schemaVersionsAccepted lists every report schema version this analyzer reads
 // and writes. contract.json's schema_versions is the list it must equal.
-var schemaVersionsAccepted = []string{"2.0.0"}
+var schemaVersionsAccepted = []string{"4.0.0"}
 
 // settingFlag is one setting a command-line flag supplies: the dotted path the
 // resolved configuration names the setting by, and what the flag's value is.
@@ -120,7 +120,37 @@ const printConfigUsage = "usage: deadset-go print-config [--target=DIR] [--confi
 
 const printRootsUsage = "usage: deadset-go print-roots [--target=DIR] [--config=FILE] [--central=FILE] [--min-confidence=CLASS]"
 
-const printRetainedUsage = "usage: deadset-go print-retained [--target=DIR] [--config=FILE] [--central=FILE] [--min-confidence=CLASS]"
+const printRetainedUsage = "usage: deadset-go print-retained [--target=DIR] [--config=FILE] [--central=FILE] [--min-confidence=CLASS] [--mode=MODE]"
+
+// The modes a run analyses in, as --mode spells them. The production mode is the one
+// the report is built from: it counts no reference a test file made, so an exemption
+// whose only evidence is in a test holds nothing. The plain mode counts every
+// reference, which is the wider set, and a symbol the production mode reports may be
+// held back in it.
+const (
+	modeProduction = "production"
+	modePlain      = "plain"
+)
+
+// modeOf is the reference mode one run analyses under: which references the named
+// mode counts, and the classification of a loaded consumer's test reference the
+// resolved configuration sets.
+//
+// It is where this command decides the mode, once per run, and every stage of that
+// run reads the value it returns: the exemption classes, the sweep and the kinds
+// each take it rather than deriving it again, because two derivations of one
+// question are two answers waiting to differ.
+//
+// A name that is neither mode this command spells is the plain mode, and no
+// invocation reaches here with one: print-retained refuses any other value of
+// --mode before resolving anything, and every verb that reports names the
+// production mode itself.
+func modeOf(cfg *config.Config, named string) graph.Mode {
+	return graph.Mode{
+		Production:              named == modeProduction,
+		ConsumerTestsProduction: cfg.Analysis.ConsumerTests == config.ProductionReference,
+	}
+}
 
 func main() {
 	// An interrupt reaches the toolchain a load spawns through the context, so a
@@ -372,6 +402,16 @@ var emitters = map[string]kinds.Emitter{
 	"DS1303": kinds.UnusedTypeParameter,
 	"DS1601": kinds.UnusedDependency,
 	"DS1605": kinds.UnusedReplace,
+	"DS1701": kinds.SuppressionsWithoutReason,
+	"DS1702": kinds.UnscopedEntries,
+	"DS1703": kinds.StaleSuppressions,
+	"DS1704": kinds.UnmatchedRoots,
+	"DS1801": kinds.UnusedParameter,
+	"DS1802": kinds.UnusedReceiver,
+	"DS1803": kinds.UnusedResult,
+	"DS1805": kinds.UnreachableStatement,
+	"DS1807": kinds.DeadStore,
+	"DS1809": kinds.UnreachableCase,
 }
 
 // configured is one configuration of the matrix: what it loaded and the
@@ -656,8 +696,14 @@ func identifiers(configurations []load.Configuration) []string {
 // configured string that names no symbol is reported on stderr by its issue kind,
 // as the root verb reports it, because the root set is what the sweep decided the
 // candidates against.
+//
+// The set is the one the report is built from unless --mode names the plain mode, so
+// this verb and explain answer about one analysis and a maintainer comparing them
+// reads one set. Which of the two the verb answers is a request of the invocation
+// rather than a setting: no configuration document spells it, and every other verb
+// names the production mode itself.
 func printRetained(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	resolved, code := resolve("print-retained", printRetainedUsage, args, stderr)
+	resolved, mode, code := printRetainedFlags(args, stderr)
 	if code != exitClean {
 		return code
 	}
@@ -668,7 +714,7 @@ func printRetained(ctx context.Context, args []string, stdout, stderr io.Writer)
 		return exitUsage
 	}
 
-	set, err := retainedOf(ctx, &resolved, &options)
+	set, err := retainedOf(ctx, &resolved, &options, mode)
 	if err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
 		return exitCodeFor(err)
@@ -689,22 +735,54 @@ func printRetained(ctx context.Context, args []string, stdout, stderr io.Writer)
 	return exitClean
 }
 
+// printRetainedFlags parses the invocation of print-retained, resolves the
+// configuration documents it names and answers which mode it asked for.
+func printRetainedFlags(args []string, stderr io.Writer) (resolved resolution, mode graph.Mode, code int) {
+	flags := configuredFlagSet("print-retained", printRetainedUsage, stderr, false)
+	named := flags.set.String("mode", modeProduction,
+		"which analysis the retained set is read from: "+modeProduction+" or "+modePlain)
+
+	if err := flags.set.Parse(args); err != nil {
+		return resolution{}, graph.Mode{}, exitUsage
+	}
+	if flags.set.NArg() != 0 {
+		fmt.Fprintf(stderr, "deadset-go: print-retained takes no argument, got %q\n", flags.set.Arg(0))
+		flags.set.Usage()
+		return resolution{}, graph.Mode{}, exitUsage
+	}
+	if *named != modeProduction && *named != modePlain {
+		fmt.Fprintf(stderr, "deadset-go: --mode=%q: the values are %s and %s\n", *named, modeProduction, modePlain)
+		flags.set.Usage()
+		return resolution{}, graph.Mode{}, exitUsage
+	}
+
+	resolved, code = flags.resolution(stderr)
+	if code != exitClean {
+		return resolution{}, graph.Mode{}, code
+	}
+	return resolved, modeOf(&resolved.config, *named), exitClean
+}
+
 // retainedOf resolves the retained set of the matrix: the stages the root verb
 // runs, then the exemption classes per configuration and one sweep of the matrix,
 // in the order the analysis runs them.
 //
 // The classes read one configuration's own types, so they run once per
-// configuration and the mode carries the union of what they found: an exemption is
-// evidence of a use the analysis cannot see, and a use under one configuration is a
-// use. One symbol, class and detail computed under more than one configuration is
-// one retained record, which is what the sweep of the matrix deduplicates.
+// configuration and the sweep's input carries the union of what they found: an
+// exemption is evidence of a use the analysis cannot see, and a use under one
+// configuration is a use. One symbol, class and detail computed under more than one
+// configuration is one retained record, which is what the sweep of the matrix
+// deduplicates.
 //
-// The sweep counts every reference, a test file's included: which symbols a
-// production sweep would report is a question about the findings rather than about
-// what an exemption held back, and a symbol held back under one mode is held back
-// under the other.
-func retainedOf(ctx context.Context, resolved *resolution, options *exempt.Options) (retainedSet, error) {
-	analyzed, err := analysisOf(ctx, resolved, options, false)
+// mode is what the classes compute and the matrix sweeps under, and the two modes
+// answer about different sets. A production sweep counts no reference a test file
+// made, so an exemption whose only evidence is a use a test makes holds nothing and
+// the symbol is reported instead; a sweep that is not the production one counts
+// that reference, so the same exemption holds the symbol back. What is held back
+// under one mode is therefore not what is held back under the other, and a caller
+// asking about the report's retained set asks for the production mode.
+func retainedOf(ctx context.Context, resolved *resolution, options *exempt.Options, mode graph.Mode) (retainedSet, error) {
+	analyzed, err := analysisOf(ctx, resolved, options, mode)
 	if err != nil {
 		return retainedSet{}, err
 	}
@@ -730,39 +808,40 @@ type analysis struct {
 	refusals []suppress.Refusal
 
 	swept graph.Result
+
+	// mode is the reference mode the classes computed and the sweep ran under,
+	// carried here because a kind reads it too and a swept graph does not hold it.
+	mode graph.Mode
 }
 
 // analysisOf runs the stages, the exemption classes of every configuration and one
 // sweep of the matrix, which is what every verb that answers about liveness reads.
 //
 // The classes read one configuration's own types, so they run once per
-// configuration and the mode carries the union of what they found: an exemption is
-// evidence of a use the analysis cannot see, and a use under one configuration is a
-// use. One symbol, class and detail computed under more than one configuration is
-// one retained record, which is what the sweep of the matrix deduplicates.
+// configuration and the sweep's input carries the union of what they found: an
+// exemption is evidence of a use the analysis cannot see, and a use under one
+// configuration is a use. One symbol, class and detail computed under more than one
+// configuration is one retained record, which is what the sweep of the matrix
+// deduplicates.
 //
 // A production sweep drops every reference a test file made, which is what makes a
 // declaration only a test references dead and a test of dead code admitted; a sweep
 // that is not the production one counts every reference, because which symbols a
 // finding reports is a different question from what an exemption held back.
-func analysisOf(ctx context.Context, resolved *resolution, options *exempt.Options, production bool) (analysis, error) {
+func analysisOf(ctx context.Context, resolved *resolution, options *exempt.Options, mode graph.Mode) (analysis, error) {
 	loaded, err := stagesOf(ctx, resolved)
 	if err != nil {
 		return analysis{}, err
 	}
 
-	// The exemption classes compute under the mode the sweep runs in: a test that
-	// marshals a value or compares one is evidence of a use that test makes, so it
-	// holds nothing under a production sweep, which is the same question the mode
-	// answers for a reference. The caller's options are left as they are, because
-	// the two verbs ask for different modes over one configuration.
-	mode := *options
-	mode.Production = production
-
+	// The exemption classes compute under the mode the sweep runs in, which is the
+	// one value the run carries: a test that marshals a value or compares one is
+	// evidence of a use that test makes, so it holds nothing under a production
+	// sweep, which is the same question the mode answers for a reference.
 	per := make([]kinds.Configured, len(loaded.per))
 	var exemptions []graph.Exemption
 	for i := range loaded.per {
-		resolver, computed, exemptErr := exemptionsOf(&loaded.per[i], loaded.root, &mode)
+		resolver, computed, exemptErr := exemptionsOf(&loaded.per[i], loaded.root, options, mode)
 		if exemptErr != nil {
 			return analysis{}, exemptErr
 		}
@@ -785,11 +864,11 @@ func analysisOf(ctx context.Context, resolved *resolution, options *exempt.Optio
 		exemptions: exemptions,
 		marks:      marks,
 		refusals:   refusals,
-		swept: loaded.matrix.Sweep(graph.Mode{
-			Marked:                  bound(marks),
-			Exempt:                  exemptions,
-			ConsumerTestsProduction: resolved.config.Analysis.ConsumerTests == config.ProductionReference,
-			Production:              production,
+		mode:       mode,
+		swept: loaded.matrix.Sweep(graph.SweepInput{
+			Marked: bound(marks),
+			Exempt: exemptions,
+			Mode:   mode,
 		}),
 	}, nil
 }
@@ -852,7 +931,7 @@ func bound(marks []suppress.Record) []graph.SymbolID {
 // exemptionsOf computes the exemptions of one configuration and returns the
 // resolver they were computed through, which is also what a kind reading one
 // configuration's positions reads.
-func exemptionsOf(one *configured, targetRoot string, options *exempt.Options) (*graph.Resolver, []graph.Exemption, error) {
+func exemptionsOf(one *configured, targetRoot string, options *exempt.Options, mode graph.Mode) (*graph.Resolver, []graph.Exemption, error) {
 	resolver, err := graph.NewResolver(&one.result, targetRoot, os.ReadFile, one.symbols)
 	if err != nil {
 		return nil, nil, err
@@ -864,6 +943,7 @@ func exemptionsOf(one *configured, targetRoot string, options *exempt.Options) (
 		Root:    targetRoot,
 		Read:    os.ReadFile,
 		Options: *options,
+		Mode:    mode,
 	}, detectors)
 	if err != nil {
 		return nil, nil, err
@@ -880,10 +960,10 @@ func exemptionsOf(one *configured, targetRoot string, options *exempt.Options) (
 // the stages: the pass reports one under its own kind, so a second list of them
 // beside the findings would be one nothing reads.
 //
-// The findings of the emitters table come first, in the canonical order, and the
-// self-check findings follow in the order their records were read. The canonical
-// order over the whole list is the envelope's, which is where every array a report
-// carries is ordered by the Contract's key.
+// Every kind of the emitters table answers into one list in the canonical order,
+// the kinds that report a suppression record and a configured string included. The
+// canonical order over the whole list is the envelope's, which is where every array
+// a report carries is ordered by the Contract's key.
 type findingSet struct {
 	// loaded is the stages the pass ran over, which is what a report names beside
 	// the findings: the matrix, the consumers, the files the toolchain ignored for
@@ -915,7 +995,7 @@ type findingSet struct {
 // is a defect in a kind's rule rather than something a report could say, and a
 // report this analyzer cannot stand behind is a failure rather than a finding list.
 func findingsOf(ctx context.Context, resolved *resolution, options *exempt.Options) (findingSet, error) {
-	analyzed, err := analysisOf(ctx, resolved, options, true)
+	analyzed, err := analysisOf(ctx, resolved, options, modeOf(&resolved.config, modeProduction))
 	if err != nil {
 		return findingSet{}, err
 	}
@@ -935,18 +1015,6 @@ func findingsOf(ctx context.Context, resolved *resolution, options *exempt.Optio
 	// The dependency a deletion orphans is a completion of the findings of the
 	// pass rather than a kind of its own, so it runs over what the pass answered.
 	kinds.Annotate(in, computed.Findings)
-
-	// The self-check kinds are called rather than registered: their subjects are a
-	// suppression record and a configured string, neither of which is a
-	// declaration of the inventory, and the framework identifies a finding by the
-	// declaration it names. Each completes its own findings.
-	for _, selfCheck := range []kinds.Emitter{kinds.SuppressionRefusals, kinds.StaleSuppressions, kinds.UnmatchedRoots} {
-		found, checkErr := selfCheck(in)
-		if checkErr != nil {
-			return findingSet{}, checkErr
-		}
-		computed.Findings = append(computed.Findings, found...)
-	}
 
 	// A declared edge is evaluated last, over every finding the run holds: a
 	// finding about a symbol an edge names dead is published inside that
@@ -977,22 +1045,22 @@ func inputOf(ctx context.Context, resolved *resolution, analyzed *analysis, gene
 		return nil, err
 	}
 	return &kinds.Input{
-		Config:     &resolved.config,
-		Merged:     analyzed.stages.merged,
-		Sweep:      &analyzed.swept,
-		Refs:       analyzed.stages.refs,
-		Exempt:     analyzed.exemptions,
-		Generated:  func(path string) bool { return generated[path] },
-		Marks:      analyzed.marks,
-		Refusals:   analyzed.refusals,
-		Deps:       &module,
-		Derived:    analyzed.stages.derived,
-		Unmatched:  analyzed.stages.unmatched,
-		Edges:      declared,
-		Matrix:     analyzed.stages.identifiers,
-		Per:        analyzed.per,
-		Consumers:  consumersOf(&resolved.config, analyzed.stages.per),
-		Production: true,
+		Config:    &resolved.config,
+		Merged:    analyzed.stages.merged,
+		Sweep:     &analyzed.swept,
+		Refs:      analyzed.stages.refs,
+		Exempt:    analyzed.exemptions,
+		Generated: func(path string) bool { return generated[path] },
+		Marks:     analyzed.marks,
+		Refusals:  analyzed.refusals,
+		Deps:      &module,
+		Derived:   analyzed.stages.derived,
+		Unmatched: analyzed.stages.unmatched,
+		Edges:     declared,
+		Matrix:    analyzed.stages.identifiers,
+		Per:       analyzed.per,
+		Consumers: consumersOf(&resolved.config, analyzed.stages.per),
+		Mode:      analyzed.mode,
 	}, nil
 }
 

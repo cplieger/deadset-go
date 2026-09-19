@@ -1,0 +1,71 @@
+One declaration per kind of the intra-function group, so a pass over the whole
+group reports six findings under six codes.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+import "io"
+
+// reader answers the reader interface.
+type reader struct{}
+
+// Read answers the reader interface.
+func (reader) Read(p []byte) (int, error) {
+	return len(p), nil
+}
+
+// counter holds a total main reads.
+type counter struct {
+	total int
+}
+
+// scaled names a label its body never reads.
+func scaled(value int, label string) int {
+	return value * 2
+}
+
+// limit names a receiver its body never reads.
+func (c *counter) limit() int {
+	return 10
+}
+
+// tally returns a count every call drops.
+func tally() int {
+	return 1
+}
+
+// halted holds a statement after its return.
+func halted() {
+	println("before the return")
+	return
+	println("after the return")
+}
+
+// overwritten stores twice before anything reads the local.
+func overwritten() int {
+	count := 1
+	count = 2
+	return count
+}
+
+// classify names the reader interface ahead of a type that implements it.
+func classify(v any) string {
+	switch v.(type) {
+	case io.Reader:
+		return "reader"
+	case reader:
+		return "concrete"
+	}
+	return "other"
+}
+
+func main() {
+	c := &counter{total: 3}
+	tally()
+	halted()
+	println(scaled(1, "a"), c.limit(), overwritten(), classify(reader{}), c.total)
+}

@@ -1,0 +1,34 @@
+A method whose body never names its receiver, one whose body reads it, and one the
+signature leaves unnamed.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+// counter holds a total two of its methods read.
+type counter struct {
+	total int
+}
+
+// limit names its receiver and never reads it.
+func (c *counter) limit() int {
+	return 10
+}
+
+// sum reads its receiver, so nothing reports it.
+func (c *counter) sum() int {
+	return c.total
+}
+
+// zero leaves its receiver unnamed, which names nothing to report.
+func (*counter) zero() int {
+	return 0
+}
+
+func main() {
+	c := &counter{total: 3}
+	println(c.limit(), c.sum(), c.zero())
+}

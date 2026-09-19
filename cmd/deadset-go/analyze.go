@@ -48,7 +48,7 @@ const documentMode = 0o644
 // which is the corpus version the Contract's corpus publishes. It is stated rather
 // than read, because no document of the Contract is read at run time, and a test
 // pins it equal to the published value.
-const corpusVersion = "1.0.0"
+const corpusVersion = "1.1.0"
 
 // corpusResult is this analyzer's result over that corpus. No run of the corpus has
 // recorded one, and the Contract admits a pass and a fail and no third value, so the

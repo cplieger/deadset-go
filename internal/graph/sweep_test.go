@@ -22,7 +22,7 @@ func unreachableChain(t *testing.T) *graphBuilder {
 
 func TestSweepNamesTheRelationThatFoundEachCandidate(t *testing.T) {
 	b := unreachableChain(t)
-	got := b.verdicts(b.graph().Sweep(Mode{}))
+	got := b.verdicts(b.graph().Sweep(SweepInput{}))
 
 	// The chain is the case the two relations answer differently: one reference
 	// from a declaration nothing reaches holds its target live under reference
@@ -38,7 +38,7 @@ func TestSweepNamesTheRelationThatFoundEachCandidate(t *testing.T) {
 
 func TestSweepNamesTheRelationsHoldingEachSymbolLive(t *testing.T) {
 	b := unreachableChain(t)
-	live := b.graph().Sweep(Mode{}).LiveUnder
+	live := b.graph().Sweep(SweepInput{}).LiveUnder
 
 	cases := map[string]struct {
 		wantCounted, wantReached bool
@@ -63,7 +63,7 @@ func TestSweepNamesTheRelationsHoldingEachSymbolLive(t *testing.T) {
 
 func TestSweepHoldsAMarkedSymbolLiveUnderBothRelationsWithWhatItReferences(t *testing.T) {
 	b := unreachableChain(t)
-	r := b.graph().Sweep(Mode{Marked: []SymbolID{b.id("unreferenced")}})
+	r := b.graph().Sweep(SweepInput{Marked: []SymbolID{b.id("unreferenced")}})
 
 	// A mark seeds reachability as well as holding its own symbol live, so
 	// nothing the marked declaration alone references is reported. A mark that
@@ -82,7 +82,7 @@ func TestSweepReportsAPublishedRootUnderReferenceCountingAndHoldsItsClosureLive(
 	b := newGraphBuilder(t).add("Exported", "helper")
 	b.root("Exported", RootPublishedAPI)
 	b.ref("Exported", "helper")
-	r := b.graph().Sweep(Mode{})
+	r := b.graph().Sweep(SweepInput{})
 
 	// The published API is the one root kind that hypothesises its caller: the
 	// exported symbol nothing references is a candidate under reference
@@ -115,7 +115,7 @@ func TestSweepHoldsEveryRootThatNamesACallerLiveUnderBothRelations(t *testing.T)
 		t.Run(test.kind.String(), func(t *testing.T) {
 			b := newGraphBuilder(t).add("entry")
 			b.root("entry", test.kind)
-			if got := b.candidates(b.graph().Sweep(Mode{})); !slices.Equal(got, test.want) {
+			if got := b.candidates(b.graph().Sweep(SweepInput{})); !slices.Equal(got, test.want) {
 				t.Errorf("Sweep over one %s root returned %v, want %v", test.kind, got, test.want)
 			}
 		})
@@ -138,14 +138,14 @@ func testOnlyUse(t *testing.T) *graphBuilder {
 
 func TestSweepCountsEveryReferenceAndSeedsEveryRoot(t *testing.T) {
 	b := testOnlyUse(t)
-	if got := b.candidates(b.graph().Sweep(Mode{})); len(got) != 0 {
+	if got := b.candidates(b.graph().Sweep(SweepInput{})); len(got) != 0 {
 		t.Errorf("Sweep counting every reference returned %v, want no candidate", got)
 	}
 }
 
 func TestSweepUnderProductionModeCountsNoTestReferenceAndSeedsNoTestRoot(t *testing.T) {
 	b := testOnlyUse(t)
-	got := b.verdicts(b.graph().Sweep(Mode{Production: true}))
+	got := b.verdicts(b.graph().Sweep(SweepInput{Mode: Mode{Production: true}}))
 
 	// The test root leaves the seed and stays live, so the test function is not a
 	// candidate and the declaration only it reaches is dead under both relations.
@@ -165,7 +165,7 @@ func TestSweepAdmitsATestOfDeadCodeAndDeclinesATestOfLiveCode(t *testing.T) {
 	b.ref("TestDead", "deadTwo")
 	b.ref("TestLive", "live")
 	b.ref("TestLive", "deadOne")
-	r := b.graph().Sweep(Mode{Production: true})
+	r := b.graph().Sweep(SweepInput{Mode: Mode{Production: true}})
 
 	want := []verdict{
 		{name: "deadOne", relation: ReferenceCounting, testRefs: 2},
@@ -193,7 +193,7 @@ func TestSweepJudgesNoPackageAndNoFile(t *testing.T) {
 	b.declare(handSymbol{name: "package", kind: KindPackage})
 	b.declare(handSymbol{name: "file", kind: KindFile, parent: "package"})
 	b.declare(handSymbol{name: "declared", parent: "package"})
-	r := b.graph().Sweep(Mode{})
+	r := b.graph().Sweep(SweepInput{})
 
 	// Nothing references a file, and an import names a package at the import
 	// spec rather than at the package clause, so both would be candidates of
@@ -241,7 +241,7 @@ func (b *graphBuilder) exemption(name, class string) Exemption {
 
 func TestSweepReportsNoExemptSymbolAndHoldsWhatItReferencesLive(t *testing.T) {
 	b := retainedMethod(t)
-	r := b.graph().Sweep(Mode{Exempt: []Exemption{b.exemption("String", "format-verb-contract")}})
+	r := b.graph().Sweep(SweepInput{Exempt: []Exemption{b.exemption("String", "format-verb-contract")}})
 
 	// An exemption seeds reachability the way a mark does, because the retained
 	// method is live by a mechanism the analysis cannot see and the helper its
@@ -265,7 +265,7 @@ func TestSweepReportsNoExemptSymbolAndHoldsWhatItReferencesLive(t *testing.T) {
 func TestSweepRecordsEveryExemptionThatHeldASymbolBackAndNoOther(t *testing.T) {
 	b := newGraphBuilder(t).add("entry", "unreferenced", "alsoUnreferenced")
 	b.root("entry", RootMain)
-	r := b.graph().Sweep(Mode{Exempt: []Exemption{
+	r := b.graph().Sweep(SweepInput{Exempt: []Exemption{
 		b.exemption("alsoUnreferenced", "enum-group"),
 		b.exemption("entry", "generated-file"),
 		b.exemption("unreferenced", "format-verb-contract"),
@@ -293,7 +293,7 @@ func TestSweepRecordsEveryExemptionThatHeldASymbolBackAndNoOther(t *testing.T) {
 
 func TestSweepRecordsNoExemptionNamingASymbolTheInventoryDoesNotHold(t *testing.T) {
 	b := newGraphBuilder(t).add("unreferenced")
-	r := b.graph().Sweep(Mode{Exempt: []Exemption{
+	r := b.graph().Sweep(SweepInput{Exempt: []Exemption{
 		{ID: SymbolID("absent.go:1:1"), Class: "reflective-lookup"},
 	}})
 
@@ -321,7 +321,7 @@ func (b *graphBuilder) suppressedBy(r Result) []string {
 func TestSweepRecordsEveryMarkThatHeldASymbolBackAndNoOther(t *testing.T) {
 	b := newGraphBuilder(t).add("entry", "heldBack", "alsoHeldBack", "exemptAndMarked")
 	b.root("entry", RootMain)
-	r := b.graph().Sweep(Mode{
+	r := b.graph().Sweep(SweepInput{
 		Marked: []SymbolID{
 			b.id("alsoHeldBack"),
 			b.id("exemptAndMarked"),
@@ -350,7 +350,7 @@ func TestSweepRecordsEveryMarkThatHeldASymbolBackAndNoOther(t *testing.T) {
 
 func TestSweepRecordsNoMarkWhenTheModeCarriesNone(t *testing.T) {
 	b := unreachableChain(t)
-	r := b.graph().Sweep(Mode{})
+	r := b.graph().Sweep(SweepInput{})
 
 	// A mode with no mark runs no further pass, so the record is empty while the
 	// declarations nothing holds back are reported as they are without it.
@@ -366,7 +366,7 @@ func TestSweepRecordsAMarkThatHeldBackATestOfDeadCode(t *testing.T) {
 	b := newGraphBuilder(t).add("deadOne").addTest("TestDead")
 	b.root("TestDead", RootTest)
 	b.ref("TestDead", "deadOne")
-	r := b.graph().Sweep(Mode{Production: true, Marked: []SymbolID{b.id("TestDead")}})
+	r := b.graph().Sweep(SweepInput{Marked: []SymbolID{b.id("TestDead")}, Mode: Mode{Production: true}})
 
 	// A test of dead code joins the candidate set by the rule rather than by a
 	// relation, and both relations hold it live, so a record read from the
@@ -396,9 +396,9 @@ func retainedTestDeclaration(t *testing.T) *graphBuilder {
 
 func TestSweepUnderProductionModeSeedsAnExemptTestDeclaration(t *testing.T) {
 	b := retainedTestDeclaration(t)
-	r := b.graph().Sweep(Mode{
-		Production: true,
-		Exempt:     []Exemption{b.exemption("Hook", "linkname-cgo-asm-plugin")},
+	r := b.graph().Sweep(SweepInput{
+		Exempt: []Exemption{b.exemption("Hook", "linkname-cgo-asm-plugin")},
+		Mode:   Mode{Production: true},
 	})
 
 	// The exemption stands for a caller the analysis cannot see, so the retained
@@ -421,7 +421,7 @@ func TestSweepUnderProductionModeSeedsAnExemptTestDeclaration(t *testing.T) {
 func TestSweepUnderProductionModeKeepsNothingATestFileRootReferences(t *testing.T) {
 	b := retainedTestDeclaration(t)
 	b.root("Hook", RootBlank)
-	r := b.graph().Sweep(Mode{Production: true})
+	r := b.graph().Sweep(SweepInput{Mode: Mode{Production: true}})
 
 	// A blank declaration in a test file is a root of a kind a production sweep
 	// keeps, so it is live and seeds the closure; what it references it references
@@ -442,7 +442,7 @@ func TestSweepUnderProductionModeKeepsNothingATestFileRootReferences(t *testing.
 
 func TestSweepUnderProductionModeWithoutTheExemptionReachesNothingTheTestReferences(t *testing.T) {
 	b := retainedTestDeclaration(t)
-	r := b.graph().Sweep(Mode{Production: true})
+	r := b.graph().Sweep(SweepInput{Mode: Mode{Production: true}})
 
 	// The same graph with nothing retaining the test declaration: no seed reaches
 	// it, so the declaration below the one it calls is dead under reachability and
@@ -463,7 +463,7 @@ func TestSweepWithoutTheExemptionReportsWhatTheRetainedMethodReferences(t *testi
 	// The same graph without the exemption: nothing seeds the closure, so the
 	// helper is dead under reachability and reported.
 	want := []string{"Stringer reachability", "String reference-counting", "helper reachability"}
-	if got := b.candidates(b.graph().Sweep(Mode{})); !slices.Equal(got, want) {
+	if got := b.candidates(b.graph().Sweep(SweepInput{})); !slices.Equal(got, want) {
 		t.Errorf("Sweep over the retained method without the exemption returned %v, want %v", got, want)
 	}
 }
@@ -478,7 +478,7 @@ func TestSweepUnderProductionModeReadsTheReferencingFileAndNotTheTargets(t *test
 	// test declaration is therefore walked; the Go rule that a test declaration
 	// is invisible to the package's production files is what makes the case
 	// unreachable through a load rather than anything the mode does.
-	if got := b.candidates(b.graph().Sweep(Mode{Production: true})); len(got) != 0 {
+	if got := b.candidates(b.graph().Sweep(SweepInput{Mode: Mode{Production: true}})); len(got) != 0 {
 		t.Errorf("Sweep under production mode returned %v, want no candidate: the reference comes from a production file", got)
 	}
 }
@@ -539,7 +539,7 @@ func TestThePassesOverAModuleThatHasTestFiles(t *testing.T) {
 		// test functions are roots, and the one declaration no file names is the
 		// whole candidate set.
 		want := []string{"orphan reference-counting"}
-		if got := s.candidatesUnder(pkg, s.graph.Sweep(Mode{})); !slices.Equal(got, want) {
+		if got := s.candidatesUnder(pkg, s.graph.Sweep(SweepInput{})); !slices.Equal(got, want) {
 			t.Errorf("Sweep(tested-module.txtar) reported %v under %s, want %v", got, pkg, want)
 		}
 	})
@@ -677,7 +677,7 @@ func (s *swept) groupsUnder(prefix string, r Result) []grouped {
 func TestSweepOverTheLoadedGraphNamesTheRelationThatFoundEachCandidate(t *testing.T) {
 	const pkg = "go://example.com/sweep#"
 	s := sweepOf(t, "sweep.txtar", RootOptions{PublishedAPI: true})
-	r := s.graph.Sweep(Mode{})
+	r := s.graph.Sweep(SweepInput{})
 
 	// The published entry point is a candidate under reference counting while the
 	// declaration it reaches is live under both relations, so a library's own API
@@ -704,7 +704,7 @@ func TestSweepOverTheLoadedGraphNamesTheRelationThatFoundEachCandidate(t *testin
 func TestSweepOverTheLoadedGraphReportsNothingUnderAMarkedDeclaration(t *testing.T) {
 	const pkg = "go://example.com/sweep#"
 	s := sweepOf(t, "sweep.txtar", RootOptions{PublishedAPI: true})
-	r := s.graph.Sweep(Mode{Marked: []SymbolID{s.id(t, pkg+"unreferenced")}})
+	r := s.graph.Sweep(SweepInput{Marked: []SymbolID{s.id(t, pkg+"unreferenced")}})
 
 	// The mark holds the declaration live under both relations and seeds
 	// reachability from it, so the declaration only it references is not reported
@@ -717,7 +717,7 @@ func TestSweepOverTheLoadedGraphReportsNothingUnderAMarkedDeclaration(t *testing
 
 func TestSweepOverTheLoadedGraphGroupsACycleAndACascade(t *testing.T) {
 	s := sweepOf(t, "sweep.txtar", RootOptions{PublishedAPI: true})
-	r := s.graph.Sweep(Mode{})
+	r := s.graph.Sweep(SweepInput{})
 
 	cases := map[string]struct {
 		prefix         string
@@ -776,7 +776,7 @@ func TestSweepOverTheLoadedGraphGroupsACycleAndACascade(t *testing.T) {
 func TestSweepOverTheLoadedGraphAdmitsATestOfDeadCode(t *testing.T) {
 	const pkg = "go://example.com/sweep/subject#"
 	s := sweepOf(t, "sweep.txtar", RootOptions{PublishedAPI: true})
-	r := s.graph.Sweep(Mode{Production: true})
+	r := s.graph.Sweep(SweepInput{Mode: Mode{Production: true}})
 
 	// The rule needs a mode that counts no test reference, because a test's own
 	// reference is what would otherwise hold its subject live. The test that
@@ -817,7 +817,7 @@ func (s *swept) verdictOf(t *testing.T, r Result, ref string) (reachable bool, c
 func TestSweepOverEveryRootClassHoldsTheRootLiveAndReportsItsLookAlike(t *testing.T) {
 	const pkg = "go://example.com/roots#"
 	s := sweepOf(t, "roots.txtar", RootOptions{PublishedAPI: true})
-	r := s.graph.Sweep(Mode{})
+	r := s.graph.Sweep(SweepInput{})
 
 	// One pair per detected root class: the declaration the class roots, and the
 	// declaration beside it that carries everything about it except what makes it
@@ -886,7 +886,7 @@ func TestSweepOverEveryRootClassHoldsTheRootLiveAndReportsItsLookAlike(t *testin
 func TestSweepWithoutThePublishedSeedReportsEveryExportedSymbolNothingReferences(t *testing.T) {
 	const pkg = "go://example.com/roots#"
 	s := sweepOf(t, "roots.txtar", RootOptions{})
-	r := s.graph.Sweep(Mode{})
+	r := s.graph.Sweep(SweepInput{})
 
 	// The published API is the one seed the target's kind decides, and it is the
 	// one root kind that changes a verdict under reachability alone: withdrawing
@@ -922,7 +922,7 @@ func TestSweepWithoutThePublishedSeedReportsEveryExportedSymbolNothingReferences
 func TestSweepOverAConfiguredRootHoldsItLiveAndReportsTheDeclarationsNothingNames(t *testing.T) {
 	const pkg = "go://example.com/patterns#"
 	s := sweepOf(t, "root-patterns.txtar", RootOptions{Patterns: []string{pkg + "Alpha"}})
-	r := s.graph.Sweep(Mode{})
+	r := s.graph.Sweep(SweepInput{})
 
 	// A configured root is the maintainer's assertion of a caller, so it is live
 	// under both relations, and reporting it would contradict the configuration
@@ -948,7 +948,7 @@ func TestSweepOverAConfiguredRootHoldsItLiveAndReportsTheDeclarationsNothingName
 func TestSweepOverAPackageWithATestVariantLeavesAFunctionOutOfTheTypesComponent(t *testing.T) {
 	const pkg = "go://example.com/receivers#"
 	s := sweepOf(t, "receivers.txtar", RootOptions{})
-	r := s.graph.Sweep(Mode{Production: true})
+	r := s.graph.Sweep(SweepInput{Mode: Mode{Production: true}})
 
 	// A package-level function's container is the package, which no sweep judges,
 	// so the function is a component of its own however dead the type beside it

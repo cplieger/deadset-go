@@ -708,7 +708,6 @@
             },
             "reachability_class": "certain",
             "confidence": "certain",
-            "liveness_relation": "reference-counting",
             "test_only": false,
             "generated": false,
             "component": {
@@ -825,7 +824,6 @@
             },
             "reachability_class": "certain",
             "confidence": "certain",
-            "liveness_relation": "reference-counting",
             "test_only": false,
             "generated": false,
             "component": {
