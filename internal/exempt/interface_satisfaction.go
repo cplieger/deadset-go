@@ -84,7 +84,7 @@ func satisfying(from types.Type, to *types.Interface) []types.Object {
 //
 //nolint:gocritic // slices.SortFunc fixes a comparator's parameters to values.
 func byHeldSymbol(a, b graph.Exemption) int {
-	if c := bySite(a.Site, b.Site); c != 0 {
+	if c := graph.ByPosition(a.Site, b.Site); c != 0 {
 		return c
 	}
 	if c := strings.Compare(string(a.ID), string(b.ID)); c != 0 {

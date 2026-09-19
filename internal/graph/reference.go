@@ -58,10 +58,14 @@ func (k RefKind) String() string {
 // loaded consumer.
 type Reference struct {
 	// From is the declaration of the target that encloses the referencing
-	// identifier, never the file that holds it. A declaration the inventory does
-	// not hold makes no From, so every reference a consumer makes carries none:
-	// the declarations a run reasons about are the target's, and a consumer's are
-	// not enumerated.
+	// identifier. A declaration the inventory does not hold makes no From, so
+	// every reference a consumer makes carries none: the declarations a run
+	// reasons about are the target's, and a consumer's are not enumerated.
+	//
+	// An import is the one reference a file makes rather than a declaration, and
+	// its From is that file's own symbol. An import belongs to the file and
+	// serves every declaration in it at once, so no declaration is the one that
+	// made it, and the file and package kinds are what read those edges.
 	From SymbolID
 	To   SymbolID
 
@@ -163,12 +167,14 @@ type referencePass struct {
 	at        *positions  // renders the file being walked, which is pos while the target is walked
 	info      *types.Info // the type information of the variant that compiles the file being walked
 	symbols   map[site]SymbolID
+	packages  map[string]SymbolID    // the inventory's package symbol per import path, which an import resolves to
 	ids       map[token.Pos]SymbolID // one resolved position, resolved once; empty for a position no symbol declares
 	kinds     map[token.Pos]RefKind  // the kind a parent node fixes for an identifier below it
 	callees   map[token.Pos]bool     // the identifiers a call expression names as its callee
 	reached   map[string]int         // per source file, by the path the toolchain named, the variants that compile it
 	declaring map[string]bool        // the import paths of the packages the target declares
 	consumer  string                 // the module path of the consumer being walked, empty while the target is
+	file      SymbolID               // the symbol of the file being walked, empty outside the inventory
 	err       error
 	refs      []Reference
 	testFiles int
@@ -186,17 +192,21 @@ func newReferencePass(r *load.Result, targetRoot string, read ReadFile, symbols 
 	}
 
 	p := &referencePass{
-		pos:     newPositions(r.Fset, targetRoot, read),
-		symbols: make(map[site]SymbolID, len(symbols)),
-		ids:     make(map[token.Pos]SymbolID),
-		kinds:   make(map[token.Pos]RefKind),
-		callees: make(map[token.Pos]bool),
-		reached: make(map[string]int),
+		pos:      newPositions(r.Fset, targetRoot, read),
+		symbols:  make(map[site]SymbolID, len(symbols)),
+		packages: make(map[string]SymbolID),
+		ids:      make(map[token.Pos]SymbolID),
+		kinds:    make(map[token.Pos]RefKind),
+		callees:  make(map[token.Pos]bool),
+		reached:  make(map[string]int),
 	}
 	p.at = p.pos
 	for i := range symbols {
 		s := &symbols[i]
 		p.symbols[site{file: s.Pos.Filename, line: s.Pos.Line, col: s.Pos.Column}] = s.ID
+		if s.Kind == KindPackage {
+			p.packages[s.PkgPath] = s.ID
+		}
 	}
 	return p, nil
 }
@@ -276,6 +286,13 @@ func (p *referencePass) walkFile(pkg *packages.Package, f *ast.File) error {
 	}
 
 	p.info = pkg.TypesInfo
+	// The file's own symbol, which its imports reference from. A consumer's file
+	// is not in the inventory and does not render against the target's root, so
+	// it is not resolved at all rather than resolved and failing.
+	p.file = ""
+	if p.consumer == "" {
+		p.file, _ = p.symbolAt(f.FileStart)
+	}
 	_, p.test = IsTestFile(position.Filename)
 	if p.test {
 		p.testFiles++
@@ -333,17 +350,49 @@ func (p *referencePass) walkTypeParams(f *ast.Field) {
 	}
 }
 
-// walkGenDecl walks one declaration group. An import declares a package name
-// and references nothing, because an import path is not an identifier.
+// walkGenDecl walks one declaration group.
 func (p *referencePass) walkGenDecl(d *ast.GenDecl) {
 	for _, spec := range d.Specs {
 		switch s := spec.(type) {
+		case *ast.ImportSpec:
+			p.walkImport(s)
 		case *ast.TypeSpec:
 			p.walkTypeSpec(s)
 		case *ast.ValueSpec:
 			p.walkValueSpec(s)
 		}
 	}
+}
+
+// walkImport records the reference one import declaration makes: a read of the
+// imported package's own symbol, at the import spec, from the file the import is
+// written in.
+//
+// The From is the file rather than a declaration because an import belongs to the
+// file: it is written once and serves every declaration below it, so no
+// declaration is the one that made it, and attributing it to the first
+// declaration of the file would make that declaration's deletion look like the
+// import's. The file and package kinds are what read these edges.
+//
+// The reference the language itself offers is not usable here: an import resolves
+// to a package name declared at the import spec, a position no symbol of the
+// inventory is written at, so the identifier walk records nothing and the rule has
+// to be stated. Nothing is recorded for a package the inventory holds no symbol
+// for, which every dependency is, nor for a consumer's import, whose file the
+// inventory does not hold either.
+func (p *referencePass) walkImport(spec *ast.ImportSpec) {
+	if p.file == "" {
+		return
+	}
+	name := p.info.PkgNameOf(spec)
+	if name == nil || name.Imported() == nil {
+		return
+	}
+	to, held := p.packages[name.Imported().Path()]
+	if !held {
+		return
+	}
+	p.add(p.file, to, spec.Pos(), RefRead)
 }
 
 // walkTypeSpec walks one type declaration. A type's own type parameters belong
@@ -484,19 +533,13 @@ func (p *referencePass) inspectExcept(node ast.Node, encl SymbolID, skip ast.Nod
 		case *ast.SelectorExpr:
 			p.reachThrough(n, encl)
 		case *ast.AssignStmt:
-			for _, target := range n.Lhs {
-				p.markWrite(target)
-			}
-			p.markAppendBack(n)
+			p.markAssign(n)
 		case *ast.CompositeLit:
 			p.markFieldKeys(n)
 		case *ast.IncDecStmt:
 			p.markWrite(n.X)
 		case *ast.RangeStmt:
-			if n.Tok == token.ASSIGN {
-				p.markWrite(n.Key)
-				p.markWrite(n.Value)
-			}
+			p.markRange(n)
 		case *ast.TypeAssertExpr:
 			p.markAssert(n.Type)
 		case *ast.TypeSwitchStmt:
@@ -504,9 +547,160 @@ func (p *referencePass) inspectExcept(node ast.Node, encl SymbolID, skip ast.Nod
 		case *ast.CallExpr:
 			p.markCallee(n.Fun)
 			p.markDelete(n)
+		case *ast.BinaryExpr, *ast.SwitchStmt, *ast.MapType, *ast.IndexExpr:
+			p.readComparedFields(n, encl)
 		}
 		return true
 	})
+}
+
+// markAssign records the stores one assignment performs: every target it names,
+// and the collection the append-back idiom reads only to store into.
+func (p *referencePass) markAssign(s *ast.AssignStmt) {
+	for _, target := range s.Lhs {
+		p.markWrite(target)
+	}
+	p.markAppendBack(s)
+}
+
+// markRange records the stores one range statement performs, which are its key and
+// its value where the statement assigns to variables declared elsewhere. A range
+// that declares them stores into nothing the inventory holds.
+func (p *referencePass) markRange(s *ast.RangeStmt) {
+	if s.Tok != token.ASSIGN {
+		return
+	}
+	p.markWrite(s.Key)
+	p.markWrite(s.Value)
+}
+
+// readComparedFields records the fields the comparison one node writes reads. The
+// four nodes are the four shapes that compare a value of struct type: equality,
+// the tag and the cases of an expression switch, the key type of a map type, and
+// the key of an index into a map.
+func (p *referencePass) readComparedFields(n ast.Node, encl SymbolID) {
+	switch n := n.(type) {
+	case *ast.BinaryExpr:
+		// Only equality compares a struct: an ordered comparison is not defined
+		// over one, so a value of struct type is never an operand of it.
+		if n.Op == token.EQL || n.Op == token.NEQ {
+			p.readComparison(encl, n.OpPos, n.X, n.Y)
+		}
+	case *ast.SwitchStmt:
+		p.readSwitch(n, encl)
+	case *ast.MapType:
+		p.readComparison(encl, n.Key.Pos(), n.Key)
+	case *ast.IndexExpr:
+		p.readMapKey(n, encl)
+	}
+}
+
+// readSwitch records the fields one expression switch reads. The tag is compared
+// against every case expression, so each of them is a comparison site of its own
+// and each is recorded where it is written.
+//
+// A switch with no tag compares each case against true and names no struct value,
+// and a type switch names types rather than values, so neither reaches here: the
+// language's type switch is its own node.
+func (p *referencePass) readSwitch(s *ast.SwitchStmt, encl SymbolID) {
+	if s.Tag == nil {
+		return
+	}
+	p.readComparison(encl, s.Tag.Pos(), s.Tag)
+	for _, stmt := range s.Body.List {
+		clause, ok := stmt.(*ast.CaseClause)
+		if !ok {
+			continue
+		}
+		for _, expr := range clause.List {
+			p.readComparison(encl, expr.Pos(), expr)
+		}
+	}
+}
+
+// readMapKey records the fields one index into a map reads. A key is compared
+// against the keys the map holds, so an index is a comparison site the way an
+// operand of equality is. An index into a slice or an array compares nothing, and
+// an instantiation of a generic declaration is written the same way and is not an
+// index at all, so the map is what decides.
+func (p *referencePass) readMapKey(e *ast.IndexExpr, encl SymbolID) {
+	held := p.info.TypeOf(e.X)
+	if held == nil {
+		return
+	}
+	if _, isMap := types.Unalias(held).Underlying().(*types.Map); !isMap {
+		return
+	}
+	p.readComparison(encl, e.Index.Pos(), e.Index)
+}
+
+// readComparison records a read of every field the comparison at pos reads, over
+// the types its operands hold.
+//
+// The two operands of one comparison usually hold one type, and an interface
+// compared with a struct value holds two, so the reads are deduplicated per site:
+// one read per field whichever operand named the type, which is what keeps the
+// reference order a total one.
+func (p *referencePass) readComparison(encl SymbolID, pos token.Pos, operands ...ast.Expr) {
+	var held map[SymbolID]bool
+	for _, operand := range operands {
+		if operand == nil {
+			continue
+		}
+		st, isStruct := comparedStruct(p.info.TypeOf(operand))
+		if !isStruct {
+			continue
+		}
+		if held == nil {
+			held = make(map[SymbolID]bool)
+		}
+		p.readFields(st, held, encl, pos)
+	}
+}
+
+// readFields records one read of every field of one struct, and of every field
+// those reach by value, at pos.
+//
+// Equality over a struct compares every field, and a map key, a switch tag and a
+// switch case are equality, so a field that decides whether two values are equal
+// carries information whatever else does or does not read it. The walk follows a
+// field of struct type and an array of them, because those are compared field by
+// field too. It stops anywhere else: a pointer field is compared by address rather
+// than by what it points at, and the dynamic type of an interface field is not
+// known here. A struct cannot hold itself by value, so the walk ends.
+func (p *referencePass) readFields(st *types.Struct, held map[SymbolID]bool, encl SymbolID, pos token.Pos) {
+	for field := range st.Fields() {
+		if to, ok := p.symbolOf(field); ok && !held[to] {
+			held[to] = true
+			p.add(encl, to, pos, RefRead)
+		}
+		if inner, isStruct := comparedStruct(field.Type()); isStruct {
+			p.readFields(inner, held, encl, pos)
+		}
+	}
+}
+
+// comparedStruct returns the struct a compared value holds, through the arrays the
+// language compares element by element, and reports whether it holds one.
+//
+// A pointer is not stepped through, because comparing two pointers compares
+// addresses and reads no field of either value. Nothing else is stepped through
+// either: a slice, a map and a function are not comparable at all, and what an
+// interface comparison reads is a dynamic type this pass cannot see.
+func comparedStruct(t types.Type) (*types.Struct, bool) {
+	if t == nil {
+		return nil, false
+	}
+	held := types.Unalias(t).Underlying()
+	for {
+		array, isArray := held.(*types.Array)
+		if !isArray {
+			break
+		}
+		held = types.Unalias(array.Elem()).Underlying()
+	}
+	st, isStruct := held.(*types.Struct)
+	return st, isStruct
 }
 
 // record keeps the reference one identifier makes, unless the identifier names

@@ -42,16 +42,19 @@ var ErrMalformed = errors.New("suppress: malformed suppression")
 // finding carries.
 type Mechanism uint8
 
-// The mechanisms this reader covers. A run reads a third document, the baseline,
-// whose rows share the entry shape and adjudicate nothing.
+// The three documents a run reads. Two of them are suppression mechanisms and
+// there is no third; the baseline shares their record shape and adjudicates
+// nothing, so it is a mechanism here and a ratchet on the finding total there.
 const (
-	MechanismInline Mechanism = iota // a directive in the source
-	MechanismIgnore                  // an entry of the ignore file
+	MechanismInline   Mechanism = iota // a directive in the source
+	MechanismIgnore                    // an entry of the ignore file
+	MechanismBaseline                  // a row of the baseline
 )
 
 var mechanismNames = [...]string{
-	MechanismInline: "inline",
-	MechanismIgnore: "ignore",
+	MechanismInline:   "inline",
+	MechanismIgnore:   "ignore",
+	MechanismBaseline: "baseline",
 }
 
 // String returns the mechanism's spelling, and a numbered form for a value
@@ -133,20 +136,4 @@ func (e *MalformedError) Unwrap() []error {
 		return []error{ErrMalformed}
 	}
 	return []error{ErrMalformed, e.Err}
-}
-
-// byPosition orders two rendered positions by file, line and column, which is
-// the order the inventory reads in and the order a reader returns its records
-// in.
-func byPosition(a, b token.Position) int {
-	if a.Filename != b.Filename {
-		if a.Filename < b.Filename {
-			return -1
-		}
-		return 1
-	}
-	if a.Line != b.Line {
-		return a.Line - b.Line
-	}
-	return a.Column - b.Column
 }

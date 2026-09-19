@@ -1,10 +1,11 @@
 One package whose types reach every destination the encoding-reflection class
-names: reflection, the three standard encoders, both template packages, a
-database scan target, a sort interface and a structured-logging call. Each type
-declares one exported method, one unexported method, one exported tagged field,
-one exported untagged field and one unexported tagged field, so the retained set
-distinguishes the four. Two further files carry the cases the class rules on: a
-value reached through a map of slices of pointers, and the writer of a template
+names: reflection, the comparison of two values by reflection, the three standard
+encoders, both template packages, a database scan target, a sort interface and a
+structured-logging call. Each type declares one exported method, one unexported
+method, one exported tagged field, one exported untagged field and one unexported
+tagged field, so the retained set distinguishes the four and states which
+destinations reach a method. Two further files carry the cases the class rules on:
+a value reached through a map of slices of pointers, and the writer of a template
 execution.
 
 -- go.mod --
@@ -296,3 +297,24 @@ func (s *Sink) hidden() int { return s.Extra }
 
 // RenderInto hands the writer to the engine.
 func RenderInto(t *template.Template, s *Sink) error { return t.Execute(s, nil) }
+
+-- comparison.go --
+package flow
+
+import "reflect"
+
+// ComparedPayload reaches the comparison of two values by reflection, which reads
+// the fields of both and calls no method of either.
+type ComparedPayload struct {
+	Name   string `compare:"name"`
+	Extra  int
+	secret string `compare:"secret"`
+}
+
+// Describe is exported.
+func (p ComparedPayload) Describe() string { return p.Name }
+
+func (p ComparedPayload) hidden() int { return p.Extra }
+
+// Same compares two values field by field.
+func Same(a, b ComparedPayload) bool { return reflect.DeepEqual(a, b) }

@@ -1,0 +1,33 @@
+One module of four packages, so the reference pass sees an import of a target
+package, an import of a dependency package the inventory holds no symbol for, a
+blank import, and a package no import reaches.
+
+-- go.mod --
+module example.com/imports
+
+go 1.27.1
+-- main.go --
+package main
+
+import (
+	"fmt"
+
+	_ "example.com/imports/registered"
+	"example.com/imports/used"
+)
+
+func main() { fmt.Println(used.Value) }
+-- used/used.go --
+package used
+
+// Value is what the main package reads.
+const Value = 1
+-- registered/registered.go --
+package registered
+
+func init() {}
+-- unreached/unreached.go --
+package unreached
+
+// Value is what no import names.
+const Value = 2

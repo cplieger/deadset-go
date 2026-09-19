@@ -78,7 +78,6 @@ func TestOfDeadCode(in *Input) ([]Finding, error) {
 		if !held {
 			continue
 		}
-		one.Relation = candidate.Relation
 		one.TestOnly = testOnly(candidate)
 		found = append(found, one)
 	}
@@ -101,7 +100,6 @@ func (in *Input) unusedDeclarations(code string) []Finding {
 		if !held {
 			continue
 		}
-		one.Relation = candidate.Relation
 		one.TestOnly = testOnly(candidate)
 		found = append(found, one)
 	}

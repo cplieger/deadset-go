@@ -1,6 +1,8 @@
 package kinds
 
 import (
+	"go/types"
+
 	"github.com/cplieger/deadset-go/internal/graph"
 )
 
@@ -48,34 +50,34 @@ type narrowing struct {
 // Three things are not. An exemption class stands for a mechanism that reaches a
 // declaration by a name, which is the name a narrowing would take away; the
 // write-only kind claims a declaration nothing reads is deletable, which is the more
-// specific answer about it than a narrower visibility; and a declared cross-language
-// edge stands for a consumer in another language, whose reference no Go reference set
-// holds.
+// specific answer about it than a narrower visibility; and a method that satisfies an
+// interface the target names as a type keeps its name from that interface, whatever
+// the references to it are.
+//
+// A declared cross-language edge is not one of them. It stands for a consumer in
+// another language, and the narrowing finding about a declaration an edge names is
+// reported here and then published as the pending finding of that edge's evaluation,
+// which is the answer a merge resolves against the paired side.
 //
 // The exemptions are the sweep's own, because an exemption on a declaration every
 // relation found live is only in what the sweep was given and that is the one a
-// narrowing has to ask about. edges is the seam the edge reader fills, and the report
-// of this slot proposes the input field that replaces it.
-func newNarrowing(in *Input, edges []string) *narrowing {
+// narrowing has to ask about.
+func newNarrowing(in *Input) *narrowing {
 	n := &narrowing{
 		in:           in,
 		reach:        make(map[graph.SymbolID]narrowScope),
 		named:        make(map[graph.SymbolID]int),
 		fromTest:     make(map[graph.SymbolID]int),
-		unnarrowable: make(map[graph.SymbolID]bool, len(in.Exempt)+len(edges)),
+		unnarrowable: make(map[graph.SymbolID]bool, len(in.Exempt)),
 	}
 	for _, exemption := range in.Exempt {
 		n.unnarrowable[exemption.ID] = true
-	}
-	for _, ref := range edges {
-		if id := in.index().byRef[ref]; id != "" {
-			n.unnarrowable[id] = true
-		}
 	}
 	for i := range in.Merged.References {
 		n.widen(&in.Merged.References[i])
 	}
 	n.holdWriteOnly()
+	n.holdInterfaceSatisfying()
 	return n
 }
 
@@ -108,6 +110,54 @@ func (n *narrowing) holdWriteOnly() {
 		symbol := &n.in.Merged.Symbols[i]
 		if _, reports := writeOnly(n.in, symbol, counted[symbol.ID], exempted); reports {
 			n.unnarrowable[symbol.ID] = true
+		}
+	}
+}
+
+// holdInterfaceSatisfying keys every method of the target that satisfies an
+// interface the target declares and something names as a type.
+//
+// Such a method cannot be unexported: unexporting it takes the type out of the
+// interface's implementors, so the conversion the interface exists for stops
+// compiling, and the edit a narrowing finding licenses is one no maintainer can
+// make on the subject alone. The interfaces this reads are the target's own, because
+// a method converted to an interface of another module is one the interface
+// satisfaction class already holds; an assertion of satisfaction counts as naming
+// the interface, because the assertion is itself a use the narrowing would break.
+func (n *narrowing) holdInterfaceSatisfying() {
+	facts := interfacesOf(n.in)
+	for i := range n.in.Per {
+		one := &n.in.Per[i]
+		if one.Result == nil || one.Resolve == nil {
+			continue
+		}
+		d := declaredIn(one)
+		for _, declared := range d.interfaces {
+			if len(facts.typeUsedBy[declared.id]) == 0 {
+				continue
+			}
+			n.holdSatisfiers(one, declared, d.concrete)
+		}
+	}
+}
+
+// holdSatisfiers keys the methods of every concrete type of the target that
+// satisfies one interface, which are the methods that interface's method set names.
+func (n *narrowing) holdSatisfiers(one *Configured, declared declaredInterface, concrete []declaredType) {
+	for _, held := range concrete {
+		recv, satisfies := implementing(held.typ, declared.iface)
+		if !satisfies {
+			continue
+		}
+		set := types.NewMethodSet(recv)
+		for method := range declared.iface.Methods() {
+			sel := set.Lookup(method.Pkg(), method.Name())
+			if sel == nil {
+				continue
+			}
+			if id, inventoried := one.Resolve.Object(sel.Obj()); inventoried {
+				n.unnarrowable[id] = true
+			}
 		}
 	}
 }
@@ -150,11 +200,17 @@ func (in *Input) closed(symbol *graph.Symbol) bool {
 // kinds: an exported declaration of a closed world that a reference names, that the
 // sweep found live, and that nothing beyond the reference set speaks for.
 //
-// A type parameter is not a subject. It is exported by its name and no consumer can
-// write it, because a caller supplies a type argument by position.
+// Three kinds of declaration are not subjects whatever their references are, because
+// for each of them the exported name answers to something other than the references.
+// A type parameter is exported by its name and no consumer can write it, because a
+// caller supplies a type argument by position. An interface method's exportedness is
+// its interface's contract, so unexporting it changes the method set every
+// implementing type must provide. A struct field's exportedness is what an encoder,
+// a template and a reflective lookup read it by, and those name it by string where
+// no reference does.
 func (n *narrowing) narrowable(symbol *graph.Symbol) bool {
 	switch {
-	case !symbol.Exported, symbol.Kind == graph.KindTypeParam:
+	case !symbol.Exported, unnarrowableKind(symbol.Kind):
 		return false
 	case n.unnarrowable[symbol.ID]:
 		return false
@@ -162,6 +218,18 @@ func (n *narrowing) narrowable(symbol *graph.Symbol) bool {
 		return false
 	default:
 		return n.named[symbol.ID] > 0
+	}
+}
+
+// unnarrowableKind reports whether one kind of declaration is outside both
+// narrowing kinds' population: a type parameter, a method an interface declares, and
+// a field of a struct.
+func unnarrowableKind(kind graph.SymbolKind) bool {
+	switch kind {
+	case graph.KindTypeParam, graph.KindInterfaceMethod, graph.KindField:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -188,17 +256,10 @@ func (n *narrowing) subjects() []*graph.Symbol {
 // external test package and an internal tree are closed whatever the run knows about
 // consumers.
 func UnnecessaryExport(in *Input) ([]Finding, error) {
-	return unnecessaryExport(in, nil)
-}
-
-// unnecessaryExport is the kind with the declared cross-language edges given
-// explicitly, which is the seam a test sets until the edge reader has an input field
-// to fill.
-func unnecessaryExport(in *Input, edges []string) ([]Finding, error) {
 	if in == nil || in.Merged == nil || in.Sweep == nil {
 		return nil, nil
 	}
-	n := newNarrowing(in, edges)
+	n := newNarrowing(in)
 	subjects := n.subjects()
 	found := make([]Finding, 0, len(subjects))
 	for _, symbol := range subjects {
@@ -226,16 +287,10 @@ func unnecessaryExport(in *Input, edges []string) ([]Finding, error) {
 //
 // It reports under the same closed-world precondition UnnecessaryExport does.
 func UnnecessaryExposure(in *Input) ([]Finding, error) {
-	return unnecessaryExposure(in, nil)
-}
-
-// unnecessaryExposure is the kind with the declared cross-language edges given
-// explicitly, for the reason unnecessaryExport is.
-func unnecessaryExposure(in *Input, edges []string) ([]Finding, error) {
 	if in == nil || in.Merged == nil || in.Sweep == nil {
 		return nil, nil
 	}
-	n := newNarrowing(in, edges)
+	n := newNarrowing(in)
 	subjects := n.subjects()
 	found := make([]Finding, 0, len(subjects))
 	for _, symbol := range subjects {
@@ -256,10 +311,6 @@ func (n *narrowing) finding(symbol *graph.Symbol, code, visibility, message stri
 	if !held {
 		return Finding{}, false
 	}
-	// The subject is live, so the relation a report carries is the counting one: the
-	// kind decides on the references made to the declaration and walks no closure
-	// from a root.
-	one.Relation = graph.ReferenceCounting
 	one.TestOnly = n.fromTest[symbol.ID] == n.named[symbol.ID]
 	one.Details = Details{NarrowerVisibility: visibility}
 	return one, true
@@ -292,7 +343,6 @@ func UnreachableExport(in *Input) ([]Finding, error) {
 		if !held {
 			continue
 		}
-		one.Relation = candidate.Relation
 		found = append(found, one)
 	}
 	return found, nil

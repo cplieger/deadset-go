@@ -46,7 +46,7 @@ func ErrorsDuckTypingDetector(in *Input) ([]graph.Exemption, error) {
 		}
 	}
 
-	slices.SortFunc(scan.found, func(a, b errorsDuckRetained) int { return bySite(a.at, b.at) })
+	slices.SortFunc(scan.found, func(a, b errorsDuckRetained) int { return graph.ByPosition(a.at, b.at) })
 	found := make([]graph.Exemption, 0, len(scan.found))
 	for i := range scan.found {
 		found = append(found, scan.found[i].exemption)
@@ -143,7 +143,7 @@ func (s *errorsDuckScan) sites(conversions []Conversion) ([]errorsDuckSite, erro
 		}
 		sites = append(sites, errorsDuckSite{from: c.From, at: at})
 	}
-	slices.SortFunc(sites, func(a, b errorsDuckSite) int { return bySite(a.at, b.at) })
+	slices.SortFunc(sites, func(a, b errorsDuckSite) int { return graph.ByPosition(a.at, b.at) })
 	return sites, nil
 }
 

@@ -6,6 +6,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/cplieger/deadset-go/internal/exempt"
 	"github.com/cplieger/deadset-go/internal/graph"
 	"github.com/cplieger/deadset-go/internal/load"
 	"golang.org/x/tools/go/packages"
@@ -382,22 +383,6 @@ func TestUnreachableExportYieldsEverySubjectAMoreSpecificKindReports(t *testing.
 	}
 }
 
-func TestNarrowingLeavesADeclaredCrossLanguageEdgeToTheEdgeEvaluation(t *testing.T) {
-	in := inputOf(t, "narrowing-published.txtar", libraryConfig(), Consumers{})
-	found, err := unnecessaryExport(in, []string{internalHelper})
-	if err != nil {
-		t.Fatalf("UnnecessaryExport(a declared edge) = error %v, want the findings", err)
-	}
-	if slices.Contains(narrowedRefs(found), internalHelper) {
-		t.Errorf("UnnecessaryExport(a declared edge) reported %s, want no finding on a declaration "+
-			"a declared cross-language edge reaches from outside its package", internalHelper)
-	}
-	if !slices.Contains(narrowedRefs(found), commandRun) {
-		t.Errorf("UnnecessaryExport(a declared edge) dropped %s, want the declarations no edge names",
-			commandRun)
-	}
-}
-
 func TestNarrowingLeavesADeclarationAnExemptionHoldsLiveAlone(t *testing.T) {
 	in := inputOf(t, "narrowing-published.txtar", libraryConfig(), Consumers{})
 	exempted := narrowedIDOf(t, in, internalHelper)
@@ -557,9 +542,62 @@ func TestNarrowingLeavesADeclarationReferencedFromOutsideTheModuleAlone(t *testi
 	}
 }
 
+// The framework fills the same fields for a narrowing finding as for any other, and
+// the confidence of one is the reachability class: a declaration of a package
+// nothing outside can import is certain whatever the run knows about consumers,
+// while a published one is certain only where the run loaded every consumer the
+// scope declared. A consumer set declared complete and declaring none is what opens
+// the two narrowing kinds on the published package, and it is not consumer
+// information, so those findings are possible.
 func TestNarrowingReportsEveryFindingTheFrameworkAccepts(t *testing.T) {
-	in := inputOf(t, "narrowing-published.txtar", libraryConfig(),
-		Consumers{Complete: true})
+	loaded := Consumers{Declared: []string{theConsumer}, Loaded: []string{theConsumer}, Complete: true}
+	tests := []struct {
+		name      string
+		consumers Consumers
+		published string
+	}{
+		{name: "a_complete_consumer_set_that_declares_none", consumers: Consumers{Complete: true}, published: "possible"},
+		{name: "a_declared_consumer_that_loaded", consumers: loaded, published: "certain"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			in := inputOf(t, "narrowing-published.txtar", libraryConfig(), tc.consumers)
+			result, err := Compute(in, map[string]Emitter{
+				unnecessaryExportCode:   UnnecessaryExport,
+				unnecessaryExposureCode: UnnecessaryExposure,
+				unreachableExportCode:   UnreachableExport,
+			})
+			if err != nil {
+				t.Fatalf("Compute(the three narrowing kinds) = error %v, want the findings", err)
+			}
+			want := map[string]string{
+				publishedHelper:   unnecessaryExportCode + " warn narrowable " + tc.published,
+				internalHelper:    unnecessaryExportCode + " warn narrowable certain",
+				commandRun:        unnecessaryExportCode + " warn narrowable certain",
+				publishedShared:   unnecessaryExposureCode + " warn narrowable " + tc.published,
+				commandUnused:     unreachableExportCode + " deny deletable certain",
+				internalUnused:    unreachableExportCode + " deny deletable certain",
+				internalForgotten: unreachableExportCode + " deny deletable certain",
+				testPackageUnused: unreachableExportCode + " deny deletable certain",
+			}
+			got := make(map[string]string, len(result.Findings))
+			for _, f := range result.Findings {
+				got[f.Symbol.Ref] = f.Code + " " + string(f.Severity) + " " +
+					f.Fixability + " " + string(f.Confidence)
+			}
+			if !maps.Equal(got, want) {
+				t.Errorf("Compute(the three narrowing kinds) reported %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+// A narrowing finding's subject is a live declaration, so no liveness relation
+// decided it and the finding says so; an unreachable-export finding's subject is a
+// candidate, so it carries the relation that found it. The framework decides both
+// from the sweep, which is why one pass over one fixture measures the two.
+func TestANarrowingFindingCarriesNoLivenessRelationAndAnUnreachableExportCarriesTheCandidates(t *testing.T) {
+	in := inputOf(t, "narrowing-published.txtar", libraryConfig(), Consumers{Complete: true})
 	result, err := Compute(in, map[string]Emitter{
 		unnecessaryExportCode:   UnnecessaryExport,
 		unnecessaryExposureCode: UnnecessaryExposure,
@@ -568,23 +606,27 @@ func TestNarrowingReportsEveryFindingTheFrameworkAccepts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compute(the three narrowing kinds) = error %v, want the findings", err)
 	}
-	want := map[string]string{
-		publishedHelper:   unnecessaryExportCode + " warn narrowable certain",
-		internalHelper:    unnecessaryExportCode + " warn narrowable certain",
-		commandRun:        unnecessaryExportCode + " warn narrowable certain",
-		publishedShared:   unnecessaryExposureCode + " warn narrowable certain",
-		commandUnused:     unreachableExportCode + " deny deletable certain",
-		internalUnused:    unreachableExportCode + " deny deletable certain",
-		internalForgotten: unreachableExportCode + " deny deletable certain",
-		testPackageUnused: unreachableExportCode + " deny deletable certain",
+	want := map[string]bool{
+		publishedHelper:   true,
+		internalHelper:    true,
+		commandRun:        true,
+		publishedShared:   true,
+		commandUnused:     false,
+		internalUnused:    false,
+		internalForgotten: false,
+		testPackageUnused: false,
 	}
-	got := make(map[string]string, len(result.Findings))
+	live := make(map[string]bool, len(result.Findings))
 	for _, f := range result.Findings {
-		got[f.Symbol.Ref] = f.Code + " " + string(f.Severity) + " " +
-			f.Fixability + " " + string(f.Confidence)
+		live[f.Symbol.Ref] = f.Live
 	}
-	if !maps.Equal(got, want) {
-		t.Errorf("Compute(the three narrowing kinds) reported %v, want %v", got, want)
+	if !maps.Equal(live, want) {
+		t.Errorf("Compute(the three narrowing kinds) reported the live subjects %v, want %v", live, want)
+	}
+	forgotten := findingOf(t, result.Findings, unreachableExportCode, "Forgotten")
+	if forgotten.Relation != graph.Reachability {
+		t.Errorf("Compute() reports %s with the relation %q, want %q: the candidate was found by reachability",
+			internalForgotten, forgotten.Relation, graph.Reachability)
 	}
 }
 
@@ -612,6 +654,85 @@ func TestNarrowingCarriesTheVocabularyNameAndTheLanguage(t *testing.T) {
 		}
 		if f.Language != "go" {
 			t.Errorf("Compute() reported %s in the language %q, want %q", f.Symbol.Ref, f.Language, "go")
+		}
+	}
+}
+
+// The declarations of narrowing-members.txtar the two narrowing kinds judge.
+const (
+	storeFill        = "go://example.com/app/internal/store#Fill"
+	storeDrain       = "go://example.com/app/internal/store#Drain"
+	storeSink        = "go://example.com/app/internal/store#Sink"
+	storeSinkWrite   = "go://example.com/app/internal/store#Sink.Write"
+	storeBuffer      = "go://example.com/app/internal/store#Buffer"
+	storeBufferData  = "go://example.com/app/internal/store#Buffer.Data"
+	storeBufferWrite = "go://example.com/app/internal/store#Buffer.Write"
+	storePipe        = "go://example.com/app/internal/store#Pipe"
+	storePipeWrite   = "go://example.com/app/internal/store#Pipe.Write"
+	sharedRecord     = "go://example.com/app/shared#Record"
+	sharedRecordName = "go://example.com/app/shared#Record.Name"
+	sharedLabel      = "go://example.com/app/shared#Label"
+)
+
+// Neither narrowing kind reports a method an interface declares, a field of a
+// struct, or a method that satisfies an interface the target names as a type. Each
+// exclusion is measured beside the declarations of the same fixture the kinds do
+// report, so an empty population cannot pass for an exclusion.
+func TestNarrowingReportsNoInterfaceMethodNoFieldAndNoInterfaceSatisfyingMethod(t *testing.T) {
+	in := inputOf(t, "narrowing-members.txtar", applicationConfig(), Consumers{Complete: true})
+	found, err := UnnecessaryExport(in)
+	if err != nil {
+		t.Fatalf("UnnecessaryExport(narrowing-members) = error %v, want the findings", err)
+	}
+	exposed, err := UnnecessaryExposure(in)
+	if err != nil {
+		t.Fatalf("UnnecessaryExposure(narrowing-members) = error %v, want the findings", err)
+	}
+	want := map[string]string{
+		storeFill:    visibilityPackage,
+		storeDrain:   visibilityPackage,
+		storeSink:    visibilityFile,
+		storeBuffer:  visibilityFile,
+		storePipe:    visibilityPackage,
+		sharedRecord: visibilityModule,
+		sharedLabel:  visibilityModule,
+	}
+	if got := narrowedTo(append(found, exposed...)); !maps.Equal(got, want) {
+		t.Errorf("the narrowing kinds over narrowing-members reported %v, want %v", got, want)
+	}
+}
+
+// The two rules that exclude a method are not one rule: the exemption class holds a
+// method the program converts to an interface, and the kinds' own rule holds a
+// method that satisfies an interface the target names as a type whether or not
+// anything is converted to it. This pins which rule answers for each of the
+// fixture's two satisfying methods, so a later change cannot delete one rule and
+// keep both methods excluded by accident.
+func TestNarrowingExcludesASatisfyingMethodTheExemptionClassDoesNotHold(t *testing.T) {
+	in := inputOf(t, "narrowing-members.txtar", applicationConfig(), Consumers{Complete: true})
+
+	exempted := make(map[string]bool, len(in.Exempt))
+	for _, exemption := range in.Exempt {
+		if exemption.Class == string(exempt.InterfaceSatisfaction) {
+			exempted[in.Refs[exemption.ID]] = true
+		}
+	}
+	if !exempted[storePipeWrite] {
+		t.Errorf("the interface-satisfaction class does not hold %s, which the conversion at the call of Drain retains: it holds %v",
+			storePipeWrite, slices.Sorted(maps.Keys(exempted)))
+	}
+	if exempted[storeBufferWrite] {
+		t.Errorf("the interface-satisfaction class holds %s, which nothing converts to the interface, so this test no longer measures the kinds' own rule",
+			storeBufferWrite)
+	}
+
+	found, err := UnnecessaryExport(in)
+	if err != nil {
+		t.Fatalf("UnnecessaryExport(narrowing-members) = error %v, want the findings", err)
+	}
+	for _, ref := range []string{storeBufferWrite, storePipeWrite} {
+		if slices.Contains(narrowedRefs(found), ref) {
+			t.Errorf("UnnecessaryExport reported %s, want no finding on a method that satisfies an interface the target names as a type", ref)
 		}
 	}
 }

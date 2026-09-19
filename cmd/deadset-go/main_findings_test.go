@@ -9,24 +9,39 @@ import (
 
 	"github.com/cplieger/deadset-go/internal/catalog"
 	"github.com/cplieger/deadset-go/internal/config"
+	"github.com/cplieger/deadset-go/internal/exempt"
 	"github.com/cplieger/deadset-go/internal/graph"
 	"github.com/cplieger/deadset-go/internal/kinds"
 	"github.com/cplieger/deadset-go/internal/load"
 )
 
-// goKindsWithoutEmitter are the live Go kinds this version of the analyzer has no
-// rule for, so a run reports nothing under any of them. Each is named rather than
-// counted, so the table's test says which kinds are silent instead of allowing a
+// goKindsWithoutEmitter are the live Go kinds the emitters table holds no entry
+// for, so no run of that table reports one. Each is named rather than counted, so
+// the table's test says which kinds the table is silent about instead of allowing a
 // kind to go missing unnoticed.
 //
-// DS1704 is in the list and is nonetheless reported, by the verb that reads the
-// root set rather than by a kind: a configured string that names no symbol is
-// answered by the stage that matched it, and the finding for it joins the report
-// with the envelope rather than through the emitters table.
+// Two of the groups have a rule all the same, for one reason: the framework
+// identifies a finding by the declaration of the inventory it names, and none of
+// these kinds has a declaration for a subject.
+//
+// DS1701 to DS1704 are answered by the rules the findings pass calls directly,
+// after the table has run: a suppression record and a configured string are not
+// declarations, so each of those rules completes its own findings and registering
+// one would fail every run.
+//
+// DS1501, DS1601 and DS1605 have a rule this analyzer does not run at all. Their
+// subjects are a file no configuration built, a module requirement and a module
+// directive, and the framework refuses a finding naming any of the three, so the
+// table cannot hold them and nothing calls them until the framework admits a
+// subject that is not a declaration.
+//
+// DS1705 is the merge's, which is another product, and the DS18xx group has no rule
+// in this version.
 var goKindsWithoutEmitter = []string{
-	"DS1501", "DS1502", // the file kinds
+	"DS1501",           // a file no configuration built
 	"DS1601", "DS1605", // the dependency kinds
-	"DS1701", "DS1702", "DS1703", "DS1704", "DS1705", // the self-checks
+	"DS1701", "DS1702", "DS1703", "DS1704", // the self-checks the pass calls directly
+	"DS1705",                                                   // the stale cross-language edge, which the merge answers
 	"DS1801", "DS1802", "DS1803", "DS1805", "DS1807", "DS1809", // the intra-function group
 }
 
@@ -490,4 +505,86 @@ func findingUnder(t *testing.T, findings []kinds.Finding, code string) kinds.Fin
 		t.Fatalf("the pass reports %d findings under %s, want 1:\n%s", len(held), code, strings.Join(reported(findings), "\n"))
 	}
 	return held[0]
+}
+
+// testEvidenceModule is the fixture the exemption mode is measured over: a field
+// production writes and never reads, whose only marshalling is in a test file. The
+// encoding class holds it under a plain sweep and holds nothing under a production
+// one, so the two verbs answer differently about one declaration.
+func testEvidenceModule(t *testing.T) string {
+	t.Helper()
+
+	return writeModule(t, map[string]string{
+		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
+		"app.go": "package main\n\nfunc main() { println(record().Name) }\n\n" +
+			"// Record is what the program fills.\ntype Record struct {\n" +
+			"\t// Name is what the entry point reads.\n\tName string `json:\"name\"`\n\n" +
+			"\t// Tally is written here and read by nothing this module compiles into its\n" +
+			"\t// program, so only the test that marshals a Record uses it.\n" +
+			"\tTally int `json:\"tally\"`\n}\n\n" +
+			"// record is the value the entry point prints.\nfunc record() Record {\n" +
+			"\tr := Record{Name: \"n\"}\n\tr.Tally = 1\n\treturn r\n}\n",
+		"app_test.go": "package main\n\nimport (\n\t\"encoding/json\"\n\t\"testing\"\n)\n\n" +
+			"func TestRecordMarshals(t *testing.T) {\n" +
+			"\tif _, err := json.Marshal(record()); err != nil {\n\t\tt.Fatal(err)\n\t}\n}\n",
+		repositoryDocument: `{"target": {"kind": "application"}}`,
+	})
+}
+
+func TestAnalysisOfComputesItsExemptionsUnderTheModeItSweepsIn(t *testing.T) {
+	dir := testEvidenceModule(t)
+	const subject = "go://example.com/app#Record.Tally"
+
+	resolved, code := resolve("print-retained", printRetainedUsage, []string{"--target=" + dir}, &strings.Builder{})
+	if code != exitClean {
+		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, exitClean)
+	}
+	options, err := exemptOptions(&resolved.config)
+	if err != nil {
+		t.Fatalf("Setup: exemptOptions(): %v", err)
+	}
+
+	// The plain mode counts the test's marshalling as the use it is evidence of, so
+	// the class holds the field; the production mode holds nothing by it.
+	for _, mode := range []struct {
+		production bool
+		want       string
+	}{
+		{production: false, want: string(exempt.EncodingReflection)},
+		{production: true, want: ""},
+	} {
+		analyzed, analysisErr := analysisOf(t.Context(), &resolved, &options, mode.production)
+		if analysisErr != nil {
+			t.Fatalf("analysisOf(production = %v) = %v, want the analysis of the run", mode.production, analysisErr)
+		}
+		var got string
+		for i := range analyzed.exemptions {
+			if analyzed.stages.refs[analyzed.exemptions[i].ID] == subject {
+				got = analyzed.exemptions[i].Class
+				break
+			}
+		}
+		if got != mode.want {
+			t.Errorf("analysisOf(production = %v) retains %s by %q, want %q: the only marshalling of the value is written in a test file",
+				mode.production, subject, got, mode.want)
+		}
+	}
+
+	// What the mode decides is what the run reports: the field is a candidate of the
+	// production sweep and a kind names it, retained by nothing.
+	set := findingsOfDir(t, dir)
+	var reported *kinds.Finding
+	for i := range set.result.Findings {
+		if set.result.Findings[i].Symbol.Ref == subject {
+			reported = &set.result.Findings[i]
+			break
+		}
+	}
+	if reported == nil {
+		t.Fatalf("the findings pass reports nothing about %s, want a finding\nreported: %v",
+			subject, findingCodes(set.result.Findings))
+	}
+	if len(reported.RetainedBy) != 0 {
+		t.Errorf("the finding about %s names %v as what retained it, want nothing", subject, reported.RetainedBy)
+	}
 }

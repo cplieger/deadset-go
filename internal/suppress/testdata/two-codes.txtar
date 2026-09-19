@@ -1,0 +1,13 @@
+One package holding one reasonless directive that names two codes, which the
+grammar reports once per code. Nothing else is declared, so a count over this
+archive is that rule's count and no other's.
+
+-- go.mod --
+module example.com/twocodes
+
+go 1.27.1
+-- catalog.go --
+package twocodes
+
+//deadset:ignore DS1001,DS1101
+func Resolve(name string) string { return name }

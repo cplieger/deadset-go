@@ -20,12 +20,16 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/internal/config"
+	"github.com/cplieger/deadset-go/internal/deps"
+	"github.com/cplieger/deadset-go/internal/edges"
 	"github.com/cplieger/deadset-go/internal/exempt"
 	"github.com/cplieger/deadset-go/internal/graph"
 	"github.com/cplieger/deadset-go/internal/kinds"
 	"github.com/cplieger/deadset-go/internal/load"
 	"github.com/cplieger/deadset-go/internal/matrix"
+	"github.com/cplieger/deadset-go/internal/report"
 	"github.com/cplieger/deadset-go/internal/scope"
+	"github.com/cplieger/deadset-go/internal/suppress"
 )
 
 // version is this analyzer's own version. It moves independently of the Contract
@@ -61,7 +65,7 @@ const language = config.GoLanguage
 
 // schemaVersionsAccepted lists every report schema version this analyzer reads
 // and writes. contract.json's schema_versions is the list it must equal.
-var schemaVersionsAccepted = []string{"1.0.0"}
+var schemaVersionsAccepted = []string{"2.0.0"}
 
 // settingFlag is one setting a command-line flag supplies: the dotted path the
 // resolved configuration names the setting by, and what the flag's value is.
@@ -294,6 +298,7 @@ var emitters = map[string]kinds.Emitter{
 	"DS1101": kinds.UnnecessaryExport,
 	"DS1102": kinds.UnnecessaryExposure,
 	"DS1103": kinds.UnreachableExport,
+	"DS1502": kinds.FileNeverImported,
 	"DS1201": kinds.UnusedInterface,
 	"DS1203": kinds.UncalledInterfaceMethod,
 	"DS1204": kinds.UnusedSatisfactionAssertion,
@@ -316,13 +321,36 @@ type configured struct {
 // against, the reference of every symbol of the inventory, and every configured
 // string that named no symbol in any configuration.
 type stages struct {
-	matrix         *graph.Matrix
-	merged         *graph.Merged
-	refs           map[graph.SymbolID]string
-	root           string
-	configurations []string
-	per            []configured
-	unmatched      []graph.Unmatched
+	matrix *graph.Matrix
+	merged *graph.Merged
+	refs   map[graph.SymbolID]string
+
+	// derived is the matrix the derivation answered, and nil where the
+	// configuration listed the build configurations itself. A kind that claims
+	// something about every configuration of the target reads it, because a
+	// matrix the run derived is not every configuration the target builds.
+	derived *matrix.Derived
+
+	root string
+
+	// configurations is the build matrix the run analyzed, in the order every
+	// configuration index reaches this command in, and identifiers is the
+	// identifier of each in the same order.
+	configurations []load.Configuration
+	identifiers    []string
+
+	per []configured
+
+	// declared is the consumer modules the scope declared, which is what a report
+	// names beside the ones the load answered.
+	declared []scope.Module
+
+	// testFileRules is the rules by which the run classified a file as a test
+	// file, one entry per rule carrying the greatest count any configuration
+	// reported: every configuration classifies the same files by the same rule.
+	testFileRules []graph.TestFileRule
+
+	unmatched []graph.Unmatched
 }
 
 // rootSet is the matrix's root set: every root any configuration detected, each
@@ -390,7 +418,7 @@ func rootsOf(ctx context.Context, resolved *resolution) (rootSet, error) {
 	}
 	return rootSet{
 		refs:           loaded.refs,
-		configurations: loaded.configurations,
+		configurations: loaded.identifiers,
 		roots:          loaded.merged.Roots,
 		unmatched:      loaded.unmatched,
 	}, nil
@@ -421,7 +449,7 @@ func stagesOf(ctx context.Context, resolved *resolution) (stages, error) {
 	if err != nil {
 		return stages{}, err
 	}
-	configurations, err := matrixOf(&resolved.config, document.Target.Path)
+	configurations, derived, err := matrixOf(&resolved.config, document.Target.Path)
 	if err != nil {
 		return stages{}, err
 	}
@@ -437,10 +465,13 @@ func stagesOf(ctx context.Context, resolved *resolution) (stages, error) {
 	}
 	per := make([]configured, len(results))
 	passes := make([]graph.Configured, len(results))
+	var rules []graph.TestFileRule
 	for i := range results {
-		if per[i], passes[i], err = passesOf(&results[i], targetRoot, rootOptions); err != nil {
+		var classified []graph.TestFileRule
+		if per[i], passes[i], classified, err = passesOf(&results[i], targetRoot, rootOptions); err != nil {
 			return stages{}, err
 		}
+		rules = greatestPerRule(rules, classified)
 	}
 
 	merged, err := graph.Merge(passes)
@@ -455,31 +486,56 @@ func stagesOf(ctx context.Context, resolved *resolution) (stages, error) {
 	return stages{
 		matrix:         x,
 		refs:           refs,
+		derived:        derived,
 		root:           targetRoot,
-		configurations: identifiers(configurations),
+		configurations: configurations,
+		identifiers:    identifiers(configurations),
 		per:            per,
+		declared:       document.Consumers,
+		testFileRules:  rules,
 		unmatched:      x.UnmatchedEverywhere(),
 		merged:         &merged,
 	}, nil
 }
 
-// passesOf runs the three passes over one loaded configuration.
-func passesOf(result *load.Result, targetRoot string, rootOptions graph.RootOptions) (configured, graph.Configured, error) {
+// passesOf runs the three passes over one loaded configuration, and returns the
+// rules by which that configuration classified a file as a test file.
+func passesOf(result *load.Result, targetRoot string, rootOptions graph.RootOptions) (configured, graph.Configured, []graph.TestFileRule, error) {
 	symbols, err := graph.Symbols(result, targetRoot, os.ReadFile)
 	if err != nil {
-		return configured{}, graph.Configured{}, err
+		return configured{}, graph.Configured{}, nil, err
 	}
-	references, _, err := graph.References(result, targetRoot, os.ReadFile, symbols)
+	references, rules, err := graph.References(result, targetRoot, os.ReadFile, symbols)
 	if err != nil {
-		return configured{}, graph.Configured{}, err
+		return configured{}, graph.Configured{}, nil, err
 	}
 	roots, unmatched, err := graph.Roots(result, targetRoot, os.ReadFile, symbols, rootOptions)
 	if err != nil {
-		return configured{}, graph.Configured{}, err
+		return configured{}, graph.Configured{}, nil, err
 	}
 	return configured{symbols: symbols, result: *result},
 		graph.Configured{Symbols: symbols, References: references, Roots: roots, Unmatched: unmatched},
+		rules,
 		nil
+}
+
+// greatestPerRule folds one configuration's test-file rules into the run's, keeping
+// the greatest count any configuration reported for a rule.
+//
+// Every configuration classifies the same files by the same rule, so two counts for
+// one rule differ only where a configuration compiled fewer files; the greater count
+// is the one the whole run classified.
+func greatestPerRule(held, next []graph.TestFileRule) []graph.TestFileRule {
+	for _, rule := range next {
+		at := slices.IndexFunc(held, func(r graph.TestFileRule) bool { return r.Rule == rule.Rule })
+		switch {
+		case at < 0:
+			held = append(held, rule)
+		case rule.Matched > held[at].Matched:
+			held[at].Matched = rule.Matched
+		}
+	}
+	return held
 }
 
 // matrixOf resolves the build matrix one run analyzes: the configurations the
@@ -488,19 +544,23 @@ func passesOf(result *load.Result, targetRoot string, rootOptions graph.RootOpti
 // A derived matrix is the atoms the tree names plus the host, never the product of
 // them, and it is incomplete by definition, which is why nothing here sets
 // analysis.matrix.complete: completeness is the configuration's own assertion.
-func matrixOf(cfg *config.Config, targetRoot string) ([]load.Configuration, error) {
+//
+// The derivation itself is returned beside the configurations, and is nil where the
+// configuration listed them: a stage that claims something about every
+// configuration of the target needs to know which of the two it is reading.
+func matrixOf(cfg *config.Config, targetRoot string) ([]load.Configuration, *matrix.Derived, error) {
 	if len(cfg.Analysis.Configurations) > 0 {
 		configurations := make([]load.Configuration, len(cfg.Analysis.Configurations))
 		for i, c := range cfg.Analysis.Configurations {
 			configurations[i] = load.Configuration{ID: c.ID, OS: c.OS, Arch: c.Arch, Tags: c.Tags}
 		}
-		return configurations, nil
+		return configurations, nil, nil
 	}
 	derived, err := matrix.Derive(targetRoot)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return derived.Configurations, nil
+	return derived.Configurations, &derived, nil
 }
 
 // identifiers lists the identifier of every configuration of the matrix, in the
@@ -594,7 +654,15 @@ type analysis struct {
 	stages     stages
 	per        []kinds.Configured
 	exemptions []graph.Exemption
-	swept      graph.Result
+
+	// marks is every suppression record the run read, bound or not, and refusals
+	// is what the grammar refused with a finding of its own. The bound records
+	// seeded the sweep below, which is what makes a record that held nothing back
+	// tell a stale suppression from one in effect.
+	marks    []suppress.Record
+	refusals []suppress.Refusal
+
+	swept graph.Result
 }
 
 // analysisOf runs the stages, the exemption classes of every configuration and one
@@ -616,12 +684,20 @@ func analysisOf(ctx context.Context, resolved *resolution, options *exempt.Optio
 		return analysis{}, err
 	}
 
+	// The exemption classes compute under the mode the sweep runs in: a test that
+	// marshals a value or compares one is evidence of a use that test makes, so it
+	// holds nothing under a production sweep, which is the same question the mode
+	// answers for a reference. The caller's options are left as they are, because
+	// the two verbs ask for different modes over one configuration.
+	mode := *options
+	mode.Production = production
+
 	per := make([]kinds.Configured, len(loaded.per))
 	var exemptions []graph.Exemption
 	for i := range loaded.per {
-		resolver, computed, err := exemptionsOf(&loaded.per[i], loaded.root, options)
-		if err != nil {
-			return analysis{}, err
+		resolver, computed, exemptErr := exemptionsOf(&loaded.per[i], loaded.root, &mode)
+		if exemptErr != nil {
+			return analysis{}, exemptErr
 		}
 		exemptions = append(exemptions, computed...)
 		per[i] = kinds.Configured{
@@ -631,16 +707,79 @@ func analysisOf(ctx context.Context, resolved *resolution, options *exempt.Optio
 		}
 	}
 
+	marks, refusals, err := suppressionsOf(&loaded, per)
+	if err != nil {
+		return analysis{}, err
+	}
+
 	return analysis{
 		stages:     loaded,
 		per:        per,
 		exemptions: exemptions,
+		marks:      marks,
+		refusals:   refusals,
 		swept: loaded.matrix.Sweep(graph.Mode{
+			Marked:                  bound(marks),
 			Exempt:                  exemptions,
 			ConsumerTestsProduction: resolved.config.Analysis.ConsumerTests == config.ProductionReference,
 			Production:              production,
 		}),
 	}, nil
+}
+
+// suppressionsOf reads the three suppression documents of one run and returns their
+// records and refusals concatenated in reader order, which is the order a stale
+// suppression is reported in: the inline directives by position, then the ignore
+// file's entries in document order, then the baseline's rows.
+//
+// The inline directives are read from the first configuration of the matrix, as the
+// consumer set is: a directive lives in the source, and one configuration's
+// resolver is what renders its site. A directive in a file only another
+// configuration compiles is therefore not read, which is the one thing this
+// composition costs.
+//
+// The ignore file and the baseline bind against the matrix inventory rather than one
+// configuration's, because an entry naming a declaration only one configuration
+// holds names something the run analyzed.
+func suppressionsOf(loaded *stages, per []kinds.Configured) ([]suppress.Record, []suppress.Refusal, error) {
+	var records []suppress.Record
+	var refusals []suppress.Refusal
+	if len(per) > 0 {
+		inline, refused, err := suppress.Inline(per[0].Result, per[0].Resolve, per[0].Symbols)
+		if err != nil {
+			return nil, nil, err
+		}
+		records, refusals = inline, refused
+	}
+
+	for _, read := range []struct {
+		of   func(path string, symbols []graph.Symbol) ([]suppress.Record, []suppress.Refusal, error)
+		name string
+	}{
+		{suppress.IgnoreFile, suppress.IgnoreFileName},
+		{suppress.Baseline, suppress.BaselineFileName},
+	} {
+		held, refused, err := read.of(filepath.Join(loaded.root, read.name), loaded.merged.Symbols)
+		if err != nil {
+			return nil, nil, err
+		}
+		records = append(records, held...)
+		refusals = append(refusals, refused...)
+	}
+	return records, refusals, nil
+}
+
+// bound is the declarations the suppression records marked live, which is what
+// seeds the sweep. A record that bound nothing contributes nothing: it names a site
+// that resolves to no declaration, and that is what makes it stale.
+func bound(marks []suppress.Record) []graph.SymbolID {
+	var marked []graph.SymbolID
+	for i := range marks {
+		if marks[i].Bound != "" {
+			marked = append(marked, marks[i].Bound)
+		}
+	}
+	return marked
 }
 
 // exemptionsOf computes the exemptions of one configuration and returns the
@@ -665,12 +804,25 @@ func exemptionsOf(one *configured, targetRoot string, options *exempt.Options) (
 	return resolver, exemptions, nil
 }
 
-// findingSet is what one findings pass produced: the findings of every kind in the
-// canonical order with the count the minimum confidence excluded, and every
-// configured string that named no symbol in any configuration.
+// findingSet is what one findings pass produced: the findings a report publishes
+// with the count the minimum confidence excluded, one evaluation per declared
+// cross-language edge side of this language, the two suppression counts a summary
+// prints, and every configured string that named no symbol in any configuration.
+//
+// The findings of the emitters table come first, in the canonical order, and the
+// self-check findings follow in the order their records were read. The canonical
+// order over the whole list is the envelope's, which is where every array a report
+// carries is ordered by the Contract's key.
 type findingSet struct {
-	unmatched []graph.Unmatched
-	result    kinds.Result
+	// loaded is the stages the pass ran over, which is what a report names beside
+	// the findings: the matrix, the consumers, the files the toolchain ignored for
+	// importing C and the rules by which a file was classified as a test file.
+	loaded stages
+
+	unmatched    []graph.Unmatched
+	evaluations  []kinds.Evaluation
+	result       kinds.Result
+	suppressions report.Suppressions
 }
 
 // findingsOf is what this analyzer reports about one target: the stages, the
@@ -695,23 +847,253 @@ func findingsOf(ctx context.Context, resolved *resolution, options *exempt.Optio
 	if err != nil {
 		return findingSet{}, err
 	}
+	in, err := inputOf(ctx, resolved, &analyzed, generated)
+	if err != nil {
+		return findingSet{}, err
+	}
 
-	computed, err := kinds.Compute(&kinds.Input{
+	computed, err := kinds.Compute(in, emitters)
+	if err != nil {
+		return findingSet{}, err
+	}
+	// The dependency a deletion orphans is a completion of the findings of the
+	// pass rather than a kind of its own, so it runs over what the pass answered.
+	kinds.Annotate(in, computed.Findings)
+
+	// The self-check kinds are called rather than registered: their subjects are a
+	// suppression record and a configured string, neither of which is a
+	// declaration of the inventory, and the framework identifies a finding by the
+	// declaration it names. Each completes its own findings.
+	for _, selfCheck := range []kinds.Emitter{kinds.SuppressionRefusals, kinds.StaleSuppressions, kinds.UnmatchedRoots} {
+		found, checkErr := selfCheck(in)
+		if checkErr != nil {
+			return findingSet{}, checkErr
+		}
+		computed.Findings = append(computed.Findings, found...)
+	}
+
+	// A declared edge is evaluated last, over every finding the run holds: a
+	// finding about a symbol an edge names dead is published inside that
+	// evaluation and nowhere else, so what the report carries is what stays.
+	kept, evaluations := kinds.Evaluate(in, computed.Findings)
+	computed.Findings = kept
+
+	inEffect, reasons := kinds.Totals(in)
+	return findingSet{
+		unmatched:    analyzed.stages.unmatched,
+		evaluations:  evaluations,
+		result:       computed,
+		suppressions: report.Suppressions{InEffect: inEffect, ReasonsRecorded: reasons},
+		loaded:       analyzed.stages,
+	}, nil
+}
+
+// inputOf is everything a kind of this analyzer reads, assembled from what the run
+// answered: the stages, the exemptions, the production sweep, the suppression
+// records, the module file, the derived matrix and the declared edges.
+func inputOf(ctx context.Context, resolved *resolution, analyzed *analysis, generated map[string]bool) (*kinds.Input, error) {
+	module, err := deps.ModuleFile(ctx, analyzed.stages.root)
+	if err != nil {
+		return nil, err
+	}
+	declared, err := edges.Read(filepath.Join(analyzed.stages.root, edges.FileName))
+	if err != nil {
+		return nil, err
+	}
+	return &kinds.Input{
 		Config:     &resolved.config,
 		Merged:     analyzed.stages.merged,
 		Sweep:      &analyzed.swept,
 		Refs:       analyzed.stages.refs,
 		Exempt:     analyzed.exemptions,
 		Generated:  func(path string) bool { return generated[path] },
-		Matrix:     analyzed.stages.configurations,
+		Marks:      analyzed.marks,
+		Refusals:   analyzed.refusals,
+		Deps:       &module,
+		Derived:    analyzed.stages.derived,
+		Unmatched:  analyzed.stages.unmatched,
+		Edges:      declared,
+		Matrix:     analyzed.stages.identifiers,
 		Per:        analyzed.per,
 		Consumers:  consumersOf(&resolved.config, analyzed.stages.per),
 		Production: true,
-	}, emitters)
+	}, nil
+}
+
+// corpusRecord is what a run of the Conformance Corpus recorded about this
+// analyzer: its result over the whole corpus, and every capability it declines with
+// the fixture the declension applies to.
+//
+// It reaches an envelope from the caller because nothing in this command can answer
+// the corpus: both are copied from the documents a corpus run commits, and the
+// report a reader admits is the one that names them.
+type corpusRecord struct {
+	conformance report.Conformance
+	gaps        []report.DeclaredGap
+}
+
+// reportOf is the report of one run: the findings pass, assembled into the envelope
+// the Contract declares.
+//
+// Assembly is a refusal rather than a best effort: an envelope the Contract cannot
+// carry fails the run, because a document no reader admits says less than an error
+// does. The corpus record is what the analyzer states about itself, and an envelope
+// naming no conformance result is one such refusal.
+func reportOf(ctx context.Context, resolved *resolution, options *exempt.Options, answered *corpusRecord) (report.Envelope, error) {
+	set, err := findingsOf(ctx, resolved, options)
 	if err != nil {
-		return findingSet{}, err
+		return report.Envelope{}, err
 	}
-	return findingSet{result: computed, unmatched: analyzed.stages.unmatched}, nil
+	target, err := targetOf(resolved, &set.loaded)
+	if err != nil {
+		return report.Envelope{}, err
+	}
+	consumers, err := consumersReported(&set.loaded)
+	if err != nil {
+		return report.Envelope{}, err
+	}
+	return report.Build(&report.BuildInput{
+		Analyzer:        analyzerOf(answered.conformance),
+		Target:          target,
+		Configurations:  configurationsReported(set.loaded.configurations),
+		Consumers:       consumers,
+		Result:          set.result,
+		EdgeEvaluations: evaluationsReported(set.evaluations),
+		DeclaredGaps:    answered.gaps,
+		ExcludedByCgo:   excludedByCgo(set.loaded.per),
+		TestFileRules:   set.loaded.testFileRules,
+		Suppressions:    set.suppressions,
+	})
+}
+
+// analyzerOf is the identity every document this analyzer writes names it by, with
+// the corpus result the Contract requires of a report.
+func analyzerOf(conformance report.Conformance) report.Analyzer {
+	return report.Analyzer{
+		Name:                   name,
+		Version:                version,
+		Languages:              []string{string(language)},
+		SchemaVersionsAccepted: schemaVersionsAccepted,
+		Conformance:            conformance,
+	}
+}
+
+// targetOf is what a report says was analyzed: the kind the configuration declared,
+// the target's directory as a reader of the report resolves it, and the name the
+// target publishes itself under.
+func targetOf(resolved *resolution, loaded *stages) (report.Target, error) {
+	root, err := relativeToRunDirectory(loaded.root)
+	if err != nil {
+		return report.Target{}, err
+	}
+	identity, err := identityOf(loaded.per)
+	if err != nil {
+		return report.Target{}, err
+	}
+	return report.Target{Kind: string(resolved.config.Target.Kind), Root: root, Identity: identity}, nil
+}
+
+// identityOf is the module path the loaded target publishes itself under, which is
+// the scope every symbol reference of the target carries.
+func identityOf(per []configured) (string, error) {
+	for i := range per {
+		for _, p := range per[i].result.Packages {
+			if p.Module != nil && p.Module.Path != "" {
+				return p.Module.Path, nil
+			}
+		}
+	}
+	return "", errors.New("the loaded target names no module path, which a report identifies it by")
+}
+
+// relativeToRunDirectory is one absolute path of the run, relative to the directory
+// the run was invoked from, with forward slashes. A report names no host path: two
+// runs over one tree on two machines would otherwise write different bytes.
+//
+// A path the run directory does not contain fails the run rather than being written.
+// The report format admits the run directory itself and every path below it and no
+// path that climbs out of it, so a target elsewhere on the filesystem has no spelling
+// a report can carry, and a document naming one is refused by every reader.
+func relativeToRunDirectory(path string) (string, error) {
+	invoked, err := os.Getwd()
+	if err != nil {
+		return "", fmt.Errorf("resolve the directory the run was invoked from: %w", err)
+	}
+	relative, err := filepath.Rel(invoked, path)
+	if err != nil {
+		return "", fmt.Errorf("resolve %s against the directory the run was invoked from: %w", path, err)
+	}
+	if relative != "." && !filepath.IsLocal(relative) {
+		return "", fmt.Errorf("%w: a report names %s relative to the directory the run was invoked from, and %s does not contain it: run from a directory that does",
+			errReportPath, path, invoked)
+	}
+	return filepath.ToSlash(relative), nil
+}
+
+// errReportPath reports a path of the run that no report can name, which is a path
+// the directory the run was invoked from does not contain.
+var errReportPath = errors.New("deadset-go: the report cannot name a path outside the run directory")
+
+// configurationsReported is the build matrix as a report names it.
+func configurationsReported(configurations []load.Configuration) []report.Configuration {
+	named := make([]report.Configuration, len(configurations))
+	for i, c := range configurations {
+		named[i] = report.Configuration{ID: c.ID, OS: c.OS, Arch: c.Arch, Tags: slices.Clone(c.Tags)}
+	}
+	return named
+}
+
+// consumersReported is the consumer set as a report names it: one entry per consumer
+// the load answered, at the directory the scope named it.
+//
+// No consumer is unavailable: a declared consumer this analyzer cannot load ends the
+// run, so a run that reached a report loaded every consumer its scope declared.
+func consumersReported(loaded *stages) (report.Consumers, error) {
+	var held []load.Consumer
+	if len(loaded.per) > 0 {
+		held = loaded.per[0].result.Consumers
+	}
+	named := report.Consumers{Loaded: make([]report.LoadedConsumer, len(held))}
+	for i := range held {
+		if i >= len(loaded.declared) {
+			return report.Consumers{}, fmt.Errorf("the load answered %d consumers and the scope declared %d",
+				len(held), len(loaded.declared))
+		}
+		path, err := relativeToRunDirectory(loaded.declared[i].Path)
+		if err != nil {
+			return report.Consumers{}, err
+		}
+		named.Loaded[i] = report.LoadedConsumer{ID: held[i].ID, Path: path}
+	}
+	named.Declared = len(named.Loaded)
+	return named, nil
+}
+
+// evaluationsReported is the edge evaluations as a report names them.
+func evaluationsReported(evaluations []kinds.Evaluation) []report.EdgeEvaluation {
+	named := make([]report.EdgeEvaluation, len(evaluations))
+	for i := range evaluations {
+		named[i] = report.EdgeEvaluation{
+			Finding: evaluations[i].Finding,
+			Edge:    evaluations[i].Edge,
+			Side:    string(evaluations[i].Side),
+			Symbol:  evaluations[i].Symbol,
+			State:   string(evaluations[i].State),
+		}
+	}
+	return named
+}
+
+// excludedByCgo is every file the toolchain ignored solely for importing the C
+// pseudo-package, over the whole matrix. A file one configuration compiles and
+// another ignores for that reason is a limit of the run, so the union is what the
+// report states.
+func excludedByCgo(per []configured) []string {
+	var held []string
+	for i := range per {
+		held = append(held, per[i].result.ExcludedByCgo...)
+	}
+	return held
 }
 
 // consumersOf is what the run knows about the target's consumers: every module the

@@ -133,8 +133,14 @@ func dials(t *rapid.T, in *Input) (map[string]Class, map[string]config.Severity)
 }
 
 // TestTheClassAndTheSeverityAreIndependentDials is property dead-code-suite/P13:
-// changing the severity map changes no finding's reachability class, and changing
-// the consumer set or the target kind changes no finding's severity.
+// changing the severity map or the assertion that the consumer set is complete
+// changes no finding's reachability class, and changing the consumer set or the
+// target kind changes no finding's severity.
+//
+// Completeness is on the severity side of the property because it is what opens the
+// narrowing kinds on a published API: what the class reads is which declared
+// consumers the run loaded, and an assertion about the consumers it did not load
+// moves neither.
 //
 // The severity map the property draws names the observed kind explicitly, which is
 // what the second half is about: the severity comes from the configuration. The one
@@ -156,10 +162,14 @@ func TestTheClassAndTheSeverityAreIndependentDials(t *testing.T) {
 		first.Severity = drawnSeverities(t, "the first run")
 		classes, severities := dials(t, propInput(symbols, first, consumers))
 
-		// The severity map moves, and nothing else does.
+		// The severity map moves, and so does the assertion that the consumer set
+		// is complete, which is a dial of the severity and not of the class.
 		second := first
 		second.Severity = drawnSeverities(t, "the second run")
-		movedSeverities, _ := dials(t, propInput(symbols, second, consumers))
+		otherCompleteness := consumers
+		otherCompleteness.Complete = !consumers.Complete
+		second.Consumers.Complete = otherCompleteness.Complete
+		movedSeverities, _ := dials(t, propInput(symbols, second, otherCompleteness))
 		for ref, class := range classes {
 			if got := movedSeverities[ref]; got != class {
 				t.Fatalf("the class of %s is %q under one severity map and %q under another, want the same class",

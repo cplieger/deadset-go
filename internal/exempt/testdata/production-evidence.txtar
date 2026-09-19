@@ -1,0 +1,44 @@
+A module whose only encoder call is written in a test file, beside a type whose
+encoder call is written in a source file. Under a production run the evidence a test
+file carries holds nothing, so the members of the first type are retained in the
+plain mode alone while the members of the second are retained in both.
+
+-- go.mod --
+module example.com/evidence
+
+go 1.27.1
+-- evidence.go --
+package evidence
+
+import "encoding/json"
+
+// Fixture is marshalled by the test of this package and by nothing else.
+type Fixture struct {
+	Name  string `json:"name"`
+	Extra int
+}
+
+// Shipped is marshalled by this file.
+type Shipped struct {
+	Name  string `json:"name"`
+	Extra int
+}
+
+// Publish hands a value to the encoder from a source file.
+func Publish(s Shipped) ([]byte, error) { return json.Marshal(s) }
+-- evidence_test.go --
+package evidence
+
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestFixtureMarshals(t *testing.T) {
+	if _, err := json.Marshal(Fixture{Name: "a"}); err != nil {
+		t.Fatalf("json.Marshal(Fixture) error: %v", err)
+	}
+	if _, err := Publish(Shipped{Name: "b"}); err != nil {
+		t.Fatalf("Publish(Shipped) error: %v", err)
+	}
+}

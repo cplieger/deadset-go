@@ -26,6 +26,11 @@ func TestTheReachabilityClassIsWhatTheRunKnowsAboutTheConsumers(t *testing.T) {
 			consumers: Consumers{Declared: []string{theConsumer}, Loaded: []string{theConsumer}, Complete: true},
 			want:      Certain,
 		},
+		"a library whose declared consumer loaded, with the set not declared complete": {
+			resolved:  libraryConfig(),
+			consumers: Consumers{Declared: []string{theConsumer}, Loaded: []string{theConsumer}},
+			want:      Certain,
+		},
 		"a library whose declared consumer did not load": {
 			resolved:  libraryConfig(),
 			consumers: Consumers{Declared: []string{theConsumer}, Complete: true},
@@ -34,6 +39,11 @@ func TestTheReachabilityClassIsWhatTheRunKnowsAboutTheConsumers(t *testing.T) {
 		"a library with no consumer information at all": {
 			resolved:  libraryConfig(),
 			consumers: Consumers{},
+			want:      Possible,
+		},
+		"a library whose consumer set is declared complete and declares none": {
+			resolved:  libraryConfig(),
+			consumers: Consumers{Complete: true},
 			want:      Possible,
 		},
 	} {
@@ -98,6 +108,69 @@ func TestTheClassOfADeclarationNoConsumerCanReachIsCertainWithoutAnyConsumerInfo
 					one.id, got, name, one.want)
 			}
 		})
+	}
+}
+
+// A type parameter of an exported function of a library's importable surface is
+// certain with no consumer information at all, because a caller supplies a type
+// argument by position and so no reference to the parameter can exist outside the
+// declaration that introduces it. The function that declares it is possible under
+// the same run, which is what tells the two apart.
+func TestTheClassOfATypeParameterOfAFunctionIsCertainWithNoConsumerInformation(t *testing.T) {
+	in := inputOf(t, "precedence-importable.txtar", libraryConfig(), Consumers{})
+
+	result := computed(t, in, packageEmitters())
+	found := findingOf(t, result.Findings, typeParameterCode, "Convert[T]")
+	if found.Class != Certain || found.Confidence != Certain {
+		t.Errorf("the pass reports the type parameter of an exported function of a library with the class %q and the confidence %q, want %q for both",
+			found.Class, found.Confidence, Certain)
+	}
+
+	container := narrowedIDOf(t, in, "go://example.com/app/api#Convert")
+	if got := in.ClassOf(container); got != Possible {
+		t.Errorf("ClassOf(the function that declares the type parameter) = %q, want %q: the type parameter's class is the parameter's own rule and not its container's",
+			got, Possible)
+	}
+}
+
+// The corpus fixture whose consumer section the run loads states the class of a
+// published declaration of a library: certain, because every consumer the scope
+// declared loaded, and the fixture declares no complete consumer set. It is the
+// fixture this rule was got backwards against, so it is pinned here against the
+// published expectation rather than against a local one.
+func TestTheCorpusConversionFixtureIsCertainWithItsConsumerLoaded(t *testing.T) {
+	const fixture = "interface-satisfaction-conversion"
+	in := corpusInput(t, fixture, libraryConfig())
+	if in.Consumers.Complete {
+		t.Fatal("Setup: the fixture's run declares the consumer set complete, so this test would pin the old rule")
+	}
+	if !slices.Equal(in.Consumers.Loaded, []string{"example.com/consumer"}) {
+		t.Fatalf("Setup: the run loaded the consumers %v, want the fixture's own consumer module",
+			in.Consumers.Loaded)
+	}
+
+	dead := narrowedIDOf(t, in, "go://example.com/target#DeadExport")
+	if got := in.ClassOf(dead); got != Certain {
+		t.Errorf("ClassOf(%s) = %q with the fixture's consumer loaded and the set not declared complete, want %q",
+			"go://example.com/target#DeadExport", got, Certain)
+	}
+
+	// The expectation's row for the same declaration is a finding, and the
+	// unreferenced-exported kind is allowed for a published API whose consumer set
+	// is not declared complete, so the row needs the assertion the corpus format
+	// cannot yet carry. Its class is the one above either way.
+	complete := libraryConfig()
+	complete.Consumers.Complete = true
+	declared := corpusInput(t, fixture, complete)
+	result := computed(t, declared, packageEmitters())
+	found := findingOf(t, result.Findings, unusedExportedCode, "DeadExport")
+	if found.Class != Certain || found.Confidence != Certain {
+		t.Errorf("the pass reports %s with the class %q and the confidence %q, want %q for both",
+			found.Symbol.Ref, found.Class, found.Confidence, Certain)
+	}
+	if !slices.Equal(found.ConsumersLoaded, []string{"example.com/consumer"}) {
+		t.Errorf("the pass reports %s naming the loaded consumers %v, want the fixture's own consumer module",
+			found.Symbol.Ref, found.ConsumersLoaded)
 	}
 }
 

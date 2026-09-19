@@ -6,11 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"go/token"
-	"io"
 	"io/fs"
 	"os"
 	"strconv"
-	"unicode/utf16"
 
 	"github.com/cplieger/deadset-go/internal/graph"
 )
@@ -20,22 +18,36 @@ import (
 // is this name and nothing has to be made relative.
 const IgnoreFileName = "deadset-ignore.json"
 
-// maxDocumentBytes bounds the ignore file. One entry is one adjudication a
-// maintainer wrote, so a document orders of magnitude past that is not one to
-// decode.
-const maxDocumentBytes = 1 << 20
-
 // The forms a malformed value of an entry is told to take.
 const (
 	codeWant   = "DS followed by four digits"
 	pathWant   = "a path relative to the target root, with the solidus as separator"
 	symbolWant = "a stable symbol reference, go://<import-path>#<fragment> or ts://<package>/<source-path>#<fragment>"
-	entryWant  = "an entry naming code, symbol, path and reason, each a string"
-	arrayWant  = "an object carrying the ignore array, and an optional description"
 )
 
-// ErrTooLarge reports a document above the size bound.
-var ErrTooLarge = errors.New("suppress: document too large")
+// shape is what one file-backed mechanism's document looks like to a reader: the
+// file it is written in, the member holding its records, and the two forms a
+// refusal names. One reader serves both documents, because the grammar gives them
+// one record shape so that a row can be moved into the ignore file by adding a
+// maintainer's reason.
+type shape struct {
+	file       string
+	array      string
+	arrayWant  string
+	recordWant string
+	mechanism  Mechanism
+}
+
+// ignoreShape is the ignore file's document.
+func ignoreShape() *shape {
+	return &shape{
+		file:       IgnoreFileName,
+		array:      "ignore",
+		arrayWant:  "an object carrying the ignore array, and an optional description",
+		recordWant: "an entry naming code, symbol, path and reason, each a string",
+		mechanism:  MechanismIgnore,
+	}
+}
 
 // wireEntry is the closed key list of one entry. Every key the grammar declares
 // appears here, so an undeclared key is a decode error, and each is a pointer so
@@ -50,10 +62,10 @@ type wireEntry struct {
 	Reason *string `json:"reason"`
 }
 
-// wireDocument is the closed key list of the document. The description carries
-// what a file header comment would have and the analysis does not read it; the
-// ignore array is required and may be empty.
-type wireDocument struct {
+// wireIgnore is the closed key list of the ignore document. The description
+// carries what a file header comment would have and the analysis does not read it;
+// the ignore array is required and may be empty.
+type wireIgnore struct {
 	Ignore      *[]json.RawMessage `json:"ignore"`
 	Description string             `json:"description"`
 }
@@ -74,103 +86,124 @@ type wireDocument struct {
 // a missing code or symbol and a value outside its published form are each
 // [MalformedError], and no record or refusal comes back with one.
 func IgnoreFile(path string, symbols []graph.Symbol) ([]Record, []Refusal, error) {
-	body, err := readBounded(path)
+	held := ignoreShape()
+	body, sites, err := document(path, held)
+	if body == nil || err != nil {
+		return nil, nil, err
+	}
+
+	var wire wireIgnore
+	if err := decodeDocument(body, &wire, held); err != nil {
+		return nil, nil, err
+	}
+	if wire.Ignore == nil {
+		return nil, nil, &MalformedError{Site: documentSite(held), Text: held.file, Want: held.arrayWant, Mechanism: held.mechanism}
+	}
+
+	return records(*wire.Ignore, sites, declarationRefs(symbols), held)
+}
+
+// document reads one suppression document and the position of the brace that opens
+// each of its records. An absent file answers a nil body and no error, which is the
+// empty document.
+func document(path string, held *shape) ([]byte, []token.Position, error) {
+	body, err := os.ReadFile(path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return nil, nil, nil
 	case err != nil:
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("suppress: read %s: %w", path, err)
 	}
-
-	sites, err := entrySites(body)
+	sites, err := recordSites(body, held)
 	if err != nil {
 		return nil, nil, err
 	}
-	var wire wireDocument
-	dec := json.NewDecoder(bytes.NewReader(body))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&wire); err != nil {
-		return nil, nil, &MalformedError{Err: err, Site: documentSite(), Text: IgnoreFileName, Want: arrayWant, Mechanism: MechanismIgnore}
-	}
-	if wire.Ignore == nil {
-		return nil, nil, &MalformedError{Site: documentSite(), Text: IgnoreFileName, Want: arrayWant, Mechanism: MechanismIgnore}
-	}
-
-	return entries(*wire.Ignore, sites, declarationRefs(symbols))
+	return body, sites, nil
 }
 
-// entries reads every entry of the document in document order, each at the site
+// decodeDocument decodes the one value the document holds into wire, under the
+// closed key list its type declares.
+func decodeDocument(body []byte, wire any, held *shape) error {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(wire); err != nil {
+		return &MalformedError{Err: err, Site: documentSite(held), Text: held.file, Want: held.arrayWant, Mechanism: held.mechanism}
+	}
+	return nil
+}
+
+// records reads every record of the document in document order, each at the site
 // the token walk recorded for it.
-func entries(raw []json.RawMessage, sites []token.Position, bound map[reference][]graph.Symbol) ([]Record, []Refusal, error) {
-	var records []Record
-	var refusals []Refusal
+func records(raw []json.RawMessage, sites []token.Position, bound map[reference][]graph.Symbol, held *shape) ([]Record, []Refusal, error) {
+	var kept []Record
+	var refused []Refusal
 	for i, body := range raw {
-		at := documentSite()
+		at := documentSite(held)
 		if i < len(sites) {
 			at = sites[i]
 		}
-		held, refused, err := entry(body, at, bound)
+		one, refusals, err := record(body, at, bound, held)
 		if err != nil {
 			return nil, nil, err
 		}
-		records = append(records, held...)
-		refusals = append(refusals, refused...)
+		kept = append(kept, one...)
+		refused = append(refused, refusals...)
 	}
-	return records, refusals, nil
+	return kept, refused, nil
 }
 
-// entry reads one entry: the records it bound, or the refusals it carries, or the
-// malformed value that ends the run.
-func entry(body []byte, at token.Position, bound map[reference][]graph.Symbol) ([]Record, []Refusal, error) {
-	wire, err := decodeEntry(body, at)
+// record reads one entry or row: the records it bound, or the refusals it carries,
+// or the malformed value that ends the run.
+func record(body []byte, at token.Position, bound map[reference][]graph.Symbol, held *shape) ([]Record, []Refusal, error) {
+	wire, err := decodeRecord(body, at, held)
 	if err != nil {
 		return nil, nil, err
 	}
 	code, symbol := *wire.Code, *wire.Symbol
 	path, reason := value(wire.Path), value(wire.Reason)
 
-	if refused := refusals(wire, at); len(refused) > 0 {
+	if refused := refusals(wire, at, held); len(refused) > 0 {
 		return nil, refused, nil
 	}
-	record := Record{
+	one := Record{
 		Code:      code,
 		Symbol:    symbol,
 		Path:      path,
 		Reason:    reason,
 		Site:      at,
-		Mechanism: MechanismIgnore,
+		Mechanism: held.mechanism,
 	}
-	held := bound[reference{ref: symbol, path: path}]
-	if len(held) == 0 {
-		return []Record{record}, nil, nil
+	names := bound[reference{ref: symbol, path: path}]
+	if len(names) == 0 {
+		return []Record{one}, nil, nil
 	}
-	records := make([]Record, 0, len(held))
-	for i := range held {
-		record.Bound = held[i].ID
-		records = append(records, record)
+	kept := make([]Record, 0, len(names))
+	for i := range names {
+		one.Bound = names[i].ID
+		kept = append(kept, one)
 	}
-	return records, nil, nil
+	return kept, nil, nil
 }
 
-// decodeEntry decodes one entry and refuses every defect that ends the run: an
-// undeclared key, a value of the wrong type, an absent code or symbol, and a
-// value outside its published form.
-func decodeEntry(body []byte, at token.Position) (*wireEntry, error) {
+// decodeRecord decodes one entry or row and refuses every defect that ends the
+// run: an undeclared key, a value of the wrong type, an absent code or symbol, and
+// a value outside its published form.
+func decodeRecord(body []byte, at token.Position, held *shape) (*wireEntry, error) {
 	refuse := func(err error, text, want string) (*wireEntry, error) {
-		return nil, &MalformedError{Err: err, Site: at, Text: text, Want: want, Mechanism: MechanismIgnore}
+		return nil, &MalformedError{Err: err, Site: at, Text: text, Want: want, Mechanism: held.mechanism}
 	}
 
 	var wire wireEntry
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&wire); err != nil {
-		return refuse(err, string(body), entryWant)
+		return refuse(err, string(body), held.recordWant)
 	}
 	switch {
 	case wire.Code == nil:
-		return refuse(nil, "an entry naming no code", entryWant)
+		return refuse(nil, "a record naming no code", held.recordWant)
 	case wire.Symbol == nil:
-		return refuse(nil, "an entry naming no symbol", entryWant)
+		return refuse(nil, "a record naming no symbol", held.recordWant)
 	case !codeForm.MatchString(*wire.Code):
 		return refuse(nil, strconv.Quote(*wire.Code), codeWant)
 	case !referenceForm(*wire.Symbol):
@@ -181,17 +214,17 @@ func decodeEntry(body []byte, at token.Position) (*wireEntry, error) {
 	return &wire, nil
 }
 
-// refusals returns every refusal one well-formed entry carries. An entry lacking
-// both its reason and its path carries both, because each rule reports the field
-// it is about and neither outranks the other.
-func refusals(wire *wireEntry, at token.Position) []Refusal {
+// refusals returns every refusal one well-formed entry or row carries. One lacking
+// both its reason and its path carries both, because each rule reports the field it
+// is about and neither outranks the other.
+func refusals(wire *wireEntry, at token.Position, held *shape) []Refusal {
 	refusal := Refusal{
 		Code:      *wire.Code,
 		Symbol:    *wire.Symbol,
 		Path:      value(wire.Path),
 		Reason:    value(wire.Reason),
 		Site:      at,
-		Mechanism: MechanismIgnore,
+		Mechanism: held.mechanism,
 	}
 	var refused []Refusal
 	if blank(wire.Reason) {
@@ -248,63 +281,50 @@ func blank(reason *string) bool {
 	return true
 }
 
-// documentSite names the document itself, for a defect no entry position
+// documentSite names the document itself, for a defect no record position
 // describes.
-func documentSite() token.Position { return token.Position{Filename: IgnoreFileName} }
-
-// readBounded returns the document's bytes, refusing one above the size bound
-// without reading it whole.
-func readBounded(path string) ([]byte, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("suppress: open %s: %w", path, err)
-	}
-	defer func() { _ = f.Close() }()
-
-	// One byte past the bound tells a document at the limit from one over it.
-	body, err := io.ReadAll(io.LimitReader(f, maxDocumentBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("suppress: read %s: %w", path, err)
-	}
-	if len(body) > maxDocumentBytes {
-		return nil, fmt.Errorf("%w: %s exceeds %d bytes", ErrTooLarge, path, maxDocumentBytes)
-	}
-	return body, nil
-}
+func documentSite(held *shape) token.Position { return token.Position{Filename: held.file} }
 
 // role is what one value of the document is, which is what decides whether the
-// brace opening it is an entry's position.
+// brace opening it is a record's position.
 type role uint8
 
 const (
 	roleDocument role = iota // the one value the document holds
-	roleArray                // the array the ignore member holds
-	roleEntry                // one entry of that array
-	roleOther                // every value below an entry, and the description
+	roleArray                // the array the mechanism's own member holds
+	roleRecord               // one entry or row of that array
+	roleOther                // every value below a record, and the description
 )
 
 // walk reads the document as tokens, which is what a decode into the closed key
 // list cannot do: a member one object writes twice, at any depth, is a document
 // whose later value silently replaces the earlier one, so it reads as though the
-// member were written once. The walk also records where each entry's opening
-// brace is, which is the position every finding about that entry carries.
+// member were written once. The walk also records where each record's opening brace
+// is, which is the position every finding about that record carries.
 type walk struct {
+	held    *shape
 	body    []byte
-	entries []token.Position
+	records []token.Position
 }
 
-// entrySites returns the position of the brace that opens each entry, refusing a
-// document that writes one member twice or carries anything after its one value.
-func entrySites(body []byte) ([]token.Position, error) {
-	w := &walk{body: body}
+// recordSites returns the position of the brace that opens each entry or row,
+// refusing a document that writes one member twice or carries anything after its
+// one value.
+func recordSites(body []byte, held *shape) ([]token.Position, error) {
+	w := &walk{held: held, body: body}
 	dec := json.NewDecoder(bytes.NewReader(body))
 	if err := w.value(dec, roleDocument); err != nil {
 		return nil, err
 	}
 	if dec.More() {
-		return nil, &MalformedError{Site: documentSite(), Text: "a second value after the document", Want: arrayWant, Mechanism: MechanismIgnore}
+		return nil, &MalformedError{
+			Site:      documentSite(held),
+			Text:      "a second value after the document",
+			Want:      held.arrayWant,
+			Mechanism: held.mechanism,
+		}
 	}
-	return w.entries, nil
+	return w.records, nil
 }
 
 // value reads the one value at the decoder's position, and its descendants.
@@ -319,8 +339,8 @@ func (w *walk) value(dec *json.Decoder, at role) error {
 	}
 	switch delim {
 	case '{':
-		if at == roleEntry {
-			w.entries = append(w.entries, w.at(dec.InputOffset()-1))
+		if at == roleRecord {
+			w.records = append(w.records, w.at(dec.InputOffset()-1))
 		}
 		return w.object(dec, at)
 	case '[':
@@ -347,23 +367,23 @@ func (w *walk) object(dec *json.Decoder, at role) error {
 			return &MalformedError{
 				Site:      w.at(dec.InputOffset()),
 				Text:      fmt.Sprintf("the member %s is written twice, so neither value is chosen", strconv.Quote(name)),
-				Want:      arrayWant,
-				Mechanism: MechanismIgnore,
+				Want:      w.held.arrayWant,
+				Mechanism: w.held.mechanism,
 			}
 		}
 		seen[name] = true
-		if err := w.value(dec, member(at, name)); err != nil {
+		if err := w.value(dec, w.member(at, name)); err != nil {
 			return err
 		}
 	}
 	return w.close(dec)
 }
 
-// array reads the entries of the array the decoder has just opened.
+// array reads the records of the array the decoder has just opened.
 func (w *walk) array(dec *json.Decoder, at role) error {
 	held := roleOther
 	if at == roleArray {
-		held = roleEntry
+		held = roleRecord
 	}
 	for dec.More() {
 		if err := w.value(dec, held); err != nil {
@@ -381,10 +401,10 @@ func (w *walk) close(dec *json.Decoder) error {
 	return nil
 }
 
-// member is what the value one member holds is: the array of entries for the
-// document's own ignore member, and nothing of interest below that.
-func member(at role, name string) role {
-	if at == roleDocument && name == "ignore" {
+// member is what the value one member holds is: the array of records for the
+// mechanism's own member, and nothing of interest below that.
+func (w *walk) member(at role, name string) role {
+	if at == roleDocument && name == w.held.array {
 		return roleArray
 	}
 	return roleOther
@@ -396,9 +416,9 @@ func (w *walk) refuse(dec *json.Decoder, err error) error {
 	return &MalformedError{
 		Err:       err,
 		Site:      w.at(dec.InputOffset()),
-		Text:      IgnoreFileName,
-		Want:      arrayWant,
-		Mechanism: MechanismIgnore,
+		Text:      w.held.file,
+		Want:      w.held.arrayWant,
+		Mechanism: w.held.mechanism,
 	}
 }
 
@@ -407,22 +427,14 @@ func (w *walk) refuse(dec *json.Decoder, err error) error {
 // one.
 func (w *walk) at(offset int64) token.Position {
 	if offset < 0 || offset > int64(len(w.body)) {
-		return documentSite()
+		return documentSite(w.held)
 	}
 	before := w.body[:offset]
 	start := bytes.LastIndexByte(before, '\n') + 1
-	column := 1
-	for _, r := range string(before[start:]) {
-		if units := utf16.RuneLen(r); units > 0 {
-			column += units
-			continue
-		}
-		column++
-	}
 	return token.Position{
-		Filename: IgnoreFileName,
+		Filename: w.held.file,
 		Offset:   int(offset),
 		Line:     1 + bytes.Count(before, []byte("\n")),
-		Column:   column,
+		Column:   graph.Column(before[start:], len(before)-start),
 	}
 }

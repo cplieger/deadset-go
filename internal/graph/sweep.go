@@ -152,6 +152,35 @@ type Result struct {
 	// one symbol reads. An exemption naming no symbol of the inventory is here
 	// under no circumstances.
 	Retained []Exemption
+
+	// Suppressed lists the marks that held a symbol back: the sweep runs once
+	// more with the same exemptions and no mark, and every mark whose symbol
+	// that pass judged a candidate is here, in the order the inventory holds
+	// those symbols, each once. A mark on a symbol live anyway, and a mark on
+	// one an exemption retains, is not here: that mark is in effect for nothing,
+	// which is what a stale suppression is. A mark naming no symbol of the
+	// inventory held nothing back either, so it is not here.
+	//
+	// Over a matrix the answer is the union of the configurations, for the
+	// reason the Retained record is one per symbol and class whatever the number
+	// of configurations: a suppression that is needed anywhere is not stale.
+	Suppressed []SymbolID
+}
+
+// withoutExemptions is the mode with the exemptions withdrawn and everything else
+// as the run gave it, which is what the sweep that answers which exemptions took
+// effect runs under.
+func (m Mode) withoutExemptions() Mode {
+	m.Exempt = nil
+	return m
+}
+
+// withoutMarks is the mode with the marks withdrawn and everything else as the run
+// gave it, which is what the sweep that answers which marks took effect runs
+// under.
+func (m Mode) withoutMarks() Mode {
+	m.Marked = nil
+	return m
 }
 
 // Sweep answers which symbols of one graph are dead under one mode, which
@@ -169,16 +198,24 @@ type Result struct {
 // and a consumer's call each name a use the target's own source does not hold, so
 // each holds its symbol live under both relations and seeds the closure from it.
 //
-// Which exemptions took effect is decided by sweeping twice, because the sweep is
-// what makes them take effect: the second sweep drops the exemptions from both
-// the seed and the candidate removal, and its candidate set is what the run would
-// have reported without them. A mode carrying no exemption sweeps once.
+// Which exemptions took effect, and which marks did, is decided by sweeping
+// again, because the sweep is what makes each take effect: a further sweep drops
+// the one under question and keeps everything else the mode carries, and its
+// candidate set is what the run would have reported without it. A mode carrying no
+// exemption and no mark sweeps once.
+//
+// The two questions are symmetric and are answered by two passes rather than one,
+// because withdrawing both at once would credit an exemption with holding back a
+// symbol a mark held back and the other way about. Neither pass is the run's
+// answer: the candidates, the components and the relations are the first sweep's.
 func (g *Graph) Sweep(m Mode) Result {
 	r := g.sweep(m).result()
-	if len(m.Exempt) == 0 {
-		return r
+	if len(m.Exempt) > 0 {
+		r.Retained = g.sweep(m.withoutExemptions()).retained(m.Exempt)
 	}
-	r.Retained = g.sweep(Mode{Marked: m.Marked, Production: m.Production}).retained(m.Exempt)
+	if len(m.Marked) > 0 {
+		r.Suppressed = g.sweep(m.withoutMarks()).suppressed(m.Marked)
+	}
 	return r
 }
 
@@ -254,6 +291,34 @@ func (s *sweep) retained(exempt []Exemption) []Exemption {
 	found := make([]Exemption, 0, len(exempt))
 	for i := range s.g.symbols {
 		found = append(found, held[s.g.symbols[i].ID]...)
+	}
+	return found
+}
+
+// suppressed lists the marks that name a symbol this sweep judged a candidate,
+// which is what a sweep without them answers, in the order the inventory holds
+// those symbols and each once.
+//
+// A mark the inventory holds no symbol for names nothing to hold back, and a mark
+// on a symbol this sweep did not judge a candidate held nothing back: the symbol
+// is live by a relation, or an exemption this sweep still carries retains it. Both
+// are marks in effect for nothing.
+func (s *sweep) suppressed(marked []SymbolID) []SymbolID {
+	held := make(map[SymbolID]bool, len(marked))
+	for _, id := range marked {
+		if at := s.g.at(id); at != outside && s.dead[at] {
+			held[id] = true
+		}
+	}
+	if len(held) == 0 {
+		return nil
+	}
+	found := make([]SymbolID, 0, len(held))
+	for i := range s.g.symbols {
+		if id := s.g.symbols[i].ID; held[id] {
+			found = append(found, id)
+			delete(held, id)
+		}
 	}
 	return found
 }

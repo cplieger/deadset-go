@@ -9,6 +9,10 @@ import (
 	spec "github.com/cplieger/deadset-spec"
 )
 
+// settingMark is the member the configuration schema marks a setting written as
+// an object with. An object without it is a section.
+const settingMark = "x-setting"
+
 // contractDocument decodes one document of the Contract this package implements.
 func contractDocument(t *testing.T, name string) map[string]any {
 	t.Helper()
@@ -25,20 +29,21 @@ func contractDocument(t *testing.T, name string) map[string]any {
 }
 
 // schemaNode builds one node of the closed key list from the Contract's
-// configuration schema: an object declaring members is a section, one that also
-// declares a default of its own is a setting written as an object, an object
-// leaving its member names to a pattern is an open object, an array of objects is
-// a list, and everything else holds one value.
+// configuration schema: an object declaring members is a section, one the schema
+// marks as a setting is a setting written as an object, an object leaving its
+// member names to a pattern is an open object, an array of objects is a list, and
+// everything else holds one value.
 //
-// A default is what tells the two objects apart, and it is the schema's own
-// statement of the difference: a section holds no value, so it declares no
-// default, while a setting declares the value a source supplying none resolves to.
+// The mark is what tells the two objects apart, and it is the schema's own
+// statement of the difference, read rather than inferred: a higher-ranked source
+// replaces a marked object whole and names it in one provenance entry, where a
+// section's keys are replaced one by one and named one entry each.
 func schemaNode(t *testing.T, at string, declaration map[string]any) keyNode {
 	t.Helper()
 
 	if properties, held := declaration["properties"]; held {
 		node := keyNode{kind: keySection, members: schemaMembers(t, at, properties)}
-		if _, carries := declaration["default"]; carries {
+		if marked, isBool := declaration[settingMark].(bool); isBool && marked {
 			node.kind = keyObject
 		}
 		return node

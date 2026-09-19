@@ -1,0 +1,71 @@
+One main package with a suppression at each of the three mechanisms in effect and
+a suppression at each of the three stale, so one archive measures both outcomes of
+every mechanism. A directive above a blank line is the bound-to-nothing case, and
+the entry naming Vanished is the case no declaration answers.
+
+-- go.mod --
+module example.com/selfcheck
+
+go 1.27.1
+-- main.go --
+package main
+
+func main() { println(loud(), Reached()) }
+
+//deadset:ignore DS1002 -- stale: main reaches loud, so the mark held nothing back
+func loud() string { return "l" }
+
+//deadset:ignore DS1002 -- in effect: nothing reaches quiet
+func quiet() string { return "q" }
+
+//deadset:ignore DS1002 -- stale: the line below this one declares nothing
+
+func gap() string { return "g" }
+
+// Reached is called from main.
+func Reached() string { return "r" }
+
+// Dropped is called by nothing, so the entry naming it holds a finding back.
+func Dropped() string { return "d" }
+-- deadset-ignore.json --
+{
+  "description": "One entry in effect, one on a live declaration, one no declaration answers.",
+  "ignore": [
+    {
+      "code": "DS1001",
+      "symbol": "go://example.com/selfcheck#Dropped",
+      "path": "main.go",
+      "reason": "in effect: nothing reaches Dropped"
+    },
+    {
+      "code": "DS1001",
+      "symbol": "go://example.com/selfcheck#Reached",
+      "path": "main.go",
+      "reason": "stale: main reaches Reached"
+    },
+    {
+      "code": "DS1001",
+      "symbol": "go://example.com/selfcheck#Vanished",
+      "path": "main.go",
+      "reason": "stale: no declaration answers this reference"
+    }
+  ]
+}
+-- deadset-baseline.json --
+{
+  "description": "Recorded findings: one still reported, one on a declaration since reached.",
+  "baseline": [
+    {
+      "code": "DS1002",
+      "symbol": "go://example.com/selfcheck#gap",
+      "path": "main.go",
+      "reason": "recorded by deadset-go 1.6.0"
+    },
+    {
+      "code": "DS1001",
+      "symbol": "go://example.com/selfcheck#Reached",
+      "path": "main.go",
+      "reason": "recorded by deadset-go 1.6.0"
+    }
+  ]
+}

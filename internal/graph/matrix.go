@@ -243,7 +243,7 @@ func distinct(refs []Reference) []Reference {
 
 // Sweep answers which symbols of the matrix are dead in every configuration they
 // exist in, which relation found each, which dead component each belongs to, and
-// which exemptions held a symbol back.
+// which exemptions and which marks held a symbol back.
 //
 // One sweep runs per configuration, over that configuration's own graph and under
 // the mode given, and the answers are combined. A symbol is a candidate when
@@ -265,6 +265,12 @@ func distinct(refs []Reference) []Reference {
 // consumer that compiles its call on one platform alone holds the symbol live
 // there, and the intersection is what decides whether the symbol is reported at
 // all.
+//
+// The candidate set intersects and the two held-back records unite, and that is
+// not an inconsistency: a symbol is reported only where every configuration agrees
+// it is dead, while an exemption or a mark that held a symbol back under any
+// configuration is in effect, because a suppression needed on one platform is not
+// stale.
 func (x *Matrix) Sweep(m Mode) Result {
 	per := make([]Result, len(x.per))
 	held := make([]map[SymbolID]Candidate, len(x.per))
@@ -297,6 +303,7 @@ func (x *Matrix) Sweep(m Mode) Result {
 
 	r.Components = x.union.componentsOf(dead, testOfDeadCode)
 	r.Retained = x.retained(m.Exempt, per)
+	r.Suppressed = x.suppressed(per)
 	return r
 }
 
@@ -402,6 +409,32 @@ func (x *Matrix) retained(exempt []Exemption, per []Result) []Exemption {
 	found := make([]Exemption, 0, len(kept))
 	for i := range x.merged.Symbols {
 		found = append(found, held[x.merged.Symbols[i].ID]...)
+	}
+	return found
+}
+
+// suppressed lists the marks that held a symbol back under any configuration, each
+// once, in the order the merged inventory holds the symbols they name.
+//
+// The answer is the union and not the intersection, which is the same rule the
+// retained record follows: a mark that holds a symbol back on one platform is in
+// effect, and withdrawing it would report the symbol there.
+func (x *Matrix) suppressed(per []Result) []SymbolID {
+	held := make(map[SymbolID]bool)
+	for i := range per {
+		for _, id := range per[i].Suppressed {
+			held[id] = true
+		}
+	}
+	if len(held) == 0 {
+		return nil
+	}
+	found := make([]SymbolID, 0, len(held))
+	for i := range x.merged.Symbols {
+		if id := x.merged.Symbols[i].ID; held[id] {
+			found = append(found, id)
+			delete(held, id)
+		}
 	}
 	return found
 }

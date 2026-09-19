@@ -13,15 +13,28 @@ import (
 
 // destinationPackages are the packages whose every function and method may name
 // the members of a value it is given at run time, so a value reaching any of them
-// keeps the members no reference points at. Sorted, and searched as a set.
-var destinationPackages = []string{
-	"encoding/gob",
-	"encoding/json",
-	"encoding/xml",
-	"html/template",
-	"reflect",
-	"text/template",
+// keeps the members no reference points at. The value is whether the destination
+// reaches METHODS as well as fields: the three standard encoders read fields and
+// call no method of the value, while a template engine selects a method by the same
+// syntax it selects a field with.
+var destinationPackages = map[string]bool{
+	"encoding/gob":  false,
+	"encoding/json": false,
+	"encoding/xml":  false,
+	"html/template": true,
+	"reflect":       true,
+	"text/template": true,
 }
+
+// The reflection package, and the one function of it that reads a value's fields
+// and reaches no method: DeepEqual compares field by field and calls nothing the
+// type declares. Every other entry point hands out a Value or a Type, from which a
+// method is reachable by name, and what a program does with one is not in the type
+// information, so the conservative answer there is that methods are reached.
+const (
+	reflectPackage = "reflect"
+	deepEqual      = "DeepEqual"
+)
 
 // destinationInterfaces are the interfaces a conversion into which reaches the
 // class, each named by its package path and its name.
@@ -40,10 +53,18 @@ const (
 
 // EncodingReflectionDetector records the encoding-reflection class: a type whose
 // values reach reflection, a standard encoder, a template engine, a database scan
-// target, a sort interface or a structured-logging call keeps its exported
-// methods, its exported fields and every field of it that carries a struct tag,
-// because that consumer names them by string and the reference graph holds no
-// edge to them.
+// target, a sort interface or a structured-logging call keeps its exported fields
+// and every field of it that carries a struct tag, because that consumer names them
+// by string and the reference graph holds no edge to them.
+//
+// What is retained is per destination, because the destinations do not read the same
+// thing. The three standard encoders, a database scan and the comparison of two
+// values by reflection read fields and call no method of the value, so those retain
+// fields alone. A template engine selects a method by the syntax it selects a field
+// with, a structured-logging handler renders a value through the method it answers
+// with, a sort interface is three methods, and every other entry point of the
+// reflection package hands out a value from which a method is reachable by name, so
+// those retain the exported methods as well.
 //
 // Three rules the class applies where the case is not spelled out. Every argument
 // of a function or method of a destination package flows, the writer of a
@@ -84,10 +105,12 @@ type interfaceTarget struct {
 }
 
 // destination is what one call is to the class: the clause an exemption records,
-// and whether only a pointer argument flows into it.
+// whether only a pointer argument flows into it, and whether it reaches the methods
+// of the value it is given as well as its fields.
 type destination struct {
 	detail   string
 	pointers bool
+	methods  bool
 }
 
 // walkCalls records every value a call hands to a destination package.
@@ -140,7 +163,7 @@ func (f *encodingFlow) arguments(info *types.Info, args []ast.Expr, d destinatio
 		if _, pointer := types.Unalias(at).(*types.Pointer); d.pointers && !pointer {
 			continue
 		}
-		if err := f.retain(at, arg.Pos(), d.detail); err != nil {
+		if err := f.retain(at, arg.Pos(), d); err != nil {
 			return err
 		}
 	}
@@ -151,6 +174,10 @@ func (f *encodingFlow) arguments(info *types.Info, args []ast.Expr, d destinatio
 // conversion set is read rather than walked a second time, so a value reaching
 // sort.Interface as an argument, as an assignment or as a satisfaction assertion
 // is recorded by one rule.
+//
+// A destination interface reaches methods, because the interface is a set of methods
+// and the package behind it calls them: what sorting reads of a value is the three
+// methods and nothing else.
 func (f *encodingFlow) walkConversions() error {
 	if len(f.targets) == 0 {
 		return nil
@@ -164,40 +191,52 @@ func (f *encodingFlow) walkConversions() error {
 		if !reaches {
 			continue
 		}
-		if err := f.retain(c.From, c.Site, "converted to "+name); err != nil {
+		if err := f.retain(c.From, c.Site, destination{
+			detail: "converted to " + name, methods: true,
+		}); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// retain records what every defined type an encoder walking a value of t reads
-// keeps: the exported methods the type declares, its exported fields, and every
-// field of it that carries a struct tag, whether that field is exported or not,
-// because a tagged field is named by its tag and not by its visibility.
-func (f *encodingFlow) retain(t types.Type, at token.Pos, detail string) error {
+// retain records what every defined type a destination walking a value of t reads
+// keeps: its exported fields, every field of it that carries a struct tag whether
+// that field is exported or not, because a tagged field is named by its tag and not
+// by its visibility, and the exported methods the type declares where the
+// destination reaches a method at all.
+func (f *encodingFlow) retain(t types.Type, at token.Pos, d destination) error {
 	site, err := f.kept.site(at)
 	if err != nil {
 		return err
 	}
 	for _, named := range encoderReach(t) {
-		origin := named.Origin()
+		f.members(named, site, d)
+	}
+	return nil
+}
+
+// members records what one destination reads of one defined type: the exported
+// methods the type declares where the destination reaches a method at all, and then
+// the fields of it a destination reading fields reads.
+func (f *encodingFlow) members(named *types.Named, site token.Position, d destination) {
+	origin := named.Origin()
+	if d.methods {
 		for m := range origin.Methods() {
 			if m.Exported() {
-				f.kept.record(m, site, detail)
-			}
-		}
-		st, isStruct := origin.Underlying().(*types.Struct)
-		if !isStruct {
-			continue
-		}
-		for i := range st.NumFields() {
-			if st.Field(i).Exported() || st.Tag(i) != "" {
-				f.kept.record(st.Field(i), site, detail)
+				f.kept.record(m, site, d.detail)
 			}
 		}
 	}
-	return nil
+	st, isStruct := origin.Underlying().(*types.Struct)
+	if !isStruct {
+		return
+	}
+	for i := range st.NumFields() {
+		if st.Field(i).Exported() || st.Tag(i) != "" {
+			f.kept.record(st.Field(i), site, d.detail)
+		}
+	}
 }
 
 // encodingDestination reports whether a call to fn reaches the class, and how.
@@ -206,17 +245,22 @@ func encodingDestination(fn *types.Func) (destination, bool) {
 	if pkg == nil {
 		return destination{}, false
 	}
-	if _, found := slices.BinarySearch(destinationPackages, pkg.Path()); found {
-		return destination{detail: "passed to " + fn.FullName()}, true
+	if methods, found := destinationPackages[pkg.Path()]; found {
+		if pkg.Path() == reflectPackage && fn.Name() == deepEqual {
+			methods = false
+		}
+		return destination{detail: "passed to " + fn.FullName(), methods: methods}, true
 	}
 	if pkg.Path() == sqlPackage && fn.Name() == sqlScanMethod && scansARow(fn) {
 		return destination{detail: "scanned by " + fn.FullName(), pointers: true}, true
 	}
 	// A structured-logging call hands its operands to a handler, which may render
 	// one by its members, so the set of those calls is the one the formatting
-	// class reads and this class shares it.
+	// class reads and this class shares it. A handler reaches methods: it renders a
+	// value that answers LogValue or String through that method, and one that
+	// answers neither by marshalling its fields.
 	if _, logs := slogFunctions[fn.Name()]; pkg.Path() == slogPackage && logs {
-		return destination{detail: "passed to " + fn.FullName()}, true
+		return destination{detail: "passed to " + fn.FullName(), methods: true}, true
 	}
 	return destination{}, false
 }

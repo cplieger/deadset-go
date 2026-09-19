@@ -65,7 +65,12 @@ func flowRefs(typeName string, members ...string) []string {
 	return qualify("example.com/flow", typeName, members...)
 }
 
-func TestEncodingReflectionRetainsTheExportedMembersAndTheTaggedFieldsOfEveryDestination(t *testing.T) {
+// What the class retains is per destination: the tagged and exported fields of the
+// value for every one of them, and the exported methods only where the destination
+// reaches a method. The comparison of two values by reflection reads fields alone,
+// while every other entry point of that package hands out a value a method is
+// reachable from.
+func TestEncodingReflectionRetainsWhatEachDestinationReads(t *testing.T) {
 	in := inputOf(t, "encoding-reflection-firing.txtar", Options{})
 	refs := retainedRefs(t, in, EncodingReflectionDetector)
 
@@ -77,17 +82,17 @@ func TestEncodingReflectionRetainsTheExportedMembersAndTheTaggedFieldsOfEveryDes
 		{
 			destination: "encoding/json",
 			typeName:    "JSONPayload",
-			want:        flowRefs("JSONPayload", "Describe", "Extra", "Name", "secret"),
+			want:        flowRefs("JSONPayload", "Extra", "Name", "secret"),
 		},
 		{
 			destination: "encoding/xml",
 			typeName:    "XMLPayload",
-			want:        flowRefs("XMLPayload", "Describe", "Extra", "Name", "secret"),
+			want:        flowRefs("XMLPayload", "Extra", "Name", "secret"),
 		},
 		{
 			destination: "encoding/gob",
 			typeName:    "GobPayload",
-			want:        flowRefs("GobPayload", "Describe", "Extra", "Name", "secret"),
+			want:        flowRefs("GobPayload", "Extra", "Name", "secret"),
 		},
 		{
 			destination: "text/template",
@@ -105,14 +110,19 @@ func TestEncodingReflectionRetainsTheExportedMembersAndTheTaggedFieldsOfEveryDes
 			want:        flowRefs("ReflectPayload", "Describe", "Extra", "Name", "secret"),
 		},
 		{
+			destination: "the comparison of two values by reflection",
+			typeName:    "ComparedPayload",
+			want:        flowRefs("ComparedPayload", "Extra", "Name", "secret"),
+		},
+		{
 			destination: "the scan target of one row",
 			typeName:    "SQLPayload",
-			want:        flowRefs("SQLPayload", "Describe", "Extra", "Name", "secret"),
+			want:        flowRefs("SQLPayload", "Extra", "Name", "secret"),
 		},
 		{
 			destination: "the scan target of a row set",
 			typeName:    "RowsPayload",
-			want:        flowRefs("RowsPayload", "Describe", "Extra", "Name", "secret"),
+			want:        flowRefs("RowsPayload", "Extra", "Name", "secret"),
 		},
 		{
 			destination: "a scan argument that is a value rather than a pointer",
@@ -132,7 +142,7 @@ func TestEncodingReflectionRetainsTheExportedMembersAndTheTaggedFieldsOfEveryDes
 		{
 			destination: "a map of slices of pointers",
 			typeName:    "Deep",
-			want:        flowRefs("Deep", "Describe", "Extra", "Inner", "Name", "secret"),
+			want:        flowRefs("Deep", "Extra", "Inner", "Name", "secret"),
 		},
 		{
 			destination: "the writer of a template execution",
@@ -142,7 +152,7 @@ func TestEncodingReflectionRetainsTheExportedMembersAndTheTaggedFieldsOfEveryDes
 		{
 			destination: "the field of a type an encoder reaches",
 			typeName:    "Inner",
-			want:        flowRefs("Inner", "Describe", "Label"),
+			want:        flowRefs("Inner", "Label"),
 		},
 	} {
 		t.Run(strings.ReplaceAll(test.destination, " ", "_"), func(t *testing.T) {
@@ -172,7 +182,7 @@ func TestEncodingReflectionReachesTheTypesTheMembersOfAnArgumentCarry(t *testing
 		{
 			reached:  "the argument of the encoder",
 			typeName: "Root",
-			want:     reachRefs("Root", "Describe", "Mid", "Opaque", "Printer"),
+			want:     reachRefs("Root", "Mid", "Opaque", "Printer"),
 		},
 		{
 			reached:  "one struct level below the argument",
@@ -182,7 +192,7 @@ func TestEncodingReflectionReachesTheTypesTheMembersOfAnArgumentCarry(t *testing
 		{
 			reached:  "two struct levels below the argument",
 			typeName: "Leaf",
-			want:     reachRefs("Leaf", "Describe", "Extra", "Label"),
+			want:     reachRefs("Leaf", "Extra", "Label"),
 		},
 		{
 			reached:  "the value a field typed as the empty interface carries",
@@ -202,7 +212,7 @@ func TestEncodingReflectionReachesTheTypesTheMembersOfAnArgumentCarry(t *testing
 		{
 			reached:  "the type embedded in an argument",
 			typeName: "Embedded",
-			want:     reachRefs("Embedded", "Extra", "Mark", "Tag"),
+			want:     reachRefs("Embedded", "Extra", "Tag"),
 		},
 		{
 			reached:  "a generic argument",
@@ -212,12 +222,12 @@ func TestEncodingReflectionReachesTheTypesTheMembersOfAnArgumentCarry(t *testing
 		{
 			reached:  "the type a generic argument is instantiated at",
 			typeName: "Boxed",
-			want:     reachRefs("Boxed", "Describe", "Extra", "Label"),
+			want:     reachRefs("Boxed", "Extra", "Label"),
 		},
 		{
 			reached:  "a type that holds a value of itself",
 			typeName: "Node",
-			want:     reachRefs("Node", "Describe", "Label", "Next"),
+			want:     reachRefs("Node", "Label", "Next"),
 		},
 	} {
 		t.Run(strings.ReplaceAll(test.reached, " ", "_"), func(t *testing.T) {
@@ -258,7 +268,6 @@ func TestEncodingReflectionNamesTheClassTheDestinationAndTheSite(t *testing.T) {
 		{"go://example.com/flow#JSONPayload.Name", "encoding-reflection", "json.go:18:70", "passed to encoding/json.Marshal"},
 		{"go://example.com/flow#JSONPayload.Extra", "encoding-reflection", "json.go:18:70", "passed to encoding/json.Marshal"},
 		{"go://example.com/flow#JSONPayload.secret", "encoding-reflection", "json.go:18:70", "passed to encoding/json.Marshal"},
-		{"go://example.com/flow#JSONPayload.Describe", "encoding-reflection", "json.go:18:70", "passed to encoding/json.Marshal"},
 		{"go://example.com/flow#LogPayload.LogValue", "encoding-reflection", "logging.go:21:68", "passed to log/slog.Info"},
 		{"go://example.com/flow#LogPayload.Describe", "encoding-reflection", "logging.go:21:68", "passed to log/slog.Info"},
 		{"go://example.com/flow#LogPayload.Name", "encoding-reflection", "logging.go:21:68", "passed to log/slog.Info"},

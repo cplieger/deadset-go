@@ -1,0 +1,7 @@
+::error file=catalog.go,line=12,col=6,endLine=12,title=DS1301 write-only-symbol::the field is written and never read
+::warning file=catalog.go,line=31,col=6,endLine=31,title=DS1203 uncalled-interface-method::no call through the interface reaches the method
+::error file=catalog.go,line=214,col=6,endLine=231,title=DS1002 unused-unexported::the function has no reference in the target
+::error file=go.mod,line=12,col=2,endLine=12,title=DS1601 unused-dependency::required by no package in the build list
+::warning file=normalize.go,line=12,col=6,endLine=27,title=DS1101 unnecessary-export::exported function is referenced only inside the package that declares it
+::error file=render_plan9.go,line=1,col=1,endLine=1,title=DS1501 file-never-built::built under no declared configuration
+::error file=deadset-ignore.json,line=7,col=5,endLine=7,title=DS1703 stale-suppression::the ignore entry named DS1001 and the symbol it names reports DS1003

@@ -1,0 +1,9 @@
+catalog/ext_test.go:4:6: function UnusedInTest: exported function has no reference in the target, and nothing outside can import the package that declares it [certain] (DS1103)
+cmd/app/main.go:8:6: function Unused: exported function has no reference in the target, and nothing outside can import the package that declares it [certain] (DS1103)
+cmd/app/run.go:4:6: function Run: exported function is referenced only inside the package that declares it [certain] (DS1101)
+internal/store/helper.go:4:6: function Helper: exported function is referenced only inside the package that declares it [certain] (DS1101)
+internal/store/open.go:7:6: function UnusedInternal: exported function has no reference in the target, and nothing outside can import the package that declares it [certain] (DS1103)
+internal/store/open.go:10:6: function Forgotten: exported function is referenced only from declarations that are themselves dead, and nothing outside can import the package that declares it [certain] (DS1103)
+internal/store/probe.go:4:6: function Probe: function is referenced only from test files and never from production code [certain] (DS1004)
+internal/store/probe_test.go:5:6: function TestProbe: every target symbol this test references is reported dead [certain] (DS1005)
+summary: 8 findings (0 allow, 2 warn, 6 deny), 10 deletable lines, 0 suppressions in effect, 0 reasons recorded, 0 stale suppressions, 0 pending, 0 omitted

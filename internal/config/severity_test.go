@@ -1,12 +1,11 @@
 package config
 
 import (
-	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
 
-	spec "github.com/cplieger/deadset-spec"
+	"github.com/cplieger/deadset-go/internal/catalog"
 )
 
 // intraFunctionFamily is the family prefix addressing the kinds that report dead
@@ -14,119 +13,63 @@ import (
 // to disable whole.
 const intraFunctionFamily = "DS18"
 
-// publishedKinds returns the issue kinds the Contract publishes as live, in the
-// order it lists them, with the default each carries.
-func publishedKinds(t *testing.T) []kind {
+// publishedKinds returns the issue kinds the vocabulary publishes as live, in the
+// order it lists them, with the default each carries. The vocabulary's own suite
+// pins those rows equal to the Contract's issue-kind document, so this package
+// reads the rows rather than the document.
+func publishedKinds(t *testing.T) []catalog.Row {
 	t.Helper()
 
-	var document struct {
-		Kinds []struct {
-			Code     string   `json:"code"`
-			Severity Severity `json:"default_severity"`
-			Enabled  bool     `json:"default_enabled"`
-			Fixed    bool     `json:"fixed"`
-		} `json:"kinds"`
+	rows := catalog.Kinds()
+	if len(rows) == 0 {
+		t.Fatal("Setup: the vocabulary publishes no live kind, so this test pins nothing")
 	}
-	decodeContract(t, "kinds.json", &document)
-
-	published := make([]kind, 0, len(document.Kinds))
-	for _, row := range document.Kinds {
-		published = append(published, kind{
-			code:     row.Code,
-			severity: row.Severity,
-			enabled:  row.Enabled,
-			fixed:    row.Fixed,
-		})
-	}
-	if len(published) == 0 {
-		t.Fatal("kinds.json publishes no live kind, so this test pins nothing")
-	}
-	return published
+	return rows
 }
 
-// retiredCodes returns the codes the Contract records as retired, which name no
-// live kind.
-func retiredCodes(t *testing.T) []string {
-	t.Helper()
-
-	var document struct {
-		Retired []struct {
-			Code string `json:"code"`
-		} `json:"retired"`
-	}
-	decodeContract(t, "kinds.json", &document)
-
-	codes := make([]string, 0, len(document.Retired))
-	for _, row := range document.Retired {
-		codes = append(codes, row.Code)
-	}
-	if len(codes) == 0 {
-		t.Fatal("kinds.json retires no code, so this test pins nothing")
-	}
-	return codes
-}
-
-// decodeContract decodes one document of the Contract into the shape a test reads
-// from it.
-func decodeContract(t *testing.T, name string, into any) {
-	t.Helper()
-
-	data, err := spec.Contract.ReadFile("contract/" + name)
-	if err != nil {
-		t.Fatalf("read contract/%s: %v", name, err)
-	}
-	if err := json.Unmarshal(data, into); err != nil {
-		t.Fatalf("decode contract/%s: %v", name, err)
-	}
-}
-
-func TestLiveKindsEqualTheContract(t *testing.T) {
+func TestLiveKindsReadTheVocabularysDefaults(t *testing.T) {
 	t.Parallel()
 
 	want := publishedKinds(t)
 	got := liveKinds()
 	if len(got) != len(want) {
-		t.Fatalf("liveKinds() holds %d kinds, want the %d kinds kinds.json publishes as live",
+		t.Fatalf("liveKinds() holds %d kinds, want the %d the vocabulary publishes as live",
 			len(got), len(want))
 	}
 	for index := range want {
-		if got[index] != want[index] {
-			t.Errorf("liveKinds()[%d] = %+v, want kinds.json's %+v", index, got[index], want[index])
+		expected := kind{
+			code:     want[index].Code,
+			severity: Severity(want[index].DefaultSeverity),
+			enabled:  want[index].DefaultEnabled,
+		}
+		if got[index] != expected {
+			t.Errorf("liveKinds()[%d] = %+v, want the vocabulary's %+v", index, got[index], expected)
+		}
+		held, live := liveKind(want[index].Code)
+		if !live || held != expected {
+			t.Errorf("liveKind(%q) = %+v, %t, want %+v, true", want[index].Code, held, live, expected)
 		}
 	}
 }
 
-func TestLiveKindsNameNoRetiredCode(t *testing.T) {
-	t.Parallel()
-
-	for _, code := range retiredCodes(t) {
-		if _, live := liveKind(code); live {
-			t.Errorf("liveKind(%q) reports a live kind, want none: kinds.json retires the code", code)
-		}
-		if namesLiveKind(code) {
-			t.Errorf("namesLiveKind(%q) = true, want false: kinds.json retires the code", code)
-		}
-	}
-}
-
-func TestFixedSeverityCodesEqualTheContract(t *testing.T) {
+func TestFixedSeverityCodesAreTheVocabularysFixedRows(t *testing.T) {
 	t.Parallel()
 
 	var want []string
-	for _, published := range publishedKinds(t) {
-		if published.fixed {
-			want = append(want, published.code)
+	for _, row := range publishedKinds(t) {
+		if row.Fixed {
+			want = append(want, row.Code)
 		}
 	}
 	slices.Sort(want)
 	if len(want) == 0 {
-		t.Fatal("kinds.json fixes no severity, so this test pins nothing")
+		t.Fatal("Setup: the vocabulary fixes no severity, so this test pins nothing")
 	}
 
 	got := fixedSeverityCodes()
 	slices.Sort(got)
 	if !slices.Equal(got, want) {
-		t.Errorf("fixedSeverityCodes() = %v, want the codes kinds.json fixes %v", got, want)
+		t.Errorf("fixedSeverityCodes() = %v, want the codes the vocabulary fixes %v", got, want)
 	}
 }
 
@@ -308,18 +251,18 @@ func TestEffectiveSeverity(t *testing.T) {
 	}
 }
 
-func TestEffectiveSeverityIsTheContractDefaultWhenNothingNamesTheKind(t *testing.T) {
+func TestEffectiveSeverityIsTheVocabularysDefaultWhenNothingNamesTheKind(t *testing.T) {
 	t.Parallel()
 
 	cfg := configFor(Application, false, nil)
 	for _, published := range publishedKinds(t) {
-		want := published.severity
-		if !published.enabled {
+		want := Severity(published.DefaultSeverity)
+		if !published.DefaultEnabled {
 			want = Allow
 		}
-		if got := cfg.EffectiveSeverity(published.code, false); got != want {
-			t.Errorf("EffectiveSeverity(%q, false) over an application naming no severity = %q, want kinds.json's %q",
-				published.code, got, want)
+		if got := cfg.EffectiveSeverity(published.Code, false); got != want {
+			t.Errorf("EffectiveSeverity(%q, false) over an application naming no severity = %q, want the vocabulary's %q",
+				published.Code, got, want)
 		}
 	}
 }
@@ -330,14 +273,14 @@ func TestEffectiveSeverityDisablesTheFamilyTheConfigurationNamesAndNoOther(t *te
 	cfg := configFor(Application, false, map[string]Severity{intraFunctionFamily: Allow})
 	disabled := 0
 	for _, published := range publishedKinds(t) {
-		want := published.severity
-		if strings.HasPrefix(published.code, intraFunctionFamily) {
+		want := Severity(published.DefaultSeverity)
+		if strings.HasPrefix(published.Code, intraFunctionFamily) {
 			want = Allow
 			disabled++
 		}
-		if got := cfg.EffectiveSeverity(published.code, false); got != want {
+		if got := cfg.EffectiveSeverity(published.Code, false); got != want {
 			t.Errorf("EffectiveSeverity(%q, false) under severity %q = %q, want %q",
-				published.code, intraFunctionFamily, got, want)
+				published.Code, intraFunctionFamily, got, want)
 		}
 	}
 	if disabled == 0 {

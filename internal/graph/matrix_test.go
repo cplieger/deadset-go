@@ -360,6 +360,55 @@ func TestMatrixSweepUnionsTheExemptionsEveryConfigurationRetained(t *testing.T) 
 	}
 }
 
+func TestMatrixSweepUnionsTheMarksEveryConfigurationSuppressed(t *testing.T) {
+	// Two configurations, each holding a caller the other does not, so each of
+	// the two declarations those callers reference is dead under one
+	// configuration and live under the other. A third declaration an entry point
+	// reaches under both is live everywhere.
+	b := newGraphBuilder(t).add("entry", "liveEverywhere",
+		"heldBackOnTheFirst", "callerOnTheSecond", "heldBackOnTheSecond", "callerOnTheFirst")
+	b.root("entry", RootMain)
+	b.root("callerOnTheFirst", RootMain)
+	b.root("callerOnTheSecond", RootMain)
+	b.ref("entry", "liveEverywhere")
+	b.ref("callerOnTheSecond", "heldBackOnTheFirst")
+	b.ref("callerOnTheFirst", "heldBackOnTheSecond")
+	per := b.configured(2, func(config int, name string) bool {
+		switch name {
+		case "callerOnTheFirst":
+			return config == 0
+		case "callerOnTheSecond":
+			return config == 1
+		default:
+			return true
+		}
+	})
+	merged, err := Merge(per)
+	if err != nil {
+		t.Fatalf("Merge = _, %v, want no error", err)
+	}
+	r := NewMatrix(&merged).Sweep(Mode{Marked: []SymbolID{
+		b.id("heldBackOnTheSecond"),
+		b.id("liveEverywhere"),
+		b.id("heldBackOnTheFirst"),
+	}})
+
+	// A mark that held a declaration back under one configuration is in effect,
+	// because withdrawing it would report the declaration there, so the record is
+	// the union and not the intersection; the mark on the declaration every
+	// configuration holds live is in effect for nothing. The record reads in the
+	// order the merged inventory holds the symbols rather than the order the
+	// marks arrived in.
+	want := []string{"heldBackOnTheFirst", "heldBackOnTheSecond"}
+	if got := b.suppressedBy(r); !slices.Equal(got, want) {
+		t.Errorf("Sweep over a matrix of two configurations suppressed %v, want %v", got, want)
+	}
+	if len(r.Candidates) != 0 {
+		t.Errorf("Sweep over a matrix whose every declaration is live somewhere reported %d candidates, want 0",
+			len(r.Candidates))
+	}
+}
+
 func TestMergeRefusesAMatrixItCannotKeyAConfigurationOf(t *testing.T) {
 	cases := map[string]int{
 		"no configuration":                 0,

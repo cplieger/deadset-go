@@ -6,6 +6,9 @@
 # not model interface satisfaction, so two whole classes below are its known
 # blind spots rather than dead code. Cross-checked at adjudication time:
 # `deadcode -test ./...` reports nothing in this module.
+#
+# Invoke it as `punused` or `punused '**/*.go'`. A package pattern reports
+# nothing and exits 0, which reads exactly like a clean scan.
 
 # --- Fixture modules under internal/load/testdata/.
 #
@@ -32,35 +35,58 @@ function Unused is unused
 # `Error()` on both error types satisfies `error`, and production code returns
 # them as `error`; `String()` on the kind enumerations satisfies `fmt.Stringer`
 # and is what renders a kind in a message and in a report; `Unwrap()` is what
-# `errors.Is` and `errors.As` call to walk a chain. No call site exists for a
-# reference search to find in either case, because the runtime dispatches
-# through the interface. Removing one would not fail the build, it would silently
-# change what a diagnostic prints or which errors match, which is why each is
-# pinned by a test of its rendered output or of the match.
+# `errors.Is` and `errors.As` call to walk a chain; `MarshalJSON` and
+# `UnmarshalJSON` on the report envelope satisfy `json.Marshaler` and
+# `json.Unmarshaler`, which is what makes marshalling an envelope write the
+# Contract's document and reading one refuse a member the schema does not
+# declare. No call site exists for a reference search to find in any of these
+# cases, because the runtime dispatches through the interface. Removing one would
+# not fail the build, it would silently change what a diagnostic prints, which
+# errors match, or which bytes a report is written as, which is why each is
+# pinned by a test of its rendered output, of the match, or of the round trip.
 method (*Error).Error
 method (ErrorKind).String
 method (RefKind).String
-method (Mechanism).String
 method (*MalformedError).Unwrap
+method (*Envelope).MarshalJSON
+method (*Envelope).UnmarshalJSON
 
-# --- The stages no verb calls yet, exercised by tests until one does.
+# --- What a reporting verb calls, exercised by tests until one exists.
 #
-# `print-roots` wires the loader, the matrix, the scope of a run, the enumeration,
-# the reference pass and the root detection into a production path; `print-retained`
-# adds the resolver, the exemption classes and the sweep of the matrix; and the
-# findings pass adds every issue kind's rule and the vocabulary it runs them in the
-# order of. So those stages have callers. These do not: no verb reads a suppression
-# or a dependency directive yet, so the two suppression readers and the four
-# dependency answers have only their tests. Each is named in the plan for the verb
-# that lands it, and the correct resolution is that call site rather than an
-# unexport: the packages are separate so that one stage's failure cannot break
-# another's compile, and a stage's entry point is its package's surface.
-function Inline
-function IgnoreFile
-function ModuleFile
-function UnusedRequirements
-function NoopReplacements
-function LastUses
+# The analysis is assembled: the composition root reads the suppression documents
+# and the declared edges, runs the matrix, the exemption classes, the sweep, the
+# emitters table and the self-check rules, and assembles the report envelope the
+# Contract declares. What has no production caller is the step AFTER that
+# envelope. No verb prints a report yet, so the five reporters and the two
+# orderings the envelope is printed through are reached by their tests alone; no
+# flag writes a baseline; and no verb returns a verdict, so nothing counts the
+# pending findings an exit code is decided by. Each is named in the plan for the
+# verb that lands it, and the correct resolution is that call site rather than an
+# unexport: a reporter is the report package's surface, and the packages are
+# separate so that one stage's failure cannot break another's compile.
+function Annotations is used in test only
+function JSON is used in test only
+function SARIF is used in test only
+function Template is used in test only
+function Text is used in test only
+function Sort is used in test only
+function Cap is used in test only
+function WriteBaseline is used in test only
+function Pending is used in test only
+
+# --- The three kinds whose subject is not a declaration of the inventory.
+#
+# Each has a rule, and none of the three can be registered in the emitters table:
+# the findings framework identifies a finding by the declaration of the inventory
+# its subject reference names, and a file no configuration built, a module
+# requirement and a module directive are none of them. Registering one fails
+# every run of the analyzer rather than reporting nothing, so the table names them
+# as kinds without an entry and its own test says which they are. Each is reached
+# by its tests until the framework admits a subject that is not a declaration,
+# and the correct resolution is that admission rather than an unexport.
+function FileNeverBuilt is used in test only
+function UnusedDependency is used in test only
+function UnusedReplace is used in test only
 
 # --- The per-analyzer configuration section.
 #
@@ -70,31 +96,16 @@ function LastUses
 # for a document that carries the section to resolve rather than be refused.
 field Go is unused
 
-# --- The details members no kind fills yet.
-#
-# A finding's details object mirrors the published schema field for field, so one
-# marshalling writes a conforming document and a kind sets only its own members.
-# Each of these belongs to a kind this version of the analyzer has no rule for: the
-# exclusion that kept a file out of the build, the class of an unused dependency,
-# the replacement a module directive names, and the dependency whose last use a
-# deletion removes. Each is filled by the kind that lands, which is why the member
-# waits rather than arriving with it.
-field ExcludedBy
-field DependencyClass
-field Replacement
-field RemovesLastUseOf
-
 # --- What the sweep answers and no verb reports yet.
 #
 # `print-retained` indexes the graph from the enumeration, the reference set and
 # the root set and sweeps it, so the index and the sweep have callers. What no
 # verb reads yet is a dead component: the listing at the depth the run asks for,
-# the two spellings a report and a message carry for a relation and a cascade, and
-# which consumers reference one symbol, which the graph records per symbol against
-# the day a finding names them one by one. Only the tests call them today, and the
-# correct resolution is the reporting verb rather than an unexport, because each is
-# a stage of the same package the enumeration and the roots are stages of.
+# the spelling a message carries for a cascade, and which consumers reference one
+# symbol, which the graph records per symbol against the day a finding names them
+# one by one. Only the tests call them today, and the correct resolution is the
+# reporting verb rather than an unexport, because each is a stage of the same
+# package the enumeration and the roots are stages of.
 method (*Component).List
-method (Relation).String
 method (Cascade).String
 method (*Graph).ConsumersOf

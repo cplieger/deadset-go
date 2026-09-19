@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"maps"
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -126,7 +125,7 @@ func boundRefs(records []Record) map[string][]string {
 
 func TestInlineBindsADirectiveToEveryDeclarationOnTheLineBelowIt(t *testing.T) {
 	result, root, symbols := loaded(t, "directives.txtar")
-	records, _, err := Inline(result, root, os.ReadFile, symbols)
+	records, _, err := Inline(result, resolverOf(t, result, root, symbols), symbols)
 	if err != nil {
 		t.Fatalf("Inline(directives.txtar) error: %v", err)
 	}
@@ -182,7 +181,7 @@ func codesOfReason(records []Record, reason string) []string {
 
 func TestInlineReadsACommentInAnotherNamespaceAsNothing(t *testing.T) {
 	result, root, symbols := loaded(t, "directives.txtar")
-	records, refusals, err := Inline(result, root, os.ReadFile, symbols)
+	records, refusals, err := Inline(result, resolverOf(t, result, root, symbols), symbols)
 	if err != nil {
 		t.Fatalf("Inline(directives.txtar) error: %v", err)
 	}
@@ -200,7 +199,7 @@ func TestInlineReadsACommentInAnotherNamespaceAsNothing(t *testing.T) {
 
 func TestInlineRefusesADirectiveThatCarriesNoReason(t *testing.T) {
 	result, root, symbols := loaded(t, "directives.txtar")
-	records, refusals, err := Inline(result, root, os.ReadFile, symbols)
+	records, refusals, err := Inline(result, resolverOf(t, result, root, symbols), symbols)
 	if err != nil {
 		t.Fatalf("Inline(directives.txtar) error: %v", err)
 	}
@@ -230,7 +229,7 @@ func TestInlineRefusesADirectiveThatCarriesNoReason(t *testing.T) {
 
 func TestInlineEndsTheReadOnADirectiveNameTheGrammarDoesNotDefine(t *testing.T) {
 	result, root, symbols := loaded(t, "malformed.txtar")
-	records, refusals, err := Inline(result, root, os.ReadFile, symbols)
+	records, refusals, err := Inline(result, resolverOf(t, result, root, symbols), symbols)
 
 	if !errors.Is(err, ErrMalformed) {
 		t.Fatalf("Inline(malformed.txtar) error = %v, want one satisfying errors.Is(err, ErrMalformed)", err)
@@ -261,7 +260,7 @@ func TestInlineReadsOneCommentPerSourceSiteAcrossPackageVariants(t *testing.T) {
 		t.Fatalf("Setup: the load returned %d packages, want the package, its nested package and at least one test variant", len(result.Packages))
 	}
 
-	records, _, err := Inline(result, root, os.ReadFile, symbols)
+	records, _, err := Inline(result, resolverOf(t, result, root, symbols), symbols)
 	if err != nil {
 		t.Fatalf("Inline(same-name.txtar) error: %v", err)
 	}
@@ -270,5 +269,31 @@ func TestInlineReadsOneCommentPerSourceSiteAcrossPackageVariants(t *testing.T) {
 	}
 	if got, want := records[0].Symbol, "go://example.com/samename#Helper"; got != want {
 		t.Errorf("Inline(same-name.txtar) bound %q, want %q", got, want)
+	}
+}
+
+func TestInlineRefusesAReasonlessDirectiveOncePerCodeItNames(t *testing.T) {
+	result, root, symbols := loaded(t, "two-codes.txtar")
+
+	records, refusals, err := Inline(result, resolverOf(t, result, root, symbols), symbols)
+	if err != nil {
+		t.Fatalf("Inline(two-codes.txtar) error: %v", err)
+	}
+	if len(records) != 0 {
+		t.Errorf("Inline(two-codes.txtar) produced %+v, want no record: a refused directive binds nothing", records)
+	}
+	if len(refusals) != 2 {
+		t.Fatalf("Inline(two-codes.txtar) returned %d refusals, want 2, one per code the directive names: %+v",
+			len(refusals), refusals)
+	}
+	got := []string{refusals[0].Code, refusals[1].Code}
+	if want := []string{"DS1001", "DS1101"}; !slices.Equal(got, want) {
+		t.Errorf("Inline(two-codes.txtar) refused the codes %v, want %v in the order the directive names them", got, want)
+	}
+	for _, refusal := range refusals {
+		if refusal.Reported != codeNoReason || refusal.Reason != "" || refusal.Site.Line != 3 {
+			t.Errorf("Inline(two-codes.txtar) refusal = %+v, want %s at catalog.go:3 with no reason",
+				refusal, codeNoReason)
+		}
 	}
 }
