@@ -1,6 +1,6 @@
 A function exported to C in a file importing "C". The load compiles with cgo
-disabled, so the file is not among the syntax the class walks and is recorded as a
-declared limit of the run.
+disabled and then type-checks the file from its original sources with the C
+pseudo-package opaque, so the file is among the syntax the class walks.
 
 -- go.mod --
 module example.com/app

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"go/token"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -305,7 +306,7 @@ func TestComputeRefusesAFindingAboutNoDeclarationOfTheInventory(t *testing.T) {
 	}
 }
 
-func TestComputeResolvesAFindingByItsReferenceWhereAnEmitterNamesNoDeclaration(t *testing.T) {
+func TestComputeRefusesAFindingAboutADeclarationAnEmitterNamesByItsReferenceAlone(t *testing.T) {
 	in := handInput(applicationConfig())
 	reported := Finding{
 		Code:     unusedExportedCode,
@@ -314,11 +315,37 @@ func TestComputeResolvesAFindingByItsReferenceWhereAnEmitterNamesNoDeclaration(t
 		Message:  "the declaration has no reference in the target",
 	}
 
-	result := computed(t, in, map[string]Emitter{unusedExportedCode: emitterOf(reported)})
+	_, err := Compute(in, map[string]Emitter{unusedExportedCode: emitterOf(reported)})
+	if !errors.Is(err, ErrEmitter) {
+		t.Errorf("Compute(a finding naming %s by reference alone) = %v, want an ErrEmitter refusal: a report's own reference does not identify a declaration, because a blank declaration shares the reference of its container",
+			exportedRef, err)
+	}
+}
 
-	if len(result.Findings) != 1 || result.Findings[0].Component.ID != "deadset-go/c-1" {
-		t.Errorf("Compute() = %v, want one finding completed from the inventory the reference names",
-			summary(result.Findings))
+func TestTheKeyOfEveryFindingAboutADeclarationIsThatDeclarationsIdentifier(t *testing.T) {
+	t.Parallel()
+
+	table := packageEmitters()
+	measured := 0
+	for _, archive := range fixtures(t) {
+		in := inputOf(t, archive, applicationConfig(), Consumers{})
+
+		result := computed(t, in, table)
+
+		for i := range result.Findings {
+			found := &result.Findings[i]
+			if shapeOf(found.Symbol.Kind) != shapeDeclaration {
+				continue
+			}
+			measured++
+			if got, want := key(found), string(found.id); got != want {
+				t.Errorf("the key of %s about %s is %q, want %q, the identifier the analysis enumerated the declaration under",
+					found.Code, found.Symbol.Ref, got, want)
+			}
+		}
+	}
+	if measured == 0 {
+		t.Fatal("no fixture reports a finding about a declaration, so the identity of one is measured over nothing")
 	}
 }
 
@@ -434,7 +461,7 @@ func swap(t *testing.T, rows []catalog.Row) {
 	t.Cleanup(func() { kindsOfCatalog = before })
 }
 
-func TestComputeReportsEveryDeclarationOnceOverEveryKindOfThePackage(t *testing.T) {
+func TestComputeReportsEveryPositionOnceOverEveryKindOfThePackage(t *testing.T) {
 	t.Parallel()
 
 	emitters := packageEmitters()
@@ -446,18 +473,19 @@ func TestComputeReportsEveryDeclarationOnceOverEveryKindOfThePackage(t *testing.
 
 			result, err := Compute(in, emitters)
 			if err != nil {
-				t.Fatalf("Compute(every kind of the package, %s) = error %v, want the findings of the pass: two kinds disagree on which code a declaration is reported under",
+				t.Fatalf("Compute(every kind of the package, %s) = error %v, want the findings of the pass: two kinds disagree on which code reports one subject",
 					archive, err)
 			}
 			under := make(map[string]string, len(result.Findings))
 			for i := range result.Findings {
 				found := &result.Findings[i]
-				if first, twice := under[found.Symbol.Ref]; twice {
+				at := key(found)
+				if first, twice := under[at]; twice {
 					t.Errorf("the pass over %s reports %s under both %s and %s, want one code",
-						archive, found.Symbol.Ref, first, found.Code)
+						archive, at, first, found.Code)
 					continue
 				}
-				under[found.Symbol.Ref] = found.Code
+				under[at] = found.Code
 			}
 		})
 	}
@@ -489,6 +517,119 @@ func TestTheKindsOfThePackageAgreeOnWhichCodeReportsADeclarationNothingReference
 			t.Errorf("the pass over precedence-importable.txtar reports %s under %q, want %q: the pass reports %v",
 				ref, got, code, summary(result.Findings))
 		}
+	}
+}
+
+// livenessAbsentKinds is the subject kinds the finding schema forbids a liveness
+// relation on, read from the branch that states the rule by the members it is written
+// with rather than by the position of that branch.
+func livenessAbsentKinds(t *testing.T) []string {
+	t.Helper()
+
+	const schemaPath = "contract/finding.schema.json"
+	body, err := spec.Contract.ReadFile(schemaPath)
+	if err != nil {
+		t.Fatalf("Setup: read %s from the contract: %v", schemaPath, err)
+	}
+	type condition struct {
+		Properties struct {
+			Symbol struct {
+				Properties struct {
+					Kind struct {
+						Enum []string `json:"enum"`
+					} `json:"kind"`
+				} `json:"properties"`
+			} `json:"symbol"`
+		} `json:"properties"`
+	}
+	var schema struct {
+		AllOf []struct {
+			If struct {
+				condition
+				AnyOf []condition `json:"anyOf"`
+			} `json:"if"`
+			Then struct {
+				Not struct {
+					Required []string `json:"required"`
+				} `json:"not"`
+			} `json:"then"`
+		} `json:"allOf"`
+	}
+	if err := json.Unmarshal(body, &schema); err != nil {
+		t.Fatalf("Setup: decode %s: %v", schemaPath, err)
+	}
+	for _, branch := range schema.AllOf {
+		if !slices.Contains(branch.Then.Not.Required, "liveness_relation") {
+			continue
+		}
+		var named []string
+		for _, arm := range append(branch.If.AnyOf, branch.If.condition) {
+			named = append(named, arm.Properties.Symbol.Properties.Kind.Enum...)
+		}
+		if len(named) == 0 {
+			t.Fatalf("Setup: %s forbids a liveness relation under no subject kind, so this test pins nothing",
+				schemaPath)
+		}
+		return named
+	}
+	t.Fatalf("Setup: %s states no branch forbidding a liveness relation", schemaPath)
+	return nil
+}
+
+func TestTheShapeTableIsTheContractsLivenessAbsenceList(t *testing.T) {
+	t.Parallel()
+
+	want := slices.Sorted(slices.Values(livenessAbsentKinds(t)))
+
+	got := slices.Sorted(maps.Keys(shapes))
+
+	if !slices.Equal(got, want) {
+		t.Errorf("the shape table marks %v as a part or a row, want %v, the subject kinds the Contract carries no liveness relation on",
+			got, want)
+	}
+	for kind, held := range shapes {
+		if held != shapePart && held != shapeRow {
+			t.Errorf("the shape table gives %q the declaration shape, want a part or a row: the table holds the exception rather than the rule",
+				kind)
+		}
+	}
+	for _, word := range symbolKinds {
+		if word == fileSubject {
+			continue
+		}
+		if shapeOf(word) != shapeDeclaration {
+			t.Errorf("a declaration of the inventory reported as subject kind %q reads as %d, want the declaration shape",
+				word, shapeOf(word))
+		}
+	}
+}
+
+func TestLivenessAbsentAnswersForEveryFindingTheContractForbidsTheRelationOn(t *testing.T) {
+	t.Parallel()
+
+	absent := livenessAbsentKinds(t)
+	table := packageEmitters()
+	measured := 0
+	for _, archive := range fixtures(t) {
+		in := inputOf(t, archive, applicationConfig(), Consumers{})
+
+		for _, found := range computed(t, in, table).Findings {
+			if !slices.Contains(absent, found.Symbol.Kind) {
+				continue
+			}
+			measured++
+			if !LivenessAbsent(&found) {
+				t.Errorf("LivenessAbsent(%s about the %s %s) = false, want true: the Contract forbids the relation on that subject kind",
+					found.Code, found.Symbol.Kind, found.Symbol.Ref)
+			}
+			if !found.Live {
+				t.Errorf("%s about the %s %s carries the relation %s, want none",
+					found.Code, found.Symbol.Kind, found.Symbol.Ref, found.Relation)
+			}
+		}
+	}
+	if measured == 0 {
+		t.Fatal("no fixture reports a finding about a part or a row, so the rule is measured over nothing")
 	}
 }
 
@@ -607,10 +748,9 @@ func TestComputeRefusesTwoFindingsAboutOneSubjectThatIsNoDeclaration(t *testing.
 
 func TestComputeRefusesAFindingAboutADeclarationKindTheInventoryDoesNotHold(t *testing.T) {
 	for kind, subject := range map[string]string{
-		"a function":    symbolKinds[graph.KindFunc],
-		"a field":       symbolKinds[graph.KindField],
-		"a suppression": suppressionSubject,
-		"no kind":       "",
+		"a function": symbolKinds[graph.KindFunc],
+		"a field":    symbolKinds[graph.KindField],
+		"no kind":    "",
 	} {
 		t.Run(kind, func(t *testing.T) {
 			in := handInput(applicationConfig())
@@ -629,14 +769,31 @@ func TestComputeRefusesAFindingAboutADeclarationKindTheInventoryDoesNotHold(t *t
 	}
 }
 
-func TestComputeRefusesAFindingAboutANonDeclarationThatNamesNoReference(t *testing.T) {
+func TestComputeRefusesARowThatNamesNoRecord(t *testing.T) {
 	in := handInput(applicationConfig())
 	unnamed := requirementFinding()
 	unnamed.Symbol.Ref = ""
 
 	_, err := Compute(in, map[string]Emitter{unusedDependencyCode: emitterOf(unnamed)})
 	if !errors.Is(err, ErrEmitter) {
-		t.Errorf("Compute(%s naming no reference) = %v, want an ErrEmitter refusal: a %s is identified by its reference",
+		t.Errorf("Compute(%s naming no reference) = %v, want an ErrEmitter refusal: a %s row is found by the record it names, because its position names the document",
 			unusedDependencyCode, err, dependencySubject)
+	}
+}
+
+func TestComputeRefusesAPartOfADeclarationTheInventoryDoesNotHold(t *testing.T) {
+	in := handInput(applicationConfig())
+	orphan := findingAt(unusedParameterCode, Subject{
+		Ref:       "go://example.com/app#Absent",
+		Kind:      parameterSubject,
+		Name:      "limit",
+		SizeLines: 1,
+	}, Position{Path: "catalog.go", Line: 14, Column: 20, EndLine: 14},
+		"parameter limit is never read in the body")
+
+	_, err := Compute(in, map[string]Emitter{unusedParameterCode: emitterOf(orphan)})
+	if !errors.Is(err, ErrEmitter) {
+		t.Errorf("Compute(a %s of a declaration the inventory does not hold) = %v, want an ErrEmitter refusal: a part belongs to a declaration and names it by reference",
+			parameterSubject, err)
 	}
 }

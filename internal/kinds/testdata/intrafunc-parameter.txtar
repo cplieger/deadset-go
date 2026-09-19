@@ -1,0 +1,40 @@
+A function whose body never reads one of its two parameters, one whose body reads
+both, one declaring the blank identifier, one leaving its parameter unnamed, and one
+nothing references, which an unused-declaration kind reports whole.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+// scaled reads its value and never its label.
+func scaled(value int, label string) int {
+	return value * 2
+}
+
+// summed reads both of its parameters, so nothing reports either.
+func summed(left, right int) int {
+	return left + right
+}
+
+// ignored declares the blank identifier, which names nothing to report.
+func ignored(_ int) int {
+	return 1
+}
+
+// unnamed leaves its parameter unnamed, which names nothing to report.
+func unnamed(int) int {
+	return 2
+}
+
+// dropped names a label it never reads and nothing references the function, so an
+// unused-declaration kind reports it whole and nothing reports a part of it.
+func dropped(value int, label string) int {
+	return value
+}
+
+func main() {
+	println(scaled(1, "a"), summed(2, 3), ignored(4), unnamed(5))
+}

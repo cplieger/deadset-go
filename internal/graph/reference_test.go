@@ -560,7 +560,7 @@ func TestReferencesLeavesTheCandidateSetToTheDeclarations(t *testing.T) {
 	// either relation, so a package every file imports and a package no file
 	// imports are alike to the sweep: what the rule added is an edge for the file
 	// and package kinds to read, not a change to what is reported.
-	for _, c := range New(a.symbols, a.refs, nil).Sweep(Mode{}).Candidates {
+	for _, c := range New(a.symbols, a.refs, nil).Sweep(SweepInput{}).Candidates {
 		if kind := kinds[c.ID]; kind == KindPackage || kind == KindFile {
 			t.Errorf("Sweep over imports.txtar reported the %s %s, want only declarations", kind, a.name(c.ID))
 		}

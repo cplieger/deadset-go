@@ -333,7 +333,8 @@ func TestComputeDropsAnExemptionATestFileIsTheEvidenceFor(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(strings.ReplaceAll(tc.name, " ", "_"), func(t *testing.T) {
-			in := inputOf(t, "production-evidence.txtar", Options{Production: tc.name == "a production run"})
+			in := inputOf(t, "production-evidence.txtar", Options{})
+			in.Mode = graph.Mode{Production: tc.name == "a production run"}
 
 			found, err := Compute(in, goDetectors())
 			if err != nil {
@@ -351,7 +352,8 @@ func TestComputeDropsAnExemptionATestFileIsTheEvidenceFor(t *testing.T) {
 // framework keeps the first site by rendered order, and a test file sorts before the
 // source file here.
 func TestComputeKeepsTheSourceSiteOfAFactATestFileAlsoCarries(t *testing.T) {
-	in := inputOf(t, "with-tests.txtar", Options{Production: true})
+	in := inputOf(t, "with-tests.txtar", Options{})
+	in.Mode = graph.Mode{Production: true}
 
 	found, err := Compute(in, goDetectors())
 	if err != nil {

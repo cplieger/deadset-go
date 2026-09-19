@@ -124,6 +124,9 @@ func envelopeOfDir(t *testing.T, dir string, kind config.TargetKind) (Envelope, 
 	if err != nil {
 		t.Fatalf("Setup: graph.NewResolver(%s): %v", dir, err)
 	}
+	// The pipeline analyses in the production mode, which is the run the analyzer
+	// makes, and the classes, the sweep and the kinds all read the one value.
+	mode := graph.Mode{Production: true}
 	exemptions, err := exempt.Compute(&exempt.Input{
 		Result: &result, Resolve: resolver, Symbols: symbols, Root: root, Read: os.ReadFile,
 		Options: exempt.Options{
@@ -132,6 +135,7 @@ func envelopeOfDir(t *testing.T, dir string, kind config.TargetKind) (Envelope, 
 				Right: resolved.Analysis.TemplateDelimiters.Right,
 			},
 		},
+		Mode: mode,
 	}, fixtureDetectors)
 	if err != nil {
 		t.Fatalf("Setup: exempt.Compute(%s): %v", dir, err)
@@ -140,21 +144,21 @@ func envelopeOfDir(t *testing.T, dir string, kind config.TargetKind) (Envelope, 
 	if err != nil {
 		t.Fatalf("Setup: graph.Merge(%s): %v", dir, err)
 	}
-	swept := graph.NewMatrix(&merged).Sweep(graph.Mode{Exempt: exemptions, Production: true})
+	swept := graph.NewMatrix(&merged).Sweep(graph.SweepInput{Exempt: exemptions, Mode: mode})
 
 	refs := make(map[graph.SymbolID]string, len(merged.Symbols))
 	for i := range merged.Symbols {
 		refs[merged.Symbols[i].ID] = merged.Symbols[i].Ref
 	}
 	computed, err := kinds.Compute(&kinds.Input{
-		Config:     &resolved,
-		Merged:     &merged,
-		Sweep:      &swept,
-		Refs:       refs,
-		Exempt:     exemptions,
-		Matrix:     []string{configuration.ID},
-		Per:        []kinds.Configured{{Result: &result, Resolve: resolver, Symbols: symbols}},
-		Production: true,
+		Config: &resolved,
+		Merged: &merged,
+		Sweep:  &swept,
+		Refs:   refs,
+		Exempt: exemptions,
+		Matrix: []string{configuration.ID},
+		Per:    []kinds.Configured{{Result: &result, Resolve: resolver, Symbols: symbols}},
+		Mode:   mode,
 	}, fixtureEmitters())
 	if err != nil {
 		t.Fatalf("Setup: kinds.Compute(%s): %v", dir, err)

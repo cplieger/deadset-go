@@ -112,7 +112,7 @@ func TestEnumGroupLeavesTheUnreferencedMemberOfAPlainGroupASweepCandidate(t *tes
 
 	// The class retained nothing on this fixture, so the mode carries no
 	// exemption and the sweep answers over the graph alone.
-	result := graph.New(in.Symbols, references, roots).Sweep(graph.Mode{})
+	result := graph.New(in.Symbols, references, roots).Sweep(graph.SweepInput{})
 
 	names := make(map[graph.SymbolID]string, len(in.Symbols))
 	for i := range in.Symbols {

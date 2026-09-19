@@ -158,8 +158,11 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 		},
 		TemplateDirs:     resolved.Analysis.TemplateDirs,
 		IncludeGenerated: resolved.Analysis.GeneratedFiles == config.IncludeGenerated,
-		Production:       true,
 	}
+	// The fixture analyses in the production mode, which is the run the analyzer
+	// makes, and every stage of the fixture reads the one value as the composition
+	// root hands it to every stage of a run.
+	mode := graph.Mode{Production: true}
 	rootOptions := graph.RootOptions{
 		Patterns:     resolved.Roots.Patterns,
 		PublishedAPI: resolved.Target.Kind == config.Library,
@@ -197,6 +200,7 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 			Root:    root,
 			Read:    os.ReadFile,
 			Options: options,
+			Mode:    mode,
 		}, detectors)
 		if err != nil {
 			t.Fatalf("Setup: exempt.Compute(%s): %v", c.ID, err)
@@ -210,7 +214,7 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 	if err != nil {
 		t.Fatalf("Setup: graph.Merge(%s): %v", doc.Target.Path, err)
 	}
-	swept := graph.NewMatrix(&merged).Sweep(graph.Mode{Exempt: exemptions, Production: true})
+	swept := graph.NewMatrix(&merged).Sweep(graph.SweepInput{Exempt: exemptions, Mode: mode})
 
 	refs := make(map[graph.SymbolID]string, len(merged.Symbols))
 	for i := range merged.Symbols {
@@ -225,16 +229,16 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 	}
 	generated := generatedPaths(t, per)
 	return &Input{
-		Config:     &resolved,
-		Merged:     &merged,
-		Sweep:      &swept,
-		Refs:       refs,
-		Exempt:     exemptions,
-		Generated:  func(path string) bool { return generated[path] },
-		Matrix:     identifiers(configurations),
-		Per:        per,
-		Consumers:  consumers,
-		Production: true,
+		Config:    &resolved,
+		Merged:    &merged,
+		Sweep:     &swept,
+		Refs:      refs,
+		Exempt:    exemptions,
+		Generated: func(path string) bool { return generated[path] },
+		Matrix:    identifiers(configurations),
+		Per:       per,
+		Consumers: consumers,
+		Mode:      mode,
 	}
 }
 
@@ -285,10 +289,10 @@ func declarationEmitters() map[string]Emitter {
 }
 
 // packageEmitters is every emitter this package implements, which is the table the
-// once rule is measured over: the Contract reports one declaration under one code,
-// so the kinds agree on precedence or a pass over any fixture fails. A kind landed
-// later is added here, and its fixtures are then measured against every kind that
-// came before it.
+// composition root registers and the table the once rule is measured over: one
+// position carries one finding, so the kinds agree on precedence or a pass over any
+// fixture fails. A kind landed later is added here, and its fixtures are then
+// measured against every kind that came before it.
 func packageEmitters() map[string]Emitter {
 	table := declarationEmitters()
 	table[unusedInterfaceCode] = UnusedInterface
@@ -300,6 +304,20 @@ func packageEmitters() map[string]Emitter {
 	table[unnecessaryExportCode] = UnnecessaryExport
 	table[unnecessaryExposureCode] = UnnecessaryExposure
 	table[unreachableExportCode] = UnreachableExport
+	table[fileNeverBuiltCode] = FileNeverBuilt
+	table[fileNeverImportedCode] = FileNeverImported
+	table[unusedDependencyCode] = UnusedDependency
+	table[unusedReplaceCode] = UnusedReplace
+	table[suppressionWithoutReasonCode] = SuppressionsWithoutReason
+	table[unscopedEntryCode] = UnscopedEntries
+	table[staleSuppressionCode] = StaleSuppressions
+	table[unmatchedRootCode] = UnmatchedRoots
+	table[unusedParameterCode] = UnusedParameter
+	table[unusedReceiverCode] = UnusedReceiver
+	table[unusedResultCode] = UnusedResult
+	table[unreachableStatementCode] = UnreachableStatement
+	table[deadStoreCode] = DeadStore
+	table[unreachableCaseCode] = UnreachableCase
 	return table
 }
 

@@ -1,6 +1,6 @@
 {
-  "schema_version": "2.0.0",
-  "contract_version": "1.3.0",
+  "schema_version": "4.0.0",
+  "contract_version": "1.5.0",
   "analyzer": {
     "name": "deadset-go",
     "version": "1.6.0",
@@ -8,7 +8,7 @@
       "go"
     ],
     "schema_versions_accepted": [
-      "2.0.0"
+      "4.0.0"
     ],
     "conformance": {
       "corpus_version": "1.0.0",

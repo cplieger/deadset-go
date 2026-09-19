@@ -105,7 +105,7 @@ func (n *narrowing) holdWriteOnly() {
 	for _, exemption := range n.in.Exempt {
 		exempted[exemption.ID] = true
 	}
-	counted := writesAndReads(n.in, n.in.Production)
+	counted := writesAndReads(n.in)
 	for i := range n.in.Merged.Symbols {
 		symbol := &n.in.Merged.Symbols[i]
 		if _, reports := writeOnly(n.in, symbol, counted[symbol.ID], exempted); reports {

@@ -1101,27 +1101,67 @@ func testedModule(t *testing.T, document string) string {
 func TestPrintRetainedOverAModuleThatHasTestFiles(t *testing.T) {
 	t.Parallel()
 
-	dir := testedModule(t, `{"target": {"kind": "application"}}`)
+	// The two production declarations are held back under either mode: the value
+	// io.Copy converts and the value fmt.Println formats are both in production
+	// code. A method declared in a test file is held back by the same class, and
+	// the external test package is its own package in the reference the line
+	// carries, but the conversion that is its evidence is a use a test makes, so
+	// the production sweep counts no such reference and the class holds nothing.
+	// The order is the site's: the production file first, then the external test
+	// file, then the in-package one.
+	const production = "go://example.com/app#Sink.Write\tinterface-satisfaction\tapp.go:26:23\tsatisfies io.Writer\n" +
+		"go://example.com/app#Tier.String\tformat-verb-contract\tapp.go:29:14\tformatted by fmt.Println\n"
+	const inTestFiles = "go://example.com/app_test#tally.Write\tinterface-satisfaction\tapp_ext_test.go:20:23\tsatisfies io.Writer\n" +
+		"go://example.com/app#probe.Write\tinterface-satisfaction\tapp_test.go:20:23\tsatisfies io.Writer\n"
+
+	tests := []struct {
+		name string
+		mode []string
+		want string
+	}{
+		{name: "the_mode_the_report_uses_by_default", mode: nil, want: production},
+		{name: "the_production_mode_named", mode: []string{"--mode=production"}, want: production},
+		{name: "the_plain_mode_named", mode: []string{"--mode=plain"}, want: production + inTestFiles},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := testedModule(t, `{"target": {"kind": "application"}}`)
+
+			var stdout, stderr bytes.Buffer
+			args := append([]string{"print-retained", "--target=" + dir}, tc.mode...)
+			if got := run(t.Context(), args, &stdout, &stderr); got != exitClean {
+				t.Fatalf("run(%q) over a module with test files = %d, want %d\nstderr: %q", args, got, exitClean, stderr.String())
+			}
+			if stderr.Len() != 0 {
+				t.Errorf("run(%q) stderr = %q, want empty", args, stderr.String())
+			}
+			if got := stdout.String(); got != tc.want {
+				t.Errorf("run(%q) stdout =\n%s\nwant\n%s", args, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPrintRetainedRefusesAModeOutsideTheTwoItAnswers(t *testing.T) {
+	t.Parallel()
+
+	dir := exemptedModule(t, `{"target": {"kind": "application"}}`)
 
 	var stdout, stderr bytes.Buffer
-	args := []string{"print-retained", "--target=" + dir}
-	if got := run(t.Context(), args, &stdout, &stderr); got != exitClean {
-		t.Fatalf("run(%q) over a module with test files = %d, want %d\nstderr: %q", args, got, exitClean, stderr.String())
+	args := []string{"print-retained", "--target=" + dir, "--mode=report"}
+	if got := run(t.Context(), args, &stdout, &stderr); got != exitUsage {
+		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, exitUsage, stderr.String())
 	}
-	if stderr.Len() != 0 {
-		t.Errorf("run(%q) stderr = %q, want empty", args, stderr.String())
+	if stdout.Len() != 0 {
+		t.Errorf("run(%q) stdout = %q, want empty: a refused invocation analyzes nothing", args, stdout.String())
 	}
-
-	// A method declared in a test file is held back by the same class as one
-	// declared in production, and the external test package is its own package in
-	// the reference the line carries. The order is the site's: the production file
-	// first, then the external test file, then the in-package one.
-	want := "go://example.com/app#Sink.Write\tinterface-satisfaction\tapp.go:26:23\tsatisfies io.Writer\n" +
-		"go://example.com/app#Tier.String\tformat-verb-contract\tapp.go:29:14\tformatted by fmt.Println\n" +
-		"go://example.com/app_test#tally.Write\tinterface-satisfaction\tapp_ext_test.go:20:23\tsatisfies io.Writer\n" +
-		"go://example.com/app#probe.Write\tinterface-satisfaction\tapp_test.go:20:23\tsatisfies io.Writer\n"
-	if got := stdout.String(); got != want {
-		t.Errorf("run(%q) stdout =\n%s\nwant\n%s", args, got, want)
+	for _, want := range []string{`--mode="report"`, modeProduction, modePlain, printRetainedUsage} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("run(%q) stderr = %q, want it to contain %q", args, stderr.String(), want)
+		}
 	}
 }
 

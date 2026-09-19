@@ -1,0 +1,48 @@
+A type switch whose second case an interface case ahead of it always matches, a
+type switch whose cases are all reachable, and a type switch naming nil.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+import "io"
+
+// reader answers the reader interface.
+type reader struct{}
+
+// Read answers the reader interface and reports nothing read.
+func (reader) Read(p []byte) (int, error) {
+	return len(p) - len(p), io.EOF
+}
+
+// classify names the reader interface ahead of the concrete type that implements
+// it, so the second case can never match.
+func classify(v any) string {
+	switch v.(type) {
+	case io.Reader:
+		return "reader"
+	case reader:
+		return "concrete"
+	}
+	return "other"
+}
+
+// ordered names the concrete type first, so both cases are reachable.
+func ordered(v any) string {
+	switch v.(type) {
+	case reader:
+		return "concrete"
+	case io.Reader:
+		return "reader"
+	case nil:
+		return "nil"
+	}
+	return "other"
+}
+
+func main() {
+	println(classify(reader{}), ordered(reader{}))
+}

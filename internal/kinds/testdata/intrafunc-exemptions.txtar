@@ -1,0 +1,63 @@
+Five functions whose signature nothing is free to change, each naming a parameter
+its body never reads: a method that satisfies an interface a value of its receiver
+type reaches, a function a variable of func type holds, a function a linkname
+directive names, a function whose body only panics and a function with no body
+statement. One further function names an unread parameter and nothing fixes its
+signature.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+import (
+	"io"
+	_ "unsafe"
+)
+
+// sink answers the writer interface and never reads what it is given.
+type sink struct{}
+
+// Write answers the writer interface, whose signature fixes both parameters.
+func (sink) Write(p []byte) (int, error) {
+	return 0, nil
+}
+
+// wrap names a depth it never reads, and a variable of func type holds it, so the
+// func type fixes the signature.
+func wrap(depth int) string {
+	return "wrapped"
+}
+
+// wrapper holds wrap, which is a use of the function outside call position.
+var wrapper func(int) string = wrap
+
+//go:linkname exposed example.com/other.exposed
+func exposed(level int) int {
+	return 7
+}
+
+// unimplemented panics and never reads the reason it is given.
+func unimplemented(reason string) int {
+	panic("not implemented")
+}
+
+// blank holds no statement and never reads the reason it is given.
+func blank(reason string) {}
+
+// plain names a label it never reads and nothing fixes its signature.
+func plain(value int, label string) int {
+	return value
+}
+
+func main() {
+	var w io.Writer = sink{}
+	n, _ := w.Write(nil)
+	blank("a")
+	println(n, wrapper(1), exposed(2), plain(3, "b"))
+	if n > 0 {
+		println(unimplemented("c"))
+	}
+}

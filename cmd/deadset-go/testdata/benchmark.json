@@ -1,0 +1,34 @@
+{
+  "description": "The performance budget this analyzer is held to, and one measurement of it. Each run below is a synthesized module the generator beside this file writes from the three numbers under generator, so a later measurement is taken over the same tree. Each time is one analysis of that module, measured with the race detector off on the machine named below, and is the upper end of a spread of about half again as much on a machine running other work. BenchmarkAnalyzeTheRecordedModules measures the times again and compares each against the recorded one; a release runs it and rewrites the numbers here.",
+  "budget": {
+    "reference_lines": 21441,
+    "reference_seconds": 0.9,
+    "budget_lines": 250000,
+    "budget_seconds": 60,
+    "budget_cores": 4
+  },
+  "machine": {
+    "cores": 20,
+    "goarch": "amd64",
+    "go_version": "go1.27.1",
+    "race_detector": false
+  },
+  "runs": [
+    {
+      "name": "reference",
+      "generator": {"packages": 14, "files_per_package": 10, "declarations_per_file": 50},
+      "size": {"packages": 14, "files": 140, "lines": 21283},
+      "configurations": 1,
+      "findings": 7140,
+      "seconds": 0.28
+    },
+    {
+      "name": "budget",
+      "generator": {"packages": 165, "files_per_package": 10, "declarations_per_file": 50},
+      "size": {"packages": 165, "files": 1650, "lines": 250803},
+      "configurations": 1,
+      "findings": 84150,
+      "seconds": 3.7
+    }
+  ]
+}

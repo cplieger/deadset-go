@@ -70,8 +70,9 @@ func namesLiveKind(key string) bool {
 	if len(key) != familyKeyLength {
 		return false
 	}
-	for _, row := range catalog.Kinds() {
-		if strings.HasPrefix(row.Code, key) {
+	published := catalog.Kinds()
+	for i := range published {
+		if strings.HasPrefix(published[i].Code, key) {
 			return true
 		}
 	}
@@ -83,9 +84,10 @@ func namesLiveKind(key string) bool {
 // key rather than a setting.
 func fixedSeverityCodes() []string {
 	var fixed []string
-	for _, row := range catalog.Kinds() {
-		if row.Fixed {
-			fixed = append(fixed, row.Code)
+	published := catalog.Kinds()
+	for i := range published {
+		if published[i].Fixed {
+			fixed = append(fixed, published[i].Code)
 		}
 	}
 	return fixed

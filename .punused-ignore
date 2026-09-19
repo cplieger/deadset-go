@@ -44,6 +44,9 @@ function Unused is unused
 # spelling is the same shape as the kind enumerations and is reached the same way:
 # a verb prints the depth a component listing was made at through a `%s`
 # conversion, so the call is the formatting package's and not a call by name.
+# `Import` satisfies `go/types.Importer` and is what answers an import path a file
+# importing "C" writes, so the second check of such a package is what calls it,
+# once per path, through the field it is assigned to.
 # No call site exists for a reference search to find in any of these cases,
 # because the runtime dispatches through the interface. Removing one would not
 # fail the build, it would silently change what a diagnostic prints, which errors
@@ -58,6 +61,7 @@ method (*MalformedError).Unwrap
 method (*Envelope).MarshalJSON
 method (*Envelope).UnmarshalJSON
 method (*formatList).Set
+method (*cgoImporter).Import
 
 # --- The per-analyzer configuration section.
 #

@@ -36,7 +36,7 @@ import (
 // SchemaVersion is the version of the report schema this package writes a
 // document to. An analyzer names every version it reads in the analyzer object,
 // and that list holds this one.
-const SchemaVersion = "2.0.0"
+const SchemaVersion = "4.0.0"
 
 // staleSuppressionCode is the code of a stale suppression, which is the one code
 // whose records the envelope carries outside its finding list.

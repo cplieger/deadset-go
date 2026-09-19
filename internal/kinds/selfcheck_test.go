@@ -38,10 +38,10 @@ func suppressed(t *testing.T, archive string, resolved config.Config) *Input {
 
 	in.Marks = slices.Concat(inline, entries, rows)
 	in.Refusals = slices.Concat(inlineRefused, entryRefused, rowRefused)
-	swept := graph.NewMatrix(in.Merged).Sweep(graph.Mode{
-		Exempt:     in.Exempt,
-		Production: true,
-		Marked:     boundMarks(in.Marks),
+	swept := graph.NewMatrix(in.Merged).Sweep(graph.SweepInput{
+		Exempt: in.Exempt,
+		Marked: boundMarks(in.Marks),
+		Mode:   graph.Mode{Production: true},
 	})
 	in.Sweep = &swept
 	// The index caches the sweep's answers, so the sweep the marks produced is the
@@ -115,12 +115,13 @@ func TestStaleSuppressionsReportsEveryRecordAtEveryMechanismTheMarkHeldNothingBa
 
 func TestStaleSuppressionsCarriesTheRecordAsWrittenAtTheFixedSeverity(t *testing.T) {
 	in := suppressed(t, "selfcheck-stale.txtar", applicationConfig())
-	found, err := StaleSuppressions(in)
-	if err != nil {
-		t.Fatalf("StaleSuppressions() = _, %v, want the stale records", err)
-	}
+
+	// Through the framework, because no emitter completes its own finding: the kind
+	// name, the class, the severity, the fixability and the component are the
+	// completion's and a reader of the report sees them.
+	found := computed(t, in, map[string]Emitter{staleSuppressionCode: StaleSuppressions}).Findings
 	if len(found) == 0 {
-		t.Fatal("StaleSuppressions() reports nothing, want the fixture's stale records")
+		t.Fatal("the stale-suppression kind reports nothing, want the fixture's stale records")
 	}
 
 	for i := range found {
@@ -149,7 +150,7 @@ func TestStaleSuppressionsCarriesTheRecordAsWrittenAtTheFixedSeverity(t *testing
 	// The record of the entry no declaration answers names the reference the entry
 	// spells, and the record of the directive that bound nothing names the file that
 	// holds it, because no declaration answered either.
-	entry := found[3]
+	entry := recordAt(t, found, suppress.IgnoreFileName, 16)
 	if entry.Symbol.Ref != "go://example.com/selfcheck#Vanished" {
 		t.Errorf("the record of the unanswered entry names %q, want the reference the entry spells", entry.Symbol.Ref)
 	}
@@ -161,11 +162,26 @@ func TestStaleSuppressionsCarriesTheRecordAsWrittenAtTheFixedSeverity(t *testing
 	}); *entry.Details.Entry != *want {
 		t.Errorf("the record of the unanswered entry carries %+v, want %+v", *entry.Details.Entry, *want)
 	}
-	directive := found[1]
+	directive := recordAt(t, found, "main.go", 11)
 	if directive.Symbol.Ref != "go://example.com/selfcheck#main.go:file" {
 		t.Errorf("the record of the directive that bound nothing names %q, want the file form of main.go",
 			directive.Symbol.Ref)
 	}
+}
+
+// recordAt is the finding reported at one site, which is how a test names a row of a
+// document: the pass returns the findings in the canonical order, which orders the
+// rows of several documents by path rather than by the order they were read in.
+func recordAt(t *testing.T, found []Finding, path string, line int) Finding {
+	t.Helper()
+
+	for i := range found {
+		if found[i].Position.Path == path && found[i].Position.Line == line {
+			return found[i]
+		}
+	}
+	t.Fatalf("the pass reports nothing at %s:%d: it reports %+v", path, line, found)
+	return Finding{}
 }
 
 func TestTotalsCountsBoundRecordsInEffectAndEveryReasonOnce(t *testing.T) {
@@ -275,7 +291,7 @@ func TestNoSeverityKeyReducesAStaleSuppressionOrAnUnmatchedRoot(t *testing.T) {
 	}
 }
 
-func TestSuppressionRefusalsReportsEachRefusalAsTheSuppressionWasWritten(t *testing.T) {
+func TestTheRefusalKindsReportEachRefusalAsTheSuppressionWasWritten(t *testing.T) {
 	in := suppressed(t, "selfcheck-stale.txtar", applicationConfig())
 	in.Refusals = []suppress.Refusal{
 		{
@@ -295,45 +311,132 @@ func TestSuppressionRefusalsReportsEachRefusalAsTheSuppressionWasWritten(t *test
 		},
 	}
 
-	found, err := SuppressionRefusals(in)
-	if err != nil {
-		t.Fatalf("SuppressionRefusals() = _, %v, want one finding per refusal", err)
-	}
-	if len(found) != 2 {
-		t.Fatalf("SuppressionRefusals() reported %d findings, want 2: %+v", len(found), summary(found))
-	}
-
-	reasonless := found[0]
+	// Each kind reports the refusals of its own code and no other, which is what
+	// lets both stand in the emitters table.
+	reasonless := oneRefusal(t, SuppressionsWithoutReason, in, suppressionWithoutReasonCode)
 	switch {
-	case reasonless.Code != suppressionWithoutReasonCode:
-		t.Errorf("SuppressionRefusals() reports %s, want %s", reasonless.Code, suppressionWithoutReasonCode)
 	case reasonless.Message != "inline directive for DS1001 carries no reason":
-		t.Errorf("SuppressionRefusals() reports %q, want the sentence naming the mechanism and the code",
+		t.Errorf("SuppressionsWithoutReason() reports %q, want the sentence naming the mechanism and the code",
 			reasonless.Message)
 	case reasonless.Details.Mechanism != "inline":
-		t.Errorf("SuppressionRefusals() names mechanism %q, want inline", reasonless.Details.Mechanism)
+		t.Errorf("SuppressionsWithoutReason() names mechanism %q, want inline", reasonless.Details.Mechanism)
 	case reasonless.Details.Entry == nil || reasonless.Details.Entry.Reason != "":
-		t.Errorf("SuppressionRefusals() carries %+v, want the record with its reason empty", reasonless.Details.Entry)
+		t.Errorf("SuppressionsWithoutReason() carries %+v, want the record with its reason empty", reasonless.Details.Entry)
 	case reasonless.Symbol.Ref != "go://example.com/selfcheck#main.go:file":
-		t.Errorf("SuppressionRefusals() names %q, want the file form of the file that holds the directive",
+		t.Errorf("SuppressionsWithoutReason() names %q, want the file form of the file that holds the directive",
 			reasonless.Symbol.Ref)
 	}
 
-	unscoped := found[1]
+	unscoped := oneRefusal(t, UnscopedEntries, in, unscopedEntryCode)
 	switch {
-	case unscoped.Code != unscopedEntryCode:
-		t.Errorf("SuppressionRefusals() reports %s, want %s", unscoped.Code, unscopedEntryCode)
 	case unscoped.Message != "ignore entry for DS1002 names a symbol and no path":
-		t.Errorf("SuppressionRefusals() reports %q, want the sentence naming the mechanism and the code",
+		t.Errorf("UnscopedEntries() reports %q, want the sentence naming the mechanism and the code",
 			unscoped.Message)
 	case unscoped.Details.Entry == nil || unscoped.Details.Entry.Path != "":
-		t.Errorf("SuppressionRefusals() carries %+v, want the record with its path empty", unscoped.Details.Entry)
+		t.Errorf("UnscopedEntries() carries %+v, want the record with its path empty", unscoped.Details.Entry)
 	case unscoped.Symbol.Ref != "go://example.com/selfcheck#Dropped":
-		t.Errorf("SuppressionRefusals() names %q, want the reference the entry spells", unscoped.Symbol.Ref)
+		t.Errorf("UnscopedEntries() names %q, want the reference the entry spells", unscoped.Symbol.Ref)
 	}
 }
 
-func TestSuppressionRefusalsRefusesARefusalUnderACodeTheGrammarDoesNotReport(t *testing.T) {
+// oneRefusal is the one finding a refusal kind reports about an input holding one
+// refusal of its code, and fails the test where it reports anything else.
+func oneRefusal(t *testing.T, emit Emitter, in *Input, code string) Finding {
+	t.Helper()
+
+	found, err := emit(in)
+	if err != nil {
+		t.Fatalf("the %s emitter = _, %v, want one finding per refusal of its code", code, err)
+	}
+	if len(found) != 1 {
+		t.Fatalf("the %s emitter reported %d findings, want 1: %+v", code, len(found), summary(found))
+	}
+	if found[0].Code != code {
+		t.Fatalf("the %s emitter reports %s", code, found[0].Code)
+	}
+	return found[0]
+}
+
+func TestAnEntryLackingBothItsReasonAndItsPathIsTwoFindingsAtOnePosition(t *testing.T) {
+	in := suppressed(t, "selfcheck-stale.txtar", applicationConfig())
+	site := position(suppress.IgnoreFileName, 4, 5)
+	refusal := suppress.Refusal{
+		Code:      "DS1002",
+		Symbol:    "go://example.com/selfcheck#Dropped",
+		Site:      site,
+		Mechanism: suppress.MechanismIgnore,
+	}
+	refusal.Reported = suppressionWithoutReasonCode
+	in.Refusals = []suppress.Refusal{refusal}
+	refusal.Reported = unscopedEntryCode
+	in.Refusals = append(in.Refusals, refusal)
+
+	result := computed(t, in, map[string]Emitter{
+		suppressionWithoutReasonCode: SuppressionsWithoutReason,
+		unscopedEntryCode:            UnscopedEntries,
+	})
+
+	want := []string{suppressionWithoutReasonCode, unscopedEntryCode}
+	if got := codesOf(result.Findings); !slices.Equal(got, want) {
+		t.Fatalf("the pass over one entry breaking two rules of the grammar reports %v, want %v: the two checks are separate and both run",
+			got, want)
+	}
+	for i := range result.Findings {
+		if at := result.Findings[i].Position; at.Path != site.Filename || at.Line != site.Line || at.Column != site.Column {
+			t.Errorf("%s reports at %s:%d:%d, want %s:%d:%d: both findings are about the one record",
+				result.Findings[i].Code, at.Path, at.Line, at.Column, site.Filename, site.Line, site.Column)
+		}
+	}
+}
+
+func TestADirectiveNamingTwoCodesAndNoReasonIsOneFindingPerCodeAtOnePosition(t *testing.T) {
+	in := suppressed(t, "selfcheck-stale.txtar", applicationConfig())
+	site := position("main.go", 21, 1)
+	refusal := suppress.Refusal{
+		Reported:  suppressionWithoutReasonCode,
+		Path:      "main.go",
+		Site:      site,
+		Mechanism: suppress.MechanismInline,
+	}
+	refusal.Code = "DS1001"
+	in.Refusals = []suppress.Refusal{refusal}
+	refusal.Code = "DS1002"
+	in.Refusals = append(in.Refusals, refusal)
+
+	result := computed(t, in, map[string]Emitter{suppressionWithoutReasonCode: SuppressionsWithoutReason})
+
+	// One directive is one record per code it names, and a reader is told which of
+	// them is now unsuppressed, so the two records are two findings at the one
+	// position the directive is written on.
+	want := []string{"DS1001", "DS1002"}
+	got := make([]string, 0, len(result.Findings))
+	for i := range result.Findings {
+		one := &result.Findings[i]
+		if one.Details.Entry == nil {
+			t.Fatalf("%s at %s:%d carries no record, want the record the directive names",
+				one.Code, one.Position.Path, one.Position.Line)
+		}
+		got = append(got, one.Details.Entry.Code)
+		switch {
+		case one.Code != suppressionWithoutReasonCode:
+			t.Errorf("the pass reports %s, want every record under %s", one.Code, suppressionWithoutReasonCode)
+		case one.Position.Path != site.Filename || one.Position.Line != site.Line ||
+			one.Position.Column != site.Column:
+			t.Errorf("the record of %s is sited at %s:%d:%d, want %s:%d:%d, the position the directive is written on",
+				one.Details.Entry.Code, one.Position.Path, one.Position.Line, one.Position.Column,
+				site.Filename, site.Line, site.Column)
+		case one.Message != written(suppress.MechanismInline)+" for "+one.Details.Entry.Code+" carries no reason":
+			t.Errorf("the record of %s reports %q, want the sentence naming the mechanism and that code",
+				one.Details.Entry.Code, one.Message)
+		}
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("the pass over one reasonless directive naming two codes reports the records %v, want %v: each code the directive names is a record of its own",
+			got, want)
+	}
+}
+
+func TestTheRefusalKindsRefuseARefusalUnderACodeTheGrammarDoesNotReport(t *testing.T) {
 	in := suppressed(t, "selfcheck-stale.txtar", applicationConfig())
 	in.Refusals = []suppress.Refusal{{
 		Reported:  staleSuppressionCode,
@@ -343,8 +446,8 @@ func TestSuppressionRefusalsRefusesARefusalUnderACodeTheGrammarDoesNotReport(t *
 		Mechanism: suppress.MechanismInline,
 	}}
 
-	if _, err := SuppressionRefusals(in); !errors.Is(err, ErrEmitter) {
-		t.Errorf("SuppressionRefusals() over a refusal reported under %s = %v, want an error satisfying errors.Is(err, ErrEmitter)",
+	if _, err := SuppressionsWithoutReason(in); !errors.Is(err, ErrEmitter) {
+		t.Errorf("SuppressionsWithoutReason() over a refusal reported under %s = %v, want an error satisfying errors.Is(err, ErrEmitter)",
 			staleSuppressionCode, err)
 	}
 }
@@ -356,19 +459,21 @@ func TestUnmatchedRootsReportsEveryConfiguredStringAsTheConfigurationSpellsIt(t 
 		{Source: "go://example.com/selfcheck#Vanish*"},
 	}
 
-	found, err := UnmatchedRoots(in)
-	if err != nil {
-		t.Fatalf("UnmatchedRoots() = _, %v, want one finding per configured string", err)
-	}
+	// Through the framework, and two strings the configuration spells at one document
+	// position are two findings: the run cannot name the line a root is written on,
+	// and a row is identified by the record it reports rather than by that position.
+	found := computed(t, in, map[string]Emitter{unmatchedRootCode: UnmatchedRoots}).Findings
 	if len(found) != 2 {
-		t.Fatalf("UnmatchedRoots() reported %d findings, want 2: %+v", len(found), summary(found))
+		t.Fatalf("the unmatched-root kind reported %d findings, want 2: %+v", len(found), summary(found))
 	}
 	for i, want := range []struct {
 		ref     string
 		message string
 	}{
-		{ref: "go://example.com/selfcheck#Vanished", message: "configured root matches no symbol of the inventory"},
+		// The canonical key orders two findings at one position by the reference each
+		// names, which is what tells the rows of one document apart.
 		{ref: "go://example.com/selfcheck#Vanish*", message: "configured root pattern matches no symbol of the inventory"},
+		{ref: "go://example.com/selfcheck#Vanished", message: "configured root matches no symbol of the inventory"},
 	} {
 		one := found[i]
 		switch {
@@ -412,7 +517,7 @@ func TestWithoutTheMarkTheDeadComponentsRootIsReportedAndTheComponentFalls(t *te
 	// The same input with the mark withdrawn, which is the run a maintainer makes
 	// after deleting the directive.
 	in.Marks = nil
-	swept := graph.NewMatrix(in.Merged).Sweep(graph.Mode{Exempt: in.Exempt, Production: true})
+	swept := graph.NewMatrix(in.Merged).Sweep(graph.SweepInput{Exempt: in.Exempt, Mode: graph.Mode{Production: true}})
 	in.Sweep = &swept
 	in.indexed = nil
 

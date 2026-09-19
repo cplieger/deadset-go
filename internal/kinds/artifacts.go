@@ -27,12 +27,13 @@ const (
 	unusedReplaceCode     = "DS1605"
 )
 
-// The words the Contract's subject vocabulary spells these subjects with. A file
-// is also the word for a declaration of the inventory, so only the two module-file
-// subjects are outside what the framework derives from a declaration's kind.
+// The words the Contract's subject vocabulary spells these subjects with. A file is
+// also the word the framework derives from the kind of a declaration of the
+// inventory, because the inventory holds one symbol per source file.
 const (
 	dependencySubject = "dependency"
 	directiveSubject  = "module-directive"
+	fileSubject       = "file"
 )
 
 // requireSection is the section of the module file that declares a dependency,
@@ -77,19 +78,15 @@ func FileNeverBuilt(in *Input) ([]Finding, error) {
 	}
 	found := make([]Finding, 0, len(ignored))
 	for _, file := range ignored {
-		found = append(found, Finding{
-			Code:     fileNeverBuiltCode,
-			Position: Position{Path: file.path, Line: 1, Column: 1, EndLine: file.lines},
-			Symbol: Subject{
-				Ref:       graph.Ref(graph.KindFile, file.pkgPath, []string{file.name}),
-				Kind:      symbolKinds[graph.KindFile],
-				Name:      file.name,
-				SizeLines: file.lines,
-			},
-			Configurations: slices.Clone(in.Matrix),
-			Message:        "no configuration of the build matrix compiles this file",
-			Details:        Details{ExcludedBy: file.constraint},
-		})
+		one := findingAt(fileNeverBuiltCode, Subject{
+			Ref:       graph.Ref(graph.KindFile, file.pkgPath, []string{file.name}),
+			Kind:      fileSubject,
+			Name:      file.name,
+			SizeLines: file.lines,
+		}, Position{Path: file.path, Line: 1, Column: 1, EndLine: file.lines},
+			"no configuration of the build matrix compiles this file")
+		one.Details.ExcludedBy = file.constraint
+		found = append(found, one)
 	}
 	return found, nil
 }
@@ -639,19 +636,15 @@ func UnusedDependency(in *Input) ([]Finding, error) {
 
 	found := make([]Finding, 0, len(unused))
 	for _, require := range unused {
-		found = append(found, Finding{
-			Code:     unusedDependencyCode,
-			Position: directivePosition(require.Site),
-			Symbol: Subject{
-				Ref:       moduleFragment(module, require.Path+":"+requireSection),
-				Kind:      dependencySubject,
-				Name:      require.Path,
-				SizeLines: 1,
-			},
-			Configurations: slices.Clone(in.Matrix),
-			Message:        "no package of the target imports a package this required module provides",
-			Details:        Details{DependencyClass: requireSection},
-		})
+		one := findingAt(unusedDependencyCode, Subject{
+			Ref:       moduleFragment(module, require.Path+":"+requireSection),
+			Kind:      dependencySubject,
+			Name:      require.Path,
+			SizeLines: 1,
+		}, directivePosition(require.Site),
+			"no package of the target imports a package this required module provides")
+		one.Details.DependencyClass = requireSection
+		found = append(found, one)
 	}
 	return found, nil
 }
@@ -692,19 +685,15 @@ func UnusedReplace(in *Input) ([]Finding, error) {
 	found := make([]Finding, 0, len(noop))
 	for _, replace := range noop {
 		named := spelled(replace.Old)
-		found = append(found, Finding{
-			Code:     unusedReplaceCode,
-			Position: directivePosition(replace.Site),
-			Symbol: Subject{
-				Ref:       moduleFragment(module, named+replaceSelector),
-				Kind:      directiveSubject,
-				Name:      named,
-				SizeLines: 1,
-			},
-			Configurations: slices.Clone(in.Matrix),
-			Message:        "the module this directive replaces is absent from the build list",
-			Details:        Details{Replacement: spelled(replace.New)},
-		})
+		one := findingAt(unusedReplaceCode, Subject{
+			Ref:       moduleFragment(module, named+replaceSelector),
+			Kind:      directiveSubject,
+			Name:      named,
+			SizeLines: 1,
+		}, directivePosition(replace.Site),
+			"the module this directive replaces is absent from the build list")
+		one.Details.Replacement = spelled(replace.New)
+		found = append(found, one)
 	}
 	return found, nil
 }

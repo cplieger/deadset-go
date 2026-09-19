@@ -1,0 +1,173 @@
+A target module and a module the scope declares as a consumer of it. The consumer
+declares three functions the target calls: one that hands its own parameter typed as
+the empty interface to an encoder it constructs, one that hands such a parameter to
+the encoding package's own marshalling function, and one that hands it to the second
+of those in turn. Each is a wrapper of the program rather than a callee the analysis
+cannot read, so a target value handed to one reaches the encoder through it.
+
+Two more consumer functions are not wrappers: one takes a parameter typed as the
+empty interface and hands it to nothing, and one takes a concrete parameter. A target
+value that reaches only those crosses nothing.
+
+The consumer also declares a print wrapper, a function that hands its own variadic
+operands to the formatting package, and one that counts its operands and formats
+nothing. One walk finds both classes' wrappers, so a value the target formats through
+the consumer's print wrapper keeps the method the verb calls and a value handed to
+the counting function keeps nothing.
+
+-- target/go.mod --
+module example.com/target
+
+go 1.27.0
+
+require example.com/httpwire v0.0.0
+
+replace example.com/httpwire => ../httpwire
+-- target/wire.go --
+// Package target hands its own wire types to a consumer module's functions.
+package target
+
+import (
+	"io"
+
+	"example.com/httpwire"
+)
+
+// Encoded reaches an encoder through the consumer's writing wrapper.
+type Encoded struct {
+	Name   string `json:"name"`
+	Extra  int
+	secret string `json:"secret"`
+}
+
+// Describe is exported, so a consumer that resolves a method by name may call it.
+func (e Encoded) Describe() string { return e.Name }
+
+func (e Encoded) hidden() int { return e.Extra }
+
+// Marshalled reaches the encoding package through the consumer's marshalling wrapper.
+type Marshalled struct {
+	Name   string `json:"name"`
+	Extra  int
+	secret string `json:"secret"`
+}
+
+// Describe is exported.
+func (m Marshalled) Describe() string { return m.Name }
+
+// Chained reaches the same encoder through two of the consumer's own functions.
+type Chained struct {
+	Name   string `json:"name"`
+	Extra  int
+	secret string `json:"secret"`
+}
+
+// Describe is exported.
+func (c Chained) Describe() string { return c.Name }
+
+// Counted reaches a parameter of the consumer typed as the empty interface that the
+// consumer hands to nothing.
+type Counted struct {
+	Name   string `json:"name"`
+	Extra  int
+	secret string `json:"secret"`
+}
+
+// Describe is exported.
+func (c Counted) Describe() string { return c.Name }
+
+// Tagged reaches a parameter of the consumer typed as a string.
+type Tagged struct {
+	Name   string `json:"name"`
+	Extra  int
+	secret string `json:"secret"`
+}
+
+// Describe is exported.
+func (t Tagged) Describe() string { return t.Name }
+
+// HandEncoded hands a value to the consumer's writing wrapper.
+func HandEncoded(w io.Writer, e Encoded) error { return httpwire.WriteJSON(w, e) }
+
+// HandMarshalled hands a value to the consumer's marshalling wrapper.
+func HandMarshalled(m Marshalled) ([]byte, error) { return httpwire.MarshalWire(m) }
+
+// HandChained hands a value through both of the consumer's wrappers.
+func HandChained(c Chained) ([]byte, error) { return httpwire.Emit(c) }
+
+// HandCounted hands a value where the consumer keeps it to itself.
+func HandCounted(c Counted) int { return httpwire.Count(c) }
+
+// HandTagged hands the consumer a string rather than a value.
+func HandTagged(t Tagged) string { return httpwire.Tag(t.Name) }
+
+// Printed reaches a formatting verb through the consumer's print wrapper.
+type Printed struct {
+	Name string
+}
+
+// String is what a formatting verb calls on a value of this type.
+func (p Printed) String() string { return p.Name }
+
+// Counting reaches the consumer's function that formats nothing.
+type Counting struct {
+	Name string
+}
+
+// String is what a formatting verb would call, and nothing formats a value of this
+// type.
+func (c Counting) String() string { return c.Name }
+
+// HandPrinted hands a value to the consumer's print wrapper.
+func HandPrinted(p Printed) { httpwire.Logf("wrote %v", p) }
+
+// HandCounting hands a value to the consumer's counting function.
+func HandCounting(c Counting) int { return httpwire.Tally(c) }
+-- target/hidden.go --
+package target
+
+// readHidden keeps the unexported method of Encoded referenced, so the fixture
+// measures what the class retains rather than what a reference already holds.
+func readHidden(e Encoded) int { return e.hidden() }
+-- httpwire/go.mod --
+module example.com/httpwire
+
+go 1.27.0
+-- httpwire/wire.go --
+// Package httpwire writes values it is given to the encoding package, which is what
+// makes it a wrapper of the program rather than a callee the analysis cannot read.
+package httpwire
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+)
+
+// WriteJSON hands its own parameter typed as the empty interface to an encoder.
+func WriteJSON(w io.Writer, v any) error { return json.NewEncoder(w).Encode(v) }
+
+// MarshalWire hands its own parameter typed as the empty interface to the encoding
+// package's marshalling function.
+func MarshalWire(v any) ([]byte, error) { return json.Marshal(v) }
+
+// Emit hands its own parameter typed as the empty interface to another wrapper.
+func Emit(v any) ([]byte, error) { return MarshalWire(v) }
+
+// Count hands its parameter to nothing, so it is no wrapper.
+func Count(v any) int {
+	if v == nil {
+		return 0
+	}
+	return 1
+}
+
+// Tag takes a concrete parameter, so no value crosses into it.
+func Tag(name string) string { return "name=" + name }
+
+// Logf hands its own variadic operands to the formatting package, which makes it a
+// print wrapper of the program.
+func Logf(format string, operands ...any) { fmt.Printf(format, operands...) }
+
+// Tally counts its operands and formats none of them, so it is no print wrapper.
+func Tally(operands ...any) int { return len(operands) }

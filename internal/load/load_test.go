@@ -220,37 +220,6 @@ func TestLoadReportsAConstraintExcludedFileAsIgnoredAndNotAsCompiled(t *testing.
 	}
 }
 
-func TestLoadRecordsOnlyTheFileCgoAloneExcludes(t *testing.T) {
-	stableToolchain(t)
-	// A host that enables cgo must not change the result: the load sets
-	// CGO_ENABLED=0 after the ambient environment, so it wins.
-	t.Setenv("CGO_ENABLED", "1")
-
-	got := loadFixture(t, "cgo")
-
-	if want := []string{"bridge.go", "bridge_tagged.go"}; !slices.Equal(got.ExcludedByCgo, want) {
-		t.Errorf("Load(testdata/cgo).ExcludedByCgo = %v, want %v", got.ExcludedByCgo, want)
-	}
-	pkg := findPackage(got, "example.com/cgo")
-	if pkg == nil {
-		t.Fatalf("Load(testdata/cgo) reported no example.com/cgo package, ids = %v", packageIDs(got))
-	}
-	ignored := baseNames(pkg.IgnoredFiles)
-	// Each of these is ignored for a reason cgo does not decide alone, so each
-	// stays in the population the build configurations reason about.
-	for _, name := range []string{"unselected.go", "bridge_windows.go", "only_cgo_tag.go", "helper_plan9.c"} {
-		if !slices.Contains(ignored, name) {
-			t.Errorf("IgnoredFiles = %v, want it to contain %s", ignored, name)
-		}
-		if slices.Contains(got.ExcludedByCgo, name) {
-			t.Errorf("ExcludedByCgo = %v, want it not to contain %s", got.ExcludedByCgo, name)
-		}
-	}
-	if compiled := baseNames(pkg.GoFiles); slices.Contains(compiled, "bridge.go") {
-		t.Errorf("GoFiles = %v, want it not to contain bridge.go: the load disables cgo", compiled)
-	}
-}
-
 func TestLoadOmitsADirectoryNoFileOfWhichIsSelected(t *testing.T) {
 	stableToolchain(t)
 	got := loadFixture(t, "vanished")
@@ -361,6 +330,18 @@ func TestLoadIsRepeatable(t *testing.T) {
 	}
 	if a, b := packageIDs(first), packageIDs(second); !slices.Equal(a, b) {
 		t.Errorf("package ids = %v then %v, want the same set twice", a, b)
+	}
+	// The opaque-C check runs inside the load, so what it accepted and what it
+	// declared are part of what two loads have to agree on.
+	a, b := findPackage(first, "example.com/cgo"), findPackage(second, "example.com/cgo")
+	if a == nil || b == nil {
+		t.Fatalf("Load(testdata/cgo) reported no example.com/cgo package, ids = %v", packageIDs(first))
+	}
+	if !slices.Equal(a.GoFiles, b.GoFiles) {
+		t.Errorf("GoFiles = %v then %v, want the same list twice", baseNames(a.GoFiles), baseNames(b.GoFiles))
+	}
+	if !slices.Equal(declaredNames(a), declaredNames(b)) {
+		t.Errorf("declarations = %v then %v, want the same set twice", declaredNames(a), declaredNames(b))
 	}
 }
 

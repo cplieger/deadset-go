@@ -80,9 +80,11 @@ type Result struct {
 	Fset *token.FileSet // one FileSet for the whole configuration
 
 	// ExcludedByCgo holds the target-relative paths, forward slashes, of the
-	// files the toolchain ignored solely because they import "C". References
-	// those files make are outside the reference set, which is a declared limit
-	// of the run rather than a file nothing builds.
+	// files the toolchain ignored for importing "C" that the opaque-C check could
+	// not read either. References those files make are outside the reference set,
+	// which is a declared limit of the run rather than a file nothing builds. A
+	// file the check did read is a file of its package like any other and is not
+	// in this list.
 	ExcludedByCgo []string
 }
 
@@ -142,10 +144,11 @@ func Load(ctx context.Context, doc scope.Document, c Configuration) (Result, err
 	}
 
 	pkgs = withoutTestBinaries(pkgs)
-	excluded, err := excludedByCgo(target, pkgs, c)
+	cgo, err := cgoOnly(pkgs, c)
 	if err != nil {
 		return Result{}, fmt.Errorf("load %s: %w", c.ID, err)
 	}
+	excluded := checkOpaqueC(ctx, fset, target, pkgs, cgo, c)
 
 	consumers, err := loadConsumers(ctx, fset, &doc, c, pkgs)
 	if err != nil {
@@ -163,6 +166,21 @@ func Load(ctx context.Context, doc scope.Document, c Configuration) (Result, err
 
 // loadPackages resolves every package of the module rooted at dir under
 // configuration c, with workspace as the child toolchain's GOWORK setting.
+func loadPackages(ctx context.Context, fset *token.FileSet, dir string, c Configuration, workspace string) ([]*packages.Package, error) {
+	cfg := &packages.Config{
+		Mode:       loadMode,
+		Context:    ctx,
+		Tests:      true,
+		Dir:        dir,
+		Env:        loadEnv(c, workspace),
+		BuildFlags: buildFlags(c.Tags),
+		Fset:       fset,
+	}
+	return packages.Load(cfg, loadPattern)
+}
+
+// loadEnv is the environment every load of configuration c runs the toolchain
+// under, with workspace as the child toolchain's GOWORK setting.
 //
 // os/exec keeps the last value of a repeated key, so the settings pinned here win
 // over the inherited environment. An ambient go.work or GOFLAGS reaches the child
@@ -171,19 +189,10 @@ func Load(ctx context.Context, doc scope.Document, c Configuration) (Result, err
 // makes the analysis's no-network rule the toolchain's rule too: a module the
 // local cache does not hold ends the load with the toolchain's own message
 // instead of being fetched.
-func loadPackages(ctx context.Context, fset *token.FileSet, dir string, c Configuration, workspace string) ([]*packages.Package, error) {
-	cfg := &packages.Config{
-		Mode:    loadMode,
-		Context: ctx,
-		Tests:   true,
-		Dir:     dir,
-		Env: append(os.Environ(),
-			"CGO_ENABLED=0", "GOOS="+c.OS, "GOARCH="+c.Arch,
-			"GOWORK="+workspace, "GOFLAGS=", "GOPROXY=off"),
-		BuildFlags: buildFlags(c.Tags),
-		Fset:       fset,
-	}
-	return packages.Load(cfg, loadPattern)
+func loadEnv(c Configuration, workspace string) []string {
+	return append(os.Environ(),
+		"CGO_ENABLED=0", "GOOS="+c.OS, "GOARCH="+c.Arch,
+		"GOWORK="+workspace, "GOFLAGS=", "GOPROXY=off")
 }
 
 // withoutTestBinaries returns every package of a test load except the test

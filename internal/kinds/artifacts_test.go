@@ -68,16 +68,18 @@ func withModuleFile(t *testing.T, archive string, resolved config.Config,
 	return in
 }
 
-// emitted runs one emitter and fails the test where it refuses, because a refusal
-// is a defect in the emitter rather than an answer.
-func emitted(t *testing.T, name string, emit Emitter, in *Input) []Finding {
+// emitted is what one kind reports about one input, through the framework, because no
+// emitter completes its own finding: a pass over a table holding that one kind is
+// what a kind's own test measures. It fails the test where the pass refuses, because
+// a refusal is a defect in the emitter rather than an answer.
+func emitted(t *testing.T, name, code string, emit Emitter, in *Input) []Finding {
 	t.Helper()
 
-	found, err := emit(in)
+	result, err := Compute(in, map[string]Emitter{code: emit})
 	if err != nil {
 		t.Fatalf("%s() = error %v, want the findings of the kind", name, err)
 	}
-	return found
+	return result.Findings
 }
 
 func TestFileNeverBuiltReportsEveryFileNoConfigurationCompiles(t *testing.T) {
@@ -86,7 +88,7 @@ func TestFileNeverBuiltReportsEveryFileNoConfigurationCompiles(t *testing.T) {
 	in := inputOf(t, "artifacts-never-built.txtar", completeMatrixConfig(), Consumers{},
 		twoConfigurations()...)
 
-	found := emitted(t, "FileNeverBuilt", FileNeverBuilt, in)
+	found := emitted(t, "FileNeverBuilt", fileNeverBuiltCode, FileNeverBuilt, in)
 	if slices.ContainsFunc(found, func(one Finding) bool { return one.Symbol.Name == "paired_darwin.go" }) {
 		t.Errorf("FileNeverBuilt reports %v, want no finding about paired_darwin.go: a file one configuration of the matrix compiles is built",
 			summary(found))
@@ -141,7 +143,7 @@ func TestFileNeverBuiltReportsNothingWhereTheMatrixIsNotDeclaredComplete(t *test
 	in := inputOf(t, "artifacts-never-built.txtar", listedMatrixConfig(), Consumers{},
 		twoConfigurations()...)
 
-	if found := emitted(t, "FileNeverBuilt", FileNeverBuilt, in); len(found) > 0 {
+	if found := emitted(t, "FileNeverBuilt", fileNeverBuiltCode, FileNeverBuilt, in); len(found) > 0 {
 		t.Errorf("FileNeverBuilt(a target listing its configurations and declaring nothing about the matrix) reports %v, want nothing: a matrix no declaration calls complete holds no claim about the configurations it leaves out",
 			summary(found))
 	}
@@ -153,7 +155,7 @@ func TestFileNeverBuiltReportsNothingWhereTheCompleteMatrixIsOneTheRunDerived(t 
 	in := inputOf(t, "artifacts-never-built.txtar", declaredCompleteWithoutConfigurations(),
 		Consumers{}, twoConfigurations()...)
 
-	if found := emitted(t, "FileNeverBuilt", FileNeverBuilt, in); len(found) > 0 {
+	if found := emitted(t, "FileNeverBuilt", fileNeverBuiltCode, FileNeverBuilt, in); len(found) > 0 {
 		t.Errorf("FileNeverBuilt(a target declaring complete a matrix it lists no configuration of) reports %v, want nothing: the declaration asserts that the listed configurations are every one the target builds, and a configuration listing none declares it of a derived matrix",
 			summary(found))
 	}
@@ -176,7 +178,7 @@ func TestFileNeverBuiltReportsNoFileTheIgnoreTagConstrains(t *testing.T) {
 	if !ignored {
 		t.Fatal("no load of the fixture ignored generate.go, so this test pins nothing")
 	}
-	found := emitted(t, "FileNeverBuilt", FileNeverBuilt, in)
+	found := emitted(t, "FileNeverBuilt", fileNeverBuiltCode, FileNeverBuilt, in)
 	if slices.ContainsFunc(found, func(one Finding) bool { return one.Symbol.Name == "generate.go" }) {
 		t.Errorf("FileNeverBuilt reports %v, want no finding about generate.go: the ignore tag is the convention for a file run by hand, so no configuration builds one by design",
 			summary(found))
@@ -189,15 +191,21 @@ func TestFileNeverBuiltReportsNoFileTheToolchainIgnoredForReachingC(t *testing.T
 	in := inputOf(t, "artifacts-never-built.txtar", completeMatrixConfig(), Consumers{},
 		twoConfigurations()...)
 
+	// The opaque-C check read the file, so no package of any configuration ignores
+	// it any more, which is the premise the kind is being held to here.
 	for _, one := range in.Per {
-		if !slices.Contains(one.Result.ExcludedByCgo, "bridge.go") {
-			t.Errorf("the %s load records ExcludedByCgo = %v, want it to hold bridge.go",
-				one.Result.Configuration.ID, one.Result.ExcludedByCgo)
+		for _, p := range one.Result.Packages {
+			if slices.ContainsFunc(p.IgnoredFiles, func(path string) bool {
+				return filepath.Base(path) == "bridge.go"
+			}) {
+				t.Errorf("the %s load has %s ignoring bridge.go, want the opaque-C check to have read it",
+					one.Result.Configuration.ID, p.ID)
+			}
 		}
 	}
-	found := emitted(t, "FileNeverBuilt", FileNeverBuilt, in)
+	found := emitted(t, "FileNeverBuilt", fileNeverBuiltCode, FileNeverBuilt, in)
 	if slices.ContainsFunc(found, func(one Finding) bool { return one.Symbol.Name == "bridge.go" }) {
-		t.Errorf("FileNeverBuilt reports %v, want no finding about bridge.go: a file ignored for reaching C is excluded by cgo rather than by a configuration",
+		t.Errorf("FileNeverBuilt reports %v, want no finding about bridge.go: a file the toolchain ignored for reaching C is read by the opaque-C check rather than decided by a configuration",
 			summary(found))
 	}
 }
@@ -241,7 +249,7 @@ func TestFileNeverImportedReportsNoFileOfALibrarysPublishedPackage(t *testing.T)
 
 	in := inputOf(t, "artifacts-never-imported.txtar", libraryConfig(), Consumers{})
 
-	found := emitted(t, "FileNeverImported", FileNeverImported, in)
+	found := emitted(t, "FileNeverImported", fileNeverImportedCode, FileNeverImported, in)
 	got := make([]string, 0, len(found))
 	for i := range found {
 		got = append(got, found[i].Position.Path)
@@ -265,7 +273,7 @@ func TestFileNeverImportedReportsNoFileOfAPackageAnImportReaches(t *testing.T) {
 		Kind: graph.RefRead,
 	})
 
-	found := emitted(t, "FileNeverImported", FileNeverImported, in)
+	found := emitted(t, "FileNeverImported", fileNeverImportedCode, FileNeverImported, in)
 	for i := range found {
 		if strings.HasPrefix(found[i].Position.Path, "internal/orphan/") {
 			t.Errorf("FileNeverImported reports %v, want no finding about a file of the package the synthesized import reaches",
@@ -281,7 +289,7 @@ func TestFileNeverImportedReportsNoFileOfAPackageHoldingALiveDeclaration(t *test
 	in := inputOf(t, "artifacts-never-imported.txtar", applicationConfig(), Consumers{})
 	retainOneDeclaration(t, in, "example.com/app/internal/orphan")
 
-	found := emitted(t, "FileNeverImported", FileNeverImported, in)
+	found := emitted(t, "FileNeverImported", fileNeverImportedCode, FileNeverImported, in)
 	for i := range found {
 		if strings.HasPrefix(found[i].Position.Path, "internal/orphan/") {
 			t.Errorf("FileNeverImported reports %v, want no finding about a file of a package holding a declaration the sweep did not judge dead: a use no reference names reaches that package, so its files do not fall with it",
@@ -314,7 +322,7 @@ func TestFileNeverImportedReportsNoFileOfTheMainPackage(t *testing.T) {
 
 	in := inputOf(t, "artifacts-never-imported.txtar", applicationConfig(), Consumers{})
 
-	found := emitted(t, "FileNeverImported", FileNeverImported, in)
+	found := emitted(t, "FileNeverImported", fileNeverImportedCode, FileNeverImported, in)
 	for _, path := range []string{"main.go", "plugin/plug.go", "tool/run.go"} {
 		if slices.ContainsFunc(found, func(one Finding) bool { return one.Position.Path == path }) {
 			t.Errorf("FileNeverImported reports %v, want no finding about %s: the toolchain builds a main package whatever imports it",
@@ -357,7 +365,7 @@ func TestUnusedDependencyReportsTheRequirementNoImportNeeds(t *testing.T) {
 
 	in := withModuleFile(t, "artifacts-dependency.txtar", applicationConfig(), twoConfigurations()...)
 
-	found := emitted(t, "UnusedDependency", UnusedDependency, in)
+	found := emitted(t, "UnusedDependency", unusedDependencyCode, UnusedDependency, in)
 	if slices.ContainsFunc(found, func(one Finding) bool { return one.Symbol.Name == "example.com/platform" }) {
 		t.Errorf("UnusedDependency reports %v, want no finding about example.com/platform: a requirement one configuration of the matrix imports is used",
 			summary(found))
@@ -399,7 +407,7 @@ func TestUnusedDependencyReportsNothingWithoutAModuleFile(t *testing.T) {
 
 	in := inputOf(t, "artifacts-dependency.txtar", applicationConfig(), Consumers{})
 
-	if found := emitted(t, "UnusedDependency", UnusedDependency, in); len(found) > 0 {
+	if found := emitted(t, "UnusedDependency", unusedDependencyCode, UnusedDependency, in); len(found) > 0 {
 		t.Errorf("UnusedDependency(a run that read no module file) reports %v, want nothing",
 			summary(found))
 	}
@@ -410,7 +418,7 @@ func TestUnusedReplaceReportsTheDirectiveOverAModuleTheBuildListDoesNotHold(t *t
 
 	in := withModuleFile(t, "artifacts-dependency.txtar", applicationConfig(), twoConfigurations()...)
 
-	found := emitted(t, "UnusedReplace", UnusedReplace, in)
+	found := emitted(t, "UnusedReplace", unusedReplaceCode, UnusedReplace, in)
 	if slices.ContainsFunc(found, func(one Finding) bool { return one.Symbol.Name == "example.com/platform" }) {
 		t.Errorf("UnusedReplace reports %v, want no finding about example.com/platform: the directive over a module one configuration of the matrix loads redirects a build",
 			summary(found))

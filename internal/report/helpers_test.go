@@ -109,6 +109,11 @@ func findingOf(code, kind, path string, line, endLine int, severity config.Sever
 // halves of the liveness relation's presence rule are exercised, a stale
 // suppression, an edge evaluation with its pending finding, a declared gap, a file
 // the cgo policy excluded, two test-file rules and both consumer lists.
+//
+// The two findings whose subject is a row of a document are left unmarked, which the
+// findings pass never does: a subject no relation over declarations answers for is
+// what the rendering reads, so the goldens carry no relation on either of them even
+// though the mark says one decided the finding.
 func fullInput() BuildInput {
 	pending := findingOf("DS1001", "unused-exported", "wire.go", 9, 12,
 		config.Deny, "deletable", "exported function is named by a declared edge and has no other reference")

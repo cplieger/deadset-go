@@ -1,0 +1,24 @@
+A method naming two parameters its body never reads and a receiver its body never
+names, which is three parts of one declaration.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+// counter counts.
+type counter struct {
+	total int
+}
+
+// limit names a receiver and two parameters its body reads none of.
+func (c *counter) limit(low, high int) int {
+	return 10
+}
+
+func main() {
+	c := &counter{total: 3}
+	println(c.limit(1, 2), c.total)
+}

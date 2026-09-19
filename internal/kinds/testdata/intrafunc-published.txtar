@@ -1,0 +1,33 @@
+A package outside the module's internal tree declaring an exported and an
+unexported function, each naming a parameter its body never reads, with a main
+package that calls both so neither is dead.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- api/api.go --
+package api
+
+// Scaled is exported and names a label its body never reads.
+func Scaled(value int, label string) int {
+	return value * 2
+}
+
+// scaled is unexported and names a label its body never reads.
+func scaled(value int, label string) int {
+	return value * 3
+}
+
+// Total reads the unexported form.
+func Total() int {
+	return scaled(1, "a")
+}
+-- main.go --
+package main
+
+import "example.com/app/api"
+
+func main() {
+	println(api.Scaled(1, "b"), api.Total())
+}

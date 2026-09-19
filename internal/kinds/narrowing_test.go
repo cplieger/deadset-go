@@ -45,7 +45,8 @@ func narrowingInput(
 	if err != nil {
 		sink.Fatalf("Setup: graph.Merge: %v", err)
 	}
-	swept := graph.NewMatrix(&merged).Sweep(graph.Mode{Production: true})
+	mode := graph.Mode{Production: true}
+	swept := graph.NewMatrix(&merged).Sweep(graph.SweepInput{Mode: mode})
 	refs := make(map[graph.SymbolID]string, len(merged.Symbols))
 	for i := range merged.Symbols {
 		refs[merged.Symbols[i].ID] = merged.Symbols[i].Ref
@@ -56,14 +57,14 @@ func narrowingInput(
 	}
 	resolved := libraryConfig()
 	return &Input{
-		Config:     &resolved,
-		Merged:     &merged,
-		Sweep:      &swept,
-		Refs:       refs,
-		Matrix:     []string{fixtureConfiguration().ID},
-		Per:        []Configured{{Result: &load.Result{Packages: loaded}}},
-		Consumers:  consumers,
-		Production: true,
+		Config:    &resolved,
+		Merged:    &merged,
+		Sweep:     &swept,
+		Refs:      refs,
+		Matrix:    []string{fixtureConfiguration().ID},
+		Per:       []Configured{{Result: &load.Result{Packages: loaded}}},
+		Consumers: consumers,
+		Mode:      mode,
 	}
 }
 

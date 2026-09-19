@@ -487,11 +487,27 @@ func componentOf(components []graph.Component, id graph.SymbolID) *graph.Compone
 // reason. Where the only path runs through a test file the answer prints it and says
 // so on the hop.
 func pathFrom(merged *graph.Merged, to graph.SymbolID) (graph.Root, []graph.Reference, bool) {
-	if root, path, reached := shortestPath(merged, to, true); reached {
+	if root, path, reached := shortestPath(merged, to, productionReferences); reached {
 		return root, path, true
 	}
-	return shortestPath(merged, to, false)
+	return shortestPath(merged, to, everyReference)
 }
+
+// referenceSet is which references one path walk follows. It is the walk's own
+// question rather than the run's mode: an explanation prefers the path the report's
+// sweep counts and answers over every reference where there is no such path, so one
+// explanation walks both sets whatever mode the run analysed under.
+type referenceSet uint8
+
+const (
+	// productionReferences is the set a production sweep counts: no reference a
+	// test file made, and no root a test file declares.
+	productionReferences referenceSet = iota
+
+	// everyReference is every reference and every root, which is the set that
+	// answers where no production path reaches the symbol.
+	everyReference
+)
 
 // shortestPath is the shortest path of references from a root to one symbol, and the
 // root it starts from.
@@ -501,11 +517,11 @@ func pathFrom(merged *graph.Merged, to graph.SymbolID) (graph.Root, []graph.Refe
 // path on every run over one tree. A symbol that is itself a root is reached by the
 // empty path.
 //
-// production drops the test roots from the seed and every reference a test file made,
-// which is the set the production sweep counts.
-func shortestPath(merged *graph.Merged, to graph.SymbolID, production bool) (graph.Root, []graph.Reference, bool) {
-	out := adjacency(merged, production)
-	steps, seen := rootSeed(merged, production)
+// The production set drops the test roots from the seed and every reference a test
+// file made, which is the set the production sweep counts.
+func shortestPath(merged *graph.Merged, to graph.SymbolID, follows referenceSet) (graph.Root, []graph.Reference, bool) {
+	out := adjacency(merged, follows)
+	steps, seen := rootSeed(merged, follows)
 
 	for head := 0; head < len(steps); head++ {
 		if steps[head].at == to {
@@ -525,10 +541,10 @@ func shortestPath(merged *graph.Merged, to graph.SymbolID, production bool) (gra
 
 // adjacency is the references each symbol makes, by the index the merge holds them
 // at, so the walk follows them in the order the merge returned them.
-func adjacency(merged *graph.Merged, production bool) map[graph.SymbolID][]int {
+func adjacency(merged *graph.Merged, follows referenceSet) map[graph.SymbolID][]int {
 	out := make(map[graph.SymbolID][]int, len(merged.Symbols))
 	for i := range merged.References {
-		if production && merged.References[i].Test {
+		if follows == productionReferences && merged.References[i].Test {
 			continue
 		}
 		out[merged.References[i].From] = append(out[merged.References[i].From], i)
@@ -538,11 +554,11 @@ func adjacency(merged *graph.Merged, production bool) map[graph.SymbolID][]int {
 
 // rootSeed is the walk's first steps, one per root the seed holds, and the symbols
 // already reached.
-func rootSeed(merged *graph.Merged, production bool) (steps []walked, seen map[graph.SymbolID]bool) {
+func rootSeed(merged *graph.Merged, follows referenceSet) (steps []walked, seen map[graph.SymbolID]bool) {
 	steps = make([]walked, 0, len(merged.Symbols))
 	seen = make(map[graph.SymbolID]bool, len(merged.Symbols))
 	for i := range merged.Roots {
-		if seen[merged.Roots[i].ID] || (production && merged.Roots[i].Kind == graph.RootTest) {
+		if seen[merged.Roots[i].ID] || (follows == productionReferences && merged.Roots[i].Kind == graph.RootTest) {
 			continue
 		}
 		seen[merged.Roots[i].ID] = true

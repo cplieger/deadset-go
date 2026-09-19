@@ -258,3 +258,116 @@ func TestThePendingFindingIsCarriedByItsEvaluation(t *testing.T) {
 		t.Errorf("Totals.Pending = %d, want one per dead evaluation", envelope.Totals.Pending)
 	}
 }
+
+// TestTheDocumentWritesTheSuppressionRecordAFindingReports pins the two members a
+// finding about a suppression record carries, and that a member the record lacks is
+// absent rather than empty: the reason-free and the unscoped kinds report exactly the
+// absence, and the schema admits no empty spelling of either member.
+func TestTheDocumentWritesTheSuppressionRecordAFindingReports(t *testing.T) {
+	reasonFree := findingOf("DS1701", "suppression-without-reason", "deadset-ignore.json", 7, 7,
+		config.Deny, "manual", "the ignore entry carries no reason")
+	reasonFree.Live = true
+	reasonFree.Symbol.Kind = "suppression"
+	reasonFree.Details.Mechanism = "ignore"
+	reasonFree.Details.Entry = &kinds.Entry{
+		Code:   "DS1001",
+		Symbol: "go://example.com/app#Catalog.legacyAlias",
+		Path:   "catalog.go",
+	}
+
+	unscoped := findingOf("DS1702", "unscoped-suppression", "deadset-ignore.json", 9, 9,
+		config.Deny, "manual", "the ignore entry names no path")
+	unscoped.Live = true
+	unscoped.Symbol.Kind = "suppression"
+	unscoped.Details.Mechanism = "ignore"
+	unscoped.Details.Entry = &kinds.Entry{Code: "DS1001", Reason: "removal is breaking"}
+
+	in := minimalInput()
+	in.Result.Findings = []kinds.Finding{reasonFree, unscoped}
+	envelope := built(t, &in)
+	document := string(rendered(t, "json", &envelope, Options{}))
+
+	for _, member := range []string{
+		`"mechanism": "ignore"`,
+		`"code": "DS1001"`,
+		`"symbol": "go://example.com/app#Catalog.legacyAlias"`,
+		`"path": "catalog.go"`,
+		`"reason": "removal is breaking"`,
+	} {
+		if !strings.Contains(document, member) {
+			t.Errorf("the document carries no %s among the records the findings report:\n%s", member, document)
+		}
+	}
+	if strings.Contains(document, `"reason": ""`) {
+		t.Errorf("the document writes an empty reason for the record the reason-free kind reports:\n%s", document)
+	}
+	if strings.Contains(document, `"path": ""`) {
+		t.Errorf("the document writes an empty path for the record the unscoped kind reports:\n%s", document)
+	}
+
+	var read Envelope
+	if err := json.Unmarshal([]byte(document), &read); err != nil {
+		t.Fatalf("json.Unmarshal(the document this run wrote) = error %v, want the envelope it encodes", err)
+	}
+	if len(read.Findings) != 2 {
+		t.Fatalf("the document read back carries %d findings, want the two the run reported", len(read.Findings))
+	}
+	back := findingUnder(t, read.Findings, "DS1701")
+	if held := back.Details.Entry; held == nil || held.Code != "DS1001" || held.Reason != "" {
+		t.Errorf("the record read back for %s is %+v, want the record the run reported", back.Code, held)
+	}
+	if got := back.Details.Mechanism; got != "ignore" {
+		t.Errorf("the mechanism read back for %s is %q, want %q", back.Code, got, "ignore")
+	}
+}
+
+// TestTheDocumentWritesTheOverlapAnIntraFunctionFindingCarries pins that the external
+// rules reporting the same kind reach the document, and that a kind the vocabulary
+// lists none for carries no member at all, because the schema admits no empty array
+// there and forbids the member outside the intra-function group.
+func TestTheDocumentWritesTheOverlapAnIntraFunctionFindingCarries(t *testing.T) {
+	part := findingOf("DS1801", "unused-parameter", "normalize.go", 12, 12,
+		config.Warn, "deletable", "parameter limit is never read in the body")
+	part.Live = true
+	part.Symbol.Kind = "parameter"
+	part.Details.Overlap = []string{"revive unused-parameter", "gopls unusedparams", "unparam"}
+
+	declaration := findingOf("DS1002", "unused-unexported", "catalog.go", 4, 8,
+		config.Deny, "deletable", "the function has no reference in the target")
+
+	in := minimalInput()
+	in.Result.Findings = []kinds.Finding{part, declaration}
+	envelope := built(t, &in)
+	document := string(rendered(t, "json", &envelope, Options{}))
+
+	for _, named := range part.Details.Overlap {
+		if !strings.Contains(document, `"`+named+`"`) {
+			t.Errorf("the document does not name %s among the rules that report the same kind:\n%s", named, document)
+		}
+	}
+	if got, want := strings.Count(document, `"overlap"`), 1; got != want {
+		t.Errorf("the document names the overlap member %d times, want %d: the kind the vocabulary lists none for carries none:\n%s",
+			got, want, document)
+	}
+
+	var read Envelope
+	if err := json.Unmarshal([]byte(document), &read); err != nil {
+		t.Fatalf("json.Unmarshal(the document this run wrote) = error %v, want the envelope it encodes", err)
+	}
+	back := findingUnder(t, read.Findings, "DS1801")
+	if got := back.Details.Overlap; !slices.Equal(got, part.Details.Overlap) {
+		t.Errorf("the overlap read back for %s is %v, want %v", back.Code, got, part.Details.Overlap)
+	}
+}
+
+// findingUnder is the one finding of a list reported under one code, which is how a
+// test names its subject where the canonical order decides the positions.
+func findingUnder(t *testing.T, findings []kinds.Finding, code string) *kinds.Finding {
+	t.Helper()
+
+	at := slices.IndexFunc(findings, func(found kinds.Finding) bool { return found.Code == code })
+	if at < 0 {
+		t.Fatalf("no finding of the list is reported under %s, want the one the run reported", code)
+	}
+	return &findings[at]
+}

@@ -178,23 +178,27 @@ func TestRootsRootsABlankDeclarationAndNotTheNamedOneBesideIt(t *testing.T) {
 	}
 }
 
-func TestRootsReachesNoCgoExportUnderTheLoadsCgoPolicy(t *testing.T) {
+func TestRootsReachesTheCgoExportTheOpaqueCheckRead(t *testing.T) {
 	d := detect(t, "roots.txtar", RootOptions{PublishedAPI: true})
 
-	if want := []string{"cgoexport/bridge.go"}; !slices.Equal(d.result.ExcludedByCgo, want) {
-		t.Errorf("Load(roots.txtar).ExcludedByCgo = %v, want %v", d.result.ExcludedByCgo, want)
+	// The file importing "C" is read by the opaque-C check, so nothing about it is
+	// a declared limit of the run.
+	if len(d.result.ExcludedByCgo) != 0 {
+		t.Errorf("Load(roots.txtar).ExcludedByCgo = %v, want empty", d.result.ExcludedByCgo)
 	}
-	for _, s := range d.symbols {
-		if s.Ref == "go://example.com/roots/cgoexport#Bridge" {
-			t.Errorf("Symbols(roots.txtar) holds %s, want it absent: the file importing \"C\" is not loaded", s.Ref)
-		}
+	const bridge = "go://example.com/roots/cgoexport#Bridge"
+	kinds := kindsByRef(d)
+	if _, held := kinds[bridge]; !held {
+		t.Fatalf("Symbols(roots.txtar) holds no %s, want the declaration of the file importing \"C\"", bridge)
 	}
-	if refs := refsOfKind(d, RootCgoExport); len(refs) != 0 {
-		t.Errorf("Roots(roots.txtar) cgo-export roots name %v, want none", refs)
+	if want := []RootKind{RootCgoExport, RootPublishedAPI}; !slices.Equal(kinds[bridge], want) {
+		t.Errorf("Roots(roots.txtar)[%s] = %v, want %v", bridge, kinds[bridge], want)
+	}
+	if refs := refsOfKind(d, RootCgoExport); !slices.Equal(refs, []string{bridge}) {
+		t.Errorf("Roots(roots.txtar) cgo-export roots name %v, want %v", refs, []string{bridge})
 	}
 	// The sibling directive carries the same name and no import of "C", which is
 	// what the class requires.
-	kinds := kindsByRef(d)
 	const plain = "go://example.com/roots/cgoexport#Plain"
 	if want := []RootKind{RootPublishedAPI}; !slices.Equal(kinds[plain], want) {
 		t.Errorf("Roots(roots.txtar)[%s] = %v, want %v", plain, kinds[plain], want)

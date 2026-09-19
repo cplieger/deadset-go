@@ -40,6 +40,14 @@ func extract(t *testing.T, archive string) string {
 	return dir
 }
 
+// The directories a two-module archive writes its target and its declared consumer
+// into. An archive holding the first is loaded as a program of two modules, which is
+// how a fixture reaches the consumer half of the boundary.
+const (
+	fixtureTargetDir   = "target"
+	fixtureConsumerDir = "httpwire"
+)
+
 // loadDir resolves one directory through the production load, so the Need bits a
 // class depends on have one owner.
 func loadDir(t *testing.T, dir string) (*load.Result, string) {
@@ -49,13 +57,49 @@ func loadDir(t *testing.T, dir string) (*load.Result, string) {
 	if err != nil {
 		t.Fatalf("Setup: scope.ForDir(%s): %v", dir, err)
 	}
+	return loadScope(t, doc)
+}
+
+// loadTwoModules resolves the target and the declared consumer of one extracted
+// two-module archive, which is the scope a run analysing a target with a consumer
+// loaded reads.
+func loadTwoModules(t *testing.T, dir string) (*load.Result, string) {
+	t.Helper()
+
+	return loadScope(t, scope.Document{
+		Target:    scope.Module{Path: filepath.Join(dir, fixtureTargetDir)},
+		Consumers: []scope.Module{{Path: filepath.Join(dir, fixtureConsumerDir)}},
+	})
+}
+
+// loadScope loads one scope document under the fixture configuration.
+func loadScope(t *testing.T, doc scope.Document) (*load.Result, string) {
+	t.Helper()
+
 	result, err := load.Load(t.Context(), doc, load.Configuration{
 		ID: fixtureOS + "-" + fixtureArch, OS: fixtureOS, Arch: fixtureArch,
 	})
 	if err != nil {
-		t.Fatalf("Setup: load.Load(%s): %v", dir, err)
+		t.Fatalf("Setup: load.Load(%s): %v", doc.Target.Path, err)
 	}
 	return &result, doc.Target.Path
+}
+
+// twoModules reports whether one archive writes a target and a consumer rather than
+// a single module, which is what decides the scope it is loaded under.
+func twoModules(t *testing.T, archive string) bool {
+	t.Helper()
+
+	parsed, err := txtar.ParseFile(filepath.Join("testdata", archive))
+	if err != nil {
+		t.Fatalf("Setup: parse testdata/%s: %v", archive, err)
+	}
+	for _, f := range parsed.Files {
+		if f.Name == fixtureTargetDir+"/go.mod" {
+			return true
+		}
+	}
+	return false
 }
 
 // inputOf extracts one archive, loads it, enumerates its declarations and builds
@@ -65,7 +109,12 @@ func loadDir(t *testing.T, dir string) (*load.Result, string) {
 func inputOf(t *testing.T, archive string, opts Options) *Input {
 	t.Helper()
 
-	result, root := loadDir(t, extract(t, archive))
+	dir := extract(t, archive)
+	program := loadDir
+	if twoModules(t, archive) {
+		program = loadTwoModules
+	}
+	result, root := program(t, dir)
 	symbols, err := graph.Symbols(result, root, os.ReadFile)
 	if err != nil {
 		t.Fatalf("Setup: graph.Symbols(%s): %v", archive, err)

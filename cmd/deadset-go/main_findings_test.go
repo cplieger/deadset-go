@@ -20,21 +20,9 @@ import (
 // the table's test says which kinds the table is silent about instead of allowing a
 // kind to go missing unnoticed.
 //
-// The self-check group has a rule all the same: the framework identifies a finding by
-// the declaration of the inventory it names, and a suppression record and a configured
-// string are not declarations.
-//
-// DS1701 to DS1704 are answered by the rules the findings pass calls directly,
-// after the table has run: a suppression record and a configured string are not
-// declarations, so each of those rules completes its own findings and registering
-// one would fail every run.
-//
-// DS1705 is the merge's, which is another product, and the DS18xx group has no rule
-// in this version.
+// DS1705 is the merge's, which is another product.
 var goKindsWithoutEmitter = []string{
-	"DS1701", "DS1702", "DS1703", "DS1704", // the self-checks the pass calls directly
-	"DS1705",                                                   // the stale cross-language edge, which the merge answers
-	"DS1801", "DS1802", "DS1803", "DS1805", "DS1807", "DS1809", // the intra-function group
+	"DS1705", // the stale cross-language edge, which the merge answers
 }
 
 // findingsArchive is the module the findings pass is driven against: an application
@@ -391,7 +379,7 @@ func TestGeneratedPathsNamesTheGeneratedFilesOfTheRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Setup: exemptOptions(): %v", err)
 	}
-	analyzed, err := analysisOf(t.Context(), &resolved, &options, true)
+	analyzed, err := analysisOf(t.Context(), &resolved, &options, modeOf(&resolved.config, modeProduction))
 	if err != nil {
 		t.Fatalf("Setup: analysisOf(): %v", err)
 	}
@@ -545,16 +533,17 @@ func TestAnalysisOfComputesItsExemptionsUnderTheModeItSweepsIn(t *testing.T) {
 
 	// The plain mode counts the test's marshalling as the use it is evidence of, so
 	// the class holds the field; the production mode holds nothing by it.
-	for _, mode := range []struct {
-		production bool
-		want       string
+	for _, test := range []struct {
+		named string
+		want  string
 	}{
-		{production: false, want: string(exempt.EncodingReflection)},
-		{production: true, want: ""},
+		{named: modePlain, want: string(exempt.EncodingReflection)},
+		{named: modeProduction, want: ""},
 	} {
-		analyzed, analysisErr := analysisOf(t.Context(), &resolved, &options, mode.production)
+		mode := modeOf(&resolved.config, test.named)
+		analyzed, analysisErr := analysisOf(t.Context(), &resolved, &options, mode)
 		if analysisErr != nil {
-			t.Fatalf("analysisOf(production = %v) = %v, want the analysis of the run", mode.production, analysisErr)
+			t.Fatalf("analysisOf(%s) = %v, want the analysis of the run", test.named, analysisErr)
 		}
 		var got string
 		for i := range analyzed.exemptions {
@@ -563,9 +552,9 @@ func TestAnalysisOfComputesItsExemptionsUnderTheModeItSweepsIn(t *testing.T) {
 				break
 			}
 		}
-		if got != mode.want {
-			t.Errorf("analysisOf(production = %v) retains %s by %q, want %q: the only marshalling of the value is written in a test file",
-				mode.production, subject, got, mode.want)
+		if got != test.want {
+			t.Errorf("analysisOf(%s) retains %s by %q, want %q: the only marshalling of the value is written in a test file",
+				test.named, subject, got, test.want)
 		}
 	}
 

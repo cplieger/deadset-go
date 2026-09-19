@@ -1,0 +1,33 @@
+A package outside the module's internal tree declaring an exported and an
+unexported function, each returning a count every call in the loaded graph drops.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- api/api.go --
+package api
+
+// Tally is exported and returns a count every call drops.
+func Tally() int {
+	return 1
+}
+
+// tally is unexported and returns a count every call drops.
+func tally() int {
+	return 2
+}
+
+// Run drops the unexported count.
+func Run() {
+	tally()
+}
+-- main.go --
+package main
+
+import "example.com/app/api"
+
+func main() {
+	api.Tally()
+	api.Run()
+}

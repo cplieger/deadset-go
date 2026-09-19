@@ -118,7 +118,7 @@ func candidatesOf(t *testing.T, archive string, opts Options) []string {
 	}
 
 	names := symbolNames(in)
-	result := graph.New(in.Symbols, refs, roots).Sweep(graph.Mode{Exempt: exemptions})
+	result := graph.New(in.Symbols, refs, roots).Sweep(graph.SweepInput{Exempt: exemptions})
 	got := make([]string, 0, len(result.Candidates))
 	for _, c := range result.Candidates {
 		got = append(got, names[c.ID])

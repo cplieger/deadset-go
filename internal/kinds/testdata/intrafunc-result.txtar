@@ -1,0 +1,37 @@
+A function whose one result every call discards, a function whose first result
+every call assigns to the blank identifier, a function whose result one call reads
+and another discards, and a function whose result every call reads.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+// tally returns a count no call reads.
+func tally() int {
+	return 1
+}
+
+// split returns a count every call drops and a flag every call reads.
+func split() (int, bool) {
+	return 1, true
+}
+
+// doubled returns a value one call reads and another drops, so nothing reports it.
+func doubled(n int) int {
+	return n * 2
+}
+
+// kept returns a value every call reads.
+func kept() int {
+	return 2
+}
+
+func main() {
+	tally()
+	_, ok := split()
+	doubled(3)
+	println(ok, doubled(4), kept())
+}

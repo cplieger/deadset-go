@@ -107,10 +107,10 @@ func (d drawnGraph) build(t *rapid.T, added []drawnRoot) *graphBuilder {
 	return b
 }
 
-// mode is the sweep's input for one drawn graph: the drawn exemptions, each
-// naming the declaration it holds, the class that holds it and a site of its own,
-// so two exemptions of one declaration are two entries.
-func (d drawnGraph) mode(b *graphBuilder) Mode {
+// input is what one drawn graph is swept under: the drawn exemptions, each naming
+// the declaration it holds, the class that holds it and a site of its own, so two
+// exemptions of one declaration are two entries.
+func (d drawnGraph) input(b *graphBuilder) SweepInput {
 	exempt := make([]Exemption, 0, len(d.exempt))
 	for i, e := range d.exempt {
 		exempt = append(exempt, Exemption{
@@ -119,7 +119,7 @@ func (d drawnGraph) mode(b *graphBuilder) Mode {
 			Site:  token.Position{Filename: handFile, Line: i + 1, Column: 1},
 		})
 	}
-	return Mode{Exempt: exempt}
+	return SweepInput{Exempt: exempt}
 }
 
 // exemptNames names every declaration a draw placed an exemption on.
@@ -189,7 +189,7 @@ func TestProperty07TheRelationRecordedIsTheOneThatFoundTheCandidate(t *testing.T
 	rapid.Check(t, func(t *rapid.T) {
 		d := drawnGraphs().Draw(t, "the graph")
 		b := d.build(t, nil)
-		r := b.graph().Sweep(d.mode(b))
+		r := b.graph().Sweep(d.input(b))
 
 		referenced, counted, reached := d.liveness(nil)
 		exempt := d.exemptNames()
@@ -229,7 +229,7 @@ func TestProperty07TheRelationRecordedIsTheOneThatFoundTheCandidate(t *testing.T
 			kind: rapid.SampledFrom(rootKinds()).Draw(t, "the added root's kind"),
 		}
 		second := d.build(t, []drawnRoot{added})
-		after := second.graph().Sweep(d.mode(second))
+		after := second.graph().Sweep(d.input(second))
 		for _, name := range b.names(namesOf(b.symbols)) {
 			before := r.LiveUnder[b.id(name)].Has(ReferenceCounting)
 			now := after.LiveUnder[second.id(name)].Has(ReferenceCounting)
@@ -383,7 +383,7 @@ func TestProperty06EveryDeadSymbolLandsInOneComponentReportedAtItsRoots(t *testi
 			}
 		}
 		g := b.graph()
-		r := g.Sweep(Mode{Production: true})
+		r := g.Sweep(SweepInput{Mode: Mode{Production: true}})
 
 		dead := make([]string, 0, len(r.Candidates))
 		reported := map[string]bool{}
@@ -818,7 +818,7 @@ func TestProperty03AReferenceFromAnyLoadedModulePreventsTheFinding(t *testing.T)
 		d := drawnLoads().Draw(t, "the run")
 		b := d.build(t)
 		g := b.graph()
-		r := g.Sweep(d.mode)
+		r := g.Sweep(SweepInput{Mode: d.mode})
 
 		referenced, called, by := d.counts()
 		reached := d.reachable(called)

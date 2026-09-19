@@ -1,0 +1,27 @@
+A function holding a statement after a return, and one whose every statement
+control flow reaches.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+// halted returns before its last statement, which nothing reaches.
+func halted() {
+	println("before the return")
+	return
+	println("after the return")
+}
+
+// reached ends on its return, so nothing reports a statement of it.
+func reached() {
+	println("before the return")
+	return
+}
+
+func main() {
+	halted()
+	reached()
+}

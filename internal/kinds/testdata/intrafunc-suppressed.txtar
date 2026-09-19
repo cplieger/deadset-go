@@ -1,0 +1,23 @@
+Two functions each naming a parameter its body never reads, one of them under an
+inline directive naming the unused-parameter code.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+//deadset:ignore DS1801 -- the label answers a shape this program does not read
+func scaled(value int, label string) int {
+	return value * 2
+}
+
+// tripled names a label it never reads and carries no directive.
+func tripled(value int, label string) int {
+	return value * 3
+}
+
+func main() {
+	println(scaled(1, "a"), tripled(2, "b"))
+}

@@ -135,6 +135,7 @@ type Details struct {
 	Replacement        string       // the right-hand side of a module directive
 	Mechanism          string       // where the suppression a finding reports lives
 	Entry              *Entry       // the suppression record a finding reports
+	Overlap            []string     // the external rules that report the same kind
 	RemovesLastUseOf   []string     // the dependencies whose last use a deletion removes
 }
 
@@ -178,10 +179,12 @@ type Finding struct {
 	Message         string
 	Details         Details
 
-	// id is the declaration of the inventory the finding is about. It is the key
-	// the framework completes a finding by, because a report's own symbol
-	// reference is not one: a blank declaration shares the reference of its
-	// container. An emitter that leaves it unset is resolved by reference.
+	// id is the declaration of the inventory the finding is about, and is empty on
+	// a finding about anything else: a part of a declaration and a row of a
+	// document are no declaration of the inventory, so neither carries one. It is
+	// what the framework reads the sweep's answers about a declaration by, because
+	// a report's own symbol reference is not one: a blank declaration shares the
+	// reference of its container.
 	id graph.SymbolID
 }
 
@@ -278,16 +281,16 @@ type Input struct {
 	// Consumers is what the run knows about the target's consumers.
 	Consumers Consumers
 
-	// Production is the reference mode the sweep ran under, which a kind that
-	// counts reads needs and a swept graph does not carry. Under a production mode
-	// a reference a test file made counts for nothing, so a read from a test file
-	// is no read and a declaration written in production and read only from a test
-	// is written and never read.
+	// Mode is the run's reference mode, the one value the composition root decided
+	// for every stage. A kind that counts reads needs it and a swept graph does not
+	// carry it: under a production mode a reference a test file made counts for
+	// nothing, so a read from a test file is no read and a declaration written in
+	// production and read only from a test is written and never read.
 	//
-	// Sweep is the production sweep, so this is true for the run the analyzer
-	// makes; it is a field rather than a constant because the mode is the run's
-	// and a kind must not assume it.
-	Production bool
+	// Sweep is the production sweep, so the mode of the run this analyzer makes is
+	// the production one; it is a field rather than a constant because the mode is
+	// the run's and a kind must not assume it.
+	Mode graph.Mode
 }
 
 // Emitter is one kind's rule: it returns the findings of its own code.
@@ -327,7 +330,7 @@ var symbolKinds = map[graph.SymbolKind]string{
 	graph.KindConst:           "constant",
 	graph.KindVar:             "variable",
 	graph.KindTypeParam:       "type-parameter",
-	graph.KindFile:            "file",
+	graph.KindFile:            fileSubject,
 }
 
 // kindsOfCatalog is the vocabulary the framework runs the emitters in the order of.
@@ -352,14 +355,16 @@ func Compute(in *Input, emitters map[string]Emitter) (Result, error) {
 	if err := checkTable(emitters); err != nil {
 		return Result{}, err
 	}
-	reported := newSubjects()
+	reported := make(map[string]string)
 	var findings []Finding
-	for _, row := range kindsOfCatalog() {
-		emit, runs := in.emitterOf(&row, emitters)
+	published := kindsOfCatalog()
+	for i := range published {
+		row := &published[i]
+		emit, runs := in.emitterOf(row, emitters)
 		if !runs {
 			continue
 		}
-		produced, err := in.runKind(emit, &row, reported)
+		produced, err := in.runKind(emit, row, reported)
 		if err != nil {
 			return Result{}, err
 		}
@@ -387,7 +392,7 @@ func (in *Input) emitterOf(row *catalog.Row, emitters map[string]Emitter) (Emitt
 
 // runKind runs one kind's emitter and completes every finding it returned, in the
 // order the emitter returned them.
-func (in *Input) runKind(emit Emitter, row *catalog.Row, reported *subjects) ([]Finding, error) {
+func (in *Input) runKind(emit Emitter, row *catalog.Row, reported map[string]string) ([]Finding, error) {
 	produced, err := emit(in)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s: %w", ErrEmitter, row.Code, err)
@@ -417,91 +422,161 @@ func checkTable(emitters map[string]Emitter) error {
 	return nil
 }
 
-// subjects is what one pass has already reported about, so that a second finding
-// about one subject is refused: the declarations of the inventory by identifier, and
-// the subjects that are no declaration by reference.
-type subjects struct {
-	declared   map[graph.SymbolID]string
-	referenced map[string]string
+// shape is what one finding carries, which the Contract decides by the kind of the
+// subject: a declaration of the inventory, a part of a declaration, or a row of a
+// document.
+type shape uint8
+
+const (
+	// shapeDeclaration is a symbol of the inventory, which the sweep judged, so the
+	// finding carries the liveness relation that decided it, the reachability class
+	// its visibility gives it, the dead component it falls with and the
+	// configurations it holds under.
+	shapeDeclaration shape = iota
+
+	// shapePart is a part of a declaration: a parameter, a receiver, a result, a
+	// statement, a case or a store. The declaration stays and the part is the
+	// subject, so no relation over declarations answers for it.
+	shapePart
+
+	// shapeRow is a row of a document: a requirement or a directive of the module
+	// file, a file no configuration compiled, a suppression record, a configured
+	// root. The analysis enumerates no declaration for it at all.
+	shapeRow
+)
+
+// shapes is the shape of every subject kind that is not a declaration, which is the
+// list the Contract publishes as the kinds a finding carries no liveness relation
+// on. Every kind absent from it is a declaration, so the table holds the exception
+// rather than the rule and a test pins its keys equal to the Contract's list.
+var shapes = map[string]shape{
+	caseSubject:        shapePart,
+	parameterSubject:   shapePart,
+	receiverSubject:    shapePart,
+	resultSubject:      shapePart,
+	statementSubject:   shapePart,
+	storeSubject:       shapePart,
+	dependencySubject:  shapeRow,
+	directiveSubject:   shapeRow,
+	fileSubject:        shapeRow,
+	rootSubject:        shapeRow,
+	suppressionSubject: shapeRow,
 }
 
-// newSubjects prepares the record of one pass.
-func newSubjects() *subjects {
-	return &subjects{
-		declared:   make(map[graph.SymbolID]string),
-		referenced: make(map[string]string),
+// shapeOf is the shape of a finding about one kind of subject.
+func shapeOf(subjectKind string) shape {
+	return shapes[subjectKind]
+}
+
+// LivenessAbsent reports whether one finding carries no liveness relation, which the
+// Contract decides two ways and this answers both: the subject is a part of a
+// declaration or a row of a document, which no relation over declarations answers
+// for, and the subject is a declaration the sweep judged live, which every kind
+// claiming something other than deadness reports.
+//
+// It is exported because the analyzer and the Contract answer this one question, so
+// a test compares this predicate against the condition the finding schema states
+// rather than against a copy of it.
+func LivenessAbsent(found *Finding) bool {
+	return shapeOf(found.Symbol.Kind) != shapeDeclaration || found.Live
+}
+
+// key is one finding's identity: the position of the thing it names, rendered the way
+// the identifier of a declaration is, so the key of a finding about a declaration is
+// that identifier and the key of a finding about a part of one is the part's own
+// token. Two findings of one key is a defect, which is what makes the rendered
+// position the whole identity of everything the analysis enumerates: one identifier,
+// one parameter name, one statement's first token.
+//
+// A row of a document carries the record it reports as well, because a position does
+// not identify a row the way it identifies a declaration, and two documents say so. A
+// suppression record breaks as many of the grammar's rules as it breaks and a
+// directive names as many codes as it names, so an entry lacking both its reason and
+// its path is one finding per rule at one position and a reasonless directive naming
+// several codes is one finding per code at one position. The repository configuration
+// writes its roots as an array whose members carry no position at all, so every
+// configured root that matches nothing renders at the document's first position and
+// the string it names is what tells one from another. Each of the three components is
+// load-bearing and the key is no longer than those two documents make it: the
+// position, the rule the row breaks, and the record itself, which is the reference it
+// names and the code it names.
+func key(found *Finding) string {
+	at := found.Position.Path + ":" + strconv.Itoa(found.Position.Line) +
+		":" + strconv.Itoa(found.Position.Column)
+	if shapeOf(found.Symbol.Kind) != shapeRow {
+		return at
 	}
+	record := at + " " + found.Code + " " + found.Symbol.Ref
+	if found.Details.Entry != nil {
+		record += " " + found.Details.Entry.Code
+	}
+	return record
 }
 
-// referenceKeyed are the subject kinds a finding is completed against its
-// reference under, because the analysis enumerates declarations and none of these
-// is one: a source file no configuration compiled, a module requirement and a
-// directive of the module file.
+// resolve identifies one finding and refuses what the Contract cannot carry: a code
+// that is not the emitter's own, a message that is not one sentence a consumer can
+// extend, a second finding of one identity, and a subject the inventory cannot answer
+// for.
 //
-// A suppression record and a configured root are not among them. Two records for
-// one symbol are two subjects written at two sites, so a reference does not
-// identify one of them, and the kinds that report those complete their own
-// findings.
-var referenceKeyed = map[string]bool{
-	symbolKinds[graph.KindFile]: true,
-	dependencySubject:           true,
-	directiveSubject:            true,
-}
-
-// resolve identifies the subject one finding is about and refuses what the
-// Contract cannot carry: a code that is not the emitter's own, a message that is
-// not one sentence a consumer can extend, a second finding about one subject, a
-// finding about a symbol an exemption retained, and a finding about a declaration
-// the inventory does not hold.
+// A finding's identity is its key, which is the position of the thing it names, so two
+// findings of one identity is two kinds disagreeing about which of them reports the
+// subject. The precedence each kind's own rule states is what settles that, so the
+// pass fails rather than publishing both.
 //
-// A declaration is identified by the identifier the emitter named or by the one its
-// reference resolves to. A subject that is no declaration is identified by its
-// reference alone, under the rule referenceKeyed states, so a finding about a file
-// the toolchain ignored or about a line of the module file is completed like every
-// other; a finding about anything else the inventory cannot answer for is a defect
-// in the emitter and is refused.
-func (in *Input) resolve(found *Finding, code string, reported *subjects) error {
+// The key is one rule for every shape; what the inventory must be able to answer for a
+// finding is the shape's, which admit decides.
+func (in *Input) resolve(found *Finding, code string, reported map[string]string) error {
 	if found.Code != code {
 		return fmt.Errorf("%w: the %s emitter returned a %s finding", ErrEmitter, code, found.Code)
 	}
 	if err := checkMessage(found); err != nil {
 		return err
 	}
-	if found.id == "" {
-		found.id = in.index().byRef[found.Symbol.Ref]
+	at := key(found)
+	if first, twice := reported[at]; twice {
+		return fmt.Errorf("%w: %s reports %s at %s, which %s already reports",
+			ErrEmitter, found.Code, found.Symbol.Ref, at, first)
 	}
-	if found.id == "" {
-		return in.admit(found, reported)
+	if err := in.admit(found); err != nil {
+		return err
 	}
-	if first, twice := reported.declared[found.id]; twice {
-		return fmt.Errorf("%w: %s reports %s, which %s already reports",
-			ErrEmitter, found.Code, found.Symbol.Ref, first)
-	}
-	if in.index().retained[found.id] {
-		return fmt.Errorf("%w: %s reports %s, which an exemption retained",
-			ErrEmitter, found.Code, found.Symbol.Ref)
-	}
-	reported.declared[found.id] = found.Code
+	reported[at] = found.Code
 	return nil
 }
 
-// admit identifies a finding the inventory holds no declaration for, which is a
-// finding about a subject that is not one: it is keyed by its reference, and a
-// finding about any other kind of subject is refused as the emitter defect it is.
-func (in *Input) admit(found *Finding, reported *subjects) error {
-	if !referenceKeyed[found.Symbol.Kind] {
-		return fmt.Errorf("%w: %s names no declaration of the inventory: %q",
-			ErrEmitter, found.Code, found.Symbol.Ref)
+// admit refuses a finding whose subject the inventory cannot answer for, which the
+// shape of the subject decides: a declaration the inventory does not hold, which is an
+// emitter naming a subject the analysis never enumerated; a declaration an exemption
+// retained, which is a symbol no kind reports at all; a part of a declaration the
+// inventory does not hold, since a part names that declaration by reference; and a row
+// naming no record, which is a row a maintainer cannot find the subject of, because a
+// row's position names the document rather than the record.
+//
+// A part does not answer for the retained rule: the subject is the part, the
+// declaration it belongs to stays whatever held it live, and an exemption over that
+// declaration is no claim about the part.
+func (in *Input) admit(found *Finding) error {
+	switch shapeOf(found.Symbol.Kind) {
+	case shapeRow:
+		if found.Symbol.Ref == "" {
+			return fmt.Errorf("%w: %s reports a %s and names no reference",
+				ErrEmitter, found.Code, found.Symbol.Kind)
+		}
+	case shapePart:
+		if in.index().byRef[found.Symbol.Ref] == "" {
+			return fmt.Errorf("%w: %s reports a %s of %q, which names no declaration of the inventory",
+				ErrEmitter, found.Code, found.Symbol.Kind, found.Symbol.Ref)
+		}
+	default:
+		if found.id == "" {
+			return fmt.Errorf("%w: %s names no declaration of the inventory: %q",
+				ErrEmitter, found.Code, found.Symbol.Ref)
+		}
+		if in.index().retained[found.id] {
+			return fmt.Errorf("%w: %s reports %s, which an exemption retained",
+				ErrEmitter, found.Code, found.Symbol.Ref)
+		}
 	}
-	if found.Symbol.Ref == "" {
-		return fmt.Errorf("%w: %s reports a %s and names no reference",
-			ErrEmitter, found.Code, found.Symbol.Kind)
-	}
-	if first, twice := reported.referenced[found.Symbol.Ref]; twice {
-		return fmt.Errorf("%w: %s reports %s, which %s already reports",
-			ErrEmitter, found.Code, found.Symbol.Ref, first)
-	}
-	reported.referenced[found.Symbol.Ref] = found.Code
 	return nil
 }
 
@@ -526,28 +601,37 @@ func checkMessage(found *Finding) error {
 // complete fills everything the Contract requires of a finding whatever its kind,
 // so no emitter decides any of it.
 //
-// The class comes from the run's consumer knowledge and the subject's visibility,
-// the confidence is that class capped by the kind's own ceiling, and the severity
-// is the resolved configuration's; a finding in a generated file carries no
+// What a finding carries is the shape of its subject, and the subject's kind is what
+// the Contract decides that by, so the shape is read from the table and nothing else
+// asks what a kind reports. A declaration carries the liveness relation that decided
+// it, which is the candidate's and is absent where the sweep judged the declaration
+// live; the reachability class the run's consumer knowledge and the declaration's
+// visibility give it; and the dead component it falls with. A part of a declaration
+// and a row of a document carry none of those and answer the degenerate value at
+// each step: no relation, because none decided them; certain, because a subject with
+// no visibility of its own has no question about its callers; and a component of
+// their own, because nothing falls with them.
+//
+// The confidence is the class capped by the kind's own ceiling, the severity is the
+// resolved configuration's, and the overlap is the vocabulary's own list for the
+// kind, so a message names no other tool. A finding in a generated file carries no
 // fixability, because nothing mechanical acts on a file a generator rewrites.
-//
-// The liveness relation is the candidate's, and a finding about a declaration the
-// sweep judged live carries none: the relation is what decided a candidate, so a
-// kind whose subject is live has nothing to name there.
-//
-// A subject that is no declaration of the inventory is completed the same way and
-// answers the degenerate value at each step: certain, because a subject with no
-// visibility has no question about its callers; a component of its own, because
-// nothing falls with it; and no relation, because none decided it. The build
-// configurations are the one member such a kind sets itself, since what a module
-// requirement or an uncompiled file holds under is the kind's claim rather than the
-// configurations a declaration exists in.
 func (in *Input) complete(found *Finding, row *catalog.Row) {
 	held := in.index()
 	found.Kind = row.Name
 	found.Language = language
-	found.relation(held.candidates[found.id])
-	found.Class = in.ClassOf(found.id)
+	if found.Symbol.Kind == "" {
+		found.Symbol.Kind = symbolKinds[held.kindOf(found.id)]
+	}
+	if shapeOf(found.Symbol.Kind) == shapeDeclaration {
+		found.relation(held.candidates[found.id])
+		found.Class = in.ClassOf(found.id)
+		found.Component = held.componentOf(found.id)
+	} else {
+		found.relation(nil)
+		found.Class = Certain
+		found.Component = held.componentOf("")
+	}
 	found.Confidence = found.Class.lower(Class(row.MaxClass))
 	found.Severity = in.Config.EffectiveSeverity(row.Code, in.consumersLoaded())
 	found.Fixability = row.Fixability
@@ -556,17 +640,12 @@ func (in *Input) complete(found *Finding, row *catalog.Row) {
 	if found.ConsumersLoaded == nil {
 		found.ConsumersLoaded = []string{}
 	}
-	if found.Configurations == nil {
-		found.Configurations = in.configurationsOf(found.id)
-	}
+	found.Configurations = in.configurationsOf(found)
+	found.Details.Overlap = slices.Clone(row.Overlap)
 	found.Generated = in.generated(found.Position.Path)
 	if found.Generated {
 		found.Fixability = generatedFixability
 	}
-	if found.Symbol.Kind == "" {
-		found.Symbol.Kind = symbolKinds[held.kindOf(found.id)]
-	}
-	found.Component = held.componentOf(found.id)
 }
 
 // relation records the liveness relation one finding carries: the candidate's
@@ -631,11 +710,27 @@ func (in *Input) generated(path string) bool {
 	return in.Generated(path)
 }
 
-// configurationsOf names the build configurations a finding about one declaration
-// holds under: the ones the candidate is dead in, and the ones the declaration
-// exists in for a finding about a live symbol.
-func (in *Input) configurationsOf(id graph.SymbolID) []string {
+// configurationsOf names the build configurations one finding holds under, which the
+// shape of its subject decides.
+//
+// A declaration holds under the configurations its candidate is dead in, and under
+// the ones it exists in where the sweep judged it live. A part holds wherever the
+// declaration it belongs to exists, because a configuration that compiles no part of
+// a declaration compiles none of it, and the part names that declaration by
+// reference. A row holds under every configuration of the matrix: the run reads a
+// document once for the whole matrix, and a requirement, a directive or a file no
+// configuration compiles is reported only where every configuration agrees.
+func (in *Input) configurationsOf(found *Finding) []string {
 	held := in.index()
+	var id graph.SymbolID
+	switch shapeOf(found.Symbol.Kind) {
+	case shapeRow:
+		return append(make([]string, 0, len(in.Matrix)), in.Matrix...)
+	case shapePart:
+		id = held.byRef[found.Symbol.Ref]
+	default:
+		id = found.id
+	}
 	set := graph.ConfigSet(0)
 	if candidate := held.candidates[id]; candidate != nil {
 		set = candidate.Configs
@@ -758,11 +853,16 @@ func (in *Input) candidateOf(id graph.SymbolID) *graph.Candidate {
 	return in.index().candidates[id]
 }
 
-// finding starts a finding about one declaration of the inventory: its code, its
-// subject, its position and the message the kind gives it. The framework fills
-// everything else, and it answers false for an identifier the inventory does not
-// hold, so a kind that reports one reports nothing rather than a finding with no
-// subject.
+// finding starts a finding about one declaration of the inventory, named by the
+// identifier the analysis enumerated it under: its code, its subject, its position
+// and the message the kind gives it. The framework fills everything else, and it
+// answers false for an identifier the inventory does not hold, so a kind that
+// reports one reports nothing rather than a finding with no subject.
+//
+// A finding about a part of a declaration or about a row of a document is started by
+// findingAt instead, which names its subject by position: the inventory holds no
+// declaration for either, and the identifier is what the sweep's answers about a
+// declaration are read by.
 func (in *Input) finding(id graph.SymbolID, code, message string) (Finding, bool) {
 	symbol := in.symbol(id)
 	if symbol == nil {
@@ -787,6 +887,20 @@ func (in *Input) finding(id graph.SymbolID, code, message string) (Finding, bool
 	}, true
 }
 
+// findingAt starts a finding about something the inventory holds no declaration for:
+// a part of a declaration, whose subject names that declaration by reference, and a
+// row of a document, whose subject names the record it reports. The position is the
+// subject's own, which is what identifies the finding, and the framework fills
+// everything else.
+func findingAt(code string, subject Subject, at Position, message string) Finding {
+	return Finding{
+		Code:     code,
+		Position: at,
+		Symbol:   subject,
+		Message:  message,
+	}
+}
+
 // word is the reader's word for the kind of one declaration, and the vocabulary's
 // own spelling for a kind no message has a word for.
 func (in *Input) word(id graph.SymbolID) string {
@@ -807,10 +921,12 @@ func (x *index) kindOf(id graph.SymbolID) graph.SymbolKind {
 
 // componentOf is the dead component one finding's subject belongs to.
 //
-// A finding about a live symbol belongs to no dead component, which the narrowing
-// kinds report and the Contract has no spelling for, so the framework mints a
-// component of that subject alone: one symbol falls with it and no line is
-// deleted, because narrowing a declaration deletes nothing.
+// A subject that belongs to none falls with nothing, which the Contract has no
+// spelling for, so the framework mints a component of that subject alone: one symbol
+// falls with it and no line is deleted. Three subjects answer that way: a declaration
+// the sweep judged live, which the narrowing kinds report; a part of a declaration,
+// which is deleted without the declaration; and a row of a document, which the
+// analysis enumerates no declaration for and names the empty identifier.
 func (x *index) componentOf(id graph.SymbolID) Component {
 	component := x.components[id]
 	if component == nil {

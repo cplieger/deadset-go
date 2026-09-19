@@ -58,25 +58,28 @@ func TestLinknameCgoAsmPluginDetectorRetainsTheExportedSymbolsOfAPluginMainPacka
 	}
 }
 
-// TestLinknameCgoAsmPluginDetectorRetainsNoCgoExportUnderACgoDisabledLoad pins
-// what the cgo mechanism can reach today: the load compiles with cgo disabled, so
-// the file carrying the export directive is not among the syntax the class walks
-// and is named as a declared limit of the run instead.
-func TestLinknameCgoAsmPluginDetectorRetainsNoCgoExportUnderACgoDisabledLoad(t *testing.T) {
+// TestLinknameCgoAsmPluginDetectorRetainsTheCgoExportOfAFileImportingC pins what
+// the cgo mechanism reaches: the load compiles with cgo disabled and then
+// type-checks the file carrying the export directive from its original sources with
+// the C pseudo-package opaque, so the file is among the syntax the class walks and
+// the function C calls is retained.
+func TestLinknameCgoAsmPluginDetectorRetainsTheCgoExportOfAFileImportingC(t *testing.T) {
 	in := inputOf(t, "cgo-export.txtar", Options{})
 
-	wantExcluded := []string{"export.go"}
-	if !slices.Equal(in.Result.ExcludedByCgo, wantExcluded) {
-		t.Fatalf("Setup: load(cgo-export.txtar).ExcludedByCgo = %q, want %q",
-			in.Result.ExcludedByCgo, wantExcluded)
+	if len(in.Result.ExcludedByCgo) != 0 {
+		t.Fatalf("Setup: load(cgo-export.txtar).ExcludedByCgo = %q, want empty",
+			in.Result.ExcludedByCgo)
 	}
 
 	got, err := LinknameCgoAsmPluginDetector(in)
 	if err != nil {
 		t.Fatalf("LinknameCgoAsmPluginDetector(cgo-export.txtar) error: %v", err)
 	}
-	if lines := rendered(in, got); len(lines) != 0 {
-		t.Errorf("LinknameCgoAsmPluginDetector(cgo-export.txtar) = %q, want no exemption", lines)
+	want := []string{
+		"Exported\tlinkname-cgo-asm-plugin\texport.go:8:1\texported to C by an export directive",
+	}
+	if lines := rendered(in, got); !slices.Equal(lines, want) {
+		t.Errorf("LinknameCgoAsmPluginDetector(cgo-export.txtar) = %q, want %q", lines, want)
 	}
 }
 
