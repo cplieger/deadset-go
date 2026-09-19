@@ -32,10 +32,6 @@ import (
 	"github.com/cplieger/deadset-go/internal/suppress"
 )
 
-// version is this analyzer's own version. It moves independently of the Contract
-// version the analyzer implements, which is config.ContractVersion.
-const version = "0.1.0-dev"
-
 // name is this analyzer's name wherever a document names a product.
 const name = "deadset-go"
 
@@ -182,7 +178,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 
 	switch verb := set.Arg(0); verb {
 	case "version":
-		fmt.Fprintf(stdout, "deadset-go %s\ncontract %s\n", version, config.ContractVersion)
+		fmt.Fprintf(stdout, "deadset-go %s\ncontract %s\n", version(), config.ContractVersion)
 		return exitClean
 	case "describe":
 		return describe(set.Args()[1:], stdout, stderr)
@@ -216,11 +212,11 @@ type describeDocument struct {
 	ContractVersion        string            `json:"contract_version"`
 	SchemaVersionsAccepted []string          `json:"schema_versions_accepted"`
 	Languages              []config.Language `json:"languages"`
-	// Conformance is the analyzer's result over the conformance corpus. It is
-	// null until a corpus run records one, which says that no corpus has been
-	// answered rather than naming a result the analyzer never produced, so a
-	// reader that requires a pass refuses this analyzer.
-	Conformance any `json:"conformance"`
+	// Conformance is the analyzer's result over the conformance corpus, read from
+	// the two documents the binary carries. The orchestrator's handshake refuses
+	// an analyzer whose result is not a pass before it runs an analysis at all,
+	// so this document states the same record the report's own block states.
+	Conformance conformanceBlock `json:"conformance"`
 }
 
 // describe writes one JSON object naming this analyzer to stdout and nothing to
@@ -232,12 +228,22 @@ func describe(args []string, stdout, stderr io.Writer) int {
 		return exitUsage
 	}
 
+	answered, err := corpusAnswer()
+	if err != nil {
+		fmt.Fprintf(stderr, "deadset-go: describe: %v\n", err)
+		return exitFailure
+	}
 	encoded, err := json.MarshalIndent(describeDocument{
 		Name:                   name,
-		Version:                version,
+		Version:                version(),
 		ContractVersion:        config.ContractVersion,
 		SchemaVersionsAccepted: schemaVersionsAccepted,
 		Languages:              []config.Language{language},
+		Conformance: conformanceBlock{
+			CorpusVersion: answered.conformance.CorpusVersion,
+			Result:        answered.conformance.Result,
+			Digest:        answered.conformance.Digest,
+		},
 	}, "", "  ")
 	if err != nil {
 		fmt.Fprintf(stderr, "deadset-go: describe: %v\n", err)
@@ -1115,7 +1121,7 @@ func reportOf(ctx context.Context, resolved *resolution, options *exempt.Options
 func analyzerOf(conformance report.Conformance) report.Analyzer {
 	return report.Analyzer{
 		Name:                   name,
-		Version:                version,
+		Version:                version(),
 		Languages:              []string{string(language)},
 		SchemaVersionsAccepted: schemaVersionsAccepted,
 		Conformance:            conformance,

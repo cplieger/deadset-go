@@ -46,9 +46,13 @@ const replaceSelector = ":replace"
 // goSuffix is the extension of the files a build configuration decides.
 const goSuffix = ".go"
 
-// versionSeparator joins a module path to the version a directive gives it,
-// wherever the two are written as one word.
+// versionSeparator joins a module path to its version in a symbol reference, which
+// is the one spelling that writes the two as one word.
 const versionSeparator = "@"
+
+// versionGap joins a module path to its version the way a module file writes the
+// two, which is as two words of one directive.
+const versionGap = " "
 
 // FileNeverBuilt reports a source file of the target that no configuration of the
 // build matrix compiles, naming the build constraint that excluded it.
@@ -684,7 +688,7 @@ func UnusedReplace(in *Input) ([]Finding, error) {
 
 	found := make([]Finding, 0, len(noop))
 	for _, replace := range noop {
-		named := spelled(replace.Old)
+		named := referenceSpelling(replace.Old)
 		one := findingAt(unusedReplaceCode, Subject{
 			Ref:       moduleFragment(module, named+replaceSelector),
 			Kind:      directiveSubject,
@@ -692,7 +696,7 @@ func UnusedReplace(in *Input) ([]Finding, error) {
 			SizeLines: 1,
 		}, directivePosition(replace.Site),
 			"the module this directive replaces is absent from the build list")
-		one.Details.Replacement = spelled(replace.New)
+		one.Details.Replacement = moduleFileSpelling(replace.New)
 		found = append(found, one)
 	}
 	return found, nil
@@ -716,13 +720,25 @@ func noopReplacements(in *Input) []deps.Replacement {
 	return noop
 }
 
-// spelled renders one module the way the module file writes it: the path, and the
-// version after an at sign where the directive names one.
-func spelled(m deps.Module) string {
+// referenceSpelling renders one module the way a symbol reference names it: the
+// path, and the version after an at sign where the directive gives one. It is the
+// form the reference grammar fixes for a directive's subject, so two directives over
+// one module at two versions are two references.
+func referenceSpelling(m deps.Module) string {
 	if m.Version == "" {
 		return m.Path
 	}
 	return m.Path + versionSeparator + m.Version
+}
+
+// moduleFileSpelling renders one module the way the module file writes it: the path,
+// and the version after a space where the directive gives one. A replacement that is
+// a directory is that directory as the file spells it and carries no version.
+func moduleFileSpelling(m deps.Module) string {
+	if m.Version == "" {
+		return m.Path
+	}
+	return m.Path + versionGap + m.Version
 }
 
 // moduleFragment is the reference of one subject the target's module file

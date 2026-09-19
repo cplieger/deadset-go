@@ -352,7 +352,7 @@ func TestAnalyzeWritesTheBaselineOfEveryFindingOfTheRun(t *testing.T) {
 		if row.Code == "" || row.Symbol == "" || row.Path == "" || row.Reason == "" {
 			t.Errorf("the baseline row %+v leaves a required field empty", row)
 		}
-		if !strings.Contains(row.Reason, name) || !strings.Contains(row.Reason, version) {
+		if !strings.Contains(row.Reason, name) || !strings.Contains(row.Reason, version()) {
 			t.Errorf("the baseline row reason is %q, want the provenance of the run that recorded it", row.Reason)
 		}
 	}
@@ -471,45 +471,6 @@ func TestWriteAtomicallyLeavesNoTemporaryFileBehind(t *testing.T) {
 		t.Errorf("the directory holds %d entries after the failed write, want 1", len(entries))
 	}
 }
-
-func TestCorpusAnswerNamesTheCorpusThePinnedContractPublishes(t *testing.T) {
-	t.Parallel()
-
-	body, err := spec.Corpus.ReadFile("corpus/corpus.json")
-	if err != nil {
-		t.Fatalf("Setup: read corpus/corpus.json: %v", err)
-	}
-	var document struct {
-		CorpusVersion string `json:"corpus_version"`
-	}
-	if err := json.Unmarshal(body, &document); err != nil {
-		t.Fatalf("Setup: decode corpus/corpus.json: %v", err)
-	}
-	if got := corpusVersion; got != document.CorpusVersion {
-		t.Errorf("this analyzer states corpus version %q, want %q as the Contract's corpus publishes it",
-			got, document.CorpusVersion)
-	}
-
-	// No run of the corpus has recorded a result, so the result stated is the one a
-	// reader refuses the report for. A report claiming a pass this analyzer has not
-	// earned is what nothing downstream can catch, which is why the value is
-	// pinned.
-	if got, want := corpusResult, "fail"; got != want {
-		t.Errorf("this analyzer states the corpus result %q, want %q until a corpus run records one", got, want)
-	}
-	answered := corpusAnswer()
-	if answered.conformance.Digest != "sha256:"+emptyDigest {
-		t.Errorf("this analyzer states the digest %q, want the digest of no bytes", answered.conformance.Digest)
-	}
-	if len(answered.gaps) != 0 {
-		t.Errorf("this analyzer declares %d gaps, want none until a corpus run records them", len(answered.gaps))
-	}
-}
-
-// emptyDigest is the lowercase hexadecimal SHA-256 of no bytes, which is what a
-// report of this release names as the digest of the results document a corpus run
-// has not written.
-const emptyDigest = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 func TestFormatListNamesEveryFormatTheContractDeclares(t *testing.T) {
 	t.Parallel()

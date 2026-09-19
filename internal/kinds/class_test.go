@@ -155,14 +155,11 @@ func TestTheCorpusConversionFixtureIsCertainWithItsConsumerLoaded(t *testing.T) 
 			"go://example.com/target#DeadExport", got, Certain)
 	}
 
-	// The expectation's row for the same declaration is a finding, and the
-	// unreferenced-exported kind is allowed for a published API whose consumer set
-	// is not declared complete, so the row needs the assertion the corpus format
-	// cannot yet carry. Its class is the one above either way.
-	complete := libraryConfig()
-	complete.Consumers.Complete = true
-	declared := corpusInput(t, fixture, complete)
-	result := computed(t, declared, packageEmitters())
+	// The expectation's row for the same declaration is a finding: the
+	// unreferenced-exported kind reports over a published API whose declared
+	// consumers all loaded, which is the fixture's run, and the completeness
+	// declaration the fixture does not carry decides nothing about it.
+	result := computed(t, in, packageEmitters())
 	found := findingOf(t, result.Findings, unusedExportedCode, "DeadExport")
 	if found.Class != Certain || found.Confidence != Certain {
 		t.Errorf("the pass reports %s with the class %q and the confidence %q, want %q for both",
@@ -171,6 +168,60 @@ func TestTheCorpusConversionFixtureIsCertainWithItsConsumerLoaded(t *testing.T) 
 	if !slices.Equal(found.ConsumersLoaded, []string{"example.com/consumer"}) {
 		t.Errorf("the pass reports %s naming the loaded consumers %v, want the fixture's own consumer module",
 			found.Symbol.Ref, found.ConsumersLoaded)
+	}
+}
+
+func TestTheClosedWorldFactAndTheConsumerInformationFactAreSeparate(t *testing.T) {
+	const otherConsumer = "example.com/other"
+
+	for name, one := range map[string]struct {
+		consumers   Consumers
+		closedWorld bool // what the narrowing kinds read
+		allLoaded   bool // what the severity map reads
+	}{
+		"no consumer declared, and nothing asserted about the set": {
+			consumers: Consumers{},
+		},
+		"a declared consumer that loaded, with the set not declared complete": {
+			consumers: Consumers{Declared: []string{theConsumer}, Loaded: []string{theConsumer}},
+			allLoaded: true,
+		},
+		"a declared consumer that loaded, with the set declared complete": {
+			consumers:   Consumers{Declared: []string{theConsumer}, Loaded: []string{theConsumer}, Complete: true},
+			closedWorld: true,
+			allLoaded:   true,
+		},
+		"a declared consumer that did not load": {
+			consumers: Consumers{Declared: []string{theConsumer}},
+		},
+		"a declared consumer that did not load, with the set declared complete": {
+			consumers: Consumers{Declared: []string{theConsumer}, Complete: true},
+		},
+		"one of two declared consumers loaded, with the set declared complete": {
+			consumers: Consumers{
+				Declared: []string{theConsumer, otherConsumer},
+				Loaded:   []string{theConsumer},
+				Complete: true,
+			},
+		},
+		"a set declared complete that declares no consumer": {
+			consumers:   Consumers{Complete: true},
+			closedWorld: true,
+			allLoaded:   true,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			in := &Input{Consumers: one.consumers}
+
+			if got := in.consumersLoaded(); got != one.closedWorld {
+				t.Errorf("consumersLoaded() = %t for %s, want %t: the narrowing kinds need the completeness declaration",
+					got, name, one.closedWorld)
+			}
+			if got := in.consumersAllLoaded(); got != one.allLoaded {
+				t.Errorf("consumersAllLoaded() = %t for %s, want %t: the severity map reads what the run loaded",
+					got, name, one.allLoaded)
+			}
+		})
 	}
 }
 

@@ -26,9 +26,14 @@ func wireRefs(typeName string, members ...string) []string {
 // A consumer's function that hands its own parameter typed as the empty interface to
 // a destination is a wrapper of the program exactly as the target's own is, so a
 // target value handed to it is retained: the consumer is inside the program, and what
-// the wrapper hands the value to is what reads it. A consumer function that forwards
-// the parameter to nothing, and one whose parameter is concrete, are no wrappers, so a
-// value reaching only those crosses nothing.
+// the wrapper hands the value to is what reads it.
+//
+// What the wrapper hands the value to also decides how much is retained. A wrapper
+// that encodes keeps the fields an encoder reads and no method, one that renders
+// through a template keeps the methods a template may select as well, and one that
+// does both keeps the union. A consumer function that forwards the parameter to
+// nothing, and one whose parameter is concrete, are no wrappers, so a value reaching
+// only those crosses nothing.
 func TestEncodingReflectionRetainsWhatAConsumersWrapperReaches(t *testing.T) {
 	in := inputOf(t, consumerArchive, Options{})
 	refs := retainedRefs(t, in, EncodingReflectionDetector)
@@ -41,17 +46,27 @@ func TestEncodingReflectionRetainsWhatAConsumersWrapperReaches(t *testing.T) {
 		{
 			wrapper:  "a consumer's function that hands the parameter to an encoder it constructs",
 			typeName: "Encoded",
-			want:     wireRefs("Encoded", "Describe", "Extra", "Name", "secret"),
+			want:     wireRefs("Encoded", "Extra", "Name", "secret"),
 		},
 		{
 			wrapper:  "a consumer's function that hands the parameter to the marshalling function",
 			typeName: "Marshalled",
-			want:     wireRefs("Marshalled", "Describe", "Extra", "Name", "secret"),
+			want:     wireRefs("Marshalled", "Extra", "Name", "secret"),
 		},
 		{
 			wrapper:  "a consumer's function that hands the parameter to another of its own",
 			typeName: "Chained",
-			want:     wireRefs("Chained", "Describe", "Extra", "Name", "secret"),
+			want:     wireRefs("Chained", "Extra", "Name", "secret"),
+		},
+		{
+			wrapper:  "a consumer's function that hands the parameter to a template engine",
+			typeName: "Rendered",
+			want:     wireRefs("Rendered", "Describe", "Extra", "Name", "secret"),
+		},
+		{
+			wrapper:  "a consumer's function that hands the parameter to an encoder and to a template engine",
+			typeName: "Unioned",
+			want:     wireRefs("Unioned", "Describe", "Extra", "Name", "secret"),
 		},
 		{
 			wrapper:  "a consumer's function that hands the parameter to nothing",

@@ -28,29 +28,14 @@ type kind struct {
 	enabled  bool
 }
 
-// liveKinds are the issue kinds this analyzer ships, in the vocabulary's order,
-// each carrying the default the vocabulary declares for it. A retired code is
-// absent from the vocabulary, so it names no live kind here and a severity key
-// naming one is refused like a code the vocabulary never held.
-//
-// The vocabulary is [catalog]'s, which is pinned equal to the Contract's
-// issue-kind document, so a kind the Contract adds or a default it moves arrives
-// here without a second table to keep in step.
-func liveKinds() []kind {
-	rows := catalog.Kinds()
-	live := make([]kind, 0, len(rows))
-	for i := range rows {
-		live = append(live, kind{
-			code:     rows[i].Code,
-			severity: Severity(rows[i].DefaultSeverity),
-			enabled:  rows[i].DefaultEnabled,
-		})
-	}
-	return live
-}
-
 // liveKind returns the issue kind one code names and whether this analyzer ships
-// it. A family prefix names no kind of its own, so it is not one.
+// it. A family prefix names no kind of its own, so it is not one. A retired code is
+// absent from the vocabulary, so it names no live kind and a severity key naming one
+// is refused like a code the vocabulary never held.
+//
+// The vocabulary is [catalog]'s, which is pinned equal to the Contract's issue-kind
+// document, so a kind the Contract adds or a default it moves arrives here without a
+// second table to keep in step.
 func liveKind(code string) (kind, bool) {
 	row, live := catalog.Kind(code)
 	if !live {
@@ -107,12 +92,17 @@ func familyPrefix(code string) string {
 // fails it. The configuration's key for the code wins, then its key for the code's
 // family, then the default the Contract declares for the kind.
 //
-// consumersLoaded is the run's own fact rather than a setting: it is true when
-// every consumer the scope declared loaded, so a run that loaded none passes
-// false. With consumers.complete it decides whether a library's published API is
-// closed world, and a library whose published API is not is the one case that
-// moves a default: the unreferenced-exported kind reports nothing, because a
-// caller the analysis cannot see may reference the symbol.
+// consumersAllLoaded is the run's own fact rather than a setting: it is true when
+// the run holds consumer information and loaded every consumer the scope declared,
+// so a run that declared none and asserted nothing about the set passes false. It
+// decides whether a library's published API is closed world, and a library whose
+// published API is not is the one case that moves a default: the
+// unreferenced-exported kind reports nothing, because a caller the analysis cannot
+// see may reference the symbol.
+//
+// Whether the configuration declares the consumer set complete is not read here:
+// that declaration opens the narrowing kinds over a published API, which is their
+// own scope rule.
 //
 // The answer is which kinds report and how loudly. Where a kind may report is the
 // kind's own rule, not this one: the narrowing kinds report over the target's
@@ -122,7 +112,7 @@ func familyPrefix(code string) string {
 // A code no live kind carries reports nothing, because it names nothing this
 // analyzer reports. A configuration cannot name one: resolution refuses a severity
 // key that names no live kind.
-func (c *Config) EffectiveSeverity(code string, consumersLoaded bool) Severity {
+func (c *Config) EffectiveSeverity(code string, consumersAllLoaded bool) Severity {
 	declared, live := liveKind(code)
 	if !live {
 		return Allow
@@ -136,16 +126,15 @@ func (c *Config) EffectiveSeverity(code string, consumersLoaded bool) Severity {
 	if !declared.enabled {
 		return Allow
 	}
-	if declared.code == unusedExportedCode && c.publishedAPIIsOpenWorld(consumersLoaded) {
+	if declared.code == unusedExportedCode && c.publishedAPIIsOpenWorld(consumersAllLoaded) {
 		return Allow
 	}
 	return declared.severity
 }
 
 // publishedAPIIsOpenWorld reports whether the target's published API may have
-// references the analysis cannot see: the target is a library, and either its
-// configuration does not declare the consumer set complete or a declared consumer
-// did not load.
-func (c *Config) publishedAPIIsOpenWorld(consumersLoaded bool) bool {
-	return c.Target.Kind == Library && (!c.Consumers.Complete || !consumersLoaded)
+// references the analysis cannot see: the target is a library, and the run either
+// holds no consumer information or did not load a consumer it declared.
+func (c *Config) publishedAPIIsOpenWorld(consumersAllLoaded bool) bool {
+	return c.Target.Kind == Library && !consumersAllLoaded
 }

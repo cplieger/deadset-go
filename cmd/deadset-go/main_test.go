@@ -212,7 +212,7 @@ func TestRun(t *testing.T) {
 			name:       "version_prints_the_analyzer_and_the_contract_it_implements",
 			args:       []string{"version"},
 			wantCode:   exitClean,
-			wantStdout: []string{"deadset-go " + version + "\n", "contract " + contractVersion + "\n"},
+			wantStdout: []string{"deadset-go " + version() + "\n", "contract " + contractVersion + "\n"},
 		},
 		{
 			name:       "no_arguments_is_a_usage_error",
@@ -356,12 +356,12 @@ func TestDescribeNamesTheContractItImplements(t *testing.T) {
 	// The document is one JSON object and every member is declared: a member the
 	// decode does not know is a member this command should not be writing.
 	var described struct {
-		Name                   string          `json:"name"`
-		Version                string          `json:"version"`
-		ContractVersion        string          `json:"contract_version"`
-		SchemaVersionsAccepted []string        `json:"schema_versions_accepted"`
-		Languages              []string        `json:"languages"`
-		Conformance            json.RawMessage `json:"conformance"`
+		Name                   string           `json:"name"`
+		Version                string           `json:"version"`
+		ContractVersion        string           `json:"contract_version"`
+		SchemaVersionsAccepted []string         `json:"schema_versions_accepted"`
+		Languages              []string         `json:"languages"`
+		Conformance            conformanceBlock `json:"conformance"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(stdout.Bytes()))
 	decoder.DisallowUnknownFields()
@@ -375,8 +375,8 @@ func TestDescribeNamesTheContractItImplements(t *testing.T) {
 	if described.Name != name {
 		t.Errorf("describe named the analyzer %q, want %q", described.Name, name)
 	}
-	if described.Version != version {
-		t.Errorf("describe named version %q, want %q", described.Version, version)
+	if described.Version != version() {
+		t.Errorf("describe named version %q, want %q", described.Version, version())
 	}
 	if described.ContractVersion != contractVersion {
 		t.Errorf("describe named contract version %q, want %q as contract/contract.json names it", described.ContractVersion, contractVersion)
@@ -387,10 +387,20 @@ func TestDescribeNamesTheContractItImplements(t *testing.T) {
 	if want := []string{string(config.GoLanguage)}; !slices.Equal(described.Languages, want) {
 		t.Errorf("describe claimed languages %v, want %v", described.Languages, want)
 	}
-	// Nothing has answered the corpus, so the record is null rather than a result
-	// this analyzer never produced.
-	if got := string(described.Conformance); got != "null" {
-		t.Errorf("describe recorded conformance %s, want null until a corpus run records one", got)
+	// The orchestrator's handshake reads this record before it runs an analysis, so
+	// the document states the record the committed conformance documents hold.
+	answered, err := corpusAnswer()
+	if err != nil {
+		t.Fatalf("Setup: corpusAnswer(): %v", err)
+	}
+	want := conformanceBlock{
+		CorpusVersion: answered.conformance.CorpusVersion,
+		Result:        answered.conformance.Result,
+		Digest:        answered.conformance.Digest,
+	}
+	if described.Conformance != want {
+		t.Errorf("describe recorded conformance %+v, want %+v as the committed conformance documents record it",
+			described.Conformance, want)
 	}
 
 	// The analyzer this document names is the analyzer a report names, so both
