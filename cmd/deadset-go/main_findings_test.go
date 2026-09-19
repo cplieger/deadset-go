@@ -37,17 +37,15 @@ var goKindsWithoutEmitter = []string{
 	"DS1801", "DS1802", "DS1803", "DS1805", "DS1807", "DS1809", // the intra-function group
 }
 
-// findingsFixture is the module the findings pass is driven against: an application
+// findingsArchive is the module the findings pass is driven against: an application
 // whose entry point reaches one declaration and whose three others are dead in three
 // different ways, every one of them unexported so that no visibility kind has a
 // subject and the six unused-declaration kinds are what the pass answers.
 //
 // The declaration order is the order the canonical key puts the findings in, which
 // is what lets the expectations below be written as a list.
-func findingsFixture(t *testing.T, document string) string {
-	t.Helper()
-
-	return writeModule(t, map[string]string{
+func findingsArchive(document string) map[string]string {
+	return map[string]string{
 		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
 		"app.go": "package main\n\nfunc main() { used() }\n\n" +
 			"// used is what the entry point calls.\nfunc used() {}\n\n" +
@@ -58,7 +56,17 @@ func findingsFixture(t *testing.T, document string) string {
 		"app_test.go": "package main\n\nimport \"testing\"\n\n" +
 			"func TestProbed(t *testing.T) { probed() }\n",
 		repositoryDocument: document,
-	})
+	}
+}
+
+// findingsFixture writes that archive in a directory of the calling test's own, which
+// is what a test that invokes a verb over the target or writes a document into it
+// takes. A test that only reads one analysis of the archive calls cachedFindings
+// instead and shares the analysis.
+func findingsFixture(t *testing.T, document string) string {
+	t.Helper()
+
+	return writeModule(t, findingsArchive(document))
 }
 
 // findingsOfDir is the findings of one run over dir, which is what every test below
@@ -126,8 +134,7 @@ func TestEmittersNameEveryLiveGoKindOrSayWhichHasNoRule(t *testing.T) {
 func TestFindingsOfReportsEveryDeadDeclarationOfAModuleOnceAndInTheCanonicalOrder(t *testing.T) {
 	t.Parallel()
 
-	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
-	set := findingsOfDir(t, dir)
+	set := cachedFindings(t.Context(), t, findingsArchive(`{"target": {"kind": "application"}}`))
 
 	// app.go before app_test.go, and within a file by line: the unreferenced
 	// declaration, the one only a test names, the deprecated one, then the test
@@ -164,8 +171,7 @@ func TestFindingsOfReportsEveryDeadDeclarationOfAModuleOnceAndInTheCanonicalOrde
 func TestFindingsOfCompletesAFindingWithEveryFieldTheContractRequires(t *testing.T) {
 	t.Parallel()
 
-	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
-	set := findingsOfDir(t, dir)
+	set := cachedFindings(t.Context(), t, findingsArchive(`{"target": {"kind": "application"}}`))
 	found := findingUnder(t, set.result.Findings, "DS1002")
 
 	// The kind fills the code, the position, the subject, the relation and the
@@ -269,8 +275,8 @@ func TestFindingsOfReportsNothingAboutAModuleWhereEveryDeclarationIsLive(t *test
 func TestFindingsOfDropsTheKindTheConfigurationAllows(t *testing.T) {
 	t.Parallel()
 
-	dir := findingsFixture(t, `{"target": {"kind": "application"}, "severity": {"DS1002": "allow"}}`)
-	set := findingsOfDir(t, dir)
+	set := cachedFindings(t.Context(), t,
+		findingsArchive(`{"target": {"kind": "application"}, "severity": {"DS1002": "allow"}}`))
 
 	// The kind the configuration allows reports nothing and no other kind claims
 	// its subject, because a severity decides what is reported and never which

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -43,6 +42,37 @@ func (s *explainedState) token() state {
 	}
 }
 
+// explainedModules is the number of generated modules the property is stated over.
+//
+// The property is about agreement per symbol over ONE analysis, so an iteration needs
+// no analysis of its own: what it reads is a symbol of an inventory and the two
+// answers the analysis holds about it. An analysis of a generated module costs about a
+// second under the race detector, because the module carries a test file and the
+// toolchain's synthesized test main pulls in the testing package's whole dependency
+// graph, so the number of analyses is what the property's cost is, and it is this
+// number rather than the iteration count.
+const explainedModules = 10
+
+// analyzedModules generates the modules the property draws from and analyzes each of
+// them once. The draws are the fixed examples of the module generator, one per seed,
+// so the set is the same on every run and a failure names a module a re-run produces.
+//
+// The four reference sites and the interface-satisfying method are why these modules
+// are the generated ones rather than a hand-written fixture: between them they put
+// symbols in all four states the explanation answers, which no reference structure
+// alone produces.
+func analyzedModules(t *testing.T) []*findingSet {
+	t.Helper()
+
+	generator := drawnModules(`{"target": {"kind": "application"}}`, false)
+	held := make([]*findingSet, explainedModules)
+	for seed := range held {
+		set := cachedFindings(t.Context(), t, generator.Example(seed).files)
+		held[seed] = &set
+	}
+	return held
+}
+
 // TestAnExplanationAgreesWithTheReport is property dead-code-suite/P30: exactly one
 // explanation applies to a symbol, and it is consistent with the report.
 //
@@ -56,48 +86,23 @@ func (s *explainedState) token() state {
 // class the sweep recorded, and a live symbol's path is a path of references the graph
 // holds, from a symbol the root set names.
 //
-// One iteration writes a module and loads it, which costs about a third of a second
-// under the race detector, so the property is about forty seconds of the package's
-// deadline.
+// An iteration draws one analyzed module and reads every symbol of its inventory,
+// which is the same assertion set the property has always made over one module and
+// costs nothing beyond rendering an explanation per symbol.
 func TestAnExplanationAgreesWithTheReport(t *testing.T) {
-	base := t.TempDir()
+	analyzed := analyzedModules(t)
+
 	rapid.Check(t, func(t *rapid.T) {
-		drawn := drawModule(t, `{"target": {"kind": "application"}}`, false)
-		dir, err := os.MkdirTemp(base, "module")
-		if err != nil {
-			t.Fatalf("create a directory for the generated module: %v", err)
-		}
-		if err := writeFiles(dir, drawn.files); err != nil {
-			t.Fatalf("write the generated module: %v", err)
-		}
-		set := findingsOfModule(t, dir)
+		set := analyzed[rapid.IntRange(0, explainedModules-1).Draw(t, "the generated module's seed")]
 
 		for i := range set.loaded.merged.Symbols {
 			subject := &set.loaded.merged.Symbols[i]
-			held := stateOf(&set, subject)
+			held := stateOf(set, subject)
 			checkDisjoint(t, subject, &held)
-			checkExplanation(t, &set, subject, &held)
+			checkExplanation(t, set, subject, &held)
 		}
-		checkOneFindingPerSymbol(t, &set)
+		checkOneFindingPerSymbol(t, set)
 	})
-}
-
-// findingsOfModule is the findings pass over one generated module, inside a property.
-func findingsOfModule(t *rapid.T, dir string) findingSet {
-	var refused strings.Builder
-	resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &refused)
-	if code != exitClean {
-		t.Fatalf("resolve the configuration of the generated module = %d: %s", code, refused.String())
-	}
-	options, err := exemptOptions(&resolved.config)
-	if err != nil {
-		t.Fatalf("exemptOptions() = %v, want the options of the generated configuration", err)
-	}
-	set, err := findingsOf(t.Context(), &resolved, &options)
-	if err != nil {
-		t.Fatalf("findingsOf(the generated module) = %v, want the findings of the run", err)
-	}
-	return set
 }
 
 // checkDisjoint asserts that the four states the analysis answers are disjoint, so

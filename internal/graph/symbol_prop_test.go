@@ -149,16 +149,14 @@ func renderDeclaration(shape, name string) string {
 }
 
 // writeModule writes one rendered package set as a module in a directory of its
-// own, removed when the iteration that drew it ends.
-func writeModule(t *rapid.T, generated []generatedPackage) string {
+// own under base, which owns the directory's lifetime.
+func writeModule(t failureSink, base string, generated []generatedPackage) string {
 	t.Helper()
 
-	dir, err := os.MkdirTemp("", "deadset-property")
+	dir, err := os.MkdirTemp(base, "module")
 	if err != nil {
 		t.Fatalf("Setup: create a module directory: %v", err)
 	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-
 	if err := os.WriteFile(filepath.Join(dir, "go.mod"),
 		[]byte("module example.test/generated\n\ngo 1.27.1\n"), 0o600); err != nil {
 		t.Fatalf("Setup: write go.mod: %v", err)
@@ -177,78 +175,126 @@ func writeModule(t *rapid.T, generated []generatedPackage) string {
 	return dir
 }
 
-// Property dead-code-suite/P1: for any target tree, any build configuration and
-// any number of package variants of one source file, each declaration appears
-// exactly once in the symbol graph.
+// loadedModules is the number of module-and-configuration pairs the property is
+// stated over.
 //
-// The enumeration takes one configuration's load, so a draw loads the one
-// configuration it drew.
+// One load of a generated module costs about a second under the race detector: a
+// module carrying any test file makes the toolchain synthesize a test main, and the
+// load takes the syntax and the types of that main's whole dependency graph, which is
+// the testing package's. A test file is the property's premise, so the cost cannot be
+// drawn away, and the number of loads is therefore what the property costs. It is this
+// number and not the iteration count: an iteration draws one pair and reads the
+// enumeration of it, which is where every assertion of the property is.
 //
-// This runs at rapid's default of 100 checks; -rapid.checks raises it for a
-// deeper local run.
-func TestProperty01OneDeclarationPerSourceSite(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-		c := rapid.SampledFrom(configurations()).Draw(t, "the build configuration")
-		drawn := drawnPackages().Draw(t, "the module's packages")
+// Four modules per build configuration is what the number buys.
+const loadedModules = 16
 
+// loadedModule is one pair the property draws: the packages as they were generated,
+// the configuration they were loaded under, and the load.
+type loadedModule struct {
+	result    *load.Result
+	root      string
+	generated []generatedPackage
+	config    load.Configuration
+}
+
+// loadedGeneratedModules generates the modules the property draws from and loads each
+// of them once, under one configuration each so that every configuration is loaded.
+//
+// The modules are the fixed examples of the package generator, one per seed, so the
+// set is the same on every run and a failure names a seed a re-run reproduces.
+func loadedGeneratedModules(t *testing.T) []*loadedModule {
+	t.Helper()
+
+	base := t.TempDir()
+	built := configurations()
+	held := make([]*loadedModule, loadedModules)
+	for seed := range held {
+		drawn := drawnPackages().Example(seed)
 		generated := make([]generatedPackage, 0, len(drawn))
 		for index, p := range drawn {
 			generated = append(generated, renderPackage(p, fmt.Sprintf("p%02d", index)))
 		}
-		result, root := loadDirUnder(t.Context(), t, writeModule(t, generated), c)
+		c := built[seed%len(built)]
+		result, root := loadDirUnder(t.Context(), t, writeModule(t, base, generated), c)
+		held[seed] = &loadedModule{result: result, root: root, generated: generated, config: c}
+	}
+	return held
+}
 
-		// The premise: an in-package test file makes the toolchain return a
-		// variant that type-checks the production files a second time.
-		variants := make(map[string]int)
-		for _, p := range result.Packages {
-			variants[p.PkgPath]++
-		}
-		for _, p := range generated {
-			if want, got := 1+boolToInt(p.inPackage), variants["example.test/generated/"+p.name]; got != want {
-				t.Fatalf("load returned %d variants of %s under %s, want %d\n%s",
-					got, p.name, c.ID, want, describe(p))
-			}
-		}
+// Property dead-code-suite/P1: for any target tree, any build configuration and
+// any number of package variants of one source file, each declaration appears
+// exactly once in the symbol graph.
+//
+// The enumeration takes one configuration's load, so an iteration draws one of the
+// loads the property was stated over.
+//
+// This runs at rapid's default of 100 checks; -rapid.checks raises it for a
+// deeper local run.
+func TestProperty01OneDeclarationPerSourceSite(t *testing.T) {
+	loaded := loadedGeneratedModules(t)
 
-		symbols, err := Symbols(result, root, os.ReadFile)
-		if err != nil {
-			t.Fatalf("Symbols over %d generated packages under %s error: %v", len(generated), c.ID, err)
-		}
-		if len(symbols) == 0 {
-			t.Fatalf("Symbols over %d generated packages under %s returned nothing", len(generated), c.ID)
-		}
-
-		at := make(map[SymbolID][]string, len(symbols))
-		for _, s := range symbols {
-			at[s.ID] = append(at[s.ID], s.Kind.String()+" "+s.Name)
-		}
-		for _, id := range slices.Sorted(maps.Keys(at)) {
-			if names := at[id]; len(names) != 1 {
-				t.Fatalf("Symbols holds %d symbols at %s (%v), want 1", len(names), id, names)
-			}
-		}
-
-		files, packageSymbols := make(map[string]int), make(map[string]int)
-		for _, s := range symbols {
-			owner, _, _ := strings.Cut(s.Pos.Filename, "/")
-			switch s.Kind {
-			case KindFile:
-				files[owner]++
-			case KindPackage:
-				packageSymbols[owner]++
-			}
-		}
-		for _, p := range generated {
-			if got := files[p.name]; got != p.goFiles {
-				t.Fatalf("Symbols holds %d file symbols under %s, want %d\n%s",
-					got, p.name, p.goFiles, describe(p))
-			}
-			if got := packageSymbols[p.name]; got != p.packages {
-				t.Fatalf("Symbols holds %d package symbols under %s, want %d\n%s",
-					got, p.name, p.packages, describe(p))
-			}
-		}
+	rapid.Check(t, func(t *rapid.T) {
+		seed := rapid.IntRange(0, loadedModules-1).Draw(t, "the generated module's seed")
+		checkOneDeclarationPerSourceSite(t, loaded[seed])
 	})
+}
+
+// checkOneDeclarationPerSourceSite is the property's own body over one load: the
+// premise about the variants the toolchain returned, then the enumeration and what it
+// holds per source site, per file and per package.
+func checkOneDeclarationPerSourceSite(t *rapid.T, one *loadedModule) {
+	// The premise: an in-package test file makes the toolchain return a
+	// variant that type-checks the production files a second time.
+	variants := make(map[string]int)
+	for _, p := range one.result.Packages {
+		variants[p.PkgPath]++
+	}
+	for _, p := range one.generated {
+		if want, got := 1+boolToInt(p.inPackage), variants["example.test/generated/"+p.name]; got != want {
+			t.Fatalf("load returned %d variants of %s under %s, want %d\n%s",
+				got, p.name, one.config.ID, want, describe(p))
+		}
+	}
+
+	symbols, err := Symbols(one.result, one.root, os.ReadFile)
+	if err != nil {
+		t.Fatalf("Symbols over %d generated packages under %s error: %v", len(one.generated), one.config.ID, err)
+	}
+	if len(symbols) == 0 {
+		t.Fatalf("Symbols over %d generated packages under %s returned nothing", len(one.generated), one.config.ID)
+	}
+
+	at := make(map[SymbolID][]string, len(symbols))
+	for _, s := range symbols {
+		at[s.ID] = append(at[s.ID], s.Kind.String()+" "+s.Name)
+	}
+	for _, id := range slices.Sorted(maps.Keys(at)) {
+		if names := at[id]; len(names) != 1 {
+			t.Fatalf("Symbols holds %d symbols at %s (%v), want 1", len(names), id, names)
+		}
+	}
+
+	files, packageSymbols := make(map[string]int), make(map[string]int)
+	for _, s := range symbols {
+		owner, _, _ := strings.Cut(s.Pos.Filename, "/")
+		switch s.Kind {
+		case KindFile:
+			files[owner]++
+		case KindPackage:
+			packageSymbols[owner]++
+		}
+	}
+	for _, p := range one.generated {
+		if got := files[p.name]; got != p.goFiles {
+			t.Fatalf("Symbols holds %d file symbols under %s, want %d\n%s",
+				got, p.name, p.goFiles, describe(p))
+		}
+		if got := packageSymbols[p.name]; got != p.packages {
+			t.Fatalf("Symbols holds %d package symbols under %s, want %d\n%s",
+				got, p.name, p.packages, describe(p))
+		}
+	}
 }
 
 // boolToInt counts a present file or package.

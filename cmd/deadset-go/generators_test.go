@@ -47,6 +47,15 @@ type drawnModule struct {
 	satisfies bool
 }
 
+// drawnModules is drawModule as a generator, so that a property whose cost is the
+// number of modules it analyzes can take a fixed set of them from the generator's own
+// examples instead of drawing one per iteration.
+func drawnModules(document string, exportedFirst bool) *rapid.Generator[drawnModule] {
+	return rapid.Custom(func(t *rapid.T) drawnModule {
+		return drawModule(t, document, exportedFirst)
+	})
+}
+
 // drawModule draws one target tree: a main package with an entry point, a few
 // declarations each referenced from the entry point, from a test file alone, from one
 // unreferenced declaration or from nothing, and a type whose method satisfies

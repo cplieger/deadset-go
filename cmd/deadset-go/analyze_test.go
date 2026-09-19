@@ -193,9 +193,7 @@ func TestAnalyzeExitsWithTheCodeTheContractsTableGivesTheRun(t *testing.T) {
 func suppressedModuleWith(t *testing.T, document string) string {
 	t.Helper()
 
-	dir := suppressedModule(t)
-	writeDocument(t, dir, repositoryDocument, document)
-	return dir
+	return writeModule(t, suppressedArchive(document))
 }
 
 // brokenModule is a module that does not type-check, which is the run that produces

@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"maps"
-	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -73,10 +72,10 @@ func drawLibrary(t *rapid.T, document string) map[string]string {
 // nothing. The third tree is the same source under the other declared kind, and its
 // finding set must differ, because the kind is what the treatment turns on.
 //
-// One iteration writes and loads three modules, which costs about a second, so the
-// property is about two minutes of the package's deadline.
+// One iteration analyzes three modules, each of which carries no test file and imports
+// nothing, so each analysis is the cheap one. An archive a later iteration draws again
+// is analyzed once.
 func TestTheDeclaredTargetKindIsTheOnlyThingThatChangesTheTargetsTreatment(t *testing.T) {
-	base := t.TempDir()
 	rapid.Check(t, func(t *rapid.T) {
 		const library = `{"target": {"kind": "library"}}`
 		files := drawLibrary(t, library)
@@ -90,14 +89,14 @@ func TestTheDeclaredTargetKindIsTheOnlyThingThatChangesTheTargetsTreatment(t *te
 		maps.Copy(asApplication, files)
 		asApplication[repositoryDocument] = `{"target": {"kind": "application"}}`
 
-		plain := libraryFindings(t, base, files)
-		entried := libraryFindings(t, base, withEntry)
+		plain := libraryFindings(t, files)
+		entried := libraryFindings(t, withEntry)
 		if !slices.Equal(plain, entried) {
 			t.Fatalf("adding an executable entry point moved the findings about the library:\n%s\n%s",
 				strings.Join(plain, "\n"), strings.Join(entried, "\n"))
 		}
 
-		application := libraryFindings(t, base, asApplication)
+		application := libraryFindings(t, asApplication)
 		if slices.Equal(plain, application) {
 			t.Fatalf("the declared target kind moved no finding about the library:\n%s",
 				strings.Join(plain, "\n"))
@@ -112,16 +111,8 @@ func TestTheDeclaredTargetKindIsTheOnlyThingThatChangesTheTargetsTreatment(t *te
 // The findings are restricted to the library's own package, because a tree carrying an
 // entry point declares declarations the other does not and a finding about one of
 // those is a new declaration rather than a changed treatment.
-func libraryFindings(t *rapid.T, base string, files map[string]string) []string {
-	dir, err := os.MkdirTemp(base, "module")
-	if err != nil {
-		t.Fatalf("create a directory for the generated module: %v", err)
-	}
-	if err := writeFiles(dir, files); err != nil {
-		t.Fatalf("write the generated module: %v", err)
-	}
-
-	set := findingsOfModule(t, dir)
+func libraryFindings(t *rapid.T, files map[string]string) []string {
+	set := cachedFindings(t.Context(), t, files)
 	var held []string
 	for i := range set.result.Findings {
 		found := &set.result.Findings[i]
