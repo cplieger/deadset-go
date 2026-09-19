@@ -169,6 +169,66 @@ func TestEncodingReflectionRetainsWhatEachDestinationReads(t *testing.T) {
 	}
 }
 
+// methodRefs spells the references of one type's members in the methods fixture.
+func methodRefs(typeName string, members ...string) []string {
+	return qualify("example.com/methods", typeName, members...)
+}
+
+// An encoder resolves a closed set of methods by name on a value it walks, so a
+// destination of that family retains those methods beside the fields. What it retains
+// is the direction it is: an entry point that encodes resolves no method that decodes,
+// one that names neither direction resolves both, and a method of neither set is
+// retained by nothing.
+func TestEncodingReflectionRetainsTheMethodsAnEncoderResolvesByName(t *testing.T) {
+	in := inputOf(t, "encoding-reflection-methods.txtar", Options{})
+	refs := retainedRefs(t, in, EncodingReflectionDetector)
+
+	for _, test := range []struct {
+		destination string
+		typeName    string
+		want        []string
+	}{
+		{
+			destination: "the JSON encoder",
+			typeName:    "Marshalled",
+			want:        methodRefs("Marshalled", "AppendText", "MarshalJSON", "MarshalJSONTo", "MarshalText", "Name"),
+		},
+		{
+			destination: "the JSON decoder",
+			typeName:    "Unmarshalled",
+			want:        methodRefs("Unmarshalled", "Name", "UnmarshalJSON", "UnmarshalText"),
+		},
+		{
+			destination: "the XML encoder",
+			typeName:    "Element",
+			want:        methodRefs("Element", "MarshalXML", "MarshalXMLAttr", "Name"),
+		},
+		{
+			destination: "the gob encoder",
+			typeName:    "Record",
+			want:        methodRefs("Record", "GobEncode", "MarshalBinary", "Name"),
+		},
+		{
+			destination: "a wrapper that forwards its erased parameter to the JSON encoder",
+			typeName:    "Wrapped",
+			want:        methodRefs("Wrapped", "MarshalJSON", "Name"),
+		},
+		{
+			destination: "an entry point that names neither direction",
+			typeName:    "Registered",
+			want:        methodRefs("Registered", "GobDecode", "GobEncode", "Name"),
+		},
+	} {
+		t.Run(strings.ReplaceAll(test.destination, " ", "_"), func(t *testing.T) {
+			got := membersOf(refs, test.typeName)
+			if !slices.Equal(got, test.want) {
+				t.Errorf("EncodingReflectionDetector(encoding-reflection-methods.txtar) retained, for %s reaching %s,\ngot  %v\nwant %v",
+					test.typeName, test.destination, got, test.want)
+			}
+		})
+	}
+}
+
 // reachRefs spells the references of one type's members in the reach fixture.
 func reachRefs(typeName string, members ...string) []string {
 	return qualify("example.com/reach", typeName, members...)

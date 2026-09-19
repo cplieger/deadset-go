@@ -19,14 +19,16 @@ func TestDeriveEmitsOneConfigurationPerAtomAndNeverTheirProduct(t *testing.T) {
 		name        string
 		archive     string
 		wantIDs     []string
+		wantGuessed []string
 		wantAtoms   Atoms
 		wantUnbuilt []File
 	}{
 		{
-			name:      "three_platform_atoms_derive_four_configurations",
-			archive:   "three-platforms.txtar",
-			wantIDs:   []string{"linux-amd64", "darwin-amd64", "windows-amd64", "linux-arm64"},
-			wantAtoms: Atoms{OS: []string{"darwin", "linux", "windows"}, Arch: []string{"arm64"}},
+			name:        "three_platform_atoms_derive_four_configurations",
+			archive:     "three-platforms.txtar",
+			wantIDs:     []string{"linux-amd64", "darwin-amd64", "windows-amd64", "linux-arm64"},
+			wantGuessed: []string{"darwin-amd64", "windows-amd64", "linux-arm64"},
+			wantAtoms:   Atoms{OS: []string{"darwin", "linux", "windows"}, Arch: []string{"arm64"}},
 		},
 		{
 			name:      "a_boolean_constraint_the_atoms_do_not_satisfy_is_unreachable",
@@ -38,22 +40,25 @@ func TestDeriveEmitsOneConfigurationPerAtomAndNeverTheirProduct(t *testing.T) {
 			},
 		},
 		{
-			name:      "each_tag_derives_the_host_carrying_that_one_tag",
-			archive:   "custom-tags.txtar",
-			wantIDs:   []string{"linux-amd64", "linux-amd64-cgo", "linux-amd64-integration"},
-			wantAtoms: Atoms{Tags: []string{"cgo", "integration"}},
+			name:        "each_tag_derives_the_host_carrying_that_one_tag",
+			archive:     "custom-tags.txtar",
+			wantIDs:     []string{"linux-amd64", "linux-amd64-cgo", "linux-amd64-integration"},
+			wantGuessed: []string{"linux-amd64-cgo", "linux-amd64-integration"},
+			wantAtoms:   Atoms{Tags: []string{"cgo", "integration"}},
 		},
 		{
-			name:      "an_atom_named_only_in_a_directory_no_configuration_builds_is_collected",
-			archive:   "vanished-dir.txtar",
-			wantIDs:   []string{"linux-amd64", "plan9-amd64"},
-			wantAtoms: Atoms{OS: []string{"plan9"}},
+			name:        "an_atom_named_only_in_a_directory_no_configuration_builds_is_collected",
+			archive:     "vanished-dir.txtar",
+			wantIDs:     []string{"linux-amd64", "plan9-amd64"},
+			wantGuessed: []string{"plan9-amd64"},
+			wantAtoms:   Atoms{OS: []string{"plan9"}},
 		},
 		{
-			name:      "a_legacy_line_a_blank_line_separates_from_the_code_carries_its_constraint",
-			archive:   "legacy-lines.txtar",
-			wantIDs:   []string{"linux-amd64", "openbsd-amd64", "linux-arm64"},
-			wantAtoms: Atoms{OS: []string{"openbsd"}, Arch: []string{"arm64"}},
+			name:        "a_legacy_line_a_blank_line_separates_from_the_code_carries_its_constraint",
+			archive:     "legacy-lines.txtar",
+			wantIDs:     []string{"linux-amd64", "openbsd-amd64", "linux-arm64"},
+			wantGuessed: []string{"openbsd-amd64", "linux-arm64"},
+			wantAtoms:   Atoms{OS: []string{"openbsd"}, Arch: []string{"arm64"}},
 			wantUnbuilt: []File{
 				{Path: "combined.go", Constraint: "openbsd && arm64"},
 			},
@@ -76,6 +81,11 @@ func TestDeriveEmitsOneConfigurationPerAtomAndNeverTheirProduct(t *testing.T) {
 			}
 			if got := identifiers(derived.Configurations); !reflect.DeepEqual(got, tc.wantIDs) {
 				t.Errorf("derive(%s) derived %v, want %v", tc.archive, got, tc.wantIDs)
+			}
+			// Every configuration but the host's is derivation's own answer about a
+			// pairing, so a load may drop one; the host's is the run's own.
+			if got := derived.Guessed; !slices.Equal(got, tc.wantGuessed) {
+				t.Errorf("derive(%s) guessed %v, want %v", tc.archive, got, tc.wantGuessed)
 			}
 			if got := derived.Atoms; !sameAtoms(got, tc.wantAtoms) {
 				t.Errorf("derive(%s) collected %+v, want %+v", tc.archive, got, tc.wantAtoms)
@@ -116,6 +126,9 @@ func TestDeriveDerivesTheHostConfigurationOfTheRunningBinary(t *testing.T) {
 	want := []load.Configuration{load.HostConfiguration()}
 	if got := derived.Configurations; !reflect.DeepEqual(got, want) {
 		t.Errorf("Derive(walk-skips.txtar) derived %+v, want the host alone, %+v", got, want)
+	}
+	if got := derived.Guessed; len(got) != 0 {
+		t.Errorf("Derive(walk-skips.txtar) guessed %v, want nothing: the host's own configuration is no guess", got)
 	}
 }
 

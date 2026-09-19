@@ -55,14 +55,15 @@ const panicBuiltin = "panic"
 // blank identifier, and one the signature leaves unnamed, name nothing and are no
 // subject.
 //
-// Free is what decides whether the finding is raised at all, because a parameter
-// is part of the function's type and an edit to it is an edit to every call site.
-// A signature is not free when the function is exported from a target whose
-// consumer set is not declared complete, when a mechanism no reference names
-// reaches the declaration, when the function is used as a value rather than
-// called, when the linker or a foreign caller names it, and when the body is a
-// stub: freeSignature is the one place those are decided and every kind of this
-// group that edits a signature asks it.
+// Free is what decides whether the finding is raised at all. A signature is not
+// free when a mechanism no reference names reaches the declaration, when the
+// function is used as a value rather than called, when the linker or a foreign
+// caller names it, and when the body is a stub: freeSignature is the one place
+// those are decided and every kind of this group that edits a signature asks it.
+//
+// A published declaration of a library is free whatever the run knows about the
+// library's consumers, because no caller can make a body read a parameter it never
+// names. The edit there is breaking, which is what the kind's fixability says.
 //
 // A parameter used under one build configuration is used, so a configuration whose
 // constraint excludes the body that reads it reports nothing.
@@ -84,10 +85,10 @@ func UnusedReceiver(in *Input) ([]Finding, error) {
 // graph discards.
 //
 // The call sites are the whole evidence and the kind reports only where they are
-// all visible: an unknown caller may consume a result, so the same free-signature
-// rule the parameter kind applies is the closed-world precondition here, and a
-// function with no call site at all is the subject of an unused-declaration kind
-// rather than of this one.
+// all visible: an unknown caller may consume a result, so this kind alone carries a
+// closed-world precondition beside the free-signature rule, and a function with no
+// call site at all is the subject of an unused-declaration kind rather than of this
+// one.
 //
 // A call whose result the source discards is a call in statement position, a call
 // under go or defer, and a call whose value is assigned to the blank identifier at
@@ -200,26 +201,29 @@ func (in *Input) intraFunc() *intrafunc {
 // change, which is the precondition of every kind of this group that reports a
 // part of a signature.
 //
-// The five reasons a signature is not free, each a reason a caller the analysis
-// cannot see may supply or consume the part:
+// The four reasons a signature is not free, each a reason the part answers to
+// something other than the body:
 //
-//   - the declaration is exported from a library whose consumer set the
-//     configuration does not declare complete, or one of whose declared consumers
-//     did not load, so a caller outside the loaded graph may pass the argument. An
-//     application's exported declaration is free, because its callers are all in
-//     the graph, and so is one in a package nothing outside the module can import.
 //   - an exemption class retained the declaration, which is a mechanism reaching
 //     it by name: satisfying an interface, answering a duck-typed contract, being
-//     named by a template, a marshaller or a reflective lookup.
+//     named by a template, a marshaller or a reflective lookup. A parameter a
+//     satisfied interface's method requires is what that retention covers.
 //   - a reference names the declaration outside call position, so a value of its
 //     type reaches a func or an interface type that fixes the signature.
 //   - the linker or a foreign caller names it through a go:linkname or an export
 //     directive.
 //   - the body is a stub, so the signature exists for the declaration's callers
 //     and the body was never written to use it.
+//
+// A published declaration of a library is free, whatever the run knows about the
+// library's consumers: a parameter its own body never reads is one no caller can
+// make it read, so the finding stands on a published surface and the fixability the
+// vocabulary gives the kind says what an edit there costs. What a caller outside the
+// graph does decide is whether a RESULT is used, which [intrafunc.callersUnknown]
+// answers for the one kind that asks.
 func (g *intrafunc) freeSignature(id graph.SymbolID, decl *ast.FuncDecl) bool {
 	switch {
-	case g.publishedWithOpenWorld(id), g.exempted[id], g.valued[id], g.foreign[id]:
+	case g.exempted[id], g.valued[id], g.foreign[id]:
 		return false
 	case isStub(decl):
 		return false
@@ -228,9 +232,16 @@ func (g *intrafunc) freeSignature(id graph.SymbolID, decl *ast.FuncDecl) bool {
 	}
 }
 
-// publishedWithOpenWorld reports whether one declaration is part of a library's
-// importable surface whose callers are not all in the loaded graph.
-func (g *intrafunc) publishedWithOpenWorld(id graph.SymbolID) bool {
+// callersUnknown reports whether one declaration is part of a library's importable
+// surface whose callers are not all in the loaded graph, which is the closed-world
+// precondition of the unused-result kind alone: an unknown caller may consume a
+// result, where none can make a body read a parameter.
+//
+// It is the narrowing kinds' precondition applied to a signature, so it reads the
+// same completeness declaration they do: a consumer set the run loaded whole is only
+// every caller there is where the configuration says the set is complete, and it is
+// the claim that no call site exists outside the graph that this kind rests on.
+func (g *intrafunc) callersUnknown(id graph.SymbolID) bool {
 	symbol := g.in.symbol(id)
 	if symbol == nil || !symbol.Exported || !g.in.importable(symbol.PkgPath) {
 		return false
@@ -520,7 +531,7 @@ func (g *intrafunc) results() ([]Finding, error) {
 		calls := callsPerFunction(one)
 		for _, fn := range functions(one) {
 			sites := calls[fn.id]
-			if len(sites) == 0 || !g.freeSignature(fn.id, fn.decl) {
+			if len(sites) == 0 || !g.freeSignature(fn.id, fn.decl) || g.callersUnknown(fn.id) {
 				continue
 			}
 			if err := g.resultsOf(one, &fn, sites, held); err != nil {

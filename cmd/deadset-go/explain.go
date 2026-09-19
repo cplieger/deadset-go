@@ -83,6 +83,7 @@ func explain(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
 		return exitCodeFor(err)
 	}
+	namedUnbuilt(stderr, set.loaded.unbuilt)
 
 	subject, partial := subjectOf(set.loaded.merged, named)
 	if subject == nil {

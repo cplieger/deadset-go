@@ -340,10 +340,13 @@ same kind, carried on every finding, so a project already running one of them si
 side it prefers.
 
 Three of the six edit a signature, and each reports only where the signature is free to change.
-A signature is not free when the function is exported from a target whose consumer set is not
-declared complete, when an exemption class retained the declaration, when the function is used as
-a value rather than called, when the linker or a foreign caller names it, or when the body is a
-stub that is empty or only panics.
+A signature is not free when an exemption class retained the declaration, when the function is
+used as a value rather than called, when the linker or a foreign caller names it, or when the body
+is a stub that is empty or only panics.
+
+A published declaration of a library is free whatever the run knows about the library's consumers:
+a parameter or a receiver a body never names is one no caller can make it read. The fixability of
+each kind says what the edit costs on such a declaration.
 
 ### DS1801 unused-parameter
 
@@ -362,9 +365,9 @@ method with no receiver name, which is why this kind is `deletable` where the pa
 ### DS1803 unused-result
 
 A result of a function every call site discards, on a function whose signature is free and every
-call site of which is in the loaded graph. An unknown caller may consume a result, so the
-closed-world precondition is part of the rule, and a function with no call site at all is an
-unused-declaration kind's subject instead.
+call site of which is in the loaded graph. An unknown caller may consume a result, so this kind
+alone carries the closed-world precondition beside the free-signature rule, and a function with no
+call site at all is an unused-declaration kind's subject instead.
 
 A call whose result the source discards is a call in statement position, a call under `go` or
 `defer`, and a call whose value is assigned to the blank identifier at that result's own index.

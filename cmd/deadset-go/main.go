@@ -464,6 +464,11 @@ type stages struct {
 	testFileRules []graph.TestFileRule
 
 	unmatched []graph.Unmatched
+
+	// unbuilt is every configuration the derivation answered that the target does
+	// not build, which the load dropped from the matrix. It is the verb's to name:
+	// a run over a shortened matrix says which configuration is missing and why.
+	unbuilt []load.Unbuilt
 }
 
 // rootSet is the matrix's root set: every root any configuration detected, each
@@ -475,6 +480,7 @@ type rootSet struct {
 	configurations []string
 	roots          []graph.Root
 	unmatched      []graph.Unmatched
+	unbuilt        []load.Unbuilt
 }
 
 // retainedSet is the matrix's retained set: every exemption that held back a
@@ -484,6 +490,7 @@ type retainedSet struct {
 	refs      map[graph.SymbolID]string
 	retained  []graph.Exemption
 	unmatched []graph.Unmatched
+	unbuilt   []load.Unbuilt
 }
 
 // printRoots writes the root set of every configuration of the matrix to stdout,
@@ -508,6 +515,7 @@ func printRoots(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return exitCodeFor(err)
 	}
 
+	namedUnbuilt(stderr, set.unbuilt)
 	for _, line := range rootLines(set.refs, set.roots, set.configurations) {
 		if _, err := fmt.Fprintln(stdout, line); err != nil {
 			fmt.Fprintf(stderr, "deadset-go: print-roots: %v\n", err)
@@ -534,6 +542,7 @@ func rootsOf(ctx context.Context, resolved *resolution) (rootSet, error) {
 		configurations: loaded.identifiers,
 		roots:          loaded.merged.Roots,
 		unmatched:      loaded.unmatched,
+		unbuilt:        loaded.unbuilt,
 	}, nil
 }
 
@@ -566,10 +575,15 @@ func stagesOf(ctx context.Context, resolved *resolution) (stages, error) {
 	if err != nil {
 		return stages{}, err
 	}
-	results, err := load.All(ctx, document, configurations)
+	results, unbuilt, err := load.All(ctx, document, configurations, guessed(derived))
 	if err != nil {
 		return stages{}, err
 	}
+	// The matrix of the run is what the target BUILDS, so a derived configuration
+	// the load dropped leaves it: no finding names a configuration nothing was
+	// computed under, and the report's matrix is the one the intersection ran over.
+	// What was dropped travels out for the verb to name.
+	configurations = built(results)
 
 	targetRoot := document.Target.Path
 	rootOptions := graph.RootOptions{
@@ -607,8 +621,45 @@ func stagesOf(ctx context.Context, resolved *resolution) (stages, error) {
 		declared:       document.Consumers,
 		testFileRules:  rules,
 		unmatched:      x.UnmatchedEverywhere(),
+		unbuilt:        unbuilt,
 		merged:         &merged,
 	}, nil
+}
+
+// guessed names the configurations of the matrix the derivation answered from an atom
+// the target tree names, which are the ones a load may drop. A matrix the
+// configuration document listed has none: each of those is the maintainer's
+// assertion that the target builds it, and a load that fails is that assertion being
+// enforced.
+func guessed(derived *matrix.Derived) []string {
+	if derived == nil {
+		return nil
+	}
+	return derived.Guessed
+}
+
+// built lists the configuration of every load that answered, in the order the matrix
+// listed them, which is the matrix the run analyzed.
+func built(results []load.Result) []load.Configuration {
+	configurations := make([]load.Configuration, len(results))
+	for i := range results {
+		configurations[i] = results[i].Configuration
+	}
+	return configurations
+}
+
+// namedUnbuilt writes one line per configuration the run derived and the target does
+// not build, each with the load error that dropped it, so a maintainer reading a run
+// over a shortened matrix learns which configuration is missing and why.
+//
+// The error's own rendering names the configuration, the number of diagnostics and
+// every diagnostic, which is what a maintainer deciding whether to declare the
+// configuration has to read.
+func namedUnbuilt(w io.Writer, unbuilt []load.Unbuilt) {
+	for i := range unbuilt {
+		fmt.Fprintf(w, "deadset-go: %s is derived from the target tree, does not build, and is dropped from the matrix: %v\n",
+			unbuilt[i].Configuration.ID, unbuilt[i].Err)
+	}
 }
 
 // passesOf runs the three passes over one loaded configuration, and returns the
@@ -726,6 +777,7 @@ func printRetained(ctx context.Context, args []string, stdout, stderr io.Writer)
 		return exitCodeFor(err)
 	}
 
+	namedUnbuilt(stderr, set.unbuilt)
 	for _, line := range retainedLines(set.refs, set.retained) {
 		if _, err := fmt.Fprintln(stdout, line); err != nil {
 			fmt.Fprintf(stderr, "deadset-go: print-retained: %v\n", err)
@@ -796,6 +848,7 @@ func retainedOf(ctx context.Context, resolved *resolution, options *exempt.Optio
 		refs:      analyzed.stages.refs,
 		retained:  analyzed.swept.Retained,
 		unmatched: analyzed.stages.unmatched,
+		unbuilt:   analyzed.stages.unbuilt,
 	}, nil
 }
 
@@ -1083,26 +1136,33 @@ type corpusRecord struct {
 }
 
 // reportOf is the report of one run: the findings pass, assembled into the envelope
-// the Contract declares.
+// the Contract declares, and every configuration the derivation answered that the
+// target does not build.
+//
+// The dropped configurations are returned beside the envelope because the report
+// schema declares no member for one: a configuration entry names an identifier, a
+// platform and a set of tags, and the array is the matrix the analysis RAN, so a
+// configuration the run did not build has no place in it. The caller names them on
+// stderr instead.
 //
 // Assembly is a refusal rather than a best effort: an envelope the Contract cannot
 // carry fails the run, because a document no reader admits says less than an error
 // does. The corpus record is what the analyzer states about itself, and an envelope
 // naming no conformance result is one such refusal.
-func reportOf(ctx context.Context, resolved *resolution, options *exempt.Options, answered *corpusRecord) (report.Envelope, error) {
+func reportOf(ctx context.Context, resolved *resolution, options *exempt.Options, answered *corpusRecord) (report.Envelope, []load.Unbuilt, error) {
 	set, err := findingsOf(ctx, resolved, options)
 	if err != nil {
-		return report.Envelope{}, err
+		return report.Envelope{}, nil, err
 	}
 	target, err := targetOf(resolved, &set.loaded)
 	if err != nil {
-		return report.Envelope{}, err
+		return report.Envelope{}, nil, err
 	}
 	consumers, err := consumersReported(&set.loaded)
 	if err != nil {
-		return report.Envelope{}, err
+		return report.Envelope{}, nil, err
 	}
-	return report.Build(&report.BuildInput{
+	envelope, err := report.Build(&report.BuildInput{
 		Analyzer:        analyzerOf(answered.conformance),
 		Target:          target,
 		Configurations:  configurationsReported(set.loaded.configurations),
@@ -1114,6 +1174,7 @@ func reportOf(ctx context.Context, resolved *resolution, options *exempt.Options
 		TestFileRules:   set.loaded.testFileRules,
 		Suppressions:    set.suppressions,
 	})
+	return envelope, set.loaded.unbuilt, err
 }
 
 // analyzerOf is the identity every document this analyzer writes names it by, with

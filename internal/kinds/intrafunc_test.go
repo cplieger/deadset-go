@@ -170,28 +170,29 @@ func TestTheSignatureKindsApplyEveryExemptionOfTheContractByName(t *testing.T) {
 	}
 }
 
-func TestTheUnusedParameterKindReportsAPublishedSignatureOnlyUnderAClosedWorld(t *testing.T) {
+// A parameter and a receiver are dead by the body that never reads them, so a
+// published declaration of a library is reported whatever the run knows about the
+// library's consumers: no caller outside the graph can make a body read one. The
+// signature an interface the receiver's type reaches fixes is retained by the
+// exemption class that records that reach, which is what keeps the satisfying
+// method's parameter out of the answer.
+func TestTheSignatureKindsReportAPublishedDeclarationOfALibrary(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name     string
 		resolved config.Config
-		want     []string
 	}{
-		{
-			name:     "a library whose consumer set is not declared complete",
-			resolved: libraryConfig(),
-			want:     []string{"api/api.go:9:24 parameter label of go://example.com/app/api#scaled"},
-		},
-		{
-			name:     "an application, whose every caller is in the graph",
-			resolved: applicationConfig(),
-			want: []string{
-				"api/api.go:4:24 parameter label of go://example.com/app/api#Scaled",
-				"api/api.go:9:24 parameter label of go://example.com/app/api#scaled",
-			},
-		},
+		{name: "a library whose consumer set is not declared complete", resolved: libraryConfig()},
+		{name: "an application, whose every caller is in the graph", resolved: applicationConfig()},
 	}
+	wantParameters := []string{
+		"api/api.go:4:24 parameter label of go://example.com/app/api#Scaled",
+		"api/api.go:9:24 parameter label of go://example.com/app/api#scaled",
+		"api/writer.go:15:20 parameter limit of go://example.com/app/api#Sink.Held",
+	}
+	wantReceivers := []string{"api/writer.go:15:7 receiver s of go://example.com/app/api#Sink.Held"}
+
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -200,12 +201,57 @@ func TestTheUnusedParameterKindReportsAPublishedSignatureOnlyUnderAClosedWorld(t
 
 			result := computed(t, in, intraFuncEmitters())
 
-			if got := subjectsOf(result.Findings, unusedParameterCode); !slices.Equal(got, test.want) {
+			if got := subjectsOf(result.Findings, unusedParameterCode); !slices.Equal(got, wantParameters) {
 				t.Errorf("the pass over intrafunc-published.txtar as %s reports %v under %s, want %v",
-					test.resolved.Target.Kind, got, unusedParameterCode, test.want)
+					test.resolved.Target.Kind, got, unusedParameterCode, wantParameters)
+			}
+			if got := subjectsOf(result.Findings, unusedReceiverCode); !slices.Equal(got, wantReceivers) {
+				t.Errorf("the pass over intrafunc-published.txtar as %s reports %v under %s, want %v",
+					test.resolved.Target.Kind, got, unusedReceiverCode, wantReceivers)
 			}
 		})
 	}
+}
+
+// An edit to a parameter of a published declaration is an edit to every call site,
+// including the ones outside the graph, which is what the vocabulary's fixability for
+// the kind says; deleting a receiver name changes no signature, which is what the
+// receiver kind's says.
+func TestTheSignatureKindsCarryTheFixabilityOfTheirOwnEditOnAPublishedDeclaration(t *testing.T) {
+	t.Parallel()
+
+	in := inputOf(t, "intrafunc-published.txtar", libraryConfig(), Consumers{})
+
+	result := computed(t, in, intraFuncEmitters())
+
+	for code, want := range map[string]string{
+		unusedParameterCode: "manual",
+		unusedReceiverCode:  "deletable",
+	} {
+		got := fixabilitiesOf(result.Findings, code, "go://example.com/app/api#")
+		if len(got) == 0 {
+			t.Errorf("the pass over intrafunc-published.txtar reports nothing under %s about the published package", code)
+		}
+		for _, one := range got {
+			if one != want {
+				t.Errorf("the pass over intrafunc-published.txtar reports a published %s finding with fixability %q, want %q",
+					code, one, want)
+			}
+		}
+	}
+}
+
+// fixabilitiesOf is the fixability of every finding of one code whose subject's
+// reference begins with prefix.
+func fixabilitiesOf(findings []Finding, code, prefix string) []string {
+	var held []string
+	for i := range findings {
+		found := &findings[i]
+		if found.Code == code && strings.HasPrefix(found.Symbol.Ref, prefix) {
+			held = append(held, found.Fixability)
+		}
+	}
+	return held
 }
 
 func TestTheUnusedResultKindReportsOnlyWhereEveryCallSiteIsLoaded(t *testing.T) {
