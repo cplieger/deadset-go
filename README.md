@@ -1,12 +1,16 @@
 # deadset-go
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/cplieger/deadset-go.svg)](https://pkg.go.dev/github.com/cplieger/deadset-go) [![Go version](https://img.shields.io/github/go-mod/go-version/cplieger/deadset-go)](https://github.com/cplieger/deadset-go/blob/main/go.mod) [![Mutation](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cplieger/deadset-go/badges/mutation.json)](https://github.com/cplieger/deadset-go/issues?q=label%3Agremlins-tracker)
+[![Go Reference](https://pkg.go.dev/badge/github.com/cplieger/deadset-go.svg)](https://pkg.go.dev/github.com/cplieger/deadset-go)
+[![Go version](https://img.shields.io/github/go-mod/go-version/cplieger/deadset-go)](https://github.com/cplieger/deadset-go/blob/main/go.mod)
+[![Mutation](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cplieger/deadset-go/badges/mutation.json)](https://github.com/cplieger/deadset-go/issues?q=label%3Agremlins-tracker)
 
 Deterministic whole-program dead-code analysis for a Go module and the consumers it declares.
 
 ## ⚠️ Pre-release software
 
-deadset-go implements version 0.1.0 of the [deadset contract](https://github.com/cplieger/deadset-spec) and has not shipped its first analysis. Today the binary answers `version` and refuses a `--fix` flag; the other verbs below are the contract's and arrive with the analysis. The report shape, the exit codes and the configuration keys can change until 1.0.
+deadset-go implements the [deadset contract](https://github.com/cplieger/deadset-spec) at the version `describe` prints. `analyze` reads a Go module and writes the contract's JSON report, rendered beside it as text, GitHub annotations, SARIF 2.1.0 or a template of yours; `explain` answers whether one symbol is live, retained, reported or judged by nothing, and why. At its 1.8.0 release the analyzer reports 67 findings over its own source, every one of them true: exports narrower than they are declared, and fields a pass writes that nothing reads. A green `go vet` or `golangci-lint` beside that number is not a contradiction, because both run per package with tests included, and these are the two questions they do not ask.
+
+What has not run yet is the conformance corpus, so every report names `"result": "fail"` in its `analyzer.conformance` block and an orchestrator refuses it: read a report yourself, do not gate on one. The report shape, the exit codes and the configuration keys can change until 1.0.
 
 ## What it does
 
