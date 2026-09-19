@@ -1,0 +1,39 @@
+A function and a method whose type parameter neither the signature nor the body
+names, a function that names its parameter in the body alone, one that names it
+in the result type alone, and the phantom type whose parameter it names nowhere.
+
+-- go.mod --
+module example.com/generic
+
+go 1.27.1
+-- main.go --
+package main
+
+// convert names its type parameter in neither the signature nor the body.
+func convert[T any](n int) int { return n }
+
+// bodied names its type parameter in the body alone.
+func bodied[T any](n int) int {
+	var zero T
+	_ = zero
+	return n
+}
+
+// resultOf names its type parameter in the result type alone.
+func resultOf[T any]() []T { return nil }
+
+// id is the phantom type: it names its type parameter nowhere and still makes
+// two instantiations distinct types.
+type id[T any] int
+
+// holder carries a method with a type parameter of its own.
+type holder struct{}
+
+// take names its type parameter in neither the signature nor the body.
+func (holder) take[T any](n int) int { return n }
+
+func main() {
+	var h holder
+	var i id[int]
+	println(convert[int](1), bodied[int](2), len(resultOf[int]()), h.take[int](3), int(i))
+}

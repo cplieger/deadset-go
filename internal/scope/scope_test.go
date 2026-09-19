@@ -60,13 +60,55 @@ func TestReadResolvesTheTargetAndItsConsumers(t *testing.T) {
 	}
 
 	want := Document{
-		Target: Module{ID: "example.com/app", Role: RoleTarget, Path: filepath.Join(dir, "app")},
+		Target: Module{ID: "example.com/app", Path: filepath.Join(dir, "app")},
 		Consumers: []Module{
-			{Role: RoleConsumer, Path: filepath.Join(filepath.Dir(dir), "consumer")},
+			{Path: filepath.Join(filepath.Dir(dir), "consumer")},
 		},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Read(%s) = %+v, want %+v", path, got, want)
+	}
+}
+
+func TestReadResolvesTheWorkspaceTheDocumentNames(t *testing.T) {
+	cases := map[string]struct {
+		declared string
+		want     func(dir string) string
+	}{
+		"a relative path, against the document's own directory": {
+			declared: "go.work",
+			want:     func(dir string) string { return filepath.Join(dir, "go.work") },
+		},
+		"a relative path above the document": {
+			declared: "../go.work",
+			want:     func(dir string) string { return filepath.Join(filepath.Dir(dir), "go.work") },
+		},
+		"an absolute path, as written": {
+			declared: "/src/go.work",
+			want:     func(string) string { return filepath.FromSlash("/src/go.work") },
+		},
+		"no workspace at all": {
+			declared: "",
+			want:     func(string) string { return "" },
+		},
+	}
+	for name, test := range cases {
+		t.Run(name, func(t *testing.T) {
+			body := `{"target": {"path": "app"}`
+			if test.declared != "" {
+				body += `, "workspace": ` + strconv.Quote(test.declared)
+			}
+			body += `}`
+			dir, path := writeDocument(t, body)
+
+			got, err := Read(path)
+			if err != nil {
+				t.Fatalf("Read(%s) with body %s = _, %v, want no error", path, body, err)
+			}
+			if want := test.want(dir); got.Workspace != want {
+				t.Errorf("Read(%s) with body %s .Workspace = %q, want %q", path, body, got.Workspace, want)
+			}
+		})
 	}
 }
 
@@ -81,15 +123,12 @@ func TestReadKeepsAnAbsolutePathAsWritten(t *testing.T) {
 	if got.Target.Path != absolute {
 		t.Errorf("Read(%s).Target.Path = %q, want %q", path, got.Target.Path, absolute)
 	}
-	if got.Target.Role != RoleTarget {
-		t.Errorf("Read(%s).Target.Role = %q, want %q", path, got.Target.Role, RoleTarget)
-	}
 	if got.Consumers != nil {
 		t.Errorf("Read(%s).Consumers = %v, want nil", path, got.Consumers)
 	}
 }
 
-func TestReadDefaultsARoleTheDocumentLeavesOut(t *testing.T) {
+func TestReadAcceptsADocumentThatLeavesEveryRoleOut(t *testing.T) {
 	dir, path := writeDocument(t, `{
   "target": { "path": "app" },
   "consumers": [ { "path": "consumer" } ]
@@ -99,11 +138,13 @@ func TestReadDefaultsARoleTheDocumentLeavesOut(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read(%s) = _, %v, want no error", path, err)
 	}
-	if got.Target.Role != RoleTarget {
-		t.Errorf("Target.Role = %q, want %q", got.Target.Role, RoleTarget)
+	// A module's role is where it sits in the document, so a document that states
+	// none is a document that states nothing the reader has to reconcile.
+	if got.Target.Path != filepath.Join(dir, "app") {
+		t.Errorf("Target.Path = %q, want %q", got.Target.Path, filepath.Join(dir, "app"))
 	}
-	if len(got.Consumers) != 1 || got.Consumers[0].Role != RoleConsumer {
-		t.Fatalf("Consumers = %+v, want one consumer with role %q", got.Consumers, RoleConsumer)
+	if len(got.Consumers) != 1 {
+		t.Fatalf("Consumers = %+v, want one consumer", got.Consumers)
 	}
 	if want := filepath.Join(dir, "consumer"); got.Consumers[0].Path != want {
 		t.Errorf("Consumers[0].Path = %q, want %q", got.Consumers[0].Path, want)
@@ -156,11 +197,7 @@ func TestReadRefusals(t *testing.T) {
 			want: hasText("empty path"),
 			desc: "an error naming the empty path",
 		},
-		"workspace, which the reader does not implement": {
-			body: `{"target": {"path": "app"}, "workspace": "/src/go.work"}`,
-			want: is(ErrUnimplemented),
-			desc: "ErrUnimplemented",
-		},
+
 		"trailing content": {
 			body: `{"target": {"path": "app"}} {"target": {"path": "other"}}`,
 			want: is(ErrTrailingContent),
@@ -241,7 +278,7 @@ func TestForDirIsTheTargetAndNothingElse(t *testing.T) {
 		t.Fatalf("ForDir(%s) = _, %v, want no error", dir, err)
 	}
 
-	want := Document{Target: Module{Role: RoleTarget, Path: dir}}
+	want := Document{Target: Module{Path: dir}}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ForDir(%s) = %+v, want %+v", dir, got, want)
 	}

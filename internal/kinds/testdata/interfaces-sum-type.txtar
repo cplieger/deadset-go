@@ -1,0 +1,33 @@
+An interface whose method set holds an unexported method, so the set of types that
+implement it is fixed by the declaring package. One function takes it as a
+parameter type and calls neither of its methods through it. The exported method's
+implementation carries statements, so only the rule about the unexported method
+keeps it unreported.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- main.go --
+package main
+
+// Node is one member of a fixed set of shapes.
+type Node interface {
+	Kind() string
+	node()
+}
+
+type leaf struct{ depth int }
+
+func (l leaf) Kind() string {
+	if l.depth == 0 {
+		return "root"
+	}
+	return "leaf"
+}
+
+func (leaf) node() {}
+
+func present(n Node) bool { return n != nil }
+
+func main() { println(present(leaf{depth: 1})) }

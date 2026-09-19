@@ -668,3 +668,192 @@ func (b *graphBuilder) orderBySweep(r Result, found []grouped, of map[string]int
 	}
 	return ordered
 }
+
+// drawnConsumerRef is one reference a drawn consumer module makes to one drawn
+// declaration.
+type drawnConsumerRef struct {
+	consumer int  // the consumer that makes it, by place in the drawn set
+	at       int  // the declaration it references
+	test     bool // one of the consumer's test files makes it
+}
+
+// drawnLoad is one run a draw produced: the declarations of the target, the
+// references between them, the number of consumers loaded, the references those
+// consumers make, and what the run's mode counts.
+type drawnLoad struct {
+	edges     [][2]int
+	consumed  []drawnConsumerRef
+	symbols   int
+	consumers int
+	mode      Mode
+}
+
+// drawnConsumer names one consumer of a drawn run as a module path, which is the
+// identifier a reference carries.
+func drawnConsumer(at int) string { return fmt.Sprintf("example.com/consumer%02d", at) }
+
+// drawnLoads draws one to six declarations, up to eight references between them,
+// one to three consumers, up to six references from those consumers, and the mode
+// the sweep runs in. The mode is drawn because what a consumer's test reference
+// counts as is the mode's, and the property holds under every combination.
+func drawnLoads() *rapid.Generator[drawnLoad] {
+	return rapid.Custom(func(t *rapid.T) drawnLoad {
+		count := rapid.IntRange(1, 6).Draw(t, "the number of declarations")
+		consumers := rapid.IntRange(1, 3).Draw(t, "the number of consumers")
+		edges := rapid.SliceOfN(rapid.Custom(func(t *rapid.T) [2]int {
+			return [2]int{
+				rapid.IntRange(0, count-1).Draw(t, "the referencing declaration"),
+				rapid.IntRange(0, count-1).Draw(t, "the referenced declaration"),
+			}
+		}), 0, 8).Draw(t, "the target's own references")
+		consumed := rapid.SliceOfN(rapid.Custom(func(t *rapid.T) drawnConsumerRef {
+			return drawnConsumerRef{
+				consumer: rapid.IntRange(0, consumers-1).Draw(t, "the consumer that references"),
+				at:       rapid.IntRange(0, count-1).Draw(t, "the declaration a consumer references"),
+				test:     rapid.Bool().Draw(t, "the reference is in a consumer's test file"),
+			}
+		}), 0, 6).Draw(t, "the consumers' references")
+		return drawnLoad{
+			symbols:   count,
+			consumers: consumers,
+			edges:     edges,
+			consumed:  consumed,
+			mode: Mode{
+				Production:              rapid.Bool().Draw(t, "the sweep counts production references alone"),
+				ConsumerTestsProduction: rapid.Bool().Draw(t, "a consumer's test reference counts as production"),
+			},
+		}
+	})
+}
+
+// build assembles one drawn run: the declarations of the target with the
+// references between them, then the references each drawn consumer makes.
+func (d drawnLoad) build(t *rapid.T) *graphBuilder {
+	b := newGraphBuilder(t)
+	for at := range d.symbols {
+		b.add(drawn(at))
+	}
+	for _, e := range d.edges {
+		b.ref(drawn(e[0]), drawn(e[1]))
+	}
+	for _, c := range d.consumed {
+		b.refFromConsumer(drawnConsumer(c.consumer), drawn(c.at), c.test)
+	}
+	return b
+}
+
+// counts answers what the mode counts the slow way, over the names a draw
+// produced: how many references each declaration carries, which declarations a
+// consumer's counted reference calls, and which consumers reference each
+// declaration whatever the mode.
+func (d drawnLoad) counts() (referenced map[string]int, called map[string]bool, by map[string][]string) {
+	referenced, called, by = map[string]int{}, map[string]bool{}, map[string][]string{}
+	for _, e := range d.edges {
+		referenced[drawn(e[1])]++
+	}
+	for _, c := range d.consumed {
+		name := drawn(c.at)
+		module := drawnConsumer(c.consumer)
+		if !slices.Contains(by[name], module) {
+			by[name] = append(by[name], module)
+		}
+		if c.test && d.mode.Production && !d.mode.ConsumerTestsProduction {
+			continue
+		}
+		referenced[name]++
+		called[name] = true
+	}
+	for name := range by {
+		slices.Sort(by[name])
+	}
+	return referenced, called, by
+}
+
+// reachable answers reachability the slow way: every declaration a consumer's
+// counted reference calls, and everything those reach through the target's own
+// references, by repeating one pass until it adds nothing.
+func (d drawnLoad) reachable(called map[string]bool) map[string]bool {
+	reached := maps.Clone(called)
+	for changed := true; changed; {
+		changed = false
+		for _, e := range d.edges {
+			if reached[drawn(e[0])] && !reached[drawn(e[1])] {
+				reached[drawn(e[1])] = true
+				changed = true
+			}
+		}
+	}
+	return reached
+}
+
+// describeLoad prints one drawn run so a failure carries the run rather than only
+// its size.
+func describeLoad(d drawnLoad) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d declarations, %d consumers, production=%t consumerTestsProduction=%t\n",
+		d.symbols, d.consumers, d.mode.Production, d.mode.ConsumerTestsProduction)
+	for _, e := range d.edges {
+		fmt.Fprintf(&b, "reference %s -> %s\n", drawn(e[0]), drawn(e[1]))
+	}
+	for _, c := range d.consumed {
+		fmt.Fprintf(&b, "consumer %s -> %s test=%t\n", drawnConsumer(c.consumer), drawn(c.at), c.test)
+	}
+	return b.String()
+}
+
+// Property dead-code-suite/P3: a reference from any loaded module prevents the
+// finding. A declaration the mode counts one reference to is live under reference
+// counting whichever module made it, a declaration a loaded consumer calls is live
+// under both relations and keeps what it references live, a declaration no counted
+// reference names is a candidate, and the consumers a declaration's references come
+// from are exactly the ones that referenced it.
+//
+// The graph is built by hand rather than loaded, so a draw costs no package load
+// and shrinks to the one declaration that carries a failure.
+//
+// This runs at rapid's default of 100 checks; -rapid.checks raises it for a
+// deeper local run.
+func TestProperty03AReferenceFromAnyLoadedModulePreventsTheFinding(t *testing.T) {
+	rapid.Check(t, func(t *rapid.T) {
+		d := drawnLoads().Draw(t, "the run")
+		b := d.build(t)
+		g := b.graph()
+		r := g.Sweep(d.mode)
+
+		referenced, called, by := d.counts()
+		reached := d.reachable(called)
+
+		want := []string{}
+		for _, name := range b.names(namesOf(b.symbols)) {
+			if referenced[name] > 0 && reached[name] {
+				continue
+			}
+			relation := Reachability
+			if referenced[name] == 0 {
+				relation = ReferenceCounting
+			}
+			want = append(want, name+" "+relation.String())
+		}
+		if got := b.candidates(r); !slices.Equal(got, want) {
+			t.Fatalf("Sweep over the drawn run reported %v, want %v\n%s", got, want, describeLoad(d))
+		}
+
+		for _, name := range b.names(namesOf(b.symbols)) {
+			set := r.LiveUnder[b.id(name)]
+			switch {
+			case referenced[name] > 0 && !set.Has(ReferenceCounting):
+				t.Fatalf("%s carries %d counted references and is dead under %s\n%s",
+					name, referenced[name], ReferenceCounting, describeLoad(d))
+			case called[name] && !set.Has(Reachability):
+				t.Fatalf("%s is called by a loaded consumer and is dead under %s\n%s",
+					name, Reachability, describeLoad(d))
+			case referenced[name] == 0 && set.Has(ReferenceCounting):
+				t.Fatalf("%s carries no counted reference and is live under %s\n%s",
+					name, ReferenceCounting, describeLoad(d))
+			}
+			if got := g.ConsumersOf(b.id(name)); !slices.Equal(got, by[name]) {
+				t.Fatalf("ConsumersOf(%s) = %v, want %v\n%s", name, got, by[name], describeLoad(d))
+			}
+		}
+	})
+}

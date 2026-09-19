@@ -1,0 +1,27 @@
+An interface declaring one exported method whose every implementation carries a
+body with no statement, which is the marker shape. One function takes the
+interface as a parameter type and calls the method through neither implementation.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- main.go --
+package main
+
+// Sealed is implemented by declaring the marker method.
+type Sealed interface {
+	Sealed()
+}
+
+type one struct{}
+
+func (one) Sealed() {}
+
+type two struct{}
+
+func (two) Sealed() {}
+
+func present(s Sealed) bool { return s != nil }
+
+func main() { println(present(one{}), present(two{})) }

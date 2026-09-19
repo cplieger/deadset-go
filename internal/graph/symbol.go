@@ -151,13 +151,7 @@ func Symbols(r *load.Result, targetRoot string, read ReadFile) ([]Symbol, error)
 //
 //nolint:gocritic // slices.SortFunc fixes a comparator's parameters to values.
 func bySite(a, b Symbol) int {
-	if c := strings.Compare(a.Pos.Filename, b.Pos.Filename); c != 0 {
-		return c
-	}
-	if c := a.Pos.Line - b.Pos.Line; c != 0 {
-		return c
-	}
-	if c := a.Pos.Column - b.Pos.Column; c != 0 {
+	if c := ByPosition(a.Pos, b.Pos); c != 0 {
 		return c
 	}
 	return strings.Compare(a.Ref, b.Ref)
@@ -473,7 +467,7 @@ func (e *enumeration) walkStruct(p *packages.Package, t *ast.StructType, chain [
 // unqualified name of the type it embeds.
 func (e *enumeration) walkField(p *packages.Package, f *ast.Field, chain []string, parent SymbolID) error {
 	if len(f.Names) == 0 {
-		embedded := embeddedName(f.Type)
+		embedded := EmbeddedName(f.Type)
 		if embedded == nil {
 			return nil
 		}
@@ -585,20 +579,25 @@ func receiverBase(recv *ast.FieldList) (name string, pointer bool) {
 	return "", pointer
 }
 
-// embeddedName returns the identifier that names an embedded field, which the
-// language defines as the unqualified name of the embedded type.
-func embeddedName(expr ast.Expr) *ast.Ident {
+// EmbeddedName returns the identifier that names an embedded field, which the
+// language defines as the unqualified name of the embedded type, and nil for a
+// type expression the language does not let a field embed.
+//
+// Every pass that reads a struct or an interface body needs the same answer,
+// because the name an embedded field carries is what a reference to that field
+// names, so the rule is written here and read from here.
+func EmbeddedName(expr ast.Expr) *ast.Ident {
 	switch t := expr.(type) {
 	case *ast.Ident:
 		return t
 	case *ast.StarExpr:
-		return embeddedName(t.X)
+		return EmbeddedName(t.X)
 	case *ast.SelectorExpr:
 		return t.Sel
 	case *ast.IndexExpr:
-		return embeddedName(t.X)
+		return EmbeddedName(t.X)
 	case *ast.IndexListExpr:
-		return embeddedName(t.X)
+		return EmbeddedName(t.X)
 	}
 	return nil
 }

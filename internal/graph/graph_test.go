@@ -126,8 +126,35 @@ func (b *graphBuilder) ref(from, to string) *graphBuilder {
 	return b
 }
 
+// The consumer modules a hand-built graph's outside references come from.
+const (
+	handConsumer      = "example.com/consumer"
+	handOtherConsumer = "example.com/other"
+)
+
+// refFromConsumer keeps one reference to a declaration from a loaded consumer
+// module, made by one of that consumer's production files or by one of its test
+// files, which is what the reference pass records for a module outside the target.
+func (b *graphBuilder) refFromConsumer(consumer, to string, test bool) *graphBuilder {
+	b.sink.Helper()
+	b.outside++
+	file := "consumer.go"
+	if test {
+		file = "consumer_test.go"
+	}
+	b.refs = append(b.refs, Reference{
+		To:       b.id(to),
+		Consumer: consumer,
+		Pos:      token.Position{Filename: file, Line: b.outside, Column: 1},
+		Kind:     RefCall,
+		Test:     test,
+	})
+	return b
+}
+
 // refFromOutside keeps one reference to a declaration from a declaration the
-// inventory does not hold, which is what a loaded consumer module makes.
+// inventory does not hold and no consumer made, which is the contrast to a
+// consumer's reference: it counts, and it names no caller.
 func (b *graphBuilder) refFromOutside(to string) *graphBuilder {
 	b.sink.Helper()
 	b.outside++

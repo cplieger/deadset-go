@@ -1,0 +1,32 @@
+An interface a test file declares and the test itself names as a type. A production
+sweep drops every reference a test file made, so the declaration is a candidate
+whatever its tests do with it.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- main.go --
+package main
+
+type disk struct{ held string }
+
+func (d *disk) Load() string { return d.held }
+
+func main() { println((&disk{held: "v"}).Load()) }
+-- main_test.go --
+package main
+
+import "testing"
+
+// loader is what the test names the value under test as.
+type loader interface {
+	Load() string
+}
+
+func TestLoad(t *testing.T) {
+	var held loader = &disk{held: "v"}
+	if held.Load() != "v" {
+		t.Errorf("(*disk).Load() = %q, want %q", held.Load(), "v")
+	}
+}

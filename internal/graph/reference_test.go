@@ -375,10 +375,17 @@ func TestReferencesInspectsEachSourceFileOnce(t *testing.T) {
 	}
 
 	// catalog.go is compiled by two variants and inspected for the first of
-	// them; each test file is compiled by the one variant that holds it.
+	// them; each test file is compiled by the one variant that holds it. A file is
+	// keyed by the path the toolchain named it by, which is what tells one
+	// module's file from another module's file of the same name, so the assertion
+	// reads the base names.
+	reached := make(map[string]int, len(p.reached))
+	for named, count := range p.reached {
+		reached[filepath.Base(named)] = count
+	}
 	want := map[string]int{"catalog.go": 2, "catalog_test.go": 1, "external_test.go": 1}
-	if !maps.Equal(p.reached, want) {
-		t.Errorf("References(variants.txtar) reached %v, want %v", p.reached, want)
+	if !maps.Equal(reached, want) {
+		t.Errorf("References(variants.txtar) reached %v, want %v", reached, want)
 	}
 
 	seen := make(map[Reference]int, len(p.refs))

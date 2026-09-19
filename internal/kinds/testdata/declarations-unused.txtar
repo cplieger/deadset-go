@@ -1,0 +1,50 @@
+A target whose importable package holds one live and one dead declaration of every
+shape the unused-declaration kinds report: an exported function, an unexported
+function, a struct field, and a function whose only reference is its own call to
+itself.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- catalog/catalog.go --
+package catalog
+
+// Used is referenced from the command, so it is live under both relations.
+func Used() int { return usedHelper() }
+
+// Resolve is referenced by nothing at all.
+func Resolve() int { return 2 }
+
+// usedHelper is referenced from Used.
+func usedHelper() int { return 3 }
+
+// helper is referenced by nothing at all.
+func helper() int { return 4 }
+
+// Recurse calls itself and nothing else calls it, so it carries one reference and
+// no path from a root reaches it.
+func Recurse(n int) int {
+	if n <= 0 {
+		return 0
+	}
+	return Recurse(n - 1)
+}
+
+// Counter carries one field the command reads and one nothing reads.
+type Counter struct {
+	Live  int
+	stale int
+}
+
+// Total reads the field the command sets.
+func (c Counter) Total() int { return c.Live }
+-- main.go --
+package main
+
+import "example.com/app/catalog"
+
+func main() {
+	c := catalog.Counter{Live: 1}
+	println(catalog.Used(), c.Total())
+}

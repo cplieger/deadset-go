@@ -70,7 +70,7 @@ func (rs *Resolver) index(pkgs []*packages.Package, symbols []Symbol) error {
 		}
 		for _, obj := range p.TypesInfo.Defs {
 			at, err := rs.hold(obj, sites)
-			if err != nil && (failure == nil || earlier(at, failed)) {
+			if err != nil && (failure == nil || ByPosition(at, failed) < 0) {
 				failure, failed = err, at
 			}
 		}
@@ -99,18 +99,6 @@ func (rs *Resolver) hold(obj types.Object, sites map[site]SymbolID) (token.Posit
 		rs.symbols[obj.Pos()] = id
 	}
 	return token.Position{}, nil
-}
-
-// earlier reports whether a is written before b, by file name, then line, then
-// column.
-func earlier(a, b token.Position) bool {
-	if a.Filename != b.Filename {
-		return a.Filename < b.Filename
-	}
-	if a.Line != b.Line {
-		return a.Line < b.Line
-	}
-	return a.Column < b.Column
 }
 
 // Object returns the identifier of the declaration obj is declared at. A nil

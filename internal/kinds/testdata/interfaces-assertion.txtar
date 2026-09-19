@@ -1,0 +1,27 @@
+A compile-time satisfaction assertion whose interface nothing else names as a
+type. The asserted type is live, because the entry point reads one of its fields,
+and the method that satisfies the interface is reached by nothing but the
+assertion.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- main.go --
+package main
+
+// Encoder renders a payload.
+type Encoder interface {
+	Encode() string
+}
+
+type payload struct{ body string }
+
+func (p payload) Encode() string { return p.body }
+
+var _ Encoder = payload{}
+
+func main() {
+	p := payload{body: "b"}
+	println(p.body)
+}

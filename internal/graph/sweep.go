@@ -76,6 +76,14 @@ type Mode struct {
 	// explanation names every class that held it.
 	Exempt []Exemption
 
+	// ConsumerTestsProduction classifies a reference from a loaded consumer's test
+	// file as a production reference rather than as the test reference it is by
+	// default. It is a classification and not a filter, so it decides the split a
+	// candidate reports as well as what a production sweep counts: a symbol only a
+	// consumer's tests reach is test-only use by default and referenced code under
+	// this mode.
+	ConsumerTestsProduction bool
+
 	// Production drops every reference a test file made from the reference count
 	// and leaves the test roots out of the reachability seed. A test root stays
 	// live all the same, so a test function is never a candidate of a production
@@ -98,9 +106,11 @@ type Candidate struct {
 	ID SymbolID
 
 	// ProductionRefs and TestRefs count every reference made to the symbol,
-	// whatever the mode: a production sweep decides liveness on ProductionRefs
-	// alone and a kind reads both, so a symbol only tests reference is
-	// distinguishable from one nothing references.
+	// whatever the mode counts, split the way the mode classifies them: a
+	// production sweep decides liveness on ProductionRefs alone and a kind reads
+	// both, so a symbol only tests reference is distinguishable from one nothing
+	// references. A reference a loaded consumer's test file made is a test
+	// reference, and a production one where the mode classifies it so.
 	ProductionRefs int
 	TestRefs       int
 
@@ -148,11 +158,16 @@ type Result struct {
 // relation found each, which dead component each belongs to, and which
 // exemptions held a symbol back.
 //
-// The order of the work is the order the answers depend on: the marks and the
-// called roots are live before either relation runs, reference counting and
-// reachability are then computed over the whole graph, the candidate set is the
-// symbols at least one relation does not hold live, the tests of dead code join
-// that set, and the components are computed over the set that results.
+// The order of the work is the order the answers depend on: the callers are live
+// before either relation runs, reference counting and reachability are then
+// computed over the whole graph, the candidate set is the symbols at least one
+// relation does not hold live, the tests of dead code join that set, and the
+// components are computed over the set that results.
+//
+// A caller is a root of every kind but the published API, and a symbol a loaded
+// consumer references. The two are one rule read twice: a root of an actual caller
+// and a consumer's call each name a use the target's own source does not hold, so
+// each holds its symbol live under both relations and seeds the closure from it.
 //
 // Which exemptions took effect is decided by sweeping twice, because the sweep is
 // what makes them take effect: the second sweep drops the exemptions from both
@@ -243,19 +258,31 @@ func (s *sweep) retained(exempt []Exemption) []Exemption {
 	return found
 }
 
-// callers keeps every root that names a caller the analysis cannot see in the
-// source: the runtime, the test binary, the linker, C code, a blank declaration's
-// initializer, or the maintainer's assertion of one in the configuration. Each is
-// live under both relations.
+// callers keeps every symbol an actual caller reaches, which is of two kinds.
 //
-// The published API of a library is the one root kind that only hypothesises a
-// caller, so it is not a caller here: its closure is live under reachability
-// while the exported symbol itself is a candidate when nothing in the loaded
-// graph references it.
+// A root that names a caller the analysis cannot see in the source: the runtime,
+// the test binary, the linker, C code, a blank declaration's initializer, or the
+// maintainer's assertion of one in the configuration. The published API of a
+// library is the one root kind that only hypothesises a caller, so it is not a
+// caller here: its closure is live under reachability while the exported symbol
+// itself is a candidate when nothing in the loaded graph references it.
+//
+// And a symbol a loaded consumer references. That caller the analysis did see, in
+// the consumer's own source, which is the whole point of loading the consumer: a
+// declared consumer is a module whose references count, so a symbol it uses is live
+// under both relations exactly as a root of an actual caller is, and what that
+// symbol references is live with it.
+//
+// Each is live under both relations.
 func (s *sweep) callers() {
 	for _, r := range s.g.rooted {
 		if r.kind != RootPublishedAPI {
 			s.called[r.at] = true
+		}
+	}
+	for i := range s.g.symbols {
+		if s.g.consumedIn(i, &s.mode) {
+			s.called[i] = true
 		}
 	}
 }
@@ -264,7 +291,7 @@ func (s *sweep) callers() {
 // reference to it, and holds every mark and every caller live before it counts.
 func (s *sweep) referenceCounting() {
 	for i := range s.g.symbols {
-		if s.marked[i] || s.called[i] || s.g.references(i, s.mode.Production) > 0 {
+		if s.marked[i] || s.called[i] || s.g.references(i, &s.mode) > 0 {
 			s.live[i] = s.live[i].with(ReferenceCounting)
 		}
 	}
@@ -276,14 +303,14 @@ func (s *sweep) referenceCounting() {
 // There are two seeds because they reach through different reference sets. A
 // symbol a mark or an exemption holds is live by a mechanism the analysis cannot
 // see, so every reference it makes is one that mechanism makes and no mode
-// withholds it; a root reaches through the references the mode counts. The held
-// seed runs first, which is what makes the wider rule transitive: a symbol its
-// closure reached is already expanded under that rule by the time the roots reach
-// it.
+// withholds it; a root and a consumer's call reach through the references the mode
+// counts. The held seed runs first, which is what makes the wider rule transitive:
+// a symbol its closure reached is already expanded under that rule by the time the
+// callers reach it.
 func (s *sweep) reachability() {
 	reached := make([]bool, len(s.g.symbols))
 	s.walk(reached, s.heldSeed(reached), true)
-	s.walk(reached, s.rootSeed(reached), false)
+	s.walk(reached, s.callerSeed(reached), false)
 	for i := range s.g.symbols {
 		if reached[i] || s.called[i] {
 			s.live[i] = s.live[i].with(Reachability)
@@ -306,10 +333,16 @@ func (s *sweep) heldSeed(reached []bool) []int {
 	return queue
 }
 
-// rootSeed is every root, except that a production sweep leaves the test roots
-// out. A test function is run by the test binary and is not a candidate, and
-// nothing it alone reaches is live.
-func (s *sweep) rootSeed(reached []bool) []int {
+// callerSeed is every root and every symbol a loaded consumer references, except
+// that a production sweep leaves the test roots out. A test function is run by the
+// test binary and is not a candidate, and nothing it alone reaches is live.
+//
+// A consumer's reference seeds the closure because the consumer is a caller: what
+// the symbol it calls references is reached through that call. Which of a
+// consumer's references count is the mode's, so a production sweep seeds from a
+// consumer's test file only where the mode classifies such a reference as a
+// production one.
+func (s *sweep) callerSeed(reached []bool) []int {
 	queue := make([]int, 0, len(s.g.rooted))
 	for _, r := range s.g.rooted {
 		if (s.mode.Production && r.kind == RootTest) || reached[r.at] {
@@ -317,6 +350,13 @@ func (s *sweep) rootSeed(reached []bool) []int {
 		}
 		reached[r.at] = true
 		queue = append(queue, r.at)
+	}
+	for i := range s.g.symbols {
+		if reached[i] || !s.g.consumedIn(i, &s.mode) {
+			continue
+		}
+		reached[i] = true
+		queue = append(queue, i)
 	}
 	return queue
 }
@@ -405,13 +445,14 @@ func (s *sweep) result() Result {
 			continue
 		}
 		relation := Reachability
-		if s.g.references(i, s.mode.Production) == 0 {
+		if s.g.references(i, &s.mode) == 0 {
 			relation = ReferenceCounting
 		}
+		production, test := s.g.counted(i, &s.mode)
 		r.Candidates = append(r.Candidates, Candidate{
 			ID:             s.g.symbols[i].ID,
-			ProductionRefs: s.g.made[i].production,
-			TestRefs:       s.g.made[i].test,
+			ProductionRefs: production,
+			TestRefs:       test,
 			Relation:       relation,
 			TestOfDeadCode: s.testOfDeadCode[i],
 		})

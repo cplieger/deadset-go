@@ -1,0 +1,39 @@
+A target whose importable package exports one struct with a field the command reads
+and a field nothing reads, so one finding's reachability class is what the run's
+consumer knowledge decides.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- catalog/catalog.go --
+package catalog
+
+// Counter is constructed by the command.
+type Counter struct {
+	// Live is read from the command.
+	Live int
+
+	// Stale is read by nothing.
+	Stale int
+}
+-- internal/store/store.go --
+package store
+
+// Kept is read from the command.
+var Kept = 1
+
+// Dropped is read by nothing, in a package nothing outside the module can import.
+var Dropped = 2
+-- main.go --
+package main
+
+import (
+	"example.com/app/catalog"
+	"example.com/app/internal/store"
+)
+
+func main() {
+	c := catalog.Counter{Live: 1}
+	println(c.Live, store.Kept)
+}

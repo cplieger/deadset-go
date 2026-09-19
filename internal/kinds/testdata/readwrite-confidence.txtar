@@ -1,0 +1,24 @@
+One package holding an unused member of an iota group and an unused function type
+parameter, so that one run answers both kinds' confidence against their class.
+
+-- go.mod --
+module example.com/both
+
+go 1.27.1
+-- main.go --
+package main
+
+// step is an enumerated type nothing converts into.
+type step int
+
+const (
+	stepFirst step = iota
+	stepSecond
+)
+
+// walk names one member of step and names its type parameter nowhere.
+func walk[T any](s step) step { return s }
+
+func main() {
+	println(int(walk[int](stepFirst)))
+}

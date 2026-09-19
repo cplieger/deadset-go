@@ -1,0 +1,36 @@
+A target whose test file references one declaration no production file references,
+beside one both reference.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- catalog/catalog.go --
+package catalog
+
+// OnlyTested is referenced from the test file alone.
+func OnlyTested() int { return 1 }
+
+// Production is referenced from the command as well as from the test file.
+func Production() int { return 2 }
+-- catalog/catalog_test.go --
+package catalog
+
+import "testing"
+
+func TestBothDeclarations(t *testing.T) {
+	if OnlyTested() != 1 {
+		t.Error("OnlyTested() is not 1")
+	}
+	if Production() != 2 {
+		t.Error("Production() is not 2")
+	}
+}
+-- main.go --
+package main
+
+import "example.com/app/catalog"
+
+func main() {
+	println(catalog.Production())
+}

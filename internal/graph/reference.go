@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"cmp"
 	"fmt"
 	"go/ast"
 	"go/token"
@@ -53,18 +54,27 @@ func (k RefKind) String() string {
 	return refKindNames[k]
 }
 
-// Reference is one use of a target symbol by one declaration.
+// Reference is one use of a target symbol, by a declaration of the target or by a
+// loaded consumer.
 type Reference struct {
-	// From is the declaration that encloses the referencing identifier, never
-	// the file that holds it. A declaration the walk's symbol set does not hold
-	// makes no reference, so nothing outside that set is the From of a reference
-	// the walk returns; a caller that widens the set past the target's own
-	// declarations widens what a From can name.
+	// From is the declaration of the target that encloses the referencing
+	// identifier, never the file that holds it. A declaration the inventory does
+	// not hold makes no From, so every reference a consumer makes carries none:
+	// the declarations a run reasons about are the target's, and a consumer's are
+	// not enumerated.
 	From SymbolID
 	To   SymbolID
 
-	// Pos is the referencing identifier's rendered position: Filename is
-	// target-relative with forward slashes and Column counts UTF-16 code units.
+	// Consumer is the module path of the loaded consumer that made the reference,
+	// and is empty for a reference the target made. A consumer's reference is an
+	// actual caller of the target from outside it, which is what the sweep reads
+	// it as.
+	Consumer string
+
+	// Pos is the referencing identifier's rendered position, relative to the root
+	// of the module that made the reference, with forward slashes and a Column
+	// counting UTF-16 code units. A consumer's reference is therefore read
+	// together with Consumer, which names the module the path is relative to.
 	Pos token.Position
 
 	// Config is the place in the matrix of the build configuration the reference
@@ -75,11 +85,11 @@ type Reference struct {
 	Test   bool // the referencing file is a test file
 }
 
-// References walks every loaded package of one configuration once and returns
-// every reference to a symbol in symbols, in a deterministic order, plus the
-// test-file rules applied. It issues no per-symbol query: one walk per source
-// file resolves every identifier the file holds through the type information the
-// load already carries.
+// References walks every loaded package of one configuration once, the target's
+// and every declared consumer's, and returns every reference to a symbol in
+// symbols, in a deterministic order, plus the test-file rules applied. It issues
+// no per-symbol query: one walk per source file resolves every identifier the file
+// holds through the type information the load already carries.
 //
 // A source file that several package variants type-check is walked once, from
 // the first variant that reaches it, so a reference a production file makes is
@@ -87,13 +97,16 @@ type Reference struct {
 // a reference a test file makes comes from the variant that compiles it.
 //
 // Every reference a test file makes carries Test, which is the flag a caller
-// filters on to count production references alone. References itself counts
-// both.
+// filters on to count production references alone, and the rule that classified
+// the file is the same rule in a consumer as in the target. References itself
+// counts both.
 //
-// A reference names a declaration of a package this configuration loaded, so a
-// use of another module's declaration and of a name the language itself declares
-// is no reference. A file targetRoot does not hold ends the walk with [ErrSource]
-// rather than being passed over.
+// A reference names a declaration the target declares, so a use of another
+// module's declaration and of a name the language itself declares is no
+// reference, whichever module made it. A file of the target that targetRoot does
+// not hold ends the walk with [ErrSource] rather than being passed over; a
+// consumer's own files are rendered against that consumer's root, so nothing of
+// the target's rendering depends on where a consumer sits.
 func References(r *load.Result, targetRoot string, read ReadFile, symbols []Symbol) ([]Reference, []TestFileRule, error) {
 	p, err := newReferencePass(r, targetRoot, read, symbols)
 	if err != nil {
@@ -102,25 +115,28 @@ func References(r *load.Result, targetRoot string, read ReadFile, symbols []Symb
 	if err := p.walk(r.Packages); err != nil {
 		return nil, nil, err
 	}
+	for i := range r.Consumers {
+		if err := p.walkConsumer(&r.Consumers[i], read); err != nil {
+			return nil, nil, err
+		}
+	}
 	slices.SortFunc(p.refs, byUse)
 	return p.refs, []TestFileRule{{Rule: goTestSuffixRule, Matched: p.testFiles}}, nil
 }
 
-// byUse orders two references by the position of the referencing identifier,
-// then by the symbol referenced, the declaration referencing it and the kind. It
-// is a total order because one identifier never references one symbol twice from
-// one declaration, while a selector that reaches through an embedded field does
-// reference two symbols at one position.
+// byUse orders two references by the module that made them, the target's own
+// first, then by the position of the referencing identifier, then by the symbol
+// referenced, the declaration referencing it and the kind. It is a total order
+// because one identifier never references one symbol twice from one declaration,
+// while a selector that reaches through an embedded field does reference two
+// symbols at one position, and a position is only unique within one module.
 //
 //nolint:gocritic // slices.SortFunc fixes a comparator's parameters to values.
 func byUse(a, b Reference) int {
-	if c := strings.Compare(a.Pos.Filename, b.Pos.Filename); c != 0 {
+	if c := strings.Compare(a.Consumer, b.Consumer); c != 0 {
 		return c
 	}
-	if c := a.Pos.Line - b.Pos.Line; c != 0 {
-		return c
-	}
-	if c := a.Pos.Column - b.Pos.Column; c != 0 {
+	if c := ByPosition(a.Pos, b.Pos); c != 0 {
 		return c
 	}
 	if c := strings.Compare(string(a.To), string(b.To)); c != 0 {
@@ -129,7 +145,7 @@ func byUse(a, b Reference) int {
 	if c := strings.Compare(string(a.From), string(b.From)); c != 0 {
 		return c
 	}
-	return int(a.Kind) - int(b.Kind)
+	return cmp.Compare(a.Kind, b.Kind)
 }
 
 // site is one declaration's rendered position, which is what a symbol
@@ -144,13 +160,15 @@ type site struct {
 // referencePass accumulates the references of one loaded configuration.
 type referencePass struct {
 	pos       *positions
+	at        *positions  // renders the file being walked, which is pos while the target is walked
 	info      *types.Info // the type information of the variant that compiles the file being walked
 	symbols   map[site]SymbolID
 	ids       map[token.Pos]SymbolID // one resolved position, resolved once; empty for a position no symbol declares
 	kinds     map[token.Pos]RefKind  // the kind a parent node fixes for an identifier below it
 	callees   map[token.Pos]bool     // the identifiers a call expression names as its callee
-	reached   map[string]int         // per source file, the variants that compile it
-	declaring map[string]bool        // the import paths of the packages this walk enumerates
+	reached   map[string]int         // per source file, by the path the toolchain named, the variants that compile it
+	declaring map[string]bool        // the import paths of the packages the target declares
+	consumer  string                 // the module path of the consumer being walked, empty while the target is
 	err       error
 	refs      []Reference
 	testFiles int
@@ -175,6 +193,7 @@ func newReferencePass(r *load.Result, targetRoot string, read ReadFile, symbols 
 		callees: make(map[token.Pos]bool),
 		reached: make(map[string]int),
 	}
+	p.at = p.pos
 	for i := range symbols {
 		s := &symbols[i]
 		p.symbols[site{file: s.Pos.Filename, line: s.Pos.Line, col: s.Pos.Column}] = s.ID
@@ -182,17 +201,57 @@ func newReferencePass(r *load.Result, targetRoot string, read ReadFile, symbols 
 	return p, nil
 }
 
-// walk visits every file of every variant, in one order, and returns the first
-// failure the walk met.
+// walkConsumer walks every package of one loaded consumer, recording the
+// references it makes to the target's declarations.
+//
+// The consumer's own declarations are not the subject of anything, so no
+// declaration of the walk's symbol set encloses them and every reference the
+// consumer makes carries no From. The positions the consumer's files render
+// against are the consumer's own root, which is the module directory the scope
+// named, so a consumer outside the target's tree renders as readily as one inside
+// it.
+func (p *referencePass) walkConsumer(consumer *load.Consumer, read ReadFile) error {
+	root := ""
+	if module := consumerModule(consumer); module != nil {
+		root = module.Dir
+	}
+	p.consumer = consumer.ID
+	p.at = newPositions(p.pos.fset, root, read)
+	defer func() {
+		p.consumer = ""
+		p.at = p.pos
+	}()
+	return p.walk(consumer.Packages)
+}
+
+// consumerModule returns the module one consumer's packages belong to, which is
+// what its files are rendered relative to.
+func consumerModule(consumer *load.Consumer) *packages.Module {
+	for _, pkg := range consumer.Packages {
+		if pkg.Module != nil && pkg.Module.Dir != "" {
+			return pkg.Module
+		}
+	}
+	return nil
+}
+
+// walk visits every file of every variant of one module, in one order, and
+// returns the first failure the walk met.
+//
+// The import paths a reference may name are the target's, recorded by the walk of
+// the target, so a consumer's own packages never join that set: a consumer
+// declares nothing this analysis reasons about.
 func (p *referencePass) walk(pkgs []*packages.Package) error {
-	groups := groupVariants(pkgs, p.pos)
-	p.declaring = make(map[string]bool, len(groups))
-	for _, g := range groups {
-		p.declaring[g.pkgPath] = true
+	groups := groupVariants(pkgs, p.at)
+	if p.consumer == "" {
+		p.declaring = make(map[string]bool, len(groups))
+		for _, g := range groups {
+			p.declaring[g.pkgPath] = true
+		}
 	}
 	for _, g := range groups {
 		for _, pkg := range g.pkgs {
-			for _, f := range syntaxFiles(pkg, p.pos) {
+			for _, f := range syntaxFiles(pkg, p.at) {
 				if err := p.walkFile(pkg, f); err != nil {
 					return err
 				}
@@ -202,14 +261,17 @@ func (p *referencePass) walk(pkgs []*packages.Package) error {
 	return nil
 }
 
-// walkFile walks one source file, unless a variant reached it first.
+// walkFile walks one source file, unless a variant reached it first. A file is
+// keyed by the path the toolchain named it by, which is unique across the modules
+// one configuration loads where a module-relative path is not.
 func (p *referencePass) walkFile(pkg *packages.Package, f *ast.File) error {
-	position, err := p.pos.render(f.FileStart)
+	position, err := p.at.render(f.FileStart)
 	if err != nil {
 		return err
 	}
-	p.reached[position.Filename]++
-	if p.reached[position.Filename] > 1 {
+	named := p.at.fset.Position(f.FileStart).Filename
+	p.reached[named]++
+	if p.reached[named] > 1 {
 		return nil
 	}
 
@@ -238,7 +300,7 @@ func (p *referencePass) walkFile(pkg *packages.Package, f *ast.File) error {
 // references from that parameter, because deleting the parameter deletes the
 // constraint with it.
 func (p *referencePass) walkFunc(d *ast.FuncDecl) {
-	id, ok := p.symbolAt(d.Name.Pos())
+	id, ok := p.owner(d.Name.Pos())
 	if !ok {
 		return
 	}
@@ -263,7 +325,7 @@ func (p *referencePass) walkFunc(d *ast.FuncDecl) {
 // from every parameter the group declares.
 func (p *referencePass) walkTypeParams(f *ast.Field) {
 	for _, n := range f.Names {
-		id, ok := p.symbolAt(n.Pos())
+		id, ok := p.owner(n.Pos())
 		if !ok {
 			return
 		}
@@ -288,7 +350,7 @@ func (p *referencePass) walkGenDecl(d *ast.GenDecl) {
 // to the type rather than being subjects of their own, so their constraints
 // reference from the type.
 func (p *referencePass) walkTypeSpec(s *ast.TypeSpec) {
-	id, ok := p.symbolAt(s.Name.Pos())
+	id, ok := p.owner(s.Name.Pos())
 	if !ok {
 		return
 	}
@@ -312,7 +374,7 @@ func (p *referencePass) walkTypeSpec(s *ast.TypeSpec) {
 func (p *referencePass) walkValueSpec(s *ast.ValueSpec) {
 	ids := make([]SymbolID, 0, len(s.Names))
 	for _, n := range s.Names {
-		id, ok := p.symbolAt(n.Pos())
+		id, ok := p.owner(n.Pos())
 		if !ok {
 			return
 		}
@@ -348,11 +410,11 @@ func (p *referencePass) walkStruct(t *ast.StructType) {
 // walkEmbedded walks one embedded field, whose type references from the field
 // the language names after that type.
 func (p *referencePass) walkEmbedded(f *ast.Field) {
-	named := embeddedName(f.Type)
+	named := EmbeddedName(f.Type)
 	if named == nil {
 		return
 	}
-	id, ok := p.symbolAt(named.Pos())
+	id, ok := p.owner(named.Pos())
 	if !ok {
 		return
 	}
@@ -367,7 +429,7 @@ func (p *referencePass) walkField(f *ast.Field) {
 	inner := anonymousStruct(f.Type)
 	members := inner
 	for _, n := range f.Names {
-		id, ok := p.symbolAt(n.Pos())
+		id, ok := p.owner(n.Pos())
 		if !ok {
 			return
 		}
@@ -386,14 +448,14 @@ func (p *referencePass) walkField(f *ast.Field) {
 func (p *referencePass) walkInterface(t *ast.InterfaceType, owner SymbolID) {
 	for _, f := range t.Methods.List {
 		if len(f.Names) == 0 {
-			if named := embeddedName(f.Type); named != nil {
+			if named := EmbeddedName(f.Type); named != nil {
 				p.kinds[named.Pos()] = RefEmbed
 			}
 			p.inspect(f.Type, owner)
 			continue
 		}
 		for _, n := range f.Names {
-			id, ok := p.symbolAt(n.Pos())
+			id, ok := p.owner(n.Pos())
 			if !ok {
 				return
 			}
@@ -664,14 +726,37 @@ func (p *referencePass) markCallee(fun ast.Expr) {
 	}
 }
 
-// add keeps one reference, rendering the referencing identifier's position.
+// add keeps one reference, rendering the referencing identifier's position against
+// the root of the module that made it.
 func (p *referencePass) add(from, to SymbolID, pos token.Pos, kind RefKind) {
-	position, err := p.pos.render(pos)
+	position, err := p.at.render(pos)
 	if err != nil {
 		p.fail(err)
 		return
 	}
-	p.refs = append(p.refs, Reference{From: from, To: to, Pos: position, Kind: kind, Test: p.test})
+	p.refs = append(p.refs, Reference{
+		From:     from,
+		To:       to,
+		Consumer: p.consumer,
+		Pos:      position,
+		Kind:     kind,
+		Test:     p.test,
+	})
+}
+
+// owner returns the declaration a subtree references from, and whether the subtree
+// is walked at all.
+//
+// In the target, a declaration the inventory does not hold owns nothing and its
+// subtree is left alone, because a reference has to come from somewhere the
+// analysis can name. In a consumer, no declaration is in the inventory and every
+// subtree is walked with no owner: what a consumer's declaration is called decides
+// nothing, and what it references decides everything.
+func (p *referencePass) owner(pos token.Pos) (SymbolID, bool) {
+	if p.consumer != "" {
+		return "", true
+	}
+	return p.symbolAt(pos)
 }
 
 // symbolOf resolves the declaration of one object a walked file names. Only a

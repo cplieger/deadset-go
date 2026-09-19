@@ -1,0 +1,60 @@
+A package-level variable two statements store into and nothing reads, a field a
+constructor sets and the package's own test alone reads, a variable one statement
+reads, and a variable an address-of and a store through a pointer both read.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+// tally is stored into twice and nothing reads it.
+var tally int
+
+// seen is read once, so nothing reports it.
+var seen int
+
+// held is addressed, and a store through the pointer lands on the pointee.
+var held int
+
+// counter holds one field the test alone reads and one the package reads.
+type counter struct {
+	hits  int
+	total int
+}
+
+// newCounter sets both fields of a counter.
+func newCounter() *counter {
+	c := &counter{}
+	c.hits = 1
+	c.total = 2
+	return c
+}
+
+// sum reads the field nothing else reads.
+func (c *counter) sum() int { return c.total }
+
+// record stores into the package's variables.
+func record() {
+	tally = 1
+	tally = 2
+	p := &held
+	*p = 3
+}
+
+func main() {
+	record()
+	println(seen, newCounter().sum())
+}
+-- main_test.go --
+package main
+
+import "testing"
+
+// TestHits reads the field production code only sets.
+func TestHits(t *testing.T) {
+	if newCounter().hits != 1 {
+		t.Fatalf("newCounter().hits = %d, want 1", newCounter().hits)
+	}
+}

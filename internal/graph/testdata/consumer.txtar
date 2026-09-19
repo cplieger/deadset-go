@@ -1,0 +1,64 @@
+A target module and a consumer module of it: one exported declaration the
+consumer's own code references, one its test file alone references, one nothing
+references, and one unexported declaration only the referenced export reaches.
+
+-- target/go.mod --
+module example.com/target
+
+go 1.27.1
+-- target/lib.go --
+// Package target exports three declarations and keeps one to itself.
+package target
+
+// UsedByConsumer is referenced by the consumer's production file.
+func UsedByConsumer() string {
+	return helper()
+}
+
+// UsedByConsumerTest is referenced by the consumer's test file alone.
+func UsedByConsumerTest() string {
+	return "test"
+}
+
+// DeadExport is referenced by nothing.
+func DeadExport() string {
+	return "dead"
+}
+
+// helper is referenced by UsedByConsumer alone.
+func helper() string {
+	return "used"
+}
+-- consumer/go.mod --
+module example.com/consumer
+
+go 1.27.1
+
+require example.com/target v0.0.0
+
+replace example.com/target => ../target
+-- consumer/main.go --
+// Command consumer references one exported declaration of the target module.
+package main
+
+import "example.com/target"
+
+func main() {
+	if target.UsedByConsumer() == "" {
+		panic("the target returned an empty string")
+	}
+}
+-- consumer/main_test.go --
+package main
+
+import (
+	"testing"
+
+	"example.com/target"
+)
+
+func TestUsedByConsumerTestReturnsText(t *testing.T) {
+	if target.UsedByConsumerTest() == "" {
+		t.Error("target.UsedByConsumerTest() = \"\", want text")
+	}
+}

@@ -441,6 +441,79 @@ func configsOfRoots(roots []Root) []int {
 	return found
 }
 
+func TestMatrixUnmatchedEverywhereIntersectsWhatEachConfigurationMatchedNothingWith(t *testing.T) {
+	cases := map[string]struct {
+		per  [][]string
+		want []string
+	}{
+		"one configuration answers its own set": {
+			per:  [][]string{{"alone", "second"}},
+			want: []string{"alone", "second"},
+		},
+		"a string every configuration matched nothing with": {
+			per:  [][]string{{"nowhere"}, {"nowhere"}},
+			want: []string{"nowhere"},
+		},
+		"a string one configuration matched": {
+			per:  [][]string{{"here"}, {}},
+			want: []string{},
+		},
+		"the order of the first configuration that reported each": {
+			per:  [][]string{{"second", "first"}, {"first", "second"}},
+			want: []string{"second", "first"},
+		},
+		"a string reported twice in one configuration": {
+			per:  [][]string{{"twice", "twice"}, {"twice"}},
+			want: []string{},
+		},
+		"nothing unmatched at all": {
+			per:  [][]string{{}, {}},
+			want: []string{},
+		},
+	}
+
+	for name, test := range cases {
+		t.Run(name, func(t *testing.T) {
+			b := newGraphBuilder(t).add("only")
+			per := b.configured(len(test.per), func(int, string) bool { return true })
+			for config, sources := range test.per {
+				for _, source := range sources {
+					per[config].Unmatched = append(per[config].Unmatched, Unmatched{Source: source})
+				}
+			}
+			merged, err := Merge(per)
+			if err != nil {
+				t.Fatalf("Merge = _, %v, want no error", err)
+			}
+
+			got := make([]string, 0, len(test.want))
+			for _, unmatched := range NewMatrix(&merged).UnmatchedEverywhere() {
+				got = append(got, unmatched.Source)
+			}
+			if !slices.Equal(got, test.want) {
+				t.Errorf("UnmatchedEverywhere over %v = %v, want %v", test.per, got, test.want)
+			}
+		})
+	}
+}
+
+func TestMergeCarriesEveryConfigurationsUnmatchedStrings(t *testing.T) {
+	b := newGraphBuilder(t).add("only")
+	per := b.configured(2, func(int, string) bool { return true })
+	per[0].Unmatched = []Unmatched{{Source: "first"}}
+	per[1].Unmatched = []Unmatched{{Source: "second"}}
+
+	merged, err := Merge(per)
+	if err != nil {
+		t.Fatalf("Merge = _, %v, want no error", err)
+	}
+
+	want := []Unmatched{{Source: "first", Config: 0}, {Source: "second", Config: 1}}
+	if !reflect.DeepEqual(merged.Unmatched, want) {
+		t.Errorf("Merge over two configurations returned unmatched %+v, want %+v", merged.Unmatched, want)
+	}
+}
+
 func TestDistinctCountsOneReferenceOncePerMatrixAndTwiceInOneConfiguration(t *testing.T) {
 	b := newGraphBuilder(t).add("caller", "target")
 	b.ref("caller", "target")
@@ -456,6 +529,24 @@ func TestDistinctCountsOneReferenceOncePerMatrixAndTwiceInOneConfiguration(t *te
 	// so the matrix counts two.
 	if got := len(distinct(merged.References)); got != 2 {
 		t.Errorf("distinct over two configurations holding two references at one position returned %d, want 2", got)
+	}
+}
+
+func TestDistinctTellsTwoConsumersReferencesAtOnePositionApart(t *testing.T) {
+	b := newGraphBuilder(t).add("called")
+	b.refFromConsumer(handConsumer, "called", false)
+	b.refFromConsumer(handOtherConsumer, "called", false)
+	// One position per consumer, which is what two modules holding a file of one
+	// name produce: the module is part of what makes a reference one reference.
+	b.refs[1].Pos = b.refs[0].Pos
+	per := b.configured(2, func(int, string) bool { return true })
+	merged, err := Merge(per)
+	if err != nil {
+		t.Fatalf("Merge = _, %v, want no error", err)
+	}
+
+	if got := len(distinct(merged.References)); got != 2 {
+		t.Errorf("distinct over two consumers referencing one symbol at one position returned %d, want 2", got)
 	}
 }
 

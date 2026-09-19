@@ -1,0 +1,22 @@
+A main package whose exported function is referenced once, from the file that
+declares it, beside one whose single reference is in another file of the same
+package.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- main.go --
+package main
+
+func main() {
+	_ = Helper() + Beyond()
+}
+
+// Helper is referenced from the file that declares it.
+func Helper() int { return 2 }
+-- beyond.go --
+package main
+
+// Beyond is referenced from another file of its package.
+func Beyond() int { return 3 }

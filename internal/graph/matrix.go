@@ -51,25 +51,28 @@ func (s ConfigSet) with(config int) ConfigSet {
 }
 
 // Configured is what the three passes returned for one build configuration: the
-// declarations that configuration holds, the references its files make and the
-// roots that seed it.
+// declarations that configuration holds, the references made to them by that
+// configuration's files and by every consumer loaded with it, the roots that seed
+// it, and the configured strings its root detection matched nothing with.
 type Configured struct {
 	Symbols    []Symbol
 	References []Reference
 	Roots      []Root
+	Unmatched  []Unmatched
 }
 
 // Merged is one matrix's inventory.
 //
 // Symbols holds every declaration any configuration declares, once per source
 // position, ordered by site the way one configuration's enumeration is, each
-// carrying the set of configurations it exists in. References and Roots hold
-// every configuration's own, each carrying the configuration it was seen in, so
-// the set one configuration contributed is recoverable from the whole.
+// carrying the set of configurations it exists in. References, Roots and Unmatched
+// hold every configuration's own, each carrying the configuration it was seen in,
+// so the set one configuration contributed is recoverable from the whole.
 type Merged struct {
 	Symbols        []Symbol
 	References     []Reference
 	Roots          []Root
+	Unmatched      []Unmatched
 	Configurations int
 }
 
@@ -119,6 +122,11 @@ func Merge(per []Configured) (Merged, error) {
 			r := one.Roots[i]
 			r.Config = config
 			m.Roots = append(m.Roots, r)
+		}
+		for i := range one.Unmatched {
+			u := one.Unmatched[i]
+			u.Config = config
+			m.Unmatched = append(m.Unmatched, u)
 		}
 	}
 	slices.SortFunc(m.Symbols, bySite)
@@ -183,16 +191,21 @@ func restrict(m *Merged, config int) Configured {
 	return one
 }
 
-// referenceSite keys one reference by what makes it one reference: the
-// declaration that makes it, the declaration it names, and the position it is
-// written at. The position's byte offset is not part of the key, so the key holds
-// whether or not a rendering carries one.
+// referenceSite keys one reference by what makes it one reference: the module that
+// makes it, the declaration that makes it, the declaration it names, and the
+// position it is written at. The position's byte offset is not part of the key, so
+// the key holds whether or not a rendering carries one.
+//
+// The module is part of the key because a position is only unique inside one
+// module: two consumers hold a file of one name, and a reference each makes at one
+// line of it is two references.
 type referenceSite struct {
-	from SymbolID
-	to   SymbolID
-	file string
-	line int
-	col  int
+	consumer string
+	from     SymbolID
+	to       SymbolID
+	file     string
+	line     int
+	col      int
 }
 
 // distinct returns the references of every configuration with the duplicates a
@@ -210,7 +223,14 @@ func distinct(refs []Reference) []Reference {
 	kept := make([]Reference, 0, len(refs))
 	for i := range refs {
 		r := &refs[i]
-		site := referenceSite{from: r.From, to: r.To, file: r.Pos.Filename, line: r.Pos.Line, col: r.Pos.Column}
+		site := referenceSite{
+			consumer: r.Consumer,
+			from:     r.From,
+			to:       r.To,
+			file:     r.Pos.Filename,
+			line:     r.Pos.Line,
+			col:      r.Pos.Column,
+		}
 		if config, held := first[site]; held && config != r.Config {
 			continue
 		} else if !held {
@@ -240,6 +260,11 @@ func distinct(refs []Reference) []Reference {
 // use. A duplicate, being one symbol, class and detail computed under more than
 // one configuration, is one retained record, at the site of the first entry the
 // mode lists.
+//
+// A consumer's reference is a reference of the configuration it was seen in, so a
+// consumer that compiles its call on one platform alone holds the symbol live
+// there, and the intersection is what decides whether the symbol is reported at
+// all.
 func (x *Matrix) Sweep(m Mode) Result {
 	per := make([]Result, len(x.per))
 	held := make([]map[SymbolID]Candidate, len(x.per))
@@ -261,7 +286,7 @@ func (x *Matrix) Sweep(m Mode) Result {
 	dead := make([]bool, len(x.merged.Symbols))
 	testOfDeadCode := make([]bool, len(x.merged.Symbols))
 	for i := range x.merged.Symbols {
-		c, candidate := x.intersect(&x.merged.Symbols[i], held)
+		c, candidate := x.intersect(&x.merged.Symbols[i], held, &m)
 		if !candidate {
 			continue
 		}
@@ -288,7 +313,7 @@ func (x *Matrix) Sweep(m Mode) Result {
 // are the matrix's totals, one per reference rather than one per configuration
 // that saw it, so a kind reading them reads how many references the declaration
 // carries.
-func (x *Matrix) intersect(s *Symbol, held []map[SymbolID]Candidate) (Candidate, bool) {
+func (x *Matrix) intersect(s *Symbol, held []map[SymbolID]Candidate, m *Mode) (Candidate, bool) {
 	c := Candidate{ID: s.ID, Relation: ReferenceCounting, Configs: 0, TestOfDeadCode: true}
 	for config := range x.merged.Configurations {
 		if !s.Configs.Has(config) {
@@ -309,10 +334,38 @@ func (x *Matrix) intersect(s *Symbol, held []map[SymbolID]Candidate) (Candidate,
 	if c.Configs == 0 {
 		return Candidate{}, false
 	}
-	at := x.union.at(s.ID)
-	c.ProductionRefs = x.union.made[at].production
-	c.TestRefs = x.union.made[at].test
+	c.ProductionRefs, c.TestRefs = x.union.counted(x.union.at(s.ID), m)
 	return c, true
+}
+
+// UnmatchedEverywhere returns the configured strings no configuration of the matrix
+// matched, in the order the first configuration that reported each lists them.
+//
+// A string one configuration matched names something, so the answer is the
+// intersection and not the union: a pattern naming a symbol one platform declares
+// is not a pattern that names nothing, and a matrix of one configuration answers
+// that configuration's own set. This is the same rule the candidate intersection
+// applies, which is why it is answered here rather than by the caller that reads
+// both.
+func (x *Matrix) UnmatchedEverywhere() []Unmatched {
+	if x.merged.Configurations == 0 {
+		return nil
+	}
+	count := make(map[string]int, len(x.merged.Unmatched))
+	for i := range x.merged.Unmatched {
+		count[x.merged.Unmatched[i].Source]++
+	}
+	everywhere := make([]Unmatched, 0, len(count))
+	held := make(map[string]bool, len(count))
+	for i := range x.merged.Unmatched {
+		source := x.merged.Unmatched[i].Source
+		if held[source] || count[source] != x.merged.Configurations {
+			continue
+		}
+		held[source] = true
+		everywhere = append(everywhere, Unmatched{Source: source})
+	}
+	return everywhere
 }
 
 // retained lists the exemptions that held a symbol back under any configuration,

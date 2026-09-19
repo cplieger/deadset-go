@@ -22,6 +22,7 @@ import (
 	"github.com/cplieger/deadset-go/internal/config"
 	"github.com/cplieger/deadset-go/internal/exempt"
 	"github.com/cplieger/deadset-go/internal/graph"
+	"github.com/cplieger/deadset-go/internal/kinds"
 	"github.com/cplieger/deadset-go/internal/load"
 	"github.com/cplieger/deadset-go/internal/matrix"
 	"github.com/cplieger/deadset-go/internal/scope"
@@ -274,6 +275,33 @@ var detectors = map[exempt.Class]exempt.Detector{
 	exempt.ReflectiveLookup:      exempt.ReflectiveLookupDetector,
 }
 
+// emitters is every issue kind this analyzer reports, each mapped to the rule that
+// reports it, and it is the whole of what a findings pass computes: the framework
+// names no kind, so a code absent from this table reports nothing at all and a code
+// the vocabulary does not hold refuses the pass rather than running as nothing.
+//
+// A code is written out rather than read from the kind's own package, because the
+// table is what says which kinds this version of the analyzer answers; the
+// vocabulary says which kinds exist, and the two are compared by a test rather than
+// derived from one another.
+var emitters = map[string]kinds.Emitter{
+	"DS1001": kinds.UnusedExported,
+	"DS1002": kinds.UnusedUnexported,
+	"DS1003": kinds.UnusedMember,
+	"DS1004": kinds.TestOnlyUse,
+	"DS1005": kinds.TestOfDeadCode,
+	"DS1006": kinds.DeprecatedAndUnused,
+	"DS1101": kinds.UnnecessaryExport,
+	"DS1102": kinds.UnnecessaryExposure,
+	"DS1103": kinds.UnreachableExport,
+	"DS1201": kinds.UnusedInterface,
+	"DS1203": kinds.UncalledInterfaceMethod,
+	"DS1204": kinds.UnusedSatisfactionAssertion,
+	"DS1301": kinds.WriteOnlySymbol,
+	"DS1302": kinds.UnusedEnumMember,
+	"DS1303": kinds.UnusedTypeParameter,
+}
+
 // configured is one configuration of the matrix: what it loaded and the
 // declarations enumerated from it, which is what a stage reading one
 // configuration's types rather than the matrix's inventory reads.
@@ -284,16 +312,17 @@ type configured struct {
 
 // stages is what the matrix produced: the configurations analyzed, one load and
 // one enumeration each, the merged inventory every configuration contributed to,
-// the target root every position is rendered against, the reference of every
-// symbol of that inventory, and every configured string that named no symbol in
-// any configuration.
+// the matrix over that inventory, the target root every position is rendered
+// against, the reference of every symbol of the inventory, and every configured
+// string that named no symbol in any configuration.
 type stages struct {
+	matrix         *graph.Matrix
+	merged         *graph.Merged
 	refs           map[graph.SymbolID]string
 	root           string
 	configurations []string
 	per            []configured
 	unmatched      []graph.Unmatched
-	merged         graph.Merged
 }
 
 // rootSet is the matrix's root set: every root any configuration detected, each
@@ -384,7 +413,11 @@ func rootsOf(ctx context.Context, resolved *resolution) (rootSet, error) {
 // unmatched sets is what keeps a matrix from reporting a root pattern as naming
 // nothing because another platform lacks the file.
 func stagesOf(ctx context.Context, resolved *resolution) (stages, error) {
-	document, err := scope.ForDir(resolved.target)
+	// No verb names a scope document, so the scope of a run is the workspace that
+	// governs the target where one lists it and the target alone otherwise. The
+	// flag that supplies a document belongs to the verb that reports a finding,
+	// which is where a declared consumer set decides what a report says.
+	document, err := scope.Resolve(ctx, resolved.target, "")
 	if err != nil {
 		return stages{}, err
 	}
@@ -404,9 +437,8 @@ func stagesOf(ctx context.Context, resolved *resolution) (stages, error) {
 	}
 	per := make([]configured, len(results))
 	passes := make([]graph.Configured, len(results))
-	unmatched := make([][]graph.Unmatched, len(results))
 	for i := range results {
-		if per[i], passes[i], unmatched[i], err = passesOf(&results[i], targetRoot, rootOptions); err != nil {
+		if per[i], passes[i], err = passesOf(&results[i], targetRoot, rootOptions); err != nil {
 			return stages{}, err
 		}
 	}
@@ -419,33 +451,35 @@ func stagesOf(ctx context.Context, resolved *resolution) (stages, error) {
 	for i := range merged.Symbols {
 		refs[merged.Symbols[i].ID] = merged.Symbols[i].Ref
 	}
+	x := graph.NewMatrix(&merged)
 	return stages{
+		matrix:         x,
 		refs:           refs,
 		root:           targetRoot,
 		configurations: identifiers(configurations),
 		per:            per,
-		unmatched:      unmatchedEverywhere(unmatched),
-		merged:         merged,
+		unmatched:      x.UnmatchedEverywhere(),
+		merged:         &merged,
 	}, nil
 }
 
 // passesOf runs the three passes over one loaded configuration.
-func passesOf(result *load.Result, targetRoot string, rootOptions graph.RootOptions) (configured, graph.Configured, []graph.Unmatched, error) {
+func passesOf(result *load.Result, targetRoot string, rootOptions graph.RootOptions) (configured, graph.Configured, error) {
 	symbols, err := graph.Symbols(result, targetRoot, os.ReadFile)
 	if err != nil {
-		return configured{}, graph.Configured{}, nil, err
+		return configured{}, graph.Configured{}, err
 	}
 	references, _, err := graph.References(result, targetRoot, os.ReadFile, symbols)
 	if err != nil {
-		return configured{}, graph.Configured{}, nil, err
+		return configured{}, graph.Configured{}, err
 	}
 	roots, unmatched, err := graph.Roots(result, targetRoot, os.ReadFile, symbols, rootOptions)
 	if err != nil {
-		return configured{}, graph.Configured{}, nil, err
+		return configured{}, graph.Configured{}, err
 	}
 	return configured{symbols: symbols, result: *result},
-		graph.Configured{Symbols: symbols, References: references, Roots: roots},
-		unmatched, nil
+		graph.Configured{Symbols: symbols, References: references, Roots: roots, Unmatched: unmatched},
+		nil
 }
 
 // matrixOf resolves the build matrix one run analyzes: the configurations the
@@ -478,27 +512,6 @@ func identifiers(configurations []load.Configuration) []string {
 		named[i] = c.ID
 	}
 	return named
-}
-
-// unmatchedEverywhere returns the configured strings no configuration matched, in
-// the order the first configuration lists them.
-func unmatchedEverywhere(per [][]graph.Unmatched) []graph.Unmatched {
-	if len(per) == 0 {
-		return nil
-	}
-	count := make(map[string]int)
-	for _, one := range per {
-		for _, unmatched := range one {
-			count[unmatched.Source]++
-		}
-	}
-	everywhere := make([]graph.Unmatched, 0, len(per[0]))
-	for _, unmatched := range per[0] {
-		if count[unmatched.Source] == len(per) {
-			everywhere = append(everywhere, unmatched)
-		}
-	}
-	return everywhere
 }
 
 // printRetained writes the retained set of the matrix to stdout, one line per
@@ -564,31 +577,81 @@ func printRetained(ctx context.Context, args []string, stdout, stderr io.Writer)
 // what an exemption held back, and a symbol held back under one mode is held back
 // under the other.
 func retainedOf(ctx context.Context, resolved *resolution, options *exempt.Options) (retainedSet, error) {
-	loaded, err := stagesOf(ctx, resolved)
+	analyzed, err := analysisOf(ctx, resolved, options, false)
 	if err != nil {
 		return retainedSet{}, err
 	}
-
-	var exemptions []graph.Exemption
-	for i := range loaded.per {
-		computed, err := exemptionsOf(&loaded.per[i], loaded.root, options)
-		if err != nil {
-			return retainedSet{}, err
-		}
-		exemptions = append(exemptions, computed...)
-	}
-
-	swept := graph.NewMatrix(&loaded.merged).Sweep(graph.Mode{Exempt: exemptions})
-	return retainedSet{refs: loaded.refs, retained: swept.Retained, unmatched: loaded.unmatched}, nil
+	return retainedSet{
+		refs:      analyzed.stages.refs,
+		retained:  analyzed.swept.Retained,
+		unmatched: analyzed.stages.unmatched,
+	}, nil
 }
 
-// exemptionsOf computes the exemptions of one configuration.
-func exemptionsOf(one *configured, targetRoot string, options *exempt.Options) ([]graph.Exemption, error) {
+// analysis is what one run answered before any kind reads it: the stages, one
+// resolver and one exemption set per configuration, and one sweep of the matrix.
+type analysis struct {
+	stages     stages
+	per        []kinds.Configured
+	exemptions []graph.Exemption
+	swept      graph.Result
+}
+
+// analysisOf runs the stages, the exemption classes of every configuration and one
+// sweep of the matrix, which is what every verb that answers about liveness reads.
+//
+// The classes read one configuration's own types, so they run once per
+// configuration and the mode carries the union of what they found: an exemption is
+// evidence of a use the analysis cannot see, and a use under one configuration is a
+// use. One symbol, class and detail computed under more than one configuration is
+// one retained record, which is what the sweep of the matrix deduplicates.
+//
+// A production sweep drops every reference a test file made, which is what makes a
+// declaration only a test references dead and a test of dead code admitted; a sweep
+// that is not the production one counts every reference, because which symbols a
+// finding reports is a different question from what an exemption held back.
+func analysisOf(ctx context.Context, resolved *resolution, options *exempt.Options, production bool) (analysis, error) {
+	loaded, err := stagesOf(ctx, resolved)
+	if err != nil {
+		return analysis{}, err
+	}
+
+	per := make([]kinds.Configured, len(loaded.per))
+	var exemptions []graph.Exemption
+	for i := range loaded.per {
+		resolver, computed, err := exemptionsOf(&loaded.per[i], loaded.root, options)
+		if err != nil {
+			return analysis{}, err
+		}
+		exemptions = append(exemptions, computed...)
+		per[i] = kinds.Configured{
+			Result:  &loaded.per[i].result,
+			Resolve: resolver,
+			Symbols: loaded.per[i].symbols,
+		}
+	}
+
+	return analysis{
+		stages:     loaded,
+		per:        per,
+		exemptions: exemptions,
+		swept: loaded.matrix.Sweep(graph.Mode{
+			Exempt:                  exemptions,
+			ConsumerTestsProduction: resolved.config.Analysis.ConsumerTests == config.ProductionReference,
+			Production:              production,
+		}),
+	}, nil
+}
+
+// exemptionsOf computes the exemptions of one configuration and returns the
+// resolver they were computed through, which is also what a kind reading one
+// configuration's positions reads.
+func exemptionsOf(one *configured, targetRoot string, options *exempt.Options) (*graph.Resolver, []graph.Exemption, error) {
 	resolver, err := graph.NewResolver(&one.result, targetRoot, os.ReadFile, one.symbols)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return exempt.Compute(&exempt.Input{
+	exemptions, err := exempt.Compute(&exempt.Input{
 		Result:  &one.result,
 		Resolve: resolver,
 		Symbols: one.symbols,
@@ -596,6 +659,108 @@ func exemptionsOf(one *configured, targetRoot string, options *exempt.Options) (
 		Read:    os.ReadFile,
 		Options: *options,
 	}, detectors)
+	if err != nil {
+		return nil, nil, err
+	}
+	return resolver, exemptions, nil
+}
+
+// findingSet is what one findings pass produced: the findings of every kind in the
+// canonical order with the count the minimum confidence excluded, and every
+// configured string that named no symbol in any configuration.
+type findingSet struct {
+	unmatched []graph.Unmatched
+	result    kinds.Result
+}
+
+// findingsOf is what this analyzer reports about one target: the stages, the
+// exemption classes, the production sweep of the matrix, and every kind of the
+// emitters table over what they answered.
+//
+// The sweep is the production one, which is the sweep the findings are about: a
+// declaration only a test file references is dead under it, and a test of a dead
+// declaration is admitted, so the two kinds that report those populations have a
+// population at all. What an exemption held back is a different question and the
+// retained verb asks it under its own mode.
+//
+// A pass that refuses a finding returns an error and no findings, because a refusal
+// is a defect in a kind's rule rather than something a report could say, and a
+// report this analyzer cannot stand behind is a failure rather than a finding list.
+func findingsOf(ctx context.Context, resolved *resolution, options *exempt.Options) (findingSet, error) {
+	analyzed, err := analysisOf(ctx, resolved, options, true)
+	if err != nil {
+		return findingSet{}, err
+	}
+	generated, err := generatedPaths(analyzed.per)
+	if err != nil {
+		return findingSet{}, err
+	}
+
+	computed, err := kinds.Compute(&kinds.Input{
+		Config:     &resolved.config,
+		Merged:     analyzed.stages.merged,
+		Sweep:      &analyzed.swept,
+		Refs:       analyzed.stages.refs,
+		Exempt:     analyzed.exemptions,
+		Generated:  func(path string) bool { return generated[path] },
+		Matrix:     analyzed.stages.configurations,
+		Per:        analyzed.per,
+		Consumers:  consumersOf(&resolved.config, analyzed.stages.per),
+		Production: true,
+	}, emitters)
+	if err != nil {
+		return findingSet{}, err
+	}
+	return findingSet{result: computed, unmatched: analyzed.stages.unmatched}, nil
+}
+
+// consumersOf is what the run knows about the target's consumers: every module the
+// scope declared, every one that loaded, and whether the configuration declares the
+// set complete.
+//
+// The declared set and the loaded set are the same modules here, and each is read
+// from the load rather than from the scope: a declared consumer this analyzer cannot
+// load or cannot count the references of ends the run, so a run that reached a
+// finding loaded every consumer its scope declared. The two are separate fields all
+// the same, because the reachability class asks a different question of each.
+//
+// The first configuration's consumers are the run's: every configuration loads the
+// modules the one scope declares, and a consumer that fails under any one of them
+// fails the run.
+func consumersOf(cfg *config.Config, per []configured) kinds.Consumers {
+	var loaded []string
+	if len(per) > 0 {
+		loaded = make([]string, len(per[0].result.Consumers))
+		for i, consumer := range per[0].result.Consumers {
+			loaded[i] = consumer.ID
+		}
+	}
+	return kinds.Consumers{Declared: loaded, Loaded: loaded, Complete: cfg.Consumers.Complete}
+}
+
+// generatedPaths is every generated file of the run, keyed by the target-relative
+// path the inventory spells its positions with, which is what a kind asks to know
+// whether a finding is about generated source.
+//
+// It asks the same owner the exemption class asks, so one run answers the question
+// once however many stages read it.
+func generatedPaths(per []kinds.Configured) (map[string]bool, error) {
+	paths := make(map[string]bool)
+	for _, one := range per {
+		for _, p := range one.Result.Packages {
+			for _, file := range p.Syntax {
+				if !exempt.IsGeneratedFile(file) {
+					continue
+				}
+				site, err := one.Resolve.Render(file.Package)
+				if err != nil {
+					return nil, fmt.Errorf("render the package clause of a generated file: %w", err)
+				}
+				paths[site.Filename] = true
+			}
+		}
+	}
+	return paths, nil
 }
 
 // exemptOptions converts the settings the exemption classes read into the value
@@ -813,6 +978,11 @@ func applyFlagSettings(set *flag.FlagSet, inputs *config.Inputs) error {
 // A configuration that fails to load is not one of those: the matrix is analyzable
 // and one of its configurations did not load, so the run is a failure that produced
 // no answer, and the load's own error names the configuration.
+//
+// A findings pass that refuses a finding is a failure of the same kind, and it needs
+// no arm of its own: a defect in a kind's rule or in the input a composition root
+// built for it is not a configuration a maintainer can fix, so it falls through to
+// the failure code rather than being reported as a finding the report could carry.
 func exitCodeFor(err error) int {
 	if _, refusal := errors.AsType[*config.Error](err); refusal {
 		return exitUsage

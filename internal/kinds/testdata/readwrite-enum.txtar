@@ -1,0 +1,56 @@
+Three iota groups of one package: one whose type declares no conversion method
+and which no conversion produces, with one member named by nothing; one whose
+type declares a String method; and one a conversion from an integer produces.
+
+-- go.mod --
+module example.com/enums
+
+go 1.27.1
+-- plain.go --
+package enums
+
+// mode is an enumerated type nothing converts into and which declares no
+// conversion method.
+type mode int
+
+const (
+	modeRead mode = iota
+	modeWrite
+)
+
+// Read names one member of mode and leaves the other named by nothing.
+func Read() mode { return modeRead }
+-- named.go --
+package enums
+
+// level is an enumerated type that spells its values as text.
+type level int
+
+const (
+	levelLow level = iota
+	levelHigh
+)
+
+// String spells one level as text.
+func (l level) String() string {
+	if l == levelLow {
+		return "low"
+	}
+	return "high"
+}
+
+// Level is the member of level the package names.
+func Level() level { return levelLow }
+-- wire.go --
+package enums
+
+// state is an enumerated type a conversion from an integer produces.
+type state int
+
+const (
+	stateIdle state = iota
+	stateBusy
+)
+
+// StateOf produces a state from a number, which is a value no member names.
+func StateOf(n int) state { return state(n) }
