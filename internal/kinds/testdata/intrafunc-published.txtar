@@ -1,6 +1,9 @@
 A package outside the module's internal tree declaring an exported and an
 unexported function, each naming a parameter its body never reads, with a main
-package that calls both so neither is dead.
+package that calls both so neither is dead. A second file of the same package
+declares an exported method an interface a value of its receiver type reaches fixes
+the signature of, and an exported method nothing fixes, so the published surface
+carries both a signature an exemption retains and one it does not.
 
 -- go.mod --
 module example.com/app
@@ -23,11 +26,35 @@ func scaled(value int, label string) int {
 func Total() int {
 	return scaled(1, "a")
 }
+-- api/writer.go --
+package api
+
+import "io"
+
+// Sink answers the writer interface and never reads what it is given.
+type Sink struct{}
+
+// Write answers the writer interface, whose signature fixes both parameters.
+func (Sink) Write(p []byte) (int, error) {
+	return 0, nil
+}
+
+// Held names a limit its body never reads, on a receiver it never reads either,
+// and no interface fixes its signature.
+func (s Sink) Held(limit int) int {
+	return 1
+}
+
+// Writer converts a value of the type to the interface.
+func Writer() io.Writer {
+	return Sink{}
+}
 -- main.go --
 package main
 
 import "example.com/app/api"
 
 func main() {
-	println(api.Scaled(1, "b"), api.Total())
+	println(api.Scaled(1, "b"), api.Total(), api.Sink{}.Held(1))
+	_ = api.Writer()
 }

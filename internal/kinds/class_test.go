@@ -1,7 +1,12 @@
 package kinds
 
 import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/cplieger/deadset-go/internal/config"
@@ -223,6 +228,72 @@ func TestTheClosedWorldFactAndTheConsumerInformationFactAreSeparate(t *testing.T
 			}
 		})
 	}
+}
+
+// The completeness declaration is the claim that no reference exists outside the
+// loaded graph, which two preconditions rest on and no other kind does: the narrowing
+// kinds' closed world, and the same precondition applied to a signature for the
+// unused-result kind. A third reader is how the declaration reached a kind family it
+// does not govern once already: what a body never reads is decided by the body, and
+// no caller can change it.
+func TestTheCompletenessDeclarationHasTwoReaders(t *testing.T) {
+	want := []string{"intrafunc.go:callersUnknown", "narrowing.go:closed"}
+
+	if got := callersOf(t, "consumersLoaded"); !slices.Equal(got, want) {
+		t.Errorf("consumersLoaded is called by %v, want %v: completeness is the claim that no reference exists outside the graph, and freeSignature does not rest on one",
+			got, want)
+	}
+}
+
+// callersOf names every function of this package, its tests excluded, that calls the
+// method named, as file and function, sorted and once each. The declaration itself is
+// no call, and neither is a doc comment naming it.
+func callersOf(t *testing.T, method string) []string {
+	t.Helper()
+
+	sources, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("Setup: list the package's own source: %v", err)
+	}
+
+	var held []string
+	set := token.NewFileSet()
+	for _, path := range sources {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(set, path, nil, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("Setup: parse %s: %v", path, err)
+		}
+		for _, decl := range file.Decls {
+			fn, declares := decl.(*ast.FuncDecl)
+			if !declares || fn.Body == nil {
+				continue
+			}
+			if calls(fn.Body, method) {
+				held = append(held, path+":"+fn.Name.Name)
+			}
+		}
+	}
+	slices.Sort(held)
+	return slices.Compact(held)
+}
+
+// calls reports whether one body selects and calls the method named.
+func calls(body *ast.BlockStmt, method string) bool {
+	found := false
+	ast.Inspect(body, func(n ast.Node) bool {
+		call, isCall := n.(*ast.CallExpr)
+		if !isCall {
+			return true
+		}
+		if selector, selects := call.Fun.(*ast.SelectorExpr); selects && selector.Sel.Name == method {
+			found = true
+		}
+		return !found
+	})
+	return found
 }
 
 func TestTheClassOfADeclarationOfAMainPackageIsCertain(t *testing.T) {

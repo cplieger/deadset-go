@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"go/types"
 	"slices"
+	"strings"
 
 	"github.com/cplieger/deadset-go/internal/graph"
 	"golang.org/x/tools/go/packages"
@@ -13,17 +14,101 @@ import (
 
 // destinationPackages are the packages whose every function and method may name
 // the members of a value it is given at run time, so a value reaching any of them
-// keeps the members no reference points at. The value is whether the destination
-// reaches METHODS as well as fields: the three standard encoders read fields and
-// call no method of the value, while a template engine selects a method by the same
-// syntax it selects a field with.
-var destinationPackages = map[string]bool{
-	"encoding/gob":  false,
-	"encoding/json": false,
-	"encoding/xml":  false,
-	"html/template": true,
-	"reflect":       true,
-	"text/template": true,
+// keeps the members no reference points at. The value is what the destination reads
+// of the value's METHODS beside its fields: a standard encoder resolves the methods
+// of [methodsResolvedByName] and calls no other, while a template engine selects a
+// method by the same syntax it selects a field with.
+var destinationPackages = map[string]reach{
+	"encoding/gob":     reachGobEncode | reachGobDecode,
+	"encoding/json":    reachJSONEncode | reachJSONDecode,
+	"encoding/json/v2": reachJSONEncode | reachJSONDecode,
+	"encoding/xml":     reachXMLEncode | reachXMLDecode,
+	"html/template":    reachExportedMethods,
+	"reflect":          reachExportedMethods,
+	"text/template":    reachExportedMethods,
+}
+
+// reach is what a destination reads of the methods of a value it is given, beside
+// the fields every destination of this class reads. A value that reaches two
+// destinations keeps what both of them read, which is the union of their reaches, so
+// each destination is one bit rather than one value.
+type reach uint16
+
+// What a destination reads of a value's methods: nothing, every exported method the
+// type declares, or the methods one direction of one encoder resolves by name.
+const (
+	reachNoMethod        reach = 0
+	reachExportedMethods reach = 1 << 0
+	reachJSONEncode      reach = 1 << 1
+	reachJSONDecode      reach = 1 << 2
+	reachXMLEncode       reach = 1 << 3
+	reachXMLDecode       reach = 1 << 4
+	reachGobEncode       reach = 1 << 5
+	reachGobDecode       reach = 1 << 6
+
+	// The two directions, so one entry point of a destination keeps its own.
+	reachEncoding reach = reachJSONEncode | reachXMLEncode | reachGobEncode
+	reachDecoding reach = reachJSONDecode | reachXMLDecode | reachGobDecode
+)
+
+// methodsResolvedByName are the methods a destination resolves by name on a value it
+// encodes or decodes, each with the destinations that resolve it. A destination
+// walking a value keeps such a method on every defined type it reaches, because the
+// destination looks the method up on the type and the reference graph holds no edge
+// to it.
+var methodsResolvedByName = map[string]reach{
+	"AppendText":        reachJSONEncode,
+	"GobDecode":         reachGobDecode,
+	"GobEncode":         reachGobEncode,
+	"MarshalBinary":     reachGobEncode,
+	"MarshalJSON":       reachJSONEncode,
+	"MarshalJSONTo":     reachJSONEncode,
+	"MarshalText":       reachJSONEncode | reachXMLEncode,
+	"MarshalXML":        reachXMLEncode,
+	"MarshalXMLAttr":    reachXMLEncode,
+	"UnmarshalBinary":   reachGobDecode,
+	"UnmarshalJSON":     reachJSONDecode,
+	"UnmarshalJSONFrom": reachJSONDecode,
+	"UnmarshalText":     reachJSONDecode | reachXMLDecode,
+	"UnmarshalXML":      reachXMLDecode,
+	"UnmarshalXMLAttr":  reachXMLDecode,
+}
+
+// The prefixes an entry point of a destination package names its direction by.
+var (
+	encodingEntryPoints = [...]string{"Encode", "Marshal"}
+	decodingEntryPoints = [...]string{"Decode", "Unmarshal"}
+)
+
+// reads reports whether a destination of this reach reads one method of a defined
+// type it walks.
+func (r reach) reads(m *types.Func) bool {
+	if r&reachExportedMethods != 0 && m.Exported() {
+		return true
+	}
+	return r&methodsResolvedByName[m.Name()] != 0
+}
+
+// forEntryPoint is what one entry point of a destination package reads of the
+// methods of a value it is given: an entry point that encodes a value resolves no
+// method that decodes one, and the other way about. An entry point naming neither
+// direction reads both, because a registration takes a value for either.
+func (r reach) forEntryPoint(name string) reach {
+	switch {
+	case hasAnyPrefix(name, encodingEntryPoints[:]):
+		return r &^ reachDecoding
+	case hasAnyPrefix(name, decodingEntryPoints[:]):
+		return r &^ reachEncoding
+	default:
+		return r
+	}
+}
+
+// hasAnyPrefix reports whether name begins with one of the prefixes.
+func hasAnyPrefix(name string, prefixes []string) bool {
+	return slices.ContainsFunc(prefixes, func(prefix string) bool {
+		return strings.HasPrefix(name, prefix)
+	})
 }
 
 // The reflection package, and the one function of it that reads a value's fields
@@ -41,7 +126,9 @@ const (
 const sortPackage = "sort"
 
 // destinationInterfaces are the interfaces a conversion into which reaches the
-// class, each named by its package path and its name.
+// class, each named by its package path and its name. A conversion to one reaches
+// every exported method, because the interface is a set of methods and the package
+// behind it calls them.
 var destinationInterfaces = [...]struct{ pkg, name string }{
 	{sortPackage, "Interface"},
 }
@@ -58,7 +145,7 @@ var destinationInterfaces = [...]struct{ pkg, name string }{
 // detail are two records of one fact.
 var namedDestinations = namedDestinationPackages()
 
-// namedDestinationPackages joins the two destination tables, so the set of named
+// namedDestinationPackages joins the destination tables, so the set of named
 // packages has the same owner as the rules it is derived from.
 func namedDestinationPackages() map[string]bool {
 	named := map[string]bool{
@@ -91,13 +178,14 @@ const (
 // by string and the reference graph holds no edge to them.
 //
 // What is retained is per destination, because the destinations do not read the same
-// thing. The three standard encoders, a database scan and the comparison of two
-// values by reflection read fields and call no method of the value, so those retain
-// fields alone. A template engine selects a method by the syntax it selects a field
-// with, a structured-logging handler renders a value through the method it answers
-// with, a sort interface is three methods, and every other entry point of the
-// reflection package hands out a value from which a method is reachable by name, so
-// those retain the exported methods as well.
+// thing. A standard encoder retains the methods it resolves by name in the direction
+// the entry point encodes or decodes in, which [methodsResolvedByName] lists; a
+// database scan and the comparison of two values by reflection read fields and call
+// no method of the value, so those retain fields alone. A template engine selects a
+// method by the syntax it selects a field with, a structured-logging handler renders
+// a value through the method it answers with, a sort interface is three methods, and
+// every other entry point of the reflection package hands out a value from which a
+// method is reachable by name, so those retain the exported methods as well.
 //
 // A struct value that leaves the analysed program is the class's widest
 // destination, and the one no list of packages can complete. A struct, or a pointer
@@ -111,9 +199,9 @@ const (
 // arguments in turn, to a fixpoint, so a wrapper of a wrapper carries the rule of the
 // call it forwards to. A wrapper retains what its destination retains rather than the
 // full set, because its body is in the program: a value handed to a wrapper that
-// encodes it keeps the fields an encoder reads and no method, one handed to a wrapper
-// that renders it through a template keeps its methods too, and a wrapper with two
-// destinations retains the union.
+// encodes it keeps the fields and the marshalling methods an encoder reads, one handed
+// to a wrapper that renders it through a template keeps every exported method, and a
+// wrapper with two destinations retains the union.
 //
 // The empty interface is the one parameter type this rule reads, because it is the
 // one an interface conversion answers nothing for: a value handed to any other
@@ -160,9 +248,9 @@ type encodingFlow struct {
 // boundary's forwarding fixpoint starts from, so a wrapper that hands its own
 // parameter to an encoder carries the encoder's set and one that hands it to a
 // template engine carries the engine's.
-func namedDestinationParameter(fn *types.Func, _ int) (methods, named bool) {
+func namedDestinationParameter(fn *types.Func, _ int) (reach, bool) {
 	d, found := encodingDestination(fn)
-	return d.methods, found
+	return d.reach, found
 }
 
 // interfaceTarget is one interface the class treats as a destination, resolved
@@ -174,12 +262,12 @@ type interfaceTarget struct {
 }
 
 // destination is what one call is to the class: the clause an exemption records,
-// whether only a pointer argument flows into it, and whether it reaches the methods
-// of the value it is given as well as its fields.
+// what it reads of the methods of the value it is given beside its fields, and
+// whether only a pointer argument flows into it.
 type destination struct {
 	detail   string
+	reach    reach
 	pointers bool
-	methods  bool
 }
 
 // walkCalls records every value a call hands to a destination package.
@@ -225,18 +313,19 @@ func (f *encodingFlow) walkFile(info *types.Info, file *ast.File) error {
 // program, which the boundary's crossing test decides argument by argument.
 //
 // What is retained is what reads the value where it arrives. A callee the program does
-// not hold retains the full set, methods included, because its body decides what it
-// reads and the analysis does not have it; a wrapper the program does hold retains what
-// its own destination retains, so a value handed to a wrapper that encodes it keeps its
-// fields and not its methods. The detail names the immediate callee either way: a
-// wrapper's caller reads the wrapper's name at its own call.
+// not hold retains the full set, every exported method included, because its body
+// decides what it reads and the analysis does not have it; a wrapper the program does
+// hold retains what its own destination retains, so a value handed to a wrapper that
+// encodes it keeps its fields and the methods that encoder resolves by name. The detail
+// names the immediate callee either way: a wrapper's caller reads the wrapper's name at
+// its own call.
 func (f *encodingFlow) crossingArguments(info *types.Info, call *ast.CallExpr) error {
 	for i, arg := range call.Args {
 		out, crosses := f.edge.crossing(info, call, i)
 		if !crosses {
 			continue
 		}
-		d := destination{detail: "passed to " + out.callee.FullName(), methods: out.methods}
+		d := destination{detail: "passed to " + out.callee.FullName(), reach: out.reach}
 		if err := f.retain(info.TypeOf(arg), arg.Pos(), d); err != nil {
 			return err
 		}
@@ -286,7 +375,7 @@ func (f *encodingFlow) walkConversions() error {
 			continue
 		}
 		if err := f.retain(c.From, c.Site, destination{
-			detail: "converted to " + name, methods: true,
+			detail: "converted to " + name, reach: reachExportedMethods,
 		}); err != nil {
 			return err
 		}
@@ -297,8 +386,7 @@ func (f *encodingFlow) walkConversions() error {
 // retain records what every defined type a destination walking a value of t reads
 // keeps: its exported fields, every field of it that carries a struct tag whether
 // that field is exported or not, because a tagged field is named by its tag and not
-// by its visibility, and the exported methods the type declares where the
-// destination reaches a method at all.
+// by its visibility, and the methods the destination reads.
 func (f *encodingFlow) retain(t types.Type, at token.Pos, d destination) error {
 	site, err := f.kept.site(at)
 	if err != nil {
@@ -310,16 +398,13 @@ func (f *encodingFlow) retain(t types.Type, at token.Pos, d destination) error {
 	return nil
 }
 
-// members records what one destination reads of one defined type: the exported
-// methods the type declares where the destination reaches a method at all, and then
-// the fields of it a destination reading fields reads.
+// members records what one destination reads of one defined type: the methods of it
+// the destination reads, and then the fields every destination of this class reads.
 func (f *encodingFlow) members(named *types.Named, site token.Position, d destination) {
 	origin := named.Origin()
-	if d.methods {
-		for m := range origin.Methods() {
-			if m.Exported() {
-				f.kept.record(m, site, d.detail)
-			}
+	for m := range origin.Methods() {
+		if d.reach.reads(m) {
+			f.kept.record(m, site, d.detail)
 		}
 	}
 	st, isStruct := origin.Underlying().(*types.Struct)
@@ -339,11 +424,14 @@ func encodingDestination(fn *types.Func) (destination, bool) {
 	if pkg == nil {
 		return destination{}, false
 	}
-	if methods, found := destinationPackages[pkg.Path()]; found {
-		if pkg.Path() == reflectPackage && fn.Name() == deepEqual {
-			methods = false
-		}
-		return destination{detail: "passed to " + fn.FullName(), methods: methods}, true
+	if pkg.Path() == reflectPackage && fn.Name() == deepEqual {
+		return destination{detail: "passed to " + fn.FullName(), reach: reachNoMethod}, true
+	}
+	if reads, found := destinationPackages[pkg.Path()]; found {
+		return destination{
+			detail: "passed to " + fn.FullName(),
+			reach:  reads.forEntryPoint(fn.Name()),
+		}, true
 	}
 	if pkg.Path() == sqlPackage && fn.Name() == sqlScanMethod && scansARow(fn) {
 		return destination{detail: "scanned by " + fn.FullName(), pointers: true}, true
@@ -354,7 +442,7 @@ func encodingDestination(fn *types.Func) (destination, bool) {
 	// value that answers LogValue or String through that method, and one that
 	// answers neither by marshalling its fields.
 	if _, logs := slogFunctions[fn.Name()]; pkg.Path() == slogPackage && logs {
-		return destination{detail: "passed to " + fn.FullName(), methods: true}, true
+		return destination{detail: "passed to " + fn.FullName(), reach: reachExportedMethods}, true
 	}
 	return destination{}, false
 }

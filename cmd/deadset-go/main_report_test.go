@@ -69,7 +69,7 @@ func reportOfDir(t *testing.T, dir string) report.Envelope {
 	if err != nil {
 		t.Fatalf("Setup: exemptOptions(): %v", err)
 	}
-	envelope, err := reportOf(t.Context(), &resolved, &options, corpusAnswered())
+	envelope, _, err := reportOf(t.Context(), &resolved, &options, corpusAnswered())
 	if err != nil {
 		t.Fatalf("reportOf(%s) = error %v, want the report of the run", dir, err)
 	}
@@ -421,7 +421,7 @@ func TestReportOfRefusesAnEnvelopeNamingNoConformanceResult(t *testing.T) {
 		t.Fatalf("Setup: exemptOptions(): %v", err)
 	}
 
-	_, err = reportOf(t.Context(), &resolved, &options, &corpusRecord{})
+	_, _, err = reportOf(t.Context(), &resolved, &options, &corpusRecord{})
 	if err == nil {
 		t.Fatalf("reportOf() with no corpus record wrote a report, want a refusal: a merge refuses a report carrying no conformance result")
 	}
@@ -449,7 +449,7 @@ func TestReportOfRefusesATargetTheRunDirectoryDoesNotContain(t *testing.T) {
 		t.Fatalf("Setup: exemptOptions(): %v", err)
 	}
 
-	_, err = reportOf(t.Context(), &resolved, &options, corpusAnswered())
+	_, _, err = reportOf(t.Context(), &resolved, &options, corpusAnswered())
 	if !errors.Is(err, errReportPath) {
 		t.Fatalf("reportOf() over a target outside the run directory = %v, want a %v", err, errReportPath)
 	}

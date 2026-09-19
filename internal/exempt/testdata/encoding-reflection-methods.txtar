@@ -1,0 +1,173 @@
+One package whose types declare the methods a standard encoder resolves by name on a
+value it encodes or decodes. Each type declares the methods of one direction, the
+twins of the other direction, and one unrelated exported method, so the retained set
+states which of the three the destination reads. A wrapper hands its own erased
+parameter to an encoder, so the fixpoint carries the encoder's set to the wrapper's
+caller.
+
+-- go.mod --
+module example.com/methods
+
+go 1.27.1
+-- json.go --
+package methods
+
+import (
+	"encoding/json"
+	"encoding/json/jsontext"
+)
+
+// Marshalled reaches the JSON encoder.
+type Marshalled struct {
+	Name string `json:"name"`
+}
+
+// MarshalJSON is resolved by an encoder of this family.
+func (m Marshalled) MarshalJSON() ([]byte, error) { return []byte(`"` + m.Name + `"`), nil }
+
+// MarshalJSONTo is resolved by an encoder of this family.
+func (m Marshalled) MarshalJSONTo(enc *jsontext.Encoder) error {
+	return enc.WriteToken(jsontext.String(m.Name))
+}
+
+// MarshalText is resolved by an encoder of this family.
+func (m Marshalled) MarshalText() ([]byte, error) { return []byte(m.Name), nil }
+
+// AppendText is resolved by an encoder of this family.
+func (m Marshalled) AppendText(b []byte) ([]byte, error) { return append(b, m.Name...), nil }
+
+// UnmarshalJSON is resolved by a decoder, and no decoder reads this value.
+func (m *Marshalled) UnmarshalJSON(b []byte) error { m.Name = string(b); return nil }
+
+// Describe is an unrelated exported method.
+func (m Marshalled) Describe() string { return m.Name }
+
+// EncodeJSON hands a value to the encoder.
+func EncodeJSON(m Marshalled) ([]byte, error) { return json.Marshal(m) }
+
+// Unmarshalled reaches the JSON decoder.
+type Unmarshalled struct {
+	Name string `json:"name"`
+}
+
+// UnmarshalJSON is resolved by a decoder of this family.
+func (u *Unmarshalled) UnmarshalJSON(b []byte) error { u.Name = string(b); return nil }
+
+// UnmarshalText is resolved by a decoder of this family.
+func (u *Unmarshalled) UnmarshalText(b []byte) error { u.Name = string(b); return nil }
+
+// MarshalJSON is resolved by an encoder, and no encoder reads this value.
+func (u Unmarshalled) MarshalJSON() ([]byte, error) { return []byte(`"` + u.Name + `"`), nil }
+
+// Describe is an unrelated exported method.
+func (u Unmarshalled) Describe() string { return u.Name }
+
+// DecodeJSON hands a pointer to the decoder.
+func DecodeJSON(b []byte) (Unmarshalled, error) {
+	var u Unmarshalled
+	err := json.Unmarshal(b, &u)
+	return u, err
+}
+-- xml.go --
+package methods
+
+import "encoding/xml"
+
+// Element reaches the XML encoder.
+type Element struct {
+	Name string `xml:"name"`
+}
+
+// MarshalXML is resolved by the XML encoder.
+func (e Element) MarshalXML(enc *xml.Encoder, start xml.StartElement) error {
+	return enc.EncodeElement(e.Name, start)
+}
+
+// MarshalXMLAttr is resolved by the XML encoder.
+func (e Element) MarshalXMLAttr(name xml.Name) (xml.Attr, error) {
+	return xml.Attr{Name: name, Value: e.Name}, nil
+}
+
+// UnmarshalXML is resolved by the XML decoder, which no call reaches.
+func (e *Element) UnmarshalXML(dec *xml.Decoder, start xml.StartElement) error {
+	return dec.DecodeElement(&e.Name, &start)
+}
+
+// Describe is an unrelated exported method.
+func (e Element) Describe() string { return e.Name }
+
+// EncodeXML hands a value to the encoder.
+func EncodeXML(e Element) ([]byte, error) { return xml.Marshal(e) }
+-- gob.go --
+package methods
+
+import (
+	"encoding/gob"
+	"io"
+)
+
+// Record reaches the gob encoder.
+type Record struct {
+	Name string
+}
+
+// GobEncode is resolved by the gob encoder.
+func (r Record) GobEncode() ([]byte, error) { return []byte(r.Name), nil }
+
+// MarshalBinary is resolved by the gob encoder.
+func (r Record) MarshalBinary() ([]byte, error) { return []byte(r.Name), nil }
+
+// GobDecode is resolved by the gob decoder, which no call reaches.
+func (r *Record) GobDecode(b []byte) error { r.Name = string(b); return nil }
+
+// Describe is an unrelated exported method.
+func (r Record) Describe() string { return r.Name }
+
+// EncodeGob hands a value to the encoder through a method of the package.
+func EncodeGob(w io.Writer, r Record) error { return gob.NewEncoder(w).Encode(r) }
+-- wrapper.go --
+package methods
+
+import "encoding/json"
+
+// Wrapped reaches the JSON encoder through a function of this package.
+type Wrapped struct {
+	Name string `json:"name"`
+}
+
+// MarshalJSON is resolved by the encoder the wrapper forwards to.
+func (w Wrapped) MarshalJSON() ([]byte, error) { return []byte(`"` + w.Name + `"`), nil }
+
+// UnmarshalJSON is resolved by a decoder, and the wrapper forwards to no decoder.
+func (w *Wrapped) UnmarshalJSON(b []byte) error { w.Name = string(b); return nil }
+
+// Describe is an unrelated exported method.
+func (w Wrapped) Describe() string { return w.Name }
+
+// keep hands its own erased parameter to the encoder.
+func keep(v any) ([]byte, error) { return json.Marshal(v) }
+
+// KeepWrapped hands a value to the wrapper.
+func KeepWrapped(w Wrapped) ([]byte, error) { return keep(w) }
+-- registered.go --
+package methods
+
+import "encoding/gob"
+
+// Registered reaches an entry point of a destination package that names neither
+// direction, so both directions read it.
+type Registered struct {
+	Name string
+}
+
+// GobEncode is resolved by the gob encoder.
+func (r Registered) GobEncode() ([]byte, error) { return []byte(r.Name), nil }
+
+// GobDecode is resolved by the gob decoder.
+func (r *Registered) GobDecode(b []byte) error { r.Name = string(b); return nil }
+
+// Describe is an unrelated exported method.
+func (r Registered) Describe() string { return r.Name }
+
+// RegisterRecord hands a value to the registration.
+func RegisterRecord(r Registered) { gob.Register(r) }

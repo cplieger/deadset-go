@@ -138,7 +138,7 @@ func (f *fixture) report(ctx context.Context) (report.Envelope, error) {
 			f.reportErr = fmt.Errorf("exemptOptions(): %w", optionsErr)
 			return
 		}
-		f.envelope, f.reportErr = reportOf(ctx, &resolved, &options, corpusAnswered())
+		f.envelope, _, f.reportErr = reportOf(ctx, &resolved, &options, corpusAnswered())
 	})
 	return f.envelope, f.reportErr
 }

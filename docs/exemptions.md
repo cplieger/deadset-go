@@ -89,17 +89,28 @@ as a writer, a round tripper or a sort interface, is an ordinary member of the c
 
 Retains, on a type whose values reach a consumer that names members by string at run time, the
 members that consumer reads: the exported fields and every field carrying a struct tag, and the
-exported methods as well where the consumer resolves a method by name.
+methods the consumer resolves by name.
 
 The destinations, and what each retains:
 
-- Fields alone for an argument of a function or method of `encoding/json`, `encoding/xml` or
-  `encoding/gob`, a `database/sql` scan target, an argument of `reflect.DeepEqual`, and an
+- Fields and the methods it resolves by name for an argument of a function or method of
+  `encoding/json`, `encoding/json/v2`, `encoding/xml` or `encoding/gob`.
+- Fields alone for a `database/sql` scan target, an argument of `reflect.DeepEqual`, and an
   argument of any other function of `reflect` that hands out no method.
-- Fields and the `LogValue` method for a `log/slog` logging call or attribute constructor.
-- Fields and the exported methods for a template engine, a sort interface, every entry point of
-  `reflect` from which a method is reachable by name, and a destination outside the analyzed
-  program.
+- Fields and the exported methods for a template engine, a sort interface, a `log/slog` logging
+  call or attribute constructor, every entry point of `reflect` from which a method is reachable by
+  name, and a destination outside the analyzed program.
+
+An encoder resolves a method by name in the direction its entry point works in: an entry point
+whose name begins `Encode` or `Marshal` retains the encoding methods, one whose name begins
+`Decode` or `Unmarshal` retains the decoding methods, and one whose name begins with neither
+retains both, because it takes a value for either direction.
+
+| Package | Encoding | Decoding |
+| --- | --- | --- |
+| `encoding/json`, `encoding/json/v2` | `AppendText`, `MarshalJSON`, `MarshalJSONTo`, `MarshalText` | `UnmarshalJSON`, `UnmarshalJSONFrom`, `UnmarshalText` |
+| `encoding/xml` | `MarshalText`, `MarshalXML`, `MarshalXMLAttr` | `UnmarshalText`, `UnmarshalXML`, `UnmarshalXMLAttr` |
+| `encoding/gob` | `GobEncode`, `MarshalBinary` | `GobDecode`, `UnmarshalBinary` |
 
 A value reaches through a pointer, a slice, an array, a map key or value and an embedded field,
 and from every type so reached through that type's fields again, until no further type joins,

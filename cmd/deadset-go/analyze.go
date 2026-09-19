@@ -140,11 +140,12 @@ func analyze(ctx context.Context, args []string, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
 		return exitFailure
 	}
-	envelope, err := reportOf(ctx, &resolved, &options, answered)
+	envelope, unbuilt, err := reportOf(ctx, &resolved, &options, answered)
 	if err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
 		return exitCodeFor(err)
 	}
+	namedUnbuilt(stderr, unbuilt)
 
 	report.Sort(&envelope, resolved.config.Reporters.Sort)
 	// The baseline records every finding of the run, which is why the rows are

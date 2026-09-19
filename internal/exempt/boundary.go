@@ -33,11 +33,12 @@ import (
 // not an opaque callee but a wrapper, and a target value handed to it reaches the
 // encoder through it. What such a wrapper retains is what its own destination
 // retains, not the full set: the wrapper's body IS in the program, so where it hands
-// the value to an encoder, which reads fields and calls no method, a method of the
-// value reaches nothing and stays reportable. A wrapper with two destinations retains
-// the union of what they retain, and a wrapper of a wrapper the set the fixpoint
-// carried to the one it forwards to. Only a callee the program does not hold retains
-// the full set, because there the analysis cannot see what is read.
+// the value to an encoder, which reads fields and resolves the marshalling methods of
+// its own direction by name, every other method of the value reaches nothing and stays
+// reportable. A wrapper with two destinations retains the union of what they retain,
+// and a wrapper of a wrapper the set the fixpoint carried to the one it forwards to.
+// Only a callee the program does not hold retains the full set, because there the
+// analysis cannot see what is read.
 //
 // The empty interface is the one parameter type the crossing reads. A value handed
 // to any other interface is a conversion the conversion set records, and the methods
@@ -89,27 +90,26 @@ type boundary struct {
 type destinationParameters map[token.Position][]sinkParameter
 
 // sinkParameter is one parameter at which a value leaves the analysed program: the
-// position of the parameter, and whether what reads the value there reads its methods
-// as well as its fields.
+// position of the parameter, and what reads the value there reads of its methods
+// beside its fields.
 type sinkParameter struct {
-	at      int
-	methods bool
+	at    int
+	reach reach
 }
 
 // destinationTest reports whether one parameter of one function is a destination the
-// calling class names by itself, and where it is, whether that destination reads the
-// methods of a value it is given as well as its fields. It is the base case the
-// forwarding fixpoint starts from and the source of every retained set the fixpoint
-// carries.
-type destinationTest func(fn *types.Func, at int) (methods, named bool)
+// calling class names by itself, and where it is, what that destination reads of the
+// methods of a value it is given. It is the base case the forwarding fixpoint starts
+// from and the source of every retained set the fixpoint carries.
+type destinationTest func(fn *types.Func, at int) (reach, bool)
 
 // crossingOut is what one argument's crossing out of the analysed program retains:
 // the callee the value leaves through, which is what an exemption's detail names, and
-// whether the code behind that callee reads the methods of the value as well as its
+// what the code behind that callee reads of the methods of the value beside its
 // fields.
 type crossingOut struct {
-	callee  *types.Func
-	methods bool
+	callee *types.Func
+	reach  reach
 }
 
 // declarationSites answers the key one declaration of the program is kept under, and
@@ -170,11 +170,11 @@ func newBoundary(in *Input, destination destinationTest) *boundary {
 		joined = false
 		for i := range candidates {
 			for _, forwarded := range candidates[i].forwards {
-				methods, reaches := b.reaches(forwarded.to, forwarded.at, destination)
+				reads, reaches := b.reaches(forwarded.to, forwarded.at, destination)
 				if !reaches {
 					continue
 				}
-				joined = b.hold(candidates[i].at, sinkParameter{at: forwarded.own, methods: methods}) || joined
+				joined = b.hold(candidates[i].at, sinkParameter{at: forwarded.own, reach: reads}) || joined
 			}
 		}
 	}
@@ -220,17 +220,18 @@ func (b *boundary) crossing(info *types.Info, call *ast.CallExpr, arg int) (cros
 	if flows == nil || !carriesStruct(flows) {
 		return crossingOut{}, false
 	}
-	return crossingOut{callee: fn, methods: sink.methods}, true
+	return crossingOut{callee: fn, reach: sink.reach}, true
 }
 
 // sinks are the parameters of one function at which a value leaves the analysis, each
 // with what reads the value there, and false where none does.
 //
 // A function the program does not declare carries a sink at every parameter typed as
-// the empty interface, each reaching methods as well as fields, because its body is
-// not in the program and what it reads of the value is unknown. A function the program
-// declares carries the ones the forwarding set holds for it, which is where it hands a
-// parameter of its own on, each retaining what the destination it forwards to retains.
+// the empty interface, each reaching every exported method as well as the fields,
+// because its body is not in the program and what it reads of the value is unknown. A
+// function the program declares carries the ones the forwarding set holds for it, which
+// is where it hands a parameter of its own on, each retaining what the destination it
+// forwards to retains.
 // A package whose destinations the vocabulary names one by one carries none: the rule
 // that names it records the call, and two spellings of one destination are two records
 // of one fact.
@@ -253,7 +254,7 @@ func (b *boundary) sinks(fn *types.Func) ([]sinkParameter, bool) {
 // reaches reports whether one parameter of one function is somewhere a value leaves
 // the program through, a destination the calling class names or a parameter this
 // boundary already carries, and what is read of the value there.
-func (b *boundary) reaches(fn *types.Func, at int, destination destinationTest) (methods, held bool) {
+func (b *boundary) reaches(fn *types.Func, at int, destination destinationTest) (reach, bool) {
 	if destination != nil {
 		if reads, named := destination(fn, at); named {
 			return reads, true
@@ -261,26 +262,27 @@ func (b *boundary) reaches(fn *types.Func, at int, destination destinationTest) 
 	}
 	sinks, carries := b.sinks(fn)
 	if !carries {
-		return false, false
+		return reachNoMethod, false
 	}
 	sink, crosses := sinkAt(sinks, at)
-	return sink.methods, crosses
+	return sink.reach, crosses
 }
 
 // hold records one sink of the declaration written at declared, and reports whether
 // that widened what the declaration carries. A parameter that reaches two destinations
-// keeps the union of what they read, so a wrapper one of whose destinations reads
-// methods reads methods.
+// keeps the union of what they read, so a wrapper one of whose destinations resolves a
+// method by name resolves it too.
 func (b *boundary) hold(declared token.Position, sink sinkParameter) bool {
 	held := b.forwards[declared]
 	for i := range held {
 		if held[i].at != sink.at {
 			continue
 		}
-		if held[i].methods || !sink.methods {
+		widened := held[i].reach | sink.reach
+		if widened == held[i].reach {
 			return false
 		}
-		held[i].methods = true
+		held[i].reach = widened
 		return true
 	}
 	b.forwards[declared] = append(held, sink)
@@ -432,14 +434,14 @@ func programPackages(r *load.Result) []*packages.Package {
 }
 
 // opaqueParameters are the sinks of a function the program does not declare: every
-// parameter typed as the empty interface, each reading the methods of a value it is
-// given as well as its fields, because the callee's body is not in the program and
-// what it does with the value is not knowable from its signature.
+// parameter typed as the empty interface, each reading every exported method of a
+// value it is given as well as its fields, because the callee's body is not in the
+// program and what it does with the value is not knowable from its signature.
 func opaqueParameters(sig *types.Signature) []sinkParameter {
 	erased := erasedParameters(sig)
 	found := make([]sinkParameter, 0, len(erased))
 	for _, at := range erased {
-		found = append(found, sinkParameter{at: at, methods: true})
+		found = append(found, sinkParameter{at: at, reach: reachExportedMethods})
 	}
 	return found
 }

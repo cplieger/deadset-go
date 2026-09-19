@@ -49,6 +49,15 @@ type Derived struct {
 	// per tag, deduplicated and in that order.
 	Configurations []load.Configuration
 
+	// Guessed names, by identifier, every configuration of Configurations that
+	// derivation answered from an atom the tree names rather than reading from the
+	// host. The pairing of an atom with an axis is derivation's own answer, so a
+	// pair the TARGET does not build is that answer being wrong rather than the
+	// target being broken, and a load may drop one. The host's own configuration is
+	// never one: a target that does not build where the run is has nothing to
+	// analyse.
+	Guessed []string
+
 	// Unreachable holds every file no configuration of the derived matrix
 	// builds, each with the constraint that excluded it, in the order the tree
 	// was read.
@@ -80,6 +89,7 @@ func derive(root string, host load.Configuration) (Derived, error) {
 	configurations := configurationsOf(host, atoms)
 	return Derived{
 		Configurations: configurations,
+		Guessed:        guessedIn(configurations, host),
 		Unreachable:    unreachableUnder(files, configurations),
 		Atoms:          atoms,
 	}, nil
@@ -115,8 +125,14 @@ func atomsOf(files []fileConstraint) Atoms {
 //
 // A platform atom is paired with the host's other axis where the toolchain builds
 // that pair and with a pair it does build otherwise, so every configuration the
-// matrix names is one that can be loaded. An atom the toolchain builds nothing
-// for derives no configuration at all.
+// matrix names is one the toolchain has a target for. An atom the toolchain builds
+// nothing for derives no configuration at all. Whether the TARGET builds for a pair
+// is a further question only its load answers, which is why every configuration but
+// the host's carries the derived mark: the pairing is this derivation's answer, and a
+// pair the target does not build is that answer being wrong.
+//
+// An atom whose pairing names the host's own identifier keeps the host's entry, so a
+// tree naming its own platform does not turn the host into a derived configuration.
 func configurationsOf(host load.Configuration, atoms Atoms) []load.Configuration {
 	configurations := []load.Configuration{host}
 	named := map[string]bool{host.ID: true}
@@ -151,6 +167,18 @@ func configurationFor(system, arch string, tags []string) load.Configuration {
 		id += idSeparator + strings.Join(tags, idSeparator)
 	}
 	return load.Configuration{ID: id, OS: system, Arch: arch, Tags: tags}
+}
+
+// guessedIn names every configuration of the matrix but the host's, in the order the
+// matrix lists them.
+func guessedIn(configurations []load.Configuration, host load.Configuration) []string {
+	var guessed []string
+	for _, c := range configurations {
+		if c.ID != host.ID {
+			guessed = append(guessed, c.ID)
+		}
+	}
+	return guessed
 }
 
 // unreachableUnder returns every file no configuration of the matrix builds.
