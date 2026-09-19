@@ -4,6 +4,8 @@ import (
 	"go/token"
 	"strconv"
 	"strings"
+
+	"github.com/cplieger/deadset-go/internal/graph"
 )
 
 // The three punctuation tokens of the grammar that carry a meaning of their own.
@@ -41,9 +43,9 @@ type replaceKey struct {
 // sites holds the line each directive of one module file is written on.
 //
 // A position is the file's own: the name a report carries for the module file, the
-// line, and the column the directive's first module path starts at. The column is
-// a byte count, which is also its count in UTF-16 code units, because a module
-// path is spelled in ASCII.
+// line, and the column the directive's first module path starts at, counted in
+// UTF-16 code units by [graph.Column], which is the unit every position of a
+// report carries.
 type sites struct {
 	requires map[Module]token.Position
 	replaces map[replaceKey]token.Position
@@ -166,8 +168,13 @@ type word struct {
 // comment a line may end with. A quoted word comes back unquoted, which is the
 // spelling the toolchain prints, and a quotation that does not close comes back as
 // it is written, so a line the grammar refuses is never read as something else.
+//
+// A word's column is the graph's own, so a module path written after text outside
+// the Basic Multilingual Plane is positioned the way every other position of a
+// report is.
 func lineWords(line string) []word {
 	var found []word
+	source := []byte(line)
 	for i := 0; i < len(line); {
 		switch {
 		case line[i] == ' ' || line[i] == '\t' || line[i] == '\r':
@@ -176,7 +183,7 @@ func lineWords(line string) []word {
 			return found
 		default:
 			text, width := readWord(line[i:])
-			found = append(found, word{text: text, column: i + 1})
+			found = append(found, word{text: text, column: graph.Column(source, i)})
 			i += width
 		}
 	}

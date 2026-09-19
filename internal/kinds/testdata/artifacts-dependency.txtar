@@ -1,0 +1,117 @@
+A module file declaring a requirement no import needs, one the file marks indirect,
+one a single dead declaration alone imports, two a single dead declaration alone
+imports together, one two dead declarations share, one only a file of a second
+configuration imports, and a replace directive over a module the build list does not
+hold.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+
+require (
+	example.com/platform v1.0.0
+	example.com/shared v1.0.0
+	example.com/used v1.0.0
+	golang.org/x/text v0.42.0
+)
+
+require golang.org/x/mod v0.41.0 // indirect
+
+replace example.com/platform => ./platform
+
+replace example.com/shared => ./shared
+
+replace example.com/used => ./used
+
+replace example.com/absent v1.0.0 => example.com/other v1.2.3
+
+require (
+	example.com/left v1.0.0
+	example.com/right v1.0.0
+)
+
+replace example.com/left => ./left
+
+replace example.com/right => ./right
+-- go.sum --
+golang.org/x/mod v0.41.0 h1:qJmnOUb4YB+FsEuM3HcWucdZASCPGhsX6uljO6pog0c=
+golang.org/x/mod v0.41.0/go.mod h1:Ek9pY8RKWXwsWvd3rQiHYtMqkjSUV+s1Rj7j4H5Ur6o=
+golang.org/x/text v0.42.0 h1:JbOZXgfeCPU9gacVtYliJqOhD+zhrEqK4LfdpmlUZqI=
+golang.org/x/text v0.42.0/go.mod h1:ojzP1Z+2QtioaF8DTtO8K5q7JWVVYwZKenzujK0Zd0E=
+-- main.go --
+package main
+
+import (
+	"example.com/left/four"
+	"example.com/right/five"
+	"example.com/shared/two"
+	"example.com/used/one"
+)
+
+func main() {}
+
+// parse holds the target's only use of the module that declares one.
+func parse() string { return one.Name() }
+
+// bundled holds the target's only use of both modules it names.
+func bundled() string { return four.Name() + five.Name() }
+
+// first shares its use of the module that declares two with second.
+func first() string { return two.Name() }
+
+// second shares its use of the module that declares two with first.
+func second() string { return two.Name() }
+-- only_darwin.go --
+package main
+
+import "example.com/platform/three"
+
+// paired holds the only use of a module one configuration of the matrix imports and
+// the other does not.
+func paired() string { return three.Name() }
+-- platform/go.mod --
+module example.com/platform
+
+go 1.27.0
+-- platform/three/three.go --
+package three
+
+// Name is the one declaration this module provides.
+func Name() string { return "platform" }
+-- used/go.mod --
+module example.com/used
+
+go 1.27.0
+-- used/one/one.go --
+package one
+
+// Name is the one declaration this module provides.
+func Name() string { return "used" }
+-- shared/go.mod --
+module example.com/shared
+
+go 1.27.0
+-- shared/two/two.go --
+package two
+
+// Name is the one declaration this module provides.
+func Name() string { return "shared" }
+-- left/go.mod --
+module example.com/left
+
+go 1.27.0
+-- left/four/four.go --
+package four
+
+// Name is the one declaration this module provides.
+func Name() string { return "left" }
+-- right/go.mod --
+module example.com/right
+
+go 1.27.0
+-- right/five/five.go --
+package five
+
+// Name is the one declaration this module provides.
+func Name() string { return "right" }

@@ -304,6 +304,65 @@ func TestEveryClassRunsCleanOverAModuleThatHasATestFile(t *testing.T) {
 	}
 }
 
+// Under a production run an exemption whose evidence a test file carries holds
+// nothing: a test that marshals a value makes no member of it live for production,
+// exactly as a test's reference is no reference there. The same fact found in a
+// source file holds under both modes, which is what tells the rule from a run that
+// retained less for another reason.
+func TestComputeDropsAnExemptionATestFileIsTheEvidenceFor(t *testing.T) {
+	tests := []struct {
+		name string
+		want []string
+	}{
+		{
+			name: "the plain mode",
+			want: []string{
+				"Shipped.Name encoding-reflection evidence.go:18:63 passed to encoding/json.Marshal",
+				"Shipped.Extra encoding-reflection evidence.go:18:63 passed to encoding/json.Marshal",
+				"Fixture.Name encoding-reflection evidence_test.go:9:28 passed to encoding/json.Marshal",
+				"Fixture.Extra encoding-reflection evidence_test.go:9:28 passed to encoding/json.Marshal",
+			},
+		},
+		{
+			name: "a production run",
+			want: []string{
+				"Shipped.Name encoding-reflection evidence.go:18:63 passed to encoding/json.Marshal",
+				"Shipped.Extra encoding-reflection evidence.go:18:63 passed to encoding/json.Marshal",
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(strings.ReplaceAll(tc.name, " ", "_"), func(t *testing.T) {
+			in := inputOf(t, "production-evidence.txtar", Options{Production: tc.name == "a production run"})
+
+			found, err := Compute(in, goDetectors())
+			if err != nil {
+				t.Fatalf("Compute(production-evidence.txtar, %s) error: %v", tc.name, err)
+			}
+			if got := retainedClauses(in, found); !slices.Equal(got, tc.want) {
+				t.Errorf("Compute(production-evidence.txtar, %s) retained\n%v\nwant\n%v", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+// A production run keeps the source file's site of a fact both a source file and a
+// test file carry, rather than dropping the fact with the test file's site: the
+// framework keeps the first site by rendered order, and a test file sorts before the
+// source file here.
+func TestComputeKeepsTheSourceSiteOfAFactATestFileAlsoCarries(t *testing.T) {
+	in := inputOf(t, "with-tests.txtar", Options{Production: true})
+
+	found, err := Compute(in, goDetectors())
+	if err != nil {
+		t.Fatalf("Compute(with-tests.txtar, a production run) error: %v", err)
+	}
+	want := []string{"Sink.Write interface-satisfaction app.go:14:34 satisfies io.Writer"}
+	if got := retainedClauses(in, found); !slices.Equal(got, want) {
+		t.Errorf("Compute(with-tests.txtar, a production run) retained\n%v\nwant\n%v", got, want)
+	}
+}
+
 // relationWords is the closed set of relations a clause may open with: every
 // class states one clause of the form relation-then-thing, and the words are what
 // a maintainer reads the nine classes by.

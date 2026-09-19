@@ -88,13 +88,11 @@ type directive struct {
 // neither is a [MalformedError], and no record or refusal comes back with it.
 //
 // Every position is rendered the way a report carries it, so a file the target
-// root does not hold ends the read rather than being passed over. Inline reaches
-// the filesystem only through read.
-func Inline(r *load.Result, root string, read graph.ReadFile, symbols []graph.Symbol) ([]Record, []Refusal, error) {
-	resolve, err := graph.NewResolver(r, root, read, symbols)
-	if err != nil {
-		return nil, nil, err
-	}
+// root does not hold ends the read rather than being passed over. The resolver is
+// the run's own, over the same load and the same inventory, so a directive and the
+// declaration below it are placed by one owner and Inline reaches the filesystem
+// not at all.
+func Inline(r *load.Result, resolve *graph.Resolver, symbols []graph.Symbol) ([]Record, []Refusal, error) {
 	directives, err := namespaced(r, resolve)
 	if err != nil {
 		return nil, nil, err
@@ -181,7 +179,7 @@ func namespaced(r *load.Result, resolve *graph.Resolver) ([]directive, error) {
 		}
 	}
 	found := read.found
-	slices.SortFunc(found, func(a, b directive) int { return byPosition(a.at, b.at) })
+	slices.SortFunc(found, func(a, b directive) int { return graph.ByPosition(a.at, b.at) })
 	return found, nil
 }
 

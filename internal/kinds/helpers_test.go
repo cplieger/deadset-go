@@ -1,8 +1,11 @@
 package kinds
 
 import (
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/cplieger/deadset-go/internal/config"
@@ -10,6 +13,7 @@ import (
 	"github.com/cplieger/deadset-go/internal/graph"
 	"github.com/cplieger/deadset-go/internal/load"
 	"github.com/cplieger/deadset-go/internal/scope"
+	spec "github.com/cplieger/deadset-spec"
 	"golang.org/x/tools/txtar"
 )
 
@@ -80,25 +84,26 @@ func extract(t *testing.T, archive string) string {
 	return dir
 }
 
-// loadDir resolves one directory through the production load, under the fixture
-// configuration unless a test names another, so the Need bits the passes depend on
-// have one owner.
-func loadDir(t *testing.T, dir string, configurations ...load.Configuration) (*load.Result, string) {
+// loadScope resolves one scope through the production load, so the Need bits the
+// passes depend on have one owner.
+func loadScope(t *testing.T, doc scope.Document, c load.Configuration) *load.Result {
 	t.Helper()
 
-	c := fixtureConfiguration()
-	if len(configurations) > 0 {
-		c = configurations[0]
-	}
-	doc, err := scope.ForDir(dir)
-	if err != nil {
-		t.Fatalf("Setup: scope.ForDir(%s): %v", dir, err)
-	}
 	result, err := load.Load(t.Context(), doc, c)
 	if err != nil {
-		t.Fatalf("Setup: load.Load(%s, %s): %v", dir, c.ID, err)
+		t.Fatalf("Setup: load.Load(%s, %s): %v", doc.Target.Path, c.ID, err)
 	}
-	return &result, doc.Target.Path
+	return &result
+}
+
+// consumerIDs is the module path of every consumer one load resolved, in the order
+// the scope declared them.
+func consumerIDs(result *load.Result) []string {
+	ids := make([]string, 0, len(result.Consumers))
+	for _, one := range result.Consumers {
+		ids = append(ids, one.ID)
+	}
+	return ids
 }
 
 // inputOf extracts one archive and builds what every kind reads from it, over the
@@ -123,6 +128,26 @@ func inputOfDir(t *testing.T, dir string, resolved config.Config, consumers Cons
 ) *Input {
 	t.Helper()
 
+	doc, err := scope.ForDir(dir)
+	if err != nil {
+		t.Fatalf("Setup: scope.ForDir(%s): %v", dir, err)
+	}
+	return inputOfScope(t, doc, resolved, consumers, configurations...)
+}
+
+// inputOfScope is inputOf over one resolved scope, which is what a run whose scope
+// declares consumers reads.
+//
+// The consumer set is the load's own where the scope declared consumers, which is
+// what the composition root does: a scope document leaves the module path to the
+// load, so the declared list and the loaded list are one list and a caller that read
+// the declared one from the document would put an empty string in it. A scope that
+// declares no consumer leaves the caller's value standing.
+func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, consumers Consumers,
+	configurations ...load.Configuration,
+) *Input {
+	t.Helper()
+
 	if len(configurations) == 0 {
 		configurations = []load.Configuration{fixtureConfiguration()}
 	}
@@ -133,6 +158,7 @@ func inputOfDir(t *testing.T, dir string, resolved config.Config, consumers Cons
 		},
 		TemplateDirs:     resolved.Analysis.TemplateDirs,
 		IncludeGenerated: resolved.Analysis.GeneratedFiles == config.IncludeGenerated,
+		Production:       true,
 	}
 	rootOptions := graph.RootOptions{
 		Patterns:     resolved.Roots.Patterns,
@@ -143,9 +169,11 @@ func inputOfDir(t *testing.T, dir string, resolved config.Config, consumers Cons
 	passes := make([]graph.Configured, len(configurations))
 	var exemptions []graph.Exemption
 	var root string
+	var loadedConsumers []string
 	for i, c := range configurations {
-		result, targetRoot := loadDir(t, dir, c)
-		root = targetRoot
+		result := loadScope(t, doc, c)
+		root = doc.Target.Path
+		loadedConsumers = consumerIDs(result)
 		symbols, err := graph.Symbols(result, root, os.ReadFile)
 		if err != nil {
 			t.Fatalf("Setup: graph.Symbols(%s): %v", c.ID, err)
@@ -180,13 +208,20 @@ func inputOfDir(t *testing.T, dir string, resolved config.Config, consumers Cons
 
 	merged, err := graph.Merge(passes)
 	if err != nil {
-		t.Fatalf("Setup: graph.Merge(%s): %v", dir, err)
+		t.Fatalf("Setup: graph.Merge(%s): %v", doc.Target.Path, err)
 	}
 	swept := graph.NewMatrix(&merged).Sweep(graph.Mode{Exempt: exemptions, Production: true})
 
 	refs := make(map[graph.SymbolID]string, len(merged.Symbols))
 	for i := range merged.Symbols {
 		refs[merged.Symbols[i].ID] = merged.Symbols[i].Ref
+	}
+	if len(loadedConsumers) > 0 {
+		consumers = Consumers{
+			Declared: loadedConsumers,
+			Loaded:   loadedConsumers,
+			Complete: resolved.Consumers.Complete,
+		}
 	}
 	generated := generatedPaths(t, per)
 	return &Input{
@@ -342,3 +377,48 @@ func summary(findings []Finding) []string {
 	}
 	return lines
 }
+
+// corpusInput builds what every kind reads from one fixture of the pinned corpus,
+// with the fixture's consumer section loaded.
+//
+// A rendering's sections are directories of one archive: target holds the module
+// being analyzed and every other top-level directory is a consumer module, which
+// reaches the target through the relative replace its own module file carries. So a
+// fixture is loaded the way a run with a scope document is, and the consumer set the
+// class ladder reads is the load's own.
+func corpusInput(t *testing.T, fixture string, resolved config.Config) *Input {
+	t.Helper()
+
+	data, err := spec.Corpus.ReadFile("corpus/fixtures/" + fixture + "/go.txtar")
+	if err != nil {
+		t.Fatalf("Setup: read the Go rendering of %s: %v", fixture, err)
+	}
+	dir := t.TempDir()
+	sections := make(map[string]bool)
+	for _, f := range txtar.Parse(data).Files {
+		path := filepath.Join(dir, filepath.FromSlash(f.Name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			t.Fatalf("Setup: create %s: %v", filepath.Dir(path), err)
+		}
+		if err := os.WriteFile(path, f.Data, 0o600); err != nil {
+			t.Fatalf("Setup: write %s: %v", path, err)
+		}
+		if section, _, nested := strings.Cut(f.Name, "/"); nested {
+			sections[section] = true
+		}
+	}
+	if !sections[corpusTargetSection] {
+		t.Fatalf("Setup: the rendering of %s carries no %s section", fixture, corpusTargetSection)
+	}
+	doc := scope.Document{Target: scope.Module{Path: filepath.Join(dir, corpusTargetSection)}}
+	for _, section := range slices.Sorted(maps.Keys(sections)) {
+		if section != corpusTargetSection {
+			doc.Consumers = append(doc.Consumers, scope.Module{Path: filepath.Join(dir, section)})
+		}
+	}
+	return inputOfScope(t, doc, resolved, Consumers{})
+}
+
+// corpusTargetSection is the directory of a fixture rendering that holds the module
+// being analyzed.
+const corpusTargetSection = "target"

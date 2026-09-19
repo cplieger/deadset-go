@@ -130,7 +130,7 @@ func (d *linkname) exemptions() []graph.Exemption {
 	}
 	slices.SortFunc(found, func(a, b graph.Exemption) int {
 		return cmp.Or(
-			bySite(a.Site, b.Site),
+			graph.ByPosition(a.Site, b.Site),
 			cmp.Compare(a.ID, b.ID),
 			strings.Compare(a.Detail, b.Detail),
 		)

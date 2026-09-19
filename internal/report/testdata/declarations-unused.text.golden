@@ -1,0 +1,3 @@
+catalog/catalog.go:13:6: function helper: unexported function has no reference in the target [certain] (DS1002)
+catalog/catalog.go:27:2: field Counter.stale: unexported field has no reference in the target [certain] (DS1003)
+summary: 2 findings (0 allow, 0 warn, 2 deny), 2 deletable lines, 0 suppressions in effect, 0 reasons recorded, 0 stale suppressions, 0 pending, 0 omitted

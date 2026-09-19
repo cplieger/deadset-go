@@ -1,0 +1,56 @@
+A target holding four files neither configuration of its matrix compiles: one the
+build expression it declares excludes, one the platform its file name names
+excludes, one that states the same platform in both its name and its build
+expression, and one the toolchain ignored because it reaches C. One further file one
+configuration of the two compiles.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- app.go --
+package app
+
+// Answer is compiled under every configuration.
+func Answer() int { return Extra() }
+-- extra.go --
+package app
+
+// Extra is compiled under every configuration.
+func Extra() int { return 1 }
+-- ninth.go --
+//go:build plan9
+
+package app
+
+// PlanNine is compiled for one system the matrix does not name.
+func PlanNine() int { return 9 }
+-- paired_darwin.go --
+package app
+
+// Paired is compiled under one configuration of the matrix and not the other.
+func Paired() int { return 11 }
+-- sized_windows.go --
+package app
+
+// Sized is compiled for one system the matrix does not name, by the name of the
+// file that declares it.
+func Sized() int { return 10 }
+-- stated_windows.go --
+//go:build windows
+
+package app
+
+// Stated is compiled for one system the matrix does not name, stated twice: by the
+// name of the file that declares it and by the build expression the file carries.
+func Stated() int { return 12 }
+-- bridge.go --
+package app
+
+/*
+#include <stdlib.h>
+*/
+import "C"
+
+// Free hands a pointer back to C.
+func Free() { C.free(nil) }

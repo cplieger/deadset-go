@@ -1,0 +1,437 @@
+{
+  "schema_version": "2.0.0",
+  "contract_version": "1.3.0",
+  "analyzer": {
+    "name": "deadset-go",
+    "version": "1.6.0",
+    "languages": [
+      "go"
+    ],
+    "schema_versions_accepted": [
+      "2.0.0"
+    ],
+    "conformance": {
+      "corpus_version": "1.0.0",
+      "result": "pass",
+      "digest": "sha256:abababababababababababababababababababababababababababababababab"
+    }
+  },
+  "target": {
+    "kind": "library",
+    "root": ".",
+    "identity": "example.com/app"
+  },
+  "configurations": [
+    {
+      "id": "linux-amd64",
+      "os": "linux",
+      "arch": "amd64",
+      "tags": []
+    },
+    {
+      "id": "linux-arm64-netgo",
+      "os": "linux",
+      "arch": "arm64",
+      "tags": [
+        "netgo"
+      ]
+    }
+  ],
+  "consumers": {
+    "declared": 2,
+    "loaded": [
+      {
+        "id": "example.com/consumer",
+        "role": "consumer",
+        "path": "../consumer"
+      }
+    ],
+    "unavailable": [
+      {
+        "id": "example.com/absent",
+        "role": "consumer",
+        "reason": "the configuration declared the consumer and named no path to load it from"
+      }
+    ]
+  },
+  "findings": [
+    {
+      "code": "DS1301",
+      "kind": "write-only-symbol",
+      "language": "go",
+      "position": {
+        "path": "catalog.go",
+        "line": 12,
+        "column": 6,
+        "end_line": 12
+      },
+      "symbol": {
+        "ref": "go://example.com/app#write-only-symbol",
+        "kind": "field",
+        "name": "write-only-symbol",
+        "size_lines": 1
+      },
+      "reachability_class": "certain",
+      "confidence": "certain",
+      "test_only": false,
+      "generated": false,
+      "component": {
+        "id": "deadset-go/c-3",
+        "root": true,
+        "symbol_count": 1,
+        "deletable_lines": 1
+      },
+      "retained_by": [],
+      "configurations": [
+        "linux-amd64",
+        "linux-arm64-netgo"
+      ],
+      "consumers_loaded": [
+        "example.com/consumer"
+      ],
+      "fixability": "deletable",
+      "severity": "deny",
+      "message": "the field is written and never read",
+      "details": {
+        "write_positions": [
+          {
+            "path": "catalog.go",
+            "line": 41,
+            "column": 3,
+            "end_line": 41
+          },
+          {
+            "path": "catalog.go",
+            "line": 52,
+            "column": 3,
+            "end_line": 52
+          }
+        ]
+      }
+    },
+    {
+      "code": "DS1203",
+      "kind": "uncalled-interface-method",
+      "language": "go",
+      "position": {
+        "path": "catalog.go",
+        "line": 31,
+        "column": 6,
+        "end_line": 31
+      },
+      "symbol": {
+        "ref": "go://example.com/app#uncalled-interface-method",
+        "kind": "interface-method",
+        "name": "uncalled-interface-method",
+        "size_lines": 1
+      },
+      "reachability_class": "certain",
+      "confidence": "certain",
+      "liveness_relation": "reference-counting",
+      "test_only": false,
+      "generated": false,
+      "component": {
+        "id": "deadset-go/c-4",
+        "root": true,
+        "symbol_count": 1,
+        "deletable_lines": 0
+      },
+      "retained_by": [],
+      "configurations": [
+        "linux-amd64",
+        "linux-arm64-netgo"
+      ],
+      "consumers_loaded": [
+        "example.com/consumer"
+      ],
+      "fixability": "manual",
+      "severity": "warn",
+      "message": "no call through the interface reaches the method",
+      "details": {
+        "implementations": [
+          {
+            "ref": "go://example.com/app#memoryStore.Purge",
+            "name": "(*memoryStore).Purge",
+            "position": {
+              "path": "store.go",
+              "line": 88,
+              "column": 18,
+              "end_line": 94
+            }
+          }
+        ]
+      }
+    },
+    {
+      "code": "DS1002",
+      "kind": "unused-unexported",
+      "language": "go",
+      "position": {
+        "path": "catalog.go",
+        "line": 214,
+        "column": 6,
+        "end_line": 231
+      },
+      "symbol": {
+        "ref": "go://example.com/app#unused-unexported",
+        "kind": "function",
+        "name": "unused-unexported",
+        "size_lines": 18
+      },
+      "reachability_class": "certain",
+      "confidence": "certain",
+      "liveness_relation": "reference-counting",
+      "test_only": false,
+      "generated": false,
+      "component": {
+        "id": "deadset-go/c-5",
+        "root": true,
+        "symbol_count": 3,
+        "deletable_lines": 41
+      },
+      "retained_by": [],
+      "configurations": [
+        "linux-amd64",
+        "linux-arm64-netgo"
+      ],
+      "consumers_loaded": [
+        "example.com/consumer"
+      ],
+      "fixability": "deletable",
+      "severity": "deny",
+      "message": "the function has no reference in the target",
+      "details": {
+        "removes_last_use_of": [
+          "example.com/left",
+          "example.com/right"
+        ]
+      }
+    },
+    {
+      "code": "DS1601",
+      "kind": "unused-dependency",
+      "language": "go",
+      "position": {
+        "path": "go.mod",
+        "line": 12,
+        "column": 2,
+        "end_line": 12
+      },
+      "symbol": {
+        "ref": "go://example.com/app#unused-dependency",
+        "kind": "dependency",
+        "name": "example.com/left",
+        "size_lines": 1
+      },
+      "reachability_class": "certain",
+      "confidence": "certain",
+      "liveness_relation": "reference-counting",
+      "test_only": false,
+      "generated": false,
+      "component": {
+        "id": "deadset-go/c-1",
+        "root": true,
+        "symbol_count": 1,
+        "deletable_lines": 1
+      },
+      "retained_by": [],
+      "configurations": [
+        "linux-amd64",
+        "linux-arm64-netgo"
+      ],
+      "consumers_loaded": [
+        "example.com/consumer"
+      ],
+      "fixability": "manual",
+      "severity": "deny",
+      "message": "required by no package in the build list",
+      "details": {
+        "dependency_class": "require"
+      }
+    },
+    {
+      "code": "DS1101",
+      "kind": "unnecessary-export",
+      "language": "go",
+      "position": {
+        "path": "normalize.go",
+        "line": 12,
+        "column": 6,
+        "end_line": 27
+      },
+      "symbol": {
+        "ref": "go://example.com/app#unnecessary-export",
+        "kind": "function",
+        "name": "unnecessary-export",
+        "size_lines": 16
+      },
+      "reachability_class": "certain",
+      "confidence": "certain",
+      "test_only": false,
+      "generated": false,
+      "component": {
+        "id": "deadset-go/c-7",
+        "root": true,
+        "symbol_count": 1,
+        "deletable_lines": 0
+      },
+      "retained_by": [],
+      "configurations": [
+        "linux-amd64",
+        "linux-arm64-netgo"
+      ],
+      "consumers_loaded": [
+        "example.com/consumer"
+      ],
+      "fixability": "narrowable",
+      "severity": "warn",
+      "message": "exported function is referenced only inside the package that declares it",
+      "details": {
+        "narrower_visibility": "package"
+      }
+    },
+    {
+      "code": "DS1501",
+      "kind": "file-never-built",
+      "language": "go",
+      "position": {
+        "path": "render_plan9.go",
+        "line": 1,
+        "column": 1,
+        "end_line": 1
+      },
+      "symbol": {
+        "ref": "go://example.com/app#file-never-built",
+        "kind": "file",
+        "name": "render_plan9.go",
+        "size_lines": 1
+      },
+      "reachability_class": "certain",
+      "confidence": "certain",
+      "liveness_relation": "reference-counting",
+      "test_only": false,
+      "generated": false,
+      "component": {
+        "id": "deadset-go/c-2",
+        "root": true,
+        "symbol_count": 1,
+        "deletable_lines": 9
+      },
+      "retained_by": [],
+      "configurations": [
+        "linux-amd64",
+        "linux-arm64-netgo"
+      ],
+      "consumers_loaded": [
+        "example.com/consumer"
+      ],
+      "fixability": "deletable",
+      "severity": "deny",
+      "message": "built under no declared configuration",
+      "details": {
+        "excluded_by": "//go:build plan9"
+      }
+    }
+  ],
+  "edge_evaluations": [
+    {
+      "edge": "wire/plan",
+      "side": "provides",
+      "symbol": "go://example.com/app#Plan",
+      "state": "dead",
+      "finding": {
+        "code": "DS1001",
+        "kind": "unused-exported",
+        "language": "go",
+        "position": {
+          "path": "wire.go",
+          "line": 9,
+          "column": 6,
+          "end_line": 12
+        },
+        "symbol": {
+          "ref": "go://example.com/app#unused-exported",
+          "kind": "function",
+          "name": "unused-exported",
+          "size_lines": 4
+        },
+        "reachability_class": "certain",
+        "confidence": "certain",
+        "liveness_relation": "reference-counting",
+        "test_only": false,
+        "generated": false,
+        "component": {
+          "id": "deadset-go/c-1",
+          "root": true,
+          "symbol_count": 1,
+          "deletable_lines": 0
+        },
+        "retained_by": [],
+        "configurations": [
+          "linux-amd64",
+          "linux-arm64-netgo"
+        ],
+        "consumers_loaded": [
+          "example.com/consumer"
+        ],
+        "fixability": "deletable",
+        "severity": "deny",
+        "message": "exported function is named by a declared edge and has no other reference",
+        "details": {}
+      }
+    }
+  ],
+  "stale_suppressions": [
+    {
+      "code": "DS1703",
+      "mechanism": "ignore",
+      "entry": {
+        "code": "DS1001",
+        "symbol": "go://example.com/app#Catalog.legacyAlias",
+        "path": "catalog.go",
+        "reason": "removal is breaking for the published API"
+      },
+      "position": {
+        "path": "deadset-ignore.json",
+        "line": 7,
+        "column": 5
+      },
+      "symbol": "go://example.com/app#Catalog.legacyAlias",
+      "message": "the ignore entry named DS1001 and the symbol it names reports DS1003"
+    }
+  ],
+  "declared_gaps": [
+    {
+      "fixture": "private-member-unread",
+      "capability": "DS1003",
+      "reason": "member-level analysis is not implemented, so no member of a type is reported"
+    }
+  ],
+  "excluded_by_cgo": [
+    "internal/bridge/glue.go"
+  ],
+  "test_file_rules": [
+    {
+      "rule": "configured-test-glob",
+      "matched": 4
+    },
+    {
+      "rule": "go-test-suffix",
+      "matched": 61
+    }
+  ],
+  "totals": {
+    "findings": 6,
+    "by_severity": {
+      "allow": 0,
+      "warn": 2,
+      "deny": 4
+    },
+    "deletable_lines": 52,
+    "suppressions_in_effect": 4,
+    "reasons_recorded": 6,
+    "stale_suppressions": 1,
+    "pending": 1,
+    "omitted": 0
+  }
+}

@@ -1,0 +1,88 @@
+Declarations of the three kinds no narrowing reports, each beside declarations of
+kinds that are reported, so an exclusion is told from an empty population: a method
+an interface declares, a field of a struct, and a method that satisfies an interface
+the target names as a type. One of the two satisfying methods reaches the interface
+through a conversion and one does not, which is the difference between the exemption
+class and the rule the kinds apply.
+
+The internal package is closed world whatever the run knows about consumers, and the
+importable one is closed only where the configuration declares the consumer set
+complete, which is what puts one field under each of the two kinds.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- internal/store/store.go --
+package store
+
+// Sink is named as a type by Drain.
+type Sink interface {
+	// Write is invoked through the interface inside this package.
+	Write(p []byte) (int, error)
+}
+
+// Buffer satisfies Sink and is converted to it nowhere.
+type Buffer struct {
+	// Data is written and read inside the file that declares it.
+	Data []byte
+}
+
+// Write appends what it is given, and is what satisfies Sink.
+func (b *Buffer) Write(p []byte) (int, error) {
+	b.Data = append(b.Data, p...)
+	return len(p), nil
+}
+
+// Pipe satisfies Sink and is converted to it at the call of Drain.
+type Pipe struct{}
+
+// Write counts what it is given.
+func (Pipe) Write(p []byte) (int, error) { return len(p), nil }
+
+// Drain writes through the interface.
+func Drain(s Sink) error {
+	_, err := s.Write([]byte("x"))
+	return err
+}
+
+// Fill writes through the concrete type.
+func Fill() int {
+	b := &Buffer{}
+	if _, err := b.Write([]byte("y")); err != nil {
+		return 0
+	}
+	return len(b.Data)
+}
+-- internal/store/use.go --
+package store
+
+// Count is what the command calls.
+func Count() int {
+	if err := Drain(Pipe{}); err != nil {
+		return 0
+	}
+	return Fill()
+}
+-- shared/shared.go --
+package shared
+
+// Record is constructed by the command.
+type Record struct {
+	// Name is written by the command and read here.
+	Name string
+}
+
+// Label answers what a record is called.
+func Label(r Record) string { return r.Name }
+-- main.go --
+package main
+
+import (
+	"example.com/app/internal/store"
+	"example.com/app/shared"
+)
+
+func main() {
+	println(store.Count(), shared.Label(shared.Record{Name: "x"}))
+}

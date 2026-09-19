@@ -1,0 +1,35 @@
+A struct whose only encoder call is written in a test file, and whose fields no
+reference names. The encoder call is the evidence of the exemption class that would
+retain the fields, and a production run does not hold it, so the fields are
+candidates and report under the code their production references select.
+
+-- go.mod --
+module example.com/evidence
+
+go 1.27.1
+-- main.go --
+package main
+
+// Fixture is marshalled by the test of this package and by nothing else.
+type Fixture struct {
+	Name  string `json:"name"`
+	Extra int
+}
+
+func main() {
+	var f Fixture
+	_ = f
+}
+-- main_test.go --
+package main
+
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestFixtureMarshals(t *testing.T) {
+	if _, err := json.Marshal(Fixture{}); err != nil {
+		t.Fatalf("json.Marshal(Fixture{}) error: %v", err)
+	}
+}

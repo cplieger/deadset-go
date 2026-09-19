@@ -1,6 +1,10 @@
 package config
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/cplieger/deadset-go/internal/catalog"
+)
 
 // severitySection is the name of the severity object, whose member names the
 // closed key list leaves open.
@@ -15,68 +19,44 @@ const familyKeyLength = 4
 // consumers.
 const unusedExportedCode = "DS1001"
 
-// kind is one issue kind this analyzer ships: the code the Contract assigns it,
-// the severity a configuration naming neither the code nor its family resolves to,
-// whether the kind reports at all, and whether the Contract fixes both against
-// configuration.
+// kind is one issue kind this analyzer ships, as resolution reads it: the code
+// the vocabulary assigns it, the severity a configuration naming neither the code
+// nor its family resolves to, and whether the kind reports at all.
 type kind struct {
 	code     string
 	severity Severity
 	enabled  bool
-	fixed    bool
 }
 
-// liveKinds are the issue kinds this analyzer ships, in ascending code order, each
-// carrying the default the Contract declares for it. A retired code is absent, so
-// it names no live kind and a severity key naming one is refused like a code the
-// vocabulary never held. A test pins the table equal to the Contract's issue-kind
-// vocabulary, so a kind the Contract adds fails there rather than resolving to
-// nothing here.
+// liveKinds are the issue kinds this analyzer ships, in the vocabulary's order,
+// each carrying the default the vocabulary declares for it. A retired code is
+// absent from the vocabulary, so it names no live kind here and a severity key
+// naming one is refused like a code the vocabulary never held.
+//
+// The vocabulary is [catalog]'s, which is pinned equal to the Contract's
+// issue-kind document, so a kind the Contract adds or a default it moves arrives
+// here without a second table to keep in step.
 func liveKinds() []kind {
-	return []kind{
-		{code: unusedExportedCode, severity: Deny, enabled: true},
-		{code: "DS1002", severity: Deny, enabled: true},
-		{code: "DS1003", severity: Deny, enabled: true},
-		{code: "DS1004", severity: Deny, enabled: true},
-		{code: "DS1005", severity: Deny, enabled: true},
-		{code: "DS1006", severity: Deny, enabled: true},
-		{code: "DS1101", severity: Warn, enabled: true},
-		{code: "DS1102", severity: Warn, enabled: true},
-		{code: "DS1103", severity: Deny, enabled: true},
-		{code: "DS1104", severity: Warn, enabled: true},
-		{code: "DS1201", severity: Deny, enabled: true},
-		{code: "DS1203", severity: Warn, enabled: true},
-		{code: "DS1204", severity: Deny, enabled: true},
-		{code: "DS1301", severity: Deny, enabled: true},
-		{code: "DS1302", severity: Deny, enabled: true},
-		{code: "DS1303", severity: Deny, enabled: true},
-		{code: "DS1501", severity: Deny, enabled: true},
-		{code: "DS1502", severity: Deny, enabled: true},
-		{code: "DS1601", severity: Deny, enabled: true},
-		{code: "DS1605", severity: Warn, enabled: true},
-		{code: "DS1701", severity: Deny, enabled: true},
-		{code: "DS1702", severity: Deny, enabled: true},
-		{code: "DS1703", severity: Deny, enabled: true, fixed: true},
-		{code: "DS1704", severity: Deny, enabled: true, fixed: true},
-		{code: "DS1705", severity: Deny, enabled: true},
-		{code: "DS1801", severity: Warn, enabled: true},
-		{code: "DS1802", severity: Warn, enabled: true},
-		{code: "DS1803", severity: Warn, enabled: true},
-		{code: "DS1805", severity: Deny, enabled: true},
-		{code: "DS1807", severity: Deny, enabled: true},
-		{code: "DS1809", severity: Deny, enabled: true},
+	rows := catalog.Kinds()
+	live := make([]kind, 0, len(rows))
+	for i := range rows {
+		live = append(live, kind{
+			code:     rows[i].Code,
+			severity: Severity(rows[i].DefaultSeverity),
+			enabled:  rows[i].DefaultEnabled,
+		})
 	}
+	return live
 }
 
 // liveKind returns the issue kind one code names and whether this analyzer ships
 // it. A family prefix names no kind of its own, so it is not one.
 func liveKind(code string) (kind, bool) {
-	for _, declared := range liveKinds() {
-		if declared.code == code {
-			return declared, true
-		}
+	row, live := catalog.Kind(code)
+	if !live {
+		return kind{}, false
 	}
-	return kind{}, false
+	return kind{code: row.Code, severity: Severity(row.DefaultSeverity), enabled: row.DefaultEnabled}, true
 }
 
 // namesLiveKind reports whether one severity key names at least one issue kind
@@ -84,22 +64,28 @@ func liveKind(code string) (kind, bool) {
 // prefix names. A retired code and a family whose range holds no live kind both
 // name none.
 func namesLiveKind(key string) bool {
-	for _, declared := range liveKinds() {
-		if key == declared.code || (len(key) == familyKeyLength && strings.HasPrefix(declared.code, key)) {
+	if _, live := catalog.Kind(key); live {
+		return true
+	}
+	if len(key) != familyKeyLength {
+		return false
+	}
+	for _, row := range catalog.Kinds() {
+		if strings.HasPrefix(row.Code, key) {
 			return true
 		}
 	}
 	return false
 }
 
-// fixedSeverityCodes are the codes whose severity the Contract fixes. A severity
+// fixedSeverityCodes are the codes whose severity the vocabulary fixes. A severity
 // key naming one, or a family prefix whose range holds one, is an unimplemented
 // key rather than a setting.
 func fixedSeverityCodes() []string {
 	var fixed []string
-	for _, declared := range liveKinds() {
-		if declared.fixed {
-			fixed = append(fixed, declared.code)
+	for _, row := range catalog.Kinds() {
+		if row.Fixed {
+			fixed = append(fixed, row.Code)
 		}
 	}
 	return fixed

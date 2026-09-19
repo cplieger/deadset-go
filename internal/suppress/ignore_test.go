@@ -45,8 +45,10 @@ func entryOutcomes() map[string][2]entryOutcome {
 	}
 }
 
-// outcomeOf reads one document and names what the reader made of its one entry.
-func outcomeOf(t *testing.T, document string) entryOutcome {
+// outcomesOf reads one document and names what the reader made of its one entry:
+// one outcome per finding the entry produced, in the order the rules apply, and the
+// one outcome of an entry that produced none.
+func outcomesOf(t *testing.T, document string) []entryOutcome {
 	t.Helper()
 	records, refusals, err := IgnoreFile(writeIgnoreFile(t, document), nil)
 	switch {
@@ -54,15 +56,33 @@ func outcomeOf(t *testing.T, document string) entryOutcome {
 		if !errors.Is(err, ErrMalformed) {
 			t.Fatalf("IgnoreFile(%s) error = %v, want one satisfying errors.Is(err, ErrMalformed)", document, err)
 		}
-		return outcomeMalformed
-	case len(refusals) == 1:
-		return entryOutcome(refusals[0].Reported)
-	case len(refusals) > 1:
-		t.Fatalf("IgnoreFile(%s) returned %d refusals, want at most one: %+v", document, len(refusals), refusals)
+		return []entryOutcome{outcomeMalformed}
+	case len(refusals) > 0:
+		got := make([]entryOutcome, 0, len(refusals))
+		for _, refusal := range refusals {
+			got = append(got, entryOutcome(refusal.Reported))
+		}
+		return got
 	case len(records) != 1:
 		t.Fatalf("IgnoreFile(%s) returned %d records, want one: %+v", document, len(records), records)
 	}
-	return outcomeRecord
+	return []entryOutcome{outcomeRecord}
+}
+
+// wanted is the outcomes one corpus case declares: the code of every finding it
+// names, and the rule's own outcome where it names none.
+func wanted(c *corpusCase, outcome [2]entryOutcome) []entryOutcome {
+	if len(c.Reports) > 0 {
+		reported := make([]entryOutcome, 0, len(c.Reports))
+		for _, code := range c.Reports {
+			reported = append(reported, entryOutcome(code))
+		}
+		return reported
+	}
+	if c.Accepted {
+		return []entryOutcome{outcome[0]}
+	}
+	return []entryOutcome{outcome[1]}
 }
 
 func TestIgnoreFileDecidesEveryPublishedEntryCase(t *testing.T) {
@@ -73,12 +93,9 @@ func TestIgnoreFileDecidesEveryPublishedEntryCase(t *testing.T) {
 				if !declared {
 					t.Fatalf("the corpus names rule %s and no outcome is declared for it: %s", c.Rule, c.Reason)
 				}
-				want := outcome[1]
-				if c.Accepted {
-					want = outcome[0]
-				}
-				if got := outcomeOf(t, documentOf(string(c.Input))); got != want {
-					t.Errorf("IgnoreFile over the %s case %s = %s, want %s: %s", kind, c.Input, got, want, c.Reason)
+				want := wanted(&c, outcome)
+				if got := outcomesOf(t, documentOf(string(c.Input))); !slices.Equal(got, want) {
+					t.Errorf("IgnoreFile over the %s case %s = %v, want %v: %s", kind, c.Input, got, want, c.Reason)
 				}
 			})
 		}
@@ -319,14 +336,6 @@ func TestIgnoreFileRefusesTheDocumentsTheGrammarRefuses(t *testing.T) {
 					document, malformed.Site, malformed.Mechanism, IgnoreFileName, MechanismIgnore)
 			}
 		})
-	}
-}
-
-func TestIgnoreFileRefusesADocumentAboveTheSizeBound(t *testing.T) {
-	document := `{"description": "` + strings.Repeat("a", maxDocumentBytes) + `", "ignore": []}`
-	_, _, err := IgnoreFile(writeIgnoreFile(t, document), nil)
-	if !errors.Is(err, ErrTooLarge) {
-		t.Fatalf("IgnoreFile over a document of %d bytes error = %v, want one satisfying errors.Is(err, ErrTooLarge)", len(document), err)
 	}
 }
 

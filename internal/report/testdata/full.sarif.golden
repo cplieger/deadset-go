@@ -1,0 +1,897 @@
+{
+  "$schema": "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "deadset-go",
+          "version": "1.6.0",
+          "semanticVersion": "1.6.0",
+          "rules": [
+            {
+              "id": "DS1001",
+              "name": "unused-exported",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "error"
+                }
+              }
+            },
+            {
+              "id": "DS1002",
+              "name": "unused-unexported",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "error"
+                }
+              }
+            },
+            {
+              "id": "DS1003",
+              "name": "unused-member",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "error"
+                }
+              }
+            },
+            {
+              "id": "DS1004",
+              "name": "test-only-use",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "error"
+                }
+              }
+            },
+            {
+              "id": "DS1005",
+              "name": "test-of-dead-code",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "error"
+                }
+              }
+            },
+            {
+              "id": "DS1006",
+              "name": "deprecated-unused",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "error"
+                }
+              }
+            },
+            {
+              "id": "DS1101",
+              "name": "unnecessary-export",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "warning"
+                }
+              }
+            },
+            {
+              "id": "DS1102",
+              "name": "unnecessary-exposure",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "warning"
+                }
+              }
+            },
+            {
+              "id": "DS1103",
+              "name": "unreachable-export",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "error"
+                }
+              }
+            },
+            {
+              "id": "DS1201",
+              "name": "unused-interface",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "error"
+                }
+              }
+            },
+            {
+              "id": "DS1203",
+              "name": "uncalled-interface-method",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "warning"
+                }
+              }
+            },
+            {
+              "id": "DS1204",
+              "name": "unused-satisfaction-assertion",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "error"
+                }
+              }
+            },
+            {
+              "id": "DS1301",
+              "name": "write-only-symbol",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "error"
+                }
+              }
+            },
+            {
+              "id": "DS1302",
+              "name": "unused-enum-member",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "error"
+                }
+              }
+            },
+            {
+              "id": "DS1303",
+              "name": "unused-type-parameter",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "error"
+                }
+              }
+            },
+            {
+              "id": "DS1501",
+              "name": "file-never-built",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "error"
+                }
+              }
+            },
+            {
+              "id": "DS1502",
+              "name": "file-never-imported",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "error"
+                }
+              }
+            },
+            {
+              "id": "DS1601",
+              "name": "unused-dependency",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "error"
+                }
+              }
+            },
+            {
+              "id": "DS1605",
+              "name": "unused-module-directive",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "warning"
+                }
+              }
+            },
+            {
+              "id": "DS1701",
+              "name": "suppression-without-reason",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "error"
+                }
+              }
+            },
+            {
+              "id": "DS1702",
+              "name": "unscoped-ignore-entry",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "error"
+                }
+              }
+            },
+            {
+              "id": "DS1703",
+              "name": "stale-suppression",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "error"
+                }
+              }
+            },
+            {
+              "id": "DS1704",
+              "name": "unmatched-root",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "error"
+                }
+              }
+            },
+            {
+              "id": "DS1705",
+              "name": "stale-cross-language-edge",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "error"
+                }
+              }
+            },
+            {
+              "id": "DS1801",
+              "name": "unused-parameter",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "warning"
+                }
+              }
+            },
+            {
+              "id": "DS1802",
+              "name": "unused-receiver",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "warning"
+                }
+              }
+            },
+            {
+              "id": "DS1803",
+              "name": "unused-result",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "warning"
+                }
+              }
+            },
+            {
+              "id": "DS1805",
+              "name": "unreachable-statement",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "error"
+                }
+              }
+            },
+            {
+              "id": "DS1807",
+              "name": "dead-store",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "error"
+                }
+              }
+            },
+            {
+              "id": "DS1809",
+              "name": "unreachable-case",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "precision": "very-high",
+                "problem": {
+                  "severity": "error"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "automationDetails": {
+        "id": "deadset/go/"
+      },
+      "columnKind": "utf16CodeUnits",
+      "originalUriBaseIds": {
+        "%SRCROOT%": {
+          "description": {
+            "text": "The target root, the directory the analyzer was run on."
+          }
+        }
+      },
+      "results": [
+        {
+          "ruleId": "DS1301",
+          "ruleIndex": 12,
+          "level": "error",
+          "message": {
+            "text": "the field is written and never read (see [write catalog.go:41:3](1), [write catalog.go:52:3](2))"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "catalog.go",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 12,
+                  "startColumn": 6,
+                  "endLine": 12
+                }
+              }
+            }
+          ],
+          "relatedLocations": [
+            {
+              "id": 1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "catalog.go",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 41,
+                  "startColumn": 3,
+                  "endLine": 41
+                }
+              },
+              "message": {
+                "text": "write"
+              }
+            },
+            {
+              "id": 2,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "catalog.go",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 52,
+                  "startColumn": 3,
+                  "endLine": 52
+                }
+              },
+              "message": {
+                "text": "write"
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "primaryLocationLineHash": "a5f3ed73026fe94c:1",
+            "deadsetSymbolRef/v1": "29996bf73a992ff059ac79f6f56a38e4cb7a7c1bae9d7093b2b9f2dcc955acc5"
+          },
+          "properties": {
+            "language": "go",
+            "symbol": {
+              "ref": "go://example.com/app#write-only-symbol",
+              "kind": "field",
+              "name": "write-only-symbol",
+              "size_lines": 1
+            },
+            "reachability_class": "certain",
+            "confidence": "certain",
+            "test_only": false,
+            "generated": false,
+            "component": {
+              "id": "deadset-go/c-3",
+              "root": true,
+              "symbol_count": 1,
+              "deletable_lines": 1
+            },
+            "retained_by": [],
+            "configurations": [
+              "linux-amd64",
+              "linux-arm64-netgo"
+            ],
+            "consumers_loaded": [
+              "example.com/consumer"
+            ],
+            "fixability": "deletable",
+            "details": {
+              "write_positions": [
+                {
+                  "path": "catalog.go",
+                  "line": 41,
+                  "column": 3,
+                  "end_line": 41
+                },
+                {
+                  "path": "catalog.go",
+                  "line": 52,
+                  "column": 3,
+                  "end_line": 52
+                }
+              ]
+            }
+          }
+        },
+        {
+          "ruleId": "DS1203",
+          "ruleIndex": 10,
+          "level": "warning",
+          "message": {
+            "text": "no call through the interface reaches the method (see [implementation store.go:88:18](1))"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "catalog.go",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 31,
+                  "startColumn": 6,
+                  "endLine": 31
+                }
+              }
+            }
+          ],
+          "relatedLocations": [
+            {
+              "id": 1,
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "store.go",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 88,
+                  "startColumn": 18,
+                  "endLine": 94
+                }
+              },
+              "message": {
+                "text": "implementation"
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "primaryLocationLineHash": "cc8210efdbd6536b:1",
+            "deadsetSymbolRef/v1": "07f1e7d06589714bf594a3b55c3fbe316b3314d7c7e529bf0c8e5d2e8f68fa8f"
+          },
+          "properties": {
+            "language": "go",
+            "symbol": {
+              "ref": "go://example.com/app#uncalled-interface-method",
+              "kind": "interface-method",
+              "name": "uncalled-interface-method",
+              "size_lines": 1
+            },
+            "reachability_class": "certain",
+            "confidence": "certain",
+            "liveness_relation": "reference-counting",
+            "test_only": false,
+            "generated": false,
+            "component": {
+              "id": "deadset-go/c-4",
+              "root": true,
+              "symbol_count": 1,
+              "deletable_lines": 0
+            },
+            "retained_by": [],
+            "configurations": [
+              "linux-amd64",
+              "linux-arm64-netgo"
+            ],
+            "consumers_loaded": [
+              "example.com/consumer"
+            ],
+            "fixability": "manual",
+            "details": {
+              "implementations": [
+                {
+                  "ref": "go://example.com/app#memoryStore.Purge",
+                  "name": "(*memoryStore).Purge",
+                  "position": {
+                    "path": "store.go",
+                    "line": 88,
+                    "column": 18,
+                    "end_line": 94
+                  }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "ruleId": "DS1002",
+          "ruleIndex": 1,
+          "level": "error",
+          "message": {
+            "text": "the function has no reference in the target"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "catalog.go",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 214,
+                  "startColumn": 6,
+                  "endLine": 231
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "primaryLocationLineHash": "db676bc408b938cb:1",
+            "deadsetSymbolRef/v1": "f7446050f832b9168c37f2e400bf463c1ebf6e6c699ce680463b0c8d156bde33"
+          },
+          "properties": {
+            "language": "go",
+            "symbol": {
+              "ref": "go://example.com/app#unused-unexported",
+              "kind": "function",
+              "name": "unused-unexported",
+              "size_lines": 18
+            },
+            "reachability_class": "certain",
+            "confidence": "certain",
+            "liveness_relation": "reference-counting",
+            "test_only": false,
+            "generated": false,
+            "component": {
+              "id": "deadset-go/c-5",
+              "root": true,
+              "symbol_count": 3,
+              "deletable_lines": 41
+            },
+            "retained_by": [],
+            "configurations": [
+              "linux-amd64",
+              "linux-arm64-netgo"
+            ],
+            "consumers_loaded": [
+              "example.com/consumer"
+            ],
+            "fixability": "deletable",
+            "details": {
+              "removes_last_use_of": [
+                "example.com/left",
+                "example.com/right"
+              ]
+            }
+          }
+        },
+        {
+          "ruleId": "DS1601",
+          "ruleIndex": 17,
+          "level": "error",
+          "message": {
+            "text": "required by no package in the build list"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "go.mod",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 12,
+                  "startColumn": 2,
+                  "endLine": 12
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "primaryLocationLineHash": "b3168dad8186e0df:1",
+            "deadsetSymbolRef/v1": "5a925b9c33c8c137bb52d9389b2d1931555ddaf27b85fb8f790fdbd0e90041b6"
+          },
+          "properties": {
+            "language": "go",
+            "symbol": {
+              "ref": "go://example.com/app#unused-dependency",
+              "kind": "dependency",
+              "name": "example.com/left",
+              "size_lines": 1
+            },
+            "reachability_class": "certain",
+            "confidence": "certain",
+            "liveness_relation": "reference-counting",
+            "test_only": false,
+            "generated": false,
+            "component": {
+              "id": "deadset-go/c-1",
+              "root": true,
+              "symbol_count": 1,
+              "deletable_lines": 1
+            },
+            "retained_by": [],
+            "configurations": [
+              "linux-amd64",
+              "linux-arm64-netgo"
+            ],
+            "consumers_loaded": [
+              "example.com/consumer"
+            ],
+            "fixability": "manual",
+            "details": {
+              "dependency_class": "require"
+            }
+          }
+        },
+        {
+          "ruleId": "DS1101",
+          "ruleIndex": 6,
+          "level": "warning",
+          "message": {
+            "text": "exported function is referenced only inside the package that declares it"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "normalize.go",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 12,
+                  "startColumn": 6,
+                  "endLine": 27
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "primaryLocationLineHash": "39662055a61a7f72:1",
+            "deadsetSymbolRef/v1": "8afc980506e733c88164512cc82876a55fe918169013de41fa0052ca5850e26d"
+          },
+          "properties": {
+            "language": "go",
+            "symbol": {
+              "ref": "go://example.com/app#unnecessary-export",
+              "kind": "function",
+              "name": "unnecessary-export",
+              "size_lines": 16
+            },
+            "reachability_class": "certain",
+            "confidence": "certain",
+            "test_only": false,
+            "generated": false,
+            "component": {
+              "id": "deadset-go/c-7",
+              "root": true,
+              "symbol_count": 1,
+              "deletable_lines": 0
+            },
+            "retained_by": [],
+            "configurations": [
+              "linux-amd64",
+              "linux-arm64-netgo"
+            ],
+            "consumers_loaded": [
+              "example.com/consumer"
+            ],
+            "fixability": "narrowable",
+            "details": {
+              "narrower_visibility": "package"
+            }
+          }
+        },
+        {
+          "ruleId": "DS1501",
+          "ruleIndex": 15,
+          "level": "error",
+          "message": {
+            "text": "built under no declared configuration"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "render_plan9.go",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 1,
+                  "startColumn": 1,
+                  "endLine": 1
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "primaryLocationLineHash": "ecff1df3d7e60c85:1",
+            "deadsetSymbolRef/v1": "037a446c01a53a17e3e71fc70305d31b4018534fff26738f87c565148aeb1eab"
+          },
+          "properties": {
+            "language": "go",
+            "symbol": {
+              "ref": "go://example.com/app#file-never-built",
+              "kind": "file",
+              "name": "render_plan9.go",
+              "size_lines": 1
+            },
+            "reachability_class": "certain",
+            "confidence": "certain",
+            "liveness_relation": "reference-counting",
+            "test_only": false,
+            "generated": false,
+            "component": {
+              "id": "deadset-go/c-2",
+              "root": true,
+              "symbol_count": 1,
+              "deletable_lines": 9
+            },
+            "retained_by": [],
+            "configurations": [
+              "linux-amd64",
+              "linux-arm64-netgo"
+            ],
+            "consumers_loaded": [
+              "example.com/consumer"
+            ],
+            "fixability": "deletable",
+            "details": {
+              "excluded_by": "//go:build plan9"
+            }
+          }
+        },
+        {
+          "ruleId": "DS1703",
+          "ruleIndex": 21,
+          "level": "error",
+          "message": {
+            "text": "the ignore entry named DS1001 and the symbol it names reports DS1003"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "deadset-ignore.json",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 7,
+                  "startColumn": 5,
+                  "endLine": 7
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "primaryLocationLineHash": "ddf6a49435e10ac5:1",
+            "deadsetSymbolRef/v1": "a574befce857688eda4eecb479b1f13684eef2e75f0f67a787e20e73e09bbcf6"
+          }
+        }
+      ],
+      "properties": {
+        "totals": {
+          "findings": 6,
+          "by_severity": {
+            "allow": 0,
+            "warn": 2,
+            "deny": 4
+          },
+          "deletable_lines": 52,
+          "suppressions_in_effect": 4,
+          "reasons_recorded": 6,
+          "stale_suppressions": 1,
+          "pending": 1,
+          "omitted": 0
+        }
+      }
+    }
+  ]
+}

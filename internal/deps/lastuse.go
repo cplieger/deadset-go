@@ -138,7 +138,7 @@ func (u *uses) declared(node ast.Node) []graph.SymbolID {
 		if len(d.Names) > 0 {
 			return u.heldAt(d.Names...)
 		}
-		if embedded := embeddedName(d.Type); embedded != nil {
+		if embedded := graph.EmbeddedName(d.Type); embedded != nil {
 			return u.heldAt(embedded)
 		}
 	}
@@ -178,22 +178,4 @@ func (u *uses) record(ident *ast.Ident, owner []graph.SymbolID) {
 		}
 		u.used[id][module] = true
 	}
-}
-
-// embeddedName returns the identifier that names an embedded field, which the
-// language defines as the unqualified name of the type embedded.
-func embeddedName(expr ast.Expr) *ast.Ident {
-	switch t := expr.(type) {
-	case *ast.Ident:
-		return t
-	case *ast.StarExpr:
-		return embeddedName(t.X)
-	case *ast.SelectorExpr:
-		return t.Sel
-	case *ast.IndexExpr:
-		return embeddedName(t.X)
-	case *ast.IndexListExpr:
-		return embeddedName(t.X)
-	}
-	return nil
 }

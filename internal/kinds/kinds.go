@@ -27,8 +27,12 @@ import (
 
 	"github.com/cplieger/deadset-go/internal/catalog"
 	"github.com/cplieger/deadset-go/internal/config"
+	"github.com/cplieger/deadset-go/internal/deps"
+	"github.com/cplieger/deadset-go/internal/edges"
 	"github.com/cplieger/deadset-go/internal/graph"
 	"github.com/cplieger/deadset-go/internal/load"
+	"github.com/cplieger/deadset-go/internal/matrix"
+	"github.com/cplieger/deadset-go/internal/suppress"
 )
 
 // The constants of every finding this analyzer produces: the language it analyzes,
@@ -104,10 +108,24 @@ type Positioned struct {
 	Position Position
 }
 
+// Entry is the suppression record a self-check finding reports, in the shape an
+// entry of the ignore file and a row of the baseline share. A member is empty
+// exactly where the record lacks it, which is what the reason-free and the
+// unscoped kinds report.
+type Entry struct {
+	Code   string // the code the record names, which is not the finding's own
+	Symbol string // the reference the record names, empty where it names none
+	Path   string // the file the record names, empty where it names none
+	Reason string // the reason the record carries, empty where it carries none
+}
+
 // Details carries the per-kind members of the Contract's details object. A kind
 // sets only its own, and a reporter omits the members the kind left unset.
 //
-//nolint:govet // fieldalignment: the field order is the Contract's field order, which a reporter writes
+// The field order is the Contract's field order, which is the order a reporter
+// writes them in. A kind whose subject is a suppression record sets Entry, which is
+// a pointer so that a record carrying nothing but a code is told from a kind that
+// reports no record at all.
 type Details struct {
 	NarrowerVisibility string       // the visibility the references support
 	Implementations    []Positioned // the concrete implementations of an interface
@@ -115,26 +133,38 @@ type Details struct {
 	ExcludedBy         string       // the build constraint that excluded a file
 	DependencyClass    string       // the section that declares a dependency
 	Replacement        string       // the right-hand side of a module directive
-	RemovesLastUseOf   string       // the dependency whose last use a deletion removes
+	Mechanism          string       // where the suppression a finding reports lives
+	Entry              *Entry       // the suppression record a finding reports
+	RemovesLastUseOf   []string     // the dependencies whose last use a deletion removes
 }
 
 // Finding is one row of a report: the Contract's finding object, field for field,
 // so a reporter marshals it and nothing else.
 //
-// An emitter sets Code, Position, Symbol, Relation, TestOnly, Message and Details,
-// and may set Symbol.Kind where the subject is a part of a declaration rather than
-// the declaration itself. The framework sets everything else.
+// An emitter sets Code, Position, Symbol, TestOnly, Message and Details, and may
+// set Symbol.Kind where the subject is a part of a declaration rather than the
+// declaration itself. The framework sets everything else, the liveness relation
+// included.
 //
 //nolint:govet // fieldalignment: the field order is the Contract's field order, which a reporter writes
 type Finding struct {
-	Code            string
-	Kind            string
-	Language        string
-	Position        Position
-	Symbol          Subject
-	Class           Class
-	Confidence      Class
-	Relation        graph.Relation
+	Code       string
+	Kind       string
+	Language   string
+	Position   Position
+	Symbol     Subject
+	Class      Class
+	Confidence Class
+	Relation   graph.Relation
+
+	// Live reports that the subject of this finding is a declaration the sweep
+	// judged live, so no liveness relation decided it and a report carries none:
+	// the narrowing kinds, the unused-satisfaction-assertion kind and the
+	// write-only kind all claim something about a live declaration. Relation then
+	// holds the relation a reader of a document that still requires the member
+	// reads, and a reporter writing a document that does not omits the member.
+	Live bool
+
 	TestOnly        bool
 	Generated       bool
 	Component       Component
@@ -203,6 +233,33 @@ type Input struct {
 
 	// Generated reports whether one target-relative path is a generated file.
 	Generated func(path string) bool
+
+	// Marks is every suppression record the run read, bound or not, and Refusals
+	// is what the grammar refused with a finding of its own rather than with an
+	// exit. The self-check kinds read both: a record the sweep did not hold back
+	// is stale, a record whose code the configuration disables is dormant and
+	// reported by nothing, and a refusal is reported as the suppression was
+	// written.
+	Marks    []suppress.Record
+	Refusals []suppress.Refusal
+
+	// Deps is the target's module file as the toolchain reports it, which is what
+	// the dependency kinds read, and nil where the run did not read it.
+	Deps *deps.File
+
+	// Derived is the matrix the derivation answered, and nil where the
+	// configuration named the build configurations itself. A kind that claims
+	// something about every configuration of a target reads it, because a derived
+	// matrix is not every configuration the target builds.
+	Derived *matrix.Derived
+
+	// Unmatched is every configured root the roots pass matched nothing with,
+	// which is a configuration naming something that no longer exists.
+	Unmatched []graph.Unmatched
+
+	// Edges is the declared cross-language edges of the target, nil where the
+	// target carries no edges document.
+	Edges *edges.Document
 
 	// indexed is what a lookup over the inventory needs, built on first use.
 	indexed *index
@@ -410,10 +467,15 @@ func checkMessage(found *Finding) error {
 // the confidence is that class capped by the kind's own ceiling, and the severity
 // is the resolved configuration's; a finding in a generated file carries no
 // fixability, because nothing mechanical acts on a file a generator rewrites.
+//
+// The liveness relation is the candidate's, and a finding about a declaration the
+// sweep judged live carries none: the relation is what decided a candidate, so a
+// kind whose subject is live has nothing to name there.
 func (in *Input) complete(found *Finding, row *catalog.Row) {
 	held := in.index()
 	found.Kind = row.Name
 	found.Language = language
+	found.relation(held.candidates[found.id])
 	found.Class = in.ClassOf(found.id)
 	found.Confidence = found.Class.lower(Class(row.MaxClass))
 	found.Severity = in.Config.EffectiveSeverity(row.Code, in.consumersLoaded())
@@ -432,6 +494,22 @@ func (in *Input) complete(found *Finding, row *catalog.Row) {
 		found.Symbol.Kind = symbolKinds[held.kindOf(found.id)]
 	}
 	found.Component = held.componentOf(found.id)
+}
+
+// relation records the liveness relation one finding carries: the candidate's
+// where the sweep judged the subject dead, and none where it judged it live.
+//
+// The relation Live leaves in place is the reference-counting one, which is what a
+// consumer of a document that requires the member reads about a subject no relation
+// decided.
+func (f *Finding) relation(candidate *graph.Candidate) {
+	if candidate == nil {
+		f.Live = true
+		f.Relation = graph.ReferenceCounting
+		return
+	}
+	f.Live = false
+	f.Relation = candidate.Relation
 }
 
 // abovePar drops every finding the configured minimum confidence excludes and

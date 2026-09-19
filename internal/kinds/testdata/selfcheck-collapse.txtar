@@ -1,0 +1,21 @@
+One main package with two directives that each produce more than one record at one
+site: one naming two codes above a live declaration, and one above a specification
+that declares two names. Both are stale at every record, so a run measures that the
+findings collapse by site.
+
+-- go.mod --
+module example.com/selfcheckcollapse
+
+go 1.27.1
+-- main.go --
+package main
+
+func main() { println(loud(), first, second) }
+
+//deadset:ignore DS1001,DS1101 -- stale at both codes: main reaches loud
+func loud() string { return "l" }
+
+var (
+	//deadset:ignore DS1002 -- stale at one code and two declarations
+	first, second = 1, 2
+)

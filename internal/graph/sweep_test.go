@@ -308,6 +308,79 @@ func TestSweepRecordsNoExemptionNamingASymbolTheInventoryDoesNotHold(t *testing.
 	}
 }
 
+// suppressedBy names the symbols of one sweep's suppression record, which are the
+// marks that held a symbol back.
+func (b *graphBuilder) suppressedBy(r Result) []string {
+	found := make([]string, 0, len(r.Suppressed))
+	for _, id := range r.Suppressed {
+		found = append(found, b.named[id])
+	}
+	return found
+}
+
+func TestSweepRecordsEveryMarkThatHeldASymbolBackAndNoOther(t *testing.T) {
+	b := newGraphBuilder(t).add("entry", "heldBack", "alsoHeldBack", "exemptAndMarked")
+	b.root("entry", RootMain)
+	r := b.graph().Sweep(Mode{
+		Marked: []SymbolID{
+			b.id("alsoHeldBack"),
+			b.id("exemptAndMarked"),
+			b.id("entry"),
+			b.id("heldBack"),
+			b.id("heldBack"),
+			SymbolID("absent.go:1:1"),
+		},
+		Exempt: []Exemption{b.exemption("exemptAndMarked", "enum-group")},
+	})
+
+	// The entry point is live under both relations whatever any mark says, the
+	// exemption holds its own symbol back whether the mark is there or not, and
+	// the mark naming no declaration of the inventory holds nothing: each is a
+	// mark in effect for nothing, which is what the staleness kind reports. The
+	// record reads in the order the inventory holds the symbols rather than the
+	// order the marks arrived in, and one symbol marked twice is one entry.
+	want := []string{"heldBack", "alsoHeldBack"}
+	if got := b.suppressedBy(r); !slices.Equal(got, want) {
+		t.Errorf("Sweep over six marks recorded %v as suppressed, want %v", got, want)
+	}
+	if got := b.candidates(r); len(got) != 0 {
+		t.Errorf("Sweep over six marks returned %v, want no candidate", got)
+	}
+}
+
+func TestSweepRecordsNoMarkWhenTheModeCarriesNone(t *testing.T) {
+	b := unreachableChain(t)
+	r := b.graph().Sweep(Mode{})
+
+	// A mode with no mark runs no further pass, so the record is empty while the
+	// declarations nothing holds back are reported as they are without it.
+	if got := b.suppressedBy(r); len(got) != 0 {
+		t.Errorf("Sweep over a mode carrying no mark recorded %v as suppressed, want none", got)
+	}
+	if got := len(b.candidates(r)); got != 2 {
+		t.Errorf("Sweep over a mode carrying no mark returned %d candidates, want 2", got)
+	}
+}
+
+func TestSweepRecordsAMarkThatHeldBackATestOfDeadCode(t *testing.T) {
+	b := newGraphBuilder(t).add("deadOne").addTest("TestDead")
+	b.root("TestDead", RootTest)
+	b.ref("TestDead", "deadOne")
+	r := b.graph().Sweep(Mode{Production: true, Marked: []SymbolID{b.id("TestDead")}})
+
+	// A test of dead code joins the candidate set by the rule rather than by a
+	// relation, and both relations hold it live, so a record read from the
+	// relations alone would call its mark stale. The pass that answers this one
+	// is the whole sweep with the mark withdrawn, which admits the test.
+	if want := []string{"TestDead"}; !slices.Equal(b.suppressedBy(r), want) {
+		t.Errorf("Sweep over a marked test of dead code recorded %v as suppressed, want %v",
+			b.suppressedBy(r), want)
+	}
+	if want := []string{"deadOne reference-counting"}; !slices.Equal(b.candidates(r), want) {
+		t.Errorf("Sweep over a marked test of dead code returned %v, want %v", b.candidates(r), want)
+	}
+}
+
 // retainedTestDeclaration is the graph a production sweep answers differently
 // once an exemption retains a test declaration: the retained declaration, the
 // production declaration only it references, and the declaration below that one,

@@ -1,0 +1,22 @@
+One main package holding a dead component of three declarations whose root carries
+a suppression, so a run measures what the mark seeds: the two declarations only the
+root reaches are unreported, and dropping the mark reports the root and says three
+symbols fall with it.
+
+-- go.mod --
+module example.com/selfcheckseed
+
+go 1.27.1
+-- main.go --
+package main
+
+func main() { println(kept()) }
+
+func kept() string { return "k" }
+
+//deadset:ignore DS1002 -- the root of a dead component
+func root() string { return helper() }
+
+func helper() string { return deeper() }
+
+func deeper() string { return "d" }

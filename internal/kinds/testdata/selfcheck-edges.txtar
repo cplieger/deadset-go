@@ -1,0 +1,56 @@
+One main package with a declared edge on a dead declaration, one on a live
+declaration, one on an exported declaration referenced only inside its own file,
+and one on a reference no declaration answers, so one archive measures every state
+an evaluation reports. Orphan is the declaration no edge names, whose finding stays
+reported.
+
+-- go.mod --
+module example.com/selfcheckedges
+
+go 1.27.1
+-- main.go --
+package main
+
+func main() { println(kept(), Local()) }
+
+func kept() string { return "k" }
+
+// Local is exported and referenced only inside the file that declares it, so a
+// narrowing reports it and a declared edge is the reference from outside.
+func Local() string { return "l" }
+
+// Event is reached by nothing, and a declared edge names it.
+type Event string
+
+// Orphan is reached by nothing and no edge names it.
+func Orphan() string { return "o" }
+-- deadset-edges.json --
+{
+  "description": "Each edge pairs a Go declaration with the TypeScript generated from it.",
+  "edges": [
+    {
+      "id": "wire/Event",
+      "because": "generated",
+      "provides": "go://example.com/selfcheckedges#Event",
+      "used_by": "ts://@example/app/src/wire.ts#Event"
+    },
+    {
+      "id": "wire/Local",
+      "because": "generated",
+      "provides": "go://example.com/selfcheckedges#Local",
+      "used_by": "ts://@example/app/src/wire.ts#Local"
+    },
+    {
+      "id": "wire/Vanished",
+      "because": "generated",
+      "provides": "go://example.com/selfcheckedges#Vanished",
+      "used_by": "ts://@example/app/src/wire.ts#Vanished"
+    },
+    {
+      "id": "wire/kept",
+      "because": "generated",
+      "provides": "go://example.com/selfcheckedges#kept",
+      "used_by": "ts://@example/app/src/wire.ts#kept"
+    }
+  ]
+}

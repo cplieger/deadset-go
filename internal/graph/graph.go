@@ -93,11 +93,10 @@ func New(symbols []Symbol, refs []Reference, roots []Root) *Graph {
 		s := &symbols[i]
 		g.parent[i] = g.at(s.Parent)
 		_, g.test[i] = IsTestFile(s.Pos.Filename)
-		// A package and a file carry no reference of their own: an import names
-		// the package's own identifier at the import spec rather than at the
-		// package clause, and nothing names a file at all. Their liveness is the
-		// subject of the file and package kinds, which read the load rather than
-		// the reference set, so the sweep does not judge them.
+		// A package and a file are not judged by either relation. Their liveness
+		// is the subject of the file and package kinds, which read the load and
+		// the file-to-package edges an import records rather than asking whether
+		// anything references the file, which nothing ever does.
 		g.subject[i] = s.Kind != KindPackage && s.Kind != KindFile
 	}
 	for i := range refs {

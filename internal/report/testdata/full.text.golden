@@ -1,0 +1,8 @@
+catalog.go:12:6: field write-only-symbol: the field is written and never read [certain] (DS1301)
+catalog.go:31:6: interface-method uncalled-interface-method: no call through the interface reaches the method [certain] (DS1203)
+catalog.go:214:6: function unused-unexported: the function has no reference in the target [certain] (DS1002)
+go.mod:12:2: dependency example.com/left: required by no package in the build list [certain] (DS1601)
+normalize.go:12:6: function unnecessary-export: exported function is referenced only inside the package that declares it [certain] (DS1101)
+render_plan9.go:1:1: file render_plan9.go: built under no declared configuration [certain] (DS1501)
+deadset-ignore.json:7:5: suppression go://example.com/app#Catalog.legacyAlias: the ignore entry named DS1001 and the symbol it names reports DS1003 [certain] (DS1703)
+summary: 6 findings (0 allow, 2 warn, 4 deny), 52 deletable lines, 4 suppressions in effect, 6 reasons recorded, 1 stale suppression, 1 pending, 0 omitted

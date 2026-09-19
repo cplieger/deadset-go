@@ -1,0 +1,72 @@
+One package writing every shape that compares a struct value, one declaration per
+shape, plus the two shapes that compare no field: a pointer comparison, and an
+interface-typed field whose dynamic type is not known.
+
+-- go.mod --
+module example.com/comparisons
+
+go 1.27.1
+-- comparisons.go --
+package comparisons
+
+type equal struct{ a, b int }
+
+func compareEqual(x, y equal) bool { return x == y }
+
+type unequal struct{ c int }
+
+func compareUnequal(x, y unequal) bool { return x != y }
+
+type indexed struct{ d int }
+
+type table map[indexed]int
+
+func readIndex(m table, k indexed) int { return m[k] }
+
+type tagged struct{ e int }
+
+func switchTag(x, y, z tagged) string {
+	switch x {
+	case y:
+		return "y"
+	case z:
+		return "z"
+	}
+	return "other"
+}
+
+type leaf struct{ f int }
+
+type nested struct {
+	inner leaf
+	list  [2]leaf
+}
+
+func compareNested(x, y nested) bool { return x == y }
+
+func compareArray(x, y [2]leaf) bool { return x == y }
+
+type embedded struct{ g int }
+
+type embedding struct {
+	embedded
+	own int
+}
+
+func compareEmbedding(x, y embedding) bool { return x == y }
+
+type shape interface{ area() int }
+
+type impl struct{ side int }
+
+func (i impl) area() int { return i.side }
+
+type opaque struct{ held shape }
+
+func compareOpaque(x, y opaque) bool { return x == y }
+
+type pointed struct{ h int }
+
+func comparePointers(x, y *pointed) bool { return x == y }
+
+func order(x, y int) bool { return x < y }

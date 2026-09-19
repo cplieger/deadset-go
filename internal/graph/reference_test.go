@@ -511,3 +511,167 @@ func TestRefKindStringNamesEveryKind(t *testing.T) {
 		})
 	}
 }
+
+// kinds maps every symbol of one analysis to its kind, so a test can pick out the
+// files and the packages the reference pass named.
+func (a analysis) kinds() map[SymbolID]SymbolKind {
+	held := make(map[SymbolID]SymbolKind, len(a.symbols))
+	for i := range a.symbols {
+		held[a.symbols[i].ID] = a.symbols[i].Kind
+	}
+	return held
+}
+
+func TestReferencesRecordsEveryImportOfATargetPackageFromTheImportingFile(t *testing.T) {
+	a := analyze(t, "imports.txtar")
+	kinds := a.kinds()
+
+	var found []string
+	for _, r := range a.refs {
+		if kinds[r.From] != KindFile {
+			continue
+		}
+		found = append(found, fmt.Sprintf("%s to %s %s %s:%d:%d",
+			a.name(r.From), a.name(r.To), r.Kind, r.Pos.Filename, r.Pos.Line, r.Pos.Column))
+	}
+
+	// An import resolves to a package name declared at the import spec, which is
+	// a position no symbol is written at, so the identifier walk records nothing
+	// and this rule is what gives the file and package kinds an edge to read. The
+	// blank import is one of the two: a package imported for its initialization is
+	// reached. The set is every reference a file makes, so the two packages the
+	// fixture holds for the negative are here by their absence: the standard
+	// library package the file also imports is no symbol of the inventory, and the
+	// target package no file imports carries no reference at all.
+	want := []string{
+		"main.go to example.com/imports/registered read main.go:6:2",
+		"main.go to example.com/imports/used read main.go:7:2",
+	}
+	if !slices.Equal(found, want) {
+		t.Errorf("References(imports.txtar) recorded %v from a file, want %v", found, want)
+	}
+}
+
+func TestReferencesLeavesTheCandidateSetToTheDeclarations(t *testing.T) {
+	a := analyze(t, "imports.txtar")
+	kinds := a.kinds()
+
+	// The import edges reach a package symbol, and a package is not a subject of
+	// either relation, so a package every file imports and a package no file
+	// imports are alike to the sweep: what the rule added is an edge for the file
+	// and package kinds to read, not a change to what is reported.
+	for _, c := range New(a.symbols, a.refs, nil).Sweep(Mode{}).Candidates {
+		if kind := kinds[c.ID]; kind == KindPackage || kind == KindFile {
+			t.Errorf("Sweep over imports.txtar reported the %s %s, want only declarations", kind, a.name(c.ID))
+		}
+	}
+}
+
+// comparisonsPackage is the prefix every reference of the comparison fixture's one
+// package carries.
+const comparisonsPackage = "go://example.com/comparisons#"
+
+// refNames maps every symbol of one analysis to its reference without the part
+// every symbol of the package shares, which is what tells a field from the type of
+// the same name where a display name cannot.
+func (a analysis) refNames(prefix string) map[SymbolID]string {
+	held := make(map[SymbolID]string, len(a.symbols))
+	for i := range a.symbols {
+		held[a.symbols[i].ID] = strings.TrimPrefix(a.symbols[i].Ref, prefix)
+	}
+	return held
+}
+
+// fieldReads names, per declaration, every field the declaration reads, sorted, so
+// a table states one shape's reads without depending on the order two reads at one
+// position are kept in.
+func (a analysis) fieldReads() map[string][]string {
+	names := a.refNames(comparisonsPackage)
+	kinds := a.kinds()
+	reads := make(map[string][]string)
+	for _, r := range a.refs {
+		if r.Kind != RefRead || kinds[r.To] != KindField {
+			continue
+		}
+		reads[names[r.From]] = append(reads[names[r.From]], names[r.To])
+	}
+	for from := range reads {
+		slices.Sort(reads[from])
+	}
+	return reads
+}
+
+func TestReferencesRecordsAReadOfEveryFieldAComparisonReads(t *testing.T) {
+	reads := analyze(t, "comparisons.txtar").fieldReads()
+
+	cases := map[string][]string{
+		// Equality reads every field of the type, and so does its negation.
+		"compareEqual":   {"equal.a", "equal.b"},
+		"compareUnequal": {"unequal.c"},
+		// A map compares its keys, so the key type is read where the map type is
+		// written and again at every index into it.
+		"table":     {"indexed.d"},
+		"readIndex": {"indexed.d"},
+		// A switch compares the tag against each case, which is three comparisons
+		// at three sites and so three reads of the one field.
+		"switchTag": {"tagged.e", "tagged.e", "tagged.e"},
+		// The walk follows a field of struct type and an array of them, so a
+		// nested field is read once however many ways the outer struct reaches it.
+		"compareNested": {"leaf.f", "nested.inner", "nested.list"},
+		"compareArray":  {"leaf.f"},
+		// An embedded field is a field, and the fields it promotes are read with
+		// it, because equality compares the whole of it.
+		"compareEmbedding": {"embedded.g", "embedding.embedded", "embedding.own"},
+		// The interface-typed field is read and the walk stops there, so no field
+		// of the type that satisfies the interface is read: which type a value
+		// holds at the comparison is not known here.
+		"compareOpaque": {"opaque.held"},
+		// The two shapes that read nothing: comparing pointers compares addresses,
+		// and an ordered comparison is not defined over a struct.
+		"comparePointers": nil,
+		"order":           nil,
+	}
+	for from, want := range cases {
+		t.Run(from, func(t *testing.T) {
+			if got := reads[from]; !slices.Equal(got, want) {
+				t.Errorf("References(comparisons.txtar) recorded %s reading the fields %v, want %v",
+					from, got, want)
+			}
+		})
+	}
+}
+
+func TestReferencesRecordsAComparisonsReadsAtTheComparisonSite(t *testing.T) {
+	a := analyze(t, "comparisons.txtar")
+	names := a.refNames(comparisonsPackage)
+	kinds := a.kinds()
+
+	sites := make(map[string][]string)
+	for _, r := range a.refs {
+		if r.Kind != RefRead || kinds[r.To] != KindField {
+			continue
+		}
+		from := names[r.From]
+		sites[from] = append(sites[from], fmt.Sprintf("%d:%d", r.Pos.Line, r.Pos.Column))
+	}
+
+	cases := map[string][]string{
+		// The equality operator's own position, so a maintainer reading the report
+		// is sent to the comparison rather than to the declaration.
+		"compareEqual": {"5:47", "5:47"},
+		// The tag and each case expression, each where it is written.
+		"switchTag": {"20:9", "21:7", "23:7"},
+		// The key type where the map type is written, and the key expression where
+		// the index is written.
+		"table":     {"13:16"},
+		"readIndex": {"15:51"},
+	}
+	for from, want := range cases {
+		t.Run(from, func(t *testing.T) {
+			if got := sites[from]; !slices.Equal(got, want) {
+				t.Errorf("References(comparisons.txtar) recorded %s reading fields at %v, want %v",
+					from, got, want)
+			}
+		})
+	}
+}

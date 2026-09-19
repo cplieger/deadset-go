@@ -397,7 +397,7 @@ func (s *enumGroupScan) record(enum *enumGroupType, rank int, pos token.Pos, det
 		return err
 	}
 	if enum.best == nil || rank < enum.best.rank ||
-		(rank == enum.best.rank && bySite(at, enum.best.at) < 0) {
+		(rank == enum.best.rank && graph.ByPosition(at, enum.best.at) < 0) {
 		enum.best = &enumGroupEvidence{rank: rank, at: at, detail: detail}
 	}
 	return nil
@@ -413,7 +413,7 @@ func (s *enumGroupScan) exemptions() []graph.Exemption {
 			continue
 		}
 		members := slices.Clone(enum.members)
-		slices.SortFunc(members, func(a, b enumGroupMember) int { return bySite(a.at, b.at) })
+		slices.SortFunc(members, func(a, b enumGroupMember) int { return graph.ByPosition(a.at, b.at) })
 		for _, m := range members {
 			found = append(found, graph.Exemption{
 				ID:     m.id,

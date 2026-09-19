@@ -1,0 +1,159 @@
+{
+  "schema_version": "2.0.0",
+  "contract_version": "1.3.0",
+  "analyzer": {
+    "name": "deadset-go",
+    "version": "1.6.0",
+    "languages": [
+      "go"
+    ],
+    "schema_versions_accepted": [
+      "2.0.0"
+    ],
+    "conformance": {
+      "corpus_version": "1.0.0",
+      "result": "pass",
+      "digest": "sha256:abababababababababababababababababababababababababababababababab"
+    }
+  },
+  "target": {
+    "kind": "application",
+    "root": ".",
+    "identity": "example.com/app"
+  },
+  "configurations": [
+    {
+      "id": "linux-amd64",
+      "os": "linux",
+      "arch": "amd64",
+      "tags": []
+    }
+  ],
+  "consumers": {
+    "declared": 0,
+    "loaded": [],
+    "unavailable": []
+  },
+  "findings": [
+    {
+      "code": "DS1301",
+      "kind": "write-only-symbol",
+      "language": "go",
+      "position": {
+        "path": "main.go",
+        "line": 4,
+        "column": 5,
+        "end_line": 4
+      },
+      "symbol": {
+        "ref": "go://example.com/app#tally",
+        "kind": "variable",
+        "name": "tally",
+        "size_lines": 1
+      },
+      "reachability_class": "certain",
+      "confidence": "certain",
+      "test_only": false,
+      "generated": false,
+      "component": {
+        "id": "deadset-go/c-1",
+        "root": true,
+        "symbol_count": 1,
+        "deletable_lines": 0
+      },
+      "retained_by": [],
+      "configurations": [
+        "linux-amd64"
+      ],
+      "consumers_loaded": [],
+      "fixability": "deletable",
+      "severity": "deny",
+      "message": "variable tally is written at 2 positions and never read",
+      "details": {
+        "write_positions": [
+          {
+            "path": "main.go",
+            "line": 31,
+            "column": 2,
+            "end_line": 31
+          },
+          {
+            "path": "main.go",
+            "line": 32,
+            "column": 2,
+            "end_line": 32
+          }
+        ]
+      }
+    },
+    {
+      "code": "DS1301",
+      "kind": "write-only-symbol",
+      "language": "go",
+      "position": {
+        "path": "main.go",
+        "line": 14,
+        "column": 2,
+        "end_line": 14
+      },
+      "symbol": {
+        "ref": "go://example.com/app#counter.hits",
+        "kind": "field",
+        "name": "counter.hits",
+        "size_lines": 1
+      },
+      "reachability_class": "certain",
+      "confidence": "certain",
+      "test_only": false,
+      "generated": false,
+      "component": {
+        "id": "deadset-go/c-2",
+        "root": true,
+        "symbol_count": 1,
+        "deletable_lines": 0
+      },
+      "retained_by": [],
+      "configurations": [
+        "linux-amd64"
+      ],
+      "consumers_loaded": [],
+      "fixability": "deletable",
+      "severity": "deny",
+      "message": "field counter.hits is written once and never read",
+      "details": {
+        "write_positions": [
+          {
+            "path": "main.go",
+            "line": 21,
+            "column": 4,
+            "end_line": 21
+          }
+        ]
+      }
+    }
+  ],
+  "edge_evaluations": [],
+  "stale_suppressions": [],
+  "declared_gaps": [],
+  "excluded_by_cgo": [],
+  "test_file_rules": [
+    {
+      "rule": "go-test-suffix",
+      "matched": 1
+    }
+  ],
+  "totals": {
+    "findings": 2,
+    "by_severity": {
+      "allow": 0,
+      "warn": 0,
+      "deny": 2
+    },
+    "deletable_lines": 0,
+    "suppressions_in_effect": 0,
+    "reasons_recorded": 0,
+    "stale_suppressions": 0,
+    "pending": 0,
+    "omitted": 0
+  }
+}

@@ -82,6 +82,13 @@ type Options struct {
 	// class retains nothing and each finding in such a file is marked as one no
 	// mechanical edit may act on.
 	IncludeGenerated bool
+
+	// Production is the reference mode the run computes under, which the composition
+	// root passes from the sweep it asked for. Under it an exemption whose evidence
+	// is written in a test file holds nothing: a test that marshals a value or
+	// compares one makes no member of it live for production, exactly as a test's
+	// reference is no reference there.
+	Production bool
 }
 
 // Delimiters are the pair that opens and closes an action of a template, as the
@@ -132,6 +139,10 @@ type Detector func(in *Input) ([]graph.Exemption, error)
 // interface is a second entry, because the detail is what differs. A class the
 // table does not hold contributes nothing, so a caller assembling the table from
 // the classes it has needs no placeholder for the ones it does not.
+//
+// Under a production run an exemption found in a test file is dropped before the
+// union, so the same fact found in a source file and in a test file is the source
+// file's entry and the same fact found only in a test file is no entry at all.
 func Compute(in *Input, detectors map[Class]Detector) ([]graph.Exemption, error) {
 	disabled := make(map[Class]bool, len(in.Options.Disabled))
 	for _, class := range in.Options.Disabled {
@@ -148,11 +159,28 @@ func Compute(in *Input, detectors map[Class]Detector) ([]graph.Exemption, error)
 		if err != nil {
 			return nil, fmt.Errorf("exempt: %s: %w", class, err)
 		}
-		found = append(found, retained...)
+		found = append(found, in.holding(retained)...)
 	}
 
 	slices.SortStableFunc(found, byEvidence)
 	return firstPerFact(found), nil
+}
+
+// holding keeps the exemptions of one class that hold under the run's reference
+// mode: every one of them in the plain mode, and the ones whose evidence a test file
+// does not carry in a production one.
+func (in *Input) holding(found []graph.Exemption) []graph.Exemption {
+	if !in.Options.Production {
+		return found
+	}
+	kept := found[:0]
+	for _, e := range found {
+		if _, test := graph.IsTestFile(e.Site.Filename); test {
+			continue
+		}
+		kept = append(kept, e)
+	}
+	return kept
 }
 
 // fact is what one exemption states, with the site left out: this class holds
@@ -186,27 +214,13 @@ func firstPerFact(found []graph.Exemption) []graph.Exemption {
 //
 //nolint:gocritic // slices.SortStableFunc fixes a comparator's parameters to values.
 func byEvidence(a, b graph.Exemption) int {
-	if c := bySite(a.Site, b.Site); c != 0 {
+	if c := graph.ByPosition(a.Site, b.Site); c != 0 {
 		return c
 	}
 	if c := strings.Compare(a.Class, b.Class); c != 0 {
 		return c
 	}
 	return strings.Compare(string(a.ID), string(b.ID))
-}
-
-// bySite orders two rendered positions by file, line and column, which is the
-// order the inventory itself reads in and is the same for every run over one
-// target. It is the whole of the package's position order: a class that ranks its
-// own evidence calls this rather than comparing the three fields again.
-func bySite(a, b token.Position) int {
-	if c := strings.Compare(a.Filename, b.Filename); c != 0 {
-		return c
-	}
-	if c := a.Line - b.Line; c != 0 {
-		return c
-	}
-	return a.Column - b.Column
 }
 
 // resolveObject returns the declaration an identifier or a selector expression

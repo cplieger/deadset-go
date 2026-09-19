@@ -97,7 +97,10 @@ func TestReferencesLeavesProductionModeOneReferenceSet(t *testing.T) {
 	if want := []string{"Resolve to normalize"}; !slices.Equal(production, want) {
 		t.Errorf("References(variants.txtar) production references are %v, want %v", production, want)
 	}
-	if len(a.refs) != 3 {
-		t.Errorf("References(variants.txtar) returned %d references, want the 3 the fixture writes", len(a.refs))
+	// The external test file's import of the target package is one of the four,
+	// and it is a test reference the way everything else that file writes is.
+	if len(a.refs) != 4 {
+		t.Errorf("References(variants.txtar) returned %d references, want the 4 the fixture writes, the external test file's import included",
+			len(a.refs))
 	}
 }

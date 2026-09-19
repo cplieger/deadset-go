@@ -1,0 +1,15 @@
+One library package whose exported declaration nothing references, carrying a
+directive whose code the severity map leaves at deny. The class of an exported
+declaration of a library with no consumer information is possible, so a run that
+raises the minimum confidence above it makes the record dormant by that arm alone
+rather than by the severity arm.
+
+-- go.mod --
+module example.com/selfcheckdormant
+
+go 1.27.1
+-- lib.go --
+package selfcheckdormant
+
+//deadset:ignore DS1002 -- in effect until a minimum confidence the finding cannot reach
+func Exported() string { return "e" }

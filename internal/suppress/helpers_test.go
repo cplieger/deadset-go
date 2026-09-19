@@ -29,11 +29,17 @@ const corpusPath = "contract/grammar/suppression-corpus.json"
 // comment with its line offset or the entry object itself, which is why it stays
 // raw until the case's kind is known.
 type corpusCase struct {
-	Input    json.RawMessage `json:"input"`
-	Kind     string          `json:"kind"`
-	Rule     string          `json:"rule"`
-	Reason   string          `json:"reason"`
-	Accepted bool            `json:"accepted"`
+	Input json.RawMessage `json:"input"`
+	Kind  string          `json:"kind"`
+	Rule  string          `json:"rule"`
+
+	// Reports names one code per finding the input produces, in the order the
+	// grammar's rules apply, and is absent on a case that produces at most one.
+	// It is what says how many findings an input is, for the two inputs the count
+	// is not otherwise readable from.
+	Reports  []string `json:"reports"`
+	Reason   string   `json:"reason"`
+	Accepted bool     `json:"accepted"`
 }
 
 // inlineInput is the input of an inline case: the text of the comment from its
@@ -135,6 +141,31 @@ func loaded(t *testing.T, archive string) (*load.Result, string, []graph.Symbol)
 func writeIgnoreFile(t *testing.T, document string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), IgnoreFileName)
+	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
+		t.Fatalf("Setup: write %s: %v", path, err)
+	}
+	return path
+}
+
+// resolverOf is the resolver over one load and its inventory, which is the one the
+// composition root builds once per configuration and hands to every pass that
+// renders a position.
+func resolverOf(t *testing.T, result *load.Result, root string, symbols []graph.Symbol) *graph.Resolver {
+	t.Helper()
+
+	resolve, err := graph.NewResolver(result, root, os.ReadFile, symbols)
+	if err != nil {
+		t.Fatalf("Setup: graph.NewResolver(%s): %v", root, err)
+	}
+	return resolve
+}
+
+// writeDocument writes one suppression document under name into a directory of its
+// own and returns its path.
+func writeDocument(t *testing.T, name, document string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), name)
 	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
 		t.Fatalf("Setup: write %s: %v", path, err)
 	}

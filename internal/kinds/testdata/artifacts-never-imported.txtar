@@ -1,0 +1,56 @@
+A package no import reaches and no root names, whose every declaration the sweep
+found dead, beside a package one reference reaches, the main package that reaches
+it, a package whose exported declaration is a root under a library target and not
+under an application, a package an init function roots, and two main packages
+declaring no main function: one whose exported function a host looks up, and one
+holding nothing exported at all.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- main.go --
+package main
+
+import "example.com/app/internal/live"
+
+func main() {
+	_ = live.Count()
+}
+-- internal/live/live.go --
+package live
+
+// Count is referenced from the main package.
+func Count() int { return 1 }
+-- internal/orphan/orphan.go --
+package orphan
+
+// Width is referenced by nothing at all.
+func Width() int { return 2 }
+-- internal/orphan/helper.go --
+package orphan
+
+// height is referenced by nothing at all.
+func height() int { return 3 }
+-- api/api.go --
+package api
+
+// Published is this module's own published API, which nothing inside it imports.
+func Published() int { return 6 }
+-- internal/setup/setup.go --
+package setup
+
+var registered int
+
+func init() { registered = 1 }
+-- plugin/plug.go --
+package main
+
+// Exported is looked up by a host this target does not hold.
+func Exported() int { return 4 }
+-- tool/run.go --
+package main
+
+// helper is referenced by nothing, in a main package holding no exported
+// declaration at all.
+func helper() int { return 5 }
