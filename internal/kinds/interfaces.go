@@ -19,6 +19,12 @@ const (
 	unusedSatisfactionAssertionCode = "DS1204"
 )
 
+// satisfactionAssertionSubject is what the subject vocabulary calls a compile-time
+// assertion that a type satisfies an interface. The language spells such an assertion
+// as a variable, and the vocabulary carries a value of its own for it, so a finding
+// about one names the subject a maintainer deletes rather than the spelling it took.
+const satisfactionAssertionSubject = "satisfaction-assertion"
+
 // What each interface kind says, in the reader's words. The unused-interface kind
 // says two things, because the relation that found the subject decides which is
 // true: a candidate found by reference counting is named as a type by nothing at
@@ -126,10 +132,12 @@ func UncalledInterfaceMethod(in *Input) ([]Finding, error) {
 // interface of the target and whose value is of a concrete type, when nothing other
 // than such an assertion names that interface as a type.
 //
-// The assertion is the subject, so the methods it retains stay retained: the
-// exemption that holds them names the assertion as its site, and this finding names
-// the declaration a maintainer deletes. Two assertions of one interface are two
-// findings, because neither is the use that would make the interface worth keeping.
+// The assertion is the subject, under the vocabulary's own value for one rather than
+// under the variable the language spells it as, so the methods it retains stay
+// retained: the exemption that holds them names the assertion as its site, and this
+// finding names the declaration a maintainer deletes. Two assertions of one interface
+// are two findings, because neither is the use that would make the interface worth
+// keeping.
 //
 // An assertion a test file writes is not reported, on the rule every kind applies
 // to a declaration whose liveness a production sweep cannot judge.
@@ -155,6 +163,7 @@ func UnusedSatisfactionAssertion(in *Input) ([]Finding, error) {
 		if !held {
 			continue
 		}
+		one.Symbol.Kind = satisfactionAssertionSubject
 		one.Relation = graph.ReferenceCounting
 		one.Details.Implementations = facts.implementationsOf(asserted.Interface)
 		found = append(found, one)

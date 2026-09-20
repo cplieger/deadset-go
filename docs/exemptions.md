@@ -5,7 +5,7 @@ would report. Every class is computed from Go type information rather than confi
 project writes no suppression for a symbol a class covers. deadset-go implements the nine classes
 the deadset contract declares for Go; the class vocabulary and its detection rules are stated once
 in the contract's
-[exemptions page](https://github.com/cplieger/deadset-spec/blob/v1.14.0/docs/exemptions.md), and
+[exemptions page](https://github.com/cplieger/deadset-spec/blob/v2.0.0/docs/exemptions.md), and
 this page states what each class does here.
 
 ## Reading the retained set

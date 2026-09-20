@@ -4,7 +4,7 @@ deadset-go reports 29 of the 31 issue kinds the deadset contract declares. This 
 per code, what this analyzer reports under it and what it treats as a use, so a reader can tell
 why a symbol was reported and why a symbol was not. The vocabulary itself, the code space and
 the fields a finding carries are stated once in the contract's
-[issue kinds page](https://github.com/cplieger/deadset-spec/blob/v1.14.0/docs/kinds.md), which
+[issue kinds page](https://github.com/cplieger/deadset-spec/blob/v2.0.0/docs/kinds.md), which
 this page does not restate.
 
 Every kind is enabled by default and every kind declares the confidence ceiling `certain`, so a
