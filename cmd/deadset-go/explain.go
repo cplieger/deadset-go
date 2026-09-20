@@ -254,8 +254,34 @@ func writeExplanation(w io.Writer, set *findingSet, cascade graph.Cascade, subje
 	default:
 		writeLiveness(&held, set, cascade, subject)
 	}
+	writeNamedElsewhere(&held, set.result.Findings, subject)
 	_, err := io.WriteString(w, held.String())
 	return err
+}
+
+// writeNamedElsewhere names every finding of the run that names this declaration by
+// reference and reports at another position, one line each in the report's own order.
+//
+// A reference is what a report publishes a finding under, and three findings name a
+// declaration while reporting somewhere else: a part of it, which is deleted without
+// the declaration and named by the reference of the declaration that holds it; a
+// compile-time assertion, which names the interface it asserts at the assertion's own
+// position; and a suppression record, which names the declaration a maintainer wrote
+// the adjudication for. Each is a finding published under the reference asked about,
+// so an explanation that left it out would disagree with the report a maintainer read
+// it in.
+//
+// The answer above is unchanged by this: it is about the declaration asked for, and
+// each finding here is about something else that names it.
+func writeNamedElsewhere(held *strings.Builder, findings []kinds.Finding, subject *graph.Symbol) {
+	for i := range findings {
+		found := &findings[i]
+		if found.Symbol.Ref != subject.Ref || positionKey(&found.Position) == string(subject.ID) {
+			continue
+		}
+		fmt.Fprintf(held, "also reported: %s %s\t%s\t%s %s\n", found.Code, found.Kind,
+			positionKey(&found.Position), found.Symbol.Kind, found.Symbol.Name)
+	}
 }
 
 // writeReported is the explanation of a symbol a finding names: the finding's code

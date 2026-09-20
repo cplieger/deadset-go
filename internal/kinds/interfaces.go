@@ -139,6 +139,16 @@ func UncalledInterfaceMethod(in *Input) ([]Finding, error) {
 // are two findings, because neither is the use that would make the interface worth
 // keeping.
 //
+// The subject is named by the interface the assertion asserts, at the assertion's
+// own position. A blank declaration has no reference of its own: every one of them
+// is named the blank identifier and they all render as the reference of the package
+// that holds them, so a reference minted at one names the package as well and an
+// adjudication written against it would name two declarations. The interface has a
+// reference, and it is what the assertion is about, so the finding carries the
+// interface's reference and the interface's display name while its position names
+// the declaration to delete. Two assertions of one interface in one file are told
+// apart by their positions.
+//
 // An assertion a test file writes is not reported, on the rule every kind applies
 // to a declaration whose liveness a production sweep cannot judge.
 //
@@ -154,8 +164,8 @@ func UnusedSatisfactionAssertion(in *Input) ([]Finding, error) {
 
 	var found []Finding
 	for _, asserted := range facts.assertions {
-		symbol := in.symbol(asserted.Var)
-		if symbol == nil || testFile(symbol) || facts.usedAsType[asserted.Interface] {
+		symbol, iface := in.symbol(asserted.Var), in.symbol(asserted.Interface)
+		if symbol == nil || iface == nil || testFile(symbol) || facts.usedAsType[asserted.Interface] {
 			continue
 		}
 		one, held := in.finding(asserted.Var, unusedSatisfactionAssertionCode,
@@ -164,6 +174,7 @@ func UnusedSatisfactionAssertion(in *Input) ([]Finding, error) {
 			continue
 		}
 		one.Symbol.Kind = satisfactionAssertionSubject
+		one.Symbol.Ref, one.Symbol.Name = iface.Ref, iface.Name
 		one.Relation = graph.ReferenceCounting
 		one.Details.Implementations = facts.implementationsOf(asserted.Interface)
 		found = append(found, one)

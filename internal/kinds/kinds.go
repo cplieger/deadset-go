@@ -266,6 +266,18 @@ type Input struct {
 	// which is a configuration naming something that no longer exists.
 	Unmatched []graph.Unmatched
 
+	// RootsDocument is the configuration document that declared the configured
+	// roots, as a target-relative path, and is empty where no document of the
+	// target did.
+	//
+	// A finding about a configured root is a finding about the document that
+	// declares it, so the document's own path is the path it carries. Which
+	// document that is belongs to the configuration resolution, which reads the
+	// documents in the order they outrank each other and records where every
+	// setting came from, so the composition root hands the answer here rather than
+	// letting this pass name a conventional path the run may not have read.
+	RootsDocument string
+
 	// Edges is the declared cross-language edges of the target, nil where the
 	// target carries no edges document.
 	Edges *edges.Document
@@ -485,19 +497,16 @@ func (in *Input) runKind(emit Emitter, row *catalog.Row, reported map[string]str
 // withheld: its remedy is the change the finding names or the severity the
 // configuration gives its code.
 //
-// A record reaches the finding two ways and either is enough. It marked the
-// finding's own declaration, which is how a directive above a declaration reaches
-// every finding about that declaration and about its parts. Or it names the reference
-// the finding carries, which is what an entry and a baseline row are matched by: the
-// code, the reference and the path of the finding the record names. The two answer
-// differently where a reference names more than one declaration, a blank declaration
-// sharing the reference of its container being the case the language makes: one record
-// names them all, and it is in effect for the finding it withheld rather than stale
-// for the declarations that produced none.
+// A record reaches the finding two ways and either is enough, which pairs is what
+// decides.
 //
-// Several records may name one code at one declaration, an inline directive and an
-// ignore entry for instance, and each of them withheld the finding, so each is in
-// effect rather than the first alone.
+// A finding is withheld by at most one record. Several may reach it, an inline
+// directive and an ignore entry naming one code at one declaration for instance, and
+// the first of them in the run's reading order is the one in effect: the records are
+// read as inline directives by position, then the ignore file in document order, then
+// the baseline, and Marks carries them in that order. A later record changes nothing
+// when it is deleted, which is what the stale-suppression kind is for, and it reads
+// what this recorded.
 //
 // A withheld finding leaves the pass and is counted nowhere. It is not what the
 // configured minimum confidence omitted, which is the number a capped report accounts
@@ -507,19 +516,49 @@ func (in *Input) withhold(found *Finding) bool {
 	if shapeOf(found.Symbol.Kind) == shapeRow {
 		return false
 	}
-	withheld := false
 	for i := range in.Marks {
-		mark := &in.Marks[i]
-		if mark.Bound == "" || mark.Code != found.Code {
-			continue
-		}
-		if mark.Bound != found.id && mark.Symbol != found.Symbol.Ref {
+		if !pairs(&in.Marks[i], found) {
 			continue
 		}
 		in.withheld[i] = true
-		withheld = true
+		return true
 	}
-	return withheld
+	return false
+}
+
+// pairs reports whether one suppression record is a record of one finding.
+//
+// A record reaches a finding two ways and either is enough. It marked the finding's
+// own declaration, which is how a directive above a declaration reaches every
+// finding about that declaration and about its parts, and it is the only way a
+// directive reaches one: a directive names a position and the declaration below it
+// is whatever begins there. Or it names the code, the reference and the path of the
+// finding, which is how an entry and a baseline row are matched, each of the three
+// exactly and none of them by pattern.
+//
+// The second way is not the first with more steps, and two findings need it. A
+// finding whose subject is no declaration of the inventory has no declaration for a
+// record to mark: the subject of a satisfaction assertion is the interface it names,
+// which is declared wherever it is declared, so an entry copied from that finding
+// names the interface's reference beside the assertion's file and resolves to no one
+// declaration at all. And a finding about a part of a declaration names that
+// declaration by reference, so an entry copied from it reaches the part through the
+// reference rather than through a mark the part never took.
+//
+// The path is matched against the finding's own position rather than against the file
+// the record's reference is declared in, which is what the grammar states and the
+// only reading under which an assertion and its interface may live in two files. An
+// entry naming a file other than the one the finding is reported in matches nothing
+// and is stale, which is what keeps an adjudication written for one file from masking
+// a same-named symbol in another.
+func pairs(mark *suppress.Record, found *Finding) bool {
+	if mark.Code != found.Code {
+		return false
+	}
+	if mark.Bound != "" && mark.Bound == found.id {
+		return true
+	}
+	return mark.Symbol == found.Symbol.Ref && mark.Path == found.Position.Path
 }
 
 // checkTable refuses a table registering an emitter under a code the vocabulary

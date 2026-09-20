@@ -121,7 +121,7 @@ No verb accepts a flag that asks for a source edit. A flag whose name carries `f
 ## Suppressing a finding
 
 Three mechanisms, all of them requiring a reason. The grammar is stated in full in the contract's
-[suppression page](https://github.com/cplieger/deadset-spec/blob/v2.0.0/contract/grammar/suppression.md).
+[suppression page](https://github.com/cplieger/deadset-spec/blob/v2.1.0/contract/grammar/suppression.md).
 
 **An inline directive** is the first token of a `//` line comment above or beside the declaration:
 

@@ -1,5 +1,5 @@
 {
-  "corpus_version": "1.4.0",
+  "corpus_version": "1.5.0",
   "product": {
     "name": "deadset-go",
     "version": "0.0.0-devel",
@@ -7,8 +7,8 @@
   },
   "result": "pass",
   "totals": {
-    "fixtures": 16,
-    "pass": 16,
+    "fixtures": 17,
+    "pass": 17,
     "gap": 0,
     "fail": 0
   },
@@ -268,6 +268,7 @@
           "result": "pass",
           "actual": {
             "report": "DS1204",
+            "symbol_kind": "satisfaction-assertion",
             "confidence": "certain",
             "reachability_class": "certain"
           },
@@ -664,6 +665,18 @@
           }
         },
         {
+          "symbol": "StaleEntry",
+          "result": "pass",
+          "actual": {
+            "report": "DS1703",
+            "symbol_kind": "suppression",
+            "confidence": "certain",
+            "details": {
+              "mechanism": "ignore"
+            }
+          }
+        },
+        {
           "symbol": "UnscopedEntry",
           "result": "pass",
           "actual": {
@@ -803,6 +816,52 @@
         },
         {
           "symbol": "Production",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "unmatched-configured-root",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "AbsentPattern",
+          "result": "pass",
+          "actual": {
+            "report": "DS1704",
+            "symbol_kind": "root",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          }
+        },
+        {
+          "symbol": "PlainDead",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Rooted",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "RootedPattern",
           "result": "pass",
           "actual": {
             "report": "none"

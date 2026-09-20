@@ -895,3 +895,69 @@ func TestComputeRefusesAPartOfADeclarationTheInventoryDoesNotHold(t *testing.T) 
 			parameterSubject, err)
 	}
 }
+
+func TestASuppressionWithholdsAFindingReportedInAnotherFileThanTheDeclarationItNames(t *testing.T) {
+	in := suppressed(t, "interfaces-assertion-elsewhere.txtar", applicationConfig())
+	emitters := map[string]Emitter{
+		unusedSatisfactionAssertionCode: UnusedSatisfactionAssertion,
+		staleSuppressionCode:            StaleSuppressions,
+	}
+
+	// The premise the entry is written against: the reference it names is the
+	// interface's, declared in iface.go, and the path it names is the file the
+	// assertion is written in, so the pair resolves to no one declaration and the
+	// record marks nothing live.
+	if len(in.Marks) != 1 {
+		t.Fatalf("Setup: the fixture's ignore document read as %d records, want 1: %+v", len(in.Marks), in.Marks)
+	}
+	if in.Marks[0].Bound != "" {
+		t.Fatalf("Setup: the entry bound %s, want no declaration: the interface is declared in another file than the assertion",
+			in.Marks[0].Bound)
+	}
+
+	// The pass with the entry withdrawn, which is the run a maintainer makes after
+	// deleting it: it is what says the withheld finding exists, and where.
+	bare := suppressed(t, "interfaces-assertion-elsewhere.txtar", applicationConfig())
+	bare.Marks = nil
+	assertion := findingOf(t, computed(t, bare, emitters).Findings, unusedSatisfactionAssertionCode, "encoder")
+	if assertion.Symbol.Ref != "go://example.com/app#encoder" {
+		t.Errorf("the assertion finding names %q, want the interface's reference", assertion.Symbol.Ref)
+	}
+	if assertion.Position.Path != "assert.go" {
+		t.Errorf("the assertion finding is reported at %s, want assert.go: the position is the assertion's own",
+			assertion.Position.Path)
+	}
+
+	// The same pass with the entry: the finding is withheld and the record that
+	// withheld it is in effect, so nothing is reported at all.
+	if got := summary(computed(t, in, emitters).Findings); len(got) != 0 {
+		t.Errorf("the pass with the fixture's entry reports %v, want nothing: the entry withholds the assertion", got)
+	}
+	if inEffect, reasons := Totals(in); inEffect != 1 || reasons != 1 {
+		t.Errorf("Totals() = %d in effect and %d reasons, want 1 and 1", inEffect, reasons)
+	}
+}
+
+func TestASuppressionWithholdsNoFindingReportedInAFileTheRecordDoesNotName(t *testing.T) {
+	in := suppressed(t, "interfaces-assertion-elsewhere.txtar", applicationConfig())
+	if len(in.Marks) != 1 {
+		t.Fatalf("Setup: the fixture's ignore document read as %d records, want 1: %+v", len(in.Marks), in.Marks)
+	}
+	// The entry as a maintainer would misfile it: the right reference and the file
+	// the interface is declared in rather than the one the finding is reported in.
+	in.Marks[0].Path = "iface.go"
+
+	found := computed(t, in, map[string]Emitter{
+		unusedSatisfactionAssertionCode: UnusedSatisfactionAssertion,
+		staleSuppressionCode:            StaleSuppressions,
+	}).Findings
+
+	want := []string{
+		"DS1204 encoder",
+		"DS1703 go://example.com/app#encoder",
+	}
+	if got := summary(found); !slices.Equal(got, want) {
+		t.Errorf("the pass with the entry naming another file reports %v, want %v: an entry matches the path the finding carries",
+			got, want)
+	}
+}
