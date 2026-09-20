@@ -121,7 +121,7 @@ No verb accepts a flag that asks for a source edit. A flag whose name carries `f
 ## Suppressing a finding
 
 Three mechanisms, all of them requiring a reason. The grammar is stated in full in the contract's
-[suppression page](https://github.com/cplieger/deadset-spec/blob/v1.12.0/contract/grammar/suppression.md).
+[suppression page](https://github.com/cplieger/deadset-spec/blob/v1.13.0/contract/grammar/suppression.md).
 
 **An inline directive** is the first token of a `//` line comment above or beside the declaration:
 
@@ -158,8 +158,16 @@ written for one symbol in one file masks nothing else.
 read back by a later run. It records a finding set so that only a finding absent from it fails the
 run, which is a ratchet on the total rather than an adjudication of any one finding.
 
-Three rules bind all three mechanisms:
+Four rules bind all three mechanisms:
 
+- A record binds to a declaration. A part of a declaration, which is a parameter, a receiver, a
+  result, a statement, a store or a case, is suppressed through the declaration its own reference
+  names. A finding about a record of a document rather than about a declaration of the program,
+  which is a requirement or a `replace` directive of the module file, a file no configuration
+  built, a suppression record or a configured root, has no suppression at all: an entry naming one
+  matches nothing and is reported as `DS1703`. The remedy there is the change the finding names,
+  `go mod tidy` for an unused requirement and deleting a `replace` that redirects nothing, or
+  setting the severity of its code to `allow`.
 - A record with no reason is refused and reported as `DS1701`. The refusal binds nothing, so the
   finding it was meant to cover stays reported beside it.
 - An ignore entry or baseline row naming a symbol and no path is refused and reported as `DS1702`.

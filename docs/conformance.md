@@ -4,7 +4,7 @@ What this analyzer implements, what it declines, where it runs, and what it is b
 
 ## The contract version
 
-deadset-go implements deadset contract version **1.5.0** and reads and writes report schema
+deadset-go implements deadset contract version **1.6.0** and reads and writes report schema
 version **4.0.0**. Every report names both, and `deadset-go describe` prints them with the
 analyzer's own version as JSON:
 
@@ -20,7 +20,7 @@ move independently.
 
 The contract publishes a conformance corpus, a set of fixtures each carrying its own expectation,
 and deadset-go runs it as part of its own test suite. The corpus version this analyzer answers is
-**1.1.0**.
+**1.2.0**.
 
 Every report names the result in its `analyzer.conformance` block, with the corpus version
 answered and the digest of the results document the corpus run wrote; `describe` prints the same
@@ -38,14 +38,10 @@ capability, each naming the capability and the reason. A capability is an issue-
 exemption class; an expectation the analyzer neither answers nor declares here is a failure of the
 corpus run rather than a gap.
 
-At corpus version 1.1.0 this analyzer declares two gaps, both on the fixture
-`unused-requirement-noop-replace` and both the same limitation. A suppression binds to a
-declaration, and neither a requirement of the module file (`DS1601`) nor a `replace` directive of it
-(`DS1605`) is one, so no ignore entry and no inline directive suppresses such a finding: an entry
-naming one is reported as a stale suppression instead. The remedy is mechanical rather than a
-suppression, `go mod tidy` for a requirement and deleting the directive for a `replace` whose
-target is absent from the build list, and setting the severity of either kind to allow silences it.
-Every report carries the same list in its `declared_gaps` member.
+At corpus version 1.2.0 this analyzer declares no gap: it answers every expectation of every
+fixture carrying a Go rendering. `conformance.json` holds an empty list, which is the positive
+statement that no capability is declined, and every report carries the same empty list in its
+`declared_gaps` member.
 
 Two codes of the contract are outside the corpus and outside this analyzer, for reasons that are
 not gaps in its Go coverage: `DS1104` applies to TypeScript and JavaScript, and `DS1705` is

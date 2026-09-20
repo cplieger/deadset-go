@@ -604,6 +604,88 @@ func TestTheShapeTableIsTheContractsLivenessAbsenceList(t *testing.T) {
 	}
 }
 
+// theMergesSubject is the one subject kind the corpus's shape table names that this
+// table does not: a cross-language edge is the subject of the kind the orchestrator's
+// merge reports over the edge evaluations the analyzers publish, so no finding this
+// analyzer produces carries it and its shape is not this table's to hold.
+const theMergesSubject = "edge"
+
+// corpusSubjectShapes reads the shape table the Contract's corpus publishes: the
+// subject kinds it names a part of one declaration and the ones it names a row of a
+// document, every other kind being a declaration.
+func corpusSubjectShapes(t *testing.T) map[string]shape {
+	t.Helper()
+
+	const corpusPath = "corpus/corpus.json"
+	body, err := spec.Corpus.ReadFile(corpusPath)
+	if err != nil {
+		t.Fatalf("Setup: read %s from the corpus: %v", corpusPath, err)
+	}
+	var document struct {
+		SubjectShapes struct {
+			Part []string `json:"part"`
+			Row  []string `json:"row"`
+		} `json:"subject_shapes"`
+	}
+	if err := json.Unmarshal(body, &document); err != nil {
+		t.Fatalf("Setup: decode %s: %v", corpusPath, err)
+	}
+	if len(document.SubjectShapes.Part) == 0 || len(document.SubjectShapes.Row) == 0 {
+		t.Fatalf("Setup: %s names %d part kinds and %d row kinds, so this test pins nothing",
+			corpusPath, len(document.SubjectShapes.Part), len(document.SubjectShapes.Row))
+	}
+	held := make(map[string]shape, len(document.SubjectShapes.Part)+len(document.SubjectShapes.Row))
+	for _, kind := range document.SubjectShapes.Part {
+		held[kind] = shapePart
+	}
+	for _, kind := range document.SubjectShapes.Row {
+		held[kind] = shapeRow
+	}
+	return held
+}
+
+// TestTheShapeTableIsTheCorpusShapeTable holds this table against the reading the
+// Contract's corpus publishes of the same fact.
+//
+// The corpus publishes the table because what a suppression record can bind to follows
+// from it: a record binds to a declaration, a part is suppressed through the
+// declaration its own reference names, and a row has no suppression at all. The corpus
+// runner reads the corpus's copy so that an amendment moves it without an edit, which
+// leaves the two readings to agree, and a drift between them would change what a corpus
+// run measures without changing what any report says.
+func TestTheShapeTableIsTheCorpusShapeTable(t *testing.T) {
+	t.Parallel()
+
+	published := corpusSubjectShapes(t)
+	for kind, want := range published {
+		if kind == theMergesSubject {
+			continue
+		}
+		if got := shapeOf(kind); got != want {
+			t.Errorf("the shape table reads the subject kind %q as %d, want %d as the corpus publishes it",
+				kind, got, want)
+		}
+	}
+	for kind, held := range shapes {
+		if _, named := published[kind]; !named {
+			t.Errorf("the shape table reads the subject kind %q as %d and the corpus names it neither a part nor a row, so the corpus reads it as a declaration",
+				kind, held)
+		}
+	}
+
+	// The one kind the first loop skips is pinned in both directions, so a corpus that
+	// stops naming it a row and a table that starts holding a shape for it both land
+	// here rather than leaving the exemption unread.
+	if got, want := published[theMergesSubject], shapeRow; got != want {
+		t.Errorf("the corpus reads the subject kind %q as %d, want %d, which is why this table holds no shape for it",
+			theMergesSubject, got, want)
+	}
+	if got := shapeOf(theMergesSubject); got != shapeDeclaration {
+		t.Errorf("the shape table reads the subject kind %q as %d, want the declaration shape, which is what a kind it does not name reads as: a kind this analyzer now reports is a kind the table owes a shape",
+			theMergesSubject, got)
+	}
+}
+
 func TestLivenessAbsentAnswersForEveryFindingTheContractForbidsTheRelationOn(t *testing.T) {
 	t.Parallel()
 
