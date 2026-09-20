@@ -284,19 +284,6 @@ func isPanicCall(expr ast.Expr) bool {
 	return isName && name.Name == panicBuiltin
 }
 
-// suppressed reports whether a suppression record bound to one declaration names
-// one code, which silences the findings that code reports about the declaration's
-// parts the way a record bound to a declaration silences the finding about the
-// declaration itself.
-func (in *Input) suppressed(id graph.SymbolID, code string) bool {
-	for i := range in.Marks {
-		if in.Marks[i].Bound == id && in.Marks[i].Code == code {
-			return true
-		}
-	}
-	return false
-}
-
 // part is one subject of this group: a part of a declaration, with the position it
 // is written at and what a message calls it.
 type part struct {
@@ -362,16 +349,18 @@ func comparePositions(a, b Position) int {
 // findings completes one finding per part, each about the part's own position and
 // the enclosing declaration's reference.
 //
-// Two things take a part out of the answer. A declaration the sweep judged dead is
-// reported under an unused-declaration kind and falls whole, so a part of it is
+// One thing takes a part out of the answer here. A declaration the sweep judged dead
+// is reported under an unused-declaration kind and falls whole, so a part of it is
 // the less specific answer and is not reported: every kind of this group claims
-// something about a declaration the analysis keeps. And a suppression record bound
-// to the declaration and naming this code silences the part the way it silences
-// the declaration's own finding.
+// something about a declaration the analysis keeps.
+//
+// A suppression record bound to the declaration and naming this code silences the part
+// as it silences every other finding, which the framework does over the output of
+// every emitter, so no kind of this group reads a record of its own.
 func (g *intrafunc) findings(code string, held []*part) ([]Finding, error) {
 	found := make([]Finding, 0, len(held))
 	for _, one := range held {
-		if g.in.candidateOf(one.id) != nil || g.in.suppressed(one.id, code) {
+		if g.in.candidateOf(one.id) != nil {
 			continue
 		}
 		symbol := g.in.symbol(one.id)

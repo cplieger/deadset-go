@@ -20,8 +20,8 @@ move independently.
 
 The contract publishes a conformance corpus, a set of fixtures each carrying its own expectation,
 and deadset-go runs it as part of its own test suite. The corpus version this analyzer answers is
-**1.3.0**, and the run answers the **12** fixtures of it that carry a Go rendering: eleven pass,
-one is a gap, none fail.
+**1.3.0**, and the run answers the **12** fixtures of it that carry a Go rendering: every one of
+them passes, none is a gap and none fails.
 
 Every report names the result in its `analyzer.conformance` block, with the corpus version
 answered and the digest of the results document the corpus run wrote; `describe` prints the same
@@ -39,14 +39,8 @@ capability, each naming the capability and the reason. A capability is an issue-
 exemption class; an expectation the analyzer neither answers nor declares here is a failure of the
 corpus run rather than a gap.
 
-At corpus version 1.3.0 this analyzer declares one gap, over two codes of one fixture, and every
-report carries the same two rows in its `declared_gaps` member. The two codes are the narrowing
-kinds `DS1101` and `DS1102`, and what is declined is their suppression: a suppression record marks
-the declaration it binds live, which withholds every finding a liveness relation would have
-produced for it, while these two kinds report a declaration the analysis already holds live, so a
-record naming either code withholds nothing and is reported as a stale suppression. Both kinds are
-reported as the corpus expects. To silence one for a single declaration, narrow the declaration the
-finding names or set the severity of the code to `allow`.
+At corpus version 1.3.0 this analyzer declares no gap, so `conformance.json` carries an empty list
+and the `declared_gaps` member of every report is empty.
 
 Two codes of the contract are outside the corpus and outside this analyzer, for reasons that are
 not gaps in its Go coverage: `DS1104` applies to TypeScript and JavaScript, and `DS1705` is

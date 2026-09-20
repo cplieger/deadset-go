@@ -536,3 +536,112 @@ func TestWithoutTheMarkTheDeadComponentsRootIsReportedAndTheComponentFalls(t *te
 func position(path string, line, column int) token.Position {
 	return token.Position{Filename: path, Line: line, Column: column}
 }
+
+func TestASuppressionWithholdsTheFindingItsCodeWouldHaveProducedWhateverTheKind(t *testing.T) {
+	in := suppressed(t, "selfcheck-withheld.txtar", applicationConfig())
+	if len(in.Marks) != 4 {
+		t.Fatalf("Setup: the fixture's directives read as %d records, want 4: %+v", len(in.Marks), in.Marks)
+	}
+	for i := range in.Marks {
+		if in.Marks[i].Bound == "" {
+			t.Fatalf("Setup: the record for %s at %s bound no declaration",
+				in.Marks[i].Code, in.Marks[i].Site)
+		}
+	}
+
+	// The pass with the fixture's directives withdrawn, which is the run a maintainer
+	// makes after deleting them: it is what says the two withheld findings exist.
+	bare := suppressed(t, "selfcheck-withheld.txtar", applicationConfig())
+	bare.Marks = nil
+	swept := graph.NewMatrix(bare.Merged).Sweep(graph.SweepInput{Exempt: bare.Exempt, Mode: graph.Mode{Production: true}})
+	bare.Sweep = &swept
+	bare.indexed = nil
+	want := []string{
+		"DS1101 Narrowed",
+		"DS1801 tag",
+	}
+	if got := summary(computed(t, bare, packageEmitters()).Findings); !slices.Equal(got, want) {
+		t.Fatalf("the pass with no suppression reports %v, want %v", got, want)
+	}
+
+	// The same pass with the records: each of the two withholds the finding its code
+	// names, the record over a declaration no narrowing reports withheld nothing, and
+	// the record naming the stale-suppression code withheld nothing either, because
+	// no record binds to a row of a document. The two stale findings are in the
+	// canonical order, which is the line each directive is written on.
+	result := computed(t, in, packageEmitters())
+	if got := summary(result.Findings); !slices.Equal(got, []string{
+		"DS1703 go://example.com/app/internal/store#Shared",
+		"DS1703 go://example.com/app/internal/store#Rowless",
+	}) {
+		t.Errorf("the pass with the fixture's directives reports %v, want the two stale records alone", got)
+	}
+	if inEffect, reasons := Totals(in); inEffect != 2 || reasons != 4 {
+		t.Errorf("Totals() = %d in effect and %d reasons, want 2 and 4", inEffect, reasons)
+	}
+}
+
+func TestTheStaleSuppressionKindReadsWhatTheSamePassWithheldWhateverTheVocabularysOrder(t *testing.T) {
+	in := suppressed(t, "selfcheck-withheld.txtar", applicationConfig())
+
+	// The unused-parameter kind runs after the stale-suppression kind in the
+	// vocabulary's order, so a pass that answered staleness in that order would call
+	// the record over tagged stale. Only these two kinds run, so the pass has nothing
+	// else that could withhold a finding.
+	found := computed(t, in, map[string]Emitter{
+		staleSuppressionCode: StaleSuppressions,
+		unusedParameterCode:  UnusedParameter,
+	}).Findings
+
+	stale := make([]string, 0, len(found))
+	for i := range found {
+		if found[i].Code == staleSuppressionCode {
+			stale = append(stale, found[i].Symbol.Ref)
+		}
+	}
+	// The narrowing kind does not run in this pass, so the record over Narrowed
+	// withheld nothing here and is stale beside the records over Shared and Rowless.
+	want := []string{
+		"go://example.com/app/internal/store#Narrowed",
+		"go://example.com/app/internal/store#Shared",
+		"go://example.com/app/internal/store#Rowless",
+	}
+	if !slices.Equal(stale, want) {
+		t.Errorf("the pass reports %v stale, want %v: the record over tagged withheld an unused-parameter finding",
+			stale, want)
+	}
+}
+
+func TestARecordIsDormantRatherThanInEffectWhereTheMinimumConfidenceWithholdsItsFindingToo(t *testing.T) {
+	for name, held := range map[string]struct {
+		minimum  config.Confidence
+		inEffect int
+	}{
+		"a minimum the withheld finding reaches":      {minimum: config.Possible, inEffect: 1},
+		"a minimum the withheld finding cannot reach": {minimum: config.Certain, inEffect: 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			resolved := libraryConfig()
+			resolved.Consumers.Complete = true
+			resolved.Analysis.MinConfidence = held.minimum
+			in := suppressed(t, "selfcheck-withheld-dormant.txtar", resolved)
+			// The narrowing kinds need the declaration the configuration makes and
+			// the run's own consumer knowledge, which the harness carries beside the
+			// resolved configuration the way the composition root hands both on.
+			in.Consumers.Complete = true
+
+			// The narrowing finding is withheld either way, so what the two runs
+			// differ in is whether the record that withheld it is counted.
+			for _, found := range computed(t, in, packageEmitters()).Findings {
+				if found.Code == unnecessaryExportCode || found.Code == staleSuppressionCode {
+					t.Errorf("the pass under %s reports %s about %s, want neither: the record withheld the narrowing finding",
+						name, found.Code, found.Symbol.Name)
+				}
+			}
+			if inEffect, reasons := Totals(in); inEffect != held.inEffect || reasons != 1 {
+				t.Errorf("Totals() under %s = %d in effect and %d reasons, want %d and 1",
+					name, inEffect, reasons, held.inEffect)
+			}
+		})
+	}
+}

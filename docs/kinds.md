@@ -303,9 +303,10 @@ rules are separate checks over one record.
 ### DS1703 stale-suppression
 
 Every suppression that matched no current finding, at either mechanism and in the baseline
-alike. A record is also stale when the symbol it bound is one the analysis would not have
-reported without the mark, because a mark in effect for nothing is a claim nobody checks. A
-record naming a retired code is stale whatever it bound, since nothing can match it.
+alike. A record is stale when it withheld nothing: it bound no declaration, or it bound one and
+the finding its code names was never held back, because a record in effect for nothing is a claim
+nobody checks. A record naming a retired code is stale whatever it bound, since nothing can match
+it.
 
 A record bound to a symbol whose code the configuration silences is dormant instead: neither in
 effect nor stale, and reported by nothing. Both ways of silencing count, the severity set to

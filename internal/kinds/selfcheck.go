@@ -112,10 +112,14 @@ func refusalMessage(refused *suppress.Refusal) (string, error) {
 // StaleSuppressions reports every suppression that matched no current finding, at
 // either mechanism and in the baseline alike.
 //
-// A record is stale when it bound to nothing, and when the symbol it bound is one
-// the sweep would not have reported without the mark: a mark in effect for nothing
-// is a claim nobody checks, so the kind is fixed on at deny and no configuration
-// reduces it.
+// A record is stale when it withheld nothing: it bound to no declaration, or it bound
+// one and the finding its code names was never held back from the report. A record in
+// effect for nothing is a claim nobody checks, so the kind is fixed on at deny and no
+// configuration reduces it.
+//
+// The kind reads what the pass withheld, so it runs after every other emitter of the
+// pass. A pass that ran no other emitter leaves it the sweep's answer alone, which is
+// every record that held a dead declaration back.
 //
 // A record naming a code this analyzer reports nothing under, a retired code, is
 // stale whatever it bound: nothing can match it. It is not dormant either, because
@@ -142,7 +146,7 @@ func StaleSuppressions(in *Input) ([]Finding, error) {
 	stale := make([]*suppress.Record, 0, len(in.Marks))
 	for i := range in.Marks {
 		mark := &in.Marks[i]
-		if in.dormant(mark) || in.inEffect(mark, suppressed) {
+		if in.dormant(mark) || in.inEffect(i, suppressed) {
 			continue
 		}
 		stale = append(stale, mark)
@@ -150,9 +154,23 @@ func StaleSuppressions(in *Input) ([]Finding, error) {
 	return in.collapsed(stale)
 }
 
-// inEffect reports whether one record held a finding back: it bound a declaration
-// the sweep would otherwise have reported, under a code this analyzer reports.
-func (in *Input) inEffect(mark *suppress.Record, suppressed map[graph.SymbolID]bool) bool {
+// inEffect reports whether the record at one place in Marks held a finding back.
+//
+// One question with two answers, because the finding a record withholds is held back
+// in two places. A record naming a kind about liveness never produces its finding at
+// all: the mark made the symbol live before the sweep ran, so the sweep's own answer
+// about which marks held a symbol back is the only record there is of it. A record
+// naming any other kind is bound to a declaration the analysis holds live, whose
+// finding an emitter produces and the pass withholds, so the pass's own record of what
+// it withheld is the answer.
+//
+// The sweep's answer is read under a code this analyzer reports, because a record
+// naming a retired code can match nothing whatever it bound.
+func (in *Input) inEffect(at int, suppressed map[graph.SymbolID]bool) bool {
+	if in.withheld[at] {
+		return true
+	}
+	mark := &in.Marks[at]
 	if mark.Bound == "" || !suppressed[mark.Bound] {
 		return false
 	}
@@ -267,8 +285,11 @@ func UnmatchedRoots(in *Input) ([]Finding, error) {
 }
 
 // Totals are the two suppression counts a report's envelope prints: how many
-// records bound to a symbol the sweep would otherwise have reported, and how many
-// directives, entries and rows carry a reason.
+// records withheld a finding, and how many directives, entries and rows carry a
+// reason.
+//
+// It reads the same answer the stale-suppression kind reads, so it is called after the
+// pass that produced the findings rather than beside it.
 //
 // The two count different things on purpose. A record is one code at one site, so a
 // directive naming two codes is two records and either may be in effect on its own;
@@ -289,7 +310,7 @@ func Totals(in *Input) (inEffect, reasons int) {
 		if mark.Reason != "" {
 			sites[token.Position{Filename: mark.Site.Filename, Line: mark.Site.Line, Column: mark.Site.Column}] = true
 		}
-		if !in.dormant(mark) && in.inEffect(mark, suppressed) {
+		if !in.dormant(mark) && in.inEffect(i, suppressed) {
 			inEffect++
 		}
 	}
