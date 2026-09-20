@@ -1,20 +1,7 @@
 {
-  "corpus_version": "1.1.0",
+  "corpus_version": "1.2.0",
   "product": {
     "name": "deadset-go"
   },
-  "gaps": [
-    {
-      "fixture": "unused-requirement-noop-replace",
-      "symbol": "NoopReplace",
-      "capability": "DS1605",
-      "reason": "A suppression binds to a declaration, and this kind's subject is a replace directive of the module file, so no ignore entry and no inline directive suppresses the finding: an entry naming one is reported as a stale suppression instead. The remedy is deleting the directive, whose target is absent from the build list. Setting the severity of DS1605 to allow silences the kind."
-    },
-    {
-      "fixture": "unused-requirement-noop-replace",
-      "symbol": "UnusedRequirement",
-      "capability": "DS1601",
-      "reason": "A suppression binds to a declaration, and this kind's subject is a requirement of the module file, so no ignore entry and no inline directive suppresses the finding: an entry naming one is reported as a stale suppression instead. The remedy is go mod tidy, which removes the requirement. Setting the severity of DS1601 to allow silences the kind."
-    }
-  ]
+  "gaps": []
 }

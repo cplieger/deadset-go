@@ -88,6 +88,28 @@ type corpusFixtureFile struct {
 	Expect     []corpusExpectation `json:"expect"`
 }
 
+// corpusSubjectShapes is the corpus's own reading of the shape of every subject a
+// finding is about: the kinds it names a part of one declaration and the kinds it
+// names a row of a document. Every kind neither list names is a declaration, so the
+// document carries the two exceptions rather than the rule.
+type corpusSubjectShapes struct {
+	Part []string `json:"part"`
+	Row  []string `json:"row"`
+}
+
+// suppressible reports whether a suppression record can bind to a finding about one
+// kind of subject, which is what decides whether the suppression phase applies to an
+// expectation about it: a record binds to a declaration, so a declaration and a part
+// of one are suppressible, a part through the declaration its own reference names,
+// while a row reports a record of a document that no record binds to and whose remedy
+// is the change the finding names or the severity the configuration gives its code.
+//
+// Only the row list decides it, because the two shapes a record reaches are the two a
+// kind the lists leave out cannot be.
+func (shapes *corpusSubjectShapes) suppressible(subjectKind string) bool {
+	return !slices.Contains(shapes.Row, subjectKind)
+}
+
 // corpusManifest is one rendering's manifest: the build matrix a run derives from the
 // rendering, and the file and line this rendering declares each logical name on.
 type corpusManifest struct {
@@ -226,6 +248,7 @@ type answered struct {
 // writes.
 func TestConformanceCorpus(t *testing.T) {
 	published := publishedCorpusVersion(t)
+	shapes := publishedSubjectShapes(t)
 	declared := committedGaps(t)
 	names := goFixtures(t)
 
@@ -237,7 +260,7 @@ func TestConformanceCorpus(t *testing.T) {
 	for _, one := range names {
 		var row fixtureAnswer
 		t.Run(one, func(t *testing.T) {
-			row = answerFixture(t, one, declared.Gaps)
+			row = answerFixture(t, one, declared.Gaps, &shapes)
 		})
 		results.Fixtures = append(results.Fixtures, row)
 	}
@@ -298,7 +321,9 @@ func printedResult(results *conformanceResults) []string {
 // Every problem it meets is a row of the document as well as a test failure, because
 // the document is the record the corpus repository's agreement check reads and a
 // fixture missing from it is a silence rather than an answer.
-func answerFixture(t *testing.T, fixtureName string, declared []conformanceGap) fixtureAnswer {
+func answerFixture(t *testing.T, fixtureName string, declared []conformanceGap,
+	shapes *corpusSubjectShapes,
+) fixtureAnswer {
 	t.Helper()
 
 	fixture, manifest, archive, err := readFixture(fixtureName)
@@ -344,7 +369,8 @@ func answerFixture(t *testing.T, fixtureName string, declared []conformanceGap) 
 		row.Expectations[i] = expectationAnswer{Symbol: held.Symbol, Actual: actual, Message: message}
 	}
 
-	if err := answerSuppression(t.Context(), rendering, document, &fixture, sites, &first, row.Expectations); err != nil {
+	if err := answerSuppression(t.Context(), rendering, document, &fixture, sites, &first,
+		row.Expectations, shapes); err != nil {
 		return failedFixture(t, fixtureName, "the second analysis did not complete: "+err.Error())
 	}
 	if err := checkRenderingUnchanged(rendering, names, before); err != nil {
@@ -571,15 +597,22 @@ func unexpectedFindings(findings []kinds.Finding, sites map[string]site) []unexp
 }
 
 // answerSuppression runs the second phase: every finding the first analysis reported
-// at an expectation's position is written into the rendering's ignore document, the
-// rendering is analyzed again, and each of those expectations records whether its
-// position fell silent and whether the entry was reported stale.
+// at an expectation's position that a suppression record can bind to is written into
+// the rendering's ignore document, the rendering is analyzed again, and each of those
+// expectations records whether its position fell silent and whether the entry was
+// reported stale.
 //
 // The entries are written together and the rendering analyzed once, because the phase
 // asks what the documented form does to the findings it names rather than what one
 // entry does in isolation.
+//
+// Which findings a record can bind to is the corpus's shape table, read from the
+// pinned corpus rather than listed here, so an amendment naming a further kind of
+// document row moves this phase without an edit. An expectation the phase skips
+// records no suppression answer, which is what the results document then says about
+// it.
 func answerSuppression(ctx context.Context, rendering, document string, fixture *corpusFixtureFile,
-	sites map[string]site, first *answered, rows []expectationAnswer,
+	sites map[string]site, first *answered, rows []expectationAnswer, shapes *corpusSubjectShapes,
 ) error {
 	entries := make([]ignoreEntry, 0, len(fixture.Expect))
 	covered := make(map[string]ignoreEntry, len(fixture.Expect))
@@ -589,7 +622,7 @@ func answerSuppression(ctx context.Context, rendering, document string, fixture 
 			continue
 		}
 		found := findingsAt(first.findings, sites[held.Symbol])
-		if len(found) == 0 {
+		if len(found) == 0 || !shapes.suppressible(found[0].Symbol.Kind) {
 			continue
 		}
 		entry := ignoreEntry{
@@ -905,6 +938,28 @@ func publishedCorpusVersion(t *testing.T) string {
 		t.Fatalf("Setup: %s names no corpus version", corpusDocument)
 	}
 	return document.CorpusVersion
+}
+
+// publishedSubjectShapes is the shape table the pinned Contract's corpus publishes,
+// which is what decides the expectations the suppression phase applies to.
+func publishedSubjectShapes(t *testing.T) corpusSubjectShapes {
+	t.Helper()
+
+	body, err := spec.Corpus.ReadFile(corpusDocument)
+	if err != nil {
+		t.Fatalf("Setup: read %s: %v", corpusDocument, err)
+	}
+	var document struct {
+		SubjectShapes corpusSubjectShapes `json:"subject_shapes"`
+	}
+	if err := json.Unmarshal(body, &document); err != nil {
+		t.Fatalf("Setup: decode %s: %v", corpusDocument, err)
+	}
+	if len(document.SubjectShapes.Part) == 0 || len(document.SubjectShapes.Row) == 0 {
+		t.Fatalf("Setup: %s names %d part kinds and %d row kinds, want a shape table with both",
+			corpusDocument, len(document.SubjectShapes.Part), len(document.SubjectShapes.Row))
+	}
+	return document.SubjectShapes
 }
 
 // committedGaps is the declared-gap document this analyzer commits, decoded from the
