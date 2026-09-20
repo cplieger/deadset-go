@@ -28,10 +28,11 @@ const (
 	rootSubject        = "root"
 )
 
-// configurationDocument is the repository configuration, whose name and location
-// the Contract fixes. It is where a configured root is written, and a configured
-// root carries no line of its own, so a finding about one renders at this
-// document's fixed position.
+// configurationDocument is the repository configuration at its conventional name and
+// location, which the Contract fixes. It is the document a finding about a configured
+// root carries where the run read its roots from no document of the target: the
+// finding is about a document and has to name one, and this is the document a
+// maintainer writes a configured root in.
 const configurationDocument = "deadset.json"
 
 // documentPosition is the fixed position of a finding about a document rather than
@@ -112,10 +113,14 @@ func refusalMessage(refused *suppress.Refusal) (string, error) {
 // StaleSuppressions reports every suppression that matched no current finding, at
 // either mechanism and in the baseline alike.
 //
-// A record is stale when it bound to nothing, and when the symbol it bound is one
-// the sweep would not have reported without the mark: a mark in effect for nothing
-// is a claim nobody checks, so the kind is fixed on at deny and no configuration
-// reduces it.
+// A record is stale when it withheld nothing: it bound to no declaration, or it bound
+// one and the finding its code names was never held back from the report. A record in
+// effect for nothing is a claim nobody checks, so the kind is fixed on at deny and no
+// configuration reduces it.
+//
+// The kind reads what the pass withheld, so it runs after every other emitter of the
+// pass. A pass that ran no other emitter leaves it the sweep's answer alone, which is
+// every record that held a dead declaration back.
 //
 // A record naming a code this analyzer reports nothing under, a retired code, is
 // stale whatever it bound: nothing can match it. It is not dormant either, because
@@ -142,7 +147,7 @@ func StaleSuppressions(in *Input) ([]Finding, error) {
 	stale := make([]*suppress.Record, 0, len(in.Marks))
 	for i := range in.Marks {
 		mark := &in.Marks[i]
-		if in.dormant(mark) || in.inEffect(mark, suppressed) {
+		if in.dormant(mark) || in.inEffect(i, suppressed) {
 			continue
 		}
 		stale = append(stale, mark)
@@ -150,14 +155,55 @@ func StaleSuppressions(in *Input) ([]Finding, error) {
 	return in.collapsed(stale)
 }
 
-// inEffect reports whether one record held a finding back: it bound a declaration
-// the sweep would otherwise have reported, under a code this analyzer reports.
-func (in *Input) inEffect(mark *suppress.Record, suppressed map[graph.SymbolID]bool) bool {
+// inEffect reports whether the record at one place in Marks held a finding back.
+//
+// One question with two answers, because the finding a record withholds is held back
+// in two places. A record naming a kind about liveness never produces its finding at
+// all: the mark made the symbol live before the sweep ran, so the sweep's own answer
+// about which marks held a symbol back is the only record there is of it. A record
+// naming any other kind is bound to a declaration the analysis holds live, whose
+// finding an emitter produces and the pass withholds, so the pass's own record of what
+// it withheld is the answer.
+//
+// The sweep's answer is read under a code this analyzer reports, because a record
+// naming a retired code can match nothing whatever it bound.
+//
+// One finding is held back by one record, so the sweep's answer is read for the first
+// record of the reading order that bound the declaration under the code and no other:
+// the sweep answers per declaration and several records may bind one, and a record
+// that changes nothing when it is deleted is what this kind reports. The pass's own
+// answer needs no such test, because the pass withholds a finding once and records the
+// one record that did it.
+func (in *Input) inEffect(at int, suppressed map[graph.SymbolID]bool) bool {
+	if in.withheld[at] {
+		return true
+	}
+	mark := &in.Marks[at]
 	if mark.Bound == "" || !suppressed[mark.Bound] {
 		return false
 	}
-	_, live := catalog.Kind(mark.Code)
-	return live
+	if _, live := catalog.Kind(mark.Code); !live {
+		return false
+	}
+	return in.firstToBind(at)
+}
+
+// firstToBind reports whether no record before this one in the run's reading order
+// bound the same declaration under the same code.
+//
+// The order is the one Marks carries, which the composition root reads the documents
+// in: the inline directives by position, then the ignore file in document order, then
+// the baseline. It is a documented order rather than a file order, so two runs over
+// one tree answer the same way and a maintainer reading the rule knows which of two
+// records to delete.
+func (in *Input) firstToBind(at int) bool {
+	mark := &in.Marks[at]
+	for i := range in.Marks[:at] {
+		if earlier := &in.Marks[i]; earlier.Code == mark.Code && earlier.Bound == mark.Bound {
+			return false
+		}
+	}
+	return true
 }
 
 // staleInput is the sweep the staleness answer is read from, and an empty answer
@@ -249,26 +295,44 @@ func codesAt(records []*suppress.Record) []string {
 // The subject is the configured string as the configuration spells it, pattern and
 // all, because that is the string a maintainer corrects. A root set nobody checks
 // silently changes every result, so the kind is fixed on at deny.
+//
+// The finding is positioned in the document that declared the root, at that
+// document's fixed position: the roots are written as an array whose members carry no
+// line of their own, so every unmatched root of a run renders at the first position of
+// the document a maintainer opens to correct it, and the string each names is what
+// tells one from another.
 func UnmatchedRoots(in *Input) ([]Finding, error) {
 	if in == nil || in.Config == nil {
 		return nil, nil
 	}
+	at := token.Position{Filename: in.rootsDocument(), Line: documentPosition, Column: documentPosition}
 	found := make([]Finding, 0, len(in.Unmatched))
 	for _, unmatched := range in.Unmatched {
 		message := "configured root matches no symbol of the inventory"
 		if strings.ContainsAny(unmatched.Source, "*?") {
 			message = "configured root pattern matches no symbol of the inventory"
 		}
-		found = append(found, selfCheck(unmatchedRootCode, rootSubject, unmatched.Source,
-			token.Position{Filename: configurationDocument, Line: documentPosition, Column: documentPosition},
-			message))
+		found = append(found, selfCheck(unmatchedRootCode, rootSubject, unmatched.Source, at, message))
 	}
 	return found, nil
 }
 
+// rootsDocument is the target-relative path of the document that declared the
+// configured roots, and the repository configuration's conventional path where the
+// run names no document.
+func (in *Input) rootsDocument() string {
+	if in.RootsDocument == "" {
+		return configurationDocument
+	}
+	return in.RootsDocument
+}
+
 // Totals are the two suppression counts a report's envelope prints: how many
-// records bound to a symbol the sweep would otherwise have reported, and how many
-// directives, entries and rows carry a reason.
+// records withheld a finding, and how many directives, entries and rows carry a
+// reason.
+//
+// It reads the same answer the stale-suppression kind reads, so it is called after the
+// pass that produced the findings rather than beside it.
 //
 // The two count different things on purpose. A record is one code at one site, so a
 // directive naming two codes is two records and either may be in effect on its own;
@@ -289,7 +353,7 @@ func Totals(in *Input) (inEffect, reasons int) {
 		if mark.Reason != "" {
 			sites[token.Position{Filename: mark.Site.Filename, Line: mark.Site.Line, Column: mark.Site.Column}] = true
 		}
-		if !in.dormant(mark) && in.inEffect(mark, suppressed) {
+		if !in.dormant(mark) && in.inEffect(i, suppressed) {
 			inEffect++
 		}
 	}

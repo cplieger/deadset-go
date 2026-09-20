@@ -1,0 +1,44 @@
+An interface declared in one file and the compile-time assertion that a type
+satisfies it in another, with an ignore entry naming the interface the finding names
+beside the file the finding is reported in. Nothing but the assertion names the
+interface as a type, so the assertion is reported, and the asserted type is live
+because the entry point reads one of its fields.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- iface.go --
+package main
+
+// encoder renders a payload.
+type encoder interface {
+	Encode() string
+}
+-- assert.go --
+package main
+
+type payload struct{ body string }
+
+func (p payload) Encode() string { return p.body }
+
+var _ encoder = payload{}
+-- main.go --
+package main
+
+func main() {
+	p := payload{body: "b"}
+	println(p.body)
+}
+-- deadset-ignore.json --
+{
+  "description": "One entry adjudicating the assertion: it names the interface the finding names and the file the assertion is written in.",
+  "ignore": [
+    {
+      "code": "DS1204",
+      "symbol": "go://example.com/app#encoder",
+      "path": "assert.go",
+      "reason": "in effect: the assertion is kept until the second consumer of the interface lands"
+    }
+  ]
+}

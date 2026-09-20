@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	spec "github.com/cplieger/deadset-spec"
+	spec "github.com/cplieger/deadset-spec/v2"
 )
 
 // The published documents that fix the three value forms an entry names.

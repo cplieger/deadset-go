@@ -70,9 +70,8 @@ func TestMeasureRealModules(t *testing.T) {
 		t.Run(one.dir, func(t *testing.T) {
 			in, result := measured(t, one.dir, one.kind)
 
-			t.Logf("%s (%s): %d candidates, %d findings, %d omitted below the minimum confidence",
-				one.dir, one.kind, len(in.Sweep.Candidates), len(result.Findings),
-				result.OmittedBelowMinConfidence)
+			t.Logf("%s (%s): %d candidates, %d findings",
+				one.dir, one.kind, len(in.Sweep.Candidates), len(result.Findings))
 			for _, line := range tallied(result.Findings, func(found *Finding) string { return found.Code }) {
 				t.Logf("   %s", line)
 			}

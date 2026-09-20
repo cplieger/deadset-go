@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	spec "github.com/cplieger/deadset-spec"
+	spec "github.com/cplieger/deadset-spec/v2"
 )
 
 // kindsPath is the vocabulary document this package's table is pinned equal to, and

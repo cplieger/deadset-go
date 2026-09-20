@@ -266,12 +266,34 @@ type Input struct {
 	// which is a configuration naming something that no longer exists.
 	Unmatched []graph.Unmatched
 
+	// RootsDocument is the configuration document that declared the configured
+	// roots, as a target-relative path, and is empty where no document of the
+	// target did.
+	//
+	// A finding about a configured root is a finding about the document that
+	// declares it, so the document's own path is the path it carries. Which
+	// document that is belongs to the configuration resolution, which reads the
+	// documents in the order they outrank each other and records where every
+	// setting came from, so the composition root hands the answer here rather than
+	// letting this pass name a conventional path the run may not have read.
+	RootsDocument string
+
 	// Edges is the declared cross-language edges of the target, nil where the
 	// target carries no edges document.
 	Edges *edges.Document
 
 	// indexed is what a lookup over the inventory needs, built on first use.
 	indexed *index
+
+	// withheld names every record of Marks, by its place in that slice, whose code
+	// and declaration matched a finding this pass produced, so the pass withheld
+	// that finding. A pass records it and the kind that reports a record which
+	// withheld nothing reads it, which is what makes staleness one question asked
+	// once over every kind rather than one answer per kind.
+	//
+	// It is the pass's own answer and is rebuilt by each pass, so a second pass over
+	// one input inherits nothing from the first.
+	withheld map[int]bool
 
 	// Matrix is the configuration identifiers in matrix order, and Per is one
 	// entry per configuration in the same order.
@@ -296,11 +318,9 @@ type Input struct {
 // Emitter is one kind's rule: it returns the findings of its own code.
 type Emitter func(in *Input) ([]Finding, error)
 
-// Result is what one findings pass produced: the findings in the canonical order,
-// and how many the configured minimum confidence excluded.
+// Result is what one findings pass produced: the findings in the canonical order.
 type Result struct {
-	Findings                  []Finding
-	OmittedBelowMinConfidence int
+	Findings []Finding
 }
 
 // words is the reader's word for each kind of declaration, which a message spells
@@ -339,6 +359,20 @@ var symbolKinds = map[graph.SymbolKind]string{
 // a finding's confidence is otherwise unreachable.
 var kindsOfCatalog = catalog.Kinds
 
+// readsThePass names the kinds whose rule is about what this pass produced rather
+// than about what the analysis answered, so their emitters run after every other
+// one and read what the earlier emitters recorded on the input.
+//
+// One kind is in it. A suppression record withholds the finding its code would have
+// produced whatever the kind, so which records withheld nothing is known only once
+// every other emitter has answered, and the vocabulary's order puts the self-check
+// family ahead of the intra-function one. The order is therefore a property of the
+// kind, declared here beside the emitter, and not of where a code sits in the
+// vocabulary.
+var readsThePass = map[string]bool{
+	staleSuppressionCode: true,
+}
+
 // Compute runs every kind the resolved severity does not disable and returns the
 // findings of the whole run.
 //
@@ -346,7 +380,14 @@ var kindsOfCatalog = catalog.Kinds
 // Contract's rather than a map's, and a code this analyzer has no emitter for
 // reports nothing. Each finding an emitter returns is checked against what the
 // Contract can carry and then completed; a refusal fails the pass, because each
-// one is a defect in an emitter rather than something a report could say.
+// one is a defect in an emitter rather than something a report could say. A finding
+// a suppression record names is then withheld, which is the whole of what a record
+// does beyond the mark the sweep already took.
+//
+// The kinds run in two phases, both in the vocabulary's order: every kind that reads
+// the analysis, then the kinds of readsThePass, which read what the first phase
+// withheld. Both phases share one identity check over the findings, so a second
+// finding at one key fails the pass whichever phase produced it.
 func Compute(in *Input, emitters map[string]Emitter) (Result, error) {
 	if in == nil || in.Config == nil {
 		return Result{}, fmt.Errorf("%w: no resolved configuration", ErrInput)
@@ -355,25 +396,46 @@ func Compute(in *Input, emitters map[string]Emitter) (Result, error) {
 	if err := checkTable(emitters); err != nil {
 		return Result{}, err
 	}
+	in.withheld = make(map[int]bool, len(in.Marks))
 	reported := make(map[string]string)
-	var findings []Finding
 	published := kindsOfCatalog()
+	findings, err := in.phase(published, emitters, reported, false)
+	if err != nil {
+		return Result{}, err
+	}
+	second, err := in.phase(published, emitters, reported, true)
+	if err != nil {
+		return Result{}, err
+	}
+	findings = append(findings, second...)
+
+	kept := in.abovePar(findings)
+	slices.SortStableFunc(kept, Compare)
+	return Result{Findings: kept}, nil
+}
+
+// phase runs the emitters of one phase, in the vocabulary's order, and returns what
+// they produced that no suppression record withheld.
+func (in *Input) phase(published []catalog.Row, emitters map[string]Emitter,
+	reported map[string]string, second bool,
+) ([]Finding, error) {
+	var findings []Finding
 	for i := range published {
 		row := &published[i]
+		if readsThePass[row.Code] != second {
+			continue
+		}
 		emit, runs := in.emitterOf(row, emitters)
 		if !runs {
 			continue
 		}
 		produced, err := in.runKind(emit, row, reported)
 		if err != nil {
-			return Result{}, err
+			return nil, err
 		}
 		findings = append(findings, produced...)
 	}
-
-	kept, omitted := in.abovePar(findings)
-	slices.SortStableFunc(kept, Compare)
-	return Result{Findings: kept, OmittedBelowMinConfidence: omitted}, nil
+	return findings, nil
 }
 
 // emitterOf is the emitter one kind of the vocabulary runs in this pass, and false
@@ -390,8 +452,13 @@ func (in *Input) emitterOf(row *catalog.Row, emitters map[string]Emitter) (Emitt
 	return emit, carried
 }
 
-// runKind runs one kind's emitter and completes every finding it returned, in the
-// order the emitter returned them.
+// runKind runs one kind's emitter, completes every finding it returned in the order
+// the emitter returned them, and withholds each finding a suppression record names.
+//
+// The withholding runs after the completion because the shape of a finding decides
+// what a record can bind to and the completion is what fills the subject's kind in.
+// A withheld finding is identified first and keeps its identity, so a record does not
+// license a second kind to claim the position the withheld finding named.
 func (in *Input) runKind(emit Emitter, row *catalog.Row, reported map[string]string) ([]Finding, error) {
 	produced, err := emit(in)
 	if err != nil {
@@ -404,9 +471,94 @@ func (in *Input) runKind(emit Emitter, row *catalog.Row, reported map[string]str
 			return nil, err
 		}
 		in.complete(&found, row)
+		if in.withhold(&found) {
+			continue
+		}
 		completed = append(completed, found)
 	}
 	return completed, nil
+}
+
+// withhold reports whether a suppression record withholds one finding, and records
+// every record that did.
+//
+// This is the half of suppression the sweep cannot take. A record marks its symbol
+// live before the sweep, which is the whole answer for a kind that reports a dead
+// declaration, and nothing at all for a kind that reports a declaration the analysis
+// holds live: a narrowing candidate, a write-only member and an unused parameter are
+// all referenced, so the mark changes nothing about them and the finding has to be
+// withheld where it is produced.
+//
+// A record binds to a declaration, so the declaration a finding is withheld through
+// is the finding's own where the subject is a declaration of the inventory, and the
+// declaration the part belongs to where the subject is a part of one, which the
+// subject names by reference. A row of a document is a record rather than a
+// declaration of the program, so nothing binds to one and no finding about one is
+// withheld: its remedy is the change the finding names or the severity the
+// configuration gives its code.
+//
+// A record reaches the finding two ways and either is enough, which pairs is what
+// decides.
+//
+// A finding is withheld by at most one record. Several may reach it, an inline
+// directive and an ignore entry naming one code at one declaration for instance, and
+// the first of them in the run's reading order is the one in effect: the records are
+// read as inline directives by position, then the ignore file in document order, then
+// the baseline, and Marks carries them in that order. A later record changes nothing
+// when it is deleted, which is what the stale-suppression kind is for, and it reads
+// what this recorded.
+//
+// A withheld finding leaves the pass and is counted nowhere. It is not what the
+// configured minimum confidence omitted, which is the number a capped report accounts
+// for; it is a finding a maintainer adjudicated, which the two suppression totals of
+// the envelope are what report.
+func (in *Input) withhold(found *Finding) bool {
+	if shapeOf(found.Symbol.Kind) == shapeRow {
+		return false
+	}
+	for i := range in.Marks {
+		if !pairs(&in.Marks[i], found) {
+			continue
+		}
+		in.withheld[i] = true
+		return true
+	}
+	return false
+}
+
+// pairs reports whether one suppression record is a record of one finding.
+//
+// A record reaches a finding two ways and either is enough. It marked the finding's
+// own declaration, which is how a directive above a declaration reaches every
+// finding about that declaration and about its parts, and it is the only way a
+// directive reaches one: a directive names a position and the declaration below it
+// is whatever begins there. Or it names the code, the reference and the path of the
+// finding, which is how an entry and a baseline row are matched, each of the three
+// exactly and none of them by pattern.
+//
+// The second way is not the first with more steps, and two findings need it. A
+// finding whose subject is no declaration of the inventory has no declaration for a
+// record to mark: the subject of a satisfaction assertion is the interface it names,
+// which is declared wherever it is declared, so an entry copied from that finding
+// names the interface's reference beside the assertion's file and resolves to no one
+// declaration at all. And a finding about a part of a declaration names that
+// declaration by reference, so an entry copied from it reaches the part through the
+// reference rather than through a mark the part never took.
+//
+// The path is matched against the finding's own position rather than against the file
+// the record's reference is declared in, which is what the grammar states and the
+// only reading under which an assertion and its interface may live in two files. An
+// entry naming a file other than the one the finding is reported in matches nothing
+// and is stale, which is what keeps an adjudication written for one file from masking
+// a same-named symbol in another.
+func pairs(mark *suppress.Record, found *Finding) bool {
+	if mark.Code != found.Code {
+		return false
+	}
+	if mark.Bound != "" && mark.Bound == found.id {
+		return true
+	}
+	return mark.Symbol == found.Symbol.Ref && mark.Path == found.Position.Path
 }
 
 // checkTable refuses a table registering an emitter under a code the vocabulary
@@ -664,22 +816,23 @@ func (f *Finding) relation(candidate *graph.Candidate) {
 	f.Relation = candidate.Relation
 }
 
-// abovePar drops every finding the configured minimum confidence excludes and
-// returns how many it dropped, which is what the report accounts for.
-func (in *Input) abovePar(findings []Finding) (kept []Finding, omitted int) {
+// abovePar drops every finding the configured minimum confidence excludes. The
+// minimum is a filter over what the pass reports, the way a kind the severity sets to
+// allow is, so a finding it drops leaves the pass and no count of the run accounts for
+// it.
+func (in *Input) abovePar(findings []Finding) []Finding {
 	least := Class(in.Config.Analysis.MinConfidence)
 	if least.rank() == 0 {
-		return findings, 0
+		return findings
 	}
-	kept = make([]Finding, 0, len(findings))
+	kept := make([]Finding, 0, len(findings))
 	for i := range findings {
 		if findings[i].Confidence.rank() < least.rank() {
-			omitted++
 			continue
 		}
 		kept = append(kept, findings[i])
 	}
-	return kept, omitted
+	return kept
 }
 
 // Compare orders two findings by the canonical key: the path, the line, the

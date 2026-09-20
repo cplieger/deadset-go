@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/internal/config"
-	spec "github.com/cplieger/deadset-spec"
+	spec "github.com/cplieger/deadset-spec/v2"
 )
 
 // configSchema decodes the Contract's configuration schema, which is what the

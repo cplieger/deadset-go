@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -11,7 +13,7 @@ import (
 
 	"github.com/cplieger/deadset-go/internal/kinds"
 	"github.com/cplieger/deadset-go/internal/report"
-	spec "github.com/cplieger/deadset-spec"
+	spec "github.com/cplieger/deadset-spec/v2"
 )
 
 // The Contract page that publishes the expression a finding line is defined by, and
@@ -243,6 +245,92 @@ func TestReportOfReportsAConfiguredRootThatNamesNothing(t *testing.T) {
 	case found.Position.Path != repositoryDocument:
 		t.Errorf("%s is sited at %q, want %q: a configured root has no line of its own",
 			unmatchedRoot, found.Position.Path, repositoryDocument)
+	}
+}
+
+func TestReportOfSitesAConfiguredRootInTheDocumentThatDeclaredIt(t *testing.T) {
+	// The configuration the invocation names rather than the one at the conventional
+	// path, so the document that declares the root is the only thing that can decide
+	// the path the finding carries. The invocation spells the target and the document
+	// independently, and every spelling of one target names one directory, so the
+	// answer is the same for each: a run that named the same two files another way
+	// would otherwise send a maintainer to a document that does not hold the string.
+	document := filepath.Join("sub", "other.json")
+	dir := writeModule(t, map[string]string{
+		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
+		"app.go": "package main\n\nfunc main() { used() }\n\n" +
+			"// used is what the entry point calls.\nfunc used() {}\n",
+		document: `{"target": {"kind": "application"}, "roots": {"patterns": ["go://example.com/app#Absent"]}}`,
+	})
+
+	for name, spelling := range map[string]struct{ target, config string }{
+		"both absolute":                {target: dir, config: filepath.Join(dir, document)},
+		"both relative":                {target: ".", config: document},
+		"a relative target":            {target: ".", config: filepath.Join(dir, document)},
+		"a relative document":          {target: dir, config: document},
+		"a target named through a dot": {target: filepath.Join(dir, "sub", ".."), config: document},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Chdir(dir)
+			resolved, code := resolve("print-roots", printRootsUsage,
+				[]string{"--target=" + spelling.target, "--config=" + spelling.config}, &strings.Builder{})
+			if code != exitClean {
+				t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, exitClean)
+			}
+			options, err := exemptOptions(&resolved.config)
+			if err != nil {
+				t.Fatalf("Setup: exemptOptions(): %v", err)
+			}
+			envelope, _, err := reportOf(t.Context(), &resolved, &options, corpusAnswered())
+			if err != nil {
+				t.Fatalf("reportOf(%s) = error %v, want the report of the run", dir, err)
+			}
+
+			found := findingUnder(t, envelope.Findings, unmatchedRoot)
+			want := "sub/other.json"
+			if found.Position.Path != want || found.Position.Line != 1 || found.Position.Column != 1 {
+				t.Errorf("%s is sited at %s:%d:%d, want %s:1:1: the position is the declaring document's",
+					unmatchedRoot, found.Position.Path, found.Position.Line, found.Position.Column, want)
+			}
+		})
+	}
+}
+
+func TestReportOfSitesAConfiguredRootAtTheConventionalDocumentWhereNoDocumentOfTheTargetDeclaredIt(t *testing.T) {
+	// The central configuration is kept outside the repository, so no path relative
+	// to the target names it and the finding has no document of the run to carry. It
+	// carries the repository configuration's conventional path instead, which is the
+	// document a maintainer writes a configured root in.
+	dir := writeModule(t, map[string]string{
+		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
+		"app.go": "package main\n\nfunc main() { used() }\n\n" +
+			"// used is what the entry point calls.\nfunc used() {}\n",
+	})
+	central := filepath.Join(t.TempDir(), "central.json")
+	body := `{"target": {"kind": "application"}, "roots": {"patterns": ["go://example.com/app#Absent"]}}`
+	if err := os.WriteFile(central, []byte(body), 0o600); err != nil {
+		t.Fatalf("Setup: write %s: %v", central, err)
+	}
+
+	t.Chdir(dir)
+	resolved, code := resolve("print-roots", printRootsUsage,
+		[]string{"--target=" + dir, "--central=" + central}, &strings.Builder{})
+	if code != exitClean {
+		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, exitClean)
+	}
+	options, err := exemptOptions(&resolved.config)
+	if err != nil {
+		t.Fatalf("Setup: exemptOptions(): %v", err)
+	}
+	envelope, _, err := reportOf(t.Context(), &resolved, &options, corpusAnswered())
+	if err != nil {
+		t.Fatalf("reportOf(%s) = error %v, want the report of the run", dir, err)
+	}
+
+	found := findingUnder(t, envelope.Findings, unmatchedRoot)
+	if found.Position.Path != repositoryDocument || found.Position.Line != 1 || found.Position.Column != 1 {
+		t.Errorf("%s is sited at %s:%d:%d, want %s:1:1: no document of the target declared the root",
+			unmatchedRoot, found.Position.Path, found.Position.Line, found.Position.Column, repositoryDocument)
 	}
 }
 

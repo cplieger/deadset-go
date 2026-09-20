@@ -1,18 +1,7 @@
 {
-  "corpus_version": "1.3.0",
+  "corpus_version": "1.5.0",
   "product": {
     "name": "deadset-go"
   },
-  "gaps": [
-    {
-      "fixture": "narrowing-under-a-closed-world",
-      "capability": "DS1101",
-      "reason": "A suppression record marks the declaration it binds live, which withholds the finding a liveness relation would have produced for it, and this kind reports a declaration the analysis already holds live, so a record naming the code withholds nothing and is reported as a stale suppression instead. Narrow the declaration the finding names, or set the severity of the code to allow."
-    },
-    {
-      "fixture": "narrowing-under-a-closed-world",
-      "capability": "DS1102",
-      "reason": "A suppression record marks the declaration it binds live, which withholds the finding a liveness relation would have produced for it, and this kind reports a declaration the analysis already holds live, so a record naming the code withholds nothing and is reported as a stale suppression instead. Narrow the declaration the finding names, or set the severity of the code to allow."
-    }
-  ]
+  "gaps": []
 }

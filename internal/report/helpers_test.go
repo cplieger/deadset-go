@@ -211,7 +211,6 @@ func fullInput() BuildInput {
 			Findings: []kinds.Finding{
 				dependency, neverBuilt, writeOnly, interfaceFinding, deletable, narrowing, stale,
 			},
-			OmittedBelowMinConfidence: 1,
 		},
 		EdgeEvaluations: []EdgeEvaluation{{
 			Edge:    "wire/plan",

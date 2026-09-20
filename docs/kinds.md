@@ -4,7 +4,7 @@ deadset-go reports 29 of the 31 issue kinds the deadset contract declares. This 
 per code, what this analyzer reports under it and what it treats as a use, so a reader can tell
 why a symbol was reported and why a symbol was not. The vocabulary itself, the code space and
 the fields a finding carries are stated once in the contract's
-[issue kinds page](https://github.com/cplieger/deadset-spec/blob/v1.14.0/docs/kinds.md), which
+[issue kinds page](https://github.com/cplieger/deadset-spec/blob/v2.1.0/docs/kinds.md), which
 this page does not restate.
 
 Every kind is enabled by default and every kind declares the confidence ceiling `certain`, so a
@@ -303,9 +303,10 @@ rules are separate checks over one record.
 ### DS1703 stale-suppression
 
 Every suppression that matched no current finding, at either mechanism and in the baseline
-alike. A record is also stale when the symbol it bound is one the analysis would not have
-reported without the mark, because a mark in effect for nothing is a claim nobody checks. A
-record naming a retired code is stale whatever it bound, since nothing can match it.
+alike. A record is stale when it withheld nothing: it bound no declaration, or it bound one and
+the finding its code names was never held back, because a record in effect for nothing is a claim
+nobody checks. A record naming a retired code is stale whatever it bound, since nothing can match
+it.
 
 A record bound to a symbol whose code the configuration silences is dormant instead: neither in
 effect nor stale, and reported by nothing. Both ways of silencing count, the severity set to

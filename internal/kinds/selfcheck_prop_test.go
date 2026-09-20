@@ -24,20 +24,75 @@ const (
 	drawnFilePath   = "app.go"
 )
 
+// The codes a drawn finding carries, in the two classes a suppression record is held
+// by. A kind whose subject the analysis judged DEAD never produces its finding at all
+// under a record, because the mark made the subject live before the sweep ran. A kind
+// whose subject the analysis holds LIVE produces its finding under a record like any
+// other, and the pass is what withholds it, so a document drawing from this class
+// alone is one the sweep's answer says nothing about.
+var (
+	deadSubjectCodes = []string{
+		unusedExportedCode, unusedUnexportedCode, unusedMemberCode, unusedInterfaceCode,
+	}
+	liveSubjectCodes = []string{
+		unnecessaryExportCode, writeOnlyCode, unusedParameterCode,
+	}
+)
+
+// The column a drawn part is written at, which is inside the declaration's own line
+// and is what gives a finding about a part an identity of its own.
+const drawnPartColumn = 20
+
 // drawnFinding is one finding a drawn document records: the code it carries and the
 // declaration it is about.
 type drawnFinding struct {
 	code   string
 	symbol string
 	id     graph.SymbolID
+	line   int
+}
+
+// live reports whether the analysis holds this finding's subject live, which decides
+// where the record naming its code is held: the sweep's mark for a dead subject, the
+// pass's own withholding for a live one.
+func (d drawnFinding) live() bool { return slices.Contains(liveSubjectCodes, d.code) }
+
+// part reports whether this finding is about a part of its declaration rather than
+// about the declaration, which is the subject a record reaches through the
+// declaration its own reference names.
+func (d drawnFinding) part() bool { return d.code == unusedParameterCode }
+
+// finding is this drawn finding as an emitter of its own kind returns it, which is
+// what the pass withholds under the record naming it.
+func (d drawnFinding) finding() Finding {
+	at := Position{Path: drawnFilePath, Line: d.line, Column: 1, EndLine: d.line}
+	subject := Subject{Ref: d.symbol, Name: "Drawn", SizeLines: 1}
+	if d.part() {
+		at.Column = drawnPartColumn
+		subject.Kind = parameterSubject
+		return findingAt(d.code, subject, at, "drawn part of a declaration the analysis keeps")
+	}
+	return Finding{
+		Code:     d.code,
+		Position: at,
+		Symbol:   subject,
+		Live:     d.live(),
+		Message:  "drawn subject of a document written by the property",
+		id:       d.id,
+	}
 }
 
 // drawnFindings draws a set of findings about distinct declarations, one per
 // declaration, which is what a suppression document is written from.
+//
+// Both classes are drawn every iteration, so no iteration measures the mark alone:
+// a document holding only dead subjects is one the sweep's Suppressed answer already
+// accounts for, and the class the pass has to withhold would go unexercised.
 func drawnFindings(t *rapid.T) []drawnFinding {
-	codes := rapid.SliceOfN(rapid.SampledFrom([]string{
-		unusedExportedCode, unusedUnexportedCode, unusedMemberCode, unusedInterfaceCode, writeOnlyCode,
-	}), 1, 8).Draw(t, "codes")
+	codes := slices.Concat(
+		rapid.SliceOfN(rapid.SampledFrom(deadSubjectCodes), 1, 4).Draw(t, "dead subjects"),
+		rapid.SliceOfN(rapid.SampledFrom(liveSubjectCodes), 1, 4).Draw(t, "live subjects"),
+	)
 
 	found := make([]drawnFinding, 0, len(codes))
 	for i, code := range codes {
@@ -46,9 +101,29 @@ func drawnFindings(t *rapid.T) []drawnFinding {
 			code:   code,
 			symbol: "go://" + drawnModulePath + "#" + name,
 			id:     graph.SymbolID(drawnFilePath + ":" + strconv.Itoa(i+1) + ":1"),
+			line:   i + 1,
 		})
 	}
 	return found
+}
+
+// drawnEmitters is one emitter per drawn code, each returning the drawn findings of
+// that code, beside the stale-suppression kind that reads what the pass withheld.
+//
+// The kinds are stubbed because the property is about the documents and the
+// withholding rather than about any kind's rule: a drawn finding stands for whatever
+// its kind would have produced, which is what lets one document draw across the two
+// classes at once.
+func drawnEmitters(found []drawnFinding) map[string]Emitter {
+	byCode := make(map[string][]Finding, len(found))
+	for _, one := range found {
+		byCode[one.code] = append(byCode[one.code], one.finding())
+	}
+	table := map[string]Emitter{staleSuppressionCode: StaleSuppressions}
+	for code, produced := range byCode {
+		table[code] = func(*Input) ([]Finding, error) { return slices.Clone(produced), nil }
+	}
+	return table
 }
 
 // inventoryOf is the inventory a drawn finding set is about, which is what a
@@ -60,22 +135,23 @@ func inventoryOf(found []drawnFinding) []graph.Symbol {
 			ID:       found[i].id,
 			Ref:      found[i].symbol,
 			Kind:     graph.KindFunc,
-			Pos:      token.Position{Filename: drawnFilePath, Line: i + 1, Column: 1},
+			Pos:      token.Position{Filename: drawnFilePath, Line: found[i].line, Column: 1},
 			Exported: true,
 		})
 	}
 	return symbols
 }
 
-// inputOfRecords is the input a self-check pass reads over hand-built records: the
-// records themselves, and the sweep answer that every record bound a declaration the
-// run would otherwise have reported.
-func inputOfRecords(records []suppress.Record, suppressed []graph.SymbolID) *Input {
+// inputOfRecords is the input a findings pass reads over hand-built records: the
+// inventory the records bind against, the records themselves, and the sweep answer
+// naming the declarations a mark held back, which is the dead-subject half of the
+// drawn set and nothing else.
+func inputOfRecords(records []suppress.Record, symbols []graph.Symbol, suppressed []graph.SymbolID) *Input {
 	resolved := config.Default()
 	resolved.Target.Kind = config.Application
 	return &Input{
 		Config: &resolved,
-		Merged: &graph.Merged{},
+		Merged: &graph.Merged{Symbols: symbols},
 		Sweep:  &graph.Result{Suppressed: suppressed},
 		Marks:  records,
 	}
@@ -91,6 +167,12 @@ func inputOfRecords(records []suppress.Record, suppressed []graph.SymbolID) *Inp
 // mechanism has no document of its own, its records being the source's directives,
 // so its records are built directly.
 //
+// The findings go through the whole pass rather than through the self-check kind
+// alone, because a record for a kind whose subject the analysis holds live is in
+// effect only where the pass withheld the finding, and the drawn set holds such a
+// finding every iteration. What the sweep answers about a mark is the other half and
+// is drawn beside it.
+//
 // The half of the property about what a mark seeds, that a symbol reachable only
 // through a suppressed one is unreported and every other finding stays reported, is
 // the sweep's answer rather than this pass's, and the fixture tests of this file's
@@ -102,7 +184,9 @@ func TestASuppressionDocumentRoundTrips(t *testing.T) {
 		symbols := inventoryOf(found)
 		suppressed := make([]graph.SymbolID, 0, len(found))
 		for i := range found {
-			suppressed = append(suppressed, found[i].id)
+			if !found[i].live() {
+				suppressed = append(suppressed, found[i].id)
+			}
 		}
 
 		for _, mechanism := range []suppress.Mechanism{
@@ -117,14 +201,15 @@ func TestASuppressionDocumentRoundTrips(t *testing.T) {
 					mechanism, len(found), len(records))
 			}
 
-			in := inputOfRecords(records, suppressed)
-			stale, err := StaleSuppressions(in)
+			in := inputOfRecords(records, symbols, suppressed)
+			result, err := Compute(in, drawnEmitters(found))
 			if err != nil {
-				t.Fatalf("StaleSuppressions() over the %s document = _, %v, want no stale record", mechanism, err)
+				t.Fatalf("Compute() over the %s document = _, %v, want the findings the document leaves",
+					mechanism, err)
 			}
-			if len(stale) != 0 {
-				t.Errorf("StaleSuppressions() over the %s document of %d findings = %v, want none",
-					mechanism, len(found), summary(stale))
+			if len(result.Findings) != 0 {
+				t.Errorf("Compute() over the %s document of %d findings reports %v, want none: the document names every one of them",
+					mechanism, len(found), summary(result.Findings))
 			}
 			inEffect, reasons := Totals(in)
 			if inEffect != len(found) || reasons != len(found) {
@@ -243,7 +328,7 @@ func TestAnythingTheConfigurationNamesThatMatchesNothingIsReported(t *testing.T)
 		}
 
 		// Nothing bound, so nothing was suppressed and nothing is enumerated.
-		in := inputOfRecords(records, nil)
+		in := inputOfRecords(records, nil, nil)
 		in.Unmatched = make([]graph.Unmatched, 0, len(roots))
 		for _, root := range roots {
 			in.Unmatched = append(in.Unmatched, graph.Unmatched{Source: root})

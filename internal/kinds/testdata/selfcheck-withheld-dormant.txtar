@@ -1,0 +1,18 @@
+One library package whose published surface is a closed world, carrying a directive
+over a declaration the narrowing kind reports. The class of an exported declaration of
+a library the run loaded no consumer of is possible, so a run that raises the minimum
+confidence above it withholds the finding the configuration already withholds, which
+is what makes the record dormant rather than in effect.
+
+-- go.mod --
+module example.com/lib
+
+go 1.27.1
+-- lib.go --
+package lib
+
+//deadset:ignore DS1101 -- exported for a reader of this package alone
+func Narrowed() int { return 3 }
+
+// Entry is the published surface, and its body holds the only reference to Narrowed.
+func Entry() int { return Narrowed() }

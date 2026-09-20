@@ -13,6 +13,7 @@ import (
 	"github.com/cplieger/deadset-go/internal/graph"
 	"github.com/cplieger/deadset-go/internal/kinds"
 	"github.com/cplieger/deadset-go/internal/load"
+	"github.com/cplieger/deadset-go/internal/suppress"
 )
 
 // goKindsWithoutEmitter are the live Go kinds the emitters table holds no entry
@@ -135,10 +136,6 @@ func TestFindingsOfReportsEveryDeadDeclarationOfAModuleOnceAndInTheCanonicalOrde
 	}
 	if got := reported(set.result.Findings); !slices.Equal(got, want) {
 		t.Errorf("findingsOf() reported\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
-	}
-	if set.result.OmittedBelowMinConfidence != 0 {
-		t.Errorf("findingsOf() omitted %d findings below the minimum confidence, want 0: the default configuration sets none",
-			set.result.OmittedBelowMinConfidence)
 	}
 	if len(set.loaded.unmatched) != 0 {
 		t.Errorf("findingsOf() reported %d configured strings as naming nothing, want 0: the fixture configures no root pattern",
@@ -574,5 +571,67 @@ func TestAnalysisOfComputesItsExemptionsUnderTheModeItSweepsIn(t *testing.T) {
 	}
 	if len(reported.RetainedBy) != 0 {
 		t.Errorf("the finding about %s names %v as what retained it, want nothing", subject, reported.RetainedBy)
+	}
+}
+
+func TestTheSuppressionRecordsAreReadInTheOrderTheGrammarResolvesThem(t *testing.T) {
+	t.Parallel()
+
+	// The records the run reads decide which of several adjudications of one finding
+	// is in effect, so the order they are read in is the grammar's: every inline
+	// directive by position, then the ignore file in document order, then the
+	// baseline. The fixture writes each mechanism twice, with the directive of the
+	// last file below every entry of the ignore document in any file order.
+	dir := writeModule(t, map[string]string{
+		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
+		"app.go": "package main\n\nfunc main() { used() }\n\n" +
+			"// used is what the entry point calls.\nfunc used() {}\n\n" +
+			"//deadset:ignore DS1002 -- the first directive by position\nfunc first() {}\n",
+		"zz.go": "package main\n\n//deadset:ignore DS1002 -- the last directive by position\nfunc last() {}\n",
+		suppress.IgnoreFileName: `{
+  "description": "Two entries in document order.",
+  "ignore": [
+    { "code": "DS1002", "symbol": "go://example.com/app#first", "path": "app.go", "reason": "the first entry" },
+    { "code": "DS1002", "symbol": "go://example.com/app#last", "path": "zz.go", "reason": "the second entry" }
+  ]
+}
+`,
+		suppress.BaselineFileName: `{
+  "description": "One recorded row.",
+  "baseline": [
+    { "code": "DS1002", "symbol": "go://example.com/app#first", "path": "app.go", "reason": "recorded by deadset-go 1.15.0" }
+  ]
+}
+`,
+		repositoryDocument: `{"target": {"kind": "application"}}`,
+	})
+
+	resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
+	if code != exitClean {
+		t.Fatalf("Setup: resolve the configuration = %d, want %d", code, exitClean)
+	}
+	options, err := exemptOptions(&resolved.config)
+	if err != nil {
+		t.Fatalf("Setup: exemptOptions(): %v", err)
+	}
+	analyzed, err := analysisOf(t.Context(), &resolved, &options, modeOf(&resolved.config, modeProduction))
+	if err != nil {
+		t.Fatalf("Setup: analysisOf(): %v", err)
+	}
+
+	read := make([]string, 0, len(analyzed.marks))
+	for i := range analyzed.marks {
+		mark := &analyzed.marks[i]
+		read = append(read, fmt.Sprintf("%s %s:%d", mark.Mechanism, mark.Site.Filename, mark.Site.Line))
+	}
+	want := []string{
+		"inline app.go:8",
+		"inline zz.go:3",
+		"ignore " + suppress.IgnoreFileName + ":4",
+		"ignore " + suppress.IgnoreFileName + ":5",
+		"baseline " + suppress.BaselineFileName + ":4",
+	}
+	if !slices.Equal(read, want) {
+		t.Errorf("the run read the records as %v, want %v", read, want)
 	}
 }

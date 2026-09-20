@@ -19,6 +19,12 @@ const (
 	unusedSatisfactionAssertionCode = "DS1204"
 )
 
+// satisfactionAssertionSubject is what the subject vocabulary calls a compile-time
+// assertion that a type satisfies an interface. The language spells such an assertion
+// as a variable, and the vocabulary carries a value of its own for it, so a finding
+// about one names the subject a maintainer deletes rather than the spelling it took.
+const satisfactionAssertionSubject = "satisfaction-assertion"
+
 // What each interface kind says, in the reader's words. The unused-interface kind
 // says two things, because the relation that found the subject decides which is
 // true: a candidate found by reference counting is named as a type by nothing at
@@ -126,10 +132,22 @@ func UncalledInterfaceMethod(in *Input) ([]Finding, error) {
 // interface of the target and whose value is of a concrete type, when nothing other
 // than such an assertion names that interface as a type.
 //
-// The assertion is the subject, so the methods it retains stay retained: the
-// exemption that holds them names the assertion as its site, and this finding names
-// the declaration a maintainer deletes. Two assertions of one interface are two
-// findings, because neither is the use that would make the interface worth keeping.
+// The assertion is the subject, under the vocabulary's own value for one rather than
+// under the variable the language spells it as, so the methods it retains stay
+// retained: the exemption that holds them names the assertion as its site, and this
+// finding names the declaration a maintainer deletes. Two assertions of one interface
+// are two findings, because neither is the use that would make the interface worth
+// keeping.
+//
+// The subject is named by the interface the assertion asserts, at the assertion's
+// own position. A blank declaration has no reference of its own: every one of them
+// is named the blank identifier and they all render as the reference of the package
+// that holds them, so a reference minted at one names the package as well and an
+// adjudication written against it would name two declarations. The interface has a
+// reference, and it is what the assertion is about, so the finding carries the
+// interface's reference and the interface's display name while its position names
+// the declaration to delete. Two assertions of one interface in one file are told
+// apart by their positions.
 //
 // An assertion a test file writes is not reported, on the rule every kind applies
 // to a declaration whose liveness a production sweep cannot judge.
@@ -146,8 +164,8 @@ func UnusedSatisfactionAssertion(in *Input) ([]Finding, error) {
 
 	var found []Finding
 	for _, asserted := range facts.assertions {
-		symbol := in.symbol(asserted.Var)
-		if symbol == nil || testFile(symbol) || facts.usedAsType[asserted.Interface] {
+		symbol, iface := in.symbol(asserted.Var), in.symbol(asserted.Interface)
+		if symbol == nil || iface == nil || testFile(symbol) || facts.usedAsType[asserted.Interface] {
 			continue
 		}
 		one, held := in.finding(asserted.Var, unusedSatisfactionAssertionCode,
@@ -155,6 +173,8 @@ func UnusedSatisfactionAssertion(in *Input) ([]Finding, error) {
 		if !held {
 			continue
 		}
+		one.Symbol.Kind = satisfactionAssertionSubject
+		one.Symbol.Ref, one.Symbol.Name = iface.Ref, iface.Name
 		one.Relation = graph.ReferenceCounting
 		one.Details.Implementations = facts.implementationsOf(asserted.Interface)
 		found = append(found, one)
