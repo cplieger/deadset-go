@@ -52,6 +52,10 @@ const unmatchedRoot = "DS1704"
 // repositoryDocument is the repository configuration's name at the target root.
 const repositoryDocument = "deadset.json"
 
+// rootsPatternsSetting is the dotted path contract/config.schema.json gives the
+// configured roots, which is the key the resolution records their origin under.
+const rootsPatternsSetting = "roots.patterns"
+
 // maxDocumentBytes bounds one configuration document. A configuration is one
 // instance of a closed key list, so the bound is far above any real document.
 const maxDocumentBytes = 1 << 20
@@ -1104,23 +1108,64 @@ func inputOf(ctx context.Context, resolved *resolution, analyzed *analysis, gene
 		return nil, err
 	}
 	return &kinds.Input{
-		Config:    &resolved.config,
-		Merged:    analyzed.stages.merged,
-		Sweep:     &analyzed.swept,
-		Refs:      analyzed.stages.refs,
-		Exempt:    analyzed.exemptions,
-		Generated: func(path string) bool { return generated[path] },
-		Marks:     analyzed.marks,
-		Refusals:  analyzed.refusals,
-		Deps:      &module,
-		Derived:   analyzed.stages.derived,
-		Unmatched: analyzed.stages.unmatched,
-		Edges:     declared,
-		Matrix:    analyzed.stages.identifiers,
-		Per:       analyzed.per,
-		Consumers: consumersOf(&resolved.config, analyzed.stages.per),
-		Mode:      analyzed.mode,
+		Config:        &resolved.config,
+		Merged:        analyzed.stages.merged,
+		Sweep:         &analyzed.swept,
+		Refs:          analyzed.stages.refs,
+		Exempt:        analyzed.exemptions,
+		Generated:     func(path string) bool { return generated[path] },
+		Marks:         analyzed.marks,
+		Refusals:      analyzed.refusals,
+		Deps:          &module,
+		Derived:       analyzed.stages.derived,
+		Unmatched:     analyzed.stages.unmatched,
+		RootsDocument: rootsDocument(resolved),
+		Edges:         declared,
+		Matrix:        analyzed.stages.identifiers,
+		Per:           analyzed.per,
+		Consumers:     consumersOf(&resolved.config, analyzed.stages.per),
+		Mode:          analyzed.mode,
 	}, nil
+}
+
+// rootsDocument is the document that supplied the configured roots, as a path
+// relative to the target root, and the empty string where no document inside the
+// target did.
+//
+// The resolution records where every setting came from, so the document is the label
+// of that setting's origin and not the conventional path: a run reading its
+// configuration from a document the invocation named must report an unmatched root in
+// the document that declares it, or a maintainer is sent to a file that does not hold
+// the string. A label naming no path inside the target, the central configuration kept
+// outside the repository for instance, is no answer at all: a finding carries a path
+// relative to the target root and has no spelling for a file above it.
+//
+// The target root and the label are each resolved against the working directory
+// before the one is taken relative to the other, because the invocation spells the
+// two independently and a relative target beside an absolute document is the ordinary
+// case: a script names the target it is standing in and the document by its full path.
+// Comparing the spellings rather than the paths answers nothing for that invocation
+// and answers it silently, since no path relative to the target exists for the
+// function to refuse.
+//
+// The line is not read here and cannot be: the resolution decodes a document with the
+// standard library's decoder, which reports no position, so a finding about a
+// configured root carries the document's fixed position.
+func rootsDocument(resolved *resolution) string {
+	label := resolved.provenance[rootsPatternsSetting].Label
+	if label == "" {
+		return ""
+	}
+	root, rootErr := filepath.Abs(resolved.target)
+	document, documentErr := filepath.Abs(label)
+	if rootErr != nil || documentErr != nil {
+		return ""
+	}
+	relative, err := filepath.Rel(root, document)
+	if err != nil || !filepath.IsLocal(relative) {
+		return ""
+	}
+	return filepath.ToSlash(relative)
 }
 
 // corpusRecord is what a run of the Conformance Corpus recorded about this

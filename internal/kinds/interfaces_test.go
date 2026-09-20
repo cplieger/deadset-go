@@ -51,7 +51,7 @@ func TestInterfaceKinds_reportEachShapeOnceUnderItsOwnCode(t *testing.T) {
 		},
 		"a satisfaction assertion that is the only thing naming its interface": {
 			archive: "interfaces-assertion.txtar",
-			want:    []string{"DS1203 Encoder.Encode", "DS1204 _"},
+			want:    []string{"DS1203 Encoder.Encode", "DS1204 Encoder"},
 		},
 	}
 	for description, tc := range cases {
@@ -136,10 +136,21 @@ func TestUnusedSatisfactionAssertion_reportsTheAssertionWhileTheConcreteMethodSt
 
 	result := computed(t, in, interfaceEmitters())
 
-	found := findingOf(t, result.Findings, unusedSatisfactionAssertionCode, "_")
+	found := findingOf(t, result.Findings, unusedSatisfactionAssertionCode, "Encoder")
 	if found.Kind != "unused-satisfaction-assertion" || found.Symbol.Kind != satisfactionAssertionSubject {
 		t.Errorf("UnusedSatisfactionAssertion(interfaces-assertion.txtar) kind, subject kind = %q, %q, want %q, %q",
 			found.Kind, found.Symbol.Kind, "unused-satisfaction-assertion", satisfactionAssertionSubject)
+	}
+	// The subject is named by the interface, at the assertion's own position: a blank
+	// declaration renders as the reference of the package that holds it, which names
+	// the package too, and the interface is what the assertion asserts.
+	if found.Symbol.Ref != "go://example.com/app#Encoder" {
+		t.Errorf("UnusedSatisfactionAssertion(interfaces-assertion.txtar) names %q, want the interface's reference go://example.com/app#Encoder",
+			found.Symbol.Ref)
+	}
+	if got, want := found.Position, (Position{Path: "main.go", Line: 12, Column: 5, EndLine: 12}); got != want {
+		t.Errorf("UnusedSatisfactionAssertion(interfaces-assertion.txtar) reports at %+v, want %+v: the position is the assertion's",
+			got, want)
 	}
 	if found.Message != unusedSatisfactionAssertionMessage {
 		t.Errorf("UnusedSatisfactionAssertion(interfaces-assertion.txtar) message = %q, want %q",

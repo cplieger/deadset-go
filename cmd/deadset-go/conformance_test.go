@@ -106,12 +106,13 @@ type corpusDetails struct {
 // target kind and consumer set the runner configures, and the exhaustive expectation
 // list.
 type corpusFixtureFile struct {
-	Name        string              `json:"name"`
-	Languages   []string            `json:"languages"`
-	TargetKind  string              `json:"target_kind"`
-	Consumers   []string            `json:"consumers"`
-	ClosedWorld []string            `json:"closed_world"`
-	Expect      []corpusExpectation `json:"expect"`
+	ConfiguredRoots map[string]string   `json:"configured_roots"`
+	Name            string              `json:"name"`
+	Languages       []string            `json:"languages"`
+	TargetKind      string              `json:"target_kind"`
+	Consumers       []string            `json:"consumers"`
+	ClosedWorld     []string            `json:"closed_world"`
+	Expect          []corpusExpectation `json:"expect"`
 }
 
 // corpusSubjectShapes is the corpus's own reading of the shape of every subject a
@@ -254,6 +255,7 @@ type site struct {
 // exemption classes the retained-symbol listing names at each position.
 type answered struct {
 	findings []kinds.Finding
+	stale    []kinds.Finding
 	retained map[site][]string
 }
 
@@ -392,11 +394,11 @@ func answerFixture(t *testing.T, fixtureName string, declared []conformanceGap,
 	row := fixtureAnswer{
 		Fixture:      fixtureName,
 		Expectations: make([]expectationAnswer, len(fixture.Expect)),
-		Unexpected:   unexpectedFindings(first.findings, sites),
+		Unexpected:   unexpectedFindings(&first, sites, fixture.ConfiguredRoots),
 	}
 	for i := range fixture.Expect {
 		held := &fixture.Expect[i]
-		actual, message := answerOf(held, sites[held.Symbol], &first)
+		actual, message := answerOf(held, sites[held.Symbol], &first, fixture.ConfiguredRoots[held.Symbol])
 		row.Expectations[i] = expectationAnswer{Symbol: held.Symbol, Actual: actual, Message: message}
 	}
 
@@ -514,7 +516,21 @@ func failedFixture(t *testing.T, fixtureName, message string) fixtureAnswer {
 
 // answerOf is what the analyzer reported at one expectation's resolved position, and
 // one line naming what differs from the expectation where anything does.
-func answerOf(expected *corpusExpectation, at site, held *answered) (reportedAnswer, string) {
+//
+// Two expectations are answered from somewhere other than the findings at a position.
+// A row naming a configured root is answered by the subject a finding names, because
+// every unmatched root of a run is positioned in the configuration document the run
+// read its roots from rather than in a file of the rendering, and root is the
+// configured entry that row names where it names one. A row naming the
+// stale-suppression code is answered from the records the report carries beside its
+// findings, because that is the array such a row is a record of.
+func answerOf(expected *corpusExpectation, at site, held *answered, root string) (reportedAnswer, string) {
+	if root != "" {
+		return answerRoot(expected, root, held)
+	}
+	if expected.Report == staleSuppression {
+		return answerStale(expected, at, held)
+	}
 	found := findingsAt(held.findings, at)
 	if expected.Report == reportNone {
 		if len(found) > 0 {
@@ -544,6 +560,67 @@ func answerOf(expected *corpusExpectation, at site, held *answered) (reportedAns
 		}
 		return answerFrom(expected, &found[0]),
 			fmt.Sprintf("want exactly one finding at %s:%d under %s, got %v", at.File, at.Line, expected.Report, codes)
+	}
+}
+
+// answerRoot is what the analyzer reported about one configured root: the finding
+// under the unmatched-root code whose subject is the entry the runner configured,
+// wherever the analyzer positioned it.
+//
+// The position answers nothing here. A configured root is written in a configuration
+// document as a member of an array whose entries carry no line, so every unmatched root
+// of a run renders at one position, and the entry the finding names is the only thing
+// that tells two of them apart. A row whose report is none states that the entry
+// matched a symbol, so the answer is that no finding names it.
+func answerRoot(expected *corpusExpectation, entry string, held *answered) (reportedAnswer, string) {
+	var found []kinds.Finding
+	for i := range held.findings {
+		if held.findings[i].Code == unmatchedRoot && held.findings[i].Symbol.Ref == entry {
+			found = append(found, held.findings[i])
+		}
+	}
+
+	if expected.Report == reportNone {
+		if len(found) > 0 {
+			return answerFrom(expected, &found[0]),
+				fmt.Sprintf("want no %s naming %s, got one: the entry matches a symbol", unmatchedRoot, entry)
+		}
+		return reportedAnswer{Report: reportNone}, ""
+	}
+	switch len(found) {
+	case 0:
+		return reportedAnswer{Report: reportNone},
+			fmt.Sprintf("want %s naming %s, got no finding under it", expected.Report, entry)
+	case 1:
+		actual := answerFrom(expected, &found[0])
+		return actual, differences(expected, &actual)
+	default:
+		return answerFrom(expected, &found[0]),
+			fmt.Sprintf("want exactly one %s naming %s, got %d", unmatchedRoot, entry, len(found))
+	}
+}
+
+// answerStale is the record the report carries at one expectation's resolved position
+// in the array it holds its stale suppressions in.
+//
+// The record's own position is the suppression's site, so the row resolves through the
+// manifest like any other; what differs is the array, because a stale suppression is a
+// record of the report rather than one of its findings. The row's confidence and
+// subject kind are answered from the record this analyzer produced rather than from the
+// fixed values a reader renders it with, so a record that claimed anything else would
+// fail the corpus rather than pass it unread.
+func answerStale(expected *corpusExpectation, at site, held *answered) (reportedAnswer, string) {
+	records := findingsAt(held.stale, at)
+	switch len(records) {
+	case 0:
+		return reportedAnswer{Report: reportNone},
+			fmt.Sprintf("want a %s record at %s:%d, got none", staleSuppression, at.File, at.Line)
+	case 1:
+		actual := answerFrom(expected, &records[0])
+		return actual, differences(expected, &actual)
+	default:
+		return answerFrom(expected, &records[0]),
+			fmt.Sprintf("want exactly one %s record at %s:%d, got %d", staleSuppression, at.File, at.Line, len(records))
 	}
 }
 
@@ -677,27 +754,53 @@ func findingsAt(findings []kinds.Finding, at site) []kinds.Finding {
 	return held
 }
 
-// unexpectedFindings is every finding at a position no expectation of the fixture
-// resolves to, ordered by file, then line, then code. The expectation list is
+// unexpectedFindings is everything the analyzer reported that no expectation of the
+// fixture accounts for, ordered by file, then line, then code. The expectation list is
 // exhaustive for the target, so each one fails the fixture.
-func unexpectedFindings(findings []kinds.Finding, sites map[string]site) []unexpectedFinding {
+//
+// The three arms the fixture is answered from are as exhaustive as one another. A
+// finding is accounted for by an expectation resolving to its position; a record of the
+// report's stale-suppression array counts as a finding at its own position, which is
+// the suppression's site; and a finding whose subject is a configured root counts by
+// the entry its subject names, because every such finding of a run shares one position.
+func unexpectedFindings(held *answered, sites map[string]site,
+	roots map[string]string,
+) []unexpectedFinding {
 	expected := make(map[site]bool, len(sites))
 	for _, at := range sites {
 		expected[at] = true
 	}
-	held := make([]unexpectedFinding, 0, len(findings))
-	for i := range findings {
-		at := site{File: findings[i].Position.Path, Line: findings[i].Position.Line}
+	configured := make(map[string]bool, len(roots))
+	for _, entry := range roots {
+		configured[entry] = true
+	}
+
+	reported := slices.Concat(held.findings, held.stale)
+	unaccounted := make([]unexpectedFinding, 0, len(reported))
+	for i := range reported {
+		found := &reported[i]
+		if found.Code == unmatchedRoot {
+			if configured[found.Symbol.Ref] {
+				continue
+			}
+			unaccounted = append(unaccounted, unexpectedFinding{
+				File:   path.Join(targetSection, found.Position.Path),
+				Line:   found.Position.Line,
+				Report: found.Code,
+			})
+			continue
+		}
+		at := site{File: found.Position.Path, Line: found.Position.Line}
 		if expected[at] {
 			continue
 		}
-		held = append(held, unexpectedFinding{
+		unaccounted = append(unaccounted, unexpectedFinding{
 			File:   path.Join(targetSection, at.File),
 			Line:   at.Line,
-			Report: findings[i].Code,
+			Report: found.Code,
 		})
 	}
-	slices.SortFunc(held, func(a, b unexpectedFinding) int {
+	slices.SortFunc(unaccounted, func(a, b unexpectedFinding) int {
 		if c := strings.Compare(a.File, b.File); c != 0 {
 			return c
 		}
@@ -706,7 +809,7 @@ func unexpectedFindings(findings []kinds.Finding, sites map[string]site) []unexp
 		}
 		return strings.Compare(a.Report, b.Report)
 	})
-	return held
+	return unaccounted
 }
 
 // answerSuppression runs the second phase: every finding the first analysis reported
@@ -723,7 +826,9 @@ func unexpectedFindings(findings []kinds.Finding, sites map[string]site) []unexp
 // pinned corpus rather than listed here, so an amendment naming a further kind of
 // document row moves this phase without an edit. An expectation the phase skips
 // records no suppression answer, which is what the results document then says about
-// it.
+// it. An expectation naming a configured root is skipped before that table is read,
+// because it resolves to no position of the rendering at all and a record binds to a
+// declaration.
 //
 // The entries are added to the rendering's own ignore document where it carries one,
 // because a fixture about suppression writes its own records and its expectations are
@@ -738,7 +843,7 @@ func answerSuppression(ctx context.Context, run *corpusRun, fixture *corpusFixtu
 	covered := make(map[string]ignoreEntry, len(fixture.Expect))
 	for i := range fixture.Expect {
 		held := &fixture.Expect[i]
-		if held.Report == reportNone {
+		if _, configured := fixture.ConfiguredRoots[held.Symbol]; held.Report == reportNone || configured {
 			continue
 		}
 		found := findingsAt(first.findings, sites[held.Symbol])
@@ -787,7 +892,7 @@ func answerSuppression(ctx context.Context, run *corpusRun, fixture *corpusFixtu
 		}
 		rows[i].Suppression = &suppressionAnswer{
 			Suppressed: len(findingsUnder(second.findings, sites[rows[i].Symbol], entry.Code)) == 0,
-			Stale:      staleFor(second.findings, entry),
+			Stale:      staleFor(second.stale, entry),
 		}
 	}
 	return written, nil
@@ -823,11 +928,12 @@ func findingsUnder(findings []kinds.Finding, at site, code string) []kinds.Findi
 	return held
 }
 
-// staleFor reports whether the run reported a stale suppression for one entry.
-func staleFor(findings []kinds.Finding, entry ignoreEntry) bool {
-	for i := range findings {
-		found := &findings[i]
-		if found.Code != staleSuppression || found.Details.Entry == nil {
+// staleFor reports whether the run held a stale-suppression record for one entry,
+// read from the array the report carries those records in.
+func staleFor(records []kinds.Finding, entry ignoreEntry) bool {
+	for i := range records {
+		found := &records[i]
+		if found.Details.Entry == nil {
 			continue
 		}
 		if found.Details.Entry.Code == entry.Code && found.Details.Entry.Symbol == entry.Symbol {
@@ -873,6 +979,12 @@ func corpusRunOf(rendering, document string, fixture *corpusFixtureFile,
 		return corpusRun{}, fmt.Errorf("the expectation file names the target kind %q", fixture.TargetKind)
 	}
 
+	// The configured roots the fixture names, in the order of the logical names that
+	// name them, so two runs over one fixture configure one list.
+	for _, logical := range slices.Sorted(maps.Keys(fixture.ConfiguredRoots)) {
+		held.config.Roots.Patterns = append(held.config.Roots.Patterns, fixture.ConfiguredRoots[logical])
+	}
+
 	for _, fact := range fixture.ClosedWorld {
 		switch fact {
 		case worldConsumers:
@@ -910,7 +1022,15 @@ func declaredMatrix(identifiers []string) ([]config.Configuration, error) {
 	return declared, nil
 }
 
-// analyzeRendering analyzes one extracted rendering under the run the corpus states.
+// analyzeRendering analyzes one extracted rendering under the run the corpus states,
+// and holds what it answered in the two arrays a report carries.
+//
+// A stale suppression is answered by the findings pass under its own code and is a
+// record of the report's own array rather than one of its findings, which is the move
+// the report assembly makes; the corpus answers a row naming that code from that
+// array, so the run splits the pass the same way here. The rule is the code and
+// nothing else, which is why the split is one line rather than a second reading of the
+// assembly.
 func analyzeRendering(ctx context.Context, run *corpusRun) (answered, error) {
 	resolved := resolution{
 		target: filepath.Join(run.rendering, targetSection),
@@ -925,7 +1045,15 @@ func analyzeRendering(ctx context.Context, run *corpusRun) (answered, error) {
 	if err != nil {
 		return answered{}, err
 	}
-	return answered{findings: set.result.Findings, retained: retainedAt(&set)}, nil
+	held := answered{retained: retainedAt(&set)}
+	for _, found := range set.result.Findings {
+		if found.Code == staleSuppression {
+			held.stale = append(held.stale, found)
+			continue
+		}
+		held.findings = append(held.findings, found)
+	}
+	return held, nil
 }
 
 // retainedAt is the exemption classes the retained-symbol listing names at each
@@ -988,11 +1116,24 @@ func readFixture(fixtureName string) (corpusFixtureFile, corpusManifest, *txtar.
 // resolvedSites binds every logical name the expectation file uses to the position the
 // rendering declares it at, relative to the target root, which is what a finding's own
 // position is relative to.
+//
+// A name the expectation file's configured-roots member declares is resolved through
+// that member instead: it names a row of the configuration the runner writes rather
+// than a declaration of the target, so no manifest carries it and it has no position
+// to resolve to. A name both documents carry is a defect in the corpus, because the
+// two readings answer the expectation differently and nothing says which one holds.
 func resolvedSites(fixture *corpusFixtureFile, manifest *corpusManifest) (map[string]site, error) {
 	sites := make(map[string]site, len(fixture.Expect))
 	for i := range fixture.Expect {
 		logical := fixture.Expect[i].Symbol
 		held, known := manifest.Symbols[logical]
+		if _, configured := fixture.ConfiguredRoots[logical]; configured {
+			if known {
+				return nil, fmt.Errorf("%s is named by both the configured roots and the manifest, which is a defect in the corpus",
+					logical)
+			}
+			continue
+		}
 		if !known || held.File == "" || held.Line == 0 {
 			return nil, fmt.Errorf("the manifest carries no file and line for %s, which is a defect in the corpus", logical)
 		}

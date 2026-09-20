@@ -329,3 +329,34 @@ func TestExplainPrefersTheProductionPathOverAShorterTestPath(t *testing.T) {
 		t.Errorf("explain stdout =\n%s\nwant no hop from a test file: a production path reaches the declaration", got.stdout)
 	}
 }
+
+func TestExplainListsTheFindingsThatNameTheSymbolAndReportSomewhereElse(t *testing.T) {
+	// The interface is live, because the assertion names it as a type, and the run
+	// reports the assertion under the interface's reference at the assertion's own
+	// position. A maintainer who read that finding asks about that reference, so the
+	// answer names the finding rather than only the interface's liveness.
+	dir := writeModule(t, map[string]string{
+		"go.mod":   "module example.com/app\n\ngo 1.27.1\n",
+		"iface.go": "package main\n\n// encoder renders a payload.\ntype encoder interface {\n\tEncode() string\n}\n",
+		"assert.go": "package main\n\ntype payload struct{ body string }\n\n" +
+			"func (p payload) Encode() string { return p.body }\n\nvar _ encoder = payload{}\n",
+		"app.go":           "package main\n\nfunc main() {\n\tp := payload{body: \"b\"}\n\tprintln(p.body)\n}\n",
+		repositoryDocument: `{"target": {"kind": "application"}}`,
+	})
+	got := runExplain(t, dir, "go://example.com/app#encoder")
+
+	if want := contractExitCodes(t)["clean"]; got.code != want {
+		t.Fatalf("explain over the asserted interface = %d, want %d\nstderr: %s", got.code, want, got.stderr)
+	}
+	for _, want := range []string{
+		"symbol: go://example.com/app#encoder",
+		"declaration: interface encoder",
+		"position: iface.go:4:6",
+		"answer: live",
+		"also reported: DS1204 unused-satisfaction-assertion\tassert.go:7:5\tsatisfaction-assertion encoder",
+	} {
+		if !strings.Contains(got.stdout, want) {
+			t.Errorf("explain stdout =\n%s\nwant it to contain %q", got.stdout, want)
+		}
+	}
+}

@@ -1,0 +1,45 @@
+Two declarations nothing reaches, each adjudicated twice: once by an inline
+directive and once by an ignore entry naming the same code at the same declaration.
+One is written in the file the file order reads first and the other in the file it
+reads last, so the archive measures the reading order in both directions.
+
+-- go.mod --
+module example.com/selfcheck
+
+go 1.27.1
+-- app.go --
+package main
+
+func main() { println(reached()) }
+
+//deadset:ignore DS1002 -- in effect: nothing reaches early
+func early() string { return "e" }
+
+// reached is called from main.
+func reached() string { return "r" }
+-- zz.go --
+package main
+
+// held is called from nothing, and the directive below it is written after every
+// entry of the ignore document in any file order.
+
+//deadset:ignore DS1002 -- in effect: nothing reaches late
+func late() string { return "l" }
+-- deadset-ignore.json --
+{
+  "description": "One entry per declaration, each naming a code a directive above that declaration already names.",
+  "ignore": [
+    {
+      "code": "DS1002",
+      "symbol": "go://example.com/selfcheck#early",
+      "path": "app.go",
+      "reason": "the second record naming DS1002 at early"
+    },
+    {
+      "code": "DS1002",
+      "symbol": "go://example.com/selfcheck#late",
+      "path": "zz.go",
+      "reason": "the second record naming DS1002 at late"
+    }
+  ]
+}

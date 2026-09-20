@@ -28,10 +28,11 @@ const (
 	rootSubject        = "root"
 )
 
-// configurationDocument is the repository configuration, whose name and location
-// the Contract fixes. It is where a configured root is written, and a configured
-// root carries no line of its own, so a finding about one renders at this
-// document's fixed position.
+// configurationDocument is the repository configuration at its conventional name and
+// location, which the Contract fixes. It is the document a finding about a configured
+// root carries where the run read its roots from no document of the target: the
+// finding is about a document and has to name one, and this is the document a
+// maintainer writes a configured root in.
 const configurationDocument = "deadset.json"
 
 // documentPosition is the fixed position of a finding about a document rather than
@@ -166,6 +167,13 @@ func StaleSuppressions(in *Input) ([]Finding, error) {
 //
 // The sweep's answer is read under a code this analyzer reports, because a record
 // naming a retired code can match nothing whatever it bound.
+//
+// One finding is held back by one record, so the sweep's answer is read for the first
+// record of the reading order that bound the declaration under the code and no other:
+// the sweep answers per declaration and several records may bind one, and a record
+// that changes nothing when it is deleted is what this kind reports. The pass's own
+// answer needs no such test, because the pass withholds a finding once and records the
+// one record that did it.
 func (in *Input) inEffect(at int, suppressed map[graph.SymbolID]bool) bool {
 	if in.withheld[at] {
 		return true
@@ -174,8 +182,28 @@ func (in *Input) inEffect(at int, suppressed map[graph.SymbolID]bool) bool {
 	if mark.Bound == "" || !suppressed[mark.Bound] {
 		return false
 	}
-	_, live := catalog.Kind(mark.Code)
-	return live
+	if _, live := catalog.Kind(mark.Code); !live {
+		return false
+	}
+	return in.firstToBind(at)
+}
+
+// firstToBind reports whether no record before this one in the run's reading order
+// bound the same declaration under the same code.
+//
+// The order is the one Marks carries, which the composition root reads the documents
+// in: the inline directives by position, then the ignore file in document order, then
+// the baseline. It is a documented order rather than a file order, so two runs over
+// one tree answer the same way and a maintainer reading the rule knows which of two
+// records to delete.
+func (in *Input) firstToBind(at int) bool {
+	mark := &in.Marks[at]
+	for i := range in.Marks[:at] {
+		if earlier := &in.Marks[i]; earlier.Code == mark.Code && earlier.Bound == mark.Bound {
+			return false
+		}
+	}
+	return true
 }
 
 // staleInput is the sweep the staleness answer is read from, and an empty answer
@@ -267,21 +295,36 @@ func codesAt(records []*suppress.Record) []string {
 // The subject is the configured string as the configuration spells it, pattern and
 // all, because that is the string a maintainer corrects. A root set nobody checks
 // silently changes every result, so the kind is fixed on at deny.
+//
+// The finding is positioned in the document that declared the root, at that
+// document's fixed position: the roots are written as an array whose members carry no
+// line of their own, so every unmatched root of a run renders at the first position of
+// the document a maintainer opens to correct it, and the string each names is what
+// tells one from another.
 func UnmatchedRoots(in *Input) ([]Finding, error) {
 	if in == nil || in.Config == nil {
 		return nil, nil
 	}
+	at := token.Position{Filename: in.rootsDocument(), Line: documentPosition, Column: documentPosition}
 	found := make([]Finding, 0, len(in.Unmatched))
 	for _, unmatched := range in.Unmatched {
 		message := "configured root matches no symbol of the inventory"
 		if strings.ContainsAny(unmatched.Source, "*?") {
 			message = "configured root pattern matches no symbol of the inventory"
 		}
-		found = append(found, selfCheck(unmatchedRootCode, rootSubject, unmatched.Source,
-			token.Position{Filename: configurationDocument, Line: documentPosition, Column: documentPosition},
-			message))
+		found = append(found, selfCheck(unmatchedRootCode, rootSubject, unmatched.Source, at, message))
 	}
 	return found, nil
+}
+
+// rootsDocument is the target-relative path of the document that declared the
+// configured roots, and the repository configuration's conventional path where the
+// run names no document.
+func (in *Input) rootsDocument() string {
+	if in.RootsDocument == "" {
+		return configurationDocument
+	}
+	return in.RootsDocument
 }
 
 // Totals are the two suppression counts a report's envelope prints: how many

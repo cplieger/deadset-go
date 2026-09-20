@@ -645,3 +645,140 @@ func TestARecordIsDormantRatherThanInEffectWhereTheMinimumConfidenceWithholdsIts
 		})
 	}
 }
+
+func TestTheFirstRecordOfTheReadingOrderIsInEffectAndALaterOneIsStale(t *testing.T) {
+	in := suppressed(t, "selfcheck-two-mechanisms.txtar", applicationConfig())
+	if len(in.Marks) != 4 {
+		t.Fatalf("Setup: the fixture's documents read as %d records, want 4: two directives and two entries", len(in.Marks))
+	}
+
+	// The two declarations are adjudicated twice each, so nothing is reported about
+	// either, and the record in effect is the directive whatever the file the
+	// directive is written in: the order is the run's reading order, which reads every
+	// inline directive before the ignore document.
+	found := computed(t, in, packageEmitters()).Findings
+	want := []staleAt{
+		{path: suppress.IgnoreFileName, line: 4, mechanism: "ignore", message: "ignore entry for DS1002 matches no current finding"},
+		{path: suppress.IgnoreFileName, line: 10, mechanism: "ignore", message: "ignore entry for DS1002 matches no current finding"},
+	}
+	if got := staleFindings(t, in); !slices.Equal(got, want) {
+		t.Errorf("StaleSuppressions() = %+v, want %+v: the entry naming a code a directive already named is the later record",
+			got, want)
+	}
+	for i := range found {
+		if found[i].Code != staleSuppressionCode {
+			t.Errorf("the pass reports %s about %s, want the two stale entries alone: both declarations are adjudicated",
+				found[i].Code, found[i].Symbol.Name)
+		}
+	}
+
+	// Each stale finding carries the entry as the document writes it, so a reader is
+	// told which of the two records to delete.
+	entry := recordAt(t, found, suppress.IgnoreFileName, 10)
+	if entry.Details.Mechanism != "ignore" {
+		t.Errorf("the stale finding names the mechanism %q, want ignore", entry.Details.Mechanism)
+	}
+	if want := (&Entry{
+		Code:   "DS1002",
+		Symbol: "go://example.com/selfcheck#late",
+		Path:   "zz.go",
+		Reason: "the second record naming DS1002 at late",
+	}); entry.Details.Entry == nil || *entry.Details.Entry != *want {
+		t.Errorf("the stale finding carries %+v, want %+v", entry.Details.Entry, want)
+	}
+
+	// Two records bound each declaration and one of each pair is in effect, which is
+	// what the envelope counts; every directive and entry carries a reason.
+	if inEffect, reasons := Totals(in); inEffect != 2 || reasons != 4 {
+		t.Errorf("Totals() = %d in effect and %d reasons, want 2 and 4", inEffect, reasons)
+	}
+}
+
+func TestTheRecordInEffectIsTheFirstOfTheReadingOrderAndNotOfAnyFileOrder(t *testing.T) {
+	in := suppressed(t, "selfcheck-two-mechanisms.txtar", applicationConfig())
+
+	// The declaration in zz.go is the one no file order reads first: its directive is
+	// written in the last file of the target and on a line below every entry of the
+	// ignore document. The record in effect is that directive all the same, because a
+	// directive is read before the ignore file whatever either is written in.
+	inEffect := make([]string, 0, len(in.Marks))
+	suppressedIDs := make(map[graph.SymbolID]bool, len(in.Sweep.Suppressed))
+	for _, id := range in.Sweep.Suppressed {
+		suppressedIDs[id] = true
+	}
+	for i := range in.Marks {
+		if in.inEffect(i, suppressedIDs) {
+			inEffect = append(inEffect, in.Marks[i].Mechanism.String()+" "+in.Marks[i].Site.Filename)
+		}
+	}
+	if want := []string{"inline app.go", "inline zz.go"}; !slices.Equal(inEffect, want) {
+		t.Errorf("the records in effect are %v, want %v", inEffect, want)
+	}
+}
+
+func TestOneFindingIsWithheldByTheFirstRecordThatNamesItAndTheSecondIsStale(t *testing.T) {
+	in := suppressed(t, "selfcheck-withheld.txtar", applicationConfig())
+
+	// The adjudication a maintainer copied out of the report into the ignore file,
+	// beside the directive that was already there: the same code, the same
+	// declaration and the same file, read after every directive. The narrowing kind's
+	// finding is the one it names, which the pass withholds rather than the sweep.
+	directive := recordNaming(t, in.Marks, unnecessaryExportCode, "go://example.com/app/internal/store#Narrowed")
+	entry := directive
+	entry.Mechanism = suppress.MechanismIgnore
+	entry.Site = position(suppress.IgnoreFileName, 4, 5)
+	entry.Reason = "the same adjudication, written a second time"
+	in.Marks = append(in.Marks, entry)
+
+	found := computed(t, in, packageEmitters()).Findings
+	for i := range found {
+		if found[i].Code == unnecessaryExportCode {
+			t.Errorf("the pass reports %s about %s, want it withheld: two records name it",
+				found[i].Code, found[i].Symbol.Name)
+		}
+	}
+	if got := recordAt(t, found, suppress.IgnoreFileName, 4); got.Details.Mechanism != "ignore" {
+		t.Errorf("the second record is reported as a %s record, want ignore", got.Details.Mechanism)
+	}
+}
+
+// recordNaming is the record of one code over one reference, which is how a test
+// names a record the target's own documents produced.
+func recordNaming(t *testing.T, marks []suppress.Record, code, ref string) suppress.Record {
+	t.Helper()
+
+	for i := range marks {
+		if marks[i].Code == code && marks[i].Symbol == ref {
+			return marks[i]
+		}
+	}
+	t.Fatalf("the run read no %s record naming %s: it read %+v", code, ref, marks)
+	return suppress.Record{}
+}
+
+func TestUnmatchedRootsIsPositionedInTheDocumentThatDeclaredTheRoot(t *testing.T) {
+	for name, held := range map[string]struct {
+		document string
+		want     string
+	}{
+		"a document the invocation named":            {document: "sub/other.json", want: "sub/other.json"},
+		"the repository document at the target root": {document: "deadset.json", want: "deadset.json"},
+		"no document of the target":                  {document: "", want: configurationDocument},
+	} {
+		t.Run(name, func(t *testing.T) {
+			in := suppressed(t, "selfcheck-stale.txtar", applicationConfig())
+			in.Unmatched = []graph.Unmatched{{Source: "go://example.com/selfcheck#Vanished"}}
+			in.RootsDocument = held.document
+			want := held.want
+
+			found := computed(t, in, map[string]Emitter{unmatchedRootCode: UnmatchedRoots}).Findings
+			if len(found) != 1 {
+				t.Fatalf("the unmatched-root kind reported %d findings, want 1: %+v", len(found), summary(found))
+			}
+			if got := found[0].Position; got.Path != want || got.Line != 1 || got.Column != 1 {
+				t.Errorf("UnmatchedRoots() sites the finding at %s:%d:%d, want %s:1:1",
+					got.Path, got.Line, got.Column, want)
+			}
+		})
+	}
+}
