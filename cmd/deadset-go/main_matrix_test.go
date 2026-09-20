@@ -101,9 +101,9 @@ func TestStagesOfFailsTheRunOnADeclaredConfigurationTheTargetDoesNotBuild(t *tes
 	}
 }
 
-// The verb names a dropped configuration on stderr, which is where the run accounts
-// for it: the report's matrix is the one the analysis ran, so a configuration the run
-// did not build has no entry in it.
+// The verb names a dropped configuration on stderr, which is the surface a maintainer
+// reading the run has, and the report names it in the array the Contract declares
+// beside the matrix the analysis ran.
 func TestAnalyzeNamesTheDerivedConfigurationItDropped(t *testing.T) {
 	dir := unbuildableDerivedModule(t, `{"target": {"kind": "application"}}`)
 
@@ -121,8 +121,30 @@ func TestAnalyzeNamesTheDerivedConfigurationItDropped(t *testing.T) {
 	envelope := envelopeAt(t, run.reportPath)
 	for _, one := range envelope.Configurations {
 		if one.ID == unbuildableWindows {
-			t.Errorf("the report names the configuration %q, want it absent: the matrix a report carries is the one the analysis ran over",
+			t.Errorf("the report names the configuration %q in its matrix, want it absent: the matrix a report carries is the one the analysis ran over",
 				one.ID)
 		}
+	}
+
+	if len(envelope.ConfigurationsNotBuilt) != 1 {
+		t.Fatalf("the report names %d configurations the run did not build, want 1",
+			len(envelope.ConfigurationsNotBuilt))
+	}
+	dropped := &envelope.ConfigurationsNotBuilt[0]
+	if dropped.ID != unbuildableWindows || dropped.OS != "windows" || dropped.Arch != runtime.GOARCH {
+		t.Errorf("the report names the dropped configuration %q on %s/%s, want %q on windows/%s",
+			dropped.ID, dropped.OS, dropped.Arch, unbuildableWindows, runtime.GOARCH)
+	}
+	if len(dropped.Tags) != 0 {
+		t.Errorf("the report names the dropped configuration %q with the tags %v, want none",
+			dropped.ID, dropped.Tags)
+	}
+	if want := "load " + unbuildableWindows + ": "; !strings.HasPrefix(dropped.Error, want) {
+		t.Errorf("the report names the error of %q as %q, want one opening %q",
+			dropped.ID, dropped.Error, want)
+	}
+	if strings.ContainsAny(dropped.Error, "\r\n") || strings.Contains(dropped.Error, dir) {
+		t.Errorf("the report names the error of %q as %q, want the load's first line and no host path",
+			dropped.ID, dropped.Error)
 	}
 }

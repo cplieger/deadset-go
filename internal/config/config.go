@@ -13,7 +13,7 @@ import (
 
 // ContractVersion is the Contract version this package implements. It is the
 // resolved value of contract_version when no source supplies one.
-const ContractVersion = "1.6.0"
+const ContractVersion = "1.7.0"
 
 // defaultTestFiles is the documented default of ts.test_files.
 const defaultTestFiles = "**/*.test.{ts,tsx,mts,cts}"

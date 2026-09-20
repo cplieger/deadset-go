@@ -53,6 +53,18 @@ func configurationsOf() []Configuration {
 	}
 }
 
+// configurationsNotBuiltOf is one configuration the derivation answered and the load
+// dropped, carrying the first line of a load error as the loader renders it.
+func configurationsNotBuiltOf() []ConfigurationNotBuilt {
+	return []ConfigurationNotBuilt{{
+		ID:    "windows-amd64",
+		OS:    "windows",
+		Arch:  "amd64",
+		Tags:  []string{},
+		Error: "load windows-amd64: 7 errors",
+	}}
+}
+
 // minimalInput is an assembly that passes every refusal and carries no record, which
 // is the input a test that checks one refusal starts from.
 func minimalInput() BuildInput {
@@ -183,9 +195,10 @@ func fullInput() BuildInput {
 	deletable.Component = kinds.Component{ID: "deadset-go/c-5", Root: true, SymbolCount: 3, DeletableLines: 41}
 
 	return BuildInput{
-		Analyzer:       analyzerOf(),
-		Target:         targetOf(),
-		Configurations: configurationsOf(),
+		Analyzer:               analyzerOf(),
+		Target:                 targetOf(),
+		Configurations:         configurationsOf(),
+		ConfigurationsNotBuilt: configurationsNotBuiltOf(),
 		Consumers: Consumers{
 			Declared: 2,
 			Loaded:   []LoadedConsumer{{ID: "example.com/consumer", Path: "../consumer"}},

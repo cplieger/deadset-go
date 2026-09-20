@@ -141,8 +141,16 @@ for functions, so run `deadcode` for the functions and deadset-go for everything
 The analysis runs one load per build configuration and intersects the answers: a symbol is
 reported only where it is dead in every configuration, a reference counts where it holds in any
 configuration, and a symbol exists where it is declared in at least one. Every finding names the
-configurations it holds in. A configuration that fails to load ends the run rather than
-intersecting over the survivors.
+configurations it holds in, and the report's `configurations` member is the matrix the analysis ran.
+
+What a configuration that fails to load does to the run depends on who named it. A configuration the
+configuration document declared is an assertion that the target builds it, so a load that fails ends
+the run rather than intersecting over the survivors, which would be systematically more permissive
+than the truth. A configuration the analyzer derived from the target's own source is its own guess,
+so a load that fails drops it from the matrix and the run answers over the configurations the target
+does build; each dropped configuration is named on stderr and in the report's
+`configurations_not_built` member, with the first line of the load error that dropped it, and an
+identifier is in that array or in the matrix and never in both.
 
 The default matrix is derived from the target's own source rather than enumerated. The derivation
 walks every Go file, reads each file's `//go:build` expression together with the constraint its

@@ -82,9 +82,9 @@ func TestTheDocumentWritesEveryRequiredMember(t *testing.T) {
 		t.Fatalf("json.Unmarshal(a report document) = error %v, want its members", err)
 	}
 	want := []string{
-		"schema_version", "contract_version", "analyzer", "target", "configurations", "consumers",
-		"findings", "edge_evaluations", "stale_suppressions", "declared_gaps", "excluded_by_cgo",
-		"test_file_rules", "totals",
+		"schema_version", "contract_version", "analyzer", "target", "configurations",
+		"configurations_not_built", "consumers", "findings", "edge_evaluations",
+		"stale_suppressions", "declared_gaps", "excluded_by_cgo", "test_file_rules", "totals",
 	}
 	for _, member := range want {
 		if _, held := document[member]; !held {
@@ -94,7 +94,7 @@ func TestTheDocumentWritesEveryRequiredMember(t *testing.T) {
 	if len(document) != len(want) {
 		t.Errorf("the document holds %d members, want the %d the schema declares", len(document), len(want))
 	}
-	for _, member := range []string{"findings", "excluded_by_cgo", "declared_gaps"} {
+	for _, member := range []string{"findings", "excluded_by_cgo", "declared_gaps", "configurations_not_built"} {
 		if got := string(document[member]); got != "[]" {
 			t.Errorf("the document writes %q as %s, want an empty array", member, got)
 		}

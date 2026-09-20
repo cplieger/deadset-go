@@ -31,19 +31,20 @@ import (
 
 // wireEnvelope is one report document.
 type wireEnvelope struct {
-	SchemaVersion     string                 `json:"schema_version"`
-	ContractVersion   string                 `json:"contract_version"`
-	Analyzer          wireAnalyzer           `json:"analyzer"`
-	Target            wireTarget             `json:"target"`
-	Configurations    []wireConfiguration    `json:"configurations"`
-	Consumers         wireConsumers          `json:"consumers"`
-	Findings          []wireFinding          `json:"findings"`
-	EdgeEvaluations   []wireEvaluation       `json:"edge_evaluations"`
-	StaleSuppressions []wireStaleSuppression `json:"stale_suppressions"`
-	DeclaredGaps      []wireDeclaredGap      `json:"declared_gaps"`
-	ExcludedByCgo     []string               `json:"excluded_by_cgo"`
-	TestFileRules     []wireTestFileRule     `json:"test_file_rules"`
-	Totals            wireTotals             `json:"totals"`
+	SchemaVersion          string                      `json:"schema_version"`
+	ContractVersion        string                      `json:"contract_version"`
+	Analyzer               wireAnalyzer                `json:"analyzer"`
+	Target                 wireTarget                  `json:"target"`
+	Configurations         []wireConfiguration         `json:"configurations"`
+	ConfigurationsNotBuilt []wireConfigurationNotBuilt `json:"configurations_not_built"`
+	Consumers              wireConsumers               `json:"consumers"`
+	Findings               []wireFinding               `json:"findings"`
+	EdgeEvaluations        []wireEvaluation            `json:"edge_evaluations"`
+	StaleSuppressions      []wireStaleSuppression      `json:"stale_suppressions"`
+	DeclaredGaps           []wireDeclaredGap           `json:"declared_gaps"`
+	ExcludedByCgo          []string                    `json:"excluded_by_cgo"`
+	TestFileRules          []wireTestFileRule          `json:"test_file_rules"`
+	Totals                 wireTotals                  `json:"totals"`
 }
 
 //nolint:govet // fieldalignment: the field order is the schema's member order, which the document writes
@@ -72,6 +73,15 @@ type wireConfiguration struct {
 	OS   string   `json:"os"`
 	Arch string   `json:"arch"`
 	Tags []string `json:"tags"`
+}
+
+//nolint:govet // fieldalignment: the field order is the schema's member order, which the document writes
+type wireConfigurationNotBuilt struct {
+	ID    string   `json:"id"`
+	OS    string   `json:"os"`
+	Arch  string   `json:"arch"`
+	Tags  []string `json:"tags"`
+	Error string   `json:"error"`
 }
 
 //nolint:govet // fieldalignment: the field order is the schema's member order, which the document writes
@@ -281,15 +291,16 @@ func (e *Envelope) wire() wireEnvelope {
 				Digest:        e.Analyzer.Conformance.Digest,
 			},
 		},
-		Target:            wireTarget{Kind: e.Target.Kind, Root: e.Target.Root, Identity: e.Target.Identity},
-		Configurations:    make([]wireConfiguration, 0, len(e.Configurations)),
-		Consumers:         wireConsumersOf(&e.Consumers),
-		Findings:          make([]wireFinding, 0, len(e.Findings)),
-		EdgeEvaluations:   make([]wireEvaluation, 0, len(e.EdgeEvaluations)),
-		StaleSuppressions: make([]wireStaleSuppression, 0, len(e.StaleSuppressions)),
-		DeclaredGaps:      make([]wireDeclaredGap, 0, len(e.DeclaredGaps)),
-		ExcludedByCgo:     list(e.ExcludedByCgo),
-		TestFileRules:     make([]wireTestFileRule, 0, len(e.TestFileRules)),
+		Target:                 wireTarget{Kind: e.Target.Kind, Root: e.Target.Root, Identity: e.Target.Identity},
+		Configurations:         make([]wireConfiguration, 0, len(e.Configurations)),
+		ConfigurationsNotBuilt: make([]wireConfigurationNotBuilt, 0, len(e.ConfigurationsNotBuilt)),
+		Consumers:              wireConsumersOf(&e.Consumers),
+		Findings:               make([]wireFinding, 0, len(e.Findings)),
+		EdgeEvaluations:        make([]wireEvaluation, 0, len(e.EdgeEvaluations)),
+		StaleSuppressions:      make([]wireStaleSuppression, 0, len(e.StaleSuppressions)),
+		DeclaredGaps:           make([]wireDeclaredGap, 0, len(e.DeclaredGaps)),
+		ExcludedByCgo:          list(e.ExcludedByCgo),
+		TestFileRules:          make([]wireTestFileRule, 0, len(e.TestFileRules)),
 		Totals: wireTotals{
 			Findings:             e.Totals.Findings,
 			BySeverity:           wireBySeverity(e.Totals.BySeverity),
@@ -305,6 +316,12 @@ func (e *Envelope) wire() wireEnvelope {
 		one := &e.Configurations[i]
 		held.Configurations = append(held.Configurations, wireConfiguration{
 			ID: one.ID, OS: one.OS, Arch: one.Arch, Tags: list(one.Tags),
+		})
+	}
+	for i := range e.ConfigurationsNotBuilt {
+		one := &e.ConfigurationsNotBuilt[i]
+		held.ConfigurationsNotBuilt = append(held.ConfigurationsNotBuilt, wireConfigurationNotBuilt{
+			ID: one.ID, OS: one.OS, Arch: one.Arch, Tags: list(one.Tags), Error: one.Error,
 		})
 	}
 	for i := range e.Findings {
@@ -462,14 +479,15 @@ func (w *wireEnvelope) envelope() (Envelope, error) {
 			SchemaVersionsAccepted: list(w.Analyzer.SchemaVersionsAccepted),
 			Conformance:            Conformance(w.Analyzer.Conformance),
 		},
-		Target:            Target(w.Target),
-		Configurations:    make([]Configuration, 0, len(w.Configurations)),
-		Findings:          make([]kinds.Finding, 0, len(w.Findings)),
-		EdgeEvaluations:   make([]EdgeEvaluation, 0, len(w.EdgeEvaluations)),
-		StaleSuppressions: make([]StaleSuppression, 0, len(w.StaleSuppressions)),
-		DeclaredGaps:      make([]DeclaredGap, 0, len(w.DeclaredGaps)),
-		ExcludedByCgo:     list(w.ExcludedByCgo),
-		TestFileRules:     make([]graph.TestFileRule, 0, len(w.TestFileRules)),
+		Target:                 Target(w.Target),
+		Configurations:         make([]Configuration, 0, len(w.Configurations)),
+		ConfigurationsNotBuilt: make([]ConfigurationNotBuilt, 0, len(w.ConfigurationsNotBuilt)),
+		Findings:               make([]kinds.Finding, 0, len(w.Findings)),
+		EdgeEvaluations:        make([]EdgeEvaluation, 0, len(w.EdgeEvaluations)),
+		StaleSuppressions:      make([]StaleSuppression, 0, len(w.StaleSuppressions)),
+		DeclaredGaps:           make([]DeclaredGap, 0, len(w.DeclaredGaps)),
+		ExcludedByCgo:          list(w.ExcludedByCgo),
+		TestFileRules:          make([]graph.TestFileRule, 0, len(w.TestFileRules)),
 		Totals: Totals{
 			Findings:             w.Totals.Findings,
 			BySeverity:           BySeverity(w.Totals.BySeverity),
@@ -497,6 +515,12 @@ func (w *wireEnvelope) envelope() (Envelope, error) {
 		one := &w.Configurations[i]
 		held.Configurations = append(held.Configurations,
 			Configuration{ID: one.ID, OS: one.OS, Arch: one.Arch, Tags: list(one.Tags)})
+	}
+	for i := range w.ConfigurationsNotBuilt {
+		one := &w.ConfigurationsNotBuilt[i]
+		held.ConfigurationsNotBuilt = append(held.ConfigurationsNotBuilt, ConfigurationNotBuilt{
+			ID: one.ID, OS: one.OS, Arch: one.Arch, Tags: list(one.Tags), Error: one.Error,
+		})
 	}
 	for i := range w.Findings {
 		found, err := w.Findings[i].finding()

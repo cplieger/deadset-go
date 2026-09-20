@@ -44,6 +44,15 @@ func TestBuildRefusesWhatTheContractCannotCarry(t *testing.T) {
 		{"no target identity", func(in *BuildInput) { in.Target.Identity = "" }, "names no target identity"},
 		{"no configuration", func(in *BuildInput) { in.Configurations = nil }, "names no build configuration"},
 		{
+			"one configuration both built and not built",
+			func(in *BuildInput) {
+				in.ConfigurationsNotBuilt = []ConfigurationNotBuilt{{
+					ID: in.Configurations[0].ID, OS: "linux", Arch: "amd64", Error: "load linux-amd64: 1 error",
+				}}
+			},
+			"as built and as not built",
+		},
+		{
 			"a consumer count that disagrees",
 			func(in *BuildInput) { in.Consumers = Consumers{Declared: 2} },
 			"declares 2 consumers and lists 0",
@@ -126,6 +135,9 @@ func TestBuildOrdersEveryArray(t *testing.T) {
 	in := fullInput()
 	slices.Reverse(in.Result.Findings)
 	slices.Reverse(in.Configurations)
+	in.ConfigurationsNotBuilt = append(in.ConfigurationsNotBuilt, ConfigurationNotBuilt{
+		ID: "js-wasm", OS: "js", Arch: "wasm", Error: "load js-wasm: 2 errors",
+	})
 	second := findingOf(staleSuppressionCode, "stale-suppression", "catalog.go", 3, 3,
 		config.Deny, "none",
 		"the inline directive named DS1002 and no candidate under that code sits below it")
@@ -165,6 +177,10 @@ func TestBuildOrdersEveryArray(t *testing.T) {
 	if envelope.Configurations[0].ID != "linux-amd64" {
 		t.Errorf("Build().Configurations[0].ID = %q, want the first identifier bytewise",
 			envelope.Configurations[0].ID)
+	}
+	if envelope.ConfigurationsNotBuilt[0].ID != "js-wasm" {
+		t.Errorf("Build().ConfigurationsNotBuilt[0].ID = %q, want the first identifier bytewise",
+			envelope.ConfigurationsNotBuilt[0].ID)
 	}
 }
 

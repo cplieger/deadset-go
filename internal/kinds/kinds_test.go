@@ -579,13 +579,32 @@ func livenessAbsentKinds(t *testing.T) []string {
 func TestTheShapeTableIsTheContractsLivenessAbsenceList(t *testing.T) {
 	t.Parallel()
 
-	want := slices.Sorted(slices.Values(livenessAbsentKinds(t)))
+	absent := livenessAbsentKinds(t)
+	want := make([]string, 0, len(absent))
+	for _, kind := range absent {
+		if kind != theMergesSubject {
+			want = append(want, kind)
+		}
+	}
+	slices.Sort(want)
 
 	got := slices.Sorted(maps.Keys(shapes))
 
 	if !slices.Equal(got, want) {
-		t.Errorf("the shape table marks %v as a part or a row, want %v, the subject kinds the Contract carries no liveness relation on",
+		t.Errorf("the shape table marks %v as a part or a row, want %v, the subject kinds the Contract carries no liveness relation on and this analyzer reports",
 			got, want)
+	}
+
+	// The kind the list above drops is pinned in both directions, so a Contract that
+	// stops forbidding the relation on it and a table that starts holding a shape for
+	// it both land here rather than leaving the exemption unread.
+	if !slices.Contains(absent, theMergesSubject) {
+		t.Errorf("the Contract carries a liveness relation on the subject kind %q, and this table holds no shape for it because it carries none",
+			theMergesSubject)
+	}
+	if got := shapeOf(theMergesSubject); got != shapeDeclaration {
+		t.Errorf("the shape table reads the subject kind %q as %d, want the declaration shape, which is what a kind it does not name reads as",
+			theMergesSubject, got)
 	}
 	for kind, held := range shapes {
 		if held != shapePart && held != shapeRow {

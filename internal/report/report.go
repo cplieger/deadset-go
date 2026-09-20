@@ -36,7 +36,7 @@ import (
 // SchemaVersion is the version of the report schema this package writes a
 // document to. An analyzer names every version it reads in the analyzer object,
 // and that list holds this one.
-const SchemaVersion = "4.0.0"
+const SchemaVersion = "5.0.0"
 
 // staleSuppressionCode is the code of a stale suppression, which is the one code
 // whose records the envelope carries outside its finding list.
@@ -106,6 +106,24 @@ type Configuration struct {
 	OS   string
 	Arch string
 	Tags []string
+}
+
+// ConfigurationNotBuilt is one configuration the analysis derived from the target
+// tree, could not build, and dropped from the matrix, with the first line of the
+// load error that dropped it.
+//
+// Error is one line and names no host detail, because two runs over one tree on two
+// machines write the same report. The load's own first line is that line; its later
+// lines carry the absolute paths the toolchain reported, which is why the record
+// carries the first alone.
+//
+//nolint:govet // fieldalignment: the field order is the Contract's field order, which a rendering writes
+type ConfigurationNotBuilt struct {
+	ID    string
+	OS    string
+	Arch  string
+	Tags  []string
+	Error string
 }
 
 // Consumers is what the run knows about the target's consumers: how many the
@@ -218,19 +236,24 @@ type BySeverity struct {
 //
 //nolint:govet // fieldalignment: the field order is the Contract's field order, which a rendering writes
 type Envelope struct {
-	SchemaVersion     string
-	ContractVersion   string
-	Analyzer          Analyzer
-	Target            Target
-	Configurations    []Configuration
-	Consumers         Consumers
-	Findings          []kinds.Finding
-	EdgeEvaluations   []EdgeEvaluation
-	StaleSuppressions []StaleSuppression
-	DeclaredGaps      []DeclaredGap
-	ExcludedByCgo     []string
-	TestFileRules     []graph.TestFileRule
-	Totals            Totals
+	SchemaVersion   string
+	ContractVersion string
+	Analyzer        Analyzer
+	Target          Target
+	Configurations  []Configuration
+	// ConfigurationsNotBuilt is every configuration the analysis derived and
+	// could not build, which is why Configurations is the matrix the analysis
+	// ran: an identifier names an entry of one array or of the other, never of
+	// both, and a finding's configuration list names only the built ones.
+	ConfigurationsNotBuilt []ConfigurationNotBuilt
+	Consumers              Consumers
+	Findings               []kinds.Finding
+	EdgeEvaluations        []EdgeEvaluation
+	StaleSuppressions      []StaleSuppression
+	DeclaredGaps           []DeclaredGap
+	ExcludedByCgo          []string
+	TestFileRules          []graph.TestFileRule
+	Totals                 Totals
 }
 
 // Options is what a rendering needs beyond the envelope. One shape serves five
@@ -259,6 +282,13 @@ type BuildInput struct {
 	Target         Target
 	Configurations []Configuration
 	Consumers      Consumers
+
+	// ConfigurationsNotBuilt is the configurations the run derived and the load
+	// dropped, which the report names beside the matrix it ran. It is empty for a
+	// run that built every configuration it derived, and for one whose matrix the
+	// configuration declared, because a declared configuration that does not load
+	// ends the run.
+	ConfigurationsNotBuilt []ConfigurationNotBuilt
 
 	// Result is the findings pass. Its findings are already in the canonical
 	// order and carry every field the Contract requires of a finding, so the
@@ -308,18 +338,19 @@ func Build(in *BuildInput) (Envelope, error) {
 	}
 
 	built := Envelope{
-		SchemaVersion:     SchemaVersion,
-		ContractVersion:   config.ContractVersion,
-		Analyzer:          in.Analyzer,
-		Target:            in.Target,
-		Configurations:    slices.Clone(in.Configurations),
-		Consumers:         in.Consumers,
-		Findings:          findings,
-		EdgeEvaluations:   slices.Clone(in.EdgeEvaluations),
-		StaleSuppressions: stale,
-		DeclaredGaps:      slices.Clone(in.DeclaredGaps),
-		ExcludedByCgo:     unique(in.ExcludedByCgo),
-		TestFileRules:     testFileRules(in.TestFileRules),
+		SchemaVersion:          SchemaVersion,
+		ContractVersion:        config.ContractVersion,
+		Analyzer:               in.Analyzer,
+		Target:                 in.Target,
+		Configurations:         slices.Clone(in.Configurations),
+		ConfigurationsNotBuilt: slices.Clone(in.ConfigurationsNotBuilt),
+		Consumers:              in.Consumers,
+		Findings:               findings,
+		EdgeEvaluations:        slices.Clone(in.EdgeEvaluations),
+		StaleSuppressions:      stale,
+		DeclaredGaps:           slices.Clone(in.DeclaredGaps),
+		ExcludedByCgo:          unique(in.ExcludedByCgo),
+		TestFileRules:          testFileRules(in.TestFileRules),
 	}
 	built.order()
 	built.Totals = totalsOf(&built, in.Suppressions)
@@ -337,11 +368,31 @@ func (in *BuildInput) check() error {
 	if len(in.Configurations) == 0 {
 		return fmt.Errorf("%w: the report names no build configuration", ErrInput)
 	}
+	if err := in.checkMatrix(); err != nil {
+		return err
+	}
 	if want := len(in.Consumers.Loaded) + len(in.Consumers.Unavailable); in.Consumers.Declared != want {
 		return fmt.Errorf("%w: the report declares %d consumers and lists %d",
 			ErrInput, in.Consumers.Declared, want)
 	}
 	return in.checkEvaluations()
+}
+
+// checkMatrix refuses an assembly naming one configuration as both built and not
+// built. A configuration is in the matrix the analysis ran or dropped from it, and a
+// finding's configuration list is drawn from the first array, so a document holding
+// one identifier in both says the analysis both did and did not answer under it. It
+// is the one rule of the two arrays no schema states, because a JSON schema compares
+// no two arrays.
+func (in *BuildInput) checkMatrix() error {
+	for i := range in.ConfigurationsNotBuilt {
+		dropped := in.ConfigurationsNotBuilt[i].ID
+		if slices.ContainsFunc(in.Configurations, func(c Configuration) bool { return c.ID == dropped }) {
+			return fmt.Errorf("%w: the report names the configuration %s as built and as not built",
+				ErrInput, dropped)
+		}
+	}
+	return nil
 }
 
 // checkAnalyzer refuses an analyzer object a report cannot name: one missing a
@@ -465,6 +516,8 @@ func (e *Envelope) order() {
 	slices.SortStableFunc(e.DeclaredGaps, compareDeclaredGaps)
 	slices.SortStableFunc(e.EdgeEvaluations, compareEvaluations)
 	slices.SortFunc(e.Configurations, func(a, b Configuration) int { return cmp.Compare(a.ID, b.ID) })
+	slices.SortFunc(e.ConfigurationsNotBuilt,
+		func(a, b ConfigurationNotBuilt) int { return cmp.Compare(a.ID, b.ID) })
 	slices.SortFunc(e.Consumers.Loaded, func(a, b LoadedConsumer) int { return cmp.Compare(a.ID, b.ID) })
 	slices.SortFunc(e.Consumers.Unavailable, func(a, b UnavailableConsumer) int { return cmp.Compare(a.ID, b.ID) })
 }
