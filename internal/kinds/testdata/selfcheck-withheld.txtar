@@ -1,0 +1,43 @@
+One internal package under a command, carrying four directives over declarations the
+analysis holds live, so a run measures the withholding a mark cannot do.
+
+Narrowed is referenced only from the file that declares it, so the narrowing kind
+reports it and the directive above it withholds that finding. Shared is referenced
+from the command's own package, so no narrowing reports it and nothing withholds the
+directive naming the same code. The tag parameter of tagged is read nowhere, so the
+unused-parameter kind reports a part of a declaration the analysis keeps, and the
+directive above the declaration withholds that finding through it. Rowless carries a
+directive naming the stale-suppression code, which is a finding about a row of a
+document that no record binds to, so that directive withholds nothing and is reported
+under the very code it names.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- internal/store/store.go --
+package store
+
+//deadset:ignore DS1101 -- exported for a reader of this package alone
+func Narrowed() int { return 3 }
+
+// Entry is what the command calls, and its body holds the only reference to
+// Narrowed and the only call of tagged.
+func Entry() int { return Narrowed() + tagged(1, "a") }
+
+//deadset:ignore DS1101 -- the command reaches this one from its own package
+func Shared() int { return 2 }
+
+//deadset:ignore DS1801 -- the tag answers a shape this program does not read
+func tagged(value int, tag string) int { return value }
+
+//deadset:ignore DS1703 -- a finding about a row of a document has no suppression
+func Rowless() int { return 4 }
+-- main.go --
+package main
+
+import "example.com/app/internal/store"
+
+func main() {
+	println(store.Entry(), store.Shared(), store.Rowless())
+}

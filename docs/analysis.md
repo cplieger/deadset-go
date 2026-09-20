@@ -20,6 +20,16 @@ seed is every root, every symbol a suppression marked, and every symbol an exemp
 because a symbol live by a mechanism the analysis cannot see makes what it references live too:
 the private helper of a retained method is not dead code.
 
+A suppression record does two things, and the second is what covers a kind neither relation
+decides. It marks the declaration it binds live under both relations, so the declaration's own
+callees are live through it. And it withholds the finding its code would have produced at that
+declaration, which is what a record for a kind that is not about liveness needs: a narrowing
+candidate, a write-only member and an unused parameter are all referenced, so the mark alone would
+change nothing about them. A record is in effect when it did either and stale when it did neither,
+and staleness is therefore one question asked once over every kind. A record binds to a declaration,
+so a finding about a part of one is withheld through the declaration the part belongs to, and a
+finding about a row of a document has no suppression at all.
+
 The two are different sets, and the difference is the point. A symbol referenced only by an
 unreachable symbol is live under reference counting and dead under reachability. A symbol dead
 under both is reported under the stronger claim.

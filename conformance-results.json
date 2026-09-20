@@ -8,8 +8,8 @@
   "result": "pass",
   "totals": {
     "fixtures": 12,
-    "pass": 11,
-    "gap": 1,
+    "pass": 12,
+    "gap": 0,
     "fail": 0
   },
   "fixtures": [
@@ -264,12 +264,11 @@
     },
     {
       "fixture": "narrowing-under-a-closed-world",
-      "result": "gap",
+      "result": "pass",
       "expectations": [
         {
           "symbol": "InFile",
-          "result": "gap",
-          "capability": "DS1101",
+          "result": "pass",
           "actual": {
             "report": "DS1101",
             "symbol_kind": "function",
@@ -277,15 +276,13 @@
             "reachability_class": "certain"
           },
           "suppression": {
-            "suppressed": false,
-            "stale": true
-          },
-          "message": "the report phase agrees and the suppression phase does not: suppressed is false and stale is true"
+            "suppressed": true,
+            "stale": false
+          }
         },
         {
           "symbol": "InModule",
-          "result": "gap",
-          "capability": "DS1102",
+          "result": "pass",
           "actual": {
             "report": "DS1102",
             "symbol_kind": "function",
@@ -293,15 +290,13 @@
             "reachability_class": "certain"
           },
           "suppression": {
-            "suppressed": false,
-            "stale": true
-          },
-          "message": "the report phase agrees and the suppression phase does not: suppressed is false and stale is true"
+            "suppressed": true,
+            "stale": false
+          }
         },
         {
           "symbol": "InPackage",
-          "result": "gap",
-          "capability": "DS1101",
+          "result": "pass",
           "actual": {
             "report": "DS1101",
             "symbol_kind": "function",
@@ -309,10 +304,9 @@
             "reachability_class": "certain"
           },
           "suppression": {
-            "suppressed": false,
-            "stale": true
-          },
-          "message": "the report phase agrees and the suppression phase does not: suppressed is false and stale is true"
+            "suppressed": true,
+            "stale": false
+          }
         },
         {
           "symbol": "Published",

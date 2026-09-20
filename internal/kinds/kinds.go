@@ -273,6 +273,16 @@ type Input struct {
 	// indexed is what a lookup over the inventory needs, built on first use.
 	indexed *index
 
+	// withheld names every record of Marks, by its place in that slice, whose code
+	// and declaration matched a finding this pass produced, so the pass withheld
+	// that finding. A pass records it and the kind that reports a record which
+	// withheld nothing reads it, which is what makes staleness one question asked
+	// once over every kind rather than one answer per kind.
+	//
+	// It is the pass's own answer and is rebuilt by each pass, so a second pass over
+	// one input inherits nothing from the first.
+	withheld map[int]bool
+
 	// Matrix is the configuration identifiers in matrix order, and Per is one
 	// entry per configuration in the same order.
 	Matrix []string
@@ -339,6 +349,20 @@ var symbolKinds = map[graph.SymbolKind]string{
 // a finding's confidence is otherwise unreachable.
 var kindsOfCatalog = catalog.Kinds
 
+// readsThePass names the kinds whose rule is about what this pass produced rather
+// than about what the analysis answered, so their emitters run after every other
+// one and read what the earlier emitters recorded on the input.
+//
+// One kind is in it. A suppression record withholds the finding its code would have
+// produced whatever the kind, so which records withheld nothing is known only once
+// every other emitter has answered, and the vocabulary's order puts the self-check
+// family ahead of the intra-function one. The order is therefore a property of the
+// kind, declared here beside the emitter, and not of where a code sits in the
+// vocabulary.
+var readsThePass = map[string]bool{
+	staleSuppressionCode: true,
+}
+
 // Compute runs every kind the resolved severity does not disable and returns the
 // findings of the whole run.
 //
@@ -346,7 +370,14 @@ var kindsOfCatalog = catalog.Kinds
 // Contract's rather than a map's, and a code this analyzer has no emitter for
 // reports nothing. Each finding an emitter returns is checked against what the
 // Contract can carry and then completed; a refusal fails the pass, because each
-// one is a defect in an emitter rather than something a report could say.
+// one is a defect in an emitter rather than something a report could say. A finding
+// a suppression record names is then withheld, which is the whole of what a record
+// does beyond the mark the sweep already took.
+//
+// The kinds run in two phases, both in the vocabulary's order: every kind that reads
+// the analysis, then the kinds of readsThePass, which read what the first phase
+// withheld. Both phases share one identity check over the findings, so a second
+// finding at one key fails the pass whichever phase produced it.
 func Compute(in *Input, emitters map[string]Emitter) (Result, error) {
 	if in == nil || in.Config == nil {
 		return Result{}, fmt.Errorf("%w: no resolved configuration", ErrInput)
@@ -355,25 +386,46 @@ func Compute(in *Input, emitters map[string]Emitter) (Result, error) {
 	if err := checkTable(emitters); err != nil {
 		return Result{}, err
 	}
+	in.withheld = make(map[int]bool, len(in.Marks))
 	reported := make(map[string]string)
-	var findings []Finding
 	published := kindsOfCatalog()
+	findings, err := in.phase(published, emitters, reported, false)
+	if err != nil {
+		return Result{}, err
+	}
+	second, err := in.phase(published, emitters, reported, true)
+	if err != nil {
+		return Result{}, err
+	}
+	findings = append(findings, second...)
+
+	kept, omitted := in.abovePar(findings)
+	slices.SortStableFunc(kept, Compare)
+	return Result{Findings: kept, OmittedBelowMinConfidence: omitted}, nil
+}
+
+// phase runs the emitters of one phase, in the vocabulary's order, and returns what
+// they produced that no suppression record withheld.
+func (in *Input) phase(published []catalog.Row, emitters map[string]Emitter,
+	reported map[string]string, second bool,
+) ([]Finding, error) {
+	var findings []Finding
 	for i := range published {
 		row := &published[i]
+		if readsThePass[row.Code] != second {
+			continue
+		}
 		emit, runs := in.emitterOf(row, emitters)
 		if !runs {
 			continue
 		}
 		produced, err := in.runKind(emit, row, reported)
 		if err != nil {
-			return Result{}, err
+			return nil, err
 		}
 		findings = append(findings, produced...)
 	}
-
-	kept, omitted := in.abovePar(findings)
-	slices.SortStableFunc(kept, Compare)
-	return Result{Findings: kept, OmittedBelowMinConfidence: omitted}, nil
+	return findings, nil
 }
 
 // emitterOf is the emitter one kind of the vocabulary runs in this pass, and false
@@ -390,8 +442,13 @@ func (in *Input) emitterOf(row *catalog.Row, emitters map[string]Emitter) (Emitt
 	return emit, carried
 }
 
-// runKind runs one kind's emitter and completes every finding it returned, in the
-// order the emitter returned them.
+// runKind runs one kind's emitter, completes every finding it returned in the order
+// the emitter returned them, and withholds each finding a suppression record names.
+//
+// The withholding runs after the completion because the shape of a finding decides
+// what a record can bind to and the completion is what fills the subject's kind in.
+// A withheld finding is identified first and keeps its identity, so a record does not
+// license a second kind to claim the position the withheld finding named.
 func (in *Input) runKind(emit Emitter, row *catalog.Row, reported map[string]string) ([]Finding, error) {
 	produced, err := emit(in)
 	if err != nil {
@@ -404,9 +461,61 @@ func (in *Input) runKind(emit Emitter, row *catalog.Row, reported map[string]str
 			return nil, err
 		}
 		in.complete(&found, row)
+		if in.withhold(&found) {
+			continue
+		}
 		completed = append(completed, found)
 	}
 	return completed, nil
+}
+
+// withhold reports whether a suppression record withholds one finding, and records
+// every record that did.
+//
+// This is the half of suppression the sweep cannot take. A record marks its symbol
+// live before the sweep, which is the whole answer for a kind that reports a dead
+// declaration, and nothing at all for a kind that reports a declaration the analysis
+// holds live: a narrowing candidate, a write-only member and an unused parameter are
+// all referenced, so the mark changes nothing about them and the finding has to be
+// withheld where it is produced.
+//
+// A record binds to a declaration, so the declaration a finding is withheld through
+// is the finding's own where the subject is a declaration of the inventory, and the
+// declaration the part belongs to where the subject is a part of one, which the
+// subject names by reference. A row of a document is a record rather than a
+// declaration of the program, so nothing binds to one and no finding about one is
+// withheld: its remedy is the change the finding names or the severity the
+// configuration gives its code.
+//
+// Several records may name one code at one declaration, an inline directive and an
+// ignore entry for instance, and each of them withheld the finding, so each is in
+// effect rather than the first alone.
+//
+// A withheld finding leaves the pass and is counted nowhere. It is not what the
+// configured minimum confidence omitted, which is the number a capped report accounts
+// for; it is a finding a maintainer adjudicated, which the two suppression totals of
+// the envelope are what report.
+func (in *Input) withhold(found *Finding) bool {
+	var bound graph.SymbolID
+	switch shapeOf(found.Symbol.Kind) {
+	case shapeRow:
+		return false
+	case shapePart:
+		bound = in.index().byRef[found.Symbol.Ref]
+	default:
+		bound = found.id
+	}
+	if bound == "" {
+		return false
+	}
+	withheld := false
+	for i := range in.Marks {
+		if in.Marks[i].Bound == bound && in.Marks[i].Code == found.Code {
+			in.withheld[i] = true
+			withheld = true
+		}
+	}
+	return withheld
 }
 
 // checkTable refuses a table registering an emitter under a code the vocabulary
