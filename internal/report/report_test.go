@@ -10,7 +10,7 @@ import (
 	"github.com/cplieger/deadset-go/internal/config"
 	"github.com/cplieger/deadset-go/internal/graph"
 	"github.com/cplieger/deadset-go/internal/kinds"
-	spec "github.com/cplieger/deadset-spec"
+	spec "github.com/cplieger/deadset-spec/v2"
 )
 
 // TestBuildRefusesWhatTheContractCannotCarry pins every assembly the envelope refuses

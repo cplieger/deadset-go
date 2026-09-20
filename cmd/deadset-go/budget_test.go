@@ -16,7 +16,7 @@ const toolsModule = "golang.org/x/tools"
 
 // testOnlyModules are the requirements no program links: the property-testing
 // instrument and the Contract, each read by a test alone.
-var testOnlyModules = []string{"github.com/cplieger/deadset-spec", "pgregory.net/rapid"}
+var testOnlyModules = []string{"github.com/cplieger/deadset-spec/v2", "pgregory.net/rapid"}
 
 // TestTheBuiltBinaryLinksNothingOutsideTheBudget reads the built program and
 // refuses a module the budget does not admit.

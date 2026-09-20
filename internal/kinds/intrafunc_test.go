@@ -11,7 +11,7 @@ import (
 
 	"github.com/cplieger/deadset-go/internal/config"
 	"github.com/cplieger/deadset-go/internal/suppress"
-	spec "github.com/cplieger/deadset-spec"
+	spec "github.com/cplieger/deadset-spec/v2"
 )
 
 // intraFuncEmitters is the table of the intra-function group, which is what a pass

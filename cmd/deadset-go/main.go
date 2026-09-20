@@ -1,6 +1,6 @@
 // Command deadset-go reports unused symbols in a Go module and its declared
 // consumers. It implements the deadset Contract published at
-// github.com/cplieger/deadset-spec, and no verb edits a source file.
+// github.com/cplieger/deadset-spec/v2, and no verb edits a source file.
 package main
 
 import (

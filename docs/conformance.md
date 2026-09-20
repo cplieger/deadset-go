@@ -4,7 +4,7 @@ What this analyzer implements, what it declines, where it runs, and what it is b
 
 ## The contract version
 
-deadset-go implements deadset contract version **1.7.0** and reads and writes report schema
+deadset-go implements deadset contract version **2.0.0** and reads and writes report schema
 version **5.0.0**. Every report names both, and `deadset-go describe` prints them with the
 analyzer's own version as JSON:
 
@@ -20,8 +20,8 @@ move independently.
 
 The contract publishes a conformance corpus, a set of fixtures each carrying its own expectation,
 and deadset-go runs it as part of its own test suite. The corpus version this analyzer answers is
-**1.3.0**, and the run answers the **12** fixtures of it that carry a Go rendering: every one of
-them passes, none is a gap and none fails.
+**1.4.0**, which publishes eighteen fixtures, and the run answers the **16** fixtures of it that
+carry a Go rendering: every one of them passes, none is a gap and none fails.
 
 Every report names the result in its `analyzer.conformance` block, with the corpus version
 answered and the digest of the results document the corpus run wrote; `describe` prints the same
@@ -39,12 +39,13 @@ capability, each naming the capability and the reason. A capability is an issue-
 exemption class; an expectation the analyzer neither answers nor declares here is a failure of the
 corpus run rather than a gap.
 
-At corpus version 1.3.0 this analyzer declares no gap, so `conformance.json` carries an empty list
+At corpus version 1.4.0 this analyzer declares no gap, so `conformance.json` carries an empty list
 and the `declared_gaps` member of every report is empty.
 
-Two codes of the contract are outside the corpus and outside this analyzer, for reasons that are
-not gaps in its Go coverage: `DS1104` applies to TypeScript and JavaScript, and `DS1705` is
-reported by the orchestrator's merge from the edge evaluations this analyzer publishes. Both are
+Two codes of the contract are outside this analyzer, for reasons that are not gaps in its Go
+coverage: `DS1104` applies to TypeScript and JavaScript, so the corpus fixture for it carries no Go
+rendering, and `DS1705` is reported by the orchestrator's merge from the edge evaluations this
+analyzer publishes. Both are
 stated in [kinds.md](kinds.md). The four exemption classes the contract declares for TypeScript
 alone are outside this analyzer for the same reason; the nine Go classes are all implemented and
 are in [exemptions.md](exemptions.md).

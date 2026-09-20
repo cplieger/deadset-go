@@ -306,11 +306,9 @@ type Input struct {
 // Emitter is one kind's rule: it returns the findings of its own code.
 type Emitter func(in *Input) ([]Finding, error)
 
-// Result is what one findings pass produced: the findings in the canonical order,
-// and how many the configured minimum confidence excluded.
+// Result is what one findings pass produced: the findings in the canonical order.
 type Result struct {
-	Findings                  []Finding
-	OmittedBelowMinConfidence int
+	Findings []Finding
 }
 
 // words is the reader's word for each kind of declaration, which a message spells
@@ -399,9 +397,9 @@ func Compute(in *Input, emitters map[string]Emitter) (Result, error) {
 	}
 	findings = append(findings, second...)
 
-	kept, omitted := in.abovePar(findings)
+	kept := in.abovePar(findings)
 	slices.SortStableFunc(kept, Compare)
-	return Result{Findings: kept, OmittedBelowMinConfidence: omitted}, nil
+	return Result{Findings: kept}, nil
 }
 
 // phase runs the emitters of one phase, in the vocabulary's order, and returns what
@@ -487,6 +485,16 @@ func (in *Input) runKind(emit Emitter, row *catalog.Row, reported map[string]str
 // withheld: its remedy is the change the finding names or the severity the
 // configuration gives its code.
 //
+// A record reaches the finding two ways and either is enough. It marked the
+// finding's own declaration, which is how a directive above a declaration reaches
+// every finding about that declaration and about its parts. Or it names the reference
+// the finding carries, which is what an entry and a baseline row are matched by: the
+// code, the reference and the path of the finding the record names. The two answer
+// differently where a reference names more than one declaration, a blank declaration
+// sharing the reference of its container being the case the language makes: one record
+// names them all, and it is in effect for the finding it withheld rather than stale
+// for the declarations that produced none.
+//
 // Several records may name one code at one declaration, an inline directive and an
 // ignore entry for instance, and each of them withheld the finding, so each is in
 // effect rather than the first alone.
@@ -496,24 +504,20 @@ func (in *Input) runKind(emit Emitter, row *catalog.Row, reported map[string]str
 // for; it is a finding a maintainer adjudicated, which the two suppression totals of
 // the envelope are what report.
 func (in *Input) withhold(found *Finding) bool {
-	var bound graph.SymbolID
-	switch shapeOf(found.Symbol.Kind) {
-	case shapeRow:
-		return false
-	case shapePart:
-		bound = in.index().byRef[found.Symbol.Ref]
-	default:
-		bound = found.id
-	}
-	if bound == "" {
+	if shapeOf(found.Symbol.Kind) == shapeRow {
 		return false
 	}
 	withheld := false
 	for i := range in.Marks {
-		if in.Marks[i].Bound == bound && in.Marks[i].Code == found.Code {
-			in.withheld[i] = true
-			withheld = true
+		mark := &in.Marks[i]
+		if mark.Bound == "" || mark.Code != found.Code {
+			continue
 		}
+		if mark.Bound != found.id && mark.Symbol != found.Symbol.Ref {
+			continue
+		}
+		in.withheld[i] = true
+		withheld = true
 	}
 	return withheld
 }
@@ -773,22 +777,23 @@ func (f *Finding) relation(candidate *graph.Candidate) {
 	f.Relation = candidate.Relation
 }
 
-// abovePar drops every finding the configured minimum confidence excludes and
-// returns how many it dropped, which is what the report accounts for.
-func (in *Input) abovePar(findings []Finding) (kept []Finding, omitted int) {
+// abovePar drops every finding the configured minimum confidence excludes. The
+// minimum is a filter over what the pass reports, the way a kind the severity sets to
+// allow is, so a finding it drops leaves the pass and no count of the run accounts for
+// it.
+func (in *Input) abovePar(findings []Finding) []Finding {
 	least := Class(in.Config.Analysis.MinConfidence)
 	if least.rank() == 0 {
-		return findings, 0
+		return findings
 	}
-	kept = make([]Finding, 0, len(findings))
+	kept := make([]Finding, 0, len(findings))
 	for i := range findings {
 		if findings[i].Confidence.rank() < least.rank() {
-			omitted++
 			continue
 		}
 		kept = append(kept, findings[i])
 	}
-	return kept, omitted
+	return kept
 }
 
 // Compare orders two findings by the canonical key: the path, the line, the

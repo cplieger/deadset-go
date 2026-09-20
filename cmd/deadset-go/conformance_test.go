@@ -5,8 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go/token"
+	"maps"
 	"os"
 	"os/exec"
 	"path"
@@ -19,7 +21,7 @@ import (
 	"github.com/cplieger/deadset-go/internal/graph"
 	"github.com/cplieger/deadset-go/internal/kinds"
 	"github.com/cplieger/deadset-go/internal/suppress"
-	spec "github.com/cplieger/deadset-spec"
+	spec "github.com/cplieger/deadset-spec/v2"
 	"golang.org/x/tools/txtar"
 )
 
@@ -74,14 +76,30 @@ const (
 // fixture-local logical name, and what an analyzer must report about it. A member the
 // row leaves out states nothing and is not checked.
 type corpusExpectation struct {
-	Symbol            string   `json:"symbol"`
-	Report            string   `json:"report"`
-	SymbolKind        string   `json:"symbol_kind"`
-	Confidence        string   `json:"confidence"`
-	ReachabilityClass string   `json:"reachability_class"`
-	LivenessRelation  string   `json:"liveness_relation"`
-	Configurations    []string `json:"configurations"`
-	RetainedBy        []string `json:"retained_by"`
+	Symbol            string         `json:"symbol"`
+	Report            string         `json:"report"`
+	SymbolKind        string         `json:"symbol_kind"`
+	Confidence        string         `json:"confidence"`
+	ReachabilityClass string         `json:"reachability_class"`
+	LivenessRelation  string         `json:"liveness_relation"`
+	Configurations    []string       `json:"configurations"`
+	RetainedBy        []string       `json:"retained_by"`
+	Details           *corpusDetails `json:"details"`
+}
+
+// corpusDetails are the details members an expectation pins, drawn from the closed
+// set the corpus's expectation file declares: the members of a finding's details
+// whose value is language-neutral, which is what an expectation binding to every
+// rendering can state. A member the row leaves out states nothing and is not
+// compared, so every member is optional here as it is there.
+type corpusDetails struct {
+	NarrowerVisibility string   `json:"narrower_visibility,omitempty"`
+	ExcludedBy         string   `json:"excluded_by,omitempty"`
+	DependencyClass    string   `json:"dependency_class,omitempty"`
+	Replacement        string   `json:"replacement,omitempty"`
+	Mechanism          string   `json:"mechanism,omitempty"`
+	Edge               string   `json:"edge,omitempty"`
+	Overlap            []string `json:"overlap,omitempty"`
 }
 
 // corpusFixtureFile is one fixture's expectation file: the renderings it has, the
@@ -185,13 +203,14 @@ type expectationAnswer struct {
 // member the expectation does not name is not written, because a runner answering a
 // row that states nothing about a member says nothing about it either.
 type reportedAnswer struct {
-	Report            string   `json:"report"`
-	SymbolKind        string   `json:"symbol_kind,omitempty"`
-	Confidence        string   `json:"confidence,omitempty"`
-	ReachabilityClass string   `json:"reachability_class,omitempty"`
-	LivenessRelation  string   `json:"liveness_relation,omitempty"`
-	Configurations    []string `json:"configurations,omitempty"`
-	RetainedBy        []string `json:"retained_by,omitempty"`
+	Report            string         `json:"report"`
+	SymbolKind        string         `json:"symbol_kind,omitempty"`
+	Confidence        string         `json:"confidence,omitempty"`
+	ReachabilityClass string         `json:"reachability_class,omitempty"`
+	LivenessRelation  string         `json:"liveness_relation,omitempty"`
+	Configurations    []string       `json:"configurations,omitempty"`
+	RetainedBy        []string       `json:"retained_by,omitempty"`
+	Details           *corpusDetails `json:"details,omitempty"`
 }
 
 // suppressionAnswer is the outcome of the second analysis: whether the position is
@@ -381,10 +400,14 @@ func answerFixture(t *testing.T, fixtureName string, declared []conformanceGap,
 		row.Expectations[i] = expectationAnswer{Symbol: held.Symbol, Actual: actual, Message: message}
 	}
 
-	if err := answerSuppression(t.Context(), &run, &fixture, sites, &first,
-		row.Expectations, shapes); err != nil {
+	written, err := answerSuppression(t.Context(), &run, &fixture, sites, &first,
+		row.Expectations, shapes)
+	if err != nil {
 		return failedFixture(t, fixtureName, "the second analysis did not complete: "+err.Error())
 	}
+	// The phase writes the ignore document itself, so the rendering is held to the
+	// bytes it wrote there and to the archive's own bytes everywhere else.
+	maps.Copy(before, written)
 	if err := checkRenderingUnchanged(rendering, names, before); err != nil {
 		return failedFixture(t, fixtureName, err.Error())
 	}
@@ -540,7 +563,56 @@ func answerFrom(expected *corpusExpectation, found *kinds.Finding) reportedAnswe
 	if len(expected.Configurations) > 0 {
 		actual.Configurations = slices.Clone(found.Configurations)
 	}
+	actual.Details = detailsOf(expected.Details, &found.Details)
 	return actual
+}
+
+// detailsOf is the finding's details in the expectation file's vocabulary, carrying
+// the members one expectation pins and no others, and nothing at all where the
+// expectation pins none: a row pins what it names, so a member it omits is answered
+// by nothing and compared by nothing.
+//
+// A member the row names and the finding does not carry answers as the empty value,
+// which the comparison names as a mismatch rather than passing over. The
+// cross-language edge is one such member always: the kind that reports an edge is the
+// orchestrator's merge rather than any analyzer's pass, so a finding of this analyzer
+// carries no edge and a row naming one cannot be answered.
+func detailsOf(expected *corpusDetails, found *kinds.Details) *corpusDetails {
+	if expected == nil {
+		return nil
+	}
+	var actual corpusDetails
+	if expected.NarrowerVisibility != "" {
+		actual.NarrowerVisibility = found.NarrowerVisibility
+	}
+	if expected.ExcludedBy != "" {
+		actual.ExcludedBy = found.ExcludedBy
+	}
+	if expected.DependencyClass != "" {
+		actual.DependencyClass = found.DependencyClass
+	}
+	if expected.Replacement != "" {
+		actual.Replacement = found.Replacement
+	}
+	if expected.Mechanism != "" {
+		actual.Mechanism = found.Mechanism
+	}
+	if len(expected.Overlap) > 0 {
+		actual.Overlap = slices.Clone(found.Overlap)
+	}
+	if actual.empty() {
+		return nil
+	}
+	return &actual
+}
+
+// empty reports whether these details name no member, which a runner omits rather
+// than writes: the results document admits details naming at least one member and a
+// row whose every pinned member the finding leaves empty is a mismatch the message
+// names.
+func (d *corpusDetails) empty() bool {
+	return d.NarrowerVisibility == "" && d.ExcludedBy == "" && d.DependencyClass == "" &&
+		d.Replacement == "" && d.Mechanism == "" && d.Edge == "" && len(d.Overlap) == 0
 }
 
 // differences is one line naming every member the expectation states and the answer
@@ -561,7 +633,36 @@ func differences(expected *corpusExpectation, actual *reportedAnswer) string {
 	if len(expected.Configurations) > 0 && !slices.Equal(expected.Configurations, actual.Configurations) {
 		held = append(held, fmt.Sprintf("configurations want %v got %v", expected.Configurations, actual.Configurations))
 	}
+	if expected.Details != nil {
+		held = append(held, detailsDifferences(expected.Details, actual.Details)...)
+	}
 	return strings.Join(held, "; ")
+}
+
+// detailsDifferences is one entry per details member the expectation pins that the
+// answer does not carry equal, which is what makes the details the thing that
+// distinguishes two findings of one code rather than a decoration.
+func detailsDifferences(expected, actual *corpusDetails) []string {
+	if actual == nil {
+		actual = &corpusDetails{}
+	}
+	var held []string
+	for _, one := range []struct{ member, want, got string }{
+		{"details.narrower_visibility", expected.NarrowerVisibility, actual.NarrowerVisibility},
+		{"details.excluded_by", expected.ExcludedBy, actual.ExcludedBy},
+		{"details.dependency_class", expected.DependencyClass, actual.DependencyClass},
+		{"details.replacement", expected.Replacement, actual.Replacement},
+		{"details.mechanism", expected.Mechanism, actual.Mechanism},
+		{"details.edge", expected.Edge, actual.Edge},
+	} {
+		if one.want != "" && one.want != one.got {
+			held = append(held, fmt.Sprintf("%s want %q got %q", one.member, one.want, one.got))
+		}
+	}
+	if len(expected.Overlap) > 0 && !slices.Equal(expected.Overlap, actual.Overlap) {
+		held = append(held, fmt.Sprintf("details.overlap want %v got %v", expected.Overlap, actual.Overlap))
+	}
+	return held
 }
 
 // findingsAt is every finding the analysis reported at one position, in the order the
@@ -623,9 +724,16 @@ func unexpectedFindings(findings []kinds.Finding, sites map[string]site) []unexp
 // document row moves this phase without an edit. An expectation the phase skips
 // records no suppression answer, which is what the results document then says about
 // it.
+//
+// The entries are added to the rendering's own ignore document where it carries one,
+// because a fixture about suppression writes its own records and its expectations are
+// written against them. The phase is the one writer of that file, so it returns what
+// it wrote and the caller holds the rendering to those bytes: what the two analyses
+// must leave alone is every file of the rendering, this one at the bytes the phase
+// gave it.
 func answerSuppression(ctx context.Context, run *corpusRun, fixture *corpusFixtureFile,
 	sites map[string]site, first *answered, rows []expectationAnswer, shapes *corpusSubjectShapes,
-) error {
+) (map[string]string, error) {
 	entries := make([]ignoreEntry, 0, len(fixture.Expect))
 	covered := make(map[string]ignoreEntry, len(fixture.Expect))
 	for i := range fixture.Expect {
@@ -647,24 +755,30 @@ func answerSuppression(ctx context.Context, run *corpusRun, fixture *corpusFixtu
 		covered[held.Symbol] = entry
 	}
 	if len(entries) == 0 {
-		return nil
+		return nil, nil
 	}
 
-	body, err := json.MarshalIndent(ignoreDocument{
-		Description: "The adjudications the conformance run writes for its suppression phase.",
-		Ignore:      entries,
-	}, "", "  ")
-	if err != nil {
-		return fmt.Errorf("render the ignore document: %w", err)
-	}
+	rendered := path.Join(targetSection, suppress.IgnoreFileName)
 	held := filepath.Join(run.rendering, targetSection, suppress.IgnoreFileName)
-	if err := os.WriteFile(held, append(body, '\n'), 0o600); err != nil {
-		return fmt.Errorf("write %s: %w", held, err)
+	document, err := ignoreDocumentAt(held)
+	if err != nil {
+		return nil, err
 	}
+	document.Ignore = append(document.Ignore, entries...)
+	body, err := json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("render the ignore document: %w", err)
+	}
+	body = append(body, '\n')
+	if err := os.WriteFile(held, body, 0o600); err != nil {
+		return nil, fmt.Errorf("write %s: %w", held, err)
+	}
+	digest := sha256.Sum256(body)
+	written := map[string]string{rendered: hex.EncodeToString(digest[:])}
 
 	second, err := analyzeRendering(ctx, run)
 	if err != nil {
-		return err
+		return written, err
 	}
 	for i := range rows {
 		entry, held := covered[rows[i].Symbol]
@@ -676,7 +790,26 @@ func answerSuppression(ctx context.Context, run *corpusRun, fixture *corpusFixtu
 			Stale:      staleFor(second.findings, entry),
 		}
 	}
-	return nil
+	return written, nil
+}
+
+// ignoreDocumentAt is the ignore document one rendering carries, and an empty one
+// under the phase's own description where the rendering carries none.
+func ignoreDocumentAt(held string) (ignoreDocument, error) {
+	body, err := os.ReadFile(held)
+	if errors.Is(err, os.ErrNotExist) {
+		return ignoreDocument{
+			Description: "The adjudications the conformance run writes for its suppression phase.",
+		}, nil
+	}
+	if err != nil {
+		return ignoreDocument{}, fmt.Errorf("read %s: %w", held, err)
+	}
+	var document ignoreDocument
+	if err := json.Unmarshal(body, &document); err != nil {
+		return ignoreDocument{}, fmt.Errorf("decode %s: %w", held, err)
+	}
+	return document, nil
 }
 
 // findingsUnder is every finding at one position under one code.
@@ -1435,16 +1568,65 @@ func TestTheCorpusRunRefusesAWorldTheCorpusDoesNotCarry(t *testing.T) {
 	}
 }
 
+// TestIgnoreDocumentAtKeepsTheRenderingsOwnRecords pins what the suppression phase
+// writes over: a fixture about suppression carries its own records and its
+// expectations are written against them, so the phase adds its entries to that
+// document rather than replacing it, and it writes a document of its own only where
+// the rendering carries none.
+func TestIgnoreDocumentAtKeepsTheRenderingsOwnRecords(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	held := filepath.Join(dir, suppress.IgnoreFileName)
+
+	absent, err := ignoreDocumentAt(held)
+	if err != nil {
+		t.Fatalf("ignoreDocumentAt(a rendering carrying no ignore document) = error %v, want a document of the phase's own", err)
+	}
+	if absent.Description == "" || len(absent.Ignore) != 0 {
+		t.Errorf("ignoreDocumentAt(no document) = %+v, want the phase's description and no entry", absent)
+	}
+
+	own := ignoreDocument{
+		Description: "One entry the fixture writes itself.",
+		Ignore: []ignoreEntry{{
+			Code:   "DS1002",
+			Symbol: "go://example.com/app#dropped",
+			Path:   "main.go",
+			Reason: "in effect: nothing reaches dropped",
+		}},
+	}
+	body, err := json.MarshalIndent(own, "", "  ")
+	if err != nil {
+		t.Fatalf("Setup: render the fixture's own document: %v", err)
+	}
+	if err := os.WriteFile(held, append(body, '\n'), 0o600); err != nil {
+		t.Fatalf("Setup: write %s: %v", held, err)
+	}
+
+	read, err := ignoreDocumentAt(held)
+	if err != nil {
+		t.Fatalf("ignoreDocumentAt(the fixture's own document) = error %v, want the document", err)
+	}
+	if read.Description != own.Description || len(read.Ignore) != 1 || read.Ignore[0] != own.Ignore[0] {
+		t.Errorf("ignoreDocumentAt(the fixture's own document) = %+v, want %+v", read, own)
+	}
+}
+
 func TestAnswerFromRendersEveryMemberAnExpectationNames(t *testing.T) {
 	t.Parallel()
 
 	found := kinds.Finding{
-		Code:           "DS1001",
+		Code:           "DS1101",
 		Symbol:         kinds.Subject{Kind: "function"},
 		Class:          kinds.Certain,
 		Confidence:     kinds.Probable,
 		Relation:       graph.ReferenceCounting,
 		Configurations: []string{"linux-amd64"},
+		Details: kinds.Details{
+			NarrowerVisibility: "file",
+			Overlap:            []string{"revive unused-parameter"},
+		},
 	}
 
 	tests := []struct {
@@ -1454,20 +1636,39 @@ func TestAnswerFromRendersEveryMemberAnExpectationNames(t *testing.T) {
 	}{
 		{
 			name:     "a_row_naming_the_code_and_the_confidence_alone",
-			expected: corpusExpectation{Report: "DS1001", Confidence: "probable"},
-			want:     reportedAnswer{Report: "DS1001", Confidence: "probable"},
+			expected: corpusExpectation{Report: "DS1101", Confidence: "probable"},
+			want:     reportedAnswer{Report: "DS1101", Confidence: "probable"},
+		},
+		{
+			name: "a_row_naming_one_details_member",
+			expected: corpusExpectation{
+				Report: "DS1101", Confidence: "probable",
+				Details: &corpusDetails{NarrowerVisibility: "file"},
+			},
+			want: reportedAnswer{
+				Report: "DS1101", Confidence: "probable",
+				Details: &corpusDetails{NarrowerVisibility: "file"},
+			},
 		},
 		{
 			name: "a_row_naming_every_member",
 			expected: corpusExpectation{
-				Report: "DS1001", Confidence: "probable", SymbolKind: "function",
+				Report: "DS1101", Confidence: "probable", SymbolKind: "function",
 				ReachabilityClass: "certain", LivenessRelation: "reference-counting",
 				Configurations: []string{"linux-amd64"},
+				Details: &corpusDetails{
+					NarrowerVisibility: "file",
+					Overlap:            []string{"revive unused-parameter"},
+				},
 			},
 			want: reportedAnswer{
-				Report: "DS1001", Confidence: "probable", SymbolKind: "function",
+				Report: "DS1101", Confidence: "probable", SymbolKind: "function",
 				ReachabilityClass: "certain", LivenessRelation: "reference-counting",
 				Configurations: []string{"linux-amd64"},
+				Details: &corpusDetails{
+					NarrowerVisibility: "file",
+					Overlap:            []string{"revive unused-parameter"},
+				},
 			},
 		},
 	}
@@ -1480,7 +1681,8 @@ func TestAnswerFromRendersEveryMemberAnExpectationNames(t *testing.T) {
 			if got.Report != tc.want.Report || got.Confidence != tc.want.Confidence ||
 				got.SymbolKind != tc.want.SymbolKind || got.ReachabilityClass != tc.want.ReachabilityClass ||
 				got.LivenessRelation != tc.want.LivenessRelation ||
-				!slices.Equal(got.Configurations, tc.want.Configurations) {
+				!slices.Equal(got.Configurations, tc.want.Configurations) ||
+				!sameDetails(got.Details, tc.want.Details) {
 				t.Errorf("answerFrom(%+v) = %+v, want %+v", tc.expected, got, tc.want)
 			}
 			if message := differences(&tc.expected, &got); message != "" {
@@ -1488,6 +1690,19 @@ func TestAnswerFromRendersEveryMemberAnExpectationNames(t *testing.T) {
 			}
 		})
 	}
+}
+
+// sameDetails reports whether two answers carry the same details members, absence
+// included: an answer that carries none where one is wanted is what a row pinning a
+// member the finding does not hold produces.
+func sameDetails(got, want *corpusDetails) bool {
+	if got == nil || want == nil {
+		return got == nil && want == nil
+	}
+	return got.NarrowerVisibility == want.NarrowerVisibility && got.ExcludedBy == want.ExcludedBy &&
+		got.DependencyClass == want.DependencyClass && got.Replacement == want.Replacement &&
+		got.Mechanism == want.Mechanism && got.Edge == want.Edge &&
+		slices.Equal(got.Overlap, want.Overlap)
 }
 
 // TestDifferencesNamesEveryMemberThatDisagrees pins the failure a mismatch produces:
@@ -1500,15 +1715,34 @@ func TestDifferencesNamesEveryMemberThatDisagrees(t *testing.T) {
 		Report: "DS1001", Confidence: "certain", SymbolKind: "function",
 		ReachabilityClass: "certain", LivenessRelation: "reference-counting",
 		Configurations: []string{"linux-amd64"},
+		Details: &corpusDetails{
+			NarrowerVisibility: "file",
+			ExcludedBy:         "handwritten",
+			DependencyClass:    "require",
+			Replacement:        "golang.org/x/sync v0.17.0",
+			Mechanism:          "inline",
+			Edge:               "wire/plan",
+			Overlap:            []string{"unparam"},
+		},
 	}
 	actual := reportedAnswer{
 		Report: "DS1002", Confidence: "probable", SymbolKind: "method",
 		ReachabilityClass: "possible", LivenessRelation: "reachability",
 		Configurations: []string{"linux-arm64"},
+		Details: &corpusDetails{
+			NarrowerVisibility: "package",
+			ExcludedBy:         "generated",
+			DependencyClass:    "dependency",
+			Replacement:        "golang.org/x/sync v0.18.0",
+			Mechanism:          "ignore",
+			Overlap:            []string{"revive unused-parameter"},
+		},
 	}
 
 	members := []string{
 		"report", "confidence", "symbol_kind", "reachability_class", "liveness_relation", "configurations",
+		"details.narrower_visibility", "details.excluded_by", "details.dependency_class",
+		"details.replacement", "details.mechanism", "details.edge", "details.overlap",
 	}
 	got := differences(&expected, &actual)
 	for _, member := range members {

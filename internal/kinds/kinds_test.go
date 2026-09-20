@@ -13,7 +13,7 @@ import (
 	"github.com/cplieger/deadset-go/internal/catalog"
 	"github.com/cplieger/deadset-go/internal/config"
 	"github.com/cplieger/deadset-go/internal/graph"
-	spec "github.com/cplieger/deadset-spec"
+	spec "github.com/cplieger/deadset-spec/v2"
 )
 
 // The declarations every hand-built input of this file holds: one exported
@@ -364,9 +364,6 @@ func TestComputeCapsTheConfidenceAtTheKindsCeilingAndTheMinimumConfidenceOmitsIt
 	if len(result.Findings) != 0 {
 		t.Errorf("Compute() = %v, want no finding: a probable confidence is below a certain minimum",
 			summary(result.Findings))
-	}
-	if result.OmittedBelowMinConfidence != 1 {
-		t.Errorf("Compute().OmittedBelowMinConfidence = %d, want 1", result.OmittedBelowMinConfidence)
 	}
 }
 

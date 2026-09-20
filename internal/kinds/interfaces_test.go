@@ -137,9 +137,9 @@ func TestUnusedSatisfactionAssertion_reportsTheAssertionWhileTheConcreteMethodSt
 	result := computed(t, in, interfaceEmitters())
 
 	found := findingOf(t, result.Findings, unusedSatisfactionAssertionCode, "_")
-	if found.Kind != "unused-satisfaction-assertion" || found.Symbol.Kind != "variable" {
+	if found.Kind != "unused-satisfaction-assertion" || found.Symbol.Kind != satisfactionAssertionSubject {
 		t.Errorf("UnusedSatisfactionAssertion(interfaces-assertion.txtar) kind, subject kind = %q, %q, want %q, %q",
-			found.Kind, found.Symbol.Kind, "unused-satisfaction-assertion", "variable")
+			found.Kind, found.Symbol.Kind, "unused-satisfaction-assertion", satisfactionAssertionSubject)
 	}
 	if found.Message != unusedSatisfactionAssertionMessage {
 		t.Errorf("UnusedSatisfactionAssertion(interfaces-assertion.txtar) message = %q, want %q",

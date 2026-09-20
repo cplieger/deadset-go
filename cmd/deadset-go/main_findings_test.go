@@ -136,10 +136,6 @@ func TestFindingsOfReportsEveryDeadDeclarationOfAModuleOnceAndInTheCanonicalOrde
 	if got := reported(set.result.Findings); !slices.Equal(got, want) {
 		t.Errorf("findingsOf() reported\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
-	if set.result.OmittedBelowMinConfidence != 0 {
-		t.Errorf("findingsOf() omitted %d findings below the minimum confidence, want 0: the default configuration sets none",
-			set.result.OmittedBelowMinConfidence)
-	}
 	if len(set.loaded.unmatched) != 0 {
 		t.Errorf("findingsOf() reported %d configured strings as naming nothing, want 0: the fixture configures no root pattern",
 			len(set.loaded.unmatched))
