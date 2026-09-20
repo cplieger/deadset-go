@@ -1,5 +1,5 @@
 {
-  "corpus_version": "1.2.0",
+  "corpus_version": "1.3.0",
   "product": {
     "name": "deadset-go",
     "version": "0.0.0-devel",
@@ -7,9 +7,9 @@
   },
   "result": "pass",
   "totals": {
-    "fixtures": 9,
-    "pass": 9,
-    "gap": 0,
+    "fixtures": 12,
+    "pass": 11,
+    "gap": 1,
     "fail": 0
   },
   "fixtures": [
@@ -176,6 +176,62 @@
       "unexpected": []
     },
     {
+      "fixture": "file-never-built-or-imported",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Generated",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Handwritten",
+          "result": "pass",
+          "actual": {
+            "report": "DS1501",
+            "symbol_kind": "file",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          }
+        },
+        {
+          "symbol": "Live",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Orphan",
+          "result": "pass",
+          "actual": {
+            "report": "DS1502",
+            "symbol_kind": "file",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          }
+        },
+        {
+          "symbol": "width",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
       "fixture": "interface-satisfaction-conversion",
       "result": "pass",
       "expectations": [
@@ -201,6 +257,75 @@
             "retained_by": [
               "interface-satisfaction"
             ]
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "narrowing-under-a-closed-world",
+      "result": "gap",
+      "expectations": [
+        {
+          "symbol": "InFile",
+          "result": "gap",
+          "capability": "DS1101",
+          "actual": {
+            "report": "DS1101",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": false,
+            "stale": true
+          },
+          "message": "the report phase agrees and the suppression phase does not: suppressed is false and stale is true"
+        },
+        {
+          "symbol": "InModule",
+          "result": "gap",
+          "capability": "DS1102",
+          "actual": {
+            "report": "DS1102",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": false,
+            "stale": true
+          },
+          "message": "the report phase agrees and the suppression phase does not: suppressed is false and stale is true"
+        },
+        {
+          "symbol": "InPackage",
+          "result": "gap",
+          "capability": "DS1101",
+          "actual": {
+            "report": "DS1101",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": false,
+            "stale": true
+          },
+          "message": "the report phase agrees and the suppression phase does not: suppressed is false and stale is true"
+        },
+        {
+          "symbol": "Published",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Reached",
+          "result": "pass",
+          "actual": {
+            "report": "none"
           }
         }
       ],
@@ -300,6 +425,57 @@
         },
         {
           "symbol": "Production",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "unreachable-export",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Forgotten",
+          "result": "pass",
+          "actual": {
+            "report": "DS1103",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Published",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Reached",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Used",
           "result": "pass",
           "actual": {
             "report": "none"

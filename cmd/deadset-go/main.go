@@ -61,7 +61,7 @@ const language = config.GoLanguage
 
 // schemaVersionsAccepted lists every report schema version this analyzer reads
 // and writes. contract.json's schema_versions is the list it must equal.
-var schemaVersionsAccepted = []string{"4.0.0"}
+var schemaVersionsAccepted = []string{"5.0.0"}
 
 // settingFlag is one setting a command-line flag supplies: the dotted path the
 // resolved configuration names the setting by, and what the flag's value is.
@@ -1139,11 +1139,11 @@ type corpusRecord struct {
 // the Contract declares, and every configuration the derivation answered that the
 // target does not build.
 //
-// The dropped configurations are returned beside the envelope because the report
-// schema declares no member for one: a configuration entry names an identifier, a
-// platform and a set of tags, and the array is the matrix the analysis RAN, so a
-// configuration the run did not build has no place in it. The caller names them on
-// stderr instead.
+// The dropped configurations are in the envelope, in the array the Contract declares
+// beside the matrix the analysis ran, and are returned as well because the verb names
+// them on stderr too: the report is the record a consumer reads and stderr is where a
+// maintainer reading the run sees them, which is the surface the verbs that write no
+// report have.
 //
 // Assembly is a refusal rather than a best effort: an envelope the Contract cannot
 // carry fails the run, because a document no reader admits says less than an error
@@ -1163,16 +1163,17 @@ func reportOf(ctx context.Context, resolved *resolution, options *exempt.Options
 		return report.Envelope{}, nil, err
 	}
 	envelope, err := report.Build(&report.BuildInput{
-		Analyzer:        analyzerOf(answered.conformance),
-		Target:          target,
-		Configurations:  configurationsReported(set.loaded.configurations),
-		Consumers:       consumers,
-		Result:          set.result,
-		EdgeEvaluations: evaluationsReported(set.evaluations),
-		DeclaredGaps:    answered.gaps,
-		ExcludedByCgo:   excludedByCgo(set.loaded.per),
-		TestFileRules:   set.loaded.testFileRules,
-		Suppressions:    set.suppressions,
+		Analyzer:               analyzerOf(answered.conformance),
+		Target:                 target,
+		Configurations:         configurationsReported(set.loaded.configurations),
+		ConfigurationsNotBuilt: configurationsNotBuilt(set.loaded.unbuilt),
+		Consumers:              consumers,
+		Result:                 set.result,
+		EdgeEvaluations:        evaluationsReported(set.evaluations),
+		DeclaredGaps:           answered.gaps,
+		ExcludedByCgo:          excludedByCgo(set.loaded.per),
+		TestFileRules:          set.loaded.testFileRules,
+		Suppressions:           set.suppressions,
 	})
 	return envelope, set.loaded.unbuilt, err
 }
@@ -1252,6 +1253,36 @@ func configurationsReported(configurations []load.Configuration) []report.Config
 		named[i] = report.Configuration{ID: c.ID, OS: c.OS, Arch: c.Arch, Tags: slices.Clone(c.Tags)}
 	}
 	return named
+}
+
+// configurationsNotBuilt is every configuration the run derived and the load dropped,
+// as a report names it: the configuration, and the first line of the error that
+// dropped it.
+//
+// The first line alone is what the report carries. The load's own rendering opens with
+// the configuration and the number of diagnostics and then lists every diagnostic,
+// each at the absolute path the toolchain reported, so the whole error is a host
+// detail and the line above it is not.
+func configurationsNotBuilt(unbuilt []load.Unbuilt) []report.ConfigurationNotBuilt {
+	named := make([]report.ConfigurationNotBuilt, len(unbuilt))
+	for i := range unbuilt {
+		c := &unbuilt[i].Configuration
+		named[i] = report.ConfigurationNotBuilt{
+			ID:    c.ID,
+			OS:    c.OS,
+			Arch:  c.Arch,
+			Tags:  slices.Clone(c.Tags),
+			Error: firstLine(unbuilt[i].Err.Error()),
+		}
+	}
+	return named
+}
+
+// firstLine is the text up to the first line break, which is one line whatever the
+// message holds.
+func firstLine(message string) string {
+	line, _, _ := strings.Cut(message, "\n")
+	return line
 }
 
 // consumersReported is the consumer set as a report names it: one entry per consumer

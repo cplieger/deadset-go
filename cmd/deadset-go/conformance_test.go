@@ -51,6 +51,13 @@ const (
 // nothing at the resolved position.
 const reportNone = "none"
 
+// The two facts about the world a fixture declares, which is the closed set the
+// expectation file's closed_world member draws from.
+const (
+	worldConsumers = "consumers"
+	worldMatrix    = "matrix"
+)
+
 // staleSuppression is the issue kind that reports an entry matching no current
 // finding, which the second phase must not produce for an entry the runner wrote.
 const staleSuppression = "DS1703"
@@ -81,11 +88,12 @@ type corpusExpectation struct {
 // target kind and consumer set the runner configures, and the exhaustive expectation
 // list.
 type corpusFixtureFile struct {
-	Name       string              `json:"name"`
-	Languages  []string            `json:"languages"`
-	TargetKind string              `json:"target_kind"`
-	Consumers  []string            `json:"consumers"`
-	Expect     []corpusExpectation `json:"expect"`
+	Name        string              `json:"name"`
+	Languages   []string            `json:"languages"`
+	TargetKind  string              `json:"target_kind"`
+	Consumers   []string            `json:"consumers"`
+	ClosedWorld []string            `json:"closed_world"`
+	Expect      []corpusExpectation `json:"expect"`
 }
 
 // corpusSubjectShapes is the corpus's own reading of the shape of every subject a
@@ -352,8 +360,12 @@ func answerFixture(t *testing.T, fixtureName string, declared []conformanceGap,
 	if err != nil {
 		return failedFixture(t, fixtureName, err.Error())
 	}
+	run, err := corpusRunOf(rendering, document, &fixture, &manifest)
+	if err != nil {
+		return failedFixture(t, fixtureName, err.Error())
+	}
 
-	first, err := analyzeRendering(t.Context(), rendering, document, fixture.TargetKind)
+	first, err := analyzeRendering(t.Context(), &run)
 	if err != nil {
 		return failedFixture(t, fixtureName, "the first analysis did not complete: "+err.Error())
 	}
@@ -369,7 +381,7 @@ func answerFixture(t *testing.T, fixtureName string, declared []conformanceGap,
 		row.Expectations[i] = expectationAnswer{Symbol: held.Symbol, Actual: actual, Message: message}
 	}
 
-	if err := answerSuppression(t.Context(), rendering, document, &fixture, sites, &first,
+	if err := answerSuppression(t.Context(), &run, &fixture, sites, &first,
 		row.Expectations, shapes); err != nil {
 		return failedFixture(t, fixtureName, "the second analysis did not complete: "+err.Error())
 	}
@@ -611,7 +623,7 @@ func unexpectedFindings(findings []kinds.Finding, sites map[string]site) []unexp
 // document row moves this phase without an edit. An expectation the phase skips
 // records no suppression answer, which is what the results document then says about
 // it.
-func answerSuppression(ctx context.Context, rendering, document string, fixture *corpusFixtureFile,
+func answerSuppression(ctx context.Context, run *corpusRun, fixture *corpusFixtureFile,
 	sites map[string]site, first *answered, rows []expectationAnswer, shapes *corpusSubjectShapes,
 ) error {
 	entries := make([]ignoreEntry, 0, len(fixture.Expect))
@@ -645,12 +657,12 @@ func answerSuppression(ctx context.Context, rendering, document string, fixture 
 	if err != nil {
 		return fmt.Errorf("render the ignore document: %w", err)
 	}
-	held := filepath.Join(rendering, targetSection, suppress.IgnoreFileName)
+	held := filepath.Join(run.rendering, targetSection, suppress.IgnoreFileName)
 	if err := os.WriteFile(held, append(body, '\n'), 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", held, err)
 	}
 
-	second, err := analyzeRendering(ctx, rendering, document, fixture.TargetKind)
+	second, err := analyzeRendering(ctx, run)
 	if err != nil {
 		return err
 	}
@@ -692,23 +704,86 @@ func staleFor(findings []kinds.Finding, entry ignoreEntry) bool {
 	return false
 }
 
-// analyzeRendering analyzes one extracted rendering as the corpus states a run is
+// corpusRun is how the runner invokes one fixture's analysis: the extracted
+// rendering, the scope document its declared consumers need, and the configuration
+// the corpus states the run is configured with.
+//
+// It is resolved once per fixture and both phases analyze under it, so the two
+// analyses are one run configuration by construction rather than by two calls that
+// happen to agree.
+type corpusRun struct {
+	rendering string
+	scope     string
+	config    config.Config
+}
+
+// corpusRunOf is the run one fixture is answered under, as the corpus states a run is
 // configured: the expectation file's target kind, the consumers the scope document
-// names, and every other setting at its default, so a rendering carrying build
-// constraints is analyzed under the matrix the analyzer derives from it.
-func analyzeRendering(ctx context.Context, rendering, document, targetKind string) (answered, error) {
-	resolved := resolution{
-		target: filepath.Join(rendering, targetSection),
-		scope:  document,
-		config: config.Default(),
-	}
-	switch config.TargetKind(targetKind) {
+// names, the world its closed_world member declares, and every other setting at its
+// default, so a rendering carrying build constraints and declaring nothing is analyzed
+// under the matrix the analyzer derives from it.
+//
+// A fixture that declares the consumer set complete is analyzed under a closed
+// published API; one that declares the matrix complete is analyzed over the
+// configurations its manifest names, because a matrix the analyzer derived is never a
+// complete one and a run configured with the declaration alone would leave the kinds
+// that need it reporting nothing. The member names no other fact and a run sets no
+// other key from it.
+func corpusRunOf(rendering, document string, fixture *corpusFixtureFile,
+	manifest *corpusManifest,
+) (corpusRun, error) {
+	held := corpusRun{rendering: rendering, scope: document, config: config.Default()}
+	switch config.TargetKind(fixture.TargetKind) {
 	case config.Application, config.Library:
-		resolved.config.Target.Kind = config.TargetKind(targetKind)
+		held.config.Target.Kind = config.TargetKind(fixture.TargetKind)
 	default:
-		return answered{}, fmt.Errorf("the expectation file names the target kind %q", targetKind)
+		return corpusRun{}, fmt.Errorf("the expectation file names the target kind %q", fixture.TargetKind)
 	}
 
+	for _, fact := range fixture.ClosedWorld {
+		switch fact {
+		case worldConsumers:
+			held.config.Consumers.Complete = true
+		case worldMatrix:
+			declared, err := declaredMatrix(manifest.Configurations)
+			if err != nil {
+				return corpusRun{}, err
+			}
+			held.config.Analysis.Matrix.Complete = true
+			held.config.Analysis.Configurations = declared
+		default:
+			return corpusRun{}, fmt.Errorf("the expectation file declares the closed-world fact %q, "+
+				"and the corpus draws that member from %q and %q", fact, worldConsumers, worldMatrix)
+		}
+	}
+	return held, nil
+}
+
+// declaredMatrix is the build matrix a rendering's manifest declares, one
+// configuration per identifier it names, spelled as an identifier spells it: the
+// operating system, the architecture and any tags joined by hyphens.
+func declaredMatrix(identifiers []string) ([]config.Configuration, error) {
+	declared := make([]config.Configuration, 0, len(identifiers))
+	for _, one := range identifiers {
+		parts := strings.Split(one, "-")
+		if len(parts) < 2 {
+			return nil, fmt.Errorf("the manifest declares the configuration %q, "+
+				"and an identifier names an operating system and an architecture", one)
+		}
+		declared = append(declared, config.Configuration{
+			ID: one, OS: parts[0], Arch: parts[1], Tags: parts[2:],
+		})
+	}
+	return declared, nil
+}
+
+// analyzeRendering analyzes one extracted rendering under the run the corpus states.
+func analyzeRendering(ctx context.Context, run *corpusRun) (answered, error) {
+	resolved := resolution{
+		target: filepath.Join(run.rendering, targetSection),
+		scope:  run.scope,
+		config: run.config,
+	}
 	options, err := exemptOptions(&resolved.config)
 	if err != nil {
 		return answered{}, err
@@ -1240,6 +1315,126 @@ func TestTheBinaryReportsTheConformanceRecordItCommitted(t *testing.T) {
 // rendering of each member is pinned here rather than by whichever fixtures the pin
 // happens to reach. A member the expectation does not name is not answered at all,
 // which is the other half of the rule.
+// TestTheCorpusRunDeclaresTheWorldTheFixtureNames pins what the runner configures
+// from an expectation file's closed-world member, which is the one thing the corpus
+// asks a runner to translate rather than to copy.
+//
+// It is a test of its own rather than a reading of the corpus run, because a fixture
+// answers under its own declaration alone: a fixture that declares nothing cannot say
+// what a declaration would have changed, and a fixture whose kind this analyzer
+// declines is answered as a gap whatever the runner configured.
+func TestTheCorpusRunDeclaresTheWorldTheFixtureNames(t *testing.T) {
+	t.Parallel()
+
+	manifest := corpusManifest{Configurations: []string{"linux-amd64", "linux-arm64-netgo"}}
+	declared := []config.Configuration{
+		{ID: "linux-amd64", OS: "linux", Arch: "amd64", Tags: []string{}},
+		{ID: "linux-arm64-netgo", OS: "linux", Arch: "arm64", Tags: []string{"netgo"}},
+	}
+
+	tests := []struct {
+		name           string
+		world          []string
+		consumers      bool
+		matrix         bool
+		configurations []config.Configuration
+	}{
+		{name: "an_open_world", world: nil, configurations: []config.Configuration{}},
+		{
+			name:           "a_declared_consumer_set",
+			world:          []string{worldConsumers},
+			consumers:      true,
+			configurations: []config.Configuration{},
+		},
+		{
+			name:           "a_declared_matrix",
+			world:          []string{worldMatrix},
+			matrix:         true,
+			configurations: declared,
+		},
+		{
+			name:           "both_facts",
+			world:          []string{worldConsumers, worldMatrix},
+			consumers:      true,
+			matrix:         true,
+			configurations: declared,
+		},
+	}
+
+	for _, one := range tests {
+		t.Run(one.name, func(t *testing.T) {
+			t.Parallel()
+
+			fixture := corpusFixtureFile{TargetKind: string(config.Library), ClosedWorld: one.world}
+			run, err := corpusRunOf("rendering", "", &fixture, &manifest)
+			if err != nil {
+				t.Fatalf("corpusRunOf(a fixture declaring %v) = error %v, want the run it is answered under",
+					one.world, err)
+			}
+			if got := run.config.Consumers.Complete; got != one.consumers {
+				t.Errorf("corpusRunOf(a fixture declaring %v) set consumers.complete to %t, want %t",
+					one.world, got, one.consumers)
+			}
+			if got := run.config.Analysis.Matrix.Complete; got != one.matrix {
+				t.Errorf("corpusRunOf(a fixture declaring %v) set analysis.matrix.complete to %t, want %t",
+					one.world, got, one.matrix)
+			}
+			if got := run.config.Analysis.Configurations; !slices.EqualFunc(got, one.configurations, sameConfiguration) {
+				t.Errorf("corpusRunOf(a fixture declaring %v) set analysis.configurations to %v, want %v",
+					one.world, got, one.configurations)
+			}
+		})
+	}
+}
+
+// sameConfiguration reports whether two configurations of a declared matrix are the
+// one configuration, every member included.
+func sameConfiguration(a, b config.Configuration) bool {
+	return a.ID == b.ID && a.OS == b.OS && a.Arch == b.Arch && slices.Equal(a.Tags, b.Tags)
+}
+
+// TestTheCorpusRunRefusesAWorldTheCorpusDoesNotCarry pins that a fact outside the
+// closed set the corpus declares, and an identifier that names no architecture, are
+// refused rather than configured as nothing: either is a corpus the runner cannot
+// answer, and a run configured from a member it did not understand would report a
+// kind's silence as this analyzer's answer.
+func TestTheCorpusRunRefusesAWorldTheCorpusDoesNotCarry(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		fixture  corpusFixtureFile
+		manifest corpusManifest
+		want     string
+	}{
+		{
+			name:    "a_fact_outside_the_closed_set",
+			fixture: corpusFixtureFile{TargetKind: string(config.Library), ClosedWorld: []string{"platforms"}},
+			want:    `"platforms"`,
+		},
+		{
+			name:     "an_identifier_naming_no_architecture",
+			fixture:  corpusFixtureFile{TargetKind: string(config.Library), ClosedWorld: []string{worldMatrix}},
+			manifest: corpusManifest{Configurations: []string{"linux"}},
+			want:     `"linux"`,
+		},
+	}
+
+	for _, one := range tests {
+		t.Run(one.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := corpusRunOf("rendering", "", &one.fixture, &one.manifest)
+			if err == nil {
+				t.Fatalf("corpusRunOf(%s) = no error, want a refusal", one.name)
+			}
+			if !strings.Contains(err.Error(), one.want) {
+				t.Errorf("corpusRunOf(%s) = error %q, want one naming %s", one.name, err, one.want)
+			}
+		})
+	}
+}
+
 func TestAnswerFromRendersEveryMemberAnExpectationNames(t *testing.T) {
 	t.Parallel()
 
