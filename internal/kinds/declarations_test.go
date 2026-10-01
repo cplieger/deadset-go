@@ -12,9 +12,7 @@ import (
 )
 
 func TestTheUnusedKindsReportEveryDeadDeclarationOfTheFixtureAndNothingLive(t *testing.T) {
-	in := inputOf(t, "declarations-unused.txtar", applicationConfig(), Consumers{})
-
-	result := computed(t, in, declarationEmitters())
+	result := analysisOf(t, "declarations-unused.txtar", asApplication, Consumers{}).findings(t, declarationKinds)
 
 	for code, want := range map[string][]string{
 		unusedExportedCode:   {"Resolve", "Recurse"},
@@ -36,9 +34,7 @@ func TestTheUnusedKindsReportEveryDeadDeclarationOfTheFixtureAndNothingLive(t *t
 }
 
 func TestASelfReferencingDeclarationIsReportedOnceUnderTheCodeItsVisibilitySelects(t *testing.T) {
-	in := inputOf(t, "declarations-unused.txtar", applicationConfig(), Consumers{})
-
-	result := computed(t, in, declarationEmitters())
+	result := analysisOf(t, "declarations-unused.txtar", asApplication, Consumers{}).findings(t, declarationKinds)
 
 	var reported []string
 	for i := range result.Findings {
@@ -62,9 +58,7 @@ func TestASelfReferencingDeclarationIsReportedOnceUnderTheCodeItsVisibilitySelec
 }
 
 func TestTheUnusedMessagesSayWhatTheAnalysisFound(t *testing.T) {
-	in := inputOf(t, "declarations-unused.txtar", applicationConfig(), Consumers{})
-
-	result := computed(t, in, declarationEmitters())
+	result := analysisOf(t, "declarations-unused.txtar", asApplication, Consumers{}).findings(t, declarationKinds)
 
 	for _, want := range []struct{ code, name, message string }{
 		{unusedExportedCode, "Resolve", "exported function has no reference in the target and none from any loaded consumer"},
@@ -79,11 +73,8 @@ func TestTheUnusedMessagesSayWhatTheAnalysisFound(t *testing.T) {
 }
 
 func TestATestOnlyReferenceIsItsOwnKindAndAProductionReferenceRemovesTheFinding(t *testing.T) {
-	tested := inputOf(t, "declarations-test-only.txtar", applicationConfig(), Consumers{})
-	moved := inputOf(t, "declarations-test-only-moved.txtar", applicationConfig(), Consumers{})
-
-	before := computed(t, tested, declarationEmitters())
-	after := computed(t, moved, declarationEmitters())
+	before := analysisOf(t, "declarations-test-only.txtar", asApplication, Consumers{}).findings(t, declarationKinds)
+	after := analysisOf(t, "declarations-test-only-moved.txtar", asApplication, Consumers{}).findings(t, declarationKinds)
 
 	if got := namesUnder(before.Findings, testOnlyUseCode); !slices.Equal(got, []string{"OnlyTested"}) {
 		t.Errorf("the pass reports %s about %v, want [OnlyTested]", testOnlyUseCode, got)
@@ -102,9 +93,7 @@ func TestATestOnlyReferenceIsItsOwnKindAndAProductionReferenceRemovesTheFinding(
 }
 
 func TestATestWhoseEveryTargetIsDeadIsReportedInTheirComponent(t *testing.T) {
-	in := inputOf(t, "declarations-test-of-dead-code.txtar", applicationConfig(), Consumers{})
-
-	result := computed(t, in, declarationEmitters())
+	result := analysisOf(t, "declarations-test-of-dead-code.txtar", asApplication, Consumers{}).findings(t, declarationKinds)
 
 	if got := namesUnder(result.Findings, testOfDeadCodeCode); !slices.Equal(got, []string{"TestDeadOnly"}) {
 		t.Fatalf("the pass reports %s about %v, want [TestDeadOnly]: TestMixed reaches a live declaration",
@@ -135,9 +124,7 @@ func TestATestWhoseEveryTargetIsDeadIsReportedInTheirComponent(t *testing.T) {
 }
 
 func TestADeprecatedDeclarationNothingReferencesIsReportedUnderTheDeprecatedKindAlone(t *testing.T) {
-	in := inputOf(t, "declarations-deprecated.txtar", applicationConfig(), Consumers{})
-
-	result := computed(t, in, declarationEmitters())
+	result := analysisOf(t, "declarations-deprecated.txtar", asApplication, Consumers{}).findings(t, declarationKinds)
 
 	want := []string{"Old", "Stale", "StaleToo", "Counter.Old"}
 	if got := namesUnder(result.Findings, deprecatedAndUnusedCode); !slices.Equal(got, want) {
@@ -160,9 +147,7 @@ func TestADeprecatedDeclarationNothingReferencesIsReportedUnderTheDeprecatedKind
 }
 
 func TestAnExportedDeclarationOfAnUnimportablePackageIsLeftToTheUnreachableExportKind(t *testing.T) {
-	in := inputOf(t, "class-visibility.txtar", applicationConfig(), Consumers{})
-
-	result := computed(t, in, declarationEmitters())
+	result := analysisOf(t, "class-visibility.txtar", asApplication, Consumers{}).findings(t, declarationKinds)
 
 	for i := range result.Findings {
 		if result.Findings[i].Symbol.Name == "Dropped" {
@@ -253,9 +238,7 @@ func TestAKindReportsNothingWhereTheSeverityMapAllowsIt(t *testing.T) {
 // exemption class that would retain them fires on the same fixture in the plain
 // mode, which is where the two modes differ.
 func TestTheMembersOfAStructOnlyATestFileMarshalsReportUnderAProductionSweep(t *testing.T) {
-	in := inputOf(t, "declarations-test-evidence.txtar", applicationConfig(), Consumers{})
-
-	result := computed(t, in, packageEmitters())
+	result := analysisOf(t, "declarations-test-evidence.txtar", asApplication, Consumers{}).findings(t, everyKind)
 	got := make(map[string]string, len(result.Findings))
 	for i := range result.Findings {
 		got[result.Findings[i].Symbol.Ref] = result.Findings[i].Code

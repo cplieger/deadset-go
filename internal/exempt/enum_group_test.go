@@ -11,12 +11,9 @@ import (
 // exemptionRows renders one class's answer as one row per retained symbol, the
 // declaration's name and the clause the exemption records, and fails the test for
 // a row naming another class, a symbol outside the inventory or no site.
-func exemptionRows(t *testing.T, in *Input, class Class, found []graph.Exemption) []string {
+func exemptionRows(t *testing.T, symbols []graph.Symbol, class Class, found []graph.Exemption) []string {
 	t.Helper()
-	names := make(map[graph.SymbolID]string, len(in.Symbols))
-	for i := range in.Symbols {
-		names[in.Symbols[i].ID] = in.Symbols[i].Name
-	}
+	names := symbolNames(symbols)
 	rows := make([]string, 0, len(found))
 	for _, e := range found {
 		name, held := names[e.ID]
@@ -75,12 +72,13 @@ func TestEnumGroupRetainsEveryMemberOfAGroupWhoseValuesCanArriveByConversion(t *
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			in := inputOf(t, test.archive, Options{})
-			found, err := EnumGroupDetector(in)
+			shared := analysisOf(t, test.archive, Options{})
+			symbols := shared.inventory(t)
+			found, err := shared.detect(t, EnumGroup)
 			if err != nil {
 				t.Fatalf("EnumGroupDetector(%s) error: %v", test.archive, err)
 			}
-			got := exemptionRows(t, in, EnumGroup, found)
+			got := exemptionRows(t, symbols, EnumGroup, found)
 			if !slices.Equal(got, test.want) {
 				t.Errorf("EnumGroupDetector(%s) retained\n%v\nwant\n%v", test.archive, got, test.want)
 			}
@@ -98,7 +96,7 @@ func TestEnumGroupLeavesTheUnreferencedMemberOfAPlainGroupASweepCandidate(t *tes
 	}
 	if len(found) != 0 {
 		t.Fatalf("EnumGroupDetector(%s) retained %v, want no exemption", archive,
-			exemptionRows(t, in, EnumGroup, found))
+			exemptionRows(t, in.Symbols, EnumGroup, found))
 	}
 
 	references, _, err := graph.References(in.Result, in.Root, in.Read, in.Symbols)

@@ -26,16 +26,10 @@ type analysis struct {
 func analyze(t *testing.T, archive string) analysis {
 	t.Helper()
 
-	dir := extract(t, archive)
-	result, root := loadDir(t, dir, "linux", "amd64")
-	symbols, err := Symbols(result, root, os.ReadFile)
-	if err != nil {
-		t.Fatalf("Setup: Symbols(%s): %v", archive, err)
-	}
-	refs, rules, err := References(result, root, os.ReadFile, symbols)
-	if err != nil {
-		t.Fatalf("References(%s) error: %v", archive, err)
-	}
+	shared := analysisOf(t, archive, nil)
+	symbols := shared.inventory(t)
+	refs := shared.references(t)
+	rules := shared.testFileRules(t)
 
 	names := make(map[SymbolID]string, len(symbols))
 	for _, s := range symbols {

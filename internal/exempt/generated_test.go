@@ -12,10 +12,10 @@ import (
 )
 
 // symbolNames maps every symbol of one inventory to the name a message renders.
-func symbolNames(in *Input) map[graph.SymbolID]string {
-	names := make(map[graph.SymbolID]string, len(in.Symbols))
-	for i := range in.Symbols {
-		names[in.Symbols[i].ID] = in.Symbols[i].Name
+func symbolNames(symbols []graph.Symbol) map[graph.SymbolID]string {
+	names := make(map[graph.SymbolID]string, len(symbols))
+	for i := range symbols {
+		names[symbols[i].ID] = symbols[i].Name
 	}
 	return names
 }
@@ -23,8 +23,8 @@ func symbolNames(in *Input) map[graph.SymbolID]string {
 // rendered prints one exemption per line as the name of the declaration it
 // retains, the class, the site and the clause, so a want list reads as source
 // rather than as positions.
-func rendered(in *Input, exemptions []graph.Exemption) []string {
-	names := symbolNames(in)
+func rendered(symbols []graph.Symbol, exemptions []graph.Exemption) []string {
+	names := symbolNames(symbols)
 	lines := make([]string, 0, len(exemptions))
 	for _, e := range exemptions {
 		lines = append(lines, fmt.Sprintf("%s\t%s\t%s:%d:%d\t%s",
@@ -80,7 +80,7 @@ func TestGeneratedFileDetectorRetainsEveryDeclarationOfAGeneratedFile(t *testing
 		"Table\tgenerated-file\tgen.go:3:1\tdeclared in a generated file",
 		"size\tgenerated-file\tgen.go:3:1\tdeclared in a generated file",
 	}
-	if lines := rendered(in, got); !slices.Equal(lines, want) {
+	if lines := rendered(in.Symbols, got); !slices.Equal(lines, want) {
 		t.Errorf("GeneratedFileDetector(generated.txtar) = %q, want %q", lines, want)
 	}
 }
@@ -93,7 +93,7 @@ func TestGeneratedFileDetectorRetainsNothingWhenGeneratedFilesAreIncluded(t *tes
 		t.Fatalf("GeneratedFileDetector(generated.txtar, include) error: %v", err)
 	}
 
-	if lines := rendered(in, got); len(lines) != 0 {
+	if lines := rendered(in.Symbols, got); len(lines) != 0 {
 		t.Errorf("GeneratedFileDetector(generated.txtar, include) = %q, want no exemption", lines)
 	}
 }
@@ -117,7 +117,7 @@ func candidatesOf(t *testing.T, archive string, opts Options) []string {
 		t.Fatalf("Setup: graph.Roots(%s): %v", archive, err)
 	}
 
-	names := symbolNames(in)
+	names := symbolNames(in.Symbols)
 	result := graph.New(in.Symbols, refs, roots).Sweep(graph.SweepInput{Exempt: exemptions})
 	got := make([]string, 0, len(result.Candidates))
 	for _, c := range result.Candidates {

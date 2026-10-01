@@ -153,8 +153,7 @@ func TestUnnecessaryExportReportsAPublishedPackageOnlyUnderAClosedWorld(t *testi
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			in := inputOf(t, "narrowing-published.txtar", libraryConfig(), tc.consumers)
-			found, err := UnnecessaryExport(in)
+			found, err := analysisOf(t, "narrowing-published.txtar", asLibrary, tc.consumers).emit(t, unnecessaryExportCode)
 			if err != nil {
 				t.Fatalf("UnnecessaryExport(%s) = error %v, want the findings", tc.name, err)
 			}
@@ -201,8 +200,7 @@ func TestUnnecessaryExposureReportsAModuleWideReferenceSetUnderAClosedWorld(t *t
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			in := inputOf(t, "narrowing-published.txtar", libraryConfig(), tc.consumers)
-			found, err := UnnecessaryExposure(in)
+			found, err := analysisOf(t, "narrowing-published.txtar", asLibrary, tc.consumers).emit(t, unnecessaryExposureCode)
 			if err != nil {
 				t.Fatalf("UnnecessaryExposure(%s) = error %v, want the findings", tc.name, err)
 			}
@@ -218,8 +216,8 @@ func TestUnnecessaryExposureReportsAModuleWideReferenceSetUnderAClosedWorld(t *t
 }
 
 func TestUnreachableExportReachesCertainWithNoConsumerInformation(t *testing.T) {
-	in := inputOf(t, "narrowing-published.txtar", libraryConfig(), Consumers{})
-	found, err := UnreachableExport(in)
+	shared := analysisOf(t, "narrowing-published.txtar", asLibrary, Consumers{})
+	found, err := shared.emit(t, unreachableExportCode)
 	if err != nil {
 		t.Fatalf("UnreachableExport(narrowing-published) = error %v, want the findings", err)
 	}
@@ -239,7 +237,7 @@ func TestUnreachableExportReachesCertainWithNoConsumerInformation(t *testing.T) 
 			t.Errorf("UnreachableExport reported %s naming the narrower visibility %q, want none",
 				f.Symbol.Ref, f.Details.NarrowerVisibility)
 		}
-		if class := in.ClassOf(narrowedIDOf(t, in, f.Symbol.Ref)); class != Certain {
+		if class := shared.classOf(t, f.Symbol.Ref); class != Certain {
 			t.Errorf("ClassOf(%s) = %q, want %q with no consumer information",
 				f.Symbol.Ref, class, Certain)
 		}
@@ -247,8 +245,7 @@ func TestUnreachableExportReachesCertainWithNoConsumerInformation(t *testing.T) 
 }
 
 func TestUnreachableExportSaysWhatTheAnalysisFoundAboutTheReferences(t *testing.T) {
-	in := inputOf(t, "narrowing-published.txtar", libraryConfig(), Consumers{})
-	found, err := UnreachableExport(in)
+	found, err := analysisOf(t, "narrowing-published.txtar", asLibrary, Consumers{}).emit(t, unreachableExportCode)
 	if err != nil {
 		t.Fatalf("UnreachableExport(narrowing-published) = error %v, want the findings", err)
 	}
@@ -267,8 +264,7 @@ func TestUnreachableExportSaysWhatTheAnalysisFoundAboutTheReferences(t *testing.
 }
 
 func TestUnreachableExportLeavesADeclarationOutsideItsPopulationAlone(t *testing.T) {
-	in := inputOf(t, "narrowing-published.txtar", libraryConfig(), Consumers{})
-	found, err := UnreachableExport(in)
+	found, err := analysisOf(t, "narrowing-published.txtar", asLibrary, Consumers{}).emit(t, unreachableExportCode)
 	if err != nil {
 		t.Fatalf("UnreachableExport(narrowing-published) = error %v, want the findings", err)
 	}
@@ -286,11 +282,8 @@ func TestUnreachableExportLeavesADeclarationOutsideItsPopulationAlone(t *testing
 }
 
 func TestUnreachableExportLeavesACandidateATestFileReferencesToTheTestOnlyKind(t *testing.T) {
-	in := inputOf(t, "narrowing-published.txtar", libraryConfig(), Consumers{})
-	result, err := Compute(in, map[string]Emitter{
-		testOnlyUseCode:       TestOnlyUse,
-		unreachableExportCode: UnreachableExport,
-	})
+	result, err := analysisOf(t, "narrowing-published.txtar", asLibrary, Consumers{}).
+		compute(t, testOnlyAndUnreachableExport)
 	if err != nil {
 		t.Fatalf("Compute(the test-only and the unreachable-export kinds) = error %v, "+
 			"want the findings", err)
@@ -372,8 +365,7 @@ func TestUnreachableExportYieldsEverySubjectAMoreSpecificKindReports(t *testing.
 		"go://example.com/app/internal/api#Loud":        unnecessaryExportCode,
 	}
 
-	in := inputOf(t, "narrowing-unimportable.txtar", applicationConfig(), Consumers{})
-	result := computed(t, in, packageEmitters())
+	result := analysisOf(t, "narrowing-unimportable.txtar", asApplication, Consumers{}).findings(t, everyKind)
 	got := make(map[string]string, len(result.Findings))
 	for _, f := range result.Findings {
 		got[f.Symbol.Ref] = f.Code
@@ -562,12 +554,7 @@ func TestNarrowingReportsEveryFindingTheFrameworkAccepts(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			in := inputOf(t, "narrowing-published.txtar", libraryConfig(), tc.consumers)
-			result, err := Compute(in, map[string]Emitter{
-				unnecessaryExportCode:   UnnecessaryExport,
-				unnecessaryExposureCode: UnnecessaryExposure,
-				unreachableExportCode:   UnreachableExport,
-			})
+			result, err := analysisOf(t, "narrowing-published.txtar", asLibrary, tc.consumers).compute(t, narrowingKinds)
 			if err != nil {
 				t.Fatalf("Compute(the three narrowing kinds) = error %v, want the findings", err)
 			}
@@ -598,12 +585,8 @@ func TestNarrowingReportsEveryFindingTheFrameworkAccepts(t *testing.T) {
 // candidate, so it carries the relation that found it. The framework decides both
 // from the sweep, which is why one pass over one fixture measures the two.
 func TestANarrowingFindingCarriesNoLivenessRelationAndAnUnreachableExportCarriesTheCandidates(t *testing.T) {
-	in := inputOf(t, "narrowing-published.txtar", libraryConfig(), Consumers{Complete: true})
-	result, err := Compute(in, map[string]Emitter{
-		unnecessaryExportCode:   UnnecessaryExport,
-		unnecessaryExposureCode: UnnecessaryExposure,
-		unreachableExportCode:   UnreachableExport,
-	})
+	result, err := analysisOf(t, "narrowing-published.txtar", asLibrary, Consumers{Complete: true}).
+		compute(t, narrowingKinds)
 	if err != nil {
 		t.Fatalf("Compute(the three narrowing kinds) = error %v, want the findings", err)
 	}
@@ -634,12 +617,8 @@ func TestANarrowingFindingCarriesNoLivenessRelationAndAnUnreachableExportCarries
 // Every finding of a kind of this file names the language and the vocabulary's own
 // name for the kind, which the framework fills rather than the emitter.
 func TestNarrowingCarriesTheVocabularyNameAndTheLanguage(t *testing.T) {
-	in := inputOf(t, "narrowing-published.txtar", libraryConfig(), Consumers{Complete: true})
-	result, err := Compute(in, map[string]Emitter{
-		unnecessaryExportCode:   UnnecessaryExport,
-		unnecessaryExposureCode: UnnecessaryExposure,
-		unreachableExportCode:   UnreachableExport,
-	})
+	result, err := analysisOf(t, "narrowing-published.txtar", asLibrary, Consumers{Complete: true}).
+		compute(t, narrowingKinds)
 	if err != nil {
 		t.Fatalf("Compute(the three narrowing kinds) = error %v, want the findings", err)
 	}

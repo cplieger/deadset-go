@@ -337,12 +337,9 @@ func TestComputeRefusesAFindingAboutADeclarationAnEmitterNamesByItsReferenceAlon
 func TestTheKeyOfEveryFindingAboutADeclarationIsThatDeclarationsIdentifier(t *testing.T) {
 	t.Parallel()
 
-	table := packageEmitters()
 	measured := 0
 	for _, archive := range fixtures(t) {
-		in := inputOf(t, archive, applicationConfig(), Consumers{})
-
-		result := computed(t, in, table)
+		result := analysisOf(t, archive, asApplication, Consumers{}).findings(t, everyKind)
 
 		for i := range result.Findings {
 			found := &result.Findings[i]
@@ -473,14 +470,11 @@ func swap(t *testing.T, rows []catalog.Row) {
 func TestComputeReportsEveryPositionOnceOverEveryKindOfThePackage(t *testing.T) {
 	t.Parallel()
 
-	emitters := packageEmitters()
 	for _, archive := range fixtures(t) {
 		t.Run(archive, func(t *testing.T) {
 			t.Parallel()
 
-			in := inputOf(t, archive, applicationConfig(), Consumers{})
-
-			result, err := Compute(in, emitters)
+			result, err := analysisOf(t, archive, asApplication, Consumers{}).compute(t, everyKind)
 			if err != nil {
 				t.Fatalf("Compute(every kind of the package, %s) = error %v, want the findings of the pass: two kinds disagree on which code reports one subject",
 					archive, err)
@@ -510,9 +504,7 @@ func TestTheKindsOfThePackageAgreeOnWhichCodeReportsADeclarationNothingReference
 		"go://example.com/app/api#Convert[T]":  typeParameterCode,
 	}
 
-	in := inputOf(t, "precedence-importable.txtar", applicationConfig(), Consumers{})
-
-	result, err := Compute(in, packageEmitters())
+	result, err := analysisOf(t, "precedence-importable.txtar", asApplication, Consumers{}).compute(t, everyKind)
 	if err != nil {
 		t.Fatalf("Compute(every kind of the package, precedence-importable.txtar) = error %v, want the findings of the pass: an unused-declaration kind takes a subject a more specific kind reports",
 			err)
@@ -718,12 +710,9 @@ func TestLivenessAbsentAnswersForEveryFindingTheContractForbidsTheRelationOn(t *
 	t.Parallel()
 
 	absent := livenessAbsentKinds(t)
-	table := packageEmitters()
 	measured := 0
 	for _, archive := range fixtures(t) {
-		in := inputOf(t, archive, applicationConfig(), Consumers{})
-
-		for _, found := range computed(t, in, table).Findings {
+		for _, found := range analysisOf(t, archive, asApplication, Consumers{}).findings(t, everyKind).Findings {
 			if !slices.Contains(absent, found.Symbol.Kind) {
 				continue
 			}

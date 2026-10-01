@@ -280,8 +280,7 @@ func TestMatrixSweepHoldsASymbolLiveUnderTheRelationsOfEveryConfiguration(t *tes
 }
 
 func TestMatrixOverOneConfigurationAnswersWhatTheGraphOfThatConfigurationAnswers(t *testing.T) {
-	dir := extract(t, "sweep.txtar")
-	one := configuredOf(t, dir, linuxAmd64(), RootOptions{PublishedAPI: true})
+	one := analysisOf(t, "sweep.txtar", nil).configured(t, true)
 	direct := New(one.Symbols, one.References, one.Roots).Sweep(SweepInput{})
 
 	merged, err := Merge([]Configured{one})

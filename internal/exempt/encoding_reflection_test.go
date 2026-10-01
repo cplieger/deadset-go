@@ -12,26 +12,27 @@ import (
 	spec "github.com/cplieger/deadset-spec/v3"
 )
 
-// retained runs one detector and returns what it recorded.
-func retained(t *testing.T, in *Input, d Detector) []graph.Exemption {
+// retained is what one class's detector recorded over a shared analysis.
+func retained(t *testing.T, shared *sharedAnalysis, class Class) []graph.Exemption {
 	t.Helper()
-	found, err := d(in)
+	found, err := shared.detect(t, class)
 	if err != nil {
 		t.Fatalf("detector error: %v", err)
 	}
 	return found
 }
 
-// retainedRefs runs one detector and returns the reference of every symbol it
-// held back, once each, sorted.
-func retainedRefs(t *testing.T, in *Input, d Detector) []string {
+// retainedRefs is the reference of every symbol one class's detector held back, once
+// each, sorted.
+func retainedRefs(t *testing.T, shared *sharedAnalysis, class Class) []string {
 	t.Helper()
-	refs := make(map[graph.SymbolID]string, len(in.Symbols))
-	for i := range in.Symbols {
-		refs[in.Symbols[i].ID] = in.Symbols[i].Ref
+	symbols := shared.inventory(t)
+	refs := make(map[graph.SymbolID]string, len(symbols))
+	for i := range symbols {
+		refs[symbols[i].ID] = symbols[i].Ref
 	}
 	var got []string
-	for _, e := range retained(t, in, d) {
+	for _, e := range retained(t, shared, class) {
 		ref, held := refs[e.ID]
 		if !held {
 			t.Errorf("exemption at %s names %s, which the inventory does not hold", e.Site, e.ID)
@@ -75,8 +76,8 @@ func flowRefs(typeName string, members ...string) []string {
 // while every other entry point of that package hands out a value a method is
 // reachable from.
 func TestEncodingReflectionRetainsWhatEachDestinationReads(t *testing.T) {
-	in := inputOf(t, "encoding-reflection-firing.txtar", Options{})
-	refs := retainedRefs(t, in, EncodingReflectionDetector)
+	shared := analysisOf(t, "encoding-reflection-firing.txtar", Options{})
+	refs := retainedRefs(t, shared, EncodingReflection)
 
 	for _, test := range []struct {
 		destination string
@@ -180,8 +181,8 @@ func methodRefs(typeName string, members ...string) []string {
 // one that names neither direction resolves both, and a method of neither set is
 // retained by nothing.
 func TestEncodingReflectionRetainsTheMethodsAnEncoderResolvesByName(t *testing.T) {
-	in := inputOf(t, "encoding-reflection-methods.txtar", Options{})
-	refs := retainedRefs(t, in, EncodingReflectionDetector)
+	shared := analysisOf(t, "encoding-reflection-methods.txtar", Options{})
+	refs := retainedRefs(t, shared, EncodingReflection)
 
 	for _, test := range []struct {
 		destination string
@@ -235,8 +236,8 @@ func reachRefs(typeName string, members ...string) []string {
 }
 
 func TestEncodingReflectionReachesTheTypesTheMembersOfAnArgumentCarry(t *testing.T) {
-	in := inputOf(t, "encoding-reflection-reach.txtar", Options{})
-	refs := retainedRefs(t, in, EncodingReflectionDetector)
+	shared := analysisOf(t, "encoding-reflection-reach.txtar", Options{})
+	refs := retainedRefs(t, shared, EncodingReflection)
 
 	for _, test := range []struct {
 		reached  string
@@ -305,22 +306,23 @@ func TestEncodingReflectionReachesTheTypesTheMembersOfAnArgumentCarry(t *testing
 }
 
 func TestEncodingReflectionRetainsNothingWhereNoTypeReachesADestination(t *testing.T) {
-	in := inputOf(t, "encoding-reflection-quiet.txtar", Options{})
-	if got := retainedRefs(t, in, EncodingReflectionDetector); len(got) > 0 {
+	shared := analysisOf(t, "encoding-reflection-quiet.txtar", Options{})
+	if got := retainedRefs(t, shared, EncodingReflection); len(got) > 0 {
 		t.Errorf("EncodingReflectionDetector(encoding-reflection-quiet.txtar) retained %v, want nothing", got)
 	}
 }
 
 func TestEncodingReflectionNamesTheClassTheDestinationAndTheSite(t *testing.T) {
-	in := inputOf(t, "encoding-reflection-firing.txtar", Options{})
-	refs := make(map[graph.SymbolID]string, len(in.Symbols))
-	for i := range in.Symbols {
-		refs[in.Symbols[i].ID] = in.Symbols[i].Ref
+	shared := analysisOf(t, "encoding-reflection-firing.txtar", Options{})
+	symbols := shared.inventory(t)
+	refs := make(map[graph.SymbolID]string, len(symbols))
+	for i := range symbols {
+		refs[symbols[i].ID] = symbols[i].Ref
 	}
 
 	type record struct{ ref, class, site, detail string }
 	var got []record
-	for _, e := range retained(t, in, EncodingReflectionDetector) {
+	for _, e := range retained(t, shared, EncodingReflection) {
 		if !strings.HasPrefix(refs[e.ID], "go://example.com/flow#JSONPayload.") &&
 			!strings.HasPrefix(refs[e.ID], "go://example.com/flow#LogPayload.") {
 			continue
@@ -360,8 +362,8 @@ func opaqueRefs(typeName string, members ...string) []string {
 // conversion set records, and the methods the interface requires are what
 // interface-satisfaction retains.
 func TestEncodingReflectionRetainsWhatCrossesOutOfTheProgram(t *testing.T) {
-	in := inputOf(t, "encoding-reflection-opaque.txtar", Options{})
-	refs := retainedRefs(t, in, EncodingReflectionDetector)
+	shared := analysisOf(t, "encoding-reflection-opaque.txtar", Options{})
+	refs := retainedRefs(t, shared, EncodingReflection)
 
 	for _, test := range []struct {
 		crossing string
@@ -433,14 +435,15 @@ func TestEncodingReflectionRetainsWhatCrossesOutOfTheProgram(t *testing.T) {
 // a wrapper's caller reads the wrapper's name at its own call, the way the
 // format-verb class names the print wrapper it found.
 func TestEncodingReflectionNamesTheCalleeAValueCrossedInto(t *testing.T) {
-	in := inputOf(t, "encoding-reflection-opaque.txtar", Options{})
-	refs := make(map[graph.SymbolID]string, len(in.Symbols))
-	for i := range in.Symbols {
-		refs[in.Symbols[i].ID] = in.Symbols[i].Ref
+	shared := analysisOf(t, "encoding-reflection-opaque.txtar", Options{})
+	symbols := shared.inventory(t)
+	refs := make(map[graph.SymbolID]string, len(symbols))
+	for i := range symbols {
+		refs[symbols[i].ID] = symbols[i].Ref
 	}
 
 	got := make(map[string]string)
-	for _, e := range retained(t, in, EncodingReflectionDetector) {
+	for _, e := range retained(t, shared, EncodingReflection) {
 		if ref, held := refs[e.ID]; held {
 			got[ref] = e.Detail
 		}
@@ -463,14 +466,14 @@ func TestEncodingReflectionNamesTheCalleeAValueCrossedInto(t *testing.T) {
 // destination table names that package. The two classes would otherwise spell one
 // fact two ways, and two spellings of a detail are two records.
 func TestFormatVerbContractAloneRecordsAnOperandOfTheFormattingPackage(t *testing.T) {
-	in := inputOf(t, "encoding-reflection-opaque.txtar", Options{})
+	shared := analysisOf(t, "encoding-reflection-opaque.txtar", Options{})
 
-	formatted := membersOf(retainedRefs(t, in, FormatVerbContractDetector), "Printed")
+	formatted := membersOf(retainedRefs(t, shared, FormatVerbContract), "Printed")
 	if want := opaqueRefs("Printed", "String"); !slices.Equal(formatted, want) {
 		t.Errorf("FormatVerbContractDetector(encoding-reflection-opaque.txtar) retained %v for Printed, want %v",
 			formatted, want)
 	}
-	if encoded := membersOf(retainedRefs(t, in, EncodingReflectionDetector), "Printed"); len(encoded) > 0 {
+	if encoded := membersOf(retainedRefs(t, shared, EncodingReflection), "Printed"); len(encoded) > 0 {
 		t.Errorf("EncodingReflectionDetector(encoding-reflection-opaque.txtar) retained %v for Printed, want nothing: the formatting package is a destination the format-verb class names",
 			encoded)
 	}

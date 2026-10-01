@@ -6,9 +6,10 @@ import (
 )
 
 func TestReflectiveLookupDetector(t *testing.T) {
-	in := inputOf(t, "reflective-lookup.txtar", Options{})
+	shared := analysisOf(t, "reflective-lookup.txtar", Options{})
+	symbols := shared.inventory(t)
 
-	got, err := ReflectiveLookupDetector(in)
+	got, err := shared.detect(t, ReflectiveLookup)
 	if err != nil {
 		t.Fatalf("ReflectiveLookupDetector(reflective-lookup.txtar) error: %v", err)
 	}
@@ -20,20 +21,21 @@ func TestReflectiveLookupDetector(t *testing.T) {
 		"Server.secret reflective-lookup server.go:38:6 looked up by reflect.Value.FieldByName",
 		"Handler reflective-lookup server.go:43:9 looked up by plugin.Plugin.Lookup",
 	}
-	if rows := retainedRows(t, in, got); !slices.Equal(rows, want) {
+	if rows := retainedRows(t, symbols, got); !slices.Equal(rows, want) {
 		t.Errorf("ReflectiveLookupDetector(reflective-lookup.txtar) = %q, want %q", rows, want)
 	}
 }
 
 func TestReflectiveLookupDetectorWithoutALookup(t *testing.T) {
-	in := inputOf(t, "reflective-lookup-none.txtar", Options{})
+	shared := analysisOf(t, "reflective-lookup-none.txtar", Options{})
+	symbols := shared.inventory(t)
 
-	got, err := ReflectiveLookupDetector(in)
+	got, err := shared.detect(t, ReflectiveLookup)
 	if err != nil {
 		t.Fatalf("ReflectiveLookupDetector(reflective-lookup-none.txtar) error: %v", err)
 	}
 	if len(got) != 0 {
 		t.Errorf("ReflectiveLookupDetector(reflective-lookup-none.txtar) = %q, want no exemption",
-			retainedRows(t, in, got))
+			retainedRows(t, symbols, got))
 	}
 }

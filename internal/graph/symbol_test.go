@@ -110,13 +110,7 @@ func readOutsideRootSource(string) ([]byte, error) { return []byte(outsideRootSo
 // enumerates it.
 func symbolsOf(t *testing.T, archive string) []Symbol {
 	t.Helper()
-	dir := extract(t, archive)
-	result, root := loadDir(t, dir, "linux", "amd64")
-	symbols, err := Symbols(result, root, os.ReadFile)
-	if err != nil {
-		t.Fatalf("Symbols(%s) error: %v", archive, err)
-	}
-	return symbols
+	return analysisOf(t, archive, nil).inventory(t)
 }
 
 // render prints one symbol per line, tab-separated, for a golden comparison.

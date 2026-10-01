@@ -30,12 +30,13 @@ func TestErrorsDuckTypingRetainsTheHelperFormsOnATypeReachableAsAnError(t *testi
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			in := inputOf(t, test.archive, Options{})
-			found, err := ErrorsDuckTypingDetector(in)
+			shared := analysisOf(t, test.archive, Options{})
+			symbols := shared.inventory(t)
+			found, err := shared.detect(t, ErrorsDuckTyping)
 			if err != nil {
 				t.Fatalf("ErrorsDuckTypingDetector(%s) error: %v", test.archive, err)
 			}
-			got := exemptionRows(t, in, ErrorsDuckTyping, found)
+			got := exemptionRows(t, symbols, ErrorsDuckTyping, found)
 			if !slices.Equal(got, test.want) {
 				t.Errorf("ErrorsDuckTypingDetector(%s) retained\n%v\nwant\n%v", test.archive, got, test.want)
 			}
