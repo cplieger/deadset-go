@@ -21,7 +21,7 @@ import (
 	"github.com/cplieger/deadset-go/internal/graph"
 	"github.com/cplieger/deadset-go/internal/kinds"
 	"github.com/cplieger/deadset-go/internal/suppress"
-	spec "github.com/cplieger/deadset-spec/v2"
+	spec "github.com/cplieger/deadset-spec/v3"
 	"golang.org/x/tools/txtar"
 )
 
