@@ -29,6 +29,15 @@ var contractVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 // them empty, . or .., and none holding a backslash or a line break.
 var projectPathPattern = regexp.MustCompile(`^(?:[^/\\.\r\n][^/\\\r\n]*|\.[^/\\.\r\n][^/\\\r\n]*|\.\.[^/\\\r\n]+)(?:/(?:[^/\\.\r\n][^/\\\r\n]*|\.[^/\\.\r\n][^/\\\r\n]*|\.\.[^/\\\r\n]+))*$`)
 
+// typescriptReferencePattern is the spelling the symbol member of a declaration
+// entry takes: a stable symbol reference in the TypeScript form.
+var typescriptReferencePattern = regexp.MustCompile(`^ts://`)
+
+// bareSpecifierPattern is the spelling the module member of a declaration entry
+// takes: a specifier that is neither relative, nor absolute, nor mapped by the
+// package's own imports field.
+var bareSpecifierPattern = regexp.MustCompile(`^[^./#]`)
+
 // keyKind classifies one node of the closed key list.
 type keyKind uint8
 
@@ -52,8 +61,9 @@ const (
 
 // keyNode is one node of the closed key list. members holds a section's declared
 // members, or a list entry's, and is empty otherwise. An entry of the build matrix
-// takes one of two shapes, and members holds the members of both: which member names
-// an entry may combine is the shape check resolution applies, not the key list.
+// or of a declaration list takes one of several shapes, and members holds the
+// members of every one: which member names an entry may combine is the shape check
+// resolution applies, not the key list.
 type keyNode struct {
 	members map[string]keyNode
 	kind    keyKind
@@ -109,10 +119,28 @@ func schemaRoot() keyNode {
 		}},
 		"go": {kind: keySection, members: map[string]keyNode{}},
 		"ts": {kind: keySection, members: map[string]keyNode{
-			"test_files":  {kind: keyLeaf},
-			"entry_files": {kind: keyLeaf},
+			"test_files":              {kind: keyLeaf},
+			"entry_files":             {kind: keyLeaf},
+			"injection_registrations": declarationList(),
+			"lifecycle_contracts": {kind: keyList, members: map[string]keyNode{
+				"components": declarationList(),
+				"bases":      declarationList(),
+				"members":    {kind: keyLeaf},
+			}},
+			"serializers": declarationList(),
 		}},
 		"provenance": {kind: keyMap},
+	}}
+}
+
+// declarationList is a list whose entries each name one TypeScript declaration,
+// holding the members of all three shapes an entry takes.
+func declarationList() keyNode {
+	return keyNode{kind: keyList, members: map[string]keyNode{
+		"symbol": {kind: keyLeaf},
+		"module": {kind: keyLeaf},
+		"name":   {kind: keyLeaf},
+		"global": {kind: keyLeaf},
 	}}
 }
 

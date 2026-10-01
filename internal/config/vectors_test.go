@@ -8,6 +8,7 @@ import (
 	"path"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -167,12 +168,118 @@ func dottedPath(pointer string) string {
 	return path.String()
 }
 
+// refusedKey returns the key a refusal of one published refused document names: the
+// value the schema refuses, or, where that value is an object carrying a member the
+// schema declares nowhere at that place, the member, because a key the closed key list
+// does not declare is refused by its own name.
+func refusedKey(t *testing.T, schema map[string]any, document []byte, pointer string) string {
+	t.Helper()
+
+	var value any
+	if err := json.Unmarshal(document, &value); err != nil {
+		t.Fatalf("decode the refused document: %v", err)
+	}
+	declarations := []map[string]any{schema}
+	for segment := range strings.SplitSeq(strings.TrimPrefix(pointer, "/"), "/") {
+		if segment == "" {
+			continue
+		}
+		declarations = schemaStep(declarations, segment)
+		value = documentStep(value, segment)
+	}
+	object, isObject := value.(map[string]any)
+	if !isObject {
+		return dottedPath(pointer)
+	}
+	declared := map[string]bool{}
+	for _, declaration := range declarations {
+		for _, shape := range shapesOf(declaration) {
+			properties, _ := shape["properties"].(map[string]any)
+			for name := range properties {
+				declared[name] = true
+			}
+		}
+	}
+	var undeclared []string
+	for name := range object {
+		if !declared[name] {
+			undeclared = append(undeclared, name)
+		}
+	}
+	switch len(undeclared) {
+	case 0:
+		return dottedPath(pointer)
+	case 1:
+		if pointer == "" {
+			return undeclared[0]
+		}
+		return dottedPath(pointer) + "." + undeclared[0]
+	default:
+		t.Fatalf("the refused value at %q carries %d members its schema does not declare, %v, "+
+			"want a document refused for one constraint", pointer, len(undeclared), undeclared)
+		return ""
+	}
+}
+
+// shapesOf returns one schema declaration together with the shapes its oneOf names,
+// which between them declare the members a value at that place may carry.
+func shapesOf(declaration map[string]any) []map[string]any {
+	shapes := []map[string]any{declaration}
+	alternatives, _ := declaration["oneOf"].([]any)
+	for _, alternative := range alternatives {
+		if shape, isObject := alternative.(map[string]any); isObject {
+			shapes = append(shapes, shape)
+		}
+	}
+	return shapes
+}
+
+// schemaStep returns the declarations of the value one JSON Pointer segment reaches
+// from the values the given declarations describe: an array's items for an index,
+// and the member a properties object declares for a name.
+func schemaStep(declarations []map[string]any, segment string) []map[string]any {
+	var next []map[string]any
+	for _, declaration := range declarations {
+		for _, shape := range shapesOf(declaration) {
+			if strings.Trim(segment, "0123456789") == "" {
+				if items, isObject := shape["items"].(map[string]any); isObject {
+					next = append(next, items)
+				}
+				continue
+			}
+			properties, _ := shape["properties"].(map[string]any)
+			if member, isObject := properties[segment].(map[string]any); isObject {
+				next = append(next, member)
+			}
+		}
+	}
+	return next
+}
+
+// documentStep returns the value one JSON Pointer segment names inside a decoded
+// value, or nil where it names none.
+func documentStep(value any, segment string) any {
+	switch held := value.(type) {
+	case map[string]any:
+		return held[segment]
+	case []any:
+		index, err := strconv.Atoi(segment)
+		if err != nil || index < 0 || index >= len(held) {
+			return nil
+		}
+		return held[index]
+	default:
+		return nil
+	}
+}
+
 // Every configuration document the Contract publishes as refused is refused here
 // with the usage code, and the refusal names the place in the document the schema's
-// own refusal names.
+// own refusal names, or the key inside it the closed key list does not declare.
 func TestPublishedRefusedConfigurations(t *testing.T) {
 	t.Parallel()
 
+	schema := configSchema(t)
 	data, err := spec.Examples.ReadFile("examples/negatives/index.json")
 	if err != nil {
 		t.Fatalf("read examples/negatives/index.json: %v", err)
@@ -206,8 +313,8 @@ func TestPublishedRefusedConfigurations(t *testing.T) {
 			if !errors.As(err, &refusal) {
 				t.Fatalf("Resolve(%s) = error %v, want a *config.Error", row.File, err)
 			}
-			if want := dottedPath(row.InstancePath); refusal.Key != want {
-				t.Errorf("Resolve(%s) named %q, want %q, the instance path %q the schema refuses",
+			if want := refusedKey(t, schema, document, row.InstancePath); refusal.Key != want {
+				t.Errorf("Resolve(%s) named %q, want %q, for the instance path %q the schema refuses",
 					row.File, refusal.Key, want, row.InstancePath)
 			}
 		})

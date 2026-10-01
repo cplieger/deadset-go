@@ -77,8 +77,11 @@ type docReporters struct {
 }
 
 type docTS struct {
-	TestFiles  *[]string `json:"test_files"`
-	EntryFiles *[]string `json:"entry_files"`
+	TestFiles              *[]string            `json:"test_files"`
+	EntryFiles             *[]string            `json:"entry_files"`
+	InjectionRegistrations *[]Declaration       `json:"injection_registrations"`
+	LifecycleContracts     *[]LifecycleContract `json:"lifecycle_contracts"`
+	Serializers            *[]Declaration       `json:"serializers"`
 }
 
 // fill allocates the sections the document omits, so reading one setting never
@@ -307,6 +310,17 @@ func resolveTS(cfg *Config, p Provenance, sources []source) {
 		func(d *doc) *[]string { return d.TS.TestFiles })
 	resolveSetting(&cfg.TS.EntryFiles, "ts.entry_files", p, sources,
 		func(d *doc) *[]string { return d.TS.EntryFiles })
+	resolveSetting(&cfg.TS.InjectionRegistrations, "ts.injection_registrations", p, sources,
+		func(d *doc) *[]Declaration { return d.TS.InjectionRegistrations })
+	resolveSetting(&cfg.TS.LifecycleContracts, "ts.lifecycle_contracts", p, sources,
+		func(d *doc) *[]LifecycleContract { return d.TS.LifecycleContracts })
+	resolveSetting(&cfg.TS.Serializers, "ts.serializers", p, sources,
+		func(d *doc) *[]Declaration { return d.TS.Serializers })
+	for index := range cfg.TS.LifecycleContracts {
+		contract := &cfg.TS.LifecycleContracts[index]
+		contract.Components = orEmpty(contract.Components)
+		contract.Bases = orEmpty(contract.Bases)
+	}
 }
 
 // resolveSeverity resolves the severity object one code at a time, so a code only
@@ -521,7 +535,102 @@ func validateTS(t *docTS, label string) *Error {
 	return firstError(
 		arrayOf(label, "ts.test_files", t.TestFiles, 1),
 		arrayOf(label, "ts.entry_files", t.EntryFiles, 0),
+		validateDeclarations(t.InjectionRegistrations, "ts.injection_registrations", label),
+		validateLifecycleContracts(t.LifecycleContracts, label),
+		validateDeclarations(t.Serializers, "ts.serializers", label),
 	)
+}
+
+// declarationShapes names the three shapes a declaration entry takes, as a refusal
+// of an entry taking none or several states them.
+const declarationShapes = "an entry names a declaration by symbol, by module and name, or by global"
+
+// validateDeclarations checks one list of declaration entries, at naming the list.
+func validateDeclarations(declarations *[]Declaration, at, label string) *Error {
+	if declarations == nil {
+		return nil
+	}
+	for index, entry := range *declarations {
+		if refusal := validateDeclaration(entry, at+"["+strconv.Itoa(index)+"]", label); refusal != nil {
+			return refusal
+		}
+	}
+	return nil
+}
+
+// validateDeclaration checks one declaration entry, at naming its place: the entry
+// takes exactly one of the three shapes and names every member its shape requires.
+func validateDeclaration(entry Declaration, at, label string) *Error {
+	bySymbol := entry.Symbol != nil
+	byExport := entry.Module != nil || entry.Name != nil
+	byGlobal := entry.Global != nil
+	switch shapes := countTrue(bySymbol, byExport, byGlobal); {
+	case shapes == 0:
+		return malformed(label, at, "names no declaration; %s", declarationShapes)
+	case shapes > 1:
+		return malformed(label, at, "names members of more than one shape; %s", declarationShapes)
+	case bySymbol:
+		if !typescriptReferencePattern.MatchString(*entry.Symbol) {
+			return malformed(label, at+".symbol",
+				"%q is not a stable symbol reference in the TypeScript form", *entry.Symbol)
+		}
+		return nil
+	case byExport:
+		refusal := firstError(
+			required(label, at+".module", valueOf(entry.Module)),
+			required(label, at+".name", valueOf(entry.Name)),
+		)
+		if refusal != nil {
+			return refusal
+		}
+		if !bareSpecifierPattern.MatchString(*entry.Module) {
+			return malformed(label, at+".module",
+				"%q is a relative, absolute or imports-mapped specifier, which names a file of the "+
+					"analyzed program; name that declaration by symbol instead", *entry.Module)
+		}
+		return nil
+	default:
+		return required(label, at+".global", *entry.Global)
+	}
+}
+
+// validateLifecycleContracts checks every lifecycle contract: each names the
+// members the framework calls, and at least one declaration or base class that makes
+// a class one of its components.
+func validateLifecycleContracts(contracts *[]LifecycleContract, label string) *Error {
+	if contracts == nil {
+		return nil
+	}
+	for index, contract := range *contracts {
+		at := "ts.lifecycle_contracts[" + strconv.Itoa(index) + "]"
+		if contract.Members == nil {
+			return required(label, at+".members", "")
+		}
+		refusal := firstError(
+			validateDeclarations(&contract.Components, at+".components", label),
+			validateDeclarations(&contract.Bases, at+".bases", label),
+			arrayOf(label, at+".members", &contract.Members, 1),
+		)
+		if refusal != nil {
+			return refusal
+		}
+		if len(contract.Components) == 0 && len(contract.Bases) == 0 {
+			return malformed(label, at,
+				"names no declaration in components and no class in bases, so no class is a component of its framework")
+		}
+	}
+	return nil
+}
+
+// countTrue counts the conditions that hold.
+func countTrue(conditions ...bool) int {
+	held := 0
+	for _, condition := range conditions {
+		if condition {
+			held++
+		}
+	}
+	return held
 }
 
 // validateSeverity checks the severity object: a key is one issue-kind code or

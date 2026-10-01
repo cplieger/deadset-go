@@ -13,7 +13,7 @@ import (
 
 // ContractVersion is the Contract version this package implements. It is the
 // resolved value of contract_version when no source supplies one.
-const ContractVersion = "3.0.0"
+const ContractVersion = "3.1.0"
 
 // defaultTestFiles is the documented default of ts.test_files.
 const defaultTestFiles = "**/*.test.{ts,tsx,mts,cts}"
@@ -197,11 +197,33 @@ type Reporters struct {
 // version and resolves to the empty object.
 type Go struct{}
 
-// TS is the section the TypeScript analyzer owns. The Go analyzer passes it
-// through unread.
+// TS is the section the TypeScript analyzer owns. This package validates and
+// prints it; nothing in the Go analysis reads it.
 type TS struct {
-	TestFiles  []string `json:"test_files"`
-	EntryFiles []string `json:"entry_files"`
+	TestFiles              []string            `json:"test_files"`
+	EntryFiles             []string            `json:"entry_files"`
+	InjectionRegistrations []Declaration       `json:"injection_registrations"`
+	LifecycleContracts     []LifecycleContract `json:"lifecycle_contracts"`
+	Serializers            []Declaration       `json:"serializers"`
+}
+
+// Declaration names one TypeScript declaration in exactly one of three shapes:
+// Symbol alone, Module with Name, or Global alone. A member is nil where the entry
+// does not name it, so the shape an entry takes is read from the members it names.
+type Declaration struct {
+	Symbol *string `json:"symbol,omitempty"`
+	Module *string `json:"module,omitempty"`
+	Name   *string `json:"name,omitempty"`
+	Global *string `json:"global,omitempty"`
+}
+
+// LifecycleContract is one framework's lifecycle contract: the declarations that
+// make a class a component, the classes whose subclasses are components, and the
+// names of the members the framework calls on a component.
+type LifecycleContract struct {
+	Components []Declaration `json:"components"`
+	Bases      []Declaration `json:"bases"`
+	Members    []string      `json:"members"`
 }
 
 // Default returns the configuration every documented default states. Target.Kind
@@ -234,8 +256,11 @@ func Default() Config {
 			FailOn:      Deny,
 		},
 		TS: TS{
-			TestFiles:  []string{defaultTestFiles},
-			EntryFiles: []string{},
+			TestFiles:              []string{defaultTestFiles},
+			EntryFiles:             []string{},
+			InjectionRegistrations: []Declaration{},
+			LifecycleContracts:     []LifecycleContract{},
+			Serializers:            []Declaration{},
 		},
 	}
 }
