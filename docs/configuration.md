@@ -43,8 +43,8 @@ The analysis.
 | `analysis.min_confidence` | `certain`, `probable`, `possible` | `possible` | The lowest confidence a finding is reported at. A finding below it is not reported and no count of the report stands for it |
 | `analysis.generated_files` | `exclude`, `include` | `exclude` | Whether declarations in generated files are judged. `include` reports them and marks every such finding as one no mechanical edit may act on |
 | `analysis.consumer_tests` | `test`, `production` | `test` | How a reference from a loaded consumer's test file counts |
-| `analysis.configurations` | array of objects | `[]` | The build matrix, each entry naming an `id`, an `os`, an `arch` and optional `tags`. Empty derives the matrix from the target tree |
-| `analysis.matrix.complete` | boolean | `false` | Declares that `analysis.configurations` lists every configuration the target builds, which `DS1501` needs |
+| `analysis.configurations` | array of objects | `[]` | The build matrix. A platform entry names an `id`, an `os`, an `arch` and optional `tags`; a project entry names an `id` and a TypeScript `project` file, which this analyzer ignores. With no platform entry the matrix derives from the target tree |
+| `analysis.matrix.complete` | boolean | `false` | Declares that the platform entries of `analysis.configurations` are every configuration the target builds, which `DS1501` needs |
 | `analysis.template_dirs` | array of strings | `[]` | Directories, relative to the target root, the `template-field` exemption scans |
 | `analysis.template_delimiters` | object with `left` and `right` | `{{` and `}}` | The action delimiters that scan parses a template with |
 | `consumers.complete` | boolean | `false` | Declares that every consumer of the published API is declared, which the narrowing kinds need |
@@ -121,7 +121,7 @@ No verb accepts a flag that asks for a source edit. A flag whose name carries `f
 ## Suppressing a finding
 
 Three mechanisms, all of them requiring a reason. The grammar is stated in full in the contract's
-[suppression page](https://github.com/cplieger/deadset-spec/blob/v2.1.0/contract/grammar/suppression.md).
+[suppression page](https://github.com/cplieger/deadset-spec/blob/v2.2.0/contract/grammar/suppression.md).
 
 **An inline directive** is the first token of a `//` line comment above or beside the declaration:
 

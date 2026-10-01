@@ -555,6 +555,41 @@ func TestResolveRefusesAMalformedDocument(t *testing.T) {
 			key:        "analysis.configurations[0].arch",
 		},
 		{
+			name:       "a_build_matrix_entry_naming_members_of_both_shapes",
+			repository: `{"target": {"kind": "library"}, "analysis": {"configurations": [{"id": "a", "os": "linux", "arch": "amd64", "project": "tsconfig.json"}]}}`,
+			key:        "analysis.configurations[0]",
+		},
+		{
+			name:       "a_build_matrix_entry_naming_tags_beside_a_project",
+			repository: `{"target": {"kind": "library"}, "analysis": {"configurations": [{"id": "a", "project": "tsconfig.json", "tags": []}]}}`,
+			key:        "analysis.configurations[0]",
+		},
+		{
+			name:       "a_build_matrix_entry_naming_neither_shape",
+			repository: `{"target": {"kind": "library"}, "analysis": {"configurations": [{"id": "a"}]}}`,
+			key:        "analysis.configurations[0]",
+		},
+		{
+			name:       "a_project_entry_naming_no_identifier",
+			repository: `{"target": {"kind": "library"}, "analysis": {"configurations": [{"project": "tsconfig.json"}]}}`,
+			key:        "analysis.configurations[0].id",
+		},
+		{
+			name:       "a_project_entry_leading_out_of_the_target_root",
+			repository: `{"target": {"kind": "library"}, "analysis": {"configurations": [{"id": "a", "project": "../tsconfig.json"}]}}`,
+			key:        "analysis.configurations[0].project",
+		},
+		{
+			name:       "a_project_entry_naming_a_directory",
+			repository: `{"target": {"kind": "library"}, "analysis": {"configurations": [{"id": "a", "project": "packages/app/"}]}}`,
+			key:        "analysis.configurations[0].project",
+		},
+		{
+			name:       "a_second_entry_naming_members_of_both_shapes",
+			repository: `{"target": {"kind": "library"}, "analysis": {"configurations": [{"id": "a", "project": "tsconfig.json"}, {"id": "b", "os": "linux", "arch": "amd64", "project": "b.json"}]}}`,
+			key:        "analysis.configurations[1]",
+		},
+		{
 			name:       "an_empty_test_file_pattern_list",
 			repository: `{"target": {"kind": "library"}, "ts": {"test_files": []}}`,
 			key:        "ts.test_files",

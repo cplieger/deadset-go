@@ -71,9 +71,15 @@ func settingGenerators() map[string]*rapid.Generator[any] {
 	}
 }
 
-// configurationEntry draws one entry of the build matrix, each member drawn on its
-// own so a shrink reaches the member that carries a failure.
+// configurationEntry draws one entry of the build matrix in either of its two
+// shapes, each member drawn on its own so a shrink reaches the member that carries a
+// failure.
 func configurationEntry() *rapid.Generator[map[string]any] {
+	return rapid.OneOf(platformEntry(), projectEntry())
+}
+
+// platformEntry draws one platform entry of the build matrix.
+func platformEntry() *rapid.Generator[map[string]any] {
 	return rapid.Custom(func(t *rapid.T) map[string]any {
 		return map[string]any{
 			"id":   rapid.StringMatching(`^[a-z]{1,7}-[a-z0-9]{1,6}$`).Draw(t, "configuration id"),
@@ -81,6 +87,20 @@ func configurationEntry() *rapid.Generator[map[string]any] {
 			"arch": rapid.SampledFrom([]string{"amd64", "arm64", "386"}).Draw(t, "configuration arch"),
 			"tags": rapid.SliceOfNDistinct(rapid.StringMatching(`^[a-z][a-z0-9]{0,5}$`), 0, 2,
 				rapid.ID[string]).Draw(t, "configuration tags"),
+		}
+	})
+}
+
+// projectEntry draws one project entry of the build matrix: a compiler configuration
+// file below the target root, at the root or in a directory whose name may lead with
+// a dot.
+func projectEntry() *rapid.Generator[map[string]any] {
+	return rapid.Custom(func(t *rapid.T) map[string]any {
+		project := rapid.StringMatching(`^(\.?[a-z]{1,6}/){0,2}tsconfig(\.[a-z]{1,5})?\.json$`).
+			Draw(t, "configuration project")
+		return map[string]any{
+			"id":      rapid.OneOf(rapid.Just(project), rapid.StringMatching(`^[a-z]{1,7}$`)).Draw(t, "configuration id"),
+			"project": project,
 		}
 	})
 }

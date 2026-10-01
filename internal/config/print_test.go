@@ -172,14 +172,16 @@ func TestPrintDoesNotMutateItsArgument(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.Config{
-		Target:   config.Target{Kind: config.Library},
-		Analysis: config.Analysis{Configurations: []config.Configuration{{ID: "a", OS: "linux", Arch: "amd64"}}},
+		Target: config.Target{Kind: config.Library},
+		Analysis: config.Analysis{Configurations: []config.Configuration{
+			{Platform: &config.Platform{ID: "a", OS: "linux", Arch: "amd64"}},
+		}},
 	}
 	var out bytes.Buffer
 	if err := config.Print(&out, cfg, config.Provenance{}); err != nil {
 		t.Fatalf("Print(a configuration with a matrix entry) = error %v, want the configuration", err)
 	}
-	if got := cfg.Analysis.Configurations[0].Tags; got != nil {
+	if got := cfg.Analysis.Configurations[0].Platform.Tags; got != nil {
 		t.Errorf("Print() left the caller's matrix entry tags = %#v, want them untouched", got)
 	}
 }

@@ -38,7 +38,7 @@ func listedMatrixConfig() config.Config {
 	resolved := applicationConfig()
 	for _, c := range twoConfigurations() {
 		resolved.Analysis.Configurations = append(resolved.Analysis.Configurations,
-			config.Configuration{ID: c.ID, OS: c.OS, Arch: c.Arch})
+			config.Configuration{Platform: &config.Platform{ID: c.ID, OS: c.OS, Arch: c.Arch}})
 	}
 	return resolved
 }
@@ -49,6 +49,21 @@ func listedMatrixConfig() config.Config {
 func declaredCompleteWithoutConfigurations() config.Config {
 	resolved := applicationConfig()
 	resolved.Analysis.Matrix.Complete = true
+	return resolved
+}
+
+// compilerProject is a project entry of the build matrix: a configuration another
+// language's analysis builds, which lists nothing this analysis builds.
+func compilerProject() config.Configuration {
+	return config.Configuration{Project: &config.Project{ID: "tsconfig.json", Path: "tsconfig.json"}}
+}
+
+// declaredCompleteListingProjectsOnly is the resolved configuration of a target
+// that declares the matrix complete and lists project entries alone, so the
+// matrix the Go analysis runs is one it derived.
+func declaredCompleteListingProjectsOnly() config.Config {
+	resolved := declaredCompleteWithoutConfigurations()
+	resolved.Analysis.Configurations = []config.Configuration{compilerProject()}
 	return resolved
 }
 
@@ -159,6 +174,38 @@ func TestFileNeverBuiltReportsNothingWhereTheCompleteMatrixIsOneTheRunDerived(t 
 	if found := emitted(t, "FileNeverBuilt", fileNeverBuiltCode, FileNeverBuilt, in); len(found) > 0 {
 		t.Errorf("FileNeverBuilt(a target declaring complete a matrix it lists no configuration of) reports %v, want nothing: the declaration asserts that the listed configurations are every one the target builds, and a configuration listing none declares it of a derived matrix",
 			summary(found))
+	}
+}
+
+func TestFileNeverBuiltReportsNothingWhereTheCompleteMatrixListsProjectsAlone(t *testing.T) {
+	t.Parallel()
+
+	in := inputOf(t, "artifacts-never-built.txtar", declaredCompleteListingProjectsOnly(),
+		Consumers{}, twoConfigurations()...)
+
+	if found := emitted(t, "FileNeverBuilt", fileNeverBuiltCode, FileNeverBuilt, in); len(found) > 0 {
+		t.Errorf("FileNeverBuilt(a target declaring complete a matrix of project entries alone) reports %v, want nothing: a project entry is another language's configuration, so the Go matrix is derived and incomplete",
+			summary(found))
+	}
+}
+
+func TestFileNeverBuiltJudgesACompleteMatrixOverItsPlatformEntries(t *testing.T) {
+	t.Parallel()
+
+	resolved := completeMatrixConfig()
+	resolved.Analysis.Configurations = append([]config.Configuration{compilerProject()},
+		resolved.Analysis.Configurations...)
+	in := inputOf(t, "artifacts-never-built.txtar", resolved, Consumers{}, twoConfigurations()...)
+
+	found := emitted(t, "FileNeverBuilt", fileNeverBuiltCode, FileNeverBuilt, in)
+	var named []string
+	for i := range found {
+		named = append(named, found[i].Symbol.Name)
+	}
+	slices.Sort(named)
+	if want := []string{"ninth.go", "sized_windows.go", "stated_windows.go"}; !slices.Equal(named, want) {
+		t.Errorf("FileNeverBuilt(a complete matrix listing a project entry beside its platforms) reports %v, want %v: the project entry changes nothing the platforms declare",
+			named, want)
 	}
 }
 

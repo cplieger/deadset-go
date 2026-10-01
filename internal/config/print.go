@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"slices"
 )
 
 // printDocument is the resolved configuration as it is written: the closed key
@@ -44,10 +43,7 @@ func Print(w io.Writer, c Config, p Provenance) error {
 // declares for every key rather than the JSON null a nil would render as.
 func written(c *Config) Config {
 	c.Analysis.Languages = orEmpty(c.Analysis.Languages)
-	c.Analysis.Configurations = slices.Clone(orEmpty(c.Analysis.Configurations))
-	for index := range c.Analysis.Configurations {
-		c.Analysis.Configurations[index].Tags = orEmpty(c.Analysis.Configurations[index].Tags)
-	}
+	c.Analysis.Configurations = orEmpty(c.Analysis.Configurations)
 	c.Analysis.TemplateDirs = orEmpty(c.Analysis.TemplateDirs)
 	c.Roots.Patterns = orEmpty(c.Roots.Patterns)
 	c.Exemptions.Disabled = orEmpty(c.Exemptions.Disabled)
