@@ -6,9 +6,10 @@ import (
 )
 
 func TestLinknameCgoAsmPluginDetectorRetainsBothSidesOfALinknameDirective(t *testing.T) {
-	in := inputOf(t, "linkname.txtar", Options{})
+	shared := analysisOf(t, "linkname.txtar", Options{})
+	symbols := shared.inventory(t)
 
-	got, err := LinknameCgoAsmPluginDetector(in)
+	got, err := shared.detect(t, LinknameCgoAsmPlugin)
 	if err != nil {
 		t.Fatalf("LinknameCgoAsmPluginDetector(linkname.txtar) error: %v", err)
 	}
@@ -19,15 +20,16 @@ func TestLinknameCgoAsmPluginDetectorRetainsBothSidesOfALinknameDirective(t *tes
 		"Value\tlinkname-cgo-asm-plugin\tapp.go:8:1\tnamed by a go:linkname directive",
 		"absent\tlinkname-cgo-asm-plugin\tapp.go:11:1\tnamed by a go:linkname directive",
 	}
-	if lines := rendered(in, got); !slices.Equal(lines, want) {
+	if lines := rendered(symbols, got); !slices.Equal(lines, want) {
 		t.Errorf("LinknameCgoAsmPluginDetector(linkname.txtar) = %q, want %q", lines, want)
 	}
 }
 
 func TestLinknameCgoAsmPluginDetectorRetainsTheDeclarationATextDirectiveNames(t *testing.T) {
-	in := inputOf(t, "assembly.txtar", Options{})
+	shared := analysisOf(t, "assembly.txtar", Options{})
+	symbols := shared.inventory(t)
 
-	got, err := LinknameCgoAsmPluginDetector(in)
+	got, err := shared.detect(t, LinknameCgoAsmPlugin)
 	if err != nil {
 		t.Fatalf("LinknameCgoAsmPluginDetector(assembly.txtar) error: %v", err)
 	}
@@ -36,15 +38,16 @@ func TestLinknameCgoAsmPluginDetectorRetainsTheDeclarationATextDirectiveNames(t 
 		"add\tlinkname-cgo-asm-plugin\tadd_amd64.s:4:1\tnamed by an assembly TEXT directive",
 		"fileLocal\tlinkname-cgo-asm-plugin\tadd_amd64.s:11:2\tnamed by an assembly TEXT directive",
 	}
-	if lines := rendered(in, got); !slices.Equal(lines, want) {
+	if lines := rendered(symbols, got); !slices.Equal(lines, want) {
 		t.Errorf("LinknameCgoAsmPluginDetector(assembly.txtar) = %q, want %q", lines, want)
 	}
 }
 
 func TestLinknameCgoAsmPluginDetectorRetainsTheExportedSymbolsOfAPluginMainPackage(t *testing.T) {
-	in := inputOf(t, "plugin.txtar", Options{})
+	shared := analysisOf(t, "plugin.txtar", Options{})
+	symbols := shared.inventory(t)
 
-	got, err := LinknameCgoAsmPluginDetector(in)
+	got, err := shared.detect(t, LinknameCgoAsmPlugin)
 	if err != nil {
 		t.Fatalf("LinknameCgoAsmPluginDetector(plugin.txtar) error: %v", err)
 	}
@@ -53,7 +56,7 @@ func TestLinknameCgoAsmPluginDetectorRetainsTheExportedSymbolsOfAPluginMainPacka
 		"Handler\tlinkname-cgo-asm-plugin\tplug.go:1:1\texported from a plugin's main package",
 		"Greet\tlinkname-cgo-asm-plugin\tplug.go:1:1\texported from a plugin's main package",
 	}
-	if lines := rendered(in, got); !slices.Equal(lines, want) {
+	if lines := rendered(symbols, got); !slices.Equal(lines, want) {
 		t.Errorf("LinknameCgoAsmPluginDetector(plugin.txtar) = %q, want %q", lines, want)
 	}
 }
@@ -78,7 +81,7 @@ func TestLinknameCgoAsmPluginDetectorRetainsTheCgoExportOfAFileImportingC(t *tes
 	want := []string{
 		"Exported\tlinkname-cgo-asm-plugin\texport.go:8:1\texported to C by an export directive",
 	}
-	if lines := rendered(in, got); !slices.Equal(lines, want) {
+	if lines := rendered(in.Symbols, got); !slices.Equal(lines, want) {
 		t.Errorf("LinknameCgoAsmPluginDetector(cgo-export.txtar) = %q, want %q", lines, want)
 	}
 }

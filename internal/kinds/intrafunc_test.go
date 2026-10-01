@@ -64,9 +64,7 @@ func subjectsOf(findings []Finding, code string) []string {
 func TestUnusedParameterReportsEveryParameterNoBodyReads(t *testing.T) {
 	t.Parallel()
 
-	in := inputOf(t, "intrafunc-parameter.txtar", applicationConfig(), Consumers{})
-
-	result := computed(t, in, intraFuncEmitters())
+	result := analysisOf(t, "intrafunc-parameter.txtar", asApplication, Consumers{}).findings(t, intraFunctionKinds)
 
 	want := []string{"main.go:4:24 parameter label of go://example.com/app#scaled"}
 	if got := subjectsOf(result.Findings, unusedParameterCode); !slices.Equal(got, want) {
@@ -78,9 +76,7 @@ func TestUnusedParameterReportsEveryParameterNoBodyReads(t *testing.T) {
 func TestUnusedReceiverReportsAReceiverNoBodyReads(t *testing.T) {
 	t.Parallel()
 
-	in := inputOf(t, "intrafunc-receiver.txtar", applicationConfig(), Consumers{})
-
-	result := computed(t, in, intraFuncEmitters())
+	result := analysisOf(t, "intrafunc-receiver.txtar", asApplication, Consumers{}).findings(t, intraFunctionKinds)
 
 	want := []string{"main.go:9:7 receiver c of go://example.com/app#counter.limit"}
 	if got := subjectsOf(result.Findings, unusedReceiverCode); !slices.Equal(got, want) {
@@ -92,9 +88,7 @@ func TestUnusedReceiverReportsAReceiverNoBodyReads(t *testing.T) {
 func TestUnusedResultReportsEveryResultEveryCallDiscards(t *testing.T) {
 	t.Parallel()
 
-	in := inputOf(t, "intrafunc-result.txtar", applicationConfig(), Consumers{})
-
-	result := computed(t, in, intraFuncEmitters())
+	result := analysisOf(t, "intrafunc-result.txtar", asApplication, Consumers{}).findings(t, intraFunctionKinds)
 
 	want := []string{
 		"main.go:4:14 result result 1 of go://example.com/app#tally",
@@ -109,9 +103,7 @@ func TestUnusedResultReportsEveryResultEveryCallDiscards(t *testing.T) {
 func TestUnreachableStatementReportsTheStatementAtThePassesOwnPosition(t *testing.T) {
 	t.Parallel()
 
-	in := inputOf(t, "intrafunc-statement.txtar", applicationConfig(), Consumers{})
-
-	result := computed(t, in, intraFuncEmitters())
+	result := analysisOf(t, "intrafunc-statement.txtar", asApplication, Consumers{}).findings(t, intraFunctionKinds)
 
 	want := []string{"main.go:7:2 statement halted of go://example.com/app#halted"}
 	if got := subjectsOf(result.Findings, unreachableStatementCode); !slices.Equal(got, want) {
@@ -123,9 +115,7 @@ func TestUnreachableStatementReportsTheStatementAtThePassesOwnPosition(t *testin
 func TestDeadStoreReportsEveryStoreNoReadReaches(t *testing.T) {
 	t.Parallel()
 
-	in := inputOf(t, "intrafunc-store.txtar", applicationConfig(), Consumers{})
-
-	result := computed(t, in, intraFuncEmitters())
+	result := analysisOf(t, "intrafunc-store.txtar", asApplication, Consumers{}).findings(t, intraFunctionKinds)
 
 	want := []string{
 		"main.go:5:2 store count of go://example.com/app#overwritten",
@@ -145,9 +135,7 @@ func TestDeadStoreReportsEveryStoreNoReadReaches(t *testing.T) {
 func TestUnreachableCaseReportsACaseAnEarlierCaseAlwaysMatchesBefore(t *testing.T) {
 	t.Parallel()
 
-	in := inputOf(t, "intrafunc-case.txtar", applicationConfig(), Consumers{})
-
-	result := computed(t, in, intraFuncEmitters())
+	result := analysisOf(t, "intrafunc-case.txtar", asApplication, Consumers{}).findings(t, intraFunctionKinds)
 
 	want := []string{"main.go:19:2 case classify of go://example.com/app#classify"}
 	if got := subjectsOf(result.Findings, unreachableCaseCode); !slices.Equal(got, want) {
@@ -159,9 +147,7 @@ func TestUnreachableCaseReportsACaseAnEarlierCaseAlwaysMatchesBefore(t *testing.
 func TestTheSignatureKindsApplyEveryExemptionOfTheContractByName(t *testing.T) {
 	t.Parallel()
 
-	in := inputOf(t, "intrafunc-exemptions.txtar", applicationConfig(), Consumers{})
-
-	result := computed(t, in, intraFuncEmitters())
+	result := analysisOf(t, "intrafunc-exemptions.txtar", asApplication, Consumers{}).findings(t, intraFunctionKinds)
 
 	want := []string{"main.go:39:23 parameter label of go://example.com/app#plain"}
 	if got := subjectsOf(result.Findings, unusedParameterCode); !slices.Equal(got, want) {
@@ -180,11 +166,11 @@ func TestTheSignatureKindsReportAPublishedDeclarationOfALibrary(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name     string
-		resolved config.Config
+		name  string
+		setup setup
 	}{
-		{name: "a library whose consumer set is not declared complete", resolved: libraryConfig()},
-		{name: "an application, whose every caller is in the graph", resolved: applicationConfig()},
+		{name: "a library whose consumer set is not declared complete", setup: asLibrary},
+		{name: "an application, whose every caller is in the graph", setup: asApplication},
 	}
 	wantParameters := []string{
 		"api/api.go:4:24 parameter label of go://example.com/app/api#Scaled",
@@ -197,17 +183,16 @@ func TestTheSignatureKindsReportAPublishedDeclarationOfALibrary(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			in := inputOf(t, "intrafunc-published.txtar", test.resolved, Consumers{})
+			result := analysisOf(t, "intrafunc-published.txtar", test.setup, Consumers{}).findings(t, intraFunctionKinds)
 
-			result := computed(t, in, intraFuncEmitters())
-
+			kind := test.setup.resolved().Target.Kind
 			if got := subjectsOf(result.Findings, unusedParameterCode); !slices.Equal(got, wantParameters) {
 				t.Errorf("the pass over intrafunc-published.txtar as %s reports %v under %s, want %v",
-					test.resolved.Target.Kind, got, unusedParameterCode, wantParameters)
+					kind, got, unusedParameterCode, wantParameters)
 			}
 			if got := subjectsOf(result.Findings, unusedReceiverCode); !slices.Equal(got, wantReceivers) {
 				t.Errorf("the pass over intrafunc-published.txtar as %s reports %v under %s, want %v",
-					test.resolved.Target.Kind, got, unusedReceiverCode, wantReceivers)
+					kind, got, unusedReceiverCode, wantReceivers)
 			}
 		})
 	}
@@ -220,9 +205,7 @@ func TestTheSignatureKindsReportAPublishedDeclarationOfALibrary(t *testing.T) {
 func TestTheSignatureKindsCarryTheFixabilityOfTheirOwnEditOnAPublishedDeclaration(t *testing.T) {
 	t.Parallel()
 
-	in := inputOf(t, "intrafunc-published.txtar", libraryConfig(), Consumers{})
-
-	result := computed(t, in, intraFuncEmitters())
+	result := analysisOf(t, "intrafunc-published.txtar", asLibrary, Consumers{}).findings(t, intraFunctionKinds)
 
 	for code, want := range map[string]string{
 		unusedParameterCode: "manual",
@@ -258,18 +241,18 @@ func TestTheUnusedResultKindReportsOnlyWhereEveryCallSiteIsLoaded(t *testing.T) 
 	t.Parallel()
 
 	tests := []struct {
-		name     string
-		resolved config.Config
-		want     []string
+		name  string
+		setup setup
+		want  []string
 	}{
 		{
-			name:     "a library whose consumer set is not declared complete",
-			resolved: libraryConfig(),
-			want:     []string{"api/api.go:9:14 result result 1 of go://example.com/app/api#tally"},
+			name:  "a library whose consumer set is not declared complete",
+			setup: asLibrary,
+			want:  []string{"api/api.go:9:14 result result 1 of go://example.com/app/api#tally"},
 		},
 		{
-			name:     "an application, whose every caller is in the graph",
-			resolved: applicationConfig(),
+			name:  "an application, whose every caller is in the graph",
+			setup: asApplication,
 			want: []string{
 				"api/api.go:4:14 result result 1 of go://example.com/app/api#Tally",
 				"api/api.go:9:14 result result 1 of go://example.com/app/api#tally",
@@ -280,13 +263,11 @@ func TestTheUnusedResultKindReportsOnlyWhereEveryCallSiteIsLoaded(t *testing.T) 
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			in := inputOf(t, "intrafunc-outofgraph.txtar", test.resolved, Consumers{})
-
-			result := computed(t, in, intraFuncEmitters())
+			result := analysisOf(t, "intrafunc-outofgraph.txtar", test.setup, Consumers{}).findings(t, intraFunctionKinds)
 
 			if got := subjectsOf(result.Findings, unusedResultCode); !slices.Equal(got, test.want) {
 				t.Errorf("the pass over intrafunc-outofgraph.txtar as %s reports %v under %s, want %v",
-					test.resolved.Target.Kind, got, unusedResultCode, test.want)
+					test.setup.resolved().Target.Kind, got, unusedResultCode, test.want)
 			}
 		})
 	}
@@ -380,9 +361,7 @@ func TestEveryIntraFunctionFindingCarriesTheOverlapTheVocabularyCarriesAndNamesI
 		t.Run(archive, func(t *testing.T) {
 			t.Parallel()
 
-			in := inputOf(t, archive, applicationConfig(), Consumers{})
-
-			found := computed(t, in, intraFuncEmitters()).Findings
+			found := analysisOf(t, archive, asApplication, Consumers{}).findings(t, intraFunctionKinds).Findings
 
 			if len(found) == 0 {
 				t.Fatalf("the kinds report nothing about %s, so the overlap rule is measured over nothing",
@@ -414,9 +393,7 @@ func TestEveryIntraFunctionFindingCarriesTheOverlapTheVocabularyCarriesAndNamesI
 func TestUnusedParameterReportsOneFindingPerParameterOfOneSignature(t *testing.T) {
 	t.Parallel()
 
-	in := inputOf(t, "intrafunc-twoparts.txtar", applicationConfig(), Consumers{})
-
-	found := computed(t, in, intraFuncEmitters()).Findings
+	found := analysisOf(t, "intrafunc-twoparts.txtar", asApplication, Consumers{}).findings(t, intraFunctionKinds).Findings
 
 	want := []string{
 		"main.go:9:25 parameter low of go://example.com/app#counter.limit",

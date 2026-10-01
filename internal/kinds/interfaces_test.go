@@ -56,9 +56,7 @@ func TestInterfaceKinds_reportEachShapeOnceUnderItsOwnCode(t *testing.T) {
 	}
 	for description, tc := range cases {
 		t.Run(description, func(t *testing.T) {
-			in := inputOf(t, tc.archive, applicationConfig(), Consumers{})
-
-			result := computed(t, in, interfaceEmitters())
+			result := analysisOf(t, tc.archive, asApplication, Consumers{}).findings(t, interfaceKinds)
 
 			if got := summary(result.Findings); !slices.Equal(got, tc.want) {
 				t.Errorf("the interface kinds over %s report %v, want %v", tc.archive, got, tc.want)
@@ -68,9 +66,7 @@ func TestInterfaceKinds_reportEachShapeOnceUnderItsOwnCode(t *testing.T) {
 }
 
 func TestUnusedInterface_namesEveryImplementationAndWhereItIsWritten(t *testing.T) {
-	in := inputOf(t, "interfaces-unused.txtar", applicationConfig(), Consumers{})
-
-	result := computed(t, in, interfaceEmitters())
+	result := analysisOf(t, "interfaces-unused.txtar", asApplication, Consumers{}).findings(t, interfaceKinds)
 
 	found := findingOf(t, result.Findings, unusedInterfaceCode, "Reader")
 	if found.Kind != "unused-interface" || found.Symbol.Kind != "interface" {
@@ -105,9 +101,7 @@ func TestUnusedInterface_namesEveryImplementationAndWhereItIsWritten(t *testing.
 }
 
 func TestUncalledInterfaceMethod_reportsTheInterfaceMethodAndNamesTheImplementation(t *testing.T) {
-	in := inputOf(t, "interfaces-uncalled.txtar", applicationConfig(), Consumers{})
-
-	result := computed(t, in, interfaceEmitters())
+	result := analysisOf(t, "interfaces-uncalled.txtar", asApplication, Consumers{}).findings(t, interfaceKinds)
 
 	found := findingOf(t, result.Findings, uncalledInterfaceMethodCode, "Store.Put")
 	if found.Kind != "uncalled-interface-method" || found.Symbol.Kind != "interface-method" {

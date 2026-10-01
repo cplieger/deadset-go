@@ -1,11 +1,14 @@
 package kinds
 
 import (
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/cplieger/deadset-go/internal/config"
@@ -352,6 +355,240 @@ func computed(t *testing.T, in *Input, emitters map[string]Emitter) Result {
 	return result
 }
 
+// setup is the resolved configuration a shared analysis is built under.
+type setup int
+
+const (
+	asApplication setup = iota
+	asLibrary
+)
+
+// resolved is the configuration one setup names.
+func (s setup) resolved() config.Config {
+	if s == asLibrary {
+		return libraryConfig()
+	}
+	return applicationConfig()
+}
+
+// table names an emitter table a shared analysis computes the findings of.
+type table int
+
+const (
+	everyKind table = iota
+	declarationKinds
+	interfaceKinds
+	intraFunctionKinds
+	narrowingKinds
+	writeOnlyKind
+	testOnlyAndUnreachableExport
+)
+
+// sharedTables is every table a shared analysis answers for.
+var sharedTables = []table{
+	everyKind, declarationKinds, interfaceKinds, intraFunctionKinds,
+	narrowingKinds, writeOnlyKind, testOnlyAndUnreachableExport,
+}
+
+// emitters is the table one name stands for.
+func (tb table) emitters() map[string]Emitter {
+	switch tb {
+	case declarationKinds:
+		return declarationEmitters()
+	case interfaceKinds:
+		return interfaceEmitters()
+	case intraFunctionKinds:
+		return intraFuncEmitters()
+	case narrowingKinds:
+		return map[string]Emitter{
+			unnecessaryExportCode:   UnnecessaryExport,
+			unnecessaryExposureCode: UnnecessaryExposure,
+			unreachableExportCode:   UnreachableExport,
+		}
+	case writeOnlyKind:
+		return map[string]Emitter{writeOnlyCode: WriteOnlySymbol}
+	case testOnlyAndUnreachableExport:
+		return map[string]Emitter{testOnlyUseCode: TestOnlyUse, unreachableExportCode: UnreachableExport}
+	default:
+		return packageEmitters()
+	}
+}
+
+// pass is one findings pass of a shared analysis: a table, under the production mode
+// the fixture is analyzed in or under the plain mode.
+type pass struct {
+	table      table
+	production bool
+}
+
+// sharedAnalysis is what one fixture answers under one setup and one consumer set,
+// read by every test that asks the same question of it: the result of each pass, the
+// findings each emitter of the package returns, and the reachability class of every
+// declaration by its reference. No part of the input it was computed from is held.
+type sharedAnalysis struct {
+	computed map[pass]Result
+	refused  map[pass]error
+	emitted  map[string][]Finding
+	failed   map[string]error
+	classes  map[string]Class
+}
+
+// analysisKey is one shared analysis: the archive, the setup and the consumer set as
+// fmt renders it in Go syntax, which quotes every string so two different sets never
+// spell one key.
+type analysisKey struct {
+	archive   string
+	setup     setup
+	consumers string
+}
+
+// analyses holds every shared analysis the package's tests built.
+var analyses memo[analysisKey, *sharedAnalysis]
+
+// analysisOf is the shared analysis of one archive under one setup and one consumer
+// set, analyzed once for every test that reads it.
+func analysisOf(t *testing.T, archive string, s setup, consumers Consumers) *sharedAnalysis {
+	t.Helper()
+
+	key := analysisKey{archive: archive, setup: s, consumers: fmt.Sprintf("%#v", consumers)}
+	return analyses.of(t, key, func(t *testing.T) *sharedAnalysis {
+		return analyzeShared(t, inputOf(t, archive, s.resolved(), consumers))
+	})
+}
+
+// analyzeShared answers every question of a shared analysis from one input. Each one
+// starts from the input's state as the analysis built it, because a pass leaves its
+// lookup and the records it withheld on the input and the lookup counts the
+// components it minted.
+func analyzeShared(t *testing.T, in *Input) *sharedAnalysis {
+	t.Helper()
+
+	held := &sharedAnalysis{
+		computed: make(map[pass]Result),
+		refused:  make(map[pass]error),
+		emitted:  make(map[string][]Finding),
+		failed:   make(map[string]error),
+		classes:  make(map[string]Class),
+	}
+	analyzed := in.Mode
+	fresh := func(production bool) {
+		in.indexed, in.withheld = nil, nil
+		in.Mode.Production = production
+	}
+	for code, emit := range packageEmitters() {
+		fresh(analyzed.Production)
+		held.emitted[code], held.failed[code] = emit(in)
+	}
+	passes := []pass{{table: writeOnlyKind, production: false}}
+	for _, tb := range sharedTables {
+		passes = append(passes, pass{table: tb, production: analyzed.Production})
+	}
+	for _, one := range passes {
+		fresh(one.production)
+		held.computed[one], held.refused[one] = Compute(in, one.table.emitters())
+	}
+	fresh(analyzed.Production)
+	for ref, id := range in.index().byRef {
+		held.classes[ref] = in.ClassOf(id)
+	}
+	return held
+}
+
+func TestASharedAnalysisAnswersTheEveryKindPassAFreshInputAnswers(t *testing.T) {
+	t.Parallel()
+
+	// The archive reports subjects that fall with no dead component, so a pass mints
+	// a component for each, and a pass that inherited an earlier question's lookup
+	// would number those components differently.
+	const archive = "artifacts-never-imported.txtar"
+	shared := analysisOf(t, archive, asApplication, Consumers{}).findings(t, everyKind).Findings
+	fresh := computed(t, inputOf(t, archive, applicationConfig(), Consumers{}), packageEmitters()).Findings
+
+	if len(shared) != len(fresh) {
+		t.Fatalf("Compute(%s, every kind) as its shared analysis answered it reports %v, want %v, what a fresh input reports",
+			archive, summary(shared), summary(fresh))
+	}
+	for i := range fresh {
+		if !reflect.DeepEqual(shared[i], fresh[i]) {
+			t.Errorf("finding %d of Compute(%s, every kind) as its shared analysis answered it = %+v, want %+v, what a fresh input reports",
+				i, archive, shared[i], fresh[i])
+		}
+	}
+}
+
+// compute is what one table's pass answered under the mode the fixture is analyzed
+// in, as Compute returned it.
+func (a *sharedAnalysis) compute(t *testing.T, tb table) (Result, error) {
+	t.Helper()
+
+	return a.computeUnder(t, tb, true)
+}
+
+// computeUnder is what one table's pass answered under the production mode or under
+// the plain mode.
+func (a *sharedAnalysis) computeUnder(t *testing.T, tb table, production bool) (Result, error) {
+	t.Helper()
+
+	one := pass{table: tb, production: production}
+	result, held := a.computed[one]
+	if !held {
+		t.Fatalf("Setup: a shared analysis computes no pass %+v", one)
+	}
+	return detachedOrFail(t, result), a.refused[one]
+}
+
+// findings is what one table's pass answered, failing the test where the pass refused
+// a finding, as computed does.
+func (a *sharedAnalysis) findings(t *testing.T, tb table) Result {
+	t.Helper()
+
+	return a.findingsUnder(t, tb, true)
+}
+
+// findingsUnder is findings under the production mode or under the plain mode.
+func (a *sharedAnalysis) findingsUnder(t *testing.T, tb table, production bool) Result {
+	t.Helper()
+
+	result, err := a.computeUnder(t, tb, production)
+	if err != nil {
+		t.Fatalf("Compute() = error %v, want the findings of the pass", err)
+	}
+	return result
+}
+
+// emit is what the emitter of one code returned when it ran alone over the input.
+func (a *sharedAnalysis) emit(t *testing.T, code string) ([]Finding, error) {
+	t.Helper()
+
+	found, held := a.emitted[code]
+	if !held {
+		t.Fatalf("Setup: the package registers no emitter under %s", code)
+	}
+	return detachedOrFail(t, found), a.failed[code]
+}
+
+// classOf is the reachability class of the declaration whose reference is ref.
+func (a *sharedAnalysis) classOf(t *testing.T, ref string) Class {
+	t.Helper()
+
+	class, held := a.classes[ref]
+	if !held {
+		t.Fatalf("Setup: the inventory holds no declaration whose reference is %q", ref)
+	}
+	return class
+}
+
+// detachedOrFail is detached, failing the test on a value it cannot copy.
+func detachedOrFail[V any](t *testing.T, value V) V {
+	t.Helper()
+
+	copied, err := detached(value)
+	if err != nil {
+		t.Fatalf("Setup: copy a shared value: %v", err)
+	}
+	return copied
+}
+
 // codesOf is the code of every finding, in the order the pass returned them.
 func codesOf(findings []Finding) []string {
 	codes := make([]string, len(findings))
@@ -440,3 +677,191 @@ func corpusInput(t *testing.T, fixture string, resolved config.Config) *Input {
 // corpusTargetSection is the directory of a fixture rendering that holds the module
 // being analyzed.
 const corpusTargetSection = "target"
+
+// memo holds one value per key, built by the first test that asks for it and read by
+// every later one. The value is built on that test, so a failure to build it is
+// reported there; every other test asking for the key fails naming that test.
+type memo[K comparable, V any] struct {
+	entries sync.Map
+}
+
+// memoEntry is one key's value and whether building it returned.
+type memoEntry[V any] struct {
+	value V
+	owner string
+	once  sync.Once
+	built bool
+}
+
+// of is the value under key, built with build on the first request.
+func (m *memo[K, V]) of(t *testing.T, key K, build func(t *testing.T) V) V {
+	t.Helper()
+
+	held, _ := m.entries.LoadOrStore(key, new(memoEntry[V]))
+	entry, _ := held.(*memoEntry[V])
+	entry.once.Do(func() {
+		entry.owner = t.Name()
+		entry.value = build(t)
+		entry.built = true
+	})
+	if !entry.built {
+		t.Fatalf("Setup: the shared analysis of %+v did not build; %s reports why", key, entry.owner)
+	}
+	return entry.value
+}
+
+// detached is a copy of value that shares no memory a test could write through: every
+// pointer, slice, map and interface it holds is copied in turn. An unexported field
+// holding any of those is refused rather than shared.
+func detached[V any](value V) (V, error) {
+	copied, err := copier{seen: make(map[copiedAt]reflect.Value)}.of(reflect.ValueOf(&value).Elem())
+	if err != nil {
+		var none V
+		return none, err
+	}
+	held, _ := reflect.TypeAssert[V](copied)
+	return held, nil
+}
+
+// copiedAt is one pointer already copied, so two pointers to one value stay two
+// pointers to one copy.
+type copiedAt struct {
+	of reflect.Type
+	at uintptr
+}
+
+// copier is one deep copy in progress.
+type copier struct {
+	seen map[copiedAt]reflect.Value
+}
+
+// of is the copy of one value.
+func (c copier) of(v reflect.Value) (reflect.Value, error) {
+	switch v.Kind() {
+	case reflect.Pointer:
+		return c.pointer(v)
+	case reflect.Slice:
+		if v.IsNil() {
+			return v, nil
+		}
+		out := reflect.MakeSlice(v.Type(), v.Len(), v.Len())
+		return out, c.elements(v, out)
+	case reflect.Array:
+		out := reflect.New(v.Type()).Elem()
+		return out, c.elements(v, out)
+	case reflect.Map:
+		return c.mapOf(v)
+	case reflect.Interface:
+		if v.IsNil() {
+			return v, nil
+		}
+		inner, err := c.of(v.Elem())
+		if err != nil {
+			return reflect.Value{}, err
+		}
+		out := reflect.New(v.Type()).Elem()
+		out.Set(inner)
+		return out, nil
+	case reflect.Struct:
+		return c.structOf(v)
+	case reflect.Chan, reflect.UnsafePointer:
+		return reflect.Value{}, fmt.Errorf("a value of type %s cannot be copied", v.Type())
+	default:
+		return v, nil
+	}
+}
+
+// pointer is the copy of one pointer and of what it points to.
+func (c copier) pointer(v reflect.Value) (reflect.Value, error) {
+	if v.IsNil() {
+		return v, nil
+	}
+	at := copiedAt{of: v.Type(), at: v.Pointer()}
+	if done, held := c.seen[at]; held {
+		return done, nil
+	}
+	out := reflect.New(v.Type().Elem())
+	c.seen[at] = out
+	inner, err := c.of(v.Elem())
+	if err != nil {
+		return reflect.Value{}, err
+	}
+	out.Elem().Set(inner)
+	return out, nil
+}
+
+// elements copies every element of a slice or an array into another.
+func (c copier) elements(from, into reflect.Value) error {
+	for i := range from.Len() {
+		inner, err := c.of(from.Index(i))
+		if err != nil {
+			return err
+		}
+		into.Index(i).Set(inner)
+	}
+	return nil
+}
+
+// mapOf is the copy of one map, its keys and values copied in turn.
+func (c copier) mapOf(v reflect.Value) (reflect.Value, error) {
+	if v.IsNil() {
+		return v, nil
+	}
+	out := reflect.MakeMapWithSize(v.Type(), v.Len())
+	for iter := v.MapRange(); iter.Next(); {
+		key, err := c.of(iter.Key())
+		if err != nil {
+			return reflect.Value{}, err
+		}
+		value, err := c.of(iter.Value())
+		if err != nil {
+			return reflect.Value{}, err
+		}
+		out.SetMapIndex(key, value)
+	}
+	return out, nil
+}
+
+// structOf is the copy of one struct: an exported field is copied in turn, and an
+// unexported one, which reflection cannot set, is taken by value and must hold no
+// reference.
+func (c copier) structOf(v reflect.Value) (reflect.Value, error) {
+	out := reflect.New(v.Type()).Elem()
+	out.Set(v)
+	for i := range v.NumField() {
+		field := v.Type().Field(i)
+		if !field.IsExported() {
+			if !flat(field.Type) {
+				return reflect.Value{}, fmt.Errorf("the unexported field %s.%s holds a reference a copy would share",
+					v.Type(), field.Name)
+			}
+			continue
+		}
+		inner, err := c.of(v.Field(i))
+		if err != nil {
+			return reflect.Value{}, err
+		}
+		out.Field(i).Set(inner)
+	}
+	return out, nil
+}
+
+// flat reports whether a value of one type holds no pointer, slice, map, interface or
+// channel, so copying it by value shares nothing.
+func flat(of reflect.Type) bool {
+	switch of.Kind() {
+	case reflect.Array:
+		return flat(of.Elem())
+	case reflect.Struct:
+		for field := range of.Fields() {
+			if !flat(field.Type) {
+				return false
+			}
+		}
+		return true
+	case reflect.Pointer, reflect.Slice, reflect.Map, reflect.Interface, reflect.Chan, reflect.UnsafePointer:
+		return false
+	default:
+		return true
+	}
+}

@@ -35,8 +35,8 @@ func wireRefs(typeName string, members ...string) []string {
 // nothing, and one whose parameter is concrete, are no wrappers, so a value reaching
 // only those crosses nothing.
 func TestEncodingReflectionRetainsWhatAConsumersWrapperReaches(t *testing.T) {
-	in := inputOf(t, consumerArchive, Options{})
-	refs := retainedRefs(t, in, EncodingReflectionDetector)
+	shared := analysisOf(t, consumerArchive, Options{})
+	refs := retainedRefs(t, shared, EncodingReflection)
 
 	for _, test := range []struct {
 		wrapper  string
@@ -94,8 +94,8 @@ func TestEncodingReflectionRetainsWhatAConsumersWrapperReaches(t *testing.T) {
 // formats through it keeps the method the verb calls, and a value handed to a
 // consumer's function that formats nothing keeps nothing.
 func TestFormatVerbContractRetainsWhatAConsumersPrintWrapperFormats(t *testing.T) {
-	in := inputOf(t, consumerArchive, Options{})
-	refs := retainedRefs(t, in, FormatVerbContractDetector)
+	shared := analysisOf(t, consumerArchive, Options{})
+	refs := retainedRefs(t, shared, FormatVerbContract)
 
 	for _, test := range []struct {
 		consumer string
@@ -127,14 +127,15 @@ func TestFormatVerbContractRetainsWhatAConsumersPrintWrapperFormats(t *testing.T
 // immediate callee, so a maintainer reading the retained set is shown the function
 // the target itself called rather than the encoder behind it.
 func TestEncodingReflectionNamesTheConsumersWrapper(t *testing.T) {
-	in := inputOf(t, consumerArchive, Options{})
-	refs := make(map[graph.SymbolID]string, len(in.Symbols))
-	for i := range in.Symbols {
-		refs[in.Symbols[i].ID] = in.Symbols[i].Ref
+	shared := analysisOf(t, consumerArchive, Options{})
+	symbols := shared.inventory(t)
+	refs := make(map[graph.SymbolID]string, len(symbols))
+	for i := range symbols {
+		refs[symbols[i].ID] = symbols[i].Ref
 	}
 
 	got := make(map[string]string)
-	for _, e := range retained(t, in, EncodingReflectionDetector) {
+	for _, e := range retained(t, shared, EncodingReflection) {
 		if ref, held := refs[e.ID]; held {
 			got[ref] = e.Detail
 		}
@@ -156,9 +157,9 @@ func TestEncodingReflectionNamesTheConsumersWrapper(t *testing.T) {
 // has no rendering there. A class that walked a consumer's calls would end the run
 // rather than record one.
 func TestEveryExemptionOfATwoModuleProgramNamesASiteOfTheTarget(t *testing.T) {
-	in := inputOf(t, consumerArchive, Options{})
+	shared := analysisOf(t, consumerArchive, Options{})
 
-	found, err := Compute(in, goDetectors())
+	found, err := shared.compute(t, false)
 	if err != nil {
 		t.Fatalf("Compute(%s) error: %v", consumerArchive, err)
 	}

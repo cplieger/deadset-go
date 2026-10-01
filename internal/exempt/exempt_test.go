@@ -258,8 +258,8 @@ func goDetectors() map[Class]Detector {
 // retainedClauses names every exemption of one union as the declaration held
 // back, the class, the site and the clause, which is the line print-retained
 // carries.
-func retainedClauses(in *Input, found []graph.Exemption) []string {
-	names := symbolNames(in)
+func retainedClauses(symbols []graph.Symbol, found []graph.Exemption) []string {
+	names := symbolNames(symbols)
 	lines := make([]string, 0, len(found))
 	for _, e := range found {
 		lines = append(lines, names[e.ID]+" "+e.Class+" "+e.Site.String()+" "+e.Detail)
@@ -268,12 +268,13 @@ func retainedClauses(in *Input, found []graph.Exemption) []string {
 }
 
 func TestComputeKeepsOneRecordForAMethodConvertedAtSeveralSites(t *testing.T) {
-	in := inputOf(t, "several-sites.txtar", Options{})
+	shared := analysisOf(t, "several-sites.txtar", Options{})
+	symbols := shared.inventory(t)
 
 	// The class states the fact once per conversion, which is what gives the
 	// framework something to collapse: without this the assertion below would
 	// hold over a fixture carrying one conversion.
-	perSite, err := InterfaceSatisfactionDetector(in)
+	perSite, err := shared.detect(t, InterfaceSatisfaction)
 	if err != nil {
 		t.Fatalf("Setup: InterfaceSatisfactionDetector(several-sites.txtar): %v", err)
 	}
@@ -282,7 +283,7 @@ func TestComputeKeepsOneRecordForAMethodConvertedAtSeveralSites(t *testing.T) {
 		t.Fatalf("Setup: the class recorded %s at %d sites, want %d", writerFact, got, sites)
 	}
 
-	found, err := Compute(in, goDetectors())
+	found, err := shared.compute(t, false)
 	if err != nil {
 		t.Fatalf("Compute(several-sites.txtar) error: %v", err)
 	}
@@ -296,7 +297,7 @@ func TestComputeKeepsOneRecordForAMethodConvertedAtSeveralSites(t *testing.T) {
 		"(*Sink).Write interface-satisfaction a.go:29:44 satisfies io.WriteCloser",
 		"(*Sink).Close interface-satisfaction a.go:29:44 satisfies io.WriteCloser",
 	}
-	if got := retainedClauses(in, found); !slices.Equal(got, want) {
+	if got := retainedClauses(symbols, found); !slices.Equal(got, want) {
 		t.Errorf("Compute(several-sites.txtar) retained\n%v\nwant\n%v", got, want)
 	}
 }
@@ -317,13 +318,14 @@ func writerSites(found []graph.Exemption) int {
 }
 
 func TestEveryClassRunsCleanOverAModuleThatHasATestFile(t *testing.T) {
-	in := inputOf(t, "with-tests.txtar", Options{})
+	shared := analysisOf(t, "with-tests.txtar", Options{})
+	symbols := shared.inventory(t)
 
 	// A test load compiles one file the target does not hold, the test binary the
 	// toolchain synthesizes, and the load drops it. So every position a class
 	// meets renders, and a class returns what it found rather than a failure: the
 	// site of a conversion written in a test file is that file.
-	found, err := Compute(in, goDetectors())
+	found, err := shared.compute(t, false)
 	if err != nil {
 		t.Fatalf("Compute(with-tests.txtar) error: %v", err)
 	}
@@ -331,7 +333,7 @@ func TestEveryClassRunsCleanOverAModuleThatHasATestFile(t *testing.T) {
 		"Sink.Write interface-satisfaction app.go:14:34 satisfies io.Writer",
 		"(*recorder).Write interface-satisfaction app_test.go:18:20 satisfies io.Writer",
 	}
-	if got := retainedClauses(in, found); !slices.Equal(got, want) {
+	if got := retainedClauses(symbols, found); !slices.Equal(got, want) {
 		t.Errorf("Compute(with-tests.txtar) retained\n%v\nwant\n%v", got, want)
 	}
 }
@@ -365,14 +367,13 @@ func TestComputeDropsAnExemptionATestFileIsTheEvidenceFor(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(strings.ReplaceAll(tc.name, " ", "_"), func(t *testing.T) {
-			in := inputOf(t, "production-evidence.txtar", Options{})
-			in.Mode = graph.Mode{Production: tc.name == "a production run"}
+			shared := analysisOf(t, "production-evidence.txtar", Options{})
 
-			found, err := Compute(in, goDetectors())
+			found, err := shared.compute(t, tc.name == "a production run")
 			if err != nil {
 				t.Fatalf("Compute(production-evidence.txtar, %s) error: %v", tc.name, err)
 			}
-			if got := retainedClauses(in, found); !slices.Equal(got, tc.want) {
+			if got := retainedClauses(shared.inventory(t), found); !slices.Equal(got, tc.want) {
 				t.Errorf("Compute(production-evidence.txtar, %s) retained\n%v\nwant\n%v", tc.name, got, tc.want)
 			}
 		})
@@ -384,15 +385,14 @@ func TestComputeDropsAnExemptionATestFileIsTheEvidenceFor(t *testing.T) {
 // framework keeps the first site by rendered order, and a test file sorts before the
 // source file here.
 func TestComputeKeepsTheSourceSiteOfAFactATestFileAlsoCarries(t *testing.T) {
-	in := inputOf(t, "with-tests.txtar", Options{})
-	in.Mode = graph.Mode{Production: true}
+	shared := analysisOf(t, "with-tests.txtar", Options{})
 
-	found, err := Compute(in, goDetectors())
+	found, err := shared.compute(t, true)
 	if err != nil {
 		t.Fatalf("Compute(with-tests.txtar, a production run) error: %v", err)
 	}
 	want := []string{"Sink.Write interface-satisfaction app.go:14:34 satisfies io.Writer"}
-	if got := retainedClauses(in, found); !slices.Equal(got, want) {
+	if got := retainedClauses(shared.inventory(t), found); !slices.Equal(got, want) {
 		t.Errorf("Compute(with-tests.txtar, a production run) retained\n%v\nwant\n%v", got, want)
 	}
 }
@@ -446,8 +446,7 @@ func TestEveryClauseIsOneRelationThenTheThingItRelatesTo(t *testing.T) {
 	seen := make(map[Class]bool, len(Classes()))
 	for _, archive := range fixtureArchives(t) {
 		t.Run(archive, func(t *testing.T) {
-			in := inputOf(t, archive, fixtureOptions(t, archive))
-			found, err := Compute(in, goDetectors())
+			found, err := analysisOf(t, archive, fixtureOptions(t, archive)).compute(t, false)
 			if err != nil {
 				t.Fatalf("Compute(%s) error: %v", archive, err)
 			}

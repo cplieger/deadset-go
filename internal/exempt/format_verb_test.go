@@ -14,8 +14,8 @@ func verbRefs(typeName string, members ...string) []string {
 }
 
 func TestFormatVerbContractRetainsTheMethodEveryVerbFamilyCalls(t *testing.T) {
-	in := inputOf(t, "format-verb-firing.txtar", Options{})
-	refs := retainedRefs(t, in, FormatVerbContractDetector)
+	shared := analysisOf(t, "format-verb-firing.txtar", Options{})
+	refs := retainedRefs(t, shared, FormatVerbContract)
 
 	for _, test := range []struct {
 		family   string
@@ -55,8 +55,8 @@ func facilityRefs(typeName string, members ...string) []string {
 }
 
 func TestFormatVerbContractRetainsTheMethodEveryFacilityCalls(t *testing.T) {
-	in := inputOf(t, "format-verb-facilities.txtar", Options{})
-	refs := retainedRefs(t, in, FormatVerbContractDetector)
+	shared := analysisOf(t, "format-verb-facilities.txtar", Options{})
+	refs := retainedRefs(t, shared, FormatVerbContract)
 
 	for _, test := range []struct {
 		facility string
@@ -86,15 +86,16 @@ func TestFormatVerbContractRetainsTheMethodEveryFacilityCalls(t *testing.T) {
 }
 
 func TestFormatVerbContractNamesTheFacilityThatFormatted(t *testing.T) {
-	in := inputOf(t, "format-verb-facilities.txtar", Options{})
-	refs := make(map[graph.SymbolID]string, len(in.Symbols))
-	for i := range in.Symbols {
-		refs[in.Symbols[i].ID] = in.Symbols[i].Ref
+	shared := analysisOf(t, "format-verb-facilities.txtar", Options{})
+	symbols := shared.inventory(t)
+	refs := make(map[graph.SymbolID]string, len(symbols))
+	for i := range symbols {
+		refs[symbols[i].ID] = symbols[i].Ref
 	}
 
 	type record struct{ ref, site, detail string }
 	var got []record
-	for _, e := range retained(t, in, FormatVerbContractDetector) {
+	for _, e := range retained(t, shared, FormatVerbContract) {
 		got = append(got, record{ref: refs[e.ID], site: e.Site.String(), detail: e.Detail})
 	}
 
@@ -121,22 +122,23 @@ func TestFormatVerbContractNamesTheFacilityThatFormatted(t *testing.T) {
 }
 
 func TestFormatVerbContractRetainsNothingWhereNoVerbAsksForAString(t *testing.T) {
-	in := inputOf(t, "format-verb-quiet.txtar", Options{})
-	if got := retainedRefs(t, in, FormatVerbContractDetector); len(got) > 0 {
+	shared := analysisOf(t, "format-verb-quiet.txtar", Options{})
+	if got := retainedRefs(t, shared, FormatVerbContract); len(got) > 0 {
 		t.Errorf("FormatVerbContractDetector(format-verb-quiet.txtar) retained %v, want nothing", got)
 	}
 }
 
 func TestFormatVerbContractNamesTheClassTheVerbAndTheSite(t *testing.T) {
-	in := inputOf(t, "format-verb-firing.txtar", Options{})
-	refs := make(map[graph.SymbolID]string, len(in.Symbols))
-	for i := range in.Symbols {
-		refs[in.Symbols[i].ID] = in.Symbols[i].Ref
+	shared := analysisOf(t, "format-verb-firing.txtar", Options{})
+	symbols := shared.inventory(t)
+	refs := make(map[graph.SymbolID]string, len(symbols))
+	for i := range symbols {
+		refs[symbols[i].ID] = symbols[i].Ref
 	}
 
 	type record struct{ ref, class, site, detail string }
 	var got []record
-	for _, e := range retained(t, in, FormatVerbContractDetector) {
+	for _, e := range retained(t, shared, FormatVerbContract) {
 		got = append(got, record{ref: refs[e.ID], class: e.Class, site: e.Site.String(), detail: e.Detail})
 	}
 

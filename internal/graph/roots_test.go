@@ -19,30 +19,28 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-// detection is one archive's load, enumeration and root set.
+// detection is one archive's enumeration and root set, and the files its load
+// excluded for importing C.
 type detection struct {
-	result    *load.Result
-	symbols   []Symbol
-	roots     []Root
-	unmatched []Unmatched
+	excludedByCgo []string
+	symbols       []Symbol
+	roots         []Root
+	unmatched     []Unmatched
 }
 
-// detect extracts one archive, loads it for one configuration, enumerates it and
-// detects its roots.
+// detect is the enumeration and the roots of one archive loaded for one
+// configuration.
 func detect(t *testing.T, archive string, opts RootOptions) detection {
 	t.Helper()
 
-	dir := extract(t, archive)
-	result, target := loadDir(t, dir, "linux", "amd64")
-	symbols, err := Symbols(result, target, os.ReadFile)
-	if err != nil {
-		t.Fatalf("Setup: Symbols(%s): %v", archive, err)
+	shared := analysisOf(t, archive, opts.Patterns)
+	roots, unmatched := shared.rootsUnder(t, opts.PublishedAPI)
+	return detection{
+		excludedByCgo: shared.excludedFiles(t),
+		symbols:       shared.inventory(t),
+		roots:         roots,
+		unmatched:     unmatched,
 	}
-	roots, unmatched, err := Roots(result, target, os.ReadFile, symbols, opts)
-	if err != nil {
-		t.Fatalf("Roots(%s) = _, _, %v, want no error", archive, err)
-	}
-	return detection{result: result, symbols: symbols, roots: roots, unmatched: unmatched}
 }
 
 // kindsByRef maps each symbol reference to the kinds of root the detection gave a
@@ -186,8 +184,8 @@ func TestRootsReachesTheCgoExportTheOpaqueCheckRead(t *testing.T) {
 
 	// The file importing "C" is read by the opaque-C check, so nothing about it is
 	// a declared limit of the run.
-	if len(d.result.ExcludedByCgo) != 0 {
-		t.Errorf("Load(roots.txtar).ExcludedByCgo = %v, want empty", d.result.ExcludedByCgo)
+	if len(d.excludedByCgo) != 0 {
+		t.Errorf("Load(roots.txtar).ExcludedByCgo = %v, want empty", d.excludedByCgo)
 	}
 	const bridge = "go://example.com/roots/cgoexport#Bridge"
 	kinds := kindsByRef(d)

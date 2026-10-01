@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -574,26 +573,16 @@ type swept struct {
 	roots   []Root
 }
 
-// sweepOf extracts one archive, loads it for one configuration and runs the three
-// passes the sweep reads, so a verdict is measured over the production pipeline
-// rather than over a graph written by hand.
+// sweepOf is the three passes the sweep reads over one archive loaded for one
+// configuration, so a verdict is measured over the production pipeline rather than
+// over a graph written by hand.
 func sweepOf(t *testing.T, archive string, opts RootOptions) *swept {
 	t.Helper()
 
-	dir := extract(t, archive)
-	result, target := loadDir(t, dir, "linux", "amd64")
-	symbols, err := Symbols(result, target, os.ReadFile)
-	if err != nil {
-		t.Fatalf("Setup: Symbols(%s): %v", archive, err)
-	}
-	refs, _, err := References(result, target, os.ReadFile, symbols)
-	if err != nil {
-		t.Fatalf("Setup: References(%s): %v", archive, err)
-	}
-	roots, _, err := Roots(result, target, os.ReadFile, symbols, opts)
-	if err != nil {
-		t.Fatalf("Setup: Roots(%s): %v", archive, err)
-	}
+	shared := analysisOf(t, archive, opts.Patterns)
+	symbols := shared.inventory(t)
+	refs := shared.references(t)
+	roots, _ := shared.rootsUnder(t, opts.PublishedAPI)
 
 	s := &swept{
 		graph:   New(symbols, refs, roots),

@@ -12,12 +12,9 @@ import (
 // retainedRows renders one exemption per line as the symbol held back, the class,
 // the site the evidence was found at and the detail, which is what a reader of the
 // retained listing sees.
-func retainedRows(t *testing.T, in *Input, got []graph.Exemption) []string {
+func retainedRows(t *testing.T, symbols []graph.Symbol, got []graph.Exemption) []string {
 	t.Helper()
-	names := make(map[graph.SymbolID]string, len(in.Symbols))
-	for i := range in.Symbols {
-		names[in.Symbols[i].ID] = in.Symbols[i].Name
-	}
+	names := symbolNames(symbols)
 	rows := make([]string, 0, len(got))
 	for _, e := range got {
 		name, held := names[e.ID]
@@ -52,7 +49,7 @@ func TestTemplateFieldDetector(t *testing.T) {
 			"Note.Title template-field templates/partial/footer.tmpl:1:12 named by {{.Title}}",
 			"Page.Title template-field templates/partial/footer.tmpl:1:12 named by {{.Title}}",
 		}
-		if rows := retainedRows(t, &in, got); !slices.Equal(rows, want) {
+		if rows := retainedRows(t, in.Symbols, got); !slices.Equal(rows, want) {
 			t.Errorf("TemplateFieldDetector(template-field.txtar, dirs=[templates]) = %q, want %q", rows, want)
 		}
 	})
@@ -68,7 +65,7 @@ func TestTemplateFieldDetector(t *testing.T) {
 		// The delimiters are the project's, so the files written with the
 		// grammar's own hold no action and the clause reads as the file writes it.
 		want := []string{"Draft.Subtitle template-field templates/custom.tmpl:1:11 named by [[.Subtitle]]"}
-		if rows := retainedRows(t, &in, got); !slices.Equal(rows, want) {
+		if rows := retainedRows(t, in.Symbols, got); !slices.Equal(rows, want) {
 			t.Errorf("TemplateFieldDetector(template-field.txtar, delimiters=[[ ]]) = %q, want %q", rows, want)
 		}
 	})
@@ -83,7 +80,7 @@ func TestTemplateFieldDetector(t *testing.T) {
 		}
 		if len(got) != 0 {
 			t.Errorf("TemplateFieldDetector(template-field.txtar, dirs=[]) = %q, want no exemption",
-				retainedRows(t, &in, got))
+				retainedRows(t, in.Symbols, got))
 		}
 	})
 
@@ -98,7 +95,7 @@ func TestTemplateFieldDetector(t *testing.T) {
 		}
 		if got != nil {
 			t.Errorf("TemplateFieldDetector(template-field.txtar, dirs=[absent]) = %q, want no exemption",
-				retainedRows(t, &in, got))
+				retainedRows(t, in.Symbols, got))
 		}
 	})
 
@@ -121,7 +118,7 @@ func TestTemplateFieldDetectorSkipsAnUnparsableFile(t *testing.T) {
 		t.Fatalf("TemplateFieldDetector(template-field-unparsed.txtar, dirs=[templates]) error: %v", err)
 	}
 	want := []string{"Page.Title template-field templates/good.tmpl:1:8 named by {{.Title}}"}
-	if rows := retainedRows(t, in, got); !slices.Equal(rows, want) {
+	if rows := retainedRows(t, in.Symbols, got); !slices.Equal(rows, want) {
 		t.Errorf("TemplateFieldDetector(template-field-unparsed.txtar, dirs=[templates]) = %q, want %q",
 			rows, want)
 	}
