@@ -32,7 +32,8 @@ func contractDocument(t *testing.T, name string) map[string]any {
 // configuration schema: an object declaring members is a section, one the schema
 // marks as a setting is a setting written as an object, an object leaving its
 // member names to a pattern is an open object, an array of objects is a list, and
-// everything else holds one value.
+// everything else holds one value. A list whose entries take one of several shapes
+// declares the members of every shape.
 //
 // The mark is what tells the two objects apart, and it is the schema's own
 // statement of the difference, read rather than inferred: a higher-ranked source
@@ -52,12 +53,39 @@ func schemaNode(t *testing.T, at string, declaration map[string]any) keyNode {
 		return keyNode{kind: keyMap}
 	}
 	entry, isObject := declaration["items"].(map[string]any)
-	if isObject {
-		if properties, held := entry["properties"]; held {
-			return keyNode{kind: keyList, members: schemaMembers(t, at, properties)}
-		}
+	if !isObject {
+		return keyNode{kind: keyLeaf}
+	}
+	if properties, held := entry["properties"]; held {
+		return keyNode{kind: keyList, members: schemaMembers(t, at, properties)}
+	}
+	if shapes, held := entry["oneOf"].([]any); held {
+		return keyNode{kind: keyList, members: shapeMembers(t, at, shapes)}
 	}
 	return keyNode{kind: keyLeaf}
+}
+
+// shapeMembers builds the members the shapes of one list's entries declare between
+// them. A member two shapes both declare is one member of the list, so the shapes
+// must agree on what it is.
+func shapeMembers(t *testing.T, at string, shapes []any) map[string]keyNode {
+	t.Helper()
+
+	members := map[string]keyNode{}
+	for index, shape := range shapes {
+		declared, isObject := shape.(map[string]any)
+		if !isObject {
+			t.Fatalf("config.schema.json: %s: shape %d is %T, want an object", at, index, shape)
+		}
+		for name, member := range schemaMembers(t, at, declared["properties"]) {
+			if held, seen := members[name]; seen && !reflect.DeepEqual(held, member) {
+				t.Fatalf("config.schema.json: %s: shapes declare %s as %+v and %+v, want one member",
+					at, name, held, member)
+			}
+			members[name] = member
+		}
+	}
+	return members
 }
 
 // schemaMembers builds the members one properties object declares.
@@ -131,6 +159,11 @@ func TestPatternsEqualTheContract(t *testing.T) {
 			got:  exemptionClassPattern.String(),
 			want: func() string { return itemsPattern(t, properties, "exemptions", "disabled") },
 		},
+		{
+			name: "the_project_path_pattern",
+			got:  projectPathPattern.String(),
+			want: func() string { return shapePattern(t, properties, "analysis", "configurations", "project") },
+		},
 	}
 
 	for _, tc := range tests {
@@ -202,6 +235,53 @@ func itemsPattern(t *testing.T, properties map[string]any, section, member strin
 		t.Fatalf("config.schema.json: %s.%s items declare no pattern", section, member)
 	}
 	return pattern
+}
+
+// shapePattern returns the pattern one member of a list entry's shapes must match:
+// the pattern of the one shape that declares the member.
+func shapePattern(t *testing.T, properties map[string]any, section, list, member string) string {
+	t.Helper()
+
+	declared, isObject := properties[section].(map[string]any)
+	if !isObject {
+		t.Fatalf("config.schema.json: %s is not an object", section)
+	}
+	members, isObject := declared["properties"].(map[string]any)
+	if !isObject {
+		t.Fatalf("config.schema.json: %s declares no properties", section)
+	}
+	array, isObject := members[list].(map[string]any)
+	if !isObject {
+		t.Fatalf("config.schema.json: %s.%s is not an object", section, list)
+	}
+	items, isObject := array["items"].(map[string]any)
+	if !isObject {
+		t.Fatalf("config.schema.json: %s.%s declares no items", section, list)
+	}
+	shapes, isList := items["oneOf"].([]any)
+	if !isList {
+		t.Fatalf("config.schema.json: %s.%s items declare no shapes", section, list)
+	}
+	var patterns []string
+	for _, shape := range shapes {
+		declaredShape, isObject := shape.(map[string]any)
+		if !isObject {
+			t.Fatalf("config.schema.json: %s.%s declares a shape that is not an object", section, list)
+		}
+		shapeMembers, isObject := declaredShape["properties"].(map[string]any)
+		if !isObject {
+			continue
+		}
+		if one, held := shapeMembers[member].(map[string]any); held {
+			if pattern, isString := one["pattern"].(string); isString {
+				patterns = append(patterns, pattern)
+			}
+		}
+	}
+	if len(patterns) != 1 {
+		t.Fatalf("config.schema.json: %s.%s declares %d patterns for %s, want one", section, list, len(patterns), member)
+	}
+	return patterns[0]
 }
 
 func TestDeclaredKeysCoverEverySetting(t *testing.T) {

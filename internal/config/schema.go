@@ -24,6 +24,11 @@ var exemptionClassPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 //nolint:gocritic // regexpSimplify: the pattern is the schema's own spelling, pinned equal to it
 var contractVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 
+// projectPathPattern is the spelling the configuration file of a project entry of the
+// build matrix takes: a path below the target root, its segments joined by /, none of
+// them empty, . or .., and none holding a backslash or a line break.
+var projectPathPattern = regexp.MustCompile(`^(?:[^/\\.\r\n][^/\\\r\n]*|\.[^/\\.\r\n][^/\\\r\n]*|\.\.[^/\\\r\n]+)(?:/(?:[^/\\.\r\n][^/\\\r\n]*|\.[^/\\.\r\n][^/\\\r\n]*|\.\.[^/\\\r\n]+))*$`)
+
 // keyKind classifies one node of the closed key list.
 type keyKind uint8
 
@@ -46,7 +51,9 @@ const (
 )
 
 // keyNode is one node of the closed key list. members holds a section's declared
-// members, or a list entry's, and is empty otherwise.
+// members, or a list entry's, and is empty otherwise. An entry of the build matrix
+// takes one of two shapes, and members holds the members of both: which member names
+// an entry may combine is the shape check resolution applies, not the key list.
 type keyNode struct {
 	members map[string]keyNode
 	kind    keyKind
@@ -68,10 +75,11 @@ func schemaRoot() keyNode {
 			"generated_files": {kind: keyLeaf},
 			"consumer_tests":  {kind: keyLeaf},
 			"configurations": {kind: keyList, members: map[string]keyNode{
-				"id":   {kind: keyLeaf},
-				"os":   {kind: keyLeaf},
-				"arch": {kind: keyLeaf},
-				"tags": {kind: keyLeaf},
+				"id":      {kind: keyLeaf},
+				"os":      {kind: keyLeaf},
+				"arch":    {kind: keyLeaf},
+				"tags":    {kind: keyLeaf},
+				"project": {kind: keyLeaf},
 			}},
 			"matrix": {kind: keySection, members: map[string]keyNode{
 				"complete": {kind: keyLeaf},

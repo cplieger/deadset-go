@@ -173,9 +173,11 @@ with each tag appended after a further hyphen. A malformed build expression ends
 the file.
 
 A derived matrix is never complete: it satisfies a Boolean constraint only where its atoms happen
-to, and a configuration no file in the tree names is never derived. `analysis.configurations`
-replaces the derivation, and `analysis.matrix.complete` declares that the listed configurations
-are every one the target builds, which is the precondition `DS1501` needs.
+to, and a configuration no file in the tree names is never derived. The platform entries of
+`analysis.configurations` replace the derivation, and `analysis.matrix.complete` declares that the
+listed platforms are every configuration the target builds, which is the precondition `DS1501`
+needs. A project entry names a TypeScript compiler configuration file, and this analyzer ignores
+it, so a configuration listing only project entries leaves the Go matrix derived and incomplete.
 
 ## cgo files, with the C half opaque
 

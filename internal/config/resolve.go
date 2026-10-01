@@ -280,9 +280,9 @@ func resolveAnalysis(cfg *Config, p Provenance, sources []source) {
 		func(d *doc) *[]string { return d.Analysis.TemplateDirs })
 	resolveSetting(&cfg.Analysis.TemplateDelimiters, "analysis.template_delimiters", p, sources,
 		func(d *doc) *TemplateDelimiters { return d.Analysis.TemplateDelimiters })
-	for index := range cfg.Analysis.Configurations {
-		if cfg.Analysis.Configurations[index].Tags == nil {
-			cfg.Analysis.Configurations[index].Tags = []string{}
+	for _, entry := range cfg.Analysis.Configurations {
+		if entry.Platform != nil && entry.Platform.Tags == nil {
+			entry.Platform.Tags = []string{}
 		}
 	}
 }
@@ -430,26 +430,57 @@ func validateDelimiters(delimiters *TemplateDelimiters, label string) *Error {
 	)
 }
 
-// validateConfigurations checks the build matrix: every entry names an
-// identifier, an operating system and an architecture.
+// matrixShapes names the two shapes an entry of the build matrix takes, as a refusal
+// of an entry taking neither or both states them.
+const matrixShapes = "an entry is a platform, naming id, os, arch and optionally tags, " +
+	"or a project, naming id and project"
+
+// validateConfigurations checks the build matrix: every entry takes exactly one of
+// the two shapes and names every member its shape requires.
 func validateConfigurations(configurations *[]Configuration, label string) *Error {
 	if configurations == nil {
 		return nil
 	}
 	for index, entry := range *configurations {
 		at := "analysis.configurations[" + strconv.Itoa(index) + "]"
-		tags := entry.Tags
-		refusal := firstError(
-			required(label, at+".id", entry.ID),
-			required(label, at+".os", entry.OS),
-			required(label, at+".arch", entry.Arch),
-			arrayOf(label, at+".tags", &tags, 0),
-		)
-		if refusal != nil {
+		if refusal := validateConfiguration(entry, at, label); refusal != nil {
 			return refusal
 		}
 	}
 	return nil
+}
+
+// validateConfiguration checks one entry of the build matrix, at naming its place in
+// the matrix.
+func validateConfiguration(entry Configuration, at, label string) *Error {
+	switch {
+	case entry.Platform != nil && entry.Project != nil:
+		return malformed(label, at, "names members of both shapes; %s", matrixShapes)
+	case entry.Platform != nil:
+		tags := entry.Platform.Tags
+		return firstError(
+			required(label, at+".id", entry.Platform.ID),
+			required(label, at+".os", entry.Platform.OS),
+			required(label, at+".arch", entry.Platform.Arch),
+			arrayOf(label, at+".tags", &tags, 0),
+		)
+	case entry.Project != nil:
+		refusal := firstError(
+			required(label, at+".id", entry.Project.ID),
+			required(label, at+".project", entry.Project.Path),
+		)
+		if refusal != nil {
+			return refusal
+		}
+		if !projectPathPattern.MatchString(entry.Project.Path) {
+			return malformed(label, at+".project",
+				"%q is not a file path below the target root, written with / between its segments",
+				entry.Project.Path)
+		}
+		return nil
+	default:
+		return malformed(label, at, "names neither shape; %s", matrixShapes)
+	}
 }
 
 // validateExemptions checks the exemption classes named for switching off.

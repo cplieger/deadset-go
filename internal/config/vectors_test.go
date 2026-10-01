@@ -40,6 +40,7 @@ func publishedCases() []string {
 		"resolved-configuration-round-trip",
 		"template-delimiters-configured",
 		"template-delimiters-half",
+		"typescript-matrix-declared",
 		"unimplemented-key",
 	}
 }
@@ -139,6 +140,78 @@ func runCase(t *testing.T, name string) {
 		t.Fatalf("Resolve(%s) = error %v, want the resolved configuration", name, err)
 	}
 	assertResolved(t, name, resolved, cfg, provenance)
+}
+
+// refusedDocument is one row of the Contract's index of refused documents: the file,
+// the schema that refuses it and the instance path the refusal names.
+type refusedDocument struct {
+	File         string `json:"file"`
+	Schema       string `json:"schema"`
+	InstancePath string `json:"instance_path"`
+}
+
+// dottedPath spells a JSON Pointer the way a refusal names a key: its member names
+// joined by dots, and an array index in brackets after the array it indexes.
+func dottedPath(pointer string) string {
+	var path strings.Builder
+	for segment := range strings.SplitSeq(strings.TrimPrefix(pointer, "/"), "/") {
+		if segment != "" && strings.Trim(segment, "0123456789") == "" {
+			path.WriteString("[" + segment + "]")
+			continue
+		}
+		if path.Len() > 0 {
+			path.WriteString(".")
+		}
+		path.WriteString(segment)
+	}
+	return path.String()
+}
+
+// Every configuration document the Contract publishes as refused is refused here
+// with the usage code, and the refusal names the place in the document the schema's
+// own refusal names.
+func TestPublishedRefusedConfigurations(t *testing.T) {
+	t.Parallel()
+
+	data, err := spec.Examples.ReadFile("examples/negatives/index.json")
+	if err != nil {
+		t.Fatalf("read examples/negatives/index.json: %v", err)
+	}
+	var index struct {
+		Negatives []refusedDocument `json:"negatives"`
+	}
+	if err := json.Unmarshal(data, &index); err != nil {
+		t.Fatalf("decode examples/negatives/index.json: %v", err)
+	}
+	var refused []refusedDocument
+	for _, row := range index.Negatives {
+		if row.Schema == "contract/config.schema.json" {
+			refused = append(refused, row)
+		}
+	}
+	if len(refused) == 0 {
+		t.Fatal("examples/negatives/index.json names no refused configuration document, so this test pins nothing")
+	}
+
+	for _, row := range refused {
+		t.Run(strings.TrimSuffix(row.File, ".json"), func(t *testing.T) {
+			t.Parallel()
+
+			document, err := spec.Examples.ReadFile("examples/negatives/" + row.File)
+			if err != nil {
+				t.Fatalf("read examples/negatives/%s: %v", row.File, err)
+			}
+			_, _, err = config.Resolve(config.Inputs{Repository: document, RepositoryLabel: row.File})
+			var refusal *config.Error
+			if !errors.As(err, &refusal) {
+				t.Fatalf("Resolve(%s) = error %v, want a *config.Error", row.File, err)
+			}
+			if want := dottedPath(row.InstancePath); refusal.Key != want {
+				t.Errorf("Resolve(%s) named %q, want %q, the instance path %q the schema refuses",
+					row.File, refusal.Key, want, row.InstancePath)
+			}
+		})
+	}
 }
 
 // assertRefused checks the refusal against the case's expected-error.json: the

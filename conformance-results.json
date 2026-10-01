@@ -1,5 +1,5 @@
 {
-  "corpus_version": "1.5.0",
+  "corpus_version": "1.6.0",
   "product": {
     "name": "deadset-go",
     "version": "0.0.0-devel",
@@ -7,8 +7,8 @@
   },
   "result": "pass",
   "totals": {
-    "fixtures": 17,
-    "pass": 17,
+    "fixtures": 18,
+    "pass": 18,
     "gap": 0,
     "fail": 0
   },
@@ -634,6 +634,52 @@
       "unexpected": []
     },
     {
+      "fixture": "satisfaction-assertion-across-files",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "AssertedInterfaceMethod",
+          "result": "pass",
+          "actual": {
+            "report": "DS1203",
+            "symbol_kind": "interface-method",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "AssertedMethod",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "interface-satisfaction"
+            ]
+          }
+        },
+        {
+          "symbol": "Assertion",
+          "result": "pass",
+          "actual": {
+            "report": "DS1204",
+            "symbol_kind": "satisfaction-assertion",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
       "fixture": "suppression-self-checks",
       "result": "pass",
       "expectations": [
@@ -839,6 +885,23 @@
           }
         },
         {
+          "symbol": "AbsentReference",
+          "result": "pass",
+          "actual": {
+            "report": "DS1704",
+            "symbol_kind": "root",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          }
+        },
+        {
+          "symbol": "ExactRooted",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
           "symbol": "PlainDead",
           "result": "pass",
           "actual": {
@@ -862,6 +925,13 @@
         },
         {
           "symbol": "RootedPattern",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "RootedReference",
           "result": "pass",
           "actual": {
             "report": "none"

@@ -148,3 +148,62 @@ func TestAnalyzeNamesTheDerivedConfigurationItDropped(t *testing.T) {
 			dropped.ID, dropped.Error)
 	}
 }
+
+// projectEntries is a build matrix listing compiler configurations alone, declared
+// complete: the matrix of another language's analysis, which leaves this one to
+// derive its own.
+const projectEntries = `{"target": {"kind": "application"}, "analysis": {` +
+	`"configurations": [{"id": "tsconfig.json", "project": "tsconfig.json"}], ` +
+	`"matrix": {"complete": true}}}`
+
+// A configuration listing project entries alone declares no configuration this
+// analysis builds, so the run derives its matrix from the tree as it does with no
+// matrix at all, and drops a derived configuration the target does not build rather
+// than failing on it.
+func TestStagesOfDerivesTheMatrixWhereTheConfigurationListsProjectsAlone(t *testing.T) {
+	dir := unbuildableDerivedModule(t, projectEntries)
+	resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
+	if code != exitClean {
+		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, exitClean)
+	}
+
+	loaded, err := stagesOf(t.Context(), &resolved)
+	if err != nil {
+		t.Fatalf("stagesOf(a target listing project entries alone) = %v, want the stages of the derived matrix", err)
+	}
+	if want := []string{load.HostConfiguration().ID}; !slices.Equal(loaded.identifiers, want) {
+		t.Errorf("stagesOf() analyzed the matrix %v, want the derived matrix the target builds %v",
+			loaded.identifiers, want)
+	}
+	if len(loaded.unbuilt) != 1 || loaded.unbuilt[0].Configuration.ID != unbuildableWindows {
+		t.Errorf("stagesOf() dropped %d configurations, want the one derived configuration %q: only a derived configuration is dropped",
+			len(loaded.unbuilt), unbuildableWindows)
+	}
+}
+
+// The report's matrix is the one the analysis ran, so a configuration listing both
+// shapes writes its platform entries and no project entry.
+func TestAnalyzeReportsThePlatformEntriesOfAMatrixListingBothShapes(t *testing.T) {
+	host := load.HostConfiguration()
+	dir := unbuildableDerivedModule(t, `{"target": {"kind": "application"}, "analysis": {"configurations": [`+
+		`{"id": "tsconfig.json", "project": "tsconfig.json"},`+
+		`{"id": "`+host.ID+`", "os": "`+runtime.GOOS+`", "arch": "`+runtime.GOARCH+`"}]}}`)
+
+	run := runAnalyze(t, dir)
+	if run.code == exitFailure || run.code == exitUsage {
+		t.Fatalf("analyze(a matrix listing a project entry beside the host platform) = %d, want a verdict: %s",
+			run.code, run.stderr)
+	}
+	envelope := envelopeAt(t, run.reportPath)
+	var named []string
+	for _, one := range envelope.Configurations {
+		named = append(named, one.ID)
+	}
+	if want := []string{host.ID}; !slices.Equal(named, want) {
+		t.Errorf("the report names the matrix %v, want the platform entries the configuration lists %v", named, want)
+	}
+	if len(envelope.ConfigurationsNotBuilt) != 0 {
+		t.Errorf("the report names %d configurations the run did not build, want none: a declared matrix derives nothing",
+			len(envelope.ConfigurationsNotBuilt))
+	}
+}

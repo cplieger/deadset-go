@@ -1015,9 +1015,9 @@ func declaredMatrix(identifiers []string) ([]config.Configuration, error) {
 			return nil, fmt.Errorf("the manifest declares the configuration %q, "+
 				"and an identifier names an operating system and an architecture", one)
 		}
-		declared = append(declared, config.Configuration{
+		declared = append(declared, config.Configuration{Platform: &config.Platform{
 			ID: one, OS: parts[0], Arch: parts[1], Tags: parts[2:],
-		})
+		}})
 	}
 	return declared, nil
 }
@@ -1602,8 +1602,8 @@ func TestTheCorpusRunDeclaresTheWorldTheFixtureNames(t *testing.T) {
 
 	manifest := corpusManifest{Configurations: []string{"linux-amd64", "linux-arm64-netgo"}}
 	declared := []config.Configuration{
-		{ID: "linux-amd64", OS: "linux", Arch: "amd64", Tags: []string{}},
-		{ID: "linux-arm64-netgo", OS: "linux", Arch: "arm64", Tags: []string{"netgo"}},
+		{Platform: &config.Platform{ID: "linux-amd64", OS: "linux", Arch: "amd64", Tags: []string{}}},
+		{Platform: &config.Platform{ID: "linux-arm64-netgo", OS: "linux", Arch: "arm64", Tags: []string{"netgo"}}},
 	}
 
 	tests := []struct {
@@ -1662,9 +1662,13 @@ func TestTheCorpusRunDeclaresTheWorldTheFixtureNames(t *testing.T) {
 }
 
 // sameConfiguration reports whether two configurations of a declared matrix are the
-// one configuration, every member included.
+// one platform configuration, every member included.
 func sameConfiguration(a, b config.Configuration) bool {
-	return a.ID == b.ID && a.OS == b.OS && a.Arch == b.Arch && slices.Equal(a.Tags, b.Tags)
+	if a.Platform == nil || b.Platform == nil || a.Project != nil || b.Project != nil {
+		return false
+	}
+	p, q := a.Platform, b.Platform
+	return p.ID == q.ID && p.OS == q.OS && p.Arch == q.Arch && slices.Equal(p.Tags, q.Tags)
 }
 
 // TestTheCorpusRunRefusesAWorldTheCorpusDoesNotCarry pins that a fact outside the

@@ -13,7 +13,7 @@ import (
 
 // ContractVersion is the Contract version this package implements. It is the
 // resolved value of contract_version when no source supplies one.
-const ContractVersion = "2.1.0"
+const ContractVersion = "2.2.0"
 
 // defaultTestFiles is the documented default of ts.test_files.
 const defaultTestFiles = "**/*.test.{ts,tsx,mts,cts}"
@@ -160,15 +160,6 @@ type Analysis struct {
 type TemplateDelimiters struct {
 	Left  string `json:"left"`
 	Right string `json:"right"`
-}
-
-// Configuration is one entry of the build matrix: a configuration the target
-// builds under, named by the identifier every finding carries.
-type Configuration struct {
-	ID   string   `json:"id"`
-	OS   string   `json:"os"`
-	Arch string   `json:"arch"`
-	Tags []string `json:"tags"`
 }
 
 // Matrix carries the declarations about the build matrix.

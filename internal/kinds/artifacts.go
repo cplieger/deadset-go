@@ -57,7 +57,7 @@ const versionGap = " "
 // FileNeverBuilt reports a source file of the target that no configuration of the
 // build matrix compiles, naming the build constraint that excluded it.
 //
-// The kind reports only where the configuration both lists the build
+// The kind reports only where the configuration both lists the platform
 // configurations and declares the matrix complete, because that declaration says
 // the listed configurations are every one the target builds. A matrix the run
 // derived holds the configurations the tree's own build atoms imply and cannot
@@ -99,12 +99,14 @@ func FileNeverBuilt(in *Input) ([]Finding, error) {
 // listed and declared complete, which is the one declaration under which a file no
 // configuration builds is a finding.
 //
-// Both halves are the declaration: the assertion is about the configurations the
-// document lists, so a configuration declaring completeness and listing none
-// declares it of a matrix the run derived, and a derived matrix is incomplete.
+// Both halves are the declaration: the assertion is about the platform
+// configurations the document lists, so a configuration declaring completeness and
+// listing none declares it of a matrix the run derived, and a derived matrix is
+// incomplete. A project configuration is another language's matrix and lists nothing
+// this analysis builds.
 func completeMatrix(in *Input) bool {
 	return in != nil && in.Config != nil &&
-		in.Config.Analysis.Matrix.Complete && len(in.Config.Analysis.Configurations) > 0
+		in.Config.Analysis.Matrix.Complete && len(in.Config.Analysis.Platforms()) > 0
 }
 
 // ignoredFile is one file of the target no configuration of the matrix compiled.

@@ -64,8 +64,9 @@ const maxDocumentBytes = 1 << 20
 const language = config.GoLanguage
 
 // schemaVersionsAccepted lists every report schema version this analyzer reads
-// and writes. contract.json's schema_versions is the list it must equal.
-var schemaVersionsAccepted = []string{"5.0.0"}
+// and writes, which is the one version the report package writes and reads.
+// contract.json's schema_versions is the list it must equal.
+var schemaVersionsAccepted = []string{report.SchemaVersion}
 
 // settingFlag is one setting a command-line flag supplies: the dotted path the
 // resolved configuration names the setting by, and what the flag's value is.
@@ -706,8 +707,10 @@ func greatestPerRule(held, next []graph.TestFileRule) []graph.TestFileRule {
 	return held
 }
 
-// matrixOf resolves the build matrix one run analyzes: the configurations the
-// configuration lists, or the matrix the target tree implies where it lists none.
+// matrixOf resolves the build matrix one run analyzes: the platform configurations
+// the configuration lists, or the matrix the target tree implies where it lists none.
+// A project configuration is another language's matrix, so a configuration listing
+// projects alone leaves this one derived.
 //
 // A derived matrix is the atoms the tree names plus the host, never the product of
 // them, and it is incomplete by definition, which is why nothing here sets
@@ -717,10 +720,10 @@ func greatestPerRule(held, next []graph.TestFileRule) []graph.TestFileRule {
 // configuration listed them: a stage that claims something about every
 // configuration of the target needs to know which of the two it is reading.
 func matrixOf(cfg *config.Config, targetRoot string) ([]load.Configuration, *matrix.Derived, error) {
-	if len(cfg.Analysis.Configurations) > 0 {
-		configurations := make([]load.Configuration, len(cfg.Analysis.Configurations))
-		for i, c := range cfg.Analysis.Configurations {
-			configurations[i] = load.Configuration{ID: c.ID, OS: c.OS, Arch: c.Arch, Tags: c.Tags}
+	if platforms := cfg.Analysis.Platforms(); len(platforms) > 0 {
+		configurations := make([]load.Configuration, len(platforms))
+		for i, p := range platforms {
+			configurations[i] = load.Configuration{ID: p.ID, OS: p.OS, Arch: p.Arch, Tags: p.Tags}
 		}
 		return configurations, nil, nil
 	}
