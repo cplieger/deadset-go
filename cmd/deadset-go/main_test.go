@@ -1021,10 +1021,37 @@ func TestPrintRetainedRefusesAClassNameOutsideTheVocabulary(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Errorf("run(%q) stdout = %q, want empty: a refused configuration computes no exemption", args, stdout.String())
 	}
-	for _, want := range []string{`"interface-satisfation" is not an exemption class`, "interface-satisfaction", "reflective-lookup"} {
+	// The refusal lists the vocabulary a configuration may name, from its first
+	// class to its last, which is a class only another language's analyzer computes.
+	for _, want := range []string{`"interface-satisfation" is not an exemption class`, "interface-satisfaction", "serialization-contract"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Errorf("run(%q) stderr = %q, want it to contain %q", args, stderr.String(), want)
 		}
+	}
+}
+
+func TestPrintRetainedAcceptsAClassAnotherLanguageComputesAndRetainsAsBefore(t *testing.T) {
+	t.Parallel()
+
+	dir := exemptedModule(t, `{"target": {"kind": "application"}, "exemptions": {"disabled": `+
+		`["decorator", "injection-container", "framework-lifecycle", "serialization-contract"]}}`)
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"print-retained", "--target=" + dir}
+	if got := run(t.Context(), args, &stdout, &stderr); got != exitClean {
+		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, exitClean, stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("run(%q) stderr = %q, want empty", args, stderr.String())
+	}
+
+	// A configuration shared with the TypeScript analyzer names classes this one
+	// does not compute, and switching them off changes nothing here: both classes
+	// that run still hold their symbols back.
+	want := "go://example.com/app#Sink.Write\tinterface-satisfaction\tapp.go:26:23\tsatisfies io.Writer\n" +
+		"go://example.com/app#Tier.String\tformat-verb-contract\tapp.go:29:14\tformatted by fmt.Println\n"
+	if got := stdout.String(); got != want {
+		t.Errorf("run(%q) stdout =\n%s\nwant\n%s", args, got, want)
 	}
 }
 
@@ -1051,15 +1078,15 @@ func TestPrintRetainedReportsEveryConfiguredStringThatNamesNothing(t *testing.T)
 	}
 }
 
-func TestDetectorsNameEveryClassOfTheVocabulary(t *testing.T) {
+func TestDetectorsNameEveryClassTheAnalyzerComputes(t *testing.T) {
 	t.Parallel()
 
 	// A class the table does not hold retains nothing, and nothing else refuses
 	// the run: the configuration that disables such a class is still accepted,
 	// because the vocabulary is what a class name is checked against, and the
 	// symbols the class would have held back are reported as candidates instead.
-	// So the table is the only place the vocabulary is wired through, and a class
-	// added to it without a row here is an exemption the analyzer never computes.
+	// So the table is the only place the Go classes are wired through, and a class
+	// added to them without a row here is an exemption the analyzer never computes.
 	classes := exempt.Classes()
 	for _, class := range classes {
 		if detectors[class] == nil {
@@ -1067,7 +1094,7 @@ func TestDetectorsNameEveryClassOfTheVocabulary(t *testing.T) {
 		}
 	}
 	if len(detectors) != len(classes) {
-		t.Errorf("detectors names %d classes, want the %d of the vocabulary: %v", len(detectors), len(classes), classes)
+		t.Errorf("detectors names %d classes, want the %d exempt.Classes() names: %v", len(detectors), len(classes), classes)
 	}
 }
 

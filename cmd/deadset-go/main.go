@@ -369,7 +369,7 @@ func printConfig(args []string, stdout, stderr io.Writer) int {
 // detectors is the exemption classes this analyzer computes, each mapped to its
 // detection, in vocabulary order. The framework names no class, so the table is
 // assembled here, where every other stage of the analysis is assembled, and it
-// names every class the vocabulary declares: a class the table does not hold
+// names every class the vocabulary declares for Go: a class the table does not hold
 // retains nothing, so a class missing from it is an exemption the analyzer stops
 // computing without anything refusing the configuration that disables it.
 var detectors = map[exempt.Class]exempt.Detector{
@@ -1439,12 +1439,15 @@ func generatedPaths(per []kinds.Configured) (map[string]bool, error) {
 // they read them from, which is the whole of the configuration that reaches a
 // class.
 //
-// A name outside the vocabulary is a configuration naming a class that does not
-// exist, and it is refused rather than ignored: a maintainer who misspelled a
+// A disabled name is checked against the whole vocabulary, so a configuration
+// shared with another language's analyzer resolves here unchanged: a class the
+// vocabulary declares for another language alone is accepted and switches nothing
+// off. A name outside the vocabulary is a configuration naming a class that does
+// not exist, and it is refused rather than ignored: a maintainer who misspelled a
 // class would otherwise be told nothing and keep the exemption they meant to
 // switch off.
 func exemptOptions(cfg *config.Config) (exempt.Options, error) {
-	known := exempt.Classes()
+	known := exempt.Vocabulary()
 	disabled := make([]exempt.Class, 0, len(cfg.Exemptions.Disabled))
 	for _, name := range cfg.Exemptions.Disabled {
 		class := exempt.Class(name)
