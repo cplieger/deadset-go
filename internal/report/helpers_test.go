@@ -188,11 +188,27 @@ func fullInput() BuildInput {
 
 	stale.Component = kinds.Component{ID: "deadset-go/c-6", Root: true, SymbolCount: 1}
 	narrowing.Component = kinds.Component{ID: "deadset-go/c-7", Root: true, SymbolCount: 1}
-	dependency.Component = kinds.Component{ID: "deadset-go/c-1", Root: true, SymbolCount: 1, DeletableLines: 1}
-	neverBuilt.Component = kinds.Component{ID: "deadset-go/c-2", Root: true, SymbolCount: 1, DeletableLines: 9}
-	writeOnly.Component = kinds.Component{ID: "deadset-go/c-3", Root: true, SymbolCount: 1, DeletableLines: 1}
+	dependency.Component = kinds.Component{
+		ID: "deadset-go/c-1", Root: true, SymbolCount: 1, DeletableLines: 1,
+		Spans: []graph.Span{{Path: "go.mod", First: 12, Last: 12}},
+	}
+	neverBuilt.Component = kinds.Component{
+		ID: "deadset-go/c-2", Root: true, SymbolCount: 1, DeletableLines: 9,
+		Spans: []graph.Span{{Path: "render_plan9.go", First: 1, Last: 9}},
+	}
+	writeOnly.Component = kinds.Component{
+		ID: "deadset-go/c-3", Root: true, SymbolCount: 1, DeletableLines: 1,
+		Spans: []graph.Span{{Path: "catalog.go", First: 12, Last: 12}},
+	}
 	interfaceFinding.Component = kinds.Component{ID: "deadset-go/c-4", Root: true, SymbolCount: 1}
-	deletable.Component = kinds.Component{ID: "deadset-go/c-5", Root: true, SymbolCount: 3, DeletableLines: 41}
+	deletable.Component = kinds.Component{
+		ID: "deadset-go/c-5", Root: true, SymbolCount: 3, DeletableLines: 41,
+		Spans: []graph.Span{
+			{Path: "catalog.go", First: 214, Last: 231},
+			{Path: "catalog.go", First: 232, Last: 245},
+			{Path: "catalog.go", First: 246, Last: 254},
+		},
+	}
 
 	return BuildInput{
 		Analyzer:               analyzerOf(),

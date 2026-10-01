@@ -101,6 +101,72 @@ func TestComponentsPlaceADeadMemberInsideItsDeadContainer(t *testing.T) {
 	}
 }
 
+func TestComponentsCountALineTwoFallingDeclarationsShareOnce(t *testing.T) {
+	b := newGraphBuilder(t)
+	b.declare(handSymbol{name: "box", kind: KindType, lines: 4})
+	b.declare(handSymbol{name: "lid", kind: KindField, parent: "box", nested: true})
+	b.declare(handSymbol{name: "side", kind: KindField, parent: "box", nested: true, lines: 2})
+	b.declare(handSymbol{name: "open", kind: KindMethod, parent: "box", lines: 2})
+	got := b.groups(b.graph().Sweep(SweepInput{}))
+
+	// The struct runs from its first line to its closing brace and its fields'
+	// lines are inside that run, so the deletion removes the struct's four lines
+	// and the method's two: six, where adding the spans of the four falling
+	// declarations together would say nine.
+	want := []grouped{{members: "box lid side open", roots: "box", falls: "box lid side open", lines: 6}}
+	if !slices.Equal(got, want) {
+		t.Errorf("Sweep over a dead struct whose fields lie inside it returned components %+v, want %+v", got, want)
+	}
+}
+
+func TestDistinctLinesCountsALineSeveralSpansCoverOnce(t *testing.T) {
+	cases := map[string]struct {
+		spans []Span
+		want  int
+	}{
+		"no span": {want: 0},
+		"one span": {
+			spans: []Span{{Path: "a.go", First: 3, Last: 5}},
+			want:  3,
+		},
+		"a span inside another": {
+			spans: []Span{{Path: "a.go", First: 3, Last: 9}, {Path: "a.go", First: 4, Last: 6}},
+			want:  7,
+		},
+		"two spans that overlap": {
+			spans: []Span{{Path: "a.go", First: 5, Last: 8}, {Path: "a.go", First: 3, Last: 6}},
+			want:  6,
+		},
+		"two spans that meet without sharing a line": {
+			spans: []Span{{Path: "a.go", First: 3, Last: 4}, {Path: "a.go", First: 5, Last: 6}},
+			want:  4,
+		},
+		"one span twice": {
+			spans: []Span{{Path: "a.go", First: 7, Last: 7}, {Path: "a.go", First: 7, Last: 7}},
+			want:  1,
+		},
+		"the same lines of two files": {
+			spans: []Span{{Path: "a.go", First: 3, Last: 5}, {Path: "b.go", First: 3, Last: 5}},
+			want:  6,
+		},
+		"a span that ends before the run it follows": {
+			spans: []Span{
+				{Path: "a.go", First: 1, Last: 10},
+				{Path: "a.go", First: 2, Last: 3},
+				{Path: "a.go", First: 9, Last: 12},
+			},
+			want: 12,
+		},
+	}
+	for name, test := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := DistinctLines(test.spans); got != test.want {
+				t.Errorf("DistinctLines(%+v) = %d, want %d", test.spans, got, test.want)
+			}
+		})
+	}
+}
+
 func TestComponentsOrderPlacesEachComponentBeforeTheOnesItReaches(t *testing.T) {
 	// The declaration that is reached is written first, so the order the sweep
 	// returns is the one the references decide rather than the one the sites do.

@@ -587,22 +587,19 @@ func totalsOf(e *Envelope, held Suppressions) Totals {
 	return counted
 }
 
-// deletableLines is the number of source lines the deletion of everything the
-// findings name removes, summed over the component of each component root so no
-// line is counted twice. A component with several roots contributes once, because
-// the members that fall with it are the same members whichever root names it.
+// deletableLines is the number of distinct source lines the deletion of everything
+// the findings name removes: the lines the fall sets of the reported component
+// roots span, a line two of them share counted once, as two declarations written
+// on one line fall with two components.
 func deletableLines(findings []kinds.Finding) int {
-	counted := make(map[string]bool)
-	total := 0
+	var spans []graph.Span
 	for i := range findings {
 		component := &findings[i].Component
-		if !component.Root || counted[component.ID] {
-			continue
+		if component.Root {
+			spans = append(spans, component.Spans...)
 		}
-		counted[component.ID] = true
-		total += component.DeletableLines
 	}
-	return total
+	return graph.DistinctLines(spans)
 }
 
 // unique is one sorted copy of a path list with no repetition, and an empty list

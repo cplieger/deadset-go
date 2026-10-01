@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/internal/graph"
-	spec "github.com/cplieger/deadset-spec/v2"
+	spec "github.com/cplieger/deadset-spec/v3"
 )
 
 // retained runs one detector and returns what it recorded.

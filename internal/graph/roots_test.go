@@ -1,6 +1,8 @@
 package graph
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"go/ast"
@@ -13,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/internal/load"
+	spec "github.com/cplieger/deadset-spec/v3"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -495,6 +498,43 @@ func TestMatchRefOnRunesRatherThanBytes(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if got := matchRef(test.pattern, ref); got != test.want {
 				t.Errorf("matchRef(%q, %q) = %t, want %t", test.pattern, ref, got, test.want)
+			}
+		})
+	}
+}
+
+// patternCase is one case of the published root-pattern corpus: a configured
+// pattern, a symbol reference, and whether the one matches the other.
+type patternCase struct {
+	Pattern   string `json:"pattern"`
+	Reference string `json:"reference"`
+	Reason    string `json:"reason"`
+	Matches   bool   `json:"matches"`
+}
+
+func TestMatchRefAnswersEveryCaseOfThePublishedPatternCorpus(t *testing.T) {
+	const path = "contract/grammar/pattern-corpus.json"
+	body, err := spec.Contract.ReadFile(path)
+	if err != nil {
+		t.Fatalf("Setup: read %s from the contract: %v", path, err)
+	}
+	var cases []patternCase
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&cases); err != nil {
+		t.Fatalf("Setup: decode %s: %v", path, err)
+	}
+	if len(cases) == 0 {
+		t.Fatalf("Setup: %s holds no case", path)
+	}
+
+	for i, test := range cases {
+		t.Run(fmt.Sprintf("case-%02d", i), func(t *testing.T) {
+			if got := matchRef(test.Pattern, test.Reference); got != test.Matches {
+				t.Errorf("matchRef(%q, %q) = %t, want %t: %s", test.Pattern, test.Reference, got, test.Matches, test.Reason)
+			}
+			if got := matchGlob([]rune(test.Pattern), []rune(test.Reference)); got != test.Matches {
+				t.Errorf("matchGlob(%q, %q) = %t, want %t: %s", test.Pattern, test.Reference, got, test.Matches, test.Reason)
 			}
 		})
 	}

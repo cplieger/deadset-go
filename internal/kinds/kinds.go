@@ -94,11 +94,17 @@ type Subject struct {
 // its roots and one deletion removes a cluster. The identifier is minted by the
 // framework, prefixed with this analyzer's own name so a merge unions components
 // without renaming one.
+//
+// Spans are the lines each symbol that falls with the component occupies, which a
+// report's total over several components counts a shared line once from. A
+// document carries the count and not the spans, so a component read back from one
+// holds none.
 type Component struct {
 	ID             string
-	Root           bool
+	Spans          []graph.Span
 	SymbolCount    int
 	DeletableLines int
+	Root           bool
 }
 
 // Positioned is one symbol a finding names beside its subject, with its position.
@@ -1092,9 +1098,10 @@ func (x *index) componentOf(id graph.SymbolID) Component {
 	}
 	return Component{
 		ID:             componentID(component.Index + 1),
-		Root:           slices.Contains(component.Roots, id),
+		Spans:          component.Spans,
 		SymbolCount:    len(component.Falls),
 		DeletableLines: component.DeletableLines,
+		Root:           slices.Contains(component.Roots, id),
 	}
 }
 

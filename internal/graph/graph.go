@@ -211,9 +211,3 @@ func (g *Graph) consumedIn(at int, m Mode) bool {
 		return m.ConsumerTestsProduction
 	}
 }
-
-// span is the number of source lines one symbol occupies. A declaration occupies
-// at least the line it starts on, so the span a report sums is never below one.
-func span(s *Symbol) int {
-	return max(1, s.EndLine-s.Pos.Line+1)
-}

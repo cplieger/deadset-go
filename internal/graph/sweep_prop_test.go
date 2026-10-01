@@ -277,6 +277,7 @@ const (
 	shapeChain     = "chain"
 	shapeCycle     = "cycle"
 	shapeContainer = "nested members"
+	shapeStruct    = "a struct holding its fields"
 	shapeDeadTest  = "a test of dead code"
 	shapeLiveTest  = "a test of live code"
 )
@@ -291,7 +292,7 @@ type drawnShape struct {
 func drawnShapes() *rapid.Generator[[]drawnShape] {
 	one := rapid.Custom(func(t *rapid.T) drawnShape {
 		return drawnShape{
-			kind: rapid.SampledFrom([]string{shapeChain, shapeCycle, shapeContainer, shapeDeadTest, shapeLiveTest}).
+			kind: rapid.SampledFrom([]string{shapeChain, shapeCycle, shapeContainer, shapeStruct, shapeDeadTest, shapeLiveTest}).
 				Draw(t, "the shape"),
 			size: rapid.IntRange(1, 4).Draw(t, "the shape's declarations"),
 		}
@@ -330,6 +331,17 @@ func plant(b *graphBuilder, at int, shape drawnShape) string {
 				d.parent, d.kind = name(i-1), KindField
 			}
 			b.declare(d)
+		}
+	case shapeStruct:
+		// The struct's opening line and closing brace enclose every field's lines,
+		// so what falls with it occupies the struct's own lines and no more.
+		lines := 2
+		for i := 1; i < shape.size; i++ {
+			lines += span(i)
+		}
+		b.declare(handSymbol{name: name(0), lines: lines, kind: KindType})
+		for i := 1; i < shape.size; i++ {
+			b.declare(handSymbol{name: name(i), lines: span(i), kind: KindField, parent: name(0), nested: true})
 		}
 	case shapeDeadTest:
 		// Nothing outside the shape names these declarations and no root reaches
@@ -432,7 +444,7 @@ func TestProperty06EveryDeadSymbolLandsInOneComponentReportedAtItsRoots(t *testi
 func (b *graphBuilder) describe(r Result) string {
 	var out strings.Builder
 	for _, s := range b.symbols {
-		fmt.Fprintf(&out, "declaration %s parent=%s lines=%d\n", b.named[s.ID], b.named[s.Parent], span(&s))
+		fmt.Fprintf(&out, "declaration %s parent=%s lines=%d-%d\n", b.named[s.ID], b.named[s.Parent], s.Pos.Line, s.EndLine)
 	}
 	for _, ref := range b.refs {
 		fmt.Fprintf(&out, "reference %s -> %s test=%t\n", b.named[ref.From], b.named[ref.To], ref.Test)
@@ -446,14 +458,17 @@ func (b *graphBuilder) describe(r Result) string {
 	return out.String()
 }
 
-// lineTotal sums the line spans of a set of symbols.
+// lineTotal is the number of distinct source lines a set of symbols occupies,
+// counted by naming every line each of them runs over.
 func (b *graphBuilder) lineTotal(g *Graph, ids []SymbolID) int {
-	total := 0
+	covered := map[token.Position]bool{}
 	for _, id := range ids {
 		symbol := g.symbols[g.at(id)]
-		total += span(&symbol)
+		for line := symbol.Pos.Line; line <= max(symbol.Pos.Line, symbol.EndLine); line++ {
+			covered[token.Position{Filename: symbol.Pos.Filename, Line: line}] = true
+		}
 	}
-	return total
+	return len(covered)
 }
 
 // slowComponents answers the component pass the slow way, from the graph's own
