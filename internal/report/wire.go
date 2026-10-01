@@ -151,6 +151,12 @@ type wireComponent struct {
 	DeletableLines int    `json:"deletable_lines"`
 }
 
+// wireComponentOf is one component as a document writes it: the count of the lines
+// its deletion removes and not the spans that count was taken over.
+func wireComponentOf(c *kinds.Component) wireComponent {
+	return wireComponent{ID: c.ID, Root: c.Root, SymbolCount: c.SymbolCount, DeletableLines: c.DeletableLines}
+}
+
 // wirePositioned is one symbol a finding names beside its subject: the reference,
 // the display name a text line renders, and where the symbol is.
 type wirePositioned struct {
@@ -376,7 +382,7 @@ func wireFindingOf(found *kinds.Finding) wireFinding {
 		LivenessRelation:  relationWritten(found),
 		TestOnly:          found.TestOnly,
 		Generated:         found.Generated,
-		Component:         wireComponent(found.Component),
+		Component:         wireComponentOf(&found.Component),
 		RetainedBy:        list(found.RetainedBy),
 		Configurations:    list(found.Configurations),
 		ConsumersLoaded:   list(found.ConsumersLoaded),
@@ -566,7 +572,7 @@ func (w *wireFinding) finding() (kinds.Finding, error) {
 		Live:            w.LivenessRelation == "",
 		TestOnly:        w.TestOnly,
 		Generated:       w.Generated,
-		Component:       kinds.Component(w.Component),
+		Component:       w.Component.component(),
 		RetainedBy:      list(w.RetainedBy),
 		Configurations:  list(w.Configurations),
 		ConsumersLoaded: list(w.ConsumersLoaded),
@@ -575,6 +581,12 @@ func (w *wireFinding) finding() (kinds.Finding, error) {
 		Message:         w.Message,
 		Details:         w.Details.details(),
 	}, nil
+}
+
+// component is one finding's component read back from the document, which carries
+// no spans.
+func (w *wireComponent) component() kinds.Component {
+	return kinds.Component{ID: w.ID, Root: w.Root, SymbolCount: w.SymbolCount, DeletableLines: w.DeletableLines}
 }
 
 // details is one finding's per-kind members read back from the document.

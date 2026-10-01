@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/internal/config"
+	"github.com/cplieger/deadset-go/internal/graph"
 	"github.com/cplieger/deadset-go/internal/kinds"
 )
 
@@ -14,15 +15,24 @@ import (
 func sized() []kinds.Finding {
 	first := findingOf("DS1002", "unused-unexported", "a.go", 10, 12,
 		config.Deny, "deletable", "the function has no reference in the target")
-	first.Component = kinds.Component{ID: "deadset-go/c-1", Root: true, SymbolCount: 1, DeletableLines: 3}
+	first.Component = kinds.Component{
+		ID: "deadset-go/c-1", Root: true, SymbolCount: 1, DeletableLines: 3,
+		Spans: []graph.Span{{Path: "a.go", First: 10, Last: 12}},
+	}
 	second := findingOf("DS1002", "unused-unexported", "b.go", 20, 60,
 		config.Deny, "deletable", "the function has no reference in the target")
 	second.Symbol.Ref = "go://example.com/app#second"
-	second.Component = kinds.Component{ID: "deadset-go/c-2", Root: true, SymbolCount: 4, DeletableLines: 41}
+	second.Component = kinds.Component{
+		ID: "deadset-go/c-2", Root: true, SymbolCount: 4, DeletableLines: 41,
+		Spans: []graph.Span{{Path: "b.go", First: 20, Last: 60}},
+	}
 	third := findingOf("DS1002", "unused-unexported", "c.go", 30, 33,
 		config.Deny, "deletable", "the function has no reference in the target")
 	third.Symbol.Ref = "go://example.com/app#third"
-	third.Component = kinds.Component{ID: "deadset-go/c-3", Root: true, SymbolCount: 1, DeletableLines: 4}
+	third.Component = kinds.Component{
+		ID: "deadset-go/c-3", Root: true, SymbolCount: 1, DeletableLines: 4,
+		Spans: []graph.Span{{Path: "c.go", First: 30, Last: 33}},
+	}
 	return []kinds.Finding{first, second, third}
 }
 
@@ -154,6 +164,26 @@ func TestTheDeletableTotalCountsRootsOnly(t *testing.T) {
 
 	if want := 3 + 4; envelope.Totals.DeletableLines != want {
 		t.Errorf("Totals.DeletableLines = %d, want %d", envelope.Totals.DeletableLines, want)
+	}
+}
+
+// TestTheDeletableTotalCountsALineTwoComponentsShareOnce pins that the total is the
+// distinct lines the reported components remove: two declarations written on one
+// line are two components and one line.
+func TestTheDeletableTotalCountsALineTwoComponentsShareOnce(t *testing.T) {
+	in := minimalInput()
+	findings := sized()
+	findings[1].Position.Path, findings[1].Position.Line, findings[1].Position.EndLine = "a.go", 11, 11
+	findings[1].Component = kinds.Component{
+		ID: "deadset-go/c-2", Root: true, SymbolCount: 1, DeletableLines: 1,
+		Spans: []graph.Span{{Path: "a.go", First: 11, Last: 11}},
+	}
+	in.Result.Findings = findings
+	envelope := built(t, &in)
+
+	if want := 3 + 4; envelope.Totals.DeletableLines != want {
+		t.Errorf("Totals.DeletableLines = %d, want %d: the second component's line is inside the first's",
+			envelope.Totals.DeletableLines, want)
 	}
 }
 

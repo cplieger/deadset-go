@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"slices"
 	"strconv"
+	"strings"
 )
 
 // unvisited is the index of a symbol the component walk has not reached.
@@ -27,13 +28,57 @@ type Component struct {
 	// component.
 	Falls []SymbolID
 
+	// Spans are the lines each symbol of Falls occupies, in the order of Falls,
+	// which is what a total over several components counts a shared line once
+	// from.
+	Spans []Span
+
 	// Index is the component's position in the order the sweep returns, which is
 	// what a report mints an identifier from.
 	Index int
 
-	// DeletableLines is the number of source lines the deletion removes, summed
-	// over Falls.
+	// DeletableLines is the number of distinct source lines the deletion removes:
+	// the lines Spans covers, a line two of them share counted once.
 	DeletableLines int
+}
+
+// Span is the run of source lines one declaration occupies: its file, and its
+// first and last line, both counted.
+type Span struct {
+	Path  string
+	First int
+	Last  int
+}
+
+// spanOf is the run of source lines one symbol occupies. A declaration occupies at
+// least the line it starts on, so a span never ends above the line it starts on.
+func spanOf(s *Symbol) Span {
+	return Span{Path: s.Pos.Filename, First: s.Pos.Line, Last: max(s.Pos.Line, s.EndLine)}
+}
+
+// DistinctLines is the number of source lines a set of spans covers, a line two of
+// them share counted once: a field's line inside its struct is one line whichever
+// of the two a deletion is counted from.
+func DistinctLines(spans []Span) int {
+	ordered := slices.Clone(spans)
+	slices.SortFunc(ordered, func(a, b Span) int {
+		return cmp.Or(strings.Compare(a.Path, b.Path), cmp.Compare(a.First, b.First))
+	})
+
+	total := 0
+	var covered Span
+	for i, s := range ordered {
+		if i == 0 || s.Path != covered.Path || s.First > covered.Last {
+			total += s.Last - s.First + 1
+			covered = s
+			continue
+		}
+		if s.Last > covered.Last {
+			total += s.Last - covered.Last
+			covered.Last = s.Last
+		}
+	}
+	return total
 }
 
 // Cascade is how much of a dead component a report carries. String returns the
@@ -123,9 +168,11 @@ func (g *Graph) componentsOf(dead, testOfDeadCode []bool) []Component {
 				component.Roots = append(component.Roots, g.symbols[at[member]].ID)
 			}
 		}
-		for _, fell := range falls[c] {
-			component.DeletableLines += span(&g.symbols[at[fell]])
+		component.Spans = make([]Span, len(falls[c]))
+		for i, fell := range falls[c] {
+			component.Spans[i] = spanOf(&g.symbols[at[fell]])
 		}
+		component.DeletableLines = DistinctLines(component.Spans)
 		components[index] = component
 	}
 	return components

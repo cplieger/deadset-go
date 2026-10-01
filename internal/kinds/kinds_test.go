@@ -13,7 +13,7 @@ import (
 	"github.com/cplieger/deadset-go/internal/catalog"
 	"github.com/cplieger/deadset-go/internal/config"
 	"github.com/cplieger/deadset-go/internal/graph"
-	spec "github.com/cplieger/deadset-spec/v2"
+	spec "github.com/cplieger/deadset-spec/v3"
 )
 
 // The declarations every hand-built input of this file holds: one exported
@@ -29,6 +29,10 @@ const (
 	internalRef                 = "go://example.com/app/internal/store#Open"
 	generatedRef                = "go://example.com/app#Wired"
 )
+
+// handSpans are the lines the hand-built component's two declarations occupy, which
+// share the line one ends and the other starts on.
+var handSpans = []graph.Span{{Path: "catalog.go", First: 14, Last: 31}, {Path: "catalog.go", First: 31, Last: 36}}
 
 // handInput is an input written by hand: one inventory, one sweep answer and one
 // two-configuration matrix, so a test of the framework measures the framework
@@ -51,8 +55,9 @@ func handInput(resolved config.Config) *Input {
 			Members:        []graph.SymbolID{exportedID, helperID},
 			Roots:          []graph.SymbolID{exportedID},
 			Falls:          []graph.SymbolID{exportedID, helperID},
+			Spans:          handSpans,
 			Index:          0,
-			DeletableLines: 24,
+			DeletableLines: 23,
 		}},
 	}
 	refs := make(map[graph.SymbolID]string, len(symbols))
@@ -119,7 +124,7 @@ func TestComputeFillsEveryFieldTheContractRequiresOfAFinding(t *testing.T) {
 		Class:           Certain,
 		Confidence:      Certain,
 		Relation:        graph.ReferenceCounting,
-		Component:       Component{ID: "deadset-go/c-1", Root: true, SymbolCount: 2, DeletableLines: 24},
+		Component:       Component{ID: "deadset-go/c-1", Spans: handSpans, SymbolCount: 2, DeletableLines: 23, Root: true},
 		RetainedBy:      []string{},
 		Configurations:  []string{"linux-amd64", "linux-arm64"},
 		ConsumersLoaded: []string{},
@@ -130,6 +135,13 @@ func TestComputeFillsEveryFieldTheContractRequiresOfAFinding(t *testing.T) {
 	if diff := differences(found, want); diff != "" {
 		t.Errorf("Compute() filled the finding as\n%s", diff)
 	}
+}
+
+// sameComponent reports whether two components agree member by member, the spans
+// their deletion covers included.
+func sameComponent(a, b *Component) bool {
+	return a.ID == b.ID && a.Root == b.Root && a.SymbolCount == b.SymbolCount &&
+		a.DeletableLines == b.DeletableLines && slices.Equal(a.Spans, b.Spans)
 }
 
 // differences names every field of a finding that is not what the Contract requires
@@ -169,7 +181,7 @@ func differences(got, want Finding) string {
 	if got.Generated != want.Generated {
 		add("Generated", got.Generated, want.Generated)
 	}
-	if got.Component != want.Component {
+	if !sameComponent(&got.Component, &want.Component) {
 		add("Component", got.Component, want.Component)
 	}
 	if !slices.Equal(got.RetainedBy, want.RetainedBy) {
@@ -420,7 +432,7 @@ func TestComputeMintsAComponentForASubjectNoDeadComponentHolds(t *testing.T) {
 		t.Fatalf("Compute() = %v, want one finding", summary(result.Findings))
 	}
 	want := Component{ID: "deadset-go/c-2", Root: true, SymbolCount: 1}
-	if got := result.Findings[0].Component; got != want {
+	if got := result.Findings[0].Component; !sameComponent(&got, &want) {
 		t.Errorf("Compute() gave a live subject the component %+v, want %+v", got, want)
 	}
 }

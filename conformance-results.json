@@ -1,5 +1,5 @@
 {
-  "corpus_version": "1.6.0",
+  "corpus_version": "1.7.0",
   "product": {
     "name": "deadset-go",
     "version": "0.0.0-devel",
@@ -7,8 +7,8 @@
   },
   "result": "pass",
   "totals": {
-    "fixtures": 18,
-    "pass": 18,
+    "fixtures": 19,
+    "pass": 19,
     "gap": 0,
     "fail": 0
   },
@@ -80,6 +80,54 @@
         },
         {
           "symbol": "wide",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "dead-container-deletable-lines",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "ledger",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "symbol_kind": "type",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reachability",
+            "component": {
+              "root": true,
+              "symbol_count": 4,
+              "deletable_lines": 7
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "ledger.count",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "ledger.entries",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "ledger.total",
           "result": "pass",
           "actual": {
             "report": "none"

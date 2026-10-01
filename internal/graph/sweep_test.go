@@ -756,8 +756,8 @@ func TestSweepOverTheLoadedGraphGroupsACycleAndACascade(t *testing.T) {
 				"fetcher.shut reference-counting",
 			},
 			wantComponents: []grouped{
-				{members: "box box.lid box.side box.open", roots: "box", falls: "box box.lid box.side box.open", lines: 7},
-				{members: "fetcher fetcher.fetch fetcher.shut", roots: "fetcher", falls: "fetcher fetcher.fetch fetcher.shut", lines: 6},
+				{members: "box box.lid box.side box.open", roots: "box", falls: "box box.lid box.side box.open", lines: 5},
+				{members: "fetcher fetcher.fetch fetcher.shut", roots: "fetcher", falls: "fetcher fetcher.fetch fetcher.shut", lines: 4},
 			},
 		},
 	}
@@ -935,7 +935,7 @@ func TestSweepOverAConfiguredRootHoldsItLiveAndReportsTheDeclarationsNothingName
 		members: "Box Box.Lid Box.Open",
 		roots:   "Box",
 		falls:   "Box Box.Lid Box.Open",
-		lines:   5,
+		lines:   4,
 	}}
 	if got := s.groupsUnder(pkg, r); !slices.Equal(got, components) {
 		t.Errorf("Sweep(root-patterns.txtar) returned components %+v under %s, want %+v", got, pkg, components)
@@ -960,7 +960,7 @@ func TestSweepOverAPackageWithATestVariantLeavesAFunctionOutOfTheTypesComponent(
 			members: "Catalog Catalog.entries Catalog.Resolve TestResolve",
 			roots:   "Catalog TestResolve",
 			falls:   "Catalog Catalog.entries Catalog.Resolve TestResolve",
-			lines:   11,
+			lines:   10,
 		},
 		{members: "Normalize", roots: "Normalize", falls: "Normalize", lines: 1},
 	}

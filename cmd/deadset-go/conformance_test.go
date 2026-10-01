@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -21,7 +22,7 @@ import (
 	"github.com/cplieger/deadset-go/internal/graph"
 	"github.com/cplieger/deadset-go/internal/kinds"
 	"github.com/cplieger/deadset-go/internal/suppress"
-	spec "github.com/cplieger/deadset-spec/v2"
+	spec "github.com/cplieger/deadset-spec/v3"
 	"golang.org/x/tools/txtar"
 )
 
@@ -76,15 +77,27 @@ const (
 // fixture-local logical name, and what an analyzer must report about it. A member the
 // row leaves out states nothing and is not checked.
 type corpusExpectation struct {
-	Symbol            string         `json:"symbol"`
-	Report            string         `json:"report"`
-	SymbolKind        string         `json:"symbol_kind"`
-	Confidence        string         `json:"confidence"`
-	ReachabilityClass string         `json:"reachability_class"`
-	LivenessRelation  string         `json:"liveness_relation"`
-	Configurations    []string       `json:"configurations"`
-	RetainedBy        []string       `json:"retained_by"`
-	Details           *corpusDetails `json:"details"`
+	Symbol            string           `json:"symbol"`
+	Report            string           `json:"report"`
+	SymbolKind        string           `json:"symbol_kind"`
+	Confidence        string           `json:"confidence"`
+	ReachabilityClass string           `json:"reachability_class"`
+	LivenessRelation  string           `json:"liveness_relation"`
+	Configurations    []string         `json:"configurations"`
+	RetainedBy        []string         `json:"retained_by"`
+	Details           *corpusDetails   `json:"details"`
+	Component         *corpusComponent `json:"component"`
+}
+
+// corpusComponent is the members of a finding's component an expectation pins:
+// whether the subject is a root member of it, how many symbols fall with it and how
+// many source lines its deletion removes. Each is a pointer because false and zero
+// are values a row pins, and a member the row leaves out states nothing and is not
+// compared.
+type corpusComponent struct {
+	Root           *bool `json:"root,omitempty"`
+	SymbolCount    *int  `json:"symbol_count,omitempty"`
+	DeletableLines *int  `json:"deletable_lines,omitempty"`
 }
 
 // corpusDetails are the details members an expectation pins, drawn from the closed
@@ -104,10 +117,12 @@ type corpusDetails struct {
 
 // corpusFixtureFile is one fixture's expectation file: the renderings it has, the
 // target kind and consumer set the runner configures, and the exhaustive expectation
-// list.
+// list. Every member the expectation schema declares has a field, the description the
+// runner reads nothing from included, because the file is decoded strictly.
 type corpusFixtureFile struct {
 	ConfiguredRoots map[string]string   `json:"configured_roots"`
 	Name            string              `json:"name"`
+	Description     string              `json:"description"`
 	Languages       []string            `json:"languages"`
 	TargetKind      string              `json:"target_kind"`
 	Consumers       []string            `json:"consumers"`
@@ -204,14 +219,15 @@ type expectationAnswer struct {
 // member the expectation does not name is not written, because a runner answering a
 // row that states nothing about a member says nothing about it either.
 type reportedAnswer struct {
-	Report            string         `json:"report"`
-	SymbolKind        string         `json:"symbol_kind,omitempty"`
-	Confidence        string         `json:"confidence,omitempty"`
-	ReachabilityClass string         `json:"reachability_class,omitempty"`
-	LivenessRelation  string         `json:"liveness_relation,omitempty"`
-	Configurations    []string       `json:"configurations,omitempty"`
-	RetainedBy        []string       `json:"retained_by,omitempty"`
-	Details           *corpusDetails `json:"details,omitempty"`
+	Report            string           `json:"report"`
+	SymbolKind        string           `json:"symbol_kind,omitempty"`
+	Confidence        string           `json:"confidence,omitempty"`
+	ReachabilityClass string           `json:"reachability_class,omitempty"`
+	LivenessRelation  string           `json:"liveness_relation,omitempty"`
+	Configurations    []string         `json:"configurations,omitempty"`
+	RetainedBy        []string         `json:"retained_by,omitempty"`
+	Details           *corpusDetails   `json:"details,omitempty"`
+	Component         *corpusComponent `json:"component,omitempty"`
 }
 
 // suppressionAnswer is the outcome of the second analysis: whether the position is
@@ -641,7 +657,29 @@ func answerFrom(expected *corpusExpectation, found *kinds.Finding) reportedAnswe
 		actual.Configurations = slices.Clone(found.Configurations)
 	}
 	actual.Details = detailsOf(expected.Details, &found.Details)
+	actual.Component = componentAnswer(expected.Component, &found.Component)
 	return actual
+}
+
+// componentAnswer is the finding's component in the expectation file's vocabulary,
+// carrying the members one expectation pins and no others, and nothing at all where
+// the expectation pins none.
+func componentAnswer(expected *corpusComponent, found *kinds.Component) *corpusComponent {
+	if expected == nil {
+		return nil
+	}
+	held := *found
+	var actual corpusComponent
+	if expected.Root != nil {
+		actual.Root = &held.Root
+	}
+	if expected.SymbolCount != nil {
+		actual.SymbolCount = &held.SymbolCount
+	}
+	if expected.DeletableLines != nil {
+		actual.DeletableLines = &held.DeletableLines
+	}
+	return &actual
 }
 
 // detailsOf is the finding's details in the expectation file's vocabulary, carrying
@@ -713,7 +751,32 @@ func differences(expected *corpusExpectation, actual *reportedAnswer) string {
 	if expected.Details != nil {
 		held = append(held, detailsDifferences(expected.Details, actual.Details)...)
 	}
+	if expected.Component != nil {
+		held = append(held, componentDifferences(expected.Component, actual.Component)...)
+	}
 	return strings.Join(held, "; ")
+}
+
+// componentDifferences is one entry per component member the expectation pins that
+// the answer does not carry equal. The answer carries every member the expectation
+// pins, because componentAnswer answers each one the row names.
+func componentDifferences(expected, actual *corpusComponent) []string {
+	var held []string
+	if expected.Root != nil && *actual.Root != *expected.Root {
+		held = append(held, fmt.Sprintf("component.root want %t got %t", *expected.Root, *actual.Root))
+	}
+	for _, one := range []struct {
+		member    string
+		want, got *int
+	}{
+		{"component.symbol_count", expected.SymbolCount, actual.SymbolCount},
+		{"component.deletable_lines", expected.DeletableLines, actual.DeletableLines},
+	} {
+		if one.want != nil && *one.got != *one.want {
+			held = append(held, fmt.Sprintf("%s want %d got %d", one.member, *one.want, *one.got))
+		}
+	}
+	return held
 }
 
 // detailsDifferences is one entry per details member the expectation pins that the
@@ -1084,13 +1147,13 @@ func retainedAt(set *findingSet) map[site][]string {
 // readFixture reads one fixture of the pinned corpus: its expectation file, the
 // manifest of its Go rendering, and the rendering itself.
 func readFixture(fixtureName string) (corpusFixtureFile, corpusManifest, *txtar.Archive, error) {
-	var fixture corpusFixtureFile
 	body, err := spec.Corpus.ReadFile(path.Join(corpusFixtures, fixtureName, expectationFile))
 	if err != nil {
-		return fixture, corpusManifest{}, nil, err
+		return corpusFixtureFile{}, corpusManifest{}, nil, err
 	}
-	if err := json.Unmarshal(body, &fixture); err != nil {
-		return fixture, corpusManifest{}, nil, fmt.Errorf("decode %s: %w", expectationFile, err)
+	fixture, err := decodeFixtureFile(body)
+	if err != nil {
+		return fixture, corpusManifest{}, nil, err
 	}
 
 	body, err = spec.Corpus.ReadFile(path.Join(corpusFixtures, fixtureName, goRendering))
@@ -1111,6 +1174,19 @@ func readFixture(fixtureName string) (corpusFixtureFile, corpusManifest, *txtar.
 		return fixture, manifest, archive, nil
 	}
 	return fixture, corpusManifest{}, nil, fmt.Errorf("the rendering carries no %s section", manifestSection)
+}
+
+// decodeFixtureFile decodes one fixture's expectation file and refuses a member this
+// runner has no field for, so a member a later corpus adds to a row fails the run
+// rather than passing unread.
+func decodeFixtureFile(body []byte) (corpusFixtureFile, error) {
+	var fixture corpusFixtureFile
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&fixture); err != nil {
+		return corpusFixtureFile{}, fmt.Errorf("decode %s: %w", expectationFile, err)
+	}
+	return fixture, nil
 }
 
 // resolvedSites binds every logical name the expectation file uses to the position the
@@ -1768,11 +1844,13 @@ func TestAnswerFromRendersEveryMemberAnExpectationNames(t *testing.T) {
 		Confidence:     kinds.Probable,
 		Relation:       graph.ReferenceCounting,
 		Configurations: []string{"linux-amd64"},
+		Component:      kinds.Component{ID: "deadset-go/c-1", SymbolCount: 4, DeletableLines: 7, Root: true},
 		Details: kinds.Details{
 			NarrowerVisibility: "file",
 			Overlap:            []string{"revive unused-parameter"},
 		},
 	}
+	yes, four, seven := true, 4, 7
 
 	tests := []struct {
 		name     string
@@ -1796,6 +1874,17 @@ func TestAnswerFromRendersEveryMemberAnExpectationNames(t *testing.T) {
 			},
 		},
 		{
+			name: "a_row_naming_one_component_member",
+			expected: corpusExpectation{
+				Report: "DS1101", Confidence: "probable",
+				Component: &corpusComponent{DeletableLines: &seven},
+			},
+			want: reportedAnswer{
+				Report: "DS1101", Confidence: "probable",
+				Component: &corpusComponent{DeletableLines: &seven},
+			},
+		},
+		{
 			name: "a_row_naming_every_member",
 			expected: corpusExpectation{
 				Report: "DS1101", Confidence: "probable", SymbolKind: "function",
@@ -1805,6 +1894,7 @@ func TestAnswerFromRendersEveryMemberAnExpectationNames(t *testing.T) {
 					NarrowerVisibility: "file",
 					Overlap:            []string{"revive unused-parameter"},
 				},
+				Component: &corpusComponent{Root: &yes, SymbolCount: &four, DeletableLines: &seven},
 			},
 			want: reportedAnswer{
 				Report: "DS1101", Confidence: "probable", SymbolKind: "function",
@@ -1814,6 +1904,7 @@ func TestAnswerFromRendersEveryMemberAnExpectationNames(t *testing.T) {
 					NarrowerVisibility: "file",
 					Overlap:            []string{"revive unused-parameter"},
 				},
+				Component: &corpusComponent{Root: &yes, SymbolCount: &four, DeletableLines: &seven},
 			},
 		},
 	}
@@ -1827,7 +1918,8 @@ func TestAnswerFromRendersEveryMemberAnExpectationNames(t *testing.T) {
 				got.SymbolKind != tc.want.SymbolKind || got.ReachabilityClass != tc.want.ReachabilityClass ||
 				got.LivenessRelation != tc.want.LivenessRelation ||
 				!slices.Equal(got.Configurations, tc.want.Configurations) ||
-				!sameDetails(got.Details, tc.want.Details) {
+				!sameDetails(got.Details, tc.want.Details) ||
+				!sameComponent(got.Component, tc.want.Component) {
 				t.Errorf("answerFrom(%+v) = %+v, want %+v", tc.expected, got, tc.want)
 			}
 			if message := differences(&tc.expected, &got); message != "" {
@@ -1850,12 +1942,33 @@ func sameDetails(got, want *corpusDetails) bool {
 		slices.Equal(got.Overlap, want.Overlap)
 }
 
+// sameComponent reports whether two answers carry the same component members,
+// absence included, so a member answered that the row did not pin is a difference
+// as well as a member pinned and left unanswered.
+func sameComponent(got, want *corpusComponent) bool {
+	if got == nil || want == nil {
+		return got == nil && want == nil
+	}
+	return samePinned(got.Root, want.Root) && samePinned(got.SymbolCount, want.SymbolCount) &&
+		samePinned(got.DeletableLines, want.DeletableLines)
+}
+
+// samePinned reports whether two pinned members are both absent or both present and
+// equal.
+func samePinned[T comparable](got, want *T) bool {
+	if got == nil || want == nil {
+		return got == nil && want == nil
+	}
+	return *got == *want
+}
+
 // TestDifferencesNamesEveryMemberThatDisagrees pins the failure a mismatch produces:
 // one line naming each member the expectation states and the answer does not match, so
 // a reader of a failed run corrects the analyzer rather than hunting for the member.
 func TestDifferencesNamesEveryMemberThatDisagrees(t *testing.T) {
 	t.Parallel()
 
+	yes, no, one, four, seven, nine := true, false, 1, 4, 7, 9
 	expected := corpusExpectation{
 		Report: "DS1001", Confidence: "certain", SymbolKind: "function",
 		ReachabilityClass: "certain", LivenessRelation: "reference-counting",
@@ -1869,6 +1982,7 @@ func TestDifferencesNamesEveryMemberThatDisagrees(t *testing.T) {
 			Edge:               "wire/plan",
 			Overlap:            []string{"unparam"},
 		},
+		Component: &corpusComponent{Root: &yes, SymbolCount: &four, DeletableLines: &seven},
 	}
 	actual := reportedAnswer{
 		Report: "DS1002", Confidence: "probable", SymbolKind: "method",
@@ -1882,17 +1996,56 @@ func TestDifferencesNamesEveryMemberThatDisagrees(t *testing.T) {
 			Mechanism:          "ignore",
 			Overlap:            []string{"revive unused-parameter"},
 		},
+		Component: &corpusComponent{Root: &no, SymbolCount: &one, DeletableLines: &nine},
 	}
 
 	members := []string{
 		"report", "confidence", "symbol_kind", "reachability_class", "liveness_relation", "configurations",
 		"details.narrower_visibility", "details.excluded_by", "details.dependency_class",
 		"details.replacement", "details.mechanism", "details.edge", "details.overlap",
+		"component.root", "component.symbol_count", "component.deletable_lines",
 	}
 	got := differences(&expected, &actual)
 	for _, member := range members {
 		if !strings.Contains(got, member) {
 			t.Errorf("differences() = %q, want it to name %s", got, member)
 		}
+	}
+}
+
+// TestDecodeFixtureFileRefusesAMemberTheRunnerHasNoFieldFor pins the strict decode: a
+// member a later corpus adds, at any depth of the expectation file, fails the run
+// rather than being dropped, which would let a row the runner cannot answer pass.
+func TestDecodeFixtureFileRefusesAMemberTheRunnerHasNoFieldFor(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{
+			name: "a_member_of_the_file",
+			body: `{"name": "f", "languages": ["go"], "target_kind": "application", "expect": [], "revision": 2}`,
+		},
+		{
+			name: "a_member_of_a_row",
+			body: `{"name": "f", "languages": ["go"], "target_kind": "application",
+				"expect": [{"symbol": "s", "report": "DS1002", "confidence": "certain", "size_lines": 3}]}`,
+		},
+		{
+			name: "a_member_of_a_row_component",
+			body: `{"name": "f", "languages": ["go"], "target_kind": "application",
+				"expect": [{"symbol": "s", "report": "DS1002", "confidence": "certain", "component": {"members": 2}}]}`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if fixture, err := decodeFixtureFile([]byte(tc.body)); err == nil {
+				t.Errorf("decodeFixtureFile(%s) = %+v, want a refusal of the member the runner has no field for",
+					tc.body, fixture)
+			}
+		})
 	}
 }

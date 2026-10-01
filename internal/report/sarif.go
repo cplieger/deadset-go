@@ -271,7 +271,7 @@ func resultProperties(found *kinds.Finding) sarifResultProperties {
 		LivenessRelation:  relationWritten(found),
 		TestOnly:          found.TestOnly,
 		Generated:         found.Generated,
-		Component:         wireComponent(found.Component),
+		Component:         wireComponentOf(&found.Component),
 		RetainedBy:        list(found.RetainedBy),
 		Configurations:    list(found.Configurations),
 		ConsumersLoaded:   list(found.ConsumersLoaded),

@@ -25,17 +25,21 @@ type handSymbol struct {
 	lines  int    // the declaration's line span, one when zero
 	kind   SymbolKind
 	inTest bool
+	nested bool // the declaration's lines lie inside its container's, as a field's lie inside its struct
 }
 
 // graphBuilder assembles the symbols, the references and the roots of one graph
 // by hand, so a sweep is exercised over a graph no load produced. Each
 // declaration takes the next lines of its file in the order it was declared, and
-// the graph holds them by site the way the enumeration does.
+// the graph holds them by site the way the enumeration does; a nested declaration
+// takes the next lines inside its container's instead, below the container's
+// first line.
 type graphBuilder struct {
 	sink    failureSink
 	ids     map[string]SymbolID
 	named   map[SymbolID]string
 	lines   map[string]int
+	inner   map[SymbolID]int
 	symbols []Symbol
 	refs    []Reference
 	roots   []Root
@@ -50,6 +54,7 @@ func newGraphBuilder(sink failureSink) *graphBuilder {
 		ids:   make(map[string]SymbolID),
 		named: make(map[SymbolID]string),
 		lines: make(map[string]int),
+		inner: make(map[SymbolID]int),
 	}
 }
 
@@ -64,8 +69,8 @@ func (b *graphBuilder) declare(d handSymbol) *graphBuilder {
 	if d.inTest {
 		file = handTestFile
 	}
-	line := b.lines[file] + 1
-	b.lines[file] += max(1, d.lines)
+	parent := b.parentOf(d)
+	line, end := b.place(d, file, parent)
 
 	id := SymbolID(fmt.Sprintf("%s:%d:1", file, line))
 	b.ids[d.name] = id
@@ -75,12 +80,38 @@ func (b *graphBuilder) declare(d handSymbol) *graphBuilder {
 		Ref:     "hand://" + d.name,
 		Name:    d.name,
 		PkgPath: handPackage,
-		Parent:  b.parentOf(d),
+		Parent:  parent,
 		Pos:     token.Position{Filename: file, Line: line, Column: 1},
-		EndLine: b.lines[file],
+		EndLine: end,
 		Kind:    d.kind,
 	})
 	return b
+}
+
+// place is the first and last line one declaration occupies: the next lines of
+// its file, or for a nested declaration the next lines inside its container,
+// which must hold them.
+func (b *graphBuilder) place(d handSymbol, file string, parent SymbolID) (first, last int) {
+	b.sink.Helper()
+	size := max(1, d.lines)
+	if !d.nested {
+		first = b.lines[file] + 1
+		b.lines[file] += size
+		return first, b.lines[file]
+	}
+
+	if parent == "" {
+		b.sink.Fatalf("the hand-built graph nests %s in no container", d.name)
+	}
+	container := b.symbols[slices.IndexFunc(b.symbols, func(s Symbol) bool { return s.ID == parent })]
+	first = max(b.inner[parent], container.Pos.Line+1)
+	last = first + size - 1
+	if last > container.EndLine {
+		b.sink.Fatalf("the hand-built graph nests %s on lines %d to %d, outside %s's %d to %d",
+			d.name, first, last, d.parent, container.Pos.Line, container.EndLine)
+	}
+	b.inner[parent] = last + 1
+	return first, last
 }
 
 // parentOf resolves a declaration's container, which the builder requires to be
@@ -331,20 +362,23 @@ func TestNewKeepsNoRootAndNoReferenceNamingNoSymbol(t *testing.T) {
 	}
 }
 
-func TestSpanCountsTheLinesOneDeclarationOccupies(t *testing.T) {
+func TestSpanOfCoversTheLinesOneDeclarationOccupies(t *testing.T) {
+	at := func(line, end int) Symbol {
+		return Symbol{Pos: token.Position{Filename: "a.go", Line: line}, EndLine: end}
+	}
 	cases := map[string]struct {
 		symbol Symbol
-		want   int
+		want   Span
 	}{
-		"one line":                   {symbol: Symbol{Pos: token.Position{Line: 10}, EndLine: 10}, want: 1},
-		"three lines":                {symbol: Symbol{Pos: token.Position{Line: 10}, EndLine: 12}, want: 3},
-		"an end line that is unset":  {symbol: Symbol{Pos: token.Position{Line: 10}}, want: 1},
-		"an end line above the line": {symbol: Symbol{Pos: token.Position{Line: 10}, EndLine: 9}, want: 1},
+		"one line":                   {symbol: at(10, 10), want: Span{Path: "a.go", First: 10, Last: 10}},
+		"three lines":                {symbol: at(10, 12), want: Span{Path: "a.go", First: 10, Last: 12}},
+		"an end line that is unset":  {symbol: at(10, 0), want: Span{Path: "a.go", First: 10, Last: 10}},
+		"an end line above the line": {symbol: at(10, 9), want: Span{Path: "a.go", First: 10, Last: 10}},
 	}
 	for name, test := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := span(&test.symbol); got != test.want {
-				t.Errorf("span(%d to %d) = %d, want %d", test.symbol.Pos.Line, test.symbol.EndLine, got, test.want)
+			if got := spanOf(&test.symbol); got != test.want {
+				t.Errorf("spanOf(%d to %d) = %+v, want %+v", test.symbol.Pos.Line, test.symbol.EndLine, got, test.want)
 			}
 		})
 	}

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/internal/config"
+	"github.com/cplieger/deadset-go/internal/graph"
 	"github.com/cplieger/deadset-go/internal/kinds"
 	"pgregory.net/rapid"
 )
@@ -36,11 +37,18 @@ func drawnFindings(t *rapid.T) []kinds.Finding {
 		)
 		found.Position.Column = rapid.IntRange(1, 3).Draw(t, label+": the column")
 		found.Symbol.Ref = "go://example.com/app#decl" + strconv.Itoa(i)
+		first := rapid.IntRange(1, 4).Draw(t, label+": the first line its component removes")
+		spans := []graph.Span{{
+			Path:  rapid.SampledFrom(paths).Draw(t, label+": the file its component removes lines of"),
+			First: first,
+			Last:  first + rapid.IntRange(0, 40).Draw(t, label+": the further lines its component removes"),
+		}}
 		found.Component = kinds.Component{
 			ID:             "deadset-go/c-" + strconv.Itoa(rapid.IntRange(1, 3).Draw(t, label+": the component")),
-			Root:           rapid.Bool().Draw(t, label+": the subject is a root of its component"),
+			Spans:          spans,
 			SymbolCount:    1,
-			DeletableLines: rapid.IntRange(0, 40).Draw(t, label+": the lines its component removes"),
+			DeletableLines: graph.DistinctLines(spans),
+			Root:           rapid.Bool().Draw(t, label+": the subject is a root of its component"),
 		}
 		findings[i] = found
 	}
@@ -178,7 +186,11 @@ func compareSizes(a, b *kinds.Finding) int {
 func sameFinding(a, b kinds.Finding) bool {
 	return kinds.Compare(a, b) == 0 &&
 		a.Severity == b.Severity &&
-		a.Component == b.Component &&
+		a.Component.ID == b.Component.ID &&
+		a.Component.Root == b.Component.Root &&
+		a.Component.SymbolCount == b.Component.SymbolCount &&
+		a.Component.DeletableLines == b.Component.DeletableLines &&
+		slices.Equal(a.Component.Spans, b.Component.Spans) &&
 		a.Symbol == b.Symbol
 }
 
