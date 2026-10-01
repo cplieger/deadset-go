@@ -14,15 +14,31 @@ import (
 	"golang.org/x/tools/txtar"
 )
 
-// goLanguage is the spelling the vocabulary gives this analyzer's language.
-const goLanguage = "go"
+// publishedRow is one class of the vocabulary document this package implements.
+type publishedRow struct {
+	Class     string   `json:"class"`
+	Languages []string `json:"languages"`
+}
 
-// vocabulary is the shape of the vocabulary document this package implements.
-type vocabulary struct {
-	Exemptions []struct {
-		Class     string   `json:"class"`
-		Languages []string `json:"languages"`
-	} `json:"exemptions"`
+// publishedRows reads every class of the embedded vocabulary, in the order the
+// document lists them.
+func publishedRows(t *testing.T) []publishedRow {
+	t.Helper()
+
+	raw, err := spec.Contract.ReadFile("contract/exemptions.json")
+	if err != nil {
+		t.Fatalf("Setup: read contract/exemptions.json: %v", err)
+	}
+	var document struct {
+		Exemptions []publishedRow `json:"exemptions"`
+	}
+	if err := json.Unmarshal(raw, &document); err != nil {
+		t.Fatalf("Setup: decode contract/exemptions.json: %v", err)
+	}
+	if len(document.Exemptions) == 0 {
+		t.Fatal("Setup: contract/exemptions.json names no class, so this test pins nothing")
+	}
+	return document.Exemptions
 }
 
 // publishedClasses reads the classes of the embedded vocabulary that run on Go, in
@@ -30,19 +46,11 @@ type vocabulary struct {
 func publishedClasses(t *testing.T) []Class {
 	t.Helper()
 
-	raw, err := spec.Contract.ReadFile("contract/exemptions.json")
-	if err != nil {
-		t.Fatalf("Setup: read contract/exemptions.json: %v", err)
-	}
-	var document vocabulary
-	if err := json.Unmarshal(raw, &document); err != nil {
-		t.Fatalf("Setup: decode contract/exemptions.json: %v", err)
-	}
-
-	published := make([]Class, 0, len(document.Exemptions))
-	for _, e := range document.Exemptions {
-		if slices.Contains(e.Languages, goLanguage) {
-			published = append(published, Class(e.Class))
+	rows := publishedRows(t)
+	published := make([]Class, 0, len(rows))
+	for _, row := range rows {
+		if slices.Contains(row.Languages, goLanguage) {
+			published = append(published, Class(row.Class))
 		}
 	}
 	if len(published) == 0 {
@@ -51,10 +59,34 @@ func publishedClasses(t *testing.T) []Class {
 	return published
 }
 
-func TestClassesIsTheVocabularyOfTheContract(t *testing.T) {
-	// The vocabulary is closed and its order is the order a run computes the
-	// classes in, so the list in this package is the published one or a class is
-	// silently absent from every run.
+func TestTheVocabularyIsTheContractsRowForRowAndInItsOrder(t *testing.T) {
+	// A configuration may disable any class the document declares, whichever
+	// language computes it, so a row missing here refuses a configuration the
+	// other analyzer accepts, and a row the document lacks accepts a name it does
+	// not.
+	want := publishedRows(t)
+	if len(vocabulary) != len(want) {
+		t.Fatalf("the vocabulary holds %d classes %v, want the %d of contract/exemptions.json %v",
+			len(vocabulary), Vocabulary(), len(want), want)
+	}
+	for i, row := range want {
+		got := vocabulary[i]
+		if string(got.class) != row.Class || !slices.Equal(got.languages, row.Languages) {
+			t.Errorf("vocabulary[%d] = %q on %v, want %q on %v", i, got.class, got.languages, row.Class, row.Languages)
+		}
+	}
+	names := make([]Class, len(want))
+	for i, row := range want {
+		names[i] = Class(row.Class)
+	}
+	if got := Vocabulary(); !slices.Equal(got, names) {
+		t.Errorf("Vocabulary() = %v, want %v", got, names)
+	}
+}
+
+func TestClassesAreTheVocabularysGoClassesInItsOrder(t *testing.T) {
+	// The order is the order a run computes the classes in, so the list in this
+	// package is the published one or a class is silently absent from every run.
 	want := publishedClasses(t)
 	if got := Classes(); !slices.Equal(got, want) {
 		t.Errorf("Classes() = %v, want %v", got, want)
@@ -492,7 +524,7 @@ func TestComputeHandsEveryClassTheLoadedConfigurationItReads(t *testing.T) {
 
 	// The framework hands a class the loaded configuration, the inventory, the
 	// resolver over it, the target root, the reader and the configured half, and
-	// every class of this wave is written against that one value.
+	// every class is written against that one value.
 	var seen *Input
 	detectors := map[Class]Detector{
 		GeneratedFile: func(in *Input) ([]graph.Exemption, error) {
