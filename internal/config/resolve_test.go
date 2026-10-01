@@ -246,6 +246,18 @@ func TestResolveRefusesAnUnimplementedKey(t *testing.T) {
 			names:      []string{`"analysis.configurations[0].cgo"`},
 		},
 		{
+			name:       "a_key_in_one_declaration_entry",
+			repository: `{"target": {"kind": "application"}, "ts": {"serializers": [{"global": "JSON.stringify", "space": 2}]}}`,
+			key:        "ts.serializers[0].space",
+			names:      []string{`"ts.serializers[0].space"`},
+		},
+		{
+			name:       "a_key_in_a_component_entry_of_a_lifecycle_contract",
+			repository: `{"target": {"kind": "application"}, "ts": {"lifecycle_contracts": [{"components": [{"global": "CustomElementRegistry.define", "argument": 1}], "members": ["connectedCallback"]}]}}`,
+			key:        "ts.lifecycle_contracts[0].components[0].argument",
+			names:      []string{`"ts.lifecycle_contracts[0].components[0].argument"`},
+		},
+		{
 			name:       "a_flag_naming_no_setting",
 			flags:      `{"analysis.min_confidences": "certain"}`,
 			repository: `{"target": {"kind": "application"}}`,
@@ -508,6 +520,7 @@ func TestResolveRefusesAMalformedDocument(t *testing.T) {
 		name       string
 		repository string
 		key        string
+		says       []string
 	}{
 		{
 			name:       "a_value_outside_a_closed_set",
@@ -595,6 +608,83 @@ func TestResolveRefusesAMalformedDocument(t *testing.T) {
 			key:        "ts.test_files",
 		},
 		{
+			name:       "a_declaration_entry_naming_no_shape",
+			repository: `{"target": {"kind": "library"}, "ts": {"serializers": [{}]}}`,
+			key:        "ts.serializers[0]",
+		},
+		{
+			name:       "a_declaration_entry_naming_members_of_two_shapes",
+			repository: `{"target": {"kind": "library"}, "ts": {"injection_registrations": [{"symbol": "ts://@example/app/src/a.ts#A", "global": "B"}]}}`,
+			key:        "ts.injection_registrations[0]",
+		},
+		{
+			name:       "a_declaration_symbol_in_the_go_form",
+			repository: `{"target": {"kind": "library"}, "ts": {"serializers": [{"symbol": "go://example.com/app#Encode"}]}}`,
+			key:        "ts.serializers[0].symbol",
+		},
+		{
+			name:       "a_declaration_module_naming_no_export_path",
+			repository: `{"target": {"kind": "library"}, "ts": {"injection_registrations": [{"module": "@example/container"}]}}`,
+			key:        "ts.injection_registrations[0].name",
+		},
+		{
+			name:       "a_declaration_export_path_naming_no_module",
+			repository: `{"target": {"kind": "library"}, "ts": {"injection_registrations": [{"name": "Container.bind"}]}}`,
+			key:        "ts.injection_registrations[0].module",
+		},
+		{
+			name:       "a_declaration_module_written_as_a_relative_specifier",
+			repository: `{"target": {"kind": "library"}, "ts": {"serializers": [{"module": "./wire.js", "name": "encode"}]}}`,
+			key:        "ts.serializers[0].module",
+		},
+		{
+			name:       "a_declaration_module_mapped_by_the_imports_field",
+			repository: `{"target": {"kind": "library"}, "ts": {"serializers": [{"module": "#wire", "name": "encode"}]}}`,
+			key:        "ts.serializers[0].module",
+		},
+		{
+			name:       "a_declaration_naming_an_empty_global_path",
+			repository: `{"target": {"kind": "library"}, "ts": {"serializers": [{"global": ""}]}}`,
+			key:        "ts.serializers[0].global",
+		},
+		{
+			name:       "a_second_declaration_entry_naming_no_shape",
+			repository: `{"target": {"kind": "library"}, "ts": {"serializers": [{"global": "structuredClone"}, {}]}}`,
+			key:        "ts.serializers[1]",
+		},
+		{
+			name:       "a_lifecycle_contract_naming_no_members",
+			repository: `{"target": {"kind": "library"}, "ts": {"lifecycle_contracts": [{"bases": [{"global": "HTMLElement"}]}]}}`,
+			key:        "ts.lifecycle_contracts[0].members",
+			says:       []string{"is required"},
+		},
+		{
+			name:       "a_lifecycle_contract_naming_an_empty_member_list",
+			repository: `{"target": {"kind": "library"}, "ts": {"lifecycle_contracts": [{"bases": [{"global": "HTMLElement"}], "members": []}]}}`,
+			key:        "ts.lifecycle_contracts[0].members",
+			says:       []string{"want at least 1"},
+		},
+		{
+			name:       "a_lifecycle_contract_naming_one_member_twice",
+			repository: `{"target": {"kind": "library"}, "ts": {"lifecycle_contracts": [{"bases": [{"global": "HTMLElement"}], "members": ["connectedCallback", "connectedCallback"]}]}}`,
+			key:        "ts.lifecycle_contracts[0].members",
+		},
+		{
+			name:       "a_lifecycle_contract_whose_component_routes_are_empty",
+			repository: `{"target": {"kind": "library"}, "ts": {"lifecycle_contracts": [{"components": [], "bases": [], "members": ["connectedCallback"]}]}}`,
+			key:        "ts.lifecycle_contracts[0]",
+		},
+		{
+			name:       "a_lifecycle_component_naming_no_shape",
+			repository: `{"target": {"kind": "library"}, "ts": {"lifecycle_contracts": [{"components": [{}], "members": ["connectedCallback"]}]}}`,
+			key:        "ts.lifecycle_contracts[0].components[0]",
+		},
+		{
+			name:       "a_lifecycle_base_written_as_a_relative_specifier",
+			repository: `{"target": {"kind": "library"}, "ts": {"lifecycle_contracts": [{"bases": [{"module": "../base.js", "name": "Base"}], "members": ["connectedCallback"]}]}}`,
+			key:        "ts.lifecycle_contracts[0].bases[0].module",
+		},
+		{
 			name:       "a_severity_outside_the_closed_set",
 			repository: `{"target": {"kind": "library"}, "severity": {"DS1101": "error"}}`,
 			key:        "severity.DS1101",
@@ -631,7 +721,7 @@ func TestResolveRefusesAMalformedDocument(t *testing.T) {
 			if refusal.Key != tc.key {
 				t.Errorf("Resolve(%s) named %q, want %q", tc.name, refusal.Key, tc.key)
 			}
-			assertMessageNames(t, tc.name, refusal, []string{"deadset.json"})
+			assertMessageNames(t, tc.name, refusal, append([]string{"deadset.json"}, tc.says...))
 		})
 	}
 }
@@ -882,6 +972,89 @@ func TestResolveRequiresEverySourceToNameItself(t *testing.T) {
 			_, _, err := config.Resolve(tc.in)
 			if !errors.Is(err, config.ErrNoSourceLabel) {
 				t.Errorf("Resolve(%s) = error %v, want it to be %v", tc.name, err, config.ErrNoSourceLabel)
+			}
+		})
+	}
+}
+
+func TestResolveWritesTheDefaultRouteOfALifecycleContractItOmits(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		contract string
+		want     config.LifecycleContract
+	}{
+		{
+			name:     "a_contract_naming_components_alone",
+			contract: `{"components": [{"global": "CustomElementRegistry.define"}], "members": ["connectedCallback"]}`,
+			want: config.LifecycleContract{
+				Components: []config.Declaration{{Global: new("CustomElementRegistry.define")}},
+				Bases:      []config.Declaration{},
+				Members:    []string{"connectedCallback"},
+			},
+		},
+		{
+			name:     "a_contract_naming_bases_alone",
+			contract: `{"bases": [{"global": "HTMLElement"}], "members": ["observedAttributes:static"]}`,
+			want: config.LifecycleContract{
+				Components: []config.Declaration{},
+				Bases:      []config.Declaration{{Global: new("HTMLElement")}},
+				Members:    []string{"observedAttributes:static"},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			repository := `{"target": {"kind": "library"}, "ts": {"lifecycle_contracts": [` + tc.contract + `]}}`
+			cfg, _, err := config.Resolve(labelled("", repository, "", nil))
+			if err != nil {
+				t.Fatalf("Resolve(%s) = error %v, want the resolved configuration", tc.contract, err)
+			}
+			want := []config.LifecycleContract{tc.want}
+			if got := cfg.TS.LifecycleContracts; !reflect.DeepEqual(got, want) {
+				t.Errorf("Resolve(%s).TS.LifecycleContracts = %#v, want %#v", tc.contract, got, want)
+			}
+		})
+	}
+}
+
+// A flag document is decoded without the member walk a configuration file goes
+// through, so a declaration entry supplied as a flag is held to the members its
+// shapes declare by the decoder alone.
+func TestResolveRefusesAFlagSuppliedDeclarationNamingAnUndeclaredMember(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		setting string
+		value   string
+	}{
+		{name: "a_serializer", setting: "ts.serializers", value: `[{"global": "structuredClone", "returns": "string"}]`},
+		{
+			name:    "a_lifecycle_contract",
+			setting: "ts.lifecycle_contracts",
+			value:   `[{"framework": "elements", "bases": [{"global": "HTMLElement"}], "members": ["connectedCallback"]}]`,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			flags := `{"` + tc.setting + `": ` + tc.value + `}`
+			_, _, err := config.Resolve(labelled(flags, `{"target": {"kind": "application"}}`, "",
+				map[string]string{tc.setting: "--" + tc.name}))
+			var refusal *config.Error
+			if !errors.As(err, &refusal) {
+				t.Fatalf("Resolve(a flag supplying %s = %s) = error %v, want a *config.Error", tc.setting, tc.value, err)
+			}
+			if refusal.Kind != config.KindMalformed {
+				t.Errorf("Resolve(a flag supplying %s = %s) = kind %v, want %v",
+					tc.setting, tc.value, refusal.Kind, config.KindMalformed)
 			}
 		})
 	}

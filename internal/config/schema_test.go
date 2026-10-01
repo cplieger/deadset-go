@@ -177,6 +177,78 @@ func TestPatternsEqualTheContract(t *testing.T) {
 	}
 }
 
+func TestDeclarationPatternsEqualTheContractAtEveryList(t *testing.T) {
+	t.Parallel()
+
+	found := map[string][]shapePatternAt{}
+	collectShapePatterns(contractDocument(t, "config.schema.json"), "", found)
+	tests := []struct {
+		member string
+		got    string
+	}{
+		{member: "symbol", got: typescriptReferencePattern.String()},
+		{member: "module", got: bareSpecifierPattern.String()},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.member, func(t *testing.T) {
+			t.Parallel()
+
+			declared := found[tc.member]
+			if len(declared) == 0 {
+				t.Fatalf("config.schema.json declares no shape with a %s pattern, so this test pins nothing", tc.member)
+			}
+			for _, declaredAt := range declared {
+				if declaredAt.pattern != tc.got {
+					t.Errorf("the %s pattern = %q, want the schema's own spelling %q at %s",
+						tc.member, tc.got, declaredAt.pattern, declaredAt.at)
+				}
+			}
+		})
+	}
+}
+
+// shapePatternAt is one pattern a shape of a list entry declares for one member, with
+// the place of the list.
+type shapePatternAt struct {
+	at      string
+	pattern string
+}
+
+// collectShapePatterns records, for every list entry the schema declares in shapes,
+// the pattern each shape declares for a member of the TypeScript declaration shapes,
+// keyed by the member, so every list holding such entries is reached however deep it
+// sits.
+func collectShapePatterns(declaration map[string]any, at string, into map[string][]shapePatternAt) {
+	if shapes, held := declaration["oneOf"].([]any); held {
+		for _, shape := range shapes {
+			declared, _ := shape.(map[string]any)
+			properties, _ := declared["properties"].(map[string]any)
+			for _, member := range []string{"symbol", "module"} {
+				if pattern, isString := nestedString(properties, member, "pattern"); isString {
+					into[member] = append(into[member], shapePatternAt{at: at, pattern: pattern})
+				}
+			}
+		}
+	}
+	if items, held := declaration["items"].(map[string]any); held {
+		collectShapePatterns(items, at+"[]", into)
+	}
+	properties, _ := declaration["properties"].(map[string]any)
+	for name, member := range properties {
+		if declared, isObject := member.(map[string]any); isObject {
+			collectShapePatterns(declared, joinKey(at, name), into)
+		}
+	}
+}
+
+// nestedString returns one string member of one member of a properties object.
+func nestedString(properties map[string]any, member, key string) (string, bool) {
+	declared, _ := properties[member].(map[string]any)
+	value, isString := declared[key].(string)
+	return value, isString
+}
+
 // onlyPatternKey returns the one key of an open object's patternProperties.
 func onlyPatternKey(t *testing.T, properties map[string]any, name string) string {
 	t.Helper()

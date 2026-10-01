@@ -62,13 +62,59 @@ func settingGenerators() map[string]*rapid.Generator[any] {
 		"reporters.formats": arrayOfDistinct(rapid.SampledFrom([]config.Format{
 			config.Text, config.JSON, config.GitHub, config.SARIF, config.Template,
 		}), 1, 3),
-		"reporters.sort":         enumOf(config.ByPosition, config.BySize),
-		"reporters.cascade":      enumOf(config.CascadeRoots, config.CascadeFull),
-		"reporters.max_findings": rapid.IntRange(0, 1000).AsAny(),
-		"reporters.fail_on":      enumOf(config.Allow, config.Warn, config.Deny),
-		"ts.test_files":          arrayOfDistinct(rapid.StringMatching(`^\*\*/\*\.[a-z]{2,4}$`), 1, 2),
-		"ts.entry_files":         arrayOfDistinct(rapid.StringMatching(`^src/[a-z]{1,6}\.ts$`), 0, 2),
+		"reporters.sort":             enumOf(config.ByPosition, config.BySize),
+		"reporters.cascade":          enumOf(config.CascadeRoots, config.CascadeFull),
+		"reporters.max_findings":     rapid.IntRange(0, 1000).AsAny(),
+		"reporters.fail_on":          enumOf(config.Allow, config.Warn, config.Deny),
+		"ts.test_files":              arrayOfDistinct(rapid.StringMatching(`^\*\*/\*\.[a-z]{2,4}$`), 1, 2),
+		"ts.entry_files":             arrayOfDistinct(rapid.StringMatching(`^src/[a-z]{1,6}\.ts$`), 0, 2),
+		"ts.injection_registrations": rapid.SliceOfN(declarationEntry(), 0, 3).AsAny(),
+		"ts.lifecycle_contracts":     rapid.SliceOfN(lifecycleContractEntry(), 0, 2).AsAny(),
+		"ts.serializers":             rapid.SliceOfN(declarationEntry(), 0, 3).AsAny(),
 	}
+}
+
+// declarationEntry draws one entry naming a TypeScript declaration, in any of its
+// three shapes.
+func declarationEntry() *rapid.Generator[map[string]any] {
+	return rapid.OneOf(
+		rapid.Custom(func(t *rapid.T) map[string]any {
+			return map[string]any{
+				"symbol": rapid.StringMatching(`^ts://@example/app/src/[a-z]{1,6}\.ts#[a-z]{1,6}$`).
+					Draw(t, "declaration symbol"),
+			}
+		}),
+		rapid.Custom(func(t *rapid.T) map[string]any {
+			return map[string]any{
+				"module": rapid.StringMatching(`^(@example/)?[a-z]{1,8}(/[a-z]{1,6}\.js)?$`).Draw(t, "declaration module"),
+				"name":   rapid.StringMatching(`^[A-Z][a-z]{0,6}(\.[a-z]{1,6}(:static)?)?$`).Draw(t, "declaration name"),
+			}
+		}),
+		rapid.Custom(func(t *rapid.T) map[string]any {
+			return map[string]any{
+				"global": rapid.StringMatching(`^[A-Z][A-Za-z]{0,10}(\.[a-z]{1,6})?$`).Draw(t, "declaration global"),
+			}
+		}),
+	)
+}
+
+// lifecycleContractEntry draws one framework's lifecycle contract, naming every
+// member with at least one declaration or base class that makes a class a component,
+// so a resolved entry prints as it was drawn.
+func lifecycleContractEntry() *rapid.Generator[map[string]any] {
+	return rapid.Custom(func(t *rapid.T) map[string]any {
+		components := rapid.SliceOfN(declarationEntry(), 0, 2).Draw(t, "lifecycle components")
+		minBases := 0
+		if len(components) == 0 {
+			minBases = 1
+		}
+		return map[string]any{
+			"components": components,
+			"bases":      rapid.SliceOfN(declarationEntry(), minBases, 2).Draw(t, "lifecycle bases"),
+			"members": rapid.SliceOfNDistinct(rapid.StringMatching(`^[a-z]{1,8}Callback(:static)?$`), 1, 3,
+				rapid.ID[string]).Draw(t, "lifecycle members"),
+		}
+	})
 }
 
 // configurationEntry draws one entry of the build matrix in either of its two
