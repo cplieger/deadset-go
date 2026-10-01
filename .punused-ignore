@@ -39,7 +39,8 @@ function Unused is unused
 # `UnmarshalJSON` on the report envelope satisfy `json.Marshaler` and
 # `json.Unmarshaler`, which is what makes marshalling an envelope write the
 # Contract's document and reading one refuse a member the schema does not
-# declare; `Set` satisfies `flag.Value`, and `flag.FlagSet.Var` is what calls it
+# declare, and on a build configuration they are what reads an entry as exactly
+# one of its two shapes and writes it back as the document spelled it; `Set` satisfies `flag.Value`, and `flag.FlagSet.Var` is what calls it
 # once per occurrence of the repeatable format flag. `String()` on the cascade
 # spelling is the same shape as the kind enumerations and is reached the same way:
 # a verb prints the depth a component listing was made at through a `%s`
@@ -60,6 +61,8 @@ method (Cascade).String
 method (*MalformedError).Unwrap
 method (*Envelope).MarshalJSON
 method (*Envelope).UnmarshalJSON
+method (*Configuration).MarshalJSON
+method (*Configuration).UnmarshalJSON
 method (*formatList).Set
 method (*cgoImporter).Import
 
