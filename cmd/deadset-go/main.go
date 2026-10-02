@@ -1,6 +1,6 @@
 // Command deadset-go reports unused symbols in a Go module and its declared
 // consumers. It implements the deadset Contract published at
-// github.com/cplieger/deadset-spec/v3, and no verb edits a source file.
+// github.com/cplieger/deadset-spec/v4, and no verb edits a source file.
 package main
 
 import (
@@ -19,11 +19,13 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cplieger/deadset-go/internal/catalog"
 	"github.com/cplieger/deadset-go/internal/config"
 	"github.com/cplieger/deadset-go/internal/deps"
 	"github.com/cplieger/deadset-go/internal/edges"
 	"github.com/cplieger/deadset-go/internal/exempt"
 	"github.com/cplieger/deadset-go/internal/graph"
+	"github.com/cplieger/deadset-go/internal/jsondoc"
 	"github.com/cplieger/deadset-go/internal/kinds"
 	"github.com/cplieger/deadset-go/internal/load"
 	"github.com/cplieger/deadset-go/internal/matrix"
@@ -63,10 +65,11 @@ const maxDocumentBytes = 1 << 20
 // language is the language this analyzer claims.
 const language = config.GoLanguage
 
-// schemaVersionsAccepted lists every report schema version this analyzer reads
-// and writes, which is the one version the report package writes and reads.
-// contract.json's schema_versions is the list it must equal.
-var schemaVersionsAccepted = []string{report.SchemaVersion}
+// schemaVersionsAccepted lists every report schema version this analyzer reads,
+// which is contract.json's schema_versions. The report package writes the first:
+// the later one adds a subject kind this analyzer never reports, so every report
+// it writes is an instance of both.
+var schemaVersionsAccepted = []string{report.SchemaVersion, "6.1.0"}
 
 // settingFlag is one setting a command-line flag supplies: the dotted path the
 // resolved configuration names the setting by, and what the flag's value is.
@@ -238,7 +241,7 @@ func describe(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "deadset-go: describe: %v\n", err)
 		return exitFailure
 	}
-	encoded, err := json.MarshalIndent(describeDocument{
+	encoded, err := jsondoc.Encode(describeDocument{
 		Name:                   name,
 		Version:                version(),
 		ContractVersion:        config.ContractVersion,
@@ -249,12 +252,12 @@ func describe(args []string, stdout, stderr io.Writer) int {
 			Result:        answered.conformance.Result,
 			Digest:        answered.conformance.Digest,
 		},
-	}, "", "  ")
+	}, "  ")
 	if err != nil {
 		fmt.Fprintf(stderr, "deadset-go: describe: %v\n", err)
 		return exitFailure
 	}
-	if _, err := stdout.Write(append(encoded, '\n')); err != nil {
+	if _, err := stdout.Write(encoded); err != nil {
 		fmt.Fprintf(stderr, "deadset-go: describe: %v\n", err)
 		return exitFailure
 	}
@@ -265,8 +268,15 @@ func describe(args []string, stdout, stderr io.Writer) int {
 // provenance of every setting, the target root the documents were read from, and
 // the scope document the invocation named, which is empty for a verb that names
 // none.
+//
+// baseline is the rows a round of a baseline write reads back in place of the
+// target's own baseline document, and nil on every other run, which reads the
+// document at the target root. prepared is the load and the exemptions the rounds
+// of one baseline write share, and nil on every other run.
 type resolution struct {
 	provenance config.Provenance
+	baseline   *[]suppress.Recorded
+	prepared   *preparation
 	target     string
 	scope      string
 	config     config.Config
@@ -895,31 +905,13 @@ type analysis struct {
 // that is not the production one counts every reference, because which symbols a
 // finding reports is a different question from what an exemption held back.
 func analysisOf(ctx context.Context, resolved *resolution, options *exempt.Options, mode graph.Mode) (analysis, error) {
-	loaded, err := stagesOf(ctx, resolved)
+	held, err := preparedOf(ctx, resolved, options, mode)
 	if err != nil {
 		return analysis{}, err
 	}
+	loaded, per, exemptions := held.stages, held.per, held.exemptions
 
-	// The exemption classes compute under the mode the sweep runs in, which is the
-	// one value the run carries: a test that marshals a value or compares one is
-	// evidence of a use that test makes, so it holds nothing under a production
-	// sweep, which is the same question the mode answers for a reference.
-	per := make([]kinds.Configured, len(loaded.per))
-	var exemptions []graph.Exemption
-	for i := range loaded.per {
-		resolver, computed, exemptErr := exemptionsOf(&loaded.per[i], loaded.root, options, mode)
-		if exemptErr != nil {
-			return analysis{}, exemptErr
-		}
-		exemptions = append(exemptions, computed...)
-		per[i] = kinds.Configured{
-			Result:  &loaded.per[i].result,
-			Resolve: resolver,
-			Symbols: loaded.per[i].symbols,
-		}
-	}
-
-	marks, refusals, err := suppressionsOf(&loaded, per)
+	marks, refusals, err := suppressionsOf(&loaded, per, resolved.baseline)
 	if err != nil {
 		return analysis{}, err
 	}
@@ -939,6 +931,52 @@ func analysisOf(ctx context.Context, resolved *resolution, options *exempt.Optio
 	}, nil
 }
 
+// preparation is what a run computes before it reads any suppression: the stages,
+// and one resolver and one exemption set per configuration under one mode. Neither
+// depends on a suppression record, so the rounds of a baseline write, which differ
+// only in the rows they read back, compute it once.
+type preparation struct {
+	stages     stages
+	per        []kinds.Configured
+	exemptions []graph.Exemption
+	mode       graph.Mode
+	held       bool
+}
+
+// preparedOf is the stages and the exemptions of one run under one mode, computed
+// once into the preparation the resolution shares where it carries one.
+//
+// The exemption classes compute under the mode the sweep runs in, which is the one
+// value the run carries: a test that marshals a value or compares one is evidence of
+// a use that test makes, so it holds nothing under a production sweep, which is the
+// same question the mode answers for a reference.
+func preparedOf(ctx context.Context, resolved *resolution, options *exempt.Options, mode graph.Mode) (*preparation, error) {
+	if shared := resolved.prepared; shared != nil && shared.held && shared.mode == mode {
+		return shared, nil
+	}
+	loaded, err := stagesOf(ctx, resolved)
+	if err != nil {
+		return nil, err
+	}
+	held := &preparation{stages: loaded, per: make([]kinds.Configured, len(loaded.per)), mode: mode, held: true}
+	for i := range loaded.per {
+		resolver, computed, exemptErr := exemptionsOf(&held.stages.per[i], loaded.root, options, mode)
+		if exemptErr != nil {
+			return nil, exemptErr
+		}
+		held.exemptions = append(held.exemptions, computed...)
+		held.per[i] = kinds.Configured{
+			Result:  &held.stages.per[i].result,
+			Resolve: resolver,
+			Symbols: held.stages.per[i].symbols,
+		}
+	}
+	if resolved.prepared != nil {
+		*resolved.prepared = *held
+	}
+	return held, nil
+}
+
 // suppressionsOf reads the three suppression documents of one run and returns their
 // records and refusals concatenated in reader order, which is the order a stale
 // suppression is reported in: the inline directives by position, then the ignore
@@ -952,8 +990,11 @@ func analysisOf(ctx context.Context, resolved *resolution, options *exempt.Optio
 //
 // The ignore file and the baseline bind against the matrix inventory rather than one
 // configuration's, because an entry naming a declaration only one configuration
-// holds names something the run analyzed.
-func suppressionsOf(loaded *stages, per []kinds.Configured) ([]suppress.Record, []suppress.Refusal, error) {
+// holds names something the run analyzed. A round of a baseline write reads the rows
+// it was given in place of the target's baseline, through the document the write
+// would publish, so a row it reports stale is positioned where that document holds
+// it.
+func suppressionsOf(loaded *stages, per []kinds.Configured, rows *[]suppress.Recorded) ([]suppress.Record, []suppress.Refusal, error) {
 	var records []suppress.Record
 	var refusals []suppress.Refusal
 	if len(per) > 0 {
@@ -969,7 +1010,7 @@ func suppressionsOf(loaded *stages, per []kinds.Configured) ([]suppress.Record, 
 		name string
 	}{
 		{suppress.IgnoreFile, suppress.IgnoreFileName},
-		{suppress.Baseline, suppress.BaselineFileName},
+		{baselineReader(rows), suppress.BaselineFileName},
 	} {
 		held, refused, err := read.of(filepath.Join(loaded.root, read.name), loaded.merged.Symbols)
 		if err != nil {
@@ -983,11 +1024,13 @@ func suppressionsOf(loaded *stages, per []kinds.Configured) ([]suppress.Record, 
 
 // bound is the declarations the suppression records marked live, which is what
 // seeds the sweep. A record that bound nothing contributes nothing: it names a site
-// that resolves to no declaration, and that is what makes it stale.
+// that resolves to no declaration, and that is what makes it stale. A record for a
+// part kind marks nothing either: it says the part is wanted, not that the
+// declaration holding it is, so it withholds its finding and keeps nothing alive.
 func bound(marks []suppress.Record) []graph.SymbolID {
 	var marked []graph.SymbolID
 	for i := range marks {
-		if marks[i].Bound != "" {
+		if marks[i].Bound != "" && !catalog.ReportsPart(marks[i].Code) {
 			marked = append(marked, marks[i].Bound)
 		}
 	}

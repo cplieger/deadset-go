@@ -1,6 +1,6 @@
 A function whose body never reads one of its two parameters, one whose body reads
 both, one declaring the blank identifier, one leaving its parameter unnamed, and one
-nothing references, which an unused-declaration kind reports whole.
+nothing references, whose unread parameter is reported beside the function.
 
 -- go.mod --
 module example.com/app
@@ -29,8 +29,9 @@ func unnamed(int) int {
 	return 2
 }
 
-// dropped names a label it never reads and nothing references the function, so an
-// unused-declaration kind reports it whole and nothing reports a part of it.
+// dropped names a label it never reads and nothing references the function: an
+// unused-declaration kind reports the function, and the label is reported beside
+// it, because a part is decided inside its declaration whatever uses it.
 func dropped(value int, label string) int {
 	return value
 }

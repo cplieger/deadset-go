@@ -11,7 +11,7 @@ import (
 
 	"github.com/cplieger/deadset-go/internal/config"
 	"github.com/cplieger/deadset-go/internal/suppress"
-	spec "github.com/cplieger/deadset-spec/v3"
+	spec "github.com/cplieger/deadset-spec/v4"
 )
 
 // intraFuncEmitters is the table of the intra-function group, which is what a pass
@@ -66,7 +66,10 @@ func TestUnusedParameterReportsEveryParameterNoBodyReads(t *testing.T) {
 
 	result := analysisOf(t, "intrafunc-parameter.txtar", asApplication, Consumers{}).findings(t, intraFunctionKinds)
 
-	want := []string{"main.go:4:24 parameter label of go://example.com/app#scaled"}
+	want := []string{
+		"main.go:4:24 parameter label of go://example.com/app#scaled",
+		"main.go:26:25 parameter label of go://example.com/app#dropped",
+	}
 	if got := subjectsOf(result.Findings, unusedParameterCode); !slices.Equal(got, want) {
 		t.Errorf("the pass over intrafunc-parameter.txtar reports %v under %s, want %v",
 			got, unusedParameterCode, want)

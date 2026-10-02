@@ -1,9 +1,10 @@
 package config
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
+
+	"github.com/cplieger/deadset-go/internal/jsondoc"
 )
 
 // printDocument is the resolved configuration as it is written: the closed key
@@ -28,11 +29,11 @@ func Print(w io.Writer, c Config, p Provenance) error {
 	for path, origin := range p {
 		document.Provenance[path] = origin.String()
 	}
-	encoded, err := json.MarshalIndent(document, "", "  ")
+	encoded, err := jsondoc.Encode(document, "  ")
 	if err != nil {
 		return fmt.Errorf("render the resolved configuration: %w", err)
 	}
-	if _, err := w.Write(append(encoded, '\n')); err != nil {
+	if _, err := w.Write(encoded); err != nil {
 		return fmt.Errorf("write the resolved configuration: %w", err)
 	}
 	return nil

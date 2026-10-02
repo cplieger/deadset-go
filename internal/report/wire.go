@@ -137,24 +137,45 @@ type wirePosition struct {
 	EndLine int    `json:"end_line"`
 }
 
+//nolint:govet // fieldalignment: the field order is the schema's member order, which the document writes
 type wireSubject struct {
 	Ref       string `json:"ref"`
 	Kind      string `json:"kind"`
 	Name      string `json:"name"`
+	Exported  *bool  `json:"exported,omitempty"`
 	SizeLines int    `json:"size_lines"`
 }
 
+//nolint:govet // fieldalignment: the field order is the schema's member order, which the document writes
 type wireComponent struct {
-	ID             string `json:"id"`
-	Root           bool   `json:"root"`
-	SymbolCount    int    `json:"symbol_count"`
-	DeletableLines int    `json:"deletable_lines"`
+	ID             string           `json:"id"`
+	Root           bool             `json:"root"`
+	SymbolCount    int              `json:"symbol_count"`
+	DeletableLines int              `json:"deletable_lines"`
+	Members        []wirePositioned `json:"members,omitempty"`
+}
+
+// wireSubjectOf is one finding's subject as a document writes it.
+func wireSubjectOf(s *kinds.Subject) wireSubject {
+	return wireSubject{Ref: s.Ref, Kind: s.Kind, Name: s.Name, Exported: s.Exported, SizeLines: s.SizeLines}
+}
+
+// subject is one finding's subject read back from the document.
+func (w *wireSubject) subject() kinds.Subject {
+	return kinds.Subject{Ref: w.Ref, Kind: w.Kind, Name: w.Name, Exported: w.Exported, SizeLines: w.SizeLines}
 }
 
 // wireComponentOf is one component as a document writes it: the count of the lines
-// its deletion removes and not the spans that count was taken over.
+// its deletion removes and not the spans that count was taken over, and the member
+// list where the run lists a component in full.
 func wireComponentOf(c *kinds.Component) wireComponent {
-	return wireComponent{ID: c.ID, Root: c.Root, SymbolCount: c.SymbolCount, DeletableLines: c.DeletableLines}
+	held := wireComponent{ID: c.ID, Root: c.Root, SymbolCount: c.SymbolCount, DeletableLines: c.DeletableLines}
+	for i := range c.Members {
+		one := &c.Members[i]
+		held.Members = append(held.Members,
+			wirePositioned{Ref: one.Ref, Name: one.Name, Position: wirePositionOf(&one.Position)})
+	}
+	return held
 }
 
 // wirePositioned is one symbol a finding names beside its subject: the reference,
@@ -380,7 +401,7 @@ func wireFindingOf(found *kinds.Finding) wireFinding {
 		Kind:              found.Kind,
 		Language:          found.Language,
 		Position:          wirePositionOf(&found.Position),
-		Symbol:            wireSubject(found.Symbol),
+		Symbol:            wireSubjectOf(&found.Symbol),
 		ReachabilityClass: string(found.Class),
 		Confidence:        string(found.Confidence),
 		LivenessRelation:  relationWritten(found),
@@ -569,7 +590,7 @@ func (w *wireFinding) finding() (kinds.Finding, error) {
 		Kind:            w.Kind,
 		Language:        w.Language,
 		Position:        kinds.Position(w.Position),
-		Symbol:          kinds.Subject(w.Symbol),
+		Symbol:          w.Symbol.subject(),
 		Class:           kinds.Class(w.ReachabilityClass),
 		Confidence:      kinds.Class(w.Confidence),
 		Relation:        relation,
@@ -590,7 +611,13 @@ func (w *wireFinding) finding() (kinds.Finding, error) {
 // component is one finding's component read back from the document, which carries
 // no spans.
 func (w *wireComponent) component() kinds.Component {
-	return kinds.Component{ID: w.ID, Root: w.Root, SymbolCount: w.SymbolCount, DeletableLines: w.DeletableLines}
+	held := kinds.Component{ID: w.ID, Root: w.Root, SymbolCount: w.SymbolCount, DeletableLines: w.DeletableLines}
+	for _, member := range w.Members {
+		held.Members = append(held.Members, kinds.Positioned{
+			Ref: member.Ref, Name: member.Name, Position: kinds.Position(member.Position),
+		})
+	}
+	return held
 }
 
 // details is one finding's per-kind members read back from the document.

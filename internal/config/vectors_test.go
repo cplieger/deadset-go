@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/internal/config"
-	spec "github.com/cplieger/deadset-spec/v3"
+	spec "github.com/cplieger/deadset-spec/v4"
 )
 
 // usageExitCode is the code every refusal this package makes maps to.
@@ -36,6 +36,7 @@ func publishedCases() []string {
 		"array-spanning-lines",
 		"duplicated-key",
 		"integer-written-with-a-fraction",
+		"member-written-as-null",
 		"missing-target-kind",
 		"provenance-on-input",
 		"provider-name-duplicated",

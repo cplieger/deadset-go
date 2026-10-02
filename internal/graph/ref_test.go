@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	spec "github.com/cplieger/deadset-spec/v3"
+	spec "github.com/cplieger/deadset-spec/v4"
 )
 
 // corpusCase is one case of the published symbol-reference corpus.

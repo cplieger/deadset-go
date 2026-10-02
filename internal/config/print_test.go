@@ -168,6 +168,28 @@ func TestPrintWritesAnEmptyArrayForAnAbsentOne(t *testing.T) {
 	}
 }
 
+func TestPrintWritesTheCharactersAPageEscapesAsThemselves(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Config{
+		Target: config.Target{Kind: config.Library},
+		Analysis: config.Analysis{
+			TemplateDelimiters: config.TemplateDelimiters{Left: "<%", Right: "%>"},
+		},
+		Roots: config.Roots{Patterns: []string{"go://example.com/app#Run&Stop"}},
+	}
+	var out bytes.Buffer
+	if err := config.Print(&out, cfg, config.Provenance{}); err != nil {
+		t.Fatalf("Print(a configuration naming <%%, %%> and &) = error %v, want the configuration", err)
+	}
+	for _, want := range []string{`"left": "<%"`, `"right": "%>"`, `"go://example.com/app#Run&Stop"`} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("Print(a configuration naming <%%, %%> and &) = %s, want it to write %s as the bytes it spells",
+				out.String(), want)
+		}
+	}
+}
+
 func TestPrintDoesNotMutateItsArgument(t *testing.T) {
 	t.Parallel()
 

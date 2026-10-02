@@ -141,7 +141,9 @@ func UnusedEnumMember(in *Input) ([]Finding, error) {
 // such as the one a defined integer type carries makes two instantiations
 // distinct types while naming the parameter nowhere, so deleting it changes the
 // program. This kind takes precedence over the unused-exported and the
-// unused-unexported kinds for a type parameter, which report none.
+// unused-unexported kinds for a type parameter, which report none. A type parameter
+// of a function or a method the sweep judged dead falls with that declaration, whose
+// own finding is the one reported.
 func UnusedTypeParameter(in *Input) ([]Finding, error) {
 	referenced := referencedSymbols(in)
 
@@ -152,7 +154,7 @@ func UnusedTypeParameter(in *Input) ([]Finding, error) {
 		if symbol == nil || symbol.Kind != graph.KindTypeParam || referenced[candidate.ID] {
 			continue
 		}
-		if !declaresTypeParameters(in.symbol(symbol.Parent)) {
+		if !declaresTypeParameters(in.symbol(symbol.Parent)) || in.candidateOf(symbol.Parent) != nil {
 			continue
 		}
 		finding, names := in.finding(candidate.ID, typeParameterCode,

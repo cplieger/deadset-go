@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	spec "github.com/cplieger/deadset-spec/v3"
+	spec "github.com/cplieger/deadset-spec/v4"
 )
 
 // writeDocument writes body as a scope document in a fresh directory and returns

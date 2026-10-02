@@ -1,10 +1,10 @@
 package report
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
+
+	"github.com/cplieger/deadset-go/internal/jsondoc"
 )
 
 // jsonIndent is the indentation of the report document: two spaces, so the bytes of
@@ -35,16 +35,7 @@ func writeDocument(w io.Writer, v any) error {
 }
 
 // encoded is one value as JSON with a closing newline, indented by indent or compact
-// where indent is empty. A string escapes what strict JSON requires and the line and
-// paragraph separators, and writes every other character as itself, `<`, `>` and `&`
-// included.
+// where indent is empty, written the way every document of this analyzer is.
 func encoded(v any, indent string) ([]byte, error) {
-	var written bytes.Buffer
-	encoder := json.NewEncoder(&written)
-	encoder.SetEscapeHTML(false)
-	encoder.SetIndent("", indent)
-	if err := encoder.Encode(v); err != nil {
-		return nil, err
-	}
-	return written.Bytes(), nil
+	return jsondoc.Encode(v, indent)
 }

@@ -293,7 +293,7 @@ func TestResolveRefusesAnUnimplementedKey(t *testing.T) {
 			name:       "a_severity_family_prefix_holding_a_fixed_code",
 			repository: `{"target": {"kind": "application"}, "severity": {"DS17": "allow"}}`,
 			key:        "severity.DS17",
-			names:      []string{`"severity.DS17"`, "fixes the severity of DS1703 and DS1704"},
+			names:      []string{`"severity.DS17"`, "fixes the severity of DS1703, DS1704 and DS1706"},
 		},
 		{
 			name:       "a_severity_code_no_live_kind_carries",
@@ -359,7 +359,7 @@ func TestResolveNamesEveryFixedCodeASeverityKeyCovers(t *testing.T) {
 			name:       "a_family_prefix_names_every_fixed_code_of_that_family",
 			repository: `{"target": {"kind": "application"}, "severity": {"DS17": "allow"}}`,
 			want: `deadset.json: key "severity.DS17" is not implemented: ` +
-				"the Contract fixes the severity of DS1703 and DS1704, which this key names",
+				"the Contract fixes the severity of DS1703, DS1704 and DS1706, which this key names",
 		},
 		{
 			name:       "a_code_names_that_code_alone",

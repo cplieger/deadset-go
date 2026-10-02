@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/token"
 	"io"
 
 	"github.com/cplieger/deadset-go/internal/graph"
@@ -70,7 +71,23 @@ func Baseline(path string, symbols []graph.Symbol) ([]Record, []Refusal, error) 
 	if body == nil || err != nil {
 		return nil, nil, err
 	}
+	return baselineRecords(body, sites, symbols, held)
+}
 
+// BaselineDocument reads one baseline document held in memory, as [Baseline] reads
+// the one at the target root: the rows a baseline write has recorded so far, read
+// back at the positions the document it writes gives them.
+func BaselineDocument(body []byte, symbols []graph.Symbol) ([]Record, []Refusal, error) {
+	held := baselineShape()
+	sites, err := recordSites(body, held)
+	if err != nil {
+		return nil, nil, err
+	}
+	return baselineRecords(body, sites, symbols, held)
+}
+
+// baselineRecords decodes one baseline document and binds each of its rows.
+func baselineRecords(body []byte, sites []token.Position, symbols []graph.Symbol, held *shape) ([]Record, []Refusal, error) {
 	var wire wireBaseline
 	if err := decodeDocument(body, &wire, held); err != nil {
 		return nil, nil, err
@@ -104,18 +121,13 @@ type Provenance struct {
 // reason is what a row this provenance writes carries.
 func (p Provenance) reason() string { return reasonPrefix + p.Analyzer + " " + p.Version }
 
-// WriteBaseline writes a baseline document to w holding one row per finding, in the
-// order given, which is the order the report lists them in.
+// WriteBaseline writes a baseline document to w holding one row per recorded
+// finding, in the order given.
 //
 // The document adjudicates nothing. Every row carries the provenance as its
-// reason, so a row is never read as a maintainer's judgement, and a later run that
-// reads the document back suppresses exactly the findings recorded here and reports
-// no stale row.
-//
-// The caller passes the findings of its report and nothing else: no row for a stale
-// suppression, no row for a pending finding, which lives in an edge evaluation and
-// is neither reported nor suppressed, and no row for a finding a directive or an
-// entry already suppressed. A finding missing a value a row needs, and an identity
+// reason, so a row is never read as a maintainer's judgement. Which findings the
+// rows record is the caller's: the fixpoint of a baseline write decides them. A
+// finding missing a value a row needs, and an identity
 // missing its name or version, are [ErrProvenance]: the grammar requires a reason
 // on every row, and a document that could not carry one is refused rather than
 // written.

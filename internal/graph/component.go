@@ -146,7 +146,7 @@ func (c *Component) List(mode Cascade) Listing {
 // a reference, so a member or an edge one configuration alone holds belongs to the
 // one component the same as any other.
 func (g *Graph) componentsOf(dead, testOfDeadCode []bool) []Component {
-	at, adj := g.deadSubgraph(dead, testOfDeadCode)
+	at, adj, place := g.deadSubgraph(dead, testOfDeadCode)
 	if len(at) == 0 {
 		return nil
 	}
@@ -166,7 +166,7 @@ func (g *Graph) componentsOf(dead, testOfDeadCode []bool) []Component {
 		component.Spans = append(component.Spans, spanOf(&g.symbols[i]))
 		// A dead member of a dead container is never a root: the container is
 		// the site the deletion starts at and the member falls with it.
-		contained := g.parent[i] != outside && dead[g.parent[i]]
+		contained := g.parent[i] != outside && place[g.parent[i]] != outside
 		if into[cycle] == 0 && !contained {
 			component.Roots = append(component.Roots, id)
 		}
@@ -213,10 +213,16 @@ func clusters(adj [][]int, cycleOf, sequence []int, cycles int) (clusterOf []int
 	return clusterOf, len(numbered)
 }
 
-// deadSubgraph indexes the dead symbols and the edges between them: every
-// reference one dead symbol makes to another, one edge each way between a dead
-// member and its dead container, and the edge back from each target of an admitted
-// test.
+// deadSubgraph indexes the dead symbols a component holds and the edges between
+// them: every reference one of them makes to another, one edge each way between a
+// member and its container, and the edge back from each target of an admitted test.
+// It returns each symbol's place in the subgraph as well, outside for one it leaves
+// out.
+//
+// A declaration of a test file is held only where the sweep admitted it as a test of
+// dead code. Any other dead test-file declaration belongs to no component, so its
+// references join no two components and make no production declaration a non-root:
+// a cluster only tests reach is rooted at a declaration outside the test files.
 //
 // The container edges are what place a dead type's fields and methods, and a dead
 // interface's methods, inside the container's component rather than in components
@@ -230,11 +236,11 @@ func clusters(adj [][]int, cycleOf, sequence []int, cycles int) (clusterOf []int
 // counts. Only an edge between two dead symbols is here, a reference a test file
 // made comes from a test declaration, and a dead test declaration's references are
 // the cascade the run is asked for: what falls with it when it is deleted.
-func (g *Graph) deadSubgraph(dead, testOfDeadCode []bool) (at []int, adj [][]int) {
-	position := make([]int, len(g.symbols))
+func (g *Graph) deadSubgraph(dead, testOfDeadCode []bool) (at []int, adj [][]int, position []int) {
+	position = make([]int, len(g.symbols))
 	for i := range g.symbols {
 		position[i] = outside
-		if dead[i] {
+		if dead[i] && (!g.test[i] || testOfDeadCode[i]) {
 			position[i] = len(at)
 			at = append(at, i)
 		}
@@ -243,12 +249,12 @@ func (g *Graph) deadSubgraph(dead, testOfDeadCode []bool) (at []int, adj [][]int
 	adj = make([][]int, len(at))
 	for from, i := range at {
 		g.referenceEdges(adj, position, from, i, testOfDeadCode)
-		if p := g.parent[i]; p != outside && dead[p] {
+		if p := g.parent[i]; p != outside && position[p] != outside {
 			adj[from] = append(adj[from], position[p])
 			adj[position[p]] = append(adj[position[p]], from)
 		}
 	}
-	return at, adj
+	return at, adj, position
 }
 
 // referenceEdges adds the references the dead symbol at one position makes to
