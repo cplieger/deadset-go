@@ -159,6 +159,44 @@ func TestTheSignatureKindsApplyEveryExemptionOfTheContractByName(t *testing.T) {
 	}
 }
 
+func TestUnusedParameterReportsNoParameterTheTestDriverFixes(t *testing.T) {
+	t.Parallel()
+
+	result := analysisOf(t, "intrafunc-test-driver.txtar", asApplication, Consumers{}).findings(t, intraFunctionKinds)
+	reported := subjectsOf(result.Findings, unusedParameterCode)
+
+	tests := []struct {
+		name string
+		at   string
+	}{
+		{name: "TestMain", at: "main_test.go:10:15 parameter m of go://example.com/app#TestMain"},
+		{name: "test", at: "main_test.go:14:18 parameter t of go://example.com/app#TestCompute"},
+		{name: "benchmark", at: "main_test.go:22:23 parameter b of go://example.com/app#BenchmarkCompute"},
+		{name: "fuzz_test", at: "main_test.go:26:18 parameter f of go://example.com/app#FuzzCompute"},
+		{name: "fuzz_target", at: "testsupport/testsupport.go:11:13 parameter t of go://example.com/app/testsupport#Target"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if slices.Contains(reported, test.at) {
+				t.Errorf("the pass over intrafunc-test-driver.txtar reports %s under %s, a parameter whose signature the test driver fixes",
+					test.at, unusedParameterCode)
+			}
+		})
+	}
+}
+
+func TestUnusedParameterReportsATestSupportFunctionTheTestDriverDoesNotRun(t *testing.T) {
+	t.Parallel()
+
+	result := analysisOf(t, "intrafunc-test-driver.txtar", asApplication, Consumers{}).findings(t, intraFunctionKinds)
+
+	want := []string{"testsupport/testsupport.go:6:12 parameter t of go://example.com/app/testsupport#Check"}
+	if got := subjectsOf(result.Findings, unusedParameterCode); !slices.Equal(got, want) {
+		t.Errorf("the pass over intrafunc-test-driver.txtar reports %v under %s, want %v",
+			got, unusedParameterCode, want)
+	}
+}
+
 // A parameter and a receiver are dead by the body that never reads them, so a
 // published declaration of a library is reported whatever the run knows about the
 // library's consumers: no caller outside the graph can make a body read one. The

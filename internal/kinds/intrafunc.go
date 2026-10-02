@@ -57,9 +57,10 @@ const panicBuiltin = "panic"
 //
 // Free is what decides whether the finding is raised at all. A signature is not
 // free when a mechanism no reference names reaches the declaration, when the
-// function is used as a value rather than called, when the linker or a foreign
-// caller names it, and when the body is a stub: freeSignature is the one place
-// those are decided and every kind of this group that edits a signature asks it.
+// function is used as a value rather than called, when the linker, a foreign
+// caller or the test driver names it, and when the body is a stub: freeSignature
+// is the one place those are decided and every kind of this group that edits a
+// signature asks it.
 //
 // A published declaration of a library is free whatever the run knows about the
 // library's consumers, because no caller can make a body read a parameter it never
@@ -159,8 +160,10 @@ type intrafunc struct {
 	// retained function's signature is not free.
 	exempted map[graph.SymbolID]bool
 
-	// foreign is every declaration the linker or a foreign caller names, which is
-	// the go:linkname and cgo-export root classes.
+	// foreign is every declaration a caller outside the source names with the
+	// signature that caller requires: the linker through a go:linkname directive, C
+	// through an export directive, and the test driver, which runs every test,
+	// benchmark, fuzz test and TestMain the toolchain recognises in a test file.
 	foreign map[graph.SymbolID]bool
 
 	// valued is every declaration a reference names outside call position, which
@@ -183,7 +186,8 @@ func (in *Input) intraFunc() *intrafunc {
 	if in.Merged != nil {
 		for i := range in.Merged.Roots {
 			root := &in.Merged.Roots[i]
-			if root.Kind == graph.RootLinkname || root.Kind == graph.RootCgoExport {
+			switch root.Kind {
+			case graph.RootLinkname, graph.RootCgoExport, graph.RootTest:
 				g.foreign[root.ID] = true
 			}
 		}
@@ -210,8 +214,10 @@ func (in *Input) intraFunc() *intrafunc {
 //     satisfied interface's method requires is what that retention covers.
 //   - a reference names the declaration outside call position, so a value of its
 //     type reaches a func or an interface type that fixes the signature.
-//   - the linker or a foreign caller names it through a go:linkname or an export
-//     directive.
+//   - a caller outside the source names it: the linker through a go:linkname
+//     directive, C through an export directive, or the test driver, which calls a
+//     test, a benchmark, a fuzz test and TestMain with the signature the toolchain
+//     requires of each.
 //   - the body is a stub, so the signature exists for the declaration's callers
 //     and the body was never written to use it.
 //
