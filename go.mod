@@ -4,7 +4,7 @@ go 1.27.1
 
 require (
 	github.com/cplieger/deadset-spec/v4 v4.0.0
-	golang.org/x/tools v0.50.0
+	golang.org/x/tools v0.51.0
 	pgregory.net/rapid v1.3.0
 )
 
