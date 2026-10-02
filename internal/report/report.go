@@ -21,14 +21,13 @@
 package report
 
 import (
-	"bytes"
 	"cmp"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
 	"slices"
 	"strings"
+	"text/template"
 
 	"github.com/cplieger/deadset-go/internal/config"
 	"github.com/cplieger/deadset-go/internal/graph"
@@ -268,9 +267,9 @@ type Options struct {
 	// document would recompute differently.
 	Read graph.ReadFile
 
-	// Template is the text of the user-supplied template, read by [Template]
-	// alone.
-	Template string
+	// Template is the user-supplied template as [ParseTemplate] parsed it, read
+	// by [Template] alone.
+	Template *template.Template
 
 	// FailOn is the lowest severity that fails the run, read by [Annotations]
 	// alone: a finding at or above it is an error and one below it a warning. The
@@ -553,16 +552,14 @@ func compareDeclaredGaps(a, b DeclaredGap) int {
 	return strings.Compare(compactEncoding(wireDeclaredGapOf(&a)), compactEncoding(wireDeclaredGapOf(&b)))
 }
 
-// compactEncoding is one record's compact JSON encoding, escaping only what strict
-// JSON requires escaped. A record is strings and integers, so it always encodes.
+// compactEncoding is one record's compact JSON encoding, the encoding a document
+// writes it in. A record is strings and integers, so it always encodes.
 func compactEncoding(v any) string {
-	var written bytes.Buffer
-	encoder := json.NewEncoder(&written)
-	encoder.SetEscapeHTML(false)
-	if err := encoder.Encode(v); err != nil {
+	written, err := encoded(v, "")
+	if err != nil {
 		panic("report: a record does not encode: " + err.Error())
 	}
-	return strings.TrimSuffix(written.String(), "\n")
+	return strings.TrimSuffix(string(written), "\n")
 }
 
 // compareEvaluations orders two edge evaluations by the edge and then the side,

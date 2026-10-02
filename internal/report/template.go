@@ -11,6 +11,17 @@ import (
 // error names the template as.
 const templateName = "report"
 
+// ParseTemplate parses the text of a template the user supplied, which is what
+// [Options] carries to [Template]. A template the parser refuses is an error of the
+// invocation that named it, so a caller parses before it analyzes anything.
+func ParseTemplate(text string) (*template.Template, error) {
+	parsed, err := template.New(templateName).Option("missingkey=error").Parse(text)
+	if err != nil {
+		return nil, fmt.Errorf("report: parse the template: %w", err)
+	}
+	return parsed, nil
+}
+
 // Template renders the envelope through a template the user supplied.
 //
 // A template that names something the envelope does not carry fails and names it,
@@ -20,15 +31,11 @@ const templateName = "report"
 // map, which no member of the envelope is today. The rendering is built whole before
 // anything is written, so a template that fails writes no partial report.
 func Template(w io.Writer, e *Envelope, opts Options) error {
-	if opts.Template == "" {
+	if opts.Template == nil {
 		return fmt.Errorf("%w: a template rendering needs a template", ErrOptions)
 	}
-	parsed, err := template.New(templateName).Option("missingkey=error").Parse(opts.Template)
-	if err != nil {
-		return fmt.Errorf("%w: parse the template: %w", ErrOptions, err)
-	}
 	var rendered bytes.Buffer
-	if err := parsed.Execute(&rendered, e); err != nil {
+	if err := opts.Template.Execute(&rendered, e); err != nil {
 		return fmt.Errorf("%w: render the template: %w", ErrOptions, err)
 	}
 	if _, err := w.Write(rendered.Bytes()); err != nil {

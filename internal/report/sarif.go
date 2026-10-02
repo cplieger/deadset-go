@@ -1,7 +1,6 @@
 package report
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
@@ -110,11 +109,7 @@ func SARIF(w io.Writer, e *Envelope, opts Options) error {
 			Properties: sarifRunProperties{Totals: e.wire().Totals},
 		}},
 	}
-	encoded, err := json.MarshalIndent(log, "", jsonIndent)
-	if err != nil {
-		return fmt.Errorf("report: write the SARIF log: %w", err)
-	}
-	if _, err := w.Write(append(encoded, '\n')); err != nil {
+	if err := writeDocument(w, log); err != nil {
 		return fmt.Errorf("report: write the SARIF log: %w", err)
 	}
 	return nil
@@ -125,11 +120,9 @@ func SARIF(w io.Writer, e *Envelope, opts Options) error {
 // it: a fixed list keeps a rule's index stable across runs and configurations, which
 // is what a consumer of the document reads it by.
 //
-// A rule carries the kind's code, its name, the severity the vocabulary defaults it
-// to and the precision its confidence ceiling maps to. It carries no description,
-// because the vocabulary this analyzer links is the table of codes, names,
-// severities, ceilings and fixabilities, and the rule text a description renders is
-// not in it.
+// A rule carries the kind's code, its name, the three descriptions its rule text
+// renders, the severity the vocabulary defaults it to and the precision its
+// confidence ceiling maps to.
 func rulesOf(languages []string) []sarifRule {
 	rows := catalog.Kinds()
 	rules := make([]sarifRule, 0, len(rows))
@@ -138,9 +131,13 @@ func rulesOf(languages []string) []sarifRule {
 		if !claims(row.Languages, languages) {
 			continue
 		}
+		text := ruleTexts[row.Code]
 		rules = append(rules, sarifRule{
 			ID:                   row.Code,
 			Name:                 row.Name,
+			ShortDescription:     sarifMessage{Text: text.shortDescription()},
+			FullDescription:      sarifMessage{Text: text.rule},
+			Help:                 sarifMessage{Text: text.help()},
 			DefaultConfiguration: sarifConfiguration{Level: levelOf(config.Severity(row.DefaultSeverity))},
 			Properties: sarifRuleProperties{
 				Precision: precisionOf(row.MaxClass),
@@ -292,12 +289,14 @@ func physicalLocation(path string, line, column, endLine int) sarifPhysical {
 }
 
 // escapedURI is one target-relative path as a relative reference, each segment
-// percent-encoded the way a path segment is.
+// percent-encoded the way a path segment is, and a colon in the first segment
+// encoded as well, where a reader would take the text before it for a scheme.
 func escapedURI(path string) string {
 	segments := strings.Split(path, "/")
 	for i, segment := range segments {
 		segments[i] = url.PathEscape(segment)
 	}
+	segments[0] = strings.ReplaceAll(segments[0], ":", "%3A")
 	return strings.Join(segments, "/")
 }
 
