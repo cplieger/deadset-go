@@ -14,7 +14,7 @@ import (
 
 	"github.com/cplieger/deadset-go/internal/config"
 	"github.com/cplieger/deadset-go/internal/report"
-	spec "github.com/cplieger/deadset-spec/v3"
+	spec "github.com/cplieger/deadset-spec/v4"
 )
 
 // analyzed is one run of the analyze verb over dir: the verb is invoked from the
@@ -386,13 +386,14 @@ func TestAnalyzeWritesTheBaselineOfEveryFindingOfTheRun(t *testing.T) {
 
 	// The maximum finding count bounds what a rendering prints and not what the
 	// baseline records: a baseline missing a finding this run reported would fail
-	// the next run on it.
+	// the next run on it. A later round of the write can record more rows than the
+	// first round's findings, never fewer.
 	envelope := envelopeAt(t, got.reportPath)
 	if len(envelope.Findings) != 1 {
 		t.Fatalf("the capped report prints %d findings, want 1", len(envelope.Findings))
 	}
-	if got, want := len(document.Baseline), envelope.Totals.Findings; got != want {
-		t.Errorf("the baseline records %d rows, want %d, the findings of the whole run", got, want)
+	if got, want := len(document.Baseline), envelope.Totals.Findings; got < want {
+		t.Errorf("the baseline records %d rows, want at least %d, the findings of the whole run", got, want)
 	}
 	for _, row := range document.Baseline {
 		if row.Code == "" || row.Symbol == "" || row.Path == "" || row.Reason == "" {

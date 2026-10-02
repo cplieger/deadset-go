@@ -72,6 +72,20 @@ func normalize(name string) string {
 //deadset:ignore DS1001
 func NoReason() bool { return Trailing() > Below() }
 
+-- wrapped.go --
+package directives
+
+// Wrapped declares its parameters and its result on lines of their own.
+func Wrapped(
+	//deadset:ignore DS1801 -- above a parameter inside a wrapped parameter list
+	chunk []byte,
+	size int,
+) (
+	//deadset:ignore DS1803 -- above a result inside a wrapped result list
+	count int,
+) {
+	return size
+}
 -- aa_header.go --
 //deadset:ignore DS1502 -- above the package clause, which no declaration of the language begins at
 package directives

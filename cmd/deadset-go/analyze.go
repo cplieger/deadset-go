@@ -14,7 +14,6 @@ import (
 	"text/template"
 
 	"github.com/cplieger/deadset-go/internal/config"
-	"github.com/cplieger/deadset-go/internal/kinds"
 	"github.com/cplieger/deadset-go/internal/report"
 	"github.com/cplieger/deadset-go/internal/suppress"
 )
@@ -149,11 +148,16 @@ func analyze(ctx context.Context, args []string, stderr io.Writer) int {
 	namedUnbuilt(stderr, unbuilt)
 
 	report.Sort(&envelope, resolved.config.Reporters.Sort)
-	// The baseline records every finding of the run, which is why the rows are
-	// taken before the maximum finding count bounds what a rendering prints: a
-	// baseline missing a finding this run reported would fail the next run on it.
-	recorded := recordedFindings(envelope.Findings)
 	report.Cap(&envelope, resolved.config.Reporters.MaxFindings)
+
+	var recorded []suppress.Recorded
+	if asked.baselineWrite != "" {
+		recorded, err = baselineRows(ctx, &resolved, &options, answered)
+		if err != nil {
+			fmt.Fprintf(stderr, "deadset-go: write the baseline: %v\n", err)
+			return exitCodeFor(err)
+		}
+	}
 
 	if err := asked.write(&envelope, recorded, resolved.config.Reporters.FailOn); err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
@@ -170,7 +174,7 @@ func analyzeFlags(args []string, stderr io.Writer) (asked invocation, resolved r
 	flags.set.Var(&asked.formats, "format", "one rendering written beside the report, repeatable; one of "+formatNames())
 	templatePath := flags.set.String("template", "", "the file holding the template the template rendering reads")
 	flags.set.StringVar(&asked.baselineWrite, "baseline-write", "",
-		"the path a baseline recording every finding of this run is written to")
+		"the path a baseline recording the findings of this target is written to")
 	exitCode := flags.set.String("exit-code", exitCodeOn,
 		"whether the exit code carries the verdict of the run: "+exitCodeOn+" or "+exitCodeOff)
 
@@ -348,20 +352,6 @@ func writeAtomically(path string, write func(w io.Writer) error) error {
 		return fmt.Errorf("publish %s: %w", path, err)
 	}
 	return nil
-}
-
-// recordedFindings is every finding of the report as a baseline row records it, in
-// the order the report lists them.
-func recordedFindings(findings []kinds.Finding) []suppress.Recorded {
-	rows := make([]suppress.Recorded, len(findings))
-	for i := range findings {
-		rows[i] = suppress.Recorded{
-			Code:   findings[i].Code,
-			Symbol: findings[i].Symbol.Ref,
-			Path:   findings[i].Position.Path,
-		}
-	}
-	return rows
 }
 
 // counted renders a count with its noun, so a message reads for one record as well

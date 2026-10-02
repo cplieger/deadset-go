@@ -23,13 +23,14 @@ const (
 	sarifColumnKind  = "utf16CodeUnits"
 	sarifURIBaseID   = "%SRCROOT%"
 	sarifAutomation  = "deadset/"
-	sarifRootComment = "The target root, the directory the analyzer was run on."
+	sarifRootComment = "The target root."
 )
 
 // The labels a related location carries, one per list a finding names positions in.
 const (
 	labelImplementation = "implementation"
 	labelWrite          = "write"
+	labelMember         = "member"
 )
 
 // maxRelatedLocations is the number of related locations a result carries: a
@@ -215,8 +216,9 @@ func staleResult(stale *StaleSuppression, index map[string]int, hashes *lineHash
 }
 
 // relatedLocations is every position a finding names beyond its own, numbered from
-// one in the order the mapping fixes: the implementations of an interface, then the
-// positions a subject is written at.
+// one in the order the mapping fixes: the implementations of an interface, the
+// positions a subject is written at, then every other member of a component the run
+// lists in full.
 func relatedLocations(found *kinds.Finding) []sarifLocation {
 	var held []sarifLocation
 	add := func(label, path string, line, column, endLine int) {
@@ -235,6 +237,11 @@ func relatedLocations(found *kinds.Finding) []sarifLocation {
 	}
 	for _, at := range found.Details.WritePositions {
 		add(labelWrite, at.Path, at.Line, at.Column, at.EndLine)
+	}
+	for _, one := range found.Component.Members {
+		if one.Ref != found.Symbol.Ref {
+			add(labelMember, one.Position.Path, one.Position.Line, one.Position.Column, one.Position.EndLine)
+		}
 	}
 	return held
 }
@@ -262,7 +269,7 @@ func messageWithLinks(message string, related []sarifLocation) string {
 func resultProperties(found *kinds.Finding) sarifResultProperties {
 	return sarifResultProperties{
 		Language:          found.Language,
-		Symbol:            wireSubject(found.Symbol),
+		Symbol:            wireSubjectOf(&found.Symbol),
 		ReachabilityClass: string(found.Class),
 		Confidence:        string(found.Confidence),
 		LivenessRelation:  relationWritten(found),

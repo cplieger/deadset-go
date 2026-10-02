@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	spec "github.com/cplieger/deadset-spec/v3"
+	spec "github.com/cplieger/deadset-spec/v4"
 )
 
 // settingMark is the member the configuration schema marks a setting written as
@@ -493,7 +493,7 @@ func TestFixedByContract(t *testing.T) {
 	}{
 		{name: "the_fixed_code_itself", code: "DS1703", want: []string{"DS1703"}},
 		{name: "the_other_fixed_code", code: "DS1704", want: []string{"DS1704"}},
-		{name: "the_family_prefix_holding_both", code: "DS17", want: []string{"DS1703", "DS1704"}},
+		{name: "the_family_prefix_holding_every_fixed_code", code: "DS17", want: []string{"DS1703", "DS1704", "DS1706"}},
 		{name: "a_sibling_code_of_that_family", code: "DS1701", want: nil},
 		{name: "another_family_prefix", code: "DS18", want: nil},
 		{name: "another_code", code: "DS1101", want: nil},

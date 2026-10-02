@@ -22,10 +22,13 @@ const (
 	unmatchedRootCode            = "DS1704"
 )
 
-// The two words the subject vocabulary has for what a self-check finding is about.
+// The words the subject vocabulary has for what a self-check finding is about. No
+// Go configuration key names a declaration, so this analyzer reports no finding
+// about a configured declaration; a report another analyzer wrote carries one.
 const (
-	suppressionSubject = "suppression"
-	rootSubject        = "root"
+	suppressionSubject           = "suppression"
+	rootSubject                  = "root"
+	configuredDeclarationSubject = "configured-declaration"
 )
 
 // configurationDocument is the repository configuration at its conventional name and

@@ -22,7 +22,7 @@ import (
 	"github.com/cplieger/deadset-go/internal/graph"
 	"github.com/cplieger/deadset-go/internal/kinds"
 	"github.com/cplieger/deadset-go/internal/suppress"
-	spec "github.com/cplieger/deadset-spec/v3"
+	spec "github.com/cplieger/deadset-spec/v4"
 	"golang.org/x/tools/txtar"
 )
 
@@ -120,14 +120,16 @@ type corpusDetails struct {
 // list. Every member the expectation schema declares has a field, the description the
 // runner reads nothing from included, because the file is decoded strictly.
 type corpusFixtureFile struct {
-	ConfiguredRoots map[string]string   `json:"configured_roots"`
-	Name            string              `json:"name"`
-	Description     string              `json:"description"`
-	Languages       []string            `json:"languages"`
-	TargetKind      string              `json:"target_kind"`
-	Consumers       []string            `json:"consumers"`
-	ClosedWorld     []string            `json:"closed_world"`
-	Expect          []corpusExpectation `json:"expect"`
+	ConfiguredRoots        map[string]string                      `json:"configured_roots"`
+	ConfiguredDeclarations map[string]corpusConfiguredDeclaration `json:"configured_declarations"`
+	Name                   string                                 `json:"name"`
+	Description            string                                 `json:"description"`
+	Languages              []string                               `json:"languages"`
+	TargetKind             string                                 `json:"target_kind"`
+	Consumers              []string                               `json:"consumers"`
+	ClosedWorld            []string                               `json:"closed_world"`
+	EdgeEvaluations        []corpusEdgeEvaluation                 `json:"edge_evaluations"`
+	Expect                 []corpusExpectation                    `json:"expect"`
 }
 
 // corpusSubjectShapes is the corpus's own reading of the shape of every subject a
@@ -270,9 +272,10 @@ type site struct {
 // answered is what one analysis of one rendering reported: every finding, and the
 // exemption classes the retained-symbol listing names at each position.
 type answered struct {
-	findings []kinds.Finding
-	stale    []kinds.Finding
-	retained map[site][]string
+	retained    map[site][]string
+	findings    []kinds.Finding
+	stale       []kinds.Finding
+	evaluations []kinds.Evaluation
 }
 
 // TestConformanceCorpus is this analyzer's run of the Conformance Corpus: for every
@@ -410,8 +413,13 @@ func answerFixture(t *testing.T, fixtureName string, declared []conformanceGap,
 	row := fixtureAnswer{
 		Fixture:      fixtureName,
 		Expectations: make([]expectationAnswer, len(fixture.Expect)),
-		Unexpected:   unexpectedFindings(&first, sites, fixture.ConfiguredRoots),
+		Unexpected:   unexpectedFindings(&first, fixture.Expect, sites, fixture.ConfiguredRoots),
 	}
+	evaluated, err := evaluationDifferences(fixture.EdgeEvaluations, &manifest, first.evaluations)
+	if err != nil {
+		return failedFixture(t, fixtureName, err.Error())
+	}
+	row.Message = strings.Join(evaluated, "; ")
 	for i := range fixture.Expect {
 		held := &fixture.Expect[i]
 		actual, message := answerOf(held, sites[held.Symbol], &first, fixture.ConfiguredRoots[held.Symbol])
@@ -442,8 +450,11 @@ func answerFixture(t *testing.T, fixtureName string, declared []conformanceGap,
 		}
 	}
 	for _, one := range row.Unexpected {
-		t.Errorf("the corpus fixture %s reports %s at %s:%d, which no expectation resolves to: the expectation list is exhaustive",
+		t.Errorf("the corpus fixture %s reports %s at %s:%d, which no expectation names at that position: the expectation list is exhaustive by position and by code",
 			fixtureName, one.Report, one.File, one.Line)
+	}
+	for _, one := range evaluated {
+		t.Errorf("the corpus fixture %s publishes edge evaluations other than it expects: %s", fixtureName, one)
 	}
 	return row
 }
@@ -497,11 +508,12 @@ func exercisedCapabilities(expected *corpusExpectation) []string {
 	return expected.RetainedBy
 }
 
-// fixtureResultOf is one fixture's result: a fail where any expectation failed or any
-// finding sits at a position no expectation resolves to, a gap where any expectation
-// is a gap, and a pass otherwise.
+// fixtureResultOf is one fixture's result: a fail where any expectation failed, any
+// finding is one no expectation names at its position, or the edge evaluations differ
+// from the ones the fixture declares; a gap where any expectation is a gap; and a pass
+// otherwise.
 func fixtureResultOf(row *fixtureAnswer) string {
-	if len(row.Unexpected) > 0 {
+	if len(row.Unexpected) > 0 || row.Message != "" {
 		return answerFail
 	}
 	held := answerPass
@@ -819,19 +831,27 @@ func findingsAt(findings []kinds.Finding, at site) []kinds.Finding {
 
 // unexpectedFindings is everything the analyzer reported that no expectation of the
 // fixture accounts for, ordered by file, then line, then code. The expectation list is
-// exhaustive for the target, so each one fails the fixture.
+// exhaustive for the target by position and by code, so each one fails the fixture.
 //
 // The three arms the fixture is answered from are as exhaustive as one another. A
-// finding is accounted for by an expectation resolving to its position; a record of the
-// report's stale-suppression array counts as a finding at its own position, which is
-// the suppression's site; and a finding whose subject is a configured root counts by
-// the entry its subject names, because every such finding of a run shares one position.
-func unexpectedFindings(held *answered, sites map[string]site,
+// finding is accounted for by an expectation resolving to its position and naming its
+// code, so a second finding beside the one a row names, at that position under another
+// code, is unaccounted for; a record of the report's stale-suppression array counts as
+// a finding at its own position, which is the suppression's site; and a finding whose
+// subject is a configured root counts by the entry its subject names, because every
+// such finding of a run shares one position.
+func unexpectedFindings(held *answered, expect []corpusExpectation, sites map[string]site,
 	roots map[string]string,
 ) []unexpectedFinding {
-	expected := make(map[site]bool, len(sites))
-	for _, at := range sites {
-		expected[at] = true
+	type named struct {
+		at   site
+		code string
+	}
+	expected := make(map[named]bool, len(expect))
+	for i := range expect {
+		if at, resolved := sites[expect[i].Symbol]; resolved {
+			expected[named{at: at, code: expect[i].Report}] = true
+		}
 	}
 	configured := make(map[string]bool, len(roots))
 	for _, entry := range roots {
@@ -854,7 +874,7 @@ func unexpectedFindings(held *answered, sites map[string]site,
 			continue
 		}
 		at := site{File: found.Position.Path, Line: found.Position.Line}
-		if expected[at] {
+		if expected[named{at: at, code: found.Code}] {
 			continue
 		}
 		unaccounted = append(unaccounted, unexpectedFinding{
@@ -1035,6 +1055,10 @@ func corpusRunOf(rendering, document string, fixture *corpusFixtureFile,
 	manifest *corpusManifest,
 ) (corpusRun, error) {
 	held := corpusRun{rendering: rendering, scope: document, config: config.Default()}
+	if len(fixture.ConfiguredDeclarations) > 0 {
+		return corpusRun{}, errors.New("the expectation file names configured declarations, " +
+			"which a fixture names only for the language the key belongs to, and no key of the go section names a declaration")
+	}
 	switch config.TargetKind(fixture.TargetKind) {
 	case config.Application, config.Library:
 		held.config.Target.Kind = config.TargetKind(fixture.TargetKind)
@@ -1108,7 +1132,7 @@ func analyzeRendering(ctx context.Context, run *corpusRun) (answered, error) {
 	if err != nil {
 		return answered{}, err
 	}
-	held := answered{retained: retainedAt(&set)}
+	held := answered{retained: retainedAt(&set), evaluations: set.evaluations}
 	for _, found := range set.result.Findings {
 		if found.Code == staleSuppression {
 			held.stale = append(held.stale, found)

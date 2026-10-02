@@ -83,7 +83,11 @@ type Position struct {
 // Subject is what a finding is about: the reference that survives an edit above
 // it, the vocabulary's word for the kind of subject, the name a text line renders,
 // and the number of source lines it spans.
+//
+// Exported is the subject's visibility where a document read back names one, and
+// nil where it names none; the findings pass leaves it nil.
 type Subject struct {
+	Exported  *bool
 	Ref       string
 	Kind      string
 	Name      string
@@ -99,9 +103,13 @@ type Subject struct {
 // report's total over several components counts a shared line once from. A
 // document carries the count and not the spans, so a component read back from one
 // holds none.
+//
+// Members is every symbol of the component in the canonical order, where the run
+// lists a component in full, and empty otherwise.
 type Component struct {
 	ID             string
 	Spans          []graph.Span
+	Members        []Positioned
 	SymbolCount    int
 	DeletableLines int
 	Root           bool
@@ -626,6 +634,15 @@ var shapes = map[string]shape{
 	fileSubject:        shapeRow,
 	rootSubject:        shapeRow,
 	suppressionSubject: shapeRow,
+
+	configuredDeclarationSubject: shapeRow,
+}
+
+// AboutDocumentRow reports whether one finding's subject is a row of a document: a
+// file, a dependency, a module directive, a suppression record, a configured root, a
+// configured declaration or a declared edge. No suppression record binds to one.
+func AboutDocumentRow(found *Finding) bool {
+	return shapeOf(found.Symbol.Kind) == shapeRow
 }
 
 // shapeOf is the shape of a finding about one kind of subject.
@@ -796,6 +813,9 @@ func (in *Input) complete(found *Finding, row *catalog.Row) {
 		found.relation(nil)
 		found.Class = Certain
 		found.Component = held.componentOf("")
+	}
+	if in.Config != nil && in.Config.Reporters.Cascade == config.CascadeFull {
+		found.Component.Members = held.membersOf(found)
 	}
 	found.Confidence = found.Class.lower(Class(row.MaxClass))
 	found.Severity = in.Config.EffectiveSeverity(row.Code, in.consumersAllLoaded())
@@ -1091,6 +1111,38 @@ func (x *index) componentOf(id graph.SymbolID) Component {
 		DeletableLines: component.DeletableLines,
 		Root:           slices.Contains(component.Roots, id),
 	}
+}
+
+// membersOf is every symbol of one finding's component, ordered by position and
+// then by reference, which is the order a full listing names them in. A component
+// minted for a subject that belongs to none holds the subject alone.
+func (x *index) membersOf(found *Finding) []Positioned {
+	component := x.components[found.id]
+	if found.id == "" || component == nil {
+		return []Positioned{{Ref: found.Symbol.Ref, Name: found.Symbol.Name, Position: found.Position}}
+	}
+	members := make([]Positioned, 0, len(component.Members))
+	for _, id := range component.Members {
+		symbol := x.symbols[id]
+		if symbol == nil {
+			continue
+		}
+		members = append(members, Positioned{Ref: symbol.Ref, Name: symbol.Name, Position: Position{
+			Path:    symbol.Pos.Filename,
+			Line:    symbol.Pos.Line,
+			Column:  symbol.Pos.Column,
+			EndLine: max(symbol.Pos.Line, symbol.EndLine),
+		}})
+	}
+	slices.SortFunc(members, func(a, b Positioned) int {
+		return cmp.Or(
+			cmp.Compare(a.Position.Path, b.Position.Path),
+			cmp.Compare(a.Position.Line, b.Position.Line),
+			cmp.Compare(a.Position.Column, b.Position.Column),
+			cmp.Compare(a.Ref, b.Ref),
+		)
+	})
+	return members
 }
 
 // componentID is the identifier this analyzer mints for one component: its own

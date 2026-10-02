@@ -349,10 +349,13 @@ func comparePositions(a, b Position) int {
 // findings completes one finding per part, each about the part's own position and
 // the enclosing declaration's reference.
 //
-// One thing takes a part out of the answer here. A declaration the sweep judged dead
-// is reported under an unused-declaration kind and falls whole, so a part of it is
-// the less specific answer and is not reported: every kind of this group claims
-// something about a declaration the analysis keeps.
+// A part is decided inside its declaration whatever uses the declaration, so a part
+// of a declaration the sweep judged dead is reported beside the declaration's own
+// finding, and a part of a declaration a declared edge names is never pending. A
+// declaration of a test file the production sweep judged dead is the exception: that
+// sweep drops the only references such a declaration can have, so it cannot judge
+// the declaration, and the exemptions that fix a signature, interface satisfaction
+// among them, hold nothing for it there either.
 //
 // A suppression record bound to the declaration and naming this code silences the part
 // as it silences every other finding, which the framework does over the output of
@@ -360,11 +363,8 @@ func comparePositions(a, b Position) int {
 func (g *intrafunc) findings(code string, held []*part) ([]Finding, error) {
 	found := make([]Finding, 0, len(held))
 	for _, one := range held {
-		if g.in.candidateOf(one.id) != nil {
-			continue
-		}
 		symbol := g.in.symbol(one.id)
-		if symbol == nil {
+		if symbol == nil || (testFile(symbol) && g.in.candidateOf(one.id) != nil) {
 			continue
 		}
 		finding := findingAt(code, Subject{

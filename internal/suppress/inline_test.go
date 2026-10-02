@@ -141,6 +141,8 @@ func TestInlineBindsADirectiveToEveryDeclarationOnTheLineBelowIt(t *testing.T) {
 		"above a specification declaring two names":                                {pkg + "first", pkg + "second"},
 		"the tab spelling, above the constant":                                     {pkg + "bound"},
 		"the space spelling, above the generic function":                           {pkg + "Best", pkg + "Best[T]"},
+		"above a parameter inside a wrapped parameter list":                        {pkg + "Wrapped"},
+		"above a result inside a wrapped result list":                              {pkg + "Wrapped"},
 		"two lines above the function, with a blank line between":                  {""},
 		"above the doc comment, which is not a token of the declaration":           {""},
 		"above the line that opens the group":                                      {""},

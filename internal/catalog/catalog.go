@@ -13,6 +13,7 @@ package catalog
 
 import (
 	"slices"
+	"strings"
 	"sync"
 )
 
@@ -57,6 +58,17 @@ type Row struct {
 	Fixed          bool
 }
 
+// partPrefix is the two-digit family prefix of the intra-function range, whose
+// kinds each report a part of a declaration rather than a declaration.
+const partPrefix = "DS18"
+
+// ReportsPart reports whether one code names a part kind: a kind of the
+// intra-function range, whose subject is a parameter, a receiver, a result, a
+// statement, a case or a store of the declaration its reference names.
+func ReportsPart(code string) bool {
+	return strings.HasPrefix(code, partPrefix)
+}
+
 // clone returns a row that shares nothing with the table, so a caller reading one
 // cannot change what the next reader sees.
 func (r *Row) clone() Row {
@@ -94,6 +106,7 @@ func rows() []Row {
 		{Code: "DS1703", Name: "stale-suppression", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixNone, DefaultEnabled: true, Fixed: true},
 		{Code: "DS1704", Name: "unmatched-root", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixNone, DefaultEnabled: true, Fixed: true},
 		{Code: "DS1705", Name: "stale-cross-language-edge", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixNone, DefaultEnabled: true},
+		{Code: "DS1706", Name: "unmatched-configured-declaration", Languages: []string{"ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixNone, DefaultEnabled: true, Fixed: true},
 		{Code: "DS1801", Name: "unused-parameter", Languages: []string{"go", "ts"}, DefaultSeverity: severityWarn, MaxClass: classCertain, Fixability: fixManual, Overlap: []string{"revive unused-parameter", "gopls unusedparams", "unparam"}, DefaultEnabled: true},
 		{Code: "DS1802", Name: "unused-receiver", Languages: []string{"go"}, DefaultSeverity: severityWarn, MaxClass: classCertain, Fixability: fixDeletable, Overlap: []string{"revive unused-receiver"}, DefaultEnabled: true},
 		{Code: "DS1803", Name: "unused-result", Languages: []string{"go", "ts"}, DefaultSeverity: severityWarn, MaxClass: classCertain, Fixability: fixManual, Overlap: []string{"unparam"}, DefaultEnabled: true},

@@ -1,6 +1,6 @@
 {
   "schema_version": "6.0.0",
-  "contract_version": "3.2.0",
+  "contract_version": "4.0.0",
   "analyzer": {
     "name": "deadset-go",
     "version": "1.6.0",
@@ -58,10 +58,10 @@
       "test_only": false,
       "generated": false,
       "component": {
-        "id": "deadset-go/c-2",
+        "id": "deadset-go/c-8",
         "root": true,
         "symbol_count": 1,
-        "deletable_lines": 1
+        "deletable_lines": 0
       },
       "retained_by": [],
       "configurations": [
@@ -95,7 +95,7 @@
       "test_only": false,
       "generated": false,
       "component": {
-        "id": "deadset-go/c-3",
+        "id": "deadset-go/c-2",
         "root": true,
         "symbol_count": 1,
         "deletable_lines": 1
@@ -131,7 +131,7 @@
       "test_only": false,
       "generated": false,
       "component": {
-        "id": "deadset-go/c-7",
+        "id": "deadset-go/c-6",
         "root": true,
         "symbol_count": 1,
         "deletable_lines": 0
@@ -169,7 +169,7 @@
       "test_only": false,
       "generated": false,
       "component": {
-        "id": "deadset-go/c-8",
+        "id": "deadset-go/c-7",
         "root": true,
         "symbol_count": 1,
         "deletable_lines": 0
@@ -208,7 +208,7 @@
       "test_only": false,
       "generated": false,
       "component": {
-        "id": "deadset-go/c-4",
+        "id": "deadset-go/c-3",
         "root": true,
         "symbol_count": 2,
         "deletable_lines": 2
@@ -245,7 +245,7 @@
       "test_only": false,
       "generated": false,
       "component": {
-        "id": "deadset-go/c-4",
+        "id": "deadset-go/c-3",
         "root": false,
         "symbol_count": 2,
         "deletable_lines": 2
@@ -282,7 +282,7 @@
       "test_only": true,
       "generated": false,
       "component": {
-        "id": "deadset-go/c-5",
+        "id": "deadset-go/c-4",
         "root": true,
         "symbol_count": 2,
         "deletable_lines": 6
@@ -319,7 +319,7 @@
       "test_only": false,
       "generated": false,
       "component": {
-        "id": "deadset-go/c-5",
+        "id": "deadset-go/c-4",
         "root": true,
         "symbol_count": 2,
         "deletable_lines": 6
@@ -352,7 +352,7 @@
       "warn": 2,
       "deny": 6
     },
-    "deletable_lines": 10,
+    "deletable_lines": 9,
     "suppressions_in_effect": 0,
     "reasons_recorded": 0,
     "stale_suppressions": 0,

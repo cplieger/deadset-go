@@ -83,7 +83,7 @@ configuration, so a document that one product refuses every product refuses.
 
 A declaration entry names one declaration by `symbol`, by `module` and `name`, or by `global`; the
 contract's
-[configuration schema](https://github.com/cplieger/deadset-spec/blob/v3.2.0/contract/config.schema.json)
+[configuration schema](https://github.com/cplieger/deadset-spec/blob/v4.0.0/contract/config.schema.json)
 states each shape. `go` is the section this analyzer owns, and it declares no key in this contract
 version.
 
@@ -128,7 +128,7 @@ Five flags supply a setting and outrank both configuration files for it:
 The rest are the invocation's own and commit nothing to a configuration file: `--report` names the
 path the JSON report is written to, `--format` names one rendering written beside it and repeats,
 `--template` names the file the template rendering reads (a file that cannot be read or does not parse refuses the invocation with 2 before any analysis, and a rendering that fails exits 3 with the report already written), `--baseline-write` names the path a
-baseline recording every finding of the run is written to, and `--exit-code=off` writes every
+baseline recording the findings of the target is written to, and `--exit-code=off` writes every
 document and exits clean. `print-retained` takes `--mode=production` or `--mode=plain`.
 
 No verb accepts a flag that asks for a source edit. A flag whose name carries `fix`, `edit`,
@@ -137,7 +137,7 @@ No verb accepts a flag that asks for a source edit. A flag whose name carries `f
 ## Suppressing a finding
 
 Three mechanisms, all of them requiring a reason. The grammar is stated in full in the contract's
-[suppression page](https://github.com/cplieger/deadset-spec/blob/v3.2.0/contract/grammar/suppression.md).
+[suppression page](https://github.com/cplieger/deadset-spec/blob/v4.0.0/contract/grammar/suppression.md).
 
 **An inline directive** is the first token of a `//` line comment above or beside the declaration:
 
@@ -172,13 +172,21 @@ written for one symbol in one file masks nothing else.
 
 **The baseline** is `deadset-baseline.json` at the target root, written by `--baseline-write` and
 read back by a later run. It records a finding set so that only a finding absent from it fails the
-run, which is a ratchet on the total rather than an adjudication of any one finding.
+run, which is a ratchet on the total rather than an adjudication of any one finding. The write
+analyzes the target with no baseline read, then again with the rows recorded so far read back,
+recording the findings each round exposes and removing every row a round reports stale, until a
+round records and removes nothing; the document read back on the tree it was written from then
+reports no finding a row can withhold and no stale row. No row is recorded for a finding about a
+row of a document, which no record binds to: such a finding fails a run after the baseline is
+written as it did before.
 
 Four rules bind all three mechanisms:
 
 - A record binds to a declaration. A part of a declaration, which is a parameter, a receiver, a
   result, a statement, a store or a case, is suppressed through the declaration its own reference
-  names. A finding about a record of a document rather than about a declaration of the program,
+  names, and the record withholds the part's finding without marking that declaration live. A
+  directive for a parameter declared on the function's first line sits above the function; one for
+  a parameter on a later line of a wrapped signature sits above that parameter, inside the list. A finding about a record of a document rather than about a declaration of the program,
   which is a requirement or a `replace` directive of the module file, a file no configuration
   built, a suppression record or a configured root, has no suppression at all: an entry naming one
   matches nothing and is reported as `DS1703`. The remedy there is the change the finding names,

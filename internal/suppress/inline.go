@@ -80,8 +80,9 @@ type directive struct {
 // to the declarations written on the line below it.
 //
 // A directive names one or more codes and carries a reason, and it binds to every
-// declaration whose own first line is the line below the directive's. Nothing
-// else binds it: not a trailing directive on the declaration's own line, not a
+// declaration whose own first line is the line below the directive's, and to the
+// function whose wrapped signature declares a receiver, a parameter or a result on
+// that line. Nothing else binds it: not a trailing directive on the declaration's own line, not a
 // line two above with a blank line or a doc-comment line between, not a line
 // below, so a directive anywhere else is a record bound to nothing. A directive
 // that lacks only its reason is a [Refusal]; a comment in the namespace that is
@@ -99,6 +100,9 @@ func Inline(r *load.Result, resolve *graph.Resolver, symbols []graph.Symbol) ([]
 	}
 
 	below := declarationLines(symbols)
+	if err := signatureLines(r, resolve, symbols, below); err != nil {
+		return nil, nil, err
+	}
 	var records []Record
 	var refusals []Refusal
 	for i := range directives {
@@ -249,4 +253,83 @@ func declarationLines(symbols []graph.Symbol) map[site][]graph.Symbol {
 type site struct {
 	file string
 	line int
+}
+
+// signatureLines adds to the index every line a wrapped function signature declares
+// a receiver, a parameter or a result on, below the line the function begins on, and
+// binds each to the function: a part of a signature is suppressed through the
+// declaration that holds it, and the directive for one on a later line of the
+// signature sits above it, inside the list.
+//
+// A file several package variants compile is read once, for the reason namespaced
+// gives.
+func signatureLines(r *load.Result, resolve *graph.Resolver, symbols []graph.Symbol,
+	below map[site][]graph.Symbol,
+) error {
+	byID := make(map[graph.SymbolID]*graph.Symbol, len(symbols))
+	for i := range symbols {
+		byID[symbols[i].ID] = &symbols[i]
+	}
+	seen := make(map[token.Pos]bool)
+	for _, p := range r.Packages {
+		for _, f := range p.Syntax {
+			if seen[f.FileStart] {
+				continue
+			}
+			seen[f.FileStart] = true
+			if err := signatureLinesOf(f, resolve, byID, below); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// signatureLinesOf adds the wrapped signature lines of one file's functions.
+func signatureLinesOf(f *ast.File, resolve *graph.Resolver, byID map[graph.SymbolID]*graph.Symbol,
+	below map[site][]graph.Symbol,
+) error {
+	for _, decl := range f.Decls {
+		fn, isFunc := decl.(*ast.FuncDecl)
+		if !isFunc {
+			continue
+		}
+		id, inventoried := resolve.At(fn.Name.Pos())
+		function := byID[id]
+		if !inventoried || function == nil {
+			continue
+		}
+		lines, err := fieldLines(fn, resolve)
+		if err != nil {
+			return err
+		}
+		for _, line := range lines {
+			if line.line == function.Pos.Line || slices.ContainsFunc(below[line], func(s graph.Symbol) bool {
+				return s.ID == function.ID
+			}) {
+				continue
+			}
+			below[line] = append(below[line], *function)
+		}
+	}
+	return nil
+}
+
+// fieldLines is the line every receiver, parameter and result of one function's
+// signature begins on, in signature order.
+func fieldLines(fn *ast.FuncDecl, resolve *graph.Resolver) ([]site, error) {
+	var lines []site
+	for _, list := range []*ast.FieldList{fn.Recv, fn.Type.Params, fn.Type.Results} {
+		if list == nil {
+			continue
+		}
+		for _, field := range list.List {
+			at, err := resolve.Render(field.Pos())
+			if err != nil {
+				return nil, err
+			}
+			lines = append(lines, site{file: at.Filename, line: at.Line})
+		}
+	}
+	return lines, nil
 }

@@ -24,11 +24,16 @@ A suppression record does two things, and the second is what covers a kind neith
 decides. It marks the declaration it binds live under both relations, so the declaration's own
 callees are live through it. And it withholds the finding its code would have produced at that
 declaration, which is what a record for a kind that is not about liveness needs: a narrowing
-candidate, a write-only member and an unused parameter are all referenced, so the mark alone would
-change nothing about them. A record is in effect when it did either and stale when it did neither,
-and staleness is therefore one question asked once over every kind. A record binds to a declaration,
-so a finding about a part of one is withheld through the declaration the part belongs to, and a
-finding about a row of a document has no suppression at all.
+candidate and a write-only member are referenced, so the mark alone would change nothing about
+them. A record is in effect when it did either and stale when it did neither, and staleness is
+therefore one question asked once over every kind. A record binds to a declaration, so a finding
+about a part of one is withheld through the declaration the part belongs to, and a finding about a
+row of a document has no suppression at all.
+
+A record for a part kind, a code from `DS1800` to `DS1899`, does the second alone: it withholds the
+part's finding and marks nothing. It says the part is wanted, not that the declaration holding it
+is, so a directive for an unused parameter of a function nothing calls leaves the function reported
+as dead, with everything only it references.
 
 The two are different sets, and the difference is the point. A symbol referenced only by an
 unreachable symbol is live under reference counting and dead under reachability. A symbol dead
@@ -38,6 +43,11 @@ The member is absent on two shapes of finding, because on each of them no relati
 anything. One is a finding whose subject is a part of a declaration or a row of a document, which
 is the intra-function kinds, the file and dependency kinds and the self-check kinds. The other is a
 finding about a declaration the analysis judged live, which is `DS1301` and `DS1204`.
+
+A part is decided inside its declaration whatever uses the declaration, so an unused parameter or a
+dead store of a function the analysis judged dead is reported beside the function's own finding,
+and a part of a declaration a cross-language edge names is reported rather than pending. A type
+parameter of a dead function falls with the function and is reported under no code of its own.
 
 ## Roots
 
@@ -79,8 +89,18 @@ member of their component, and a symbol two roots both reach joins the two into 
 because deleting either alone leaves a reference to it. A finding about any member names the one
 component, so every finding one deletion removes carries one identifier.
 
+A declaration of a test file is a member only when it is reported as a test of dead code, and such
+a test and each declaration it references count as referencing each other, so the test is a root
+member with them. No other test-file declaration belongs to a component, so its references join no
+two components and make no production declaration a non-root: a cluster only tests reach is rooted
+at a declaration outside the test files.
+
 The count is the component's members and the line total the distinct lines they span.
-`reporters.cascade` set to `full` lists every member of every component as well as the roots.
+`reporters.cascade` set to `full` lists every member of every component as well as the roots, under
+the finding's `component.members`, and a SARIF result carries each member other than its own
+symbol as a related location. A finding whose subject belongs to no dead component, being a
+declaration the analysis holds live, a part of a declaration or a row of a document, names a
+component of that subject alone, with no line deleted.
 
 A finding the configuration withholds, by setting its kind to `allow` or by a minimum confidence
 it does not reach, withholds every finding of its component when it is a root's, whatever their
