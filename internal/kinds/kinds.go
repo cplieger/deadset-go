@@ -301,6 +301,10 @@ type Input struct {
 	// one input inherits nothing from the first.
 	withheld map[int]bool
 
+	// dialed is what the configuration dials withhold beyond the findings they
+	// name, which the pass computes between its two phases.
+	dialed dialed
+
 	// Matrix is the configuration identifiers in matrix order, and Per is one
 	// entry per configuration in the same order.
 	Matrix []string
@@ -409,13 +413,16 @@ func Compute(in *Input, emitters map[string]Emitter) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	if withholding := in.withholdComponents(published, emitters, findings); withholding != nil {
+		return Result{}, withholding
+	}
 	second, err := in.phase(published, emitters, reported, true)
 	if err != nil {
 		return Result{}, err
 	}
 	findings = append(findings, second...)
 
-	kept := in.abovePar(findings)
+	kept := in.reportable(findings)
 	slices.SortStableFunc(kept, Compare)
 	return Result{Findings: kept}, nil
 }
@@ -822,25 +829,6 @@ func (f *Finding) relation(candidate *graph.Candidate) {
 	f.Relation = candidate.Relation
 }
 
-// abovePar drops every finding the configured minimum confidence excludes. The
-// minimum is a filter over what the pass reports, the way a kind the severity sets to
-// allow is, so a finding it drops leaves the pass and no count of the run accounts for
-// it.
-func (in *Input) abovePar(findings []Finding) []Finding {
-	least := Class(in.Config.Analysis.MinConfidence)
-	if least.rank() == 0 {
-		return findings
-	}
-	kept := make([]Finding, 0, len(findings))
-	for i := range findings {
-		if findings[i].Confidence.rank() < least.rank() {
-			continue
-		}
-		kept = append(kept, findings[i])
-	}
-	return kept
-}
-
 // Compare orders two findings by the canonical key: the path, the line, the
 // column, the code and the symbol reference. The analyzer name is the key's last
 // component and is one analyzer's own in its own report, so it decides nothing
@@ -1099,7 +1087,7 @@ func (x *index) componentOf(id graph.SymbolID) Component {
 	return Component{
 		ID:             componentID(component.Index + 1),
 		Spans:          component.Spans,
-		SymbolCount:    len(component.Falls),
+		SymbolCount:    len(component.Members),
 		DeletableLines: component.DeletableLines,
 		Root:           slices.Contains(component.Roots, id),
 	}

@@ -38,6 +38,20 @@ var typescriptReferencePattern = regexp.MustCompile(`^ts://`)
 // package's own imports field.
 var bareSpecifierPattern = regexp.MustCompile(`^[^./#]`)
 
+// analyzerNamePattern is the spelling an analyzer name takes in the provider list:
+// lowercase words joined by single hyphens.
+var analyzerNamePattern = regexp.MustCompile(`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
+
+// providerSourcePattern is the spelling the source of an acquirable analyzer takes.
+var providerSourcePattern = regexp.MustCompile(`^(go|npm):[^ \t\r\n]+$`)
+
+// providerVersionPattern is the spelling the version of an acquirable analyzer
+// takes: a semantic version with no leading v.
+var providerVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$`)
+
+// providerDigestPattern is the spelling the digest of an acquirable analyzer takes.
+var providerDigestPattern = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
 // keyKind classifies one node of the closed key list.
 type keyKind uint8
 
@@ -116,6 +130,16 @@ func schemaRoot() keyNode {
 			"cascade":      {kind: keyLeaf},
 			"max_findings": {kind: keyLeaf},
 			"fail_on":      {kind: keyLeaf},
+		}},
+		"providers": {kind: keySection, members: map[string]keyNode{
+			"analyzers": {kind: keyList, members: map[string]keyNode{
+				"name":      {kind: keyLeaf},
+				"languages": {kind: keyLeaf},
+				"command":   {kind: keyLeaf},
+				"source":    {kind: keyLeaf},
+				"version":   {kind: keyLeaf},
+				"digest":    {kind: keyLeaf},
+			}},
 		}},
 		"go": {kind: keySection, members: map[string]keyNode{}},
 		"ts": {kind: keySection, members: map[string]keyNode{

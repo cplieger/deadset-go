@@ -10,27 +10,27 @@ import (
 // unvisited is the index of a symbol the component walk has not reached.
 const unvisited = -1
 
-// Component is one strongly connected component of the dead subgraph, with its
-// place in the acyclic graph over those components.
+// Component is one dead component: its root members and every dead symbol that
+// falls with them, which is what one deletion removes.
+//
+// The dead symbols form cycles, a dead member and its dead container counting as
+// referencing each other and a symbol on no cycle being a cycle of one. A root
+// cycle is one no dead symbol outside it references. A symbol that only dead
+// symbols reference falls with the root cycles that reach it, and a symbol two root
+// cycles both reach is dead only through the two of them together, so a component
+// holds every root cycle such a symbol links and every symbol they reach: deleting
+// any part of it alone leaves a reference to what was deleted.
 type Component struct {
-	// Members are the component's own symbols, by site. A dead member of a dead
-	// container is one of them rather than a component of its own.
+	// Members are every symbol of the component, by site.
 	Members []SymbolID
 
-	// Roots are the members no other dead component references, which are the
-	// symbols a deletion starts at. A cycle has as many roots as it has members
-	// no dead component outside it references.
+	// Roots are the members of the component's root cycles whose container is not
+	// itself dead, by site: the symbols a deletion starts at. Every component has
+	// at least one, because a member's dead container sits on the member's own
+	// cycle.
 	Roots []SymbolID
 
-	// Falls are the symbols one deletion of this component removes: its members,
-	// and every dead symbol only this component reaches. A dead symbol two
-	// components both reach falls with neither and is reported by its own
-	// component.
-	Falls []SymbolID
-
-	// Spans are the lines each symbol of Falls occupies, in the order of Falls,
-	// which is what a total over several components counts a shared line once
-	// from.
+	// Spans are the lines each member occupies, in the order of Members.
 	Spans []Span
 
 	// Index is the component's position in the order the sweep returns, which is
@@ -118,28 +118,26 @@ type Listing struct {
 	// otherwise.
 	Members []SymbolID
 
-	// SymbolCount and DeletableLines are what falls with the component, under
-	// either mode.
+	// SymbolCount and DeletableLines are the component's size, under either mode.
 	SymbolCount    int
 	DeletableLines int
 }
 
 // List returns what a report carries for the component under mode: its roots and
-// the size of what falls with it, and every member where the mode lists a
-// component in full.
+// its size, and every member where the mode lists a component in full.
 func (c *Component) List(mode Cascade) Listing {
-	l := Listing{Roots: c.Roots, SymbolCount: len(c.Falls), DeletableLines: c.DeletableLines}
+	l := Listing{Roots: c.Roots, SymbolCount: len(c.Members), DeletableLines: c.DeletableLines}
 	if mode == CascadeFull {
 		l.Members = c.Members
 	}
 	return l
 }
 
-// componentsOf groups the symbols dead marks into strongly connected components,
-// orders the components so that each precedes every component it reaches, and
-// computes what falls with each. Both arguments carry one flag per symbol of the
-// graph, in the graph's own order: which symbols are dead, and which of those a
-// sweep admitted by the test-of-dead-code rule.
+// componentsOf groups the symbols dead marks into dead components, orders the
+// components by their first root cycle, and computes each one's size. Both
+// arguments carry one flag per symbol of the graph, in the graph's own order: which
+// symbols are dead, and which of those a sweep admitted by the test-of-dead-code
+// rule.
 //
 // The dead set arrives rather than being read from a sweep, because over a matrix
 // of build configurations the set is the intersection of what several sweeps
@@ -152,39 +150,67 @@ func (g *Graph) componentsOf(dead, testOfDeadCode []bool) []Component {
 	if len(at) == 0 {
 		return nil
 	}
-	compOf, members := connected(adj)
-	edges, into := condense(adj, compOf, len(members))
-	falls := fallSets(edges, members, into)
-	predecessor := external(adj, compOf)
+	cycleOf, cycles := connected(adj)
+	edges, into := condense(adj, cycleOf, len(cycles))
+	clusterOf, count := clusters(adj, cycleOf, order(edges, cycles), len(cycles))
 
-	components := make([]Component, len(members))
-	for index, c := range order(edges, members) {
-		component := Component{Index: index, Members: g.identify(at, members[c]), Falls: g.identify(at, falls[c])}
-		for _, member := range members[c] {
-			// A dead member of a dead container is never a root: the container
-			// is the site the deletion starts at and the member falls with it.
-			contained := g.parent[at[member]] != outside && dead[g.parent[at[member]]]
-			if !predecessor[member] && !contained {
-				component.Roots = append(component.Roots, g.symbols[at[member]].ID)
-			}
+	components := make([]Component, count)
+	for index := range components {
+		components[index].Index = index
+	}
+	for position, i := range at {
+		cycle := cycleOf[position]
+		component := &components[clusterOf[cycle]]
+		id := g.symbols[i].ID
+		component.Members = append(component.Members, id)
+		component.Spans = append(component.Spans, spanOf(&g.symbols[i]))
+		// A dead member of a dead container is never a root: the container is
+		// the site the deletion starts at and the member falls with it.
+		contained := g.parent[i] != outside && dead[g.parent[i]]
+		if into[cycle] == 0 && !contained {
+			component.Roots = append(component.Roots, id)
 		}
-		component.Spans = make([]Span, len(falls[c]))
-		for i, fell := range falls[c] {
-			component.Spans[i] = spanOf(&g.symbols[at[fell]])
-		}
-		component.DeletableLines = DistinctLines(component.Spans)
-		components[index] = component
+	}
+	for index := range components {
+		components[index].DeletableLines = DistinctLines(components[index].Spans)
 	}
 	return components
 }
 
-// identify names the symbols at a set of positions in the dead subgraph.
-func (g *Graph) identify(at, positions []int) []SymbolID {
-	ids := make([]SymbolID, 0, len(positions))
-	for _, p := range positions {
-		ids = append(ids, g.symbols[at[p]].ID)
+// clusters numbers the dead components: two cycles joined by a reference belong to
+// one, because the root cycles reaching either reach both. A component is numbered
+// by the place its first cycle takes in the order the cycles are worked in, which
+// puts every root cycle ahead of the cycles it reaches.
+func clusters(adj [][]int, cycleOf, sequence []int, cycles int) (clusterOf []int, count int) {
+	parent := make([]int, cycles)
+	for c := range parent {
+		parent[c] = c
 	}
-	return ids
+	find := func(c int) int {
+		for parent[c] != c {
+			parent[c] = parent[parent[c]]
+			c = parent[c]
+		}
+		return c
+	}
+	for from, targets := range adj {
+		for _, to := range targets {
+			parent[find(cycleOf[from])] = find(cycleOf[to])
+		}
+	}
+
+	numbered := make(map[int]int, cycles)
+	clusterOf = make([]int, cycles)
+	for _, c := range sequence {
+		root := find(c)
+		number, held := numbered[root]
+		if !held {
+			number = len(numbered)
+			numbered[root] = number
+		}
+		clusterOf[c] = number
+	}
+	return clusterOf, len(numbered)
 }
 
 // deadSubgraph indexes the dead symbols and the edges between them: every
@@ -241,8 +267,8 @@ func (g *Graph) referenceEdges(adj [][]int, position []int, from, at int, testOf
 	}
 }
 
-// connected returns each dead symbol's component and each component's members by
-// site, found by Tarjan's algorithm in one pass over the subgraph.
+// connected returns each dead symbol's cycle and each cycle's members by site,
+// found by Tarjan's algorithm in one pass over the subgraph.
 func connected(adj [][]int) (compOf []int, members [][]int) {
 	t := &tarjan{
 		adj:     adj,
@@ -269,8 +295,8 @@ func connected(adj [][]int) (compOf []int, members [][]int) {
 }
 
 // tarjan is the state of one run of Tarjan's algorithm over the dead subgraph.
-// The components it finds are closed in an order in which every component follows
-// the components it reaches.
+// The cycles it finds are closed in an order in which every cycle follows the
+// cycles it reaches.
 type tarjan struct {
 	adj     [][]int
 	index   []int // per symbol, the order the walk reached it
@@ -282,7 +308,7 @@ type tarjan struct {
 }
 
 // connect walks one dead symbol, keeps the lowest index the walk below it reaches,
-// and closes a component at every symbol whose walk reaches nothing above it.
+// and closes a cycle at every symbol whose walk reaches nothing above it.
 func (t *tarjan) connect(at int) {
 	t.index[at], t.low[at] = t.next, t.next
 	t.next++
@@ -316,9 +342,9 @@ func (t *tarjan) connect(at int) {
 	t.found = append(t.found, group)
 }
 
-// condense returns, per component, the components it reaches in one step, and how
-// many components reach it, counting each pair once. The result is acyclic,
-// because an edge inside a component is not an edge between two.
+// condense returns, per cycle, the cycles it reaches in one step, and how many
+// cycles reach it, counting each pair once. The result is acyclic, because an
+// edge inside a cycle is not an edge between two.
 func condense(adj [][]int, compOf []int, groups int) (edges [][]int, into []int) {
 	edges = make([][]int, groups)
 	into = make([]int, groups)
@@ -337,33 +363,18 @@ func condense(adj [][]int, compOf []int, groups int) (edges [][]int, into []int)
 	return edges, into
 }
 
-// external reports, per dead symbol, whether a dead component other than its own
-// references it, which is what makes a member of a component a root or not.
-func external(adj [][]int, compOf []int) []bool {
-	referenced := make([]bool, len(adj))
-	for from, targets := range adj {
-		for _, to := range targets {
-			if compOf[from] != compOf[to] {
-				referenced[to] = true
-			}
-		}
-	}
-	return referenced
-}
-
-// order returns the components in the order a report is worked in: each component
-// precedes every component it reaches, and two components neither of which
-// reaches the other are ordered by the site of the first member of each, so one
-// graph yields one order.
+// order returns the cycles in the order a report is worked in: each cycle precedes
+// every cycle it reaches, and two cycles neither of which reaches the other are
+// ordered by the site of the first member of each, so one graph yields one order.
 func order(edges, members [][]int) []int {
 	sequence := make([]int, 0, len(edges))
 	for c := range slices.Backward(edges) {
 		sequence = append(sequence, c)
 	}
 
-	// The components are closed in an order in which every component follows the
-	// ones it reaches, so reading it backwards reaches every component after the
-	// components that reach it, which is what makes one pass enough.
+	// The cycles are closed in an order in which every cycle follows the ones it
+	// reaches, so reading it backwards reaches every cycle after the cycles that
+	// reach it, which is what makes one pass enough.
 	depth := make([]int, len(edges))
 	for _, from := range sequence {
 		for _, to := range edges[from] {
@@ -375,66 +386,4 @@ func order(edges, members [][]int) []int {
 		return cmp.Or(cmp.Compare(depth[a], depth[b]), cmp.Compare(members[a][0], members[b][0]))
 	})
 	return sequence
-}
-
-// fallSets returns, per component, the dead symbols one deletion of that
-// component removes.
-//
-// A component reached from more than one root of the condensation falls with
-// neither, because deleting either root leaves the other reaching it; it is
-// reported by its own component instead. A component that is not a root of the
-// condensation carries its own members alone, because whatever it reaches is
-// reached through the root above it as well.
-func fallSets(edges, members [][]int, into []int) [][]int {
-	owners := rootOwners(edges, into)
-	sets := make([][]int, len(edges))
-	for c := range edges {
-		set := slices.Clone(members[c])
-		if into[c] == 0 {
-			for d, reached := range closure(edges, c) {
-				if reached && d != c && owners[d] == 1 {
-					set = append(set, members[d]...)
-				}
-			}
-		}
-		slices.Sort(set)
-		sets[c] = set
-	}
-	return sets
-}
-
-// rootOwners counts, per component, how many roots of the condensation reach it.
-// Every component is reached by at least one, because a component no other
-// component reaches is a root itself.
-func rootOwners(edges [][]int, into []int) []int {
-	owners := make([]int, len(edges))
-	for c := range edges {
-		if into[c] != 0 {
-			continue
-		}
-		for d, reached := range closure(edges, c) {
-			if reached {
-				owners[d]++
-			}
-		}
-	}
-	return owners
-}
-
-// closure returns the components one component reaches, itself included.
-func closure(edges [][]int, from int) []bool {
-	reached := make([]bool, len(edges))
-	reached[from] = true
-	stack := []int{from}
-	for len(stack) > 0 {
-		at := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
-		for _, to := range edges[at] {
-			if !reached[to] {
-				reached[to] = true
-				stack = append(stack, to)
-			}
-		}
-	}
-	return reached
 }

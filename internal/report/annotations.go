@@ -8,14 +8,12 @@ import (
 	"github.com/cplieger/deadset-go/internal/config"
 )
 
-// The workflow commands an annotation is written as, one per severity. A finding at
-// the failing severity is an error, so a pull request shows it as a failure; a
-// finding the configuration lowered is a warning, and one it lowered further is a
-// notice.
+// The workflow commands an annotation is written as. A finding at or above the
+// failing severity is an error, so a pull request shows it as a failure, and a
+// finding below it is a warning.
 const (
 	commandError   = "error"
 	commandWarning = "warning"
-	commandNotice  = "notice"
 )
 
 // Annotations writes one workflow annotation per finding and one per stale
@@ -27,12 +25,13 @@ const (
 // the kind as its title, and carries the finding's message; a value is escaped the
 // way the workflow command grammar requires, so a message or a path holding a
 // separator does not truncate the annotation.
-func Annotations(w io.Writer, e *Envelope, _ Options) error {
+func Annotations(w io.Writer, e *Envelope, opts Options) error {
+	failing := normalizedFailOn(opts.FailOn)
 	out := &sink{w: w}
 	for i := range e.Findings {
 		found := &e.Findings[i]
 		out.printf("::%s file=%s,line=%d,col=%d,endLine=%d,title=%s::%s\n",
-			commandOf(found.Severity),
+			commandOf(found.Severity, failing),
 			escapeProperty(found.Position.Path), found.Position.Line, found.Position.Column,
 			found.Position.EndLine,
 			escapeProperty(found.Code+" "+found.Kind), escapeData(found.Message))
@@ -48,16 +47,13 @@ func Annotations(w io.Writer, e *Envelope, _ Options) error {
 	return out.err
 }
 
-// commandOf is the workflow command one severity is annotated with.
-func commandOf(severity config.Severity) string {
-	switch severity {
-	case config.Deny:
+// commandOf is the workflow command one severity is annotated with under the
+// failing severity.
+func commandOf(severity, failing config.Severity) string {
+	if fails(severity, failing) {
 		return commandError
-	case config.Warn:
-		return commandWarning
-	default:
-		return commandNotice
 	}
+	return commandWarning
 }
 
 // kindName is the name of the kind one code names, and the code itself where the

@@ -113,6 +113,11 @@ func TestRootsDetectsEachClassAndDeclinesItsLookAlike(t *testing.T) {
 		{ref: pkg + "pushed", want: []RootKind{RootLinkname}},
 		{ref: pkg + "aliased", want: []RootKind{RootLinkname}},
 		{ref: pkg + "counted", want: []RootKind{RootLinkname}},
+		{ref: pkg + "pulled", want: []RootKind{RootLinkname}},
+		{ref: pkg + "typed", want: []RootKind{RootLinkname}},
+		{ref: "go://example.com/roots/internal/hidden#linked", want: []RootKind{RootLinkname}},
+		{ref: "go://example.com/roots/internal/hidden#unlinked"},
+		{ref: "go://example.com/roots/internal/hidden#Kind"},
 		{ref: pkg + "notLinked"},
 		{ref: pkg + "unsafeless"},
 

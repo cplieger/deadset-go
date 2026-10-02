@@ -54,7 +54,6 @@ func handInput(resolved config.Config) *Input {
 		Components: []graph.Component{{
 			Members:        []graph.SymbolID{exportedID, helperID},
 			Roots:          []graph.SymbolID{exportedID},
-			Falls:          []graph.SymbolID{exportedID, helperID},
 			Spans:          handSpans,
 			Index:          0,
 			DeletableLines: 23,
@@ -213,24 +212,18 @@ func render(value any) string {
 	return fmt.Sprintf("%+v", value)
 }
 
-func TestComputeSkipsTheEmitterOfAnAllowedKindAndACodeWithNoEmitter(t *testing.T) {
+func TestComputeReportsNoFindingOfAnAllowedKindAndNoneOfACodeWithNoEmitter(t *testing.T) {
 	resolved := applicationConfig()
 	resolved.Severity = map[string]config.Severity{unusedExportedCode: config.Allow}
 	in := handInput(resolved)
 
-	ran := false
 	result := computed(t, in, map[string]Emitter{
-		unusedExportedCode: func(*Input) ([]Finding, error) {
-			ran = true
-			return nil, nil
-		},
+		unusedExportedCode: emitterOf(oneFinding(in, unusedExportedCode, exportedID)),
 	})
 
-	if ran {
-		t.Error("Compute() ran the emitter of a kind the severity map allows, want it skipped")
-	}
 	if len(result.Findings) != 0 {
-		t.Errorf("Compute() = %v, want no finding: every other code has no emitter", summary(result.Findings))
+		t.Errorf("Compute() = %v, want no finding: a kind at allow is withheld and every other code has no emitter",
+			summary(result.Findings))
 	}
 }
 

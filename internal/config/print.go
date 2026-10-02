@@ -48,6 +48,7 @@ func written(c *Config) Config {
 	c.Roots.Patterns = orEmpty(c.Roots.Patterns)
 	c.Exemptions.Disabled = orEmpty(c.Exemptions.Disabled)
 	c.Reporters.Formats = orEmpty(c.Reporters.Formats)
+	c.Providers.Analyzers = orEmpty(c.Providers.Analyzers)
 	c.TS.TestFiles = orEmpty(c.TS.TestFiles)
 	c.TS.EntryFiles = orEmpty(c.TS.EntryFiles)
 	c.TS.InjectionRegistrations = orEmpty(c.TS.InjectionRegistrations)

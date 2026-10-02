@@ -21,7 +21,9 @@
 package report
 
 import (
+	"bytes"
 	"cmp"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -269,6 +271,11 @@ type Options struct {
 	// Template is the text of the user-supplied template, read by [Template]
 	// alone.
 	Template string
+
+	// FailOn is the lowest severity that fails the run, read by [Annotations]
+	// alone: a finding at or above it is an error and one below it a warning. The
+	// empty value reads as the configuration's default.
+	FailOn config.Severity
 }
 
 // BuildInput is what one run answered, from which an envelope is assembled.
@@ -538,14 +545,24 @@ func compareStaleSuppressions(a, b StaleSuppression) int {
 
 // compareDeclaredGaps orders two declared gaps by the bytewise comparison of their
 // compact encodings in the schema's property order, which is what the canonical
-// key falls back to for a record supplying none of its components.
+// key falls back to for a record supplying none of its components. The encodings
+// are compared rather than the fields, because a field's closing quote takes part
+// in the comparison: a reason that is a prefix of another followed by a space sorts
+// after it.
 func compareDeclaredGaps(a, b DeclaredGap) int {
-	return cmp.Or(
-		cmp.Compare(a.Fixture, b.Fixture),
-		cmp.Compare(a.Symbol, b.Symbol),
-		cmp.Compare(a.Capability, b.Capability),
-		cmp.Compare(a.Reason, b.Reason),
-	)
+	return strings.Compare(compactEncoding(wireDeclaredGapOf(&a)), compactEncoding(wireDeclaredGapOf(&b)))
+}
+
+// compactEncoding is one record's compact JSON encoding, escaping only what strict
+// JSON requires escaped. A record is strings and integers, so it always encodes.
+func compactEncoding(v any) string {
+	var written bytes.Buffer
+	encoder := json.NewEncoder(&written)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(v); err != nil {
+		panic("report: a record does not encode: " + err.Error())
+	}
+	return strings.TrimSuffix(written.String(), "\n")
 }
 
 // compareEvaluations orders two edge evaluations by the edge and then the side,

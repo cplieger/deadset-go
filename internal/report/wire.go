@@ -230,6 +230,11 @@ type wireDeclaredGap struct {
 	Reason     string `json:"reason"`
 }
 
+// wireDeclaredGapOf is one declared gap as a document writes it.
+func wireDeclaredGapOf(g *DeclaredGap) wireDeclaredGap {
+	return wireDeclaredGap{Fixture: g.Fixture, Symbol: g.Symbol, Capability: g.Capability, Reason: g.Reason}
+}
+
 type wireTestFileRule struct {
 	Rule    string `json:"rule"`
 	Matched int    `json:"matched"`
@@ -341,9 +346,7 @@ func (e *Envelope) wire() wireEnvelope {
 	}
 	for i := range e.DeclaredGaps {
 		one := &e.DeclaredGaps[i]
-		held.DeclaredGaps = append(held.DeclaredGaps, wireDeclaredGap{
-			Fixture: one.Fixture, Symbol: one.Symbol, Capability: one.Capability, Reason: one.Reason,
-		})
+		held.DeclaredGaps = append(held.DeclaredGaps, wireDeclaredGapOf(one))
 	}
 	for _, rule := range e.TestFileRules {
 		held.TestFileRules = append(held.TestFileRules, wireTestFileRule{Rule: rule.Rule, Matched: rule.Matched})

@@ -39,6 +39,11 @@ var (
 	// ErrTrailingContent reports bytes after the document's closing brace.
 	ErrTrailingContent = errors.New("scope: trailing content after document")
 
+	// ErrMember reports a member the closed key list refuses: a key it does not
+	// declare, compared as bytes so a key spelled in another case is undeclared, a
+	// key written twice in one object, a null value, or an empty id or workspace.
+	ErrMember = errors.New("scope: refused member")
+
 	// errNotDirectory reports a target path that exists and is not a directory.
 	errNotDirectory = errors.New("not a directory")
 )
@@ -70,18 +75,19 @@ type Document struct {
 	Consumers []Module
 }
 
-// wireModule is one module as a scope document spells it.
+// wireModule is one module as a scope document spells it. ID is nil where the
+// document omits it, which is distinguishable from the empty name it refuses.
 type wireModule struct {
-	ID   string `json:"id"`
-	Role string `json:"role"`
-	Path string `json:"path"`
+	ID   *string `json:"id"`
+	Role string  `json:"role"`
+	Path string  `json:"path"`
 }
 
 // wireDocument is the closed key list of a scope document. Every key the format
 // declares appears here, so an undeclared key is a decode error.
 type wireDocument struct {
+	Workspace *string      `json:"workspace"`
 	Target    wireModule   `json:"target"`
-	Workspace string       `json:"workspace"`
 	Consumers []wireModule `json:"consumers"`
 }
 
@@ -89,14 +95,17 @@ type wireDocument struct {
 // is an error, trailing content after the document is an error, and a relative
 // path inside the document resolves against the document's own directory.
 //
-// Read returns [ErrNoTarget], [ErrRole], [ErrTooLarge] or [ErrTrailingContent]
-// for a document it refuses, an error satisfying errors.Is(err, fs.ErrNotExist)
-// when the document is absent, and a *json.SyntaxError or
-// *json.UnmarshalTypeError for one it cannot decode.
+// Read returns [ErrNoTarget], [ErrRole], [ErrMember], [ErrTooLarge] or
+// [ErrTrailingContent] for a document it refuses, an error satisfying
+// errors.Is(err, fs.ErrNotExist) when the document is absent, and a
+// *json.SyntaxError or *json.UnmarshalTypeError for one it cannot decode.
 func Read(path string) (Document, error) {
 	body, err := readBounded(path)
 	if err != nil {
 		return Document{}, err
+	}
+	if err := checkMembers(body); err != nil {
+		return Document{}, fmt.Errorf("scope: decode %s: %w", path, err)
 	}
 
 	var wire wireDocument
@@ -175,8 +184,11 @@ func resolve(wire *wireDocument, base string) (Document, error) {
 	}
 	doc := Document{Target: target}
 
-	if wire.Workspace != "" {
-		workspace := wire.Workspace
+	if wire.Workspace != nil {
+		workspace := *wire.Workspace
+		if workspace == "" {
+			return Document{}, fmt.Errorf("%w: workspace is empty, which names no file", ErrMember)
+		}
 		if !filepath.IsAbs(workspace) {
 			workspace = filepath.Join(base, workspace)
 		}
@@ -202,6 +214,14 @@ func resolveModule(w wireModule, role, base string) (Module, error) {
 	if w.Path == "" {
 		return Module{}, fmt.Errorf("scope: %s declares an empty path", role)
 	}
+	var id string
+	if w.ID != nil {
+		if *w.ID == "" {
+			return Module{}, fmt.Errorf("%w: %s %s declares an empty id; leave the name to the load by omitting it",
+				ErrMember, role, w.Path)
+		}
+		id = *w.ID
+	}
 	path := w.Path
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(base, path)
@@ -210,5 +230,5 @@ func resolveModule(w wireModule, role, base string) (Module, error) {
 	if err != nil {
 		return Module{}, fmt.Errorf("scope: resolve %s: %w", w.Path, err)
 	}
-	return Module{ID: w.ID, Path: abs}, nil
+	return Module{ID: id, Path: abs}, nil
 }

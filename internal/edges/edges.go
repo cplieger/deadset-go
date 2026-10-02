@@ -51,7 +51,7 @@ var ErrMalformed = errors.New("edges: malformed edges document")
 // the three characters ://, a scope holding no fragment separator, then the
 // separator and the fragment. It is deliberately weaker than the published
 // reference grammar, which the language's own reader owns; see [Document.Own].
-var referenceShape = regexp.MustCompile(`^[a-z][a-z0-9]*://[^\s#]+#\S*$`)
+var referenceShape = regexp.MustCompile(`^[a-z][a-z0-9]*://[^ \t\r\n#]+#[^ \t\r\n]*$`)
 
 // wildcard is the one character a configured root pattern is written with. An edge
 // admits none: a declaration broader than one symbol would silence findings nobody

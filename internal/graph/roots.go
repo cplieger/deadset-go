@@ -112,6 +112,7 @@ func Roots(r *load.Result, targetRoot string, read ReadFile, symbols []Symbol, o
 		byID:       make(map[SymbolID]Symbol, len(symbols)),
 		mains:      make(map[string]bool),
 		published:  make(map[string]bool),
+		byPath:     make(map[string][]*packages.Package),
 		found:      make(map[Root]struct{}),
 	}
 	for i := range symbols {
@@ -157,8 +158,9 @@ type rootDetection struct {
 	pos        *positions
 	byPosition map[token.Position]SymbolID // a rendered position to the declaration at it
 	byID       map[SymbolID]Symbol
-	mains      map[string]bool // import path of a main package
-	published  map[string]bool // import path a consumer outside the module can import
+	mains      map[string]bool                // import path of a main package
+	published  map[string]bool                // import path a consumer outside the module can import
+	byPath     map[string][]*packages.Package // import path to its type-checked variants
 	found      map[Root]struct{}
 }
 
@@ -185,7 +187,9 @@ func (d *rootDetection) addAt(pos token.Pos, kind RootKind) error {
 // signatures the file's own syntax carries. Variants of one package are walked in
 // the order the enumeration walks them, so one configuration yields one order.
 func (d *rootDetection) walk(r *load.Result) error {
-	for _, g := range groupVariants(r.Packages, d.pos) {
+	groups := groupVariants(r.Packages, d.pos)
+	d.index(groups)
+	for _, g := range groups {
 		d.classify(g)
 		for _, p := range g.pkgs {
 			for _, f := range syntaxFiles(p, d.pos) {
@@ -196,6 +200,18 @@ func (d *rootDetection) walk(r *load.Result) error {
 		}
 	}
 	return nil
+}
+
+// index keeps every type-checked variant by the import path a linkname directive
+// of another package spells.
+func (d *rootDetection) index(groups []variantGroup) {
+	for _, g := range groups {
+		for _, p := range g.pkgs {
+			if p.Types != nil {
+				d.byPath[g.pkgPath] = append(d.byPath[g.pkgPath], p)
+			}
+		}
+	}
 }
 
 // classify records what one import path is: a main package, whose declarations no
@@ -249,27 +265,51 @@ func (d *rootDetection) walkFile(p *packages.Package, f *ast.File) error {
 }
 
 // linknames keeps every function and variable a //go:linkname directive of this
-// file names.
+// file names, on either side of the directive.
 //
-// The directive is enabled only in a file that imports "unsafe", it names a
-// function or a variable of the file's own package, and its position does not
-// decide which declaration it names, so the name is resolved in the package's
-// scope rather than by adjacency.
+// The directive is enabled only in a file that imports "unsafe", and its position
+// does not decide which declaration it names, so the local name is resolved in
+// the package's scope rather than by adjacency. The qualified name it joins the
+// local one to is resolved in every loaded variant of the package whose import
+// path it spells, the last full stop separating the path from the name.
 func (d *rootDetection) linknames(p *packages.Package, f *ast.File) error {
 	if p.Types == nil || !importsPath(f, unsafeImport) {
 		return nil
 	}
 	for _, group := range f.Comments {
 		for _, c := range group.List {
-			local, _, ok := LinknameDirective(c.Text)
+			local, qualified, ok := LinknameDirective(c.Text)
 			if !ok {
 				continue
 			}
-			switch obj := p.Types.Scope().Lookup(local).(type) {
-			case *types.Func, *types.Var:
-				if err := d.addAt(obj.Pos(), RootLinkname); err != nil {
-					return err
-				}
+			if err := d.linked(d.joined(p, local, qualified)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// joined returns what one directive names: the local name in p's scope, and the
+// qualified name in every loaded variant of the package whose path it spells.
+func (d *rootDetection) joined(p *packages.Package, local, qualified string) []types.Object {
+	named := []types.Object{p.Types.Scope().Lookup(local)}
+	if at := strings.LastIndex(qualified, "."); at > 0 {
+		for _, remote := range d.byPath[qualified[:at]] {
+			named = append(named, remote.Types.Scope().Lookup(qualified[at+1:]))
+		}
+	}
+	return named
+}
+
+// linked keeps each function and variable of objs as a linkname root; the linker
+// joins no other kind of declaration.
+func (d *rootDetection) linked(objs []types.Object) error {
+	for _, obj := range objs {
+		switch obj.(type) {
+		case *types.Func, *types.Var:
+			if err := d.addAt(obj.Pos(), RootLinkname); err != nil {
+				return err
 			}
 		}
 	}

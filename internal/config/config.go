@@ -13,7 +13,7 @@ import (
 
 // ContractVersion is the Contract version this package implements. It is the
 // resolved value of contract_version when no source supplies one.
-const ContractVersion = "3.1.0"
+const ContractVersion = "3.2.0"
 
 // defaultTestFiles is the documented default of ts.test_files.
 const defaultTestFiles = "**/*.test.{ts,tsx,mts,cts}"
@@ -128,6 +128,7 @@ type Config struct {
 	Severity        map[string]Severity `json:"severity"`
 	Exemptions      Exemptions          `json:"exemptions"`
 	Reporters       Reporters           `json:"reporters"`
+	Providers       Providers           `json:"providers"`
 	Go              Go                  `json:"go"`
 	TS              TS                  `json:"ts"`
 }
@@ -193,6 +194,27 @@ type Reporters struct {
 	FailOn      Severity `json:"fail_on"`
 }
 
+// Providers names the analyzers the orchestrator runs. This package validates and
+// prints the section; nothing in the Go analysis reads it.
+type Providers struct {
+	Analyzers []Provider `json:"analyzers"`
+}
+
+// Provider is one entry of the provider list, in one of two shapes: an installed
+// analyzer names Name, Languages and Command alone, and an acquirable one also
+// names Source, Version and Digest. Those three are nil where the entry does not
+// name them, so the shape an entry takes is read from the members it names.
+//
+//nolint:govet // fieldalignment: the field order is the schema's key order, which Print writes
+type Provider struct {
+	Name      string     `json:"name"`
+	Languages []Language `json:"languages"`
+	Command   string     `json:"command"`
+	Source    *string    `json:"source,omitempty"`
+	Version   *string    `json:"version,omitempty"`
+	Digest    *string    `json:"digest,omitempty"`
+}
+
 // Go is the section the Go analyzer owns. It declares no key in this Contract
 // version and resolves to the empty object.
 type Go struct{}
@@ -255,6 +277,10 @@ func Default() Config {
 			MaxFindings: 0,
 			FailOn:      Deny,
 		},
+		Providers: Providers{Analyzers: []Provider{
+			{Name: "deadset-go", Languages: []Language{GoLanguage}, Command: "deadset-go"},
+			{Name: "deadset-ts", Languages: []Language{TSLanguage}, Command: "deadset-ts"},
+		}},
 		TS: TS{
 			TestFiles:              []string{defaultTestFiles},
 			EntryFiles:             []string{},

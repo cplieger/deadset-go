@@ -692,7 +692,7 @@ func TestResolveRefusesAMalformedDocument(t *testing.T) {
 		{
 			name:       "a_value_of_the_wrong_type",
 			repository: `{"target": {"kind": "library"}, "consumers": {"complete": "yes"}}`,
-			key:        "",
+			key:        "consumers.complete",
 		},
 		{
 			name:       "a_second_document_after_the_first",
@@ -1069,5 +1069,103 @@ func assertMessageNames(t *testing.T, name string, refusal *config.Error, names 
 		if !strings.Contains(refusal.Error(), want) {
 			t.Errorf("Resolve(%s) = %q, want the message to name %q", name, refusal.Error(), want)
 		}
+	}
+}
+
+func TestResolveRefusesAProviderEntryOfNeitherShape(t *testing.T) {
+	t.Parallel()
+
+	const digest = `"sha256:4444444444444444444444444444444444444444444444444444444444444444"`
+	tests := []struct {
+		name  string
+		entry string
+		key   string
+	}{
+		{
+			name:  "a_name_that_is_not_hyphenated_lowercase_words",
+			entry: `{"name": "Example_Go", "languages": ["go"], "command": "example-go"}`,
+			key:   "providers.analyzers[0].name",
+		},
+		{
+			name:  "no_language",
+			entry: `{"name": "example-go", "languages": [], "command": "example-go"}`,
+			key:   "providers.analyzers[0].languages",
+		},
+		{
+			name:  "a_language_no_kind_carries",
+			entry: `{"name": "example-go", "languages": ["rust"], "command": "example-go"}`,
+			key:   "providers.analyzers[0].languages",
+		},
+		{
+			name:  "no_command",
+			entry: `{"name": "example-go", "languages": ["go"]}`,
+			key:   "providers.analyzers[0].command",
+		},
+		{
+			name:  "a_source_without_its_version_and_digest",
+			entry: `{"name": "example-go", "languages": ["go"], "command": "example-go", "source": "go:example.com/x"}`,
+			key:   "providers.analyzers[0]",
+		},
+		{
+			name: "a_version_with_a_leading_v",
+			entry: `{"name": "example-go", "languages": ["go"], "command": "example-go", ` +
+				`"source": "go:example.com/x", "version": "v1.4.0", "digest": ` + digest + `}`,
+			key: "providers.analyzers[0].version",
+		},
+		{
+			name: "a_source_of_another_scheme",
+			entry: `{"name": "example-go", "languages": ["go"], "command": "example-go", ` +
+				`"source": "https://example.com/x", "version": "1.4.0", "digest": ` + digest + `}`,
+			key: "providers.analyzers[0].source",
+		},
+		{
+			name: "a_digest_in_uppercase",
+			entry: `{"name": "example-go", "languages": ["go"], "command": "example-go", ` +
+				`"source": "go:example.com/x", "version": "1.4.0", "digest": "sha256:` +
+				strings.Repeat("A", 64) + `"}`,
+			key: "providers.analyzers[0].digest",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			document := `{"target": {"kind": "library"}, "providers": {"analyzers": [` + tc.entry + `]}}`
+			_, _, err := config.Resolve(labelled("", document, "", nil))
+			var refusal *config.Error
+			if !errors.As(err, &refusal) {
+				t.Fatalf("Resolve(%s) = error %v, want a *config.Error", tc.name, err)
+			}
+			if refusal.Key != tc.key {
+				t.Errorf("Resolve(%s) named %q, want %q", tc.name, refusal.Key, tc.key)
+			}
+			assertMessageNames(t, tc.name, refusal, []string{"deadset.json", tc.key})
+		})
+	}
+}
+
+func TestResolveAcceptsBothProviderShapes(t *testing.T) {
+	t.Parallel()
+
+	const document = `{"target": {"kind": "library"}, "providers": {"analyzers": [
+  {"name": "deadset-ts", "languages": ["ts"], "command": "deadset-ts"},
+  {"name": "example-go", "languages": ["go"], "command": "/opt/example-go/bin/example-go",
+   "source": "npm:@example/go", "version": "1.4.0-rc.1+build.7",
+   "digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444"}
+]}}`
+	cfg, provenance, err := config.Resolve(labelled("", document, "", nil))
+	if err != nil {
+		t.Fatalf("Resolve(two provider shapes) = error %v, want the resolved configuration", err)
+	}
+	if got := len(cfg.Providers.Analyzers); got != 2 {
+		t.Fatalf("Resolve(two provider shapes) resolved %d providers, want 2", got)
+	}
+	if got := cfg.Providers.Analyzers[1].Digest; got == nil {
+		t.Errorf("Resolve(two provider shapes) dropped the acquirable entry's digest")
+	}
+	if got := provenance["providers.analyzers"].String(); got != "repository: deadset.json" {
+		t.Errorf("Resolve(two provider shapes) provenance of providers.analyzers = %q, want %q",
+			got, "repository: deadset.json")
 	}
 }

@@ -33,8 +33,11 @@ func drawReport(t *rapid.T) drawnReport {
 		pending:    rapid.IntRange(0, 3).Draw(t, "the number of pending findings"),
 		failOn:     rapid.SampledFrom(severities).Draw(t, "the failing severity"),
 	}
+	// A finding at allow is withheld, so a report holds findings at warn and deny
+	// alone, while the failing severity takes all three values.
+	reported := []config.Severity{config.Warn, config.Deny}
 	for i := range count {
-		drawn.severities[i] = rapid.SampledFrom(severities).Draw(t, "finding "+strconv.Itoa(i)+": the severity")
+		drawn.severities[i] = rapid.SampledFrom(reported).Draw(t, "finding "+strconv.Itoa(i)+": the severity")
 	}
 	return drawn
 }

@@ -1,0 +1,20 @@
+A package whose one file holds a package clause and its comment and declares
+nothing, which no import reaches, beside the main package of the program and a
+package the main package imports whose one file declares nothing either.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- main.go --
+package main
+
+import _ "example.com/app/internal/imported"
+
+func main() {}
+-- internal/imported/doc.go --
+// Package imported is reached by the main package's blank import.
+package imported
+-- internal/docs/doc.go --
+// Package docs declares nothing and nothing imports it.
+package docs

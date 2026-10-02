@@ -375,8 +375,8 @@ func plant(b *graphBuilder, at int, shape drawnShape) string {
 }
 
 // Property dead-code-suite/P6: every dead symbol lands in exactly one component,
-// each component is reported at its roots, and the set that falls with a
-// component is the one the condensation over the components decides.
+// each component is reported at its roots, and a component holds every dead
+// symbol a chain of references joins to it.
 //
 // The oracle is written over the names a draw produced and answers mutual
 // reachability by a transitive closure rather than by Tarjan's algorithm, so an
@@ -432,9 +432,8 @@ func TestProperty06EveryDeadSymbolLandsInOneComponentReportedAtItsRoots(t *testi
 			if c.Index != i {
 				t.Fatalf("Components[%d].Index = %d, want %d\n%s", i, c.Index, i, b.describe(r))
 			}
-			if lines := b.lineTotal(g, c.Falls); lines != c.DeletableLines {
-				t.Fatalf("Components[%d].DeletableLines = %d, want %d over %v\n%s",
-					i, c.DeletableLines, lines, b.names(c.Falls), b.describe(r))
+			if len(c.Roots) == 0 {
+				t.Fatalf("Components[%d] holds no root\n%s", i, b.describe(r))
 			}
 		}
 	})
@@ -472,82 +471,68 @@ func (b *graphBuilder) lineTotal(g *Graph, ids []SymbolID) int {
 }
 
 // slowComponents answers the component pass the slow way, from the graph's own
-// inputs: two dead declarations share a component when each reaches the other
-// through the dead subgraph, a component is a root of the condensation when no
-// other component reaches it, and a component falls with the one root of the
-// condensation that reaches it, if exactly one does.
+// inputs: two dead declarations share a cycle when each reaches the other through
+// the dead subgraph, a cycle is a root when no declaration outside it references
+// one of its members, and two declarations share a component when a chain of
+// references joins them whichever way each reference points.
 func (b *graphBuilder) slowComponents(g *Graph, r Result, dead []string, admitted map[string]bool) []grouped {
 	edges := b.slowSubgraph(dead, admitted)
 	reaches := closureByName(edges, dead)
 
-	var groups [][]string
-	of := map[string]int{}
+	cycleOf := map[string]int{}
+	cycles := 0
 	for _, name := range dead {
-		if _, held := of[name]; held {
+		if _, held := cycleOf[name]; held {
 			continue
 		}
-		group := []string{}
 		for _, other := range dead {
-			if _, held := of[other]; !held && reaches[name][other] && reaches[other][name] {
-				of[other] = len(groups)
-				group = append(group, other)
+			if _, held := cycleOf[other]; !held && reaches[name][other] && reaches[other][name] {
+				cycleOf[other] = cycles
 			}
 		}
-		groups = append(groups, group)
+		cycles++
 	}
-
-	between := make([]map[int]bool, len(groups))
-	into := make([]int, len(groups))
-	for i := range groups {
-		between[i] = map[int]bool{}
+	rootCycle := make([]bool, cycles)
+	for i := range rootCycle {
+		rootCycle[i] = true
 	}
+	joined := map[string][]string{}
 	for from, targets := range edges {
 		for _, to := range targets {
-			if of[from] == of[to] || between[of[from]][of[to]] {
-				continue
+			if cycleOf[from] != cycleOf[to] {
+				rootCycle[cycleOf[to]] = false
 			}
-			between[of[from]][of[to]] = true
-			into[of[to]]++
+			joined[from] = append(joined[from], to)
+			joined[to] = append(joined[to], from)
 		}
 	}
+	linked := closureByName(joined, dead)
 
-	owners := make([]int, len(groups))
-	for i := range groups {
-		if into[i] != 0 {
+	componentOf := map[string]int{}
+	var found []grouped
+	for _, name := range dead {
+		if _, held := componentOf[name]; held {
 			continue
 		}
-		for j := range groups {
-			if reachesGroup(between, i, j) {
-				owners[j]++
+		var members, roots []string
+		for _, other := range dead {
+			if !linked[name][other] {
+				continue
 			}
-		}
-	}
-
-	found := make([]grouped, 0, len(groups))
-	for i, members := range groups {
-		falls := slices.Clone(members)
-		var roots []string
-		for _, member := range members {
-			container := b.named[g.symbols[g.at(b.id(member))].Parent]
-			if !b.referencedFromOutside(edges, of, member) && (container == "" || of[container] != of[member]) {
-				roots = append(roots, member)
-			}
-		}
-		if into[i] == 0 {
-			for j, other := range groups {
-				if j != i && reachesGroup(between, i, j) && owners[j] == 1 {
-					falls = append(falls, other...)
-				}
+			componentOf[other] = len(found)
+			members = append(members, other)
+			container := b.named[g.symbols[g.at(b.id(other))].Parent]
+			if rootCycle[cycleOf[other]] && !slices.Contains(dead, container) {
+				roots = append(roots, other)
 			}
 		}
 		found = append(found, grouped{
 			members: strings.Join(b.bySite(members), " "),
 			roots:   strings.Join(b.bySite(roots), " "),
-			falls:   strings.Join(b.bySite(falls), " "),
-			lines:   b.lineTotal(g, b.identifiers(falls)),
+			lines:   b.lineTotal(g, b.identifiers(members)),
 		})
 	}
-	return b.orderBySweep(r, found, of)
+	return b.orderBySweep(r, found, componentOf)
 }
 
 // slowSubgraph is the dead subgraph the oracle reads: every reference one dead
@@ -587,19 +572,6 @@ func (b *graphBuilder) slowSubgraph(dead []string, admitted map[string]bool) map
 	return edges
 }
 
-// referencedFromOutside reports whether a dead component other than the member's
-// own references it.
-func (b *graphBuilder) referencedFromOutside(edges map[string][]string, of map[string]int, member string) bool {
-	for from, targets := range edges {
-		for _, to := range targets {
-			if to == member && of[from] != of[member] {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // closureByName answers which dead declarations each dead declaration reaches,
 // itself included, by repeating one pass over the edges until it adds nothing.
 func closureByName(edges map[string][]string, dead []string) map[string]map[string]bool {
@@ -621,29 +593,6 @@ func closureByName(edges map[string][]string, dead []string) map[string]map[stri
 		}
 	}
 	return reaches
-}
-
-// reachesGroup reports whether one component reaches another, itself included.
-func reachesGroup(between []map[int]bool, from, to int) bool {
-	if from == to {
-		return true
-	}
-	seen := map[int]bool{from: true}
-	stack := []int{from}
-	for len(stack) > 0 {
-		at := stack[len(stack)-1]
-		stack = stack[:len(stack)-1]
-		for next := range between[at] {
-			if next == to {
-				return true
-			}
-			if !seen[next] {
-				seen[next] = true
-				stack = append(stack, next)
-			}
-		}
-	}
-	return false
 }
 
 // bySite orders a set of names the way the graph holds the symbols they name.

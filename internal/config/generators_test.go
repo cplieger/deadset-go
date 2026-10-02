@@ -62,16 +62,39 @@ func settingGenerators() map[string]*rapid.Generator[any] {
 		"reporters.formats": arrayOfDistinct(rapid.SampledFrom([]config.Format{
 			config.Text, config.JSON, config.GitHub, config.SARIF, config.Template,
 		}), 1, 3),
-		"reporters.sort":             enumOf(config.ByPosition, config.BySize),
-		"reporters.cascade":          enumOf(config.CascadeRoots, config.CascadeFull),
-		"reporters.max_findings":     rapid.IntRange(0, 1000).AsAny(),
-		"reporters.fail_on":          enumOf(config.Allow, config.Warn, config.Deny),
+		"reporters.sort":         enumOf(config.ByPosition, config.BySize),
+		"reporters.cascade":      enumOf(config.CascadeRoots, config.CascadeFull),
+		"reporters.max_findings": rapid.IntRange(0, 1000).AsAny(),
+		"reporters.fail_on":      enumOf(config.Allow, config.Warn, config.Deny),
+		"providers.analyzers": rapid.SliceOfNDistinct(providerEntry(), 0, 3, func(entry map[string]any) any {
+			return entry["name"]
+		}).AsAny(),
 		"ts.test_files":              arrayOfDistinct(rapid.StringMatching(`^\*\*/\*\.[a-z]{2,4}$`), 1, 2),
 		"ts.entry_files":             arrayOfDistinct(rapid.StringMatching(`^src/[a-z]{1,6}\.ts$`), 0, 2),
 		"ts.injection_registrations": rapid.SliceOfN(declarationEntry(), 0, 3).AsAny(),
 		"ts.lifecycle_contracts":     rapid.SliceOfN(lifecycleContractEntry(), 0, 2).AsAny(),
 		"ts.serializers":             rapid.SliceOfN(declarationEntry(), 0, 3).AsAny(),
 	}
+}
+
+// providerEntry draws one entry of the provider list, installed or acquirable.
+func providerEntry() *rapid.Generator[map[string]any] {
+	return rapid.Custom(func(t *rapid.T) map[string]any {
+		entry := map[string]any{
+			"name": rapid.StringMatching(`^[a-z][a-z0-9]{0,5}(-[a-z0-9]{1,4})?$`).Draw(t, "provider name"),
+			"languages": rapid.SliceOfNDistinct(rapid.SampledFrom([]config.Language{config.GoLanguage, config.TSLanguage}),
+				1, 2, rapid.ID[config.Language]).Draw(t, "provider languages"),
+			"command": rapid.StringMatching(`^(/opt/[a-z]{1,6}/)?[a-z]{1,8}$`).Draw(t, "provider command"),
+		}
+		if rapid.Bool().Draw(t, "provider acquirable") {
+			entry["source"] = rapid.StringMatching(`^(go:example\.com/[a-z]{1,6}|npm:@example/[a-z]{1,6})$`).
+				Draw(t, "provider source")
+			entry["version"] = rapid.StringMatching(`^[0-9]{1,2}\.[0-9]{1,2}\.[0-9]{1,2}(-rc\.[0-9])?$`).
+				Draw(t, "provider version")
+			entry["digest"] = "sha256:" + rapid.StringMatching(`^[0-9a-f]{64}$`).Draw(t, "provider digest")
+		}
+		return entry
+	})
 }
 
 // declarationEntry draws one entry naming a TypeScript declaration, in any of its

@@ -550,11 +550,9 @@ func FileNeverImported(in *Input) ([]Finding, error) {
 }
 
 // unreachedPackages is every import path of the target that no import reaches, no
-// root names, and whose every declaration is a candidate of the sweep.
-//
-// A package declaring nothing at all is absent from the set rather than in it:
-// there is nothing dead in it, so its files fall with no declaration and the more
-// specific answer about the directory is that it holds no code.
+// root names, and whose every declaration is a candidate of the sweep. A package
+// whose files declare nothing is in the set when nothing imports it, because
+// nothing compiles those files into anything a program runs.
 //
 // A declaration the sweep did not judge dead keeps the package's files out of the
 // set whatever held it live, which for a package nothing imports is an exemption: a
@@ -564,21 +562,21 @@ func unreachedPackages(in *Input) map[string]bool {
 	imported := in.importedPackages()
 	rooted := in.rootedPackages()
 
-	declared := make(map[string]int)
+	files := make(map[string]bool)
 	live := make(map[string]int)
 	for i := range in.Merged.Symbols {
 		symbol := &in.Merged.Symbols[i]
-		if symbol.Kind == graph.KindPackage || symbol.Kind == graph.KindFile {
-			continue
-		}
-		declared[symbol.PkgPath]++
-		if in.candidateOf(symbol.ID) == nil {
+		switch {
+		case symbol.Kind == graph.KindFile:
+			files[symbol.PkgPath] = true
+		case symbol.Kind == graph.KindPackage:
+		case in.candidateOf(symbol.ID) == nil:
 			live[symbol.PkgPath]++
 		}
 	}
 
-	unreached := make(map[string]bool, len(declared))
-	for pkgPath := range declared {
+	unreached := make(map[string]bool, len(files))
+	for pkgPath := range files {
 		if imported[pkgPath] || rooted[pkgPath] || in.index().mains[pkgPath] {
 			continue
 		}

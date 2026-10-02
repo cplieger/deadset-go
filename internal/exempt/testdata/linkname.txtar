@@ -1,6 +1,7 @@
 Both directions of the linkname directive, a directive whose qualified name names
 nothing of this module, and a directive in a file that does not import "unsafe",
-which the toolchain does not enable.
+which the toolchain does not enable. The names a directive joins are roots, so
+the class retains none of them.
 
 -- go.mod --
 module example.com/app

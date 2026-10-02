@@ -89,7 +89,7 @@ func TestSweepReportsAPublishedRootUnderReferenceCountingAndHoldsItsClosureLive(
 	if want := []string{"Exported reference-counting"}; !slices.Equal(b.candidates(r), want) {
 		t.Errorf("Sweep over a published root returned %v, want %v", b.candidates(r), want)
 	}
-	want := []grouped{{members: "Exported", roots: "Exported", falls: "Exported", lines: 1}}
+	want := []grouped{{members: "Exported", roots: "Exported", lines: 1}}
 	if got := b.groups(r); !slices.Equal(got, want) {
 		t.Errorf("Sweep over a published root returned components %+v, want %+v", got, want)
 	}
@@ -179,7 +179,6 @@ func TestSweepAdmitsATestOfDeadCodeAndDeclinesATestOfLiveCode(t *testing.T) {
 	components := []grouped{{
 		members: "deadOne deadTwo TestDead",
 		roots:   "deadOne deadTwo TestDead",
-		falls:   "deadOne deadTwo TestDead",
 		lines:   3,
 	}}
 	if got := b.groups(r); !slices.Equal(got, components) {
@@ -200,7 +199,7 @@ func TestSweepJudgesNoPackageAndNoFile(t *testing.T) {
 	if want := []string{"declared reference-counting"}; !slices.Equal(b.candidates(r), want) {
 		t.Errorf("Sweep over a package, a file and one declaration returned %v, want %v", b.candidates(r), want)
 	}
-	want := []grouped{{members: "declared", roots: "declared", falls: "declared", lines: 1}}
+	want := []grouped{{members: "declared", roots: "declared", lines: 1}}
 	if got := b.groups(r); !slices.Equal(got, want) {
 		t.Errorf("Sweep over a package, a file and one declaration returned components %+v, want %+v", got, want)
 	}
@@ -656,7 +655,6 @@ func (s *swept) groupsUnder(prefix string, r Result) []grouped {
 		found = append(found, grouped{
 			members: strings.Join(s.names(c.Members, prefix), " "),
 			roots:   strings.Join(s.names(c.Roots, prefix), " "),
-			falls:   strings.Join(s.names(c.Falls, prefix), " "),
 			lines:   c.DeletableLines,
 		})
 	}
@@ -681,9 +679,8 @@ func TestSweepOverTheLoadedGraphNamesTheRelationThatFoundEachCandidate(t *testin
 		t.Errorf("Sweep(sweep.txtar) reported %v under %s, want %v", got, pkg, want)
 	}
 	components := []grouped{
-		{members: "Published", roots: "Published", falls: "Published", lines: 1},
-		{members: "unreferenced", roots: "unreferenced", falls: "unreferenced referencedByDeadCode", lines: 2},
-		{members: "referencedByDeadCode", falls: "referencedByDeadCode", lines: 1},
+		{members: "Published", roots: "Published", lines: 1},
+		{members: "unreferenced referencedByDeadCode", roots: "unreferenced", lines: 2},
 	}
 	if got := s.groupsUnder(pkg, r); !slices.Equal(got, components) {
 		t.Errorf("Sweep(sweep.txtar) returned components %+v under %s, want %+v", got, pkg, components)
@@ -716,7 +713,7 @@ func TestSweepOverTheLoadedGraphGroupsACycleAndACascade(t *testing.T) {
 		"a cycle of mutually referencing declarations": {
 			prefix:         "go://example.com/sweep/cycle#",
 			wantCandidates: []string{"alpha reachability", "beta reachability"},
-			wantComponents: []grouped{{members: "alpha beta", roots: "alpha beta", falls: "alpha beta", lines: 2}},
+			wantComponents: []grouped{{members: "alpha beta", roots: "alpha beta", lines: 2}},
 		},
 		"one declaration reaching three further dead ones": {
 			prefix: "go://example.com/sweep/cascade#",
@@ -727,10 +724,7 @@ func TestSweepOverTheLoadedGraphGroupsACycleAndACascade(t *testing.T) {
 				"third reachability",
 			},
 			wantComponents: []grouped{
-				{members: "head", roots: "head", falls: "head first second third", lines: 12},
-				{members: "first", falls: "first", lines: 3},
-				{members: "second", falls: "second", lines: 3},
-				{members: "third", falls: "third", lines: 3},
+				{members: "head first second third", roots: "head", lines: 12},
 			},
 		},
 		"a dead type and a dead interface with their members": {
@@ -745,8 +739,8 @@ func TestSweepOverTheLoadedGraphGroupsACycleAndACascade(t *testing.T) {
 				"fetcher.shut reference-counting",
 			},
 			wantComponents: []grouped{
-				{members: "box box.lid box.side box.open", roots: "box", falls: "box box.lid box.side box.open", lines: 5},
-				{members: "fetcher fetcher.fetch fetcher.shut", roots: "fetcher", falls: "fetcher fetcher.fetch fetcher.shut", lines: 4},
+				{members: "box box.lid box.side box.open", roots: "box", lines: 5},
+				{members: "fetcher fetcher.fetch fetcher.shut", roots: "fetcher", lines: 4},
 			},
 		},
 	}
@@ -782,7 +776,6 @@ func TestSweepOverTheLoadedGraphAdmitsATestOfDeadCode(t *testing.T) {
 	components := []grouped{{
 		members: "deadOne deadTwo TestDeadOnly",
 		roots:   "deadOne deadTwo TestDeadOnly",
-		falls:   "deadOne deadTwo TestDeadOnly",
 		lines:   7,
 	}}
 	if got := s.groupsUnder(pkg, r); !slices.Equal(got, components) {
@@ -837,6 +830,8 @@ func TestSweepOverEveryRootClassHoldsTheRootLiveAndReportsItsLookAlike(t *testin
 		{ref: pkg + "pushed", reachable: true},
 		{ref: pkg + "aliased", reachable: true},
 		{ref: pkg + "counted", reachable: true},
+		{ref: "go://example.com/roots/internal/hidden#linked", reachable: true},
+		{ref: "go://example.com/roots/internal/hidden#unlinked", candidate: "reference-counting"},
 		{ref: pkg + "notLinked", candidate: "reference-counting"},
 		{ref: pkg + "unsafeless", candidate: "reference-counting"},
 
@@ -923,7 +918,6 @@ func TestSweepOverAConfiguredRootHoldsItLiveAndReportsTheDeclarationsNothingName
 	components := []grouped{{
 		members: "Box Box.Lid Box.Open",
 		roots:   "Box",
-		falls:   "Box Box.Lid Box.Open",
 		lines:   4,
 	}}
 	if got := s.groupsUnder(pkg, r); !slices.Equal(got, components) {
@@ -948,10 +942,9 @@ func TestSweepOverAPackageWithATestVariantLeavesAFunctionOutOfTheTypesComponent(
 		{
 			members: "Catalog Catalog.entries Catalog.Resolve TestResolve",
 			roots:   "Catalog TestResolve",
-			falls:   "Catalog Catalog.entries Catalog.Resolve TestResolve",
 			lines:   10,
 		},
-		{members: "Normalize", roots: "Normalize", falls: "Normalize", lines: 1},
+		{members: "Normalize", roots: "Normalize", lines: 1},
 	}
 	if got := s.groupsUnder(pkg, r); !slices.Equal(got, want) {
 		t.Errorf("Sweep(receivers.txtar) returned components %+v under %s, want %+v", got, pkg, want)

@@ -292,6 +292,24 @@ func TestFileNeverImportedReportsEveryFileOfAPackageNothingReaches(t *testing.T)
 	}
 }
 
+func TestFileNeverImportedReportsAFileOfAPackageThatDeclaresNothing(t *testing.T) {
+	t.Parallel()
+
+	in := inputOf(t, "artifacts-declaring-nothing.txtar", applicationConfig(), Consumers{})
+
+	found := emitted(t, "FileNeverImported", fileNeverImportedCode, FileNeverImported, in)
+	got := make([]string, 0, len(found))
+	for i := range found {
+		got = append(got, found[i].Position.Path)
+	}
+	// The package nothing imports is reported though it holds no declaration, and
+	// the package the blank import reaches is not.
+	if want := []string{"internal/docs/doc.go"}; !slices.Equal(got, want) {
+		t.Errorf("FileNeverImported(a target holding a package that declares nothing) reports %v, want %v",
+			got, want)
+	}
+}
+
 func TestFileNeverImportedReportsNoFileOfALibrarysPublishedPackage(t *testing.T) {
 	t.Parallel()
 

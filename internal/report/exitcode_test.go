@@ -116,10 +116,16 @@ func TestExitCodeIsTheVerdictTheContractsTableNames(t *testing.T) {
 			want:  codes["clean"],
 		},
 		{
-			name:  "an_allow_finding_fails_a_run_configured_to_fail_on_allow",
-			build: func() BuildInput { return severityInput(config.Allow) },
+			name:  "a_warn_finding_fails_a_run_configured_to_fail_on_allow",
+			build: func() BuildInput { return severityInput(config.Warn) },
 			on:    config.Allow,
 			want:  codes["findings"],
+		},
+		{
+			name:  "fail_on_allow_reads_as_warn_and_fails_on_nothing_warn_does_not",
+			build: func() BuildInput { return severityInput(config.Allow) },
+			on:    config.Allow,
+			want:  codes["clean"],
 		},
 		{
 			name:  "a_stale_suppression_fails_a_run_whose_every_kind_is_allowed",
@@ -205,6 +211,11 @@ func TestFailOnIsTheDocumentedDefaultWhereTheConfigurationNamesNoSeverity(t *tes
 			cfg:  &config.Config{Reporters: config.Reporters{FailOn: config.Warn}},
 			want: config.Warn,
 		},
+		{
+			name: "allow_which_fails_on_what_warn_fails_on",
+			cfg:  &config.Config{Reporters: config.Reporters{FailOn: config.Allow}},
+			want: config.Warn,
+		},
 	}
 
 	for _, tc := range tests {
@@ -228,14 +239,14 @@ func TestFailingFindingsCountsEverySeverityAtOrAboveTheFailingOne(t *testing.T) 
 	}{
 		{at: config.Deny, want: 5},
 		{at: config.Warn, want: 8},
-		{at: config.Allow, want: 10},
+		{at: config.Allow, want: 8},
 	}
 
 	for _, tc := range tests {
 		t.Run(string(tc.at), func(t *testing.T) {
 			t.Parallel()
 
-			if got := failingFindings(&counted, tc.at); got != tc.want {
+			if got := failingFindings(&counted, normalizedFailOn(tc.at)); got != tc.want {
 				t.Errorf("failingFindings(%+v, %q) = %d, want %d", counted, tc.at, got, tc.want)
 			}
 		})

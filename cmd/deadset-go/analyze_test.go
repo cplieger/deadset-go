@@ -634,6 +634,30 @@ func consumedTree(t *testing.T) string {
 	})
 }
 
+func TestAnalyzeRendersSARIFAgainstTheTargetTheScopeDocumentNames(t *testing.T) {
+	dir := consumedTree(t)
+	t.Chdir(dir)
+	reportPath := filepath.Join(t.TempDir(), "report.json")
+
+	// The invocation names no target, so the target directory is the scope
+	// document's, and the SARIF rendering reads the lines it fingerprints there.
+	var stdout, stderr bytes.Buffer
+	code := run(t.Context(), []string{
+		"analyze", "--scope=scope.json", "--config=target/" + repositoryDocument,
+		"--format=sarif", "--report=" + reportPath,
+	}, &stdout, &stderr)
+	if want := contractExitCodes(t)["findings"]; code != want {
+		t.Fatalf("analyze --scope=scope.json --format=sarif = %d, want %d\nstderr: %s", code, want, stderr.String())
+	}
+	rendered, err := os.ReadFile(reportPath + renderings[config.SARIF].suffix)
+	if err != nil {
+		t.Fatalf("read the SARIF rendering: %v", err)
+	}
+	if !bytes.Contains(rendered, []byte("lib.go")) {
+		t.Errorf("the SARIF rendering names no result in lib.go:\n%s", rendered)
+	}
+}
+
 func TestAnalyzeReadsTheScopeDocumentTheInvocationNames(t *testing.T) {
 	dir := consumedTree(t)
 	t.Chdir(dir)

@@ -15,11 +15,8 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-// The spellings the four mechanisms are written with.
+// The spellings the two mechanisms are written with.
 const (
-	unsafeImport     = `"unsafe"`
-	cgoImport        = `"C"`
-	exportDirective  = "//export "
 	mainPackage      = "main"
 	mainFunction     = "main"
 	asmExtension     = ".s"
@@ -32,29 +29,16 @@ const (
 	asmSymbolPrefix = "·"
 )
 
-// The clause each mechanism records. One class covers four of them, so the class
-// name alone does not say which one retained a symbol.
+// The clause each mechanism records. One class covers both, so the class name
+// alone does not say which one retained a symbol.
 const (
-	detailLinkname   = "named by a go:linkname directive"
-	detailCgoExport  = "exported to C by an export directive"
 	detailAssembly   = "named by an assembly TEXT directive"
 	detailPluginMain = "exported from a plugin's main package"
 )
 
-// LinknameCgoAsmPluginDetector retains a symbol another compilation unit or the
-// runtime reaches by a name the type checker never records, which is four
-// mechanisms:
+// LinknameCgoAsmPluginDetector retains a symbol another compilation unit reaches
+// by a name the type checker never records, which is two mechanisms:
 //
-//   - A function or variable named on either side of a //go:linkname or
-//     //go:linknamestd directive, in a file importing "unsafe" as the toolchain
-//     requires of the directive. The local name is resolved in the declaring
-//     package's scope rather than by adjacency, and the qualified name the
-//     directive joins it to is resolved in the loaded package whose import path it
-//     spells, because a directive in one package names a symbol of another.
-//   - A function carrying an //export directive in a file importing "C". The load
-//     compiles with cgo disabled, so such a file is not among the syntax this
-//     walks and the mechanism retains nothing until it is; the file is recorded as
-//     a declared limit of the run instead.
 //   - The declaration a TEXT directive of an assembly file of the same package
 //     names. The directive is a line whose first word is TEXT, followed by ·name
 //     or ·name<> and then (SB), the middle dot first: a qualified form, pkg·name,
@@ -66,9 +50,11 @@ const (
 //     a function or a variable by name, so no other kind is retained, and a
 //     declaration of a test file is not part of the plugin.
 //
-// The string a plugin lookup call names is the other side of the last mechanism
-// and belongs to the reflective-lookup class, whose rule is a string literal
-// beside a call; nothing here reads a string literal.
+// A name a //go:linkname directive joins and a function an //export directive
+// gives C are roots of the analysis, so neither is retained here. The string a
+// plugin lookup call names is the other side of the plugin mechanism and belongs
+// to the reflective-lookup class, whose rule is a string literal beside a call;
+// nothing here reads a string literal.
 func LinknameCgoAsmPluginDetector(in *Input) ([]graph.Exemption, error) {
 	d := newLinkname(in)
 	for _, p := range d.loaded {
@@ -82,18 +68,15 @@ func LinknameCgoAsmPluginDetector(in *Input) ([]graph.Exemption, error) {
 // linkname accumulates one configuration's exemptions of the class.
 type linkname struct {
 	in     *Input
-	byPath map[string][]*packages.Package // import path to the variants that spell it
 	found  map[graph.Exemption]struct{}
 	loaded []*packages.Package
 }
 
 // newLinkname keeps every type-checked package of one configuration, in one
-// order, and indexes them by the import path a directive of another package
-// spells.
+// order.
 func newLinkname(in *Input) *linkname {
 	d := &linkname{
 		in:     in,
-		byPath: make(map[string][]*packages.Package),
 		found:  make(map[graph.Exemption]struct{}),
 		loaded: make([]*packages.Package, 0, len(in.Result.Packages)),
 	}
@@ -103,17 +86,12 @@ func newLinkname(in *Input) *linkname {
 		}
 	}
 	slices.SortFunc(d.loaded, func(a, b *packages.Package) int { return strings.Compare(a.ID, b.ID) })
-	for _, p := range d.loaded {
-		d.byPath[p.PkgPath] = append(d.byPath[p.PkgPath], p)
-	}
 	return d
 }
 
-// mechanisms runs the four mechanisms of the class over one package.
+// mechanisms runs the two mechanisms of the class over one package.
 func (d *linkname) mechanisms(p *packages.Package) error {
-	for _, mechanism := range []func(*packages.Package) error{
-		d.linknames, d.cgoExports, d.assembly, d.plugin,
-	} {
+	for _, mechanism := range []func(*packages.Package) error{d.assembly, d.plugin} {
 		if err := mechanism(p); err != nil {
 			return err
 		}
@@ -121,7 +99,7 @@ func (d *linkname) mechanisms(p *packages.Package) error {
 	return nil
 }
 
-// exemptions returns what the four mechanisms found, ordered by site and then by
+// exemptions returns what the two mechanisms found, ordered by site and then by
 // the symbol and the clause, and once per symbol, site and clause.
 func (d *linkname) exemptions() []graph.Exemption {
 	found := make([]graph.Exemption, 0, len(d.found))
@@ -156,8 +134,8 @@ func (d *linkname) keep(obj types.Object, site token.Pos, detail string) error {
 // linkable returns the identifier of the declaration obj is written at, when the
 // inventory holds it and it is a kind this class can retain.
 //
-// A function and a variable are those two kinds: they are what a linker alias, an
-// assembly definition and a plugin lookup name, so a name denoting any other kind
+// A function and a variable are those two kinds: they are what an assembly
+// definition and a plugin lookup name, so a name denoting any other kind
 // of declaration is not evidence of a caller outside the type checker's view.
 func (d *linkname) linkable(obj types.Object) (graph.SymbolID, bool) {
 	switch obj.(type) {
@@ -178,92 +156,6 @@ func (d *linkname) at(id graph.SymbolID, site token.Position, detail string) {
 		Site:   site,
 		Detail: detail,
 	}] = struct{}{}
-}
-
-// linknames retains both sides of every linkname directive of one package.
-func (d *linkname) linknames(p *packages.Package) error {
-	for _, f := range p.Syntax {
-		if !importsPath(f, unsafeImport) {
-			continue
-		}
-		for _, group := range f.Comments {
-			if err := d.directives(p, group); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// directives retains both sides of every linkname directive one comment group
-// carries.
-func (d *linkname) directives(p *packages.Package, group *ast.CommentGroup) error {
-	for _, c := range group.List {
-		local, qualified, ok := graph.LinknameDirective(c.Text)
-		if !ok {
-			continue
-		}
-		if err := d.keep(p.Types.Scope().Lookup(local), c.Pos(), detailLinkname); err != nil {
-			return err
-		}
-		if err := d.remote(qualified, c.Pos()); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// remote retains the symbol a directive's qualified name denotes, when the name
-// spells a package of this load. The last full stop separates the import path
-// from the symbol, because a path element carries one of its own.
-func (d *linkname) remote(qualified string, site token.Pos) error {
-	at := strings.LastIndex(qualified, ".")
-	if at <= 0 || at == len(qualified)-1 {
-		return nil
-	}
-	for _, p := range d.byPath[qualified[:at]] {
-		if err := d.keep(p.Types.Scope().Lookup(qualified[at+1:]), site, detailLinkname); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// cgoExports retains every function an export directive names in a file importing
-// "C". The directive names the function it precedes, and a name that disagrees is
-// refused by the toolchain rather than exporting something else.
-func (d *linkname) cgoExports(p *packages.Package) error {
-	for _, f := range p.Syntax {
-		if !importsPath(f, cgoImport) {
-			continue
-		}
-		for _, decl := range f.Decls {
-			fn, ok := decl.(*ast.FuncDecl)
-			// A method has no receiver for C to call it on.
-			if !ok || fn.Recv != nil || fn.Doc == nil {
-				continue
-			}
-			if err := d.exportedToC(p, fn); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// exportedToC retains fn when its documentation carries the directive that gives C
-// a name for it.
-func (d *linkname) exportedToC(p *packages.Package, fn *ast.FuncDecl) error {
-	for _, c := range fn.Doc.List {
-		name, found := strings.CutPrefix(c.Text, exportDirective)
-		if !found || strings.TrimSpace(name) != fn.Name.Name {
-			continue
-		}
-		if err := d.keep(p.TypesInfo.Defs[fn.Name], c.Pos(), detailCgoExport); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // assembly retains every declaration a TEXT directive of one of the package's own
@@ -347,17 +239,6 @@ func declaringFile(p *packages.Package, pos token.Pos) *ast.File {
 		}
 	}
 	return nil
-}
-
-// importsPath reports whether the file imports the given quoted path, a blank
-// import included.
-func importsPath(f *ast.File, quoted string) bool {
-	for _, imp := range f.Imports {
-		if imp.Path != nil && imp.Path.Value == quoted {
-			return true
-		}
-	}
-	return false
 }
 
 // textDirective is one TEXT directive of an assembly file: the name it defines in

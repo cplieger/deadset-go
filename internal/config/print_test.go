@@ -21,7 +21,7 @@ var provenanceValue = regexp.MustCompile(`^(default|(repository|central|flag): .
 func schemaKeyOrder() []string {
 	return []string{
 		"contract_version", "target", "analysis", "consumers", "roots",
-		"severity", "exemptions", "reporters", "go", "ts", "provenance",
+		"severity", "exemptions", "reporters", "providers", "go", "ts", "provenance",
 	}
 }
 

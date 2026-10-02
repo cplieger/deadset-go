@@ -36,6 +36,7 @@ func entryOutcomes() map[string][2]entryOutcome {
 		"entry-shape":     {outcomeRecord, outcomeMalformed},
 		"row-shape":       {outcomeRecord, outcomeMalformed},
 		"reason-required": {outcomeRecord, outcomeNoReason},
+		"reason-text":     {outcomeRecord, outcomeNoReason},
 		"path-required":   {outcomeRecord, outcomeUnscoped},
 		"path-form":       {outcomeRecord, outcomeMalformed},
 		"symbol-form":     {outcomeRecord, outcomeMalformed},
