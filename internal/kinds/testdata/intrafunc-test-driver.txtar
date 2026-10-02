@@ -1,0 +1,78 @@
+Functions whose signature the test driver fixes, each naming a parameter its body
+never reads: TestMain, a test, a benchmark, a fuzz test, a fuzz target a fuzz test
+passes to Fuzz, and a function literal a fuzz test passes to Fuzz. An example takes
+no parameter. A test-support function takes the testing type a test takes, is
+called by a test and never reads it, and nothing fixes its signature.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+// compute is what every test of the package exercises.
+func compute(n int) int {
+	return n * 2
+}
+
+func main() {
+	println(compute(1))
+}
+-- testsupport/testsupport.go --
+package testsupport
+
+import "testing"
+
+// Check takes the testing type a test takes and never reads it.
+func Check(t *testing.T, n int) int {
+	return n * 2
+}
+
+// Target is the fuzz target a fuzz test passes to Fuzz.
+func Target(t *testing.T, data []byte) {
+	_ = len(data)
+}
+-- main_test.go --
+package main
+
+import (
+	"os"
+	"testing"
+
+	"example.com/app/testsupport"
+)
+
+func TestMain(m *testing.M) {
+	os.Exit(0)
+}
+
+func TestCompute(t *testing.T) {
+	_ = compute(2)
+}
+
+func TestChecked(t *testing.T) {
+	println(testsupport.Check(t, compute(3)))
+}
+
+func BenchmarkCompute(b *testing.B) {
+	_ = compute(4)
+}
+
+func FuzzCompute(f *testing.F) {
+	_ = compute(5)
+}
+
+func FuzzTargeted(f *testing.F) {
+	f.Fuzz(testsupport.Target)
+}
+
+func FuzzLiteral(f *testing.F) {
+	f.Fuzz(func(t *testing.T, data []byte) {
+		_ = compute(len(data))
+	})
+}
+
+func ExampleCompute() {
+	println(compute(6))
+}

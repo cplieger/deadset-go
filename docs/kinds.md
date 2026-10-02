@@ -343,8 +343,9 @@ side it prefers.
 
 Three of the six edit a signature, and each reports only where the signature is free to change.
 A signature is not free when an exemption class retained the declaration, when the function is
-used as a value rather than called, when the linker or a foreign caller names it, or when the body
-is a stub that is empty or only panics.
+used as a value rather than called, when the linker or a foreign caller names it, when the test
+driver runs it as a test, a benchmark, a fuzz test or `TestMain`, or when the body is a stub that
+is empty or only panics. A fuzz target passed to `Fuzz` is used as a value.
 
 A published declaration of a library is free whatever the run knows about the library's consumers:
 a parameter or a receiver a body never names is one no caller can make it read. The fixability of
