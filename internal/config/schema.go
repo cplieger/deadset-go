@@ -286,9 +286,9 @@ func editDistance(a, b string) int {
 }
 
 // checkDocument refuses a member the closed key list does not declare, naming its
-// dotted path, and a member one object writes twice, naming the same. A decoder
-// unmarshalling into a struct cannot report the second: the later value replaces
-// the earlier one, so the document reads as though it named the member once.
+// dotted path, a member one object writes twice, and a null value, naming the same.
+// A decoder unmarshalling into a struct cannot report the last two: the later value
+// replaces the earlier one, and a null reads as the member's absence.
 func checkDocument(data []byte, label string) *Error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	if err := walkValue(dec, "", schemaRoot(), label); err != nil {
@@ -301,11 +301,19 @@ func checkDocument(data []byte, label string) *Error {
 }
 
 // walkValue reads the one value at the decoder's position, checking it and its
-// descendants against node. at is the dotted path of that value.
+// descendants against node. at is the dotted path of that value. A null is refused
+// wherever it sits: every value the closed key list declares has a type, and a
+// decoder would read null as the key's absence.
 func walkValue(dec *json.Decoder, at string, node keyNode, label string) *Error {
 	token, err := dec.Token()
 	if err != nil {
 		return malformed(label, at, "%s", err)
+	}
+	if token == nil {
+		if at == "" {
+			return malformed(label, "", "want one JSON object, got null")
+		}
+		return malformed(label, at, "holds null; a document that leaves a setting to its default omits it")
 	}
 	delim, isDelim := token.(json.Delim)
 	if !isDelim {

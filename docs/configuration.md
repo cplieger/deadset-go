@@ -67,12 +67,25 @@ Reporting.
 | `reporters.max_findings` | integer | `0` | The most findings a rendering prints, `0` being all of them. The report names the number omitted |
 | `reporters.fail_on` | `allow`, `warn`, `deny` | `deny` | The lowest severity that fails the run. A finding at `allow` is never reported, so `allow` fails on what `warn` fails on |
 
-Four further keys exist and this analyzer has nothing to read in them. `contract_version` names the
-contract version a configuration is written against, and an absent key means this analyzer's own.
-`go` is the section this analyzer owns and it declares no key of its own in this contract version.
-`providers` is the orchestrator's list of the analyzers it runs, and `ts` is the TypeScript
-analyzer's section: this analyzer validates both and prints them in the resolved configuration, so
-a document that one product refuses every product refuses.
+Keys this analyzer reads nothing from. It validates each one and prints it in the resolved
+configuration, so a document that one product refuses every product refuses.
+
+| Key | Type | Default | What it is |
+| --- | --- | --- | --- |
+| `contract_version` | semantic version | this analyzer's contract version | The contract version a configuration is written against. An absent key means this analyzer's own |
+| `analysis.languages` | array of `go`, `ts` | `[]` | The orchestrator's: the languages in scope. An empty array means the orchestrator detects them from the target tree |
+| `providers.analyzers` | array of objects | `deadset-go` and `deadset-ts` | The orchestrator's: the analyzers it runs. An entry names a `name`, its `languages` and a `command`, and an entry the orchestrator acquires also names a `source`, a `version` and a `digest` |
+| `ts.test_files` | array of strings | `["**/*.test.{ts,tsx,mts,cts}"]` | The TypeScript analyzer's: glob patterns naming its test files |
+| `ts.entry_files` | array of strings | `[]` | The TypeScript analyzer's: glob patterns naming files whose exports are roots |
+| `ts.injection_registrations` | array of declaration entries | `[]` | The TypeScript analyzer's: the declarations whose call registers a class with a dependency-injection container |
+| `ts.lifecycle_contracts` | array of objects | `[]` | The TypeScript analyzer's: one framework's lifecycle contract per entry, naming its `components`, its `bases` and the `members` the framework calls |
+| `ts.serializers` | array of declaration entries | `[]` | The TypeScript analyzer's: the declarations whose call reads its arguments' data members by name |
+
+A declaration entry names one declaration by `symbol`, by `module` and `name`, or by `global`; the
+contract's
+[configuration schema](https://github.com/cplieger/deadset-spec/blob/v3.2.0/contract/config.schema.json)
+states each shape. `go` is the section this analyzer owns, and it declares no key in this contract
+version.
 
 A pattern in `roots.patterns` is matched against the reference of every symbol the analysis
 enumerates: `*` matches any run of characters including the solidus, `?` matches exactly one

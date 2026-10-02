@@ -436,6 +436,115 @@ func TestResolveRefusesADuplicateMember(t *testing.T) {
 	}
 }
 
+func TestResolveRefusesANullWhereverItSits(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		flags      string
+		repository string
+		central    string
+		key        string
+	}{
+		{name: "the_document", repository: `null`, key: ""},
+		{
+			name:       "a_root_setting",
+			repository: `{"contract_version": null, "target": {"kind": "library"}}`,
+			key:        "contract_version",
+		},
+		{name: "a_section", repository: `{"target": {"kind": "library"}, "analysis": null}`, key: "analysis"},
+		{name: "a_section_declaring_no_key", repository: `{"target": {"kind": "library"}, "go": null}`, key: "go"},
+		{name: "an_enumerated_setting", repository: `{"target": {"kind": null}}`, key: "target.kind"},
+		{
+			name:       "a_boolean_setting",
+			repository: `{"target": {"kind": "library"}, "consumers": {"complete": null}}`,
+			key:        "consumers.complete",
+		},
+		{
+			name:       "an_integer_setting",
+			repository: `{"target": {"kind": "library"}, "reporters": {"max_findings": null}}`,
+			key:        "reporters.max_findings",
+		},
+		{
+			name:       "an_array_setting",
+			repository: `{"target": {"kind": "library"}, "analysis": {"languages": null}}`,
+			key:        "analysis.languages",
+		},
+		{
+			name:       "an_array_entry",
+			repository: `{"target": {"kind": "library"}, "roots": {"patterns": ["go://example.com/app#Serve", null]}}`,
+			key:        "roots.patterns[1]",
+		},
+		{
+			name:       "a_setting_written_as_an_object",
+			repository: `{"target": {"kind": "library"}, "analysis": {"template_delimiters": null}}`,
+			key:        "analysis.template_delimiters",
+		},
+		{
+			name:       "a_member_of_a_setting_written_as_an_object",
+			repository: `{"target": {"kind": "library"}, "analysis": {"template_delimiters": {"left": null, "right": "]]"}}}`,
+			key:        "analysis.template_delimiters.left",
+		},
+		{
+			name:       "a_list_entry",
+			repository: `{"target": {"kind": "library"}, "analysis": {"configurations": [null]}}`,
+			key:        "analysis.configurations[0]",
+		},
+		{
+			name:       "a_member_of_a_list_entry",
+			repository: `{"target": {"kind": "library"}, "ts": {"serializers": [{"symbol": null, "global": "x"}]}}`,
+			key:        "ts.serializers[0].symbol",
+		},
+		{
+			name: "a_member_of_a_list_entry_inside_a_list_entry",
+			repository: `{"target": {"kind": "library"}, "ts": {"lifecycle_contracts": [
+				{"bases": [{"global": null}], "members": ["connectedCallback"]}]}}`,
+			key: "ts.lifecycle_contracts[0].bases[0].global",
+		},
+		{
+			name:       "a_severity_code",
+			repository: `{"target": {"kind": "library"}, "severity": {"DS1101": null}}`,
+			key:        "severity.DS1101",
+		},
+		{
+			name:       "a_provenance_entry",
+			repository: `{"target": {"kind": "library"}, "provenance": {"target.kind": null}}`,
+			key:        "provenance.target.kind",
+		},
+		{
+			name:       "in_the_central_configuration",
+			repository: `{"target": {"kind": "library"}}`,
+			central:    `{"reporters": {"sort": null}}`,
+			key:        "reporters.sort",
+		},
+		{
+			name:       "in_the_flag_document",
+			flags:      `{"reporters.sort": null}`,
+			repository: `{"target": {"kind": "library"}}`,
+			key:        "reporters.sort",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, _, err := config.Resolve(labelled(tc.flags, tc.repository, tc.central, map[string]string{"reporters.sort": "--sort"}))
+			var refusal *config.Error
+			if !errors.As(err, &refusal) {
+				t.Fatalf("Resolve(%s) = error %v, want a *config.Error", tc.name, err)
+			}
+			if refusal.Kind != config.KindMalformed {
+				t.Errorf("Resolve(%s) = kind %v, want %v", tc.name, refusal.Kind, config.KindMalformed)
+			}
+			if refusal.Key != tc.key {
+				t.Errorf("Resolve(%s) named %q, want %q", tc.name, refusal.Key, tc.key)
+			}
+			assertMessageNames(t, tc.name, refusal, []string{"null"})
+		})
+	}
+}
+
 func TestResolveSeverityPerCode(t *testing.T) {
 	t.Parallel()
 
