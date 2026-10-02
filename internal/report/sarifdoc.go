@@ -34,6 +34,9 @@ type sarifDriver struct {
 type sarifRule struct {
 	ID                   string              `json:"id"`
 	Name                 string              `json:"name"`
+	ShortDescription     sarifMessage        `json:"shortDescription"`
+	FullDescription      sarifMessage        `json:"fullDescription"`
+	Help                 sarifMessage        `json:"help"`
 	DefaultConfiguration sarifConfiguration  `json:"defaultConfiguration"`
 	Properties           sarifRuleProperties `json:"properties"`
 }

@@ -317,6 +317,52 @@ func TestAnalyzeRefusesTheTemplateRenderingWithNoTemplate(t *testing.T) {
 	}
 }
 
+func TestAnalyzeRefusesAnUnparseableTemplateBeforeAnyAnalysis(t *testing.T) {
+	tests := []struct {
+		name    string
+		formats []string
+	}{
+		{name: "the_template_rendering_asked_for"},
+		{name: "no_rendering_reads_the_template", formats: []string{"--format=json"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := findingsFixture(t, `{"target": {"kind": "application"}, "reporters": {"formats": ["template"]}}`)
+			templatePath := writeDocument(t, dir, "unclosed.tmpl", "{{ .Totals")
+			got := runAnalyze(t, dir, append([]string{"--template=" + templatePath}, tc.formats...)...)
+
+			if want := contractExitCodes(t)["usage"]; got.code != want {
+				t.Errorf("analyze --template=unclosed.tmpl %v = %d, want %d\nstderr: %s", tc.formats, got.code, want, got.stderr)
+			}
+			if !strings.Contains(got.stderr, "unclosed.tmpl") || !strings.Contains(got.stderr, "parse the template") {
+				t.Errorf("analyze stderr = %q, want it to name the template and the parse it failed", got.stderr)
+			}
+			if _, err := os.Stat(got.reportPath); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("analyze wrote a report before refusing the template, want the refusal to cost no analysis: %v", err)
+			}
+		})
+	}
+}
+
+func TestAnalyzeExitsWithFailureWhenTheTemplateFailsToRender(t *testing.T) {
+	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
+	templatePath := writeDocument(t, dir, "absent-field.tmpl", "{{ .Totals.Findings }} {{ .Invented }}\n")
+	got := runAnalyze(t, dir, "--format=template", "--template="+templatePath)
+
+	if want := contractExitCodes(t)["failure"]; got.code != want {
+		t.Errorf("analyze with a template naming an absent field = %d, want %d\nstderr: %s", got.code, want, got.stderr)
+	}
+	if !strings.Contains(got.stderr, "Invented") {
+		t.Errorf("analyze stderr = %q, want it to name what the template named and the report does not carry", got.stderr)
+	}
+	if envelope := envelopeAt(t, got.reportPath); envelope.Totals.Findings == 0 {
+		t.Error("the report the run wrote before the rendering failed holds no finding, want the run's report")
+	}
+	if _, err := os.Stat(got.reportPath + renderings[config.Template].suffix); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("analyze wrote the template rendering that failed, want none: %v", err)
+	}
+}
+
 func TestAnalyzeWritesTheBaselineOfEveryFindingOfTheRun(t *testing.T) {
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
 	baseline := filepath.Join(t.TempDir(), "deadset-baseline.json")

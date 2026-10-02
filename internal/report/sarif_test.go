@@ -92,13 +92,14 @@ func TestTheRuleListIsTheWholeVocabulary(t *testing.T) {
 }
 
 // TestTheRuleCarriesTheVocabularysDefaults pins the members of a rule this analyzer
-// reads from the vocabulary: the kind's name, the level its default severity maps to,
-// the precision its confidence ceiling maps to, and the problem severity a consumer
-// combines with that precision.
+// reads from the vocabulary: the kind's name, the descriptions its rule text renders,
+// the level its default severity maps to, the precision its confidence ceiling maps
+// to, and the problem severity a consumer combines with that precision.
 func TestTheRuleCarriesTheVocabularysDefaults(t *testing.T) {
 	in := minimalInput()
 	envelope := built(t, &in)
 	run := &sarifOf(t, &envelope, Options{Read: lines()}).Runs[0]
+	published := publishedRuleTexts(t)
 
 	for _, rule := range run.Tool.Driver.Rules {
 		row, live := catalog.Kind(rule.ID)
@@ -106,9 +107,21 @@ func TestTheRuleCarriesTheVocabularysDefaults(t *testing.T) {
 			t.Errorf("the rules name %s, which the vocabulary holds no live row for", rule.ID)
 			continue
 		}
+		text := published[rule.ID]
+		help := text.rule
+		if text.precondition != "" {
+			help += "\n\n" + text.precondition
+		}
+		if !strings.HasPrefix(text.rule, rule.ShortDescription.Text) || !strings.HasSuffix(rule.ShortDescription.Text, ".") {
+			t.Errorf("the rule for %s has the short description %q, want a sentence opening its rule %q",
+				rule.ID, rule.ShortDescription.Text, text.rule)
+		}
 		want := sarifRule{
 			ID:                   row.Code,
 			Name:                 row.Name,
+			ShortDescription:     rule.ShortDescription,
+			FullDescription:      sarifMessage{Text: text.rule},
+			Help:                 sarifMessage{Text: help},
 			DefaultConfiguration: sarifConfiguration{Level: levelOf(config.Severity(row.DefaultSeverity))},
 			Properties: sarifRuleProperties{
 				Precision: precisionOf(row.MaxClass),
@@ -201,6 +214,93 @@ func TestTheUriEncodesEachSegment(t *testing.T) {
 	want := "the field is written and never read (see [write odd dir/a b.go:9:3](1))"
 	if result.Message.Text != want {
 		t.Errorf("message.text = %q, want %q", result.Message.Text, want)
+	}
+}
+
+// TestTheUriEncodesAColonInTheFirstSegment pins that a colon a reader would take
+// for the end of a scheme is percent-encoded in the first segment and written as
+// itself in any later one, where no reader takes it for one.
+func TestTheUriEncodesAColonInTheFirstSegment(t *testing.T) {
+	tests := []struct {
+		name, path, wantURI string
+	}{
+		{name: "a_file_at_the_root", path: "a:b.go", wantURI: "a%3Ab.go"},
+		{name: "a_directory_at_the_root", path: "c:/a.go", wantURI: "c%3A/a.go"},
+		{name: "a_file_below_the_root", path: "dir/a:b.go", wantURI: "dir/a:b.go"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			found := findingOf("DS1301", "write-only-symbol", tc.path, 4, 8,
+				config.Deny, "deletable", "the field is written and never read")
+			found.Details.WritePositions = []kinds.Position{{Path: tc.path, Line: 9, Column: 3, EndLine: 9}}
+			in := minimalInput()
+			in.Result.Findings = []kinds.Finding{found}
+			envelope := built(t, &in)
+			result := &sarifOf(t, &envelope, Options{Read: lines()}).Runs[0].Results[0]
+
+			if got := result.Locations[0].PhysicalLocation.ArtifactLocation.URI; got != tc.wantURI {
+				t.Errorf("artifactLocation.uri of %q = %q, want %q", tc.path, got, tc.wantURI)
+			}
+			if got := result.RelatedLocations[0].PhysicalLocation.ArtifactLocation.URI; got != tc.wantURI {
+				t.Errorf("relatedLocations[0].artifactLocation.uri of %q = %q, want %q", tc.path, got, tc.wantURI)
+			}
+			if want := "[write " + tc.path + ":9:3](1)"; !strings.Contains(result.Message.Text, want) {
+				t.Errorf("message.text = %q, want the link %q naming the path a reader recognises",
+					result.Message.Text, want)
+			}
+		})
+	}
+}
+
+// TestTheRuleDescribesTheKind pins the three descriptions of two rules whole: one
+// whose kind declares no precondition and one whose kind declares one.
+func TestTheRuleDescribesTheKind(t *testing.T) {
+	in := minimalInput()
+	envelope := built(t, &in)
+	run := &sarifOf(t, &envelope, Options{Read: lines()}).Runs[0]
+	rules := make(map[string]sarifRule, len(run.Tool.Driver.Rules))
+	for _, rule := range run.Tool.Driver.Rules {
+		rules[rule.ID] = rule
+	}
+
+	tests := []struct {
+		code              string
+		short, full, help string
+	}{
+		{
+			code:  "DS1002",
+			short: "An unexported symbol with no reference in the target.",
+			full: "An unexported symbol with no reference in the target. " +
+				"A symbol referenced only from its own declaration site counts as unreferenced.",
+			help: "An unexported symbol with no reference in the target. " +
+				"A symbol referenced only from its own declaration site counts as unreferenced.",
+		},
+		{
+			code:  "DS1802",
+			short: "A named method receiver with no reference inside the method body, on a method whose signature is free to change.",
+			full: "A named method receiver with no reference inside the method body, on a method whose signature is free to change. " +
+				"Go permits a method with no receiver name, so the fix deletes an identifier and changes no signature.",
+			help: "A named method receiver with no reference inside the method body, on a method whose signature is free to change. " +
+				"Go permits a method with no receiver name, so the fix deletes an identifier and changes no signature.\n\n" +
+				"The same free-signature rule as unused-parameter, applied to the receiver.",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.code, func(t *testing.T) {
+			rule, held := rules[tc.code]
+			if !held {
+				t.Fatalf("the rules name no %s", tc.code)
+			}
+			if rule.ShortDescription.Text != tc.short {
+				t.Errorf("shortDescription.text of %s = %q, want %q", tc.code, rule.ShortDescription.Text, tc.short)
+			}
+			if rule.FullDescription.Text != tc.full {
+				t.Errorf("fullDescription.text of %s = %q, want %q", tc.code, rule.FullDescription.Text, tc.full)
+			}
+			if rule.Help.Text != tc.help {
+				t.Errorf("help.text of %s = %q, want %q", tc.code, rule.Help.Text, tc.help)
+			}
+		})
 	}
 }
 

@@ -1,6 +1,7 @@
 package report
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,12 +18,33 @@ const jsonIndent = "  "
 // an envelope refuses a member the schema does not declare and yields the same
 // bytes again.
 func JSON(w io.Writer, e *Envelope, _ Options) error {
-	encoded, err := json.MarshalIndent(e, "", jsonIndent)
-	if err != nil {
-		return fmt.Errorf("report: write the report document: %w", err)
-	}
-	if _, err := w.Write(append(encoded, '\n')); err != nil {
+	if err := writeDocument(w, e); err != nil {
 		return fmt.Errorf("report: write the report document: %w", err)
 	}
 	return nil
+}
+
+// writeDocument writes one document as indented JSON with a closing newline.
+func writeDocument(w io.Writer, v any) error {
+	encoded, err := encoded(v, jsonIndent)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(encoded)
+	return err
+}
+
+// encoded is one value as JSON with a closing newline, indented by indent or compact
+// where indent is empty. A string escapes what strict JSON requires and the line and
+// paragraph separators, and writes every other character as itself, `<`, `>` and `&`
+// included.
+func encoded(v any, indent string) ([]byte, error) {
+	var written bytes.Buffer
+	encoder := json.NewEncoder(&written)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", indent)
+	if err := encoder.Encode(v); err != nil {
+		return nil, err
+	}
+	return written.Bytes(), nil
 }

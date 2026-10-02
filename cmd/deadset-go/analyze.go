@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"text/template"
 
 	"github.com/cplieger/deadset-go/internal/config"
 	"github.com/cplieger/deadset-go/internal/kinds"
@@ -110,8 +111,8 @@ func (l *formatList) Set(value string) error {
 // of those renderings reads, the path a baseline of the run is written to, and
 // whether the exit code carries the verdict.
 type invocation struct {
+	template      *template.Template
 	report        string
-	template      string
 	baselineWrite string
 	formats       formatList
 	exitCodeOff   bool
@@ -167,7 +168,7 @@ func analyzeFlags(args []string, stderr io.Writer) (asked invocation, resolved r
 	flags := configuredFlagSet("analyze", analyzeUsage, stderr, true)
 	flags.set.StringVar(&asked.report, "report", "", "the path the JSON report is written to")
 	flags.set.Var(&asked.formats, "format", "one rendering written beside the report, repeatable; one of "+formatNames())
-	template := flags.set.String("template", "", "the file holding the template the template rendering reads")
+	templatePath := flags.set.String("template", "", "the file holding the template the template rendering reads")
 	flags.set.StringVar(&asked.baselineWrite, "baseline-write", "",
 		"the path a baseline recording every finding of this run is written to")
 	exitCode := flags.set.String("exit-code", exitCodeOn,
@@ -198,7 +199,7 @@ func analyzeFlags(args []string, stderr io.Writer) (asked invocation, resolved r
 	if len(asked.formats) == 0 {
 		asked.formats = slices.Clone(resolved.config.Reporters.Formats)
 	}
-	if err := asked.read(*template); err != nil {
+	if err := asked.read(*templatePath); err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
 		flags.set.Usage()
 		return invocation{}, resolution{}, exitUsage
@@ -227,13 +228,11 @@ func (a *invocation) request(exitCode string) error {
 }
 
 // read completes the renderings the run writes and reads the template one of them
-// needs.
-//
-// It runs after the resolution, because the renderings are the resolved
+// needs. It runs after the resolution, because the renderings are the resolved
 // configuration's where the invocation named none. A format this analyzer renders
-// nothing for is refused wherever it came from, and the template rendering without a
-// template is refused before the analysis runs rather than after it, so neither
-// costs a load.
+// nothing for is refused wherever it came from, a template the invocation names is
+// read and parsed whether or not a rendering reads it, and the template rendering
+// without a template is refused, all before the analysis runs, so none costs a load.
 func (a *invocation) read(templatePath string) error {
 	for _, format := range a.formats {
 		if _, held := renderings[format]; !held {
@@ -246,7 +245,11 @@ func (a *invocation) read(templatePath string) error {
 		if err != nil {
 			return err
 		}
-		a.template = string(body)
+		parsed, err := report.ParseTemplate(string(body))
+		if err != nil {
+			return fmt.Errorf("%s: %w", templatePath, err)
+		}
+		a.template = parsed
 	}
 	if slices.Contains(a.formats, config.Template) && templatePath == "" {
 		return errors.New("the template rendering reads the template --template names, and no path was named")

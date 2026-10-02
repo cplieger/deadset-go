@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/internal/config"
+	spec "github.com/cplieger/deadset-spec/v3"
 )
 
 // The shape a documentation entry takes, pinned here so that a page and this test
@@ -105,6 +106,68 @@ func TestEveryExemptionClassHasADocumentationEntry(t *testing.T) {
 		t.Errorf("docs/exemptions.md documents the classes %v, want the %d the detectors table computes: %v",
 			documented, len(want), want)
 	}
+}
+
+// TestEveryConfigurationKeyHasADocumentationEntry reads the configuration page and
+// refuses a key the configuration schema declares that the page never names.
+//
+// A key's entry is its dotted path in backticks, wherever on the page it sits: the
+// page names the keys this analyzer reads and the keys it reads nothing from, so
+// every key a document may carry is one a reader can look up.
+func TestEveryConfigurationKeyHasADocumentationEntry(t *testing.T) {
+	t.Parallel()
+
+	page := docPage(t, "configuration.md")
+	keys := configurationKeys(t)
+	for _, key := range keys {
+		if !strings.Contains(page, "`"+key+"`") {
+			t.Errorf("docs/configuration.md names none of %s, which contract/config.schema.json declares among its %d keys",
+				key, len(keys))
+		}
+	}
+}
+
+// schemaNode is the part of one configuration schema node the key walk reads: the
+// members it declares, and whether it is one setting written as an object.
+type schemaNode struct {
+	Properties map[string]schemaNode `json:"properties"`
+	Type       string                `json:"type"`
+	Setting    bool                  `json:"x-setting"`
+}
+
+// configurationKeys is every key the configuration schema declares, as a dotted
+// path, in ascending order. An object declaring members is a section and its members
+// are the keys, except an object that is one setting; a section declaring no member
+// is a key of its own.
+func configurationKeys(t *testing.T) []string {
+	t.Helper()
+
+	body, err := spec.Contract.ReadFile("contract/config.schema.json")
+	if err != nil {
+		t.Fatalf("Setup: read contract/config.schema.json: %v", err)
+	}
+	var root schemaNode
+	if err := json.Unmarshal(body, &root); err != nil {
+		t.Fatalf("Setup: decode contract/config.schema.json: %v", err)
+	}
+	var keys []string
+	var walk func(prefix string, node schemaNode)
+	walk = func(prefix string, node schemaNode) {
+		for name, member := range node.Properties {
+			key := prefix + name
+			if member.Type != "object" || member.Setting || len(member.Properties) == 0 {
+				keys = append(keys, key)
+				continue
+			}
+			walk(key+".", member)
+		}
+	}
+	walk("", root)
+	if len(keys) == 0 {
+		t.Fatal("Setup: contract/config.schema.json declares no key, so this test pins nothing")
+	}
+	slices.Sort(keys)
+	return keys
 }
 
 // TestEveryDeclaredGapIsDocumented reads the committed declared-gap file and

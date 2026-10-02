@@ -263,7 +263,8 @@ type wireBySeverity struct {
 // The method is on the pointer, as every other method of the envelope is, so an
 // envelope is marshalled through one.
 func (e *Envelope) MarshalJSON() ([]byte, error) {
-	return json.Marshal(e.wire())
+	written, err := encoded(e.wire(), "")
+	return bytes.TrimSuffix(written, []byte("\n")), err
 }
 
 // UnmarshalJSON reads one report document this analyzer wrote, refusing a member

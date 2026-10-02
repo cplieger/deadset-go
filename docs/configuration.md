@@ -127,7 +127,7 @@ Five flags supply a setting and outrank both configuration files for it:
 
 The rest are the invocation's own and commit nothing to a configuration file: `--report` names the
 path the JSON report is written to, `--format` names one rendering written beside it and repeats,
-`--template` names the file the template rendering reads, `--baseline-write` names the path a
+`--template` names the file the template rendering reads (a file that cannot be read or does not parse refuses the invocation with 2 before any analysis, and a rendering that fails exits 3 with the report already written), `--baseline-write` names the path a
 baseline recording every finding of the run is written to, and `--exit-code=off` writes every
 document and exits clean. `print-retained` takes `--mode=production` or `--mode=plain`.
 

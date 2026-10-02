@@ -12,6 +12,15 @@
             {
               "id": "DS1001",
               "name": "unused-exported",
+              "shortDescription": {
+                "text": "An exported symbol with no reference in the target and no reference from any loaded consumer."
+              },
+              "fullDescription": {
+                "text": "An exported symbol with no reference in the target and no reference from any loaded consumer. A symbol referenced only from its own declaration site counts as unreferenced."
+              },
+              "help": {
+                "text": "An exported symbol with no reference in the target and no reference from any loaded consumer. A symbol referenced only from its own declaration site counts as unreferenced."
+              },
               "defaultConfiguration": {
                 "level": "error"
               },
@@ -25,6 +34,15 @@
             {
               "id": "DS1002",
               "name": "unused-unexported",
+              "shortDescription": {
+                "text": "An unexported symbol with no reference in the target."
+              },
+              "fullDescription": {
+                "text": "An unexported symbol with no reference in the target. A symbol referenced only from its own declaration site counts as unreferenced."
+              },
+              "help": {
+                "text": "An unexported symbol with no reference in the target. A symbol referenced only from its own declaration site counts as unreferenced."
+              },
               "defaultConfiguration": {
                 "level": "error"
               },
@@ -38,6 +56,15 @@
             {
               "id": "DS1003",
               "name": "unused-member",
+              "shortDescription": {
+                "text": "A struct field, class member or type member with no reference, a private member included."
+              },
+              "fullDescription": {
+                "text": "A struct field, class member or type member with no reference, a private member included. A member referenced only from its own declaration site counts as unreferenced."
+              },
+              "help": {
+                "text": "A struct field, class member or type member with no reference, a private member included. A member referenced only from its own declaration site counts as unreferenced."
+              },
               "defaultConfiguration": {
                 "level": "error"
               },
@@ -51,6 +78,15 @@
             {
               "id": "DS1004",
               "name": "test-only-use",
+              "shortDescription": {
+                "text": "A symbol with zero production references and at least one test reference: an unused-exported or unused-unexported candidate whose test reference count is not zero, reported once under this code."
+              },
+              "fullDescription": {
+                "text": "A symbol with zero production references and at least one test reference: an unused-exported or unused-unexported candidate whose test reference count is not zero, reported once under this code. A reference from a consumer's test files is a test reference unless the configuration counts consumer tests as production."
+              },
+              "help": {
+                "text": "A symbol with zero production references and at least one test reference: an unused-exported or unused-unexported candidate whose test reference count is not zero, reported once under this code. A reference from a consumer's test files is a test reference unless the configuration counts consumer tests as production."
+              },
               "defaultConfiguration": {
                 "level": "error"
               },
@@ -64,6 +100,15 @@
             {
               "id": "DS1005",
               "name": "test-of-dead-code",
+              "shortDescription": {
+                "text": "A test symbol whose set of referenced target symbols is non-empty and every member of that set is reported dead."
+              },
+              "fullDescription": {
+                "text": "A test symbol whose set of referenced target symbols is non-empty and every member of that set is reported dead. A test that references at least one live target symbol is never reported, no notion of a test's subject and no name matching enters the rule, and the message states the rule. The test joins the dead component of the symbols it references."
+              },
+              "help": {
+                "text": "A test symbol whose set of referenced target symbols is non-empty and every member of that set is reported dead. A test that references at least one live target symbol is never reported, no notion of a test's subject and no name matching enters the rule, and the message states the rule. The test joins the dead component of the symbols it references."
+              },
               "defaultConfiguration": {
                 "level": "error"
               },
@@ -77,6 +122,15 @@
             {
               "id": "DS1006",
               "name": "deprecated-unused",
+              "shortDescription": {
+                "text": "A symbol carrying a deprecation marker and no production reference: an unused-exported, unused-unexported or unused-member candidate whose symbol is deprecated, reported once under this code."
+              },
+              "fullDescription": {
+                "text": "A symbol carrying a deprecation marker and no production reference: an unused-exported, unused-unexported or unused-member candidate whose symbol is deprecated, reported once under this code. Go identifies the marker by the convention the standard tools recognize, TypeScript by the documentation tag its tools recognize."
+              },
+              "help": {
+                "text": "A symbol carrying a deprecation marker and no production reference: an unused-exported, unused-unexported or unused-member candidate whose symbol is deprecated, reported once under this code. Go identifies the marker by the convention the standard tools recognize, TypeScript by the documentation tag its tools recognize."
+              },
               "defaultConfiguration": {
                 "level": "error"
               },
@@ -90,6 +144,15 @@
             {
               "id": "DS1101",
               "name": "unnecessary-export",
+              "shortDescription": {
+                "text": "An exported symbol whose every reference is inside the symbol's own package or module, reported as a candidate for unexporting."
+              },
+              "fullDescription": {
+                "text": "An exported symbol whose every reference is inside the symbol's own package or module, reported as a candidate for unexporting. The subject is a package-level declaration or a method, and three subjects are excluded: an interface method, whose exportedness is the contract of the interface that declares it; a struct field, which an encoder reads by name; and a method that satisfies an interface some symbol uses as a type, which cannot be unexported without its type ceasing to satisfy that interface. The finding names the narrower visibility the references support. A declared cross-language edge counts as an out-of-package reference; where the edge's other side is unknown to the analyzer the finding is emitted pending."
+              },
+              "help": {
+                "text": "An exported symbol whose every reference is inside the symbol's own package or module, reported as a candidate for unexporting. The subject is a package-level declaration or a method, and three subjects are excluded: an interface method, whose exportedness is the contract of the interface that declares it; a struct field, which an encoder reads by name; and a method that satisfies an interface some symbol uses as a type, which cannot be unexported without its type ceasing to satisfy that interface. The finding names the narrower visibility the references support. A declared cross-language edge counts as an out-of-package reference; where the edge's other side is unknown to the analyzer the finding is emitted pending.\n\nClosed world only. Reported always for a main package and an internal/ directory tree, and for a published package only when the configuration declares the consumer set complete and every declared consumer loads. A library with no consumer loaded and no complete consumer set declared gets this finding on its internal/ tree and its main packages and never on its published API."
+              },
               "defaultConfiguration": {
                 "level": "warning"
               },
@@ -103,6 +166,15 @@
             {
               "id": "DS1102",
               "name": "unnecessary-exposure",
+              "shortDescription": {
+                "text": "An exported symbol of a non-internal package whose every reference is inside the target module, reported as a candidate for relocation behind an internal boundary."
+              },
+              "fullDescription": {
+                "text": "An exported symbol of a non-internal package whose every reference is inside the target module, reported as a candidate for relocation behind an internal boundary. The subject is a package-level declaration or a method, and three subjects are excluded: an interface method, whose exportedness is the contract of the interface that declares it; a struct field, which an encoder reads by name; and a method that satisfies an interface some symbol uses as a type, which cannot be unexported without its type ceasing to satisfy that interface. The finding names the narrower visibility the references support. A declared cross-language edge counts as an out-of-package reference; where the edge's other side is unknown to the analyzer the finding is emitted pending."
+              },
+              "help": {
+                "text": "An exported symbol of a non-internal package whose every reference is inside the target module, reported as a candidate for relocation behind an internal boundary. The subject is a package-level declaration or a method, and three subjects are excluded: an interface method, whose exportedness is the contract of the interface that declares it; a struct field, which an encoder reads by name; and a method that satisfies an interface some symbol uses as a type, which cannot be unexported without its type ceasing to satisfy that interface. The finding names the narrower visibility the references support. A declared cross-language edge counts as an out-of-package reference; where the edge's other side is unknown to the analyzer the finding is emitted pending.\n\nClosed world only. Reported always for a main package and an internal/ directory tree, and for a published package only when the configuration declares the consumer set complete and every declared consumer loads. A library with no consumer loaded and no complete consumer set declared gets this finding on its internal/ tree and its main packages and never on its published API."
+              },
               "defaultConfiguration": {
                 "level": "warning"
               },
@@ -116,6 +188,15 @@
             {
               "id": "DS1103",
               "name": "unreachable-export",
+              "shortDescription": {
+                "text": "An unused exported symbol in a package or file no external code can import: an unused-exported candidate whose enclosing package or file is unimportable from outside, reported once under this code at the certain class, because unimportability is a property of the package graph rather than of the consumer set."
+              },
+              "fullDescription": {
+                "text": "An unused exported symbol in a package or file no external code can import: an unused-exported candidate whose enclosing package or file is unimportable from outside, reported once under this code at the certain class, because unimportability is a property of the package graph rather than of the consumer set."
+              },
+              "help": {
+                "text": "An unused exported symbol in a package or file no external code can import: an unused-exported candidate whose enclosing package or file is unimportable from outside, reported once under this code at the certain class, because unimportability is a property of the package graph rather than of the consumer set."
+              },
               "defaultConfiguration": {
                 "level": "error"
               },
@@ -129,6 +210,15 @@
             {
               "id": "DS1201",
               "name": "unused-interface",
+              "shortDescription": {
+                "text": "An interface no symbol uses as a type, counting uses from every loaded module."
+              },
+              "fullDescription": {
+                "text": "An interface no symbol uses as a type, counting uses from every loaded module. The finding names the concrete implementations and their positions, and the interface's members join its dead component rather than being reported as independent unused declarations."
+              },
+              "help": {
+                "text": "An interface no symbol uses as a type, counting uses from every loaded module. The finding names the concrete implementations and their positions, and the interface's members join its dead component rather than being reported as independent unused declarations."
+              },
               "defaultConfiguration": {
                 "level": "error"
               },
@@ -142,6 +232,15 @@
             {
               "id": "DS1203",
               "name": "uncalled-interface-method",
+              "shortDescription": {
+                "text": "An interface method that no call site invokes or selects through the interface, whatever the number of implementations."
+              },
+              "fullDescription": {
+                "text": "An interface method that no call site invokes or selects through the interface, whatever the number of implementations. The finding names the concrete implementations and their positions."
+              },
+              "help": {
+                "text": "An interface method that no call site invokes or selects through the interface, whatever the number of implementations. The finding names the concrete implementations and their positions.\n\nExempt: every method of an interface that declares an unexported method, the sum-type shape whose method set exists to restrict the implementors; and every marker method, an interface method whose every implementation carries an empty body."
+              },
               "defaultConfiguration": {
                 "level": "warning"
               },
@@ -155,6 +254,15 @@
             {
               "id": "DS1204",
               "name": "unused-satisfaction-assertion",
+              "shortDescription": {
+                "text": "A compile-time satisfaction assertion whose interface no symbol uses as a type."
+              },
+              "fullDescription": {
+                "text": "A compile-time satisfaction assertion whose interface no symbol uses as a type."
+              },
+              "help": {
+                "text": "A compile-time satisfaction assertion whose interface no symbol uses as a type."
+              },
               "defaultConfiguration": {
                 "level": "error"
               },
@@ -168,6 +276,15 @@
             {
               "id": "DS1301",
               "name": "write-only-symbol",
+              "shortDescription": {
+                "text": "A package-level or module-level variable, struct field, class member or collection that production code writes and never reads."
+              },
+              "fullDescription": {
+                "text": "A package-level or module-level variable, struct field, class member or collection that production code writes and never reads. In production mode a read from a test file counts as no read. A comparison of struct values reads every field of the type: in Go, a value of a struct type used as an operand of `==` or `!=`, as a map key, or as a `switch` tag or `case` expression is a read of every field of that type, transitively through the fields of every struct type it holds, recorded at the comparison, because equality reads every field and a field that decides equality carries information. In TypeScript a comparison of two object references reads no member, because `===` compares identity and never a member. The finding names each write position, so the deletion set is visible."
+              },
+              "help": {
+                "text": "A package-level or module-level variable, struct field, class member or collection that production code writes and never reads. In production mode a read from a test file counts as no read. A comparison of struct values reads every field of the type: in Go, a value of a struct type used as an operand of `==` or `!=`, as a map key, or as a `switch` tag or `case` expression is a read of every field of that type, transitively through the fields of every struct type it holds, recorded at the comparison, because equality reads every field and a field that decides equality carries information. In TypeScript a comparison of two object references reads no member, because `===` compares identity and never a member. The finding names each write position, so the deletion set is visible."
+              },
               "defaultConfiguration": {
                 "level": "error"
               },
@@ -181,6 +298,15 @@
             {
               "id": "DS1302",
               "name": "unused-enum-member",
+              "shortDescription": {
+                "text": "An enumerated member that no symbol names, at the reachability class derived for the member and with no confidence ceiling below it."
+              },
+              "fullDescription": {
+                "text": "An enumerated member that no symbol names, at the reachability class derived for the member and with no confidence ceiling below it. Every member of a type that carries a string, text or binary conversion method, or that a conversion from an integer or a wire value produces, is retained by the enum-group exemption first, so a member reached only by value is never a candidate."
+              },
+              "help": {
+                "text": "An enumerated member that no symbol names, at the reachability class derived for the member and with no confidence ceiling below it. Every member of a type that carries a string, text or binary conversion method, or that a conversion from an integer or a wire value produces, is retained by the enum-group exemption first, so a member reached only by value is never a candidate."
+              },
               "defaultConfiguration": {
                 "level": "error"
               },
@@ -194,6 +320,15 @@
             {
               "id": "DS1303",
               "name": "unused-type-parameter",
+              "shortDescription": {
+                "text": "A type parameter of a function or method that no part of the declaration's signature and no part of the declaration's body names, at the certain class."
+              },
+              "fullDescription": {
+                "text": "A type parameter of a function or method that no part of the declaration's signature and no part of the declaration's body names, at the certain class. The deletion is local to the declaration and the explicit instantiations the reference set already lists."
+              },
+              "help": {
+                "text": "A type parameter of a function or method that no part of the declaration's signature and no part of the declaration's body names, at the certain class. The deletion is local to the declaration and the explicit instantiations the reference set already lists.\n\nFunction and method type parameters only. A type parameter of a type declaration is never reported, because a phantom type parameter such as `type ID[T any] int` makes two instantiations distinct types while naming the parameter nowhere, so deleting it changes the program."
+              },
               "defaultConfiguration": {
                 "level": "error"
               },
@@ -207,6 +342,15 @@
             {
               "id": "DS1501",
               "name": "file-never-built",
+              "shortDescription": {
+                "text": "A source file no configuration in the build matrix builds."
+              },
+              "fullDescription": {
+                "text": "A source file no configuration in the build matrix builds. On the Go side the finding names the build constraint that excluded the file. A file whose build constraint is the ignore tag is never reported: the toolchain applies no build constraint to a file named on its own command line, so that tag is the toolchain's convention for a file built by hand. A file any other custom tag excludes is reported under a matrix the configuration declares complete, because completeness is the maintainer's assertion that the listed configurations are every one the target builds, and a configuration the maintainer builds by hand belongs in that list."
+              },
+              "help": {
+                "text": "A source file no configuration in the build matrix builds. On the Go side the finding names the build constraint that excluded the file. A file whose build constraint is the ignore tag is never reported: the toolchain applies no build constraint to a file named on its own command line, so that tag is the toolchain's convention for a file built by hand. A file any other custom tag excludes is reported under a matrix the configuration declares complete, because completeness is the maintainer's assertion that the listed configurations are every one the target builds, and a configuration the maintainer builds by hand belongs in that list.\n\nReported only when the configuration declares the build matrix complete, and never for a file the toolchain ignored solely because it imports \"C\" under a build with cgo disabled; such a file is recorded as excluded by cgo rather than as never built."
+              },
               "defaultConfiguration": {
                 "level": "error"
               },
@@ -220,6 +364,15 @@
             {
               "id": "DS1502",
               "name": "file-never-imported",
+              "shortDescription": {
+                "text": "A source file that no import reaches, that no root names, and in which no declared cross-language edge names a declaration."
+              },
+              "fullDescription": {
+                "text": "A source file that no import reaches, that no root names, and in which no declared cross-language edge names a declaration. An edge's side names a declaration as a root names one, so a file holding a declaration an edge names is evaluated with the edge rather than reported: whether that declaration is dead is the edge evaluation's to say, and the merge resolves it against the paired side."
+              },
+              "help": {
+                "text": "A source file that no import reaches, that no root names, and in which no declared cross-language edge names a declaration. An edge's side names a declaration as a root names one, so a file holding a declaration an edge names is evaluated with the edge rather than reported: whether that declaration is dead is the edge evaluation's to say, and the merge resolves it against the paired side."
+              },
               "defaultConfiguration": {
                 "level": "error"
               },
@@ -233,6 +386,15 @@
             {
               "id": "DS1601",
               "name": "unused-dependency",
+              "shortDescription": {
+                "text": "A directly declared dependency that no import in the target needs."
+              },
+              "fullDescription": {
+                "text": "A directly declared dependency that no import in the target needs. On the Go side, a direct require whose module provides no package any target package or test variant imports. On the TypeScript side, a manifest dependency, development dependency or peer dependency the project's import closure does not need. A deletion finding whose fix would remove the last use of a dependency names that dependency."
+              },
+              "help": {
+                "text": "A directly declared dependency that no import in the target needs. On the Go side, a direct require whose module provides no package any target package or test variant imports. On the TypeScript side, a manifest dependency, development dependency or peer dependency the project's import closure does not need. A deletion finding whose fix would remove the last use of a dependency names that dependency.\n\nOn the Go side the rule is the semantics of `go mod tidy -diff` exactly: a requirement marked indirect is never reported, because it exists to pin a transitive version and removing it changes the build list."
+              },
               "defaultConfiguration": {
                 "level": "error"
               },
@@ -246,6 +408,15 @@
             {
               "id": "DS1605",
               "name": "unused-module-directive",
+              "shortDescription": {
+                "text": "A replace directive whose target module is absent from the build list, the one case in which the directive is exactly a no-op."
+              },
+              "fullDescription": {
+                "text": "A replace directive whose target module is absent from the build list, the one case in which the directive is exactly a no-op."
+              },
+              "help": {
+                "text": "A replace directive whose target module is absent from the build list, the one case in which the directive is exactly a no-op.\n\nOnly a replace whose target is absent from the build list. No other module-file directive is reported: not an exclude directive, because not selected is a counterfactual about a resolution that did not happen; not a workspace use entry and not a tool directive, because each is an external entry point whose invocation lives outside anything the analysis reads."
+              },
               "defaultConfiguration": {
                 "level": "warning"
               },
@@ -259,6 +430,15 @@
             {
               "id": "DS1701",
               "name": "suppression-without-reason",
+              "shortDescription": {
+                "text": "A suppression that carries no reason, in any of the three documents: an inline directive, an ignore-file entry or a baseline row."
+              },
+              "fullDescription": {
+                "text": "A suppression that carries no reason, in any of the three documents: an inline directive, an ignore-file entry or a baseline row. For the ignore file and the baseline, an entry or a row whose reason field is absent, empty or whitespace only is refused and reported rather than matched."
+              },
+              "help": {
+                "text": "A suppression that carries no reason, in any of the three documents: an inline directive, an ignore-file entry or a baseline row. For the ignore file and the baseline, an entry or a row whose reason field is absent, empty or whitespace only is refused and reported rather than matched."
+              },
               "defaultConfiguration": {
                 "level": "error"
               },
@@ -272,6 +452,15 @@
             {
               "id": "DS1702",
               "name": "unscoped-ignore-entry",
+              "shortDescription": {
+                "text": "An ignore-file entry or a baseline row that names a symbol and no file path."
+              },
+              "fullDescription": {
+                "text": "An ignore-file entry or a baseline row that names a symbol and no file path. The entry is reported rather than matched, so a bare name cannot mask a match anywhere else in the project; the inline directive is scoped by its position and cannot be unscoped."
+              },
+              "help": {
+                "text": "An ignore-file entry or a baseline row that names a symbol and no file path. The entry is reported rather than matched, so a bare name cannot mask a match anywhere else in the project; the inline directive is scoped by its position and cannot be unscoped."
+              },
               "defaultConfiguration": {
                 "level": "error"
               },
@@ -285,6 +474,15 @@
             {
               "id": "DS1703",
               "name": "stale-suppression",
+              "shortDescription": {
+                "text": "A suppression that matches no current finding, at either mechanism and in the baseline alike."
+              },
+              "fullDescription": {
+                "text": "A suppression that matches no current finding, at either mechanism and in the baseline alike. The run exits with the findings code when at least one is reported. The kind is fixed on at deny: no flag, no severity setting and no per-mechanism exception reduces it below a finding, and a configuration naming this code under a severity key is an unimplemented key."
+              },
+              "help": {
+                "text": "A suppression that matches no current finding, at either mechanism and in the baseline alike. The run exits with the findings code when at least one is reported. The kind is fixed on at deny: no flag, no severity setting and no per-mechanism exception reduces it below a finding, and a configuration naming this code under a severity key is an unimplemented key."
+              },
               "defaultConfiguration": {
                 "level": "error"
               },
@@ -298,6 +496,15 @@
             {
               "id": "DS1704",
               "name": "unmatched-root",
+              "shortDescription": {
+                "text": "A configured root that matches no symbol, or a configured root pattern that matches no symbol."
+              },
+              "fullDescription": {
+                "text": "A configured root that matches no symbol, or a configured root pattern that matches no symbol. A root set nobody checks silently changes every result, so a stale one is a finding. The kind is fixed on at deny: no flag, no severity setting and no exception reduces it below a finding, and a configuration naming this code under a severity key is an unimplemented key."
+              },
+              "help": {
+                "text": "A configured root that matches no symbol, or a configured root pattern that matches no symbol. A root set nobody checks silently changes every result, so a stale one is a finding. The kind is fixed on at deny: no flag, no severity setting and no exception reduces it below a finding, and a configuration naming this code under a severity key is an unimplemented key."
+              },
               "defaultConfiguration": {
                 "level": "error"
               },
@@ -311,6 +518,15 @@
             {
               "id": "DS1705",
               "name": "stale-cross-language-edge",
+              "shortDescription": {
+                "text": "A declared cross-language edge with a side that at least one analyzer evaluated and every evaluation of that side reports absent, so no analyzer that ran enumerates that side's symbol."
+              },
+              "fullDescription": {
+                "text": "A declared cross-language edge with a side that at least one analyzer evaluated and every evaluation of that side reports absent, so no analyzer that ran enumerates that side's symbol. Emitted by the merge, once per edge, never by an analyzer, so a stale edge is visible rather than silently inert. A dead side paired with an absent side drops its pending finding, and the edge is the reported defect: a misspelled reference must not turn a live pairing into a deletion."
+              },
+              "help": {
+                "text": "A declared cross-language edge with a side that at least one analyzer evaluated and every evaluation of that side reports absent, so no analyzer that ran enumerates that side's symbol. Emitted by the merge, once per edge, never by an analyzer, so a stale edge is visible rather than silently inert. A dead side paired with an absent side drops its pending finding, and the edge is the reported defect: a misspelled reference must not turn a live pairing into a deletion."
+              },
               "defaultConfiguration": {
                 "level": "error"
               },
@@ -324,6 +540,15 @@
             {
               "id": "DS1801",
               "name": "unused-parameter",
+              "shortDescription": {
+                "text": "A parameter with no reference inside its function body, on a function whose signature is free to change."
+              },
+              "fullDescription": {
+                "text": "A parameter with no reference inside its function body, on a function whose signature is free to change."
+              },
+              "help": {
+                "text": "A parameter with no reference inside its function body, on a function whose signature is free to change.\n\nThe signature must be free, defined as follows: the function is not a method retained by interface satisfaction, is not used as a value, is not a go:linkname or cgo target, and is not a stub whose body is empty or only panics. A parameter its body never names is dead whatever the callers, so a published declaration of a library is reported too, with the fixability the vocabulary gives the kind: the signature change is a breaking change."
+              },
               "defaultConfiguration": {
                 "level": "warning"
               },
@@ -337,6 +562,15 @@
             {
               "id": "DS1802",
               "name": "unused-receiver",
+              "shortDescription": {
+                "text": "A named method receiver with no reference inside the method body, on a method whose signature is free to change."
+              },
+              "fullDescription": {
+                "text": "A named method receiver with no reference inside the method body, on a method whose signature is free to change. Go permits a method with no receiver name, so the fix deletes an identifier and changes no signature."
+              },
+              "help": {
+                "text": "A named method receiver with no reference inside the method body, on a method whose signature is free to change. Go permits a method with no receiver name, so the fix deletes an identifier and changes no signature.\n\nThe same free-signature rule as unused-parameter, applied to the receiver."
+              },
               "defaultConfiguration": {
                 "level": "warning"
               },
@@ -350,6 +584,15 @@
             {
               "id": "DS1803",
               "name": "unused-result",
+              "shortDescription": {
+                "text": "A result value that no call site of the function uses, on a function whose signature is free to change."
+              },
+              "fullDescription": {
+                "text": "A result value that no call site of the function uses, on a function whose signature is free to change."
+              },
+              "help": {
+                "text": "A result value that no call site of the function uses, on a function whose signature is free to change.\n\nThe same free-signature rule as unused-parameter, plus a closed-world condition: every call site of the function must be in the loaded graph, because an unknown caller may consume the result, so the kind reports only for a function whose callers are all visible."
+              },
               "defaultConfiguration": {
                 "level": "warning"
               },
@@ -363,6 +606,15 @@
             {
               "id": "DS1805",
               "name": "unreachable-statement",
+              "shortDescription": {
+                "text": "A statement that control flow cannot reach, at the precision the language's compiler applies to the same construct."
+              },
+              "fullDescription": {
+                "text": "A statement that control flow cannot reach, at the precision the language's compiler applies to the same construct."
+              },
+              "help": {
+                "text": "A statement that control flow cannot reach, at the precision the language's compiler applies to the same construct."
+              },
               "defaultConfiguration": {
                 "level": "error"
               },
@@ -376,6 +628,15 @@
             {
               "id": "DS1807",
               "name": "dead-store",
+              "shortDescription": {
+                "text": "A write to a local variable with no read before the next write to it or the end of its scope, computed on the same read-and-write classification the write-only-symbol kind uses."
+              },
+              "fullDescription": {
+                "text": "A write to a local variable with no read before the next write to it or the end of its scope, computed on the same read-and-write classification the write-only-symbol kind uses. The finding names the write position."
+              },
+              "help": {
+                "text": "A write to a local variable with no read before the next write to it or the end of its scope, computed on the same read-and-write classification the write-only-symbol kind uses. The finding names the write position."
+              },
               "defaultConfiguration": {
                 "level": "error"
               },
@@ -389,6 +650,15 @@
             {
               "id": "DS1809",
               "name": "unreachable-case",
+              "shortDescription": {
+                "text": "A switch case whose type or value an earlier case in the same switch already covers."
+              },
+              "fullDescription": {
+                "text": "A switch case whose type or value an earlier case in the same switch already covers."
+              },
+              "help": {
+                "text": "A switch case whose type or value an earlier case in the same switch already covers."
+              },
               "defaultConfiguration": {
                 "level": "error"
               },

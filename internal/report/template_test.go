@@ -4,7 +4,19 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"text/template"
 )
+
+// parsedTemplate parses one template the test supplies.
+func parsedTemplate(t *testing.T, text string) *template.Template {
+	t.Helper()
+
+	parsed, err := ParseTemplate(text)
+	if err != nil {
+		t.Fatalf("Setup: ParseTemplate(%q) = error %v, want the template", text, err)
+	}
+	return parsed
+}
 
 // TestTheTemplateRendersTheEnvelope pins that a template reaches the envelope's own
 // members, which is what a user-supplied rendering is for.
@@ -15,7 +27,7 @@ func TestTheTemplateRendersTheEnvelope(t *testing.T) {
 	var held strings.Builder
 	text := "{{ .Totals.Findings }} findings under {{ .Analyzer.Name }}\n" +
 		"{{ range .Findings }}{{ .Code }} {{ .Symbol.Name }}\n{{ end }}"
-	if err := Template(&held, &envelope, Options{Template: text}); err != nil {
+	if err := Template(&held, &envelope, Options{Template: parsedTemplate(t, text)}); err != nil {
 		t.Fatalf("Template() = error %v, want the rendering", err)
 	}
 	want := "6 findings under deadset-go\nDS1301 write-only-symbol\n"
@@ -32,7 +44,8 @@ func TestTheTemplateFailsOnAnAbsentField(t *testing.T) {
 	envelope := built(t, &in)
 
 	var held strings.Builder
-	err := Template(&held, &envelope, Options{Template: "{{ .Totals.Findings }} {{ .Invented }}\n"})
+	parsed := parsedTemplate(t, "{{ .Totals.Findings }} {{ .Invented }}\n")
+	err := Template(&held, &envelope, Options{Template: parsed})
 	if !errors.Is(err, ErrOptions) {
 		t.Fatalf("Template(a template naming an absent field) = error %v, want one carrying ErrOptions", err)
 	}
@@ -56,14 +69,14 @@ func TestTheTemplateNeedsATemplate(t *testing.T) {
 	}
 }
 
-// TestTheTemplateReportsAnUnparseableTemplate pins that a template the parser refuses is
-// named as such.
-func TestTheTemplateReportsAnUnparseableTemplate(t *testing.T) {
-	in := minimalInput()
-	envelope := built(t, &in)
-
-	err := Template(&strings.Builder{}, &envelope, Options{Template: "{{ .Totals"})
-	if !errors.Is(err, ErrOptions) {
-		t.Errorf("Template(an unparseable template) = error %v, want one carrying ErrOptions", err)
+// TestParseTemplateRefusesAnUnparseableTemplate pins that a template the parser refuses
+// is refused when it is parsed, which is before any rendering exists to fail.
+func TestParseTemplateRefusesAnUnparseableTemplate(t *testing.T) {
+	parsed, err := ParseTemplate("{{ .Totals")
+	if err == nil {
+		t.Fatalf("ParseTemplate(an unclosed action) = %v, nil, want an error", parsed)
+	}
+	if !strings.Contains(err.Error(), "parse the template") {
+		t.Errorf("ParseTemplate(an unclosed action) = error %q, want one saying the parse failed", err)
 	}
 }
