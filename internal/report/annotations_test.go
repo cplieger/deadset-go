@@ -25,28 +25,37 @@ func TestOneAnnotationPerRecord(t *testing.T) {
 	}
 }
 
-// TestTheAnnotationCommandFollowsTheSeverity pins which command each severity is
-// annotated with, and that a stale suppression is annotated as a failure whatever the
-// rest of the severity map holds.
-func TestTheAnnotationCommandFollowsTheSeverity(t *testing.T) {
+// TestTheAnnotationCommandFollowsTheFailingSeverity pins that a finding at or above
+// the failing severity is annotated as an error and one below it as a warning, and
+// that a stale suppression is annotated as a failure whatever the rest of the
+// severity map holds.
+func TestTheAnnotationCommandFollowsTheFailingSeverity(t *testing.T) {
 	cases := []struct {
 		severity config.Severity
+		failOn   config.Severity
 		want     string
 	}{
-		{config.Deny, "::error "},
-		{config.Warn, "::warning "},
-		{config.Allow, "::notice "},
+		{config.Deny, config.Deny, "::error "},
+		{config.Warn, config.Deny, "::warning "},
+		{config.Deny, config.Warn, "::error "},
+		{config.Warn, config.Warn, "::error "},
+		{config.Warn, config.Allow, "::error "},
+		{config.Warn, "", "::warning "},
 	}
 	for _, one := range cases {
-		t.Run(string(one.severity), func(t *testing.T) {
+		t.Run(string(one.severity)+"_under_"+string(one.failOn), func(t *testing.T) {
 			in := minimalInput()
 			in.Result.Findings = []kinds.Finding{findingOf("DS1002", "unused-unexported", "a.go", 4, 8,
 				one.severity, "deletable", "the function has no reference in the target")}
 			envelope := built(t, &in)
 
-			got := annotationLines(t, &envelope)[0]
-			if !strings.HasPrefix(got, one.want) {
-				t.Errorf("a %s finding is annotated %q, want a line starting %q", one.severity, got, one.want)
+			var out strings.Builder
+			if err := Annotations(&out, &envelope, Options{FailOn: one.failOn}); err != nil {
+				t.Fatalf("Annotations(fail_on %q) = %v", one.failOn, err)
+			}
+			if got := out.String(); !strings.HasPrefix(got, one.want) {
+				t.Errorf("a %s finding under fail_on %q is annotated %q, want a line starting %q",
+					one.severity, one.failOn, got, one.want)
 			}
 		})
 	}

@@ -252,3 +252,35 @@ func TestReadReportsADocumentItCannotRead(t *testing.T) {
 		t.Errorf("Read(a directory) = _, %v, want neither an absent document nor a malformed one", err)
 	}
 }
+
+func TestReadRefusesAScopeHoldingWhitespace(t *testing.T) {
+	for name, side := range map[string]string{
+		"a space":           "go://example.com/a pp#A",
+		"a tab":             "go://example.com/a\tpp#A",
+		"a carriage return": "go://example.com/a\rpp#A",
+		"a line feed":       "go://example.com/a\npp#A",
+	} {
+		t.Run(name, func(t *testing.T) {
+			held, err := Read(write(t, `{"edges": [
+      {"id": "a", "provides": `+strconv.Quote(side)+`, "used_by": "ts://@example/app/src/a.ts#A"}]}`))
+			if !errors.Is(err, ErrMalformed) {
+				t.Errorf("Read(a document whose provides side holds %s in its scope) = %+v, %v, want an error satisfying errors.Is(err, ErrMalformed)",
+					name, held, err)
+			}
+		})
+	}
+}
+
+func TestReadAcceptsAScopeHoldingAFormFeed(t *testing.T) {
+	// Whitespace is exactly space, tab, carriage return and line feed. A form feed
+	// is none of them, so a scope holding one is a misspelling that names no
+	// symbol rather than a reference naming more than one.
+	const side = "go://example.com/a\fpp#A"
+
+	held := read(t, `{"edges": [
+      {"id": "a", "provides": `+strconv.Quote(side)+`, "used_by": "ts://@example/app/src/a.ts#A"}]}`)
+	if len(held.Edges) != 1 || held.Edges[0].Provides != side {
+		t.Errorf("Read(a document whose provides side holds a form feed in its scope) carries %+v, want the side as written",
+			held.Edges)
+	}
+}

@@ -290,7 +290,6 @@ func (b *graphBuilder) candidates(r Result) []string {
 type grouped struct {
 	members string
 	roots   string
-	falls   string
 	lines   int
 }
 
@@ -302,7 +301,6 @@ func (b *graphBuilder) groups(r Result) []grouped {
 		found = append(found, grouped{
 			members: strings.Join(b.names(c.Members), " "),
 			roots:   strings.Join(b.names(c.Roots), " "),
-			falls:   strings.Join(b.names(c.Falls), " "),
 			lines:   c.DeletableLines,
 		})
 	}

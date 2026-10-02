@@ -370,10 +370,9 @@ func renderRun(symbols []Symbol, refs []Reference, r Result) string {
 			names[c.ID], c.Relation, c.ProductionRefs, c.TestRefs, c.TestOfDeadCode)
 	}
 	for _, c := range r.Components {
-		fmt.Fprintf(&b, "component\t%d\tmembers=%s\troots=%s\tfalls=%s\tlines=%d\n",
+		fmt.Fprintf(&b, "component\t%d\tmembers=%s\troots=%s\tlines=%d\n",
 			c.Index, strings.Join(namesIn(names, c.Members), " "),
-			strings.Join(namesIn(names, c.Roots), " "),
-			strings.Join(namesIn(names, c.Falls), " "), c.DeletableLines)
+			strings.Join(namesIn(names, c.Roots), " "), c.DeletableLines)
 	}
 	for _, s := range symbols {
 		if set := r.LiveUnder[s.ID]; set != 0 {

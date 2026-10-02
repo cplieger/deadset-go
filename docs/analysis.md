@@ -50,7 +50,7 @@ per reason.
 | `main` | The `main` function of a `main` package |
 | `init` | Every `init` function |
 | `test` | A test, benchmark, example or fuzz function of a test file, under the signature rule the toolchain applies |
-| `linkname` | A name a `//go:linkname` directive gives the linker |
+| `linkname` | A function or variable named on either side of a `//go:linkname` or `//go:linknamestd` directive in a file importing `"unsafe"`: the local name in the file's own package, and the qualified name in the loaded package whose import path it spells |
 | `cgo-export` | A function under an `//export` directive in a file importing `"C"` |
 | `blank` | A declaration made with the blank identifier, whose initializer still runs |
 | `published-api` | An exported symbol of a non-internal package, when the target is declared a library |
@@ -71,13 +71,20 @@ A configured root or pattern that names no symbol is reported as `DS1704` rather
 ## Dead components and what falls with a deletion
 
 Every dead symbol lands in exactly one dead component, computed over the references between dead
-symbols with one edge each way between a dead member and its dead container. A finding names its
-component's root member, the symbols and the lines that fall when that root is deleted, and the
-order the report should be worked in, which is the reverse topological order over the components.
+symbols with one edge each way between a dead member and its dead container. The dead symbols form
+cycles, a symbol on no cycle being a cycle of one, and a cycle no dead symbol outside it references
+is a root cycle: its members whose container is not dead are the component's root members, where a
+deletion starts. A symbol only dead symbols reference falls with the roots that reach it and is a
+member of their component, and a symbol two roots both reach joins the two into one component,
+because deleting either alone leaves a reference to it. A finding about any member names the one
+component, so every finding one deletion removes carries one identifier.
 
-The count covers the component's own members plus every dead symbol only that component reaches,
-which is what a deletion at the root actually removes. `reporters.cascade` set to `full` lists
-every member of every component as well as the roots.
+The count is the component's members and the line total the distinct lines they span.
+`reporters.cascade` set to `full` lists every member of every component as well as the roots.
+
+A finding the configuration withholds, by setting its kind to `allow` or by a minimum confidence
+it does not reach, withholds every finding of its component when it is a root's, whatever their
+severity and confidence: a member is dead only through its root.
 
 ## What the report claims about callers
 

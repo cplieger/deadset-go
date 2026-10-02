@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	spec "github.com/cplieger/deadset-spec/v3"
 )
 
 // writeDocument writes body as a scope document in a fresh directory and returns
@@ -34,6 +36,11 @@ func is(target error) func(error) bool {
 // encoding/json gives no sentinel and no type.
 func hasText(phrase string) func(error) bool {
 	return func(err error) bool { return err != nil && strings.Contains(err.Error(), phrase) }
+}
+
+// memberRefused matches a refusal of one member, naming it.
+func memberRefused(named string) func(error) bool {
+	return func(err error) bool { return errors.Is(err, ErrMember) && strings.Contains(err.Error(), named) }
 }
 
 // isSyntaxError matches the decoder's refusal of malformed JSON.
@@ -159,13 +166,58 @@ func TestReadRefusals(t *testing.T) {
 	}{
 		"undeclared document key": {
 			body: `{"target": {"path": "app"}, "roots": ["x"]}`,
-			want: hasText("unknown field"),
-			desc: "an error naming the unknown field",
+			want: memberRefused("roots"),
+			desc: "ErrMember naming roots",
 		},
 		"undeclared module key": {
 			body: `{"target": {"path": "app", "kind": "library"}}`,
-			want: hasText("unknown field"),
-			desc: "an error naming the unknown field",
+			want: memberRefused("target.kind"),
+			desc: "ErrMember naming target.kind",
+		},
+		"a declared key spelled in another case": {
+			body: `{"target": {"path": "app"}, "Consumers": [{"path": "c"}]}`,
+			want: memberRefused("Consumers"),
+			desc: "ErrMember naming Consumers",
+		},
+		"a module key spelled in another case": {
+			body: `{"target": {"Path": "app"}}`,
+			want: memberRefused("target.Path"),
+			desc: "ErrMember naming target.Path",
+		},
+		"a key written twice": {
+			body: `{"target": {"path": "app", "path": "other"}}`,
+			want: memberRefused("target.path"),
+			desc: "ErrMember naming target.path",
+		},
+		"a null id": {
+			body: `{"target": {"id": null, "path": "app"}}`,
+			want: memberRefused("target.id"),
+			desc: "ErrMember naming target.id",
+		},
+		"a null consumer": {
+			body: `{"target": {"path": "app"}, "consumers": [null]}`,
+			want: memberRefused("consumers[0]"),
+			desc: "ErrMember naming consumers[0]",
+		},
+		"a null consumer list": {
+			body: `{"target": {"path": "app"}, "consumers": null}`,
+			want: memberRefused("consumers"),
+			desc: "ErrMember naming consumers",
+		},
+		"an empty target id": {
+			body: `{"target": {"id": "", "path": "app"}}`,
+			want: memberRefused("empty id"),
+			desc: "ErrMember naming the empty id",
+		},
+		"an empty consumer id": {
+			body: `{"target": {"path": "app"}, "consumers": [{"id": "", "path": "c"}]}`,
+			want: memberRefused("empty id"),
+			desc: "ErrMember naming the empty id",
+		},
+		"an empty workspace": {
+			body: `{"target": {"path": "app"}, "workspace": ""}`,
+			want: memberRefused("workspace"),
+			desc: "ErrMember naming the workspace",
 		},
 		"no target": {
 			body: `{"consumers": [{"path": "consumer"}]}`,
@@ -322,5 +374,87 @@ func TestForDirRefusals(t *testing.T) {
 				t.Errorf("ForDir(%s) = %+v, want the zero Document", test.dir, got)
 			}
 		})
+	}
+}
+
+// publishedScope writes one published document as a scope document in a fresh
+// directory, so Read reads it through the production path.
+func publishedScope(t *testing.T, name string) (dir, path string) {
+	t.Helper()
+	body, err := spec.Examples.ReadFile(name)
+	if err != nil {
+		t.Fatalf("read %s: %v", name, err)
+	}
+	return writeDocument(t, string(body))
+}
+
+func TestReadAcceptsEveryPublishedScopeDocument(t *testing.T) {
+	entries, err := fs.ReadDir(spec.Examples, "examples/scope")
+	if err != nil {
+		t.Fatalf("read examples/scope: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("examples/scope publishes no document, so this test pins nothing")
+	}
+	for _, entry := range entries {
+		t.Run(strings.TrimSuffix(entry.Name(), ".json"), func(t *testing.T) {
+			_, path := publishedScope(t, "examples/scope/"+entry.Name())
+			if _, err := Read(path); err != nil {
+				t.Errorf("Read(examples/scope/%s) = _, %v, want no error", entry.Name(), err)
+			}
+		})
+	}
+}
+
+func TestReadResolvesThePublishedDocumentNamingEveryMember(t *testing.T) {
+	dir, path := publishedScope(t, "examples/scope/target-and-consumers.json")
+
+	got, err := Read(path)
+	if err != nil {
+		t.Fatalf("Read(target-and-consumers.json) = _, %v, want no error", err)
+	}
+	want := Document{
+		Workspace: filepath.Join(dir, "go.work"),
+		Target:    Module{ID: "example.com/app", Path: filepath.Join(dir, "app")},
+		Consumers: []Module{
+			{ID: "example.com/consumer", Path: filepath.Join(dir, "consumer")},
+			{Path: filepath.FromSlash("/src/example.com/tool")},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Read(target-and-consumers.json) = %+v, want %+v", got, want)
+	}
+}
+
+func TestReadRefusesEveryPublishedScopeNegative(t *testing.T) {
+	data, err := spec.Examples.ReadFile("examples/negatives/index.json")
+	if err != nil {
+		t.Fatalf("read examples/negatives/index.json: %v", err)
+	}
+	var index struct {
+		Negatives []struct {
+			File   string `json:"file"`
+			Schema string `json:"schema"`
+		} `json:"negatives"`
+	}
+	if err := json.Unmarshal(data, &index); err != nil {
+		t.Fatalf("decode examples/negatives/index.json: %v", err)
+	}
+	refused := 0
+	for _, row := range index.Negatives {
+		if row.Schema != "contract/scope.schema.json" {
+			continue
+		}
+		refused++
+		t.Run(strings.TrimSuffix(row.File, ".json"), func(t *testing.T) {
+			_, path := publishedScope(t, "examples/negatives/"+row.File)
+			got, err := Read(path)
+			if err == nil {
+				t.Errorf("Read(examples/negatives/%s) = %+v, nil, want a refusal", row.File, got)
+			}
+		})
+	}
+	if refused == 0 {
+		t.Fatal("examples/negatives/index.json names no refused scope document, so this test pins nothing")
 	}
 }

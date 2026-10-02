@@ -174,7 +174,6 @@ func (x *sweptMatrix) groupsUnder(prefix string, r Result) []grouped {
 		found = append(found, grouped{
 			members: strings.Join(x.names(c.Members, prefix), " "),
 			roots:   strings.Join(x.names(c.Roots, prefix), " "),
-			falls:   strings.Join(x.names(c.Falls, prefix), " "),
 			lines:   c.DeletableLines,
 		})
 	}
@@ -248,16 +247,14 @@ func TestMatrixSweepGroupsOneComponentOverEveryConfigurationsEdges(t *testing.T)
 	// The type and the method are one component although only one configuration
 	// declares the method, because a report lists a dead component once and an
 	// edge that holds under one configuration is an edge. The pair the windows
-	// configuration alone holds an edge between is one component reaching
-	// another, for the same reason.
+	// configuration alone holds an edge between is one component for the same
+	// reason, the declaration it references falling with its root.
 	want := []grouped{
-		{members: "windowsOnlyDeadCaller", roots: "windowsOnlyDeadCaller", falls: "windowsOnlyDeadCaller referencedByDeadCodeOnWindows", lines: 2},
-		{members: "box.shut box", roots: "box", falls: "box.shut box", lines: 2},
-		{members: "Resolve", roots: "Resolve", falls: "Resolve", lines: 1},
-		{members: "deadEverywhere", roots: "deadEverywhere", falls: "deadEverywhere", lines: 1},
-		{members: "deadCallerEverywhere", roots: "deadCallerEverywhere", falls: "deadCallerEverywhere countedOnce", lines: 2},
-		{members: "referencedByDeadCodeOnWindows", falls: "referencedByDeadCodeOnWindows", lines: 1},
-		{members: "countedOnce", falls: "countedOnce", lines: 1},
+		{members: "windowsOnlyDeadCaller referencedByDeadCodeOnWindows", roots: "windowsOnlyDeadCaller", lines: 2},
+		{members: "box.shut box", roots: "box", lines: 2},
+		{members: "Resolve", roots: "Resolve", lines: 1},
+		{members: "deadEverywhere", roots: "deadEverywhere", lines: 1},
+		{members: "deadCallerEverywhere countedOnce", roots: "deadCallerEverywhere", lines: 2},
 	}
 	if got := x.groupsUnder(matrixPackage, r); !slices.Equal(got, want) {
 		t.Errorf("Sweep(matrix.txtar) over two configurations returned components\n%+v\nwant\n%+v", got, want)

@@ -216,9 +216,10 @@ func (in *Input) staleInput() *graph.Result {
 }
 
 // dormant reports whether one bound record is silent rather than in effect or
-// stale: the configuration silences the code it names, or the finding that code
+// stale: the configuration silences the code it names, the finding that code
 // would produce for the symbol it bound falls below the configured minimum
-// confidence.
+// confidence, or that finding falls in a component whose root finding either dial
+// withholds.
 //
 // An unbound record is never dormant. Nothing silenced it: it names a site that
 // resolves to no declaration, which is a claim about code that has gone whatever
@@ -231,7 +232,7 @@ func (in *Input) dormant(mark *suppress.Record) bool {
 	if !live {
 		return false
 	}
-	if in.Config.EffectiveSeverity(mark.Code, in.consumersAllLoaded()) == config.Allow {
+	if in.Config.EffectiveSeverity(mark.Code, in.consumersAllLoaded()) == config.Allow || in.dialed.dormant[mark.Bound] {
 		return true
 	}
 	least := Class(in.Config.Analysis.MinConfidence)

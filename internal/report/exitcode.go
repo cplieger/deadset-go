@@ -48,30 +48,39 @@ func ExitCode(e *Envelope, cfg *config.Config, exitCodeOff bool) int {
 }
 
 // failOn is the lowest severity that fails a run: the configured one, and the
-// documented default where the configuration names none or names a value outside
-// the three severities. A resolved configuration always names one, so the fallback
-// is for a caller holding no configuration at all rather than for a document.
+// documented default where the configuration names none. A resolved configuration
+// always names one, so the fallback is for a caller holding no configuration at
+// all rather than for a document.
 func failOn(cfg *config.Config) config.Severity {
 	if cfg == nil {
 		return config.Deny
 	}
-	switch cfg.Reporters.FailOn {
-	case config.Allow, config.Warn, config.Deny:
-		return cfg.Reporters.FailOn
+	return normalizedFailOn(cfg.Reporters.FailOn)
+}
+
+// normalizedFailOn is the failing severity one value names. A finding at allow is
+// withheld, so allow fails on what warn fails on, and a value outside the three
+// severities reads as the default.
+func normalizedFailOn(at config.Severity) config.Severity {
+	switch at {
+	case config.Allow, config.Warn:
+		return config.Warn
 	default:
 		return config.Deny
 	}
 }
 
+// fails reports whether a finding of one severity fails a run whose failing
+// severity is the normalized one given.
+func fails(severity, failing config.Severity) bool {
+	return severity == config.Deny || (failing == config.Warn && severity == config.Warn)
+}
+
 // failingFindings is how many findings of the run carry a severity at or above the
 // failing one, over the whole finding set.
-func failingFindings(counted *BySeverity, at config.Severity) int {
-	failing := counted.Deny
-	if at == config.Warn || at == config.Allow {
-		failing += counted.Warn
+func failingFindings(counted *BySeverity, failing config.Severity) int {
+	if failing == config.Warn {
+		return counted.Deny + counted.Warn
 	}
-	if at == config.Allow {
-		failing += counted.Allow
-	}
-	return failing
+	return counted.Deny
 }

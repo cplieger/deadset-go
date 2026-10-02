@@ -18,7 +18,7 @@ func TestComponentsGroupACycleAndReportEveryMemberAsARoot(t *testing.T) {
 	if want := []string{"alpha reachability", "beta reachability"}; !slices.Equal(b.candidates(r), want) {
 		t.Errorf("Sweep over a cycle of two dead declarations returned %v, want %v", b.candidates(r), want)
 	}
-	want := []grouped{{members: "alpha beta", roots: "alpha beta", falls: "alpha beta", lines: 2}}
+	want := []grouped{{members: "alpha beta", roots: "alpha beta", lines: 2}}
 	if got := b.groups(r); !slices.Equal(got, want) {
 		t.Errorf("Sweep over a cycle of two dead declarations returned components %+v, want %+v", got, want)
 	}
@@ -39,37 +39,32 @@ func cascadeChain(t *testing.T) *graphBuilder {
 	return b
 }
 
-func TestComponentsFallSetCoversWhatOnlyTheComponentReaches(t *testing.T) {
+func TestComponentsHoldEverySymbolThatFallsWithTheRoot(t *testing.T) {
 	b := cascadeChain(t)
 	got := b.groups(b.graph().Sweep(SweepInput{}))
 
-	// The count and the line total a report names at the root cover everything
-	// the deletion removes, which is the component's own members plus every dead
-	// symbol only this component reaches. A component another dead component
-	// reaches is no root and carries its own members alone.
+	// The three declarations the head reaches are dead only through it, so they
+	// fall with it and are members of its component: every finding the one
+	// deletion removes names one component, and the head is its one root.
 	want := []grouped{
-		{members: "head", roots: "head", falls: "head first second third", lines: 10},
-		{members: "first", falls: "first", lines: 2},
-		{members: "second", falls: "second", lines: 4},
-		{members: "third", falls: "third", lines: 1},
+		{members: "head first second third", roots: "head", lines: 10},
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("Sweep over a chain of four dead declarations returned components %+v, want %+v", got, want)
 	}
 }
 
-func TestComponentsFallSetLeavesOutASymbolTwoComponentsReach(t *testing.T) {
+func TestComponentsJoinTwoRootsThatReachOneDeclaration(t *testing.T) {
 	b := newGraphBuilder(t).add("leftRoot", "rightRoot", "shared")
 	b.ref("leftRoot", "shared")
 	b.ref("rightRoot", "shared")
 	got := b.groups(b.graph().Sweep(SweepInput{}))
 
-	// Deleting either root leaves the other reaching the shared declaration, so
-	// it falls with neither and its own component is what reports it.
+	// Deleting either root alone leaves the other referencing the shared
+	// declaration, which is dead only through the two of them, so the three are
+	// one component with two roots and no finding names a component without one.
 	want := []grouped{
-		{members: "leftRoot", roots: "leftRoot", falls: "leftRoot", lines: 1},
-		{members: "rightRoot", roots: "rightRoot", falls: "rightRoot", lines: 1},
-		{members: "shared", falls: "shared", lines: 1},
+		{members: "leftRoot rightRoot shared", roots: "leftRoot rightRoot", lines: 3},
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("Sweep over two roots reaching one declaration returned components %+v, want %+v", got, want)
@@ -93,8 +88,8 @@ func TestComponentsPlaceADeadMemberInsideItsDeadContainer(t *testing.T) {
 	// container is the one root, because a deletion starts there and the members
 	// fall with it.
 	want := []grouped{
-		{members: "box lid side open", roots: "box", falls: "box lid side open", lines: 8},
-		{members: "fetcher fetch", roots: "fetcher", falls: "fetcher fetch", lines: 4},
+		{members: "box lid side open", roots: "box", lines: 8},
+		{members: "fetcher fetch", roots: "fetcher", lines: 4},
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("Sweep over a dead type and a dead interface returned components %+v, want %+v", got, want)
@@ -113,7 +108,7 @@ func TestComponentsCountALineTwoFallingDeclarationsShareOnce(t *testing.T) {
 	// lines are inside that run, so the deletion removes the struct's four lines
 	// and the method's two: six, where adding the spans of the four falling
 	// declarations together would say nine.
-	want := []grouped{{members: "box lid side open", roots: "box", falls: "box lid side open", lines: 6}}
+	want := []grouped{{members: "box lid side open", roots: "box", lines: 6}}
 	if !slices.Equal(got, want) {
 		t.Errorf("Sweep over a dead struct whose fields lie inside it returned components %+v, want %+v", got, want)
 	}
@@ -167,18 +162,22 @@ func TestDistinctLinesCountsALineSeveralSpansCoverOnce(t *testing.T) {
 	}
 }
 
-func TestComponentsOrderPlacesEachComponentBeforeTheOnesItReaches(t *testing.T) {
-	// The declaration that is reached is written first, so the order the sweep
-	// returns is the one the references decide rather than the one the sites do.
-	b := newGraphBuilder(t).add("tail", "head")
-	b.ref("head", "tail")
+func TestComponentsOrderPlacesEachComponentAtItsFirstRoot(t *testing.T) {
+	// Each component's reached declaration is written first, so the order the
+	// sweep returns is the one the roots decide rather than the one the sites do.
+	b := newGraphBuilder(t).add("lateTail", "earlyTail", "lateHead", "earlyHead")
+	b.ref("lateHead", "lateTail")
+	b.ref("earlyHead", "earlyTail")
+	b.ref("earlyTail", "earlyHead")
+	b.ref("lateHead", "lateTail")
 	got := b.groups(b.graph().Sweep(SweepInput{}))
 
-	// The components read from the root down while each component's own symbol
-	// sets stay ordered by site, so what falls with the root reads in file order.
+	// The cycle and the chain are two components, each holding its own members by
+	// site, and the component whose root cycle comes first in site order comes
+	// first.
 	want := []grouped{
-		{members: "head", roots: "head", falls: "tail head", lines: 2},
-		{members: "tail", falls: "tail", lines: 1},
+		{members: "earlyTail earlyHead", roots: "earlyTail earlyHead", lines: 2},
+		{members: "lateTail lateHead", roots: "lateHead", lines: 2},
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("Sweep over one declaration reaching a declaration written above it returned components %+v, want %+v", got, want)
@@ -201,7 +200,7 @@ func TestComponentsOrderIsTheSameOnEveryCall(t *testing.T) {
 	}
 	// The reference back from the last declaration makes the whole chain one
 	// component, which is the shape a report's identifier counter is minted over.
-	want := []grouped{{members: "head first second third", roots: "head first second third", falls: "head first second third", lines: 10}}
+	want := []grouped{{members: "head first second third", roots: "head first second third", lines: 10}}
 	if got := b.groups(first); !slices.Equal(got, want) {
 		t.Errorf("Sweep over a chain closed into a cycle returned components %+v, want %+v", got, want)
 	}
@@ -255,5 +254,21 @@ func TestCascadeStringNamesEveryMode(t *testing.T) {
 				t.Errorf("Cascade(%d).String() = %q, want %q", test.mode, got, test.want)
 			}
 		})
+	}
+}
+
+func TestComponentsMarkNoMemberOfAReachedCycleAsARoot(t *testing.T) {
+	b := newGraphBuilder(t).add("caller", "ping", "pong")
+	b.ref("caller", "ping")
+	b.ref("ping", "pong")
+	b.ref("pong", "ping")
+	got := b.groups(b.graph().Sweep(SweepInput{}))
+
+	// Only ping is referenced from outside the cycle, and pong is not, yet the
+	// cycle as a whole is referenced: deleting pong alone leaves ping
+	// referencing it, so neither is a root and the caller is the one root.
+	want := []grouped{{members: "caller ping pong", roots: "caller", lines: 3}}
+	if !slices.Equal(got, want) {
+		t.Errorf("Sweep over a dead caller of a dead cycle returned components %+v, want %+v", got, want)
 	}
 }

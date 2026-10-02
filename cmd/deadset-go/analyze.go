@@ -154,7 +154,7 @@ func analyze(ctx context.Context, args []string, stderr io.Writer) int {
 	recorded := recordedFindings(envelope.Findings)
 	report.Cap(&envelope, resolved.config.Reporters.MaxFindings)
 
-	if err := asked.write(&envelope, recorded, resolved.target); err != nil {
+	if err := asked.write(&envelope, recorded, resolved.config.Reporters.FailOn); err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
 		return exitFailure
 	}
@@ -257,16 +257,19 @@ func (a *invocation) read(templatePath string) error {
 // write writes every document one invocation asked for: the report at the path it
 // named, one rendering per format beside it, and the baseline where it named a path
 // for one.
-func (a *invocation) write(e *report.Envelope, recorded []suppress.Recorded, targetRoot string) error {
+func (a *invocation) write(e *report.Envelope, recorded []suppress.Recorded, failOn config.Severity) error {
 	if err := writeAtomically(a.report, func(w io.Writer) error { return report.JSON(w, e, report.Options{}) }); err != nil {
 		return err
 	}
 
 	// The SARIF rendering hashes the source line each of its results names, and a
 	// position of the report is target-relative, so the reader it is given is one
-	// that resolves a position against the target root.
+	// that resolves a position against the root the report names, which is the
+	// scope's target relative to the run directory whatever the flags named.
+	targetRoot := filepath.FromSlash(e.Target.Root)
 	options := report.Options{
 		Read:     func(path string) ([]byte, error) { return os.ReadFile(filepath.Join(targetRoot, path)) },
+		FailOn:   failOn,
 		Template: a.template,
 	}
 	for _, format := range a.formats {

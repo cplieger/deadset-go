@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -32,6 +34,7 @@ type doc struct {
 	Severity        map[string]Severity `json:"severity"`
 	Exemptions      *docExemptions      `json:"exemptions"`
 	Reporters       *docReporters       `json:"reporters"`
+	Providers       *docProviders       `json:"providers"`
 	Go              *Go                 `json:"go"`
 	TS              *docTS              `json:"ts"`
 	Provenance      map[string]string   `json:"provenance"`
@@ -76,6 +79,10 @@ type docReporters struct {
 	FailOn      *Severity `json:"fail_on"`
 }
 
+type docProviders struct {
+	Analyzers *[]Provider `json:"analyzers"`
+}
+
 type docTS struct {
 	TestFiles              *[]string            `json:"test_files"`
 	EntryFiles             *[]string            `json:"entry_files"`
@@ -108,6 +115,9 @@ func (d *doc) fill() {
 	}
 	if d.Reporters == nil {
 		d.Reporters = &docReporters{}
+	}
+	if d.Providers == nil {
+		d.Providers = &docProviders{}
 	}
 	if d.TS == nil {
 		d.TS = &docTS{}
@@ -151,6 +161,8 @@ func Resolve(in Inputs) (Config, Provenance, error) {
 	resolveRoot(&cfg, provenance, sources)
 	resolveAnalysis(&cfg, provenance, sources)
 	resolveReporters(&cfg, provenance, sources)
+	resolveSetting(&cfg.Providers.Analyzers, "providers.analyzers", provenance, sources,
+		func(d *doc) *[]Provider { return d.Providers.Analyzers })
 	resolveTS(&cfg, provenance, sources)
 	resolveSeverity(&cfg, provenance, sources)
 
@@ -225,6 +237,10 @@ func decodeChecked(data []byte, label string) (*doc, *Error) {
 	dec.DisallowUnknownFields()
 	var document doc
 	if err := dec.Decode(&document); err != nil {
+		var mistyped *json.UnmarshalTypeError
+		if errors.As(err, &mistyped) && mistyped.Field != "" {
+			return nil, malformed(label, mistyped.Field, "holds %s, want %s", mistyped.Value, jsonTypeOf(mistyped.Type))
+		}
 		return nil, malformed(label, "", "%s", err)
 	}
 	if dec.More() {
@@ -235,6 +251,25 @@ func decodeChecked(data []byte, label string) (*doc, *Error) {
 		return nil, refusal
 	}
 	return &document, nil
+}
+
+// jsonTypeOf names the JSON type a refusal asks for in place of the decode target's
+// Go type. An integer setting is written as digits alone, so a number carrying a
+// fraction or an exponent is refused even where it denotes an integer.
+func jsonTypeOf(target reflect.Type) string {
+	switch target.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return "an integer written as an optional minus sign and digits alone"
+	case reflect.String:
+		return "a string"
+	case reflect.Bool:
+		return "a Boolean"
+	case reflect.Slice, reflect.Array:
+		return "an array"
+	default:
+		return "an object"
+	}
 }
 
 // resolveSetting assigns the value the highest-ranked source carrying one
@@ -404,6 +439,7 @@ func validate(d *doc, label string) *Error {
 		validateSeverity(d.Severity, label),
 		validateExemptions(d.Exemptions, label),
 		validateReporters(d.Reporters, label),
+		validateProviders(d.Providers.Analyzers, label),
 		validateTS(d.TS, label),
 	)
 }
@@ -526,6 +562,66 @@ func validateReporters(r *docReporters, label string) *Error {
 	}
 	if r.MaxFindings != nil && *r.MaxFindings < 0 {
 		return malformed(label, "reporters.max_findings", "%d is below the minimum of 0", *r.MaxFindings)
+	}
+	return nil
+}
+
+// providerShapes names the two shapes a provider entry takes, as a refusal of an
+// entry taking neither states them.
+const providerShapes = "an entry names name, languages and command, " +
+	"and an acquirable one also names source, version and digest"
+
+// validateProviders checks the provider list: every entry takes one of the two
+// shapes, and no two entries share a name, the later one named by the refusal.
+func validateProviders(providers *[]Provider, label string) *Error {
+	if providers == nil {
+		return nil
+	}
+	seen := make(map[string]bool, len(*providers))
+	for index, entry := range *providers {
+		at := "providers.analyzers[" + strconv.Itoa(index) + "]"
+		if refusal := validateProvider(&entry, at, label); refusal != nil {
+			return refusal
+		}
+		if seen[entry.Name] {
+			return malformed(label, at+".name", "%q names an analyzer an earlier entry already names", entry.Name)
+		}
+		seen[entry.Name] = true
+	}
+	return nil
+}
+
+// validateProvider checks one provider entry, at naming its place in the list.
+func validateProvider(entry *Provider, at, label string) *Error {
+	if !analyzerNamePattern.MatchString(entry.Name) {
+		return malformed(label, at+".name", "%q is not lowercase words joined by single hyphens", entry.Name)
+	}
+	languages := entry.Languages
+	refusal := firstError(
+		arrayOf(label, at+".languages", &languages, 1, GoLanguage, TSLanguage),
+		required(label, at+".command", entry.Command),
+	)
+	if refusal != nil {
+		return refusal
+	}
+	if entry.Source == nil && entry.Version == nil && entry.Digest == nil {
+		return nil
+	}
+	for _, member := range []struct {
+		value   *string
+		pattern *regexp.Regexp
+		name    string
+	}{
+		{entry.Source, providerSourcePattern, "source"},
+		{entry.Version, providerVersionPattern, "version"},
+		{entry.Digest, providerDigestPattern, "digest"},
+	} {
+		if member.value == nil {
+			return malformed(label, at, "names some of source, version and digest; %s", providerShapes)
+		}
+		if !member.pattern.MatchString(*member.value) {
+			return malformed(label, at+"."+member.name, "%q is not of the form the provider list declares", *member.value)
+		}
 	}
 	return nil
 }

@@ -73,6 +73,12 @@ func aliased() {}
 var counted int
 
 func notLinked() {}
+
+//go:linkname pulled example.com/roots/internal/hidden.linked
+var pulled int
+
+//go:linkname typed example.com/roots/internal/hidden.Kind
+var typed int
 -- unsafeless.go --
 package roots
 
@@ -167,3 +173,12 @@ package hidden
 
 // Exported is exported from a package only this module can import.
 func Exported() {}
+
+// linked is the declaration a directive of another package joins a name to.
+var linked int
+
+// unlinked is named by no directive.
+var unlinked int
+
+// Kind is a type a directive names, which the linker joins nothing to.
+type Kind int

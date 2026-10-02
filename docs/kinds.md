@@ -4,7 +4,7 @@ deadset-go reports 29 of the 31 issue kinds the deadset contract declares. This 
 per code, what this analyzer reports under it and what it treats as a use, so a reader can tell
 why a symbol was reported and why a symbol was not. The vocabulary itself, the code space and
 the fields a finding carries are stated once in the contract's
-[issue kinds page](https://github.com/cplieger/deadset-spec/blob/v3.1.0/docs/kinds.md), which
+[issue kinds page](https://github.com/cplieger/deadset-spec/blob/v3.2.0/docs/kinds.md), which
 this page does not restate.
 
 Every kind is enabled by default and every kind declares the confidence ceiling `certain`, so a
@@ -243,7 +243,7 @@ stays in this population, because that tag is an atom a configuration names.
 ### DS1502 file-never-imported
 
 A source file of a package no import reaches, that no root names, and whose every declaration
-the analysis found dead. A `main` package is never a subject, because the toolchain builds one
+the analysis found dead, a package whose files declare nothing included. A `main` package is never a subject, because the toolchain builds one
 whatever imports it, and neither is a package holding a root, which is what leaves a test
 package with a test function out.
 
@@ -310,8 +310,9 @@ it.
 
 A record bound to a symbol whose code the configuration silences is dormant instead: neither in
 effect nor stale, and reported by nothing. Both ways of silencing count, the severity set to
-`allow` and a confidence the configured minimum excludes, so turning a kind off never fails the
-run over the adjudications turning it back on would need.
+`allow` and a confidence the configured minimum excludes, and so does either of them withholding a
+root of the component the record's finding falls in, so turning a kind off never fails the run
+over the adjudications turning it back on would need.
 
 Several stale records at one site are one finding naming every code, because one directive above
 a line that declares several symbols is one record per symbol and a maintainer edits one line.

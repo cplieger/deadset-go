@@ -7,7 +7,6 @@ candidate	normalize	reachability	production=1	test=1	testOfDeadCode=false
 candidate	orphan	reference-counting	production=0	test=0	testOfDeadCode=false
 candidate	TestNormalize	reference-counting	production=0	test=0	testOfDeadCode=true
 candidate	TestResolve	reference-counting	production=0	test=0	testOfDeadCode=true
-component	0	members=Resolve TestResolve	roots=Resolve TestResolve	falls=Resolve normalize TestNormalize TestResolve	lines=12
-component	1	members=orphan	roots=orphan	falls=orphan	lines=1
-component	2	members=normalize TestNormalize	roots=TestNormalize	falls=normalize TestNormalize	lines=6
+component	0	members=Resolve normalize TestNormalize TestResolve	roots=Resolve TestResolve	lines=12
+component	1	members=orphan	roots=orphan	lines=1
 live	normalize	reference-counting

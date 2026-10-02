@@ -5,7 +5,10 @@ import (
 	"testing"
 )
 
-func TestLinknameCgoAsmPluginDetectorRetainsBothSidesOfALinknameDirective(t *testing.T) {
+// TestLinknameCgoAsmPluginDetectorRetainsNeitherSideOfALinknameDirective pins
+// that a linkname directive is no evidence of this class: the names it joins are
+// roots of the analysis, which the graph's root detection keeps.
+func TestLinknameCgoAsmPluginDetectorRetainsNeitherSideOfALinknameDirective(t *testing.T) {
 	shared := analysisOf(t, "linkname.txtar", Options{})
 	symbols := shared.inventory(t)
 
@@ -13,15 +16,8 @@ func TestLinknameCgoAsmPluginDetectorRetainsBothSidesOfALinknameDirective(t *tes
 	if err != nil {
 		t.Fatalf("LinknameCgoAsmPluginDetector(linkname.txtar) error: %v", err)
 	}
-
-	want := []string{
-		"pushed\tlinkname-cgo-asm-plugin\tapp.go:5:1\tnamed by a go:linkname directive",
-		"pulled\tlinkname-cgo-asm-plugin\tapp.go:8:1\tnamed by a go:linkname directive",
-		"Value\tlinkname-cgo-asm-plugin\tapp.go:8:1\tnamed by a go:linkname directive",
-		"absent\tlinkname-cgo-asm-plugin\tapp.go:11:1\tnamed by a go:linkname directive",
-	}
-	if lines := rendered(symbols, got); !slices.Equal(lines, want) {
-		t.Errorf("LinknameCgoAsmPluginDetector(linkname.txtar) = %q, want %q", lines, want)
+	if lines := rendered(symbols, got); len(lines) != 0 {
+		t.Errorf("LinknameCgoAsmPluginDetector(linkname.txtar) = %q, want none", lines)
 	}
 }
 
@@ -61,12 +57,12 @@ func TestLinknameCgoAsmPluginDetectorRetainsTheExportedSymbolsOfAPluginMainPacka
 	}
 }
 
-// TestLinknameCgoAsmPluginDetectorRetainsTheCgoExportOfAFileImportingC pins what
-// the cgo mechanism reaches: the load compiles with cgo disabled and then
-// type-checks the file carrying the export directive from its original sources with
-// the C pseudo-package opaque, so the file is among the syntax the class walks and
-// the function C calls is retained.
-func TestLinknameCgoAsmPluginDetectorRetainsTheCgoExportOfAFileImportingC(t *testing.T) {
+// TestLinknameCgoAsmPluginDetectorRetainsNoCgoExport pins that an export
+// directive is no evidence of this class. The load type-checks the file carrying
+// it with the C pseudo-package opaque, so the file is among the syntax the class
+// walks, and the function C calls is a root of the analysis rather than an
+// exemption.
+func TestLinknameCgoAsmPluginDetectorRetainsNoCgoExport(t *testing.T) {
 	in := inputOf(t, "cgo-export.txtar", Options{})
 
 	if len(in.Result.ExcludedByCgo) != 0 {
@@ -78,11 +74,8 @@ func TestLinknameCgoAsmPluginDetectorRetainsTheCgoExportOfAFileImportingC(t *tes
 	if err != nil {
 		t.Fatalf("LinknameCgoAsmPluginDetector(cgo-export.txtar) error: %v", err)
 	}
-	want := []string{
-		"Exported\tlinkname-cgo-asm-plugin\texport.go:8:1\texported to C by an export directive",
-	}
-	if lines := rendered(in.Symbols, got); !slices.Equal(lines, want) {
-		t.Errorf("LinknameCgoAsmPluginDetector(cgo-export.txtar) = %q, want %q", lines, want)
+	if lines := rendered(in.Symbols, got); len(lines) != 0 {
+		t.Errorf("LinknameCgoAsmPluginDetector(cgo-export.txtar) = %q, want none", lines)
 	}
 }
 

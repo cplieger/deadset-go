@@ -262,3 +262,29 @@ func TestTheSchemaVersionIsOneThePinnedContractAdmits(t *testing.T) {
 		t.Errorf("SchemaVersion = %q, want one of contract.json's %v", SchemaVersion, contract.SchemaVersions)
 	}
 }
+
+func TestBuildOrdersDeclaredGapsByTheirCompactEncodings(t *testing.T) {
+	cases := map[string]struct {
+		shorter, longer string
+	}{
+		"a reason followed by a space": {shorter: "no Go rendering", longer: "no Go rendering yet"},
+		"a reason followed by a bang":  {shorter: "no Go rendering", longer: "no Go rendering!"},
+	}
+	for name, test := range cases {
+		t.Run(name, func(t *testing.T) {
+			in := minimalInput()
+			gap := func(reason string) DeclaredGap {
+				return DeclaredGap{Fixture: "fixture", Capability: "DS1104", Reason: reason}
+			}
+			in.DeclaredGaps = []DeclaredGap{gap(test.shorter), gap(test.longer)}
+			envelope := built(t, &in)
+
+			// The shorter reason's closing quote sorts after the space or the bang
+			// the longer one continues with, so the longer row comes first.
+			got := []string{envelope.DeclaredGaps[0].Reason, envelope.DeclaredGaps[1].Reason}
+			if want := []string{test.longer, test.shorter}; !slices.Equal(got, want) {
+				t.Errorf("Build().DeclaredGaps reasons = %q, want %q", got, want)
+			}
+		})
+	}
+}

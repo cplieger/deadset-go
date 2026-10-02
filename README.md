@@ -19,7 +19,7 @@ deadset-go loads a Go module with its tests, type-checks it and reports the decl
 Three properties separate it from a per-package linter:
 
 - **Consumers are part of the program.** A library's exported API is dead only when no declared consumer uses it. Name the repositories that import the module and the analysis loads them into one whole-program graph, so an export a downstream repository calls is never reported.
-- **Exemptions are computed, not configured.** A method that satisfies an interface a value of its type is converted to, a `main`, an `init`, a test function, a symbol a `go:linkname` directive names: each is held live by a documented exemption class, and `print-retained` lists every symbol an exemption held back and the class that held it. The nine classes are in [docs/exemptions.md](docs/exemptions.md).
+- **Exemptions are computed, not configured.** A `main`, an `init`, a test function and both sides of a `go:linkname` directive are roots, and a method that satisfies an interface a value of its type is converted to is held live by a documented exemption class; `print-retained` lists every symbol an exemption held back and the class that held it. The nine classes are in [docs/exemptions.md](docs/exemptions.md).
 - **A cascade is one finding.** When a dead function is the only caller of three more, the report names the root and counts what falls with it, so the deletion total is known before the edit.
 
 It also reports over-visibility: an exported symbol only its own package uses, which can be unexported without a behavior change.

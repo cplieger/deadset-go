@@ -5,7 +5,7 @@ would report. Every class is computed from Go type information rather than confi
 project writes no suppression for a symbol a class covers. deadset-go implements the nine classes
 the deadset contract declares for Go; the class vocabulary and its detection rules are stated once
 in the contract's
-[exemptions page](https://github.com/cplieger/deadset-spec/blob/v3.1.0/docs/exemptions.md), and
+[exemptions page](https://github.com/cplieger/deadset-spec/blob/v3.2.0/docs/exemptions.md), and
 this page states what each class does here.
 
 ## Reading the retained set
@@ -181,14 +181,9 @@ file.
 
 ### linkname-cgo-asm-plugin
 
-Retains a symbol another compilation unit or the runtime reaches by a name the type checker never
-records, which is four mechanisms:
+Retains a symbol another compilation unit reaches by a name the type checker never records, which
+is two mechanisms:
 
-- A function or variable named on either side of a `//go:linkname` or `//go:linknamestd`
-  directive, in a file importing `"unsafe"` as the toolchain requires of the directive. The local
-  name is resolved in the declaring package's scope, and the qualified name the directive joins it
-  to is resolved in the loaded package whose import path it spells.
-- A function carrying an `//export` directive in a file importing `"C"`.
 - The declaration a `TEXT` directive of an assembly file of the same package names, which is a
   line whose first word is `TEXT`, followed by the middle dot, the name, optionally `<>`, and then
   `(SB)`. A qualified form names a symbol of another package and retains nothing here.
@@ -196,7 +191,9 @@ records, which is four mechanisms:
   the shape of a plugin's `main` package: such a package cannot be linked as a program, and a
   plugin resolves a function or a variable by name, so no other kind is retained.
 
-The string a plugin lookup call names is the other side of the last mechanism and belongs to
+A name a `//go:linkname` directive joins and a function an `//export` directive gives C are the
+`linkname` and `cgo-export` roots of the analysis, so this class retains neither. The string a
+plugin lookup call names is the other side of the plugin mechanism and belongs to
 `reflective-lookup`.
 
 ### template-field

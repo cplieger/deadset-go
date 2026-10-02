@@ -40,7 +40,7 @@ The analysis.
 
 | Key | Type | Default | What it does |
 | --- | --- | --- | --- |
-| `analysis.min_confidence` | `certain`, `probable`, `possible` | `possible` | The lowest confidence a finding is reported at. A finding below it is not reported and no count of the report stands for it |
+| `analysis.min_confidence` | `certain`, `probable`, `possible` | `possible` | The lowest confidence a finding is reported at. A finding below it is not reported and no count of the report stands for it, and when it is a root of its dead component no finding of that component is reported |
 | `analysis.generated_files` | `exclude`, `include` | `exclude` | Whether declarations in generated files are judged. `include` reports them and marks every such finding as one no mechanical edit may act on |
 | `analysis.consumer_tests` | `test`, `production` | `test` | How a reference from a loaded consumer's test file counts |
 | `analysis.configurations` | array of objects | `[]` | The build matrix. A platform entry names an `id`, an `os`, an `arch` and optional `tags`; a project entry names an `id` and a TypeScript `project` file, which this analyzer ignores. With no platform entry the matrix derives from the target tree |
@@ -54,7 +54,7 @@ Severity and exemptions.
 
 | Key | Type | Default | What it does |
 | --- | --- | --- | --- |
-| `severity` | object | `{}` | Per-kind severity. A key is a code or a two-digit family prefix, a value is `allow`, `warn` or `deny` |
+| `severity` | object | `{}` | Per-kind severity. A key is a code or a two-digit family prefix naming at least one kind, a value is `allow`, `warn` or `deny`. A finding at `allow` is not reported, and when it is a root of its dead component no finding of that component is reported |
 | `exemptions.disabled` | array of strings | `[]` | Exemption classes that do not run |
 
 Reporting.
@@ -65,11 +65,14 @@ Reporting.
 | `reporters.sort` | `position`, `size` | `position` | The order findings are rendered in. `size` orders by deletable lines, largest first |
 | `reporters.cascade` | `roots`, `full` | `roots` | Whether a rendering lists a dead component's root members or every member |
 | `reporters.max_findings` | integer | `0` | The most findings a rendering prints, `0` being all of them. The report names the number omitted |
-| `reporters.fail_on` | `allow`, `warn`, `deny` | `deny` | The lowest severity that fails the run |
+| `reporters.fail_on` | `allow`, `warn`, `deny` | `deny` | The lowest severity that fails the run. A finding at `allow` is never reported, so `allow` fails on what `warn` fails on |
 
-Two further keys exist and this analyzer has nothing to read in them. `contract_version` names the
+Four further keys exist and this analyzer has nothing to read in them. `contract_version` names the
 contract version a configuration is written against, and an absent key means this analyzer's own.
 `go` is the section this analyzer owns and it declares no key of its own in this contract version.
+`providers` is the orchestrator's list of the analyzers it runs, and `ts` is the TypeScript
+analyzer's section: this analyzer validates both and prints them in the resolved configuration, so
+a document that one product refuses every product refuses.
 
 A pattern in `roots.patterns` is matched against the reference of every symbol the analysis
 enumerates: `*` matches any run of characters including the solidus, `?` matches exactly one
@@ -121,7 +124,7 @@ No verb accepts a flag that asks for a source edit. A flag whose name carries `f
 ## Suppressing a finding
 
 Three mechanisms, all of them requiring a reason. The grammar is stated in full in the contract's
-[suppression page](https://github.com/cplieger/deadset-spec/blob/v3.1.0/contract/grammar/suppression.md).
+[suppression page](https://github.com/cplieger/deadset-spec/blob/v3.2.0/contract/grammar/suppression.md).
 
 **An inline directive** is the first token of a `//` line comment above or beside the declaration:
 
@@ -185,4 +188,5 @@ Four rules bind all three mechanisms:
 | 4 | pending | At least one pending finding, whose cross-language edge the other side has not evaluated. Such a report is an input to a merge rather than an answer |
 
 Codes 2 and 3 end a run before any verdict exists. Codes 4, 1 and 0 are verdicts about a complete
-report, and the highest applicable code wins. A `warn` finding never fails a run.
+report, and the highest applicable code wins. Under the default `reporters.fail_on`, `deny`, a `warn`
+finding never fails a run.

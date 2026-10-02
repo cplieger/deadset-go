@@ -35,10 +35,13 @@ func publishedCases() []string {
 	return []string{
 		"array-spanning-lines",
 		"duplicated-key",
+		"integer-written-with-a-fraction",
 		"missing-target-kind",
 		"provenance-on-input",
+		"provider-name-duplicated",
 		"quoted-key-with-a-dot",
 		"resolved-configuration-round-trip",
+		"severity-key-names-no-kind",
 		"template-delimiters-configured",
 		"template-delimiters-half",
 		"typescript-matrix-declared",
