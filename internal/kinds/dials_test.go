@@ -146,6 +146,48 @@ func TestARecordOnASymbolThatReferencesAMemberOfAWithheldComponentIsDormant(t *t
 	}
 }
 
+func TestARecordOnAMethodWhoseTypeIsAMemberOfAWithheldComponentIsDormant(t *testing.T) {
+	resolved := applicationConfig()
+	resolved.Severity = map[string]config.Severity{unusedExportedCode: config.Allow}
+	in := handInput(resolved)
+	in.Merged.Symbols[1].Kind = graph.KindType
+	const markedID graph.SymbolID = "catalog.go:40:6"
+	method := handSymbol(markedID, "go://example.com/app#resolve.marked", "marked", "example.com/app", "catalog.go", 40, 42, false)
+	method.Kind, method.Parent = graph.KindMethod, helperID
+	in.Merged.Symbols = append(in.Merged.Symbols, method)
+	in.Refs[markedID] = method.Ref
+	heldBackMark(in, markedID)
+
+	computed(t, in, rootMemberAndBystander(in))
+
+	// Without its record the method is dead and its receiver type falls with the
+	// withheld root, so the method falls with that root and its record is dormant.
+	if inEffect, _ := Totals(in); inEffect != 0 {
+		t.Errorf("Totals() = %d in effect, want 0: the record's method belongs to a type the severity withholds", inEffect)
+	}
+}
+
+func TestARecordOnATypeWhoseMethodIsAMemberOfAWithheldComponentIsDormant(t *testing.T) {
+	resolved := applicationConfig()
+	resolved.Severity = map[string]config.Severity{unusedExportedCode: config.Allow}
+	in := handInput(resolved)
+	const markedID graph.SymbolID = "catalog.go:40:6"
+	container := handSymbol(markedID, "go://example.com/app#marked", "marked", "example.com/app", "catalog.go", 40, 42, false)
+	container.Kind = graph.KindType
+	in.Merged.Symbols = append(in.Merged.Symbols, container)
+	in.Merged.Symbols[1].Kind, in.Merged.Symbols[1].Parent = graph.KindMethod, markedID
+	in.Refs[markedID] = container.Ref
+	heldBackMark(in, markedID)
+
+	computed(t, in, rootMemberAndBystander(in))
+
+	// Without its record the type is dead and holds a method that falls with the
+	// withheld root, so the type joins that component and its record is dormant.
+	if inEffect, _ := Totals(in); inEffect != 0 {
+		t.Errorf("Totals() = %d in effect, want 0: the record's type holds a method the severity withholds", inEffect)
+	}
+}
+
 func TestARecordOnAMemberIsInEffectWhileItsRootIsReported(t *testing.T) {
 	in := handInput(applicationConfig())
 	heldBackMark(in, helperID)

@@ -83,3 +83,8 @@ field Go is unused
 # finding rather than an unexport, because the record is a stage of the same
 # package the enumeration and the roots are stages of.
 method (*Graph).ConsumersOf
+
+# --- The shared test support, which only test files import. Detached and Of
+# hand each test a copy of an analysis computed once per process.
+function Detached is used in test only
+method (*Memo[K, V]).Of is used in test only

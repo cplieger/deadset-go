@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/cplieger/deadset-go/internal/report"
+	"github.com/cplieger/deadset-go/internal/testsupport"
 )
 
 // failureSink is what a fixture helper needs of the test that calls it: mark itself a
@@ -162,9 +163,8 @@ func sharedModule(sink failureSink, files map[string]string) string {
 
 // cachedFindings is the findings of one run over the archive's module: the resolution a
 // verb would build, the exemption options it would convert, and the pass itself,
-// computed once per archive however many tests ask for it.
-//
-// Every caller reads one value, so no caller writes to what it returns.
+// computed once per archive however many tests ask for it. Each caller gets its own
+// copy of the set.
 func cachedFindings(ctx context.Context, sink failureSink, files map[string]string) findingSet {
 	sink.Helper()
 
@@ -172,13 +172,37 @@ func cachedFindings(ctx context.Context, sink failureSink, files map[string]stri
 	if err != nil {
 		sink.Fatalf("the findings of the fixture module: %v", err)
 	}
-	return set
+	return detachedSet(sink, &set)
+}
+
+// detachedSet is a copy of one shared finding set that shares no memory a caller could
+// write through, except the per-configuration loads and the matrix over them: those
+// hold state no copy reaches, the type checker's own and the matrix's unexported
+// inventory, and only the production code a test hands the set to reads them.
+func detachedSet(sink failureSink, set *findingSet) findingSet {
+	sink.Helper()
+
+	loaded := set.loaded
+	loaded.merged = testsupport.Detached(sink, set.loaded.merged)
+	loaded.refs = testsupport.Detached(sink, set.loaded.refs)
+	loaded.derived = testsupport.Detached(sink, set.loaded.derived)
+	loaded.configurations = testsupport.Detached(sink, set.loaded.configurations)
+	loaded.identifiers = testsupport.Detached(sink, set.loaded.identifiers)
+	loaded.declared = testsupport.Detached(sink, set.loaded.declared)
+	loaded.testFileRules = testsupport.Detached(sink, set.loaded.testFileRules)
+	loaded.unmatched = testsupport.Detached(sink, set.loaded.unmatched)
+	loaded.unbuilt = testsupport.Detached(sink, set.loaded.unbuilt)
+	return findingSet{
+		loaded:       loaded,
+		swept:        testsupport.Detached(sink, set.swept),
+		evaluations:  testsupport.Detached(sink, set.evaluations),
+		result:       testsupport.Detached(sink, set.result),
+		suppressions: set.suppressions,
+	}
 }
 
 // cachedEnvelope is the report of one run over the archive's module, assembled once per
-// archive however many tests ask for it.
-//
-// Every caller reads one value, so no caller writes to what it returns.
+// archive however many tests ask for it. Each caller gets its own copy of the report.
 func cachedEnvelope(ctx context.Context, sink failureSink, files map[string]string) report.Envelope {
 	sink.Helper()
 
@@ -186,5 +210,5 @@ func cachedEnvelope(ctx context.Context, sink failureSink, files map[string]stri
 	if err != nil {
 		sink.Fatalf("the report of the fixture module: %v", err)
 	}
-	return envelope
+	return testsupport.Detached(sink, envelope)
 }
