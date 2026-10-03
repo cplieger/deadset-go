@@ -1,36 +1,24 @@
 # Configuration and invocation
 
-Everything deadset-go reads is strict JSON or a command-line flag. There is no other syntax, no
-comment form and no converter from another tool's format; a key the contract's schema does not
-declare ends the run with the usage code naming the key, so no configuration is silently ignored.
+Everything deadset-go reads is strict JSON or a command-line flag. The tool accepts no other syntax, comment form or converter from another tool's format. A key the contract's schema does not declare ends the run with the usage code naming the key, so no configuration is silently ignored.
 
 ## The sources, and which wins
 
 Three sources supply a setting, and the higher-ranked one wins per setting:
 
 1. A command-line flag.
-2. The repository configuration, `deadset.json` at the target root, or the file `--config` names
-   in its place.
+2. The repository configuration, `deadset.json` at the target root, or the file `--config` names in its place.
 3. The central configuration, the file `--central` names.
 
-Under all three sits the default the contract's schema declares for the key. No source has to be
-complete, and none of them is required, but the resolved configuration must name a target kind: a
-run whose sources all omit `target.kind` exits with the usage code naming the field and the two
-files it looked in.
+Under all three sits the default the contract's schema declares for the key. No source has to be complete, and none of them is required, but the resolved configuration must name a target kind. A run whose sources all omit `target.kind` exits with the usage code naming the field and the two files it looked in.
 
-`deadset-go print-config` prints the resolved configuration with the source of every setting under
-a `provenance` object keyed by the setting's dotted path. That output reads back as a repository
-configuration: `provenance` is accepted on input and ignored by resolution, so printing and
-re-reading changes no resolved value.
+`deadset-go print-config` prints the resolved configuration with the source of every setting under a `provenance` object keyed by the setting's dotted path. That output reads back as a repository configuration. `provenance` is accepted on input and ignored by resolution, so printing and re-reading changes no resolved value.
 
-A section's keys are replaced one by one, so a repository configuration naming one key of
-`analysis` leaves the rest at their defaults. `analysis.template_delimiters` is one setting rather
-than a section: a higher-ranked source replaces both of its members together.
+A section's keys are replaced one by one, so a repository configuration naming one key of `analysis` leaves the rest at their defaults. `analysis.template_delimiters` is one setting rather than a section, so a higher-ranked source replaces both of its members together.
 
 ## Settings
 
-Required. The analysis branches on this field alone and never on whether the target declares an
-executable entry point.
+Required. The analysis branches on this field alone and never on whether the target declares an executable entry point.
 
 | Key | Type | Default | What it does |
 | --- | --- | --- | --- |
@@ -43,7 +31,7 @@ The analysis.
 | `analysis.min_confidence` | `certain`, `probable`, `possible` | `possible` | The lowest confidence a finding is reported at. A finding below it is not reported and no count of the report stands for it, and when it is a root of its dead component no finding of that component is reported |
 | `analysis.generated_files` | `exclude`, `include` | `exclude` | Whether declarations in generated files are judged. `include` reports them and marks every such finding as one no mechanical edit may act on |
 | `analysis.consumer_tests` | `test`, `production` | `test` | How a reference from a loaded consumer's test file counts |
-| `analysis.configurations` | array of objects | `[]` | The build matrix. A platform entry names an `id`, an `os`, an `arch` and optional `tags`; a project entry names an `id` and a TypeScript `project` file, which this analyzer ignores. With no platform entry the matrix derives from the target tree |
+| `analysis.configurations` | array of objects | `[]` | The build matrix. A platform entry names an `id`, an `os`, an `arch` and optional `tags`. A project entry names an `id` and a TypeScript `project` file, which this analyzer ignores. With no platform entry the matrix derives from the target tree |
 | `analysis.matrix.complete` | boolean | `false` | Declares that the platform entries of `analysis.configurations` are every configuration the target builds, which `DS1501` needs |
 | `analysis.template_dirs` | array of strings | `[]` | Directories, relative to the target root, the `template-field` exemption scans |
 | `analysis.template_delimiters` | object with `left` and `right` | `{{` and `}}` | The action delimiters that scan parses a template with |
@@ -67,8 +55,7 @@ Reporting.
 | `reporters.max_findings` | integer | `0` | The most findings a rendering prints, `0` being all of them. The report names the number omitted |
 | `reporters.fail_on` | `allow`, `warn`, `deny` | `deny` | The lowest severity that fails the run. A finding at `allow` is never reported, so `allow` fails on what `warn` fails on |
 
-Keys this analyzer reads nothing from. It validates each one and prints it in the resolved
-configuration, so a document that one product refuses every product refuses.
+Keys this analyzer reads nothing from. It validates each one and prints it in the resolved configuration, so a document that one product refuses every product refuses.
 
 | Key | Type | Default | What it is |
 | --- | --- | --- | --- |
@@ -81,23 +68,13 @@ configuration, so a document that one product refuses every product refuses.
 | `ts.lifecycle_contracts` | array of objects | `[]` | The TypeScript analyzer's: one framework's lifecycle contract per entry, naming its `components`, its `bases` and the `members` the framework calls |
 | `ts.serializers` | array of declaration entries | `[]` | The TypeScript analyzer's: the declarations whose call reads its arguments' data members by name |
 
-A declaration entry names one declaration by `symbol`, by `module` and `name`, or by `global`; the
-contract's
-[configuration schema](https://github.com/cplieger/deadset-spec/blob/v4.0.0/contract/config.schema.json)
-states each shape. `go` is the section this analyzer owns, and it declares no key in this contract
-version.
+A declaration entry names one declaration by `symbol`, by `module` and `name`, or by `global`. The contract's [configuration schema](https://github.com/cplieger/deadset-spec/blob/v4.0.0/contract/config.schema.json) states each shape. `go` is the section this analyzer owns, and it declares no key in this contract version.
 
-A pattern in `roots.patterns` is matched against the reference of every symbol the analysis
-enumerates: `*` matches any run of characters including the solidus, `?` matches exactly one
-character counted as a Unicode code point, no other character is special, and an entry holding
-neither wildcard matches only the symbol whose reference it spells exactly. An entry that matches
-nothing is reported as `DS1704`.
+A pattern in `roots.patterns` is matched against the reference of every symbol the analysis enumerates. In a pattern, `*` matches any run of characters including the solidus. `?` matches exactly one character, counted as a Unicode code point, and no other character is special. An entry holding neither wildcard matches only the symbol whose reference it spells exactly. An entry that matches nothing is reported as `DS1704`.
 
 ### Naming a severity the contract fixes
 
-The severity of `DS1703` and `DS1704` is fixed. A severity key naming either code, or the family
-prefix `DS17` whose range holds them, is an unimplemented key and exits with the usage code, so no
-configuration reduces a stale suppression or an unmatched root below a finding.
+The severity of `DS1703` and `DS1704` is fixed. A severity key naming either code, or the family prefix `DS17` whose range holds them, is an unimplemented key and exits with the usage code. So no configuration reduces a stale suppression or an unmatched root below a finding.
 
 ## Verbs and flags
 
@@ -111,9 +88,7 @@ configuration reduces a stale suppression or an unmatched root below a finding.
 | `describe` | Prints the analyzer, the contract version, the schema versions and the conformance record as JSON |
 | `version` | Prints the analyzer version and the contract version |
 
-Every verb that resolves a configuration takes `--target` for the target root, `--config` and
-`--central` for the two configuration files, and `--min-confidence`. `analyze` and `explain` also
-take `--scope` for the scope document naming the target and its declared consumers.
+Every verb that resolves a configuration takes `--target` for the target root, `--config` and `--central` for the two configuration files, and `--min-confidence`. `analyze` and `explain` also take `--scope` for the scope document naming the target and its declared consumers.
 
 Five flags supply a setting and outrank both configuration files for it:
 
@@ -125,32 +100,35 @@ Five flags supply a setting and outrank both configuration files for it:
 | `--max-findings` | `reporters.max_findings` |
 | `--fail-on` | `reporters.fail_on` |
 
-The rest are the invocation's own and commit nothing to a configuration file: `--report` names the
-path the JSON report is written to, `--format` names one rendering written beside it and repeats,
-`--template` names the file the template rendering reads (a file that cannot be read or does not parse refuses the invocation with 2 before any analysis, and a rendering that fails exits 3 with the report already written), `--baseline-write` names the path a
-baseline recording the findings of the target is written to, and `--exit-code=off` writes every
-document and exits clean. `print-retained` takes `--mode=production` or `--mode=plain`.
+The rest belong to the invocation and commit nothing to a configuration file:
 
-No verb accepts a flag that asks for a source edit. A flag whose name carries `fix`, `edit`,
-`delete` or `rewrite` exits with the usage code naming the flag, whatever the verb.
+- `--report` names the path the JSON report is written to.
+- `--format` names one rendering written beside the report, and repeats. Naming any format replaces the default `text` rendering, so add `--format=text` to keep it.
+- `--template` names the file the template rendering reads. A file that cannot be read or does not parse refuses the invocation with 2 before any analysis, and a rendering that fails exits 3 with the report already written.
+- `--baseline-write` names the path a baseline recording the findings of the target is written to.
+- `--exit-code=off` writes every document and exits clean.
+
+`print-retained` takes `--mode=production` or `--mode=plain`.
+
+No verb accepts a flag that asks for a source edit. A flag whose name carries `fix`, `edit`, `delete` or `rewrite` exits with the usage code naming the flag, whatever the verb.
 
 ## Suppressing a finding
 
-Three mechanisms, all of them requiring a reason. The grammar is stated in full in the contract's
-[suppression page](https://github.com/cplieger/deadset-spec/blob/v4.0.0/contract/grammar/suppression.md).
+Three mechanisms, all of them requiring a reason. The grammar is stated in full in the contract's [suppression page](https://github.com/cplieger/deadset-spec/blob/v4.0.0/contract/grammar/suppression.md).
 
-**An inline directive** is the first token of a `//` line comment above or beside the declaration:
+### Inline directive
+
+An inline directive is the first token of a `//` line comment above or beside the declaration:
 
 ```go
 //deadset:ignore DS1001 -- Kept for the v3 API promise; removing it is a major bump.
 ```
 
-Both `//deadset:ignore` and `// deadset:ignore` parse to the same directive. The separator is
-exactly `--`, and the reason is everything after it to the end of the line.
+Both `//deadset:ignore` and `// deadset:ignore` parse to the same directive. The separator is exactly `--`, and the reason is everything after it to the end of the line.
 
-**The ignore file** is `deadset-ignore.json` at the target root. An absent file is an empty one.
-Each entry names the code, the stable symbol reference, the path of the file holding the
-declaration relative to the target root, and the reason:
+### Ignore file
+
+The ignore file is `deadset-ignore.json` at the target root. An absent file is an empty one. Each entry names the code, the stable symbol reference, the path of the file holding the declaration relative to the target root, and the reason:
 
 ```json
 {
@@ -166,36 +144,21 @@ declaration relative to the target root, and the reason:
 }
 ```
 
-An entry matches only when its code, its symbol reference and its path all equal the finding's own.
-There is no glob, no regular expression, no bare name and no substring match, so an adjudication
-written for one symbol in one file masks nothing else.
+An entry matches only when its code, its symbol reference and its path all equal the finding's own. An entry supports no glob, regular expression, bare name or substring match. So an adjudication written for one symbol in one file masks nothing else.
 
-**The baseline** is `deadset-baseline.json` at the target root, written by `--baseline-write` and
-read back by a later run. It records a finding set so that only a finding absent from it fails the
-run, which is a ratchet on the total rather than an adjudication of any one finding. The write
-analyzes the target with no baseline read, then again with the rows recorded so far read back,
-recording the findings each round exposes and removing every row a round reports stale, until a
-round records and removes nothing; the document read back on the tree it was written from then
-reports no finding a row can withhold and no stale row. No row is recorded for a finding about a
-row of a document, which no record binds to: such a finding fails a run after the baseline is
-written as it did before.
+### Baseline
+
+The baseline is `deadset-baseline.json` at the target root, written by `--baseline-write` and read back by a later run. It records a finding set so that only a finding absent from it fails the run, which is a ratchet on the total rather than an adjudication of any one finding. The write analyzes the target with no baseline read, then again with the rows recorded so far read back. Each round records the findings it exposes and removes every row it reports stale, and the write stops when a round records and removes nothing.
+
+The document read back on the tree it was written from then reports no finding a row can withhold and no stale row. No row is recorded for a finding about a row of a document, which no record binds to. Such a finding fails a run after the baseline is written as it did before.
+
+### Rules for all three
 
 Four rules bind all three mechanisms:
 
-- A record binds to a declaration. A part of a declaration, which is a parameter, a receiver, a
-  result, a statement, a store or a case, is suppressed through the declaration its own reference
-  names, and the record withholds the part's finding without marking that declaration live. A
-  directive for a parameter declared on the function's first line sits above the function; one for
-  a parameter on a later line of a wrapped signature sits above that parameter, inside the list. A finding about a record of a document rather than about a declaration of the program,
-  which is a requirement or a `replace` directive of the module file, a file no configuration
-  built, a suppression record or a configured root, has no suppression at all: an entry naming one
-  matches nothing and is reported as `DS1703`. The remedy there is the change the finding names,
-  `go mod tidy` for an unused requirement and deleting a `replace` that redirects nothing, or
-  setting the severity of its code to `allow`.
-- A record with no reason is refused and reported as `DS1701`. The refusal binds nothing, so the
-  finding it was meant to cover stays reported beside it.
-- An ignore entry or baseline row naming a symbol and no path is refused and reported as `DS1702`.
-  A record lacking both is two findings at one position.
+- A record binds to a declaration. A part of a declaration, which is a parameter, a receiver, a result, a statement, a store or a case, is suppressed through the declaration its own reference names. The record withholds the part's finding without marking that declaration live. A directive for a parameter declared on the function's first line sits above the function. One for a parameter on a later line of a wrapped signature sits above that parameter, inside the list. A finding about a record of a document, rather than about a declaration of the program, has no suppression at all. Such a record is a requirement or a `replace` directive of the module file, a file no configuration built, a suppression record or a configured root. An entry naming one matches nothing and is reported as `DS1703`. The remedy there is the change the finding names, `go mod tidy` for an unused requirement and deleting a `replace` that redirects nothing, or setting the severity of its code to `allow`.
+- A record with no reason is refused and reported as `DS1701`. The refusal binds nothing, so the finding it was meant to cover stays reported beside it.
+- An ignore entry or baseline row naming a symbol and no path is refused and reported as `DS1702`. A record lacking both is two findings at one position.
 - A record that matched no current finding is reported as `DS1703` and fails the run.
 
 ## Exit codes
@@ -208,6 +171,4 @@ Four rules bind all three mechanisms:
 | 3 | failure | The target, a declared consumer or a build configuration failed to load or type-check. The errors are printed and no finding list is |
 | 4 | pending | At least one pending finding, whose cross-language edge the other side has not evaluated. Such a report is an input to a merge rather than an answer |
 
-Codes 2 and 3 end a run before any verdict exists. Codes 4, 1 and 0 are verdicts about a complete
-report, and the highest applicable code wins. Under the default `reporters.fail_on`, `deny`, a `warn`
-finding never fails a run.
+Codes 2 and 3 end a run before any verdict exists. Codes 4, 1 and 0 are verdicts about a complete report, and the highest applicable code wins. Under the default `reporters.fail_on`, `deny`, a `warn` finding never fails a run.
