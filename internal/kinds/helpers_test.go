@@ -16,7 +16,7 @@ import (
 	"github.com/cplieger/deadset-go/internal/load"
 	"github.com/cplieger/deadset-go/internal/scope"
 	"github.com/cplieger/deadset-go/internal/testsupport"
-	spec "github.com/cplieger/deadset-spec/v4"
+	spec "github.com/cplieger/deadset-spec/v5"
 	"golang.org/x/tools/txtar"
 )
 
