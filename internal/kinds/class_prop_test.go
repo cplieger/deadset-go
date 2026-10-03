@@ -143,9 +143,8 @@ func dials(t *rapid.T, in *Input) (map[string]Class, map[string]config.Severity)
 // moves neither.
 //
 // The severity map the property draws names the observed kind explicitly, which is
-// what the second half is about: the severity comes from the configuration. The one
-// kind whose DEFAULT the consumer model moves is the unreferenced-exported kind, and
-// a configuration that names a kind leaves that default unread.
+// what the second half is about: the severity comes from the configuration. The
+// minimum confidence is possible, so no finding is withheld by the class it carries.
 func TestTheClassAndTheSeverityAreIndependentDials(t *testing.T) {
 	t.Parallel()
 
@@ -158,6 +157,7 @@ func TestTheClassAndTheSeverityAreIndependentDials(t *testing.T) {
 
 		first := config.Default()
 		first.Target.Kind = kind
+		first.Analysis.MinConfidence = config.Possible
 		first.Consumers.Complete = consumers.Complete
 		first.Severity = drawnSeverities(t, "the first run")
 		classes, severities := dials(t, propInput(symbols, first, consumers))

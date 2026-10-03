@@ -358,10 +358,7 @@ func comparePositions(a, b Position) int {
 // A part is decided inside its declaration whatever uses the declaration, so a part
 // of a declaration the sweep judged dead is reported beside the declaration's own
 // finding, and a part of a declaration a declared edge names is never pending. A
-// declaration of a test file the production sweep judged dead is the exception: that
-// sweep drops the only references such a declaration can have, so it cannot judge
-// the declaration, and the exemptions that fix a signature, interface satisfaction
-// among them, hold nothing for it there either.
+// declaration of test code nothing references is the exception, as unjudged states.
 //
 // A suppression record bound to the declaration and naming this code silences the part
 // as it silences every other finding, which the framework does over the output of
@@ -370,7 +367,7 @@ func (g *intrafunc) findings(code string, held []*part) ([]Finding, error) {
 	found := make([]Finding, 0, len(held))
 	for _, one := range held {
 		symbol := g.in.symbol(one.id)
-		if symbol == nil || (testFile(symbol) && g.in.candidateOf(one.id) != nil) {
+		if symbol == nil || g.unjudged(symbol, one.id) {
 			continue
 		}
 		finding := findingAt(code, Subject{
@@ -385,6 +382,18 @@ func (g *intrafunc) findings(code string, held []*part) ([]Finding, error) {
 		found = append(found, finding)
 	}
 	return found, nil
+}
+
+// unjudged reports whether one declaration of test code is outside the reach of
+// the intra-function kinds: a declaration of test code is judged while test code
+// references it, and one nothing references, which the production sweep cannot
+// judge either, has none of its parts reported.
+func (g *intrafunc) unjudged(symbol *graph.Symbol, id graph.SymbolID) bool {
+	candidate := g.in.candidateOf(id)
+	if candidate == nil || (!testFile(symbol) && !g.in.testSupport(symbol)) {
+		return false
+	}
+	return candidate.TestRefs == 0
 }
 
 // walked is one function the run compiled: its declaration, the type information

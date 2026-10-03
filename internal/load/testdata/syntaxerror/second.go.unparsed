@@ -1,0 +1,5 @@
+package syntaxerror
+
+// Unclosed is followed by a closing brace no declaration opened, so the load
+// reports a second diagnostic in a second file.
+func Unclosed() { _ = Mismatch() } }

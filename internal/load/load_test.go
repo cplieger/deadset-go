@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -156,23 +157,23 @@ func TestLoadKeysOnePositionAcrossVariantsAndReportsEveryDiagnostic(t *testing.T
 	stableToolchain(t)
 	c := HostConfiguration()
 
-	got, err := Load(t.Context(), fixtureScope(t, "typeerror"), c)
+	got, err := Load(t.Context(), unparsedScope(t, "syntaxerror"), c)
 
 	var loadErr *Error
 	if !errors.As(err, &loadErr) {
-		t.Fatalf("Load(testdata/typeerror) = _, %v, want a *load.Error", err)
+		t.Fatalf("Load(testdata/syntaxerror) = _, %v, want a *load.Error", err)
 	}
 	if !reflect.DeepEqual(got, Result{}) {
-		t.Errorf("Load(testdata/typeerror) = %+v, want the zero Result so no finding list follows", got)
+		t.Errorf("Load(testdata/syntaxerror) = %+v, want the zero Result so no finding list follows", got)
 	}
 	if loadErr.Configuration != c.ID {
-		t.Errorf("Load(testdata/typeerror) error names configuration %q, want %q", loadErr.Configuration, c.ID)
+		t.Errorf("Load(testdata/syntaxerror) error names configuration %q, want %q", loadErr.Configuration, c.ID)
 	}
 	// The fixture holds one error per file and an in-package test variant that
-	// type-checks both files again, so a walk that keys on the source site
+	// compiles both files again, so a walk that keys on the source site
 	// reports two diagnostics and one that does not reports four.
 	if len(loadErr.Diagnostics) != 2 {
-		t.Fatalf("Load(testdata/typeerror) reported %d diagnostics, want 2: %v", len(loadErr.Diagnostics), loadErr.Diagnostics)
+		t.Fatalf("Load(testdata/syntaxerror) reported %d diagnostics, want 2: %v", len(loadErr.Diagnostics), loadErr.Diagnostics)
 	}
 	files := make([]string, 0, len(loadErr.Diagnostics))
 	for _, d := range loadErr.Diagnostics {
@@ -188,13 +189,37 @@ func TestLoadKeysOnePositionAcrossVariantsAndReportsEveryDiagnostic(t *testing.T
 	}
 	slices.Sort(files)
 	if want := []string{"first.go", "second.go"}; !slices.Equal(files, want) {
-		t.Errorf("Load(testdata/typeerror) named files %v, want %v", files, want)
+		t.Errorf("Load(testdata/syntaxerror) named files %v, want %v", files, want)
 	}
 	rendered := loadErr.Error()
 	for _, d := range loadErr.Diagnostics {
 		if !strings.Contains(rendered, d.Message) {
 			t.Errorf("(*Error).Error() = %q, want it to contain %q", rendered, d.Message)
 		}
+	}
+}
+
+// A type error in a package of the target fails nothing: the load records it in the
+// package's TypeErrors, once per variant that checks the file, and the analysis skips
+// the declaration that holds it.
+func TestLoadRecordsATypeErrorOfTheTargetWithoutFailing(t *testing.T) {
+	stableToolchain(t)
+
+	got, err := Load(t.Context(), fixtureScope(t, "typeerror"), HostConfiguration())
+	if err != nil {
+		t.Fatalf("Load(testdata/typeerror) = _, %v, want the package set", err)
+	}
+	positions := make(map[string]bool)
+	for _, p := range got.Packages {
+		if len(p.Errors) != 0 {
+			t.Errorf("Load(testdata/typeerror) package %s carries the errors %v, want none", p.ID, p.Errors)
+		}
+		for _, e := range p.TypeErrors {
+			positions[filepath.Base(e.Fset.Position(e.Pos).Filename)] = true
+		}
+	}
+	if want := map[string]bool{"first.go": true, "second.go": true}; !maps.Equal(positions, want) {
+		t.Errorf("Load(testdata/typeerror) recorded type errors in %v, want %v", positions, want)
 	}
 }
 
@@ -230,6 +255,36 @@ func TestLoadOmitsADirectoryNoFileOfWhichIsSelected(t *testing.T) {
 	if pkg := findPackage(got, "example.com/vanished"); pkg == nil {
 		t.Errorf("Load(testdata/vanished) reported no example.com/vanished package, ids = %v", packageIDs(got))
 	}
+}
+
+// unparsedSuffix ends the name of a fixture file that does not parse, which is kept
+// under another extension so no formatter of the repository reads it, and which
+// unparsedScope writes under its Go name.
+const unparsedSuffix = ".unparsed"
+
+// unparsedScope copies the testdata module named by dir into a directory of its own,
+// each file ending in unparsedSuffix written under its Go name, and returns the
+// scope of the copy.
+func unparsedScope(t *testing.T, dir string) scope.Document {
+	t.Helper()
+	dst := t.TempDir()
+	copyFixture(t, dir, dst)
+	entries, err := os.ReadDir(dst)
+	if err != nil {
+		t.Fatalf("Setup: read %s: %v", dst, err)
+	}
+	for _, e := range entries {
+		if named, ok := strings.CutSuffix(e.Name(), unparsedSuffix); ok {
+			if err := os.Rename(filepath.Join(dst, e.Name()), filepath.Join(dst, named)); err != nil {
+				t.Fatalf("Setup: rename %s: %v", e.Name(), err)
+			}
+		}
+	}
+	doc, err := scope.ForDir(dst)
+	if err != nil {
+		t.Fatalf("scope.ForDir(a copy of testdata/%s) = _, %v, want no error", dir, err)
+	}
+	return doc
 }
 
 // copyFixture copies the testdata module named by dir into dst.
@@ -379,15 +434,6 @@ func TestLoadRefusals(t *testing.T) {
 			doc:     func(t *testing.T) scope.Document { return fixtureScope(t, "clean") },
 			config:  Configuration{ID: "linux-amd64", OS: "linux"},
 			wantErr: ErrConfiguration,
-		},
-		"declared consumer absent from the filesystem": {
-			doc: func(t *testing.T) scope.Document {
-				doc := fixtureScope(t, "clean")
-				doc.Consumers = []scope.Module{{Path: absent}}
-				return doc
-			},
-			config:  HostConfiguration(),
-			wantErr: ErrConsumer,
 		},
 		"target with no path": {
 			doc:     func(*testing.T) scope.Document { return scope.Document{} },

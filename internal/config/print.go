@@ -52,6 +52,8 @@ func written(c *Config) Config {
 	c.Providers.Analyzers = orEmpty(c.Providers.Analyzers)
 	c.TS.TestFiles = orEmpty(c.TS.TestFiles)
 	c.TS.EntryFiles = orEmpty(c.TS.EntryFiles)
+	c.TS.ComponentExtensions = orEmpty(c.TS.ComponentExtensions)
+	c.TS.DisabledConventions = orEmpty(c.TS.DisabledConventions)
 	c.TS.InjectionRegistrations = orEmpty(c.TS.InjectionRegistrations)
 	c.TS.LifecycleContracts = orEmpty(c.TS.LifecycleContracts)
 	c.TS.Serializers = orEmpty(c.TS.Serializers)

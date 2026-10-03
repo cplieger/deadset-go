@@ -289,10 +289,10 @@ func TestFindingsOfFailures(t *testing.T) {
 		want  int
 	}{
 		{
-			name: "a_target_that_does_not_type-check_is_a_failure",
+			name: "a_target_that_does_not_parse_is_a_failure",
 			files: map[string]string{
 				"go.mod":           "module example.com/app\n\ngo 1.27.1\n",
-				"app.go":           "package main\n\nfunc main() { missing() }\n",
+				"app.go":           "package main\n\nfunc main() { missing( }\n",
 				repositoryDocument: `{"target": {"kind": "application"}}`,
 			},
 			want: codes["failure"],

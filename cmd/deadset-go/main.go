@@ -1,6 +1,6 @@
 // Command deadset-go reports unused symbols in a Go module and its declared
 // consumers. It implements the deadset Contract published at
-// github.com/cplieger/deadset-spec/v4, and no verb edits a source file.
+// github.com/cplieger/deadset-spec/v5, and no verb edits a source file.
 package main
 
 import (
@@ -29,6 +29,7 @@ import (
 	"github.com/cplieger/deadset-go/internal/kinds"
 	"github.com/cplieger/deadset-go/internal/load"
 	"github.com/cplieger/deadset-go/internal/matrix"
+	"github.com/cplieger/deadset-go/internal/memory"
 	"github.com/cplieger/deadset-go/internal/report"
 	"github.com/cplieger/deadset-go/internal/scope"
 	"github.com/cplieger/deadset-go/internal/suppress"
@@ -66,10 +67,8 @@ const maxDocumentBytes = 1 << 20
 const language = config.GoLanguage
 
 // schemaVersionsAccepted lists every report schema version this analyzer reads,
-// which is contract.json's schema_versions. The report package writes the first:
-// the later one adds a subject kind this analyzer never reports, so every report
-// it writes is an instance of both.
-var schemaVersionsAccepted = []string{report.SchemaVersion, "6.1.0"}
+// which is contract.json's schema_versions.
+var schemaVersionsAccepted = []string{report.SchemaVersion}
 
 // settingFlag is one setting a command-line flag supplies: the dotted path the
 // resolved configuration names the setting by, and what the flag's value is.
@@ -157,13 +156,21 @@ func modeOf(cfg *config.Config, named string) graph.Mode {
 }
 
 func main() {
-	// An interrupt reaches the toolchain a load spawns through the context, so a
-	// cancelled run stops rather than waiting for the packages it asked for. The
-	// exit path runs no deferred function, so the signal handler is released here.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
-	stop()
-	os.Exit(code)
+	os.Exit(governed(os.Args[1:], os.Stdout, os.Stderr, memory.PlatformSources()))
+}
+
+// governed runs one invocation under the memory governor reading sources. An
+// interrupt reaches the toolchain a load spawns through the context, so a cancelled
+// run stops rather than waiting for the packages it asked for, and the governor ends
+// a run that cannot fit by cancelling the same context.
+func governed(args []string, stdout, stderr io.Writer, sources []memory.Source) int {
+	signalled, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	ctx, cancel := context.WithCancelCause(signalled)
+	defer cancel(nil)
+	govern := memory.Start(ctx, cancel, sources)
+	defer govern()
+	return run(ctx, args, stdout, stderr)
 }
 
 // run executes one invocation and returns its exit code: 0 for a served verb that
@@ -480,6 +487,10 @@ type stages struct {
 
 	unmatched []graph.Unmatched
 
+	// typeErrorSkips is every type error of the target over the matrix, each with
+	// the declaration it skipped.
+	typeErrorSkips []graph.TypeErrorSkip
+
 	// unbuilt is every configuration the derivation answered that the target does
 	// not build, which the load dropped from the matrix. It is the verb's to name:
 	// a run over a shortened matrix says which configuration is missing and why.
@@ -526,8 +537,7 @@ func printRoots(ctx context.Context, args []string, stdout, stderr io.Writer) in
 
 	set, err := rootsOf(ctx, &resolved)
 	if err != nil {
-		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
-		return exitCodeFor(err)
+		return failed(ctx, stderr, err)
 	}
 
 	namedUnbuilt(stderr, set.unbuilt)
@@ -590,6 +600,9 @@ func stagesOf(ctx context.Context, resolved *resolution) (stages, error) {
 	if err != nil {
 		return stages{}, err
 	}
+	if builtErr := taggedTestsBuilt(derived); builtErr != nil {
+		return stages{}, builtErr
+	}
 	results, unbuilt, err := load.All(ctx, document, configurations, guessed(derived))
 	if err != nil {
 		return stages{}, err
@@ -608,12 +621,15 @@ func stagesOf(ctx context.Context, resolved *resolution) (stages, error) {
 	per := make([]configured, len(results))
 	passes := make([]graph.Configured, len(results))
 	var rules []graph.TestFileRule
+	var skips []graph.TypeErrorSkip
 	for i := range results {
+		results[i].TestSupport = graph.ClassifyTestSupport(&results[i], rootOptions.PublishedAPI)
 		var classified []graph.TestFileRule
 		if per[i], passes[i], classified, err = passesOf(&results[i], targetRoot, rootOptions); err != nil {
 			return stages{}, err
 		}
 		rules = greatestPerRule(rules, classified)
+		skips = append(skips, graph.TypeErrorSkips(&results[i], targetRoot)...)
 	}
 
 	merged, err := graph.Merge(passes)
@@ -635,6 +651,7 @@ func stagesOf(ctx context.Context, resolved *resolution) (stages, error) {
 		per:            per,
 		declared:       document.Consumers,
 		testFileRules:  rules,
+		typeErrorSkips: skips,
 		unmatched:      x.UnmatchedEverywhere(),
 		unbuilt:        unbuilt,
 		merged:         &merged,
@@ -790,8 +807,7 @@ func printRetained(ctx context.Context, args []string, stdout, stderr io.Writer)
 
 	set, err := retainedOf(ctx, &resolved, &options, mode)
 	if err != nil {
-		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
-		return exitCodeFor(err)
+		return failed(ctx, stderr, err)
 	}
 
 	namedUnbuilt(stderr, set.unbuilt)
@@ -1121,6 +1137,7 @@ func findingsOf(ctx context.Context, resolved *resolution, options *exempt.Optio
 	if err != nil {
 		return findingSet{}, err
 	}
+	computed.Findings = withoutSkipped(computed.Findings, analyzed.stages.typeErrorSkips)
 	// The dependency a deletion orphans is a completion of the findings of the
 	// pass rather than a kind of its own, so it runs over what the pass answered.
 	kinds.Annotate(in, computed.Findings)
@@ -1130,6 +1147,12 @@ func findingsOf(ctx context.Context, resolved *resolution, options *exempt.Optio
 	// evaluation and nowhere else, so what the report carries is what stays.
 	kept, evaluations := kinds.Evaluate(in, computed.Findings)
 	computed.Findings = kept
+
+	// The passes after the load read no context, so a run cancelled while they ran
+	// ends here rather than writing a report the cancellation outdated.
+	if cause := context.Cause(ctx); cause != nil {
+		return findingSet{}, cause
+	}
 
 	inEffect, reasons := kinds.Totals(in)
 	return findingSet{
@@ -1264,6 +1287,8 @@ func reportOf(ctx context.Context, resolved *resolution, options *exempt.Options
 		DeclaredGaps:           answered.gaps,
 		ExcludedByCgo:          excludedByCgo(set.loaded.per),
 		TestFileRules:          set.loaded.testFileRules,
+		TypeErrorSkips:         typeErrorSkipsReported(set.loaded.typeErrorSkips),
+		Notes:                  notesOf(resolved.config.Target.Kind, &set.loaded),
 		Suppressions:           set.suppressions,
 	})
 	return envelope, set.loaded.unbuilt, err
@@ -1704,6 +1729,29 @@ func settingValue(setting *settingFlag, value string) (json.RawMessage, error) {
 		return nil, fmt.Errorf("%s is a number, and %q is not one", setting.path, value)
 	}
 	return json.Marshal(held)
+}
+
+// failed prints the error a run ended with and returns the exit code it carries. A
+// setup failure is one line per failure, each starting with the setup-failure
+// prefix so a log reader finds it whatever product wrote it.
+//
+// A run the memory governor ended prints the memory line whatever stage stopped:
+// the governor ends a run by cancelling ctx, so the stage running at that moment
+// returns its own wrapping of the cancellation, and the cause is the error that
+// says why the run ended.
+func failed(ctx context.Context, stderr io.Writer, err error) int {
+	if exhausted, ok := errors.AsType[*memory.ExhaustedError](context.Cause(ctx)); ok {
+		fmt.Fprintln(stderr, exhausted.Error())
+		return exitFailure
+	}
+	if setup, ok := errors.AsType[*load.SetupError](err); ok {
+		for _, one := range setup.Failures {
+			fmt.Fprintln(stderr, one.Line())
+		}
+		return exitFailure
+	}
+	fmt.Fprintf(stderr, "deadset-go: %v\n", err)
+	return exitCodeFor(err)
 }
 
 // exitCodeFor maps an error to the exit code contract/exit-codes.json gives it: a

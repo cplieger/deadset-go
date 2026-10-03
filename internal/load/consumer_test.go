@@ -2,7 +2,7 @@ package load
 
 import (
 	"errors"
-	"io/fs"
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -119,24 +119,11 @@ func TestLoadSharesOneFileSetWithEveryConsumer(t *testing.T) {
 }
 
 func TestLoadRefusesAConsumerItCannotCount(t *testing.T) {
-	absent, err := filepath.Abs(filepath.Join("testdata", "consumed", "missing"))
-	if err != nil {
-		t.Fatalf("Setup: resolve the absent path: %v", err)
-	}
-
 	cases := map[string]struct {
 		consumers []string
 		declared  func(t *testing.T) scope.Document
 		wantText  []string
 	}{
-		"an absent path": {
-			declared: func(t *testing.T) scope.Document {
-				doc := consumedScope(t)
-				doc.Consumers = append(doc.Consumers, scope.Module{Path: absent})
-				return doc
-			},
-			wantText: []string{absent},
-		},
 		"a module identity the scope disagrees with": {
 			declared: func(t *testing.T) scope.Document {
 				doc := consumedScope(t, "consumer")
@@ -179,19 +166,58 @@ func TestLoadRefusesAConsumerItCannotCount(t *testing.T) {
 	}
 }
 
-func TestLoadRefusesAnAbsentConsumerPathAsAMissingFile(t *testing.T) {
+func TestLoadRefusesAnAbsentConsumerAsAMissingConsumer(t *testing.T) {
 	stableToolchain(t)
 	absent := filepath.Join(t.TempDir(), "missing")
 	doc := consumedScope(t)
 	doc.Consumers = append(doc.Consumers, scope.Module{Path: absent})
 
+	got, err := Load(t.Context(), doc, HostConfiguration())
+
+	assertMissingConsumer(t, "a scope naming an absent consumer", err, absent)
+	if !reflect.DeepEqual(got, Result{}) {
+		t.Errorf("Load(a scope naming an absent consumer) = %+v, want the zero Result", got)
+	}
+}
+
+// A declared consumer whose required module is not installed is present and not
+// installed, which is the second arm of the missing-consumer class.
+func TestLoadRefusesAConsumerWhoseDependenciesAreNotInstalledAsAMissingConsumer(t *testing.T) {
+	stableToolchain(t)
+	consumer := t.TempDir()
+	for name, body := range map[string]string{
+		"go.mod":  "module example.com/uninstalled\n\ngo 1.27.1\n\nrequire example.com/nowhere v1.0.0\n",
+		"main.go": "package main\n\nimport \"example.com/nowhere\"\n\nfunc main() { nowhere.Run() }\n",
+	} {
+		if err := os.WriteFile(filepath.Join(consumer, name), []byte(body), 0o600); err != nil {
+			t.Fatalf("Setup: write %s: %v", name, err)
+		}
+	}
+	doc := consumedScope(t)
+	doc.Consumers = append(doc.Consumers, scope.Module{Path: consumer})
+
 	_, err := Load(t.Context(), doc, HostConfiguration())
 
-	if !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("Load(a scope naming an absent consumer) = _, %v, want an error matching fs.ErrNotExist", err)
+	assertMissingConsumer(t, "a scope naming a consumer whose import nothing provides", err, consumer, "example.com/nowhere")
+}
+
+// assertMissingConsumer checks that a load ended with one missing-consumer setup
+// failure whose line names every string of want.
+func assertMissingConsumer(t *testing.T, what string, err error, want ...string) {
+	t.Helper()
+	setup, ok := errors.AsType[*SetupError](err)
+	if !ok || len(setup.Failures) == 0 {
+		t.Fatalf("Load(%s) = _, %v, want a *load.SetupError", what, err)
 	}
-	if err != nil && !strings.Contains(err.Error(), absent) {
-		t.Errorf("Load() error = %q, want it to name %s", err, absent)
+	for _, one := range setup.Failures {
+		if one.Class != MissingConsumer {
+			t.Errorf("Load(%s) failed with the class %q, want %q", what, one.Class, MissingConsumer)
+		}
+		for _, text := range want {
+			if !strings.Contains(one.Line(), text) {
+				t.Errorf("Load(%s) line = %q, want it to name %q", what, one.Line(), text)
+			}
+		}
 	}
 }
 

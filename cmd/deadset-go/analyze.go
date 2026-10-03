@@ -11,7 +11,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"text/template"
 
 	"github.com/cplieger/deadset-go/internal/config"
 	"github.com/cplieger/deadset-go/internal/report"
@@ -110,7 +109,7 @@ func (l *formatList) Set(value string) error {
 // of those renderings reads, the path a baseline of the run is written to, and
 // whether the exit code carries the verdict.
 type invocation struct {
-	template      *template.Template
+	template      *report.ParsedTemplate
 	report        string
 	baselineWrite string
 	formats       formatList
@@ -142,10 +141,10 @@ func analyze(ctx context.Context, args []string, stderr io.Writer) int {
 	}
 	envelope, unbuilt, err := reportOf(ctx, &resolved, &options, answered)
 	if err != nil {
-		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
-		return exitCodeFor(err)
+		return failed(ctx, stderr, err)
 	}
 	namedUnbuilt(stderr, unbuilt)
+	namedSkips(stderr, envelope.TypeErrorSkips)
 
 	report.Sort(&envelope, resolved.config.Reporters.Sort)
 	report.Cap(&envelope, resolved.config.Reporters.MaxFindings)
@@ -154,8 +153,7 @@ func analyze(ctx context.Context, args []string, stderr io.Writer) int {
 	if asked.baselineWrite != "" {
 		recorded, err = baselineRows(ctx, &resolved, &options, answered)
 		if err != nil {
-			fmt.Fprintf(stderr, "deadset-go: write the baseline: %v\n", err)
-			return exitCodeFor(err)
+			return failed(ctx, stderr, fmt.Errorf("write the baseline: %w", err))
 		}
 	}
 

@@ -133,13 +133,12 @@ func TestEffectiveSeverity(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name               string
-		severity           map[string]Severity
-		code               string
-		of                 TargetKind
-		want               Severity
-		complete           bool
-		consumersAllLoaded bool
+		name     string
+		severity map[string]Severity
+		code     string
+		of       TargetKind
+		want     Severity
+		complete bool
 	}{
 		{
 			name: "a_kind_no_source_names_takes_the_contract_default",
@@ -174,9 +173,10 @@ func TestEffectiveSeverity(t *testing.T) {
 			severity: map[string]Severity{intraFunctionFamily: Allow, "DS1801": Deny},
 			of:       Application, code: "DS1801", want: Deny,
 		},
+
 		{
-			name: "a_library_with_no_consumer_information_reports_no_unused_export",
-			of:   Library, code: "DS1001", want: Allow,
+			name: "a_library_keeps_the_unused_export_default",
+			of:   Library, code: "DS1001", want: Deny,
 		},
 		{
 			name: "a_library_with_no_consumer_information_keeps_the_narrowing_kinds",
@@ -190,23 +190,7 @@ func TestEffectiveSeverity(t *testing.T) {
 			name: "a_library_with_no_consumer_information_keeps_test_only_use",
 			of:   Library, code: "DS1004", want: Deny,
 		},
-		{
-			name: "a_library_declaring_its_consumer_set_complete_that_loaded_none",
-			of:   Library, complete: true, code: "DS1001", want: Allow,
-		},
-		{
-			name: "a_library_whose_every_declared_consumer_loaded",
-			of:   Library, complete: true, consumersAllLoaded: true, code: "DS1001", want: Deny,
-		},
-		{
-			name: "a_library_that_loaded_consumers_it_never_declared_complete",
-			of:   Library, consumersAllLoaded: true, code: "DS1001", want: Deny,
-		},
-		{
-			name:     "a_library_naming_the_kind_outranks_the_library_default",
-			severity: map[string]Severity{"DS1001": Deny},
-			of:       Library, code: "DS1001", want: Deny,
-		},
+
 		{
 			name: "an_application_reads_no_consumer_fact",
 			of:   Application, code: "DS1001", want: Deny,
@@ -234,9 +218,9 @@ func TestEffectiveSeverity(t *testing.T) {
 			t.Parallel()
 
 			cfg := configFor(tc.of, tc.complete, tc.severity)
-			if got := cfg.EffectiveSeverity(tc.code, tc.consumersAllLoaded); got != tc.want {
-				t.Errorf("EffectiveSeverity(%q, %t) with target kind %q, severity %v and consumers.complete %t = %q, want %q",
-					tc.code, tc.consumersAllLoaded, tc.of, tc.severity, tc.complete, got, tc.want)
+			if got := cfg.EffectiveSeverity(tc.code); got != tc.want {
+				t.Errorf("EffectiveSeverity(%q) with target kind %q, severity %v and consumers.complete %t = %q, want %q",
+					tc.code, tc.of, tc.severity, tc.complete, got, tc.want)
 			}
 		})
 	}
@@ -251,8 +235,8 @@ func TestEffectiveSeverityIsTheVocabularysDefaultWhenNothingNamesTheKind(t *test
 		if !published.DefaultEnabled {
 			want = Allow
 		}
-		if got := cfg.EffectiveSeverity(published.Code, false); got != want {
-			t.Errorf("EffectiveSeverity(%q, false) over an application naming no severity = %q, want the vocabulary's %q",
+		if got := cfg.EffectiveSeverity(published.Code); got != want {
+			t.Errorf("EffectiveSeverity(%q) over an application naming no severity = %q, want the vocabulary's %q",
 				published.Code, got, want)
 		}
 	}
@@ -269,8 +253,8 @@ func TestEffectiveSeverityDisablesTheFamilyTheConfigurationNamesAndNoOther(t *te
 			want = Allow
 			disabled++
 		}
-		if got := cfg.EffectiveSeverity(published.Code, false); got != want {
-			t.Errorf("EffectiveSeverity(%q, false) under severity %q = %q, want %q",
+		if got := cfg.EffectiveSeverity(published.Code); got != want {
+			t.Errorf("EffectiveSeverity(%q) under severity %q = %q, want %q",
 				published.Code, intraFunctionFamily, got, want)
 		}
 	}

@@ -42,6 +42,12 @@ var bareSpecifierPattern = regexp.MustCompile(`^[^./#]`)
 // lowercase words joined by single hyphens.
 var analyzerNamePattern = regexp.MustCompile(`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
 
+// componentExtensionPattern is the shape of an entry of ts.component_extensions.
+var componentExtensionPattern = regexp.MustCompile(`^\.[A-Za-z0-9]+$`)
+
+// conventionNamePattern is the shape of an entry of ts.disabled_conventions.
+var conventionNamePattern = regexp.MustCompile(`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
+
 // providerSourcePattern is the spelling the source of an acquirable analyzer takes.
 var providerSourcePattern = regexp.MustCompile(`^(go|npm):[^ \t\r\n]+$`)
 
@@ -145,6 +151,8 @@ func schemaRoot() keyNode {
 		"ts": {kind: keySection, members: map[string]keyNode{
 			"test_files":              {kind: keyLeaf},
 			"entry_files":             {kind: keyLeaf},
+			"component_extensions":    {kind: keyLeaf},
+			"disabled_conventions":    {kind: keyLeaf},
 			"injection_registrations": declarationList(),
 			"lifecycle_contracts": {kind: keyList, members: map[string]keyNode{
 				"components": declarationList(),

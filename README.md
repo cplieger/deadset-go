@@ -97,14 +97,14 @@ deadset-go is a standalone command, and its interface is seven verbs, the JSON r
 - `analyze` writes the report and exits with the verdict, and `explain` answers for one symbol.
 - `print-config`, `print-roots` and `print-retained` print the resolved configuration with each setting's source, the root set, and every symbol an exemption held back.
 - `describe` prints the analyzer, contract and schema versions and the conformance record as JSON, and `version` prints the analyzer and contract versions.
-- The run exits 0 when no finding fails it and 1 when one does. It exits 2 on a usage error or a refused source-edit flag, and 3 when the load or type check fails. It exits 4 when a finding is about a symbol a cross-language edge names, which only the merge in [deadset](https://github.com/cplieger/deadset) can settle.
+- The run exits 0 when no finding fails it and 1 when one does. It exits 2 on a usage error or a refused source-edit flag, and 3 when the analysis fails before a verdict. It exits 4 when a finding is about a symbol a cross-language edge names, which only the merge in [deadset](https://github.com/cplieger/deadset) can settle.
 
 The report follows the [deadset contract](https://github.com/cplieger/deadset-spec). [Configuration and invocation](docs/configuration.md) lists every flag, setting and suppression form.
 
 ## Unsupported by design
 
 - Source edits. Every verb only reports, and a flag whose name holds `fix`, `edit`, `delete` or `rewrite` exits with 2. The JSON report carries what an external codemod needs.
-- Network access. Consumers are local checkouts, and the toolchain runs with `GOPROXY=off`, so a module missing from the module cache stops the run with exit 3.
+- Network access. Consumers are local checkouts, and the toolchain runs with `GOPROXY=off`. A module missing from the module cache then stops the run with exit 3 where a declared or host configuration needs it.
 - Runtime evidence. Coverage profiles and production logs are not inputs.
 - Guesses. A kind ships only where its answer follows exactly from type information and the module graph.
 - Other languages. [deadset-ts](https://github.com/cplieger/deadset-ts) analyzes TypeScript and JavaScript.
@@ -113,7 +113,7 @@ The report follows the [deadset contract](https://github.com/cplieger/deadset-sp
 
 ## Related projects
 
-deadset-go implements the [deadset contract](https://github.com/cplieger/deadset-spec), which fixes the issue codes, the report schema and the exit codes. It passes all 35 of the contract's conformance fixtures that carry a Go rendering, and every report names that result.
+deadset-go implements the [deadset contract](https://github.com/cplieger/deadset-spec), which fixes the issue codes, the report schema and the exit codes. It passes all 46 of the contract's conformance fixtures that carry a Go rendering, and every report names that result.
 
 - [deadset-ts](https://github.com/cplieger/deadset-ts) is the same analysis for TypeScript and JavaScript.
 - [deadset](https://github.com/cplieger/deadset) runs both analyzers as one command and merges their reports, resolving the references between Go and TypeScript code.

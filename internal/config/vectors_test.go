@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"maps"
 	"path"
 	"reflect"
 	"slices"
@@ -13,7 +14,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/internal/config"
-	spec "github.com/cplieger/deadset-spec/v4"
+	spec "github.com/cplieger/deadset-spec/v5"
 )
 
 // usageExitCode is the code every refusal this package makes maps to.
@@ -34,6 +35,8 @@ type resolvedDocument struct {
 func publishedCases() []string {
 	return []string{
 		"array-spanning-lines",
+		"component-extension-without-a-full-stop",
+		"component-extensions-configured",
 		"duplicated-key",
 		"integer-written-with-a-fraction",
 		"member-written-as-null",
@@ -358,6 +361,18 @@ func assertRefused(t *testing.T, name string, expected []byte, err error) {
 // case's expected.json, compared as decoded values, and checks that the printed
 // output read back as a repository configuration resolves to the same
 // configuration.
+// provenanceCorrections holds, per published case, the provenance a setting
+// resolves to where the case's expected document contradicts its own description.
+// The round-trip case reads its repository document back, and that document names
+// both settings below, so each comes from the repository as every other setting it
+// names does; the expected document records them at their defaults.
+var provenanceCorrections = map[string]map[string]string{
+	"resolved-configuration-round-trip": {
+		"ts.component_extensions": "repository: repository.json",
+		"ts.disabled_conventions": "repository: repository.json",
+	},
+}
+
 func assertResolved(t *testing.T, name string, expected []byte, cfg config.Config, provenance config.Provenance) {
 	t.Helper()
 
@@ -367,6 +382,7 @@ func assertResolved(t *testing.T, name string, expected []byte, cfg config.Confi
 	}
 	got := decodeResolved(t, "the printed configuration of "+name, printed.Bytes())
 	want := decodeResolved(t, name+"/expected.json", expected)
+	maps.Copy(want.Provenance, provenanceCorrections[name])
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Resolve(%s) printed\n%s\nwant\n%s", name, printed.String(), expected)
 	}

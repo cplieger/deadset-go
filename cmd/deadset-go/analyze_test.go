@@ -14,7 +14,7 @@ import (
 
 	"github.com/cplieger/deadset-go/internal/config"
 	"github.com/cplieger/deadset-go/internal/report"
-	spec "github.com/cplieger/deadset-spec/v4"
+	spec "github.com/cplieger/deadset-spec/v5"
 )
 
 // analyzed is one run of the analyze verb over dir: the verb is invoked from the
@@ -149,12 +149,22 @@ func TestAnalyzeExitsWithTheCodeTheContractsTableGivesTheRun(t *testing.T) {
 			want:       codes["usage"],
 		},
 		{
-			name:   "a_target_that_does_not_type-check_is_a_failure",
+			name:   "a_target_that_does_not_parse_is_a_failure",
 			module: brokenModule,
 			// A run that produced no answer prints the load errors and no
 			// finding list, so it writes no report either.
-			wantStderr: []string{"undefined: missing"},
+			wantStderr: []string{"app.go:3:"},
 			want:       codes["failure"],
+		},
+		{
+			name:   "a_type_error_skips_its_function_and_the_run_answers",
+			module: mistypedModule,
+			// The function holding the error is not evaluated and is named on
+			// stderr, and the exit code follows the findings, of which there are
+			// none.
+			wantStderr: []string{"app.go:3: undefined: missing"},
+			want:       codes["clean"],
+			wantReport: true,
 		},
 		{
 			name:       "a_pending_finding_outranks_the_findings_the_run_holds",
@@ -196,14 +206,26 @@ func suppressedModuleWith(t *testing.T, document string) string {
 	return writeModule(t, suppressedArchive(document))
 }
 
-// brokenModule is a module that does not type-check, which is the run that produces
-// no answer.
-func brokenModule(t *testing.T) string {
+// mistypedModule is a module whose one function holds a type error, which the
+// analysis skips.
+func mistypedModule(t *testing.T) string {
 	t.Helper()
 
 	return writeModule(t, map[string]string{
 		"go.mod":           "module example.com/app\n\ngo 1.27.1\n",
 		"app.go":           "package main\n\nfunc main() { missing() }\n",
+		repositoryDocument: `{"target": {"kind": "application"}}`,
+	})
+}
+
+// brokenModule is a module that does not parse, which is the run that produces no
+// answer.
+func brokenModule(t *testing.T) string {
+	t.Helper()
+
+	return writeModule(t, map[string]string{
+		"go.mod":           "module example.com/app\n\ngo 1.27.1\n",
+		"app.go":           "package main\n\nfunc main() { missing( }\n",
 		repositoryDocument: `{"target": {"kind": "application"}}`,
 	})
 }
@@ -291,7 +313,7 @@ func TestAnalyzeRenderingsAreTheInvocationsWhereItNamesAny(t *testing.T) {
 func TestAnalyzeTemplateRenderingReadsTheTemplateTheInvocationNames(t *testing.T) {
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
 	templatePath := writeDocument(t, dir, "one-line.tmpl",
-		"{{range .Findings}}{{.Code}} {{.Symbol.Ref}}\n{{end}}")
+		"{{range .findings}}{{.code}} {{.symbol.ref}}\n{{end}}")
 	got := runAnalyze(t, dir, "--format=template", "--template="+templatePath)
 
 	body, err := os.ReadFile(got.reportPath + ".tmpl")
@@ -328,7 +350,7 @@ func TestAnalyzeRefusesAnUnparseableTemplateBeforeAnyAnalysis(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := findingsFixture(t, `{"target": {"kind": "application"}, "reporters": {"formats": ["template"]}}`)
-			templatePath := writeDocument(t, dir, "unclosed.tmpl", "{{ .Totals")
+			templatePath := writeDocument(t, dir, "unclosed.tmpl", "{{ .totals")
 			got := runAnalyze(t, dir, append([]string{"--template=" + templatePath}, tc.formats...)...)
 
 			if want := contractExitCodes(t)["usage"]; got.code != want {
@@ -346,13 +368,13 @@ func TestAnalyzeRefusesAnUnparseableTemplateBeforeAnyAnalysis(t *testing.T) {
 
 func TestAnalyzeExitsWithFailureWhenTheTemplateFailsToRender(t *testing.T) {
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
-	templatePath := writeDocument(t, dir, "absent-field.tmpl", "{{ .Totals.Findings }} {{ .Invented }}\n")
+	templatePath := writeDocument(t, dir, "absent-field.tmpl", "{{ .totals.findings }} {{ .invented }}\n")
 	got := runAnalyze(t, dir, "--format=template", "--template="+templatePath)
 
 	if want := contractExitCodes(t)["failure"]; got.code != want {
 		t.Errorf("analyze with a template naming an absent field = %d, want %d\nstderr: %s", got.code, want, got.stderr)
 	}
-	if !strings.Contains(got.stderr, "Invented") {
+	if !strings.Contains(got.stderr, "invented") {
 		t.Errorf("analyze stderr = %q, want it to name what the template named and the report does not carry", got.stderr)
 	}
 	if envelope := envelopeAt(t, got.reportPath); envelope.Totals.Findings == 0 {

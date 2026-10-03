@@ -94,13 +94,16 @@ func TestUnusedRequirementsReportsNothingWithoutALoad(t *testing.T) {
 }
 
 func TestTheLoadFailsBeforeADependencyAnswerWhereAnImportResolvesToNoModule(t *testing.T) {
-	cases := map[string]string{
-		"a module the file does not require": "missing-requirement.txtar",
-		"a package the module does not hold": "unresolvable-import.txtar",
+	cases := map[string]struct {
+		archive string
+		setup   bool
+	}{
+		"a module the file does not require": {archive: "missing-requirement.txtar"},
+		"a package the module does not hold": {archive: "unresolvable-import.txtar", setup: true},
 	}
-	for name, archive := range cases {
+	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			dir := extract(t, archive)
+			dir := extract(t, tc.archive)
 			doc, err := scope.ForDir(dir)
 			if err != nil {
 				t.Fatalf("Setup: scope.ForDir(%s): %v", dir, err)
@@ -109,12 +112,13 @@ func TestTheLoadFailsBeforeADependencyAnswerWhereAnImportResolvesToNoModule(t *t
 			_, err = load.Load(t.Context(), doc, load.Configuration{
 				ID: fixtureOS + "-" + fixtureArch, OS: fixtureOS, Arch: fixtureArch,
 			})
-			var diagnosed *load.Error
-			if !errors.As(err, &diagnosed) {
-				t.Fatalf("load.Load(%s) error = %v, want the load's own diagnostics", archive, err)
-			}
-			if len(diagnosed.Diagnostics) == 0 {
-				t.Errorf("load.Load(%s) returned no diagnostic, want the compile error", archive)
+			setup, isSetup := errors.AsType[*load.SetupError](err)
+			_, diagnosed := errors.AsType[*load.Error](err)
+			switch {
+			case tc.setup && (!isSetup || len(setup.Failures) == 0 || setup.Failures[0].Class != load.MissingModule):
+				t.Errorf("load.Load(%s) error = %v, want a missing-module failure: the module file requires the module", tc.archive, err)
+			case !tc.setup && !diagnosed:
+				t.Errorf("load.Load(%s) error = %v, want the load's own diagnostics: nothing requires the module", tc.archive, err)
 			}
 		})
 	}

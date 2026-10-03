@@ -176,25 +176,22 @@ func TestTheCorpusConversionFixtureIsCertainWithItsConsumerLoaded(t *testing.T) 
 	}
 }
 
-func TestTheClosedWorldFactAndTheConsumerInformationFactAreSeparate(t *testing.T) {
+func TestTheClosedWorldFactNeedsTheCompletenessDeclaration(t *testing.T) {
 	const otherConsumer = "example.com/other"
 
 	for name, one := range map[string]struct {
 		consumers   Consumers
 		closedWorld bool // what the narrowing kinds read
-		allLoaded   bool // what the severity map reads
 	}{
 		"no consumer declared, and nothing asserted about the set": {
 			consumers: Consumers{},
 		},
 		"a declared consumer that loaded, with the set not declared complete": {
 			consumers: Consumers{Declared: []string{theConsumer}, Loaded: []string{theConsumer}},
-			allLoaded: true,
 		},
 		"a declared consumer that loaded, with the set declared complete": {
 			consumers:   Consumers{Declared: []string{theConsumer}, Loaded: []string{theConsumer}, Complete: true},
 			closedWorld: true,
-			allLoaded:   true,
 		},
 		"a declared consumer that did not load": {
 			consumers: Consumers{Declared: []string{theConsumer}},
@@ -212,7 +209,6 @@ func TestTheClosedWorldFactAndTheConsumerInformationFactAreSeparate(t *testing.T
 		"a set declared complete that declares no consumer": {
 			consumers:   Consumers{Complete: true},
 			closedWorld: true,
-			allLoaded:   true,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -221,10 +217,6 @@ func TestTheClosedWorldFactAndTheConsumerInformationFactAreSeparate(t *testing.T
 			if got := in.consumersLoaded(); got != one.closedWorld {
 				t.Errorf("consumersLoaded() = %t for %s, want %t: the narrowing kinds need the completeness declaration",
 					got, name, one.closedWorld)
-			}
-			if got := in.consumersAllLoaded(); got != one.allLoaded {
-				t.Errorf("consumersAllLoaded() = %t for %s, want %t: the severity map reads what the run loaded",
-					got, name, one.allLoaded)
 			}
 		})
 	}

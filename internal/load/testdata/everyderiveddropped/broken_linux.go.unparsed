@@ -1,0 +1,6 @@
+//go:build linux
+
+package main
+
+// The linux configuration does not parse, which drops it with a load error.
+func init() { } }

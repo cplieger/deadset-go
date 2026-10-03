@@ -84,7 +84,8 @@ func TestTheDocumentWritesEveryRequiredMember(t *testing.T) {
 	want := []string{
 		"schema_version", "contract_version", "analyzer", "target", "configurations",
 		"configurations_not_built", "consumers", "findings", "edge_evaluations",
-		"stale_suppressions", "declared_gaps", "excluded_by_cgo", "test_file_rules", "totals",
+		"stale_suppressions", "declared_gaps", "excluded_by_cgo", "test_file_rules", "type_error_skips",
+		"notes", "unanswered_questions", "conventions_applied", "totals",
 	}
 	for _, member := range want {
 		if _, held := document[member]; !held {
@@ -94,7 +95,10 @@ func TestTheDocumentWritesEveryRequiredMember(t *testing.T) {
 	if len(document) != len(want) {
 		t.Errorf("the document holds %d members, want the %d the schema declares", len(document), len(want))
 	}
-	for _, member := range []string{"findings", "excluded_by_cgo", "declared_gaps", "configurations_not_built"} {
+	for _, member := range []string{
+		"findings", "excluded_by_cgo", "declared_gaps", "configurations_not_built",
+		"type_error_skips", "notes", "unanswered_questions", "conventions_applied",
+	} {
 		if got := string(document[member]); got != "[]" {
 			t.Errorf("the document writes %q as %s, want an empty array", member, got)
 		}

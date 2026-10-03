@@ -1,0 +1,6 @@
+// Package syntaxerror does not parse, so a load of it produces diagnostics and no
+// package set at all.
+package syntaxerror
+
+// Mismatch is followed by a closing brace no declaration opened.
+func Mismatch() int { return 1 } }

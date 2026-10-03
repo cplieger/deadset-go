@@ -95,3 +95,27 @@ method (*Graph).ConsumersOf
 # hand each test a copy of an analysis computed once per process.
 function Detached is used in test only
 method (*Memo[K, V]).Of is used in test only
+
+# --- A fixture dependency under internal/load/testdata/sigdeps.
+#
+# The cgo importer test loads a package that only a file importing "C" imports.
+# That file is the one caller of this function, and punused does not read a file
+# importing "C", so the call is invisible to it.
+function Name is unused
+
+# --- The platform memory readers.
+#
+# punused analyzes the linux build, where main calls the linux file's
+# PlatformSources. The darwin, windows and other files declare the same function
+# for their own builds, so under the linux build nothing references them.
+function PlatformSources is unused
+
+# --- The report schema's unanswered_questions and conventions_applied records.
+#
+# The wire conversion reads these fields through a struct conversion, which
+# punused does not count as a reference. This analyzer leaves both arrays empty
+# for Go, so no other code reads them by name.
+field Questions is unused
+field Declarations is unused
+field Package is unused
+field Version is unused

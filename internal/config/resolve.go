@@ -86,6 +86,8 @@ type docProviders struct {
 type docTS struct {
 	TestFiles              *[]string            `json:"test_files"`
 	EntryFiles             *[]string            `json:"entry_files"`
+	ComponentExtensions    *[]string            `json:"component_extensions"`
+	DisabledConventions    *[]string            `json:"disabled_conventions"`
 	InjectionRegistrations *[]Declaration       `json:"injection_registrations"`
 	LifecycleContracts     *[]LifecycleContract `json:"lifecycle_contracts"`
 	Serializers            *[]Declaration       `json:"serializers"`
@@ -345,6 +347,10 @@ func resolveTS(cfg *Config, p Provenance, sources []source) {
 		func(d *doc) *[]string { return d.TS.TestFiles })
 	resolveSetting(&cfg.TS.EntryFiles, "ts.entry_files", p, sources,
 		func(d *doc) *[]string { return d.TS.EntryFiles })
+	resolveSetting(&cfg.TS.ComponentExtensions, "ts.component_extensions", p, sources,
+		func(d *doc) *[]string { return d.TS.ComponentExtensions })
+	resolveSetting(&cfg.TS.DisabledConventions, "ts.disabled_conventions", p, sources,
+		func(d *doc) *[]string { return d.TS.DisabledConventions })
 	resolveSetting(&cfg.TS.InjectionRegistrations, "ts.injection_registrations", p, sources,
 		func(d *doc) *[]Declaration { return d.TS.InjectionRegistrations })
 	resolveSetting(&cfg.TS.LifecycleContracts, "ts.lifecycle_contracts", p, sources,
@@ -631,6 +637,10 @@ func validateTS(t *docTS, label string) *Error {
 	return firstError(
 		arrayOf(label, "ts.test_files", t.TestFiles, 1),
 		arrayOf(label, "ts.entry_files", t.EntryFiles, 0),
+		patternedArray(label, "ts.component_extensions", t.ComponentExtensions, componentExtensionPattern,
+			"is not a full stop followed by letters and digits"),
+		patternedArray(label, "ts.disabled_conventions", t.DisabledConventions, conventionNamePattern,
+			"is not lowercase words joined by single hyphens"),
 		validateDeclarations(t.InjectionRegistrations, "ts.injection_registrations", label),
 		validateLifecycleContracts(t.LifecycleContracts, label),
 		validateDeclarations(t.Serializers, "ts.serializers", label),
@@ -838,6 +848,23 @@ func arrayOf[T ~string](label, path string, values *[]T, minItems int, allowed .
 			return malformed(label, path, "%q is not one of %s", string(value), spell(allowed))
 		}
 		seen[value] = true
+	}
+	return nil
+}
+
+// patternedArray checks an array of strings whose every entry matches pattern,
+// shape naming what a refused entry is not.
+func patternedArray(label, path string, values *[]string, pattern *regexp.Regexp, shape string) *Error {
+	if refusal := arrayOf(label, path, values, 0); refusal != nil {
+		return refusal
+	}
+	if values == nil {
+		return nil
+	}
+	for _, value := range *values {
+		if !pattern.MatchString(value) {
+			return malformed(label, path, "%q %s", value, shape)
+		}
 	}
 	return nil
 }

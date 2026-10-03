@@ -31,8 +31,28 @@ const (
 // empty otherwise) and any package importing one of those are checked whole, their
 // syntax and type information kept for the analysis to walk. Every other package is
 // checked for its declarations alone, function bodies skipped and only its types
-// kept, so a type error inside one of its bodies is not reported.
+// kept. A type error in a package of the main module, or of module, is recorded in
+// the package's TypeErrors alone and fails nothing, because the analysis skips the
+// declaration that holds it; a type error in any other package checked for its
+// declarations is no error of the program and is dropped.
 func typeCheck(ctx context.Context, fset *token.FileSet, roots []*packages.Package, arch, module string) error {
+	return check(ctx, fset, roots, arch, func(p *packages.Package) bool {
+		return p.Module != nil && (module == "" && p.Module.Main || module != "" && p.Module.Path == module)
+	}, true)
+}
+
+// typeCheckDeclarations type-checks every package reachable from roots for its
+// declarations alone, none of them whole, as typeCheck checks a dependency.
+func typeCheckDeclarations(ctx context.Context, fset *token.FileSet, roots []*packages.Package, arch string) error {
+	return check(ctx, fset, roots, arch, func(*packages.Package) bool { return false }, false)
+}
+
+// check runs one load's checks: own names the packages whose type errors skip a
+// declaration rather than fail the load, and mainWhole whether the main module's
+// packages, and every package importing one, are checked whole.
+func check(ctx context.Context, fset *token.FileSet, roots []*packages.Package, arch string,
+	own func(*packages.Package) bool, mainWhole bool,
+) error {
 	sizes := types.SizesFor(gcCompiler, arch)
 	if sizes == nil {
 		return fmt.Errorf("no type sizes for architecture %q", arch)
@@ -44,7 +64,7 @@ func typeCheck(ctx context.Context, fset *token.FileSet, roots []*packages.Packa
 		parsed: make(map[string]*parsedFile),
 		cpu:    make(chan struct{}, runtime.GOMAXPROCS(0)),
 	}
-	c.run(schedule(roots, module))
+	c.run(schedule(roots, own, mainWhole))
 	return ctx.Err()
 }
 
@@ -55,15 +75,17 @@ type checkNode struct {
 	preds   []*checkNode
 	pending atomic.Int32
 	whole   bool
+	program bool // a type error in the package skips its declaration rather than failing the load
 }
 
 // schedule builds the graph typeCheck walks, in import order, deciding which
 // packages are checked whole.
-func schedule(roots []*packages.Package, module string) []*checkNode {
+func schedule(roots []*packages.Package, own func(*packages.Package) bool, mainWhole bool) []*checkNode {
 	nodes := make(map[*packages.Package]*checkNode)
 	var order []*checkNode
 	packages.Visit(roots, nil, func(p *packages.Package) {
-		n := &checkNode{pkg: p, whole: p.Module != nil && (p.Module.Main || module != "" && p.Module.Path == module)}
+		program := own(p)
+		n := &checkNode{pkg: p, whole: program || mainWhole && p.Module != nil && p.Module.Main, program: program}
 		seen := make(map[*checkNode]bool, len(p.Imports))
 		for _, imported := range p.Imports {
 			in := nodes[imported]
@@ -71,7 +93,7 @@ func schedule(roots []*packages.Package, module string) []*checkNode {
 				continue
 			}
 			seen[in] = true
-			n.whole = n.whole || in.whole
+			n.whole = n.whole || mainWhole && in.whole
 			n.pending.Add(1)
 			in.preds = append(in.preds, n)
 		}
@@ -107,7 +129,7 @@ func (c *checker) run(nodes []*checkNode) {
 	var start func(n *checkNode)
 	start = func(n *checkNode) {
 		wg.Go(func() {
-			c.check(n.pkg, n.whole)
+			c.check(n.pkg, n.whole, n.program)
 			for _, pred := range n.preds {
 				if pred.pending.Add(-1) == 0 {
 					start(pred)
@@ -130,7 +152,7 @@ func (c *checker) run(nodes []*checkNode) {
 }
 
 // check parses and type-checks one package whose imports are already checked.
-func (c *checker) check(p *packages.Package, whole bool) {
+func (c *checker) check(p *packages.Package, whole, program bool) {
 	p.Fset = c.fset
 	p.TypesSizes = c.sizes
 	if p.PkgPath == "unsafe" {
@@ -157,7 +179,7 @@ func (c *checker) check(p *packages.Package, whole bool) {
 	conf := &types.Config{
 		Importer:         importer{pkg: p},
 		IgnoreFuncBodies: !whole,
-		Error:            func(err error) { appendError(p, err) },
+		Error:            typeErrorSink(p, whole, program),
 		Sizes:            c.sizes,
 	}
 	if p.Module != nil && p.Module.GoVersion != "" {
@@ -167,12 +189,28 @@ func (c *checker) check(p *packages.Package, whole bool) {
 	c.cpu <- struct{}{}
 	err := types.NewChecker(conf, c.fset, p.Types, info).Files(files)
 	<-c.cpu
-	if err != nil && len(p.Errors) == 0 {
+	if _, typed := err.(types.Error); err != nil && len(p.Errors) == 0 && !typed {
 		appendError(p, err)
 	}
 	p.IllTyped = len(p.Errors) > 0
 	for _, imported := range p.Imports {
 		p.IllTyped = p.IllTyped || imported.IllTyped
+	}
+}
+
+// typeErrorSink is where one package's checker sends its errors: a type error of a
+// package the program holds is recorded to skip a declaration, one of a package
+// checked for its declarations alone is dropped, and every other error is the
+// package's.
+func typeErrorSink(p *packages.Package, whole, program bool) func(error) {
+	return func(err error) {
+		if typed, ok := err.(types.Error); ok && (program || !whole) {
+			if program {
+				p.TypeErrors = append(p.TypeErrors, typed)
+			}
+			return
+		}
+		appendError(p, err)
 	}
 }
 

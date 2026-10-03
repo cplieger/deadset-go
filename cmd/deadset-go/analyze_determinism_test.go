@@ -65,7 +65,7 @@ func determinismModule(t *testing.T, base string) {
 // run reads it and the target is what the report-only guarantee is about.
 const (
 	templateName     = "one.tmpl"
-	templateDocument = "{{ range .Findings }}{{ .Code }} {{ .Symbol.Ref }}\n{{ end }}"
+	templateDocument = "{{ range .findings }}{{ .code }} {{ .symbol.ref }}\n{{ end }}"
 )
 
 // determinismBase writes the target and the template, makes their directory the

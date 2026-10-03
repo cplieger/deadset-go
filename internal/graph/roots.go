@@ -31,6 +31,7 @@ const (
 	RootPublishedAPI                 // an exported symbol a consumer outside the module can name
 	RootConfigured                   // an exact reference from the configuration
 	RootPattern                      // a pattern from the configuration
+	RootTypeError                    // a declaration a type error skipped, or what its unresolved expression could reach
 )
 
 var rootNames = [...]string{
@@ -43,6 +44,7 @@ var rootNames = [...]string{
 	RootPublishedAPI: "published-api",
 	RootConfigured:   "configured",
 	RootPattern:      "pattern",
+	RootTypeError:    "type-error",
 }
 
 // String returns the kind's spelling, and a numbered form for a value outside the
@@ -123,6 +125,7 @@ func Roots(r *load.Result, targetRoot string, read ReadFile, symbols []Symbol, o
 	if err := d.walk(r); err != nil {
 		return nil, nil, err
 	}
+	d.typeErrors(r)
 	d.declared(symbols)
 	if opts.PublishedAPI {
 		d.publishedAPI(symbols)

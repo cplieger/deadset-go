@@ -114,3 +114,23 @@ func TestLoadRefusesAConfigurationOnItsMetadataBeforeCheckingAnything(t *testing
 		t.Errorf("Load(testdata/metadataerror) diagnostics = %+v, want one naming example.com/nowhere", loadErr.Diagnostics)
 	}
 }
+
+// A package only a file importing "C" imports is checked for its declarations alone,
+// as every other dependency is, so an error inside one of its bodies refuses
+// nothing and the file that imports it is read.
+func TestLoadChecksAPackageOnlyAFileImportingCImportsForItsDeclarations(t *testing.T) {
+	stableToolchain(t)
+	got := loadFixture(t, filepath.Join("sigdeps", "app"))
+
+	if len(got.ExcludedByCgo) != 0 {
+		t.Errorf("Load(testdata/sigdeps/app).ExcludedByCgo = %v, want empty: the file importing C reads a dependency whose only error is in a body",
+			got.ExcludedByCgo)
+	}
+	pkg := findPackage(got, "example.com/sigdeps")
+	if pkg == nil || pkg.Imports["example.com/sigdep/viac"] == nil {
+		t.Fatalf("Load(testdata/sigdeps/app) holds no import of example.com/sigdep/viac, ids = %v", packageIDs(got))
+	}
+	if viac := pkg.Imports["example.com/sigdep/viac"]; viac.TypesInfo != nil || len(viac.Errors) != 0 {
+		t.Errorf("example.com/sigdep/viac carries type information %t and errors %v, want neither", viac.TypesInfo != nil, viac.Errors)
+	}
+}

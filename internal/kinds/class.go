@@ -123,25 +123,9 @@ func (in *Input) importable(pkgPath string) bool {
 // narrowing kinds need: narrowing a published declaration says no consumer outside
 // the set exists, and only the declaration supplies that.
 //
-// It is neither the severity map's fact nor the reachability class's rule.
-// [Input.consumersAllLoaded] is what the severity map reads, and a published surface
-// whose declared consumers all loaded is as known as an application's whether or not
-// the set is declared complete, which is what the class is about.
+// It is not the reachability class's rule: a published surface whose declared
+// consumers all loaded is as known as an application's whether or not the set is
+// declared complete, which is what the class is about.
 func (in *Input) consumersLoaded() bool {
 	return in.Consumers.Complete && in.everyDeclaredLoaded()
-}
-
-// consumersAllLoaded reports whether the run holds consumer information and loaded
-// every consumer it declared, which is the fact the severity map reads: the
-// unreferenced-exported kind reports over a library's published API where the run
-// loaded every consumer the scope declared, and reports nothing where the run holds
-// no consumer information at all.
-//
-// A configuration declaring the set complete while declaring no consumer holds
-// consumer information, because it says the library has no consumer. Completeness is
-// otherwise not read here: a consumer set the run loaded whole leaves no caller the
-// analysis cannot see, whether or not the configuration also asserts that none
-// exists outside it.
-func (in *Input) consumersAllLoaded() bool {
-	return in.everyDeclaredLoaded() && (in.Consumers.Complete || len(in.Consumers.Declared) > 0)
 }

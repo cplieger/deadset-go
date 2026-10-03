@@ -1,6 +1,6 @@
 # Exemption classes
 
-An exemption is a named reason for which deadset-go keeps a symbol the reference graph alone would report. Every class is computed from Go type information rather than configured, so a project writes no suppression for a symbol a class covers. deadset-go implements the nine classes the deadset contract declares for Go. The class vocabulary and its detection rules are stated once in the contract's [exemptions page](https://github.com/cplieger/deadset-spec/blob/v4.0.0/docs/exemptions.md), and this page states what each class does here.
+An exemption is a named reason for which deadset-go keeps a symbol the reference graph alone would report. Every class is computed from Go type information rather than configured, so a project writes no suppression for a symbol a class covers. deadset-go implements the nine classes the deadset contract declares for Go. The class vocabulary and its detection rules are stated once in the contract's [exemptions page](https://github.com/cplieger/deadset-spec/blob/v5.1.0/docs/exemptions.md), and this page states what each class does here.
 
 ## Reading the retained set
 

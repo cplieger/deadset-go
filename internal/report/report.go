@@ -27,7 +27,6 @@ import (
 	"maps"
 	"slices"
 	"strings"
-	"text/template"
 
 	"github.com/cplieger/deadset-go/internal/config"
 	"github.com/cplieger/deadset-go/internal/graph"
@@ -37,7 +36,7 @@ import (
 // SchemaVersion is the version of the report schema this package writes a
 // document to. An analyzer names every version it reads in the analyzer object,
 // and that list holds this one.
-const SchemaVersion = "6.0.0"
+const SchemaVersion = "7.0.0"
 
 // staleSuppressionCode is the code of a stale suppression, which is the one code
 // whose records the envelope carries outside its finding list.
@@ -203,6 +202,43 @@ type DeclaredGap struct {
 	Reason     string
 }
 
+// TypeErrorSkip is one type error the compiler reported inside a function or a
+// file-level statement the analysis therefore did not evaluate: the target-relative
+// file, the line of the error's position and the compiler's message on one line.
+type TypeErrorSkip struct {
+	Path    string
+	Message string
+	Line    int
+}
+
+// Note is one hint about the run's setup the analysis cannot decide: its kind, the
+// target-relative directory it is about, the configuration key that settles it and
+// the hint in words.
+type Note struct {
+	Kind    string
+	Path    string
+	Key     string
+	Message string
+}
+
+// UnansweredQuestion is one configuration in which questions the analysis asked its
+// type checker went unanswered, with how many went unanswered and how many
+// declarations they held.
+type UnansweredQuestion struct {
+	Configuration string
+	Questions     int
+	Declarations  int
+}
+
+// ConventionApplied is one convention row the analysis applied: its name, its
+// enabling package, the installed version and the manifest that declared it.
+type ConventionApplied struct {
+	Name     string
+	Package  string
+	Version  string
+	Manifest string
+}
+
 // Suppressions is what the run's suppression records amount to: how many bound to
 // a symbol that would otherwise have produced a finding, and how many carry a
 // reason. Both are counts the summary prints and no rendering recomputes.
@@ -254,6 +290,10 @@ type Envelope struct {
 	DeclaredGaps           []DeclaredGap
 	ExcludedByCgo          []string
 	TestFileRules          []graph.TestFileRule
+	TypeErrorSkips         []TypeErrorSkip
+	Notes                  []Note
+	UnansweredQuestions    []UnansweredQuestion
+	ConventionsApplied     []ConventionApplied
 	Totals                 Totals
 }
 
@@ -269,7 +309,7 @@ type Options struct {
 
 	// Template is the user-supplied template as [ParseTemplate] parsed it, read
 	// by [Template] alone.
-	Template *template.Template
+	Template *ParsedTemplate
 
 	// FailOn is the lowest severity that fails the run, read by [Annotations]
 	// alone: a finding at or above it is an error and one below it a warning. The
@@ -320,6 +360,12 @@ type BuildInput struct {
 	ExcludedByCgo []string
 	TestFileRules []graph.TestFileRule
 
+	// TypeErrorSkips is every type error that skipped a function or a file-level
+	// statement, and Notes every hint about the run's setup. The assembly removes
+	// duplicates, so a skip every configuration reports is one entry.
+	TypeErrorSkips []TypeErrorSkip
+	Notes          []Note
+
 	// Suppressions is what the run's suppression records amount to, which no
 	// rendering recomputes.
 	Suppressions Suppressions
@@ -357,6 +403,10 @@ func Build(in *BuildInput) (Envelope, error) {
 		DeclaredGaps:           slices.Clone(in.DeclaredGaps),
 		ExcludedByCgo:          unique(in.ExcludedByCgo),
 		TestFileRules:          testFileRules(in.TestFileRules),
+		TypeErrorSkips:         uniqueRecords(in.TypeErrorSkips),
+		Notes:                  uniqueRecords(in.Notes),
+		UnansweredQuestions:    []UnansweredQuestion{},
+		ConventionsApplied:     []ConventionApplied{},
 	}
 	built.order()
 	built.Totals = totalsOf(&built, in.Suppressions)
@@ -526,6 +576,35 @@ func (e *Envelope) order() {
 		func(a, b ConfigurationNotBuilt) int { return cmp.Compare(a.ID, b.ID) })
 	slices.SortFunc(e.Consumers.Loaded, func(a, b LoadedConsumer) int { return cmp.Compare(a.ID, b.ID) })
 	slices.SortFunc(e.Consumers.Unavailable, func(a, b UnavailableConsumer) int { return cmp.Compare(a.ID, b.ID) })
+	slices.SortFunc(e.TypeErrorSkips, func(a, b TypeErrorSkip) int {
+		return cmp.Or(cmp.Compare(a.Path, b.Path), cmp.Compare(a.Line, b.Line),
+			strings.Compare(compactEncoding(wireTypeErrorSkip(a)), compactEncoding(wireTypeErrorSkip(b))))
+	})
+	slices.SortFunc(e.Notes, func(a, b Note) int {
+		return cmp.Or(cmp.Compare(a.Kind, b.Kind), cmp.Compare(a.Path, b.Path),
+			strings.Compare(compactEncoding(wireNote(a)), compactEncoding(wireNote(b))))
+	})
+	slices.SortFunc(e.UnansweredQuestions, func(a, b UnansweredQuestion) int {
+		return cmp.Or(cmp.Compare(a.Configuration, b.Configuration),
+			strings.Compare(compactEncoding(wireUnansweredQuestion(a)), compactEncoding(wireUnansweredQuestion(b))))
+	})
+	slices.SortFunc(e.ConventionsApplied, func(a, b ConventionApplied) int {
+		return cmp.Or(cmp.Compare(a.Name, b.Name), cmp.Compare(a.Manifest, b.Manifest),
+			strings.Compare(compactEncoding(wireConventionApplied(a)), compactEncoding(wireConventionApplied(b))))
+	})
+}
+
+// uniqueRecords is records with each distinct record once, in the order first seen.
+func uniqueRecords[T comparable](records []T) []T {
+	seen := make(map[T]bool, len(records))
+	held := make([]T, 0, len(records))
+	for _, one := range records {
+		if !seen[one] {
+			seen[one] = true
+			held = append(held, one)
+		}
+	}
+	return held
 }
 
 // compareStaleSuppressions orders two stale suppressions by the canonical key,

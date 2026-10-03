@@ -44,8 +44,51 @@ type wireEnvelope struct {
 	DeclaredGaps           []wireDeclaredGap           `json:"declared_gaps"`
 	ExcludedByCgo          []string                    `json:"excluded_by_cgo"`
 	TestFileRules          []wireTestFileRule          `json:"test_file_rules"`
+	TypeErrorSkips         []wireTypeErrorSkipRecord   `json:"type_error_skips"`
+	Notes                  []wireNoteRecord            `json:"notes"`
+	UnansweredQuestions    []wireUnansweredRecord      `json:"unanswered_questions"`
+	ConventionsApplied     []wireConventionRecord      `json:"conventions_applied"`
 	Totals                 wireTotals                  `json:"totals"`
 }
+
+//nolint:govet // fieldalignment: the field order is the schema's member order, which the document writes
+type wireTypeErrorSkipRecord struct {
+	Path    string `json:"path"`
+	Line    int    `json:"line"`
+	Message string `json:"message"`
+}
+
+type wireNoteRecord struct {
+	Kind    string `json:"kind"`
+	Path    string `json:"path"`
+	Key     string `json:"key"`
+	Message string `json:"message"`
+}
+
+type wireUnansweredRecord struct {
+	Configuration string `json:"configuration"`
+	Questions     int    `json:"questions"`
+	Declarations  int    `json:"declarations"`
+}
+
+type wireConventionRecord struct {
+	Name     string `json:"name"`
+	Package  string `json:"package"`
+	Version  string `json:"version"`
+	Manifest string `json:"manifest"`
+}
+
+func wireTypeErrorSkip(s TypeErrorSkip) wireTypeErrorSkipRecord {
+	return wireTypeErrorSkipRecord{Path: s.Path, Line: s.Line, Message: s.Message}
+}
+
+func wireNote(n Note) wireNoteRecord { return wireNoteRecord(n) }
+
+func wireUnansweredQuestion(q UnansweredQuestion) wireUnansweredRecord {
+	return wireUnansweredRecord(q)
+}
+
+func wireConventionApplied(c ConventionApplied) wireConventionRecord { return wireConventionRecord(c) }
 
 //nolint:govet // fieldalignment: the field order is the schema's member order, which the document writes
 type wireAnalyzer struct {
@@ -334,6 +377,10 @@ func (e *Envelope) wire() wireEnvelope {
 		DeclaredGaps:           make([]wireDeclaredGap, 0, len(e.DeclaredGaps)),
 		ExcludedByCgo:          list(e.ExcludedByCgo),
 		TestFileRules:          make([]wireTestFileRule, 0, len(e.TestFileRules)),
+		TypeErrorSkips:         make([]wireTypeErrorSkipRecord, 0, len(e.TypeErrorSkips)),
+		Notes:                  make([]wireNoteRecord, 0, len(e.Notes)),
+		UnansweredQuestions:    make([]wireUnansweredRecord, 0, len(e.UnansweredQuestions)),
+		ConventionsApplied:     make([]wireConventionRecord, 0, len(e.ConventionsApplied)),
 		Totals: wireTotals{
 			Findings:             e.Totals.Findings,
 			BySeverity:           wireBySeverity(e.Totals.BySeverity),
@@ -372,6 +419,18 @@ func (e *Envelope) wire() wireEnvelope {
 	}
 	for _, rule := range e.TestFileRules {
 		held.TestFileRules = append(held.TestFileRules, wireTestFileRule{Rule: rule.Rule, Matched: rule.Matched})
+	}
+	for _, one := range e.TypeErrorSkips {
+		held.TypeErrorSkips = append(held.TypeErrorSkips, wireTypeErrorSkip(one))
+	}
+	for _, one := range e.Notes {
+		held.Notes = append(held.Notes, wireNote(one))
+	}
+	for _, one := range e.UnansweredQuestions {
+		held.UnansweredQuestions = append(held.UnansweredQuestions, wireUnansweredQuestion(one))
+	}
+	for _, one := range e.ConventionsApplied {
+		held.ConventionsApplied = append(held.ConventionsApplied, wireConventionApplied(one))
 	}
 	return held
 }
@@ -576,7 +635,27 @@ func (w *wireEnvelope) envelope() (Envelope, error) {
 	for _, rule := range w.TestFileRules {
 		held.TestFileRules = append(held.TestFileRules, graph.TestFileRule(rule))
 	}
+	held.TypeErrorSkips = readBack(w.TypeErrorSkips, func(one wireTypeErrorSkipRecord) TypeErrorSkip {
+		return TypeErrorSkip{Path: one.Path, Line: one.Line, Message: one.Message}
+	})
+	held.Notes = readBack(w.Notes, func(one wireNoteRecord) Note { return Note(one) })
+	held.UnansweredQuestions = readBack(w.UnansweredQuestions, func(one wireUnansweredRecord) UnansweredQuestion {
+		return UnansweredQuestion(one)
+	})
+	held.ConventionsApplied = readBack(w.ConventionsApplied, func(one wireConventionRecord) ConventionApplied {
+		return ConventionApplied(one)
+	})
 	return held, nil
+}
+
+// readBack converts every record of one array of the document, into an empty
+// rather than a nil slice so a document read back writes the array it held.
+func readBack[W, T any](records []W, convert func(W) T) []T {
+	held := make([]T, 0, len(records))
+	for _, one := range records {
+		held = append(held, convert(one))
+	}
+	return held
 }
 
 // finding is one finding read back from the document.

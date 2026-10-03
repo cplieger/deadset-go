@@ -34,13 +34,6 @@ const (
 	wildcard = "..."
 )
 
-// typesOnlyMode is what an import only a file importing "C" writes needs: the
-// types of the package and of its own dependencies, and no syntax at all. The
-// module is in it because a dependency's module path is what a dependency of the
-// target is recognised by.
-const typesOnlyMode = packages.NeedName | packages.NeedTypes |
-	packages.NeedImports | packages.NeedDeps | packages.NeedModule
-
 // checkOpaqueC type-checks every loaded package that ignored a file solely for
 // importing "C" a second time, from that package's original sources, with the C
 // pseudo-package opaque, and returns the target-relative paths, forward slashes,
@@ -63,7 +56,7 @@ func checkOpaqueC(ctx context.Context, fset *token.FileSet, target string, pkgs 
 	}
 	o := &opaqueCheck{
 		fset:     fset,
-		imports:  newCgoImporter(ctx, target, c, pkgs),
+		imports:  newCgoImporter(ctx, fset, target, c, pkgs),
 		parsed:   make(map[string]*ast.File),
 		excluded: make(map[string]bool, len(cgo)),
 		sizes:    types.SizesFor(gcCompiler, c.Arch),
@@ -418,7 +411,8 @@ func goVersionOf(p *packages.Package) string {
 
 // cgoImporter answers the second check's imports from the packages the load
 // already type-checked, loading a package only a file importing "C" imports on
-// demand, types only.
+// demand from its metadata and checked for its declarations alone, as every
+// dependency of the load is.
 //
 // go/types reaches an importer through an interface the language's own package
 // fixes, and that interface carries no context, so the run's is held here: an
@@ -426,6 +420,7 @@ func goVersionOf(p *packages.Package) string {
 // the run does.
 type cgoImporter struct {
 	ctx     context.Context
+	fset    *token.FileSet
 	known   map[string]*packages.Package
 	refused map[string]bool
 	target  string
@@ -437,9 +432,10 @@ type cgoImporter struct {
 //
 // A package and its test variants share one import path and an import of that path
 // names the package itself, so a variant is never indexed.
-func newCgoImporter(ctx context.Context, target string, c Configuration, pkgs []*packages.Package) *cgoImporter {
+func newCgoImporter(ctx context.Context, fset *token.FileSet, target string, c Configuration, pkgs []*packages.Package) *cgoImporter {
 	im := &cgoImporter{
 		ctx:     ctx,
+		fset:    fset,
 		known:   make(map[string]*packages.Package),
 		refused: make(map[string]bool),
 		target:  target,
@@ -491,7 +487,7 @@ func (im *cgoImporter) resolve(path string) (*packages.Package, error) {
 	}
 
 	cfg := &packages.Config{
-		Mode:       typesOnlyMode,
+		Mode:       metadataMode,
 		Context:    im.ctx,
 		Dir:        im.target,
 		Env:        loadEnv(im.c, workspaceOff),
@@ -502,7 +498,13 @@ func (im *cgoImporter) resolve(path string) (*packages.Package, error) {
 		im.refused[path] = true
 		return nil, err
 	}
-	packages.Visit(pkgs, nil, im.keep)
+	if len(collect(pkgs)) == 0 {
+		if err := typeCheckDeclarations(im.ctx, im.fset, pkgs, im.c.Arch); err != nil {
+			im.refused[path] = true
+			return nil, err
+		}
+		packages.Visit(pkgs, nil, im.keep)
+	}
 	if p, held := im.known[path]; held {
 		return p, nil
 	}

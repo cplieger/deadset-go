@@ -40,11 +40,12 @@ func TestDeriveEmitsOneConfigurationPerAtomAndNeverTheirProduct(t *testing.T) {
 			},
 		},
 		{
-			name:        "each_tag_derives_the_host_carrying_that_one_tag",
+			name:        "a_tag_a_source_file_names_derives_the_host_carrying_it_and_a_tag_only_tests_name_derives_nothing",
 			archive:     "custom-tags.txtar",
-			wantIDs:     []string{"linux-amd64", "linux-amd64-cgo", "linux-amd64-integration"},
-			wantGuessed: []string{"linux-amd64-cgo", "linux-amd64-integration"},
+			wantIDs:     []string{"linux-amd64", "linux-amd64-cgo"},
+			wantGuessed: []string{"linux-amd64-cgo"},
 			wantAtoms:   Atoms{Tags: []string{"cgo", "integration"}},
+			wantUnbuilt: []File{{Path: "app_integration_test.go", Constraint: "integration"}},
 		},
 		{
 			name:        "an_atom_named_only_in_a_directory_no_configuration_builds_is_collected",
@@ -94,6 +95,22 @@ func TestDeriveEmitsOneConfigurationPerAtomAndNeverTheirProduct(t *testing.T) {
 				t.Errorf("derive(%s) recorded unreachable %+v, want %+v", tc.archive, got, tc.wantUnbuilt)
 			}
 		})
+	}
+}
+
+// A test file whose constraint names a tag only test files name is built by no
+// derived configuration, and the derivation names it with that tag, which is what a
+// run reports as the configuration the project declares to build it.
+func TestDeriveNamesATestFileOnlyATestTagBuilds(t *testing.T) {
+	t.Parallel()
+
+	derived, err := derive(extract(t, "custom-tags.txtar"), fixtureHost())
+	if err != nil {
+		t.Fatalf("derive(custom-tags.txtar) = error %v, want the derived matrix", err)
+	}
+	want := []TaggedTest{{Path: "app_integration_test.go", Tags: []string{"integration"}}}
+	if !reflect.DeepEqual(derived.TaggedTests, want) {
+		t.Errorf("derive(custom-tags.txtar).TaggedTests = %+v, want %+v", derived.TaggedTests, want)
 	}
 }
 

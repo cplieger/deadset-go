@@ -38,15 +38,17 @@ type Unbuilt struct {
 // matrix and returned as an [Unbuilt] for the caller to report; the run then answers
 // over the configurations the target does build rather than having no answer at all.
 // Both errors are the load's own, which names the configuration and every diagnostic
-// it reported.
+// it reported, or the [*SetupError] naming what the project does not provide.
 //
 // A matrix whose every configuration was dropped leaves nothing to analyse, so the
-// first dropped configuration's error is returned in that case: at least one
+// first dropped setup failure, or else the first dropped configuration's error, is
+// returned in that case: at least one
 // configuration of every matrix this analyzer builds is one it did not derive, the
 // host's own, and a caller that names every configuration as derived is asking about
 // a target it cannot read at all.
 //
-// Cancelling ctx stops the next load and every load already running.
+// Cancelling ctx stops the next load and every load already running, and the error
+// returned then wraps the cause ctx was cancelled with.
 func All(ctx context.Context, doc scope.Document, configurations []Configuration, derived []string) ([]Result, []Unbuilt, error) {
 	if len(configurations) == 0 {
 		return nil, nil, fmt.Errorf("%w: %s", ErrNoConfiguration, doc.Target.Path)
@@ -57,6 +59,8 @@ func All(ctx context.Context, doc scope.Document, configurations []Configuration
 	for _, c := range configurations {
 		r, err := Load(ctx, doc, c)
 		switch {
+		case err != nil && ctx.Err() != nil:
+			return nil, nil, fmt.Errorf("load %s: %w", c.ID, context.Cause(ctx))
 		case err != nil && !slices.Contains(derived, c.ID):
 			return nil, nil, err
 		case err != nil:
@@ -66,7 +70,19 @@ func All(ctx context.Context, doc scope.Document, configurations []Configuration
 		}
 	}
 	if len(results) == 0 {
-		return nil, nil, dropped[0].Err
+		return nil, nil, droppedError(dropped)
 	}
 	return results, dropped, nil
+}
+
+// droppedError is the error a matrix whose every configuration was dropped ends
+// with: the first setup failure among the drops, because a setup failure ends a run
+// that has no configuration left to analyze, and otherwise the first drop's error.
+func droppedError(dropped []Unbuilt) error {
+	for _, one := range dropped {
+		if _, ok := errors.AsType[*SetupError](one.Err); ok {
+			return one.Err
+		}
+	}
+	return dropped[0].Err
 }

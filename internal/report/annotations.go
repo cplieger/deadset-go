@@ -16,8 +16,14 @@ const (
 	commandWarning = "warning"
 )
 
-// Annotations writes one workflow annotation per finding and one per stale
-// suppression.
+// The title and the message prefix of a type-error skip's annotation.
+const (
+	typeErrorSkipTitle   = "type error skipped"
+	typeErrorSkipMessage = "the analysis did not evaluate the function or statement holding this type error: "
+)
+
+// Annotations writes one workflow annotation per finding, one per stale
+// suppression and one warning per type-error skip.
 //
 // A stale suppression is an error whatever the rest of the severity map holds,
 // because the kind is fixed on at the failing severity. Each annotation names the
@@ -43,6 +49,11 @@ func Annotations(w io.Writer, e *Envelope, opts Options) error {
 			escapeProperty(stale.Position.Path), stale.Position.Line, stale.Position.Column,
 			stale.Position.Line,
 			escapeProperty(stale.Code+" "+kindName(stale.Code)), escapeData(stale.Message))
+	}
+	for _, skip := range e.TypeErrorSkips {
+		out.printf("::%s file=%s,line=%d,title=%s::%s\n",
+			commandWarning, escapeProperty(skip.Path), skip.Line, escapeProperty(typeErrorSkipTitle),
+			escapeData(typeErrorSkipMessage+skip.Message))
 	}
 	return out.err
 }

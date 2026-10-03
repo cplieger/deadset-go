@@ -66,6 +66,19 @@ type Derived struct {
 	// Atoms is what the tree named, including the names the toolchain no longer
 	// builds for, which derive no configuration of their own.
 	Atoms Atoms
+
+	// TaggedTests holds every test file of Unreachable whose constraint names a
+	// tag only test files name, each with the tags it names. A tag only tests
+	// need derives no configuration: building those tests is a configuration the
+	// project declares.
+	TaggedTests []TaggedTest
+}
+
+// TaggedTest is one test file no configuration of the derived matrix builds,
+// because its constraint names a tag only test files name.
+type TaggedTest struct {
+	Path string   // target-relative, forward slashes
+	Tags []string // the test-only tags its constraint names, sorted
 }
 
 // Derive reads the module tree rooted at root and returns the matrix its build
@@ -86,13 +99,69 @@ func derive(root string, host load.Configuration) (Derived, error) {
 		return Derived{}, err
 	}
 	atoms := atomsOf(files)
-	configurations := configurationsOf(host, atoms)
+	testOnly := testOnlyTags(files, atoms)
+	deriving := atoms
+	deriving.Tags = slices.DeleteFunc(slices.Clone(atoms.Tags), func(tag string) bool { return testOnly[tag] })
+	configurations := configurationsOf(host, deriving)
+	unreachable := unreachableUnder(files, configurations)
 	return Derived{
 		Configurations: configurations,
 		Guessed:        guessedIn(configurations, host),
-		Unreachable:    unreachableUnder(files, configurations),
+		Unreachable:    unreachable,
 		Atoms:          atoms,
+		TaggedTests:    taggedTests(files, unreachable, testOnly),
 	}, nil
+}
+
+// testOnlyTags is every tag of atoms that test files name and no other file does.
+func testOnlyTags(files []fileConstraint, atoms Atoms) map[string]bool {
+	inTests, elsewhere := make(map[string]bool), make(map[string]bool)
+	for _, file := range files {
+		if isTestFile(file.path) {
+			collectTags(file.expr(), inTests)
+		} else {
+			collectTags(file.expr(), elsewhere)
+		}
+	}
+	held := make(map[string]bool)
+	for _, tag := range atoms.Tags {
+		if inTests[tag] && !elsewhere[tag] {
+			held[tag] = true
+		}
+	}
+	return held
+}
+
+// taggedTests is every unreachable test file whose constraint names a test-only tag.
+func taggedTests(files []fileConstraint, unreachable []File, testOnly map[string]bool) []TaggedTest {
+	missing := make(map[string]bool, len(unreachable))
+	for _, file := range unreachable {
+		missing[file.Path] = true
+	}
+	var held []TaggedTest
+	for _, file := range files {
+		if !missing[file.path] || !isTestFile(file.path) {
+			continue
+		}
+		named := make(map[string]bool)
+		collectTags(file.expr(), named)
+		var tags []string
+		for tag := range named {
+			if testOnly[tag] {
+				tags = append(tags, tag)
+			}
+		}
+		if len(tags) > 0 {
+			slices.Sort(tags)
+			held = append(held, TaggedTest{Path: file.path, Tags: tags})
+		}
+	}
+	return held
+}
+
+// isTestFile reports whether a target-relative path names a test file.
+func isTestFile(path string) bool {
+	return strings.HasSuffix(path, "_test.go")
 }
 
 // atomsOf classifies every tag the files name onto the axis it belongs to.
