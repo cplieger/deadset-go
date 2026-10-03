@@ -45,11 +45,11 @@ func deadStoresIn(info *types.Info, body *ast.BlockStmt) []*ast.Ident {
 // for.
 func localVariables(info *types.Info, body *ast.BlockStmt) map[types.Object]bool {
 	bound := make(map[types.Object]bool)
-	for _, object := range info.Implicits {
-		bound[object] = true
-	}
 	subjects := make(map[types.Object]bool)
 	ast.Inspect(body, func(n ast.Node) bool {
+		if object, implicit := info.Implicits[n]; implicit {
+			bound[object] = true
+		}
 		switch n := n.(type) {
 		case *ast.FuncType:
 			for _, field := range fieldNames(n.Params, n.Results) {
