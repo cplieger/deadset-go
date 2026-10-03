@@ -135,6 +135,9 @@ func refusalMessage(refused *suppress.Refusal) (string, error) {
 // both ways of silencing one count, the severity set to allow and a confidence the
 // configured minimum excludes.
 //
+// The records one row binds are stale together or not at all, so a row binding a
+// declaration whose finding it withheld is not reported for another it also binds.
+//
 // Several stale records at one site are one finding naming every code, because one
 // directive above a line that declares several symbols is one record per symbol and
 // a maintainer edits one line.
@@ -148,14 +151,32 @@ func StaleSuppressions(in *Input) ([]Finding, error) {
 	}
 
 	stale := make([]*suppress.Record, 0, len(in.Marks))
+	held := make(map[recordKey]bool, len(in.Marks))
 	for i := range in.Marks {
 		mark := &in.Marks[i]
 		if in.dormant(mark) || in.inEffect(i, suppressed) {
+			held[keyOf(mark)] = true
 			continue
 		}
 		stale = append(stale, mark)
 	}
+	stale = slices.DeleteFunc(stale, func(mark *suppress.Record) bool { return held[keyOf(mark)] })
 	return in.collapsed(stale)
+}
+
+// recordKey is what the records one suppression binds share: the site it is
+// written at, the code it names and the reference it names. A row whose reference
+// and path bind several declarations, as two init functions of one file do, is one
+// record per declaration under one key, and it is stale only when every record it
+// binds is.
+type recordKey struct {
+	code   string
+	symbol string
+	site   token.Position
+}
+
+func keyOf(mark *suppress.Record) recordKey {
+	return recordKey{site: mark.Site, code: mark.Code, symbol: mark.Symbol}
 }
 
 // inEffect reports whether the record at one place in Marks held a finding back.
@@ -235,7 +256,7 @@ func (in *Input) dormant(mark *suppress.Record) bool {
 	if !live {
 		return false
 	}
-	if in.Config.EffectiveSeverity(mark.Code, in.consumersAllLoaded()) == config.Allow || in.dialed.dormant[mark.Bound] {
+	if in.Config.EffectiveSeverity(mark.Code) == config.Allow || in.dialed.dormant[mark.Bound] {
 		return true
 	}
 	least := Class(in.Config.Analysis.MinConfidence)

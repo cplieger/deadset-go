@@ -2,6 +2,7 @@ package load
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"go/token"
 	"os"
@@ -64,7 +65,10 @@ func loadConsumers(ctx context.Context, fset *token.FileSet, doc *scope.Document
 // this target's run cannot count.
 func loadConsumer(ctx context.Context, fset *token.FileSet, doc *scope.Document, c Configuration, declared scope.Module, main *packages.Module) (Consumer, error) {
 	if _, err := os.Stat(declared.Path); err != nil {
-		return Consumer{}, fmt.Errorf("%w: %s: %w", ErrConsumer, declared.Path, err)
+		return Consumer{}, &SetupError{Failures: []SetupFailure{{Class: MissingConsumer, Detail: fmt.Sprintf(
+			"the declared consumer %s does not exist; check it out at that path and install its dependencies",
+			declared.Path,
+		)}}}
 	}
 
 	workspace := workspaceOff
@@ -76,6 +80,16 @@ func loadConsumer(ctx context.Context, fset *token.FileSet, doc *scope.Document,
 		targetModule = main.Path
 	}
 	pkgs, diagnostics, err := loadPackages(ctx, fset, declared.Path, c, workspace, targetModule)
+	if setup, failed := errors.AsType[*SetupError](err); failed {
+		consumer := &SetupError{}
+		for _, one := range setup.Failures {
+			consumer.Failures = append(consumer.Failures, SetupFailure{Class: MissingConsumer, Detail: fmt.Sprintf(
+				"the declared consumer %s does not load (%s); check it out at that path and install its dependencies",
+				declared.Path, one.Detail,
+			)})
+		}
+		return Consumer{}, consumer
+	}
 	if err != nil {
 		return Consumer{}, fmt.Errorf("load %s: consumer %s: %w", c.ID, declared.Path, err)
 	}

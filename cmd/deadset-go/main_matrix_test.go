@@ -207,3 +207,57 @@ func TestAnalyzeReportsThePlatformEntriesOfAMatrixListingBothShapes(t *testing.T
 			len(envelope.ConfigurationsNotBuilt))
 	}
 }
+
+// setupFailingWindowsModule writes a target whose file names make derivation answer
+// a Windows configuration, and whose only Windows file imports a package of the
+// target's own module that nothing provides: a setup failure of that configuration
+// alone.
+func setupFailingWindowsModule(t *testing.T, document string) string {
+	t.Helper()
+
+	return writeModule(t, map[string]string{
+		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
+		"app.go": "package main\n\nfunc main() {}\n",
+		"app_windows.go": "package main\n\nimport \"example.com/app/gen\"\n\n" +
+			"// generated is what the Windows build reads from the generator's output.\nvar generated = gen.Value\n",
+		repositoryDocument: document,
+	})
+}
+
+// A derived configuration's setup failure drops that configuration, which the report
+// names with the setup failure's line, and the run answers over the rest.
+func TestAnalyzeReportsADerivedConfigurationsSetupFailureAsNotBuilt(t *testing.T) {
+	dir := setupFailingWindowsModule(t, `{"target": {"kind": "application"}}`)
+
+	run := runAnalyze(t, dir)
+	if run.code == exitFailure || run.code == exitUsage {
+		t.Fatalf("analyze(a target whose derived Windows configuration meets a setup failure) = %d, want a verdict: %s",
+			run.code, run.stderr)
+	}
+	envelope := envelopeAt(t, run.reportPath)
+	if len(envelope.ConfigurationsNotBuilt) != 1 {
+		t.Fatalf("the report names %d configurations the run did not build, want 1", len(envelope.ConfigurationsNotBuilt))
+	}
+	dropped := &envelope.ConfigurationsNotBuilt[0]
+	if want := "setup failure: missing-module: "; dropped.ID != unbuildableWindows || !strings.HasPrefix(dropped.Error, want) {
+		t.Errorf("the report names %q as not built with %q, want %q with an error opening %q",
+			dropped.ID, dropped.Error, unbuildableWindows, want)
+	}
+}
+
+// The same configuration, declared by the maintainer, ends the run with exit code 3
+// and the setup failure's line.
+func TestAnalyzeEndsTheRunOnADeclaredConfigurationsSetupFailure(t *testing.T) {
+	dir := setupFailingWindowsModule(t, `{"target": {"kind": "application"}, "analysis": {"configurations": [`+
+		`{"id": "`+load.HostConfiguration().ID+`", "os": "`+runtime.GOOS+`", "arch": "`+runtime.GOARCH+`"},`+
+		`{"id": "`+unbuildableWindows+`", "os": "windows", "arch": "`+runtime.GOARCH+`"}]}}`)
+
+	run := runAnalyze(t, dir)
+	if run.code != exitFailure {
+		t.Errorf("analyze(a target declaring a Windows configuration that meets a setup failure) = %d, want %d\nstderr: %s",
+			run.code, exitFailure, run.stderr)
+	}
+	if !strings.HasPrefix(run.stderr, "setup failure: missing-module: ") {
+		t.Errorf("analyze() wrote to stderr %q, want the setup failure's line", run.stderr)
+	}
+}

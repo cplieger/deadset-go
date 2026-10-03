@@ -10,7 +10,7 @@ import (
 	"github.com/cplieger/deadset-go/internal/config"
 	"github.com/cplieger/deadset-go/internal/graph"
 	"github.com/cplieger/deadset-go/internal/kinds"
-	spec "github.com/cplieger/deadset-spec/v4"
+	spec "github.com/cplieger/deadset-spec/v5"
 )
 
 // TestBuildRefusesWhatTheContractCannotCarry pins every assembly the envelope refuses
@@ -200,6 +200,42 @@ func TestBuildUnionsTheDeclaredLimits(t *testing.T) {
 	}
 	if !slices.Equal(envelope.TestFileRules, want) {
 		t.Errorf("Build().TestFileRules = %v, want %v", envelope.TestFileRules, want)
+	}
+}
+
+// TestBuildOrdersAndUnionsTheSkipsAndTheNotes pins the order the schema states for
+// the two records an analysis of several configurations answers more than once: a
+// skip by path and then by line as a number, a note by kind and then by path, each
+// distinct record once.
+func TestBuildOrdersAndUnionsTheSkipsAndTheNotes(t *testing.T) {
+	in := minimalInput()
+	in.TypeErrorSkips = []TypeErrorSkip{
+		{Path: "b.go", Line: 2, Message: "undefined: x"},
+		{Path: "a.go", Line: 10, Message: "undefined: y"},
+		{Path: "a.go", Line: 9, Message: "undefined: z"},
+		{Path: "b.go", Line: 2, Message: "undefined: x"},
+	}
+	in.Notes = []Note{
+		{Kind: "published-package", Path: "client", Key: "roots.patterns", Message: "m"},
+		{Kind: "published-package", Path: "api", Key: "roots.patterns", Message: "m"},
+		{Kind: "published-package", Path: "client", Key: "roots.patterns", Message: "m"},
+	}
+	envelope := built(t, &in)
+
+	wantSkips := []TypeErrorSkip{
+		{Path: "a.go", Line: 9, Message: "undefined: z"},
+		{Path: "a.go", Line: 10, Message: "undefined: y"},
+		{Path: "b.go", Line: 2, Message: "undefined: x"},
+	}
+	if !slices.Equal(envelope.TypeErrorSkips, wantSkips) {
+		t.Errorf("Build().TypeErrorSkips = %v, want %v", envelope.TypeErrorSkips, wantSkips)
+	}
+	var paths []string
+	for _, note := range envelope.Notes {
+		paths = append(paths, note.Path)
+	}
+	if !slices.Equal(paths, []string{"api", "client"}) {
+		t.Errorf("Build().Notes = %v, want the notes about api and client, once each", envelope.Notes)
 	}
 }
 

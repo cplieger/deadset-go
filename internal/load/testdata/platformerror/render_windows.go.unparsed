@@ -1,0 +1,7 @@
+//go:build windows
+
+package platformerror
+
+// render is followed by a closing brace no declaration opened, so the windows
+// configuration does not parse.
+func render(name string) string { return name } }

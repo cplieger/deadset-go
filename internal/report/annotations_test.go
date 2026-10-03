@@ -98,6 +98,22 @@ func TestTheStaleSuppressionAnnotationNamesItsKind(t *testing.T) {
 	}
 }
 
+// TestATypeErrorSkipIsAWarningAnnotation pins that each type-error skip is annotated
+// as a warning at its file and line, whatever the failing severity, naming the
+// compiler's message.
+func TestATypeErrorSkipIsAWarningAnnotation(t *testing.T) {
+	in := minimalInput()
+	in.TypeErrorSkips = []TypeErrorSkip{{Path: "app/main.go", Line: 9, Message: "undefined: missing"}}
+	envelope := built(t, &in)
+
+	written := annotationLines(t, &envelope)
+	want := "::warning file=app/main.go,line=9,title=type error skipped::" +
+		"the analysis did not evaluate the function or statement holding this type error: undefined: missing"
+	if len(written) != 1 || written[0] != want {
+		t.Errorf("Annotations(one type-error skip) = %q, want [%q]", written, want)
+	}
+}
+
 // TestTheAnnotationEscapesWhatWouldTruncateIt pins the five characters a workflow
 // command reads as structure, each in the place it would do damage.
 func TestTheAnnotationEscapesWhatWouldTruncateIt(t *testing.T) {

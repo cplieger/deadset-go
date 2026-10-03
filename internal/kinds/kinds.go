@@ -466,7 +466,7 @@ func (in *Input) emitterOf(row *catalog.Row, emitters map[string]Emitter) (Emitt
 	if !slices.Contains(row.Languages, language) {
 		return nil, false
 	}
-	if in.Config.EffectiveSeverity(row.Code, in.consumersAllLoaded()) == config.Allow {
+	if in.Config.EffectiveSeverity(row.Code) == config.Allow {
 		return nil, false
 	}
 	emit, carried := emitters[row.Code]
@@ -818,7 +818,7 @@ func (in *Input) complete(found *Finding, row *catalog.Row) {
 		found.Component.Members = held.membersOf(found)
 	}
 	found.Confidence = found.Class.lower(Class(row.MaxClass))
-	found.Severity = in.Config.EffectiveSeverity(row.Code, in.consumersAllLoaded())
+	found.Severity = in.Config.EffectiveSeverity(row.Code)
 	found.Fixability = row.Fixability
 	found.RetainedBy = []string{}
 	found.ConsumersLoaded = slices.Clone(in.Consumers.Loaded)

@@ -80,8 +80,7 @@ func explain(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	set, err := findingsOf(ctx, &resolved, &options)
 	if err != nil {
-		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
-		return exitCodeFor(err)
+		return failed(ctx, stderr, err)
 	}
 	namedUnbuilt(stderr, set.loaded.unbuilt)
 

@@ -8,15 +8,19 @@ package config
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
 // ContractVersion is the Contract version this package implements. It is the
 // resolved value of contract_version when no source supplies one.
-const ContractVersion = "4.0.0"
+const ContractVersion = "5.1.0"
 
 // defaultTestFiles is the documented default of ts.test_files.
-const defaultTestFiles = "**/*.test.{ts,tsx,mts,cts}"
+var defaultTestFiles = []string{"**/*.test.{ts,tsx,mts,cts}", "**/*.spec.*", "**/__tests__/**", "**/__mocks__/**"}
+
+// defaultComponentExtensions is the documented default of ts.component_extensions.
+var defaultComponentExtensions = []string{".vue", ".svelte", ".astro"}
 
 // The documented default of analysis.template_delimiters: the template grammar's
 // own action delimiters.
@@ -224,6 +228,8 @@ type Go struct{}
 type TS struct {
 	TestFiles              []string            `json:"test_files"`
 	EntryFiles             []string            `json:"entry_files"`
+	ComponentExtensions    []string            `json:"component_extensions"`
+	DisabledConventions    []string            `json:"disabled_conventions"`
 	InjectionRegistrations []Declaration       `json:"injection_registrations"`
 	LifecycleContracts     []LifecycleContract `json:"lifecycle_contracts"`
 	Serializers            []Declaration       `json:"serializers"`
@@ -255,7 +261,7 @@ func Default() Config {
 		ContractVersion: ContractVersion,
 		Analysis: Analysis{
 			Languages:      []Language{},
-			MinConfidence:  Possible,
+			MinConfidence:  Probable,
 			GeneratedFiles: ExcludeGenerated,
 			ConsumerTests:  TestReference,
 			Configurations: []Configuration{},
@@ -282,8 +288,10 @@ func Default() Config {
 			{Name: "deadset-ts", Languages: []Language{TSLanguage}, Command: "deadset-ts"},
 		}},
 		TS: TS{
-			TestFiles:              []string{defaultTestFiles},
+			TestFiles:              slices.Clone(defaultTestFiles),
 			EntryFiles:             []string{},
+			ComponentExtensions:    slices.Clone(defaultComponentExtensions),
+			DisabledConventions:    []string{},
 			InjectionRegistrations: []Declaration{},
 			LifecycleContracts:     []LifecycleContract{},
 			Serializers:            []Declaration{},

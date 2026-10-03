@@ -100,7 +100,8 @@ type Reference struct {
 // recorded once whatever the number of test variants that compile that file, and
 // a reference a test file makes comes from the variant that compiles it.
 //
-// Every reference a test file makes carries Test, which is the flag a caller
+// Every reference a test file or a test-support package makes carries Test, which
+// is the flag a caller
 // filters on to count production references alone, and the rule that classified
 // the file is the same rule in a consumer as in the target. References itself
 // counts both.
@@ -125,7 +126,11 @@ func References(r *load.Result, targetRoot string, read ReadFile, symbols []Symb
 		}
 	}
 	slices.SortFunc(p.refs, byUse)
-	return p.refs, []TestFileRule{{Rule: goTestSuffixRule, Matched: p.testFiles}}, nil
+	rules := []TestFileRule{{Rule: goTestSuffixRule, Matched: p.testFiles}}
+	if p.supportFile > 0 {
+		rules = append(rules, TestFileRule{Rule: testSupportRule, Matched: p.supportFile})
+	}
+	return p.refs, rules, nil
 }
 
 // byUse orders two references by the module that made them, the target's own
@@ -163,22 +168,24 @@ type site struct {
 
 // referencePass accumulates the references of one loaded configuration.
 type referencePass struct {
-	pos       *positions
-	at        *positions  // renders the file being walked, which is pos while the target is walked
-	info      *types.Info // the type information of the variant that compiles the file being walked
-	symbols   map[site]SymbolID
-	packages  map[string]SymbolID    // the inventory's package symbol per import path, which an import resolves to
-	ids       map[token.Pos]SymbolID // one resolved position, resolved once; empty for a position no symbol declares
-	kinds     map[token.Pos]RefKind  // the kind a parent node fixes for an identifier below it
-	callees   map[token.Pos]bool     // the identifiers a call expression names as its callee
-	reached   map[string]int         // per source file, by the path the toolchain named, the variants that compile it
-	declaring map[string]bool        // the import paths of the packages the target declares
-	consumer  string                 // the module path of the consumer being walked, empty while the target is
-	file      SymbolID               // the symbol of the file being walked, empty outside the inventory
-	err       error
-	refs      []Reference
-	testFiles int
-	test      bool // the file being walked is a test file
+	pos         *positions
+	at          *positions  // renders the file being walked, which is pos while the target is walked
+	info        *types.Info // the type information of the variant that compiles the file being walked
+	symbols     map[site]SymbolID
+	packages    map[string]SymbolID    // the inventory's package symbol per import path, which an import resolves to
+	ids         map[token.Pos]SymbolID // one resolved position, resolved once; empty for a position no symbol declares
+	kinds       map[token.Pos]RefKind  // the kind a parent node fixes for an identifier below it
+	callees     map[token.Pos]bool     // the identifiers a call expression names as its callee
+	reached     map[string]int         // per source file, by the path the toolchain named, the variants that compile it
+	declaring   map[string]bool        // the import paths of the packages the target declares
+	support     map[string]bool        // the import paths of the target's test-support packages
+	consumer    string                 // the module path of the consumer being walked, empty while the target is
+	file        SymbolID               // the symbol of the file being walked, empty outside the inventory
+	err         error
+	refs        []Reference
+	testFiles   int
+	supportFile int  // the files of the target's test-support packages
+	test        bool // the file being walked is test code
 }
 
 // newReferencePass prepares one configuration's walk, and refuses a result
@@ -199,6 +206,7 @@ func newReferencePass(r *load.Result, targetRoot string, read ReadFile, symbols 
 		kinds:    make(map[token.Pos]RefKind),
 		callees:  make(map[token.Pos]bool),
 		reached:  make(map[string]int),
+		support:  r.TestSupport,
 	}
 	p.at = p.pos
 	for i := range symbols {
@@ -294,8 +302,12 @@ func (p *referencePass) walkFile(pkg *packages.Package, f *ast.File) error {
 		p.file, _ = p.symbolAt(f.FileStart)
 	}
 	_, p.test = IsTestFile(position.Filename)
-	if p.test {
+	switch {
+	case p.test:
 		p.testFiles++
+	case p.consumer == "" && p.support[pkg.PkgPath]:
+		p.test = true
+		p.supportFile++
 	}
 
 	for _, d := range f.Decls {

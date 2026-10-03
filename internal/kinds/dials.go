@@ -64,7 +64,7 @@ func (in *Input) withholdComponents(published []catalog.Row, emitters map[string
 // dialAllows reports whether the severity dial sets one kind of this language to
 // allow, read with the published API closed so the open-world rule takes no part.
 func (in *Input) dialAllows(row *catalog.Row) bool {
-	return slices.Contains(row.Languages, language) && in.Config.EffectiveSeverity(row.Code, true) == config.Allow
+	return slices.Contains(row.Languages, language) && in.Config.EffectiveSeverity(row.Code) == config.Allow
 }
 
 // withholdRoot records the component of one withheld finding when the finding is a

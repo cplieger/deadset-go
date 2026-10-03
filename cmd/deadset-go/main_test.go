@@ -18,7 +18,7 @@ import (
 	"github.com/cplieger/deadset-go/internal/exempt"
 	"github.com/cplieger/deadset-go/internal/graph"
 	"github.com/cplieger/deadset-go/internal/load"
-	spec "github.com/cplieger/deadset-spec/v4"
+	spec "github.com/cplieger/deadset-spec/v5"
 )
 
 // TestMain creates the directory the shared fixture modules are written under, runs
@@ -881,13 +881,13 @@ func TestPrintRootsFailures(t *testing.T) {
 		wantStderr []string
 	}{
 		{
-			name: "a_target_that_does_not_type_check",
+			name: "a_target_that_does_not_parse",
 			files: map[string]string{
 				"go.mod":           "module example.com/app\n\ngo 1.27.1\n",
-				"app.go":           "package main\n\nfunc main() {\n\tvar n int = \"one\"\n\t_ = n\n}\n",
+				"app.go":           "package main\n\nfunc main() {\n\tvar n int =\n\t_ = n\n}\n",
 				repositoryDocument: `{"target": {"kind": "application"}}`,
 			},
-			wantStderr: []string{"1 error", "app.go:4:14", "cannot use"},
+			wantStderr: []string{"1 error", "app.go:5:", "expected"},
 		},
 		{
 			name:       "a_target_the_filesystem_does_not_hold",
@@ -1283,9 +1283,9 @@ func TestPrintRootsOverAMatrixLoadsEveryConfigurationAndNamesThemPerRoot(t *test
 func TestPrintRootsFailsWhenOneConfigurationOfTheMatrixDoesNotLoad(t *testing.T) {
 	t.Parallel()
 
-	// The Windows file returns an integer where the signature says string, so the
-	// first configuration of the matrix loads and the second does not.
-	dir := platformModule(t, twoConfigurations, "1")
+	// The Windows file closes a brace no declaration opened, so the first
+	// configuration of the matrix loads and the second does not parse.
+	dir := platformModule(t, twoConfigurations, `"windows" }`)
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-roots", "--target=" + dir}
@@ -1296,7 +1296,7 @@ func TestPrintRootsFailsWhenOneConfigurationOfTheMatrixDoesNotLoad(t *testing.T)
 	if stdout.Len() != 0 {
 		t.Errorf("run(%q) stdout = %q, want empty: a matrix missing a configuration has no intersection to print", args, stdout.String())
 	}
-	for _, want := range []string{"windows-amd64", "platform_windows.go:3:33", "cannot use 1"} {
+	for _, want := range []string{"windows-amd64", "platform_windows.go:3:", "expected"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Errorf("run(%q) stderr = %q, want it to contain %q", args, stderr.String(), want)
 		}

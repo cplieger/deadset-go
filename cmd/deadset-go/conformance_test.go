@@ -21,8 +21,10 @@ import (
 	"github.com/cplieger/deadset-go/internal/config"
 	"github.com/cplieger/deadset-go/internal/graph"
 	"github.com/cplieger/deadset-go/internal/kinds"
+	"github.com/cplieger/deadset-go/internal/load"
+	"github.com/cplieger/deadset-go/internal/report"
 	"github.com/cplieger/deadset-go/internal/suppress"
-	spec "github.com/cplieger/deadset-spec/v4"
+	spec "github.com/cplieger/deadset-spec/v5"
 	"golang.org/x/tools/txtar"
 )
 
@@ -129,7 +131,25 @@ type corpusFixtureFile struct {
 	Consumers              []string                               `json:"consumers"`
 	ClosedWorld            []string                               `json:"closed_world"`
 	EdgeEvaluations        []corpusEdgeEvaluation                 `json:"edge_evaluations"`
+	MinConfidence          string                                 `json:"min_confidence"`
+	TypeErrorSkips         []string                               `json:"type_error_skips"`
+	Notes                  []corpusNote                           `json:"notes"`
+	SetupFailure           *corpusSetupFailure                    `json:"setup_failure"`
 	Expect                 []corpusExpectation                    `json:"expect"`
+}
+
+// corpusNote is one note a fixture's run must list, by its kind and the directory it
+// names relative to the target root.
+type corpusNote struct {
+	Kind string `json:"kind"`
+	Path string `json:"path"`
+}
+
+// corpusSetupFailure is the setup failure a fixture's run must end with: its class
+// and the strings the line on standard error contains.
+type corpusSetupFailure struct {
+	Class string   `json:"class"`
+	Names []string `json:"names"`
 }
 
 // corpusSubjectShapes is the corpus's own reading of the shape of every subject a
@@ -272,10 +292,12 @@ type site struct {
 // answered is what one analysis of one rendering reported: every finding, and the
 // exemption classes the retained-symbol listing names at each position.
 type answered struct {
-	retained    map[site][]string
-	findings    []kinds.Finding
-	stale       []kinds.Finding
-	evaluations []kinds.Evaluation
+	retained       map[site][]string
+	findings       []kinds.Finding
+	stale          []kinds.Finding
+	evaluations    []kinds.Evaluation
+	typeErrorSkips []graph.TypeErrorSkip
+	notes          []report.Note
 }
 
 // TestConformanceCorpus is this analyzer's run of the Conformance Corpus: for every
@@ -406,6 +428,9 @@ func answerFixture(t *testing.T, fixtureName string, declared []conformanceGap,
 	}
 
 	first, err := analyzeRendering(t.Context(), &run)
+	if fixture.SetupFailure != nil {
+		return answerSetupFailure(t, fixtureName, fixture.SetupFailure, err, declared)
+	}
 	if err != nil {
 		return failedFixture(t, fixtureName, "the first analysis did not complete: "+err.Error())
 	}
@@ -419,6 +444,11 @@ func answerFixture(t *testing.T, fixtureName string, declared []conformanceGap,
 	if err != nil {
 		return failedFixture(t, fixtureName, err.Error())
 	}
+	recorded, err := recordDifferences(&fixture, &manifest, &first)
+	if err != nil {
+		return failedFixture(t, fixtureName, err.Error())
+	}
+	evaluated = append(evaluated, recorded...)
 	row.Message = strings.Join(evaluated, "; ")
 	for i := range fixture.Expect {
 		held := &fixture.Expect[i]
@@ -454,9 +484,94 @@ func answerFixture(t *testing.T, fixtureName string, declared []conformanceGap,
 			fixtureName, one.Report, one.File, one.Line)
 	}
 	for _, one := range evaluated {
-		t.Errorf("the corpus fixture %s publishes edge evaluations other than it expects: %s", fixtureName, one)
+		t.Errorf("the corpus fixture %s publishes evaluations, skips or notes other than it expects: %s", fixtureName, one)
 	}
 	return row
+}
+
+// answerSetupFailure is the row of a fixture whose run must end with a setup
+// failure: the run ends with one, and one line of it names the class and contains
+// every string the fixture lists. A declared gap naming the class covers it.
+func answerSetupFailure(t *testing.T, fixtureName string, want *corpusSetupFailure, err error,
+	declared []conformanceGap,
+) fixtureAnswer {
+	t.Helper()
+	row := fixtureAnswer{
+		Fixture: fixtureName, Result: answerPass,
+		Expectations: []expectationAnswer{}, Unexpected: []unexpectedFinding{},
+	}
+	setup, failed := errors.AsType[*load.SetupError](err)
+	switch {
+	case err == nil:
+		row.Message = "the run completed, and the fixture expects the setup failure " + want.Class
+	case !failed:
+		row.Message = "the run ended with an error that is no setup failure: " + err.Error()
+	default:
+		if !slices.ContainsFunc(setup.Failures, func(one load.SetupFailure) bool {
+			line := one.Line()
+			return strings.HasPrefix(line, "setup failure: "+want.Class+": ") &&
+				!slices.ContainsFunc(want.Names, func(name string) bool { return !strings.Contains(line, name) })
+		}) {
+			row.Message = fmt.Sprintf("no setup-failure line names %s and contains %q: %s", want.Class, want.Names, err)
+		}
+	}
+	if row.Message == "" {
+		return row
+	}
+	if slices.ContainsFunc(declared, func(gap conformanceGap) bool {
+		return gap.Fixture == fixtureName && gap.Capability == want.Class
+	}) {
+		row.Result = answerGap
+		return row
+	}
+	row.Result = answerFail
+	t.Errorf("the corpus fixture %s expects a setup failure and this analyzer answers otherwise: %s", fixtureName, row.Message)
+	return row
+}
+
+// recordDifferences compares the report's type-error skips and notes with the ones
+// the fixture names: every named skip resolves to at least one record at its file and
+// line, every named note to exactly one record of its kind and path, and every record
+// to a name, because both members are exhaustive.
+func recordDifferences(fixture *corpusFixtureFile, manifest *corpusManifest, held *answered) ([]string, error) {
+	var differ []string
+	named := make(map[site]bool, len(fixture.TypeErrorSkips))
+	for _, logical := range fixture.TypeErrorSkips {
+		at, known := manifest.Symbols[logical]
+		within, inside := strings.CutPrefix(at.File, targetSection+"/")
+		if !known || !inside || at.Line == 0 {
+			return nil, fmt.Errorf("the manifest carries no target file and line for the type error %s, which is a defect in the corpus", logical)
+		}
+		key := site{File: within, Line: at.Line}
+		named[key] = true
+		if !slices.ContainsFunc(held.typeErrorSkips, func(skip graph.TypeErrorSkip) bool {
+			return skip.Path == key.File && skip.Line == key.Line
+		}) {
+			differ = append(differ, fmt.Sprintf("want a type-error skip at %s:%d, got none", key.File, key.Line))
+		}
+	}
+	for _, skip := range held.typeErrorSkips {
+		if !named[site{File: skip.Path, Line: skip.Line}] {
+			differ = append(differ, fmt.Sprintf("type-error skip at %s:%d is named by no entry", skip.Path, skip.Line))
+		}
+	}
+	for _, want := range fixture.Notes {
+		count := 0
+		for _, note := range held.notes {
+			if note.Kind == want.Kind && note.Path == want.Path {
+				count++
+			}
+		}
+		if count != 1 {
+			differ = append(differ, fmt.Sprintf("want one %s note about %s, got %d", want.Kind, want.Path, count))
+		}
+	}
+	for _, note := range held.notes {
+		if !slices.ContainsFunc(fixture.Notes, func(want corpusNote) bool { return want.Kind == note.Kind && want.Path == note.Path }) {
+			differ = append(differ, fmt.Sprintf("%s note about %s is named by no entry", note.Kind, note.Path))
+		}
+	}
+	return differ, nil
 }
 
 // rule decides one expectation's result: a pass when what the analyzer answered is
@@ -1066,6 +1181,10 @@ func corpusRunOf(rendering, document string, fixture *corpusFixtureFile,
 		return corpusRun{}, fmt.Errorf("the expectation file names the target kind %q", fixture.TargetKind)
 	}
 
+	if fixture.MinConfidence != "" {
+		held.config.Analysis.MinConfidence = config.Confidence(fixture.MinConfidence)
+	}
+
 	// The configured roots the fixture names, in the order of the logical names that
 	// name them, so two runs over one fixture configure one list.
 	for _, logical := range slices.Sorted(maps.Keys(fixture.ConfiguredRoots)) {
@@ -1132,7 +1251,12 @@ func analyzeRendering(ctx context.Context, run *corpusRun) (answered, error) {
 	if err != nil {
 		return answered{}, err
 	}
-	held := answered{retained: retainedAt(&set), evaluations: set.evaluations}
+	held := answered{
+		retained:       retainedAt(&set),
+		evaluations:    set.evaluations,
+		typeErrorSkips: set.loaded.typeErrorSkips,
+		notes:          notesOf(run.config.Target.Kind, &set.loaded),
+	}
 	for _, found := range set.result.Findings {
 		if found.Code == staleSuppression {
 			held.stale = append(held.stale, found)

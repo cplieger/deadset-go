@@ -16,7 +16,7 @@ import (
 	"github.com/cplieger/deadset-go/internal/load"
 	"github.com/cplieger/deadset-go/internal/scope"
 	"github.com/cplieger/deadset-go/internal/testsupport"
-	spec "github.com/cplieger/deadset-spec/v4"
+	spec "github.com/cplieger/deadset-spec/v5"
 	"golang.org/x/tools/txtar"
 )
 
@@ -58,10 +58,12 @@ func applicationConfig() config.Config {
 }
 
 // libraryConfig is the resolved configuration of a target whose published API has
-// callers outside the graph.
+// callers outside the graph, with every finding reported whatever its class, so a
+// test reads what each kind decides rather than what the minimum withholds.
 func libraryConfig() config.Config {
 	resolved := config.Default()
 	resolved.Target.Kind = config.Library
+	resolved.Analysis.MinConfidence = config.Possible
 	return resolved
 }
 

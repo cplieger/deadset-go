@@ -136,16 +136,11 @@ func (in *Input) unusedDeclarations(code string) []Finding {
 // signature, and a report names each as what it is. A reference from anywhere,
 // including a test file alone, takes those last two out of that population and
 // leaves them to this rule, which is what makes such a constant the test-only
-// kind's subject.
+// kind's subject. A declaration of a test-support package that test code
+// references is live, because test code is judged with the tests.
 func (in *Input) codeOf(candidate *graph.Candidate) string {
 	symbol := in.symbol(candidate.ID)
-	if symbol == nil || candidate.TestOfDeadCode || testFile(symbol) {
-		return ""
-	}
-	if symbol.Parent != "" && in.candidateOf(symbol.Parent) != nil {
-		return ""
-	}
-	if interfaceDeclaration(symbol.Kind) || in.readOrWriteSubject(candidate, symbol) {
+	if symbol == nil || in.outsideTheRule(candidate, symbol) {
 		return ""
 	}
 	switch {
@@ -161,6 +156,23 @@ func (in *Input) codeOf(candidate *graph.Candidate) string {
 		return ""
 	default:
 		return unusedExportedCode
+	}
+}
+
+// outsideTheRule reports whether another rule, or none, judges a candidate: a test
+// of dead code or a test file's declaration, a member of a dead parent, an
+// interface's declaration, a read-or-write kind's subject, and a test-support
+// declaration test code references.
+func (in *Input) outsideTheRule(candidate *graph.Candidate, symbol *graph.Symbol) bool {
+	switch {
+	case candidate.TestOfDeadCode || testFile(symbol):
+		return true
+	case symbol.Parent != "" && in.candidateOf(symbol.Parent) != nil:
+		return true
+	case interfaceDeclaration(symbol.Kind) || in.readOrWriteSubject(candidate, symbol):
+		return true
+	default:
+		return candidate.TestRefs > 0 && in.testSupport(symbol)
 	}
 }
 
@@ -256,6 +268,17 @@ func testOnly(candidate *graph.Candidate) bool {
 func testFile(symbol *graph.Symbol) bool {
 	_, test := graph.IsTestFile(symbol.Pos.Filename)
 	return test
+}
+
+// testSupport reports whether a test-support package declares one symbol, under any
+// configuration of the run.
+func (in *Input) testSupport(symbol *graph.Symbol) bool {
+	for _, one := range in.Per {
+		if one.Result != nil && one.Result.TestSupport[symbol.PkgPath] {
+			return true
+		}
+	}
+	return false
 }
 
 // deprecations is every declaration of the inventory carrying a deprecation

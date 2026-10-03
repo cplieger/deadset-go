@@ -13,7 +13,7 @@ import (
 
 	"github.com/cplieger/deadset-go/internal/kinds"
 	"github.com/cplieger/deadset-go/internal/report"
-	spec "github.com/cplieger/deadset-spec/v4"
+	spec "github.com/cplieger/deadset-spec/v5"
 )
 
 // The Contract page that publishes the expression a finding line is defined by, and

@@ -28,7 +28,7 @@ The analysis.
 
 | Key | Type | Default | What it does |
 | --- | --- | --- | --- |
-| `analysis.min_confidence` | `certain`, `probable`, `possible` | `possible` | The lowest confidence a finding is reported at. A finding below it is not reported and no count of the report stands for it, and when it is a root of its dead component no finding of that component is reported |
+| `analysis.min_confidence` | `certain`, `probable`, `possible` | `probable` | The lowest confidence a finding is reported at. The default withholds the findings about a library's published API when no consumer is declared and reports every other finding. A finding below it is not reported and no count of the report stands for it, and when it is a root of its dead component no finding of that component is reported |
 | `analysis.generated_files` | `exclude`, `include` | `exclude` | Whether declarations in generated files are judged. `include` reports them and marks every such finding as one no mechanical edit may act on |
 | `analysis.consumer_tests` | `test`, `production` | `test` | How a reference from a loaded consumer's test file counts |
 | `analysis.configurations` | array of objects | `[]` | The build matrix. A platform entry names an `id`, an `os`, an `arch` and optional `tags`. A project entry names an `id` and a TypeScript `project` file, which this analyzer ignores. With no platform entry the matrix derives from the target tree |
@@ -62,13 +62,15 @@ Keys this analyzer reads nothing from. It validates each one and prints it in th
 | `contract_version` | semantic version | this analyzer's contract version | The contract version a configuration is written against. An absent key means this analyzer's own |
 | `analysis.languages` | array of `go`, `ts` | `[]` | The orchestrator's: the languages in scope. An empty array means the orchestrator detects them from the target tree |
 | `providers.analyzers` | array of objects | `deadset-go` and `deadset-ts` | The orchestrator's: the analyzers it runs. An entry names a `name`, its `languages` and a `command`, and an entry the orchestrator acquires also names a `source`, a `version` and a `digest` |
-| `ts.test_files` | array of strings | `["**/*.test.{ts,tsx,mts,cts}"]` | The TypeScript analyzer's: glob patterns naming its test files |
+| `ts.test_files` | array of strings | `["**/*.test.{ts,tsx,mts,cts}", "**/*.spec.*", "**/__tests__/**", "**/__mocks__/**"]` | The TypeScript analyzer's: glob patterns naming its test files |
 | `ts.entry_files` | array of strings | `[]` | The TypeScript analyzer's: glob patterns naming files whose exports are roots |
+| `ts.component_extensions` | array of strings | `[".vue", ".svelte", ".astro"]` | The TypeScript analyzer's: the extensions of component files, each a full stop followed by letters and digits |
+| `ts.disabled_conventions` | array of strings | `[]` | The TypeScript analyzer's: the convention rows that do not apply, each lowercase words joined by hyphens |
 | `ts.injection_registrations` | array of declaration entries | `[]` | The TypeScript analyzer's: the declarations whose call registers a class with a dependency-injection container |
 | `ts.lifecycle_contracts` | array of objects | `[]` | The TypeScript analyzer's: one framework's lifecycle contract per entry, naming its `components`, its `bases` and the `members` the framework calls |
 | `ts.serializers` | array of declaration entries | `[]` | The TypeScript analyzer's: the declarations whose call reads its arguments' data members by name |
 
-A declaration entry names one declaration by `symbol`, by `module` and `name`, or by `global`. The contract's [configuration schema](https://github.com/cplieger/deadset-spec/blob/v4.0.0/contract/config.schema.json) states each shape. `go` is the section this analyzer owns, and it declares no key in this contract version.
+A declaration entry names one declaration by `symbol`, by `module` and `name`, or by `global`. The contract's [configuration schema](https://github.com/cplieger/deadset-spec/blob/v5.1.0/contract/config.schema.json) states each shape. `go` is the section this analyzer owns, and it declares no key in this contract version.
 
 A pattern in `roots.patterns` is matched against the reference of every symbol the analysis enumerates. In a pattern, `*` matches any run of characters including the solidus. `?` matches exactly one character, counted as a Unicode code point, and no other character is special. An entry holding neither wildcard matches only the symbol whose reference it spells exactly. An entry that matches nothing is reported as `DS1704`.
 
@@ -104,7 +106,7 @@ The rest belong to the invocation and commit nothing to a configuration file:
 
 - `--report` names the path the JSON report is written to.
 - `--format` names one rendering written beside the report, and repeats. Naming any format replaces the default `text` rendering, so add `--format=text` to keep it.
-- `--template` names the file the template rendering reads. A file that cannot be read or does not parse refuses the invocation with 2 before any analysis, and a rendering that fails exits 3 with the report already written.
+- `--template` names the file the template rendering reads. The file holds a template in the contract's [template subset](https://github.com/cplieger/deadset-spec/blob/v5.1.0/contract/grammar/template.md), which runs over the JSON report and names its members as the report spells them. A file that cannot be read or does not parse refuses the invocation with 2 before any analysis, and a rendering that fails exits 3 with the report already written.
 - `--baseline-write` names the path a baseline recording the findings of the target is written to.
 - `--exit-code=off` writes every document and exits clean.
 
@@ -114,7 +116,7 @@ No verb accepts a flag that asks for a source edit. A flag whose name carries `f
 
 ## Suppressing a finding
 
-Three mechanisms, all of them requiring a reason. The grammar is stated in full in the contract's [suppression page](https://github.com/cplieger/deadset-spec/blob/v4.0.0/contract/grammar/suppression.md).
+Three mechanisms, all of them requiring a reason. The grammar is stated in full in the contract's [suppression page](https://github.com/cplieger/deadset-spec/blob/v5.1.0/contract/grammar/suppression.md).
 
 ### Inline directive
 
@@ -168,7 +170,9 @@ Four rules bind all three mechanisms:
 | 0 | clean | No finding at or above the failing severity, no stale suppression and no pending finding. Also what `--exit-code=off` returns while still writing every document |
 | 1 | findings | At least one finding at or above the failing severity, or at least one stale suppression |
 | 2 | usage | The invocation is malformed, no source supplied the target kind, a source named a key this analyzer does not implement, an explanation named a symbol that does not exist, or a flag asked for a source edit. No analysis runs |
-| 3 | failure | The target, a declared consumer or a build configuration failed to load or type-check. The errors are printed and no finding list is |
+| 3 | failure | A setup failure, a load failure or a lack of memory stopped the analysis. The errors are printed and no finding list is |
 | 4 | pending | At least one pending finding, whose cross-language edge the other side has not evaluated. Such a report is an input to a merge rather than an answer |
+
+A run that needs more memory than the machine makes available prints one line on stderr: `memory exhausted: at least N GB were needed, M GB are available`. N is the heap the run was about to need, rounded up, and M is the memory available to it, rounded down, both in decimal gigabytes. M is read from the tightest cgroup limit of the process and its parents, less their working set, or else from the system's available memory.
 
 Codes 2 and 3 end a run before any verdict exists. Codes 4, 1 and 0 are verdicts about a complete report, and the highest applicable code wins. Under the default `reporters.fail_on`, `deny`, a `warn` finding never fails a run.

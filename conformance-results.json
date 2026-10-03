@@ -1,5 +1,5 @@
 {
-  "corpus_version": "2.0.0",
+  "corpus_version": "2.1.0",
   "product": {
     "name": "deadset-go",
     "version": "0.0.0-devel",
@@ -7,8 +7,8 @@
   },
   "result": "pass",
   "totals": {
-    "fixtures": 35,
-    "pass": 35,
+    "fixtures": 46,
+    "pass": 46,
     "gap": 0,
     "fail": 0
   },
@@ -26,6 +26,27 @@
         },
         {
           "symbol": "BackedRequirement",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "baseline-row-binding-two-declarations",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "RowBindingBothInits",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "UnreachableStatement",
           "result": "pass",
           "actual": {
             "report": "none"
@@ -508,6 +529,12 @@
       "unexpected": []
     },
     {
+      "fixture": "incomplete-module-sum-setup-failure",
+      "result": "pass",
+      "expectations": [],
+      "unexpected": []
+    },
+    {
       "fixture": "interface-members-and-assertions",
       "result": "pass",
       "expectations": [
@@ -639,14 +666,7 @@
             "report": "DS1807",
             "symbol_kind": "store",
             "confidence": "certain",
-            "reachability_class": "certain",
-            "details": {
-              "overlap": [
-                "ineffassign",
-                "wastedassign",
-                "staticcheck SA4006"
-              ]
-            }
+            "reachability_class": "certain"
           },
           "suppression": {
             "suppressed": true,
@@ -660,12 +680,7 @@
             "report": "DS1803",
             "symbol_kind": "result",
             "confidence": "certain",
-            "reachability_class": "certain",
-            "details": {
-              "overlap": [
-                "unparam"
-              ]
-            }
+            "reachability_class": "certain"
           },
           "suppression": {
             "suppressed": true,
@@ -707,12 +722,7 @@
             "report": "DS1809",
             "symbol_kind": "case",
             "confidence": "certain",
-            "reachability_class": "certain",
-            "details": {
-              "overlap": [
-                "staticcheck SA4020"
-              ]
-            }
+            "reachability_class": "certain"
           },
           "suppression": {
             "suppressed": true,
@@ -726,12 +736,7 @@
             "report": "DS1805",
             "symbol_kind": "statement",
             "confidence": "certain",
-            "reachability_class": "certain",
-            "details": {
-              "overlap": [
-                "go vet unreachable"
-              ]
-            }
+            "reachability_class": "certain"
           },
           "suppression": {
             "suppressed": true,
@@ -745,14 +750,7 @@
             "report": "DS1801",
             "symbol_kind": "parameter",
             "confidence": "certain",
-            "reachability_class": "certain",
-            "details": {
-              "overlap": [
-                "revive unused-parameter",
-                "gopls unusedparams",
-                "unparam"
-              ]
-            }
+            "reachability_class": "certain"
           },
           "suppression": {
             "suppressed": true,
@@ -824,6 +822,18 @@
           }
         }
       ],
+      "unexpected": []
+    },
+    {
+      "fixture": "missing-consumer-setup-failure",
+      "result": "pass",
+      "expectations": [],
+      "unexpected": []
+    },
+    {
+      "fixture": "missing-module-setup-failure",
+      "result": "pass",
+      "expectations": [],
       "unexpected": []
     },
     {
@@ -1030,6 +1040,168 @@
           "suppression": {
             "suppressed": true,
             "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "published-api-confidence",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Catalog",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Count",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "symbol_kind": "function",
+            "confidence": "possible",
+            "reachability_class": "possible"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Exposed",
+          "result": "pass",
+          "actual": {
+            "report": "DS1003",
+            "confidence": "possible",
+            "reachability_class": "possible"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "hidden",
+          "result": "pass",
+          "actual": {
+            "report": "DS1003",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "orphan",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "published-api-withheld-by-default",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Catalog",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Count",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Exposed",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "hidden",
+          "result": "pass",
+          "actual": {
+            "report": "DS1003",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "orphan",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "published-package-note",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "ClientFile",
+          "result": "pass",
+          "actual": {
+            "report": "DS1502",
+            "symbol_kind": "file",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          }
+        },
+        {
+          "symbol": "Fetch",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Run",
+          "result": "pass",
+          "actual": {
+            "report": "none"
           }
         }
       ],
@@ -1268,6 +1440,75 @@
           "suppression": {
             "suppressed": true,
             "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "test-build-tag-setup-failure",
+      "result": "pass",
+      "expectations": [],
+      "unexpected": []
+    },
+    {
+      "fixture": "test-driver-signatures",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "BenchmarkParameter",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "DeadHelperUnread",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "FuzzParameter",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "HelperUnread",
+          "result": "pass",
+          "actual": {
+            "report": "DS1801",
+            "symbol_kind": "parameter",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "details": {
+              "overlap": [
+                "revive unused-parameter",
+                "gopls unusedparams",
+                "unparam"
+              ]
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "MainParameter",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "TestParameter",
+          "result": "pass",
+          "actual": {
+            "report": "none"
           }
         }
       ],
@@ -1539,6 +1780,57 @@
       "unexpected": []
     },
     {
+      "fixture": "test-support-code",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Encode",
+          "result": "pass",
+          "actual": {
+            "report": "DS1004",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Fixture",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Live",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Unused",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
       "fixture": "two-roots-share-a-member",
       "result": "pass",
       "expectations": [
@@ -1627,6 +1919,56 @@
           "suppression": {
             "suppressed": true,
             "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "type-error-skips-its-function",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "broken",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "count",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "dead",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "helper",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "panel",
+          "result": "pass",
+          "actual": {
+            "report": "none"
           }
         }
       ],

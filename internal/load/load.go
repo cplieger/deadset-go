@@ -43,7 +43,7 @@ var (
 	ErrConfiguration = errors.New("load: incomplete configuration")
 
 	// ErrConsumer reports a declared consumer whose references a configuration
-	// cannot count: a path absent from the filesystem, a module whose identity
+	// cannot count: a module whose identity
 	// disagrees with the scope, or one whose own module graph resolves the target
 	// somewhere other than the target's own directory. Each is refused rather
 	// than passed over, because a run that counted no reference from a declared
@@ -77,6 +77,12 @@ type Result struct {
 
 	Fset *token.FileSet // one FileSet for the whole configuration
 
+	// TestSupport holds the import paths of the target's test-support packages:
+	// packages only test code imports, which every stage judges as test code. The
+	// load leaves it empty and [graph.ClassifyTestSupport] fills it, because the
+	// classification turns on the target kind.
+	TestSupport map[string]bool
+
 	// ExcludedByCgo holds the target-relative paths, forward slashes, of the
 	// files the toolchain ignored for importing "C" that the opaque-C check could
 	// not read either. References those files make are outside the reference set,
@@ -98,7 +104,9 @@ func HostConfiguration() Configuration {
 }
 
 // Load resolves configuration c of doc's target and of every consumer doc
-// declares; cancelling ctx stops it. An error in the toolchain's metadata, then any
+// declares; cancelling ctx stops it. A file or a component the analysis needs and
+// the project does not provide, a declared consumer absent from its path among
+// them, returns a *[SetupError]. Any other error in the toolchain's metadata, then any
 // error a package checked as [typeCheck] states reports, returns a *[Error] with a
 // zero Result, so no finding is computed from a partial load. A consumer that cannot
 // be loaded or counted against this target returns [ErrConsumer]. Load makes no
@@ -125,6 +133,9 @@ func Load(ctx context.Context, doc scope.Document, c Configuration) (Result, err
 	// The target's own module file decides the target's versions, so its load
 	// never reads a workspace, the ambient one included.
 	pkgs, diagnostics, err := loadPackages(ctx, fset, target, c, workspaceOff, "")
+	if _, setup := errors.AsType[*SetupError](err); setup {
+		return Result{}, err
+	}
 	if err != nil {
 		return Result{}, fmt.Errorf("load %s: %s: %w", c.ID, target, err)
 	}
@@ -171,6 +182,9 @@ func loadPackages(ctx context.Context, fset *token.FileSet, dir string, c Config
 		return nil, nil, err
 	}
 	if diagnostics := collect(pkgs); len(diagnostics) > 0 {
+		if failure := setupFailures(diagnostics, expectedModules(ctx, dir, c, workspace, pkgs)); failure != nil {
+			return nil, nil, failure
+		}
 		return nil, diagnostics, nil
 	}
 	if err := typeCheck(ctx, fset, pkgs, c.Arch, module); err != nil {
