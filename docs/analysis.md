@@ -189,6 +189,14 @@ does build; each dropped configuration is named on stderr and in the report's
 `configurations_not_built` member, with the first line of the load error that dropped it, and an
 identifier is in that array or in the matrix and never in both.
 
+A load fails when the toolchain reports an error while listing the configuration's packages, or
+when a package of the target or of a declared consumer, or a package importing one of them, does
+not parse or type-check. The listing is read first, and a configuration whose listing carries an
+error is refused with those errors before any package is type-checked. Every other dependency is
+type-checked for its declarations alone, so a type error inside one of its function bodies does
+not fail the load, whether the configuration document declared the configuration or the analyzer
+derived it.
+
 The default matrix is derived from the target's own source rather than enumerated. The derivation
 walks every Go file, reads each file's `//go:build` expression together with the constraint its
 name implies, collects the operating system, architecture and custom tag atoms that appear, and

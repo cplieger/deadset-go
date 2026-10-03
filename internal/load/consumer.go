@@ -71,11 +71,15 @@ func loadConsumer(ctx context.Context, fset *token.FileSet, doc *scope.Document,
 	if doc.Workspace != "" {
 		workspace = doc.Workspace
 	}
-	pkgs, err := loadPackages(ctx, fset, declared.Path, c, workspace)
+	targetModule := ""
+	if main != nil {
+		targetModule = main.Path
+	}
+	pkgs, diagnostics, err := loadPackages(ctx, fset, declared.Path, c, workspace, targetModule)
 	if err != nil {
 		return Consumer{}, fmt.Errorf("load %s: consumer %s: %w", c.ID, declared.Path, err)
 	}
-	if diagnostics := collect(pkgs); len(diagnostics) > 0 {
+	if len(diagnostics) > 0 {
 		return Consumer{}, &Error{Configuration: c.ID, Module: declared.Path, Diagnostics: diagnostics}
 	}
 	pkgs = withoutTestBinaries(pkgs)

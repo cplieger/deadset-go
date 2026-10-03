@@ -17,17 +17,15 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-// loadMode is the information one configuration's load needs.
-//
-// NeedTypesInfo carries Uses, Defs, Implicits and Selections, which are the
-// reference pass. NeedForTest populates Package.ForTest, which names the package
-// a test variant belongs to. NeedFiles populates IgnoredFiles, where a file a
-// build constraint excluded appears. NeedModule gives the module path a symbol
-// reference is built from. NeedEmbedFiles is absent because nothing reads it.
-const loadMode = packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
-	packages.NeedSyntax | packages.NeedTypes | packages.NeedTypesInfo |
-	packages.NeedImports | packages.NeedDeps | packages.NeedModule |
-	packages.NeedForTest
+// metadataMode is what one configuration's load asks the toolchain for: the
+// package graph and its files, and nothing the toolchain would type-check, because
+// [typeCheck] checks the packages itself. NeedForTest populates Package.ForTest,
+// which names the package a test variant belongs to. NeedFiles populates
+// IgnoredFiles, where a file a build constraint excluded appears. NeedModule gives
+// the module path a symbol reference is built from and the language version a
+// package is checked under. NeedEmbedFiles is absent because nothing reads it.
+const metadataMode = packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
+	packages.NeedImports | packages.NeedDeps | packages.NeedModule | packages.NeedForTest
 
 // loadPattern matches every package of the target directory's module tree.
 const loadPattern = "./..."
@@ -100,22 +98,13 @@ func HostConfiguration() Configuration {
 }
 
 // Load resolves configuration c of doc's target and of every consumer doc
-// declares. Cancelling ctx stops the load.
-//
-// Every package's Errors is walked, dependencies, test variants and synthesized
-// test binaries included, and a non-empty set returns a *[Error] carrying all of
-// them together with a zero Result, so nothing downstream can compute a finding
-// from a partial load. The test binaries are then dropped from the Result. Load
-// makes no network request, writes no cache, and pins the toolchain settings that
-// decide what loads whatever the environment says, so it needs no C toolchain and
-// no caller has to neutralise its own environment first.
-//
-// A declared consumer is loaded from its own directory, as the module it is, and
-// a consumer that cannot be loaded or whose references cannot be counted against
-// this target returns [ErrConsumer] with a zero Result. One module's packages are
-// loaded once per configuration whatever the number of other modules that import
-// it, so the file set is shared and a declaration of the target renders to one
-// position whichever module's load reached it.
+// declares; cancelling ctx stops it. An error in the toolchain's metadata, then any
+// error a package checked as [typeCheck] states reports, returns a *[Error] with a
+// zero Result, so no finding is computed from a partial load. A consumer that cannot
+// be loaded or counted against this target returns [ErrConsumer]. Load makes no
+// network request, runs no compiler and pins the toolchain settings that decide what
+// loads, so it needs no C toolchain. One module's packages load once per
+// configuration, so a declaration of the target renders to one position.
 func Load(ctx context.Context, doc scope.Document, c Configuration) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, fmt.Errorf("load %s: %w", c.ID, err)
@@ -135,11 +124,11 @@ func Load(ctx context.Context, doc scope.Document, c Configuration) (Result, err
 	fset := token.NewFileSet()
 	// The target's own module file decides the target's versions, so its load
 	// never reads a workspace, the ambient one included.
-	pkgs, err := loadPackages(ctx, fset, target, c, workspaceOff)
+	pkgs, diagnostics, err := loadPackages(ctx, fset, target, c, workspaceOff, "")
 	if err != nil {
 		return Result{}, fmt.Errorf("load %s: %s: %w", c.ID, target, err)
 	}
-	if diagnostics := collect(pkgs); len(diagnostics) > 0 {
+	if len(diagnostics) > 0 {
 		return Result{}, &Error{Configuration: c.ID, Diagnostics: diagnostics}
 	}
 
@@ -164,19 +153,33 @@ func Load(ctx context.Context, doc scope.Document, c Configuration) (Result, err
 	}, nil
 }
 
-// loadPackages resolves every package of the module rooted at dir under
-// configuration c, with workspace as the child toolchain's GOWORK setting.
-func loadPackages(ctx context.Context, fset *token.FileSet, dir string, c Configuration, workspace string) ([]*packages.Package, error) {
+// loadPackages resolves and type-checks every package of the module rooted at dir
+// under configuration c, with workspace as the child toolchain's GOWORK setting and
+// module as the further module [typeCheck] checks whole. A load that reports errors
+// returns them as diagnostics and no packages.
+func loadPackages(ctx context.Context, fset *token.FileSet, dir string, c Configuration, workspace, module string) ([]*packages.Package, []Diagnostic, error) {
 	cfg := &packages.Config{
-		Mode:       loadMode,
+		Mode:       metadataMode,
 		Context:    ctx,
 		Tests:      true,
 		Dir:        dir,
 		Env:        loadEnv(c, workspace),
 		BuildFlags: buildFlags(c.Tags),
-		Fset:       fset,
 	}
-	return packages.Load(cfg, loadPattern)
+	pkgs, err := packages.Load(cfg, loadPattern)
+	if err != nil {
+		return nil, nil, err
+	}
+	if diagnostics := collect(pkgs); len(diagnostics) > 0 {
+		return nil, diagnostics, nil
+	}
+	if err := typeCheck(ctx, fset, pkgs, c.Arch, module); err != nil {
+		return nil, nil, err
+	}
+	if diagnostics := collect(pkgs); len(diagnostics) > 0 {
+		return nil, diagnostics, nil
+	}
+	return pkgs, nil, nil
 }
 
 // loadEnv is the environment every load of configuration c runs the toolchain

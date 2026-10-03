@@ -14,7 +14,7 @@ Every report names the analyzer's conformance result in its `analyzer.conformanc
 
 ## What it does
 
-deadset-go loads a Go module with its tests, type-checks it and reports the declarations nothing uses: a function nobody calls, a struct field nothing reads, an exported symbol no consumer imports, an interface no value is converted to. Every verdict comes from type information and the reference graph, never from a text search, so two runs over one tree produce one report. Every kind it reports, and what it treats as a use, is in [docs/kinds.md](docs/kinds.md).
+deadset-go loads a Go module with its tests, type-checks it and reports the declarations nothing uses: a function nobody calls, a struct field nothing reads, an exported symbol no consumer imports, an interface no value is converted to. Every verdict comes from type information and the reference graph, never from a text search, so two runs over one tree produce one report. Every kind it reports, and what it treats as a use, is in [docs/kinds.md](docs/kinds.md). A dependency outside the target and its declared consumers is type-checked for its declarations alone, so a type error inside one of its function bodies does not stop the analysis.
 
 Three properties separate it from a per-package linter:
 

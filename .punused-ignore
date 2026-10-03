@@ -29,6 +29,12 @@ function Undefined
 function Used is unused
 function UsedByConsumerTest
 function Unused is unused
+function Area is unused
+function Count is unused
+function Twice is unused
+variable Width is unused
+variable Height is unused
+function Broken is unused
 
 # --- Methods a standard interface calls, never a caller by name.
 #
@@ -66,6 +72,7 @@ method (*Configuration).MarshalJSON
 method (*Configuration).UnmarshalJSON
 method (*formatList).Set
 method (*cgoImporter).Import
+method (importer).Import
 
 # --- The per-analyzer configuration section.
 #
