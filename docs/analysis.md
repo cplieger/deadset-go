@@ -1,59 +1,30 @@
 # How the analysis decides
 
-deadset-go loads a Go module with its tests and its declared consumers, type-checks it, and
-answers two questions about every declaration: does anything reference it, and does anything reach
-it from a root. This page states those two relations, what the report claims about a symbol's
-callers, what the build matrix does, what the analysis cannot see, and how the answer differs from
-a call-graph tool.
+deadset-go loads a Go module with its tests and its declared consumers, type-checks it, and answers two questions about every declaration. Does anything reference it, and does anything reach it from a root? This page states those two relations, what the report claims about a symbol's callers, what the build matrix does and what the analysis cannot see. It is for a maintainer who wants to know why a symbol was or was not reported.
 
 ## The two liveness relations
 
-Both relations run over the same reference set, which is built once per build configuration from
-type information. The kinds in [kinds.md](kinds.md) read one or the other, and every finding names
-in `liveness_relation` the relation that produced it.
+Both relations run over the same reference set, which is built once per build configuration from type information. The kinds in [Issue kinds](kinds.md) read one or the other, and every finding names in `liveness_relation` the relation that produced it.
 
-**Reference counting** is not recursive and ignores roots: a symbol is live when at least one
-declaration in the loaded graph references it, whether or not that declaration is itself live.
+Reference counting is not recursive and ignores roots. Under it, a symbol is live when at least one declaration in the loaded graph references it, whether or not that declaration is itself live.
 
-**Reachability** is the closure of the root set through the references each declaration makes. The
-seed is every root, every symbol a suppression marked, and every symbol an exemption retained,
-because a symbol live by a mechanism the analysis cannot see makes what it references live too:
-the private helper of a retained method is not dead code.
+Reachability is the closure of the root set through the references each declaration makes. The seed is every root, every symbol a suppression marked, and every symbol an exemption retained, because a symbol live by a mechanism the analysis cannot see makes what it references live too. So the private helper of a retained method is not dead code.
 
-A suppression record does two things, and the second is what covers a kind neither relation
-decides. It marks the declaration it binds live under both relations, so the declaration's own
-callees are live through it. And it withholds the finding its code would have produced at that
-declaration, which is what a record for a kind that is not about liveness needs: a narrowing
-candidate and a write-only member are referenced, so the mark alone would change nothing about
-them. A record is in effect when it did either and stale when it did neither, and staleness is
-therefore one question asked once over every kind. A record binds to a declaration, so a finding
-about a part of one is withheld through the declaration the part belongs to, and a finding about a
-row of a document has no suppression at all.
+A suppression record does two things, and the second is what covers a kind neither relation decides. It marks the declaration it binds live under both relations, so the declaration's own callees are live through it. And it withholds the finding its code would have produced at that declaration, which is what a record for a kind that is not about liveness needs.
 
-A record for a part kind, a code from `DS1800` to `DS1899`, does the second alone: it withholds the
-part's finding and marks nothing. It says the part is wanted, not that the declaration holding it
-is, so a directive for an unused parameter of a function nothing calls leaves the function reported
-as dead, with everything only it references.
+A narrowing candidate and a write-only member are referenced, so the mark alone would change nothing about them. A record is in effect when it did either and stale when it did neither, and staleness is therefore one question asked once over every kind. A record binds to a declaration, so a finding about a part of one is withheld through the declaration the part belongs to. A finding about a row of a document has no suppression at all.
 
-The two are different sets, and the difference is the point. A symbol referenced only by an
-unreachable symbol is live under reference counting and dead under reachability. A symbol dead
-under both is reported under the stronger claim.
+A record for a part kind, a code from `DS1800` to `DS1899`, does the second alone. It withholds the part's finding and marks nothing. It says the part is wanted, not that the declaration holding it is. So a directive for an unused parameter of a function nothing calls leaves the function reported as dead, with everything only it references.
 
-The member is absent on two shapes of finding, because on each of them no relation decided
-anything. One is a finding whose subject is a part of a declaration or a row of a document, which
-is the intra-function kinds, the file and dependency kinds and the self-check kinds. The other is a
-finding about a declaration the analysis judged live, which is `DS1301` and `DS1204`.
+The two are different sets, and the difference is the point. A symbol referenced only by an unreachable symbol is live under reference counting and dead under reachability. A symbol dead under both is reported under the stronger claim.
 
-A part is decided inside its declaration whatever uses the declaration, so an unused parameter or a
-dead store of a function the analysis judged dead is reported beside the function's own finding,
-and a part of a declaration a cross-language edge names is reported rather than pending. A type
-parameter of a dead function falls with the function and is reported under no code of its own.
+The member is absent on two shapes of finding, because on each of them no relation decided anything. One is a finding whose subject is a part of a declaration or a row of a document, which is the intra-function kinds, the file and dependency kinds and the self-check kinds. The other is a finding about a declaration the analysis judged live, which is `DS1301` and `DS1204`.
+
+A part is decided inside its declaration, whatever uses the declaration. So an unused parameter or a dead store of a function the analysis judged dead is reported beside the function's own finding. A part of a declaration a cross-language edge names is reported rather than pending. A type parameter of a dead function falls with the function and is reported under no code of its own.
 
 ## Roots
 
-A root makes a symbol live under reachability. `deadset-go print-roots` prints the resolved root
-set in file order, with the reason for each; a symbol that is a root for two reasons appears once
-per reason.
+A root makes a symbol live under reachability. `deadset-go print-roots` prints the resolved root set in file order, with the reason for each. A symbol that is a root for two reasons appears once per reason.
 
 | Root | What the analysis reads |
 | --- | --- |
@@ -67,65 +38,39 @@ per reason.
 | `configured` | An exact symbol reference from `roots.patterns` |
 | `pattern` | A pattern from `roots.patterns` |
 
-Every root but `published-api` names an actual caller: the runtime, the test binary, the linker, C
-code, or the maintainer asserting one. Those are live under both relations, so a test function is
-never reported as unreferenced.
+Every root but `published-api` names an actual caller, which is the runtime, the test binary, the linker, C code, or the maintainer asserting one. Those are live under both relations, so a test function is never reported as unreferenced.
 
-`published-api` is the one root that only hypothesises a caller. It makes a library's exported
-symbol live under reachability, so the symbol's closure is not a dead component, and leaves the
-symbol itself a candidate under reference counting, which is what `DS1001` answers at the
-confidence the consumer model gives it.
+`published-api` is the one root that only hypothesises a caller. It makes a library's exported symbol live under reachability, so the symbol's closure is not a dead component. The symbol itself stays a candidate under reference counting, which is what `DS1001` answers at the confidence the consumer model gives it.
 
 A configured root or pattern that names no symbol is reported as `DS1704` rather than ignored.
 
 ## Dead components and what falls with a deletion
 
-Every dead symbol lands in exactly one dead component, computed over the references between dead
-symbols with one edge each way between a dead member and its dead container. The dead symbols form
-cycles, a symbol on no cycle being a cycle of one, and a cycle no dead symbol outside it references
-is a root cycle: its members whose container is not dead are the component's root members, where a
-deletion starts. A symbol only dead symbols reference falls with the roots that reach it and is a
-member of their component, and a symbol two roots both reach joins the two into one component,
-because deleting either alone leaves a reference to it. A finding about any member names the one
-component, so every finding one deletion removes carries one identifier.
+Every dead symbol lands in exactly one dead component, computed over the references between dead symbols with one edge each way between a dead member and its dead container. The dead symbols form cycles, a symbol on no cycle being a cycle of one, and a cycle no dead symbol outside it references is a root cycle. Its members whose container is not dead are the component's root members, where a deletion starts.
 
-A declaration of a test file is a member only when it is reported as a test of dead code, and such
-a test and each declaration it references count as referencing each other, so the test is a root
-member with them. No other test-file declaration belongs to a component, so its references join no
-two components and make no production declaration a non-root: a cluster only tests reach is rooted
-at a declaration outside the test files.
+A symbol only dead symbols reference falls with the roots that reach it and is a member of their component. A symbol two roots both reach joins the two into one component, because deleting either alone leaves a reference to it. A finding about any member names the one component, so every finding one deletion removes carries one identifier.
 
-The count is the component's members and the line total the distinct lines they span.
-`reporters.cascade` set to `full` lists every member of every component as well as the roots, under
-the finding's `component.members`, and a SARIF result carries each member other than its own
-symbol as a related location. A finding whose subject belongs to no dead component, being a
-declaration the analysis holds live, a part of a declaration or a row of a document, names a
-component of that subject alone, with no line deleted.
+A declaration of a test file is a member only when it is reported as a test of dead code. Such a test and each declaration it references count as referencing each other, so the test is a root member with them. No other test-file declaration belongs to a component, so its references join no two components and make no production declaration a non-root. A cluster only tests reach is rooted at a declaration outside the test files.
 
-A finding the configuration withholds, by setting its kind to `allow` or by a minimum confidence
-it does not reach, withholds every finding of its component when it is a root's, whatever their
-severity and confidence: a member is dead only through its root.
+The count is the component's members and the line total the distinct lines they span. `reporters.cascade` set to `full` lists every member of every component as well as the roots, under the finding's `component.members`, and a SARIF result carries each member other than its own symbol as a related location. A finding whose subject is in no dead component names a component of that subject alone, with no line deleted. Such a subject is a declaration the analysis holds live, a part of a declaration or a row of a document.
+
+The configuration withholds a finding by setting its kind to `allow` or by a minimum confidence the finding does not reach. When the withheld finding is a root's, every finding of its component is withheld too, whatever their severity and confidence, because a member is dead only through its root.
 
 ## What the report claims about callers
 
-Every finding carries a `reachability_class`, which is what the analysis knows about the symbol's
-callers, and a `confidence`, which is that class capped by the kind's ceiling. Every kind of this
-contract version declares the ceiling `certain`, so the two are equal on every finding. Neither is
-a number and neither is a score.
+Every finding carries a `reachability_class`, which is what the analysis knows about the symbol's callers, and a `confidence`, which is that class capped by the kind's ceiling. Every kind of this contract version declares the ceiling `certain`, so the two are equal on every finding. Neither is a number and neither is a score.
 
 | Class | When |
 | --- | --- |
-| `certain` | Every caller that can exist is in the analyzed graph: an application, or a library whose consumer set is declared complete with every declared consumer loaded |
-| `probable` | A declared consumer was unavailable by configuration |
+| `certain` | Every caller that can exist is in the analyzed graph. That is an application, or a library whose scope document declares consumers that all loaded |
+| `probable` | The scope document declares consumers and not every one of them loaded |
 | `possible` | The target is a library and the run has no consumer information |
 
-`analysis.min_confidence` filters on `confidence`, so `certain` reports only findings whose every
-caller is visible.
+`analysis.min_confidence` filters on `confidence`, so `certain` reports only findings whose every caller is visible.
 
 ### Consumers
 
-The consumer set comes from the scope document the invocation names, and from nowhere else. Each
-entry is a path on the local filesystem, because the analysis makes no network request:
+The consumer set comes from the scope document the invocation names, and from nowhere else. Each entry is a path on the local filesystem, because the analysis makes no network request. A report names every path relative to the directory the run starts in, so start the run from a directory that holds the target and every consumer. A relative path in the scope document resolves against the document's own directory. For example:
 
 ```json
 {
@@ -134,137 +79,60 @@ entry is a path on the local filesystem, because the analysis makes no network r
 }
 ```
 
-A consumer path absent from the filesystem, or one that fails to load, ends the run with the load
-failure code and prints no findings, because a finding computed without a declared consumer is
-systematically more permissive than the truth. Every report names the consumers that loaded and
-the ones that did not.
+A consumer path absent from the filesystem, or one that fails to load, ends the run with the load failure code and prints no findings. The run stops because a finding computed without a declared consumer is systematically more permissive than the truth. Every report names the consumers that loaded and the ones that did not.
 
-A reference from a loaded consumer holds a target symbol live like any other reference. That is
-what an exemption cannot do and a scope document can: naming the repositories that import the
-module removes the whole class of adjudications written because a caller lives elsewhere.
+A reference from a loaded consumer holds a target symbol live like any other reference. That is what an exemption cannot do and a scope document can. Naming the repositories that import the module removes the whole class of adjudications written because a caller lives elsewhere.
 
 ### The closed-world rule
 
-Four kinds report only where every reference that can exist is one the run loaded, because each
-proposes an edit whose safety depends on having seen every caller.
+Four kinds report only where every reference that can exist is one the run loaded, because each proposes an edit whose safety depends on having seen every caller.
 
-`DS1101`, `DS1102` and `DS1103` are the narrowing kinds. A `main` package, an external test
-package and a package under an `internal` tree are closed whatever the run knows about consumers;
-a published package is closed only where the configuration declares `consumers.complete` and every
-declared consumer loaded. `DS1103` is the exception that needs no precondition, because
-unimportability is a property of the package graph.
+`DS1101`, `DS1102` and `DS1103` are the narrowing kinds. A `main` package, an external test package and a package under an `internal` tree are closed whatever the run knows about consumers. A published package is closed only where the configuration declares `consumers.complete` and every declared consumer loaded. `DS1103` is the exception that needs no precondition, because unimportability is a property of the package graph.
 
-`DS1803` applies the same rule to a signature: a result is reported unused only where every call
-site of the function is in the loaded graph.
-
-## How this differs from a call-graph tool
-
-[`golang.org/x/tools/cmd/deadcode`](https://pkg.go.dev/golang.org/x/tools/cmd/deadcode) answers a
-different question, and running both is worth it.
-
-`deadcode` builds a call graph from each `main` with rapid type analysis, which resolves calls
-through interfaces by tracking the types that reach run time, and reports the functions no call
-path reaches. It is the stronger answer for a function: a function that is called from code
-nothing ever runs is unreachable there and referenced here.
-
-deadset-go covers what a call graph has no node for, which is types, struct fields, constants,
-variables, interface methods and type parameters; it treats a library's declared consumers as part
-of the program, which a call graph rooted at `main` cannot; and it records on each finding which
-of the two relations produced it. Reference-based liveness is weaker than call-graph reachability
-for functions, so run `deadcode` for the functions and deadset-go for everything else.
+`DS1803` applies the same rule to a signature. A result is reported unused only where every call site of the function is in the loaded graph.
 
 ## Build configurations
 
-The analysis runs one load per build configuration and intersects the answers: a symbol is
-reported only where it is dead in every configuration, a reference counts where it holds in any
-configuration, and a symbol exists where it is declared in at least one. Every finding names the
-configurations it holds in, and the report's `configurations` member is the matrix the analysis ran.
+The analysis runs one load per build configuration and intersects the answers. A symbol is reported only where it is dead in every configuration, a reference counts where it holds in any configuration, and a symbol exists where it is declared in at least one. Every finding names the configurations it holds in, and the report's `configurations` member is the matrix the analysis ran.
 
-What a configuration that fails to load does to the run depends on who named it. A configuration the
-configuration document declared is an assertion that the target builds it, so a load that fails ends
-the run rather than intersecting over the survivors, which would be systematically more permissive
-than the truth. A configuration the analyzer derived from the target's own source is its own guess,
-so a load that fails drops it from the matrix and the run answers over the configurations the target
-does build; each dropped configuration is named on stderr and in the report's
-`configurations_not_built` member, with the first line of the load error that dropped it, and an
-identifier is in that array or in the matrix and never in both.
+What a configuration that fails to load does to the run depends on who named it. A configuration the configuration document declared is an assertion that the target builds it. So a load that fails ends the run, rather than intersecting over the survivors, which would be systematically more permissive than the truth.
 
-A load fails when the toolchain reports an error while listing the configuration's packages, or
-when a package of the target or of a declared consumer, or a package importing one of them, does
-not parse or type-check. The listing is read first, and a configuration whose listing carries an
-error is refused with those errors before any package is type-checked. Every other dependency is
-type-checked for its declarations alone, so a type error inside one of its function bodies does
-not fail the load, whether the configuration document declared the configuration or the analyzer
-derived it.
+A configuration the analyzer derived from the target's own source is its own guess, so a load that fails drops it from the matrix and the run answers over the configurations the target does build. Each dropped configuration is named on stderr and in the report's `configurations_not_built` member, with the first line of the load error that dropped it. An identifier is in that array or in the matrix, never in both.
 
-The default matrix is derived from the target's own source rather than enumerated. The derivation
-walks every Go file, reads each file's `//go:build` expression together with the constraint its
-name implies, collects the operating system, architecture and custom tag atoms that appear, and
-emits one configuration per distinct platform atom plus the host. A platform atom pairs with the
-host's other axis where the toolchain builds that pair and with the first axis it does build
-otherwise. `unix`, `gc`, `gccgo`, `boringcrypto`, the `goexperiment` tags and the release tags are
-not atoms. A derived identifier is the operating system and the architecture joined by a hyphen,
-with each tag appended after a further hyphen. A malformed build expression ends the run naming
-the file.
+A load fails when the toolchain reports an error while listing the configuration's packages, or when a package of the target, of a declared consumer, or one importing either, does not parse or type-check. The listing is read first, and a configuration whose listing carries an error is refused with those errors before any package is type-checked. Every other dependency is type-checked for its declarations alone, so a type error inside one of its function bodies does not fail the load. That holds whether the configuration document declared the configuration or the analyzer derived it.
 
-A derived matrix is never complete: it satisfies a Boolean constraint only where its atoms happen
-to, and a configuration no file in the tree names is never derived. The platform entries of
-`analysis.configurations` replace the derivation, and `analysis.matrix.complete` declares that the
-listed platforms are every configuration the target builds, which is the precondition `DS1501`
-needs. A project entry names a TypeScript compiler configuration file, and this analyzer ignores
-it, so a configuration listing only project entries leaves the Go matrix derived and incomplete.
+The default matrix is derived from the target's own source rather than enumerated. The derivation walks every Go file and reads each file's `//go:build` expression together with the constraint its name implies. It collects the operating system, architecture and custom tag atoms that appear, and emits one configuration per distinct platform atom plus the host. A platform atom pairs with the host's other axis where the toolchain builds that pair and with the first axis it does build otherwise. `unix`, `gc`, `gccgo`, `boringcrypto`, the `goexperiment` tags and the release tags are not atoms.
+
+A derived identifier is the operating system and the architecture joined by a hyphen, with each tag appended after a further hyphen. A malformed build expression ends the run naming the file.
+
+A derived matrix is never complete. It satisfies a Boolean constraint only where its atoms happen to, and a configuration no file in the tree names is never derived. The platform entries of `analysis.configurations` replace the derivation, and `analysis.matrix.complete` declares that the listed platforms are every configuration the target builds, which is the precondition `DS1501` needs. A project entry names a TypeScript compiler configuration file, and this analyzer ignores it, so a configuration listing only project entries leaves the Go matrix derived and incomplete.
 
 ## cgo files, with the C half opaque
 
-The load runs with cgo disabled, so the binary needs no C toolchain on the analyzing host and one
-matrix can cover every configuration. The toolchain ignores every file that imports `"C"` under
-that setting, which would drop those files out of the analysis entirely, so each package holding
-such files is type-checked a second time from its original sources, cgo files included, with every
-`C.x` selector treated as an opaque value.
+The load runs with cgo disabled, so the binary needs no C toolchain on the analyzing host and one matrix can cover every configuration. The toolchain ignores every file that imports `"C"` under that setting, which would drop those files out of the analysis entirely. So each package holding such files is type-checked a second time from its original sources, cgo files included, with every `C.x` selector treated as an opaque value.
 
-So a Go declaration in a cgo file is a symbol, a Go helper only a cgo file calls carries a
-reference, and a function under an `//export` directive is a root. Positions are the original
-file's. The C half is not analyzed under any option: a `C.x` expression has no recorded type, a C
-struct's field is no symbol, and the only way C reaches a Go symbol is the `//export` directive,
-which is the root.
+So a Go declaration in a cgo file is a symbol, a Go helper only a cgo file calls carries a reference, and a function under an `//export` directive is a root. Positions are the original file's. The C half is not analyzed under any option. A `C.x` expression has no recorded type, a C struct's field is no symbol, and the only way C reaches a Go symbol is the `//export` directive, which is the root.
 
-Where that second check fails for any other reason, the file is recorded in the report's
-`excluded_by_cgo` list, its references are dropped, and the report says that references made only
-from it are outside the reference set. One further limit is recorded rather than worked around: a
-directory whose every file a constraint excludes returns no package at all, so neither `DS1501`
-nor the matrix derivation can see a file in one, and nothing claims to report it.
+Where that second check fails for any other reason, the file is recorded in the report's `excluded_by_cgo` list and its references are dropped. The report says that references made only from it are outside the reference set.
+
+One further limit is recorded rather than worked around. A directory whose every file a constraint excludes returns no package at all. So neither `DS1501` nor the matrix derivation can see a file in one, and nothing claims to report it.
 
 ## What leaves the analysis
 
-The analysis has a boundary, and what crosses it is treated as fully reachable rather than as
-dead. There are five crossings:
+The analysis has a boundary, and what crosses it is treated as fully reachable rather than as dead. Five things cross that boundary:
 
-- A struct value handed to an empty-interface parameter of a function outside the program flows
-  into `encoding-reflection` with the full retained set, and a wrapper that forwards its own such
-  parameter inherits the crossing; see [exemptions.md](exemptions.md).
+- A struct value handed to an empty-interface parameter of a function outside the program flows into `encoding-reflection` with the full retained set. A wrapper that forwards its own such parameter inherits the crossing, as [Exemption classes](exemptions.md#what-leaves-the-analysis-is-fully-reachable) describes.
 - Evidence a test file carries does not hold under a production analysis.
 - A compiled file outside the target root is dropped at the load.
-- A reference from a declared consumer into the target is an ordinary reference, live under both
-  relations.
-- An interface-typed field is where an exemption class's reach stops, because the analysis does
-  not see the dynamic type behind it.
+- A reference from a declared consumer into the target is an ordinary reference, live under both relations.
+- An interface-typed field is where an exemption class's reach stops, because the analysis does not see the dynamic type behind it.
 
 ## Cross-language edges
 
-A declared edge stands for a consumer this analyzer cannot read, a generated TypeScript type
-standing for a Go server type among them. deadset-go evaluates its own side of each declared edge
-and publishes one record per side in `edge_evaluations`, naming the symbol and whether it is live,
-dead or absent.
+A declared edge stands for a consumer this analyzer cannot read, a generated TypeScript type standing for a Go server type among them. For each declared edge, deadset-go evaluates its own side and publishes one record per side in `edge_evaluations`, naming the symbol and whether it is live, dead or absent.
 
-A finding about a symbol an edge names is pending rather than reported: it moves out of the
-finding list and into the record, where the orchestrator's merge resolves it against the paired
-side. One rule covers deadness and narrowing both, because a declared edge counts as a reference
-from outside the symbol's own package exactly as it counts as a use. A run that holds a pending
-finding exits with the pending code, so an unmerged report is never read as an answer.
+A finding about a symbol an edge names is pending rather than reported. It moves out of the finding list and into the record, where the orchestrator's merge resolves it against the paired side. One rule covers deadness and narrowing both, because a declared edge counts as a reference from outside the symbol's own package exactly as it counts as a use. A run that holds a pending finding exits with the pending code, so an unmerged report is never read as an answer.
 
 ## Determinism
 
-Two runs over one tree produce one report. Nothing is written to disk between runs, so no cached
-state changes an answer; no analysis is sharded and no report is truncated by a time budget; the
-finding order is a total order with no ambient input. Every file of the target is byte-identical
-after a run.
+Two runs over one tree produce one report. Nothing is written to disk between runs, so no cached state changes an answer. No analysis is sharded and no report is truncated by a time budget. The finding order is a total order with no ambient input. Every file of the target is byte-identical after a run.

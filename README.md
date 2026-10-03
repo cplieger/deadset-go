@@ -4,68 +4,127 @@
 [![Go version](https://img.shields.io/github/go-mod/go-version/cplieger/deadset-go)](https://github.com/cplieger/deadset-go/blob/main/go.mod)
 [![Mutation](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cplieger/deadset-go/badges/mutation.json)](https://github.com/cplieger/deadset-go/issues?q=label%3Agremlins-tracker)
 
-Deterministic whole-program dead-code analysis for a Go module and the consumers it declares.
+deadset-go finds dead code in a Go module and in the repositories that import it, and writes a report your CI can fail on.
 
-## ⚠️ Pre-release software
+It type-checks the module with its tests through `golang.org/x/tools`, its one run-time dependency, and reports without editing your code. A dependency outside the module and its named consumers is checked for its declarations alone, so a type error inside one of its function bodies does not stop the analysis. It is pre-release, so the report shape, exit codes and configuration keys can change until 1.0. It supports Linux only, needs Go 1.27.1 or later and is licensed under GPL-3.0-or-later.
 
-deadset-go implements the [deadset contract](https://github.com/cplieger/deadset-spec) at the version `describe` prints. `analyze` reads a Go module and writes the contract's JSON report, rendered beside it as text, GitHub annotations, SARIF 2.1.0 or a template of yours; `explain` answers whether one symbol is live, retained, reported or judged by nothing, and why. Over a whole module it reports exports narrower than they are declared, fields the program writes and never reads, methods whose bodies never name their receiver, and declarations only a test names. A green `go vet` or `golangci-lint` beside such a finding is not a contradiction, because both run per package with tests included, and these are the two questions they do not ask.
+## Why use it
 
-Every report names the analyzer's conformance result in its `analyzer.conformance` block, and an orchestrator admits a pass and nothing else, so read that block rather than gating blind on a report. The contract version, the corpus version, the declared gaps, the platform set and the non-goals are in [docs/conformance.md](docs/conformance.md). The report shape, the exit codes and the configuration keys can change until 1.0.
+deadset-go is built for a CI gate on dead code across a module, with every verdict from type information and the reference graph.
 
-## What it does
+- It reports unused declarations, declarations only tests use, and tests of dead code.
+- It reports exports only their own package uses, fields written and never read, and uncalled interface methods.
+- Inside a function, it reports unused parameters, results and receivers, unreachable code and dead stores.
+- It loads the consumers you name, so an export a downstream repository calls is never reported.
+- Nine exemption classes hold back code that encoders, `fmt`, templates or reflection reach.
+- The same tree gives the same report, as JSON, text, GitHub annotations, SARIF 2.1.0 or your own template.
 
-deadset-go loads a Go module with its tests, type-checks it and reports the declarations nothing uses: a function nobody calls, a struct field nothing reads, an exported symbol no consumer imports, an interface no value is converted to. Every verdict comes from type information and the reference graph, never from a text search, so two runs over one tree produce one report. Every kind it reports, and what it treats as a use, is in [docs/kinds.md](docs/kinds.md). A dependency outside the target and its declared consumers is type-checked for its declarations alone, so a type error inside one of its function bodies does not stop the analysis.
+Consider [`deadcode`](https://pkg.go.dev/golang.org/x/tools/cmd/deadcode) if you want the functions no call path from a `main` package reaches. It follows calls through func values, interface methods and reflection, and `-whylive` shows the path that keeps a function live.
 
-Three properties separate it from a per-package linter:
-
-- **Consumers are part of the program.** A library's exported API is dead only when no declared consumer uses it. Name the repositories that import the module and the analysis loads them into one whole-program graph, so an export a downstream repository calls is never reported.
-- **Exemptions are computed, not configured.** A `main`, an `init`, a test function and both sides of a `go:linkname` directive are roots, and a method that satisfies an interface a value of its type is converted to is held live by a documented exemption class; `print-retained` lists every symbol an exemption held back and the class that held it. The nine classes are in [docs/exemptions.md](docs/exemptions.md).
-- **A cascade is one finding.** When a dead function is the only caller of three more, the report names the root and counts what falls with it, so the deletion total is known before the edit.
-
-It also reports over-visibility: an exported symbol only its own package uses, which can be unexported without a behavior change.
-
-The output is a report, never an edit: a JSON document, one `path:line:col` text line per finding, or SARIF 2.1.0 for code-scanning upload. Every verb refuses a `--fix` flag with exit 2.
-
-## Quick start
+## Install
 
 ```sh
 go install github.com/cplieger/deadset-go/cmd/deadset-go@latest
-deadset-go version
 ```
 
-Installing needs Go 1.27 or later, and running needs the `go` toolchain on `PATH`, which loads the packages. deadset-go runs no language server and builds with cgo disabled, so a host with no C toolchain runs it.
+## Usage
 
-## Commands
+deadset-go loads packages with the `go` toolchain on your `PATH` and never downloads a module, so run `go mod download` in the module and in every consumer first. Then create a `deadset.json` at the module root that says whether the module is an `application` or a `library`, and run `analyze` there:
 
-| Verb | What it does |
-| --- | --- |
-| `analyze` | Loads the module and its declared consumers, writes the report, exits with the verdict |
-| `explain` | Says why a symbol is dead, why it is live, or why it was not reported |
-| `print-config` | Prints the resolved configuration with the source of every setting |
-| `print-roots` | Prints the resolved root set |
-| `print-retained` | Prints every symbol an exemption held back, with the classes that held it |
-| `describe` | Prints the analyzer's name, version, contract version and conformance record as JSON |
-| `version` | Prints the analyzer version and the contract version |
+```sh
+echo '{ "target": { "kind": "application" } }' > deadset.json
+deadset-go analyze --report=deadset-report.json
+```
 
-Exit codes follow the contract: 0 clean, 1 findings, 2 a usage error or a requested source edit, 3 a load or type-check failure, 4 a finding whose cross-language reference is unresolved. Every configuration key, every flag, the three suppression forms and the exit-code table are in [docs/configuration.md](docs/configuration.md).
+`analyze` writes the JSON report to `deadset-report.json` and a text rendering beside it as `deadset-report.json.txt`. Take this `main.go`:
 
-## How it relates to deadcode
+```go
+package main
 
-[`golang.org/x/tools/cmd/deadcode`](https://pkg.go.dev/golang.org/x/tools/cmd/deadcode) answers a different question, and running both is worth it. `deadcode` builds a call graph from each `main` with rapid type analysis, which resolves calls through interfaces by tracking the types that reach run time, and reports the functions no call path reaches. deadset-go covers the symbol kinds a call graph has no node for (types, fields, constants, variables, interface methods, type parameters), treats a library's declared consumers as part of the program, and records on each finding which relation produced it: a reference count of zero, or unreachability from the roots. Run `deadcode` for the functions and deadset-go for everything else. The two liveness relations, the reachability classes, the build matrix and what leaves the analysis are in [docs/analysis.md](docs/analysis.md).
+import "fmt"
 
-## Security
+type counter struct {
+	count int
+	label string
+}
 
-deadset-go reads source and writes a report. It edits no file, and every verb refuses a `--fix` flag, or any flag whose name contains `fix`, with exit 2. It spawns no analysis process other than the Go toolchain's own `go list`, which resolves the module's dependencies as `go build` does, and it opens no network connection of its own: a module download happens only where `go list` would download, so a run against a populated module cache stays offline.
+func (c *counter) increment() { c.count++ }
+
+func greet(name string) string { return "hello " + name }
+
+func farewell(name string) string { return "bye " + name }
+
+func main() {
+	c := &counter{label: "x"}
+	c.increment()
+	fmt.Println(greet("you"), c.count)
+}
+```
+
+The text rendering lists two findings:
+
+```text
+main.go:7:2: field counter.label: field counter.label is written once and never read [certain] (DS1301)
+main.go:14:6: function farewell: unexported function has no reference in the target [certain] (DS1002)
+summary: 2 findings (0 allow, 0 warn, 2 deny), 1 deletable line, 0 suppressions in effect, 0 reasons recorded, 0 stale suppressions, 0 pending, 0 omitted
+```
+
+The run exits 1 because the report holds a finding at `deny` severity, and 0 when it holds none. Common next steps:
+
+- Add `--format=sarif` or `--format=github` for a SARIF file or GitHub annotations. Naming any format replaces the text rendering, so add `--format=text` to keep it.
+- Run `deadset-go explain farewell` to see why one symbol is reported, retained, live or not reported.
+- To keep one declaration, put `//deadset:ignore DS1002 -- <reason>` on the line above it. To accept today's findings, add `--baseline-write=deadset-baseline.json`.
+
+A library's unused exports are reported only when a scope document lists its consumers. Put a `scope.json` in a folder that holds the library and its consumers, with each path relative to that file:
+
+```json
+{
+  "target": { "path": "lib", "role": "target" },
+  "consumers": [{ "path": "app", "role": "consumer" }]
+}
+```
+
+Then run from that folder, with `--target` naming the library folder whose `deadset.json` says `library`:
+
+```sh
+deadset-go analyze --target=lib --scope=scope.json --report=deadset-report.json
+```
+
+## API
+
+deadset-go is a standalone command, and its interface is seven verbs, the JSON report and the exit codes.
+
+- `analyze` writes the report and exits with the verdict, and `explain` answers for one symbol.
+- `print-config`, `print-roots` and `print-retained` print the resolved configuration with each setting's source, the root set, and every symbol an exemption held back.
+- `describe` prints the analyzer, contract and schema versions and the conformance record as JSON, and `version` prints the analyzer and contract versions.
+- The run exits 0 when no finding fails it and 1 when one does. It exits 2 on a usage error or a refused source-edit flag, and 3 when the load or type check fails. It exits 4 when a finding is about a symbol a cross-language edge names, which only the merge in [deadset](https://github.com/cplieger/deadset) can settle.
+
+The report follows the [deadset contract](https://github.com/cplieger/deadset-spec). [Configuration and invocation](docs/configuration.md) lists every flag, setting and suppression form.
+
+## Unsupported by design
+
+- Source edits. Every verb only reports, and a flag whose name holds `fix`, `edit`, `delete` or `rewrite` exits with 2. The JSON report carries what an external codemod needs.
+- Network access. Consumers are local checkouts, and the toolchain runs with `GOPROXY=off`, so a module missing from the module cache stops the run with exit 3.
+- Runtime evidence. Coverage profiles and production logs are not inputs.
+- Guesses. A kind ships only where its answer follows exactly from type information and the module graph.
+- Other languages. [deadset-ts](https://github.com/cplieger/deadset-ts) analyzes TypeScript and JavaScript.
+
+[Conformance, platforms and non-goals](docs/conformance.md#non-goals) explains each one.
 
 ## Related projects
 
-- [deadset-spec](https://github.com/cplieger/deadset-spec): the contract and the conformance corpus deadset-go implements and passes before each release.
-- [deadset-ts](https://github.com/cplieger/deadset-ts): the same analysis for TypeScript and JavaScript. Neither analyzer can analyze the other's language: the TypeScript 7 compiler module `github.com/microsoft/TypeScript/tsc` keeps every analysis package under `internal/`, its programmatic surface is a TypeScript client over a private protocol, and no port of Go's type checker to JavaScript exists.
-- [deadset](https://github.com/cplieger/deadset): runs both analyzers over a repository holding both languages, resolves the references that cross the language boundary and merges the reports into one.
+deadset-go implements the [deadset contract](https://github.com/cplieger/deadset-spec), which fixes the issue codes, the report schema and the exit codes. It passes all 35 of the contract's conformance fixtures that carry a Go rendering, and every report names that result.
 
-## Dependencies
+- [deadset-ts](https://github.com/cplieger/deadset-ts) is the same analysis for TypeScript and JavaScript.
+- [deadset](https://github.com/cplieger/deadset) runs both analyzers as one command and merges their reports, resolving the references between Go and TypeScript code.
 
-deadset-go allows itself two dependencies: the Go standard library and `golang.org/x/tools`, which supplies the package loader and the type information no reimplementation can. `go version -m` on a released binary lists nothing else. Renovate keeps the pins in `go.mod` current.
+## Documentation
+
+- [Configuration and invocation](docs/configuration.md) lists every setting, verb, flag, suppression form and exit code.
+- [Issue kinds](docs/kinds.md) states what each code reports and what counts as a use.
+- [Exemption classes](docs/exemptions.md) explains the nine reasons a symbol is held back.
+- [How the analysis decides](docs/analysis.md) covers the roots, consumers, build configurations and cgo files.
+- [Conformance, platforms and non-goals](docs/conformance.md) gives the contract version, the conformance result, the platforms and the performance budget.
 
 ## Contributing
 
