@@ -217,7 +217,7 @@ func resolveModule(w wireModule, role, base string) (Module, error) {
 	var id string
 	if w.ID != nil {
 		if *w.ID == "" {
-			return Module{}, fmt.Errorf("%w: %s %s declares an empty id; leave the name to the load by omitting it",
+			return Module{}, fmt.Errorf("%w: %s %s declares an empty id. Leave the name to the load by omitting it",
 				ErrMember, role, w.Path)
 		}
 		id = *w.ID

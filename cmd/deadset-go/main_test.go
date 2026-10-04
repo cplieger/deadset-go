@@ -550,7 +550,7 @@ func TestPrintConfigRefusals(t *testing.T) {
 			document:   `{"target": {"kind": "library"}, "reporters": {"fail_under": "warn"}}`,
 			writeIt:    true,
 			wantCode:   codes["usage"],
-			wantStderr: []string{`key "reporters.fail_under" is not implemented`, `the nearest implemented key is "reporters.fail_on"`},
+			wantStderr: []string{`key "reporters.fail_under" is not implemented`, `The nearest implemented key is "reporters.fail_on"`},
 		},
 		{
 			name:       "a_document_that_is_not_one_instance_of_the_key_list",

@@ -321,7 +321,7 @@ func walkValue(dec *json.Decoder, at string, node keyNode, label string) *Error 
 		if at == "" {
 			return malformed(label, "", "want one JSON object, got null")
 		}
-		return malformed(label, at, "holds null; a document that leaves a setting to its default omits it")
+		return malformed(label, at, "holds null. A document that leaves a setting to its default omits it")
 	}
 	delim, isDelim := token.(json.Delim)
 	if !isDelim {

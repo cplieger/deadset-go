@@ -169,7 +169,7 @@ func analyze(ctx context.Context, args []string, stderr io.Writer) int {
 func analyzeFlags(args []string, stderr io.Writer) (asked invocation, resolved resolution, code int) {
 	flags := configuredFlagSet("analyze", analyzeUsage, stderr, true)
 	flags.set.StringVar(&asked.report, "report", "", "the path the JSON report is written to")
-	flags.set.Var(&asked.formats, "format", "one rendering written beside the report, repeatable; one of "+formatNames())
+	flags.set.Var(&asked.formats, "format", "one rendering written beside the report, repeatable, and one of "+formatNames())
 	templatePath := flags.set.String("template", "", "the file holding the template the template rendering reads")
 	flags.set.StringVar(&asked.baselineWrite, "baseline-write", "",
 		"the path a baseline recording the findings of this target is written to")
