@@ -46,7 +46,7 @@ func walk(dec *json.Decoder, s *shape, at string) error {
 	}
 	switch token {
 	case nil:
-		return fmt.Errorf("%w: %s is null; a document that leaves a member to its default omits it", ErrMember, at)
+		return fmt.Errorf("%w: %s is null. A document that leaves a member to its default omits it", ErrMember, at)
 	case json.Delim('{'):
 		if s != nil && s.members == nil {
 			s = nil

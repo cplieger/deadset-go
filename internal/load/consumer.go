@@ -144,7 +144,7 @@ func resolvesTarget(pkgs []*packages.Package, path string, main *packages.Module
 	if resolved == "" || sameDir(resolved, main.Dir) {
 		return nil
 	}
-	return fmt.Errorf("%w: %s: it resolves %s at %s rather than at %s; a consumer reaches the target through a replace directive in its own module file or through a workspace the scope declares",
+	return fmt.Errorf("%w: %s: it resolves %s at %s rather than at %s. A consumer reaches the target through a replace directive in its own module file or through a workspace the scope declares",
 		ErrConsumer, path, main.Path, resolved, main.Dir)
 }
 

@@ -692,7 +692,7 @@ func validateDeclaration(entry Declaration, at, label string) *Error {
 		if !bareSpecifierPattern.MatchString(*entry.Module) {
 			return malformed(label, at+".module",
 				"%q is a relative, absolute or imports-mapped specifier, which names a file of the "+
-					"analyzed program; name that declaration by symbol instead", *entry.Module)
+					"analyzed program. Name that declaration by symbol instead", *entry.Module)
 		}
 		return nil
 	default:

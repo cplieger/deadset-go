@@ -406,9 +406,9 @@ func unimplementedKey(label, path string) *Error {
 	switch nearest := nearestKey(path); nearest {
 	case "":
 	case path:
-		fmt.Fprintf(&hint, "; %q is one setting written as nested objects, not as one key", path)
+		fmt.Fprintf(&hint, ". %q is one setting written as nested objects, not as one key", path)
 	default:
-		fmt.Fprintf(&hint, "; the nearest implemented key is %q", nearest)
+		fmt.Fprintf(&hint, ". The nearest implemented key is %q", nearest)
 	}
 	return &Error{
 		Kind:    KindUnimplementedKey,
