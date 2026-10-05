@@ -128,7 +128,7 @@ deadset-go implements the [deadset contract](https://github.com/cplieger/deadset
 
 ## Contributing
 
-Issues and pull requests are welcome. The general guidelines live in [cplieger/.github](https://github.com/cplieger/.github/blob/main/CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Disclaimer
 
