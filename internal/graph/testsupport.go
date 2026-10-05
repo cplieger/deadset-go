@@ -1,6 +1,8 @@
 package graph
 
 import (
+	"go/token"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -17,33 +19,36 @@ const testSupportRule = "test-support"
 // nothing imports.
 const testPackageSuffix = "_test"
 
-// ClassifyTestSupport returns the import paths of the target's test-support
-// packages: a non-main package of the target, not a test package by name, that at
-// least one test file imports and that nothing but test code imports, directly or
-// through other test-support packages. A library's importable package is never
-// one, because outside programs may import it; only a package under an internal
-// tree is.
-func ClassifyTestSupport(r *load.Result, library bool) map[string]bool {
-	importers := make(map[string][]importer)
+// The users a package's import or reference is written in, beside the package
+// paths of the target: a test file, and a consumer's file that is not a test
+// file. Neither spelling is an import path.
+const (
+	testUser    = ""
+	outsideUser = " consumer"
+)
+
+// ClassifyTestSupport records the target's test-support packages in r.TestSupport and
+// marks their declarations in symbols. That is the largest set of non-main packages of
+// the target, none a test package by name and none holding a root, that a test reaches
+// and that nothing outside the set imports or references except a test file. A
+// package's own test files are outside it. A reference is a resolved name, so a call
+// through an interface method references no implementation. An init function, a blank
+// declaration and a test are no root here. A library's package is one only under an
+// internal tree, because outside programs may import any other.
+func ClassifyTestSupport(r *load.Result, symbols []Symbol, roots []Root, library bool) {
 	candidates := make(map[string]bool)
-	seen := make(map[string]bool)
 	for _, p := range r.Packages {
-		if p.Module == nil || !p.Module.Main {
-			continue
-		}
-		if supportCandidate(p, library) {
+		if p.Module != nil && p.Module.Main && supportCandidate(p, library) {
 			candidates[p.PkgPath] = true
 		}
-		addImporters(importers, seen, r, p)
 	}
-	return closeSupport(candidates, importers)
-}
-
-// importer is one file's import of a package: the importing package, and whether
-// the file is a test file.
-type importer struct {
-	from string
-	test bool
+	for path := range rootedPackages(symbols, roots) {
+		delete(candidates, path)
+	}
+	r.TestSupport = largestSupport(candidates, usersOf(r, candidates))
+	for i := range symbols {
+		symbols[i].TestSupport = r.TestSupport[symbols[i].PkgPath]
+	}
 }
 
 // supportCandidate reports whether one package of the main module could be test
@@ -53,43 +58,153 @@ func supportCandidate(p *packages.Package, library bool) bool {
 		(!library || slices.Contains(strings.Split(p.PkgPath, "/"), internalElement))
 }
 
-// addImporters records the imports of every file of p not already seen, since a
-// file belongs to a package and to its test variant both.
-func addImporters(importers map[string][]importer, seen map[string]bool, r *load.Result, p *packages.Package) {
-	for _, f := range p.Syntax {
-		name := r.Fset.Position(f.FileStart).Filename
-		if seen[name] {
+// rootedPackages is the import path of every package that declares a root of a
+// kind that keeps a package out of test-support code.
+func rootedPackages(symbols []Symbol, roots []Root) map[string]bool {
+	pkgOf := make(map[SymbolID]string, len(symbols))
+	for i := range symbols {
+		pkgOf[symbols[i].ID] = symbols[i].PkgPath
+	}
+	rooted := make(map[string]bool)
+	for _, root := range roots {
+		switch root.Kind {
+		case RootInit, RootBlank, RootTest:
 			continue
 		}
-		seen[name] = true
-		_, test := IsTestFile(name)
+		if path, held := pkgOf[root.ID]; held {
+			rooted[path] = true
+		}
+	}
+	return rooted
+}
+
+// usersOf is, per candidate, every user that imports it or references one of its
+// declarations from outside it: the package path of a target file that is not a
+// test file, testUser for a test file of the target or of a consumer, and
+// outsideUser for any other file of a consumer.
+func usersOf(r *load.Result, candidates map[string]bool) map[string]map[string]bool {
+	users := make(map[string]map[string]bool, len(candidates))
+	add := func(to, from string) {
+		if !candidates[to] || to == from {
+			return
+		}
+		if users[to] == nil {
+			users[to] = make(map[string]bool)
+		}
+		users[to][from] = true
+	}
+	for _, p := range r.Packages {
+		if p.Module != nil && p.Module.Main {
+			addUses(r.Fset, p, p.PkgPath, add)
+		}
+	}
+	for _, consumer := range r.Consumers {
+		for _, p := range consumer.Packages {
+			addUses(r.Fset, p, outsideUser, add)
+		}
+	}
+	return users
+}
+
+// addUses records every import and every resolved name of one package against the
+// user its file is: testUser for a test file and production for any other.
+func addUses(fset *token.FileSet, p *packages.Package, production string, add func(to, from string)) {
+	files := fileUsers{fset: fset, production: production, of: make(map[*token.File]string)}
+	for _, f := range p.Syntax {
+		user := files.at(f.FileStart)
 		for _, spec := range f.Imports {
-			path, err := strconv.Unquote(spec.Path.Value)
-			if err != nil {
-				continue
+			if path, err := strconv.Unquote(spec.Path.Value); err == nil {
+				add(path, user)
 			}
-			importers[path] = append(importers[path], importer{from: p.PkgPath, test: test})
+		}
+	}
+	if p.TypesInfo == nil {
+		return
+	}
+	for id, object := range p.TypesInfo.Uses {
+		if object.Pkg() != nil {
+			add(object.Pkg().Path(), files.at(id.Pos()))
 		}
 	}
 }
 
-// closeSupport is the candidates every importer of which is a test file or a
-// package already found to be test support, grown until nothing changes.
-func closeSupport(candidates map[string]bool, importers map[string][]importer) map[string]bool {
-	support := make(map[string]bool)
+// fileUsers is the user each file of one package is, computed once per file.
+type fileUsers struct {
+	fset       *token.FileSet
+	of         map[*token.File]string
+	production string
+}
+
+// at is the user of the file holding one position.
+func (u *fileUsers) at(pos token.Pos) string {
+	file := u.fset.File(pos)
+	if user, held := u.of[file]; held {
+		return user
+	}
+	user := u.production
+	if file != nil {
+		if _, test := IsTestFile(file.Name()); test {
+			user = testUser
+		}
+	}
+	u.of[file] = user
+	return user
+}
+
+// largestSupport is the largest subset of the candidates in which every user of a
+// member is a test file or another member and a test reaches every member. Each
+// pass drops what breaks either condition, and a set either condition holds of
+// survives every pass, so the fixpoint is the largest such set.
+func largestSupport(candidates map[string]bool, users map[string]map[string]bool) map[string]bool {
+	support := maps.Clone(candidates)
 	for changed := true; changed; {
 		changed = false
-		for candidate := range candidates {
-			held := importers[candidate]
-			if support[candidate] || len(held) == 0 {
-				continue
+		for member := range support {
+			if hasOutsideUser(users[member], support) {
+				delete(support, member)
+				changed = true
 			}
-			if slices.ContainsFunc(held, func(one importer) bool { return !one.test && !support[one.from] }) {
-				continue
+		}
+		reached := reachedByTests(support, users)
+		for member := range support {
+			if !reached[member] {
+				delete(support, member)
+				changed = true
 			}
-			support[candidate] = true
-			changed = true
 		}
 	}
 	return support
+}
+
+// hasOutsideUser reports whether a user of one member is neither a test file nor
+// another member.
+func hasOutsideUser(users, support map[string]bool) bool {
+	for user := range users {
+		if user != testUser && !support[user] {
+			return true
+		}
+	}
+	return false
+}
+
+// reachedByTests is every member of support that a chain of users starting at a
+// test file reaches through other members.
+func reachedByTests(support map[string]bool, users map[string]map[string]bool) map[string]bool {
+	reached := make(map[string]bool, len(support))
+	for growing := true; growing; {
+		growing = false
+		for member := range support {
+			if reached[member] {
+				continue
+			}
+			for user := range users[member] {
+				if user == testUser || reached[user] {
+					reached[member] = true
+					growing = true
+					break
+				}
+			}
+		}
+	}
+	return reached
 }

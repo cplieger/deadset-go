@@ -1,0 +1,200 @@
+One module: a command, a production package with an interface and its own test,
+and beside them every shape of package only tests reach and every shape that
+production code or a root reaches as well.
+
+-- go.mod --
+module example.com/support
+
+go 1.27.1
+-- main.go --
+package main
+
+import (
+	"example.com/support/store"
+	"example.com/support/uses"
+)
+
+func main() { println(store.Count(nil), uses.Total()) }
+-- store/store.go --
+package store
+
+// Store is what Count reads through.
+type Store interface {
+	Len() int
+}
+
+// Count calls through the interface, which references no implementation.
+func Count(s Store) int {
+	if s == nil {
+		return 0
+	}
+	return s.Len()
+}
+-- store/store_test.go --
+package store_test
+
+import (
+	"testing"
+
+	"example.com/support/fake"
+	"example.com/support/store"
+)
+
+func TestCount(t *testing.T) {
+	if store.Count(fake.New()) != 1 {
+		t.Error("count")
+	}
+}
+-- fake/fake.go --
+package fake
+
+import "example.com/support/chain"
+
+// Memory implements store.Store.
+type Memory struct{}
+
+// Len reports one.
+func (Memory) Len() int { return chain.One() }
+
+// New returns a fake store.
+func New() Memory { return Memory{} }
+-- chain/chain.go --
+package chain
+
+// One is called by the fake alone.
+func One() int { return 1 }
+-- internal/own/own.go --
+package own
+
+// Helper is called by this package's own test alone.
+func Helper() int { return 2 }
+-- internal/own/own_test.go --
+package own
+
+import "testing"
+
+func TestHelper(t *testing.T) {
+	if Helper() != 2 {
+		t.Error("helper")
+	}
+}
+-- withinit/withinit.go --
+package withinit
+
+var started int
+
+func init() { started = 1 }
+
+var _ = started
+
+// Started is called by a test alone.
+func Started() int { return started }
+-- withinit/withinit_test.go --
+package withinit_test
+
+import (
+	"testing"
+
+	"example.com/support/withinit"
+)
+
+func TestStarted(t *testing.T) {
+	if withinit.Started() != 1 {
+		t.Error("started")
+	}
+}
+-- register/register.go --
+package register
+
+var registered bool
+
+func init() { registered = true }
+-- register/register_test.go --
+package register_test
+
+import (
+	"testing"
+
+	_ "example.com/support/register"
+)
+
+func TestRegistered(t *testing.T) {}
+-- configured/configured.go --
+package configured
+
+// Kept is a configured root.
+func Kept() int { return 3 }
+-- configured/configured_test.go --
+package configured_test
+
+import (
+	"testing"
+
+	"example.com/support/configured"
+)
+
+func TestKept(t *testing.T) {
+	if configured.Kept() != 3 {
+		t.Error("kept")
+	}
+}
+-- shared/shared.go --
+package shared
+
+// Both is called by a test and by the command's package.
+func Both() int { return 4 }
+-- shared/shared_test.go --
+package shared_test
+
+import (
+	"testing"
+
+	"example.com/support/shared"
+)
+
+func TestBoth(t *testing.T) {
+	if shared.Both() != 4 {
+		t.Error("both")
+	}
+}
+-- uses/uses.go --
+package uses
+
+import "example.com/support/shared"
+
+// Total is production code a test calls, so shared stays production.
+func Total() int { return shared.Both() }
+-- uses/uses_test.go --
+package uses
+
+import "testing"
+
+func TestTotal(t *testing.T) {
+	if Total() != 4 {
+		t.Error("total")
+	}
+}
+-- uses/link.go --
+package uses
+
+import _ "example.com/support/tiedup"
+-- tiedup/tiedup.go --
+package tiedup
+
+// Tied is reached by a production blank import.
+func Tied() int { return 5 }
+-- tiedup/tiedup_test.go --
+package tiedup
+
+import "testing"
+
+func TestTied(t *testing.T) {
+	if Tied() != 5 {
+		t.Error("tied")
+	}
+}
+-- unreached/unreached.go --
+package unreached
+
+// Alone is reached by nothing.
+func Alone() int { return 6 }

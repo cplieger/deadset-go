@@ -1,0 +1,44 @@
+One package that makes its JSON decoder refuse a document naming a member the type
+lacks, so a decoding entry point of that package retains the fields an encoder would,
+while a decoder of another package still retains none.
+
+-- go.mod --
+module example.com/strict
+
+go 1.27.1
+-- strict.go --
+package strict
+
+import (
+	"bytes"
+	"encoding/json"
+	"encoding/xml"
+)
+
+// Strict is decoded by a decoder that refuses unknown members.
+type Strict struct {
+	Name  string `json:"name"`
+	Extra int
+}
+
+// Loose is decoded by a decoder of another package.
+type Loose struct {
+	Name  string `xml:"name"`
+	Extra int
+}
+
+// DecodeStrict decodes refusing unknown members.
+func DecodeStrict(b []byte) (Strict, error) {
+	var s Strict
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	err := dec.Decode(&s)
+	return s, err
+}
+
+// DecodeLoose decodes with the XML decoder.
+func DecodeLoose(b []byte) (Loose, error) {
+	var l Loose
+	err := xml.Unmarshal(b, &l)
+	return l, err
+}

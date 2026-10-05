@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"maps"
 	"slices"
 	"strings"
 
@@ -13,12 +14,11 @@ import (
 )
 
 // destinationPackages are the packages whose every function and method may name
-// the members of a value it is given at run time, so a value reaching any of them
-// keeps the members no reference points at. The value is what the destination reads
-// of the value's METHODS beside its fields: a standard encoder resolves the methods
-// of [methodsResolvedByName] and calls no other, while a template engine selects a
-// method by the same syntax it selects a field with.
-var destinationPackages = map[string]reach{
+// the members of a value it is given at run time, each with the methods it resolves
+// by name: a standard encoder resolves the methods of [methodsResolvedByName] and
+// calls no other, while a template engine selects a method by the syntax it selects
+// a field with.
+var destinationPackages = map[string]methodReach{
 	"encoding/gob":     reachGobEncode | reachGobDecode,
 	"encoding/json":    reachJSONEncode | reachJSONDecode,
 	"encoding/json/v2": reachJSONEncode | reachJSONDecode,
@@ -28,38 +28,73 @@ var destinationPackages = map[string]reach{
 	"text/template":    reachExportedMethods,
 }
 
-// reach is what a destination reads of the methods of a value it is given, beside
-// the fields every destination of this class reads. A value that reaches two
-// destinations keeps what both of them read, which is the union of their reaches, so
-// each destination is one bit rather than one value.
-type reach uint16
+// jsonPackages are the encoders whose decoder can refuse a document naming a member
+// the type lacks.
+var jsonPackages = map[string]bool{"encoding/json": true, "encoding/json/v2": true}
+
+// methodReach is what a destination reads of the methods of a value it is given. A
+// value that reaches two destinations keeps what both read, so each destination is
+// one bit.
+type methodReach uint16
 
 // What a destination reads of a value's methods: nothing, every exported method the
-// type declares, or the methods one direction of one encoder resolves by name.
+// type declares, or the methods one destination resolves by name.
 const (
-	reachNoMethod        reach = 0
-	reachExportedMethods reach = 1 << 0
-	reachJSONEncode      reach = 1 << 1
-	reachJSONDecode      reach = 1 << 2
-	reachXMLEncode       reach = 1 << 3
-	reachXMLDecode       reach = 1 << 4
-	reachGobEncode       reach = 1 << 5
-	reachGobDecode       reach = 1 << 6
+	reachExportedMethods methodReach = 1 << 0
+	reachJSONEncode      methodReach = 1 << 1
+	reachJSONDecode      methodReach = 1 << 2
+	reachXMLEncode       methodReach = 1 << 3
+	reachXMLDecode       methodReach = 1 << 4
+	reachGobEncode       methodReach = 1 << 5
+	reachGobDecode       methodReach = 1 << 6
+	reachLogValue        methodReach = 1 << 7
 
 	// The two directions, so one entry point of a destination keeps its own.
-	reachEncoding reach = reachJSONEncode | reachXMLEncode | reachGobEncode
-	reachDecoding reach = reachJSONDecode | reachXMLDecode | reachGobDecode
+	reachEncoding methodReach = reachJSONEncode | reachXMLEncode | reachGobEncode
+	reachDecoding methodReach = reachJSONDecode | reachXMLDecode | reachGobDecode
 )
+
+// reach is what a destination retains of a value it is given: the methods it
+// resolves by name, whether it reads fields, and the packages outside the analysed
+// program the value reaches, each of which retains the methods by which the value
+// satisfies an interface that package can name.
+type reach struct {
+	outside []*types.Package // ordered by path, each once
+	methods methodReach
+	fields  bool
+}
+
+// union is what a value reaching both destinations retains.
+func (r reach) union(other reach) reach {
+	joined := reach{methods: r.methods | other.methods, fields: r.fields || other.fields}
+	joined.outside = slices.Clone(r.outside)
+	for _, pkg := range other.outside {
+		at, held := slices.BinarySearchFunc(joined.outside, pkg.Path(), func(p *types.Package, path string) int {
+			return strings.Compare(p.Path(), path)
+		})
+		if !held {
+			joined.outside = slices.Insert(joined.outside, at, pkg)
+		}
+	}
+	return joined
+}
+
+// covers reports whether r retains everything other does.
+func (r reach) covers(other reach) bool {
+	widened := r.union(other)
+	return widened.methods == r.methods && widened.fields == r.fields && len(widened.outside) == len(r.outside)
+}
 
 // methodsResolvedByName are the methods a destination resolves by name on a value it
 // encodes or decodes, each with the destinations that resolve it. A destination
 // walking a value keeps such a method on every defined type it reaches, because the
 // destination looks the method up on the type and the reference graph holds no edge
 // to it.
-var methodsResolvedByName = map[string]reach{
+var methodsResolvedByName = map[string]methodReach{
 	"AppendText":        reachJSONEncode,
 	"GobDecode":         reachGobDecode,
 	"GobEncode":         reachGobEncode,
+	"LogValue":          reachLogValue,
 	"MarshalBinary":     reachGobEncode,
 	"MarshalJSON":       reachJSONEncode,
 	"MarshalJSONTo":     reachJSONEncode,
@@ -82,25 +117,26 @@ var (
 
 // reads reports whether a destination of this reach reads one method of a defined
 // type it walks.
-func (r reach) reads(m *types.Func) bool {
+func (r methodReach) reads(m *types.Func) bool {
 	if r&reachExportedMethods != 0 && m.Exported() {
 		return true
 	}
 	return r&methodsResolvedByName[m.Name()] != 0
 }
 
-// forEntryPoint is what one entry point of a destination package reads of the
-// methods of a value it is given: an entry point that encodes a value resolves no
-// method that decodes one, and the other way about. An entry point naming neither
-// direction reads both, because a registration takes a value for either.
-func (r reach) forEntryPoint(name string) reach {
+// entryPoint is what one function of an encoder package retains of a value it is
+// given: an encoding entry point reads fields and resolves the encoding methods, a
+// decoding one fills fields through reflection, which reads none, and resolves the
+// decoding methods, and any other, a registration among them, retains both. A JSON
+// decoder retains fields as well where the program makes it refuse unknown members.
+func entryPoint(pkg, name string, resolved methodReach, unknownMembers bool) reach {
 	switch {
 	case hasAnyPrefix(name, encodingEntryPoints[:]):
-		return r &^ reachDecoding
+		return reach{methods: resolved &^ reachDecoding, fields: true}
 	case hasAnyPrefix(name, decodingEntryPoints[:]):
-		return r &^ reachEncoding
+		return reach{methods: resolved &^ reachEncoding, fields: unknownMembers && jsonPackages[pkg]}
 	default:
-		return r
+		return reach{methods: resolved, fields: true}
 	}
 }
 
@@ -113,13 +149,17 @@ func hasAnyPrefix(name string, prefixes []string) bool {
 
 // The reflection package, and the one function of it that reads a value's fields
 // and reaches no method: DeepEqual compares field by field and calls nothing the
-// type declares. Every other entry point hands out a Value or a Type, from which a
-// method is reachable by name, and what a program does with one is not in the type
-// information, so the conservative answer there is that methods are reached.
+// type declares. Any other entry point reaches the exported methods only in a
+// program that names one of [methodFinders].
 const (
 	reflectPackage = "reflect"
 	deepEqual      = "DeepEqual"
 )
+
+// methodFinders are the methods of reflect.Value and reflect.Type that find a method
+// of a value; a program calls a method through a Value only after one of them finds
+// it. A program-wide answer is a superset of every value that reaches one.
+var methodFinders = map[string]bool{"Method": true, "MethodByName": true, "NumMethod": true}
 
 // sortPackage is the package whose one interface a conversion reaches the class
 // through.
@@ -133,16 +173,10 @@ var destinationInterfaces = [...]struct{ pkg, name string }{
 	{sortPackage, "Interface"},
 }
 
-// namedDestinations are the packages whose destinations a rule of the vocabulary
-// names one by one: the encoders, the template engines and the reflection package
-// this class reads above, the database package whose scan target it reads, the
-// sorting package whose interface the conversion set reads, and the formatting,
-// logging, testing and structured-logging packages the format-verb class reads.
-//
-// A call into one of them is recorded by the rule that names it, and the rule for a
-// callee the analysis cannot read passes over it. Both rules would otherwise fire on
-// the same call and spell the destination differently, and two spellings of one
-// detail are two records of one fact.
+// namedDestinations are the packages whose destinations a rule names one by one: the
+// encoders, the template engines and the reflection package above, the database and
+// sorting packages, and the packages the format-verb class reads. The rule for a
+// callee the analysis cannot read passes over them, so one call is one record.
 var namedDestinations = namedDestinationPackages()
 
 // namedDestinationPackages joins the destination tables, so the set of named
@@ -172,59 +206,23 @@ const (
 )
 
 // EncodingReflectionDetector records the encoding-reflection class: a type whose
-// values reach reflection, a standard encoder, a template engine, a database scan
-// target, a sort interface or a structured-logging call keeps its exported fields
-// and every field of it that carries a struct tag, because that consumer names them
-// by string and the reference graph holds no edge to them.
-//
-// What is retained is per destination, because the destinations do not read the same
-// thing. A standard encoder retains the methods it resolves by name in the direction
-// the entry point encodes or decodes in, which [methodsResolvedByName] lists; a
-// database scan and the comparison of two values by reflection read fields and call
-// no method of the value, so those retain fields alone. A template engine selects a
-// method by the syntax it selects a field with, a structured-logging handler renders
-// a value through the method it answers with, a sort interface is three methods, and
-// every other entry point of the reflection package hands out a value from which a
-// method is reachable by name, so those retain the exported methods as well.
-//
-// A struct value that leaves the analysed program is the class's widest
-// destination, and the one no list of packages can complete. A struct, or a pointer
-// to one, handed to a parameter typed as the empty interface of a function or method
-// the load did not read has left the analysis: the callee's body is not in the
-// program, the parameter's type keeps nothing of the value, and whatever the callee
-// does with it, encode it, render it, log it or reflect over it, reads its fields and
-// may call its exported methods. Such a value therefore flows with the full retained
-// set. A function of the program that hands one of its own such parameters to that
-// call, or to any other destination of the class, is a destination for its callers'
-// arguments in turn, to a fixpoint, so a wrapper of a wrapper carries the rule of the
-// call it forwards to. A wrapper retains what its destination retains rather than the
-// full set, because its body is in the program: a value handed to a wrapper that
-// encodes it keeps the fields and the marshalling methods an encoder reads, one handed
-// to a wrapper that renders it through a template keeps every exported method, and a
-// wrapper with two destinations retains the union.
-//
-// The empty interface is the one parameter type this rule reads, because it is the
-// one an interface conversion answers nothing for: a value handed to any other
-// interface is a conversion the conversion set records, and the methods that
-// interface requires are what interface-satisfaction retains for it, which is
-// everything the callee can reach through the parameter's own type.
-//
-// Three rules the class applies where the case is not spelled out. Every argument
-// of a function or method of a destination package flows, the writer of a
-// template execution included, because what is named is the argument position and
-// not the parameter's meaning. A value reaches through a pointer, a slice, an
-// array and a map, and from every type so reached through the fields of that type
-// again, until no further type joins, because an encoder walks the whole value and
-// not only its outermost type; the walk stops at an interface-typed field, whose
-// dynamic type the analysis does not see. A method is retained when the defined
-// type declares it, so a method promoted from an embedded type is retained where
-// the embedded type is reached, which the field walk does.
+// values reach a destination that reads them by name at run time keeps the members
+// that destination reads, on the type and on every type reached from its fields,
+// because the reference graph holds no edge to them. What a destination retains is
+// [destination]'s, and every argument of a destination function flows. The walk
+// reaches through an interface-typed field to the types the program stores in it
+// ([storedTypes]), and a promoted method is retained where the embedded type is.
 func EncodingReflectionDetector(in *Input) ([]graph.Exemption, error) {
 	f := &encodingFlow{
-		kept:    newRetention(in, EncodingReflection),
-		edge:    newBoundary(in, namedDestinationParameter),
-		targets: conversionTargets(in.Result.Packages),
+		kept:           newRetention(in, EncodingReflection),
+		targets:        conversionTargets(in.Result.Packages),
+		unknownMembers: namesFunction(in, jsonPackages, unknownMemberRefusals),
+		findsMethods:   namesFunction(in, map[string]bool{reflectPackage: true}, methodFinders),
+		closures:       make(map[string]*importClosure),
+		satisfying:     make(map[string]map[string]bool),
 	}
+	f.edge = newBoundary(in, f.namedDestinationParameter)
+	f.stored = storedTypesOf(in, f.edge.sites)
 	if err := f.walkCalls(); err != nil {
 		return nil, err
 	}
@@ -236,20 +234,26 @@ func EncodingReflectionDetector(in *Input) ([]graph.Exemption, error) {
 
 // encodingFlow accumulates the class over one loaded configuration.
 type encodingFlow struct {
-	kept    *retention
-	edge    *boundary
-	targets []interfaceTarget
+	kept       *retention
+	edge       *boundary
+	stored     *storedTypes
+	closures   map[string]*importClosure  // by package path, computed on first use
+	satisfying map[string]map[string]bool // by type and package, the method names retained
+	targets    []interfaceTarget
+
+	// unknownMembers is whether the program makes a JSON decoder refuse a document
+	// naming a member the type lacks.
+	unknownMembers bool
+	// findsMethods is whether the program names a reflection method finder.
+	findsMethods bool
 }
 
 // namedDestinationParameter reports whether one parameter of one function is a
-// destination this class names by itself, which every parameter of one is (what a
-// destination call names is the argument position and not the parameter's meaning),
-// and what that destination reads of the value it is given. It is the base case the
-// boundary's forwarding fixpoint starts from, so a wrapper that hands its own
-// parameter to an encoder carries the encoder's set and one that hands it to a
-// template engine carries the engine's.
-func namedDestinationParameter(fn *types.Func, _ int) (reach, bool) {
-	d, found := encodingDestination(fn)
+// destination this class names by itself, which every parameter of one is, and what
+// that destination retains. It is the base case of the boundary's forwarding
+// fixpoint.
+func (f *encodingFlow) namedDestinationParameter(fn *types.Func, _ int) (reach, bool) {
+	d, found := f.encodingDestination(fn)
 	return d.reach, found
 }
 
@@ -299,7 +303,7 @@ func (f *encodingFlow) walkFile(info *types.Info, file *ast.File) error {
 		if !isFunc {
 			return true
 		}
-		if d, reaches := encodingDestination(fn); reaches {
+		if d, reaches := f.encodingDestination(fn); reaches {
 			failed = f.arguments(info, call.Args, d)
 			return failed == nil
 		}
@@ -310,15 +314,9 @@ func (f *encodingFlow) walkFile(info *types.Info, file *ast.File) error {
 }
 
 // crossingArguments records the struct values one call carries out of the analysed
-// program, which the boundary's crossing test decides argument by argument.
-//
-// What is retained is what reads the value where it arrives. A callee the program does
-// not hold retains the full set, every exported method included, because its body
-// decides what it reads and the analysis does not have it; a wrapper the program does
-// hold retains what its own destination retains, so a value handed to a wrapper that
-// encodes it keeps its fields and the methods that encoder resolves by name. The detail
-// names the immediate callee either way: a wrapper's caller reads the wrapper's name at
-// its own call.
+// program, which the boundary's crossing test decides argument by argument. What is
+// retained is what the boundary carries for the callee, and the detail names the
+// immediate callee, so a wrapper's caller reads the wrapper's name.
 func (f *encodingFlow) crossingArguments(info *types.Info, call *ast.CallExpr) error {
 	for i, arg := range call.Args {
 		out, crosses := f.edge.crossing(info, call, i)
@@ -375,7 +373,7 @@ func (f *encodingFlow) walkConversions() error {
 			continue
 		}
 		if err := f.retain(c.From, c.Site, destination{
-			detail: "converted to " + name, reach: reachExportedMethods,
+			detail: "converted to " + name, reach: reach{methods: reachExportedMethods, fields: true},
 		}); err != nil {
 			return err
 		}
@@ -384,31 +382,32 @@ func (f *encodingFlow) walkConversions() error {
 }
 
 // retain records what every defined type a destination walking a value of t reads
-// keeps: its exported fields, every field of it that carries a struct tag whether
-// that field is exported or not, because a tagged field is named by its tag and not
-// by its visibility, and the methods the destination reads.
+// keeps.
 func (f *encodingFlow) retain(t types.Type, at token.Pos, d destination) error {
 	site, err := f.kept.site(at)
 	if err != nil {
 		return err
 	}
-	for _, named := range encoderReach(t) {
+	for _, named := range f.encoderReach(t) {
 		f.members(named, site, d)
 	}
 	return nil
 }
 
-// members records what one destination reads of one defined type: the methods of it
-// the destination reads, and then the fields every destination of this class reads.
+// members records what one destination reads of one defined type: the methods it
+// resolves by name, the methods an outside package can name, and, where it reads
+// fields, the exported fields and every field carrying a tag, because a tagged field
+// is named by its tag and not by its visibility.
 func (f *encodingFlow) members(named *types.Named, site token.Position, d destination) {
 	origin := named.Origin()
+	every, satisfying := f.outsideMethods(named, d.reach.outside)
 	for m := range origin.Methods() {
-		if d.reach.reads(m) {
+		if d.reach.methods.reads(m) || (every && m.Exported()) || satisfying[m.Name()] {
 			f.kept.record(m, site, d.detail)
 		}
 	}
 	st, isStruct := origin.Underlying().(*types.Struct)
-	if !isStruct {
+	if !isStruct || !d.reach.fields {
 		return
 	}
 	for i := range st.NumFields() {
@@ -419,32 +418,153 @@ func (f *encodingFlow) members(named *types.Named, site token.Position, d destin
 }
 
 // encodingDestination reports whether a call to fn reaches the class, and how.
-func encodingDestination(fn *types.Func) (destination, bool) {
+func (f *encodingFlow) encodingDestination(fn *types.Func) (destination, bool) {
 	pkg := fn.Pkg()
 	if pkg == nil {
 		return destination{}, false
 	}
-	if pkg.Path() == reflectPackage && fn.Name() == deepEqual {
-		return destination{detail: "passed to " + fn.FullName(), reach: reachNoMethod}, true
+	detail := "passed to " + fn.FullName()
+	if pkg.Path() == reflectPackage && (fn.Name() == deepEqual || !f.findsMethods) {
+		return destination{detail: detail, reach: reach{fields: true}}, true
 	}
-	if reads, found := destinationPackages[pkg.Path()]; found {
-		return destination{
-			detail: "passed to " + fn.FullName(),
-			reach:  reads.forEntryPoint(fn.Name()),
-		}, true
+	if resolved, found := destinationPackages[pkg.Path()]; found {
+		if resolved&reachEncoding != 0 {
+			return destination{detail: detail, reach: entryPoint(pkg.Path(), fn.Name(), resolved, f.unknownMembers)}, true
+		}
+		return destination{detail: detail, reach: reach{methods: resolved, fields: true}}, true
 	}
 	if pkg.Path() == sqlPackage && fn.Name() == sqlScanMethod && scansARow(fn) {
-		return destination{detail: "scanned by " + fn.FullName(), pointers: true}, true
+		return destination{detail: "scanned by " + fn.FullName(), reach: reach{fields: true}, pointers: true}, true
 	}
-	// A structured-logging call hands its operands to a handler, which may render
-	// one by its members, so the set of those calls is the one the formatting
-	// class reads and this class shares it. A handler reaches methods: it renders a
-	// value that answers LogValue or String through that method, and one that
-	// answers neither by marshalling its fields.
+	// The formatting class reads the same calls for String and Error.
 	if _, logs := slogFunctions[fn.Name()]; pkg.Path() == slogPackage && logs {
-		return destination{detail: "passed to " + fn.FullName(), reach: reachExportedMethods}, true
+		return destination{detail: detail, reach: reach{methods: reachLogValue, fields: true}}, true
 	}
 	return destination{}, false
+}
+
+// unknownMemberRefusals are the functions by which a program makes a JSON decoder
+// refuse a document naming a member the type lacks: a method of the first package's
+// decoder, and an option of the second package.
+var unknownMemberRefusals = map[string]bool{"DisallowUnknownFields": true, "RejectUnknownMembers": true}
+
+// namesFunction reports whether any file of the analysed program uses a function or
+// method of one of the packages whose name is one of names.
+func namesFunction(in *Input, pkgPaths, names map[string]bool) bool {
+	for _, p := range programPackages(in.Result) {
+		if p.TypesInfo == nil {
+			continue
+		}
+		for _, object := range p.TypesInfo.Uses {
+			if _, isFunc := object.(*types.Func); isFunc && object.Pkg() != nil &&
+				pkgPaths[object.Pkg().Path()] && names[object.Name()] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// templatePackages are the template engines, whose presence in an outside package's
+// import closure lets it resolve any exported method by name.
+var templatePackages = map[string]bool{"text/template": true, "html/template": true}
+
+// importClosure is what one package outside the analysed program can name: the
+// interfaces it and the packages it imports, at any depth, declare, and whether a
+// template engine is among those packages.
+type importClosure struct {
+	interfaces []*types.Interface
+	templates  bool
+}
+
+// closureOf reads one package's import closure on first use. A generic interface is
+// skipped, because [types.Implements] decides no uninstantiated one, and so is an
+// interface holding a type term or embedding comparable, which only constrains a
+// type parameter.
+func (f *encodingFlow) closureOf(pkg *types.Package) *importClosure {
+	if held, known := f.closures[pkg.Path()]; known {
+		return held
+	}
+	closure := &importClosure{}
+	seen := map[string]bool{pkg.Path(): true}
+	queue := []*types.Package{pkg}
+	for len(queue) > 0 {
+		one := queue[0]
+		queue = queue[1:]
+		closure.templates = closure.templates || templatePackages[one.Path()]
+		closure.interfaces = append(closure.interfaces, declaredInterfaces(one)...)
+		for _, imported := range one.Imports() {
+			if !seen[imported.Path()] {
+				seen[imported.Path()] = true
+				queue = append(queue, imported)
+			}
+		}
+	}
+	f.closures[pkg.Path()] = closure
+	return closure
+}
+
+// declaredInterfaces is every non-generic interface with methods one package
+// declares at package level whose type set is its method set.
+func declaredInterfaces(pkg *types.Package) []*types.Interface {
+	var found []*types.Interface
+	scope := pkg.Scope()
+	for _, name := range scope.Names() {
+		typeName, isType := scope.Lookup(name).(*types.TypeName)
+		if !isType || typeName.IsAlias() {
+			continue
+		}
+		named, isNamed := typeName.Type().(*types.Named)
+		if !isNamed || named.TypeParams().Len() > 0 {
+			continue
+		}
+		iface, isInterface := named.Underlying().(*types.Interface)
+		if isInterface && iface.IsMethodSet() && iface.NumMethods() > 0 {
+			found = append(found, iface)
+		}
+	}
+	return found
+}
+
+// outsideMethods is what the packages outside the program a value reaches retain of
+// one type's methods: every exported method where an import closure holds a template
+// engine, and otherwise the methods by which the type, or a pointer to it,
+// implements an interface a closure declares.
+func (f *encodingFlow) outsideMethods(named *types.Named, outside []*types.Package) (every bool, names map[string]bool) {
+	if len(outside) == 0 {
+		return false, nil
+	}
+	names = make(map[string]bool)
+	for _, pkg := range outside {
+		closure := f.closureOf(pkg)
+		if closure.templates {
+			return true, nil
+		}
+		key := types.TypeString(named, nil) + " " + pkg.Path()
+		held, known := f.satisfying[key]
+		if !known {
+			held = satisfiedMethods(named, closure.interfaces)
+			f.satisfying[key] = held
+		}
+		maps.Copy(names, held)
+	}
+	return false, names
+}
+
+// satisfiedMethods names the methods of every interface the type, or a pointer to
+// it, implements.
+func satisfiedMethods(named *types.Named, interfaces []*types.Interface) map[string]bool {
+	names := make(map[string]bool)
+	pointer := types.NewPointer(named)
+	for _, iface := range interfaces {
+		if !types.Implements(named, iface) && !types.Implements(pointer, iface) {
+			continue
+		}
+		for method := range iface.Methods() {
+			names[method.Name()] = true
+		}
+	}
+	return names
 }
 
 // scansARow reports whether fn is the Scan method of a row or of a row set rather
@@ -539,14 +659,14 @@ func namedTypesReached(t types.Type) []*types.Named {
 // are composed of, until no further type joins. A type reached by several paths
 // joins once, and a generic type instantiated twice joins once per instantiation,
 // because the members of the two carry different types.
-func encoderReach(t types.Type) []*types.Named {
+func (f *encodingFlow) encoderReach(t types.Type) []*types.Named {
 	found := namedTypesReached(t)
 	seen := make(map[string]bool, len(found))
 	for _, named := range found {
 		seen[types.TypeString(named, nil)] = true
 	}
 	for at := 0; at < len(found); at++ {
-		for _, next := range membersReached(found[at]) {
+		for _, next := range f.membersReached(found[at]) {
 			key := types.TypeString(next, nil)
 			if seen[key] {
 				continue
@@ -560,16 +680,19 @@ func encoderReach(t types.Type) []*types.Named {
 
 // membersReached returns the defined types the members of one reached type are
 // composed of: the types of its fields, an embedded field among them, or the
-// elements of what it is built from where it is no struct. A member typed as an
-// interface is where the walk stops, because the dynamic type an encoder would
-// read there is not in the type information.
-func membersReached(named *types.Named) []*types.Named {
+// elements of what it is built from where it is no struct. A field that is, or holds
+// as its element or map value, an interface reaches the types the program stores in
+// it ([storedTypes]).
+func (f *encodingFlow) membersReached(named *types.Named) []*types.Named {
 	st, isStruct := named.Underlying().(*types.Struct)
 	if !isStruct {
 		return concreteTypes(namedTypesReached(named.Underlying()))
 	}
 	var found []*types.Named
 	for field := range st.Fields() {
+		for _, stored := range f.stored.of(field) {
+			found = append(found, concreteTypes(namedTypesReached(stored))...)
+		}
 		if types.IsInterface(field.Type()) {
 			continue
 		}

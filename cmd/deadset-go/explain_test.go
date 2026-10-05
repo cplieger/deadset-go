@@ -147,6 +147,25 @@ func retainedModule(t *testing.T) string {
 	})
 }
 
+// A field written and never read that an exemption holds back is a symbol the run
+// would otherwise have reported, so it is retained as a dead symbol held back is.
+func TestExplainAnswersAboutAWriteOnlyFieldAnExemptionHoldsBackAsRetained(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
+		"app.go": "package main\n\nimport \"encoding/json\"\n\n" +
+			"type answer struct {\n\tStatus string `json:\"status\"`\n}\n\n" +
+			"func main() {\n\tvar a answer\n\ta.Status = \"ok\"\n\tb, _ := json.Marshal(a)\n\tprintln(len(b))\n}\n",
+		repositoryDocument: `{"target": {"kind": "application"}}`,
+	})
+	got := runExplain(t, dir, "go://example.com/app#answer.Status")
+
+	for _, want := range []string{"answer: retained", "class: encoding-reflection"} {
+		if !strings.Contains(got.stdout, want) {
+			t.Errorf("explain stdout =\n%s\nwant it to contain %q", got.stdout, want)
+		}
+	}
+}
+
 func TestExplainAnswersAboutADeadSymbolNoFindingNamesWithTheKindItsConfigurationSilences(t *testing.T) {
 	got := runExplain(t, findingsFixture(t,
 		`{"target": {"kind": "application"}, "severity": {"DS1002": "allow"}}`),

@@ -48,26 +48,11 @@ const panicBuiltin = "panic"
 
 // UnusedParameter reports a named, non-blank parameter of a function or method
 // whose body names it nowhere, on a function whose signature is free to change.
-//
-// The body is the whole evidence: the type checker resolves every identifier of
-// the body to the object it denotes, so a parameter object no identifier of the
-// body denotes is one the function does not read. A parameter declared with the
-// blank identifier, and one the signature leaves unnamed, name nothing and are no
-// subject.
-//
-// Free is what decides whether the finding is raised at all. A signature is not
-// free when a mechanism no reference names reaches the declaration, when the
-// function is used as a value rather than called, when the linker, a foreign
-// caller or the test driver names it, and when the body is a stub: freeSignature
-// is the one place those are decided and every kind of this group that edits a
-// signature asks it.
-//
-// A published declaration of a library is free whatever the run knows about the
-// library's consumers, because no caller can make a body read a parameter it never
-// names. The edit there is breaking, which is what the kind's fixability says.
-//
-// A parameter used under one build configuration is used, so a configuration whose
-// constraint excludes the body that reads it reports nothing.
+// The body is the whole evidence, because the type checker resolves every identifier
+// of it. [intrafunc.freeSignature] decides free for every kind of this group. A
+// published declaration of a library is free, because no caller makes a body read a
+// parameter it never names, and the breaking edit is what the fixability says. A
+// parameter used under one build configuration is used.
 func UnusedParameter(in *Input) ([]Finding, error) {
 	return in.intraFunc().parameters(unusedParameterCode)
 }
@@ -83,19 +68,11 @@ func UnusedReceiver(in *Input) ([]Finding, error) {
 }
 
 // UnusedResult reports a result of a function that every call site in the loaded
-// graph discards.
-//
-// The call sites are the whole evidence and the kind reports only where they are
-// all visible: an unknown caller may consume a result, so this kind alone carries a
-// closed-world precondition beside the free-signature rule, and a function with no
-// call site at all is the subject of an unused-declaration kind rather than of this
-// one.
-//
-// A call whose result the source discards is a call in statement position, a call
-// under go or defer, and a call whose value is assigned to the blank identifier at
-// that result's own index. Every other context uses the result, including a
-// multi-value call passed straight to another call, which is the conservative
-// answer: the result reaches a parameter the analysis does not follow.
+// graph discards, under a closed-world precondition, because an unknown caller may
+// consume a result. A function with no call site is an unused declaration's subject.
+// A result is discarded by a call in statement position, under go or defer, or
+// assigned to the blank identifier at its own index; every other context, a
+// multi-value call passed straight to another call among them, uses it.
 func UnusedResult(in *Input) ([]Finding, error) {
 	return in.intraFunc().results()
 }
@@ -110,41 +87,22 @@ func UnreachableStatement(in *Input) ([]Finding, error) {
 	return in.intraFunc().unreachableStatements()
 }
 
-// DeadStore reports a write to a local variable that no read reaches.
-//
-// The answer is a liveness walk over the control-flow graph of one function body:
-// a store is dead when the variable is not live where the store happens, which is
-// when no path from the store reaches a read before the next store to the same
-// variable or the end of the body.
-//
-// The subject is a variable the body declares. A parameter, a result and a
-// receiver are not subjects, which is what keeps a named result a deferred
-// function assigns out of the population, and neither is a package-level variable
-// or a field, which the write-only kind answers for.
-//
-// Four constructs take a variable out of the population, each because a store to
-// it may be read where the graph cannot see: its address is taken, a function
-// literal of the body names it, a method with a pointer receiver is selected on
-// it, and a selector or an index on it is assigned to, which reads the variable to
-// address its part. A call is assumed to return, apart from a call to the panic
-// built-in, so a path the graph keeps is a path a store may be read on.
+// DeadStore reports a write to a local variable that no read reaches on any path of
+// the function's control-flow graph before the next store or the end of the body.
+// The subject is a variable the body declares, never a parameter, a result, a
+// receiver, a package-level variable or a field. A variable whose address is taken,
+// that a function literal names, on which a pointer method is selected, or whose
+// selector or index is assigned to, is no subject, because a store to it may be read
+// where the graph cannot see. Every call but the panic built-in is assumed to return.
 func DeadStore(in *Input) ([]Finding, error) {
 	return in.intraFunc().deadStores()
 }
 
 // UnreachableCase reports a case clause of a type switch that can never match
-// because an earlier clause of the same switch always matches first.
-//
-// One clause subsumes a later one when the earlier names an interface every value
-// the later names implements: clauses are evaluated in source order, so the later
-// clause is unreachable. That covers an interface ahead of a concrete type, an
-// interface ahead of a wider interface, and two structurally identical
-// interfaces. A clause naming nil and the default clause are always reachable and
-// are no subject, and a type parameter names no method set to compare.
-//
-// A switch over values has no population: the language refuses a duplicated
-// constant case at compile time, so a case a constant case covers never reaches an
-// analysis.
+// because an earlier clause names an interface every value the later one names
+// implements. A clause naming nil, the default clause and a type parameter are no
+// subject. A switch over values has none either, because the language refuses a
+// duplicated constant case.
 func UnreachableCase(in *Input) ([]Finding, error) {
 	return in.intraFunc().unreachableCases()
 }
@@ -236,14 +194,9 @@ func (g *intrafunc) twinned(id graph.SymbolID, decl *ast.FuncDecl) bool {
 }
 
 // callersUnknown reports whether one declaration is part of a library's importable
-// surface whose callers are not all in the loaded graph, which is the closed-world
-// precondition of the unused-result kind alone: an unknown caller may consume a
-// result, where none can make a body read a parameter.
-//
-// It is the narrowing kinds' precondition applied to a signature, so it reads the
-// same completeness declaration they do: a consumer set the run loaded whole is only
-// every caller there is where the configuration says the set is complete, and it is
-// the claim that no call site exists outside the graph that this kind rests on.
+// surface whose callers are not all in the loaded graph, the unused-result kind's
+// precondition. It reads the narrowing kinds' completeness declaration, because a
+// consumer set loaded whole is every caller only where the configuration says so.
 func (g *intrafunc) callersUnknown(id graph.SymbolID) bool {
 	symbol := g.in.symbol(id)
 	if symbol == nil || !symbol.Exported || !g.in.importable(symbol.PkgPath) {
@@ -350,16 +303,10 @@ func comparePositions(a, b Position) int {
 }
 
 // findings completes one finding per part, each about the part's own position and
-// the enclosing declaration's reference.
-//
-// A part is decided inside its declaration whatever uses the declaration, so a part
-// of a declaration the sweep judged dead is reported beside the declaration's own
-// finding, and a part of a declaration a declared edge names is never pending. A
-// declaration of test code nothing references is the exception, as unjudged states.
-//
-// A suppression record bound to the declaration and naming this code silences the part
-// as it silences every other finding, which the framework does over the output of
-// every emitter, so no kind of this group reads a record of its own.
+// the enclosing declaration's reference. A part of a declaration the sweep judged
+// dead is reported beside the declaration's own finding, a part is never pending, and
+// a declaration of test code nothing references is the exception unjudged states. A
+// suppression record silences a part through the framework, as any other finding.
 func (g *intrafunc) findings(code string, held []*part) ([]Finding, error) {
 	found := make([]Finding, 0, len(held))
 	for _, one := range held {
@@ -416,7 +363,7 @@ func functions(one *Configured) []walked {
 	}
 	var found []walked
 	seen := make(map[string]bool)
-	for _, p := range sortedPackages(one.Result.Packages) {
+	for _, p := range graph.SortedPackages(one.Result.Packages) {
 		if p.TypesInfo == nil {
 			continue
 		}
@@ -641,7 +588,7 @@ func callsPerFunction(one *Configured) map[graph.SymbolID][]*callSite {
 		return calls
 	}
 	seen := make(map[string]bool)
-	for _, p := range sortedPackages(one.Result.Packages) {
+	for _, p := range graph.SortedPackages(one.Result.Packages) {
 		if p.TypesInfo == nil {
 			continue
 		}
@@ -719,7 +666,7 @@ func (g *intrafunc) unreachableStatements() ([]Finding, error) {
 		if one.Result == nil || one.Resolve == nil {
 			continue
 		}
-		for _, p := range sortedPackages(one.Result.Packages) {
+		for _, p := range graph.SortedPackages(one.Result.Packages) {
 			if p.TypesInfo == nil || len(p.Syntax) == 0 {
 				continue
 			}

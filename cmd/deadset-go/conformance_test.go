@@ -119,8 +119,8 @@ type corpusDetails struct {
 
 // corpusFixtureFile is one fixture's expectation file: the renderings it has, the
 // target kind and consumer set the runner configures, and the exhaustive expectation
-// list. Every member the expectation schema declares has a field, the description the
-// runner reads nothing from included, because the file is decoded strictly.
+// list. Every member a fixture of the Go rendering names has a field, the description
+// the runner reads nothing from included, because the file is decoded strictly.
 type corpusFixtureFile struct {
 	ConfiguredRoots        map[string]string                      `json:"configured_roots"`
 	ConfiguredDeclarations map[string]corpusConfiguredDeclaration `json:"configured_declarations"`
@@ -1276,7 +1276,7 @@ func retainedAt(set *findingSet) map[site][]string {
 		positions[set.loaded.merged.Symbols[i].ID] = set.loaded.merged.Symbols[i].Pos
 	}
 	held := make(map[site][]string)
-	for _, one := range set.swept.Retained {
+	for _, one := range set.retained {
 		at, known := positions[one.ID]
 		if !known {
 			continue

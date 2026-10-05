@@ -94,14 +94,10 @@ var testingFunctions = map[string]printSignature{
 }
 
 // slogFunctions are the logging functions of the structured-logging package, the
-// methods of its logger, which carry the same names and the same operand positions,
-// and the attribute constructors whose value is typed as any. There is no format
-// string: every argument after the message, the level and the context is an
-// operand, and the handler may render it with the formatting machinery.
-//
-// It is the one declaration of that set, because a value reaching one of these
-// calls reaches this class and the encoding class both: the encoding class reads
-// this table to know its own destinations.
+// methods of its logger, which carry the same names and operand positions, and the
+// attribute constructors whose value is typed as any. Every argument after the
+// message, the level and the context is an operand. The encoding class reads this
+// table for its own destinations, so it is the one declaration of the set.
 var slogFunctions = map[string]printSignature{
 	"Any":          {format: verbless, operands: 1},
 	"Debug":        {format: verbless, operands: 1},
@@ -168,26 +164,12 @@ type operand struct {
 }
 
 // FormatVerbContractDetector records the format-verb-contract class: a type whose
-// values reach a facility that formats its operands with the formatting machinery
-// keeps its String and Error methods, because the facility calls them through an
-// interface and no static reference exists.
-//
-// The facilities are the print, format and error-construction functions of the
-// formatting package, the print, fatal and panic functions of the logging package
-// and the same methods of its logger, the log, error, fatal and skip methods of a
-// testing type, the logging functions of the structured-logging package with the
-// methods of its logger and its attribute constructors, and the functions of the
-// analysed program that forward their own variadic operands to any of those.
-//
-// Three rules the class applies where the case is not spelled out. A format string
-// the call computes rather than writes is read as binding every operand, which
-// retains more than the call can reach and never less. A method is retained only
-// in the form a verb calls, taking no argument and returning one string, so a
-// method of another shape that shares the name is not. And an operand reaches
-// through a pointer, a slice, an array and a map, because the machinery formats
-// the elements of a value it is given and asks each of them for its string in
-// turn; the reach stops at each defined type, so the members of a type a retained
-// type is built from are not retained.
+// values reach a facility that formats its operands keeps its String and Error
+// methods, because the facility calls them through an interface. The facilities are
+// the tables of this file and the program's functions forwarding their variadic
+// operands to one. A computed format string binds every operand; only a method taking
+// no argument and returning one string is retained; and an operand reaches through a
+// pointer, a slice, an array and a map, stopping at each defined type.
 func FormatVerbContractDetector(in *Input) ([]graph.Exemption, error) {
 	sites := newDeclarationSites(in.Result.Fset)
 	f := &formatFlow{kept: newRetention(in, FormatVerbContract), sites: sites, wrappers: forwardingWrappers(in, sites)}
@@ -256,14 +238,10 @@ func (f *formatFlow) printFunction(fn *types.Func) (printSignature, bool) {
 type printWrappers map[token.Position]printSignature
 
 // forwardingWrappers returns the functions of the loaded configuration that format
-// their operands by passing them on: a function whose final parameter is a variadic
-// list of any, and whose body hands that whole list to a function that formats its
-// operands, formats its own. Such a function is then itself something a further
-// function can forward to, so the set grows until no function joins it, which is
-// what makes a wrapper of a wrapper carry the same rule as the one it calls.
-//
-// A wrapper's callers write the format string when the wrapper passes a parameter
-// of its own to the format position of the call it forwards to; otherwise the
+// their operands by handing their whole final variadic list of any to a function that
+// formats its operands, grown until no function joins, so a wrapper of a wrapper
+// carries the rule of the one it calls. A wrapper's callers write the format string
+// when the wrapper passes its own parameter to the format position; otherwise the
 // wrapper formats every operand as the verb-less forms do.
 func forwardingWrappers(in *Input, sites *declarationSites) printWrappers {
 	candidates := variadicWrappers(in, sites)
@@ -342,14 +320,10 @@ func variadicWrappers(in *Input, sites *declarationSites) []variadicWrapper {
 }
 
 // variadicOperands reports whether one declaration takes a variadic list of any as
-// its final parameter and hands that whole list to another function, and returns
-// the calls that do. A call that passes the list element by element, or passes a
-// list of its own, is not one: what the rule reads is the operands of the
-// declaration's own caller reaching a formatting facility unchanged.
-//
-// The final parameter's type is read through the boundary's own test for a parameter
-// that keeps nothing of the value it is given, which is where this package decides
-// what the empty interface is.
+// its final parameter and hands that whole list to another function, and returns the
+// calls that do. A list passed element by element, or a list of its own, is not one.
+// The final parameter's type is read through the boundary's own test of the empty
+// interface.
 func variadicOperands(sites *declarationSites, declared programFunction) (variadicWrapper, bool) {
 	sig := declared.fn.Signature()
 	params := sig.Params()

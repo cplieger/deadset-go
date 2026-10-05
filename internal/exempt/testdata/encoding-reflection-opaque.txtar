@@ -1,18 +1,19 @@
-Nine types, each handed to a different kind of callee. One goes to a parameter typed
+Eleven types, each handed to a different kind of callee. One goes to a parameter typed
 as the empty interface of a method of a package the load did not read, and one goes to
 the same method as a pointer. One goes to a function of the target that hands its own
 such parameter to that method, and one to a function that hands its parameter to that
-function in turn. Each of those three keeps its exported methods as well as its fields,
-because the method behind them is one the analysis does not hold. One goes to a
-function of the target that hands its parameter to an encoder the class names, and an
-encoder reads fields and calls no method, so that one's method is retained by nothing.
-One goes to a function of the target whose parameter is typed
-as the value's own type, which crosses no boundary. One goes to a type parameter of a
-function of a package the load did not read, which the caller instantiates with the
-value's own type, so nothing about it is lost. One goes to a parameter typed as an
-interface that declares a method, which is a conversion the conversion set records.
-One is an operand of the formatting package, whose destinations the format-verb class
-names.
+function in turn. Each of those keeps its fields and no method, because the package
+behind the method declares no interface they satisfy. One satisfies an interface that
+package declares and keeps the methods of it. One goes to a function of a package that
+imports a template engine and keeps every exported method. One goes to a function of
+the target that hands its parameter to an encoder the class names, and an encoder
+reads fields and calls no method, so that one's method is retained by nothing. One
+goes to a function of the target whose parameter is typed as the value's own type,
+which crosses no boundary. One goes to a type parameter of a function of a package the
+load did not read, which the caller instantiates with the value's own type, so nothing
+about it is lost. One goes to a parameter typed as an interface that declares a method,
+which is a conversion the conversion set records. One is an operand of the formatting
+package, whose destinations the format-verb class names.
 
 -- go.mod --
 module example.com/opaque
@@ -207,3 +208,44 @@ func (c *Copied) Describe() string { return c.Name }
 // HandCopied hands the value to a parameter whose interface declares one method, so
 // what the callee can reach through it is that method.
 func HandCopied(c *Copied, r io.Reader) (int64, error) { return io.Copy(c, r) }
+-- locked.go --
+package opaque
+
+import "sync"
+
+// Locked satisfies the locker interface of the package it is handed to.
+type Locked struct {
+	Name string
+}
+
+// Lock is what the locker interface requires.
+func (l *Locked) Lock() {}
+
+// Unlock is what the locker interface requires.
+func (l *Locked) Unlock() {}
+
+// Spare satisfies no interface that package can name.
+func (l *Locked) Spare() {}
+
+// HandLocked puts a value where the analysis cannot follow it.
+func HandLocked(m *sync.Map, l *Locked) { m.Store("locked", l) }
+-- served.go --
+package opaque
+
+import "net/rpc"
+
+// Served is registered with a package whose import closure holds a template engine.
+type Served struct {
+	Name string
+}
+
+// Hello is exported.
+func (s *Served) Hello(args int, reply *int) error { *reply = args; return nil }
+
+// Other is exported.
+func (s *Served) Other() {}
+
+func (s *Served) hidden() {}
+
+// Register hands a value to the registry.
+func Register(s *Served) error { return rpc.Register(s) }

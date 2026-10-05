@@ -272,3 +272,40 @@ func TestAPackageAProductionFileImportsUnderOneConfigurationIsNotTestSupport(t *
 			testOnlyUseCode, got)
 	}
 }
+
+// A declaration of test-support code a test references is reported under the test-only
+// kind at the possible class, a deprecated one included, and an interface under the
+// unused-interface kind instead. Each finding is in a component minted for it, holding
+// the subject and the dead members that fall with it and deleting no line.
+func TestTestSupportCodeATestReferencesIsReportedAtPossible(t *testing.T) {
+	resolved := applicationConfig()
+	resolved.Analysis.MinConfidence = config.Possible
+	in := inputOf(t, "declarations-test-support-possible.txtar", resolved, Consumers{})
+	emitters := declarationEmitters()
+	emitters[unusedInterfaceCode] = UnusedInterface
+	result := computed(t, in, emitters)
+
+	for _, test := range []struct {
+		code, name string
+		members    int
+	}{
+		{code: testOnlyUseCode, name: "Old", members: 1},
+		{code: testOnlyUseCode, name: "Fake", members: 3},
+		{code: unusedInterfaceCode, name: "Sink", members: 3},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			found := findingOf(t, result.Findings, test.code, test.name)
+			if found.Class != Possible || found.Confidence != Possible {
+				t.Errorf("%s about %s has class %s and confidence %s, want possible and possible",
+					test.code, test.name, found.Class, found.Confidence)
+			}
+			if c := found.Component; !c.Root || c.SymbolCount != test.members || c.DeletableLines != 0 {
+				t.Errorf("%s about %s has component root=%t symbols=%d lines=%d, want root=true symbols=%d lines=0",
+					test.code, test.name, c.Root, c.SymbolCount, c.DeletableLines, test.members)
+			}
+		})
+	}
+	if got := summary(result.Findings); len(got) != 3 {
+		t.Errorf("the pass over declarations-test-support-possible.txtar reports %v, want the three findings above alone", got)
+	}
+}

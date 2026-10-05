@@ -1,0 +1,34 @@
+A generic function whose type parameter's constraint embeds comparable, instantiated
+with a struct type, and one whose constraint is any, instantiated with another: the
+first instantiation compares values of its type argument and reads every field, the
+second reads none.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+// key embeds comparable.
+type key interface{ comparable }
+
+func index[K key](xs []K, k K) int {
+	for i, x := range xs {
+		if x == k {
+			return i
+		}
+	}
+	return -1
+}
+
+func keep[T any](v T) T { return v }
+
+type point struct{ x int }
+
+type tag struct{ name string }
+
+func main() {
+	_ = keep(tag{name: "a"})
+	println(index([]point{{x: 1}}, point{x: 1}))
+}

@@ -1,5 +1,5 @@
 {
-  "corpus_version": "2.2.0",
+  "corpus_version": "3.0.0",
   "product": {
     "name": "deadset-go",
     "version": "0.0.0-devel",
@@ -7,8 +7,8 @@
   },
   "result": "pass",
   "totals": {
-    "fixtures": 52,
-    "pass": 52,
+    "fixtures": 65,
+    "pass": 65,
     "gap": 0,
     "fail": 0
   },
@@ -50,6 +50,41 @@
           "result": "pass",
           "actual": {
             "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "comparable-type-argument",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Point.X",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Point.Y",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Tag.Name",
+          "result": "pass",
+          "actual": {
+            "report": "DS1301",
+            "symbol_kind": "field",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         }
       ],
@@ -199,6 +234,33 @@
       "unexpected": []
     },
     {
+      "fixture": "consumer-write-counts-as-read",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Options.label",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Options.note",
+          "result": "pass",
+          "actual": {
+            "report": "DS1301",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
       "fixture": "dead-container-deletable-lines",
       "result": "pass",
       "expectations": [
@@ -334,6 +396,59 @@
       "unexpected": []
     },
     {
+      "fixture": "encoding-reflection-decode-only",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Level.Describe",
+          "result": "pass",
+          "actual": {
+            "report": "DS1103",
+            "symbol_kind": "method",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Level.UnmarshalJSON",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "Settings.Name",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Settings.Theme",
+          "result": "pass",
+          "actual": {
+            "report": "DS1003",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
       "fixture": "encoding-reflection-encoder-fields",
       "result": "pass",
       "expectations": [
@@ -353,6 +468,79 @@
         },
         {
           "symbol": "Record.Name",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "encoding-reflection-interface-field",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Started.ID",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "Stopped.ID",
+          "result": "pass",
+          "actual": {
+            "report": "DS1003",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "encoding-reflection-outside-destination",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Repo.Name",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "Repo.ResetName",
+          "result": "pass",
+          "actual": {
+            "report": "DS1103",
+            "symbol_kind": "method",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Repo.TableName",
           "result": "pass",
           "actual": {
             "report": "none",
@@ -2072,6 +2260,150 @@
       "unexpected": []
     },
     {
+      "fixture": "test-support-helper-chain",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Live",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "NewService",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Open",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Seed",
+          "result": "pass",
+          "actual": {
+            "report": "DS1004",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "component": {
+              "root": true
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Unused",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "test-support-helper-chain-at-possible",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Live",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "NewService",
+          "result": "pass",
+          "actual": {
+            "report": "DS1004",
+            "symbol_kind": "function",
+            "confidence": "possible",
+            "reachability_class": "possible",
+            "liveness_relation": "reference-counting",
+            "component": {
+              "root": true
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Open",
+          "result": "pass",
+          "actual": {
+            "report": "DS1004",
+            "symbol_kind": "function",
+            "confidence": "possible",
+            "reachability_class": "possible",
+            "liveness_relation": "reference-counting",
+            "component": {
+              "root": true
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Seed",
+          "result": "pass",
+          "actual": {
+            "report": "DS1004",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "component": {
+              "root": true
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Unused",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
       "fixture": "test-support-helper-use",
       "result": "pass",
       "expectations": [
@@ -2137,6 +2469,432 @@
           "result": "pass",
           "actual": {
             "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "test-support-helper-use-at-possible",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Detached",
+          "result": "pass",
+          "actual": {
+            "report": "DS1004",
+            "symbol_kind": "function",
+            "confidence": "possible",
+            "reachability_class": "possible",
+            "liveness_relation": "reference-counting",
+            "component": {
+              "root": true
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Drain",
+          "result": "pass",
+          "actual": {
+            "report": "DS1004",
+            "symbol_kind": "function",
+            "confidence": "possible",
+            "reachability_class": "possible",
+            "liveness_relation": "reference-counting",
+            "component": {
+              "root": true
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Live",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Sink",
+          "result": "pass",
+          "actual": {
+            "report": "DS1201",
+            "symbol_kind": "interface",
+            "confidence": "possible",
+            "reachability_class": "possible",
+            "liveness_relation": "reference-counting",
+            "component": {
+              "root": true
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Sink.Put",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Spare",
+          "result": "pass",
+          "actual": {
+            "report": "DS1201",
+            "symbol_kind": "interface",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "component": {
+              "root": true
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "TestDetached",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "TestDrain",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Unused",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "fixture",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "test-support-interface-fake",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Get",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "New",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Seed",
+          "result": "pass",
+          "actual": {
+            "report": "DS1004",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "component": {
+              "root": true
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Total",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Unused",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "test-support-package-tests",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Count",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "TestCount",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "TestTotal",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Total",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Unused",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "component": {
+              "root": true,
+              "symbol_count": 1,
+              "deletable_lines": 1
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "test-support-package-tests-at-possible",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Count",
+          "result": "pass",
+          "actual": {
+            "report": "DS1004",
+            "symbol_kind": "function",
+            "confidence": "possible",
+            "reachability_class": "possible",
+            "liveness_relation": "reference-counting",
+            "component": {
+              "root": true,
+              "symbol_count": 1,
+              "deletable_lines": 0
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "TestCount",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "TestTotal",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Total",
+          "result": "pass",
+          "actual": {
+            "report": "DS1004",
+            "symbol_kind": "function",
+            "confidence": "possible",
+            "reachability_class": "possible",
+            "liveness_relation": "reference-counting",
+            "component": {
+              "root": true,
+              "symbol_count": 1,
+              "deletable_lines": 0
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Unused",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "component": {
+              "root": true,
+              "symbol_count": 1,
+              "deletable_lines": 1
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "test-support-test-of-dead-code",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Check",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "component": {
+              "root": true
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Decode",
+          "result": "pass",
+          "actual": {
+            "report": "DS1004",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "component": {
+              "root": true
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Encode",
+          "result": "pass",
+          "actual": {
+            "report": "DS1004",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "component": {
+              "root": true
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Fixture",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Live",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "TestDecode",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "TestEncode",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "component": {
+              "root": true
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         }
       ],
@@ -2713,6 +3471,40 @@
             "details": {
               "dependency_class": "require"
             }
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "write-only-cascade-type",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Mode",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Settings.mode",
+          "result": "pass",
+          "actual": {
+            "report": "DS1301",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Settings.name",
+          "result": "pass",
+          "actual": {
+            "report": "none"
           }
         }
       ],

@@ -236,3 +236,236 @@ func cascadeClause(names []string) string {
 			strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 	}
 }
+
+// annotationFalls is what the write-only kind's annotation cascade answers: per
+// subject, the declarations its finding names as falling with it, and every
+// declaration that falls with some subject.
+type annotationFalls struct {
+	named map[graph.SymbolID][]string
+	falls map[graph.SymbolID]bool
+}
+
+// renderedSpan is the run of rendered positions one node of a file covers, its end
+// excluded.
+type renderedSpan struct {
+	path     string
+	from, to [2]int
+}
+
+// holds reports whether one rendered position is inside the renderedSpan.
+func (s renderedSpan) holds(at token.Position) bool {
+	p := [2]int{at.Line, at.Column}
+	return at.Filename == s.path && !before(p, s.from) && before(p, s.to)
+}
+
+// before orders two line and column pairs.
+func before(a, b [2]int) bool {
+	return a[0] < b[0] || (a[0] == b[0] && a[1] < b[1])
+}
+
+// annotationCascade is the declarations that fall with the write-only findings: a
+// declaration of the target, certain in class, whose every counted use is in the
+// type annotation of a write-only subject or in a write such a finding names. It is
+// computed on first use and then held, because every emitter reads it to withhold a
+// finding about such a declaration.
+func (in *Input) annotationCascade() *annotationFalls {
+	held := in.index()
+	if held.falling == nil {
+		held.falling = computeAnnotationCascade(in)
+	}
+	return held.falling
+}
+
+// computeAnnotationCascade answers annotationCascade over the whole run.
+func computeAnnotationCascade(in *Input) *annotationFalls {
+	falls := &annotationFalls{named: make(map[graph.SymbolID][]string), falls: make(map[graph.SymbolID]bool)}
+	if in.Merged == nil {
+		return falls
+	}
+	subjects := writeOnlySubjects(in)
+	if len(subjects) == 0 {
+		return falls
+	}
+	holders, outside := annotationHolders(in, subjects, subjectSpans(in, subjects))
+	for i := range in.Merged.Symbols {
+		symbol := &in.Merged.Symbols[i]
+		if outside[symbol.ID] || len(holders[symbol.ID]) == 0 || !fallsWithAnnotation(in, symbol) {
+			continue
+		}
+		falls.falls[symbol.ID] = true
+		name := in.word(symbol.ID) + " " + symbol.Name
+		for holder := range holders[symbol.ID] {
+			falls.named[holder] = append(falls.named[holder], name)
+		}
+	}
+	return falls
+}
+
+// writeOnlySubjects is every declaration the write-only kind reports, with its uses.
+func writeOnlySubjects(in *Input) map[graph.SymbolID]*uses {
+	exempted := make(map[graph.SymbolID]bool, len(in.Exempt))
+	for _, exemption := range in.Exempt {
+		exempted[exemption.ID] = true
+	}
+	counted := writesAndReads(in)
+	subjects := make(map[graph.SymbolID]*uses)
+	for i := range in.Merged.Symbols {
+		symbol := &in.Merged.Symbols[i]
+		if writeOnlySubject(in, symbol, counted[symbol.ID], exempted) {
+			subjects[symbol.ID] = counted[symbol.ID]
+		}
+	}
+	return subjects
+}
+
+// annotationHolders is, per declaration a counted reference outside the subjects
+// names, the subjects whose annotation or writes hold those references, and the
+// declarations some such reference outside every span names.
+func annotationHolders(in *Input, subjects map[graph.SymbolID]*uses, spans map[graph.SymbolID][]renderedSpan,
+) (holders map[graph.SymbolID]map[graph.SymbolID]bool, outside map[graph.SymbolID]bool) {
+	holders = make(map[graph.SymbolID]map[graph.SymbolID]bool)
+	outside = make(map[graph.SymbolID]bool)
+	for i := range in.Merged.References {
+		r := &in.Merged.References[i]
+		if in.uncounted(r) || subjects[r.To] != nil || outside[r.To] {
+			continue
+		}
+		holder, inside := holderOf(spans, r)
+		if !inside {
+			outside[r.To] = true
+			continue
+		}
+		if holders[r.To] == nil {
+			holders[r.To] = make(map[graph.SymbolID]bool)
+		}
+		holders[r.To][holder] = true
+	}
+	return holders, outside
+}
+
+// fallsWithAnnotation reports whether one declaration is of a shape the annotation
+// cascade deletes: a declaration of its own, not a member, a type parameter, which
+// the type-parameter clause names, a package or a file, and one no code outside the
+// analysis can name.
+func fallsWithAnnotation(in *Input, symbol *graph.Symbol) bool {
+	switch symbol.Kind {
+	case graph.KindPackage, graph.KindFile, graph.KindField, graph.KindTypeParam, graph.KindMethod, graph.KindInterfaceMethod:
+		return false
+	}
+	return in.ClassOf(symbol.ID) == Certain
+}
+
+// holderOf is the subject whose annotation or writes hold one reference's position.
+func holderOf(spans map[graph.SymbolID][]renderedSpan, r *graph.Reference) (graph.SymbolID, bool) {
+	for id, held := range spans {
+		for _, s := range held {
+			if s.holds(r.Pos) {
+				return id, true
+			}
+		}
+	}
+	return "", false
+}
+
+// subjectSpans is, per write-only subject, the spans of its type annotation and of
+// every statement and literal element that performs one of its writes, read from the
+// first variant that compiles each file.
+func subjectSpans(in *Input, subjects map[graph.SymbolID]*uses) map[graph.SymbolID][]renderedSpan {
+	at := subjectsByPosition(in, subjects)
+	spans := make(map[graph.SymbolID][]renderedSpan)
+	done := make(map[string]bool)
+	for typed := range in.typedFiles() {
+		site, err := typed.one.Resolve.Render(typed.file.FileStart)
+		if err != nil || done[site.Filename] {
+			continue
+		}
+		done[site.Filename] = true
+		annotationSpans(typed, at[site.Filename], spans)
+		for id, u := range subjects {
+			spans[id] = append(spans[id], writeSpans(typed, site.Filename, u)...)
+		}
+	}
+	return spans
+}
+
+// subjectsByPosition is every subject keyed by its file, then its line and column.
+func subjectsByPosition(in *Input, subjects map[graph.SymbolID]*uses) map[string]map[[2]int]graph.SymbolID {
+	at := make(map[string]map[[2]int]graph.SymbolID)
+	for id := range subjects {
+		symbol := in.symbol(id)
+		if at[symbol.Pos.Filename] == nil {
+			at[symbol.Pos.Filename] = make(map[[2]int]graph.SymbolID)
+		}
+		at[symbol.Pos.Filename][[2]int{symbol.Pos.Line, symbol.Pos.Column}] = id
+	}
+	return at
+}
+
+// writeSpans is the span of every statement and literal element of one file that
+// performs one of a subject's writes.
+func writeSpans(typed typedFile, path string, u *uses) []renderedSpan {
+	writes := make(map[[2]int]bool)
+	for _, w := range u.writes {
+		if w.Path == path {
+			writes[[2]int{w.Line, w.Column}] = true
+		}
+	}
+	var spans []renderedSpan
+	for _, node := range writeNodes(typed.file, typed.one, writes) {
+		if s, rendered := renderSpan(typed.one, node); rendered {
+			spans = append(spans, s)
+		}
+	}
+	return spans
+}
+
+// annotationSpans adds the renderedSpan of the type annotation of every subject one file
+// declares, a field or a package-level variable written with a type.
+func annotationSpans(typed typedFile, declared map[[2]int]graph.SymbolID, spans map[graph.SymbolID][]renderedSpan) {
+	if len(declared) == 0 {
+		return
+	}
+	ast.Inspect(typed.file, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.Field:
+			annotationSpan(typed, declared, spans, n.Names, n.Type)
+		case *ast.ValueSpec:
+			annotationSpan(typed, declared, spans, n.Names, n.Type)
+		}
+		return true
+	})
+}
+
+// annotationSpan adds the span of one annotation to every subject among the names it
+// types.
+func annotationSpan(typed typedFile, declared map[[2]int]graph.SymbolID, spans map[graph.SymbolID][]renderedSpan,
+	names []*ast.Ident, annotation ast.Expr,
+) {
+	if annotation == nil {
+		return
+	}
+	for _, name := range names {
+		site, err := typed.one.Resolve.Render(name.Pos())
+		if err != nil {
+			continue
+		}
+		if id, isSubject := declared[[2]int{site.Line, site.Column}]; isSubject {
+			if s, rendered := renderSpan(typed.one, annotation); rendered {
+				spans[id] = append(spans[id], s)
+			}
+		}
+	}
+}
+
+// renderSpan renders the renderedSpan one node covers.
+func renderSpan(one *Configured, node ast.Node) (renderedSpan, bool) {
+	from, err := one.Resolve.Render(node.Pos())
+	if err != nil {
+		return renderedSpan{}, false
+	}
+	to, err := one.Resolve.Render(node.End())
+	if err != nil {
+		return renderedSpan{}, false
+	}
+	return renderedSpan{path: from.Filename, from: [2]int{from.Line, from.Column}, to: [2]int{to.Line, to.Column}}, true
+}
