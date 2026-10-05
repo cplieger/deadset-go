@@ -43,34 +43,22 @@ func (c Class) lower(other Class) Class {
 	return other
 }
 
-// ClassOf is the reachability class of one declaration under this run.
-//
-// A subject the inventory holds no declaration for is certain: a source file, a
-// module requirement and a directive of the module file have no visibility, so
-// there is no question about callers the analysis cannot see.
-//
-// An unexported declaration is certain, because every reference to it is inside
-// the module the analysis loaded. An exported one in a package nothing outside can
-// import is certain for the same reason: a main package, an external test package
-// and an internal tree have no importer the analysis cannot see. A type parameter
-// of a function or a method is certain whatever the target is, because nothing
-// outside the declaration that introduces it can name it: a caller supplies a type
-// argument by position. An exported declaration of an application is certain,
-// because an application's callers are all in the graph.
-//
-// That leaves an exported declaration of a library's importable surface, which is
-// certain where every consumer the scope declared loaded, probable where consumers
-// are declared and not all of them loaded, and possible where the run has no
-// consumer information at all. Whether the configuration declares the consumer set
-// complete decides nothing here: completeness is what opens the narrowing kinds on
-// a published API, and a consumer set the run loaded whole is what the class is
-// about.
+// ClassOf is the reachability class of one declaration under this run. It is
+// certain wherever no reference can come from outside the graph: a subject with no
+// declaration, an unexported declaration, a declaration of a test file, a type
+// parameter of a function or method, any declaration of an application, and an
+// exported one in a main package, an external test package or an internal tree. An
+// exported declaration of a library's importable surface is certain where every
+// declared consumer loaded, probable where some did not, and possible with no
+// consumer information; whether the consumer set is declared complete decides nothing.
 func (in *Input) ClassOf(id graph.SymbolID) Class {
 	symbol := in.symbol(id)
 	switch {
 	case symbol == nil || !symbol.Exported:
 		return Certain
 	case symbol.Kind == graph.KindTypeParam && declaresTypeParameters(in.symbol(symbol.Parent)):
+		return Certain
+	case testFile(symbol):
 		return Certain
 	case !in.importable(symbol.PkgPath):
 		return Certain
@@ -83,6 +71,27 @@ func (in *Input) ClassOf(id graph.SymbolID) Class {
 	default:
 		return Possible
 	}
+}
+
+// componentCap is the lowest reachability class among the roots of the dead
+// component one declaration falls with, which caps the confidence of every finding
+// of that component so the minimum confidence withholds or reports it whole. It is
+// no class where the declaration falls with no component.
+func (in *Input) componentCap(id graph.SymbolID) Class {
+	held := in.index()
+	component := held.components[id]
+	if component == nil {
+		return ""
+	}
+	if least, computed := held.caps[component.Index]; computed {
+		return least
+	}
+	least := Certain
+	for _, root := range component.Roots {
+		least = least.lower(in.ClassOf(root))
+	}
+	held.caps[component.Index] = least
+	return least
 }
 
 // everyConsumerLoaded reports whether the run declared at least one consumer and

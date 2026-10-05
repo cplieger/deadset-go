@@ -1,6 +1,6 @@
 # Exemption classes
 
-An exemption is a named reason for which deadset-go keeps a symbol the reference graph alone would report. Every class is computed from Go type information rather than configured, so a project writes no suppression for a symbol a class covers. deadset-go implements the nine classes the deadset contract declares for Go. The class vocabulary and its detection rules are stated once in the contract's [exemptions page](https://github.com/cplieger/deadset-spec/blob/v5.1.0/docs/exemptions.md), and this page states what each class does here.
+An exemption is a named reason for which deadset-go keeps a symbol the reference graph alone would report. Every class is computed from Go type information rather than configured, so a project writes no suppression for a symbol a class covers. deadset-go implements the nine classes the deadset contract declares for Go. The class vocabulary and its detection rules are stated once in the contract's [exemptions page](https://github.com/cplieger/deadset-spec/blob/v5.2.0/docs/exemptions.md), and this page states what each class does here.
 
 ## Reading the retained set
 
@@ -24,7 +24,7 @@ Two classes read files and retain nothing until the project configures them: `an
 
 ## Evidence in a test file does not hold for production
 
-A report is built from a production analysis, which counts no reference a test file made. An exemption whose evidence is in a test file does not hold there either. A test that marshals a value or compares one makes no member of that value live for production, exactly as a test's reference is no reference there. `print-retained --mode=plain` counts every reference and every piece of evidence, which is the wider set, and a symbol the report names may be held back in it.
+A report is built from a production analysis, which counts no reference a test file made. An exemption whose evidence is in a test file does not hold there either. A test that marshals a value or compares one makes no member of that value live for production. Such evidence counts as a test reference, so a member nothing in production references is reported as `DS1004`. `print-retained --mode=plain` counts every reference and every piece of evidence, which is the wider set, and a symbol the report names may be held back in it.
 
 ## What leaves the analysis is fully reachable
 

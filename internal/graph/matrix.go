@@ -296,6 +296,7 @@ func (x *Matrix) Sweep(in SweepInput) Result {
 		if !candidate {
 			continue
 		}
+		c.TestRefs += in.TestEvidence[c.ID]
 		dead[i] = true
 		testOfDeadCode[i] = c.TestOfDeadCode
 		r.Candidates = append(r.Candidates, c)

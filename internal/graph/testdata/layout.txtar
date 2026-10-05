@@ -1,0 +1,49 @@
+One command whose memory-layout uses reach fields only through type parameters:
+a generic function that converts a pointer to its type parameter to
+unsafe.Pointer, called with a struct, a generic function that instantiates it
+with its own type parameter, a method of a generic type that converts a pointer
+to its field, and a struct no conversion reaches.
+
+-- go.mod --
+module example.com/layout
+
+go 1.27.1
+-- layout.go --
+package main
+
+import "unsafe"
+
+// direct is laid out by the conversion addr instantiates it for.
+type direct struct {
+	width int32
+}
+
+// relayed is laid out through forward's own type parameter.
+type relayed struct {
+	depth int32
+}
+
+// boxed is laid out by a method of the generic type that holds it.
+type boxed struct {
+	flag uint8
+}
+
+// unreached is converted nowhere.
+type unreached struct {
+	hidden int
+}
+
+func addr[T any](v *T) uintptr { return uintptr(unsafe.Pointer(v)) }
+
+func forward[U any](v *U) uintptr { return addr(v) }
+
+type box[T any] struct {
+	value T
+}
+
+func (b *box[T]) at() uintptr { return uintptr(unsafe.Pointer(&b.value)) }
+
+func main() {
+	b := &box[boxed]{}
+	println(addr(&direct{}), forward(&relayed{}), b.at(), unreached{}.hidden)
+}

@@ -96,6 +96,12 @@ type Mode struct {
 // SweepInput is what one sweep runs over besides the graph: the symbols a
 // mechanism outside the reference graph holds live, and the mode.
 type SweepInput struct {
+	// TestEvidence counts, per symbol, the exemptions whose evidence a test file
+	// carries, which a production run does not hold: each is a test reference to
+	// its symbol, as a reference from a test file is, and holds nothing live.
+	// [TestReferencesOf] builds it and [Matrix.Sweep] counts it.
+	TestEvidence map[SymbolID]int
+
 	// Marked are the symbols a matched suppression names. A mark makes its
 	// symbol live under both relations before either runs, and seeds
 	// reachability, so nothing the marked symbol alone references cascades into
@@ -539,4 +545,24 @@ func (s *sweep) result() Result {
 	}
 	r.Components = s.g.componentsOf(s.dead, s.testOfDeadCode)
 	return r
+}
+
+// TestReferencesOf counts, per symbol, the distinct facts test evidence states
+// about it: one per class and detail, however many configurations or sites found
+// it.
+func TestReferencesOf(evidence []Exemption) map[SymbolID]int {
+	type fact struct {
+		id     SymbolID
+		class  string
+		detail string
+	}
+	seen := make(map[fact]bool, len(evidence))
+	counts := make(map[SymbolID]int, len(evidence))
+	for _, e := range evidence {
+		if f := (fact{id: e.ID, class: e.Class, detail: e.Detail}); !seen[f] {
+			seen[f] = true
+			counts[e.ID]++
+		}
+	}
+	return counts
 }

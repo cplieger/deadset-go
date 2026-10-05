@@ -165,15 +165,20 @@ func (in *Input) codeOf(candidate *graph.Candidate) string {
 // declaration test code references.
 func (in *Input) outsideTheRule(candidate *graph.Candidate, symbol *graph.Symbol) bool {
 	switch {
-	case candidate.TestOfDeadCode || testFile(symbol):
+	case candidate.TestOfDeadCode || in.judgedWithTheTests(candidate, symbol):
 		return true
 	case symbol.Parent != "" && in.candidateOf(symbol.Parent) != nil:
 		return true
-	case interfaceDeclaration(symbol.Kind) || in.readOrWriteSubject(candidate, symbol):
-		return true
 	default:
-		return candidate.TestRefs > 0 && in.testSupport(symbol)
+		return interfaceDeclaration(symbol.Kind) || in.readOrWriteSubject(candidate, symbol)
 	}
+}
+
+// judgedWithTheTests reports whether test code declares one candidate in a way no
+// production sweep judges: a test file's declaration, and a test-support
+// declaration test code references.
+func (in *Input) judgedWithTheTests(candidate *graph.Candidate, symbol *graph.Symbol) bool {
+	return testFile(symbol) || (candidate.TestRefs > 0 && in.testSupport(symbol))
 }
 
 // unusedMessage is what one unused-declaration finding says, in the reader's words:

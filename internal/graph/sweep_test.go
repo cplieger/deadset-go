@@ -1,6 +1,8 @@
 package graph
 
 import (
+	"go/token"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -151,6 +153,23 @@ func TestSweepUnderProductionModeCountsNoTestReferenceAndSeedsNoTestRoot(t *test
 	want := []verdict{{name: "usedByTestOnly", relation: ReferenceCounting, testRefs: 1}}
 	if !slices.Equal(got, want) {
 		t.Errorf("Sweep under production mode returned %+v, want %+v", got, want)
+	}
+}
+
+func TestTestReferencesOfCountsOneReferencePerClassAndDetail(t *testing.T) {
+	b := unreachableChain(t)
+	one, other := b.id("unreferenced"), b.id("reached")
+	got := TestReferencesOf([]Exemption{
+		{ID: one, Class: "encoding-reflection", Detail: "json.Marshal", Site: token.Position{Line: 3}},
+		{ID: one, Class: "encoding-reflection", Detail: "json.Marshal", Site: token.Position{Line: 9}},
+		{ID: one, Class: "encoding-reflection", Detail: "json.Unmarshal"},
+		{ID: one, Class: "interface-satisfaction", Detail: "json.Marshal"},
+		{ID: other, Class: "encoding-reflection", Detail: "json.Marshal"},
+	})
+
+	want := map[SymbolID]int{one: 3, other: 1}
+	if !maps.Equal(got, want) {
+		t.Errorf("TestReferencesOf over five records, one repeated at a second site, returned %v, want %v", got, want)
 	}
 }
 

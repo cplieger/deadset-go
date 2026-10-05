@@ -7,7 +7,7 @@ Address	count	read	false	counter.go:35:31
 Selector	shared	read	false	counter.go:38:24
 Selector	Counter.total	write	false	counter.go:38:31
 Element	Counter	type-use	false	counter.go:41:17
-Element	Counter.names	write	false	counter.go:41:50
+Element	Counter.names	read	false	counter.go:41:50
 Indirect	slot	read	false	counter.go:44:25
 Entry	index	write	false	counter.go:47:33
 Swap	Counter	type-use	false	counter.go:50:14
@@ -45,3 +45,15 @@ Mismatched	Bucket	type-use	false	counter.go:117:32
 Mismatched	Bucket.names	write	false	counter.go:117:57
 Mismatched	Counter.names	read	false	counter.go:117:74
 Accumulate	tally	write	false	counter.go:120:38
+Held.inner	Record	type-use	false	counter.go:124:9
+Nested	Held	type-use	false	counter.go:130:16
+Nested	Held.inner	write	false	counter.go:130:26
+Nested	Record.label	write	false	counter.go:130:32
+Slotted	Held	type-use	false	counter.go:133:17
+Slotted	Held.slots	write	false	counter.go:133:34
+Forget	Held	type-use	false	counter.go:136:16
+Forget	Held.lookup	read	false	counter.go:136:45
+Paned.cells	Record	type-use	false	counter.go:140:11
+Celled	Paned	type-use	false	counter.go:145:16
+Celled	Paned.cells	write	false	counter.go:145:34
+Celled	Record.label	write	false	counter.go:145:43

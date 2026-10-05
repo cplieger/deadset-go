@@ -56,13 +56,41 @@ func TestWriteOnlySymbolCountsATestReadAsNoReadUnderProductionModeAlone(t *testi
 				return
 			}
 			hits := findingOf(t, found, writeOnlyCode, "counter.hits")
-			if want := "field counter.hits is written once and never read"; hits.Message != want {
+			if want := "field counter.hits is written once and read only from test files"; hits.Message != want {
 				t.Errorf("WriteOnlySymbol with Production=true reports counter.hits with message %q, want %q", hits.Message, want)
 			}
 			if got := writePositions(hits); !slices.Equal(got, []string{"main.go:21:4"}) {
 				t.Errorf("WriteOnlySymbol with Production=true names write positions %v for counter.hits, want [main.go:21:4]", got)
 			}
 		})
+	}
+}
+
+func TestWriteOnlySymbolCountsNoTestWriteAsATestRead(t *testing.T) {
+	found := analysisOf(t, "readwrite-testwrite.txtar", asApplication, Consumers{}).
+		findingsUnder(t, writeOnlyKind, true).Findings
+
+	level := findingOf(t, found, writeOnlyCode, "gauge.level")
+	if want := "field gauge.level is written once and never read"; level.Message != want {
+		t.Errorf("WriteOnlySymbol with Production=true over readwrite-testwrite.txtar reports gauge.level with message %q, want %q",
+			level.Message, want)
+	}
+}
+
+func TestWriteOnlySymbolNamesWhatDeletingItsWritesAlsoDeletes(t *testing.T) {
+	found := analysisOf(t, "readwrite-cascade.txtar", asApplication, Consumers{}).
+		findingsUnder(t, writeOnlyKind, true).Findings
+
+	for subject, want := range map[string]string{
+		"box.held": "field box.held is written once and never read, and deleting it with its writes " +
+			"also deletes type parameter T",
+		"stamp": "variable stamp is written once and never read, and deleting it with its writes " +
+			`also deletes import "strconv"`,
+		"label": "variable label is written once and never read",
+	} {
+		if got := findingOf(t, found, writeOnlyCode, subject).Message; got != want {
+			t.Errorf("WriteOnlySymbol over readwrite-cascade.txtar reports %s with message %q, want %q", subject, got, want)
+		}
 	}
 }
 

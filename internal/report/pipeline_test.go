@@ -127,7 +127,7 @@ func envelopeOfDir(t *testing.T, dir string, kind config.TargetKind) (Envelope, 
 	// The pipeline analyses in the production mode, which is the run the analyzer
 	// makes, and the classes, the sweep and the kinds all read the one value.
 	mode := graph.Mode{Production: true}
-	exemptions, err := exempt.Compute(&exempt.Input{
+	exemptions, testEvidence, err := exempt.Compute(&exempt.Input{
 		Result: &result, Resolve: resolver, Symbols: symbols, Root: root, Read: os.ReadFile,
 		Options: exempt.Options{
 			TemplateDelimiters: exempt.Delimiters{
@@ -144,7 +144,7 @@ func envelopeOfDir(t *testing.T, dir string, kind config.TargetKind) (Envelope, 
 	if err != nil {
 		t.Fatalf("Setup: graph.Merge(%s): %v", dir, err)
 	}
-	swept := graph.NewMatrix(&merged).Sweep(graph.SweepInput{Exempt: exemptions, Mode: mode})
+	swept := graph.NewMatrix(&merged).Sweep(graph.SweepInput{Exempt: exemptions, TestEvidence: graph.TestReferencesOf(testEvidence), Mode: mode})
 
 	refs := make(map[graph.SymbolID]string, len(merged.Symbols))
 	for i := range merged.Symbols {

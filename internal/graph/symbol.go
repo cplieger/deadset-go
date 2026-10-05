@@ -100,6 +100,10 @@ type Symbol struct {
 	Kind     SymbolKind
 	Exported bool
 	Blank    bool // declared with the blank identifier
+
+	// TestSupport reports a declaration of a test-support package, which is test
+	// code as a test file's declaration is.
+	TestSupport bool
 }
 
 // ReadFile returns the bytes of one file the load compiled. A loaded package
@@ -128,6 +132,7 @@ func Symbols(r *load.Result, targetRoot string, read ReadFile) ([]Symbol, error)
 		seen:    make(map[token.Pos]SymbolID),
 		refs:    make(map[SymbolID]string),
 		typeIDs: make(map[string]SymbolID),
+		support: r.TestSupport,
 	}
 	for _, g := range groupVariants(r.Packages, e.pos) {
 		if err := e.walkPackage(g); err != nil {
@@ -219,6 +224,7 @@ type enumeration struct {
 	seen    map[token.Pos]SymbolID // one declaration per source site
 	refs    map[SymbolID]string    // a symbol's reference, for a container to lend
 	typeIDs map[string]SymbolID    // import path and type name to that type's symbol
+	support map[string]bool        // the import paths of the target's test-support packages
 	pending []receiverOwner
 	symbols []Symbol
 }
@@ -273,16 +279,17 @@ func (e *enumeration) append(d *declaration) (SymbolID, error) {
 	e.seen[d.pos] = id
 	e.refs[id] = ref
 	e.symbols = append(e.symbols, Symbol{
-		ID:       id,
-		Ref:      ref,
-		Name:     d.name,
-		PkgPath:  d.pkgPath,
-		Parent:   d.parent,
-		Pos:      position,
-		EndLine:  end.Line,
-		Kind:     d.kind,
-		Exported: named && ast.IsExported(own),
-		Blank:    blank,
+		ID:          id,
+		Ref:         ref,
+		Name:        d.name,
+		PkgPath:     d.pkgPath,
+		Parent:      d.parent,
+		Pos:         position,
+		EndLine:     end.Line,
+		Kind:        d.kind,
+		Exported:    named && ast.IsExported(own),
+		Blank:       blank,
+		TestSupport: e.support[d.pkgPath],
 	})
 	return id, nil
 }

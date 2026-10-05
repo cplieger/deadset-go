@@ -1,8 +1,8 @@
 # Issue kinds
 
-deadset-go reports 29 of the 32 issue kinds the deadset contract declares. This page states, per code, what this analyzer reports under it and what it treats as a use, so a reader can tell why a symbol was reported and why a symbol was not. The vocabulary itself, the code space and the fields a finding carries are stated once in the contract's [issue kinds page](https://github.com/cplieger/deadset-spec/blob/v5.1.0/docs/kinds.md), which this page does not restate.
+deadset-go reports 29 of the 32 issue kinds the deadset contract declares. This page states, per code, what this analyzer reports under it and what it treats as a use, so a reader can tell why a symbol was reported and why a symbol was not. The vocabulary itself, the code space and the fields a finding carries are stated once in the contract's [issue kinds page](https://github.com/cplieger/deadset-spec/blob/v5.2.0/docs/kinds.md), which this page does not restate.
 
-Every kind is enabled by default and every kind declares the confidence ceiling `certain`, so a finding's `confidence` equals its `reachability_class`. `Severity` is what a finding does to the run. A `deny` finding fails it and a `warn` finding does not. `Fixability` is what a mechanical edit may do with the finding. A `deletable` finding's declaration can be removed, a `narrowable` one's visibility reduced, a `manual` one is for a maintainer to decide, and nothing mechanical acts on a `none` one. A configuration changes a severity by code or by two-digit family prefix, as [Configuration and invocation](configuration.md#settings) describes.
+Every kind is enabled by default and every kind declares the confidence ceiling `certain`. `Severity` is what a finding does to the run. A `deny` finding fails it and a `warn` finding does not. `Fixability` is what a mechanical edit may do with the finding. A `deletable` finding's declaration can be removed, a `narrowable` one's visibility reduced, a `manual` one is for a maintainer to decide, and nothing mechanical acts on a `none` one. A configuration changes a severity by code or by two-digit family prefix, as [Configuration and invocation](configuration.md#settings) describes.
 
 The three codes of the contract it does not report have no section here and are listed under [Kinds this analyzer does not report](#kinds-this-analyzer-does-not-report).
 
@@ -12,15 +12,17 @@ Every kind below rests on one reference set, built once per build configuration 
 
 The position the identifier is written in classifies each reference as a read, a write, a call, a type use, a conversion, an embedding or a type assertion. The classification decides the read-and-write kinds and nothing else. Every other kind asks only whether a reference exists.
 
-Seven rules of that classification answer most questions about a symbol the analyzer did not report:
+Nine rules of that classification answer most questions about a symbol the analyzer did not report:
 
 - The defining identifier of a declaration is no reference to it, so a symbol named only at its own declaration site is unreferenced.
 - A call a function makes to itself is a reference, so a recursive function is referenced.
 - A selector resolves to the field or method it selects rather than to the enclosing type, and a selector through an embedded field records a read of each field on the path.
 - The left side of an assignment, the operand of `++`, `--` or a compound assignment, a field key in a composite literal, an index or map assignment and a `delete` are writes. Everything else is a read.
+- A store through a struct field holding a map, a slice or a pointer reads the field, because the store lands in shared storage. Through a field holding an array or a struct, it writes the field.
 - A struct value used as an operand of `==` or `!=`, as a map key, or as a switch tag or case expression reads every field of that type. It also reads every field of every struct field beneath it, because equality reads them all.
 - `x = append(x, v)` reads nothing of `x`, because the read inside the call is the mechanics of the store. `y = append(x, v)` reads `x`.
 - The operand of `&` is a read, and `*p = v` reads `p`, because the write lands on the pointee rather than on the symbol.
+- A conversion between a pointer and `unsafe.Pointer` reads every field the pointed-to type lays out, through nested structs and arrays. A struct with a `structs.HostLayout` field reads all its fields the same way.
 
 A reference from a test file is a test reference, which is what separates the test-only kind from the unused kinds. A reference from a declared consumer the run loaded is an ordinary reference. A reference from a consumer's test files is a test reference unless the configuration counts consumer tests as production.
 
@@ -77,11 +79,11 @@ A declared cross-language edge counts as a reference from outside the symbol's o
 
 ### DS1101 unnecessary-export
 
-An exported declaration whose every reference is inside the package that declares it. The finding names the narrower visibility those references support, which is the file where every reference is in the declaring file, and the package otherwise.
+An exported declaration whose every reference is inside the package that declares it. The finding names the narrower visibility those references support, which is the file where every reference is in the declaring file, and the package otherwise. A type in a parameter or result of an exported function or method stays unreported while code outside the package references that function or method.
 
 ### DS1102 unnecessary-exposure
 
-An exported declaration of a package an importer outside the module can name, whose every reference is inside the target module. The declaration can move behind an `internal` boundary.
+An exported declaration of a package an importer outside the module can name, whose every reference is inside the target module. The declaration can move behind an `internal` boundary. A type in a parameter or result of an exported function or method stays unreported while code outside the module references that function or method.
 
 ### DS1103 unreachable-export
 
@@ -119,7 +121,7 @@ A compile-time satisfaction assertion is a package-level declaration of the blan
 
 ### DS1301 write-only-symbol
 
-A package-level variable or a struct field the references store into and never read, which means at least one write and no reference of any other kind. The finding names every write position. A constant cannot be written and is no subject. A variable a function declares is the dead-store kind's subject instead.
+A package-level variable or a struct field the references store into and never read, which means at least one write and no reference of any other kind. The finding names every write position. Its message says when only test files read the subject, and names any type parameter or import the deletion also removes. A constant cannot be written and is no subject. A variable a function declares is the dead-store kind's subject instead.
 
 The subject is a live declaration, because a write is a reference and holds the symbol live. The kind asks whether anything reads the declaration, which is the question the liveness relations do not ask.
 

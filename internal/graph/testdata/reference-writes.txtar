@@ -5,8 +5,9 @@ a store into a collection through an index and through a key, a write through an
 indirection, a field a composite literal keys, a field a literal whose type the
 language supplies keys, a key of a map literal, a delete, the append-back idiom,
 an append whose result lands elsewhere, an append back to a field, an append
-between two fields of one value, an append between the fields of two values, and a
-compound assignment through a key. Every subject is declared at package level,
+between two fields of one value, an append between the fields of two values, a
+compound assignment through a key, and stores through fields holding a struct, an
+array, an array of structs and a map. Every subject is declared at package level,
 because a local carries no symbol and so no reference at all.
 
 -- go.mod --
@@ -134,3 +135,28 @@ func Mismatched(c *Counter, b *Bucket, name string) { b.names = append(c.names, 
 
 // Accumulate writes tally through a key and records no read of it.
 func Accumulate(key string, n int) { tally[key] += n }
+
+// Held holds a struct, an array and a map, each of which a store reaches through.
+type Held struct {
+	inner  Record
+	slots  [2]int
+	lookup map[string]int
+}
+
+// Nested writes a field of the struct a field holds, which writes that field too.
+func Nested(h *Held) { h.inner.label = "nested" }
+
+// Slotted writes an element of the array a field holds, which writes the field.
+func Slotted(h *Held, i int) { h.slots[i] = i }
+
+// Forget removes an entry of the map a field holds, which reads the field.
+func Forget(h *Held, key string) { delete(h.lookup, key) }
+
+// Paned holds an array of structs a store reaches through one element.
+type Paned struct {
+	cells [2]Record
+}
+
+// Celled writes a field of an element of the array a field holds, which writes
+// the field.
+func Celled(p *Paned, i int) { p.cells[i].label = "cell" }

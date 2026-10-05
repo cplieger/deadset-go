@@ -1,0 +1,36 @@
+A field a constructor sets and the package's own test only stores into again, so
+no file reads it.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+// gauge holds one field production code sets and nothing reads.
+type gauge struct {
+	level int
+}
+
+// newGauge sets the field.
+func newGauge() *gauge {
+	g := &gauge{}
+	g.level = 1
+	return g
+}
+
+func main() {
+	println(newGauge() != nil)
+}
+-- main_test.go --
+package main
+
+import "testing"
+
+// TestReset stores into the field and reads nothing of it.
+func TestReset(t *testing.T) {
+	g := newGauge()
+	g.level = 0
+	t.Log(g != nil)
+}

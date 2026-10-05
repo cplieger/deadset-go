@@ -226,7 +226,7 @@ func heldBack(union []graph.Exemption, reported map[graph.SymbolID]bool) map[str
 // sweptWith computes the union of the classes the table holds under one set of
 // disabled classes, sweeps the graph with it, and returns both.
 func sweptWith(t *rapid.T, g *graph.Graph, table map[Class]Detector, disabled []Class, mode graph.Mode) ([]graph.Exemption, graph.Result) {
-	union, err := Compute(&Input{Options: Options{Disabled: disabled}, Mode: mode}, table)
+	union, _, err := Compute(&Input{Options: Options{Disabled: disabled}, Mode: mode}, table)
 	if err != nil {
 		t.Fatalf("Compute over the drawn retentions error: %v", err)
 	}

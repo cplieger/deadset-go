@@ -940,9 +940,10 @@ func analysisOf(ctx context.Context, resolved *resolution, options *exempt.Optio
 		refusals:   refusals,
 		mode:       mode,
 		swept: loaded.matrix.Sweep(graph.SweepInput{
-			Marked: bound(marks),
-			Exempt: exemptions,
-			Mode:   mode,
+			Marked:       bound(marks),
+			Exempt:       exemptions,
+			TestEvidence: graph.TestReferencesOf(held.testEvidence),
+			Mode:         mode,
 		}),
 	}, nil
 }
@@ -955,8 +956,12 @@ type preparation struct {
 	stages     stages
 	per        []kinds.Configured
 	exemptions []graph.Exemption
-	mode       graph.Mode
-	held       bool
+
+	// testEvidence is the exemption evidence a test file carries, which the mode
+	// does not hold and the sweep counts as test references.
+	testEvidence []graph.Exemption
+	mode         graph.Mode
+	held         bool
 }
 
 // preparedOf is the stages and the exemptions of one run under one mode, computed
@@ -976,11 +981,12 @@ func preparedOf(ctx context.Context, resolved *resolution, options *exempt.Optio
 	}
 	held := &preparation{stages: loaded, per: make([]kinds.Configured, len(loaded.per)), mode: mode, held: true}
 	for i := range loaded.per {
-		resolver, computed, exemptErr := exemptionsOf(&held.stages.per[i], loaded.root, options, mode)
+		resolver, computed, evidence, exemptErr := exemptionsOf(&held.stages.per[i], loaded.root, options, mode)
 		if exemptErr != nil {
 			return nil, exemptErr
 		}
 		held.exemptions = append(held.exemptions, computed...)
+		held.testEvidence = append(held.testEvidence, evidence...)
 		held.per[i] = kinds.Configured{
 			Result:  &held.stages.per[i].result,
 			Resolve: resolver,
@@ -1056,12 +1062,14 @@ func bound(marks []suppress.Record) []graph.SymbolID {
 // exemptionsOf computes the exemptions of one configuration and returns the
 // resolver they were computed through, which is also what a kind reading one
 // configuration's positions reads.
-func exemptionsOf(one *configured, targetRoot string, options *exempt.Options, mode graph.Mode) (*graph.Resolver, []graph.Exemption, error) {
-	resolver, err := graph.NewResolver(&one.result, targetRoot, os.ReadFile, one.symbols)
+func exemptionsOf(one *configured, targetRoot string, options *exempt.Options, mode graph.Mode) (
+	resolver *graph.Resolver, exemptions, testEvidence []graph.Exemption, err error,
+) {
+	resolver, err = graph.NewResolver(&one.result, targetRoot, os.ReadFile, one.symbols)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	exemptions, err := exempt.Compute(&exempt.Input{
+	exemptions, testEvidence, err = exempt.Compute(&exempt.Input{
 		Result:  &one.result,
 		Resolve: resolver,
 		Symbols: one.symbols,
@@ -1071,9 +1079,9 @@ func exemptionsOf(one *configured, targetRoot string, options *exempt.Options, m
 		Mode:    mode,
 	}, detectors)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return resolver, exemptions, nil
+	return resolver, exemptions, testEvidence, nil
 }
 
 // findingSet is what one findings pass produced: the findings a report publishes

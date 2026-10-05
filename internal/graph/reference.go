@@ -179,6 +179,7 @@ type referencePass struct {
 	reached     map[string]int         // per source file, by the path the toolchain named, the variants that compile it
 	declaring   map[string]bool        // the import paths of the packages the target declares
 	support     map[string]bool        // the import paths of the target's test-support packages
+	instances   *instantiations        // the type arguments a layout read lays a type parameter out as
 	consumer    string                 // the module path of the consumer being walked, empty while the target is
 	file        SymbolID               // the symbol of the file being walked, empty outside the inventory
 	err         error
@@ -199,14 +200,15 @@ func newReferencePass(r *load.Result, targetRoot string, read ReadFile, symbols 
 	}
 
 	p := &referencePass{
-		pos:      newPositions(r.Fset, targetRoot, read),
-		symbols:  make(map[site]SymbolID, len(symbols)),
-		packages: make(map[string]SymbolID),
-		ids:      make(map[token.Pos]SymbolID),
-		kinds:    make(map[token.Pos]RefKind),
-		callees:  make(map[token.Pos]bool),
-		reached:  make(map[string]int),
-		support:  r.TestSupport,
+		pos:       newPositions(r.Fset, targetRoot, read),
+		symbols:   make(map[site]SymbolID, len(symbols)),
+		packages:  make(map[string]SymbolID),
+		ids:       make(map[token.Pos]SymbolID),
+		kinds:     make(map[token.Pos]RefKind),
+		callees:   make(map[token.Pos]bool),
+		reached:   make(map[string]int),
+		support:   r.TestSupport,
+		instances: instantiationsOf(r.Packages),
 	}
 	p.at = p.pos
 	for i := range symbols {
@@ -420,7 +422,7 @@ func (p *referencePass) walkTypeSpec(s *ast.TypeSpec) {
 	}
 	switch t := s.Type.(type) {
 	case *ast.StructType:
-		p.walkStruct(t)
+		p.walkStruct(t, id)
 	case *ast.InterfaceType:
 		p.walkInterface(t, id)
 	default:
@@ -457,8 +459,10 @@ func (p *referencePass) walkValueSpec(s *ast.ValueSpec) {
 }
 
 // walkStruct walks the fields of one struct type. Every field is a symbol of its
-// own, so nothing in a struct body references from the type that declares it.
-func (p *referencePass) walkStruct(t *ast.StructType) {
+// own, so nothing in a struct body references from the type that declares it but
+// the layout reads a host-layout field records from owner.
+func (p *referencePass) walkStruct(t *ast.StructType, owner SymbolID) {
+	p.readHostLayout(t, owner)
 	for _, f := range t.Fields.List {
 		if len(f.Names) == 0 {
 			p.walkEmbedded(f)
@@ -498,7 +502,7 @@ func (p *referencePass) walkField(f *ast.Field) {
 		if members == nil {
 			continue
 		}
-		p.walkStruct(members)
+		p.walkStruct(members, id)
 		members = nil
 	}
 }
@@ -559,6 +563,7 @@ func (p *referencePass) inspectExcept(node ast.Node, encl SymbolID, skip ast.Nod
 		case *ast.CallExpr:
 			p.markCallee(n.Fun)
 			p.markDelete(n)
+			p.readUnsafeConversion(n, encl)
 		case *ast.BinaryExpr, *ast.SwitchStmt, *ast.MapType, *ast.IndexExpr:
 			p.readComparedFields(n, encl)
 		}
@@ -791,15 +796,83 @@ func (p *referencePass) kindOf(id *ast.Ident, obj types.Object) RefKind {
 // into, because a slice or a map a package only ever stores into holds nothing
 // anything reads. An indirection writes through a value it reads: the pointer's
 // own value is read to find the pointee, and the pointee is not a declaration.
+// markIndexed and markHeldIn own a store through a struct field.
 func (p *referencePass) markWrite(target ast.Expr) {
 	switch t := ast.Unparen(target).(type) {
 	case *ast.Ident:
 		p.kinds[t.Pos()] = RefWrite
 	case *ast.SelectorExpr:
 		p.kinds[t.Sel.Pos()] = RefWrite
+		p.markHeldIn(t.X)
 	case *ast.IndexExpr:
-		p.markWrite(t.X)
+		p.markIndexed(t.X)
 	}
+}
+
+// markIndexed records the collection one index store lands in: a field holding a
+// map, a slice or a pointer is read, and any other collection is written.
+func (p *referencePass) markIndexed(collection ast.Expr) {
+	switch t := ast.Unparen(collection).(type) {
+	case *ast.SelectorExpr:
+		if field, ok := p.fieldOf(t); ok && holdsByReference(field) {
+			return
+		}
+		p.markWrite(t)
+	default:
+		p.markWrite(t)
+	}
+}
+
+// markHeldIn records the storage one selector store lands in beyond the member it
+// writes: a field holding a struct, or an element of a field holding an array, is
+// written, and a store through anything else reads it.
+func (p *referencePass) markHeldIn(holder ast.Expr) {
+	switch t := ast.Unparen(holder).(type) {
+	case *ast.SelectorExpr:
+		if field, ok := p.fieldOf(t); ok && holdsByValue(field) {
+			p.kinds[t.Sel.Pos()] = RefWrite
+			p.markHeldIn(t.X)
+		}
+	case *ast.IndexExpr:
+		if field, ok := p.fieldOf(ast.Unparen(t.X)); ok && holdsArray(field) {
+			p.markHeldIn(t.X)
+		}
+	}
+}
+
+// fieldOf returns the struct field one expression selects, and false for anything
+// else.
+func (p *referencePass) fieldOf(e ast.Expr) (*types.Var, bool) {
+	sel, ok := e.(*ast.SelectorExpr)
+	if !ok {
+		return nil, false
+	}
+	field, ok := p.info.Uses[sel.Sel].(*types.Var)
+	return field, ok && field.IsField()
+}
+
+// holdsByReference reports whether a field's value refers to storage other values
+// share: a map, a slice or a pointer.
+func holdsByReference(field *types.Var) bool {
+	switch field.Type().Underlying().(type) {
+	case *types.Map, *types.Slice, *types.Pointer:
+		return true
+	default:
+		return false
+	}
+}
+
+// holdsByValue reports whether a field's value is storage of its own, a struct or
+// an array.
+func holdsByValue(field *types.Var) bool {
+	_, isStruct := field.Type().Underlying().(*types.Struct)
+	return isStruct || holdsArray(field)
+}
+
+// holdsArray reports whether a field holds an array.
+func holdsArray(field *types.Var) bool {
+	_, isArray := field.Type().Underlying().(*types.Array)
+	return isArray
 }
 
 // markFieldKeys records the fields one composite literal writes. A keyed field
@@ -831,7 +904,7 @@ func (p *referencePass) markDelete(call *ast.CallExpr) {
 	if len(call.Args) == 0 || !p.builtin(call.Fun, deleteBuiltin) {
 		return
 	}
-	p.markWrite(call.Args[0])
+	p.markIndexed(call.Args[0])
 }
 
 // markAppendBack records the store the append-back idiom performs. In
