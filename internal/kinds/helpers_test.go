@@ -175,7 +175,7 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 
 	per := make([]Configured, len(configurations))
 	passes := make([]graph.Configured, len(configurations))
-	var exemptions []graph.Exemption
+	var exemptions, testEvidence []graph.Exemption
 	var root string
 	var loadedConsumers []string
 	for i, c := range configurations {
@@ -198,7 +198,7 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 		if err != nil {
 			t.Fatalf("Setup: graph.NewResolver(%s): %v", c.ID, err)
 		}
-		computed, err := exempt.Compute(&exempt.Input{
+		computed, evidence, err := exempt.Compute(&exempt.Input{
 			Result:  result,
 			Resolve: resolver,
 			Symbols: symbols,
@@ -211,6 +211,7 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 			t.Fatalf("Setup: exempt.Compute(%s): %v", c.ID, err)
 		}
 		exemptions = append(exemptions, computed...)
+		testEvidence = append(testEvidence, evidence...)
 		per[i] = Configured{Result: result, Resolve: resolver, Symbols: symbols}
 		passes[i] = graph.Configured{Symbols: symbols, References: references, Roots: roots}
 	}
@@ -219,7 +220,7 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 	if err != nil {
 		t.Fatalf("Setup: graph.Merge(%s): %v", doc.Target.Path, err)
 	}
-	swept := graph.NewMatrix(&merged).Sweep(graph.SweepInput{Exempt: exemptions, Mode: mode})
+	swept := graph.NewMatrix(&merged).Sweep(graph.SweepInput{Exempt: exemptions, TestEvidence: graph.TestReferencesOf(testEvidence), Mode: mode})
 
 	refs := make(map[graph.SymbolID]string, len(merged.Symbols))
 	for i := range merged.Symbols {

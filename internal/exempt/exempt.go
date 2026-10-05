@@ -62,7 +62,7 @@ var vocabulary = []classRow{
 	{class: FormatVerbContract, languages: []string{"go"}},
 	{class: ErrorsDuckTyping, languages: []string{"go"}},
 	{class: EnumGroup, languages: []string{"go", "ts"}},
-	{class: GeneratedFile, languages: []string{"go"}},
+	{class: GeneratedFile, languages: []string{"go", "ts"}},
 	{class: LinknameCgoAsmPlugin, languages: []string{"go"}},
 	{class: TemplateField, languages: []string{"go", "ts"}},
 	{class: ReflectiveLookup, languages: []string{"go", "ts"}},
@@ -164,56 +164,42 @@ type Input struct {
 // fails only where the evidence it needs is unreadable.
 type Detector func(in *Input) ([]graph.Exemption, error)
 
-// Compute runs every class a Go analysis computes that the detector table holds
-// and the options do not disable, in vocabulary order, and returns the union.
-//
-// The result is ordered by site, then by class, then by symbol, and holds one
-// entry per distinct symbol, class and detail, carrying the first site by that
-// order: a method a program converts to one interface at sixty-nine sites is one
-// entry naming the earliest of them, and the same method converted to a second
-// interface is a second entry, because the detail is what differs. A class the
-// table does not hold contributes nothing, so a caller assembling the table from
-// the classes it has needs no placeholder for the ones it does not.
-//
-// Under a production run an exemption found in a test file is dropped before the
-// union, so the same fact found in a source file and in a test file is the source
-// file's entry and the same fact found only in a test file is no entry at all.
-func Compute(in *Input, detectors map[Class]Detector) ([]graph.Exemption, error) {
+// Compute runs every class the detector table holds and the options do not disable,
+// in vocabulary order; a class the table does not hold contributes nothing. Each
+// result is ordered by site, class and symbol and holds one entry per distinct
+// symbol, class and detail at its first site, so a method converted to one
+// interface at sixty-nine sites is one entry. Under a production run an exemption
+// found in a test file is returned as test evidence rather than held: it retains
+// nothing and counts as a test reference, and a fact a source file also carries
+// stays the source file's held entry.
+func Compute(in *Input, detectors map[Class]Detector) (held, testEvidence []graph.Exemption, err error) {
 	disabled := make(map[Class]bool, len(in.Options.Disabled))
 	for _, class := range in.Options.Disabled {
 		disabled[class] = true
 	}
 
-	var found []graph.Exemption
+	var found, evidence []graph.Exemption
 	for _, class := range Classes() {
-		detect, held := detectors[class]
-		if disabled[class] || !held {
+		detect, carried := detectors[class]
+		if disabled[class] || !carried {
 			continue
 		}
-		retained, err := detect(in)
-		if err != nil {
-			return nil, fmt.Errorf("exempt: %s: %w", class, err)
+		retained, detectErr := detect(in)
+		if detectErr != nil {
+			return nil, nil, fmt.Errorf("exempt: %s: %w", class, detectErr)
 		}
-		found = append(found, in.holding(retained)...)
+		for _, e := range retained {
+			if holdsInMode(e.Site, in.Mode) {
+				found = append(found, e)
+			} else {
+				evidence = append(evidence, e)
+			}
+		}
 	}
 
 	slices.SortStableFunc(found, byEvidence)
-	return firstPerFact(found), nil
-}
-
-// holding keeps the exemptions of one class whose evidence holds under the run's
-// reference mode, which the boundary's own predicate decides: the crossing of
-// evidence out of a production run is one of the five the boundary states, so the
-// rule is written there and read here.
-func (in *Input) holding(found []graph.Exemption) []graph.Exemption {
-	kept := found[:0]
-	for _, e := range found {
-		if !holdsInMode(e.Site, in.Mode) {
-			continue
-		}
-		kept = append(kept, e)
-	}
-	return kept
+	slices.SortStableFunc(evidence, byEvidence)
+	return firstPerFact(found), firstPerFact(evidence), nil
 }
 
 // fact is what one exemption states, with the site left out: this class holds

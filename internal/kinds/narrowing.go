@@ -2,6 +2,7 @@ package kinds
 
 import (
 	"go/types"
+	"slices"
 
 	"github.com/cplieger/deadset-go/internal/graph"
 )
@@ -41,6 +42,10 @@ type narrowing struct {
 	named        map[graph.SymbolID]int
 	fromTest     map[graph.SymbolID]int
 	unnarrowable map[graph.SymbolID]bool
+
+	// signatures keys every type an exported function or method of the type's own
+	// package names in a parameter or a result, with those functions and methods.
+	signatures map[graph.SymbolID][]graph.SymbolID
 }
 
 // newNarrowing folds every reference of the inventory into the spread of the
@@ -69,6 +74,7 @@ func newNarrowing(in *Input) *narrowing {
 		named:        make(map[graph.SymbolID]int),
 		fromTest:     make(map[graph.SymbolID]int),
 		unnarrowable: make(map[graph.SymbolID]bool, len(in.Exempt)),
+		signatures:   signatureTypes(in),
 	}
 	for _, exemption := range in.Exempt {
 		n.unnarrowable[exemption.ID] = true
@@ -272,6 +278,9 @@ func UnnecessaryExport(in *Input) ([]Finding, error) {
 		case scopeModule, scopeOutside:
 			continue
 		}
+		if n.namedBySignatureReachedFrom(symbol, scopeModule) {
+			continue
+		}
 		message := "exported " + in.word(symbol.ID) +
 			" is referenced only inside the " + visibility + " that declares it"
 		if one, held := n.finding(symbol, unnecessaryExportCode, visibility, message); held {
@@ -294,7 +303,8 @@ func UnnecessaryExposure(in *Input) ([]Finding, error) {
 	subjects := n.subjects()
 	found := make([]Finding, 0, len(subjects))
 	for _, symbol := range subjects {
-		if !in.importable(symbol.PkgPath) || n.reach[symbol.ID] != scopeModule {
+		if !in.importable(symbol.PkgPath) || n.reach[symbol.ID] != scopeModule ||
+			n.namedBySignatureReachedFrom(symbol, scopeOutside) {
 			continue
 		}
 		message := "exported " + in.word(symbol.ID) + " is referenced only inside this module"
@@ -303,6 +313,130 @@ func UnnecessaryExposure(in *Input) ([]Finding, error) {
 		}
 	}
 	return found, nil
+}
+
+// namedBySignatureReachedFrom reports whether an exported function or method that
+// names one type in a parameter or a result is referenced from at least as far as
+// scope. Its callers then hold values of the type, so narrowing the type would leave
+// an exported signature naming a type those callers cannot name.
+func (n *narrowing) namedBySignatureReachedFrom(symbol *graph.Symbol, scope narrowScope) bool {
+	for _, fn := range n.signatures[symbol.ID] {
+		if n.reach[fn] >= scope {
+			return true
+		}
+	}
+	return false
+}
+
+// signatureTypes keys every type of the target that an exported function or method
+// of the type's own package names in a parameter or a result, with the functions
+// and methods that name it, over every configuration of the run.
+func signatureTypes(in *Input) map[graph.SymbolID][]graph.SymbolID {
+	named := make(map[graph.SymbolID][]graph.SymbolID)
+	for one, p := range in.typedPackages() {
+		for _, fn := range exportedFuncs(p.Types) {
+			holdSignature(named, one, fn, p.Types.Path())
+		}
+	}
+	return named
+}
+
+// holdSignature keys every type of the package at path that one function's
+// signature names to that function.
+func holdSignature(named map[graph.SymbolID][]graph.SymbolID, one *Configured, fn *types.Func, path string) {
+	fnID, held := one.Resolve.Object(fn)
+	if !held {
+		return
+	}
+	for name := range typesNamedBy(fn.Signature(), path) {
+		id, inventoried := one.Resolve.Object(name)
+		if inventoried && !slices.Contains(named[id], fnID) {
+			named[id] = append(named[id], fnID)
+		}
+	}
+}
+
+// exportedFuncs is every exported function of one package and every exported method
+// of a type it defines.
+func exportedFuncs(pkg *types.Package) []*types.Func {
+	var funcs []*types.Func
+	scope := pkg.Scope()
+	for _, name := range scope.Names() {
+		switch object := scope.Lookup(name).(type) {
+		case *types.Func:
+			if object.Exported() {
+				funcs = append(funcs, object)
+			}
+		case *types.TypeName:
+			funcs = append(funcs, exportedMethods(object)...)
+		}
+	}
+	return funcs
+}
+
+// exportedMethods is every exported method one defined type declares.
+func exportedMethods(object *types.TypeName) []*types.Func {
+	defined, isNamed := object.Type().(*types.Named)
+	if !isNamed || object.IsAlias() {
+		return nil
+	}
+	var methods []*types.Func
+	for method := range defined.Methods() {
+		if method.Exported() {
+			methods = append(methods, method)
+		}
+	}
+	return methods
+}
+
+// typesNamedBy is every type of the package at path that one signature's parameters
+// and results name, through any composite type that spells it.
+func typesNamedBy(signature *types.Signature, path string) map[*types.TypeName]bool {
+	held := make(map[*types.TypeName]bool)
+	var walk func(t types.Type)
+	keep := func(name *types.TypeName) {
+		if name.Pkg() != nil && name.Pkg().Path() == path {
+			held[name] = true
+		}
+	}
+	walkTuple := func(tuple *types.Tuple) {
+		for v := range tuple.Variables() {
+			walk(v.Type())
+		}
+	}
+	walk = func(t types.Type) {
+		switch t := t.(type) {
+		case *types.Alias:
+			keep(t.Obj())
+			walk(t.Rhs())
+		case *types.Named:
+			keep(t.Obj())
+			for arg := range t.TypeArgs().Types() {
+				walk(arg)
+			}
+		case *types.Pointer:
+			walk(t.Elem())
+		case *types.Slice:
+			walk(t.Elem())
+		case *types.Array:
+			walk(t.Elem())
+		case *types.Chan:
+			walk(t.Elem())
+		case *types.Map:
+			walk(t.Key())
+			walk(t.Elem())
+		case *types.Signature:
+			walkTuple(t.Params())
+			walkTuple(t.Results())
+		case *types.Struct:
+			for field := range t.Fields() {
+				walk(field.Type())
+			}
+		}
+	}
+	walkTuple(signature.Params())
+	walkTuple(signature.Results())
+	return held
 }
 
 // finding renders one finding of a narrowing kind.

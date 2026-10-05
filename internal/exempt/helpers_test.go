@@ -185,7 +185,7 @@ func analyzeShared(in *Input) *sharedAnalysis {
 	}
 	for _, production := range []bool{false, true} {
 		in.Mode = graph.Mode{Production: production}
-		held.union[production], held.refused[production] = Compute(in, goDetectors())
+		held.union[production], _, held.refused[production] = Compute(in, goDetectors())
 	}
 	return held
 }

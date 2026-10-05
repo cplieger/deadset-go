@@ -80,8 +80,12 @@ func writeOnly(in *Input, symbol *graph.Symbol, u *uses, exempted map[graph.Symb
 	case u == nil, len(u.writes) == 0, u.reads > 0:
 		return Finding{}, false
 	}
-	finding, names := in.finding(symbol.ID, writeOnlyCode,
-		in.word(symbol.ID)+" "+symbol.Name+" is written "+writeCount(len(u.writes))+" and never read")
+	read := " and never read"
+	if u.testReads > 0 {
+		read = " and read only from test files"
+	}
+	finding, names := in.finding(symbol.ID, writeOnlyCode, in.word(symbol.ID)+" "+symbol.Name+
+		" is written "+writeCount(len(u.writes))+read+cascadeClause(writeCascade(in, symbol, u.writes)))
 	if !names {
 		return Finding{}, false
 	}
@@ -177,12 +181,14 @@ func declaresTypeParameters(owner *graph.Symbol) bool {
 
 // uses is how one declaration's counted references divide for the write-only
 // kind: the positions written, in reference order and once per position, how many
-// references of every other kind read it, and how the two split by file.
+// references of every other kind read it, and how the two split by file. testReads
+// counts the reads of test files a production mode does not count.
 type uses struct {
 	writes     []Position
 	reads      int
 	production int
 	test       int
+	testReads  int
 }
 
 // writesAndReads divides every reference the run's mode counts by whether it
@@ -197,13 +203,14 @@ func writesAndReads(in *Input) map[graph.SymbolID]*uses {
 	counted := make(map[graph.SymbolID]*uses)
 	for i := range in.Merged.References {
 		r := &in.Merged.References[i]
-		if in.Mode.Production && r.Test {
-			continue
-		}
 		held := counted[r.To]
 		if held == nil {
 			held = &uses{}
 			counted[r.To] = held
+		}
+		if in.Mode.Production && r.Test {
+			held.testReads += readCount(r)
+			continue
 		}
 		if r.Test {
 			held.test++
@@ -219,6 +226,14 @@ func writesAndReads(in *Input) map[graph.SymbolID]*uses {
 		}
 	}
 	return counted
+}
+
+// readCount is one for a reference that reads its target and zero for a store.
+func readCount(r *graph.Reference) int {
+	if r.Kind == graph.RefWrite {
+		return 0
+	}
+	return 1
 }
 
 // positionAt renders one reference's position. A reference is an identifier, so

@@ -234,9 +234,9 @@ func TestAKindReportsNothingWhereTheSeverityMapAllowsIt(t *testing.T) {
 
 // A production sweep does not hold an exemption whose evidence a test file carries,
 // so the fields of a struct the test of its own package is the only thing to marshal
-// are candidates and report under the code their production references select. The
-// exemption class that would retain them fires on the same fixture in the plain
-// mode, which is where the two modes differ.
+// are candidates, and the evidence counts as a test reference to each, so they report
+// as test-only use. The exemption class that would retain them fires on the same
+// fixture in the plain mode, which is where the two modes differ.
 func TestTheMembersOfAStructOnlyATestFileMarshalsReportUnderAProductionSweep(t *testing.T) {
 	result := analysisOf(t, "declarations-test-evidence.txtar", asApplication, Consumers{}).findings(t, everyKind)
 	got := make(map[string]string, len(result.Findings))
@@ -244,8 +244,8 @@ func TestTheMembersOfAStructOnlyATestFileMarshalsReportUnderAProductionSweep(t *
 		got[result.Findings[i].Symbol.Ref] = result.Findings[i].Code
 	}
 	want := map[string]string{
-		"go://example.com/evidence#Fixture.Name":  unusedMemberCode,
-		"go://example.com/evidence#Fixture.Extra": unusedMemberCode,
+		"go://example.com/evidence#Fixture.Name":  testOnlyUseCode,
+		"go://example.com/evidence#Fixture.Extra": testOnlyUseCode,
 		// The struct itself is live, exported in a main package, and named only
 		// from inside that package, which is the export-narrowing kind's subject
 		// rather than this test's: the table is the whole pass over the fixture.

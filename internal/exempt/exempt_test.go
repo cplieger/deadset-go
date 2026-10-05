@@ -139,7 +139,7 @@ func TestComputeRunsEveryClassTheTableHoldsInVocabularyOrder(t *testing.T) {
 	// caller assembling the table from the classes it has produces.
 	delete(detectors, EnumGroup)
 
-	if _, err := Compute(&Input{}, detectors); err != nil {
+	if _, _, err := Compute(&Input{}, detectors); err != nil {
 		t.Fatalf("Compute over a table of every class error: %v", err)
 	}
 	want := slices.DeleteFunc(Classes(), func(class Class) bool { return class == EnumGroup })
@@ -156,7 +156,7 @@ func TestComputeRunsNoDisabledClass(t *testing.T) {
 	}
 
 	in := &Input{Options: Options{Disabled: []Class{InterfaceSatisfaction, InterfaceSatisfaction, "not-a-class"}}}
-	found, err := Compute(in, detectors)
+	found, _, err := Compute(in, detectors)
 	if err != nil {
 		t.Fatalf("Compute with one class disabled error: %v", err)
 	}
@@ -182,7 +182,7 @@ func TestComputeOrdersTheUnionBySiteThenClassThenSymbol(t *testing.T) {
 		),
 	}
 
-	found, err := Compute(&Input{}, detectors)
+	found, _, err := Compute(&Input{}, detectors)
 	if err != nil {
 		t.Fatalf("Compute over two classes error: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestComputeKeepsOneEntryPerSymbolClassAndDetail(t *testing.T) {
 		),
 	}
 
-	found, err := Compute(&Input{}, detectors)
+	found, _, err := Compute(&Input{}, detectors)
 	if err != nil {
 		t.Fatalf("Compute over one class error: %v", err)
 	}
@@ -499,7 +499,7 @@ func TestComputeNamesTheClassThatFailed(t *testing.T) {
 		TemplateField: func(*Input) ([]graph.Exemption, error) { return nil, errEvidence },
 	}
 
-	found, err := Compute(&Input{}, detectors)
+	found, _, err := Compute(&Input{}, detectors)
 	if !errors.Is(err, errEvidence) {
 		t.Errorf("Compute over a class that failed error = %v, want one wrapping %v", err, errEvidence)
 	}
@@ -531,7 +531,7 @@ func TestComputeHandsEveryClassTheLoadedConfigurationItReads(t *testing.T) {
 			return nil, nil
 		},
 	}
-	if _, err := Compute(in, detectors); err != nil {
+	if _, _, err := Compute(in, detectors); err != nil {
 		t.Fatalf("Compute over the loaded configuration error: %v", err)
 	}
 	if seen != in {

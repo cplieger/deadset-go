@@ -305,3 +305,16 @@ func TestTheClassOfADeclarationOfAMainPackageIsCertain(t *testing.T) {
 		t.Fatal("the fixture's inventory holds no declaration of its main package, so this test pins nothing")
 	}
 }
+
+// A declaration of a test file is compiled into no package anything imports, so a
+// test function in a published package's own test file is certain with no consumer
+// information, where the package's exported declarations are possible.
+func TestTheClassOfADeclarationOfATestFileIsCertain(t *testing.T) {
+	in := inputOf(t, "declarations-test-of-dead-code.txtar", libraryConfig(), Consumers{})
+
+	test := narrowedIDOf(t, in, "go://example.com/app/catalog#TestDeadOnly")
+	if got := in.ClassOf(test); got != Certain {
+		t.Errorf("ClassOf(TestDeadOnly) = %q for a test function of a published package's own test file, want %q",
+			got, Certain)
+	}
+}

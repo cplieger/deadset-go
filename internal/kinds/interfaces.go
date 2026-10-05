@@ -38,20 +38,12 @@ const (
 )
 
 // UnusedInterface reports an interface declaration no symbol names as a type,
-// naming the concrete types that implement it and where each is written.
-//
-// The subject is the sweep's own candidate, so a use from a loaded consumer holds
-// the interface live the way any other reference does, and the relation the finding
-// carries is the one that found it. A satisfaction assertion is itself a use of the
-// interface, so an interface whose only use is an assertion is live and the
-// assertion is what is reported.
-//
-// The interface's own members are not reported beside it: a member whose container
-// is a candidate falls with the container and is reported inside its component.
-//
-// An interface a test file declares is not reported at all, because a production
-// sweep drops the only references such a declaration can have and so judges every
-// one of them a candidate whatever its test files do with it.
+// naming the concrete types that implement it and where each is written. The
+// subject is the sweep's own candidate, so a loaded consumer's use holds it live; a
+// satisfaction assertion is a use, so an interface used only by one is live and the
+// assertion is reported. Its members fall with it inside its component. An
+// interface test code declares is not reported where test code references it,
+// because a production sweep drops every reference such a declaration can have.
 func UnusedInterface(in *Input) ([]Finding, error) {
 	if in == nil || in.Sweep == nil {
 		return nil, nil
@@ -62,7 +54,7 @@ func UnusedInterface(in *Input) ([]Finding, error) {
 	for i := range in.Sweep.Candidates {
 		candidate := &in.Sweep.Candidates[i]
 		symbol := in.symbol(candidate.ID)
-		if symbol == nil || symbol.Kind != graph.KindInterface || testFile(symbol) {
+		if symbol == nil || symbol.Kind != graph.KindInterface || in.judgedWithTheTests(candidate, symbol) {
 			continue
 		}
 		one, held := in.finding(candidate.ID, unusedInterfaceCode, unusedInterfaceMessage)

@@ -70,7 +70,7 @@ Keys this analyzer reads nothing from. It validates each one and prints it in th
 | `ts.lifecycle_contracts` | array of objects | `[]` | The TypeScript analyzer's: one framework's lifecycle contract per entry, naming its `components`, its `bases` and the `members` the framework calls |
 | `ts.serializers` | array of declaration entries | `[]` | The TypeScript analyzer's: the declarations whose call reads its arguments' data members by name |
 
-A declaration entry names one declaration by `symbol`, by `module` and `name`, or by `global`. The contract's [configuration schema](https://github.com/cplieger/deadset-spec/blob/v5.1.0/contract/config.schema.json) states each shape. `go` is the section this analyzer owns, and it declares no key in this contract version.
+A declaration entry names one declaration by `symbol`, by `module` and `name`, or by `global`. The contract's [configuration schema](https://github.com/cplieger/deadset-spec/blob/v5.2.0/contract/config.schema.json) states each shape. `go` is the section this analyzer owns, and it declares no key in this contract version.
 
 A pattern in `roots.patterns` is matched against the reference of every symbol the analysis enumerates. In a pattern, `*` matches any run of characters including the solidus. `?` matches exactly one character, counted as a Unicode code point, and no other character is special. An entry holding neither wildcard matches only the symbol whose reference it spells exactly. An entry that matches nothing is reported as `DS1704`.
 
@@ -106,7 +106,7 @@ The rest belong to the invocation and commit nothing to a configuration file:
 
 - `--report` names the path the JSON report is written to.
 - `--format` names one rendering written beside the report, and repeats. Naming any format replaces the default `text` rendering, so add `--format=text` to keep it.
-- `--template` names the file the template rendering reads. The file holds a template in the contract's [template subset](https://github.com/cplieger/deadset-spec/blob/v5.1.0/contract/grammar/template.md), which runs over the JSON report and names its members as the report spells them. A file that cannot be read or does not parse refuses the invocation with 2 before any analysis, and a rendering that fails exits 3 with the report already written.
+- `--template` names the file the template rendering reads. The file holds a template in the contract's [template subset](https://github.com/cplieger/deadset-spec/blob/v5.2.0/contract/grammar/template.md), which runs over the JSON report and names its members as the report spells them. A file that cannot be read or does not parse refuses the invocation with 2 before any analysis, and a rendering that fails exits 3 with the report already written.
 - `--baseline-write` names the path a baseline recording the findings of the target is written to.
 - `--exit-code=off` writes every document and exits clean.
 
@@ -116,7 +116,7 @@ No verb accepts a flag that asks for a source edit. A flag whose name carries `f
 
 ## Suppressing a finding
 
-Three mechanisms, all of them requiring a reason. The grammar is stated in full in the contract's [suppression page](https://github.com/cplieger/deadset-spec/blob/v5.1.0/contract/grammar/suppression.md).
+Three mechanisms, all of them requiring a reason. The grammar is stated in full in the contract's [suppression page](https://github.com/cplieger/deadset-spec/blob/v5.2.0/contract/grammar/suppression.md).
 
 ### Inline directive
 

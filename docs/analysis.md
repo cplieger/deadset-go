@@ -58,7 +58,7 @@ The configuration withholds a finding by setting its kind to `allow` or by a min
 
 ## What the report claims about callers
 
-Every finding carries a `reachability_class`, which is what the analysis knows about the symbol's callers, and a `confidence`, which is that class capped by the kind's ceiling. Every kind of this contract version declares the ceiling `certain`, so the two are equal on every finding. Neither is a number and neither is a score.
+Every finding carries a `reachability_class`, which is what the analysis knows about the symbol's callers, and a `confidence`, which is that class capped by the kind's ceiling. Every kind of this contract version declares the ceiling `certain`. A finding of a dead component is also capped by the lowest class among the component's root members. So a test of a published declaration is no more certain than that declaration. Neither is a number and neither is a score.
 
 | Class | When |
 | --- | --- |

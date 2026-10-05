@@ -781,23 +781,13 @@ func checkMessage(found *Finding) error {
 }
 
 // complete fills everything the Contract requires of a finding whatever its kind,
-// so no emitter decides any of it.
-//
-// What a finding carries is the shape of its subject, and the subject's kind is what
-// the Contract decides that by, so the shape is read from the table and nothing else
-// asks what a kind reports. A declaration carries the liveness relation that decided
-// it, which is the candidate's and is absent where the sweep judged the declaration
-// live; the reachability class the run's consumer knowledge and the declaration's
-// visibility give it; and the dead component it falls with. A part of a declaration
-// and a row of a document carry none of those and answer the degenerate value at
-// each step: no relation, because none decided them; certain, because a subject with
-// no visibility of its own has no question about its callers; and a component of
-// their own, because nothing falls with them.
-//
-// The confidence is the class capped by the kind's own ceiling, the severity is the
-// resolved configuration's, and the overlap is the vocabulary's own list for the
-// kind, so a message names no other tool. A finding in a generated file carries no
-// fixability, because nothing mechanical acts on a file a generator rewrites.
+// so no emitter decides any of it; the subject's shape is read from the table. A
+// declaration carries the relation that decided it (none where the sweep judged it
+// live), its reachability class and its dead component; a part or a document row
+// carries no relation, the certain class and a component of its own. The confidence
+// is the class capped by the kind's ceiling and the component's cap, the severity
+// is the configuration's, the overlap is the vocabulary's list so a message names no
+// other tool, and a finding in a generated file carries no fixability.
 func (in *Input) complete(found *Finding, row *catalog.Row) {
 	held := in.index()
 	found.Kind = row.Name
@@ -817,7 +807,7 @@ func (in *Input) complete(found *Finding, row *catalog.Row) {
 	if in.Config != nil && in.Config.Reporters.Cascade == config.CascadeFull {
 		found.Component.Members = held.membersOf(found)
 	}
-	found.Confidence = found.Class.lower(Class(row.MaxClass))
+	found.Confidence = found.Class.lower(Class(row.MaxClass)).lower(in.componentCap(found.id))
 	found.Severity = in.Config.EffectiveSeverity(row.Code)
 	found.Fixability = row.Fixability
 	found.RetainedBy = []string{}
@@ -925,6 +915,9 @@ type index struct {
 	byRef      map[string]graph.SymbolID
 	mains      map[string]bool
 
+	// caps is each dead component's confidence cap by its index, computed on first use.
+	caps map[int]Class
+
 	// deprecated is every declaration carrying a deprecation marker, and
 	// enumerated every constant of an enumerated type with the type's name. Both
 	// are read from the syntax on first use, because the kinds that need them are
@@ -947,6 +940,7 @@ func (in *Input) index() *index {
 		retained:   make(map[graph.SymbolID]bool),
 		byRef:      make(map[string]graph.SymbolID),
 		mains:      make(map[string]bool),
+		caps:       make(map[int]Class),
 	}
 	held.holdInventory(in.Merged)
 	held.holdSweep(in.Sweep)

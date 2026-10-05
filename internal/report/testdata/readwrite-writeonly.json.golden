@@ -1,6 +1,6 @@
 {
   "schema_version": "7.0.0",
-  "contract_version": "5.1.0",
+  "contract_version": "5.2.0",
   "analyzer": {
     "name": "deadset-go",
     "version": "1.6.0",
@@ -120,7 +120,7 @@
       "consumers_loaded": [],
       "fixability": "deletable",
       "severity": "deny",
-      "message": "field counter.hits is written once and never read",
+      "message": "field counter.hits is written once and read only from test files",
       "details": {
         "write_positions": [
           {

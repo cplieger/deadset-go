@@ -56,7 +56,7 @@ type Graph struct {
 	made     []counts // per symbol, the references made to the symbol
 	consumed []calls  // per symbol, how a loaded consumer references it
 	parent   []int    // per symbol, the position of its container
-	test     []bool   // per symbol, a test file declares it
+	test     []bool   // per symbol, test code declares it: a test file or a test-support package
 	subject  []bool   // per symbol, the sweep judges its liveness
 	rooted   []rooted
 }
@@ -92,7 +92,8 @@ func New(symbols []Symbol, refs []Reference, roots []Root) *Graph {
 	for i := range symbols {
 		s := &symbols[i]
 		g.parent[i] = g.at(s.Parent)
-		_, g.test[i] = IsTestFile(s.Pos.Filename)
+		_, inTestFile := IsTestFile(s.Pos.Filename)
+		g.test[i] = inTestFile || s.TestSupport
 		// A package and a file are not judged by either relation. Their liveness
 		// is the subject of the file and package kinds, which read the load and
 		// the file-to-package edges an import records rather than asking whether

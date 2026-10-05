@@ -1,0 +1,43 @@
+Three write-only declarations: a field of a generic type whose type parameter only
+that field names, a variable whose one write is the only use of an import, and a
+variable whose one write uses an import the file uses elsewhere too.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+import (
+	"strconv"
+	"strings"
+)
+
+// box holds a value of a type nothing but held names.
+type box[T any] struct {
+	held  T
+	count int
+}
+
+// stamp is stored into through the file's one use of strconv.
+var stamp string
+
+// label is stored into through a use of strings the file makes again below.
+var label string
+
+func fill(b *box[int]) int {
+	b.held = 1
+	b.count++
+	return b.count
+}
+
+func record() {
+	stamp = strconv.Itoa(7)
+	label = strings.ToUpper("a")
+}
+
+func main() {
+	record()
+	println(fill(&box[int]{}), strings.ToLower("B"))
+}

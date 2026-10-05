@@ -838,14 +838,14 @@ func arrayOf[T ~string](label, path string, values *[]T, minItems int, allowed .
 		return malformed(label, path, "holds %d entries, want at least %d", len(*values), minItems)
 	}
 	seen := make(map[T]bool, len(*values))
-	for _, value := range *values {
+	for index, value := range *values {
 		switch {
 		case value == "":
-			return malformed(label, path, "holds an empty entry")
+			return malformed(label, entryPath(path, index), "is empty")
 		case seen[value]:
-			return malformed(label, path, "names %q twice", string(value))
+			return malformed(label, entryPath(path, index), "names %q a second time", string(value))
 		case len(allowed) > 0 && !slices.Contains(allowed, value):
-			return malformed(label, path, "%q is not one of %s", string(value), spell(allowed))
+			return malformed(label, entryPath(path, index), "%q is not one of %s", string(value), spell(allowed))
 		}
 		seen[value] = true
 	}
@@ -861,12 +861,17 @@ func patternedArray(label, path string, values *[]string, pattern *regexp.Regexp
 	if values == nil {
 		return nil
 	}
-	for _, value := range *values {
+	for index, value := range *values {
 		if !pattern.MatchString(value) {
-			return malformed(label, path, "%q %s", value, shape)
+			return malformed(label, entryPath(path, index), "%q %s", value, shape)
 		}
 	}
 	return nil
+}
+
+// entryPath names one entry of the array at path, as a refusal of that entry names it.
+func entryPath(path string, index int) string {
+	return path + "[" + strconv.Itoa(index) + "]"
 }
 
 // required refuses a member the closed key list declares as required and the

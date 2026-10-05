@@ -639,12 +639,12 @@ func TestResolveRefusesAMalformedDocument(t *testing.T) {
 		{
 			name:       "a_language_outside_the_closed_set",
 			repository: `{"target": {"kind": "library"}, "analysis": {"languages": ["go", "rust"]}}`,
-			key:        "analysis.languages",
+			key:        "analysis.languages[1]",
 		},
 		{
 			name:       "an_array_naming_one_entry_twice",
 			repository: `{"target": {"kind": "library"}, "roots": {"patterns": ["go://a#B", "go://a#B"]}}`,
-			key:        "roots.patterns",
+			key:        "roots.patterns[1]",
 		},
 		{
 			name:       "an_empty_format_list",
@@ -776,7 +776,7 @@ func TestResolveRefusesAMalformedDocument(t *testing.T) {
 		{
 			name:       "a_lifecycle_contract_naming_one_member_twice",
 			repository: `{"target": {"kind": "library"}, "ts": {"lifecycle_contracts": [{"bases": [{"global": "HTMLElement"}], "members": ["connectedCallback", "connectedCallback"]}]}}`,
-			key:        "ts.lifecycle_contracts[0].members",
+			key:        "ts.lifecycle_contracts[0].members[1]",
 		},
 		{
 			name:       "a_lifecycle_contract_whose_component_routes_are_empty",
@@ -886,7 +886,7 @@ func collectEnums(t *testing.T, declaration map[string]any, at string, into *[]e
 			*into = append(*into, enumeratedSetting{
 				at:    at,
 				value: []any{valueOutsideEveryClosedSet},
-				names: at,
+				names: at + "[0]",
 			})
 		}
 		if members, holds := entry["properties"]; holds {
@@ -970,8 +970,8 @@ func TestResolveRefusesEveryEnumeratedSettingsMalformedValue(t *testing.T) {
 	// joins the table above without a test edit; one this derivation stops
 	// reaching fails here.
 	for _, want := range []string{
-		"target.kind", "analysis.languages", "analysis.min_confidence", "analysis.generated_files",
-		"analysis.consumer_tests", "severity.DS1101", "reporters.formats", "reporters.sort",
+		"target.kind", "analysis.languages[0]", "analysis.min_confidence", "analysis.generated_files",
+		"analysis.consumer_tests", "severity.DS1101", "reporters.formats[0]", "reporters.sort",
 		"reporters.cascade", "reporters.fail_on",
 	} {
 		if !slices.ContainsFunc(found, func(setting enumeratedSetting) bool { return setting.names == want }) {
@@ -1203,7 +1203,7 @@ func TestResolveRefusesAProviderEntryOfNeitherShape(t *testing.T) {
 		{
 			name:  "a_language_no_kind_carries",
 			entry: `{"name": "example-go", "languages": ["rust"], "command": "example-go"}`,
-			key:   "providers.analyzers[0].languages",
+			key:   "providers.analyzers[0].languages[0]",
 		},
 		{
 			name:  "no_command",
