@@ -748,3 +748,119 @@ func TestReportOfOmitsTheLivenessRelationWhereTheContractForbidsIt(t *testing.T)
 		}
 	}
 }
+
+// detailsRequiredCodes reads the codes contract/finding.schema.json requires one
+// details member on, from the branch that requires it, so the test compares the
+// document against the Contract's own condition rather than against a copy of it.
+// The same branch forbids the member on every other code.
+func detailsRequiredCodes(t *testing.T, member string) []string {
+	t.Helper()
+
+	body, err := spec.Contract.ReadFile("contract/finding.schema.json")
+	if err != nil {
+		t.Fatalf("Setup: read contract/finding.schema.json: %v", err)
+	}
+	var document struct {
+		AllOf []struct {
+			If struct {
+				Properties struct {
+					Code struct {
+						Enum []string `json:"enum"`
+					} `json:"code"`
+				} `json:"properties"`
+			} `json:"if"`
+			Then struct {
+				Properties struct {
+					Details struct {
+						Required []string `json:"required"`
+					} `json:"details"`
+				} `json:"properties"`
+			} `json:"then"`
+		} `json:"allOf"`
+	}
+	if err := json.Unmarshal(body, &document); err != nil {
+		t.Fatalf("Setup: decode contract/finding.schema.json: %v", err)
+	}
+	for _, branch := range document.AllOf {
+		if slices.Contains(branch.Then.Properties.Details.Required, member) {
+			if codes := branch.If.Properties.Code.Enum; len(codes) > 0 {
+				return codes
+			}
+		}
+	}
+	t.Fatalf("Setup: contract/finding.schema.json states no branch requiring details.%s under a code", member)
+	return nil
+}
+
+// implementationsWritten is the details.implementations member of every finding of
+// one document, keyed by the code and the subject reference, with nil where the
+// member is absent.
+func implementationsWritten(t *testing.T, document []byte) map[string]json.RawMessage {
+	t.Helper()
+
+	var decoded struct {
+		Findings []struct {
+			Code   string `json:"code"`
+			Symbol struct {
+				Ref string `json:"ref"`
+			} `json:"symbol"`
+			Details map[string]json.RawMessage `json:"details"`
+		} `json:"findings"`
+	}
+	if err := json.Unmarshal(document, &decoded); err != nil {
+		t.Fatalf("decode the document this run wrote: %v\n%s", err, document)
+	}
+	written := make(map[string]json.RawMessage, len(decoded.Findings))
+	for _, found := range decoded.Findings {
+		written[found.Code+" "+found.Symbol.Ref] = found.Details["implementations"]
+	}
+	return written
+}
+
+func TestReportOfWritesAnEmptyImplementationListForAnInterfaceNothingImplements(t *testing.T) {
+	envelope := reportOfDir(t, writeModule(t, map[string]string{
+		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
+		"app.go": "package main\n\n" +
+			"// Store is used as a type, its method is called by nothing and nothing implements it.\n" +
+			"type Store interface{ Purge() }\n\n" +
+			"// unused is named by nothing and implemented by nothing.\n" +
+			"type unused interface{ Drop() }\n\n" +
+			"func main() {\n\tvar s Store\n\tprintln(s == nil)\n}\n",
+		repositoryDocument: `{"target": {"kind": "application"}}`,
+	}))
+	codes := detailsRequiredCodes(t, "implementations")
+
+	var written bytes.Buffer
+	if err := report.JSON(&written, &envelope, report.Options{}); err != nil {
+		t.Fatalf("report.JSON() = %v, want the document of the envelope", err)
+	}
+	members := implementationsWritten(t, written.Bytes())
+
+	for _, key := range []string{"DS1201 go://example.com/app#unused", "DS1203 go://example.com/app#Store.Purge"} {
+		if got, held := members[key]; !held || string(got) != "[]" {
+			t.Errorf("the document's finding %s carries implementations %s, want []: the schema requires the member on %v",
+				key, got, codes)
+		}
+	}
+	for key, got := range members {
+		code, _, _ := strings.Cut(key, " ")
+		if required := slices.Contains(codes, code); required != (got != nil) {
+			t.Errorf("the document's finding %s carries implementations %s, want the member present = %t: the schema requires it exactly on %v",
+				key, got, required, codes)
+		}
+	}
+
+	// The reader keeps the empty list, so a document read back writes it again.
+	var decoded report.Envelope
+	if err := json.Unmarshal(written.Bytes(), &decoded); err != nil {
+		t.Fatalf("decode the document this run wrote: %v", err)
+	}
+	var again bytes.Buffer
+	if err := report.JSON(&again, &decoded, report.Options{}); err != nil {
+		t.Fatalf("report.JSON() over the decoded envelope = %v", err)
+	}
+	if !bytes.Equal(written.Bytes(), again.Bytes()) {
+		t.Errorf("the document does not round-trip:\n--- written\n%s\n+++ read back and written again\n%s",
+			written.String(), again.String())
+	}
+}
