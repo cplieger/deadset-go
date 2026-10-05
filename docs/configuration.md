@@ -28,7 +28,7 @@ The analysis.
 
 | Key | Type | Default | What it does |
 | --- | --- | --- | --- |
-| `analysis.min_confidence` | `certain`, `probable`, `possible` | `probable` | The lowest confidence a finding is reported at. The default withholds the findings about a library's published API when no consumer is declared and reports every other finding. A finding below it is not reported and no count of the report stands for it, and when it is a root of its dead component no finding of that component is reported |
+| `analysis.min_confidence` | `certain`, `probable`, `possible` | `probable` | The lowest confidence a finding is reported at. The default withholds the findings about a library's published API when no consumer is declared. A finding below it is not reported and no count of the report stands for it, and when it is a root of its dead component no finding of that component is reported |
 | `analysis.generated_files` | `exclude`, `include` | `exclude` | Whether declarations in generated files are judged. `include` reports them and marks every such finding as one no mechanical edit may act on |
 | `analysis.consumer_tests` | `test`, `production` | `test` | How a reference from a loaded consumer's test file counts |
 | `analysis.configurations` | array of objects | `[]` | The build matrix. A platform entry names an `id`, an `os`, an `arch` and optional `tags`. A project entry names an `id` and a TypeScript `project` file, which this analyzer ignores. With no platform entry the matrix derives from the target tree |

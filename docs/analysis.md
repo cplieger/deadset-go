@@ -99,7 +99,9 @@ The analysis runs one load per build configuration and intersects the answers. A
 
 What a configuration that fails to load does to the run depends on who named it. A configuration the configuration document declared is an assertion that the target builds it. So a load that fails ends the run, rather than intersecting over the survivors, which would be systematically more permissive than the truth.
 
-A configuration the analyzer derived from the target's own source is its own guess, so a failed load or a setup failure drops it from the matrix. The run then answers over the configurations the target does build. Each dropped configuration is named on stderr and in the report's `configurations_not_built` member, with the first line of the error that dropped it. An identifier is in that array or in the matrix, never in both.
+A configuration the analyzer derived from a platform atom of the target's own source is its own guess, so a failed load or a setup failure drops it from the matrix. The run then answers over the configurations the target does build. Each dropped configuration is named on stderr and in the report's `configurations_not_built` member, with the first line of the error that dropped it. An identifier is in that array or in the matrix, never in both.
+
+The host's own configuration is never dropped, so a target that does not build on the host ends the run with exit 3.
 
 A load fails when the toolchain reports an error while listing the configuration's packages, or when a package of the target, of a declared consumer, or one importing either, does not parse. It also fails when one of those packages outside the target does not type-check. A type error in a package of the target skips the declaration holding it, and the report lists the skip in `type_error_skips`.
 
