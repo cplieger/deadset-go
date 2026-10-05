@@ -2,9 +2,12 @@ package kinds
 
 import (
 	"go/ast"
+	"slices"
 	"strings"
 
 	"github.com/cplieger/deadset-go/internal/graph"
+	"github.com/cplieger/deadset-go/internal/load"
+	"golang.org/x/tools/go/packages"
 )
 
 // The codes of the unused-declaration kinds.
@@ -275,15 +278,27 @@ func testFile(symbol *graph.Symbol) bool {
 	return test
 }
 
-// testSupport reports whether a test-support package declares one symbol, under any
-// configuration of the run.
+// testSupport reports whether a test-support package declares one symbol: every
+// configuration of the run that loads the package classified it as one. A
+// production import under one configuration makes the package production code,
+// whatever another configuration that compiles none of its importers says.
 func (in *Input) testSupport(symbol *graph.Symbol) bool {
+	support := false
 	for _, one := range in.Per {
-		if one.Result != nil && one.Result.TestSupport[symbol.PkgPath] {
-			return true
+		switch {
+		case one.Result == nil:
+		case one.Result.TestSupport[symbol.PkgPath]:
+			support = true
+		case loads(one.Result, symbol.PkgPath):
+			return false
 		}
 	}
-	return false
+	return support
+}
+
+// loads reports whether one configuration loaded the package at path.
+func loads(r *load.Result, path string) bool {
+	return slices.ContainsFunc(r.Packages, func(p *packages.Package) bool { return p.PkgPath == path })
 }
 
 // deprecations is every declaration of the inventory carrying a deprecation

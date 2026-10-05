@@ -42,7 +42,7 @@ func suppressed(t *testing.T, archive string, resolved config.Config) *Input {
 		Exempt: in.Exempt,
 		Marked: boundMarks(in.Marks),
 		Mode:   graph.Mode{Production: true},
-	})
+	}, nil)
 	in.Sweep = &swept
 	// The index caches the sweep's answers, so the sweep the marks produced is the
 	// one every lookup of this input reads.
@@ -517,7 +517,7 @@ func TestWithoutTheMarkTheDeadComponentsRootIsReportedAndTheComponentFalls(t *te
 	// The same input with the mark withdrawn, which is the run a maintainer makes
 	// after deleting the directive.
 	in.Marks = nil
-	swept := graph.NewMatrix(in.Merged).Sweep(graph.SweepInput{Exempt: in.Exempt, Mode: graph.Mode{Production: true}})
+	swept := graph.NewMatrix(in.Merged).Sweep(graph.SweepInput{Exempt: in.Exempt, Mode: graph.Mode{Production: true}}, nil)
 	in.Sweep = &swept
 	in.indexed = nil
 
@@ -553,7 +553,7 @@ func TestASuppressionWithholdsTheFindingItsCodeWouldHaveProducedWhateverTheKind(
 	// makes after deleting them: it is what says the two withheld findings exist.
 	bare := suppressed(t, "selfcheck-withheld.txtar", applicationConfig())
 	bare.Marks = nil
-	swept := graph.NewMatrix(bare.Merged).Sweep(graph.SweepInput{Exempt: bare.Exempt, Mode: graph.Mode{Production: true}})
+	swept := graph.NewMatrix(bare.Merged).Sweep(graph.SweepInput{Exempt: bare.Exempt, Mode: graph.Mode{Production: true}}, nil)
 	bare.Sweep = &swept
 	bare.indexed = nil
 	want := []string{

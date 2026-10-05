@@ -32,7 +32,7 @@ func inputForDir(t *testing.T, dir, subject string) *Input {
 // renderConversions prints one conversion per line, tab-separated, for a golden
 // comparison. Each position is rendered against the target root, so the temporary
 // directory the archive was written to does not reach the golden.
-func renderConversions(t *testing.T, in *Input, sites []conversion) string {
+func renderConversions(t *testing.T, in *Input, sites []graph.Conversion) string {
 	t.Helper()
 	var b strings.Builder
 	for i := range sites {
@@ -42,7 +42,7 @@ func renderConversions(t *testing.T, in *Input, sites []conversion) string {
 			t.Fatalf("Resolve.Render(%v) error: %v", c.Site, err)
 		}
 		fmt.Fprintf(&b, "%s:%d:%d\t%s\t%s\timplements=%t\n",
-			at.Filename, at.Line, at.Column, c.From, c.name, types.Implements(c.From, c.To))
+			at.Filename, at.Line, at.Column, c.From, c.Name, types.Implements(c.From, c.To))
 	}
 	return b.String()
 }
@@ -70,7 +70,7 @@ func compareGolden(t *testing.T, name, subject, got string) {
 
 func TestConversionsGoldenTableOverEverySyntacticShape(t *testing.T) {
 	in := inputOf(t, "conversion-shapes.txtar", Options{})
-	sites, err := conversionSites(in)
+	sites, err := Conversions(in)
 	if err != nil {
 		t.Fatalf("Conversions(conversion-shapes.txtar) error: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestConversionsGoldenTableOverEverySyntacticShape(t *testing.T) {
 
 func TestConversionsRecordsNeitherAnAssertionNorATypeSwitchNorADeclaration(t *testing.T) {
 	in := inputOf(t, "conversion-shapes.txtar", Options{})
-	sites, err := conversionSites(in)
+	sites, err := Conversions(in)
 	if err != nil {
 		t.Fatalf("Conversions(conversion-shapes.txtar) error: %v", err)
 	}
@@ -100,11 +100,11 @@ func TestConversionsRecordsNeitherAnAssertionNorATypeSwitchNorADeclaration(t *te
 
 func TestConversionsIsIndependentOfTheOrderItIsCalledIn(t *testing.T) {
 	in := inputOf(t, "conversion-shapes.txtar", Options{})
-	first, err := conversionSites(in)
+	first, err := Conversions(in)
 	if err != nil {
 		t.Fatalf("Conversions(conversion-shapes.txtar) first call error: %v", err)
 	}
-	second, err := conversionSites(in)
+	second, err := Conversions(in)
 	if err != nil {
 		t.Fatalf("Conversions(conversion-shapes.txtar) second call error: %v", err)
 	}

@@ -1,0 +1,29 @@
+One error type a production file returns into an error result and a test file,
+whose name sorts first, assigns to an error variable.
+
+-- go.mod --
+module example.com/errorsduck
+
+go 1.27.1
+-- fault.go --
+package errorsduck
+
+type fault struct{ cause error }
+
+func (f *fault) Error() string { return "fault" }
+
+func (f *fault) Is(target error) bool { return target == f.cause }
+
+// Fail returns a value of fault at a position typed as error.
+func Fail(cause error) error { return &fault{cause: cause} }
+-- a_test.go --
+package errorsduck
+
+import "testing"
+
+func TestFault(t *testing.T) {
+	var err error = &fault{}
+	if err.Error() != "fault" {
+		t.Error("the fault does not say fault")
+	}
+}

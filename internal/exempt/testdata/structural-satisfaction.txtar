@@ -1,0 +1,90 @@
+Five types answering interfaces no expression converts them to: one reaches a
+type parameter's constraint as a type argument, one reaches an empty interface
+that a type assertion then narrows to another interface, one reaches the empty
+interface in a test file alone, one reaches it in a test file of one package and
+in a source file of another, and one reaches no interface at all.
+
+-- go.mod --
+module example.com/structural
+
+go 1.27.0
+-- structural.go --
+// Package structural holds types an interface reaches only structurally.
+package structural
+
+type closer interface{ Close() error }
+
+type namer interface{ Name() string }
+
+type instantiated struct{}
+
+func (instantiated) Close() error { return nil }
+
+type asserted struct{}
+
+func (asserted) Name() string { return "asserted" }
+
+type tested struct{}
+
+func (tested) Name() string { return "tested" }
+
+// Shared is converted by a test file of one package and a source file of another.
+type Shared struct{}
+
+// Name answers namer.
+func (Shared) Name() string { return "shared" }
+
+type unreached struct{}
+
+func (unreached) Name() string { return "unreached" }
+
+func shut[T closer](v T) error { return v.Close() }
+
+// Shut closes a value through a constraint.
+func Shut() error { return shut(instantiated{}) }
+
+// Held boxes a value in an empty interface.
+func Held() any { return asserted{} }
+
+// NameOf names a value an assertion finds to be a namer.
+func NameOf(v any) string {
+	if n, ok := v.(namer); ok {
+		return n.Name()
+	}
+	return unreached{}.Name()
+}
+-- a_test.go --
+package structural
+
+import "testing"
+
+func TestNameOf(t *testing.T) {
+	if NameOf(tested{}) != "tested" {
+		t.Error("NameOf(tested{}) is not tested")
+	}
+}
+-- user/user.go --
+// Package user names a shared value.
+package user
+
+import "example.com/structural"
+
+// Name names the shared value.
+func Name() string { return structural.NameOf(structural.Shared{}) }
+-- aa/aa.go --
+// Package aa sorts before user and converts the shared value only in its test.
+package aa
+-- aa/aa_test.go --
+package aa
+
+import (
+	"testing"
+
+	"example.com/structural"
+)
+
+func TestShared(t *testing.T) {
+	if structural.NameOf(structural.Shared{}) != "shared" {
+		t.Error("the shared value is not named shared")
+	}
+}

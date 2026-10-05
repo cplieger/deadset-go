@@ -46,7 +46,7 @@ func narrowingInput(
 		sink.Fatalf("Setup: graph.Merge: %v", err)
 	}
 	mode := graph.Mode{Production: true}
-	swept := graph.NewMatrix(&merged).Sweep(graph.SweepInput{Mode: mode})
+	swept := graph.NewMatrix(&merged).Sweep(graph.SweepInput{Mode: mode}, nil)
 	refs := make(map[graph.SymbolID]string, len(merged.Symbols))
 	for i := range merged.Symbols {
 		refs[merged.Symbols[i].ID] = merged.Symbols[i].Ref

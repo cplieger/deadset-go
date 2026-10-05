@@ -83,6 +83,11 @@ type Result struct {
 	// classification turns on the target kind.
 	TestSupport map[string]bool
 
+	// Programs holds the target's files run on their own under the ignore tag,
+	// which no package of the target compiles and every stage but the root
+	// detection leaves alone.
+	Programs []Program
+
 	// ExcludedByCgo holds the target-relative paths, forward slashes, of the
 	// files the toolchain ignored for importing "C" that the opaque-C check could
 	// not read either. References those files make are outside the reference set,
@@ -149,6 +154,7 @@ func Load(ctx context.Context, doc scope.Document, c Configuration) (Result, err
 		return Result{}, fmt.Errorf("load %s: %w", c.ID, err)
 	}
 	excluded := checkOpaqueC(ctx, fset, target, pkgs, cgo, c)
+	programs := checkPrograms(ctx, fset, target, pkgs, c)
 
 	consumers, err := loadConsumers(ctx, fset, &doc, c, pkgs)
 	if err != nil {
@@ -161,6 +167,7 @@ func Load(ctx context.Context, doc scope.Document, c Configuration) (Result, err
 		Consumers:     consumers,
 		Fset:          fset,
 		ExcludedByCgo: excluded,
+		Programs:      programs,
 	}, nil
 }
 
@@ -181,6 +188,11 @@ func loadPackages(ctx context.Context, fset *token.FileSet, dir string, c Config
 	if err != nil {
 		return nil, nil, err
 	}
+	for _, p := range pkgs {
+		if unbuilt(p) {
+			p.Errors = nil
+		}
+	}
 	if diagnostics := collect(pkgs); len(diagnostics) > 0 {
 		if failure := setupFailures(diagnostics, expectedModules(ctx, dir, c, workspace, pkgs)); failure != nil {
 			return nil, nil, failure
@@ -194,6 +206,20 @@ func loadPackages(ctx context.Context, fset *token.FileSet, dir string, c Config
 		return nil, diagnostics, nil
 	}
 	return pkgs, nil, nil
+}
+
+// unbuilt reports whether one package of the main module is a directory whose
+// every Go file the configuration's constraints exclude, which the pattern still
+// names and the configuration does not build. The toolchain reports such a
+// package with a positionless error only while its build cache holds no entry for
+// it, so the error is dropped and the package is read the same way on every run.
+func unbuilt(p *packages.Package) bool {
+	if p.Module == nil || !p.Module.Main || len(p.GoFiles) > 0 || len(p.CompiledGoFiles) > 0 || len(p.IgnoredFiles) == 0 {
+		return false
+	}
+	return len(p.Errors) > 0 && !slices.ContainsFunc(p.Errors, func(e packages.Error) bool {
+		return e.Kind != packages.ListError || e.Pos != ""
+	})
 }
 
 // loadEnv is the environment every load of configuration c runs the toolchain

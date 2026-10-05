@@ -940,11 +940,10 @@ func analysisOf(ctx context.Context, resolved *resolution, options *exempt.Optio
 		refusals:   refusals,
 		mode:       mode,
 		swept: loaded.matrix.Sweep(graph.SweepInput{
-			Marked:       bound(marks),
-			Exempt:       exemptions,
-			TestEvidence: graph.TestReferencesOf(held.testEvidence),
-			Mode:         mode,
-		}),
+			Marked: bound(marks),
+			Exempt: exemptions,
+			Mode:   mode,
+		}, graph.TestReferencesOf(held.testEvidence)),
 	}, nil
 }
 

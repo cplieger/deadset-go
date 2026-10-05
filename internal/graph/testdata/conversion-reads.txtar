@@ -1,0 +1,56 @@
+One command whose conversions to interfaces need what no identifier at the site
+names: a method two struct types promote from one embedded field, reached by a
+conversion in a function, by a package-level variable and by a type argument;
+an interface value converted to a narrower interface declaring its own method;
+and an interface value converted to an interface it embeds.
+
+-- go.mod --
+module example.com/conv
+
+go 1.27.1
+-- conv.go --
+package main
+
+type closer interface{ Close() error }
+
+type base struct{}
+
+func (base) Close() error { return nil }
+
+type converted struct {
+	base
+}
+
+type held struct {
+	base
+}
+
+type instantiated struct {
+	base
+}
+
+type wide interface {
+	Close() error
+	Flush()
+}
+
+type embedding interface {
+	closer
+	Flush()
+}
+
+var global closer = held{}
+
+func shut[T closer](v T) error { return v.Close() }
+
+func convert() closer { return converted{} }
+
+func instantiate() error { return shut(instantiated{}) }
+
+func narrow(w wide) closer { return w }
+
+func widen(e embedding) closer { return e }
+
+func main() {
+	println(convert(), global, instantiate(), narrow(nil), widen(nil))
+}

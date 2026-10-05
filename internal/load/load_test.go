@@ -523,3 +523,20 @@ func TestSameDiagnosticKeysAPositionedProblemOnItsSourceSite(t *testing.T) {
 		})
 	}
 }
+
+// A package whose every file but its external test the configuration excludes is
+// one the pattern names and the configuration does not build. The toolchain
+// reports it with an error only while its build cache holds no entry for it, so
+// the load answers the same on a cold cache as on a warm one.
+func TestLoadReadsAPackageTheConfigurationBuildsNoFileOfTheSameOnAColdBuildCache(t *testing.T) {
+	stableToolchain(t)
+	t.Setenv("GOCACHE", t.TempDir())
+
+	got, err := Load(t.Context(), fixtureScope(t, "unbuilt"), Configuration{ID: "linux-amd64", OS: "linux", Arch: "amd64"})
+	if err != nil {
+		t.Fatalf("Load(testdata/unbuilt) on an empty build cache = _, %v, want no error", err)
+	}
+	if p := findPackage(got, "example.com/unbuilt"); p == nil || len(p.GoFiles) != 1 {
+		t.Errorf("Load(testdata/unbuilt) carries %v for the built package, want its one file", p)
+	}
+}

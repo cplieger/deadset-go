@@ -674,3 +674,53 @@ func TestReferencesRecordsAComparisonsReadsAtTheComparisonSite(t *testing.T) {
 		})
 	}
 }
+
+func TestReferencesReadWhatAConversionRequiresOfTheValueItConverts(t *testing.T) {
+	a := analyze(t, "conversion-reads.txtar")
+
+	cases := []struct {
+		name string
+		from string
+		to   string
+		want int
+	}{
+		{name: "an_embedded_field_promoting_a_required_method_in_a_function", from: "convert", to: "converted.base", want: 1},
+		{name: "an_embedded_field_promoting_a_required_method_in_a_variable", from: "global", to: "held.base", want: 1},
+		{name: "an_embedded_field_promoting_a_constraint_method_to_a_type_argument", from: "instantiate", to: "instantiated.base", want: 1},
+		{name: "a_method_of_an_interface_converted_to_one_declaring_its_own", from: "narrow", to: "wide.Close", want: 1},
+		{name: "a_method_of_an_interface_converted_to_the_interface_it_embeds", from: "widen", to: "closer.Close", want: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := a.count(tc.from, tc.to, RefRead); got != tc.want {
+				t.Errorf("References(conversion-reads.txtar) holds %d read references from %s to %s, want %d",
+					got, tc.from, tc.to, tc.want)
+			}
+		})
+	}
+}
+
+func TestReferencesResolveTheMembersSelectedOnAGoConversionOfACValue(t *testing.T) {
+	a := analyze(t, "cgo-conversion.txtar")
+
+	cases := []struct {
+		name string
+		from string
+		to   string
+		kind RefKind
+		want int
+	}{
+		{name: "a_method_of_the_converted_value", from: "direct", to: "count.double", kind: RefCall, want: 1},
+		{name: "a_method_promoted_to_a_variable_a_conversion_initialized", from: "throughVariable", to: "inner.depth", kind: RefCall, want: 1},
+		{name: "the_embedded_field_the_promotion_passes_through", from: "throughVariable", to: "wrapper.inner", kind: RefRead, want: 1},
+		{name: "a_method_nothing_selects", from: "direct", to: "count.unused", kind: RefCall, want: 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := a.count(tc.from, tc.to, tc.kind); got != tc.want {
+				t.Errorf("References(cgo-conversion.txtar) holds %d %s references from %s to %s, want %d",
+					got, tc.kind, tc.from, tc.to, tc.want)
+			}
+		})
+	}
+}

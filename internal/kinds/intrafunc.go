@@ -170,6 +170,10 @@ type intrafunc struct {
 	// is a function used as a value: its signature is fixed by the func or
 	// interface type the value reaches.
 	valued map[graph.SymbolID]bool
+
+	// twins is every function and method by package, receiver type and name, to
+	// the files that declare it.
+	twins map[string]map[string]bool
 }
 
 // intraFunc prepares what these kinds read, once per findings pass.
@@ -179,6 +183,7 @@ func (in *Input) intraFunc() *intrafunc {
 		exempted: make(map[graph.SymbolID]bool, len(in.Exempt)),
 		foreign:  make(map[graph.SymbolID]bool),
 		valued:   make(map[graph.SymbolID]bool),
+		twins:    platformTwins(in),
 	}
 	for _, exemption := range in.Exempt {
 		g.exempted[exemption.ID] = true
@@ -201,32 +206,14 @@ func (in *Input) intraFunc() *intrafunc {
 	return g
 }
 
-// freeSignature reports whether the signature of one declaration is free to
-// change, which is the precondition of every kind of this group that reports a
-// part of a signature.
-//
-// The four reasons a signature is not free, each a reason the part answers to
-// something other than the body:
-//
-//   - an exemption class retained the declaration, which is a mechanism reaching
-//     it by name: satisfying an interface, answering a duck-typed contract, being
-//     named by a template, a marshaller or a reflective lookup. A parameter a
-//     satisfied interface's method requires is what that retention covers.
-//   - a reference names the declaration outside call position, so a value of its
-//     type reaches a func or an interface type that fixes the signature.
-//   - a caller outside the source names it: the linker through a go:linkname
-//     directive, C through an export directive, or the test driver, which calls a
-//     test, a benchmark, a fuzz test and TestMain with the signature the toolchain
-//     requires of each.
-//   - the body is a stub, so the signature exists for the declaration's callers
-//     and the body was never written to use it.
-//
-// A published declaration of a library is free, whatever the run knows about the
-// library's consumers: a parameter its own body never reads is one no caller can
-// make it read, so the finding stands on a published surface and the fixability the
-// vocabulary gives the kind says what an edit there costs. What a caller outside the
-// graph does decide is whether a RESULT is used, which [intrafunc.callersUnknown]
-// answers for the one kind that asks.
+// freeSignature reports whether one declaration's signature answers only to its
+// body, the precondition of every kind of this group that reports a part of a
+// signature: it is not free when the declaration is [intrafunc.exempted],
+// [intrafunc.valued] or [intrafunc.foreign], or when its body is a stub, which
+// exists for its callers. A library's published declaration is free whatever the
+// run knows of its consumers, since no caller can make a body read a parameter;
+// [intrafunc.callersUnknown] answers for the one kind a caller outside the graph
+// decides.
 func (g *intrafunc) freeSignature(id graph.SymbolID, decl *ast.FuncDecl) bool {
 	switch {
 	case g.exempted[id], g.valued[id], g.foreign[id]:
@@ -236,6 +223,16 @@ func (g *intrafunc) freeSignature(id graph.SymbolID, decl *ast.FuncDecl) bool {
 	default:
 		return true
 	}
+}
+
+// twinned reports whether another file of the declaration's package declares it
+// too, for another build configuration: every configuration's callers pass its
+// parameters, and each body is one platform's answer to them. A receiver's name is
+// no part of the signature, and a result every visible call discards is decided by
+// those calls.
+func (g *intrafunc) twinned(id graph.SymbolID, decl *ast.FuncDecl) bool {
+	symbol := g.in.symbol(id)
+	return symbol != nil && decl != nil && len(g.twins[twinKey(symbol.PkgPath, decl)]) > 1
 }
 
 // callersUnknown reports whether one declaration is part of a library's importable
@@ -460,7 +457,7 @@ func (g *intrafunc) parameters(code string) ([]Finding, error) {
 	for i := range g.in.Per {
 		one := &g.in.Per[i]
 		for _, fn := range functions(one) {
-			if !g.freeSignature(fn.id, fn.decl) {
+			if !g.freeSignature(fn.id, fn.decl) || (code == unusedParameterCode && g.twinned(fn.id, fn.decl)) {
 				continue
 			}
 			fields := fn.decl.Type.Params

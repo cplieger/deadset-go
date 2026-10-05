@@ -26,7 +26,7 @@ import (
 // interface kinds judge separately: the assertion retains the methods here and is
 // still reported when nothing else uses the interface as a type.
 func InterfaceSatisfactionDetector(in *Input) ([]graph.Exemption, error) {
-	sites, err := conversionSites(in)
+	sites, err := Conversions(in)
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +54,7 @@ func InterfaceSatisfactionDetector(in *Input) ([]graph.Exemption, error) {
 				ID:     id,
 				Class:  string(InterfaceSatisfaction),
 				Site:   site,
-				Detail: "satisfies " + c.name,
+				Detail: "satisfies " + c.Name,
 			})
 		}
 	}

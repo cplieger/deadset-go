@@ -1,6 +1,8 @@
 package kinds
 
 import (
+	"go/types"
+	"iter"
 	"slices"
 	"strings"
 
@@ -44,13 +46,13 @@ func (c Class) lower(other Class) Class {
 }
 
 // ClassOf is the reachability class of one declaration under this run. It is
-// certain wherever no reference can come from outside the graph: a subject with no
-// declaration, an unexported declaration, a declaration of a test file, a type
-// parameter of a function or method, any declaration of an application, and an
-// exported one in a main package, an external test package or an internal tree. An
-// exported declaration of a library's importable surface is certain where every
-// declared consumer loaded, probable where some did not, and possible with no
-// consumer information; whether the consumer set is declared complete decides nothing.
+// certain wherever no reference can come from outside the graph: no declaration, an
+// unexported one, a test file's, a function's type parameter, an application's, an
+// exported one in a main package, an external test package or an internal tree, and
+// a member [Input.hiddenMember] reports. An exported declaration of a library's
+// importable surface is certain where every declared consumer loaded, probable where
+// some did not, and possible with no consumer information; whether the consumer set
+// is declared complete decides nothing.
 func (in *Input) ClassOf(id graph.SymbolID) Class {
 	symbol := in.symbol(id)
 	switch {
@@ -61,6 +63,8 @@ func (in *Input) ClassOf(id graph.SymbolID) Class {
 	case testFile(symbol):
 		return Certain
 	case !in.importable(symbol.PkgPath):
+		return Certain
+	case in.hiddenMember(symbol):
 		return Certain
 	case in.Config == nil || in.Config.Target.Kind != config.Library:
 		return Certain
@@ -137,4 +141,108 @@ func (in *Input) importable(pkgPath string) bool {
 // declared complete, which is what the class is about.
 func (in *Input) consumersLoaded() bool {
 	return in.Consumers.Complete && in.everyDeclaredLoaded()
+}
+
+// hiddenMember reports whether one declaration is a field of an unexported type,
+// or a method of an unexported interface, that no exported declaration of its
+// package exposes, so no code outside the module holds a value to select it on. A
+// concrete type's method is never hidden: a value converted to an interface carries
+// it out, where an assertion calls it. A field of an anonymous struct belongs to
+// the type that holds the struct.
+func (in *Input) hiddenMember(symbol *graph.Symbol) bool {
+	switch symbol.Kind {
+	case graph.KindField, graph.KindInterfaceMethod:
+	default:
+		return false
+	}
+	owner := in.symbol(symbol.Parent)
+	for owner != nil && owner.Kind == graph.KindField {
+		owner = in.symbol(owner.Parent)
+	}
+	if owner == nil || owner.Exported || (owner.Kind != graph.KindType && owner.Kind != graph.KindInterface) {
+		return false
+	}
+	held := in.index()
+	if held.exposed == nil {
+		held.exposed = exposedTypes(in)
+	}
+	return !held.exposed[owner.ID]
+}
+
+// exposedTypes is every type of the target that code outside its package can name
+// or hold a value of: an exported type, and every type an exported declaration's
+// type spells, closed over the exported fields, the embedded fields and the
+// exported methods of every type it holds.
+func exposedTypes(in *Input) map[graph.SymbolID]bool {
+	exposed := make(map[graph.SymbolID]bool)
+	for one, p := range in.typedPackages() {
+		for name := range exposedIn(p.Types) {
+			if id, held := one.Resolve.Object(name); held {
+				exposed[id] = true
+			}
+		}
+	}
+	return exposed
+}
+
+// exposedIn is every type of one package that code outside it can name or hold a
+// value of.
+func exposedIn(pkg *types.Package) map[*types.TypeName]bool {
+	reached := make(map[*types.TypeName]bool)
+	var queue []*types.TypeName
+	visit := func(t types.Type) {
+		named := make(map[*types.TypeName]bool)
+		typeNamesIn(named, pkg.Path(), t)
+		for name := range named {
+			if !reached[name] {
+				reached[name] = true
+				queue = append(queue, name)
+			}
+		}
+	}
+	scope := pkg.Scope()
+	for _, name := range scope.Names() {
+		if object := scope.Lookup(name); object.Exported() {
+			visit(object.Type())
+		}
+	}
+	for len(queue) > 0 {
+		name := queue[0]
+		queue = queue[1:]
+		visitMembers(name, visit)
+	}
+	return reached
+}
+
+// visitMembers visits the type of every member of one type that code outside its
+// package can reach: the exported methods, the exported and embedded fields, and
+// the embedded interfaces, an embedded type promoting its own exported members.
+func visitMembers(name *types.TypeName, visit func(types.Type)) {
+	if named, ok := name.Type().(*types.Named); ok {
+		visitExported(named.Methods(), visit)
+	}
+	switch u := name.Type().Underlying().(type) {
+	case *types.Struct:
+		for field := range u.Fields() {
+			if field.Exported() || field.Embedded() {
+				visit(field.Type())
+			}
+		}
+	case *types.Interface:
+		visitExported(u.Methods(), visit)
+		for embedded := range u.EmbeddedTypes() {
+			visit(embedded)
+		}
+	default:
+		visit(u)
+	}
+}
+
+// visitExported visits the type of every exported method of a sequence.
+func visitExported(methods iter.Seq[*types.Func], visit func(types.Type)) {
+	for method := range methods {
+		if method.Exported() {
+			visit(method.Type())
+		}
+	}
 }

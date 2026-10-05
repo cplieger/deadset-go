@@ -1,0 +1,30 @@
+A command declaring one function and one method once per operating system,
+whose linux bodies leave a parameter and the receiver unread, beside a function
+declared once that leaves a parameter unread.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- main.go --
+package main
+
+func main() {
+	println(open("x", 1), solo("y", 2), disk{}.free("z"))
+}
+
+type disk struct{ size int }
+
+func solo(path string, mode int) int { return len(path) }
+-- open_linux.go --
+package main
+
+func open(path string, mode int) int { return len(path) }
+
+func (d disk) free(path string) int { return len(path) }
+-- open_windows.go --
+package main
+
+func open(path string, mode int) int { return len(path) + mode }
+
+func (d disk) free(path string) int { return d.size - len(path) }

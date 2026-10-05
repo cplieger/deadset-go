@@ -57,7 +57,7 @@ func sweepCgo(t *testing.T) *cgoGraph {
 		roots:      make(map[string][]RootKind),
 		files:      make(map[string]bool),
 		excluded:   result.ExcludedByCgo,
-		swept:      NewMatrix(&merged).Sweep(SweepInput{}),
+		swept:      NewMatrix(&merged).Sweep(SweepInput{}, nil),
 	}
 	for _, s := range merged.Symbols {
 		g.byID[s.ID] = s

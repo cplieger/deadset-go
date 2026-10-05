@@ -718,6 +718,7 @@ func TestRootKindStringNamesEveryKind(t *testing.T) {
 		{RootPublishedAPI, "published-api"},
 		{RootConfigured, "configured"},
 		{RootPattern, "pattern"},
+		{RootProgram, "program"},
 		{RootKind(200), "RootKind(200)"},
 	}
 	for _, test := range cases {
@@ -726,5 +727,27 @@ func TestRootKindStringNamesEveryKind(t *testing.T) {
 				t.Errorf("RootKind(%d).String() = %q, want %q", test.kind, got, test.want)
 			}
 		})
+	}
+}
+
+func TestRootsRootsWhatAProgramUnderTheIgnoreTagNames(t *testing.T) {
+	d := analysisOf(t, "programs.txtar", nil)
+	roots, _ := d.rootsUnder(t, false)
+	names := make(map[SymbolID]string)
+	for _, s := range d.inventory(t) {
+		names[s.ID] = s.Name
+	}
+	var programs []string
+	for _, r := range roots {
+		if r.Kind == RootProgram {
+			programs = append(programs, names[r.ID])
+		}
+	}
+
+	// Generate is what the generator program calls. Ignored is called by an
+	// ignored file of a library package, which go run cannot run, and Tooled by a
+	// program behind another tag, so neither is a program's.
+	if want := []string{"Generate"}; !slices.Equal(programs, want) {
+		t.Errorf("Roots(programs.txtar) roots %v as a program's, want %v", programs, want)
 	}
 }

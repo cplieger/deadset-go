@@ -271,7 +271,7 @@ func distinct(refs []Reference) []Reference {
 // it is dead, while an exemption or a mark that held a symbol back under any
 // configuration is in effect, because a suppression needed on one platform is not
 // stale.
-func (x *Matrix) Sweep(in SweepInput) Result {
+func (x *Matrix) Sweep(in SweepInput, evidence TestEvidence) Result {
 	per := make([]Result, len(x.per))
 	held := make([]map[SymbolID]Candidate, len(x.per))
 	r := Result{LiveUnder: make(map[SymbolID]RelationSet)}
@@ -296,7 +296,7 @@ func (x *Matrix) Sweep(in SweepInput) Result {
 		if !candidate {
 			continue
 		}
-		c.TestRefs += in.TestEvidence[c.ID]
+		c.TestRefs += evidence[c.ID]
 		dead[i] = true
 		testOfDeadCode[i] = c.TestOfDeadCode
 		r.Candidates = append(r.Candidates, c)

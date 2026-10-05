@@ -37,8 +37,10 @@ A root makes a symbol live under reachability. `deadset-go print-roots` prints t
 | `published-api` | An exported symbol of a non-internal package, when the target is declared a library |
 | `configured` | An exact symbol reference from `roots.patterns` |
 | `pattern` | A pattern from `roots.patterns` |
+| `type-error` | A declaration a type error skipped, and every method and field of a type an unresolved selector in it could name |
+| `program` | A declaration named by a `package main` file that only the `ignore` build tag includes, which `go run` runs on its own |
 
-Every root but `published-api` names an actual caller, which is the runtime, the test binary, the linker, C code, or the maintainer asserting one. Those are live under both relations, so a test function is never reported as unreferenced.
+Every root but `published-api` and `type-error` names an actual caller, which is the runtime, the test binary, the linker, C code, `go run`, or the maintainer asserting one. A `type-error` root withholds a judgement the type error made impossible. Those are live under both relations, so a test function is never reported as unreferenced.
 
 `published-api` is the one root that only hypothesises a caller. It makes a library's exported symbol live under reachability, so the symbol's closure is not a dead component. The symbol itself stays a candidate under reference counting, which is what `DS1001` answers at the confidence the consumer model gives it.
 

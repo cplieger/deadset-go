@@ -144,7 +144,7 @@ func envelopeOfDir(t *testing.T, dir string, kind config.TargetKind) (Envelope, 
 	if err != nil {
 		t.Fatalf("Setup: graph.Merge(%s): %v", dir, err)
 	}
-	swept := graph.NewMatrix(&merged).Sweep(graph.SweepInput{Exempt: exemptions, TestEvidence: graph.TestReferencesOf(testEvidence), Mode: mode})
+	swept := graph.NewMatrix(&merged).Sweep(graph.SweepInput{Exempt: exemptions, Mode: mode}, graph.TestReferencesOf(testEvidence))
 
 	refs := make(map[graph.SymbolID]string, len(merged.Symbols))
 	for i := range merged.Symbols {

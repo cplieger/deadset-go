@@ -918,6 +918,10 @@ type index struct {
 	// caps is each dead component's confidence cap by its index, computed on first use.
 	caps map[int]Class
 
+	// exposed is every type code outside its package can reach, computed on first
+	// use and nil until then.
+	exposed map[graph.SymbolID]bool
+
 	// deprecated is every declaration carrying a deprecation marker, and
 	// enumerated every constant of an enumerated type with the type's name. Both
 	// are read from the syntax on first use, because the kinds that need them are
