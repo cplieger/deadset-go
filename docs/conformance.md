@@ -4,7 +4,7 @@ This page states what deadset-go implements, what it declines, where it runs and
 
 ## The contract version
 
-deadset-go implements deadset contract version **5.2.0**, and writes and reads report schema version 7.0.0. Every report names both, and `deadset-go describe` prints them with the analyzer's own version as JSON:
+deadset-go implements deadset contract version 5.2.0, and writes and reads report schema version 7.0.0. Every report names both, and `deadset-go describe` prints them with the analyzer's own version as JSON:
 
 ```sh
 deadset-go describe
@@ -14,7 +14,7 @@ A consumer that requires a particular contract version reads it from that output
 
 ## The conformance corpus
 
-The contract publishes a conformance corpus, a set of fixtures each carrying its own expectation, and deadset-go runs it as part of its own test suite. The corpus version this analyzer answers is **2.2.0**, which publishes 89 fixtures, and the run answers the **52** fixtures of it that carry a Go rendering. Every one of them passes, none is a gap and none fails.
+The contract publishes a conformance corpus, a set of fixtures each carrying its own expectation, and deadset-go runs it as part of its own test suite. The corpus version this analyzer answers is 2.2.0, which publishes 89 fixtures, and the run answers the 52 fixtures of it that carry a Go rendering. Every one of them passes, none is a gap and none fails.
 
 Every report names the result in its `analyzer.conformance` block, with the corpus version answered and the digest of the results document the corpus run wrote. `describe` prints the same record. That document, `conformance-results.json` at the repository root, names the version of the build that ran the corpus. Under the test suite that version is `0.0.0-devel`, so the committed document is reproducible from the source at its commit, and its digest binds the record to that source. A merge admits a report whose result is a pass and no other, so a consumer gating on conformance reads that block rather than assuming one.
 

@@ -6,7 +6,7 @@
 
 deadset-go finds dead code in a Go module and in the repositories that import it, and writes a report your CI can fail on.
 
-It type-checks the module with its tests through `golang.org/x/tools`, its one run-time dependency, and reports without editing your code. A dependency outside the module and its named consumers is checked for its declarations alone, so a type error inside one of its function bodies does not stop the analysis. It is pre-release, so the report shape, exit codes and configuration keys can change until 1.0. It supports Linux only, needs Go 1.27.1 or later and is licensed under GPL-3.0-or-later.
+It type-checks the module with its tests through `golang.org/x/tools`, its one run-time dependency, and reports without editing your code. It is in active development, so the report shape, exit codes and configuration keys can change between minor releases. It supports Linux only, needs Go 1.27.1 or later and is licensed under GPL-3.0-or-later.
 
 ## Why use it
 
