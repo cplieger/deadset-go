@@ -398,7 +398,7 @@ func programFunctions(in *Input) []programFunction {
 		if p.TypesInfo == nil {
 			continue
 		}
-		for _, file := range sortedFiles(p, in.Result.Fset) {
+		for _, file := range graph.SortedSyntax(p, in.Result.Fset) {
 			found = append(found, fileFunctions(p.TypesInfo, file)...)
 		}
 	}
@@ -426,9 +426,9 @@ func fileFunctions(info *types.Info, file *ast.File) []programFunction {
 // programPackages are the packages of the analysed program: the target's own, then
 // every loaded consumer's in the order the scope declared them, each set ordered.
 func programPackages(r *load.Result) []*packages.Package {
-	found := sortedPackages(r.Packages)
+	found := graph.SortedPackages(r.Packages)
 	for _, one := range r.Consumers {
-		found = append(found, sortedPackages(one.Packages)...)
+		found = append(found, graph.SortedPackages(one.Packages)...)
 	}
 	return found
 }

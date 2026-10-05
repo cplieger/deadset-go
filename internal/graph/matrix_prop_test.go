@@ -130,7 +130,7 @@ func TestProperty11MatrixIntersectionReportsOnlyWhatIsDeadEverywhere(t *testing.
 		if err != nil {
 			t.Fatalf("Merge over %d configurations = _, %v, want no error", d.configs, err)
 		}
-		r := NewMatrix(&merged).Sweep(in)
+		r := NewMatrix(&merged).Sweep(in, nil)
 
 		oracle := make([]map[SymbolID]Candidate, d.configs)
 		for config := range d.configs {

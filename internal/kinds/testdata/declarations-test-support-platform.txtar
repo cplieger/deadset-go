@@ -1,0 +1,46 @@
+A command whose internal package a production file imports under linux and
+only a test file imports under windows, with one function of the package only
+the test references.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- internal/sys/sys.go --
+package sys
+
+// Live is called from production under linux.
+func Live() int { return 1 }
+
+// OnlyTested is called from the test file alone.
+func OnlyTested() int { return 2 }
+-- main.go --
+package main
+
+func main() {
+	println(watch())
+}
+-- watch_linux.go --
+package main
+
+import "example.com/app/internal/sys"
+
+func watch() int { return sys.Live() }
+-- watch_windows.go --
+package main
+
+func watch() int { return 0 }
+-- main_test.go --
+package main
+
+import (
+	"testing"
+
+	"example.com/app/internal/sys"
+)
+
+func TestOnlyTested(t *testing.T) {
+	if sys.OnlyTested() != 2 {
+		t.Error("sys.OnlyTested() is not 2")
+	}
+}

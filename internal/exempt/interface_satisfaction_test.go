@@ -464,3 +464,49 @@ func corpusManifestOf(t *testing.T, archive *txtar.Archive) corpusManifest {
 	t.Fatalf("Setup: the rendering carries no fixture.json")
 	return corpusManifest{}
 }
+
+// A type argument reaches its parameter's constraint, and a value boxed into one
+// interface reaches every interface an assertion on that interface names, so the
+// methods each requires are retained although no expression converts the type
+// to it. A type that reaches no interface keeps nothing retained.
+func TestInterfaceSatisfactionRetainsWhatAConstraintAndAnAssertionReach(t *testing.T) {
+	in := inputOf(t, "structural-satisfaction.txtar", Options{})
+	set := retainedSet(retainedBy(t, in, "structural-satisfaction.txtar"))
+
+	for member, want := range map[string]bool{
+		"instantiated.Close": true,
+		"asserted.Name":      true,
+		"unreached.Name":     false,
+	} {
+		t.Run(member, func(t *testing.T) {
+			ref := "go://example.com/structural#" + member
+			if got := set[symbolRef(t, in, ref).ID]; got != want {
+				t.Errorf("InterfaceSatisfactionDetector(structural-satisfaction.txtar) retains %s = %t, want %t (retained %v)",
+					ref, got, want, refsOf(in, set))
+			}
+		})
+	}
+}
+
+// A type only a test file converts reaches an asserted interface only while the
+// tests run, so a production run holds nothing for it and the plain run holds it.
+// A type a source file converts too is held by both, whichever file sorts first.
+func TestInterfaceSatisfactionHoldsWhatAnAssertionReachesFromATestFileOutsideAProductionRun(t *testing.T) {
+	shared := analysisOf(t, "structural-satisfaction.txtar", Options{})
+	in := inputOf(t, "structural-satisfaction.txtar", Options{})
+
+	for _, production := range []bool{false, true} {
+		held, err := shared.compute(t, production)
+		if err != nil {
+			t.Fatalf("Compute(structural-satisfaction.txtar, production %t) error: %v", production, err)
+		}
+		set := retainedSet(held)
+		for member, want := range map[string]bool{"tested.Name": !production, "Shared.Name": true} {
+			ref := "go://example.com/structural#" + member
+			if got := set[symbolRef(t, in, ref).ID]; got != want {
+				t.Errorf("Compute(structural-satisfaction.txtar, production %t) holds %s = %t, want %t",
+					production, ref, got, want)
+			}
+		}
+	}
+}

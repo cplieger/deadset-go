@@ -393,6 +393,13 @@ func exportedMethods(object *types.TypeName) []*types.Func {
 // and results name, through any composite type that spells it.
 func typesNamedBy(signature *types.Signature, path string) map[*types.TypeName]bool {
 	held := make(map[*types.TypeName]bool)
+	typeNamesIn(held, path, signature)
+	return held
+}
+
+// typeNamesIn adds to held every type of the package at path that t spells,
+// through any composite type, a signature's parameters and results included.
+func typeNamesIn(held map[*types.TypeName]bool, path string, t types.Type) {
 	var walk func(t types.Type)
 	keep := func(name *types.TypeName) {
 		if name.Pkg() != nil && name.Pkg().Path() == path {
@@ -434,9 +441,7 @@ func typesNamedBy(signature *types.Signature, path string) map[*types.TypeName]b
 			}
 		}
 	}
-	walkTuple(signature.Params())
-	walkTuple(signature.Results())
-	return held
+	walk(t)
 }
 
 // finding renders one finding of a narrowing kind.

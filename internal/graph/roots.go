@@ -32,6 +32,7 @@ const (
 	RootConfigured                   // an exact reference from the configuration
 	RootPattern                      // a pattern from the configuration
 	RootTypeError                    // a declaration a type error skipped, or what its unresolved expression could reach
+	RootProgram                      // a declaration a file run on its own under the ignore tag names
 )
 
 var rootNames = [...]string{
@@ -45,6 +46,7 @@ var rootNames = [...]string{
 	RootConfigured:   "configured",
 	RootPattern:      "pattern",
 	RootTypeError:    "type-error",
+	RootProgram:      "program",
 }
 
 // String returns the kind's spelling, and a numbered form for a value outside the
@@ -126,6 +128,7 @@ func Roots(r *load.Result, targetRoot string, read ReadFile, symbols []Symbol, o
 		return nil, nil, err
 	}
 	d.typeErrors(r)
+	d.programs(r)
 	d.declared(symbols)
 	if opts.PublishedAPI {
 		d.publishedAPI(symbols)
@@ -184,6 +187,22 @@ func (d *rootDetection) addAt(pos token.Pos, kind RootKind) error {
 		d.add(id, kind, "")
 	}
 	return nil
+}
+
+// programs roots every declaration of the target a program names: a program's main
+// is a root of its own, and its own declarations are no symbols, so what any of
+// them names is reached from it.
+func (d *rootDetection) programs(r *load.Result) {
+	for _, program := range r.Programs {
+		for _, obj := range program.Info.Uses {
+			// A position outside the target renders to no declaration of it.
+			if rendered, err := d.pos.render(obj.Pos()); err == nil {
+				if id, ok := d.byPosition[rendered]; ok {
+					d.add(id, RootProgram, "")
+				}
+			}
+		}
+	}
 }
 
 // walk classifies every import path of the load and reads the directives and the

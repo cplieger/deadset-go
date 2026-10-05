@@ -1,6 +1,7 @@
 package exempt
 
 import (
+	"cmp"
 	"go/token"
 	"go/types"
 	"slices"
@@ -129,8 +130,9 @@ func (s *errorsDuckScan) tuple(list []types.Type) *types.Tuple {
 
 // sites keeps the conversions whose interface is error, each with its position
 // rendered, ordered so that the first site of a type is the same site whatever
-// order the load parsed the files in.
-func (s *errorsDuckScan) sites(conversions []Conversion) ([]errorsDuckSite, error) {
+// order the load parsed the files in. A site the mode holds comes first, because a
+// method keeps only its first site and a test file's site retains nothing.
+func (s *errorsDuckScan) sites(conversions []graph.Conversion) ([]errorsDuckSite, error) {
 	sites := make([]errorsDuckSite, 0, len(conversions))
 	for i := range conversions {
 		c := &conversions[i]
@@ -143,7 +145,15 @@ func (s *errorsDuckScan) sites(conversions []Conversion) ([]errorsDuckSite, erro
 		}
 		sites = append(sites, errorsDuckSite{from: c.From, at: at})
 	}
-	slices.SortFunc(sites, func(a, b errorsDuckSite) int { return graph.ByPosition(a.at, b.at) })
+	rank := func(at token.Position) int {
+		if holdsInMode(at, s.in.Mode) {
+			return 0
+		}
+		return 1
+	}
+	slices.SortFunc(sites, func(a, b errorsDuckSite) int {
+		return cmp.Or(cmp.Compare(rank(a.at), rank(b.at)), graph.ByPosition(a.at, b.at))
+	})
 	return sites, nil
 }
 

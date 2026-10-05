@@ -206,7 +206,7 @@ type formatFlow struct {
 
 // walkCalls records every value a formatting call asks for a string.
 func (f *formatFlow) walkCalls() error {
-	for _, p := range sortedPackages(f.kept.in.Result.Packages) {
+	for _, p := range graph.SortedPackages(f.kept.in.Result.Packages) {
 		if p.TypesInfo == nil {
 			continue
 		}

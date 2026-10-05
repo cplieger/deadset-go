@@ -1,0 +1,41 @@
+One package whose file importing "C" converts the results of C calls to two Go
+types and selects members of the converted values: a method of one type, and a
+method the other promotes through an embedded field.
+
+-- go.mod --
+module example.com/cgoconv
+
+go 1.27.1
+-- conv/conv.go --
+package conv
+
+type count int32
+
+func (c count) double() int32 { return int32(c) * 2 }
+
+func (c count) unused() int32 { return int32(c) }
+
+type inner struct{}
+
+func (inner) depth() int32 { return 1 }
+
+type wrapper struct {
+	inner
+}
+-- conv/bridge.go --
+package conv
+
+/*
+static int one(void) { return 1; }
+static int two(void) { return 2; }
+*/
+import "C"
+
+//export direct
+func direct() int32 { return count(C.one()).double() }
+
+//export throughVariable
+func throughVariable() int32 {
+	w := wrapper(C.two())
+	return w.depth()
+}

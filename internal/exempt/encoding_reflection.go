@@ -272,7 +272,7 @@ type destination struct {
 
 // walkCalls records every value a call hands to a destination package.
 func (f *encodingFlow) walkCalls() error {
-	for _, p := range sortedPackages(f.kept.in.Result.Packages) {
+	for _, p := range graph.SortedPackages(f.kept.in.Result.Packages) {
 		if p.TypesInfo == nil {
 			continue
 		}

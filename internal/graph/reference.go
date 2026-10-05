@@ -172,16 +172,18 @@ type referencePass struct {
 	at          *positions  // renders the file being walked, which is pos while the target is walked
 	info        *types.Info // the type information of the variant that compiles the file being walked
 	symbols     map[site]SymbolID
-	packages    map[string]SymbolID    // the inventory's package symbol per import path, which an import resolves to
-	ids         map[token.Pos]SymbolID // one resolved position, resolved once; empty for a position no symbol declares
-	kinds       map[token.Pos]RefKind  // the kind a parent node fixes for an identifier below it
-	callees     map[token.Pos]bool     // the identifiers a call expression names as its callee
-	reached     map[string]int         // per source file, by the path the toolchain named, the variants that compile it
-	declaring   map[string]bool        // the import paths of the packages the target declares
-	support     map[string]bool        // the import paths of the target's test-support packages
-	instances   *instantiations        // the type arguments a layout read lays a type parameter out as
-	consumer    string                 // the module path of the consumer being walked, empty while the target is
-	file        SymbolID               // the symbol of the file being walked, empty outside the inventory
+	packages    map[string]SymbolID       // the inventory's package symbol per import path, which an import resolves to
+	ids         map[token.Pos]SymbolID    // one resolved position, resolved once; empty for a position no symbol declares
+	kinds       map[token.Pos]RefKind     // the kind a parent node fixes for an identifier below it
+	callees     map[token.Pos]bool        // the identifiers a call expression names as its callee
+	reached     map[string]int            // per source file, by the path the toolchain named, the variants that compile it
+	declaring   map[string]bool           // the import paths of the packages the target declares
+	support     map[string]bool           // the import paths of the target's test-support packages
+	instances   *instantiations           // the type arguments a layout read lays a type parameter out as
+	consumer    string                    // the module path of the consumer being walked, empty while the target is
+	file        SymbolID                  // the symbol of the file being walked, empty outside the inventory
+	syntax      *ast.File                 // the file being walked
+	converted   map[*types.Var]types.Type // per file, the type a typeless variable's conversion initializer names
 	err         error
 	refs        []Reference
 	testFiles   int
@@ -296,6 +298,7 @@ func (p *referencePass) walkFile(pkg *packages.Package, f *ast.File) error {
 	}
 
 	p.info = pkg.TypesInfo
+	p.syntax, p.converted = f, nil
 	// The file's own symbol, which its imports reference from. A consumer's file
 	// is not in the inventory and does not render against the target's root, so
 	// it is not resolved at all rather than resolved and failing.
@@ -319,6 +322,7 @@ func (p *referencePass) walkFile(pkg *packages.Package, f *ast.File) error {
 		case *ast.GenDecl:
 			p.walkGenDecl(d)
 		}
+		p.readConversions(d)
 		if p.err != nil {
 			return p.err
 		}
@@ -548,6 +552,7 @@ func (p *referencePass) inspectExcept(node ast.Node, encl SymbolID, skip ast.Nod
 			return false
 		case *ast.SelectorExpr:
 			p.reachThrough(n, encl)
+			p.recoverSelection(n, encl)
 		case *ast.AssignStmt:
 			p.markAssign(n)
 		case *ast.CompositeLit:
@@ -743,22 +748,213 @@ func (p *referencePass) reachThrough(e *ast.SelectorExpr, encl SymbolID) {
 	if sel == nil {
 		return
 	}
-	index := sel.Index()
+	p.readPath(sel.Recv(), sel.Index(), encl, e.Sel.Pos(), nil)
+}
+
+// readPath records a read at pos of every embedded field one selection index path
+// passes through from recv, the last step being the member selected. A field in
+// seen is not read twice, and seen gains every field read; a nil seen keeps none.
+func (p *referencePass) readPath(recv types.Type, index []int, encl SymbolID, pos token.Pos, seen map[SymbolID]bool) {
 	if len(index) < 2 {
 		return
 	}
-	held := sel.Recv()
+	held := recv
 	for _, i := range index[:len(index)-1] {
 		st, ok := structAt(held)
 		if !ok || i >= st.NumFields() {
 			return
 		}
 		field := st.Field(i)
-		if to, ok := p.symbolOf(field); ok {
-			p.add(encl, to, e.Sel.Pos(), RefRead)
+		if to, ok := p.symbolOf(field); ok && !seen[to] {
+			if seen != nil {
+				seen[to] = true
+			}
+			p.add(encl, to, pos, RefRead)
 		}
 		held = field.Type()
 	}
+}
+
+// readConversions records what each conversion one declaration writes requires of
+// the value it converts, which no identifier at the site names: the embedded
+// fields through which the value's type promotes a method the interface requires,
+// and, for a value of another interface type, each of that interface's methods the
+// destination requires. Deleting any of them breaks the conversion.
+func (p *referencePass) readConversions(d ast.Decl) {
+	switch d := d.(type) {
+	case *ast.FuncDecl:
+		if id, ok := p.owner(d.Name.Pos()); ok {
+			p.readRequired(conversionsIn(p.info, d), func(token.Pos) SymbolID { return id })
+		}
+	case *ast.GenDecl:
+		for _, spec := range d.Specs {
+			if s, ok := spec.(*ast.ValueSpec); ok {
+				p.readRequiredIn(s)
+			}
+		}
+	}
+}
+
+// readRequiredIn records the conversions one constant or variable group writes,
+// each from the name whose value holds it, as walkValueSpec attributes the values.
+func (p *referencePass) readRequiredIn(s *ast.ValueSpec) {
+	ids := make([]SymbolID, 0, len(s.Names))
+	for _, n := range s.Names {
+		id, ok := p.owner(n.Pos())
+		if !ok {
+			return
+		}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return
+	}
+	p.readRequired(conversionsIn(p.info, s), func(site token.Pos) SymbolID {
+		if len(ids) == len(s.Values) {
+			for i, v := range s.Values {
+				if v.Pos() <= site && site < v.End() {
+					return ids[i]
+				}
+			}
+		}
+		return ids[0]
+	})
+}
+
+// readRequired records, for every conversion of sites, a read of what it requires
+// of the value converted, once per declaration and site.
+func (p *referencePass) readRequired(sites []Conversion, from func(token.Pos) SymbolID) {
+	seen := make(map[token.Pos]map[SymbolID]bool)
+	for i := range sites {
+		c := &sites[i]
+		if !types.Implements(c.From, c.To) {
+			continue
+		}
+		if seen[c.Site] == nil {
+			seen[c.Site] = make(map[SymbolID]bool)
+		}
+		encl, set := from(c.Site), types.NewMethodSet(c.From)
+		for required := range c.To.Methods() {
+			sel := set.Lookup(required.Pkg(), required.Name())
+			if sel == nil {
+				continue
+			}
+			p.readPath(sel.Recv(), sel.Index(), encl, c.Site, seen[c.Site])
+			// A method the destination declares through the same object is
+			// deleted from both at once, which breaks nothing.
+			if to, ok := p.symbolOf(sel.Obj()); ok && types.IsInterface(c.From) && sel.Obj() != required && !seen[c.Site][to] {
+				seen[c.Site][to] = true
+				p.add(encl, to, c.Site, RefRead)
+			}
+		}
+	}
+}
+
+// recoverSelection records the member one selector names when the type checker
+// recorded no type for its operand, which happens only on a value of C, and the
+// operand is a conversion to a Go type, or a variable a conversion initialized:
+// the conversion still names the Go type, so the member is the one that type
+// declares.
+func (p *referencePass) recoverSelection(e *ast.SelectorExpr, encl SymbolID) {
+	if p.info.Uses[e.Sel] != nil || p.info.Selections[e] != nil {
+		return
+	}
+	if t := p.info.TypeOf(e.X); t != nil && t != types.Typ[types.Invalid] {
+		return
+	}
+	held := p.convertedType(e.X)
+	if held == nil {
+		return
+	}
+	var pkg *types.Package
+	if named, ok := types.Unalias(derefed(held)).(*types.Named); ok {
+		pkg = named.Obj().Pkg()
+	}
+	obj, index, _ := types.LookupFieldOrMethod(held, true, pkg, e.Sel.Name)
+	if obj == nil {
+		return
+	}
+	p.readPath(held, index, encl, e.Sel.Pos(), nil)
+	if to, ok := p.symbolOf(obj); ok {
+		p.add(encl, to, e.Sel.Pos(), p.kindOf(e.Sel, obj))
+	}
+}
+
+// convertedType is the Go type a conversion names for one typeless operand: the
+// operand itself converted, or a variable of the walked file whose initializer is
+// such a conversion. It is nil for anything else.
+func (p *referencePass) convertedType(x ast.Expr) types.Type {
+	switch x := ast.Unparen(x).(type) {
+	case *ast.CallExpr:
+		if tv, ok := p.info.Types[x.Fun]; ok && tv.IsType() && len(x.Args) == 1 {
+			return tv.Type
+		}
+	case *ast.Ident:
+		if v, ok := p.info.Uses[x].(*types.Var); ok {
+			return p.conversionsOfFile()[v]
+		}
+	}
+	return nil
+}
+
+// conversionsOfFile keys every variable of the walked file that a single
+// conversion initializes to the type the conversion names, built on first use.
+func (p *referencePass) conversionsOfFile() map[*types.Var]types.Type {
+	if p.converted != nil {
+		return p.converted
+	}
+	p.converted = make(map[*types.Var]types.Type)
+	ast.Inspect(p.syntax, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.AssignStmt:
+			if n.Tok == token.DEFINE {
+				p.holdConversions(definedNames(n.Lhs), n.Rhs)
+			}
+		case *ast.ValueSpec:
+			p.holdConversions(n.Names, n.Values)
+		}
+		return true
+	})
+	return p.converted
+}
+
+// holdConversions keys each name a single conversion initializes to the type the
+// conversion names.
+func (p *referencePass) holdConversions(names []*ast.Ident, values []ast.Expr) {
+	if len(names) != len(values) {
+		return
+	}
+	for i, name := range names {
+		v, ok := p.info.Defs[name].(*types.Var)
+		if !ok {
+			continue
+		}
+		if call, isCall := ast.Unparen(values[i]).(*ast.CallExpr); isCall {
+			if t := p.convertedType(call); t != nil {
+				p.converted[v] = t
+			}
+		}
+	}
+}
+
+// definedNames lists the identifiers the left side of a short variable
+// declaration spells.
+func definedNames(lhs []ast.Expr) []*ast.Ident {
+	names := make([]*ast.Ident, 0, len(lhs))
+	for _, l := range lhs {
+		if id, ok := l.(*ast.Ident); ok {
+			names = append(names, id)
+		}
+	}
+	return names
+}
+
+// derefed is the type a pointer points to, and t itself for anything else.
+func derefed(t types.Type) types.Type {
+	if ptr, ok := types.Unalias(t).(*types.Pointer); ok {
+		return ptr.Elem()
+	}
+	return t
 }
 
 // structAt returns the struct a selector's receiver holds at one step of its

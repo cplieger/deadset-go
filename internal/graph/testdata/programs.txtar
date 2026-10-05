@@ -1,0 +1,61 @@
+One command beside a generator program its ignore tag keeps out of every
+configuration, a file of a library package the ignore tag also constrains, and
+a program behind another tag.
+
+-- go.mod --
+module example.com/gen
+
+go 1.27.1
+-- main.go --
+package main
+
+import "example.com/gen/table"
+
+func main() { println(table.Size) }
+-- table/table.go --
+package table
+
+// Size is read by the command.
+var Size = 1
+
+// Generate is called by the generator program alone.
+func Generate() string { return emit() }
+
+func emit() string { return "" }
+
+// Tooled is called by the program behind the tools tag alone.
+func Tooled() {}
+
+-- extra/extra.go --
+package extra
+
+// Ignored is called by an ignored file of another package alone.
+func Ignored() {}
+-- table/gen.go --
+//go:build ignore
+
+package main
+
+import (
+	"fmt"
+
+	"example.com/gen/table"
+)
+
+func main() { fmt.Println(table.Generate()) }
+-- table/scratch.go --
+//go:build ignore
+
+package table
+
+import "example.com/gen/extra"
+
+func scratch() { extra.Ignored() }
+-- table/tools.go --
+//go:build tools
+
+package main
+
+import "example.com/gen/table"
+
+func main() { table.Tooled() }

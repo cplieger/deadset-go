@@ -17,7 +17,6 @@ package exempt
 import (
 	"fmt"
 	"go/ast"
-	"go/token"
 	"go/types"
 	"slices"
 	"strings"
@@ -262,26 +261,4 @@ func resolveObject(info *types.Info, expr ast.Expr) types.Object {
 		return resolveObject(info, e.X)
 	}
 	return nil
-}
-
-// Conversion is one site at which a value of a concrete type reaches a position
-// typed as an interface: an assertion, an assignment, an argument, a return value
-// or an element stored in an interface-typed container.
-//
-// The set of these sites is what narrows interface satisfaction from every type
-// that could implement an interface to the types a program actually converts, and
-// three classes read it: the methods a conversion's interface requires, the error
-// helpers' duck typing over a conversion to error, and the string and error
-// methods a formatting verb calls.
-type Conversion struct {
-	// From is the concrete type converted, with the pointer stripped where the
-	// site strips it.
-	From types.Type
-
-	// To is the interface type reached.
-	To *types.Interface
-
-	// Site is where the conversion is written, unrendered: a class records the
-	// site it publishes through the resolver.
-	Site token.Pos
 }

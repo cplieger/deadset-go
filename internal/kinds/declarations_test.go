@@ -9,6 +9,7 @@ import (
 
 	"github.com/cplieger/deadset-go/internal/config"
 	"github.com/cplieger/deadset-go/internal/graph"
+	"github.com/cplieger/deadset-go/internal/load"
 )
 
 func TestTheUnusedKindsReportEveryDeadDeclarationOfTheFixtureAndNothingLive(t *testing.T) {
@@ -253,5 +254,21 @@ func TestTheMembersOfAStructOnlyATestFileMarshalsReportUnderAProductionSweep(t *
 	}
 	if !maps.Equal(got, want) {
 		t.Errorf("the pass over declarations-test-evidence reported %v, want %v", got, want)
+	}
+}
+
+// A package one configuration imports from production code is production code,
+// whatever another configuration that compiles none of its production importers
+// says, so a function of it only a test references is reported as test-only.
+func TestAPackageAProductionFileImportsUnderOneConfigurationIsNotTestSupport(t *testing.T) {
+	in := inputOf(t, "declarations-test-support-platform.txtar", applicationConfig(), Consumers{},
+		load.Configuration{ID: "linux-amd64", OS: "linux", Arch: "amd64"},
+		load.Configuration{ID: "windows-amd64", OS: "windows", Arch: "amd64"})
+
+	result := computed(t, in, declarationEmitters())
+
+	if got := namesUnder(result.Findings, testOnlyUseCode); !slices.Equal(got, []string{"OnlyTested"}) {
+		t.Errorf("the pass over linux and windows reports %s about %v, want [OnlyTested]: linux imports the package from production code",
+			testOnlyUseCode, got)
 	}
 }

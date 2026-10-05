@@ -180,6 +180,7 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 	var loadedConsumers []string
 	for i, c := range configurations {
 		result := loadScope(t, doc, c)
+		result.TestSupport = graph.ClassifyTestSupport(result, rootOptions.PublishedAPI)
 		root = doc.Target.Path
 		loadedConsumers = consumerIDs(result)
 		symbols, err := graph.Symbols(result, root, os.ReadFile)
@@ -220,7 +221,7 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 	if err != nil {
 		t.Fatalf("Setup: graph.Merge(%s): %v", doc.Target.Path, err)
 	}
-	swept := graph.NewMatrix(&merged).Sweep(graph.SweepInput{Exempt: exemptions, TestEvidence: graph.TestReferencesOf(testEvidence), Mode: mode})
+	swept := graph.NewMatrix(&merged).Sweep(graph.SweepInput{Exempt: exemptions, Mode: mode}, graph.TestReferencesOf(testEvidence))
 
 	refs := make(map[graph.SymbolID]string, len(merged.Symbols))
 	for i := range merged.Symbols {

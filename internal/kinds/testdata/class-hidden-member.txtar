@@ -1,0 +1,72 @@
+A library package declaring members of eight types: an unexported struct and an
+unexported interface no exported declaration names, an unexported type an
+exported function returns, an unexported type promoted through an exported
+struct's embedded field, an unexported interface an exported interface embeds,
+an unexported struct an exported alias names, an unexported interface an
+exported variable holds, and an exported type.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- shape/shape.go --
+package shape
+
+type hidden struct {
+	Width int
+}
+
+func (h hidden) Area() int { return h.Width }
+
+type returned struct {
+	Height int
+}
+
+// Make returns a value of an unexported type.
+func Make() returned { return returned{} }
+
+type promoted struct {
+	Depth int
+}
+
+// Outer embeds an unexported type, whose exported members it promotes.
+type Outer struct {
+	promoted
+}
+
+type sizer interface {
+	Measure() int
+}
+
+type spanner interface {
+	Span() int
+}
+
+// Spans embeds an unexported interface, whose methods it promotes.
+type Spans interface {
+	spanner
+}
+
+type aliased struct {
+	Length int
+}
+
+// Alias names an unexported struct.
+type Alias = aliased
+
+type counter interface {
+	Count() int
+}
+
+// Counter holds a value of an unexported interface type.
+var Counter counter
+
+// Shown is exported.
+type Shown struct {
+	Size int
+}
+
+// Use reads one member of every type.
+func Use() int {
+	return hidden{}.Area() + Make().Height + Outer{}.Depth + Shown{}.Size
+}

@@ -3,6 +3,8 @@ package exempt
 import (
 	"slices"
 	"testing"
+
+	"github.com/cplieger/deadset-go/internal/graph"
 )
 
 func TestErrorsDuckTypingRetainsTheHelperFormsOnATypeReachableAsAnError(t *testing.T) {
@@ -41,5 +43,22 @@ func TestErrorsDuckTypingRetainsTheHelperFormsOnATypeReachableAsAnError(t *testi
 				t.Errorf("ErrorsDuckTypingDetector(%s) retained\n%v\nwant\n%v", test.archive, got, test.want)
 			}
 		})
+	}
+}
+
+// A production run holds what a source file's conversion retains although a test
+// file converts the same type at a site that sorts first, because a test file's
+// site retains nothing in that run.
+func TestErrorsDuckTypingHoldsTheSourceFilesSiteUnderAProductionRun(t *testing.T) {
+	shared := analysisOf(t, "errors-duck-test-site.txtar", Options{})
+	held, err := shared.compute(t, true)
+	if err != nil {
+		t.Fatalf("Compute(errors-duck-test-site.txtar, production) error: %v", err)
+	}
+
+	held = slices.DeleteFunc(held, func(e graph.Exemption) bool { return e.Class != string(ErrorsDuckTyping) })
+	got := exemptionRows(t, shared.inventory(t), ErrorsDuckTyping, held)
+	if want := []string{"(*fault).Is\timplements Is(error) bool"}; !slices.Equal(got, want) {
+		t.Errorf("Compute(errors-duck-test-site.txtar, production) holds %v under %s, want %v", got, ErrorsDuckTyping, want)
 	}
 }

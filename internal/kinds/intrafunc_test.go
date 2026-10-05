@@ -579,3 +579,23 @@ func TestMeasureTheIntraFunctionKindsOverRealModules(t *testing.T) {
 		})
 	}
 }
+
+// A function another file of its package declares for another build
+// configuration has the signature every configuration's callers call, so a
+// parameter one platform's body leaves unread is that platform's answer and no
+// finding. The same body declared once is reported, and so is an unread receiver
+// of a method declared per platform, whose name is no part of the signature.
+func TestUnusedParameterReportsNothingAboutAFunctionDeclaredOncePerPlatform(t *testing.T) {
+	t.Parallel()
+
+	result := analysisOf(t, "intrafunc-platform-twins.txtar", asApplication, Consumers{}).findings(t, intraFunctionKinds)
+
+	for code, want := range map[string][]string{
+		unusedParameterCode: {"main.go:9:24 parameter mode of go://example.com/app#solo"},
+		unusedReceiverCode:  {"open_linux.go:5:7 receiver d of go://example.com/app#disk.free"},
+	} {
+		if got := subjectsOf(result.Findings, code); !slices.Equal(got, want) {
+			t.Errorf("the pass over intrafunc-platform-twins.txtar reports %v under %s, want %v", got, code, want)
+		}
+	}
+}
