@@ -180,20 +180,20 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 	var loadedConsumers []string
 	for i, c := range configurations {
 		result := loadScope(t, doc, c)
-		result.TestSupport = graph.ClassifyTestSupport(result, rootOptions.PublishedAPI)
 		root = doc.Target.Path
 		loadedConsumers = consumerIDs(result)
 		symbols, err := graph.Symbols(result, root, os.ReadFile)
 		if err != nil {
 			t.Fatalf("Setup: graph.Symbols(%s): %v", c.ID, err)
 		}
-		references, _, err := graph.References(result, root, os.ReadFile, symbols)
-		if err != nil {
-			t.Fatalf("Setup: graph.References(%s): %v", c.ID, err)
-		}
 		roots, _, err := graph.Roots(result, root, os.ReadFile, symbols, rootOptions)
 		if err != nil {
 			t.Fatalf("Setup: graph.Roots(%s): %v", c.ID, err)
+		}
+		graph.ClassifyTestSupport(result, symbols, roots, rootOptions.PublishedAPI)
+		references, _, err := graph.References(result, root, os.ReadFile, symbols)
+		if err != nil {
+			t.Fatalf("Setup: graph.References(%s): %v", c.ID, err)
 		}
 		resolver, err := graph.NewResolver(result, root, os.ReadFile, symbols)
 		if err != nil {
@@ -328,8 +328,8 @@ func packageEmitters() map[string]Emitter {
 	return table
 }
 
-// fixtures is every archive under testdata, which is every fixture of every kind of
-// this package.
+// fixtures is every one-module archive under testdata, which is every fixture of every
+// kind of this package but the archives of testdata/sections, which hold a consumer.
 func fixtures(t *testing.T) []string {
 	t.Helper()
 
@@ -641,6 +641,14 @@ func corpusInput(t *testing.T, fixture string, resolved config.Config) *Input {
 	if err != nil {
 		t.Fatalf("Setup: read the Go rendering of %s: %v", fixture, err)
 	}
+	return sectionsInput(t, fixture, data, resolved)
+}
+
+// sectionsInput builds what every kind reads from one archive whose target section
+// is the module analyzed and whose every other top-level directory is a consumer.
+func sectionsInput(t *testing.T, fixture string, data []byte, resolved config.Config) *Input {
+	t.Helper()
+
 	dir := t.TempDir()
 	sections := make(map[string]bool)
 	for _, f := range txtar.Parse(data).Files {

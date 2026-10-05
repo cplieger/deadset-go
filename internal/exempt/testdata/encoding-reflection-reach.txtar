@@ -1,10 +1,12 @@
 One module whose types an encoder reaches through the members of the value it is
 given: a field two struct levels below the argument, a field typed as the empty
-interface and one typed as a named interface, an embedded field, the field of a
-generic type instantiated at the call, and a type that holds a value of itself.
-Each type declares one exported tagged field, one exported untagged field and one
-unexported untagged field, so the retained set states which of the three the class
-keeps.
+interface and one typed as a named interface, which reach the types the program
+stores in them, an embedded field, the field of a generic type instantiated at the
+call, and a type that holds a value of itself. A further file stores values in
+fields holding interface elements by append, by an index, by a literal and through
+two functions' parameters, and leaves one parameter no call passes. Each type
+declares one exported tagged field, one exported untagged field and one unexported
+untagged field, so the retained set states which of the three the class keeps.
 
 -- go.mod --
 module example.com/reach
@@ -143,3 +145,68 @@ func (n Node) Describe() string { return n.Label }
 
 // EncodeNode hands a value that holds itself to the encoder.
 func EncodeNode(n Node) ([]byte, error) { return json.Marshal(n) }
+-- stored.go --
+package reach
+
+import "encoding/json"
+
+// Feed holds interface values in a slice, a map and two plain fields.
+type Feed struct {
+	Items   []any          `json:"items"`
+	ByName  map[string]any `json:"by_name"`
+	Slot    any            `json:"slot"`
+	Pending any            `json:"pending"`
+}
+
+// Appended is appended to the items.
+type Appended struct {
+	Label  string `json:"label"`
+	Extra  int
+	secret string
+}
+
+// Indexed is stored at an index of the map.
+type Indexed struct {
+	Label  string `json:"label"`
+	Extra  int
+	secret string
+}
+
+// Listed is an element of a literal stored in the items.
+type Listed struct {
+	Label  string `json:"label"`
+	Extra  int
+	secret string
+}
+
+// Relayed reaches the slot through two functions' parameters.
+type Relayed struct {
+	Label  string `json:"label"`
+	Extra  int
+	secret string
+}
+
+// Ignored is built, and never handed to the one function that would store it.
+type Ignored struct {
+	Label  string `json:"label"`
+	Extra  int
+	secret string
+}
+
+func slotted(v any) Feed { return Feed{Slot: v} }
+
+func relay(v any) Feed { return slotted(v) }
+
+func pending(v any) Feed { return Feed{Pending: v} }
+
+// EncodeFeed fills a feed and hands it to the encoder.
+func EncodeFeed() ([]byte, error) {
+	f := relay(Relayed{})
+	f.Items = []any{Listed{}}
+	f.Items = append(f.Items, Appended{})
+	f.ByName = map[string]any{}
+	f.ByName["k"] = Indexed{}
+	_ = pending
+	println(len([]Ignored{{}}))
+	return json.Marshal(f)
+}

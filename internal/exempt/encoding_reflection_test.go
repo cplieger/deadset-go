@@ -4,6 +4,10 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"go/types"
 	"slices"
 	"strings"
 	"testing"
@@ -72,9 +76,8 @@ func flowRefs(typeName string, members ...string) []string {
 
 // What the class retains is per destination: the tagged and exported fields of the
 // value for every one of them, and the exported methods only where the destination
-// reaches a method. The comparison of two values by reflection reads fields alone,
-// while every other entry point of that package hands out a value a method is
-// reachable from.
+// reaches a method. Reflection reads fields alone in a program that finds no method
+// through it, and a structured-logging call resolves LogValue alone.
 func TestEncodingReflectionRetainsWhatEachDestinationReads(t *testing.T) {
 	shared := analysisOf(t, "encoding-reflection-firing.txtar", Options{})
 	refs := retainedRefs(t, shared, EncodingReflection)
@@ -112,7 +115,7 @@ func TestEncodingReflectionRetainsWhatEachDestinationReads(t *testing.T) {
 		{
 			destination: "reflect",
 			typeName:    "ReflectPayload",
-			want:        flowRefs("ReflectPayload", "Describe", "Extra", "Name", "secret"),
+			want:        flowRefs("ReflectPayload", "Extra", "Name", "secret"),
 		},
 		{
 			destination: "the comparison of two values by reflection",
@@ -142,7 +145,7 @@ func TestEncodingReflectionRetainsWhatEachDestinationReads(t *testing.T) {
 		{
 			destination: "a structured-logging call",
 			typeName:    "LogPayload",
-			want:        flowRefs("LogPayload", "Describe", "Extra", "LogValue", "Name", "secret"),
+			want:        flowRefs("LogPayload", "Extra", "LogValue", "Name", "secret"),
 		},
 		{
 			destination: "a map of slices of pointers",
@@ -176,10 +179,10 @@ func methodRefs(typeName string, members ...string) []string {
 }
 
 // An encoder resolves a closed set of methods by name on a value it walks, so a
-// destination of that family retains those methods beside the fields. What it retains
-// is the direction it is: an entry point that encodes resolves no method that decodes,
-// one that names neither direction resolves both, and a method of neither set is
-// retained by nothing.
+// destination of that family retains those methods. What it retains is the direction
+// it is: an entry point that encodes reads fields and resolves no method that decodes,
+// one that decodes fills fields through reflection and so retains none, one that names
+// neither direction retains both, and a method of neither set is retained by nothing.
 func TestEncodingReflectionRetainsTheMethodsAnEncoderResolvesByName(t *testing.T) {
 	shared := analysisOf(t, "encoding-reflection-methods.txtar", Options{})
 	refs := retainedRefs(t, shared, EncodingReflection)
@@ -197,7 +200,7 @@ func TestEncodingReflectionRetainsTheMethodsAnEncoderResolvesByName(t *testing.T
 		{
 			destination: "the JSON decoder",
 			typeName:    "Unmarshalled",
-			want:        methodRefs("Unmarshalled", "Name", "UnmarshalJSON", "UnmarshalText"),
+			want:        methodRefs("Unmarshalled", "UnmarshalJSON", "UnmarshalText"),
 		},
 		{
 			destination: "the XML encoder",
@@ -227,6 +230,67 @@ func TestEncodingReflectionRetainsTheMethodsAnEncoderResolvesByName(t *testing.T
 					test.typeName, test.destination, got, test.want)
 			}
 		})
+	}
+}
+
+// A program that makes its JSON decoder refuse a document naming a member the type
+// lacks retains, at a JSON decoding entry point, the fields an encoder reads, because
+// deleting one then changes which documents decode. A decoder of another package is
+// unaffected.
+func TestEncodingReflectionRetainsTheFieldsARefusingJSONDecoderReads(t *testing.T) {
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-unknown-members.txtar", Options{}), EncodingReflection)
+
+	for typeName, want := range map[string][]string{
+		"Strict": qualify("example.com/strict", "Strict", "Extra", "Name"),
+		"Loose":  nil,
+	} {
+		if got := membersOf(refs, typeName); !slices.Equal(got, want) {
+			t.Errorf("EncodingReflectionDetector(encoding-reflection-unknown-members.txtar) retained, for %s,\ngot  %v\nwant %v",
+				typeName, got, want)
+		}
+	}
+}
+
+// A program that finds a method of a reflected value by name may call any exported
+// method of a value it hands to reflection, so each such value keeps them.
+func TestEncodingReflectionRetainsTheExportedMethodsWhereReflectionFindsMethods(t *testing.T) {
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-method-finder.txtar", Options{}), EncodingReflection)
+
+	want := qualify("example.com/finder", "Found", "Describe", "Extra", "Name")
+	if got := membersOf(refs, "Found"); !slices.Equal(got, want) {
+		t.Errorf("EncodingReflectionDetector(encoding-reflection-method-finder.txtar) retained, for Found,\ngot  %v\nwant %v", got, want)
+	}
+}
+
+// An outside package's import closure names an interface only where implementing it
+// is decidable: a generic interface no instantiation names, and an interface whose
+// type set is not its method set, a type term or comparable among them, only
+// constrain a type parameter.
+func TestDeclaredInterfacesKeepsTheInterfacesAValueCanSatisfy(t *testing.T) {
+	const source = `package p
+
+type Plain interface{ M() }
+type Generic[T any] interface{ M() T }
+type Terms interface{ ~int; M() }
+type Comparable interface{ comparable; M() }
+type Empty interface{}
+type Alias = Plain
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "p.go", source, 0)
+	if err != nil {
+		t.Fatalf("Setup: parse: %v", err)
+	}
+	pkg, err := new(types.Config).Check("example.com/p", fset, []*ast.File{file}, nil)
+	if err != nil {
+		t.Fatalf("Setup: check: %v", err)
+	}
+	var got []string
+	for _, iface := range declaredInterfaces(pkg) {
+		got = append(got, types.TypeString(iface, nil))
+	}
+	if want := []string{"interface{M()}"}; !slices.Equal(got, want) {
+		t.Errorf("declaredInterfaces(example.com/p) = %v, want %v", got, want)
 	}
 }
 
@@ -260,13 +324,38 @@ func TestEncodingReflectionReachesTheTypesTheMembersOfAnArgumentCarry(t *testing
 			want:     reachRefs("Leaf", "Extra", "Label"),
 		},
 		{
-			reached:  "the value a field typed as the empty interface carries",
+			reached:  "the value the program stores in a field typed as the empty interface",
 			typeName: "Opaque",
-			want:     nil,
+			want:     reachRefs("Opaque", "Extra", "Label"),
 		},
 		{
-			reached:  "the value a field typed as an interface carries",
+			reached:  "the value the program stores in a field typed as an interface",
 			typeName: "Printed",
+			want:     reachRefs("Printed", "Extra", "Label"),
+		},
+		{
+			reached:  "a value appended to a field holding interface elements",
+			typeName: "Appended",
+			want:     reachRefs("Appended", "Extra", "Label"),
+		},
+		{
+			reached:  "a value stored at an index of a map field holding interface values",
+			typeName: "Indexed",
+			want:     reachRefs("Indexed", "Extra", "Label"),
+		},
+		{
+			reached:  "an element of a slice literal stored in a field",
+			typeName: "Listed",
+			want:     reachRefs("Listed", "Extra", "Label"),
+		},
+		{
+			reached:  "an argument a parameter stored in a field stands for, through a second function",
+			typeName: "Relayed",
+			want:     reachRefs("Relayed", "Extra", "Label"),
+		},
+		{
+			reached:  "a value only a parameter no call passes would store",
+			typeName: "Ignored",
 			want:     nil,
 		},
 		{
@@ -335,7 +424,6 @@ func TestEncodingReflectionNamesTheClassTheDestinationAndTheSite(t *testing.T) {
 		{"go://example.com/flow#JSONPayload.Extra", "encoding-reflection", "json.go:18:70", "passed to encoding/json.Marshal"},
 		{"go://example.com/flow#JSONPayload.secret", "encoding-reflection", "json.go:18:70", "passed to encoding/json.Marshal"},
 		{"go://example.com/flow#LogPayload.LogValue", "encoding-reflection", "logging.go:21:68", "passed to log/slog.Info"},
-		{"go://example.com/flow#LogPayload.Describe", "encoding-reflection", "logging.go:21:68", "passed to log/slog.Info"},
 		{"go://example.com/flow#LogPayload.Name", "encoding-reflection", "logging.go:21:68", "passed to log/slog.Info"},
 		{"go://example.com/flow#LogPayload.Extra", "encoding-reflection", "logging.go:21:68", "passed to log/slog.Info"},
 		{"go://example.com/flow#LogPayload.secret", "encoding-reflection", "logging.go:21:68", "passed to log/slog.Info"},
@@ -353,14 +441,12 @@ func opaqueRefs(typeName string, members ...string) []string {
 }
 
 // A value that crosses out of the analysed program through a parameter typed as the
-// empty interface flows with the full retained set, because the callee's body is not
-// in the program, the parameter keeps nothing of the value's type, and whatever the
-// callee does with it reads its fields and may call its exported methods. A function
-// of the target that hands such a parameter on is a destination of its own, to a
-// fixpoint. A parameter typed as the value's own type is not one at all, and neither
-// is one typed as an interface that declares a method: that is a conversion the
-// conversion set records, and the methods the interface requires are what
-// interface-satisfaction retains.
+// empty interface keeps its fields and the methods the callee's package can name: the
+// methods by which it satisfies an interface of that package's import closure, and
+// every exported method where that closure holds a template engine. A function of the
+// target that hands such a parameter on is a destination of its own, to a fixpoint. A
+// parameter typed as the value's own type is not one at all, and neither is one typed
+// as an interface that declares a method, which interface-satisfaction answers.
 func TestEncodingReflectionRetainsWhatCrossesOutOfTheProgram(t *testing.T) {
 	shared := analysisOf(t, "encoding-reflection-opaque.txtar", Options{})
 	refs := retainedRefs(t, shared, EncodingReflection)
@@ -378,22 +464,22 @@ func TestEncodingReflectionRetainsWhatCrossesOutOfTheProgram(t *testing.T) {
 		{
 			crossing: "a method of a package the load did not read",
 			typeName: "Crossing",
-			want:     opaqueRefs("Crossing", "Describe", "Extra", "Inner", "Name", "secret"),
+			want:     opaqueRefs("Crossing", "Extra", "Inner", "Name", "secret"),
 		},
 		{
 			crossing: "a type the crossing value's fields reach",
 			typeName: "Nested",
-			want:     opaqueRefs("Nested", "Label", "Title"),
+			want:     opaqueRefs("Nested", "Label"),
 		},
 		{
 			crossing: "a function of the target that hands its own erased parameter to such a method",
 			typeName: "Wrapped",
-			want:     opaqueRefs("Wrapped", "Describe", "Extra", "Name", "secret"),
+			want:     opaqueRefs("Wrapped", "Extra", "Name", "secret"),
 		},
 		{
 			crossing: "the same method as a pointer",
 			typeName: "Pointed",
-			want:     opaqueRefs("Pointed", "Describe", "Extra", "Name", "secret"),
+			want:     opaqueRefs("Pointed", "Extra", "Name", "secret"),
 		},
 		{
 			crossing: "a type parameter of a function of a package the load did not read",
@@ -403,12 +489,22 @@ func TestEncodingReflectionRetainsWhatCrossesOutOfTheProgram(t *testing.T) {
 		{
 			crossing: "a function of the target that hands its parameter to such a function",
 			typeName: "Chained",
-			want:     opaqueRefs("Chained", "Describe", "Extra", "Name", "secret"),
+			want:     opaqueRefs("Chained", "Extra", "Name", "secret"),
 		},
 		{
 			crossing: "a function of the target that hands its parameter to an encoder",
 			typeName: "Encoded",
 			want:     opaqueRefs("Encoded", "Extra", "Name", "secret"),
+		},
+		{
+			crossing: "a method of a package declaring an interface the value satisfies",
+			typeName: "Locked",
+			want:     opaqueRefs("Locked", "Lock", "Name", "Unlock"),
+		},
+		{
+			crossing: "a function of a package whose import closure holds a template engine",
+			typeName: "Served",
+			want:     opaqueRefs("Served", "Hello", "Name", "Other"),
 		},
 		{
 			crossing: "a function of the target typed as the value's own type",
@@ -482,7 +578,7 @@ func TestFormatVerbContractAloneRecordsAnOperandOfTheFormattingPackage(t *testin
 // The mechanism text of the class, as the Contract states it for this language. The
 // class implements this text; a pin bump that moves it must be read against the
 // destination table before this literal moves with it.
-const encodingReflectionMechanismSHA256 = "d31a6053bf460ab76f08190db5a3d13bdca3af17f7df488add83a3736e83ab1d"
+const encodingReflectionMechanismSHA256 = "5c11f7d93ba385909655a6c2dc23ebec86fc26f2115081ecae1861339d64cc7a"
 
 func TestEncodingReflectionImplementsTheContractsMechanismText(t *testing.T) {
 	body, err := spec.Contract.ReadFile("contract/exemptions.json")

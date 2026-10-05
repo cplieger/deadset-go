@@ -1,0 +1,48 @@
+A command and a package only the command's test imports: a deprecated function the
+test calls, a struct type the test names whose field and method nothing references,
+and an interface the test names with two methods.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+func main() {}
+-- main_test.go --
+package main
+
+import (
+	"testing"
+
+	"example.com/app/support"
+)
+
+func TestSupport(t *testing.T) {
+	var sink support.Sink
+	if support.Old() != 1 || sink != nil || (support.Fake{}) != (support.Fake{}) {
+		t.Error("support")
+	}
+}
+-- support/support.go --
+package support
+
+// Old is called by a test alone.
+//
+// Deprecated: nothing replaces it.
+func Old() int { return 1 }
+
+// Fake is named by a test alone.
+type Fake struct {
+	N int
+}
+
+// Get is called by nothing.
+func (f Fake) Get() int { return f.N }
+
+// Sink is named by a test alone.
+type Sink interface {
+	Put(v int)
+	Take() int
+}

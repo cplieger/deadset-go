@@ -12,72 +12,16 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-// The boundary of the analysed program is one rule: what leaves the program is
-// fully reachable, and what the analysis cannot read ends the run rather than being
-// passed over. A value or a position leaves in five ways, and this file answers the
-// two an exemption class meets.
-//
-// A value crosses out when a struct, or a pointer to one, is handed to a parameter
-// typed as the EMPTY interface of a function or method of a package outside the
-// target and the consumers the run loaded. The callee's body is not in the program
-// and the parameter keeps nothing of the value's type, so whatever the callee does
-// with it, encode it, render it, log it or reflect over it, reads its fields and may
-// call its exported methods; the value therefore flows into encoding-reflection with
-// that class's full retained set, recorded at the call with the immediate callee
-// named.
-//
-// A function of the program that hands one of its own such parameters on inherits the
-// crossing at that parameter, to a fixpoint, so a wrapper of a wrapper carries the
-// rule of the call it forwards to. A consumer's function is walked for that exactly
-// as the target's is: a consumer is inside the program, so a consumer's WriteJSON is
-// not an opaque callee but a wrapper, and a target value handed to it reaches the
-// encoder through it. What such a wrapper retains is what its own destination
-// retains, not the full set: the wrapper's body IS in the program, so where it hands
-// the value to an encoder, which reads fields and resolves the marshalling methods of
-// its own direction by name, every other method of the value reaches nothing and stays
-// reportable. A wrapper with two destinations retains the union of what they retain,
-// and a wrapper of a wrapper the set the fixpoint carried to the one it forwards to.
-// Only a callee the program does not hold retains the full set, because there the
-// analysis cannot see what is read.
-//
-// The empty interface is the one parameter type the crossing reads. A value handed
-// to any other interface is a conversion the conversion set records, and the methods
-// that interface requires are what interface-satisfaction retains for it, which is
-// everything the callee can reach through the parameter's own type. A type parameter
-// keeps everything too: it stands for the type the caller instantiates the
-// declaration with, whatever the constraint admits.
-//
-// Evidence crosses out the other way. An exemption whose evidence a test file
-// carries does not hold under a production run: a test that marshals a value or
-// compares one makes no member of it live for production, exactly as a test's
-// reference is no reference there.
-//
-// The remaining three crossings are answered where they arise, and a stage that
-// meets a value at the edge of the program reads this list rather than adding a
-// sixth policy. A compiled file outside the target root is dropped at the load. A
-// consumer's reference into the target is an ordinary reference of the graph, live
-// under both relations. And an interface-typed field is where a class's reach stops,
-// which is the one stated limit of that reach: the dynamic type behind such a field
-// is not in the type information, so a member reached only through one is retained by
-// nothing and nothing infers it.
-//
-// One consequence of the second and third crossings together: a class records the
-// site its evidence was found at, and a site is rendered relative to the target root,
-// so every site a class publishes is a file of the target. That is why the call walks
-// read the target's packages while the forwarding walk reads the whole program: a
-// consumer's own call site has no rendering, and recording one would end the run.
+// The boundary of the analysed program: a struct value handed to an empty-interface
+// parameter of a function the program does not declare has left the analysis, and
+// evidence a test file carries does not hold under a production run. A site renders
+// against the target root alone, so the call walks read the target's packages.
 
 // boundary is the edge of the analysed program over one loaded configuration: the
 // declarations the program holds, and the parameters of its own functions a value
-// crosses out through.
-//
-// What decides the edge is the declaration and not the package path, because two
-// modules of one program can hold two copies of one package. The target's load reads
-// its own module file and never a workspace, so a module the scope declares as a
-// consumer and the target also depends on is read twice, at the consumer's directory
-// and at whatever the target's build list resolves; the copy the target calls is then
-// a function whose body the program does not hold, whatever its import path says, and
-// the crossing is what that is.
+// crosses out through. The declaration decides the edge rather than the package path,
+// because a module both a consumer and the target's build list hold is loaded twice,
+// and the copy the target calls is then a body the program does not hold.
 type boundary struct {
 	sites    *declarationSites
 	held     map[token.Position]bool
@@ -93,8 +37,8 @@ type destinationParameters map[token.Position][]sinkParameter
 // position of the parameter, and what reads the value there reads of its methods
 // beside its fields.
 type sinkParameter struct {
-	at    int
 	reach reach
+	at    int
 }
 
 // destinationTest reports whether one parameter of one function is a destination the
@@ -113,19 +57,11 @@ type crossingOut struct {
 }
 
 // declarationSites answers the key one declaration of the program is kept under, and
-// remembers each answer.
+// remembers each answer, because a walk asks once per argument of every call.
 //
-// The key is the position the toolchain reported for the declaration, because that is
-// the one spelling every load of one file agrees on. A package and its test variant
-// share a token.Pos within one load, but a file two modules' loads both read is parsed
-// twice into the configuration's file set and the two readings carry different token.Pos
-// values for the same declaration, so a consumer's wrapper found in the consumer's own
-// load would never match the callee a target's call resolves to. The rendered site of a
-// report cannot serve here: a consumer's file is outside the target root and renders
-// nowhere.
-//
-// The answers are remembered because a walk asks for the same callee once per argument
-// of every call it makes, and the file set answers by searching its files under a lock.
+// The key is the toolchain's position: a file two modules' loads both read is parsed
+// twice into one file set, so token.Pos differs between the readings, and a consumer's
+// file renders nowhere against the target root.
 type declarationSites struct {
 	fset  *token.FileSet
 	known map[token.Pos]token.Position
@@ -136,13 +72,13 @@ func newDeclarationSites(fset *token.FileSet) *declarationSites {
 	return &declarationSites{fset: fset, known: make(map[token.Pos]token.Position)}
 }
 
-// of is the key fn's declaration is kept under.
-func (d *declarationSites) of(fn *types.Func) token.Position {
-	if held, known := d.known[fn.Pos()]; known {
+// of is the key one declaration is kept under.
+func (d *declarationSites) of(object types.Object) token.Position {
+	if held, known := d.known[object.Pos()]; known {
 		return held
 	}
-	at := d.fset.Position(fn.Pos())
-	d.known[fn.Pos()] = at
+	at := d.fset.Position(object.Pos())
+	d.known[object.Pos()] = at
 	return at
 }
 
@@ -187,15 +123,10 @@ func newBoundary(in *Input, destination destinationTest) *boundary {
 }
 
 // crossing reports whether the argument at position arg of one call carries a value
-// out of the analysed program, and names the callee it leaves through. It is the
-// whole of the crossing test: the callee is a function or method the program does not
-// declare, or one of its own that forwards the parameter on; the parameter the
-// argument supplies is typed as the empty interface, the variadic parameter included;
-// and the value is a struct or a pointer to one, which is the shape a consumer
-// reading a value by name reads the members of.
-//
-// A slice, a map or a channel of structs is not one, because what crosses is the
-// value the argument's own type describes.
+// out of the analysed program, and names the callee it leaves through: the callee
+// does not belong to the program or forwards the parameter on, the parameter is typed
+// as the empty interface, the variadic one included, and the value is a struct or a
+// pointer to one. A slice, a map or a channel of structs is not one.
 func (b *boundary) crossing(info *types.Info, call *ast.CallExpr, arg int) (crossingOut, bool) {
 	if arg >= len(call.Args) {
 		return crossingOut{}, false
@@ -224,17 +155,10 @@ func (b *boundary) crossing(info *types.Info, call *ast.CallExpr, arg int) (cros
 }
 
 // sinks are the parameters of one function at which a value leaves the analysis, each
-// with what reads the value there, and false where none does.
-//
-// A function the program does not declare carries a sink at every parameter typed as
-// the empty interface, each reaching every exported method as well as the fields,
-// because its body is not in the program and what it reads of the value is unknown. A
-// function the program declares carries the ones the forwarding set holds for it, which
-// is where it hands a parameter of its own on, each retaining what the destination it
-// forwards to retains.
-// A package whose destinations the vocabulary names one by one carries none: the rule
-// that names it records the call, and two spellings of one destination are two records
-// of one fact.
+// with what reads the value there, and false where none does. A function the program
+// does not declare carries one at every empty-interface parameter; one it declares
+// carries the ones the forwarding set holds. A package a destination rule names one by
+// one carries none, so one fact is recorded once.
 func (b *boundary) sinks(fn *types.Func) ([]sinkParameter, bool) {
 	if fn.Pkg() == nil {
 		return nil, false
@@ -247,7 +171,7 @@ func (b *boundary) sinks(fn *types.Func) ([]sinkParameter, bool) {
 	if namedDestinations[fn.Pkg().Path()] {
 		return nil, false
 	}
-	sinks := opaqueParameters(fn.Signature())
+	sinks := opaqueParameters(fn)
 	return sinks, len(sinks) > 0
 }
 
@@ -262,7 +186,7 @@ func (b *boundary) reaches(fn *types.Func, at int, destination destinationTest) 
 	}
 	sinks, carries := b.sinks(fn)
 	if !carries {
-		return reachNoMethod, false
+		return reach{}, false
 	}
 	sink, crosses := sinkAt(sinks, at)
 	return sink.reach, crosses
@@ -278,11 +202,10 @@ func (b *boundary) hold(declared token.Position, sink sinkParameter) bool {
 		if held[i].at != sink.at {
 			continue
 		}
-		widened := held[i].reach | sink.reach
-		if widened == held[i].reach {
+		if held[i].reach.covers(sink.reach) {
 			return false
 		}
-		held[i].reach = widened
+		held[i].reach = held[i].reach.union(sink.reach)
 		return true
 	}
 	b.forwards[declared] = append(held, sink)
@@ -381,17 +304,10 @@ type programFunction struct {
 }
 
 // programFunctions returns every function the analysed program declares, the
-// target's and every loaded consumer's, in one order so that two runs over one load
-// read the same set. It is the one enumeration the boundary and the forwarding walks
-// of the classes read, so what the program holds and what forwards a parameter are
-// answered from one walk and a consumer's wrapper is found for every class at once.
-//
-// A declaration with no body is here: a function the program declares and implements
-// elsewhere, in assembly or through a directive, is the program's own declaration, and
-// it forwards nothing because there is no body to forward in.
-//
-// A function literal is not one: nothing names it, so no call to it resolves to a
-// function a class can recognise.
+// target's and every loaded consumer's, in one order. It is the one enumeration the
+// boundary and the forwarding walks read, so a consumer's wrapper is found for every
+// class at once. A declaration with no body is here and forwards nothing; a function
+// literal is not, because no call resolves to it by name.
 func programFunctions(in *Input) []programFunction {
 	var found []programFunction
 	for _, p := range programPackages(in.Result) {
@@ -434,14 +350,19 @@ func programPackages(r *load.Result) []*packages.Package {
 }
 
 // opaqueParameters are the sinks of a function the program does not declare: every
-// parameter typed as the empty interface, each reading every exported method of a
-// value it is given as well as its fields, because the callee's body is not in the
-// program and what it does with the value is not knowable from its signature.
-func opaqueParameters(sig *types.Signature) []sinkParameter {
-	erased := erasedParameters(sig)
+// parameter typed as the empty interface. The callee's body is not in the program, so
+// each reads the value's fields, resolves the encoding and decoding methods of both
+// directions, and retains what the callee's package can name ([reach]).
+func opaqueParameters(fn *types.Func) []sinkParameter {
+	erased := erasedParameters(fn.Signature())
 	found := make([]sinkParameter, 0, len(erased))
+	outside := []*types.Package{fn.Pkg()}
 	for _, at := range erased {
-		found = append(found, sinkParameter{at: at, reach: reachExportedMethods})
+		found = append(found, sinkParameter{at: at, reach: reach{
+			methods: reachEncoding | reachDecoding,
+			fields:  true,
+			outside: outside,
+		}})
 	}
 	return found
 }
@@ -525,14 +446,9 @@ func parameterNamed(info *types.Info, arg ast.Expr) *types.Var {
 
 // holdsInMode reports whether the evidence one exemption found at site holds under
 // the run's mode: every exemption in the plain mode, and in a production one only an
-// exemption whose evidence a test file does not carry.
-//
-// The site is a file of the target, because a class records its evidence where the
-// analysis can render it and the renderer answers for the target root alone. So
-// Mode.ConsumerTestsProduction reaches no exemption: it classifies the references a
-// loaded consumer's test file MAKES, and a consumer's test file is no site an
-// exemption can carry. A production run therefore drops the evidence of the target's
-// own test files under both classifications.
+// exemption whose evidence a test file does not carry. A site is a file of the target,
+// so Mode.ConsumerTestsProduction, which classifies a consumer's test references,
+// reaches no exemption.
 func holdsInMode(site token.Position, m graph.Mode) bool {
 	if !m.Production {
 		return true

@@ -242,7 +242,7 @@ func writeExplanation(w io.Writer, set *findingSet, cascade graph.Cascade, subje
 	fmt.Fprintf(&held, "configurations: %s\n", configurationNames(set.loaded.identifiers, subject.Configs))
 
 	found := findingAbout(set.result.Findings, subject)
-	retained := retentionsOf(set.swept.Retained, subject.ID)
+	retained := retentionsOf(set.retained, subject.ID)
 	switch {
 	case found != nil:
 		fmt.Fprintf(&held, "answer: %s\n", stateReported)

@@ -1,0 +1,33 @@
+A struct a live function writes and marshals as JSON: the encoding-reflection class
+retains the exported field, which is the read that holds back the write-only finding
+about it, while the unexported field is written and never read. The exported field
+the function also reads is no write-only subject, so its exemption holds nothing back.
+
+-- go.mod --
+module example.com/wire
+
+go 1.27.1
+-- main.go --
+package main
+
+import "encoding/json"
+
+// answer is written out as JSON, which reads every exported field of it.
+type answer struct {
+	Status string `json:"status"`
+	Code   int    `json:"code"`
+	note   string
+}
+
+func reply() ([]byte, error) {
+	a := answer{}
+	a.Status = "ok"
+	a.note = "unread"
+	a.Code = 200
+	if a.Code != 200 {
+		return nil, nil
+	}
+	return json.Marshal(a)
+}
+
+func main() { _, _ = reply() }

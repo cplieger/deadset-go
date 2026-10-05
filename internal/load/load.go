@@ -78,9 +78,9 @@ type Result struct {
 	Fset *token.FileSet // one FileSet for the whole configuration
 
 	// TestSupport holds the import paths of the target's test-support packages:
-	// packages only test code imports, which every stage judges as test code. The
-	// load leaves it empty and [graph.ClassifyTestSupport] fills it, because the
-	// classification turns on the target kind.
+	// packages only tests reach, which every stage judges as test code. The load
+	// leaves it empty and [graph.ClassifyTestSupport] fills it, because the
+	// classification turns on the target kind and the roots.
 	TestSupport map[string]bool
 
 	// Programs holds the target's files run on their own under the ignore tag,

@@ -1,0 +1,46 @@
+A library whose options type has a field only it writes and nothing reads, and a
+second field it writes that a loaded consumer's test file writes as well.
+
+-- target/go.mod --
+module example.com/target
+
+go 1.27.1
+-- target/options.go --
+// Package target returns options.
+package target
+
+// Options holds two settings.
+type Options struct {
+	Label string
+	Note  string
+}
+
+// Defaults returns the options with both settings written.
+func Defaults() *Options { return &Options{Label: "default", Note: "default"} }
+-- consumer/go.mod --
+module example.com/consumer
+
+go 1.27.1
+
+require example.com/target v0.0.0
+
+replace example.com/target => ../target
+-- consumer/main.go --
+package main
+
+import "example.com/target"
+
+func main() { _ = target.Defaults() }
+-- consumer/main_test.go --
+package main
+
+import (
+	"testing"
+
+	"example.com/target"
+)
+
+func TestLabel(t *testing.T) {
+	options := target.Defaults()
+	options.Label = "test"
+}

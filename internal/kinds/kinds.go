@@ -492,6 +492,9 @@ func (in *Input) runKind(emit Emitter, row *catalog.Row, reported map[string]str
 			return nil, err
 		}
 		in.complete(&found, row)
+		if found.id != "" && in.annotationCascade().falls[found.id] {
+			continue
+		}
 		if in.withhold(&found) {
 			continue
 		}
@@ -914,6 +917,7 @@ type index struct {
 	retained   map[graph.SymbolID]bool
 	byRef      map[string]graph.SymbolID
 	mains      map[string]bool
+	children   map[graph.SymbolID][]graph.SymbolID
 
 	// caps is each dead component's confidence cap by its index, computed on first use.
 	caps map[int]Class
@@ -928,6 +932,9 @@ type index struct {
 	// few and the walk is the whole tree's.
 	deprecated map[graph.SymbolID]bool
 	enumerated map[graph.SymbolID]string
+
+	// falling is the write-only kind's annotation cascade, computed on first use.
+	falling *annotationFalls
 
 	minted int
 }
@@ -944,6 +951,7 @@ func (in *Input) index() *index {
 		retained:   make(map[graph.SymbolID]bool),
 		byRef:      make(map[string]graph.SymbolID),
 		mains:      make(map[string]bool),
+		children:   make(map[graph.SymbolID][]graph.SymbolID),
 		caps:       make(map[int]Class),
 	}
 	held.holdInventory(in.Merged)
@@ -963,6 +971,9 @@ func (x *index) holdInventory(merged *graph.Merged) {
 	for i := range merged.Symbols {
 		symbol := &merged.Symbols[i]
 		x.symbols[symbol.ID] = symbol
+		if symbol.Parent != "" {
+			x.children[symbol.Parent] = append(x.children[symbol.Parent], symbol.ID)
+		}
 		if _, collides := x.byRef[symbol.Ref]; !collides {
 			x.byRef[symbol.Ref] = symbol.ID
 		}
@@ -1086,12 +1097,12 @@ func (x *index) kindOf(id graph.SymbolID) graph.SymbolKind {
 
 // componentOf is the dead component one finding's subject belongs to.
 //
-// A subject that belongs to none falls with nothing, which the Contract has no
-// spelling for, so the framework mints a component of that subject alone: one symbol
-// falls with it and no line is deleted. Three subjects answer that way: a declaration
-// the sweep judged live, which the narrowing kinds report; a part of a declaration,
-// which is deleted without the declaration; and a row of a document, which the
-// analysis enumerates no declaration for and names the empty identifier.
+// A subject that belongs to none gets a component minted for it alone, the subject
+// its one root and [index.fallen] its members, which deletes no line. Four subjects
+// answer that way: a declaration the sweep judged live, which the narrowing kinds
+// report; a declaration of test-support code that test code references; a part of a
+// declaration, which is deleted without the declaration; and a row of a document,
+// which names the empty identifier.
 func (x *index) componentOf(id graph.SymbolID) Component {
 	component := x.components[id]
 	if component == nil {
@@ -1099,7 +1110,7 @@ func (x *index) componentOf(id graph.SymbolID) Component {
 		return Component{
 			ID:          componentID(x.minted),
 			Root:        true,
-			SymbolCount: 1,
+			SymbolCount: len(x.fallen(id)),
 		}
 	}
 	return Component{
@@ -1116,11 +1127,15 @@ func (x *index) componentOf(id graph.SymbolID) Component {
 // minted for a subject that belongs to none holds the subject alone.
 func (x *index) membersOf(found *Finding) []Positioned {
 	component := x.components[found.id]
-	if found.id == "" || component == nil {
+	if found.id == "" || (component == nil && x.candidates[found.id] == nil) {
 		return []Positioned{{Ref: found.Symbol.Ref, Name: found.Symbol.Name, Position: found.Position}}
 	}
-	members := make([]Positioned, 0, len(component.Members))
-	for _, id := range component.Members {
+	ids := x.fallen(found.id)
+	if component != nil {
+		ids = component.Members
+	}
+	members := make([]Positioned, 0, len(ids))
+	for _, id := range ids {
 		symbol := x.symbols[id]
 		if symbol == nil {
 			continue
@@ -1140,6 +1155,24 @@ func (x *index) membersOf(found *Finding) []Positioned {
 			cmp.Compare(a.Ref, b.Ref),
 		)
 	})
+	return members
+}
+
+// fallen is the members of a component minted for one subject: the subject, and
+// where the sweep judged it dead, every dead member it contains at any depth, which
+// falls with its container.
+func (x *index) fallen(id graph.SymbolID) []graph.SymbolID {
+	members := []graph.SymbolID{id}
+	if id == "" || x.candidates[id] == nil {
+		return members
+	}
+	for at := 0; at < len(members); at++ {
+		for _, child := range x.children[members[at]] {
+			if x.candidates[child] != nil {
+				members = append(members, child)
+			}
+		}
+	}
 	return members
 }
 

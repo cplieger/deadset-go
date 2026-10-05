@@ -31,9 +31,9 @@ var (
 	docsKindHeading     = regexp.MustCompile(`(?m)^### (DS[0-9]{4})\b`)
 	docsKindRow         = regexp.MustCompile("(?m)^\\| `(DS[0-9]{4})` \\|")
 	docsClassHeading    = regexp.MustCompile(`(?m)^### ([a-z][a-z0-9]*(?:-[a-z0-9]+)*)$`)
-	docsContractVersion = regexp.MustCompile(`(?is)contract version\s+\*\*([0-9]+\.[0-9]+\.[0-9]+)\*\*`)
-	docsCorpusVersion   = regexp.MustCompile(`(?is)corpus version this analyzer answers is\s+\*\*([0-9]+\.[0-9]+\.[0-9]+)\*\*`)
-	docsFixtureCount    = regexp.MustCompile(`(?is)the run answers the\s+\*\*([0-9]+)\*\* fixtures`)
+	docsContractVersion = regexp.MustCompile(`(?is)contract version\s+([0-9]+\.[0-9]+\.[0-9]+)`)
+	docsCorpusVersion   = regexp.MustCompile(`(?is)corpus version this analyzer answers is\s+([0-9]+\.[0-9]+\.[0-9]+)`)
+	docsFixtureCount    = regexp.MustCompile(`(?is)the run answers the\s+([0-9]+) fixtures`)
 )
 
 // TestEveryReportedKindHasADocumentationEntry reads the kinds page and refuses a

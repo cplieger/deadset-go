@@ -74,18 +74,16 @@ func WriteOnlySymbol(in *Input) ([]Finding, error) {
 // inventory: whether the counted references store into it and never read it, and
 // the finding that says so.
 func writeOnly(in *Input, symbol *graph.Symbol, u *uses, exempted map[graph.SymbolID]bool) (Finding, bool) {
-	switch {
-	case !writableSubject(in, symbol), exempted[symbol.ID], in.candidateOf(symbol.ID) != nil:
-		return Finding{}, false
-	case u == nil, len(u.writes) == 0, u.reads > 0:
+	if !writeOnlySubject(in, symbol, u, exempted) {
 		return Finding{}, false
 	}
 	read := " and never read"
 	if u.testReads > 0 {
 		read = " and read only from test files"
 	}
+	cascade := append(writeCascade(in, symbol, u.writes), in.annotationCascade().named[symbol.ID]...)
 	finding, names := in.finding(symbol.ID, writeOnlyCode, in.word(symbol.ID)+" "+symbol.Name+
-		" is written "+writeCount(len(u.writes))+read+cascadeClause(writeCascade(in, symbol, u.writes)))
+		" is written "+writeCount(len(u.writes))+read+cascadeClause(cascade))
 	if !names {
 		return Finding{}, false
 	}
@@ -96,6 +94,42 @@ func writeOnly(in *Input, symbol *graph.Symbol, u *uses, exempted map[graph.Symb
 	finding.TestOnly = u.production == 0 && u.test > 0
 	finding.Details.WritePositions = slices.Clone(u.writes)
 	return finding, true
+}
+
+// WriteOnlyRetained is every exemption on a declaration the counted references store
+// into and never read: the exemption is a read, so it holds back the write-only
+// finding about a declaration the sweep judges live and lists nowhere else. One
+// symbol, class and detail is one record.
+func WriteOnlyRetained(in *Input) []graph.Exemption {
+	type fact struct {
+		id            graph.SymbolID
+		class, detail string
+	}
+	counted := writesAndReads(in)
+	seen := make(map[fact]bool)
+	var held []graph.Exemption
+	for _, exemption := range in.Exempt {
+		symbol := in.symbol(exemption.ID)
+		one := fact{id: exemption.ID, class: exemption.Class, detail: exemption.Detail}
+		if symbol == nil || seen[one] || !writeOnlySubject(in, symbol, counted[symbol.ID], nil) {
+			continue
+		}
+		seen[one] = true
+		held = append(held, exemption)
+	}
+	return held
+}
+
+// writeOnlySubject reports whether the counted references store into one
+// declaration of the inventory and never read it.
+func writeOnlySubject(in *Input, symbol *graph.Symbol, u *uses, exempted map[graph.SymbolID]bool) bool {
+	switch {
+	case !writableSubject(in, symbol), exempted[symbol.ID], in.candidateOf(symbol.ID) != nil:
+		return false
+	case u == nil, len(u.writes) == 0, u.reads > 0:
+		return false
+	}
+	return true
 }
 
 // UnusedEnumMember reports a constant of an enumerated type that nothing names.
@@ -208,16 +242,19 @@ func writesAndReads(in *Input) map[graph.SymbolID]*uses {
 			held = &uses{}
 			counted[r.To] = held
 		}
-		if in.Mode.Production && r.Test {
+		test := in.testReference(r)
+		if in.uncounted(r) {
 			held.testReads += readCount(r)
 			continue
 		}
-		if r.Test {
+		if test {
 			held.test++
 		} else {
 			held.production++
 		}
-		if r.Kind != graph.RefWrite {
+		// A loaded consumer's write counts as a read, because deleting the
+		// subject and its writes would break code the target does not own.
+		if r.Kind != graph.RefWrite || r.Consumer != "" {
 			held.reads++
 			continue
 		}
@@ -226,6 +263,19 @@ func writesAndReads(in *Input) map[graph.SymbolID]*uses {
 		}
 	}
 	return counted
+}
+
+// testReference reports whether the mode classifies one reference as a test
+// reference: a test file's, and a loaded consumer's test file's unless the
+// configuration counts those as production.
+func (in *Input) testReference(r *graph.Reference) bool {
+	return r.Test && (r.Consumer == "" || !in.Mode.ConsumerTestsProduction)
+}
+
+// uncounted reports whether the mode counts one reference as no use at all, which a
+// production mode does for every test reference.
+func (in *Input) uncounted(r *graph.Reference) bool {
+	return in.Mode.Production && in.testReference(r)
 }
 
 // readCount is one for a reference that reads its target and zero for a store.

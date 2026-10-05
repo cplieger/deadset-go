@@ -45,18 +45,23 @@ func (c Class) lower(other Class) Class {
 	return other
 }
 
-// ClassOf is the reachability class of one declaration under this run. It is
-// certain wherever no reference can come from outside the graph: no declaration, an
-// unexported one, a test file's, a function's type parameter, an application's, an
-// exported one in a main package, an external test package or an internal tree, and
-// a member [Input.hiddenMember] reports. An exported declaration of a library's
-// importable surface is certain where every declared consumer loaded, probable where
-// some did not, and possible with no consumer information; whether the consumer set
-// is declared complete decides nothing.
+// ClassOf is the reachability class of one declaration under this run. Test-support
+// code test code references is possible unless the test-of-dead-code kind reports it.
+// Any other is certain where no reference can come from outside the graph: no
+// declaration, an unexported one, a test file's, a function's type parameter, an
+// application's, and an exported one in a main package, an external test package, an
+// internal tree or a member [Input.hiddenMember] reports. A library's importable export
+// is certain where every declared consumer loaded, probable where some did not, and
+// possible with no consumer information, whether or not the set is declared complete.
 func (in *Input) ClassOf(id graph.SymbolID) Class {
 	symbol := in.symbol(id)
+	candidate := in.candidateOf(id)
 	switch {
-	case symbol == nil || !symbol.Exported:
+	case symbol == nil:
+		return Certain
+	case candidate != nil && in.supportReferenced(candidate, symbol):
+		return Possible
+	case !symbol.Exported:
 		return Certain
 	case symbol.Kind == graph.KindTypeParam && declaresTypeParameters(in.symbol(symbol.Parent)):
 		return Certain

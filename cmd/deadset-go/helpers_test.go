@@ -195,6 +195,7 @@ func detachedSet(sink failureSink, set *findingSet) findingSet {
 	return findingSet{
 		loaded:       loaded,
 		swept:        testsupport.Detached(sink, set.swept),
+		retained:     testsupport.Detached(sink, set.retained),
 		evaluations:  testsupport.Detached(sink, set.evaluations),
 		result:       testsupport.Detached(sink, set.result),
 		suppressions: set.suppressions,

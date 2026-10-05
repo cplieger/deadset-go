@@ -1,0 +1,27 @@
+One package that finds a method of a reflected value by a name it computes, so every
+value it hands to reflection keeps its exported methods beside its fields.
+
+-- go.mod --
+module example.com/finder
+
+go 1.27.1
+-- finder.go --
+package finder
+
+import "reflect"
+
+// Found is handed to reflection in a program that finds methods by name.
+type Found struct {
+	Name  string
+	Extra int
+}
+
+// Describe is exported.
+func (f Found) Describe() string { return f.Name }
+
+func (f Found) hidden() int { return f.Extra }
+
+// Call calls the method of v that name names.
+func Call(v Found, name string) []reflect.Value {
+	return reflect.ValueOf(v).MethodByName(name).Call(nil)
+}

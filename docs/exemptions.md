@@ -1,6 +1,6 @@
 # Exemption classes
 
-An exemption is a named reason for which deadset-go keeps a symbol the reference graph alone would report. Every class is computed from Go type information rather than configured, so a project writes no suppression for a symbol a class covers. deadset-go implements the nine classes the deadset contract declares for Go. The class vocabulary and its detection rules are stated once in the contract's [exemptions page](https://github.com/cplieger/deadset-spec/blob/v5.2.0/docs/exemptions.md), and this page states what each class does here.
+An exemption is a named reason for which deadset-go keeps a symbol the reference graph alone would report. Every class is computed from Go type information rather than configured, so a project writes no suppression for a symbol a class covers. deadset-go implements the nine classes the deadset contract declares for Go. The class vocabulary and its detection rules are stated once in the contract's [exemptions page](https://github.com/cplieger/deadset-spec/blob/v5.3.0/docs/exemptions.md), and this page states what each class does here.
 
 ## Reading the retained set
 
@@ -28,7 +28,9 @@ A report is built from a production analysis, which counts no reference a test f
 
 ## What leaves the analysis is fully reachable
 
-A struct value, or a pointer to one, handed to a parameter typed as the empty interface of a function or method outside the analyzed program has left the analysis. The callee's body is not in the program, and the parameter's type keeps nothing of the value. So whatever the callee does with it reads its fields and may call its exported methods. The value flows into `encoding-reflection` with that class's full retained set, recorded at the call with the callee named.
+A struct value, or a pointer to one, handed to a parameter typed as the empty interface of a function or method outside the analyzed program has left the analysis. The callee's body is not in the program, and the parameter's type keeps nothing of the value. So the callee may read its fields and call the methods its own package can name.
+
+The value flows into `encoding-reflection`, recorded at the call with the callee named. It keeps its fields and the encoding and decoding methods of both directions. It also keeps every method by which it satisfies an interface that the callee's package or a package in that package's import closure declares. Where those packages include a template engine, it keeps every exported method.
 
 A function of the program that hands one of its own empty-interface parameters on inherits the crossing at that parameter, to a fixpoint. So a wrapper of a wrapper carries the rule of the call it forwards to. A declared consumer is inside the program, so a consumer's own wrapper is walked like the target's and a target value handed to it reaches the destination through it.
 
@@ -52,9 +54,11 @@ Retains, on a type whose values reach a consumer that names members by string at
 
 The destinations, and what each retains:
 
-- Fields and the methods it resolves by name for an argument of a function or method of `encoding/json`, `encoding/json/v2`, `encoding/xml` or `encoding/gob`.
-- Fields alone for a `database/sql` scan target, an argument of `reflect.DeepEqual`, and an argument of any other function of `reflect` that hands out no method.
-- Fields and the exported methods for a template engine, a sort interface, and a `log/slog` logging call or attribute constructor. The same holds for every entry point of `reflect` from which a method is reachable by name, and for a destination outside the analyzed program.
+- Fields and the methods it resolves by name for an argument of a function or method of `encoding/json`, `encoding/json/v2`, `encoding/xml` or `encoding/gob`. A decoding entry point fills fields through reflection, which reads none, so it retains its methods alone. A JSON decoding entry point retains fields as well in a program that calls `(*json.Decoder).DisallowUnknownFields` or names `json.RejectUnknownMembers`.
+- Fields alone for a `database/sql` scan target and an argument of `reflect.DeepEqual`. Fields alone also for an argument of any other `reflect` function in a program that calls none of the method finders `Method`, `MethodByName` and `NumMethod`.
+- Fields and the `LogValue` method for a `log/slog` logging call or attribute constructor.
+- Fields and the exported methods for a template engine and a sort interface. The same holds for an argument of any other function of `reflect` in a program that calls one of those method finders.
+- For a destination outside the analyzed program, what [the previous section](#what-leaves-the-analysis-is-fully-reachable) states.
 
 An encoder resolves a method by name in the direction its entry point works in. An entry point whose name begins `Encode` or `Marshal` retains the encoding methods. One whose name begins `Decode` or `Unmarshal` retains the decoding methods. One whose name begins with neither retains both, because it takes a value for either direction.
 
@@ -64,7 +68,9 @@ An encoder resolves a method by name in the direction its entry point works in. 
 | `encoding/xml` | `MarshalText`, `MarshalXML`, `MarshalXMLAttr` | `UnmarshalText`, `UnmarshalXML`, `UnmarshalXMLAttr` |
 | `encoding/gob` | `GobEncode`, `MarshalBinary` | `GobDecode`, `UnmarshalBinary` |
 
-A value reaches through a pointer, a slice, an array, a map key or value and an embedded field. From every type so reached, it reaches through that type's fields again until no further type joins, because an encoder walks the whole value rather than its outermost type. The walk stops at an interface-typed field, whose dynamic type the analysis does not see. A method is retained where the defined type declares it, so a method promoted from an embedded type is retained where the embedded type is reached.
+A value reaches through a pointer, a slice, an array, a map key or value and an embedded field. From every type so reached, it reaches through that type's fields again until no further type joins, because an encoder walks the whole value rather than its outermost type.
+
+A field that is an interface, or holds interface elements or map values, reaches the types the program stores in it. A store is a composite literal, an assignment, an `append` or an index assignment. A stored parameter stands for every argument the program's calls pass for it. A method is retained where the defined type declares it, so a method promoted from an embedded type is retained where the embedded type is reached.
 
 ### format-verb-contract
 

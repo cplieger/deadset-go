@@ -213,34 +213,19 @@ func clusters(adj [][]int, cycleOf, sequence []int, cycles int) (clusterOf []int
 	return clusterOf, len(numbered)
 }
 
-// deadSubgraph indexes the dead symbols a component holds and the edges between
-// them: every reference one of them makes to another, one edge each way between a
-// member and its container, and the edge back from each target of an admitted test.
-// It returns each symbol's place in the subgraph as well, outside for one it leaves
-// out.
-//
-// A declaration of a test file is held only where the sweep admitted it as a test of
-// dead code. Any other dead test-file declaration belongs to no component, so its
-// references join no two components and make no production declaration a non-root:
-// a cluster only tests reach is rooted at a declaration outside the test files.
-//
-// The container edges are what place a dead type's fields and methods, and a dead
-// interface's methods, inside the container's component rather than in components
-// of their own. One direction alone would not: a member its container only points
-// at is a component the container reaches rather than a member of it. The edge back
-// from an admitted test's target is the same mechanism for the same reason: a
-// subject never references its test, so nothing else would close the cycle that
-// puts a test of dead code in the component of the code it exercises.
-//
-// The references are the ones the graph holds rather than the ones the mode
-// counts. Only an edge between two dead symbols is here, a reference a test file
-// made comes from a test declaration, and a dead test declaration's references are
-// the cascade the run is asked for: what falls with it when it is deleted.
+// deadSubgraph indexes the dead symbols a component holds, each symbol's place in it
+// (outside for one left out), and the edges between them: the graph's references from
+// one to another, both directions between a member and its container, and the edge
+// back from each target of an admitted test, which close the cycles that put members
+// and tests of dead code in the component they belong to. A test-code declaration is
+// held only as an admitted test or as [Graph.unreferencedSupport], so no other test
+// reference joins two components or makes a production declaration a non-root, and a
+// cluster only tests reach is rooted outside test code.
 func (g *Graph) deadSubgraph(dead, testOfDeadCode []bool) (at []int, adj [][]int, position []int) {
 	position = make([]int, len(g.symbols))
 	for i := range g.symbols {
 		position[i] = outside
-		if dead[i] && (!g.test[i] || testOfDeadCode[i]) {
+		if dead[i] && (!g.test[i] || testOfDeadCode[i] || g.unreferencedSupport(i)) {
 			position[i] = len(at)
 			at = append(at, i)
 		}
@@ -255,6 +240,22 @@ func (g *Graph) deadSubgraph(dead, testOfDeadCode []bool) (at []int, adj [][]int
 		}
 	}
 	return at, adj, position
+}
+
+// unreferencedSupport reports whether one symbol is a declaration of test-support
+// code whose outermost declaration nothing references, which is dead as a
+// production declaration nothing references is.
+func (g *Graph) unreferencedSupport(i int) bool {
+	if !g.symbols[i].TestSupport {
+		return false
+	}
+	if _, inTestFile := IsTestFile(g.symbols[i].Pos.Filename); inTestFile {
+		return false
+	}
+	for g.parent[i] != outside && g.subject[g.parent[i]] {
+		i = g.parent[i]
+	}
+	return g.made[i].test == 0 && g.made[i].production == 0
 }
 
 // referenceEdges adds the references the dead symbol at one position makes to

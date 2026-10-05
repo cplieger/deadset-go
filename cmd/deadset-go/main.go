@@ -623,7 +623,6 @@ func stagesOf(ctx context.Context, resolved *resolution) (stages, error) {
 	var rules []graph.TestFileRule
 	var skips []graph.TypeErrorSkip
 	for i := range results {
-		results[i].TestSupport = graph.ClassifyTestSupport(&results[i], rootOptions.PublishedAPI)
 		var classified []graph.TestFileRule
 		if per[i], passes[i], classified, err = passesOf(&results[i], targetRoot, rootOptions); err != nil {
 			return stages{}, err
@@ -695,17 +694,20 @@ func namedUnbuilt(w io.Writer, unbuilt []load.Unbuilt) {
 }
 
 // passesOf runs the three passes over one loaded configuration, and returns the
-// rules by which that configuration classified a file as a test file.
+// rules by which that configuration classified a file as a test file. The
+// test-support classification reads the roots and decides which references are
+// test references, so it runs between the two.
 func passesOf(result *load.Result, targetRoot string, rootOptions graph.RootOptions) (configured, graph.Configured, []graph.TestFileRule, error) {
 	symbols, err := graph.Symbols(result, targetRoot, os.ReadFile)
 	if err != nil {
 		return configured{}, graph.Configured{}, nil, err
 	}
-	references, rules, err := graph.References(result, targetRoot, os.ReadFile, symbols)
+	roots, unmatched, err := graph.Roots(result, targetRoot, os.ReadFile, symbols, rootOptions)
 	if err != nil {
 		return configured{}, graph.Configured{}, nil, err
 	}
-	roots, unmatched, err := graph.Roots(result, targetRoot, os.ReadFile, symbols, rootOptions)
+	graph.ClassifyTestSupport(result, symbols, roots, rootOptions.PublishedAPI)
+	references, rules, err := graph.References(result, targetRoot, os.ReadFile, symbols)
 	if err != nil {
 		return configured{}, graph.Configured{}, nil, err
 	}
@@ -879,10 +881,42 @@ func retainedOf(ctx context.Context, resolved *resolution, options *exempt.Optio
 	}
 	return retainedSet{
 		refs:      analyzed.stages.refs,
-		retained:  analyzed.swept.Retained,
+		retained:  retainedListing(resolved, &analyzed),
 		unmatched: analyzed.stages.unmatched,
 		unbuilt:   analyzed.stages.unbuilt,
 	}, nil
+}
+
+// retainedListing is every exemption the retained-symbol listing names: those that
+// held a dead symbol back, and those that held a write-only finding back.
+func retainedListing(resolved *resolution, analyzed *analysis) []graph.Exemption {
+	writeOnly := kinds.WriteOnlyRetained(&kinds.Input{
+		Config: &resolved.config,
+		Merged: analyzed.stages.merged,
+		Sweep:  &analyzed.swept,
+		Exempt: analyzed.exemptions,
+		Per:    analyzed.per,
+		Mode:   analyzed.mode,
+	})
+	return inInventoryOrder(analyzed.stages.merged, analyzed.swept.Retained, writeOnly)
+}
+
+// inInventoryOrder joins the exemptions that held a dead symbol back and those that
+// held a write-only finding back, ordered by the inventory and then by input order,
+// which is the order the listing groups one symbol's classes in.
+func inInventoryOrder(merged *graph.Merged, swept, writeOnly []graph.Exemption) []graph.Exemption {
+	if len(writeOnly) == 0 {
+		return swept
+	}
+	held := make(map[graph.SymbolID][]graph.Exemption)
+	for _, e := range slices.Concat(swept, writeOnly) {
+		held[e.ID] = append(held[e.ID], e)
+	}
+	ordered := make([]graph.Exemption, 0, len(swept)+len(writeOnly))
+	for i := range merged.Symbols {
+		ordered = append(ordered, held[merged.Symbols[i].ID]...)
+	}
+	return ordered
 }
 
 // analysis is what one run answered before any kind reads it: the stages, one
@@ -1108,6 +1142,9 @@ type findingSet struct {
 	// sweep's answers rather than the report's.
 	swept graph.Result
 
+	// retained is what the retained-symbol listing names ([retainedListing]).
+	retained []graph.Exemption
+
 	evaluations  []kinds.Evaluation
 	result       kinds.Result
 	suppressions report.Suppressions
@@ -1164,6 +1201,7 @@ func findingsOf(ctx context.Context, resolved *resolution, options *exempt.Optio
 	inEffect, reasons := kinds.Totals(in)
 	return findingSet{
 		swept:        analyzed.swept,
+		retained:     retainedListing(resolved, &analyzed),
 		evaluations:  evaluations,
 		result:       computed,
 		suppressions: report.Suppressions{InEffect: inEffect, ReasonsRecorded: reasons},

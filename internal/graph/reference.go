@@ -549,6 +549,7 @@ func (p *referencePass) inspectExcept(node ast.Node, encl SymbolID, skip ast.Nod
 		switch n := n.(type) {
 		case *ast.Ident:
 			p.record(n, encl)
+			p.readComparableArguments(n, encl)
 			return false
 		case *ast.SelectorExpr:
 			p.reachThrough(n, encl)
@@ -678,6 +679,53 @@ func (p *referencePass) readComparison(encl SymbolID, pos token.Pos, operands ..
 		}
 		p.readFields(st, held, encl, pos)
 	}
+}
+
+// readComparableArguments records the fields an instantiation at one identifier
+// reads: a type argument whose type parameter's constraint is comparable, or embeds
+// it, is compared by the generic code as an operand of == is. reflect.DeepEqual
+// takes no type parameter, so it is no such comparison.
+func (p *referencePass) readComparableArguments(id *ast.Ident, encl SymbolID) {
+	instance, held := p.info.Instances[id]
+	if !held || instance.TypeArgs == nil {
+		return
+	}
+	params := typeParamsOf(p.info.Uses[id])
+	if params == nil || params.Len() != instance.TypeArgs.Len() {
+		return
+	}
+	var read map[SymbolID]bool
+	for i := range params.Len() {
+		if !embedsComparable(params.At(i).Constraint()) {
+			continue
+		}
+		st, isStruct := comparedStruct(instance.TypeArgs.At(i))
+		if !isStruct {
+			continue
+		}
+		if read == nil {
+			read = make(map[SymbolID]bool)
+		}
+		p.readFields(st, read, encl, id.Pos())
+	}
+}
+
+// embedsComparable reports whether a constraint is the predeclared comparable or
+// an interface embedding it at any depth.
+func embedsComparable(constraint types.Type) bool {
+	if types.Identical(constraint, types.Universe.Lookup("comparable").Type()) {
+		return true
+	}
+	iface, ok := types.Unalias(constraint).Underlying().(*types.Interface)
+	if !ok {
+		return false
+	}
+	for embedded := range iface.EmbeddedTypes() {
+		if embedsComparable(embedded) {
+			return true
+		}
+	}
+	return false
 }
 
 // readFields records one read of every field of one struct, and of every field

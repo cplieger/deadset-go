@@ -1,6 +1,6 @@
 # Issue kinds
 
-deadset-go reports 29 of the 32 issue kinds the deadset contract declares. This page states, per code, what this analyzer reports under it and what it treats as a use, so a reader can tell why a symbol was reported and why a symbol was not. The vocabulary itself, the code space and the fields a finding carries are stated once in the contract's [issue kinds page](https://github.com/cplieger/deadset-spec/blob/v5.2.0/docs/kinds.md), which this page does not restate.
+deadset-go reports 29 of the 32 issue kinds the deadset contract declares. This page states, per code, what this analyzer reports under it and what it treats as a use, so a reader can tell why a symbol was reported and why a symbol was not. The vocabulary itself, the code space and the fields a finding carries are stated once in the contract's [issue kinds page](https://github.com/cplieger/deadset-spec/blob/v5.3.0/docs/kinds.md), which this page does not restate.
 
 Every kind is enabled by default and every kind declares the confidence ceiling `certain`. `Severity` is what a finding does to the run. A `deny` finding fails it and a `warn` finding does not. `Fixability` is what a mechanical edit may do with the finding. A `deletable` finding's declaration can be removed, a `narrowable` one's visibility reduced, a `manual` one is for a maintainer to decide, and nothing mechanical acts on a `none` one. A configuration changes a severity by code or by two-digit family prefix, as [Configuration and invocation](configuration.md#settings) describes.
 
@@ -56,6 +56,8 @@ A struct field no reference names, whose container the analysis did not also fin
 ### DS1004 test-only-use
 
 A declaration no production file references and at least one test file does. It is the unused-exported or unused-unexported answer for a symbol whose only callers are tests, reported once under this code, because the symbol and its tests are deleted in one change.
+
+Test-support code is a package only tests reach, through its own test files or through other such packages. In a library, only a package under an `internal` tree can be test-support code. A package holding a root other than an `init`, `blank` or `test` root never is. A declaration of test-support code that a test references is reported here at the `possible` class, which the default minimum confidence withholds. An interface of it is reported under `DS1201` instead.
 
 ### DS1005 test-of-dead-code
 
@@ -121,9 +123,9 @@ A compile-time satisfaction assertion is a package-level declaration of the blan
 
 ### DS1301 write-only-symbol
 
-A package-level variable or a struct field the references store into and never read, which means at least one write and no reference of any other kind. The finding names every write position. Its message says when only test files read the subject, and names any type parameter or import the deletion also removes. A constant cannot be written and is no subject. A variable a function declares is the dead-store kind's subject instead.
+A package-level variable or a struct field the references store into and never read, which means at least one write and no reference of any other kind. The finding names every write position. Its message says when only test files read the subject, and names any type parameter, import or declaration the deletion also removes. Such a declaration is one whose every use is in a reported subject's type or writes, and no finding is reported about it. A constant cannot be written and is no subject. A variable a function declares is the dead-store kind's subject instead.
 
-The subject is a live declaration, because a write is a reference and holds the symbol live. The kind asks whether anything reads the declaration, which is the question the liveness relations do not ask.
+The subject is a live declaration, because a write is a reference and holds the symbol live. The kind asks whether anything reads the declaration, which is the question the liveness relations do not ask. A loaded consumer's write counts as a read. A type argument of a type parameter constrained by `comparable` has every field read, as a comparison of it does.
 
 ### DS1302 unused-enum-member
 

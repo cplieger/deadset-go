@@ -54,6 +54,8 @@ A symbol only dead symbols reference falls with the roots that reach it and is a
 
 A declaration of a test file is a member only when it is reported as a test of dead code. Such a test and each declaration it references count as referencing each other, so the test is a root member with them. No other test-file declaration belongs to a component, so its references join no two components and make no production declaration a non-root. A cluster only tests reach is rooted at a declaration outside the test files.
 
+A declaration of test-support code that a test references is in a component of its own that removes no line. One that nothing references is in a dead component, as production code is.
+
 The count is the component's members and the line total the distinct lines they span. `reporters.cascade` set to `full` lists every member of every component as well as the roots, under the finding's `component.members`, and a SARIF result carries each member other than its own symbol as a related location. A finding whose subject is in no dead component names a component of that subject alone, with no line deleted. Such a subject is a declaration the analysis holds live, a part of a declaration or a row of a document.
 
 The configuration withholds a finding by setting its kind to `allow` or by a minimum confidence the finding does not reach. When the withheld finding is a root's, every finding of its component is withheld too, whatever their severity and confidence, because a member is dead only through its root.
@@ -127,11 +129,11 @@ One further limit is recorded rather than worked around. A directory whose every
 
 The analysis has a boundary, and what crosses it is treated as fully reachable rather than as dead. Five things cross that boundary:
 
-- A struct value handed to an empty-interface parameter of a function outside the program flows into `encoding-reflection` with the full retained set. A wrapper that forwards its own such parameter inherits the crossing, as [Exemption classes](exemptions.md#what-leaves-the-analysis-is-fully-reachable) describes.
+- A struct value handed to an empty-interface parameter of a function outside the program flows into `encoding-reflection` with what that function's package can name. A wrapper that forwards its own such parameter inherits the crossing, as [Exemption classes](exemptions.md#what-leaves-the-analysis-is-fully-reachable) describes.
 - Evidence a test file carries does not hold under a production analysis.
 - A compiled file outside the target root is dropped at the load.
 - A reference from a declared consumer into the target is an ordinary reference, live under both relations.
-- An interface-typed field is where an exemption class's reach stops, because the analysis does not see the dynamic type behind it.
+- An interface-typed field reaches the types the program stores in it, and no other dynamic type.
 
 ## Cross-language edges
 

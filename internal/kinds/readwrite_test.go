@@ -1,6 +1,8 @@
 package kinds
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"testing"
@@ -262,4 +264,91 @@ func writePositions(found Finding) []string {
 		rendered = append(rendered, p.Path+":"+strconv.Itoa(p.Line)+":"+strconv.Itoa(p.Column))
 	}
 	return rendered
+}
+
+// A type argument whose type parameter's constraint embeds comparable is compared by
+// the generic code as an operand of == is, so every field of it is read; one whose
+// constraint is any is not.
+func TestWriteOnlySymbolReadsTheFieldsOfAComparableTypeArgument(t *testing.T) {
+	found := analysisOf(t, "readwrite-comparable.txtar", asApplication, Consumers{}).
+		findingsUnder(t, writeOnlyKind, true).Findings
+
+	if got := namesUnder(found, writeOnlyCode); !slices.Equal(got, []string{"tag.name"}) {
+		t.Errorf("WriteOnlySymbol over readwrite-comparable.txtar reports %v, want [tag.name]: point.x is compared", got)
+	}
+}
+
+// A declaration whose every use is a write-only subject's annotation falls with the
+// findings whose annotations hold it: each finding names it and no finding is
+// reported about it. A type its own method's receiver names is used elsewhere.
+func TestWriteOnlySymbolNamesTheDeclarationsOnlyItsAnnotationUses(t *testing.T) {
+	resolved := applicationConfig()
+	in := inputOf(t, "readwrite-cascade-declarations.txtar", resolved, Consumers{})
+	in.Mode = graph.Mode{Production: true}
+	result := computed(t, in, packageEmitters())
+
+	for subject, want := range map[string]string{
+		"settings.mode":   "field settings.mode is written once and never read, and deleting it with its writes also deletes type Mode",
+		"settings.level":  "field settings.level is written once and never read",
+		"settings.first":  "field settings.first is written once and never read, and deleting it with its writes also deletes type shared",
+		"settings.second": "field settings.second is written once and never read, and deleting it with its writes also deletes type shared",
+	} {
+		if got := findingOf(t, result.Findings, writeOnlyCode, subject).Message; got != want {
+			t.Errorf("WriteOnlySymbol over readwrite-cascade-declarations.txtar reports %s with message %q, want %q", subject, got, want)
+		}
+	}
+	for _, found := range result.Findings {
+		if found.Symbol.Name == "Mode" || found.Symbol.Name == "shared" {
+			t.Errorf("the pass over readwrite-cascade-declarations.txtar reports %s about %s, which falls with a write-only finding",
+				found.Code, found.Symbol.Name)
+		}
+	}
+}
+
+// A loaded consumer's write counts as a read. Its test file's write counts in the run
+// that counts test references, and in a production one only where the configuration
+// counts consumer tests as production.
+func TestWriteOnlySymbolCountsAConsumersWriteAsARead(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "sections", "readwrite-consumer-write.txtar"))
+	if err != nil {
+		t.Fatalf("Setup: read readwrite-consumer-write.txtar: %v", err)
+	}
+	resolved := libraryConfig()
+	for _, test := range []struct {
+		name string
+		mode graph.Mode
+		want []string
+	}{
+		{name: "production", mode: graph.Mode{Production: true}, want: []string{"Options.Label", "Options.Note"}},
+		{name: "consumer_tests_production", mode: graph.Mode{Production: true, ConsumerTestsProduction: true}, want: []string{"Options.Note"}},
+		{name: "test_references", mode: graph.Mode{}, want: []string{"Options.Note"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			in := sectionsInput(t, "readwrite-consumer-write.txtar", data, resolved)
+			in.Mode = test.mode
+			found := computed(t, in, map[string]Emitter{writeOnlyCode: WriteOnlySymbol}).Findings
+			if got := namesUnder(found, writeOnlyCode); !slices.Equal(got, test.want) {
+				t.Errorf("WriteOnlySymbol over readwrite-consumer-write.txtar under %+v reports %v, want %v", test.mode, got, test.want)
+			}
+		})
+	}
+}
+
+// An exemption on a live declaration that is written and never read holds back the
+// write-only finding, so it is what the retained listing names for it.
+func TestWriteOnlyRetainedNamesTheExemptionThatHoldsAWriteOnlyFindingBack(t *testing.T) {
+	in := inputOf(t, "readwrite-encoded.txtar", applicationConfig(), Consumers{})
+	in.Mode = graph.Mode{Production: true}
+
+	var got []string
+	for _, exemption := range WriteOnlyRetained(in) {
+		got = append(got, in.symbol(exemption.ID).Name+" "+exemption.Class)
+	}
+	if want := []string{"answer.Status encoding-reflection"}; !slices.Equal(got, want) {
+		t.Errorf("WriteOnlyRetained(readwrite-encoded.txtar) = %v, want %v", got, want)
+	}
+	found := computed(t, in, map[string]Emitter{writeOnlyCode: WriteOnlySymbol}).Findings
+	if names := namesUnder(found, writeOnlyCode); !slices.Equal(names, []string{"answer.note"}) {
+		t.Errorf("WriteOnlySymbol over readwrite-encoded.txtar reports %v, want [answer.note]", names)
+	}
 }

@@ -42,8 +42,8 @@ const (
 // subject is the sweep's own candidate, so a loaded consumer's use holds it live; a
 // satisfaction assertion is a use, so an interface used only by one is live and the
 // assertion is reported. Its members fall with it inside its component. An
-// interface test code declares is not reported where test code references it,
-// because a production sweep drops every reference such a declaration can have.
+// interface a test file declares is not reported, because a production sweep
+// drops every reference such a declaration can have.
 func UnusedInterface(in *Input) ([]Finding, error) {
 	if in == nil || in.Sweep == nil {
 		return nil, nil
@@ -54,7 +54,7 @@ func UnusedInterface(in *Input) ([]Finding, error) {
 	for i := range in.Sweep.Candidates {
 		candidate := &in.Sweep.Candidates[i]
 		symbol := in.symbol(candidate.ID)
-		if symbol == nil || symbol.Kind != graph.KindInterface || in.judgedWithTheTests(candidate, symbol) {
+		if symbol == nil || symbol.Kind != graph.KindInterface || testFile(symbol) {
 			continue
 		}
 		one, held := in.finding(candidate.ID, unusedInterfaceCode, unusedInterfaceMessage)
@@ -485,7 +485,7 @@ func declaredIn(one *Configured) declared {
 		written: make(map[token.Pos]*ast.FuncDecl),
 		seen:    make(map[graph.SymbolID]bool),
 	}
-	for _, p := range sortedPackages(one.Result.Packages) {
+	for _, p := range graph.SortedPackages(one.Result.Packages) {
 		if p.TypesInfo == nil {
 			continue
 		}
@@ -567,15 +567,6 @@ func blanksOf(info *types.Info, decl *ast.GenDecl) []blankDeclaration {
 		}
 	}
 	return found
-}
-
-// sortedPackages orders one configuration's packages by identifier, so the variant
-// that answers for a declaration several variants type-check is the same one on
-// every run.
-func sortedPackages(pkgs []*packages.Package) []*packages.Package {
-	ordered := slices.Clone(pkgs)
-	slices.SortFunc(ordered, func(a, b *packages.Package) int { return strings.Compare(a.ID, b.ID) })
-	return ordered
 }
 
 // restrictsImplementors reports whether one interface's method set holds an

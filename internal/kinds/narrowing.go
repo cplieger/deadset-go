@@ -114,7 +114,7 @@ func (n *narrowing) holdWriteOnly() {
 	counted := writesAndReads(n.in)
 	for i := range n.in.Merged.Symbols {
 		symbol := &n.in.Merged.Symbols[i]
-		if _, reports := writeOnly(n.in, symbol, counted[symbol.ID], exempted); reports {
+		if writeOnlySubject(n.in, symbol, counted[symbol.ID], exempted) {
 			n.unnarrowable[symbol.ID] = true
 		}
 	}

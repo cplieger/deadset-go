@@ -1,0 +1,34 @@
+A struct with four write-only fields: one whose type nothing else names, one whose
+type declares a method, and two whose one type the two annotations alone name. A
+fifth field is read.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+// Mode is named by one write-only field's annotation alone.
+type Mode int
+
+// Level is named by a field's annotation and by its own method's receiver.
+type Level int
+
+// String is called by nothing.
+func (l Level) String() string { return "level" }
+
+// shared is named by two write-only fields' annotations alone.
+type shared int
+
+type settings struct {
+	mode   Mode
+	level  Level
+	first  shared
+	second shared
+	name   string
+}
+
+func load() settings { return settings{mode: 1, level: 2, first: 3, second: 4, name: "app"} }
+
+func main() { println(load().name) }
