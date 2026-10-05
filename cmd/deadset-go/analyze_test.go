@@ -167,6 +167,15 @@ func TestAnalyzeExitsWithTheCodeTheContractsTableGivesTheRun(t *testing.T) {
 			wantReport: true,
 		},
 		{
+			// A C value has no type in the cgo-disabled load, and a conversion of
+			// one answers: through unsafe.Pointer it reads nothing, and to a Go
+			// pointer it reads every field the pointed-to type lays out.
+			name:       "a_conversion_of_a_c_value_answers",
+			module:     cgoConversionModule,
+			want:       codes["clean"],
+			wantReport: true,
+		},
+		{
 			name:       "a_pending_finding_outranks_the_findings_the_run_holds",
 			module:     edgedModule,
 			wantStderr: []string{"1 pending finding", "no merge has resolved it"},
@@ -214,6 +223,26 @@ func mistypedModule(t *testing.T) string {
 	return writeModule(t, map[string]string{
 		"go.mod":           "module example.com/app\n\ngo 1.27.1\n",
 		"app.go":           "package main\n\nfunc main() { missing() }\n",
+		repositoryDocument: `{"target": {"kind": "application"}}`,
+	})
+}
+
+// cgoConversionModule is a module whose file importing "C" converts C values to
+// and from unsafe.Pointer, into a Go type whose second field nothing names.
+func cgoConversionModule(t *testing.T) string {
+	t.Helper()
+
+	return writeModule(t, map[string]string{
+		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
+		"app.go": "package main\n\nfunc main() {}\n",
+		"bridge.go": "package main\n\n/*\n#include <stdlib.h>\n*/\nimport \"C\"\n\nimport \"unsafe\"\n\n" +
+			"// mirror is laid out for memory C allocates.\n" +
+			"type mirror struct {\n\tused    int\n\tpadding int\n}\n\n" +
+			"//export release\n" +
+			"func release() int {\n" +
+			"\tC.free(unsafe.Pointer(C.CString(\"x\")))\n" +
+			"\theld := (*mirror)(C.malloc(16))\n" +
+			"\treturn held.used\n}\n",
 		repositoryDocument: `{"target": {"kind": "application"}}`,
 	})
 }

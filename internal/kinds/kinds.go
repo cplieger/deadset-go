@@ -142,7 +142,7 @@ type Entry struct {
 // reports no record at all.
 type Details struct {
 	NarrowerVisibility string       // the visibility the references support
-	Implementations    []Positioned // the concrete implementations of an interface
+	Implementations    []Positioned // the concrete implementations of an interface, empty and not nil where it has none
 	WritePositions     []Position   // every position a subject is written at
 	ExcludedBy         string       // the build constraint that excluded a file
 	DependencyClass    string       // the section that declares a dependency

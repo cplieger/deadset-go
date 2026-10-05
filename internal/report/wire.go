@@ -232,7 +232,7 @@ type wirePositioned struct {
 // wireDetails is one finding's per-kind members, in the schema's member order.
 type wireDetails struct {
 	NarrowerVisibility string            `json:"narrower_visibility,omitempty"`
-	Implementations    []wirePositioned  `json:"implementations,omitempty"`
+	Implementations    []wirePositioned  `json:"implementations,omitzero"`
 	WritePositions     []wirePosition    `json:"write_positions,omitempty"`
 	ExcludedBy         string            `json:"excluded_by,omitempty"`
 	DependencyClass    string            `json:"dependency_class,omitempty"`
@@ -514,6 +514,9 @@ func wireDetailsOf(details *kinds.Details) wireDetails {
 			Reason: details.Entry.Reason,
 		}
 	}
+	if details.Implementations != nil {
+		held.Implementations = make([]wirePositioned, 0, len(details.Implementations))
+	}
 	for _, one := range details.Implementations {
 		held.Implementations = append(held.Implementations,
 			wirePositioned{Ref: one.Ref, Name: one.Name, Position: wirePositionOf(&one.Position)})
@@ -717,6 +720,9 @@ func (w *wireDetails) details() kinds.Details {
 			Path:   w.Entry.Path,
 			Reason: w.Entry.Reason,
 		}
+	}
+	if w.Implementations != nil {
+		held.Implementations = make([]kinds.Positioned, 0, len(w.Implementations))
 	}
 	for _, one := range w.Implementations {
 		held.Implementations = append(held.Implementations,

@@ -117,12 +117,15 @@ func (p *referencePass) readUnsafeConversion(call *ast.CallExpr, encl SymbolID) 
 	if !held || !target.IsType() {
 		return
 	}
+	// An operand without a type is a C value, which names no Go type to read;
+	// converted to a Go pointer it can only have been an unsafe.Pointer.
 	from := p.info.TypeOf(call.Args[0])
+	unknown := typeUnknown(from)
 	var converted types.Type
 	switch {
-	case isUnsafePointer(target.Type):
+	case isUnsafePointer(target.Type) && !unknown:
 		converted = from
-	case isUnsafePointer(from):
+	case unknown, isUnsafePointer(from):
 		converted = target.Type
 	default:
 		return
@@ -201,6 +204,17 @@ func isUnsafePointer(t types.Type) bool {
 	}
 	basic, isBasic := types.Unalias(t).Underlying().(*types.Basic)
 	return isBasic && basic.Kind() == types.UnsafePointer
+}
+
+// typeUnknown reports whether the type checker recorded no type for an expression,
+// or recorded the invalid type, which an identifier declared from such an
+// expression holds.
+func typeUnknown(t types.Type) bool {
+	if t == nil {
+		return true
+	}
+	basic, isBasic := t.(*types.Basic)
+	return isBasic && basic.Kind() == types.Invalid
 }
 
 // isHostLayout reports whether a field's type is structs.HostLayout.

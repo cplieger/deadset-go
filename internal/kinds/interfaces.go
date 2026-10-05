@@ -409,9 +409,12 @@ func (f *interfaceFacts) exempt(iface, method graph.SymbolID) bool {
 }
 
 // implementationsOf returns the concrete implementations of one interface, in the
-// order they are written.
+// order they are written, and an empty list for an interface nothing implements.
 func (f *interfaceFacts) implementationsOf(iface graph.SymbolID) []Positioned {
-	return f.ordered[iface]
+	if held, ok := f.ordered[iface]; ok {
+		return held
+	}
+	return []Positioned{}
 }
 
 // positionOf renders one declaration's position the way a finding carries it. The
