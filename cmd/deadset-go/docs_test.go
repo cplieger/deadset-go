@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/internal/config"
-	spec "github.com/cplieger/deadset-spec/v5"
+	spec "github.com/cplieger/deadset-spec/v6"
 )
 
 // The shape a documentation entry takes, pinned here so that a page and this test

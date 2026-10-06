@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/internal/graph"
-	spec "github.com/cplieger/deadset-spec/v5"
+	spec "github.com/cplieger/deadset-spec/v6"
 	"golang.org/x/tools/txtar"
 )
 
