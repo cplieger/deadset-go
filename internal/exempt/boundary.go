@@ -74,11 +74,16 @@ func newDeclarationSites(fset *token.FileSet) *declarationSites {
 
 // of is the key one declaration is kept under.
 func (d *declarationSites) of(object types.Object) token.Position {
-	if held, known := d.known[object.Pos()]; known {
+	return d.position(object.Pos())
+}
+
+// position is the key the declaration or literal written at pos is kept under.
+func (d *declarationSites) position(pos token.Pos) token.Position {
+	if held, known := d.known[pos]; known {
 		return held
 	}
-	at := d.fset.Position(object.Pos())
-	d.known[object.Pos()] = at
+	at := d.fset.Position(pos)
+	d.known[pos] = at
 	return at
 }
 

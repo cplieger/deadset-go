@@ -250,6 +250,12 @@ type Input struct {
 	// is a read of its value.
 	Exempt []graph.Exemption
 
+	// TestEvidence is the exemption evidence a test file carries, which a
+	// production mode leaves out of Exempt. A conversion or a satisfaction a test
+	// makes still fixes the signature it reaches, so the intra-function kinds read
+	// it beside Exempt.
+	TestEvidence []graph.Exemption
+
 	// Generated reports whether one target-relative path is a generated file.
 	Generated func(path string) bool
 

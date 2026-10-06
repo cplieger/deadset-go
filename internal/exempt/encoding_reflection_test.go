@@ -394,6 +394,54 @@ func TestEncodingReflectionReachesTheTypesTheMembersOfAnArgumentCarry(t *testing
 	}
 }
 
+func TestEncodingReflectionReachesTheTypesStoredInAContainerArgument(t *testing.T) {
+	shared := analysisOf(t, "encoding-reflection-container.txtar", Options{})
+	refs := retainedRefs(t, shared, EncodingReflection)
+	containerRefs := func(typeName string, members ...string) []string {
+		return qualify("example.com/container", typeName, members...)
+	}
+
+	for _, test := range []struct {
+		reached  string
+		typeName string
+		want     []string
+	}{
+		{
+			reached:  "a value a setter stores in a map field a renderer passes on",
+			typeName: "Pagination",
+			want:     containerRefs("Pagination", "HasNext", "LastOffset"),
+		},
+		{
+			reached:  "a value of the map literal stored in that field",
+			typeName: "Menu",
+			want:     containerRefs("Menu", "Label", "Title"),
+		},
+		{
+			reached:  "a value stored at an index of a local map",
+			typeName: "Indexed",
+			want:     containerRefs("Indexed", "Name", "Upper"),
+		},
+		{
+			reached:  "an element of a slice literal written at the call",
+			typeName: "Listed",
+			want:     containerRefs("Listed", "Name", "Upper"),
+		},
+		{
+			reached:  "a value stored in a map no destination receives",
+			typeName: "Unrendered",
+			want:     nil,
+		},
+	} {
+		t.Run(test.typeName, func(t *testing.T) {
+			got := membersOf(refs, test.typeName)
+			if !slices.Equal(got, test.want) {
+				t.Errorf("EncodingReflectionDetector(encoding-reflection-container.txtar) retained, for %s reaching %s,\ngot  %v\nwant %v",
+					test.typeName, test.reached, got, test.want)
+			}
+		})
+	}
+}
+
 func TestEncodingReflectionRetainsNothingWhereNoTypeReachesADestination(t *testing.T) {
 	shared := analysisOf(t, "encoding-reflection-quiet.txtar", Options{})
 	if got := retainedRefs(t, shared, EncodingReflection); len(got) > 0 {

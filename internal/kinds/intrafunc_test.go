@@ -123,6 +123,10 @@ func TestDeadStoreReportsEveryStoreNoReadReaches(t *testing.T) {
 	want := []string{
 		"main.go:5:2 store count of go://example.com/app#overwritten",
 		"main.go:14:2 store count of go://example.com/app#trailing",
+		"signature.go:6:10 store err of go://example.com/app#scraped",
+		"signature.go:8:10 store err of go://example.com/app#scraped",
+		"signature.go:30:2 store n of go://example.com/app#rebound",
+		"signature.go:39:2 store c of go://example.com/app#requeried",
 	}
 	if got := subjectsOf(result.Findings, deadStoreCode); !slices.Equal(got, want) {
 		t.Fatalf("the pass over intrafunc-store.txtar reports %v under %s, want %v",

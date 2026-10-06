@@ -89,11 +89,10 @@ func UnreachableStatement(in *Input) ([]Finding, error) {
 
 // DeadStore reports a write to a local variable that no read reaches on any path of
 // the function's control-flow graph before the next store or the end of the body.
-// The subject is a variable the body declares, never a parameter, a result, a
-// receiver, a package-level variable or a field. A variable whose address is taken,
-// that a function literal names, on which a pointer method is selected, or whose
-// selector or index is assigned to, is no subject, because a store to it may be read
-// where the graph cannot see. Every call but the panic built-in is assumed to return.
+// The subject is a variable the body or its signature declares, never a
+// package-level variable or a field, and a return naming no value reads every named
+// result. A variable a store to which may be read where the graph cannot see is no
+// subject ([escaped]). Every call but the panic built-in is assumed to return.
 func DeadStore(in *Input) ([]Finding, error) {
 	return in.intraFunc().deadStores()
 }
@@ -112,10 +111,10 @@ func UnreachableCase(in *Input) ([]Finding, error) {
 type intrafunc struct {
 	in *Input
 
-	// exempted is every declaration an exemption class retained. A class stands
-	// for a mechanism that reaches the declaration by a name the analysis cannot
-	// see, and a mechanism that reaches a function fixes its signature, so a
-	// retained function's signature is not free.
+	// exempted is every declaration an exemption class retained, on evidence in
+	// any file. A class stands for a mechanism that reaches the declaration by a
+	// name the analysis cannot see, and a mechanism that reaches a function fixes
+	// its signature, so a retained function's signature is not free.
 	exempted map[graph.SymbolID]bool
 
 	// foreign is every declaration a caller outside the source names with the
@@ -144,6 +143,9 @@ func (in *Input) intraFunc() *intrafunc {
 		twins:    platformTwins(in),
 	}
 	for _, exemption := range in.Exempt {
+		g.exempted[exemption.ID] = true
+	}
+	for _, exemption := range in.TestEvidence {
 		g.exempted[exemption.ID] = true
 	}
 	if in.Merged != nil {
@@ -887,7 +889,7 @@ func (g *intrafunc) deadStores() ([]Finding, error) {
 		}
 		for _, fn := range functions(one) {
 			for _, body := range bodies(fn.decl) {
-				if err := g.storesOf(one, &fn, body, held); err != nil {
+				if err := g.storesOf(one, &fn, &body, held); err != nil {
 					return nil, err
 				}
 			}
@@ -896,14 +898,22 @@ func (g *intrafunc) deadStores() ([]Finding, error) {
 	return g.findings(deadStoreCode, held.unused())
 }
 
+// functionBody is one body and the signature that declares the variables it
+// receives: its receiver, its parameters and its results.
+type functionBody struct {
+	recv      *ast.FieldList
+	signature *ast.FuncType
+	body      *ast.BlockStmt
+}
+
 // bodies is every body one function declaration holds: its own, and the body of
 // each function literal written inside it. A literal has a control flow of its
 // own, so its stores are answered over a graph of its own.
-func bodies(decl *ast.FuncDecl) []*ast.BlockStmt {
-	found := []*ast.BlockStmt{decl.Body}
+func bodies(decl *ast.FuncDecl) []functionBody {
+	found := []functionBody{{recv: decl.Recv, signature: decl.Type, body: decl.Body}}
 	ast.Inspect(decl.Body, func(n ast.Node) bool {
 		if literal, isLiteral := n.(*ast.FuncLit); isLiteral {
-			found = append(found, literal.Body)
+			found = append(found, functionBody{signature: literal.Type, body: literal.Body})
 		}
 		return true
 	})
@@ -911,7 +921,7 @@ func bodies(decl *ast.FuncDecl) []*ast.BlockStmt {
 }
 
 // storesOf records every dead store of one body.
-func (g *intrafunc) storesOf(one *Configured, fn *walked, body *ast.BlockStmt, held *parts) error {
+func (g *intrafunc) storesOf(one *Configured, fn *walked, body *functionBody, held *parts) error {
 	symbol := g.in.symbol(fn.id)
 	if symbol == nil {
 		return nil

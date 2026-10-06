@@ -217,7 +217,7 @@ The six kinds are one family behind one switch, and `"DS18": "allow"` in the sev
 
 Three of the six edit a signature, and each reports only where the signature is free to change. A signature is not free in five cases:
 
-- An exemption class retained the declaration.
+- An exemption class retained the declaration, on evidence in any file, a test file included.
 - The function is used as a value rather than called.
 - The linker or a foreign caller names it.
 - The test driver runs it as a test, a benchmark, a fuzz test or `TestMain`.
@@ -249,9 +249,9 @@ A statement control flow cannot reach. The rule is the toolchain's own unreachab
 
 A write to a local variable no read reaches, decided by a liveness walk over the control-flow graph of one function body. No path from the store reaches a read before the next store to the same variable or the end of the body.
 
-The subject is a variable the body declares. A parameter, a result and a receiver are not subjects, which keeps a named result a deferred function assigns out of the population. Neither is a package-level variable or a field, which `DS1301` answers for.
+The subject is a variable the body or its signature declares, so a parameter, a named result and a receiver are subjects too. A return naming no value reads every named result. A package-level variable and a field are not subjects, which `DS1301` answers for.
 
-Four constructs take a variable out of the population, each because a store to it may be read where the graph cannot see. Its address is taken, a function literal of the body names it, a method with a pointer receiver is selected on it, and a selector or an index on it is assigned to. A call is assumed to return, apart from a call to the `panic` built-in.
+Four constructs take a variable out of the population, each because a store to it may be read where the graph cannot see. Its address is taken, or a function literal of the body names it. A method with a pointer receiver is selected on it while it is not a pointer. A selector or an index on it is assigned to. A call is assumed to return, apart from a call to the `panic` built-in.
 
 ### DS1809 unreachable-case
 

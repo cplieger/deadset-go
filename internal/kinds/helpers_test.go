@@ -236,16 +236,17 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 	}
 	generated := generatedPaths(t, per)
 	return &Input{
-		Config:    &resolved,
-		Merged:    &merged,
-		Sweep:     &swept,
-		Refs:      refs,
-		Exempt:    exemptions,
-		Generated: func(path string) bool { return generated[path] },
-		Matrix:    identifiers(configurations),
-		Per:       per,
-		Consumers: consumers,
-		Mode:      mode,
+		Config:       &resolved,
+		Merged:       &merged,
+		Sweep:        &swept,
+		Refs:         refs,
+		Exempt:       exemptions,
+		TestEvidence: testEvidence,
+		Generated:    func(path string) bool { return generated[path] },
+		Matrix:       identifiers(configurations),
+		Per:          per,
+		Consumers:    consumers,
+		Mode:         mode,
 	}
 }
 

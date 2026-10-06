@@ -70,7 +70,7 @@ An encoder resolves a method by name in the direction its entry point works in. 
 
 A value reaches through a pointer, a slice, an array, a map key or value and an embedded field. From every type so reached, it reaches through that type's fields again until no further type joins, because an encoder walks the whole value rather than its outermost type.
 
-A field that is an interface, or holds interface elements or map values, reaches the types the program stores in it. A store is a composite literal, an assignment, an `append` or an index assignment. A stored parameter stands for every argument the program's calls pass for it. A method is retained where the defined type declares it, so a method promoted from an embedded type is retained where the embedded type is reached.
+A field that is an interface, or holds interface elements or map values, reaches the types the program stores in it. A store is a composite literal, an assignment, an `append` or an index assignment. A stored parameter stands for every argument the program's calls pass for it. An argument holding interface elements or map values reaches the stored types the same way. It may be a literal, a variable or a parameter. A method is retained where the defined type declares it, so a method promoted from an embedded type is retained where the embedded type is reached.
 
 ### format-verb-contract
 

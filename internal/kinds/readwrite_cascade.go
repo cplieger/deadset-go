@@ -410,6 +410,9 @@ func writeSpans(typed typedFile, path string, u *uses) []renderedSpan {
 			writes[[2]int{w.Line, w.Column}] = true
 		}
 	}
+	if len(writes) == 0 {
+		return nil
+	}
 	var spans []renderedSpan
 	for _, node := range writeNodes(typed.file, typed.one, writes) {
 		if s, rendered := renderSpan(typed.one, node); rendered {

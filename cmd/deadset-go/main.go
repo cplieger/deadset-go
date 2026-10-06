@@ -926,6 +926,10 @@ type analysis struct {
 	per        []kinds.Configured
 	exemptions []graph.Exemption
 
+	// testEvidence is the exemption evidence a test file carries, which the mode
+	// did not hold.
+	testEvidence []graph.Exemption
+
 	// marks is every suppression record the run read, bound or not, and refusals
 	// is what the grammar refused with a finding of its own. The bound records
 	// seeded the sweep below, which is what makes a record that held nothing back
@@ -967,12 +971,13 @@ func analysisOf(ctx context.Context, resolved *resolution, options *exempt.Optio
 	}
 
 	return analysis{
-		stages:     loaded,
-		per:        per,
-		exemptions: exemptions,
-		marks:      marks,
-		refusals:   refusals,
-		mode:       mode,
+		stages:       loaded,
+		per:          per,
+		exemptions:   exemptions,
+		testEvidence: held.testEvidence,
+		marks:        marks,
+		refusals:     refusals,
+		mode:         mode,
 		swept: loaded.matrix.Sweep(graph.SweepInput{
 			Marked: bound(marks),
 			Exempt: exemptions,
@@ -1227,6 +1232,7 @@ func inputOf(ctx context.Context, resolved *resolution, analyzed *analysis, gene
 		Sweep:         &analyzed.swept,
 		Refs:          analyzed.stages.refs,
 		Exempt:        analyzed.exemptions,
+		TestEvidence:  analyzed.testEvidence,
 		Generated:     func(path string) bool { return generated[path] },
 		Marks:         analyzed.marks,
 		Refusals:      analyzed.refusals,

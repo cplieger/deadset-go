@@ -1,0 +1,112 @@
+One module whose template engine receives maps and slices holding interface values,
+and reaches the types the program stores in them: a view whose setter stores each
+argument in a map field that a renderer hands to the template through a parameter, a
+value of the map literal that builds the view, a value stored at an index of a local
+map, and an element of a slice literal written at the call. A map holding a value
+that no destination receives retains nothing. Each type declares one exported field,
+one unexported field and one exported method, so the retained set states which of
+the three the class keeps.
+
+-- go.mod --
+module example.com/container
+
+go 1.27.1
+-- view.go --
+package container
+
+import (
+	"html/template"
+	"io"
+)
+
+type view struct {
+	tpl    *template.Template
+	params map[string]any
+}
+
+func newView(tpl *template.Template) *view {
+	return &view{tpl, map[string]any{"menu": Menu{}}}
+}
+
+func (v *view) Set(name string, value any) *view {
+	v.params[name] = value
+	return v
+}
+
+func (v *view) Render(w io.Writer) error {
+	return render(v.tpl, w, v.params)
+}
+
+func render(tpl *template.Template, w io.Writer, data map[string]any) error {
+	return tpl.ExecuteTemplate(w, "base", data)
+}
+
+// Pagination is stored in the view through its setter.
+type Pagination struct {
+	LastOffset int
+	offset     int
+}
+
+// HasNext is exported.
+func (p Pagination) HasNext() bool { return p.offset < p.LastOffset }
+
+// Menu is a value of the literal that builds the view.
+type Menu struct {
+	Title  string
+	active bool
+}
+
+// Label is exported.
+func (m Menu) Label() string { return m.Title }
+
+// Page renders one page.
+func Page(tpl *template.Template, w io.Writer) error {
+	return newView(tpl).Set("pagination", Pagination{}).Render(w)
+}
+-- local.go --
+package container
+
+import (
+	"io"
+	"text/template"
+)
+
+// Indexed is stored at an index of a local map.
+type Indexed struct {
+	Name   string
+	hidden int
+}
+
+// Upper is exported.
+func (i Indexed) Upper() string { return i.Name }
+
+// Listed is an element of a slice literal written at the call.
+type Listed struct {
+	Name   string
+	hidden int
+}
+
+// Upper is exported.
+func (l Listed) Upper() string { return l.Name }
+
+// Unrendered is stored in a map no destination receives.
+type Unrendered struct {
+	Name   string
+	hidden int
+}
+
+// Upper is exported.
+func (u Unrendered) Upper() string { return u.Name }
+
+// Local renders a local map and a slice literal.
+func Local(tpl *template.Template, w io.Writer) error {
+	data := map[string]any{}
+	data["indexed"] = Indexed{}
+	if err := tpl.Execute(w, data); err != nil {
+		return err
+	}
+	kept := map[string]any{}
+	kept["unrendered"] = Unrendered{}
+	_ = len(kept)
+	return tpl.Execute(w, []any{Listed{}})
+}
