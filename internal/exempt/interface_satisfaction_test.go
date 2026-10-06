@@ -465,10 +465,11 @@ func corpusManifestOf(t *testing.T, archive *txtar.Archive) corpusManifest {
 	return corpusManifest{}
 }
 
-// A type argument reaches its parameter's constraint, and a value boxed into one
-// interface reaches every interface an assertion on that interface names, so the
-// methods each requires are retained although no expression converts the type
-// to it. A type that reaches no interface keeps nothing retained.
+// A type argument reaches the methods its parameter's constraint requires at the
+// instantiation's arguments, whatever terms the constraint holds, and a value
+// boxed into one interface reaches every interface an assertion on that interface
+// names, so the methods each requires are retained although no expression converts
+// the type to it. A type that reaches no interface keeps nothing retained.
 func TestInterfaceSatisfactionRetainsWhatAConstraintAndAnAssertionReach(t *testing.T) {
 	in := inputOf(t, "structural-satisfaction.txtar", Options{})
 	set := retainedSet(retainedBy(t, in, "structural-satisfaction.txtar"))
@@ -477,6 +478,12 @@ func TestInterfaceSatisfactionRetainsWhatAConstraintAndAnAssertionReach(t *testi
 		"instantiated.Close": true,
 		"asserted.Name":      true,
 		"unreached.Name":     false,
+		"file.Path":          true,
+		"rank.Less":          true,
+		"tagged.Label":       true,
+		"weight.Heavier":     true,
+		"linked.Follow":      true,
+		"coin.Boxed":         true,
 	} {
 		t.Run(member, func(t *testing.T) {
 			ref := "go://example.com/structural#" + member

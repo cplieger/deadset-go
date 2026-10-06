@@ -1,6 +1,10 @@
 A function that overwrites a local before anything reads it, a function whose last
 store nothing reads, a function every store of which a read reaches, and a function
-whose local a closure reads after the store.
+whose local a closure reads after the store. A further file stores to results and a
+parameter: results a return naming values overwrites, results a bare return reads, a
+result a deferred closure reads, and a parameter stored after its last read; and to a
+pointer a pointer method is called through, beside a value a pointer method takes
+the address of.
 
 -- go.mod --
 module example.com/app
@@ -41,4 +45,69 @@ func captured() func() int {
 
 func main() {
 	println(overwritten(), trailing(), threaded(), captured()())
+	println(scraped(true))
+	println(bare())
+	println(deferred(), rebound(1), requeried(), addressed())
 }
+-- signature.go --
+package main
+
+// scraped stores results that the return naming values overwrites.
+func scraped(fail bool) (label string, err error) {
+	if fail {
+		label, err = parse()
+	} else {
+		label, err = parse()
+	}
+	return label, nil
+}
+
+// bare returns its results by a return naming none, which reads them.
+func bare() (label string, err error) {
+	label, err = parse()
+	return
+}
+
+// deferred reads its result in a deferred closure, which no graph orders, so
+// nothing reports a store to it.
+func deferred() (err error) {
+	defer func() { _ = err }()
+	_, err = parse()
+	return nil
+}
+
+// rebound stores to its parameter after the parameter's last read.
+func rebound(n int) int {
+	total := n
+	n = 0
+	return total
+}
+
+// requeried calls a method through a pointer it holds, then overwrites the pointer
+// before anything reads it.
+func requeried() int {
+	c := newCounter()
+	n := c.next()
+	c = newCounter()
+	return n
+}
+
+// addressed calls a pointer method on a value it holds, which takes the value's
+// address, so nothing reports a store to it.
+func addressed() int {
+	var c counter
+	n := c.next()
+	c = counter{}
+	return n
+}
+
+type counter struct{ n int }
+
+func newCounter() *counter { return &counter{} }
+
+func (c *counter) next() int {
+	c.n++
+	return c.n
+}
+
+func parse() (string, error) { return "", nil }

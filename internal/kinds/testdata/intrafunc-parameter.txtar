@@ -1,6 +1,8 @@
 A function whose body never reads one of its two parameters, one whose body reads
 both, one declaring the blank identifier, one leaving its parameter unnamed, and one
-nothing references, whose unread parameter is reported beside the function.
+nothing references, whose unread parameter is reported beside the function. A test
+file declares a method whose parameter its body never reads and converts its type to
+the interface the method satisfies, which fixes the signature.
 
 -- go.mod --
 module example.com/app
@@ -38,4 +40,26 @@ func dropped(value int, label string) int {
 
 func main() {
 	println(scaled(1, "a"), summed(2, 3), ignored(4), unnamed(5))
+}
+-- main_test.go --
+package main
+
+import (
+	"errors"
+	"io"
+	"testing"
+)
+
+// failing satisfies io.Reader, whose signature fixes the parameter it never reads.
+type failing struct{}
+
+func (failing) Read(p []byte) (int, error) {
+	return 0, errors.New("failing")
+}
+
+func TestRead(t *testing.T) {
+	var r io.Reader = failing{}
+	if _, err := r.Read(nil); err == nil {
+		t.Fatal("Read() = nil error, want one")
+	}
 }

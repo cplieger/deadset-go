@@ -219,7 +219,8 @@ func EncodingReflectionDetector(in *Input) ([]graph.Exemption, error) {
 		unknownMembers: namesFunction(in, jsonPackages, unknownMemberRefusals),
 		findsMethods:   namesFunction(in, map[string]bool{reflectPackage: true}, methodFinders),
 		closures:       make(map[string]*importClosure),
-		satisfying:     make(map[string]map[string]bool),
+		satisfying:     make(map[satisfactionKey]map[string]bool),
+		methodNames:    make(map[*types.Named]map[string]bool),
 	}
 	f.edge = newBoundary(in, f.namedDestinationParameter)
 	f.stored = storedTypesOf(in, f.edge.sites)
@@ -234,12 +235,13 @@ func EncodingReflectionDetector(in *Input) ([]graph.Exemption, error) {
 
 // encodingFlow accumulates the class over one loaded configuration.
 type encodingFlow struct {
-	kept       *retention
-	edge       *boundary
-	stored     *storedTypes
-	closures   map[string]*importClosure  // by package path, computed on first use
-	satisfying map[string]map[string]bool // by type and package, the method names retained
-	targets    []interfaceTarget
+	kept        *retention
+	edge        *boundary
+	stored      *storedTypes
+	closures    map[string]*importClosure           // by package path, computed on first use
+	satisfying  map[satisfactionKey]map[string]bool // the method names retained
+	methodNames map[*types.Named]map[string]bool    // the names a type or a pointer to it declares
+	targets     []interfaceTarget
 
 	// unknownMembers is whether the program makes a JSON decoder refuse a document
 	// naming a member the type lacks.
@@ -294,23 +296,29 @@ func (f *encodingFlow) walkCalls() error {
 // resolves the same positions, so the repeated records collapse on the site.
 func (f *encodingFlow) walkFile(info *types.Info, file *ast.File) error {
 	var failed error
-	ast.Inspect(file, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok || failed != nil {
+	for _, decl := range file.Decls {
+		enclosing := enclosingFunc(info, decl)
+		ast.Inspect(decl, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok || failed != nil {
+				return failed == nil
+			}
+			fn, isFunc := resolveObject(info, call.Fun).(*types.Func)
+			if !isFunc {
+				return true
+			}
+			if d, reaches := f.encodingDestination(fn); reaches {
+				failed = f.arguments(info, enclosing, call.Args, d)
+				return failed == nil
+			}
+			failed = f.crossingArguments(info, call)
 			return failed == nil
+		})
+		if failed != nil {
+			return failed
 		}
-		fn, isFunc := resolveObject(info, call.Fun).(*types.Func)
-		if !isFunc {
-			return true
-		}
-		if d, reaches := f.encodingDestination(fn); reaches {
-			failed = f.arguments(info, call.Args, d)
-			return failed == nil
-		}
-		failed = f.crossingArguments(info, call)
-		return failed == nil
-	})
-	return failed
+	}
+	return nil
 }
 
 // crossingArguments records the struct values one call carries out of the analysed
@@ -331,8 +339,10 @@ func (f *encodingFlow) crossingArguments(info *types.Info, call *ast.CallExpr) e
 	return nil
 }
 
-// arguments records the types the arguments of one destination call carry.
-func (f *encodingFlow) arguments(info *types.Info, args []ast.Expr, d destination) error {
+// arguments records the types the arguments of one destination call in the body of
+// enclosing carry. A slice, an array or a map holding interface values carries the
+// types the program stores in it ([storedTypes.argument]).
+func (f *encodingFlow) arguments(info *types.Info, enclosing *types.Func, args []ast.Expr, d destination) error {
 	for _, arg := range args {
 		// The argument's own type is what flows, which for a parameter typed as
 		// an interface is the type written at the call rather than the interface
@@ -346,6 +356,11 @@ func (f *encodingFlow) arguments(info *types.Info, args []ast.Expr, d destinatio
 		}
 		if err := f.retain(at, arg.Pos(), d); err != nil {
 			return err
+		}
+		for _, stored := range f.stored.argument(info, enclosing, arg) {
+			if err := f.retain(stored, arg.Pos(), d); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -540,10 +555,10 @@ func (f *encodingFlow) outsideMethods(named *types.Named, outside []*types.Packa
 		if closure.templates {
 			return true, nil
 		}
-		key := types.TypeString(named, nil) + " " + pkg.Path()
+		key := satisfactionKey{named: named, pkg: pkg.Path()}
 		held, known := f.satisfying[key]
 		if !known {
-			held = satisfiedMethods(named, closure.interfaces)
+			held = satisfiedMethods(named, f.declaredNames(named), closure.interfaces)
 			f.satisfying[key] = held
 		}
 		maps.Copy(names, held)
@@ -551,12 +566,37 @@ func (f *encodingFlow) outsideMethods(named *types.Named, outside []*types.Packa
 	return false, names
 }
 
+// satisfactionKey is one type and one package outside the program it reaches.
+type satisfactionKey struct {
+	named *types.Named
+	pkg   string
+}
+
+// declaredNames is the name of every method in the method set of a pointer to the
+// type, which holds the type's own.
+func (f *encodingFlow) declaredNames(named *types.Named) map[string]bool {
+	if held, known := f.methodNames[named]; known {
+		return held
+	}
+	set := types.NewMethodSet(types.NewPointer(named))
+	held := make(map[string]bool, set.Len())
+	for selection := range set.Methods() {
+		held[selection.Obj().Name()] = true
+	}
+	f.methodNames[named] = held
+	return held
+}
+
 // satisfiedMethods names the methods of every interface the type, or a pointer to
-// it, implements.
-func satisfiedMethods(named *types.Named, interfaces []*types.Interface) map[string]bool {
+// it, implements. An interface naming a method the type's names lack is one
+// neither implements, so [types.Implements] is asked only of the rest.
+func satisfiedMethods(named *types.Named, declared map[string]bool, interfaces []*types.Interface) map[string]bool {
 	names := make(map[string]bool)
 	pointer := types.NewPointer(named)
 	for _, iface := range interfaces {
+		if !namesEvery(declared, iface) {
+			continue
+		}
 		if !types.Implements(named, iface) && !types.Implements(pointer, iface) {
 			continue
 		}
@@ -565,6 +605,16 @@ func satisfiedMethods(named *types.Named, interfaces []*types.Interface) map[str
 		}
 	}
 	return names
+}
+
+// namesEvery reports whether every method of the interface has a name among names.
+func namesEvery(names map[string]bool, iface *types.Interface) bool {
+	for method := range iface.Methods() {
+		if !names[method.Name()] {
+			return false
+		}
+	}
+	return true
 }
 
 // scansARow reports whether fn is the Scan method of a row or of a row set rather

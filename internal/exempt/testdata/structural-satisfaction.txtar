@@ -2,7 +2,12 @@ Five types answering interfaces no expression converts them to: one reaches a
 type parameter's constraint as a type argument, one reaches an empty interface
 that a type assertion then narrows to another interface, one reaches the empty
 interface in a test file alone, one reaches it in a test file of one package and
-in a source file of another, and one reaches no interface at all.
+in a source file of another, and one reaches no interface at all. Six more reach
+constraints that name a type parameter: a generic constraint holding a pointer
+term, a generic constraint whose method takes the parameter, a constraint written
+in place holding a pointer term, a constraint written in place whose method takes
+the parameter, one whose method takes a struct holding the parameter, and one
+whose method returns a generic type instantiated at the parameter.
 
 -- go.mod --
 module example.com/structural
@@ -53,6 +58,91 @@ func NameOf(v any) string {
 	}
 	return unreached{}.Name()
 }
+-- generic.go --
+package structural
+
+type pathed[T any] interface {
+	*T
+	Path() string
+}
+
+type file struct{ path string }
+
+func (f *file) Path() string { return f.path }
+
+func pathOf[T any, PT pathed[T]](v *T) string { return PT(v).Path() }
+
+// PathOf reads a path through a generic constraint holding a pointer term.
+func PathOf() string { return pathOf(&file{path: "p"}) }
+
+type lesser[T any] interface{ Less(T) bool }
+
+type rank int
+
+func (r rank) Less(other rank) bool { return r < other }
+
+func least[T lesser[T]](a, b T) T {
+	if b.Less(a) {
+		return b
+	}
+	return a
+}
+
+// Least orders two ranks through a constraint whose method takes the parameter.
+func Least() rank { return least(rank(1), rank(2)) }
+
+type tagged struct{ label string }
+
+func (t *tagged) Label() string { return t.label }
+
+func labelOf[T any, PT interface {
+	*T
+	Label() string
+}](v *T) string {
+	return PT(v).Label()
+}
+
+// LabelOf reads a label through a constraint written in place.
+func LabelOf() string { return labelOf(&tagged{label: "l"}) }
+
+type weight int
+
+func (w weight) Heavier(other weight) bool { return w > other }
+
+func heaviest[T interface{ Heavier(T) bool }](a, b T) T {
+	if b.Heavier(a) {
+		return b
+	}
+	return a
+}
+
+// Heaviest orders two weights through a constraint written in place whose method
+// takes the parameter.
+func Heaviest() weight { return heaviest(weight(1), weight(2)) }
+
+type linked struct{ name string }
+
+func (l linked) Follow(hop struct{ next linked }) linked { return hop.next }
+
+func follow[T interface{ Follow(struct{ next T }) T }](v T) T {
+	return v.Follow(struct{ next T }{next: v})
+}
+
+// Follow follows a link through a constraint whose method takes a struct holding
+// the parameter.
+func Follow() linked { return follow(linked{name: "n"}) }
+
+type box[T any] struct{ v T }
+
+type coin int
+
+func (c coin) Boxed() box[coin] { return box[coin]{v: c} }
+
+func boxed[T interface{ Boxed() box[T] }](v T) box[T] { return v.Boxed() }
+
+// Boxed boxes a coin through a constraint whose method returns a generic type
+// instantiated at the parameter.
+func Boxed() box[coin] { return boxed(coin(1)) }
 -- a_test.go --
 package structural
 

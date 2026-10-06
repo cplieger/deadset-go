@@ -136,6 +136,10 @@ type Input struct {
 	// there, which is how a class names the symbol it retains.
 	Resolve *graph.Resolver
 
+	// conversions is the conversion set [Conversions] computed first, which every
+	// later class reads rather than walking the program again.
+	conversions *[]graph.Conversion
+
 	// Symbols is the inventory, for a class that reads a declaration's own
 	// properties rather than resolving an object.
 	Symbols []graph.Symbol

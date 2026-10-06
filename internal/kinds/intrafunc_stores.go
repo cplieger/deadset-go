@@ -10,31 +10,36 @@ import (
 )
 
 // deadStoresIn is every store of one function body that no read reaches, in the
-// order the body writes them.
-//
-// The answer is a liveness walk over the control-flow graph of the body. A
-// variable is live at a point when some path from that point reads it before
-// writing it again; a store to a variable that is not live where the store happens
-// is a store nothing reads, which is the rule the compiler applies to the same
-// construct and the one the external linters of this kind's overlap share.
-//
-// The population is the variables the body declares, and only the ones no
-// construct can reach behind the graph's back: escaped names it for the four
-// constructs that do, and a variable among them is answered for by nothing here.
-func deadStoresIn(info *types.Info, body *ast.BlockStmt) []*ast.Ident {
-	subjects := localVariables(info, body)
+// order the body writes them, by a liveness walk over the body's control-flow
+// graph. The population is the variables the body and its signature declare,
+// which the language makes ordinary local variables, less the ones [escaped]
+// names because a construct reaches them behind the graph's back. A return naming
+// no value reads every named result.
+func deadStoresIn(info *types.Info, fn *functionBody) []*ast.Ident {
+	subjects := localVariables(info, fn.body)
+	for _, name := range fieldNames(fn.recv, fn.signature.Params, fn.signature.Results) {
+		if variable, declared := info.Defs[name].(*types.Var); declared && name.Name != blankName {
+			subjects[variable] = true
+		}
+	}
 	if len(subjects) == 0 {
 		return nil
 	}
-	for object := range escaped(info, body, subjects) {
+	for object := range escaped(info, fn.body, subjects) {
 		delete(subjects, object)
 	}
 	if len(subjects) == 0 {
 		return nil
 	}
 
-	graph := cfg.New(body, mayReturn(info))
-	flow := newFlow(info, graph, subjects)
+	var results []types.Object
+	for _, name := range fieldNames(fn.signature.Results) {
+		if object := info.Defs[name]; object != nil && subjects[object] {
+			results = append(results, object)
+		}
+	}
+	graph := cfg.New(fn.body, mayReturn(info))
+	flow := newFlow(info, graph, subjects, results)
 	flow.settle()
 	return flow.dead()
 }
@@ -166,10 +171,12 @@ func addressed(expr ast.Expr) ast.Expr {
 }
 
 // selectsPointerMethod reports whether one selector selects a method whose
-// receiver is a pointer, which takes the address of the value selected on.
+// receiver is a pointer on a value that is not one, which takes the address of the
+// value selected on. A selection through a pointer, the operand's own or an
+// embedded one, takes no address.
 func selectsPointerMethod(info *types.Info, expr *ast.SelectorExpr) bool {
 	selection := info.Selections[expr]
-	if selection == nil || selection.Kind() != types.MethodVal {
+	if selection == nil || selection.Kind() != types.MethodVal || selection.Indirect() {
 		return false
 	}
 	signature, isFunc := selection.Obj().Type().(*types.Signature)
@@ -214,7 +221,7 @@ type flow struct {
 }
 
 // newFlow reads every block of one graph into the accesses its nodes make.
-func newFlow(info *types.Info, graph *cfg.CFG, subjects map[types.Object]bool) *flow {
+func newFlow(info *types.Info, graph *cfg.CFG, subjects map[types.Object]bool, results []types.Object) *flow {
 	f := &flow{
 		blocks:   graph.Blocks,
 		accesses: make([][]access, len(graph.Blocks)),
@@ -224,7 +231,7 @@ func newFlow(info *types.Info, graph *cfg.CFG, subjects map[types.Object]bool) *
 	for at, block := range graph.Blocks {
 		f.index[block] = at
 		f.liveIn[at] = make(map[types.Object]bool)
-		reader := &accessReader{info: info, subjects: subjects}
+		reader := &accessReader{info: info, subjects: subjects, results: results}
 		for _, node := range block.Nodes {
 			reader.node(node)
 		}
@@ -317,13 +324,15 @@ func sameLive(a, b map[types.Object]bool) bool {
 type accessReader struct {
 	info     *types.Info
 	subjects map[types.Object]bool
+	results  []types.Object // the named results of the population
 	made     []access
 }
 
 // node reads one node of a block. A block holds the statements a body writes and
 // the subexpressions of the control statements it does not, so a node that stores
 // is an assignment, an increment or a declaration with a value, and every other
-// node is read for the variables it names.
+// node is read for the variables it names, a return naming no value reading the
+// named results as well.
 func (r *accessReader) node(n ast.Node) {
 	switch n := n.(type) {
 	case *ast.AssignStmt:
@@ -331,6 +340,13 @@ func (r *accessReader) node(n ast.Node) {
 	case *ast.IncDecStmt:
 		r.reads(n.X)
 		r.store(n.X)
+	case *ast.ReturnStmt:
+		r.reads(n)
+		if len(n.Results) == 0 {
+			for _, object := range r.results {
+				r.made = append(r.made, access{object: object})
+			}
+		}
 	case *ast.ValueSpec:
 		if len(n.Values) == 0 {
 			return

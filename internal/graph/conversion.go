@@ -495,8 +495,8 @@ func spell(dst types.Type) string {
 }
 
 // instance records the type arguments one instantiation passes to type
-// parameters whose constraints declare methods: each argument reaches its
-// constraint, through which the generic body calls those methods.
+// parameters whose constraints declare methods: each argument reaches the methods
+// its constraint requires, through which the generic body calls them.
 func (s *conversionScan) instance(id *ast.Ident) {
 	inst, ok := s.info.Instances[id]
 	if !ok {
@@ -513,10 +513,112 @@ func (s *conversionScan) instance(id *ast.Ident) {
 	}
 	for i := range min(params.Len(), inst.TypeArgs.Len()) {
 		constraint := params.At(i).Constraint()
-		if iface := interfaceOf(constraint); iface != nil && iface.NumMethods() > 0 {
-			s.keep(constraint, inst.TypeArgs.At(i), id.Pos())
+		from := inst.TypeArgs.At(i)
+		if !concrete(from) {
+			continue
+		}
+		if required := requiredMethods(constraint, params, inst.TypeArgs); required != nil {
+			s.sites = append(s.sites, Conversion{From: from, To: required, Name: spell(constraint), Site: id.Pos()})
 		}
 	}
+}
+
+// requiredMethods is the interface of the methods one constraint requires of the
+// type arguments of one instantiation, with each method's signature written at
+// those arguments, and nil where it requires none. The type terms are left out,
+// because an argument the program compiles with is in the type set.
+func requiredMethods(constraint types.Type, params *types.TypeParamList, args *types.TypeList) *types.Interface {
+	iface := interfaceOf(constraint)
+	if iface == nil || iface.NumMethods() == 0 {
+		return nil
+	}
+	return substitutedInterface(iface, params, args)
+}
+
+// instantiatedAt is one generic type's instance with every type parameter of
+// params among its type arguments replaced by the argument at its index, and the
+// type itself where it has no type argument or the instantiation fails.
+func instantiatedAt(named *types.Named, params *types.TypeParamList, args *types.TypeList) types.Type {
+	if named.TypeArgs().Len() == 0 {
+		return named
+	}
+	mapped := make([]types.Type, named.TypeArgs().Len())
+	for j := range mapped {
+		mapped[j] = substituted(named.TypeArgs().At(j), params, args)
+	}
+	instantiated, err := types.Instantiate(nil, named.Origin(), mapped, false)
+	if err != nil {
+		return named
+	}
+	return instantiated
+}
+
+// substituted is t with every type parameter of params replaced by the argument
+// at its index, through every type constructor and through the type arguments of
+// a generic type. A signature loses its receiver.
+func substituted(t types.Type, params *types.TypeParamList, args *types.TypeList) types.Type {
+	switch u := types.Unalias(t).(type) {
+	case *types.TypeParam:
+		for k := range min(params.Len(), args.Len()) {
+			if params.At(k) == u {
+				return args.At(k)
+			}
+		}
+	case *types.Pointer:
+		return types.NewPointer(substituted(u.Elem(), params, args))
+	case *types.Slice:
+		return types.NewSlice(substituted(u.Elem(), params, args))
+	case *types.Array:
+		return types.NewArray(substituted(u.Elem(), params, args), u.Len())
+	case *types.Map:
+		return types.NewMap(substituted(u.Key(), params, args), substituted(u.Elem(), params, args))
+	case *types.Chan:
+		return types.NewChan(u.Dir(), substituted(u.Elem(), params, args))
+	case *types.Signature:
+		return types.NewSignatureType(nil, nil, nil,
+			substitutedTuple(u.Params(), params, args), substitutedTuple(u.Results(), params, args), u.Variadic())
+	case *types.Struct:
+		return substitutedStruct(u, params, args)
+	case *types.Interface:
+		return substitutedInterface(u, params, args)
+	case *types.Named:
+		return instantiatedAt(u, params, args)
+	}
+	return t
+}
+
+// substitutedStruct is one struct type with [substituted] applied to every field's
+// type.
+func substitutedStruct(u *types.Struct, params *types.TypeParamList, args *types.TypeList) *types.Struct {
+	fields := make([]*types.Var, u.NumFields())
+	tags := make([]string, u.NumFields())
+	for i := range u.NumFields() {
+		f := u.Field(i)
+		fields[i] = types.NewField(f.Pos(), f.Pkg(), f.Name(), substituted(f.Type(), params, args), f.Embedded())
+		tags[i] = u.Tag(i)
+	}
+	return types.NewStruct(fields, tags)
+}
+
+// substitutedInterface is the interface of one interface type's methods with
+// [substituted] applied to every signature. Its type terms are left out.
+func substitutedInterface(u *types.Interface, params *types.TypeParamList, args *types.TypeList) *types.Interface {
+	methods := make([]*types.Func, 0, u.NumMethods())
+	for m := range u.Methods() {
+		sig, _ := substituted(m.Signature(), params, args).(*types.Signature)
+		methods = append(methods, types.NewFunc(m.Pos(), m.Pkg(), m.Name(), sig))
+	}
+	return types.NewInterfaceType(methods, nil).Complete()
+}
+
+// substitutedTuple is one parameter or result list with [substituted] applied to
+// every variable's type.
+func substitutedTuple(tuple *types.Tuple, params *types.TypeParamList, args *types.TypeList) *types.Tuple {
+	vars := make([]*types.Var, 0, tuple.Len())
+	for v := range tuple.Variables() {
+		vars = append(vars, types.NewParam(v.Pos(), v.Pkg(), v.Name(), substituted(v.Type(), params, args)))
+	}
+	return types.NewTuple(vars...)
 }
 
 // assert keeps one type assertion of an interface-typed operand to an interface.
