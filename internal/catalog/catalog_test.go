@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	spec "github.com/cplieger/deadset-spec/v5"
+	spec "github.com/cplieger/deadset-spec/v6"
 )
 
 // kindsPath is the vocabulary document this package's table is pinned equal to, and
@@ -36,7 +36,6 @@ type vocabulary struct {
 	} `json:"kinds"`
 	Retired []struct {
 		Code string `json:"code"`
-		Name string `json:"name"`
 	} `json:"retired"`
 }
 

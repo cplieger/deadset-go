@@ -14,7 +14,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/internal/memory"
-	spec "github.com/cplieger/deadset-spec/v5"
+	spec "github.com/cplieger/deadset-spec/v6"
 )
 
 // memoryExhaustionLine is the line the Contract's exit-code table states for a run

@@ -1,0 +1,30 @@
+A command converts a wrapper to a writer, and the only assertion to a closer in
+the program is inside the wrapper's own Close.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- main.go --
+package main
+
+import (
+	"io"
+	"os"
+)
+
+type wrapper struct{ w io.Writer }
+
+func (x *wrapper) Write(p []byte) (int, error) { return x.w.Write(p) }
+
+func (x *wrapper) Close() error {
+	if c, ok := x.w.(io.Closer); ok {
+		return c.Close()
+	}
+	return nil
+}
+
+func main() {
+	var w io.Writer = &wrapper{w: os.Stdout}
+	_, _ = w.Write(nil)
+}

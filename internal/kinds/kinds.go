@@ -342,9 +342,11 @@ type Input struct {
 // Emitter is one kind's rule: it returns the findings of its own code.
 type Emitter func(in *Input) ([]Finding, error)
 
-// Result is what one findings pass produced: the findings in the canonical order.
+// Result is what one findings pass produced: the findings in the canonical order,
+// and the findings the configured minimum confidence alone withheld.
 type Result struct {
 	Findings []Finding
+	Withheld []Finding
 }
 
 // words is the reader's word for each kind of declaration, which a message spells
@@ -436,9 +438,9 @@ func Compute(in *Input, emitters map[string]Emitter) (Result, error) {
 	}
 	findings = append(findings, second...)
 
-	kept := in.reportable(findings)
+	kept, withheld := in.reportable(findings)
 	slices.SortStableFunc(kept, Compare)
-	return Result{Findings: kept}, nil
+	return Result{Findings: kept, Withheld: withheld}, nil
 }
 
 // phase runs the emitters of one phase, in the vocabulary's order, and returns what

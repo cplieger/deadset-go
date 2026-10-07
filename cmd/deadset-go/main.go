@@ -1,6 +1,6 @@
 // Command deadset-go reports unused symbols in a Go module and its declared
 // consumers. It implements the deadset Contract published at
-// github.com/cplieger/deadset-spec/v5, and no verb edits a source file.
+// github.com/cplieger/deadset-spec/v6, and no verb edits a source file.
 package main
 
 import (
@@ -926,8 +926,7 @@ type analysis struct {
 	per        []kinds.Configured
 	exemptions []graph.Exemption
 
-	// testEvidence is the exemption evidence a test file carries, which the mode
-	// did not hold.
+	// testEvidence is [preparation.testEvidence].
 	testEvidence []graph.Exemption
 
 	// marks is every suppression record the run read, bound or not, and refusals
@@ -978,9 +977,10 @@ func analysisOf(ctx context.Context, resolved *resolution, options *exempt.Optio
 		marks:        marks,
 		refusals:     refusals,
 		mode:         mode,
-		swept: loaded.matrix.Sweep(graph.SweepInput{
+		swept: loaded.matrix.Sweep(&graph.SweepInput{
 			Marked: bound(marks),
 			Exempt: exemptions,
+			Uses:   held.uses,
 			Mode:   mode,
 		}, graph.TestReferencesOf(held.testEvidence)),
 	}, nil
@@ -998,8 +998,12 @@ type preparation struct {
 	// testEvidence is the exemption evidence a test file carries, which the mode
 	// does not hold and the sweep counts as test references.
 	testEvidence []graph.Exemption
-	mode         graph.Mode
-	held         bool
+
+	// uses are the references from each uncalled interface method to the methods
+	// implementing it.
+	uses []graph.Use
+	mode graph.Mode
+	held bool
 }
 
 // preparedOf is the stages and the exemptions of one run under one mode, computed
@@ -1031,10 +1035,23 @@ func preparedOf(ctx context.Context, resolved *resolution, options *exempt.Optio
 			Symbols: held.stages.per[i].symbols,
 		}
 	}
+	uncalled, uses := kinds.InterfaceImplementations(&kinds.Input{Merged: held.stages.merged, Per: held.per})
+	held.uses = uses
+	held.exemptions = withoutUncalledRetentions(held.exemptions, uncalled)
+	held.testEvidence = withoutUncalledRetentions(held.testEvidence, uncalled)
 	if resolved.prepared != nil {
 		*resolved.prepared = *held
 	}
 	return held, nil
+}
+
+// withoutUncalledRetentions drops every interface-satisfaction retention of a method
+// through an interface method no call site reaches, which the uncalled-method kind
+// reports with its implementations.
+func withoutUncalledRetentions(exemptions []graph.Exemption, uncalled map[graph.SymbolID]bool) []graph.Exemption {
+	return slices.DeleteFunc(exemptions, func(e graph.Exemption) bool {
+		return e.Class == string(exempt.InterfaceSatisfaction) && e.Via != "" && uncalled[e.Via]
+	})
 }
 
 // suppressionsOf reads the three suppression documents of one run and returns their
@@ -1196,6 +1213,9 @@ func findingsOf(ctx context.Context, resolved *resolution, options *exempt.Optio
 	// evaluation and nowhere else, so what the report carries is what stays.
 	kept, evaluations := kinds.Evaluate(in, computed.Findings)
 	computed.Findings = kept
+	// A withheld finding is counted only where the lowest minimum would put it in
+	// the findings, so it passes the same two filters.
+	computed.Withheld, _ = kinds.Evaluate(in, withoutSkipped(computed.Withheld, analyzed.stages.typeErrorSkips))
 
 	// The passes after the load read no context, so a run cancelled while they ran
 	// ends here rather than writing a report the cancellation outdated.

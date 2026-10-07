@@ -311,7 +311,7 @@ func TestNewCountsAReferenceWhoseSourceIsOutsideTheInventory(t *testing.T) {
 	b := newGraphBuilder(t).add("consumed", "internal")
 	b.refFromOutside("consumed")
 	b.ref("consumed", "internal")
-	got := b.verdicts(b.graph().Sweep(SweepInput{}))
+	got := b.verdicts(b.graph().Sweep(&SweepInput{}))
 
 	// A declaration outside the inventory is a declaration of the loaded graph,
 	// so the reference it makes holds its target live under reference counting
@@ -334,7 +334,7 @@ func TestNewSplitsTheReferenceCountsByTheFileThatMadeThem(t *testing.T) {
 	// admits a test of dead code leaves it out of this graph's answer.
 	b.ref("exercise", "entry")
 	b.root("entry", RootMain)
-	got := b.verdicts(b.graph().Sweep(SweepInput{}))
+	got := b.verdicts(b.graph().Sweep(&SweepInput{}))
 
 	want := []verdict{
 		{name: "subject", relation: Reachability, productionRefs: 1, testRefs: 2},
@@ -350,7 +350,7 @@ func TestNewKeepsNoRootAndNoReferenceNamingNoSymbol(t *testing.T) {
 	b := newGraphBuilder(t).add("alone")
 	b.rootOutside(RootMain)
 	b.refToOutside("alone")
-	got := b.candidates(b.graph().Sweep(SweepInput{}))
+	got := b.candidates(b.graph().Sweep(&SweepInput{}))
 
 	// A root the inventory does not hold seeds nothing, and a reference to a
 	// symbol it does not hold is a reference to nothing the sweep reasons about,

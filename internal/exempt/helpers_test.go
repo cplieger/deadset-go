@@ -52,34 +52,35 @@ const (
 
 // loadDir resolves one directory through the production load, so the Need bits a
 // class depends on have one owner.
-func loadDir(t *testing.T, dir string) (*load.Result, string) {
+func loadDir(t *testing.T, dir string, tags ...string) (*load.Result, string) {
 	t.Helper()
 
 	doc, err := scope.ForDir(dir)
 	if err != nil {
 		t.Fatalf("Setup: scope.ForDir(%s): %v", dir, err)
 	}
-	return loadScope(t, doc)
+	return loadScope(t, doc, tags)
 }
 
 // loadTwoModules resolves the target and the declared consumer of one extracted
 // two-module archive, which is the scope a run analysing a target with a consumer
 // loaded reads.
-func loadTwoModules(t *testing.T, dir string) (*load.Result, string) {
+func loadTwoModules(t *testing.T, dir string, tags ...string) (*load.Result, string) {
 	t.Helper()
 
 	return loadScope(t, scope.Document{
 		Target:    scope.Module{Path: filepath.Join(dir, fixtureTargetDir)},
 		Consumers: []scope.Module{{Path: filepath.Join(dir, fixtureConsumerDir)}},
-	})
+	}, tags)
 }
 
-// loadScope loads one scope document under the fixture configuration.
-func loadScope(t *testing.T, doc scope.Document) (*load.Result, string) {
+// loadScope loads one scope document under the fixture configuration with the
+// given build tags.
+func loadScope(t *testing.T, doc scope.Document, tags []string) (*load.Result, string) {
 	t.Helper()
 
 	result, err := load.Load(t.Context(), doc, load.Configuration{
-		ID: fixtureOS + "-" + fixtureArch, OS: fixtureOS, Arch: fixtureArch,
+		ID: fixtureOS + "-" + fixtureArch, OS: fixtureOS, Arch: fixtureArch, Tags: tags,
 	})
 	if err != nil {
 		t.Fatalf("Setup: load.Load(%s): %v", doc.Target.Path, err)
@@ -107,8 +108,8 @@ func twoModules(t *testing.T, archive string) bool {
 // inputOf extracts one archive, loads it, enumerates its declarations and builds
 // the input every class reads, so a class is measured over the production path
 // from the archive to the type information rather than over a graph written by
-// hand.
-func inputOf(t *testing.T, archive string, opts Options) *Input {
+// hand. The archive loads with the given build tags.
+func inputOf(t *testing.T, archive string, opts Options, tags ...string) *Input {
 	t.Helper()
 
 	dir := extract(t, archive)
@@ -116,7 +117,7 @@ func inputOf(t *testing.T, archive string, opts Options) *Input {
 	if twoModules(t, archive) {
 		program = loadTwoModules
 	}
-	result, root := program(t, dir)
+	result, root := program(t, dir, tags...)
 	symbols, err := graph.Symbols(result, root, os.ReadFile)
 	if err != nil {
 		t.Fatalf("Setup: graph.Symbols(%s): %v", archive, err)

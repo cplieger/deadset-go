@@ -1,0 +1,118 @@
+A package that decodes through two decoders of a dependency whose bodies depend on a
+build constraint. Under the tag wrapped the first only decodes into its argument, and
+without the tag it also prints it. With cgo disabled, as the load compiles, the second
+only decodes into its argument, and with cgo enabled it also prints it. The
+dependency is a module the target requires and replaces with a directory of its own,
+so the archive loads with no network access.
+
+-- go.mod --
+module example.com/tagged
+
+go 1.27.0
+
+require example.com/codec v0.0.0
+
+replace example.com/codec => ./codec
+-- tagged.go --
+package tagged
+
+import (
+	"io"
+
+	"example.com/codec"
+)
+
+// Settings is decoded through the tagged decoder.
+type Settings struct {
+	Theme string `json:"theme"`
+}
+
+// String is called by nothing under the tag.
+func (Settings) String() string { return "settings" }
+
+// Profile is decoded through the decoder cgo selects the body of.
+type Profile struct {
+	Email string `json:"email"`
+}
+
+// String is called by nothing with cgo disabled.
+func (Profile) String() string { return "profile" }
+
+// Load decodes the settings and the profile r holds.
+func Load(r io.Reader) (Settings, Profile, error) {
+	var s Settings
+	var p Profile
+	if err := codec.Decode(r, &s); err != nil {
+		return s, p, err
+	}
+	err := codec.Settle(r, &p)
+	return s, p, err
+}
+-- codec/go.mod --
+module example.com/codec
+
+go 1.27.0
+-- codec/decode_wrapped.go --
+//go:build wrapped
+
+// Package codec decodes documents.
+package codec
+
+import (
+	"encoding/json"
+	"io"
+)
+
+// Decode decodes the document r holds into v and does nothing else with it.
+func Decode(r io.Reader, v any) error { return json.NewDecoder(r).Decode(v) }
+-- codec/decode_plain.go --
+//go:build !wrapped
+
+// Package codec decodes documents.
+package codec
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+)
+
+// Decode decodes the document r holds into v and prints it.
+func Decode(r io.Reader, v any) error {
+	if err := json.NewDecoder(r).Decode(v); err != nil {
+		return err
+	}
+	fmt.Println(v)
+	return nil
+}
+-- codec/settle_nocgo.go --
+//go:build !cgo
+
+package codec
+
+import (
+	"encoding/json"
+	"io"
+)
+
+// Settle decodes the document r holds into v and does nothing else with it.
+func Settle(r io.Reader, v any) error { return json.NewDecoder(r).Decode(v) }
+-- codec/settle_cgo.go --
+//go:build cgo
+
+package codec
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+)
+
+// Settle decodes the document r holds into v and prints it.
+func Settle(r io.Reader, v any) error {
+	if err := json.NewDecoder(r).Decode(v); err != nil {
+		return err
+	}
+	fmt.Println(v)
+	return nil
+}

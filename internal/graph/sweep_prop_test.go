@@ -110,7 +110,7 @@ func (d drawnGraph) build(t *rapid.T, added []drawnRoot) *graphBuilder {
 // input is what one drawn graph is swept under: the drawn exemptions, each naming
 // the declaration it holds, the class that holds it and a site of its own, so two
 // exemptions of one declaration are two entries.
-func (d drawnGraph) input(b *graphBuilder) SweepInput {
+func (d drawnGraph) input(b *graphBuilder) *SweepInput {
 	exempt := make([]Exemption, 0, len(d.exempt))
 	for i, e := range d.exempt {
 		exempt = append(exempt, Exemption{
@@ -119,7 +119,7 @@ func (d drawnGraph) input(b *graphBuilder) SweepInput {
 			Site:  token.Position{Filename: handFile, Line: i + 1, Column: 1},
 		})
 	}
-	return SweepInput{Exempt: exempt}
+	return &SweepInput{Exempt: exempt}
 }
 
 // exemptNames names every declaration a draw placed an exemption on.
@@ -395,7 +395,7 @@ func TestProperty06EveryDeadSymbolLandsInOneComponentReportedAtItsRoots(t *testi
 			}
 		}
 		g := b.graph()
-		r := g.Sweep(SweepInput{Mode: Mode{Production: true}})
+		r := g.Sweep(&SweepInput{Mode: Mode{Production: true}})
 
 		dead := make([]string, 0, len(r.Candidates))
 		reported := map[string]bool{}
@@ -782,7 +782,7 @@ func TestProperty03AReferenceFromAnyLoadedModulePreventsTheFinding(t *testing.T)
 		d := drawnLoads().Draw(t, "the run")
 		b := d.build(t)
 		g := b.graph()
-		r := g.Sweep(SweepInput{Mode: d.mode})
+		r := g.Sweep(&SweepInput{Mode: d.mode})
 
 		referenced, called, by := d.counts()
 		reached := d.reachable(called)

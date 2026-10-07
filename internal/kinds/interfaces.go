@@ -203,6 +203,8 @@ type interfaceFacts struct {
 	usedAsType      map[graph.SymbolID]bool
 	typeUsedBy      map[graph.SymbolID][]graph.SymbolID
 	asserted        map[assertion]bool
+	implementors    map[graph.SymbolID][]graph.SymbolID
+	declaredBy      map[graph.SymbolID]graph.SymbolID
 	assertions      []assertion
 }
 
@@ -219,6 +221,8 @@ func interfacesOf(in *Input) *interfaceFacts {
 		usedAsType:      make(map[graph.SymbolID]bool),
 		typeUsedBy:      make(map[graph.SymbolID][]graph.SymbolID),
 		asserted:        make(map[assertion]bool),
+		implementors:    make(map[graph.SymbolID][]graph.SymbolID),
+		declaredBy:      make(map[graph.SymbolID]graph.SymbolID),
 	}
 	if in.Merged != nil {
 		f.references(in, in.Merged.References)
@@ -333,8 +337,16 @@ func (f *interfaceFacts) count(one *Configured, declared declaredInterface, recv
 			f.counted[id] = &implementationCount{}
 		}
 		f.counted[id].implementations++
-		if sel := set.Lookup(method.Pkg(), method.Name()); sel != nil && emptyBody(written, sel.Obj()) {
+		f.declaredBy[id] = declared.id
+		sel := set.Lookup(method.Pkg(), method.Name())
+		if sel == nil {
+			continue
+		}
+		if emptyBody(written, sel.Obj()) {
 			f.counted[id].empty++
+		}
+		if implementor, held := one.Resolve.Object(sel.Obj()); held && !slices.Contains(f.implementors[id], implementor) {
+			f.implementors[id] = append(f.implementors[id], implementor)
 		}
 	}
 }
@@ -406,6 +418,30 @@ func (f *interfaceFacts) exempt(iface, method graph.SymbolID) bool {
 	}
 	counted := f.counted[method]
 	return counted != nil && counted.implementations > 0 && counted.empty == counted.implementations
+}
+
+// InterfaceImplementations answers, before any sweep, which interface methods of
+// the target the rule of DS1203 holds for and its precondition does not exempt, and
+// a use of each method implementing one by that interface method, so an
+// implementation nothing else keeps belongs to the interface method's dead
+// component. It reads the inventory, the references and the type information alone.
+func InterfaceImplementations(in *Input) (uncalled map[graph.SymbolID]bool, uses []graph.Use) {
+	facts := interfacesOf(in)
+	uncalled = make(map[graph.SymbolID]bool)
+	for method, iface := range facts.declaredBy {
+		symbol := in.symbol(method)
+		if symbol == nil || testFile(symbol) || facts.exempt(iface, method) {
+			continue
+		}
+		uncalled[method] = true
+		for _, implementor := range facts.implementors[method] {
+			uses = append(uses, graph.Use{From: method, To: implementor})
+		}
+	}
+	slices.SortFunc(uses, func(a, b graph.Use) int {
+		return cmp.Or(strings.Compare(string(a.From), string(b.From)), strings.Compare(string(a.To), string(b.To)))
+	})
+	return uncalled, uses
 }
 
 // implementationsOf returns the concrete implementations of one interface, in the

@@ -9,7 +9,7 @@ func TestComponentsGroupACycleAndReportEveryMemberAsARoot(t *testing.T) {
 	b := newGraphBuilder(t).add("alpha", "beta")
 	b.ref("alpha", "beta")
 	b.ref("beta", "alpha")
-	r := b.graph().Sweep(SweepInput{})
+	r := b.graph().Sweep(&SweepInput{})
 
 	// Each holds the other live under reference counting and no root reaches
 	// either, so both are candidates under reachability and the cycle is one
@@ -41,7 +41,7 @@ func cascadeChain(t *testing.T) *graphBuilder {
 
 func TestComponentsHoldEverySymbolThatFallsWithTheRoot(t *testing.T) {
 	b := cascadeChain(t)
-	got := b.groups(b.graph().Sweep(SweepInput{}))
+	got := b.groups(b.graph().Sweep(&SweepInput{}))
 
 	// The three declarations the head reaches are dead only through it, so they
 	// fall with it and are members of its component: every finding the one
@@ -58,7 +58,7 @@ func TestComponentsJoinTwoRootsThatReachOneDeclaration(t *testing.T) {
 	b := newGraphBuilder(t).add("leftRoot", "rightRoot", "shared")
 	b.ref("leftRoot", "shared")
 	b.ref("rightRoot", "shared")
-	got := b.groups(b.graph().Sweep(SweepInput{}))
+	got := b.groups(b.graph().Sweep(&SweepInput{}))
 
 	// Deleting either root alone leaves the other referencing the shared
 	// declaration, which is dead only through the two of them, so the three are
@@ -81,7 +81,7 @@ func TestComponentsPlaceADeadMemberInsideItsDeadContainer(t *testing.T) {
 	b.declare(handSymbol{name: "fetch", kind: KindInterfaceMethod, parent: "fetcher"})
 	b.ref("open", "box")
 	b.ref("open", "lid")
-	got := b.groups(b.graph().Sweep(SweepInput{}))
+	got := b.groups(b.graph().Sweep(&SweepInput{}))
 
 	// A dead type's fields and methods and a dead interface's methods are members
 	// of the container's component rather than components of their own, and the
@@ -102,7 +102,7 @@ func TestComponentsCountALineTwoFallingDeclarationsShareOnce(t *testing.T) {
 	b.declare(handSymbol{name: "lid", kind: KindField, parent: "box", nested: true})
 	b.declare(handSymbol{name: "side", kind: KindField, parent: "box", nested: true, lines: 2})
 	b.declare(handSymbol{name: "open", kind: KindMethod, parent: "box", lines: 2})
-	got := b.groups(b.graph().Sweep(SweepInput{}))
+	got := b.groups(b.graph().Sweep(&SweepInput{}))
 
 	// The struct runs from its first line to its closing brace and its fields'
 	// lines are inside that run, so the deletion removes the struct's four lines
@@ -170,7 +170,7 @@ func TestComponentsOrderPlacesEachComponentAtItsFirstRoot(t *testing.T) {
 	b.ref("earlyHead", "earlyTail")
 	b.ref("earlyTail", "earlyHead")
 	b.ref("lateHead", "lateTail")
-	got := b.groups(b.graph().Sweep(SweepInput{}))
+	got := b.groups(b.graph().Sweep(&SweepInput{}))
 
 	// The cycle and the chain are two components, each holding its own members by
 	// site, and the component whose root cycle comes first in site order comes
@@ -189,7 +189,7 @@ func TestComponentsOrderIsTheSameOnEveryCall(t *testing.T) {
 	b.ref("third", "head")
 	g := b.graph()
 
-	first, second := g.Sweep(SweepInput{}), g.Sweep(SweepInput{})
+	first, second := g.Sweep(&SweepInput{}), g.Sweep(&SweepInput{})
 	if got, want := b.groups(first), b.groups(second); !slices.Equal(got, want) {
 		t.Errorf("Sweep returned a different order on the second call\n--- first\n%+v\n+++ second\n%+v", got, want)
 	}
@@ -210,7 +210,7 @@ func TestComponentListNamesEveryMemberOnlyWhereTheModeIsFull(t *testing.T) {
 	b := newGraphBuilder(t)
 	b.declare(handSymbol{name: "box", kind: KindType, lines: 2})
 	b.declare(handSymbol{name: "lid", kind: KindField, parent: "box"})
-	components := b.graph().Sweep(SweepInput{}).Components
+	components := b.graph().Sweep(&SweepInput{}).Components
 	if len(components) != 1 {
 		t.Fatalf("Sweep over a dead type and its field returned %d components, want 1", len(components))
 	}
@@ -262,7 +262,7 @@ func TestComponentsMarkNoMemberOfAReachedCycleAsARoot(t *testing.T) {
 	b.ref("caller", "ping")
 	b.ref("ping", "pong")
 	b.ref("pong", "ping")
-	got := b.groups(b.graph().Sweep(SweepInput{}))
+	got := b.groups(b.graph().Sweep(&SweepInput{}))
 
 	// Only ping is referenced from outside the cycle, and pong is not, yet the
 	// cycle as a whole is referenced: deleting pong alone leaves ping

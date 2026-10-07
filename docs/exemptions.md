@@ -12,7 +12,7 @@ Three rules decide what the retained set holds:
 
 - A symbol is in it only when an exemption is what kept the symbol from being reported. An exemption on a symbol something references anyway is computed and not listed, because the reference is the reason it is live.
 - A symbol an exempt symbol keeps alive is in neither. The exemption seeds the reachability closure, so the private helper of a retained method is live rather than held back.
-- One record per symbol, class and detail, at the first site by rendered position. A method converted to one interface at sixty sites is one record.
+- One record per symbol, class, detail and holding declaration, at its first site by rendered position. A method one function converts to one interface at sixty sites is one record.
 
 ## Turning a class off
 
@@ -28,9 +28,13 @@ A report is built from a production analysis, which counts no reference a test f
 
 ## What leaves the analysis is fully reachable
 
-A struct value, or a pointer to one, handed to a parameter typed as the empty interface of a function or method outside the analyzed program has left the analysis. The callee's body is not in the program, and the parameter's type keeps nothing of the value. So the callee may read its fields and call the methods its own package can name.
+A struct value or a pointer to one, handed to a parameter typed as the empty interface of a function or method outside the analyzed program, has left the analysis. So has a slice, an array or a map of such values. The callee's body is not in the program, and the parameter's type keeps nothing of the value. So the callee may read its fields and call the methods its own package can name.
 
-The value flows into `encoding-reflection`, recorded at the call with the callee named. It keeps its fields and the encoding and decoding methods of both directions. It also keeps every method by which it satisfies an interface that the callee's package or a package in that package's import closure declares. Where those packages include a template engine, it keeps every exported method.
+So has such a value returned as an interface-typed result by a method that implements an exported interface declared outside the program. That interface's package then stands for the callee's package.
+
+The value flows into `encoding-reflection`, recorded at the call or the return. It keeps its fields and the encoding and decoding methods of both directions. It also keeps every method by which it satisfies an exported interface of the callee's package or of a package in its import closure. An outside package of the program's import closure that imports the callee's package counts as well. Where the callee's package's imports include a template engine, the value keeps every exported method.
+
+A callee whose body only decodes into the parameter is a decoding destination rather than this rule's. Its body is read from the build list's source for that question alone.
 
 A function of the program that hands one of its own empty-interface parameters on inherits the crossing at that parameter, to a fixpoint. So a wrapper of a wrapper carries the rule of the call it forwards to. A declared consumer is inside the program, so a consumer's own wrapper is walked like the target's and a target value handed to it reaches the destination through it.
 
@@ -44,6 +48,8 @@ Retains every method that satisfies an interface a value of the method's receive
 
 The evidence is the conversion set, every site where a value of a concrete type reaches a position typed as an interface. Such a site is an explicit conversion or a satisfaction assertion, an assignment, an argument, a return value, or an element stored in an interface-typed container. For each such pair of concrete type and interface, the methods of the type that answer what the interface requires are retained at that site.
 
+A method answering an interface method no call site invokes is not retained, and `DS1203` reports it with that interface method. Each retention is a use by the declaration that holds the site, so it holds only while that declaration is live. A satisfaction assertion is a use by the type it asserts, so it keeps nothing of a type only dead code builds.
+
 A type whose values never reach an interface retains nothing whatever it happens to implement, because no caller can dispatch to it through an interface the program never builds.
 
 A method satisfying two interfaces at two sites is retained twice, once per site, so the retained set shows every conversion that depends on the method. A type registered as a flag value, or used as a writer, a round tripper or a sort interface, is an ordinary member of the conversion set.
@@ -54,7 +60,7 @@ Retains, on a type whose values reach a consumer that names members by string at
 
 The destinations, and what each retains:
 
-- Fields and the methods it resolves by name for an argument of a function or method of `encoding/json`, `encoding/json/v2`, `encoding/xml` or `encoding/gob`. A decoding entry point fills fields through reflection, which reads none, so it retains its methods alone. A JSON decoding entry point retains fields as well in a program that calls `(*json.Decoder).DisallowUnknownFields` or names `json.RejectUnknownMembers`.
+- Fields and the methods it resolves by name for an argument of a function or method of `encoding/json`, `encoding/json/v2`, `encoding/xml` or `encoding/gob`. A decoding entry point fills fields through reflection, which reads none, so it retains its methods alone. An encoder skips a field whose tag for that encoder is exactly `-`, and an XML decoding entry point reads the `XMLName` field. A JSON decoding entry point retains fields as well in a program that calls `(*json.Decoder).DisallowUnknownFields` or names `json.RejectUnknownMembers`.
 - Fields alone for a `database/sql` scan target and an argument of `reflect.DeepEqual`. Fields alone also for an argument of any other `reflect` function in a program that calls none of the method finders `Method`, `MethodByName` and `NumMethod`.
 - Fields and the `LogValue` method for a `log/slog` logging call or attribute constructor.
 - Fields and the exported methods for a template engine and a sort interface. The same holds for an argument of any other function of `reflect` in a program that calls one of those method finders.
@@ -68,9 +74,11 @@ An encoder resolves a method by name in the direction its entry point works in. 
 | `encoding/xml` | `MarshalText`, `MarshalXML`, `MarshalXMLAttr` | `UnmarshalText`, `UnmarshalXML`, `UnmarshalXMLAttr` |
 | `encoding/gob` | `GobEncode`, `MarshalBinary` | `GobDecode`, `UnmarshalBinary` |
 
-A value reaches through a pointer, a slice, an array, a map key or value and an embedded field. From every type so reached, it reaches through that type's fields again until no further type joins, because an encoder walks the whole value rather than its outermost type.
+A value reaches through a pointer, a slice, an array, a map key or value and an embedded field. It also reaches through the fields of a struct type with no name. From every type so reached, it reaches through that type's fields again until no further type joins, because an encoder walks the whole value rather than its outermost type.
 
-A field that is an interface, or holds interface elements or map values, reaches the types the program stores in it. A store is a composite literal, an assignment, an `append` or an index assignment. A stored parameter stands for every argument the program's calls pass for it. An argument holding interface elements or map values reaches the stored types the same way. It may be a literal, a variable or a parameter. A method is retained where the defined type declares it, so a method promoted from an embedded type is retained where the embedded type is reached.
+A field that is an interface, or holds interface elements or map values, reaches the types the program stores in it. A store is a composite literal, an assignment, an `append` or an index assignment. A stored parameter stands for every argument the program's calls pass for it. An argument holding interface elements or map values reaches the stored types the same way. It may be a literal, a variable, a parameter or a field selector.
+
+A method is retained where the defined type declares it, so a method promoted from an embedded type is retained where the embedded type is reached.
 
 ### format-verb-contract
 

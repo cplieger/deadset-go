@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/internal/graph"
-	spec "github.com/cplieger/deadset-spec/v5"
+	spec "github.com/cplieger/deadset-spec/v6"
 	"golang.org/x/tools/txtar"
 )
 
@@ -203,7 +203,7 @@ func TestComputeOrdersTheUnionBySiteThenClassThenSymbol(t *testing.T) {
 	}
 }
 
-func TestComputeKeepsOneEntryPerSymbolClassAndDetail(t *testing.T) {
+func TestComputeKeepsOneEntryPerSymbolClassDetailAndHolder(t *testing.T) {
 	const converted = "satisfies io.Writer"
 	detectors := map[Class]Detector{
 		GeneratedFile: detector(
@@ -215,6 +215,9 @@ func TestComputeKeepsOneEntryPerSymbolClassAndDetail(t *testing.T) {
 			// on a second symbol: each is a fact of its own.
 			graph.Exemption{ID: "a.go:1:1", Class: string(GeneratedFile), Site: at("a.go", 9, 4), Detail: "satisfies io.Closer"},
 			graph.Exemption{ID: "a.go:2:1", Class: string(GeneratedFile), Site: at("a.go", 9, 4), Detail: converted},
+			// The first fact again, held by a declaration: live only while that
+			// declaration is, so it is a fact of its own.
+			graph.Exemption{ID: "a.go:1:1", Class: string(GeneratedFile), Site: at("a.go", 12, 1), Detail: converted, Holder: "h.go:1:1"},
 		),
 	}
 
@@ -225,14 +228,15 @@ func TestComputeKeepsOneEntryPerSymbolClassAndDetail(t *testing.T) {
 
 	// One class holding one symbol for one reason is one exemption however many
 	// sites the class found it at, and the site kept is the earliest of them; a
-	// second reason and a second symbol are each an exemption of their own.
+	// second reason, a second symbol and a holder are each an exemption of their own.
 	want := []string{
 		"a.go:1:1 generated-file a.go:4:7",
 		"a.go:1:1 generated-file a.go:9:4",
 		"a.go:2:1 generated-file a.go:9:4",
+		"a.go:1:1 generated-file a.go:12:1",
 	}
 	if got := held(found); !slices.Equal(got, want) {
-		t.Errorf("Compute over five reports of one class retained %v, want %v", got, want)
+		t.Errorf("Compute over six reports of one class retained %v, want %v", got, want)
 	}
 	if found[0].Detail != converted {
 		t.Errorf("Compute kept the detail %q at the earliest site, want %q", found[0].Detail, converted)
@@ -267,7 +271,7 @@ func retainedClauses(symbols []graph.Symbol, found []graph.Exemption) []string {
 	return lines
 }
 
-func TestComputeKeepsOneRecordForAMethodConvertedAtSeveralSites(t *testing.T) {
+func TestComputeKeepsOneRecordPerHolderForAMethodConvertedAtSeveralSites(t *testing.T) {
 	shared := analysisOf(t, "several-sites.txtar", Options{})
 	symbols := shared.inventory(t)
 
@@ -278,7 +282,7 @@ func TestComputeKeepsOneRecordForAMethodConvertedAtSeveralSites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Setup: InterfaceSatisfactionDetector(several-sites.txtar): %v", err)
 	}
-	const sites = 5
+	const sites = 6
 	if got := writerSites(perSite); got != sites {
 		t.Fatalf("Setup: the class recorded %s at %d sites, want %d", writerFact, got, sites)
 	}
@@ -288,14 +292,20 @@ func TestComputeKeepsOneRecordForAMethodConvertedAtSeveralSites(t *testing.T) {
 		t.Fatalf("Compute(several-sites.txtar) error: %v", err)
 	}
 
-	// Write is converted to io.Writer at five sites over two files and the union
-	// states that once, at the earliest site by file and line; the conversion to
-	// io.WriteCloser is a second reason on the same symbol and class, so it is a
-	// record of its own rather than a site the first one swallowed.
+	// Write is converted to io.Writer at six sites over two files and the union
+	// states that once per holder, at its earliest site, so Assigned's two sites
+	// are one record; the conversion to io.WriteCloser is a second reason on the
+	// same symbol and class, so it is a record of its own. The blank assertion's
+	// holder is the asserted type, which holds the assertion record too.
 	want := []string{
 		"(*Sink).Write interface-satisfaction a.go:20:43 satisfies io.Writer",
-		"(*Sink).Write interface-satisfaction a.go:29:44 satisfies io.WriteCloser",
-		"(*Sink).Close interface-satisfaction a.go:29:44 satisfies io.WriteCloser",
+		"(*Sink).Write interface-satisfaction a.go:24:20 satisfies io.Writer",
+		"(*Sink).Write interface-satisfaction a.go:30:44 satisfies io.WriteCloser",
+		"(*Sink).Close interface-satisfaction a.go:30:44 satisfies io.WriteCloser",
+		"(*Sink).Write interface-satisfaction b.go:6:19 satisfies io.Writer",
+		"_ interface-satisfaction b.go:6:19 asserts io.Writer",
+		"(*Sink).Write interface-satisfaction b.go:9:55 satisfies io.Writer",
+		"(*Sink).Write interface-satisfaction b.go:12:43 satisfies io.Writer",
 	}
 	if got := retainedClauses(symbols, found); !slices.Equal(got, want) {
 		t.Errorf("Compute(several-sites.txtar) retained\n%v\nwant\n%v", got, want)
@@ -402,7 +412,7 @@ func TestComputeKeepsTheSourceSiteOfAFactATestFileAlsoCarries(t *testing.T) {
 // a maintainer reads the nine classes by.
 var relationWords = []string{
 	"satisfies", "passed", "scanned", "converted", "decoded", "formatted",
-	"implements", "declares", "declared", "named", "exported", "looked",
+	"implements", "declares", "declared", "named", "exported", "looked", "asserts", "returned",
 }
 
 // fixtureArchives names every txtar archive of the package's testdata, which is

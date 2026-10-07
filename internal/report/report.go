@@ -36,7 +36,7 @@ import (
 // SchemaVersion is the version of the report schema this package writes a
 // document to. An analyzer names every version it reads in the analyzer object,
 // and that list holds this one.
-const SchemaVersion = "7.0.0"
+const SchemaVersion = "8.0.0"
 
 // staleSuppressionCode is the code of a stale suppression, which is the one code
 // whose records the envelope carries outside its finding list.
@@ -258,6 +258,16 @@ type Totals struct {
 	StaleSuppressions    int
 	Pending              int
 	Omitted              int
+	Withheld             Withheld
+}
+
+// Withheld is how many findings the configured minimum confidence withheld, per
+// confidence: the findings a run at the lowest minimum reports that this one does
+// not.
+type Withheld struct {
+	Certain  int
+	Probable int
+	Possible int
 }
 
 // BySeverity is how many findings of the run carry each severity, over the whole
@@ -410,6 +420,7 @@ func Build(in *BuildInput) (Envelope, error) {
 	}
 	built.order()
 	built.Totals = totalsOf(&built, in.Suppressions)
+	built.Totals.Withheld = withheldOf(in.Result.Withheld)
 	return built, nil
 }
 
@@ -675,6 +686,23 @@ func totalsOf(e *Envelope, held Suppressions) Totals {
 	for i := range e.EdgeEvaluations {
 		if e.EdgeEvaluations[i].State == deadState {
 			counted.Pending++
+		}
+	}
+	return counted
+}
+
+// withheldOf counts the findings the minimum confidence withheld by the confidence
+// each carries.
+func withheldOf(findings []kinds.Finding) Withheld {
+	var counted Withheld
+	for i := range findings {
+		switch findings[i].Confidence {
+		case kinds.Certain:
+			counted.Certain++
+		case kinds.Probable:
+			counted.Probable++
+		case kinds.Possible:
+			counted.Possible++
 		}
 	}
 	return counted

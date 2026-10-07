@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/internal/graph"
-	spec "github.com/cplieger/deadset-spec/v5"
+	spec "github.com/cplieger/deadset-spec/v6"
 )
 
 // retained is what one class's detector recorded over a shared analysis.
@@ -575,6 +575,142 @@ func TestEncodingReflectionRetainsWhatCrossesOutOfTheProgram(t *testing.T) {
 	}
 }
 
+// keysRefs spells the references of one type's members in the keys fixture.
+func keysRefs(typeName string, members ...string) []string {
+	return qualify("example.com/keys", typeName, members...)
+}
+
+// An encoder skips a field whose tag names the key -, and encodes one whose tag names
+// "-," under the name -. An XML decoder reads the XMLName field to match the element
+// and only writes the others. A struct crosses out of the program inside a slice, an
+// array or a map the way it crosses alone.
+func TestEncodingReflectionRetainsWhatAnEncoderReadsByKey(t *testing.T) {
+	shared := analysisOf(t, "encoding-reflection-keys.txtar", Options{})
+	refs := retainedRefs(t, shared, EncodingReflection)
+
+	for _, test := range []struct {
+		desc     string
+		typeName string
+		want     []string
+	}{
+		{desc: "a field tagged with the key - is skipped", typeName: "Record", want: keysRefs("Record", "Dash", "ID")},
+		{desc: "a decoded XMLName field is read", typeName: "Feed", want: keysRefs("Feed", "XMLName")},
+		{desc: "the element of a slice crosses", typeName: "Listed", want: keysRefs("Listed", "Name")},
+		{desc: "the value of a map crosses", typeName: "Mapped", want: keysRefs("Mapped", "ID")},
+		{desc: "a slice that crosses nothing", typeName: "Kept", want: nil},
+	} {
+		t.Run(test.typeName, func(t *testing.T) {
+			if got := membersOf(refs, test.typeName); !slices.Equal(got, test.want) {
+				t.Errorf("EncodingReflectionDetector(encoding-reflection-keys.txtar) retained, for %s (%s),\ngot  %v\nwant %v",
+					test.typeName, test.desc, got, test.want)
+			}
+		})
+	}
+}
+
+// anonymousRefs spells the references of one type's members in the anonymous fixture.
+func anonymousRefs(typeName string, members ...string) []string {
+	return qualify("example.com/anonymous", typeName, members...)
+}
+
+// An encoder walks the fields of a struct type with no name as it walks a defined
+// struct's, at the value handed to it and in a field of a type it reaches.
+func TestEncodingReflectionWalksTheFieldsOfAStructTypeWithNoName(t *testing.T) {
+	shared := analysisOf(t, "encoding-reflection-anonymous.txtar", Options{})
+	refs := retainedRefs(t, shared, EncodingReflection)
+
+	for _, test := range []struct {
+		desc     string
+		typeName string
+		want     []string
+	}{
+		{desc: "a field of the value decoded into", typeName: "Keys", want: anonymousRefs("Keys", "UnmarshalJSON")},
+		{desc: "a field of a field of the value encoded", typeName: "Stamp", want: anonymousRefs("Stamp", "MarshalText")},
+		{desc: "a field of a defined type's field", typeName: "Mark", want: anonymousRefs("Mark", "MarshalText")},
+		{desc: "the fields of a defined type's field, and none of a skipped one", typeName: "Envelope", want: anonymousRefs("Envelope", "Inner", "Inner.Count", "Inner.Mark")},
+		{desc: "a value no destination reaches", typeName: "Unused", want: nil},
+	} {
+		t.Run(test.typeName, func(t *testing.T) {
+			if got := membersOf(refs, test.typeName); !slices.Equal(got, test.want) {
+				t.Errorf("EncodingReflectionDetector(encoding-reflection-anonymous.txtar) retained, for %s (%s),\ngot  %v\nwant %v",
+					test.typeName, test.desc, got, test.want)
+			}
+		})
+	}
+}
+
+// A dependency's function is read under the build context the run loads with, its
+// tags and cgo disabled, so the body a constraint selects decides whether the
+// function only decodes.
+func TestEncodingReflectionReadsADependencyUnderTheConfigurationsTags(t *testing.T) {
+	for _, test := range []struct {
+		desc string
+		tags []string
+		want []string
+	}{
+		{desc: "the body that also prints", want: qualify("example.com/tagged", "Settings", "String", "Theme")},
+		{desc: "the body that only decodes", tags: []string{"wrapped"}},
+	} {
+		t.Run(test.desc, func(t *testing.T) {
+			in := inputOf(t, "encoding-reflection-tagged.txtar", Options{}, test.tags...)
+			found, err := EncodingReflectionDetector(in)
+			if err != nil {
+				t.Fatalf("EncodingReflectionDetector(encoding-reflection-tagged.txtar, tags %v): %v", test.tags, err)
+			}
+			refs := make(map[graph.SymbolID]string, len(in.Symbols))
+			for i := range in.Symbols {
+				refs[in.Symbols[i].ID] = in.Symbols[i].Ref
+			}
+			var got []string
+			for _, e := range found {
+				got = append(got, refs[e.ID])
+			}
+			slices.Sort(got)
+			if got = slices.Compact(got); !slices.Equal(got, test.want) {
+				t.Errorf("EncodingReflectionDetector(encoding-reflection-tagged.txtar, tags %v) retained\ngot  %v\nwant %v",
+					test.tags, got, test.want)
+			}
+		})
+	}
+}
+
+// outsideRefs spells the references of one type's members in the outside fixture.
+func outsideRefs(typeName string, members ...string) []string {
+	return qualify("example.com/outside", typeName, members...)
+}
+
+// A value crossing into a dependency keeps the methods by which it satisfies an
+// exported interface of the callee's package or of a package that imports it, and not
+// one of an unexported interface. A value returned through a method of an interface
+// the dependency declares crosses the same way. A value only decoded into is written,
+// so it keeps nothing; one the callee also hands to a destination keeps what that
+// destination reads. A function that never uses its parameter, or has no body, is no
+// decoder, so a value handed to it crosses.
+func TestEncodingReflectionRetainsWhatADependencyCanName(t *testing.T) {
+	shared := analysisOf(t, "encoding-reflection-outside.txtar", Options{})
+	refs := retainedRefs(t, shared, EncodingReflection)
+
+	for _, test := range []struct {
+		desc     string
+		typeName string
+		want     []string
+	}{
+		{desc: "registered with a function taking the empty interface", typeName: "Record", want: outsideRefs("Record", "Describe", "Label")},
+		{desc: "returned through a method of the dependency's interface", typeName: "Service", want: outsideRefs("Service", "Addr", "Label")},
+		{desc: "decoded through a method that only decodes", typeName: "Settings", want: nil},
+		{desc: "decoded through a method that also prints", typeName: "Profile", want: outsideRefs("Profile", "Email", "String")},
+		{desc: "handed to a function that never uses its parameter", typeName: "Ignored", want: outsideRefs("Ignored", "Label", "Note")},
+		{desc: "handed to a function with no body", typeName: "Discarded", want: outsideRefs("Discarded", "Label", "Note")},
+	} {
+		t.Run(test.typeName, func(t *testing.T) {
+			if got := membersOf(refs, test.typeName); !slices.Equal(got, test.want) {
+				t.Errorf("EncodingReflectionDetector(encoding-reflection-outside.txtar) retained, for %s (%s),\ngot  %v\nwant %v",
+					test.typeName, test.desc, got, test.want)
+			}
+		})
+	}
+}
+
 // The detail names the callee the value was handed to, which is the immediate one:
 // a wrapper's caller reads the wrapper's name at its own call, the way the
 // format-verb class names the print wrapper it found.
@@ -626,7 +762,7 @@ func TestFormatVerbContractAloneRecordsAnOperandOfTheFormattingPackage(t *testin
 // The mechanism text of the class, as the Contract states it for this language. The
 // class implements this text; a pin bump that moves it must be read against the
 // destination table before this literal moves with it.
-const encodingReflectionMechanismSHA256 = "5c11f7d93ba385909655a6c2dc23ebec86fc26f2115081ecae1861339d64cc7a"
+const encodingReflectionMechanismSHA256 = "5ee64006da92cdf0ec2730a1a58fc0eebb3de58dd4df769b2822b6e0968673c4"
 
 func TestEncodingReflectionImplementsTheContractsMechanismText(t *testing.T) {
 	body, err := spec.Contract.ReadFile("contract/exemptions.json")

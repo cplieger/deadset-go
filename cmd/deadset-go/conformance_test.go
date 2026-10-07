@@ -24,7 +24,7 @@ import (
 	"github.com/cplieger/deadset-go/internal/load"
 	"github.com/cplieger/deadset-go/internal/report"
 	"github.com/cplieger/deadset-go/internal/suppress"
-	spec "github.com/cplieger/deadset-spec/v5"
+	spec "github.com/cplieger/deadset-spec/v6"
 	"golang.org/x/tools/txtar"
 )
 
@@ -132,6 +132,7 @@ type corpusFixtureFile struct {
 	ClosedWorld            []string                               `json:"closed_world"`
 	EdgeEvaluations        []corpusEdgeEvaluation                 `json:"edge_evaluations"`
 	MinConfidence          string                                 `json:"min_confidence"`
+	ConsumerTests          string                                 `json:"consumer_tests"`
 	TypeErrorSkips         []string                               `json:"type_error_skips"`
 	Notes                  []corpusNote                           `json:"notes"`
 	SetupFailure           *corpusSetupFailure                    `json:"setup_failure"`
@@ -1183,6 +1184,13 @@ func corpusRunOf(rendering, document string, fixture *corpusFixtureFile,
 
 	if fixture.MinConfidence != "" {
 		held.config.Analysis.MinConfidence = config.Confidence(fixture.MinConfidence)
+	}
+	switch tests := config.ConsumerTests(fixture.ConsumerTests); tests {
+	case "":
+	case config.TestReference, config.ProductionReference:
+		held.config.Analysis.ConsumerTests = tests
+	default:
+		return corpusRun{}, fmt.Errorf("the expectation file names consumer_tests %q", fixture.ConsumerTests)
 	}
 
 	// The configured roots the fixture names, in the order of the logical names that

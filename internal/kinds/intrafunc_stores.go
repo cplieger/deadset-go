@@ -173,7 +173,9 @@ func addressed(expr ast.Expr) ast.Expr {
 // selectsPointerMethod reports whether one selector selects a method whose
 // receiver is a pointer on a value that is not one, which takes the address of the
 // value selected on. A selection through a pointer, the operand's own or an
-// embedded one, takes no address.
+// embedded one, takes no address. Selection.Indirect also reports true for a
+// pointer operand on a pointer method, https://go.dev/issue/8353, which is the
+// answer wanted here.
 func selectsPointerMethod(info *types.Info, expr *ast.SelectorExpr) bool {
 	selection := info.Selections[expr]
 	if selection == nil || selection.Kind() != types.MethodVal || selection.Indirect() {

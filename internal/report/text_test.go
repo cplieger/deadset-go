@@ -9,7 +9,7 @@ import (
 
 	"github.com/cplieger/deadset-go/internal/config"
 	"github.com/cplieger/deadset-go/internal/kinds"
-	spec "github.com/cplieger/deadset-spec/v5"
+	spec "github.com/cplieger/deadset-spec/v6"
 )
 
 // textLinePage is the Contract page that publishes the expression the text format is
@@ -133,6 +133,61 @@ func TestTheSummaryIsNotAFindingLine(t *testing.T) {
 	}
 }
 
+// TestTheWithheldLineNamesEachCountTheMinimumWithheld pins the line the format writes
+// after the records where the minimum confidence withheld a finding: the probable and
+// the possible count, each only where it is not 0, then the setting that shows them
+// all, in a shape the finding-line expression does not match.
+func TestTheWithheldLineNamesEachCountTheMinimumWithheld(t *testing.T) {
+	expression := publishedExpression(t)
+	cases := []struct {
+		name     string
+		withheld Withheld
+		want     string
+	}{
+		{name: "none"},
+		{
+			name:     "possible",
+			withheld: Withheld{Possible: 5},
+			want:     "withheld by analysis.min_confidence: 5 possible, shown with analysis.min_confidence set to possible",
+		},
+		{
+			name:     "probable-and-possible",
+			withheld: Withheld{Probable: 2, Possible: 5},
+			want:     "withheld by analysis.min_confidence: 2 probable, 5 possible, shown with analysis.min_confidence set to possible",
+		},
+		{
+			name:     "probable",
+			withheld: Withheld{Probable: 3},
+			want:     "withheld by analysis.min_confidence: 3 probable, shown with analysis.min_confidence set to probable",
+		},
+		{name: "certain-alone", withheld: Withheld{Certain: 4}},
+		{
+			name:     "certain-and-possible",
+			withheld: Withheld{Certain: 1, Possible: 5},
+			want:     "withheld by analysis.min_confidence: 5 possible, shown with analysis.min_confidence set to possible",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			in := fullInput()
+			envelope := built(t, &in)
+			envelope.Totals.Withheld = c.withheld
+			written := strings.Split(strings.TrimRight(string(rendered(t, "text", &envelope, Options{})), "\n"), "\n")
+			after := written[len(envelope.Findings)+len(envelope.StaleSuppressions) : len(written)-1]
+			var got string
+			if len(after) == 1 {
+				got = after[0]
+			}
+			if len(after) > 1 || got != c.want {
+				t.Fatalf("Text(withheld %+v) wrote %q between the records and the summary, want %q", c.withheld, after, c.want)
+			}
+			if got != "" && expression.MatchString(got) {
+				t.Errorf("the withheld line matches the finding-line expression: %q", got)
+			}
+		})
+	}
+}
+
 // TestTheTextRenderingCarriesNoAmbientDetail pins that nothing of the machine or the
 // moment reaches the output, so two runs over an unchanged tree write the same bytes.
 func TestTheTextRenderingCarriesNoAmbientDetail(t *testing.T) {
@@ -165,15 +220,17 @@ func TestTheTextRenderingReportsAWriteFailure(t *testing.T) {
 	}
 }
 
-// findingLines is every line of a text rendering but its summary.
+// findingLines is the lines of a text rendering its findings and stale suppressions
+// wrote, which come before the withheld line and the summary.
 func findingLines(t *testing.T, e *Envelope) []string {
 	t.Helper()
 
 	written := strings.Split(strings.TrimRight(string(rendered(t, "text", e, Options{})), "\n"), "\n")
-	if len(written) == 0 {
-		t.Fatal("the text rendering wrote nothing, not even a summary")
+	records := len(e.Findings) + len(e.StaleSuppressions)
+	if len(written) <= records {
+		t.Fatalf("the text rendering wrote %d lines for %d records, want the summary after them", len(written), records)
 	}
-	return written[:len(written)-1]
+	return written[:records]
 }
 
 // refusingWriter is a writer that fails every write, which is what a rendering meets

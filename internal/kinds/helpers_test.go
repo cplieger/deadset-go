@@ -16,7 +16,7 @@ import (
 	"github.com/cplieger/deadset-go/internal/load"
 	"github.com/cplieger/deadset-go/internal/scope"
 	"github.com/cplieger/deadset-go/internal/testsupport"
-	spec "github.com/cplieger/deadset-spec/v5"
+	spec "github.com/cplieger/deadset-spec/v6"
 	"golang.org/x/tools/txtar"
 )
 
@@ -221,7 +221,7 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 	if err != nil {
 		t.Fatalf("Setup: graph.Merge(%s): %v", doc.Target.Path, err)
 	}
-	swept := graph.NewMatrix(&merged).Sweep(graph.SweepInput{Exempt: exemptions, Mode: mode}, graph.TestReferencesOf(testEvidence))
+	swept := graph.NewMatrix(&merged).Sweep(&graph.SweepInput{Exempt: exemptions, Mode: mode}, graph.TestReferencesOf(testEvidence))
 
 	refs := make(map[graph.SymbolID]string, len(merged.Symbols))
 	for i := range merged.Symbols {

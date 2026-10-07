@@ -6,6 +6,7 @@ import (
 	"go/token"
 	"go/types"
 	"maps"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -31,6 +32,9 @@ var destinationPackages = map[string]methodReach{
 // jsonPackages are the encoders whose decoder can refuse a document naming a member
 // the type lacks.
 var jsonPackages = map[string]bool{"encoding/json": true, "encoding/json/v2": true}
+
+// xmlPackage is the XML encoder's package.
+const xmlPackage = "encoding/xml"
 
 // methodReach is what a destination reads of the methods of a value it is given. A
 // value that reaches two destinations keeps what both read, so each destination is
@@ -62,11 +66,68 @@ type reach struct {
 	outside []*types.Package // ordered by path, each once
 	methods methodReach
 	fields  bool
+
+	// keys are the tag keys of the encoders the fields are read through, where
+	// every reader of the fields is such an encoder, which skips a field its key
+	// tags exactly "-". Zero, the fields are read whatever their tags say.
+	keys tagKeys
+
+	// xmlName is whether an XML decoder compares the value's XMLName field.
+	xmlName bool
+}
+
+// tagKeys is a set of the struct tag keys an encoder names a field by.
+type tagKeys uint8
+
+// The tag keys an encoder skips a field by, each one bit.
+const (
+	jsonKey tagKeys = 1 << iota
+	xmlKey
+)
+
+// tagKeyOf is the tag key the encoders of one package read, and zero for a package
+// whose encoder reads no tag.
+func tagKeyOf(pkg string) tagKeys {
+	switch {
+	case jsonPackages[pkg]:
+		return jsonKey
+	case pkg == xmlPackage:
+		return xmlKey
+	default:
+		return 0
+	}
+}
+
+// skips reports whether every encoder the fields are read through skips one field,
+// its tag naming the key "-" for each of them. A tag of "-," names the key "-".
+func (k tagKeys) skips(tag string) bool {
+	if k == 0 {
+		return false
+	}
+	st := reflect.StructTag(tag)
+	for key, name := range map[tagKeys]string{jsonKey: "json", xmlKey: "xml"} {
+		if k&key != 0 && st.Get(name) != "-" {
+			return false
+		}
+	}
+	return true
 }
 
 // union is what a value reaching both destinations retains.
 func (r reach) union(other reach) reach {
-	joined := reach{methods: r.methods | other.methods, fields: r.fields || other.fields}
+	joined := reach{
+		methods: r.methods | other.methods,
+		fields:  r.fields || other.fields,
+		xmlName: r.xmlName || other.xmlName,
+	}
+	switch {
+	case !r.fields:
+		joined.keys = other.keys
+	case !other.fields:
+		joined.keys = r.keys
+	case r.keys != 0 && other.keys != 0:
+		joined.keys = r.keys | other.keys
+	}
 	joined.outside = slices.Clone(r.outside)
 	for _, pkg := range other.outside {
 		at, held := slices.BinarySearchFunc(joined.outside, pkg.Path(), func(p *types.Package, path string) int {
@@ -82,7 +143,8 @@ func (r reach) union(other reach) reach {
 // covers reports whether r retains everything other does.
 func (r reach) covers(other reach) bool {
 	widened := r.union(other)
-	return widened.methods == r.methods && widened.fields == r.fields && len(widened.outside) == len(r.outside)
+	return widened.methods == r.methods && widened.fields == r.fields && len(widened.outside) == len(r.outside) &&
+		widened.keys == r.keys && widened.xmlName == r.xmlName
 }
 
 // methodsResolvedByName are the methods a destination resolves by name on a value it
@@ -130,13 +192,17 @@ func (r methodReach) reads(m *types.Func) bool {
 // decoding methods, and any other, a registration among them, retains both. A JSON
 // decoder retains fields as well where the program makes it refuse unknown members.
 func entryPoint(pkg, name string, resolved methodReach, unknownMembers bool) reach {
+	key := tagKeyOf(pkg)
 	switch {
 	case hasAnyPrefix(name, encodingEntryPoints[:]):
-		return reach{methods: resolved &^ reachDecoding, fields: true}
+		return reach{methods: resolved &^ reachDecoding, fields: true, keys: key}
 	case hasAnyPrefix(name, decodingEntryPoints[:]):
-		return reach{methods: resolved &^ reachEncoding, fields: unknownMembers && jsonPackages[pkg]}
+		return reach{
+			methods: resolved &^ reachEncoding, fields: unknownMembers && jsonPackages[pkg], keys: key,
+			xmlName: pkg == xmlPackage,
+		}
 	default:
-		return reach{methods: resolved, fields: true}
+		return reach{methods: resolved, fields: true, keys: key, xmlName: pkg == xmlPackage}
 	}
 }
 
@@ -222,12 +288,16 @@ func EncodingReflectionDetector(in *Input) ([]graph.Exemption, error) {
 		satisfying:     make(map[satisfactionKey]map[string]bool),
 		methodNames:    make(map[*types.Named]map[string]bool),
 	}
+	f.decode = newDecoders(f)
 	f.edge = newBoundary(in, f.namedDestinationParameter)
 	f.stored = storedTypesOf(in, f.edge.sites)
 	if err := f.walkCalls(); err != nil {
 		return nil, err
 	}
 	if err := f.walkConversions(); err != nil {
+		return nil, err
+	}
+	if err := f.walkReturns(); err != nil {
 		return nil, err
 	}
 	return f.kept.exemptions(), nil
@@ -239,8 +309,11 @@ type encodingFlow struct {
 	edge        *boundary
 	stored      *storedTypes
 	closures    map[string]*importClosure           // by package path, computed on first use
+	outside     *[]*types.Package                   // the program's outside imports, on first use
+	byName      map[string][]interfaceMethod        // their interfaces' methods, on first use
 	satisfying  map[satisfactionKey]map[string]bool // the method names retained
 	methodNames map[*types.Named]map[string]bool    // the names a type or a pointer to it declares
+	decode      *decoders
 	targets     []interfaceTarget
 
 	// unknownMembers is whether the program makes a JSON decoder refuse a document
@@ -254,9 +327,11 @@ type encodingFlow struct {
 // destination this class names by itself, which every parameter of one is, and what
 // that destination retains. It is the base case of the boundary's forwarding
 // fixpoint.
-func (f *encodingFlow) namedDestinationParameter(fn *types.Func, _ int) (reach, bool) {
-	d, found := f.encodingDestination(fn)
-	return d.reach, found
+func (f *encodingFlow) namedDestinationParameter(fn *types.Func, at int) (reach, bool) {
+	if d, found := f.encodingDestination(fn); found {
+		return d.reach, true
+	}
+	return f.decode.at(fn, at)
 }
 
 // interfaceTarget is one interface the class treats as a destination, resolved
@@ -326,7 +401,17 @@ func (f *encodingFlow) walkFile(info *types.Info, file *ast.File) error {
 // retained is what the boundary carries for the callee, and the detail names the
 // immediate callee, so a wrapper's caller reads the wrapper's name.
 func (f *encodingFlow) crossingArguments(info *types.Info, call *ast.CallExpr) error {
+	callee, _ := resolveObject(info, call.Fun).(*types.Func)
 	for i, arg := range call.Args {
+		if at, supplies := parameterAt(callee.Signature(), i); supplies && !f.edge.declares(callee) {
+			if decoded, decodes := f.decode.at(callee, at); decodes {
+				d := destination{detail: "decoded by " + callee.FullName(), reach: decoded}
+				if err := f.retain(info.TypeOf(arg), arg.Pos(), d); err != nil {
+					return err
+				}
+				continue
+			}
+		}
 		out, crosses := f.edge.crossing(info, call, i)
 		if !crosses {
 			continue
@@ -364,6 +449,95 @@ func (f *encodingFlow) arguments(info *types.Info, enclosing *types.Func, args [
 		}
 	}
 	return nil
+}
+
+// walkReturns records every value a method of the program returns as an
+// interface-typed result where the method implements a method of an exported
+// interface an outside package declares: code outside the analysis calls the method
+// through that interface and receives the value, so the value reaches that package.
+func (f *encodingFlow) walkReturns() error {
+	for _, one := range programFunctions(f.kept.in) {
+		if one.decl.Recv == nil || one.decl.Body == nil {
+			continue
+		}
+		answered, implements := f.outsideMethod(one.fn)
+		if !implements {
+			continue
+		}
+		d := destination{
+			detail: "returned through " + answered.FullName(),
+			reach:  reach{methods: reachEncoding | reachDecoding, fields: true, outside: []*types.Package{answered.Pkg()}},
+		}
+		if err := f.returned(one, d); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// outsideMethod is the method of an exported interface declared outside the program
+// that one method of the program implements, where its results hold an interface.
+func (f *encodingFlow) outsideMethod(fn *types.Func) (*types.Func, bool) {
+	sig := fn.Signature()
+	if !slices.ContainsFunc(slices.Collect(sig.Results().Variables()), func(v *types.Var) bool { return types.IsInterface(v.Type()) }) {
+		return nil, false
+	}
+	recv := sig.Recv().Type()
+	for _, candidate := range f.outsideInterfaceMethods()[fn.Name()] {
+		if types.Implements(recv, candidate.iface) {
+			return candidate.method, true
+		}
+	}
+	return nil, false
+}
+
+// interfaceMethod is one method of one exported interface an outside package
+// declares.
+type interfaceMethod struct {
+	iface  *types.Interface
+	method *types.Func
+}
+
+// outsideInterfaceMethods indexes the methods of the exported interfaces the outside
+// packages declare by name, on first use.
+func (f *encodingFlow) outsideInterfaceMethods() map[string][]interfaceMethod {
+	if f.byName != nil {
+		return f.byName
+	}
+	f.byName = make(map[string][]interfaceMethod)
+	for _, pkg := range f.outsidePackages() {
+		for _, iface := range declaredInterfaces(pkg) {
+			for m := range iface.Methods() {
+				f.byName[m.Name()] = append(f.byName[m.Name()], interfaceMethod{iface: iface, method: m})
+			}
+		}
+	}
+	return f.byName
+}
+
+// returned records the value each return statement of one method hands back at an
+// interface-typed result, a function literal's returns excepted.
+func (f *encodingFlow) returned(one programFunction, d destination) error {
+	results := one.fn.Signature().Results()
+	var failed error
+	ast.Inspect(one.decl.Body, func(n ast.Node) bool {
+		if _, literal := n.(*ast.FuncLit); literal || failed != nil {
+			return false
+		}
+		ret, isReturn := n.(*ast.ReturnStmt)
+		if !isReturn || len(ret.Results) != results.Len() {
+			return true
+		}
+		for i, value := range ret.Results {
+			at := one.info.TypeOf(value)
+			if !types.IsInterface(results.At(i).Type()) || at == nil || !carriesStruct(at) {
+				continue
+			}
+			failed = f.retain(at, value.Pos(), d)
+		}
+		return failed == nil
+	})
+	return failed
 }
 
 // walkConversions records every value converted to a destination interface. The
@@ -421,15 +595,41 @@ func (f *encodingFlow) members(named *types.Named, site token.Position, d destin
 			f.kept.record(m, site, d.detail)
 		}
 	}
-	st, isStruct := origin.Underlying().(*types.Struct)
-	if !isStruct || !d.reach.fields {
-		return
+	if st, isStruct := origin.Underlying().(*types.Struct); isStruct {
+		f.fields(st, site, d)
 	}
+}
+
+// fields records the fields of one struct a destination reads, and those of each
+// struct type with no name a field it visits holds, whose fields are symbols of the
+// type that holds the struct.
+func (f *encodingFlow) fields(st *types.Struct, site token.Position, d destination) {
 	for i := range st.NumFields() {
-		if st.Field(i).Exported() || st.Tag(i) != "" {
-			f.kept.record(st.Field(i), site, d.detail)
+		field := st.Field(i)
+		visited := (field.Exported() || st.Tag(i) != "") && !d.reach.keys.skips(st.Tag(i))
+		switch {
+		case d.reach.fields && visited:
+			f.kept.record(field, site, d.detail)
+		case d.reach.xmlName && field.Name() == xmlNameField && isXMLName(field.Type()):
+			f.kept.record(field, site, d.detail)
+		}
+		if !visited {
+			continue
+		}
+		_, inner := typesReached(field.Type())
+		for _, held := range inner {
+			f.fields(held, site, d)
 		}
 	}
+}
+
+// xmlNameField is the field an XML decoder compares with the element's name.
+const xmlNameField = "XMLName"
+
+// isXMLName reports whether a type is encoding/xml's Name.
+func isXMLName(t types.Type) bool {
+	named, ok := types.Unalias(t).(*types.Named)
+	return ok && named.Obj().Pkg() != nil && named.Obj().Pkg().Path() == xmlPackage && named.Obj().Name() == "Name"
 }
 
 // encodingDestination reports whether a call to fn reaches the class, and how.
@@ -485,8 +685,9 @@ func namesFunction(in *Input, pkgPaths, names map[string]bool) bool {
 var templatePackages = map[string]bool{"text/template": true, "html/template": true}
 
 // importClosure is what one package outside the analysed program can name: the
-// interfaces it and the packages it imports, at any depth, declare, and whether a
-// template engine is among those packages.
+// exported interfaces it, the packages it imports at any depth, and the outside
+// packages of the program's import closure that import it declare, and whether a
+// template engine is among the packages it imports.
 type importClosure struct {
 	interfaces []*types.Interface
 	templates  bool
@@ -515,18 +716,60 @@ func (f *encodingFlow) closureOf(pkg *types.Package) *importClosure {
 			}
 		}
 	}
+	for _, importer := range f.outsidePackages() {
+		if !seen[importer.Path()] && slices.ContainsFunc(importer.Imports(), func(p *types.Package) bool {
+			return p.Path() == pkg.Path()
+		}) {
+			closure.interfaces = append(closure.interfaces, declaredInterfaces(importer)...)
+		}
+	}
 	f.closures[pkg.Path()] = closure
 	return closure
 }
 
-// declaredInterfaces is every non-generic interface with methods one package
-// declares at package level whose type set is its method set.
+// outsidePackages is every package the program's import closure holds that is
+// neither the target's nor a loaded consumer's, ordered by path.
+func (f *encodingFlow) outsidePackages() []*types.Package {
+	if f.outside != nil {
+		return *f.outside
+	}
+	own := make(map[string]bool)
+	var queue []*types.Package
+	for _, p := range programPackages(f.kept.in.Result) {
+		if p.Types != nil {
+			own[p.PkgPath] = true
+			queue = append(queue, p.Types)
+		}
+	}
+	seen := make(map[string]bool)
+	var found []*types.Package
+	for len(queue) > 0 {
+		one := queue[0]
+		queue = queue[1:]
+		for _, imported := range one.Imports() {
+			if seen[imported.Path()] {
+				continue
+			}
+			seen[imported.Path()] = true
+			queue = append(queue, imported)
+			if !own[imported.Path()] {
+				found = append(found, imported)
+			}
+		}
+	}
+	slices.SortFunc(found, func(a, b *types.Package) int { return strings.Compare(a.Path(), b.Path()) })
+	f.outside = &found
+	return found
+}
+
+// declaredInterfaces is every exported non-generic interface with methods one
+// package declares at package level whose type set is its method set.
 func declaredInterfaces(pkg *types.Package) []*types.Interface {
 	var found []*types.Interface
 	scope := pkg.Scope()
 	for _, name := range scope.Names() {
 		typeName, isType := scope.Lookup(name).(*types.TypeName)
-		if !isType || typeName.IsAlias() {
+		if !isType || typeName.IsAlias() || !typeName.Exported() {
 			continue
 		}
 		named, isNamed := typeName.Type().(*types.Named)
@@ -672,13 +915,21 @@ func matchInterface(targets []interfaceTarget, iface *types.Interface) (string, 
 	return "", false
 }
 
-// namedTypesReached returns every defined type a value of t is composed of,
-// reaching through a pointer, a slice, an array and a map key or value, and
-// stopping at each defined type it finds. A channel is not one of them: nothing
-// reads the value a channel carries out of the value it is a member of, and the
-// standard encoders refuse a channel outright.
+// namedTypesReached returns every defined type a value of t is composed of
+// ([typesReached]).
 func namedTypesReached(t types.Type) []*types.Named {
+	found, _ := typesReached(t)
+	return found
+}
+
+// typesReached returns every defined type and every struct type with no name a
+// value of t is composed of, reaching through a pointer, a slice, an array and a map
+// key or value, and stopping at each one it finds. A channel is not one of them:
+// nothing reads the value a channel carries out of the value it is a member of, and
+// the standard encoders refuse a channel outright.
+func typesReached(t types.Type) ([]*types.Named, []*types.Struct) {
 	var found []*types.Named
+	var structs []*types.Struct
 	seen := make(map[types.Type]bool)
 	stack := []types.Type{t}
 	for len(stack) > 0 {
@@ -699,9 +950,11 @@ func namedTypesReached(t types.Type) []*types.Named {
 			stack = append(stack, u.Elem())
 		case *types.Map:
 			stack = append(stack, u.Key(), u.Elem())
+		case *types.Struct:
+			structs = append(structs, u)
 		}
 	}
-	return found
+	return found, structs
 }
 
 // encoderReach returns every defined type an encoder walking a value of t reads:
@@ -710,7 +963,7 @@ func namedTypesReached(t types.Type) []*types.Named {
 // joins once, and a generic type instantiated twice joins once per instantiation,
 // because the members of the two carry different types.
 func (f *encodingFlow) encoderReach(t types.Type) []*types.Named {
-	found := namedTypesReached(t)
+	found := f.encodedTypes(t)
 	seen := make(map[string]bool, len(found))
 	for _, named := range found {
 		seen[types.TypeString(named, nil)] = true
@@ -730,23 +983,39 @@ func (f *encodingFlow) encoderReach(t types.Type) []*types.Named {
 
 // membersReached returns the defined types the members of one reached type are
 // composed of: the types of its fields, an embedded field among them, or the
-// elements of what it is built from where it is no struct. A field that is, or holds
-// as its element or map value, an interface reaches the types the program stores in
-// it ([storedTypes]).
+// elements of what it is built from where it is no struct ([encodingFlow.encodedTypes]).
 func (f *encodingFlow) membersReached(named *types.Named) []*types.Named {
-	st, isStruct := named.Underlying().(*types.Struct)
-	if !isStruct {
-		return concreteTypes(namedTypesReached(named.Underlying()))
+	return concreteTypes(f.encodedTypes(named.Underlying()))
+}
+
+// encodedTypes returns the defined types a value of t is composed of, and the ones
+// the fields of each struct type with no name it is composed of reach, because an
+// encoder walks those fields as it walks a defined struct's. A field that is, or
+// holds as its element or map value, an interface reaches the types the program
+// stores in it ([storedTypes]).
+func (f *encodingFlow) encodedTypes(t types.Type) []*types.Named {
+	found, structs := typesReached(t)
+	seen := make(map[*types.Struct]bool, len(structs))
+	join := func(reached types.Type) {
+		named, inner := typesReached(reached)
+		found = append(found, concreteTypes(named)...)
+		structs = append(structs, inner...)
 	}
-	var found []*types.Named
-	for field := range st.Fields() {
-		for _, stored := range f.stored.of(field) {
-			found = append(found, concreteTypes(namedTypesReached(stored))...)
-		}
-		if types.IsInterface(field.Type()) {
+	for len(structs) > 0 {
+		st := structs[len(structs)-1]
+		structs = structs[:len(structs)-1]
+		if seen[st] {
 			continue
 		}
-		found = append(found, concreteTypes(namedTypesReached(field.Type()))...)
+		seen[st] = true
+		for field := range st.Fields() {
+			for _, stored := range f.stored.of(field) {
+				join(stored)
+			}
+			if !types.IsInterface(field.Type()) {
+				join(field.Type())
+			}
+		}
 	}
 	return found
 }

@@ -46,7 +46,7 @@ func narrowingInput(
 		sink.Fatalf("Setup: graph.Merge: %v", err)
 	}
 	mode := graph.Mode{Production: true}
-	swept := graph.NewMatrix(&merged).Sweep(graph.SweepInput{Mode: mode}, nil)
+	swept := graph.NewMatrix(&merged).Sweep(&graph.SweepInput{Mode: mode}, nil)
 	refs := make(map[graph.SymbolID]string, len(merged.Symbols))
 	for i := range merged.Symbols {
 		refs[merged.Symbols[i].ID] = merged.Symbols[i].Ref
@@ -643,14 +643,11 @@ const (
 	storeFill        = "go://example.com/app/internal/store#Fill"
 	storeDrain       = "go://example.com/app/internal/store#Drain"
 	storeSink        = "go://example.com/app/internal/store#Sink"
-	storeSinkWrite   = "go://example.com/app/internal/store#Sink.Write"
 	storeBuffer      = "go://example.com/app/internal/store#Buffer"
-	storeBufferData  = "go://example.com/app/internal/store#Buffer.Data"
 	storeBufferWrite = "go://example.com/app/internal/store#Buffer.Write"
 	storePipe        = "go://example.com/app/internal/store#Pipe"
 	storePipeWrite   = "go://example.com/app/internal/store#Pipe.Write"
 	sharedRecord     = "go://example.com/app/shared#Record"
-	sharedRecordName = "go://example.com/app/shared#Record.Name"
 	sharedLabel      = "go://example.com/app/shared#Label"
 )
 

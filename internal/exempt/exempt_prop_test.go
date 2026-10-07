@@ -230,7 +230,7 @@ func sweptWith(t *rapid.T, g *graph.Graph, table map[Class]Detector, disabled []
 	if err != nil {
 		t.Fatalf("Compute over the drawn retentions error: %v", err)
 	}
-	return union, g.Sweep(graph.SweepInput{Exempt: union, Mode: mode})
+	return union, g.Sweep(&graph.SweepInput{Exempt: union, Mode: mode})
 }
 
 // Property dead-code-suite/P4: the reported set and the retained set are

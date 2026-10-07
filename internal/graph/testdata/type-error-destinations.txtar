@@ -1,0 +1,61 @@
+Functions a type error skips, each handing a value, or a function returning one,
+to a position whose type the compiler could not resolve, beside a type no
+skipped function hands anywhere and a type one assigns to a resolved position in
+the same statement.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- main.go --
+package main
+
+type returned struct{}
+
+func (returned) Write(p []byte) (int, error) { return len(p), nil }
+
+type passed struct{}
+
+func (passed) Close() error { return nil }
+
+type stored struct{}
+
+func (stored) Len() int { return 0 }
+
+type built struct{}
+
+func (*built) Step() {}
+
+func newBuilt() *built { return &built{} }
+
+type assigned struct{}
+
+func (assigned) Shift() {}
+
+type resolved struct{}
+
+func (resolved) Hold() {}
+
+type untouched struct{}
+
+func (untouched) Reset() {}
+
+func result() Missing { return returned{} }
+
+func argument() { missing(passed{}) }
+
+func element() any { return []Absent{stored{}} }
+
+func registered() { register(newBuilt) }
+
+func paired() {
+	var known any
+	var unknown Gone
+	known, unknown = resolved{}, assigned{}
+	_, _ = known, unknown
+}
+
+func main() {
+	var u untouched
+	_ = u
+}

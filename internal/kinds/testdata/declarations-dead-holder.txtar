@@ -1,0 +1,22 @@
+A command that uses a type and never calls its method, and a function nothing
+calls that converts the type to an interface the method satisfies.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- main.go --
+package main
+
+import "io"
+
+type sink struct{ n int }
+
+func (s *sink) Write(p []byte) (int, error) { return len(p), nil }
+
+func spare() io.Writer { return &sink{} }
+
+func main() {
+	var s sink
+	println(s.n)
+}

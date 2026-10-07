@@ -11,7 +11,7 @@ import (
 
 	"github.com/cplieger/deadset-go/internal/config"
 	"github.com/cplieger/deadset-go/internal/suppress"
-	spec "github.com/cplieger/deadset-spec/v5"
+	spec "github.com/cplieger/deadset-spec/v6"
 )
 
 // intraFuncEmitters is the table of the intra-function group, which is what a pass
@@ -601,5 +601,21 @@ func TestUnusedParameterReportsNothingAboutAFunctionDeclaredOncePerPlatform(t *t
 		if got := subjectsOf(result.Findings, code); !slices.Equal(got, want) {
 			t.Errorf("the pass over intrafunc-platform-twins.txtar reports %v under %s, want %v", got, code, want)
 		}
+	}
+}
+
+func TestAMethodATypeErrorRootsHasNoSignatureFreeToChange(t *testing.T) {
+	result := analysisOf(t, "intrafunc-type-error.txtar", asApplication, Consumers{}).findings(t, everyKind)
+
+	var reported []string
+	for i := range result.Findings {
+		if result.Findings[i].Code == unusedParameterCode {
+			reported = append(reported, result.Findings[i].Symbol.Ref+" "+result.Findings[i].Symbol.Name)
+		}
+	}
+	want := []string{"go://example.com/app#plain.Use x"}
+	if !slices.Equal(reported, want) {
+		t.Errorf("the pass reports %s about %v, want %v: the interface the skipped open returns into may fix Filter's signature",
+			unusedParameterCode, reported, want)
 	}
 }

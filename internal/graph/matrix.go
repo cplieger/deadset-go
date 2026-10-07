@@ -271,12 +271,14 @@ func distinct(refs []Reference) []Reference {
 // it is dead, while an exemption or a mark that held a symbol back under any
 // configuration is in effect, because a suppression needed on one platform is not
 // stale.
-func (x *Matrix) Sweep(in SweepInput, evidence TestEvidence) Result {
+func (x *Matrix) Sweep(in *SweepInput, evidence TestEvidence) Result {
 	per := make([]Result, len(x.per))
 	held := make([]map[SymbolID]Candidate, len(x.per))
 	r := Result{LiveUnder: make(map[SymbolID]RelationSet)}
+	tested := *in
+	tested.tested = evidence
 	for config, g := range x.per {
-		per[config] = g.Sweep(in)
+		per[config] = g.Sweep(&tested)
 		held[config] = make(map[SymbolID]Candidate, len(per[config].Candidates))
 		for _, c := range per[config].Candidates {
 			held[config][c.ID] = c
@@ -289,20 +291,23 @@ func (x *Matrix) Sweep(in SweepInput, evidence TestEvidence) Result {
 		}
 	}
 
+	union := x.union.using(in)
 	dead := make([]bool, len(x.merged.Symbols))
 	testOfDeadCode := make([]bool, len(x.merged.Symbols))
+	unreferencedTest := make([]bool, len(x.merged.Symbols))
 	for i := range x.merged.Symbols {
-		c, candidate := x.intersect(&x.merged.Symbols[i], held, in.Mode)
+		c, candidate := x.intersect(union, &x.merged.Symbols[i], held, in.Mode)
 		if !candidate {
 			continue
 		}
 		c.TestRefs += evidence[c.ID]
 		dead[i] = true
 		testOfDeadCode[i] = c.TestOfDeadCode
+		unreferencedTest[i] = c.UnreferencedTest
 		r.Candidates = append(r.Candidates, c)
 	}
 
-	r.Components = x.union.componentsOf(dead, testOfDeadCode)
+	r.Components = union.componentsOf(dead, testOfDeadCode, unreferencedTest)
 	r.Retained = x.retained(in.Exempt, per)
 	r.Suppressed = x.suppressed(per)
 	return r
@@ -321,8 +326,8 @@ func (x *Matrix) Sweep(in SweepInput, evidence TestEvidence) Result {
 // are the matrix's totals, one per reference rather than one per configuration
 // that saw it, so a kind reading them reads how many references the declaration
 // carries.
-func (x *Matrix) intersect(s *Symbol, held []map[SymbolID]Candidate, m Mode) (Candidate, bool) {
-	c := Candidate{ID: s.ID, Relation: ReferenceCounting, Configs: 0, TestOfDeadCode: true}
+func (x *Matrix) intersect(union *Graph, s *Symbol, held []map[SymbolID]Candidate, m Mode) (Candidate, bool) {
+	c := Candidate{ID: s.ID, Relation: ReferenceCounting, Configs: 0, TestOfDeadCode: true, UnreferencedTest: true}
 	for config := range x.merged.Configurations {
 		if !s.Configs.Has(config) {
 			continue
@@ -338,11 +343,14 @@ func (x *Matrix) intersect(s *Symbol, held []map[SymbolID]Candidate, m Mode) (Ca
 		if !found.TestOfDeadCode {
 			c.TestOfDeadCode = false
 		}
+		if !found.UnreferencedTest {
+			c.UnreferencedTest = false
+		}
 	}
 	if c.Configs == 0 {
 		return Candidate{}, false
 	}
-	c.ProductionRefs, c.TestRefs = x.union.counted(x.union.at(s.ID), m)
+	c.ProductionRefs, c.TestRefs = union.counted(union.at(s.ID), m)
 	return c, true
 }
 
@@ -441,15 +449,16 @@ func (x *Matrix) suppressed(per []Result) []SymbolID {
 }
 
 // exemptionKey is what makes two exemptions of a matrix one record: the symbol,
-// the class and the detail, which is the key the exemption classes themselves
-// deduplicate one configuration's records on.
+// the class, the detail and the holder, which is the key the exemption classes
+// themselves deduplicate one configuration's records on.
 type exemptionKey struct {
 	id     SymbolID
 	class  string
 	detail string
+	holder SymbolID
 }
 
 // keyOf keys one exemption.
 func keyOf(e *Exemption) exemptionKey {
-	return exemptionKey{id: e.ID, class: e.Class, detail: e.Detail}
+	return exemptionKey{id: e.ID, class: e.Class, detail: e.Detail, holder: e.Holder}
 }

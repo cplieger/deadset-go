@@ -313,6 +313,13 @@ type wireTotals struct {
 	StaleSuppressions    int            `json:"stale_suppressions"`
 	Pending              int            `json:"pending"`
 	Omitted              int            `json:"omitted"`
+	Withheld             wireWithheld   `json:"withheld"`
+}
+
+type wireWithheld struct {
+	Certain  int `json:"certain"`
+	Probable int `json:"probable"`
+	Possible int `json:"possible"`
 }
 
 type wireBySeverity struct {
@@ -390,6 +397,7 @@ func (e *Envelope) wire() wireEnvelope {
 			StaleSuppressions:    e.Totals.StaleSuppressions,
 			Pending:              e.Totals.Pending,
 			Omitted:              e.Totals.Omitted,
+			Withheld:             wireWithheld(e.Totals.Withheld),
 		},
 	}
 	for i := range e.Configurations {
@@ -590,6 +598,7 @@ func (w *wireEnvelope) envelope() (Envelope, error) {
 			StaleSuppressions:    w.Totals.StaleSuppressions,
 			Pending:              w.Totals.Pending,
 			Omitted:              w.Totals.Omitted,
+			Withheld:             Withheld(w.Totals.Withheld),
 		},
 	}
 	held.Consumers = Consumers{

@@ -107,7 +107,7 @@ func SARIF(w io.Writer, e *Envelope, opts Options) error {
 				sarifURIBaseID: {Description: sarifMessage{Text: sarifRootComment}},
 			},
 			Results:    results,
-			Properties: sarifRunProperties{Totals: e.wire().Totals},
+			Properties: sarifRunProperties{Totals: e.wire().Totals, Withheld: withheldLine(&e.Totals.Withheld)},
 		}},
 	}
 	if err := writeDocument(w, log); err != nil {

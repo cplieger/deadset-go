@@ -37,13 +37,21 @@ func cgoOnly(roots []*packages.Package, c Configuration) (map[string]bool, error
 	return decided, nil
 }
 
-// cgoEnabledContext is configuration c with cgo enabled, which is what answers
-// whether the configuration would select a file with cgo out of the way.
-func cgoEnabledContext(c Configuration) build.Context {
+// Context is the build context a load of configuration c compiles under, cgo
+// disabled as [loadEnv] sets it, which is what selects the files of a package.
+func (c Configuration) Context() build.Context {
 	ctxt := build.Default
 	ctxt.GOOS = c.OS
 	ctxt.GOARCH = c.Arch
 	ctxt.BuildTags = slices.Clone(c.Tags)
+	ctxt.CgoEnabled = false
+	return ctxt
+}
+
+// cgoEnabledContext is configuration c with cgo enabled, which is what answers
+// whether the configuration would select a file with cgo out of the way.
+func cgoEnabledContext(c Configuration) build.Context {
+	ctxt := c.Context()
 	ctxt.CgoEnabled = true
 	return ctxt
 }
