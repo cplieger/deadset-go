@@ -1,0 +1,27 @@
+A method only a function a type error skips hands anywhere, with a parameter its
+body never reads, beside a method the command calls with the same shape.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- main.go --
+package main
+
+type cursor struct{ n int }
+
+func (c *cursor) Filter(idx int) error {
+	c.n = 0
+	return nil
+}
+
+func open() Missing { return &cursor{} }
+
+type plain struct{ n int }
+
+func (p *plain) Use(x int) { p.n = 0 }
+
+func main() {
+	var p plain
+	p.Use(1)
+}

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	spec "github.com/cplieger/deadset-spec/v5"
+	spec "github.com/cplieger/deadset-spec/v6"
 )
 
 // templateVectorRoot is where the pinned Contract publishes the template vectors.

@@ -1,0 +1,47 @@
+A test reaches a test-file type and a generic test-file helper. The type has a
+field the test reads, two fields nothing names, a type only one of those fields
+names, and two methods nothing calls; the helper has a type parameter nothing
+names; an enumerated type has a member nothing names.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- main.go --
+package main
+
+func main() {}
+-- main_test.go --
+package main
+
+import "testing"
+
+type fixture struct {
+	Used  int
+	Spare entry
+	stale int
+}
+
+type entry struct {
+	Name string
+}
+
+func (fixture) helper() int { return 1 }
+
+func (fixture) Label() string { return "fixture" }
+
+func first[T, U any](values []T) T { return values[0] }
+
+type phase int
+
+const (
+	phaseStart phase = iota
+	PhaseStop
+)
+
+func TestFixture(t *testing.T) {
+	var f fixture
+	if first([]int{f.Used}) != int(phaseStart) {
+		t.Error("Used is not zero")
+	}
+}

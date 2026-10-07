@@ -119,8 +119,9 @@ type intrafunc struct {
 
 	// foreign is every declaration a caller outside the source names with the
 	// signature that caller requires: the linker through a go:linkname directive, C
-	// through an export directive, and the test driver, which runs every test,
-	// benchmark, fuzz test and TestMain the toolchain recognises in a test file.
+	// through an export directive, the test driver, which runs every test,
+	// benchmark, fuzz test and TestMain the toolchain recognises in a test file, and
+	// code a type error left unresolved, whose interface may fix the signature.
 	foreign map[graph.SymbolID]bool
 
 	// valued is every declaration a reference names outside call position, which
@@ -152,7 +153,7 @@ func (in *Input) intraFunc() *intrafunc {
 		for i := range in.Merged.Roots {
 			root := &in.Merged.Roots[i]
 			switch root.Kind {
-			case graph.RootLinkname, graph.RootCgoExport, graph.RootTest:
+			case graph.RootLinkname, graph.RootCgoExport, graph.RootTest, graph.RootTypeError:
 				g.foreign[root.ID] = true
 			}
 		}
@@ -339,7 +340,7 @@ func (g *intrafunc) unjudged(symbol *graph.Symbol, id graph.SymbolID) bool {
 	if candidate == nil || (!testFile(symbol) && !g.in.testSupport(symbol)) {
 		return false
 	}
-	return candidate.TestRefs == 0
+	return candidate.TestRefs == 0 || candidate.UnreferencedTest
 }
 
 // walked is one function the run compiled: its declaration, the type information

@@ -6,10 +6,11 @@ import (
 	"go/token"
 	"go/types"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/cplieger/deadset-go/internal/graph"
-	spec "github.com/cplieger/deadset-spec/v5"
+	spec "github.com/cplieger/deadset-spec/v6"
 	"golang.org/x/tools/txtar"
 )
 
@@ -86,7 +87,7 @@ func sweepWith(t *testing.T, in *Input, subject string, held []graph.Exemption) 
 	if err != nil {
 		t.Fatalf("Setup: graph.Roots(%s): %v", subject, err)
 	}
-	return graph.New(in.Symbols, references, roots).Sweep(graph.SweepInput{Exempt: held})
+	return graph.New(in.Symbols, references, roots).Sweep(&graph.SweepInput{Exempt: held})
 }
 
 // candidateOf returns the candidate one sweep reported for a symbol.
@@ -133,6 +134,8 @@ func TestInterfaceSatisfactionNamesTheInterfaceAndTheSiteItWasFoundAt(t *testing
 		Class:  "interface-satisfaction",
 		Site:   token.Position{Filename: "counters.go", Offset: got.Site.Offset, Line: 24, Column: 31},
 		Detail: "satisfies conservative.Counter",
+		Holder: symbolRef(t, in, "go://example.com/conservative#Sum").ID,
+		Via:    symbolRef(t, in, "go://example.com/conservative#Counter.Count").ID,
 	}
 	if got != want {
 		t.Errorf("InterfaceSatisfactionDetector(unconverted-implementation.txtar) = %+v, want %+v", got, want)
@@ -175,6 +178,9 @@ func TestInterfaceSatisfactionRetainsEveryMethodOfAMultiMethodInterfaceAtEverySi
 	pointer := symbolRef(t, in, "go://example.com/shapes#Pointed.Count")
 	sites := make(map[graph.SymbolID]int)
 	for i := range found {
+		if strings.HasPrefix(found[i].Detail, "asserts ") {
+			continue
+		}
 		sites[found[i].ID]++
 		if found[i].ID != value.ID && found[i].ID != pointer.ID {
 			t.Errorf("InterfaceSatisfactionDetector(conversion-shapes.txtar) retained %s, want only the two Count methods",

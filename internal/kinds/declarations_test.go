@@ -124,6 +124,87 @@ func TestATestWhoseEveryTargetIsDeadIsReportedInTheirComponent(t *testing.T) {
 	}
 }
 
+func TestTheMembersOfATestFileDeclarationATestReachesAreJudgedOnTheirOwn(t *testing.T) {
+	result := analysisOf(t, "declarations-test-file-members.txtar", asApplication, Consumers{}).findings(t, everyKind)
+
+	for code, want := range map[string][]string{
+		unusedMemberCode:      {"fixture.Spare", "fixture.stale"},
+		unusedUnexportedCode:  {"entry", "fixture.helper"},
+		unreachableExportCode: {"fixture.Label"},
+		typeParameterCode:     {"first[U]"},
+		enumMemberCode:        {"PhaseStop"},
+	} {
+		if got := namesUnder(result.Findings, code); !slices.Equal(got, want) {
+			t.Errorf("the pass reports %s about %v, want %v: the test reaches their container, which holds none of them live",
+				code, got, want)
+		}
+	}
+	for i := range result.Findings {
+		switch name := result.Findings[i].Symbol.Name; name {
+		case "fixture", "fixture.Used", "first", "TestFixture", "entry.Name", "phase", "phaseStart":
+			t.Errorf("the pass reports %s about %s, want nothing: a test reaches it, or it falls with its container",
+				result.Findings[i].Code, name)
+		}
+	}
+	entry := findingOf(t, result.Findings, unusedUnexportedCode, "entry")
+	spare := findingOf(t, result.Findings, unusedMemberCode, "fixture.Spare")
+	if entry.Component.ID != spare.Component.ID {
+		t.Errorf("the pass puts entry in component %s and fixture.Spare in %s, want one component: only the field names the type",
+			entry.Component.ID, spare.Component.ID)
+	}
+}
+
+func TestAMethodOnlyADeadDeclarationConvertsFallsWithItAndNoExemptionRetainsIt(t *testing.T) {
+	result := analysisOf(t, "declarations-dead-holder.txtar", asApplication, Consumers{}).findings(t, everyKind)
+
+	spare := findingOf(t, result.Findings, unusedUnexportedCode, "spare")
+	write := findingOf(t, result.Findings, unreachableExportCode, "(*sink).Write")
+	if write.Component.ID != spare.Component.ID {
+		t.Errorf("the pass puts (*sink).Write in component %s and spare in %s, want one component: only spare's conversion keeps the method",
+			write.Component.ID, spare.Component.ID)
+	}
+	if len(write.RetainedBy) != 0 {
+		t.Errorf("the pass reports (*sink).Write retained by %v, want none: the conversion that satisfies io.Writer is in dead code",
+			write.RetainedBy)
+	}
+}
+
+func TestAConversionInLiveCodeRetainsAMethodADeadDeclarationConvertsFirst(t *testing.T) {
+	result := analysisOf(t, "declarations-held-twice.txtar", asApplication, Consumers{}).findings(t, everyKind)
+
+	findingOf(t, result.Findings, unusedUnexportedCode, "spare")
+	for i := range result.Findings {
+		if result.Findings[i].Symbol.Name == "(*sink).Write" {
+			t.Errorf("the pass reports %s about (*sink).Write, want nothing: main converts the type to io.Writer",
+				result.Findings[i].Code)
+		}
+	}
+}
+
+func TestAnAssertionInsideAMethodRetainsItWhileTheConversionThatReachesItIsLive(t *testing.T) {
+	result := analysisOf(t, "declarations-asserted-inside.txtar", asApplication, Consumers{}).findings(t, everyKind)
+
+	for i := range result.Findings {
+		if name := result.Findings[i].Symbol.Name; name == "(*wrapper).Close" || name == "(*wrapper).Write" {
+			t.Errorf("the pass reports %s about %s, want nothing: main converts the wrapper to io.Writer, and the assertion to io.Closer reaches it",
+				result.Findings[i].Code, name)
+		}
+	}
+}
+
+func TestAMethodAnErrorsAsTargetRequiresIsRetainedOnATypeUsedAsAnError(t *testing.T) {
+	result := analysisOf(t, "interfaces-errors-as.txtar", asApplication, Consumers{}).findings(t, everyKind)
+
+	var reported []string
+	for i := range result.Findings {
+		reported = append(reported, result.Findings[i].Code+" "+result.Findings[i].Symbol.Name)
+	}
+	if want := []string{unreachableExportCode + " plain.Extra"}; !slices.Equal(reported, want) {
+		t.Errorf("the pass reports %v, want %v: errors.As and errors.AsType assert the error to the interface whose method the classifier calls",
+			reported, want)
+	}
+}
+
 func TestADeprecatedDeclarationNothingReferencesIsReportedUnderTheDeprecatedKindAlone(t *testing.T) {
 	result := analysisOf(t, "declarations-deprecated.txtar", asApplication, Consumers{}).findings(t, declarationKinds)
 

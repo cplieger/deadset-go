@@ -192,7 +192,7 @@ func UnusedTypeParameter(in *Input) ([]Finding, error) {
 		if symbol == nil || symbol.Kind != graph.KindTypeParam || referenced[candidate.ID] {
 			continue
 		}
-		if !declaresTypeParameters(in.symbol(symbol.Parent)) || in.candidateOf(symbol.Parent) != nil {
+		if !declaresTypeParameters(in.symbol(symbol.Parent)) || in.deadParent(symbol) {
 			continue
 		}
 		finding, names := in.finding(candidate.ID, typeParameterCode,

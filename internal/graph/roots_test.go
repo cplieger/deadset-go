@@ -15,7 +15,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/internal/load"
-	spec "github.com/cplieger/deadset-spec/v5"
+	spec "github.com/cplieger/deadset-spec/v6"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -181,6 +181,25 @@ func TestRootsRootsABlankDeclarationAndNotTheNamedOneBesideIt(t *testing.T) {
 	}
 	if refs := refsOfKind(d, RootBlank); len(refs) != 1 {
 		t.Errorf("Roots(roots.txtar) blank roots name %v, want the one blank declaration", refs)
+	}
+}
+
+func TestRootsRootsTheMembersOfAValueAPositionOfNoResolvedTypeReceives(t *testing.T) {
+	d := detect(t, "type-error-destinations.txtar", RootOptions{})
+
+	const pkg = "go://example.com/app#"
+	got := refsOfKind(d, RootTypeError)
+	for _, want := range []string{"returned.Write", "passed.Close", "stored.Len", "built.Step", "assigned.Shift"} {
+		if !slices.Contains(got, pkg+want) {
+			t.Errorf("Roots(type-error-destinations.txtar) type-error roots %v, want %s: a skipped function hands its value to a type the compiler could not resolve",
+				got, want)
+		}
+	}
+	if slices.Contains(got, pkg+"untouched.Reset") {
+		t.Errorf("Roots(type-error-destinations.txtar) type-error roots %v, want no untouched.Reset: no skipped function hands the type anywhere", got)
+	}
+	if slices.Contains(got, pkg+"resolved.Hold") {
+		t.Errorf("Roots(type-error-destinations.txtar) type-error roots %v, want no resolved.Hold: its position in the assignment has a resolved type", got)
 	}
 }
 

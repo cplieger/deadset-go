@@ -23,9 +23,14 @@ func rootMemberAndBystander(in *Input) map[string]Emitter {
 
 // reportedIDs names the subject of every finding a pass reported, in its order.
 func reportedIDs(result Result) []graph.SymbolID {
-	ids := make([]graph.SymbolID, 0, len(result.Findings))
-	for i := range result.Findings {
-		ids = append(ids, result.Findings[i].id)
+	return idsOf(result.Findings)
+}
+
+// idsOf names the subject of every finding of a list, in its order.
+func idsOf(findings []Finding) []graph.SymbolID {
+	ids := make([]graph.SymbolID, 0, len(findings))
+	for i := range findings {
+		ids = append(ids, findings[i].id)
 	}
 	return ids
 }
@@ -41,6 +46,11 @@ func TestComputeWithholdsTheComponentOfARootTheSeverityAllows(t *testing.T) {
 	// whatever its own severity, while a declaration outside the component stays.
 	if got, want := reportedIDs(result), []graph.SymbolID{internalID}; !slices.Equal(got, want) {
 		t.Errorf("Compute() with the root's kind at allow reported %v, want %v", got, want)
+	}
+	// The lowest minimum confidence still withholds a component whose root the
+	// severity allows, so the minimum withheld none of it.
+	if got := idsOf(result.Withheld); len(got) != 0 {
+		t.Errorf("Compute() with the root's kind at allow counted %v as withheld by the minimum, want none", got)
 	}
 }
 
@@ -70,6 +80,14 @@ func TestComputeWithholdsTheComponentOfARootBelowTheMinimumConfidence(t *testing
 
 	if got, want := reportedIDs(result), []graph.SymbolID{internalID}; !slices.Equal(got, want) {
 		t.Errorf("Compute() with the root below the minimum confidence reported %v, want %v", got, want)
+	}
+	// The member falls with the root, so the minimum withheld both, each counted.
+	got := idsOf(result.Withheld)
+	slices.Sort(got)
+	want := []graph.SymbolID{exportedID, helperID}
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Errorf("Compute() with the root below the minimum confidence withheld %v, want %v", got, want)
 	}
 }
 

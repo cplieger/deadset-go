@@ -1,6 +1,6 @@
-One type converted to one interface at five sites across two files, and to a
-second interface at one of them, so the union carries one record per symbol,
-class and reason rather than one per site.
+One type converted to one interface at six sites across two files, two of them
+in one function, and to a second interface at one of them, so the union carries
+one record per symbol, class, reason and holder rather than one per site.
 
 -- go.mod --
 module example.com/sites
@@ -28,9 +28,10 @@ func (s *Sink) Close() error { return nil }
 // conversion of the fixture by file and line.
 func Returned(s *Sink) io.Writer { return s }
 
-// Assigned converts a Sink into a variable typed as a writer.
+// Assigned converts a Sink into a variable typed as a writer, twice.
 func Assigned(s *Sink) io.Writer {
 	var w io.Writer = s
+	w = s
 	return w
 }
 

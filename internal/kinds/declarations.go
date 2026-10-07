@@ -123,12 +123,25 @@ func (in *Input) codeOf(candidate *graph.Candidate) string {
 		return ""
 	}
 	switch {
+	case candidate.UnreferencedTest && symbol.Exported && !member(symbol.Kind):
+		return ""
+	case candidate.UnreferencedTest:
+		return in.shapeCode(symbol)
 	case in.supportReferenced(candidate, symbol):
 		return testOnlyUseCode
 	case candidate.ProductionRefs == 0 && in.deprecations()[candidate.ID]:
 		return deprecatedAndUnusedCode
 	case candidate.ProductionRefs == 0 && candidate.TestRefs > 0:
 		return testOnlyUseCode
+	default:
+		return in.shapeCode(symbol)
+	}
+}
+
+// shapeCode is the unreferenced kind a declaration's shape selects: the member kind
+// for a struct field, then the kind its visibility selects.
+func (in *Input) shapeCode(symbol *graph.Symbol) string {
+	switch {
 	case member(symbol.Kind):
 		return unusedMemberCode
 	case !symbol.Exported:
@@ -141,17 +154,30 @@ func (in *Input) codeOf(candidate *graph.Candidate) string {
 }
 
 // outsideTheRule reports whether another rule, or none, judges a candidate: a test
-// of dead code or a test file's declaration, a member of a dead parent, an
+// of dead code, a blank declaration, which falls with what it asserts, or a test
+// file's declaration that something reaches, a member of a dead parent, an
 // interface's declaration, and a read-or-write kind's subject.
 func (in *Input) outsideTheRule(candidate *graph.Candidate, symbol *graph.Symbol) bool {
 	switch {
-	case candidate.TestOfDeadCode || testFile(symbol):
+	case candidate.TestOfDeadCode || symbol.Blank || (testFile(symbol) && !candidate.UnreferencedTest):
 		return true
-	case symbol.Parent != "" && in.candidateOf(symbol.Parent) != nil:
+	case in.deadParent(symbol):
 		return true
 	default:
 		return interfaceDeclaration(symbol.Kind) || in.readOrWriteSubject(candidate, symbol)
 	}
+}
+
+// deadParent reports whether a declaration's container is dead. A test file's
+// declaration a test reaches is a candidate of the production sweep alone, so its
+// members are judged on their own.
+func (in *Input) deadParent(symbol *graph.Symbol) bool {
+	parent := in.candidateOf(symbol.Parent)
+	if parent == nil {
+		return false
+	}
+	container := in.symbol(symbol.Parent)
+	return container == nil || !testFile(container) || parent.UnreferencedTest || parent.TestOfDeadCode
 }
 
 // supportReferenced reports whether one candidate is a declaration of test-support

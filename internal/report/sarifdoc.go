@@ -11,6 +11,7 @@ type sarifLog struct {
 	Runs    []sarifRun `json:"runs"`
 }
 
+//nolint:govet // fieldalignment: the field order is the mapping's property order, which the document writes
 type sarifRun struct {
 	Tool               sarifTool               `json:"tool"`
 	AutomationDetails  sarifAutomationDetails  `json:"automationDetails"`
@@ -62,8 +63,10 @@ type sarifURIBase struct {
 	Description sarifMessage `json:"description"`
 }
 
+//nolint:govet // fieldalignment: the field order is the mapping's property order, which the document writes
 type sarifRunProperties struct {
-	Totals wireTotals `json:"totals"`
+	Totals   wireTotals `json:"totals"`
+	Withheld string     `json:"withheld,omitempty"`
 }
 
 //nolint:govet // fieldalignment: the field order is the mapping's property order, which the document writes

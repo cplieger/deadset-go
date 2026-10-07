@@ -145,8 +145,8 @@ func (c *Component) List(mode Cascade) Listing {
 // report lists one dead component once, and a reference under any configuration is
 // a reference, so a member or an edge one configuration alone holds belongs to the
 // one component the same as any other.
-func (g *Graph) componentsOf(dead, testOfDeadCode []bool) []Component {
-	at, adj, place := g.deadSubgraph(dead, testOfDeadCode)
+func (g *Graph) componentsOf(dead, testOfDeadCode, unreferencedTest []bool) []Component {
+	at, adj, place := g.deadSubgraph(dead, testOfDeadCode, unreferencedTest)
 	if len(at) == 0 {
 		return nil
 	}
@@ -214,18 +214,18 @@ func clusters(adj [][]int, cycleOf, sequence []int, cycles int) (clusterOf []int
 }
 
 // deadSubgraph indexes the dead symbols a component holds, each symbol's place in it
-// (outside for one left out), and the edges between them: the graph's references from
-// one to another, both directions between a member and its container, and the edge
-// back from each target of an admitted test, which close the cycles that put members
-// and tests of dead code in the component they belong to. A test-code declaration is
-// held only as an admitted test or as [Graph.unreferencedSupport], so no other test
-// reference joins two components or makes a production declaration a non-root, and a
-// cluster only tests reach is rooted outside test code.
-func (g *Graph) deadSubgraph(dead, testOfDeadCode []bool) (at []int, adj [][]int, position []int) {
+// (outside for one left out), and the edges between them: references between members,
+// both directions between a member and its container, and the edge back from each
+// target of an admitted test, which puts a test of dead code in its targets'
+// component. A test-code declaration is held only as an admitted test, as
+// [Graph.unreferencedSupport] or as an unreferenced test-file declaration, whose
+// references to production code join nothing, so a cluster only tests reach is
+// rooted outside test code.
+func (g *Graph) deadSubgraph(dead, testOfDeadCode, unreferencedTest []bool) (at []int, adj [][]int, position []int) {
 	position = make([]int, len(g.symbols))
 	for i := range g.symbols {
 		position[i] = outside
-		if dead[i] && (!g.test[i] || testOfDeadCode[i] || g.unreferencedSupport(i)) {
+		if dead[i] && (!g.test[i] || testOfDeadCode[i] || unreferencedTest[i] || g.unreferencedSupport(i)) {
 			position[i] = len(at)
 			at = append(at, i)
 		}
@@ -233,7 +233,7 @@ func (g *Graph) deadSubgraph(dead, testOfDeadCode []bool) (at []int, adj [][]int
 
 	adj = make([][]int, len(at))
 	for from, i := range at {
-		g.referenceEdges(adj, position, from, i, testOfDeadCode)
+		g.referenceEdges(adj, position, from, i, testOfDeadCode, unreferencedTest)
 		if p := g.parent[i]; p != outside && position[p] != outside {
 			adj[from] = append(adj[from], position[p])
 			adj[position[p]] = append(adj[position[p]], from)
@@ -261,10 +261,10 @@ func (g *Graph) unreferencedSupport(i int) bool {
 // referenceEdges adds the references the dead symbol at one position makes to
 // other dead symbols, and the edge back from every production declaration an
 // admitted test references.
-func (g *Graph) referenceEdges(adj [][]int, position []int, from, at int, testOfDeadCode []bool) {
+func (g *Graph) referenceEdges(adj [][]int, position []int, from, at int, testOfDeadCode, unreferencedTest []bool) {
 	for _, e := range g.out[at] {
 		to := position[e.to]
-		if to == outside {
+		if to == outside || (unreferencedTest[at] && !g.test[e.to]) {
 			continue
 		}
 		adj[from] = append(adj[from], to)

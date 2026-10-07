@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/internal/config"
-	spec "github.com/cplieger/deadset-spec/v5"
+	spec "github.com/cplieger/deadset-spec/v6"
 )
 
 // The shape a documentation entry takes, pinned here so that a page and this test
@@ -34,6 +34,7 @@ var (
 	docsContractVersion = regexp.MustCompile(`(?is)contract version\s+([0-9]+\.[0-9]+\.[0-9]+)`)
 	docsCorpusVersion   = regexp.MustCompile(`(?is)corpus version this analyzer answers is\s+([0-9]+\.[0-9]+\.[0-9]+)`)
 	docsFixtureCount    = regexp.MustCompile(`(?is)the run answers the\s+([0-9]+) fixtures`)
+	readmeFixtureCount  = regexp.MustCompile(`(?is)passes all\s+([0-9]+) of the contract's conformance fixtures`)
 )
 
 // TestEveryReportedKindHasADocumentationEntry reads the kinds page and refuses a
@@ -231,19 +232,16 @@ func TestTheDocumentedCorpusVersionIsTheOneAnswered(t *testing.T) {
 	}
 }
 
-// TestTheDocumentedFixtureCountIsTheOneAnswered refuses a conformance page stating a
-// fixture count other than the one the committed results document records.
+// TestTheDocumentedFixtureCountIsTheOneAnswered refuses a conformance page or a
+// README stating a fixture count other than the one the committed results document
+// records.
 //
 // The count is what a reader compares a published corpus against, and it moves every
-// time the corpus adds a fixture carrying a Go rendering, which is a release the page
-// and the record move in together.
+// time the corpus adds a fixture carrying a Go rendering, which is a release the
+// pages and the record move in together.
 func TestTheDocumentedFixtureCountIsTheOneAnswered(t *testing.T) {
 	t.Parallel()
 
-	stated := matched(docsFixtureCount, docPage(t, "conformance.md"))
-	if len(stated) != 1 {
-		t.Fatalf("docs/conformance.md states the fixture count %v, want exactly one statement of it", stated)
-	}
 	var document struct {
 		Totals struct {
 			Fixtures int `json:"fixtures"`
@@ -257,9 +255,29 @@ func TestTheDocumentedFixtureCountIsTheOneAnswered(t *testing.T) {
 	if err := json.Unmarshal(body, &document); err != nil {
 		t.Fatalf("Setup: decode %s: %v", path, err)
 	}
-	if want := strconv.Itoa(document.Totals.Fixtures); stated[0] != want {
-		t.Errorf("docs/conformance.md states %s fixtures, want %s, which %s records",
-			stated[0], want, conformanceResultsFile)
+	want := strconv.Itoa(document.Totals.Fixtures)
+	readme, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
+	if err != nil {
+		t.Fatalf("Setup: read README.md: %v", err)
+	}
+	pages := []struct {
+		name       string
+		text       string
+		expression *regexp.Regexp
+	}{
+		{"docs/conformance.md", docPage(t, "conformance.md"), docsFixtureCount},
+		{"README.md", string(readme), readmeFixtureCount},
+	}
+	for _, page := range pages {
+		stated := matched(page.expression, page.text)
+		if len(stated) != 1 {
+			t.Errorf("%s states the fixture count %v, want exactly one statement of it", page.name, stated)
+			continue
+		}
+		if stated[0] != want {
+			t.Errorf("%s states %s fixtures, want %s, which %s records",
+				page.name, stated[0], want, conformanceResultsFile)
+		}
 	}
 }
 

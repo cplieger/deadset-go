@@ -131,7 +131,7 @@ func newBoundary(in *Input, destination destinationTest) *boundary {
 // out of the analysed program, and names the callee it leaves through: the callee
 // does not belong to the program or forwards the parameter on, the parameter is typed
 // as the empty interface, the variadic one included, and the value is a struct or a
-// pointer to one. A slice, a map or a channel of structs is not one.
+// pointer to one, or a slice, an array or a map of such values.
 func (b *boundary) crossing(info *types.Info, call *ast.CallExpr, arg int) (crossingOut, bool) {
 	if arg >= len(call.Args) {
 		return crossingOut{}, false
@@ -178,6 +178,11 @@ func (b *boundary) sinks(fn *types.Func) ([]sinkParameter, bool) {
 	}
 	sinks := opaqueParameters(fn)
 	return sinks, len(sinks) > 0
+}
+
+// declares reports whether the analysed program declares one function.
+func (b *boundary) declares(fn *types.Func) bool {
+	return fn.Pkg() != nil && b.held[b.sites.of(fn)]
 }
 
 // reaches reports whether one parameter of one function is somewhere a value leaves
@@ -405,8 +410,22 @@ func erasesTheType(t types.Type) bool {
 }
 
 // carriesStruct reports whether a value of t is a struct or a pointer to one, which
-// is the shape a consumer reading a value by name reads the members of.
+// is the shape a consumer reading a value by name reads the members of, or a slice,
+// an array or a map whose element, key or value is one.
 func carriesStruct(t types.Type) bool {
+	switch collection := types.Unalias(t).Underlying().(type) {
+	case *types.Slice:
+		return isStructValue(collection.Elem())
+	case *types.Array:
+		return isStructValue(collection.Elem())
+	case *types.Map:
+		return isStructValue(collection.Key()) || isStructValue(collection.Elem())
+	}
+	return isStructValue(t)
+}
+
+// isStructValue reports whether a value of t is a struct or a pointer to one.
+func isStructValue(t types.Type) bool {
 	u := types.Unalias(t)
 	if p, pointer := u.(*types.Pointer); pointer {
 		u = types.Unalias(p.Elem())

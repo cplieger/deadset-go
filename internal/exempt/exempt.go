@@ -170,8 +170,8 @@ type Detector func(in *Input) ([]graph.Exemption, error)
 // Compute runs every class the detector table holds and the options do not disable,
 // in vocabulary order; a class the table does not hold contributes nothing. Each
 // result is ordered by site, class and symbol and holds one entry per distinct
-// symbol, class and detail at its first site, so a method converted to one
-// interface at sixty-nine sites is one entry. Under a production run an exemption
+// symbol, class, detail and holder at its first site, so a method one declaration
+// converts to one interface at sixty-nine sites is one entry. Under a production run an exemption
 // found in a test file is returned as test evidence rather than held: it retains
 // nothing and counts as a test reference, and a fact a source file also carries
 // stays the source file's held entry.
@@ -206,12 +206,13 @@ func Compute(in *Input, detectors map[Class]Detector) (held, testEvidence []grap
 }
 
 // fact is what one exemption states, with the site left out: this class holds
-// this symbol for this reason. A class that finds the same fact at several sites
-// found it once.
+// this symbol for this reason while this holder is live. A class that finds the
+// same fact at several sites found it once.
 type fact struct {
 	id     graph.SymbolID
 	class  string
 	detail string
+	holder graph.SymbolID
 }
 
 // firstPerFact keeps one exemption per distinct fact, the first of each in the
@@ -221,7 +222,7 @@ func firstPerFact(found []graph.Exemption) []graph.Exemption {
 	seen := make(map[fact]bool, len(found))
 	kept := found[:0]
 	for _, e := range found {
-		stated := fact{id: e.ID, class: e.Class, detail: e.Detail}
+		stated := fact{id: e.ID, class: e.Class, detail: e.Detail, holder: e.Holder}
 		if seen[stated] {
 			continue
 		}

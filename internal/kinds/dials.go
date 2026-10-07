@@ -10,10 +10,12 @@ import (
 
 // dialed is what the two configuration dials withhold beyond the findings they
 // name: the dead components a root finding of which they withhold, by identifier,
-// and the symbols a suppression record bound to is dormant for, because the
-// record's finding would fall in one of those components.
+// those the severity dial withholds among them, and the symbols a suppression
+// record bound to is dormant for, because the record's finding would fall in one
+// of those components.
 type dialed struct {
 	components map[string]bool
+	allowed    map[string]bool
 	dormant    map[graph.SymbolID]bool
 }
 
@@ -31,11 +33,15 @@ type dialed struct {
 // It says the analysis cannot see every caller, not that the configuration
 // withholds a finding, so a kind it alone silences withholds no component.
 func (in *Input) withholdComponents(published []catalog.Row, emitters map[string]Emitter, first []Finding) error {
-	in.dialed = dialed{components: make(map[string]bool), dormant: make(map[graph.SymbolID]bool)}
+	in.dialed = dialed{
+		components: make(map[string]bool),
+		allowed:    make(map[string]bool),
+		dormant:    make(map[graph.SymbolID]bool),
+	}
 	least := Class(in.Config.Analysis.MinConfidence)
 	for i := range first {
 		if found := &first[i]; found.Confidence.rank() < least.rank() {
-			in.withholdRoot(found)
+			in.withholdRoot(found, false)
 		}
 	}
 
@@ -54,7 +60,7 @@ func (in *Input) withholdComponents(published []catalog.Row, emitters map[string
 			return err
 		}
 		for j := range produced {
-			in.withholdRoot(&produced[j])
+			in.withholdRoot(&produced[j], true)
 		}
 	}
 	in.dormantNear()
@@ -68,14 +74,19 @@ func (in *Input) dialAllows(row *catalog.Row) bool {
 }
 
 // withholdRoot records the component of one withheld finding when the finding is a
-// root of a dead component the sweep computed. A component minted for one finding
-// holds that finding alone, so withholding it withholds nothing more.
-func (in *Input) withholdRoot(found *Finding) {
+// root of a dead component the sweep computed, and whether the severity dial is
+// what withheld it. A component minted for one finding holds that finding alone, so
+// withholding it withholds nothing more.
+func (in *Input) withholdRoot(found *Finding, allowed bool) {
 	if !found.Component.Root || found.id == "" {
 		return
 	}
 	if component := in.index().components[found.id]; component != nil {
-		in.dialed.components[componentID(component.Index+1)] = true
+		id := componentID(component.Index + 1)
+		in.dialed.components[id] = true
+		if allowed {
+			in.dialed.allowed[id] = true
+		}
 	}
 }
 
@@ -127,17 +138,21 @@ func (in *Input) withheldMembers() map[graph.SymbolID]bool {
 	return members
 }
 
-// reportable is the findings no dial withholds: each finding at or above the
-// configured minimum confidence whose component the dials do not withhold.
-func (in *Input) reportable(findings []Finding) []Finding {
+// reportable splits the findings into those no dial withholds, each at or above
+// the configured minimum confidence in a component the dials do not withhold, and
+// those the minimum alone withholds, which a run at the lowest minimum reports.
+func (in *Input) reportable(findings []Finding) (kept, withheld []Finding) {
 	least := Class(in.Config.Analysis.MinConfidence)
-	kept := make([]Finding, 0, len(findings))
+	kept = make([]Finding, 0, len(findings))
 	for i := range findings {
 		found := &findings[i]
-		if found.Confidence.rank() < least.rank() || in.dialed.components[found.Component.ID] {
-			continue
+		switch {
+		case in.dialed.allowed[found.Component.ID]:
+		case found.Confidence.rank() < least.rank() || in.dialed.components[found.Component.ID]:
+			withheld = append(withheld, *found)
+		default:
+			kept = append(kept, *found)
 		}
-		kept = append(kept, *found)
 	}
-	return kept
+	return kept, withheld
 }

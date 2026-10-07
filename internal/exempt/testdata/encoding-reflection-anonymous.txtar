@@ -1,0 +1,79 @@
+Values of struct types with no name reach an encoder and a decoder. One is decoded
+into directly, a field of it holding a type with its own decoding method. One is
+encoded directly, a field of it holding a struct type with no name whose field holds
+a type with its own encoding method. One is a defined type whose field holds a
+struct type with no name, encoded, beside a field the encoder skips by its tag that
+holds another. One is built and reaches no destination.
+
+-- go.mod --
+module example.com/anonymous
+
+go 1.27.0
+-- anonymous.go --
+package anonymous
+
+import "encoding/json"
+
+// Keys is decoded inside a struct type with no name.
+type Keys []string
+
+// UnmarshalJSON is called by the decoder that fills the field holding Keys.
+func (k *Keys) UnmarshalJSON(data []byte) error {
+	*k = append(*k, string(data))
+	return nil
+}
+
+// Stamp is encoded two struct types with no name deep.
+type Stamp struct{}
+
+// MarshalText is called by the encoder that reaches Stamp.
+func (Stamp) MarshalText() ([]byte, error) { return []byte("stamp"), nil }
+
+// Mark is encoded inside the field of a defined type.
+type Mark struct{}
+
+// MarshalText is called by the encoder that reaches Mark.
+func (Mark) MarshalText() ([]byte, error) { return []byte("mark"), nil }
+
+// Envelope holds a struct type with no name.
+type Envelope struct {
+	Inner struct {
+		Mark  Mark
+		Count int
+	}
+	Hidden struct {
+		Secret string
+	} `json:"-"`
+}
+
+// Unused is reached by no destination.
+type Unused struct{}
+
+// MarshalText is called by nothing.
+func (Unused) MarshalText() ([]byte, error) { return nil, nil }
+
+// Decode decodes into a struct type with no name.
+func Decode(data []byte) (int, error) {
+	var v struct{ Properties Keys }
+	err := json.Unmarshal(data, &v)
+	return len(v.Properties), err
+}
+
+// Encode encodes a struct type with no name, and a defined type holding one.
+func Encode() ([]byte, error) {
+	first, err := json.Marshal(struct {
+		Outer struct{ At Stamp }
+	}{})
+	if err != nil {
+		return nil, err
+	}
+	second, err := json.Marshal(Envelope{})
+	return append(first, second...), err
+}
+
+// Build builds a struct type with no name and hands it to nothing.
+func Build() int {
+	v := struct{ U Unused }{}
+	_ = v.U
+	return 1
+}

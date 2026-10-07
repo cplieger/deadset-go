@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"slices"
 	"strings"
 
 	"github.com/cplieger/deadset-go/internal/load"
@@ -84,8 +85,9 @@ func TypeErrorSkips(r *load.Result, targetRoot string) []TypeErrorSkip {
 // typeErrors roots every declaration a type error skipped, because the skip only
 // withholds: nothing is reported about the declaration and every reference in it
 // the compiler resolved still counts. A selector the compiler could not resolve on
-// an operand whose type it knows could have named any member of that type, so every
-// method and field of the type is rooted too.
+// an operand whose type it knows could have named any member of that type, and a
+// value reaching a position whose type it could not resolve could reach an
+// interface, so every method and field of the type is rooted too.
 func (d *rootDetection) typeErrors(r *load.Result) {
 	for _, one := range skippedDecls(r) {
 		if !d.rootDeclared(one.decl) {
@@ -93,6 +95,7 @@ func (d *rootDetection) typeErrors(r *load.Result) {
 		}
 		if info := one.pkg.TypesInfo; info != nil {
 			d.rootUnresolvedSelections(info, one.decl)
+			d.rootUnresolvedDestinations(info, one.decl, nil)
 		}
 	}
 }
@@ -133,6 +136,133 @@ func (d *rootDetection) rootUnresolvedSelections(info *types.Info, node ast.Node
 		}
 		return true
 	})
+}
+
+// rootUnresolvedDestinations roots every member of the type of each value inside
+// node that reaches a result, an argument, an assigned name, a declared variable
+// or a composite literal element whose type the compiler could not resolve.
+func (d *rootDetection) rootUnresolvedDestinations(info *types.Info, node ast.Node, results []types.Type) {
+	ast.Inspect(node, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.FuncDecl:
+			if n.Body != nil {
+				d.rootUnresolvedDestinations(info, n.Body, resultsOf(info.TypeOf(n.Name)))
+			}
+			return false
+		case *ast.FuncLit:
+			d.rootUnresolvedDestinations(info, n.Body, resultsOf(info.TypeOf(n)))
+			return false
+		case *ast.ReturnStmt:
+			d.rootInto(info, results, n.Results)
+		case *ast.CallExpr:
+			d.rootArguments(info, n)
+		case *ast.AssignStmt:
+			d.rootInto(info, typesOf(info, n.Lhs), n.Rhs)
+		case *ast.ValueSpec:
+			if n.Type != nil {
+				d.rootInto(info, slices.Repeat([]types.Type{info.TypeOf(n.Type)}, len(n.Values)), n.Values)
+			}
+		case *ast.CompositeLit:
+			d.rootElements(info, n)
+		}
+		return true
+	})
+}
+
+// rootElements roots the members of each element of a composite literal whose
+// type, or whose element type, the compiler could not resolve.
+func (d *rootDetection) rootElements(info *types.Info, lit *ast.CompositeLit) {
+	if t := info.TypeOf(lit); !unresolved(t) && !unresolved(elementOf(t)) {
+		return
+	}
+	for _, elt := range lit.Elts {
+		if kv, keyed := elt.(*ast.KeyValueExpr); keyed {
+			elt = kv.Value
+		}
+		d.rootReached(info.TypeOf(elt))
+	}
+}
+
+// rootArguments roots the members of each argument a call passes to a parameter,
+// or to a function, whose type the compiler could not resolve.
+func (d *rootDetection) rootArguments(info *types.Info, call *ast.CallExpr) {
+	fun := info.TypeOf(call.Fun)
+	if tv, known := info.Types[call.Fun]; known && tv.IsType() {
+		d.rootInto(info, []types.Type{fun}, call.Args)
+		return
+	}
+	sig, isSignature := types.Unalias(fun).(*types.Signature)
+	for i, arg := range call.Args {
+		if fun == nil || unresolved(fun) || isSignature && unresolved(parameterType(sig, i, call.Ellipsis.IsValid())) {
+			d.rootReached(info.TypeOf(arg))
+		}
+	}
+}
+
+// rootInto roots the members of each value whose destination type is unresolved,
+// pairing destinations and values one to one.
+func (d *rootDetection) rootInto(info *types.Info, destinations []types.Type, values []ast.Expr) {
+	if len(destinations) != len(values) {
+		return
+	}
+	for i, value := range values {
+		if unresolved(destinations[i]) { //nolint:gosec // G602: the guard above makes both lengths equal
+			d.rootReached(info.TypeOf(value))
+		}
+	}
+}
+
+// elementOf is the element type of a slice, an array or a map, nil for another type.
+func elementOf(t types.Type) types.Type {
+	if t == nil {
+		return nil
+	}
+	switch u := t.Underlying().(type) {
+	case *types.Slice:
+		return u.Elem()
+	case *types.Array:
+		return u.Elem()
+	case *types.Map:
+		return u.Elem()
+	default:
+		return nil
+	}
+}
+
+// unresolved reports whether the compiler left a type invalid.
+func unresolved(t types.Type) bool {
+	basic, ok := t.(*types.Basic)
+	return ok && basic.Kind() == types.Invalid
+}
+
+// resultsOf lists the result types of a function type, nothing for another type.
+func resultsOf(t types.Type) []types.Type {
+	sig, ok := t.(*types.Signature)
+	if !ok {
+		return nil
+	}
+	return tupleTypes(sig.Results())
+}
+
+// typesOf lists the type of each expression.
+func typesOf(info *types.Info, exprs []ast.Expr) []types.Type {
+	held := make([]types.Type, 0, len(exprs))
+	for _, e := range exprs {
+		held = append(held, info.TypeOf(e))
+	}
+	return held
+}
+
+// rootReached roots the members of the type of a value an unresolved position
+// receives, or of each result of a function value, which that position may call.
+func (d *rootDetection) rootReached(t types.Type) {
+	if sig, isFunc := types.Unalias(t).(*types.Signature); isFunc {
+		for _, result := range tupleTypes(sig.Results()) {
+			d.rootMembers(result)
+		}
+		return
+	}
+	d.rootMembers(t)
 }
 
 // rootMembers roots every method and field one type declares.

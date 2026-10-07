@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 )
 
 // The confidence a stale suppression is rendered with. The kind is fixed on at the
@@ -41,8 +42,37 @@ func Text(w io.Writer, e *Envelope, _ Options) error {
 			staleSuppressionKind, stale.Symbol, stale.Message,
 			staleSuppressionConfidence, stale.Code)
 	}
+	if line := withheldLine(&e.Totals.Withheld); line != "" {
+		out.printf("%s\n", line)
+	}
 	out.printf("%s\n", summary(&e.Totals))
 	return out.err
+}
+
+// withheldLine names the probable and the possible count the minimum confidence
+// withheld, each only where it is not 0, and the setting that shows them all; it is
+// empty where both are 0.
+func withheldLine(withheld *Withheld) string {
+	counts := []struct {
+		confidence string
+		n          int
+	}{
+		{"probable", withheld.Probable},
+		{"possible", withheld.Possible},
+	}
+	var named []string
+	lowest := ""
+	for _, count := range counts {
+		if count.n > 0 {
+			named = append(named, strconv.Itoa(count.n)+" "+count.confidence)
+			lowest = count.confidence
+		}
+	}
+	if named == nil {
+		return ""
+	}
+	return "withheld by analysis.min_confidence: " + strings.Join(named, ", ") +
+		", shown with analysis.min_confidence set to " + lowest
 }
 
 // summary is the report's totals in one line: every count the totals hold, in the

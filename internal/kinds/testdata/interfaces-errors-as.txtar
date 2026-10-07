@@ -1,0 +1,50 @@
+Two error types, each matched only by errors.As or errors.AsType against an
+interface whose method the classifier calls, and a third error type with a
+method neither target interface requires.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- main.go --
+package main
+
+import (
+	"errors"
+	"fmt"
+)
+
+type temporary interface{ Temporary() bool }
+
+type hint interface{ Hint() int }
+
+type netErr struct{}
+
+func (netErr) Error() string { return "net" }
+
+func (netErr) Temporary() bool { return true }
+
+type hinted struct{}
+
+func (hinted) Error() string { return "hinted" }
+
+func (hinted) Hint() int { return 1 }
+
+type plain struct{}
+
+func (plain) Error() string { return "plain" }
+
+func (plain) Extra() int { return 2 }
+
+func classify(err error) bool {
+	var t temporary
+	if errors.As(err, &t) {
+		return t.Temporary()
+	}
+	if h, ok := errors.AsType[hint](err); ok {
+		return h.Hint() > 0
+	}
+	return false
+}
+
+func main() { fmt.Println(classify(netErr{}), classify(hinted{}), classify(plain{})) }

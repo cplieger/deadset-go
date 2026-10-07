@@ -1,0 +1,64 @@
+Four types an encoder or a callee the load did not read reaches. One is encoded
+with a field whose tag names the key - and so is skipped, beside a field whose tag
+names the key "-," and so is encoded under the name -. One is decoded from an XML
+document with an XMLName field, which the decoder reads to match the element name,
+beside a field it only writes. Two cross out of the program inside a collection,
+one as the element of a slice of pointers and one as the value of a map; a third is
+built inside a slice that crosses nothing.
+
+-- go.mod --
+module example.com/keys
+
+go 1.27.0
+-- keys.go --
+package keys
+
+import (
+	"encoding/json"
+	"encoding/xml"
+	"sync"
+)
+
+// Record is encoded.
+type Record struct {
+	ID     string `json:"id"`
+	Secret string `json:"-"`
+	Dash   string `json:"-,"`
+}
+
+// Feed is decoded.
+type Feed struct {
+	XMLName xml.Name `xml:"feed"`
+	Title   string   `xml:"title"`
+}
+
+// Listed crosses out of the program as the element of a slice.
+type Listed struct {
+	Name string `db:"name"`
+}
+
+// Mapped crosses out of the program as the value of a map.
+type Mapped struct {
+	ID string `db:"id"`
+}
+
+// Kept is built inside a slice that crosses nothing.
+type Kept struct {
+	Title string `db:"title"`
+}
+
+// Encode encodes a record.
+func Encode() ([]byte, error) { return json.Marshal(Record{}) }
+
+// Decode decodes a feed.
+func Decode(data []byte) error {
+	var f Feed
+	return xml.Unmarshal(data, &f)
+}
+
+// Store hands two collections to a method the load did not read.
+func Store(m *sync.Map) int {
+	m.Store("listed", []*Listed{{Name: "a"}})
+	m.Store("mapped", map[string]Mapped{"a": {ID: "1"}})
+	return len([]Kept{{}})
+}

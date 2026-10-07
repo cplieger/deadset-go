@@ -1,0 +1,206 @@
+A package that hands values to a dependency module the load did not read. One value
+is registered with a function taking the empty interface; it satisfies an exported
+interface of the callee's package, an exported interface of a package that imports
+the callee's package, and an unexported interface of the callee's package. Another is
+returned through a method of an interface the dependency declares, and satisfies one
+exported and one unexported interface of that package. Two are decoded through a
+dependency's decoder: one through a method that only decodes into its argument, one
+through a method that also prints it. Two are handed to dependency functions that are no
+decoder: one never uses its parameter, one has no body. The dependency is a module the
+target requires and replaces with a directory of its own, so the archive loads with no
+network access.
+
+-- go.mod --
+module example.com/outside
+
+go 1.27.0
+
+require example.com/plugin v0.0.0
+
+replace example.com/plugin => ./plugin
+-- outside.go --
+package outside
+
+import (
+	"io"
+
+	"example.com/plugin"
+	"example.com/plugin/describe"
+)
+
+// Record is registered with the host.
+type Record struct{}
+
+// Label satisfies an exported interface of the callee's package.
+func (Record) Label() string { return "record" }
+
+// Describe satisfies an exported interface of a package that imports the callee's package.
+func (Record) Describe() string { return "a record" }
+
+// Name satisfies only an unexported interface of the callee's package.
+func (Record) Name() string { return "record" }
+
+// Service is the value the plugin serves.
+type Service struct {
+	Addr string
+}
+
+// Label satisfies an exported interface of the plugin interface's package.
+func (Service) Label() string { return "service" }
+
+// Name satisfies only an unexported interface of that package.
+func (Service) Name() string { return "service" }
+
+type impl struct{}
+
+// Server returns the value the host serves.
+func (impl) Server() (any, error) { return &Service{}, nil }
+
+// Settings is decoded through a method that only decodes.
+type Settings struct {
+	Theme string `json:"theme"`
+}
+
+// String is called by nothing.
+func (Settings) String() string { return "settings" }
+
+// Profile is decoded through a method that also prints it.
+type Profile struct {
+	Email string `json:"email"`
+}
+
+// String is called by the printing it is handed to.
+func (Profile) String() string { return "profile" }
+
+// Ignored is handed to a function that never uses its parameter.
+type Ignored struct {
+	Note string
+}
+
+// Label satisfies an exported interface of the callee's package.
+func (Ignored) Label() string { return "ignored" }
+
+// Discarded is handed to a function with no body.
+type Discarded struct {
+	Note string
+}
+
+// Label satisfies an exported interface of the callee's package.
+func (Discarded) Label() string { return "discarded" }
+
+// Run registers, serves and decodes.
+func Run(r io.Reader) error {
+	plugin.Register(&Record{})
+	if err := plugin.Serve(impl{}); err != nil {
+		return err
+	}
+	var s Settings
+	var p Profile
+	d := plugin.NewDecoder(r)
+	if err := d.Decode(&s); err != nil {
+		return err
+	}
+	if err := d.DecodeAndPrint(&p); err != nil {
+		return err
+	}
+	plugin.Ignore(&Ignored{})
+	plugin.Discard(&Discarded{})
+	println(describe.Version())
+	return nil
+}
+-- plugin/go.mod --
+module example.com/plugin
+
+go 1.27.0
+-- plugin/plugin.go --
+// Package plugin serves values to a host process.
+package plugin
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+)
+
+// Plugin is implemented by a value the host serves.
+type Plugin interface {
+	// Server returns the value the host serves by reflection.
+	Server() (any, error)
+}
+
+// Labeler names a value in the host's listing.
+type Labeler interface {
+	Label() string
+}
+
+type namer interface {
+	Name() string
+}
+
+// Serve serves the value p returns.
+func Serve(p Plugin) error {
+	v, err := p.Server()
+	if err != nil {
+		return err
+	}
+	if n, ok := v.(namer); ok {
+		_ = n.Name()
+	}
+	return nil
+}
+
+// Register records v in the host's table.
+func Register(v any) {
+	if l, ok := v.(Labeler); ok {
+		_ = l.Label()
+	}
+}
+
+// Decoder decodes one document after another from a reader.
+type Decoder struct {
+	dec *json.Decoder
+}
+
+// NewDecoder returns a Decoder reading r.
+func NewDecoder(r io.Reader) *Decoder { return &Decoder{dec: json.NewDecoder(r)} }
+
+// Decode decodes the next document into v and does nothing else with it.
+func (d *Decoder) Decode(v any) error { return d.dec.Decode(v) }
+
+// DecodeAndPrint decodes the next document into v and prints it.
+func (d *Decoder) DecodeAndPrint(v any) error {
+	if err := d.dec.Decode(v); err != nil {
+		return err
+	}
+	fmt.Println(v)
+	return nil
+}
+
+// Ignore accepts v and reads nothing of it.
+func Ignore(v any) {}
+
+// Discard accepts v; its body is in assembly.
+func Discard(v any)
+-- plugin/discard.s --
+// Discard is implemented in assembly.
+-- plugin/describe/describe.go --
+// Package describe describes the values the plugin package serves.
+package describe
+
+import "example.com/plugin"
+
+// Describer describes a value in the host's help output.
+type Describer interface {
+	Describe() string
+}
+
+// Version is the version of the description format.
+func Version() string { return "1" }
+
+// Of describes p.
+func Of(p plugin.Plugin) string {
+	if d, ok := p.(Describer); ok {
+		return d.Describe()
+	}
+	return ""
+}

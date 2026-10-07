@@ -2,6 +2,7 @@ package graph
 
 import (
 	"go/token"
+	"slices"
 	"strconv"
 )
 
@@ -51,8 +52,20 @@ func (s RelationSet) with(r Relation) RelationSet { return s | 1<<r }
 type Exemption struct {
 	ID     SymbolID
 	Class  string
-	Detail string         // one short clause naming the evidence
-	Site   token.Position // last, so the counted fields of a position end the value
+	Detail string // one short clause naming the evidence
+
+	// Holder is the declaration whose code holds the evidence, where the class
+	// retains as a use by that declaration: the symbol is then live only while
+	// the holder is, and falls into the holder's dead component with it. A root
+	// the exemption names is held by the holder instead. Empty, the exemption
+	// holds the symbol live whatever else is.
+	Holder SymbolID
+
+	// Via is the interface method a retained method answers, where the class
+	// retains through an interface the inventory declares.
+	Via SymbolID
+
+	Site token.Position // last, so the counted fields of a position end the value
 }
 
 // Mode is the run's reference mode: which references a sweep counts, and how a
@@ -76,6 +89,11 @@ type Mode struct {
 // SweepInput is what one sweep runs over besides the graph: the symbols a
 // mechanism outside the reference graph holds live, and the mode.
 type SweepInput struct {
+	// tested is the test evidence [Matrix.Sweep] holds: each symbol it counts
+	// seeds the reach that admits unreferenced test-file declarations, as an
+	// exemption does.
+	tested TestEvidence
+
 	// Marked are the symbols a matched suppression names: each is live under both
 	// relations and seeds reachability.
 	Marked []SymbolID
@@ -85,7 +103,17 @@ type SweepInput struct {
 	// a symbol stands, so an explanation names each class that held it.
 	Exempt []Exemption
 
+	// Uses are references the analysis infers rather than reads, each a use of
+	// To by From, which every sweep counts as a reference From makes.
+	Uses []Use
+
 	Mode Mode
+}
+
+// Use is one inferred reference: From uses To.
+type Use struct {
+	From SymbolID
+	To   SymbolID
 }
 
 // Candidate is one dead symbol, the relation that found it, and the reference
@@ -108,6 +136,11 @@ type Candidate struct {
 	// TestOfDeadCode reports a test declaration [sweep.admitTestsOfDeadCode]
 	// admitted rather than a relation.
 	TestOfDeadCode bool
+
+	// UnreferencedTest reports a declaration of a test file that no root, and no
+	// test of dead code, reaches through any reference, test files' included
+	// ([sweep.admitUnreferencedTests]). Its relation counts every reference.
+	UnreferencedTest bool
 }
 
 // Result is one sweep's answer.
@@ -137,16 +170,18 @@ type Result struct {
 
 // withoutExemptions is the input with the exemptions withdrawn, which the sweep
 // that answers which exemptions took effect runs under.
-func (in SweepInput) withoutExemptions() SweepInput {
-	in.Exempt = nil
-	return in
+func (in *SweepInput) withoutExemptions() *SweepInput {
+	out := *in
+	out.Exempt = nil
+	return &out
 }
 
 // withoutMarks is the input with the marks withdrawn, which the sweep that answers
 // which marks took effect runs under.
-func (in SweepInput) withoutMarks() SweepInput {
-	in.Marked = nil
-	return in
+func (in *SweepInput) withoutMarks() *SweepInput {
+	out := *in
+	out.Marked = nil
+	return &out
 }
 
 // Sweep answers which symbols of one graph are dead under the input's mode, which
@@ -155,10 +190,11 @@ func (in SweepInput) withoutMarks() SweepInput {
 // answered by one further sweep each with only that set withdrawn: withdrawing both
 // at once would credit an exemption with a symbol a mark held back. The
 // candidates, components and relations are the first sweep's.
-func (g *Graph) Sweep(in SweepInput) Result {
-	r := g.sweep(in).result()
+func (g *Graph) Sweep(in *SweepInput) Result {
+	swept := g.sweep(in)
+	r := swept.result()
 	if len(in.Exempt) > 0 {
-		r.Retained = g.sweep(in.withoutExemptions()).retained(in.Exempt)
+		r.Retained = g.sweep(in.withoutExemptions()).retained(in.Exempt, swept)
 	}
 	if len(in.Marked) > 0 {
 		r.Suppressed = g.sweep(in.withoutMarks()).suppressed(in.Marked)
@@ -168,23 +204,64 @@ func (g *Graph) Sweep(in SweepInput) Result {
 
 // sweep runs every pass of one input over the graph, in the order the answers
 // depend on.
-func (g *Graph) sweep(in SweepInput) *sweep {
+func (g *Graph) sweep(in *SweepInput) *sweep {
+	g = g.using(in)
 	s := &sweep{
-		g:              g,
-		in:             in,
-		marked:         g.positions(in.Marked),
-		exempt:         g.exempted(in.Exempt),
-		called:         make([]bool, len(g.symbols)),
-		live:           make([]RelationSet, len(g.symbols)),
-		dead:           make([]bool, len(g.symbols)),
-		testOfDeadCode: make([]bool, len(g.symbols)),
+		g:                g,
+		in:               in,
+		marked:           g.positions(in.Marked),
+		exempt:           g.exempted(in.Exempt),
+		called:           make([]bool, len(g.symbols)),
+		live:             make([]RelationSet, len(g.symbols)),
+		dead:             make([]bool, len(g.symbols)),
+		testOfDeadCode:   make([]bool, len(g.symbols)),
+		unreferencedTest: make([]bool, len(g.symbols)),
 	}
 	s.callers()
 	s.referenceCounting()
 	s.reachability()
 	s.decide()
 	s.admitTestsOfDeadCode()
+	s.admitUnreferencedTests()
 	return s
+}
+
+// using is the graph with the input's inferred references and the uses its held
+// exemptions state added, and with every blank root such an exemption names left to
+// its holder. The graph itself is unchanged, so one graph answers any number of
+// inputs.
+func (g *Graph) using(in *SweepInput) *Graph {
+	uses := slices.Clone(in.Uses)
+	held := make(map[int]bool)
+	for _, e := range in.Exempt {
+		if e.Holder != "" {
+			uses = append(uses, Use{From: e.Holder, To: e.ID})
+			if at := g.at(e.ID); at != outside {
+				held[at] = true
+			}
+		}
+	}
+	if len(uses) == 0 {
+		return g
+	}
+	derived := *g
+	derived.out = make([][]edge, len(g.out))
+	for i := range g.out {
+		derived.out[i] = slices.Clip(g.out[i])
+	}
+	derived.made = slices.Clone(g.made)
+	derived.rooted = slices.DeleteFunc(slices.Clone(g.rooted), func(r rooted) bool {
+		return r.kind == RootBlank && held[r.at]
+	})
+	for _, use := range uses {
+		from := g.at(use.From)
+		if from == outside {
+			continue
+		}
+		_, test := IsTestFile(g.symbols[from].Pos.Filename)
+		derived.add(&Reference{From: use.From, To: use.To, Test: test})
+	}
+	return &derived
 }
 
 // positions returns one flag per symbol, set for each symbol the identifiers
@@ -204,30 +281,34 @@ func (g *Graph) positions(ids []SymbolID) []bool {
 func (g *Graph) exempted(exempt []Exemption) []bool {
 	ids := make([]SymbolID, 0, len(exempt))
 	for _, e := range exempt {
-		ids = append(ids, e.ID)
+		if e.Holder == "" {
+			ids = append(ids, e.ID)
+		}
 	}
 	return g.positions(ids)
 }
 
 // sweep is one sweep's state over one graph.
 type sweep struct {
-	g              *Graph
-	marked         []bool
-	exempt         []bool
-	called         []bool
-	live           []RelationSet
-	dead           []bool
-	testOfDeadCode []bool
-	in             SweepInput
+	in               *SweepInput
+	g                *Graph
+	marked           []bool
+	exempt           []bool
+	called           []bool
+	live             []RelationSet
+	dead             []bool
+	testOfDeadCode   []bool
+	unreferencedTest []bool
 }
 
 // retained lists the exemptions that name a symbol this sweep judged a candidate,
-// which is what a sweep without them answers, in the order the inventory holds
-// those symbols.
-func (s *sweep) retained(exempt []Exemption) []Exemption {
+// which is what a sweep without them answers, and the sweep with them did not, in
+// the order the inventory holds those symbols. An exemption whose holder is dead
+// held nothing back.
+func (s *sweep) retained(exempt []Exemption, with *sweep) []Exemption {
 	held := make(map[SymbolID][]Exemption)
 	for _, e := range exempt {
-		if at := s.g.at(e.ID); at != outside && s.dead[at] {
+		if at := s.g.at(e.ID); at != outside && s.dead[at] && !with.dead[at] && with.holds(&e) {
 			held[e.ID] = append(held[e.ID], e)
 		}
 	}
@@ -239,6 +320,12 @@ func (s *sweep) retained(exempt []Exemption) []Exemption {
 		found = append(found, held[s.g.symbols[i].ID]...)
 	}
 	return found
+}
+
+// holds reports whether one exemption's holder, if it has one, is live.
+func (s *sweep) holds(e *Exemption) bool {
+	at := s.g.at(e.Holder)
+	return e.Holder == "" || at == outside || !s.dead[at]
 }
 
 // suppressed lists the marks that name a symbol this sweep, run without them,
@@ -390,6 +477,55 @@ func (s *sweep) admitTestsOfDeadCode() {
 	}
 }
 
+// admitUnreferencedTests adds every declaration of a test file that the run counting
+// test references holds live under neither relation: no reference names it, or no
+// root reaches it. The roots are every root, test roots included, every mark,
+// exemption, test evidence and consumer reference, but not a test of dead code,
+// which is reported, so a test-file declaration only reported declarations reach
+// falls with them.
+func (s *sweep) admitUnreferencedTests() {
+	reached := s.reachedCountingTests()
+	for i := range s.g.symbols {
+		if !s.g.subject[i] || s.exempt[i] || s.marked[i] || s.testOfDeadCode[i] || reached[i] {
+			continue
+		}
+		if _, inTestFile := IsTestFile(s.g.symbols[i].Pos.Filename); !inTestFile {
+			continue
+		}
+		s.dead[i] = true
+		s.unreferencedTest[i] = true
+	}
+}
+
+// reachedCountingTests marks every symbol the roots [sweep.admitUnreferencedTests]
+// names reach over every edge.
+func (s *sweep) reachedCountingTests() []bool {
+	reached := make([]bool, len(s.g.symbols))
+	queue := make([]int, 0, len(s.g.rooted))
+	seed := func(i int) {
+		if !reached[i] && !s.testOfDeadCode[i] {
+			reached[i] = true
+			queue = append(queue, i)
+		}
+	}
+	for _, r := range s.g.rooted {
+		seed(r.at)
+	}
+	for i := range s.g.symbols {
+		if s.marked[i] || s.exempt[i] || s.in.tested[s.g.symbols[i].ID] > 0 || s.g.consumedIn(i, s.in.Mode) {
+			seed(i)
+		}
+	}
+	for len(queue) > 0 {
+		at := queue[len(queue)-1]
+		queue = queue[:len(queue)-1]
+		for _, e := range s.g.out[at] {
+			seed(e.to)
+		}
+	}
+	return reached
+}
+
 // targetsOf counts the production declarations one test declaration references,
 // and how many of them are not candidates.
 func (s *sweep) targetsOf(at int) (targets, live int) {
@@ -416,20 +552,21 @@ func (s *sweep) result() Result {
 		if !s.dead[i] {
 			continue
 		}
+		production, test := s.g.counted(i, s.in.Mode)
 		relation := Reachability
-		if s.g.references(i, s.in.Mode) == 0 {
+		if s.g.references(i, s.in.Mode) == 0 && (!s.unreferencedTest[i] || production+test == 0) {
 			relation = ReferenceCounting
 		}
-		production, test := s.g.counted(i, s.in.Mode)
 		r.Candidates = append(r.Candidates, Candidate{
-			ID:             s.g.symbols[i].ID,
-			ProductionRefs: production,
-			TestRefs:       test,
-			Relation:       relation,
-			TestOfDeadCode: s.testOfDeadCode[i],
+			ID:               s.g.symbols[i].ID,
+			ProductionRefs:   production,
+			TestRefs:         test,
+			Relation:         relation,
+			TestOfDeadCode:   s.testOfDeadCode[i],
+			UnreferencedTest: s.unreferencedTest[i],
 		})
 	}
-	r.Components = s.g.componentsOf(s.dead, s.testOfDeadCode)
+	r.Components = s.g.componentsOf(s.dead, s.testOfDeadCode, s.unreferencedTest)
 	return r
 }
 

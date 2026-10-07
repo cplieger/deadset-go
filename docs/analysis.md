@@ -37,7 +37,7 @@ A root makes a symbol live under reachability. `deadset-go print-roots` prints t
 | `published-api` | An exported symbol of a non-internal package, when the target is declared a library |
 | `configured` | An exact symbol reference from `roots.patterns` |
 | `pattern` | A pattern from `roots.patterns` |
-| `type-error` | A declaration a type error skipped, and every method and field of a type an unresolved selector in it could name |
+| `type-error` | A declaration a type error skipped, and every member of a type its unresolved code could name or reach |
 | `program` | A declaration named by a `package main` file that only the `ignore` build tag includes, which `go run` runs on its own |
 
 Every root but `published-api` and `type-error` names an actual caller, which is the runtime, the test binary, the linker, C code, `go run`, or the maintainer asserting one. A `type-error` root withholds a judgement the type error made impossible. Those are live under both relations, so a test function is never reported as unreferenced.
@@ -52,7 +52,9 @@ Every dead symbol lands in exactly one dead component, computed over the referen
 
 A symbol only dead symbols reference falls with the roots that reach it and is a member of their component. A symbol two roots both reach joins the two into one component, because deleting either alone leaves a reference to it. A finding about any member names the one component, so every finding one deletion removes carries one identifier.
 
-A declaration of a test file is a member only when it is reported as a test of dead code. Such a test and each declaration it references count as referencing each other, so the test is a root member with them. No other test-file declaration belongs to a component, so its references join no two components and make no production declaration a non-root. A cluster only tests reach is rooted at a declaration outside the test files.
+A declaration of a test file is a member only when it is reported as a test of dead code or as unreferenced. A test of dead code and each declaration it references count as referencing each other, so the test is a root member with them. An unreferenced test-file declaration joins only the test-file declarations it references, so a production declaration it references stays out of its component.
+
+No other test-file declaration belongs to a component, so its references join no two components and make no production declaration a non-root. A cluster only tests reach is rooted at a declaration outside the test files.
 
 A declaration of test-support code that a test references is in a component of its own that removes no line. One that nothing references is in a dead component, as production code is.
 

@@ -61,7 +61,7 @@ Test-support code is a package only tests reach, through its own test files or t
 
 ### DS1005 test-of-dead-code
 
-A test declaration whose set of referenced target production declarations is not empty and every member of which is reported dead. A test that references one live target declaration is never reported, and the message says so. A reported test joins the dead component of the declarations it references, so the report names the test beside the code it exercises.
+A test declaration whose set of referenced target production declarations is not empty and every member of which is reported dead. A test that references one live target declaration is never reported, and the message says so. A reported test joins the dead component of the declarations it references, so the report names the test beside the code it exercises. A test-file declaration nothing reaches that is no such test is reported under the code a production declaration of its shape carries.
 
 ### DS1006 deprecated-unused
 
@@ -89,7 +89,7 @@ An exported declaration of a package an importer outside the module can name, wh
 
 ### DS1103 unreachable-export
 
-An unused exported declaration of a package nothing outside can import, which is a `main` package, an external test package, or a package under an `internal` tree no importer outside its parent reaches. The claim is about the package graph rather than about the consumer set, so this kind needs no consumer information and reaches `certain` without any. Its subject may be declared in a test file, which is what puts an exported declaration of an external test package in this population and in no other.
+An unused exported declaration of a package nothing outside can import, which is a `main` package, an external test package, or a package under an `internal` tree no importer outside its parent reaches. The claim is about the package graph rather than about the consumer set, so this kind needs no consumer information and reaches `certain` without any. Its subject may be declared in a test file, which is what puts an exported declaration of an external test package, and an exported test-file declaration nothing reaches, in this population and in no other.
 
 ## DS1200 to DS1299: interfaces
 
@@ -105,7 +105,7 @@ An interface declaration no symbol names as a type. The finding names the concre
 
 ### DS1203 uncalled-interface-method
 
-A method an interface declares that no call site invokes and no expression selects through the interface, whatever the number of implementations. A method selected as a value is selected through the interface and counts as invoked. A call on a value of a concrete type invokes that type's own method and not this one.
+A method an interface declares that no call site invokes and no expression selects through the interface, whatever the number of implementations. A method selected as a value is selected through the interface and counts as invoked. A call on a value of a concrete type invokes that type's own method and not this one. Each method implementing it that nothing else keeps is reported under the code its own references select, as a member of this finding's component.
 
 Two shapes are exempt. Every method of an interface whose method set holds an unexported method, because such a method set exists to fix which types implement the interface rather than to be called through it. And a marker method, being a method whose every implementation in the target carries a body with no statement. An implementation the target does not declare is a body this analysis cannot read, which leaves the method not a marker.
 
@@ -215,12 +215,13 @@ Every configured root and every configured root pattern that named no symbol of 
 
 The six kinds are one family behind one switch, and `"DS18": "allow"` in the severity section turns off all of them. `Overlaps` is the vocabulary's own list of external rules that report the same kind, carried on every finding, so a project already running one of them silences whichever side it prefers.
 
-Three of the six edit a signature, and each reports only where the signature is free to change. A signature is not free in five cases:
+Three of the six edit a signature, and each reports only where the signature is free to change. A signature is not free in six cases:
 
 - An exemption class retained the declaration, on evidence in any file, a test file included.
 - The function is used as a value rather than called.
 - The linker or a foreign caller names it.
 - The test driver runs it as a test, a benchmark, a fuzz test or `TestMain`.
+- A type error roots it, because the code the error left unresolved may fix the signature.
 - The body is a stub that is empty or only panics.
 
 A fuzz target passed to `Fuzz` is used as a value.
@@ -251,7 +252,7 @@ A write to a local variable no read reaches, decided by a liveness walk over the
 
 The subject is a variable the body or its signature declares, so a parameter, a named result and a receiver are subjects too. A return naming no value reads every named result. A package-level variable and a field are not subjects, which `DS1301` answers for.
 
-Four constructs take a variable out of the population, each because a store to it may be read where the graph cannot see. Its address is taken, or a function literal of the body names it. A method with a pointer receiver is selected on it while it is not a pointer. A selector or an index on it is assigned to. A call is assumed to return, apart from a call to the `panic` built-in.
+Four constructs take a variable out of the population, each because a store to it may be read where the graph cannot see. Its address is taken, or a function literal of the body names it. A method with a pointer receiver is selected on it while it is not a pointer, and no embedded pointer field carries the selection. A selector or an index on it is assigned to. A call is assumed to return, apart from a call to the `panic` built-in.
 
 ### DS1809 unreachable-case
 

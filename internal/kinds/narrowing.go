@@ -456,16 +456,11 @@ func (n *narrowing) finding(symbol *graph.Symbol, code, visibility, message stri
 }
 
 // UnreachableExport reports an unused exported declaration of a package nothing
-// outside can import: a main package, an external test package, or a package under an
-// internal tree.
-//
-// The subject is a candidate of the sweep, so the kind is the unused-exported answer
-// for a declaration whose export reaches nobody, and it needs no consumer
-// information: unimportability is a property of the package graph rather than of the
-// consumer set. Because the claim is about the package graph rather than about the
-// references, the subject may be declared in a test file, which is what puts an
-// exported declaration of an external test package in this population and in no
-// other.
+// outside can import: a main package, an external test package, or a package under
+// an internal tree. Unimportability is a property of the package graph, so the kind
+// needs no consumer information, and its subject may be declared in a test file: an
+// exported declaration of an external test package, or an exported test-file
+// declaration nothing reaches, is in this population and no other.
 func UnreachableExport(in *Input) ([]Finding, error) {
 	if in == nil || in.Sweep == nil {
 		return nil, nil
@@ -498,13 +493,14 @@ func UnreachableExport(in *Input) ([]Finding, error) {
 // declaration carrying a deprecation marker, a declaration only a test file
 // references, and a field of a struct.
 func (in *Input) unreachableExport(candidate *graph.Candidate, symbol *graph.Symbol) bool {
-	if !symbol.Exported || in.importable(symbol.PkgPath) {
-		return false
-	}
 	switch {
-	case candidate.TestOfDeadCode:
+	case !symbol.Exported:
 		return false
-	case symbol.Parent != "" && in.candidateOf(symbol.Parent) != nil:
+	case candidate.UnreferencedTest:
+		return in.unreferencedTestExport(candidate, symbol)
+	case in.importable(symbol.PkgPath), candidate.TestOfDeadCode:
+		return false
+	case in.deadParent(symbol):
 		return false
 	case interfaceDeclaration(symbol.Kind), in.readOrWriteSubject(candidate, symbol):
 		return false
@@ -515,6 +511,14 @@ func (in *Input) unreachableExport(candidate *graph.Candidate, symbol *graph.Sym
 	default:
 		return !member(symbol.Kind)
 	}
+}
+
+// unreferencedTestExport reports whether an exported test-file declaration nothing
+// reaches is this kind's population, whatever its package: no other program compiles
+// a test file, so its export reaches nobody.
+func (in *Input) unreferencedTestExport(candidate *graph.Candidate, symbol *graph.Symbol) bool {
+	return !member(symbol.Kind) && !interfaceDeclaration(symbol.Kind) && !in.deadParent(symbol) &&
+		!in.readOrWriteSubject(candidate, symbol)
 }
 
 // unreachableMessage is what one unreachable-export finding says, in the reader's
