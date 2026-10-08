@@ -570,6 +570,7 @@ func (p *referencePass) inspectExcept(node ast.Node, encl SymbolID, skip ast.Nod
 			p.markCallee(n.Fun)
 			p.markDelete(n)
 			p.readUnsafeConversion(n, encl)
+			p.readContainerKeys(n, encl)
 		case *ast.BinaryExpr, *ast.SwitchStmt, *ast.MapType, *ast.IndexExpr:
 			p.readComparedFields(n, encl)
 		}

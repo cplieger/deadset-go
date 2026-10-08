@@ -1,0 +1,78 @@
+One printed value whose fields hold types with a String or an Error method: an
+exported field, a field of a defined struct type, a field of a struct type with no
+name, an element of a slice field, a map value of a defined map type, an embedded
+field, an embedded field of an unexported type whose method the struct holding it
+promotes, an unexported field and an interface-typed field.
+
+-- go.mod --
+module example.com/fields
+
+go 1.27.0
+-- fields.go --
+package fields
+
+import "fmt"
+
+type Level int
+
+func (Level) Error() string { return "level" }
+
+type Code int
+
+func (Code) Error() string { return "code" }
+
+type Tag int
+
+func (Tag) String() string { return "tag" }
+
+type Item int
+
+func (Item) String() string { return "item" }
+
+type Value int
+
+func (Value) String() string { return "value" }
+
+type Table map[string]Value
+
+type Base int
+
+func (Base) String() string { return "base" }
+
+type local int
+
+func (local) String() string { return "local" }
+
+type Hidden int
+
+func (Hidden) String() string { return "hidden" }
+
+type Behind int
+
+func (Behind) String() string { return "behind" }
+
+type Detail struct {
+	Code Code
+}
+
+type Wrapper struct {
+	local
+}
+
+type Event struct {
+	Base
+	Wrap   Wrapper
+	Level  Level
+	Detail Detail
+	Meta   struct{ Tag Tag }
+	Items  []Item
+	Table  Table
+	note   Hidden
+	Held   fmt.Stringer
+}
+
+// Print prints one event.
+func Print(e Event) {
+	e.Held = Behind(0)
+	fmt.Println(e)
+}

@@ -19,7 +19,7 @@ Nine rules of that classification answer most questions about a symbol the analy
 - A selector resolves to the field or method it selects rather than to the enclosing type, and a selector through an embedded field records a read of each field on the path.
 - The left side of an assignment, the operand of `++`, `--` or a compound assignment, a field key in a composite literal, an index or map assignment and a `delete` are writes. Everything else is a read.
 - A store through a struct field holding a map, a slice or a pointer reads the field, because the store lands in shared storage. Through a field holding an array or a struct, it writes the field.
-- A struct value used as an operand of `==` or `!=`, as a map key, or as a switch tag or case expression reads every field of that type. It also reads every field of every struct field beneath it, because equality reads them all.
+- A struct value used as an operand of `==` or `!=`, as a map key, or as a switch tag or case expression reads every field of that type. It also reads every field of every struct field beneath it, because equality reads them all. A key handed to a method of `sync.Map` or to `context.WithValue`, and the old value a compare-and-swap or compare-and-delete compares, is read the same way.
 - `x = append(x, v)` reads nothing of `x`, because the read inside the call is the mechanics of the store. `y = append(x, v)` reads `x`.
 - The operand of `&` is a read, and `*p = v` reads `p`, because the write lands on the pointee rather than on the symbol.
 - A conversion between a pointer and `unsafe.Pointer` reads every field the pointed-to type lays out, through nested structs and arrays. A struct with a `structs.HostLayout` field reads all its fields the same way.

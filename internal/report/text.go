@@ -75,8 +75,8 @@ func withheldLine(withheld *Withheld) string {
 		", shown with analysis.min_confidence set to " + lowest
 }
 
-// summary is the report's totals in one line: every count the totals hold, in the
-// order the report declares them.
+// summary is the report's totals in one line: every count but the withheld ones,
+// which the withheld line names, in the order the report declares them.
 func summary(totals *Totals) string {
 	return fmt.Sprintf("summary: %s (%d allow, %d warn, %d deny), %s, %s, %s, %s, %d pending, %d omitted",
 		plural(totals.Findings, "finding", "findings"),

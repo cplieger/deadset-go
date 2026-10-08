@@ -57,8 +57,8 @@ func Decode(data []byte) error {
 }
 
 // Store hands two collections to a method the load did not read.
-func Store(m *sync.Map) int {
-	m.Store("listed", []*Listed{{Name: "a"}})
-	m.Store("mapped", map[string]Mapped{"a": {ID: "1"}})
+func Store(p *sync.Pool) int {
+	p.Put([]*Listed{{Name: "a"}})
+	p.Put(map[string]Mapped{"a": {ID: "1"}})
 	return len([]Kept{{}})
 }

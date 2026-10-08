@@ -612,7 +612,7 @@ func (f *formatFlow) retain(t types.Type, at token.Pos, detail string) error {
 	if err != nil {
 		return err
 	}
-	for _, named := range namedTypesReached(t) {
+	for _, named := range formattedTypes(t) {
 		for m := range named.Origin().Methods() {
 			if rendersAString(m) {
 				f.kept.record(m, site, detail)
@@ -633,4 +633,65 @@ func rendersAString(m *types.Func) bool {
 		return false
 	}
 	return types.Identical(sig.Results().At(0).Type(), types.Typ[types.String])
+}
+
+// formattedTypes returns every defined type the machinery formats a value of t
+// through: the types the value is composed of, and those an embedded or exported
+// field of a struct type among them holds, defined or with no name, at any depth.
+// The walk stops at an interface, whose dynamic type is not seen here, and at an
+// unexported field, which is printed without a method call.
+func formattedTypes(t types.Type) []*types.Named {
+	w := formatWalk{seen: make(map[string]bool), walked: make(map[*types.Struct]bool)}
+	for queue := []types.Type{t}; len(queue) > 0; {
+		next := queue[0]
+		queue = append(queue[1:], w.step(next)...)
+	}
+	return w.found
+}
+
+// formatWalk is the state of one [formattedTypes] walk.
+type formatWalk struct {
+	seen   map[string]bool
+	walked map[*types.Struct]bool
+	found  []*types.Named
+}
+
+// step records the defined types a value of t is composed of and returns the types
+// the walk continues to: the underlying type of each, and the fields of each struct.
+func (w *formatWalk) step(t types.Type) []types.Type {
+	named, structs := typesReached(t)
+	var next []types.Type
+	for _, one := range named {
+		key := types.TypeString(one, nil)
+		if w.seen[key] {
+			continue
+		}
+		w.seen[key] = true
+		w.found = append(w.found, one)
+		if st, isStruct := one.Underlying().(*types.Struct); isStruct {
+			structs = append(structs, st)
+		} else {
+			next = append(next, one.Underlying())
+		}
+	}
+	for _, st := range structs {
+		next = append(next, w.fields(st)...)
+	}
+	return next
+}
+
+// fields returns the types of the fields of one struct the machinery formats, once
+// per struct.
+func (w *formatWalk) fields(st *types.Struct) []types.Type {
+	if w.walked[st] {
+		return nil
+	}
+	w.walked[st] = true
+	var held []types.Type
+	for field := range st.Fields() {
+		if field.Exported() || field.Embedded() {
+			held = append(held, field.Type())
+		}
+	}
+	return held
 }

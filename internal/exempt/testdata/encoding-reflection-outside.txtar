@@ -1,12 +1,15 @@
 A package that hands values to a dependency module the load did not read. One value
 is registered with a function taking the empty interface; it satisfies an exported
 interface of the callee's package, an exported interface of a package that imports
-the callee's package, and an unexported interface of the callee's package. Another is
-returned through a method of an interface the dependency declares, and satisfies one
-exported and one unexported interface of that package. Two are decoded through a
+the callee's package, an unexported interface of the callee's package, an interface
+type literal the callee's package writes, and an unexported interface of a package the
+callee's package imports. Another is returned through a method of an interface the
+dependency declares, and satisfies one exported and one unexported interface of that
+package. Two are decoded through a
 dependency's decoder: one through a method that only decodes into its argument, one
-through a method that also prints it. Two are handed to dependency functions that are no
-decoder: one never uses its parameter, one has no body. The dependency is a module the
+through a method that also prints it. Three are handed to dependency functions that are no
+decoder: one never uses its parameter, one has no body, and one only stores it in a
+sync.Map. The dependency is a module the
 target requires and replaces with a directory of its own, so the archive loads with no
 network access.
 
@@ -37,8 +40,14 @@ func (Record) Label() string { return "record" }
 // Describe satisfies an exported interface of a package that imports the callee's package.
 func (Record) Describe() string { return "a record" }
 
-// Name satisfies only an unexported interface of the callee's package.
+// Name satisfies an unexported interface of the callee's package.
 func (Record) Name() string { return "record" }
+
+// Weight satisfies an interface type literal the callee's package writes.
+func (Record) Weight() int { return 1 }
+
+// Title satisfies only an unexported interface of a package the callee's package imports.
+func (Record) Title() string { return "record" }
 
 // Service is the value the plugin serves.
 type Service struct {
@@ -48,7 +57,7 @@ type Service struct {
 // Label satisfies an exported interface of the plugin interface's package.
 func (Service) Label() string { return "service" }
 
-// Name satisfies only an unexported interface of that package.
+// Name satisfies an unexported interface of that package.
 func (Service) Name() string { return "service" }
 
 type impl struct{}
@@ -88,6 +97,14 @@ type Discarded struct {
 // Label satisfies an exported interface of the callee's package.
 func (Discarded) Label() string { return "discarded" }
 
+// Kept is handed to a function that only stores it.
+type Kept struct {
+	Note string
+}
+
+// Label satisfies an exported interface of the callee's package.
+func (Kept) Label() string { return "kept" }
+
 // Run registers, serves and decodes.
 func Run(r io.Reader) error {
 	plugin.Register(&Record{})
@@ -105,6 +122,7 @@ func Run(r io.Reader) error {
 	}
 	plugin.Ignore(&Ignored{})
 	plugin.Discard(&Discarded{})
+	plugin.Keep(&Kept{})
 	println(describe.Version())
 	return nil
 }
@@ -120,6 +138,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"sync"
+
+	"example.com/plugin/diag"
 )
 
 // Plugin is implemented by a value the host serves.
@@ -154,6 +175,10 @@ func Register(v any) {
 	if l, ok := v.(Labeler); ok {
 		_ = l.Label()
 	}
+	if w, ok := v.(interface{ Weight() int }); ok {
+		_ = w.Weight()
+	}
+	diag.Note(v)
 }
 
 // Decoder decodes one document after another from a reader.
@@ -176,6 +201,11 @@ func (d *Decoder) DecodeAndPrint(v any) error {
 	return nil
 }
 
+var kept sync.Map
+
+// Keep stores v.
+func Keep(v any) { kept.Store("kept", v) }
+
 // Ignore accepts v and reads nothing of it.
 func Ignore(v any) {}
 
@@ -183,6 +213,20 @@ func Ignore(v any) {}
 func Discard(v any)
 -- plugin/discard.s --
 // Discard is implemented in assembly.
+-- plugin/diag/diag.go --
+// Package diag reports on the values the plugin package records.
+package diag
+
+type titler interface {
+	Title() string
+}
+
+// Note reads the title of v where v has one.
+func Note(v any) {
+	if t, ok := v.(titler); ok {
+		_ = t.Title()
+	}
+}
 -- plugin/describe/describe.go --
 // Package describe describes the values the plugin package serves.
 package describe

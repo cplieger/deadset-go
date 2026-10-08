@@ -140,6 +140,10 @@ type Input struct {
 	// later class reads rather than walking the program again.
 	conversions *[]graph.Conversion
 
+	// assert is what the packages outside the program can assert, read from their
+	// source on first use and shared by every class that asks ([assertableOf]).
+	assert *assertable
+
 	// Symbols is the inventory, for a class that reads a declaration's own
 	// properties rather than resolving an object.
 	Symbols []graph.Symbol

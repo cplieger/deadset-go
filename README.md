@@ -113,7 +113,7 @@ The report follows the [deadset contract](https://github.com/cplieger/deadset-sp
 
 ## Related projects
 
-deadset-go implements the [deadset contract](https://github.com/cplieger/deadset-spec), which fixes the issue codes, the report schema and the exit codes. It passes all 79 of the contract's conformance fixtures that carry a Go rendering, and every report names that result.
+deadset-go implements the [deadset contract](https://github.com/cplieger/deadset-spec), which fixes the issue codes, the report schema and the exit codes. It passes all 83 of the contract's conformance fixtures that carry a Go rendering, and every report names that result.
 
 - [deadset-ts](https://github.com/cplieger/deadset-ts) is the same analysis for TypeScript and JavaScript.
 - [deadset](https://github.com/cplieger/deadset) runs both analyzers as one command and merges their reports, resolving the references between Go and TypeScript code.
@@ -123,6 +123,7 @@ deadset-go implements the [deadset contract](https://github.com/cplieger/deadset
 - [Configuration and invocation](docs/configuration.md) lists every setting, verb, flag, suppression form and exit code.
 - [Issue kinds](docs/kinds.md) states what each code reports and what counts as a use.
 - [Exemption classes](docs/exemptions.md) explains the nine reasons a symbol is held back.
+- [The encoding-reflection class](docs/encoding-reflection.md) lists what encoders and reflection retain.
 - [How the analysis decides](docs/analysis.md) covers the roots, consumers, build configurations and cgo files.
 - [Conformance, platforms and non-goals](docs/conformance.md) gives the contract version, the conformance result, the platforms and the performance budget.
 

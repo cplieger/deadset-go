@@ -59,13 +59,16 @@ const (
 )
 
 // reach is what a destination retains of a value it is given: the methods it
-// resolves by name, whether it reads fields, and the packages outside the analysed
+// resolves by name, whether it reads fields, the packages outside the analysed
 // program the value reaches, each of which retains the methods by which the value
-// satisfies an interface that package can name.
+// satisfies an interface that package can name, and the standard containers that
+// store it, each of which retains only the methods by which it satisfies an
+// interface of the container's own package.
 type reach struct {
-	outside []*types.Package // ordered by path, each once
-	methods methodReach
-	fields  bool
+	outside   []*types.Package // ordered by path, each once
+	contained []*types.Package // ordered by path, each once
+	methods   methodReach
+	fields    bool
 
 	// keys are the tag keys of the encoders the fields are read through, where
 	// every reader of the fields is such an encoder, which skips a field its key
@@ -128,13 +131,20 @@ func (r reach) union(other reach) reach {
 	case r.keys != 0 && other.keys != 0:
 		joined.keys = r.keys | other.keys
 	}
-	joined.outside = slices.Clone(r.outside)
-	for _, pkg := range other.outside {
-		at, held := slices.BinarySearchFunc(joined.outside, pkg.Path(), func(p *types.Package, path string) int {
+	joined.outside = joinPackages(r.outside, other.outside)
+	joined.contained = joinPackages(r.contained, other.contained)
+	return joined
+}
+
+// joinPackages is the packages of two lists ordered by path, each once.
+func joinPackages(held, other []*types.Package) []*types.Package {
+	joined := slices.Clone(held)
+	for _, pkg := range other {
+		at, found := slices.BinarySearchFunc(joined, pkg.Path(), func(p *types.Package, path string) int {
 			return strings.Compare(p.Path(), path)
 		})
-		if !held {
-			joined.outside = slices.Insert(joined.outside, at, pkg)
+		if !found {
+			joined = slices.Insert(joined, at, pkg)
 		}
 	}
 	return joined
@@ -144,7 +154,13 @@ func (r reach) union(other reach) reach {
 func (r reach) covers(other reach) bool {
 	widened := r.union(other)
 	return widened.methods == r.methods && widened.fields == r.fields && len(widened.outside) == len(r.outside) &&
-		widened.keys == r.keys && widened.xmlName == r.xmlName
+		len(widened.contained) == len(r.contained) && widened.keys == r.keys && widened.xmlName == r.xmlName
+}
+
+// storesOnly reports whether every destination of this reach is a standard
+// container, which hands the value back unchanged and so reads nothing beneath it.
+func (r reach) storesOnly() bool {
+	return len(r.contained) > 0 && r.methods == 0 && !r.fields && !r.xmlName && len(r.outside) == 0
 }
 
 // methodsResolvedByName are the methods a destination resolves by name on a value it
@@ -279,16 +295,18 @@ const (
 // reaches through an interface-typed field to the types the program stores in it
 // ([storedTypes]), and a promoted method is retained where the embedded type is.
 func EncodingReflectionDetector(in *Input) ([]graph.Exemption, error) {
+	assert := assertableOf(in)
 	f := &encodingFlow{
 		kept:           newRetention(in, EncodingReflection),
 		targets:        conversionTargets(in.Result.Packages),
 		unknownMembers: namesFunction(in, jsonPackages, unknownMemberRefusals),
 		findsMethods:   namesFunction(in, map[string]bool{reflectPackage: true}, methodFinders),
 		closures:       make(map[string]*importClosure),
+		assert:         assert,
 		satisfying:     make(map[satisfactionKey]map[string]bool),
 		methodNames:    make(map[*types.Named]map[string]bool),
 	}
-	f.decode = newDecoders(f)
+	f.decode = newDecoders(f, assert.source)
 	f.edge = newBoundary(in, f.namedDestinationParameter)
 	f.stored = storedTypesOf(in, f.edge.sites)
 	if err := f.walkCalls(); err != nil {
@@ -308,7 +326,8 @@ type encodingFlow struct {
 	kept        *retention
 	edge        *boundary
 	stored      *storedTypes
-	closures    map[string]*importClosure           // by package path, computed on first use
+	closures    map[string]*importClosure // by package path, computed on first use
+	assert      *assertable
 	outside     *[]*types.Package                   // the program's outside imports, on first use
 	byName      map[string][]interfaceMethod        // their interfaces' methods, on first use
 	satisfying  map[satisfactionKey]map[string]bool // the method names retained
@@ -383,7 +402,7 @@ func (f *encodingFlow) walkFile(info *types.Info, file *ast.File) error {
 				return true
 			}
 			if d, reaches := f.encodingDestination(fn); reaches {
-				failed = f.arguments(info, enclosing, call.Args, d)
+				failed = f.arguments(info, enclosing, call.Args, &d)
 				return failed == nil
 			}
 			failed = f.crossingArguments(info, call)
@@ -406,7 +425,7 @@ func (f *encodingFlow) crossingArguments(info *types.Info, call *ast.CallExpr) e
 		if at, supplies := parameterAt(callee.Signature(), i); supplies && !f.edge.declares(callee) {
 			if decoded, decodes := f.decode.at(callee, at); decodes {
 				d := destination{detail: "decoded by " + callee.FullName(), reach: decoded}
-				if err := f.retain(info.TypeOf(arg), arg.Pos(), d); err != nil {
+				if err := f.retain(info.TypeOf(arg), arg.Pos(), &d); err != nil {
 					return err
 				}
 				continue
@@ -417,7 +436,7 @@ func (f *encodingFlow) crossingArguments(info *types.Info, call *ast.CallExpr) e
 			continue
 		}
 		d := destination{detail: "passed to " + out.callee.FullName(), reach: out.reach}
-		if err := f.retain(info.TypeOf(arg), arg.Pos(), d); err != nil {
+		if err := f.retain(info.TypeOf(arg), arg.Pos(), &d); err != nil {
 			return err
 		}
 	}
@@ -427,7 +446,7 @@ func (f *encodingFlow) crossingArguments(info *types.Info, call *ast.CallExpr) e
 // arguments records the types the arguments of one destination call in the body of
 // enclosing carry. A slice, an array or a map holding interface values carries the
 // types the program stores in it ([storedTypes.argument]).
-func (f *encodingFlow) arguments(info *types.Info, enclosing *types.Func, args []ast.Expr, d destination) error {
+func (f *encodingFlow) arguments(info *types.Info, enclosing *types.Func, args []ast.Expr, d *destination) error {
 	for _, arg := range args {
 		// The argument's own type is what flows, which for a parameter typed as
 		// an interface is the type written at the call rather than the interface
@@ -468,7 +487,7 @@ func (f *encodingFlow) walkReturns() error {
 			detail: "returned through " + answered.FullName(),
 			reach:  reach{methods: reachEncoding | reachDecoding, fields: true, outside: []*types.Package{answered.Pkg()}},
 		}
-		if err := f.returned(one, d); err != nil {
+		if err := f.returned(one, &d); err != nil {
 			return err
 		}
 	}
@@ -506,7 +525,7 @@ func (f *encodingFlow) outsideInterfaceMethods() map[string][]interfaceMethod {
 	}
 	f.byName = make(map[string][]interfaceMethod)
 	for _, pkg := range f.outsidePackages() {
-		for _, iface := range declaredInterfaces(pkg) {
+		for _, iface := range declaredInterfaces(pkg, false) {
 			for m := range iface.Methods() {
 				f.byName[m.Name()] = append(f.byName[m.Name()], interfaceMethod{iface: iface, method: m})
 			}
@@ -517,7 +536,7 @@ func (f *encodingFlow) outsideInterfaceMethods() map[string][]interfaceMethod {
 
 // returned records the value each return statement of one method hands back at an
 // interface-typed result, a function literal's returns excepted.
-func (f *encodingFlow) returned(one programFunction, d destination) error {
+func (f *encodingFlow) returned(one programFunction, d *destination) error {
 	results := one.fn.Signature().Results()
 	var failed error
 	ast.Inspect(one.decl.Body, func(n ast.Node) bool {
@@ -561,7 +580,7 @@ func (f *encodingFlow) walkConversions() error {
 		if !reaches {
 			continue
 		}
-		if err := f.retain(c.From, c.Site, destination{
+		if err := f.retain(c.From, c.Site, &destination{
 			detail: "converted to " + name, reach: reach{methods: reachExportedMethods, fields: true},
 		}); err != nil {
 			return err
@@ -572,12 +591,16 @@ func (f *encodingFlow) walkConversions() error {
 
 // retain records what every defined type a destination walking a value of t reads
 // keeps.
-func (f *encodingFlow) retain(t types.Type, at token.Pos, d destination) error {
+func (f *encodingFlow) retain(t types.Type, at token.Pos, d *destination) error {
 	site, err := f.kept.site(at)
 	if err != nil {
 		return err
 	}
-	for _, named := range f.encoderReach(t) {
+	reached := f.encoderReach(t)
+	if d.reach.storesOnly() {
+		reached = concreteTypes(namedTypesReached(t))
+	}
+	for _, named := range reached {
 		f.members(named, site, d)
 	}
 	return nil
@@ -587,9 +610,9 @@ func (f *encodingFlow) retain(t types.Type, at token.Pos, d destination) error {
 // resolves by name, the methods an outside package can name, and, where it reads
 // fields, the exported fields and every field carrying a tag, because a tagged field
 // is named by its tag and not by its visibility.
-func (f *encodingFlow) members(named *types.Named, site token.Position, d destination) {
+func (f *encodingFlow) members(named *types.Named, site token.Position, d *destination) {
 	origin := named.Origin()
-	every, satisfying := f.outsideMethods(named, d.reach.outside)
+	every, satisfying := f.outsideMethods(named, d.reach)
 	for m := range origin.Methods() {
 		if d.reach.methods.reads(m) || (every && m.Exported()) || satisfying[m.Name()] {
 			f.kept.record(m, site, d.detail)
@@ -603,7 +626,7 @@ func (f *encodingFlow) members(named *types.Named, site token.Position, d destin
 // fields records the fields of one struct a destination reads, and those of each
 // struct type with no name a field it visits holds, whose fields are symbols of the
 // type that holds the struct.
-func (f *encodingFlow) fields(st *types.Struct, site token.Position, d destination) {
+func (f *encodingFlow) fields(st *types.Struct, site token.Position, d *destination) {
 	for i := range st.NumFields() {
 		field := st.Field(i)
 		visited := (field.Exported() || st.Tag(i) != "") && !d.reach.keys.skips(st.Tag(i))
@@ -637,6 +660,9 @@ func (f *encodingFlow) encodingDestination(fn *types.Func) (destination, bool) {
 	pkg := fn.Pkg()
 	if pkg == nil {
 		return destination{}, false
+	}
+	if _, contains := graph.StandardContainer(fn); contains {
+		return destination{detail: "passed to " + fn.FullName(), reach: reach{contained: []*types.Package{pkg}}}, true
 	}
 	detail := "passed to " + fn.FullName()
 	if pkg.Path() == reflectPackage && (fn.Name() == deepEqual || !f.findsMethods) {
@@ -684,43 +710,27 @@ func namesFunction(in *Input, pkgPaths, names map[string]bool) bool {
 // import closure lets it resolve any exported method by name.
 var templatePackages = map[string]bool{"text/template": true, "html/template": true}
 
-// importClosure is what one package outside the analysed program can name: the
-// exported interfaces it, the packages it imports at any depth, and the outside
-// packages of the program's import closure that import it declare, and whether a
-// template engine is among the packages it imports.
+// importClosure is what one package outside the analysed program can name: every
+// interface it declares or writes as a literal, the exported interfaces the packages
+// it imports at any depth and the outside packages of the program's import closure
+// that import it declare, and whether a template engine is among the packages it
+// imports.
 type importClosure struct {
 	interfaces []*types.Interface
 	templates  bool
 }
 
-// closureOf reads one package's import closure on first use. A generic interface is
-// skipped, because [types.Implements] decides no uninstantiated one, and so is an
-// interface holding a type term or embedding comparable, which only constrains a
-// type parameter.
+// closureOf reads one package's import closure on first use.
 func (f *encodingFlow) closureOf(pkg *types.Package) *importClosure {
 	if held, known := f.closures[pkg.Path()]; known {
 		return held
 	}
-	closure := &importClosure{}
-	seen := map[string]bool{pkg.Path(): true}
-	queue := []*types.Package{pkg}
-	for len(queue) > 0 {
-		one := queue[0]
-		queue = queue[1:]
-		closure.templates = closure.templates || templatePackages[one.Path()]
-		closure.interfaces = append(closure.interfaces, declaredInterfaces(one)...)
-		for _, imported := range one.Imports() {
-			if !seen[imported.Path()] {
-				seen[imported.Path()] = true
-				queue = append(queue, imported)
-			}
-		}
-	}
+	imported := f.assert.importedBy(pkg)
+	closure := &importClosure{templates: imported.templates}
+	closure.interfaces = append(slices.Clone(f.assert.ownInterfaces(pkg)), imported.interfaces...)
 	for _, importer := range f.outsidePackages() {
-		if !seen[importer.Path()] && slices.ContainsFunc(importer.Imports(), func(p *types.Package) bool {
-			return p.Path() == pkg.Path()
-		}) {
-			closure.interfaces = append(closure.interfaces, declaredInterfaces(importer)...)
+		if slices.ContainsFunc(importer.Imports(), func(p *types.Package) bool { return p.Path() == pkg.Path() }) {
+			closure.interfaces = append(closure.interfaces, declaredInterfaces(importer, false)...)
 		}
 	}
 	f.closures[pkg.Path()] = closure
@@ -762,14 +772,17 @@ func (f *encodingFlow) outsidePackages() []*types.Package {
 	return found
 }
 
-// declaredInterfaces is every exported non-generic interface with methods one
-// package declares at package level whose type set is its method set.
-func declaredInterfaces(pkg *types.Package) []*types.Interface {
+// declaredInterfaces is every non-generic interface with methods one package
+// declares at package level whose type set is its method set, the unexported ones
+// only where every is set. A generic interface is skipped, because
+// [types.Implements] decides no uninstantiated one, and so is an interface holding a
+// type term or embedding comparable, which only constrains a type parameter.
+func declaredInterfaces(pkg *types.Package, every bool) []*types.Interface {
 	var found []*types.Interface
 	scope := pkg.Scope()
 	for _, name := range scope.Names() {
 		typeName, isType := scope.Lookup(name).(*types.TypeName)
-		if !isType || typeName.IsAlias() || !typeName.Exported() {
+		if !isType || typeName.IsAlias() || (!every && !typeName.Exported()) {
 			continue
 		}
 		named, isNamed := typeName.Type().(*types.Named)
@@ -787,32 +800,44 @@ func declaredInterfaces(pkg *types.Package) []*types.Interface {
 // outsideMethods is what the packages outside the program a value reaches retain of
 // one type's methods: every exported method where an import closure holds a template
 // engine, and otherwise the methods by which the type, or a pointer to it,
-// implements an interface a closure declares.
-func (f *encodingFlow) outsideMethods(named *types.Named, outside []*types.Package) (every bool, names map[string]bool) {
-	if len(outside) == 0 {
+// implements an interface a closure declares, or an interface a container that
+// stores the value declares or writes.
+func (f *encodingFlow) outsideMethods(named *types.Named, r reach) (every bool, names map[string]bool) {
+	if len(r.outside) == 0 && len(r.contained) == 0 {
 		return false, nil
 	}
 	names = make(map[string]bool)
-	for _, pkg := range outside {
+	for _, pkg := range r.outside {
 		closure := f.closureOf(pkg)
 		if closure.templates {
 			return true, nil
 		}
-		key := satisfactionKey{named: named, pkg: pkg.Path()}
-		held, known := f.satisfying[key]
-		if !known {
-			held = satisfiedMethods(named, f.declaredNames(named), closure.interfaces)
-			f.satisfying[key] = held
-		}
-		maps.Copy(names, held)
+		maps.Copy(names, f.satisfied(satisfactionKey{named: named, pkg: pkg.Path()}, closure.interfaces))
+	}
+	for _, pkg := range r.contained {
+		key := satisfactionKey{named: named, pkg: pkg.Path(), contained: true}
+		maps.Copy(names, f.satisfied(key, f.assert.ownInterfaces(pkg)))
 	}
 	return false, names
 }
 
-// satisfactionKey is one type and one package outside the program it reaches.
+// satisfied names the methods by which one type satisfies one package's interfaces,
+// computed once per type and package.
+func (f *encodingFlow) satisfied(key satisfactionKey, interfaces []*types.Interface) map[string]bool {
+	held, known := f.satisfying[key]
+	if !known {
+		held = satisfiedMethods(key.named, f.declaredNames(key.named), interfaces)
+		f.satisfying[key] = held
+	}
+	return held
+}
+
+// satisfactionKey is one type and one package outside the program it reaches, as
+// a callee or as a container that stores it.
 type satisfactionKey struct {
-	named *types.Named
-	pkg   string
+	named     *types.Named
+	pkg       string
+	contained bool
 }
 
 // declaredNames is the name of every method in the method set of a pointer to the
@@ -821,12 +846,19 @@ func (f *encodingFlow) declaredNames(named *types.Named) map[string]bool {
 	if held, known := f.methodNames[named]; known {
 		return held
 	}
+	held := declaredMethodNames(named)
+	f.methodNames[named] = held
+	return held
+}
+
+// declaredMethodNames is the name of every method in the method set of a pointer
+// to the type.
+func declaredMethodNames(named *types.Named) map[string]bool {
 	set := types.NewMethodSet(types.NewPointer(named))
 	held := make(map[string]bool, set.Len())
 	for selection := range set.Methods() {
 		held[selection.Obj().Name()] = true
 	}
-	f.methodNames[named] = held
 	return held
 }
 

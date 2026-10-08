@@ -217,8 +217,9 @@ func staleResult(stale *StaleSuppression, index map[string]int, hashes *lineHash
 
 // relatedLocations is every position a finding names beyond its own, numbered from
 // one in the order the mapping fixes: the implementations of an interface, the
-// positions a subject is written at, then every other member of a component the run
-// lists in full.
+// positions a subject is written at, then every member of a component the run lists
+// in full other than the finding's own declaration, the member with both its
+// reference and its path.
 func relatedLocations(found *kinds.Finding) []sarifLocation {
 	var held []sarifLocation
 	add := func(label, path string, line, column, endLine int) {
@@ -239,7 +240,7 @@ func relatedLocations(found *kinds.Finding) []sarifLocation {
 		add(labelWrite, at.Path, at.Line, at.Column, at.EndLine)
 	}
 	for _, one := range found.Component.Members {
-		if one.Ref != found.Symbol.Ref {
+		if one.Ref != found.Symbol.Ref || one.Position.Path != found.Position.Path {
 			add(labelMember, one.Position.Path, one.Position.Line, one.Position.Column, one.Position.EndLine)
 		}
 	}

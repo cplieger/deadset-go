@@ -255,3 +255,35 @@ func TestStringOperandsReportsHowFarTheVerbsReachedAndWhetherAnIndexAppeared(t *
 		})
 	}
 }
+
+// The machinery formats the exported fields of a value at any depth and calls each
+// field type's own method there, through a defined struct type, a struct type with
+// no name, a collection and an embedded field alike. An unexported field is printed
+// without a method call, and an interface-typed field holds a type the walk does
+// not see.
+func TestFormatVerbContractRetainsTheMethodsOfTheFieldsItFormats(t *testing.T) {
+	refs := retainedRefs(t, analysisOf(t, "format-verb-fields.txtar", Options{}), FormatVerbContract)
+
+	for _, test := range []struct {
+		reach    string
+		typeName string
+		want     []string
+	}{
+		{reach: "an exported field", typeName: "Level", want: qualify("example.com/fields", "Level", "Error")},
+		{reach: "a field of a defined struct type", typeName: "Code", want: qualify("example.com/fields", "Code", "Error")},
+		{reach: "a field of a struct type with no name", typeName: "Tag", want: qualify("example.com/fields", "Tag", "String")},
+		{reach: "an element of a slice field", typeName: "Item", want: qualify("example.com/fields", "Item", "String")},
+		{reach: "a value of a defined map type", typeName: "Value", want: qualify("example.com/fields", "Value", "String")},
+		{reach: "an embedded field", typeName: "Base", want: qualify("example.com/fields", "Base", "String")},
+		{reach: "an embedded field of an unexported type whose method is promoted", typeName: "local", want: qualify("example.com/fields", "local", "String")},
+		{reach: "an unexported field", typeName: "Hidden", want: nil},
+		{reach: "an interface-typed field", typeName: "Behind", want: nil},
+	} {
+		t.Run(test.typeName, func(t *testing.T) {
+			if got := membersOf(refs, test.typeName); !slices.Equal(got, test.want) {
+				t.Errorf("FormatVerbContractDetector(format-verb-fields.txtar) retained, for %s reached through %s,\ngot  %v\nwant %v",
+					test.typeName, test.reach, got, test.want)
+			}
+		})
+	}
+}

@@ -275,6 +275,7 @@ type Terms interface{ ~int; M() }
 type Comparable interface{ comparable; M() }
 type Empty interface{}
 type Alias = Plain
+type hidden interface{ N() }
 `
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "p.go", source, 0)
@@ -285,12 +286,20 @@ type Alias = Plain
 	if err != nil {
 		t.Fatalf("Setup: check: %v", err)
 	}
-	var got []string
-	for _, iface := range declaredInterfaces(pkg) {
-		got = append(got, types.TypeString(iface, nil))
-	}
-	if want := []string{"interface{M()}"}; !slices.Equal(got, want) {
-		t.Errorf("declaredInterfaces(example.com/p) = %v, want %v", got, want)
+	for _, tc := range []struct {
+		want  []string
+		every bool
+	}{
+		{every: false, want: []string{"interface{M()}"}},
+		{every: true, want: []string{"interface{M()}", "interface{N()}"}},
+	} {
+		var got []string
+		for _, iface := range declaredInterfaces(pkg, tc.every) {
+			got = append(got, types.TypeString(iface, nil))
+		}
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("declaredInterfaces(example.com/p, %t) = %v, want %v", tc.every, got, tc.want)
+		}
 	}
 }
 
@@ -695,16 +704,44 @@ func TestEncodingReflectionRetainsWhatADependencyCanName(t *testing.T) {
 		typeName string
 		want     []string
 	}{
-		{desc: "registered with a function taking the empty interface", typeName: "Record", want: outsideRefs("Record", "Describe", "Label")},
-		{desc: "returned through a method of the dependency's interface", typeName: "Service", want: outsideRefs("Service", "Addr", "Label")},
+		{desc: "registered with a function taking the empty interface", typeName: "Record", want: outsideRefs("Record", "Describe", "Label", "Name", "Weight")},
+		{desc: "returned through a method of the dependency's interface", typeName: "Service", want: outsideRefs("Service", "Addr", "Label", "Name")},
 		{desc: "decoded through a method that only decodes", typeName: "Settings", want: nil},
 		{desc: "decoded through a method that also prints", typeName: "Profile", want: outsideRefs("Profile", "Email", "String")},
 		{desc: "handed to a function that never uses its parameter", typeName: "Ignored", want: outsideRefs("Ignored", "Label", "Note")},
 		{desc: "handed to a function with no body", typeName: "Discarded", want: outsideRefs("Discarded", "Label", "Note")},
+		{desc: "handed to a function that only stores it", typeName: "Kept", want: outsideRefs("Kept", "Label", "Note")},
 	} {
 		t.Run(test.typeName, func(t *testing.T) {
 			if got := membersOf(refs, test.typeName); !slices.Equal(got, test.want) {
 				t.Errorf("EncodingReflectionDetector(encoding-reflection-outside.txtar) retained, for %s (%s),\ngot  %v\nwant %v",
+					test.typeName, test.desc, got, test.want)
+			}
+		})
+	}
+}
+
+// A standard container stores a value and hands it back to the program unchanged,
+// so the value keeps no field and only the methods by which it satisfies an
+// interface of the container's own package, whether the program stores it directly
+// or through a function of its own.
+func TestEncodingReflectionRetainsWhatAStandardContainerReads(t *testing.T) {
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-standard-containers.txtar", Options{}), EncodingReflection)
+
+	for _, test := range []struct {
+		desc     string
+		typeName string
+		want     []string
+	}{
+		{desc: "stored in a sync.Map", typeName: "entry", want: qualify("example.com/stored", "entry", "Lock", "Unlock")},
+		{desc: "the type of a field of a stored value", typeName: "guard", want: nil},
+		{desc: "stored in an atomic.Value", typeName: "role", want: nil},
+		{desc: "the value of a context", typeName: "tracer", want: qualify("example.com/stored", "tracer", "String")},
+		{desc: "stored through a function of the program", typeName: "boxed", want: qualify("example.com/stored", "boxed", "Lock", "Unlock")},
+	} {
+		t.Run(test.typeName, func(t *testing.T) {
+			if got := membersOf(refs, test.typeName); !slices.Equal(got, test.want) {
+				t.Errorf("EncodingReflectionDetector(encoding-reflection-standard-containers.txtar) retained, for %s (%s),\ngot  %v\nwant %v",
 					test.typeName, test.desc, got, test.want)
 			}
 		})
@@ -729,8 +766,8 @@ func TestEncodingReflectionNamesTheCalleeAValueCrossedInto(t *testing.T) {
 		}
 	}
 	for ref, want := range map[string]string{
-		"go://example.com/opaque#Crossing.Name": "passed to (*sync.Map).Store",
-		"go://example.com/opaque#Nested.Label":  "passed to (*sync.Map).Store",
+		"go://example.com/opaque#Crossing.Name": "passed to (*sync.Pool).Put",
+		"go://example.com/opaque#Nested.Label":  "passed to (*sync.Pool).Put",
 		"go://example.com/opaque#Wrapped.Name":  "passed to example.com/opaque.respond",
 		"go://example.com/opaque#Chained.Name":  "passed to example.com/opaque.relay",
 		"go://example.com/opaque#Encoded.Name":  "passed to example.com/opaque.keep",
@@ -762,7 +799,7 @@ func TestFormatVerbContractAloneRecordsAnOperandOfTheFormattingPackage(t *testin
 // The mechanism text of the class, as the Contract states it for this language. The
 // class implements this text; a pin bump that moves it must be read against the
 // destination table before this literal moves with it.
-const encodingReflectionMechanismSHA256 = "5ee64006da92cdf0ec2730a1a58fc0eebb3de58dd4df769b2822b6e0968673c4"
+const encodingReflectionMechanismSHA256 = "25902c8bf950966ab032ad8bf9c429f42a9a2b727fdd179e7b45118804f01852"
 
 func TestEncodingReflectionImplementsTheContractsMechanismText(t *testing.T) {
 	body, err := spec.Contract.ReadFile("contract/exemptions.json")
