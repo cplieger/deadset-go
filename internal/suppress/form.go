@@ -63,7 +63,7 @@ var referenceForms = [...]string{
 	`^go://GO_PATH#GO_PATH(?:@GO_VERSION)?:replace$`,
 	`^ts://TS_PACKAGE/TS_FILE#$`,
 	`^ts://TS_PACKAGE/TS_FILE#TS_HEAD$`,
-	`^ts://TS_PACKAGE/TS_FILE#TS_HEAD:alias$`,
+	`^ts://TS_PACKAGE/TS_FILE#(?:TS_QUOTED\.)?TS_HEAD:alias$`,
 	`^ts://TS_PACKAGE/TS_FILE#TS_HEAD(?:\.TS_MEMBER)+$`,
 	`^ts://TS_PACKAGE/TS_FILE#TS_HEAD(?:\.TS_MEMBER)+:static$`,
 	`^ts://TS_PACKAGE/TS_FILE#TS_HEAD(?:\.TS_MEMBER)*(?::static)?<TS_IDENT>$`,

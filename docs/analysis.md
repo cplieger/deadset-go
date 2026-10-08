@@ -129,13 +129,14 @@ One further limit is recorded rather than worked around. A directory whose every
 
 ## What leaves the analysis
 
-The analysis has a boundary, and what crosses it is treated as fully reachable rather than as dead. Five things cross that boundary:
+The analysis has a boundary, and what crosses it is treated as fully reachable rather than as dead. Six things cross that boundary:
 
 - A struct value handed to an empty-interface parameter of a function outside the program flows into `encoding-reflection` with what that function's package can name. A wrapper that forwards its own such parameter inherits the crossing, as [Exemption classes](exemptions.md#what-leaves-the-analysis-is-fully-reachable) describes.
 - Evidence a test file carries does not hold under a production analysis.
 - A compiled file outside the target root is dropped at the load.
 - A reference from a declared consumer into the target is an ordinary reference, live under both relations.
 - An interface-typed field reaches the types the program stores in it, and no other dynamic type.
+- A value converted to a defined interface of a package outside the program keeps what that package can assert on it, as [Exemption classes](exemptions.md#interface-satisfaction) describes.
 
 ## Cross-language edges
 

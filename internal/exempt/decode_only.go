@@ -2,15 +2,11 @@ package exempt
 
 import (
 	"go/ast"
-	"go/build"
 	"go/importer"
-	"go/parser"
 	"go/token"
 	"go/types"
-	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 )
 
 // decoders answers which parameters of a function only decode into the value they
@@ -23,29 +19,19 @@ type decoders struct {
 	flow     *encodingFlow
 	answered map[*types.Func]map[int]reach
 	pending  map[*types.Func]bool
-	sources  map[string]*checkedSource
+	reader   *sources
 	declared map[*types.Func]programFunction // the program's and every checked source's
-	fset     *token.FileSet
-	context  build.Context // the configuration's, which selects a source's files
 }
 
-// checkedSource is one package outside the program, parsed and type-checked from
-// its source directory, and false where that failed.
-type checkedSource struct {
-	decls map[string]programFunction // by the declaring file and line of the name
-	ok    bool
-}
-
-// newDecoders starts the answer over one configuration.
-func newDecoders(f *encodingFlow) *decoders {
+// newDecoders starts the answer over one configuration, reading source through one
+// reader.
+func newDecoders(f *encodingFlow, source *sources) *decoders {
 	d := &decoders{
 		flow:     f,
 		answered: make(map[*types.Func]map[int]reach),
 		pending:  make(map[*types.Func]bool),
-		sources:  make(map[string]*checkedSource),
+		reader:   source,
 		declared: make(map[*types.Func]programFunction),
-		fset:     token.NewFileSet(),
-		context:  f.kept.in.Result.Configuration.Context(),
 	}
 	for _, one := range programFunctions(f.kept.in) {
 		d.declared[one.fn.Origin()] = one
@@ -159,7 +145,7 @@ func (d *decoders) receives(callee *types.Func, at int) (reach, bool) {
 // decodingOnly reports whether a destination fills a value's fields without reading
 // them and resolves only decoding methods.
 func decodingOnly(r reach) bool {
-	return r.methods&^reachDecoding == 0 && !r.fields && len(r.outside) == 0
+	return r.methods&^reachDecoding == 0 && !r.fields && len(r.outside) == 0 && len(r.contained) == 0
 }
 
 // usedParameter is the variable an argument names, unchanged or converted to an
@@ -204,51 +190,20 @@ func (d *decoders) body(fn *types.Func) (*ast.FuncDecl, *types.Info) {
 	return one.decl, one.info
 }
 
-// source parses and type-checks the package in one directory, its imports resolved
-// to the packages the loaded program holds and otherwise to the toolchain's export
-// data, so its objects are the program's own.
+// source is the package in one directory, read through the shared reader, with
+// its function declarations indexed on first use.
 func (d *decoders) source(pkg *types.Package, dir string) *checkedSource {
-	if held, known := d.sources[dir]; known {
+	held := d.reader.read(pkg, dir)
+	if !held.ok || held.decls != nil {
 		return held
 	}
-	held := &checkedSource{decls: make(map[string]programFunction)}
-	d.sources[dir] = held
-	files := d.parseDir(pkg, dir)
-	if len(files) == 0 {
-		return held
-	}
-	info := checkFiles(pkg, d.fset, files)
-	for _, file := range files {
+	held.decls = make(map[string]programFunction)
+	for _, file := range held.files {
 		for _, decl := range file.Decls {
-			d.index(held, info, decl)
+			d.index(held, held.info, decl)
 		}
 	}
-	held.ok = true
 	return held
-}
-
-// parseDir parses the files of one directory that build into the package under the
-// configuration's build context, tests excluded.
-func (d *decoders) parseDir(pkg *types.Package, dir string) []*ast.File {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-	var files []*ast.File
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		if match, matchErr := d.context.MatchFile(dir, name); matchErr != nil || !match {
-			continue
-		}
-		file, parseErr := parser.ParseFile(d.fset, filepath.Join(dir, name), nil, parser.SkipObjectResolution)
-		if parseErr == nil && file.Name.Name == pkg.Name() {
-			files = append(files, file)
-		}
-	}
-	return files
 }
 
 // checkFiles type-checks one package's files, its imports resolved to the packages
@@ -291,7 +246,7 @@ func (d *decoders) index(held *checkedSource, info *types.Info, decl ast.Decl) {
 	}
 	one := programFunction{info: info, decl: fd, fn: fn}
 	d.declared[fn] = one
-	at := d.fset.Position(fd.Name.Pos())
+	at := d.reader.fset.Position(fd.Name.Pos())
 	held.decls[declKey(filepath.Base(at.Filename), at.Line)] = one
 }
 

@@ -17,14 +17,15 @@ import (
 // declares methods.
 //
 // From is the value's type, possibly an interface, never a type parameter. To is
-// the structural interface reached; Name spells it as the site does, because a
-// defined interface's name is not derivable from To.
+// the structural interface reached; Interface is the type the site names, and Name
+// spells it as the site does, because a defined interface is not derivable from To.
 type Conversion struct {
-	From types.Type
-	To   *types.Interface
-	Name string
-	Site token.Pos
-	Held token.Pos // on an assertion-derived site, a conversion of From into an interface, one derived site per declaration converting it: the assertion is reached only while that declaration runs
+	From      types.Type
+	Interface types.Type
+	To        *types.Interface
+	Name      string
+	Site      token.Pos
+	Held      token.Pos // on an assertion-derived site, a conversion of From into an interface, one derived site per declaration converting it: the assertion is reached only while that declaration runs
 }
 
 // Conversions returns every conversion site of one loaded configuration's
@@ -520,7 +521,7 @@ func (s *conversionScan) keep(dst, from types.Type, pos token.Pos) {
 	if iface == nil || !concrete(from) {
 		return
 	}
-	s.sites = append(s.sites, Conversion{From: from, To: iface, Name: spell(dst), Site: pos})
+	s.sites = append(s.sites, Conversion{From: from, Interface: dst, To: iface, Name: spell(dst), Site: pos})
 	s.holders = append(s.holders, s.holder)
 }
 
@@ -585,7 +586,7 @@ func (s *conversionScan) instance(id *ast.Ident) {
 			continue
 		}
 		if required := requiredMethods(constraint, params, inst.TypeArgs); required != nil {
-			s.sites = append(s.sites, Conversion{From: from, To: required, Name: spell(constraint), Site: id.Pos()})
+			s.sites = append(s.sites, Conversion{From: from, Interface: constraint, To: required, Name: spell(constraint), Site: id.Pos()})
 			s.holders = append(s.holders, s.holder)
 		}
 	}
@@ -747,7 +748,7 @@ func (s *conversionScan) asserted() []Conversion {
 				site = h.testOnly
 			}
 			for _, held := range h.held {
-				reached = append(reached, Conversion{From: h.from, To: to, Name: spell(a.to), Site: site, Held: held})
+				reached = append(reached, Conversion{From: h.from, Interface: a.to, To: to, Name: spell(a.to), Site: site, Held: held})
 			}
 		}
 	}

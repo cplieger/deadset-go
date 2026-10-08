@@ -1,0 +1,78 @@
+Values stored in the standard containers, which hand them back to the program
+unchanged. One is stored in a sync.Map and satisfies the locker interface package
+sync declares. One is stored in an atomic.Value. One is the value of a context and
+satisfies an interface the context package declares. One reaches a sync.Map through
+a function of the program that stores its own parameter. None keeps a field, and
+each keeps only the methods by which it satisfies an interface of the container's
+own package. The type of a field of a stored value is not stored, so it keeps
+nothing.
+
+-- go.mod --
+module example.com/stored
+
+go 1.27.0
+-- stored.go --
+package stored
+
+import (
+	"context"
+	"sync"
+	"sync/atomic"
+)
+
+type entry struct {
+	Status string `json:"status"`
+	Guard  guard
+}
+
+type guard struct{}
+
+func (guard) Lock() {}
+
+func (guard) Unlock() {}
+
+func (*entry) Lock() {}
+
+func (*entry) Unlock() {}
+
+func (*entry) String() string { return "entry" }
+
+type role struct {
+	Name string
+}
+
+func (role) String() string { return "role" }
+
+type tracer struct {
+	Name string
+}
+
+func (tracer) String() string { return "tracer" }
+
+func (tracer) Lock() {}
+
+type key struct{}
+
+type boxed struct {
+	Label string
+}
+
+func (*boxed) Lock() {}
+
+func (*boxed) Unlock() {}
+
+func (*boxed) Spare() {}
+
+func put(m *sync.Map, v any) { m.Store("boxed", v) }
+
+// Keep stores one value in each container and reads each back.
+func Keep(ctx context.Context) (any, any, any) {
+	var entries sync.Map
+	entries.Store("ready", &entry{})
+	var current atomic.Value
+	current.Store(role{})
+	ctx = context.WithValue(ctx, key{}, tracer{})
+	put(&entries, &boxed{})
+	got, _ := entries.Load("ready")
+	return got, current.Load(), ctx.Value(key{})
+}

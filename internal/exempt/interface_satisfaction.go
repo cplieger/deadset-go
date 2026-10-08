@@ -11,18 +11,19 @@ import (
 )
 
 // InterfaceSatisfactionDetector retains every method that satisfies an interface
-// a value of the method's receiver type reaches: at each conversion site
-// types.Implements decides satisfaction, and a type no value of which reaches an
-// interface retains nothing. Each retention is a use by the declaration holding the
-// site, and an assertion's is a use by the asserted type, so the assertion and the
-// methods fall with a type only dead code builds. A method satisfying two
-// interfaces at two sites is retained once per site.
+// a value of the method's receiver type reaches, as types.Implements decides at each
+// conversion site, and what a package outside the program declaring that interface
+// can assert on the value ([outsideAssertions]). Each retention is a use by the
+// declaration holding the site, and an assertion's is a use by the asserted type, so
+// the assertion and the methods fall with a type only dead code builds. A method
+// satisfying two interfaces at two sites is retained once per site.
 func InterfaceSatisfactionDetector(in *Input) ([]graph.Exemption, error) {
 	sites, err := Conversions(in)
 	if err != nil {
 		return nil, err
 	}
 	spans := declarationSpans(in)
+	spans.outside = newOutsideAssertions(in)
 
 	var retained []graph.Exemption
 	for i := range sites {
@@ -45,6 +46,7 @@ type span struct {
 // spans indexes, per file, the top-level declarations and the satisfaction
 // assertions: a blank variable declared with a type and one value.
 type spans struct {
+	outside      *outsideAssertions
 	declarations []span
 	assertions   []span
 }
@@ -161,7 +163,111 @@ func (s *spans) retain(in *Input, c *graph.Conversion, retained []graph.Exemptio
 			Via:    via,
 		})
 	}
+	pkg, asserts := s.outside.of(c.Interface)
+	if !asserts {
+		return retained, nil
+	}
+	detail := "satisfies what " + pkg.Path() + " can assert through " + c.Name
+	for _, method := range s.outside.methods(c.From, pkg) {
+		if slices.ContainsFunc(methods, func(m answer) bool { return m.method == method }) {
+			continue
+		}
+		if id, inventoried := in.Resolve.Object(method); inventoried {
+			retained = append(retained, graph.Exemption{
+				ID: id, Class: string(InterfaceSatisfaction), Site: site, Detail: detail, Holder: holder,
+			})
+		}
+	}
 	return retained, nil
+}
+
+// outsideAssertions answers what code outside the program can assert on a value it
+// holds through a defined interface its own package declares: every interface that
+// package declares, exported or not, or writes as a literal, and every exported
+// interface a package it imports at any depth declares.
+type outsideAssertions struct {
+	program   map[string]bool
+	assert    *assertable
+	sets      map[string][]*types.Interface    // by package path
+	methodsOf map[outsideKey][]types.Object    // the methods retained, by type and package
+	names     map[*types.Named]map[string]bool // the names a type or a pointer to it declares
+}
+
+// outsideKey is one converted type and one package outside the program holding it.
+type outsideKey struct {
+	t   string
+	pkg string
+}
+
+// newOutsideAssertions answers over one input.
+func newOutsideAssertions(in *Input) *outsideAssertions {
+	program := make(map[string]bool)
+	for _, p := range programPackages(in.Result) {
+		program[p.PkgPath] = true
+	}
+	return &outsideAssertions{
+		program:   program,
+		assert:    assertableOf(in),
+		sets:      make(map[string][]*types.Interface),
+		methodsOf: make(map[outsideKey][]types.Object),
+		names:     make(map[*types.Named]map[string]bool),
+	}
+}
+
+// of is the package that declares one interface a site names, where that interface
+// is a defined type of a package that is neither the target nor a loaded consumer.
+func (o *outsideAssertions) of(iface types.Type) (*types.Package, bool) {
+	named, isNamed := types.Unalias(iface).(*types.Named)
+	if !isNamed || named.Obj().Pkg() == nil || o.program[named.Obj().Pkg().Path()] {
+		return nil, false
+	}
+	return named.Obj().Pkg(), true
+}
+
+// methods is every method by which a value of t, or a pointer to it, implements an
+// interface code of pkg can assert, each the declaration a deletion would remove.
+func (o *outsideAssertions) methods(t types.Type, pkg *types.Package) []types.Object {
+	named, isNamed := definedType(t)
+	if !isNamed {
+		return nil
+	}
+	key := outsideKey{t: types.TypeString(named, nil), pkg: pkg.Path()}
+	if held, known := o.methodsOf[key]; known {
+		return held
+	}
+	names, known := o.names[named]
+	if !known {
+		names = declaredMethodNames(named)
+		o.names[named] = names
+	}
+	satisfied := satisfiedMethods(named, names, o.interfaces(pkg))
+	var held []types.Object
+	for selection := range types.NewMethodSet(types.NewPointer(named)).Methods() {
+		if satisfied[selection.Obj().Name()] {
+			held = append(held, selection.Obj())
+		}
+	}
+	o.methodsOf[key] = held
+	return held
+}
+
+// interfaces is what code of one package can assert, computed once per package.
+func (o *outsideAssertions) interfaces(pkg *types.Package) []*types.Interface {
+	if held, known := o.sets[pkg.Path()]; known {
+		return held
+	}
+	held := append(slices.Clone(o.assert.ownInterfaces(pkg)), o.assert.importedBy(pkg).interfaces...)
+	o.sets[pkg.Path()] = held
+	return held
+}
+
+// definedType is the defined type a value of t is, or a pointer to it points to.
+func definedType(t types.Type) (*types.Named, bool) {
+	if pointer, isPointer := types.Unalias(t).(*types.Pointer); isPointer {
+		t = pointer.Elem()
+	}
+	named, isNamed := types.Unalias(t).(*types.Named)
+	return named, isNamed
 }
 
 // typeDeclaration is the declaration of a defined type, or of the type a pointer

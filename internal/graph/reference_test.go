@@ -629,6 +629,15 @@ func TestReferencesRecordsAReadOfEveryFieldAComparisonReads(t *testing.T) {
 		// and an ordered comparison is not defined over a struct.
 		"comparePointers": nil,
 		"order":           nil,
+		// A standard container compares a key, and the old value of a
+		// compare-and-swap or compare-and-delete, as a map compares its keys, and
+		// compares no value it only stores.
+		"storeKey":               {"keyed.k"},
+		"swapOld":                {"keyed.k", "swapped.o"},
+		"storeThroughExpression": {"keyed.k"},
+		"contextKey":             {"keyed.k"},
+		"atomicOld":              {"swapped.o"},
+		"atomicStore":            nil,
 	}
 	for from, want := range cases {
 		t.Run(from, func(t *testing.T) {

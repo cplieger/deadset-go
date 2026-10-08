@@ -1,0 +1,131 @@
+A command that converts values to interfaces and hands them on. Two go to a defined
+interface a dependency module declares, which holds them and asserts further
+interfaces on them: one by pointer and one by value. The dependency asserts an
+exported and an unexported interface of its own, two interface type literals, one of
+which names a type the dependency declares, and an exported and an unexported
+interface of a package it imports. A third value goes to an interface the command
+declares, which nothing outside the program holds. The dependency is a module the
+command requires and replaces with a directory of its own, so the archive loads with
+no network access.
+
+-- go.mod --
+module example.com/assert
+
+go 1.27.0
+
+require example.com/host v0.0.0
+
+replace example.com/host => ./host
+-- main.go --
+package main
+
+import "example.com/host"
+
+type recorder struct{}
+
+func (*recorder) Write(p []byte) (int, error) { return len(p), nil }
+
+func (*recorder) Flush() {}
+
+func (*recorder) Reset() {}
+
+func (*recorder) SetDeadline(int) error { return nil }
+
+func (*recorder) Accept(host.Request) bool { return true }
+
+func (*recorder) Close() error { return nil }
+
+func (*recorder) Label() string { return "recorder" }
+
+func (*recorder) Spare() string { return "spare" }
+
+type stamp struct{}
+
+func (stamp) Write(p []byte) (int, error) { return len(p), nil }
+
+func (*stamp) Flush() {}
+
+type writer interface {
+	Write(p []byte) (int, error)
+}
+
+type quiet struct{}
+
+func (*quiet) Write(p []byte) (int, error) { return len(p), nil }
+
+func (*quiet) Flush() {}
+
+func main() {
+	var w host.Writer = &recorder{}
+	_ = host.Serve(w)
+	_ = host.Serve(stamp{})
+	var own writer = &quiet{}
+	_, _ = own.Write(nil)
+}
+-- host/go.mod --
+module example.com/host
+
+go 1.27.0
+-- host/host.go --
+// Package host writes through a value its caller hands it.
+package host
+
+import "example.com/host/base"
+
+// Request is what a writer may accept.
+type Request struct{}
+
+// Writer is the interface a caller hands the host a value through.
+type Writer interface {
+	Write(p []byte) (int, error)
+}
+
+// Flusher is an exported interface the host asserts on a Writer.
+type Flusher interface {
+	Flush()
+}
+
+type resetter interface {
+	Reset()
+}
+
+// Serve writes to w and calls what else w implements.
+func Serve(w Writer) error {
+	if f, ok := w.(Flusher); ok {
+		f.Flush()
+	}
+	if r, ok := w.(resetter); ok {
+		r.Reset()
+	}
+	if d, ok := w.(interface{ SetDeadline(int) error }); ok {
+		_ = d.SetDeadline(0)
+	}
+	if a, ok := w.(interface{ Accept(Request) bool }); ok {
+		_ = a.Accept(Request{})
+	}
+	if c, ok := w.(base.Closer); ok {
+		defer c.Close()
+	}
+	base.Describe(w)
+	_, err := w.Write(nil)
+	return err
+}
+-- host/base/base.go --
+// Package base holds the interfaces the host builds on.
+package base
+
+// Closer is an exported interface of a package the host imports.
+type Closer interface {
+	Close() error
+}
+
+type labeler interface {
+	Label() string
+}
+
+// Describe calls Label where v implements it.
+func Describe(v any) {
+	if l, ok := v.(labeler); ok {
+		_ = l.Label()
+	}
+}

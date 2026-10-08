@@ -1,6 +1,8 @@
 One package writing every shape that compares a struct value, one declaration per
 shape, plus the two shapes that compare no field: a pointer comparison, and an
-interface-typed field whose dynamic type is not known.
+interface-typed field whose dynamic type is not known. A second file hands values to
+the standard containers, which compare a key and an old value as a map compares its
+keys and compare no value they only store.
 
 -- go.mod --
 module example.com/comparisons
@@ -70,3 +72,31 @@ type pointed struct{ h int }
 func comparePointers(x, y *pointed) bool { return x == y }
 
 func order(x, y int) bool { return x < y }
+-- containers.go --
+package comparisons
+
+import (
+	"context"
+	"sync"
+	"sync/atomic"
+)
+
+type keyed struct{ k int }
+
+type swapped struct{ o int }
+
+type stored struct{ v int }
+
+func storeKey(m *sync.Map) { m.Store(keyed{k: 1}, stored{v: 2}) }
+
+func swapOld(m *sync.Map) bool { return m.CompareAndSwap(keyed{}, swapped{o: 1}, stored{}) }
+
+func storeThroughExpression(m *sync.Map) { (*sync.Map).Store(m, keyed{}, stored{}) }
+
+func contextKey(ctx context.Context) context.Context {
+	return context.WithValue(ctx, keyed{}, stored{})
+}
+
+func atomicOld(v *atomic.Value) bool { return v.CompareAndSwap(swapped{}, stored{}) }
+
+func atomicStore(v *atomic.Value) { v.Store(stored{}) }

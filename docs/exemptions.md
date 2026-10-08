@@ -1,6 +1,6 @@
 # Exemption classes
 
-An exemption is a named reason for which deadset-go keeps a symbol the reference graph alone would report. Every class is computed from Go type information rather than configured, so a project writes no suppression for a symbol a class covers. deadset-go implements the nine classes the deadset contract declares for Go. The class vocabulary and its detection rules are stated once in the contract's [exemptions page](https://github.com/cplieger/deadset-spec/blob/v5.3.0/docs/exemptions.md), and this page states what each class does here.
+An exemption is a named reason for which deadset-go keeps a symbol the reference graph alone would report. Every class is computed from Go type information rather than configured, so a project writes no suppression for a symbol a class covers. deadset-go implements the nine classes the deadset contract declares for Go. The class vocabulary and its detection rules are stated once in the contract's [exemptions page](https://github.com/cplieger/deadset-spec/blob/v6.1.1/docs/exemptions.md), and this page states what each class does here.
 
 ## Reading the retained set
 
@@ -32,7 +32,11 @@ A struct value or a pointer to one, handed to a parameter typed as the empty int
 
 So has such a value returned as an interface-typed result by a method that implements an exported interface declared outside the program. That interface's package then stands for the callee's package.
 
-The value flows into `encoding-reflection`, recorded at the call or the return. It keeps its fields and the encoding and decoding methods of both directions. It also keeps every method by which it satisfies an exported interface of the callee's package or of a package in its import closure. An outside package of the program's import closure that imports the callee's package counts as well. Where the callee's package's imports include a template engine, the value keeps every exported method.
+The value flows into `encoding-reflection`, recorded at the call or the return. It keeps its fields and the encoding and decoding methods of both directions.
+
+It also keeps every method by which it satisfies an interface the callee's package declares, exported or not, or writes as an interface type literal. An exported interface of a package in the callee's import closure counts too. So does an exported interface of an outside package of the program's import closure that imports the callee's package. Where the callee's package's imports include a template engine, the value keeps every exported method.
+
+A standard container hands the value back to the program unchanged. A value given to a method of `sync.Map`, to a method of `atomic.Value` or to `context.WithValue` keeps no field. It keeps only the methods by which it satisfies an interface the container's own package declares or writes as a literal.
 
 A callee whose body only decodes into the parameter is a decoding destination rather than this rule's. Its body is read from the build list's source for that question alone.
 
@@ -50,6 +54,8 @@ The evidence is the conversion set, every site where a value of a concrete type 
 
 A method answering an interface method no call site invokes is not retained, and `DS1203` reports it with that interface method. Each retention is a use by the declaration that holds the site, so it holds only while that declaration is live. A satisfaction assertion is a use by the type it asserts, so it keeps nothing of a type only dead code builds.
 
+A value converted to a defined interface that a package outside the program declares is held by that package, which may assert another interface on it. So the value also keeps the methods by which it, or a pointer to it, satisfies another interface of that package, exported or not, or an interface type literal its source writes. An exported interface of a package in its import closure counts too.
+
 A type whose values never reach an interface retains nothing whatever it happens to implement, because no caller can dispatch to it through an interface the program never builds.
 
 A method satisfying two interfaces at two sites is retained twice, once per site, so the retained set shows every conversion that depends on the method. A type registered as a flag value, or used as a writer, a round tripper or a sort interface, is an ordinary member of the conversion set.
@@ -58,27 +64,7 @@ A method satisfying two interfaces at two sites is retained twice, once per site
 
 Retains, on a type whose values reach a consumer that names members by string at run time, the members that consumer reads. Those are the exported fields, every field carrying a struct tag, and the methods the consumer resolves by name.
 
-The destinations, and what each retains:
-
-- Fields and the methods it resolves by name for an argument of a function or method of `encoding/json`, `encoding/json/v2`, `encoding/xml` or `encoding/gob`. A decoding entry point fills fields through reflection, which reads none, so it retains its methods alone. An encoder skips a field whose tag for that encoder is exactly `-`, and an XML decoding entry point reads the `XMLName` field. A JSON decoding entry point retains fields as well in a program that calls `(*json.Decoder).DisallowUnknownFields` or names `json.RejectUnknownMembers`.
-- Fields alone for a `database/sql` scan target and an argument of `reflect.DeepEqual`. Fields alone also for an argument of any other `reflect` function in a program that calls none of the method finders `Method`, `MethodByName` and `NumMethod`.
-- Fields and the `LogValue` method for a `log/slog` logging call or attribute constructor.
-- Fields and the exported methods for a template engine and a sort interface. The same holds for an argument of any other function of `reflect` in a program that calls one of those method finders.
-- For a destination outside the analyzed program, what [the previous section](#what-leaves-the-analysis-is-fully-reachable) states.
-
-An encoder resolves a method by name in the direction its entry point works in. An entry point whose name begins `Encode` or `Marshal` retains the encoding methods. One whose name begins `Decode` or `Unmarshal` retains the decoding methods. One whose name begins with neither retains both, because it takes a value for either direction.
-
-| Package | Encoding | Decoding |
-| --- | --- | --- |
-| `encoding/json`, `encoding/json/v2` | `AppendText`, `MarshalJSON`, `MarshalJSONTo`, `MarshalText` | `UnmarshalJSON`, `UnmarshalJSONFrom`, `UnmarshalText` |
-| `encoding/xml` | `MarshalText`, `MarshalXML`, `MarshalXMLAttr` | `UnmarshalText`, `UnmarshalXML`, `UnmarshalXMLAttr` |
-| `encoding/gob` | `GobEncode`, `MarshalBinary` | `GobDecode`, `UnmarshalBinary` |
-
-A value reaches through a pointer, a slice, an array, a map key or value and an embedded field. It also reaches through the fields of a struct type with no name. From every type so reached, it reaches through that type's fields again until no further type joins, because an encoder walks the whole value rather than its outermost type.
-
-A field that is an interface, or holds interface elements or map values, reaches the types the program stores in it. A store is a composite literal, an assignment, an `append` or an index assignment. A stored parameter stands for every argument the program's calls pass for it. An argument holding interface elements or map values reaches the stored types the same way. It may be a literal, a variable, a parameter or a field selector.
-
-A method is retained where the defined type declares it, so a method promoted from an embedded type is retained where the embedded type is reached.
+[The encoding-reflection class](encoding-reflection.md) lists its destinations, what each retains and how a value reaches the types it holds.
 
 ### format-verb-contract
 
@@ -92,7 +78,9 @@ The facilities are:
 - The logging functions of `log/slog`, with the methods of its logger and its attribute constructors.
 - The functions of the analyzed program that forward their own variadic operands to any of those.
 
-Three rules narrow it. A format string the call computes rather than writes is read as binding every operand, which retains more than the call can reach and never less. A method is retained only in the form a verb calls, taking no argument and returning one string, so a method of another shape that shares the name is not. And an operand reaches through a pointer, a slice, an array and a map, because the machinery asks each element for its string in turn, but the reach stops at each defined type.
+Three rules narrow it. A format string the call computes rather than writes is read as binding every operand, which retains more than the call can reach and never less. A method is retained only in the form a verb calls, taking no argument and returning one string, so a method of another shape that shares the name is not. And the reach stops at an interface-typed field and at an unexported field, which the machinery prints without calling a method.
+
+An operand reaches through a pointer, a slice, an array and a map, because the machinery asks each element for its string in turn. It also reaches through every exported or embedded field, of a defined struct type or of a struct type with no name, at any depth.
 
 ### errors-duck-typing
 

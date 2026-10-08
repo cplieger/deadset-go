@@ -47,7 +47,7 @@ type Nested struct {
 func (n Nested) Title() string { return n.Label }
 
 // Hand puts a value where the analysis cannot follow it.
-func Hand(m *sync.Map, c Crossing) { m.Store("crossing", c) }
+func Hand(p *sync.Pool, c Crossing) { p.Put(c) }
 -- wrapped.go --
 package opaque
 
@@ -65,10 +65,10 @@ func (w Wrapped) Describe() string { return w.Name }
 
 // respond hands its own interface-typed parameter to a method the analysis does not
 // hold the body of.
-func respond(m *sync.Map, v any) { m.Store("respond", v) }
+func respond(p *sync.Pool, v any) { p.Put(v) }
 
 // HandWrapped puts a value through the wrapper.
-func HandWrapped(m *sync.Map, w Wrapped) { respond(m, w) }
+func HandWrapped(p *sync.Pool, w Wrapped) { respond(p, w) }
 -- chained.go --
 package opaque
 
@@ -85,10 +85,10 @@ type Chained struct {
 func (c Chained) Describe() string { return c.Name }
 
 // relay hands its own interface-typed parameter to a wrapper.
-func relay(m *sync.Map, v any) { respond(m, v) }
+func relay(p *sync.Pool, v any) { respond(p, v) }
 
 // HandChained puts a value through both wrappers.
-func HandChained(m *sync.Map, c Chained) { relay(m, c) }
+func HandChained(p *sync.Pool, c Chained) { relay(p, c) }
 -- encoded.go --
 package opaque
 
@@ -166,7 +166,7 @@ type Pointed struct {
 func (p *Pointed) Describe() string { return p.Name }
 
 // HandPointed puts a pointer where the analysis cannot follow it.
-func HandPointed(m *sync.Map, p *Pointed) { m.Store("pointed", p) }
+func HandPointed(pool *sync.Pool, p *Pointed) { pool.Put(p) }
 -- sought.go --
 package opaque
 
@@ -228,7 +228,7 @@ func (l *Locked) Unlock() {}
 func (l *Locked) Spare() {}
 
 // HandLocked puts a value where the analysis cannot follow it.
-func HandLocked(m *sync.Map, l *Locked) { m.Store("locked", l) }
+func HandLocked(p *sync.Pool, l *Locked) { p.Put(l) }
 -- served.go --
 package opaque
 

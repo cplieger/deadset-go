@@ -261,9 +261,8 @@ type Totals struct {
 	Withheld             Withheld
 }
 
-// Withheld is how many findings the configured minimum confidence withheld, per
-// confidence: the findings a run at the lowest minimum reports that this one does
-// not.
+// Withheld is how many findings the configured minimum confidence withheld, each
+// counted once at the confidence this run assigns it.
 type Withheld struct {
 	Certain  int
 	Probable int

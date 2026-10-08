@@ -523,3 +523,30 @@ func TestInterfaceSatisfactionHoldsWhatAnAssertionReachesFromATestFileOutsideAPr
 		}
 	}
 }
+
+// A value converted to an interface a package outside the program declares is held
+// by that package, which may assert another interface on it: one the package
+// declares, exported or not, an interface type literal its source writes, or an
+// exported interface of a package it imports. A value converted to the program's own
+// interface keeps what that interface requires and nothing more.
+func TestInterfaceSatisfactionRetainsWhatAnOutsideHolderCanAssert(t *testing.T) {
+	refs := retainedRefs(t, analysisOf(t, "interface-satisfaction-outside.txtar", Options{}), InterfaceSatisfaction)
+
+	for _, test := range []struct {
+		desc     string
+		typeName string
+		want     []string
+	}{
+		{desc: "converted by pointer", typeName: "recorder", want: qualify("example.com/assert", "recorder",
+			"Accept", "Close", "Flush", "Reset", "SetDeadline", "Write")},
+		{desc: "converted by value", typeName: "stamp", want: qualify("example.com/assert", "stamp", "Flush", "Write")},
+		{desc: "converted to the program's own interface", typeName: "quiet", want: qualify("example.com/assert", "quiet", "Write")},
+	} {
+		t.Run(test.typeName, func(t *testing.T) {
+			if got := membersOf(refs, test.typeName); !slices.Equal(got, test.want) {
+				t.Errorf("InterfaceSatisfactionDetector(interface-satisfaction-outside.txtar) retained, for %s (%s),\ngot  %v\nwant %v",
+					test.typeName, test.desc, got, test.want)
+			}
+		})
+	}
+}
