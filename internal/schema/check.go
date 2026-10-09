@@ -132,16 +132,25 @@ func (n *node) checkString(v, at string, found *[]Error) {
 	}
 }
 
-// checkNumber applies minimum.
+// checkNumber applies minimum and maximum.
 func (n *node) checkNumber(v json.Number, at string, found *[]Error) {
-	if n.minimum == nil {
+	if n.minimum == nil && n.maximum == nil {
 		return
 	}
 	value, parsed := new(big.Rat).SetString(v.String())
-	if parsed && value.Cmp(n.minimum) < 0 {
+	if !parsed {
+		return
+	}
+	if n.minimum != nil && value.Cmp(n.minimum) < 0 {
 		*found = append(*found, Error{
 			Keyword: "minimum", InstancePath: at,
 			Reason: fmt.Sprintf("%s is below %s", v, n.minimum.RatString()),
+		})
+	}
+	if n.maximum != nil && value.Cmp(n.maximum) > 0 {
+		*found = append(*found, Error{
+			Keyword: "maximum", InstancePath: at,
+			Reason: fmt.Sprintf("%s is above %s", v, n.maximum.RatString()),
 		})
 	}
 }

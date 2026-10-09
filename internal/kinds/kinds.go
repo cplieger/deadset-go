@@ -303,6 +303,9 @@ type Input struct {
 	// indexed is what a lookup over the inventory needs, built on first use.
 	indexed *index
 
+	// fixed is [Input.fixedByOutsideInterface]'s answer, built on first use.
+	fixed map[graph.SymbolID]bool
+
 	// withheld names every record of Marks, by its place in that slice, whose code
 	// and declaration matched a finding this pass produced, so the pass withheld
 	// that finding. A pass records it and the kind that reports a record which

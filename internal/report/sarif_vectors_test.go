@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	spec "github.com/cplieger/deadset-spec/v6"
+	spec "github.com/cplieger/deadset-spec/v7"
 )
 
 // sarifVectorRoot is where the pinned Contract publishes the SARIF vectors.

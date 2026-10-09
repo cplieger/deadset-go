@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	spec "github.com/cplieger/deadset-spec/v6"
+	spec "github.com/cplieger/deadset-spec/v7"
 )
 
 // publishedRuleTexts is the rule and the precondition of every live kind of the

@@ -136,7 +136,7 @@ The analysis has a boundary, and what crosses it is treated as fully reachable r
 - A compiled file outside the target root is dropped at the load.
 - A reference from a declared consumer into the target is an ordinary reference, live under both relations.
 - An interface-typed field reaches the types the program stores in it, and no other dynamic type.
-- A value converted to a defined interface of a package outside the program keeps what that package can assert on it, as [Exemption classes](exemptions.md#interface-satisfaction) describes.
+- A value converted to a defined interface of a package outside the program keeps what that package asserts on it, as [Exemption classes](exemptions.md#interface-satisfaction) describes.
 
 ## Cross-language edges
 

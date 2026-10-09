@@ -83,10 +83,11 @@ func (s *sources) parseDir(pkg *types.Package, dir string) []*ast.File {
 // assertable answers which interfaces a package outside the analysed program can
 // assert on a value it holds, each package's answer computed once.
 type assertable struct {
-	in       *Input
-	source   *sources
-	own      map[string][]*types.Interface // by package path
-	imported map[string]importedSet        // by package path
+	in         *Input
+	source     *sources
+	own        map[string][]*types.Interface // by package path
+	imported   map[string]importedSet        // by package path
+	assertions map[string][]*types.Interface // by package path
 }
 
 // importedSet is what the packages one package imports at any depth can name: their
@@ -100,10 +101,11 @@ type importedSet struct {
 func assertableOf(in *Input) *assertable {
 	if in.assert == nil {
 		in.assert = &assertable{
-			in:       in,
-			source:   newSources(in),
-			own:      make(map[string][]*types.Interface),
-			imported: make(map[string]importedSet),
+			in:         in,
+			source:     newSources(in),
+			own:        make(map[string][]*types.Interface),
+			imported:   make(map[string]importedSet),
+			assertions: make(map[string][]*types.Interface),
 		}
 	}
 	return in.assert
@@ -180,6 +182,58 @@ func (a *assertable) literals(pkg *types.Package) []*types.Interface {
 			return true
 		})
 	}
+	return found
+}
+
+// asserted is every interface one package outside the program asserts: the interface
+// type of each type assertion and each type switch case its source writes, wherever
+// it stands and whatever value it asserts on, read from the directory the package
+// was compiled from. A case naming a type that is no interface asserts nothing.
+func (a *assertable) asserted(pkg *types.Package) []*types.Interface {
+	if held, known := a.assertions[pkg.Path()]; known {
+		return held
+	}
+	a.assertions[pkg.Path()] = nil
+	dir, located := packageDir(a.in.Result.Fset, pkg)
+	if !located {
+		return nil
+	}
+	source := a.source.read(pkg, dir)
+	if !source.ok {
+		return nil
+	}
+	local := localizer{pkg: pkg}
+	var found []*types.Interface
+	for _, file := range source.files {
+		for _, expr := range assertedTypes(file) {
+			if iface, stated := local.assertedInterface(source.info.TypeOf(expr)); stated {
+				found = append(found, iface)
+			}
+		}
+	}
+	a.assertions[pkg.Path()] = found
+	return found
+}
+
+// assertedTypes is the type expression of every type assertion and every type switch
+// case one file writes. A case of an expression switch is no assertion.
+func assertedTypes(file *ast.File) []ast.Expr {
+	var found []ast.Expr
+	ast.Inspect(file, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.TypeAssertExpr:
+			if n.Type != nil {
+				found = append(found, n.Type)
+			}
+		case *ast.TypeSwitchStmt:
+			for _, stmt := range n.Body.List {
+				if clause, isCase := stmt.(*ast.CaseClause); isCase {
+					found = append(found, clause.List...)
+				}
+			}
+		}
+		return true
+	})
 	return found
 }
 
@@ -346,4 +400,21 @@ func (l localizer) iface(iface *types.Interface) (*types.Interface, bool) {
 		methods = append(methods, types.NewFunc(m.Pos(), l.pkg, m.Name(), sig))
 	}
 	return types.NewInterfaceType(methods, nil).Complete(), true
+}
+
+// assertedInterface is the interface an asserted type is in the loaded program's
+// types, and false for a type that is no interface with methods.
+func (l localizer) assertedInterface(t types.Type) (*types.Interface, bool) {
+	if t == nil || !types.IsInterface(t) {
+		return nil, false
+	}
+	loaded, stated := l.of(t)
+	if !stated {
+		return nil, false
+	}
+	iface, isInterface := loaded.Underlying().(*types.Interface)
+	if !isInterface || !iface.IsMethodSet() || iface.NumMethods() == 0 {
+		return nil, false
+	}
+	return iface, true
 }

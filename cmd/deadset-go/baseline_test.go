@@ -11,7 +11,7 @@ import (
 
 	"github.com/cplieger/deadset-go/internal/report"
 	"github.com/cplieger/deadset-go/internal/suppress"
-	spec "github.com/cplieger/deadset-spec/v6"
+	spec "github.com/cplieger/deadset-spec/v7"
 )
 
 // baselineVectorRoot is where the pinned Contract publishes the baseline vectors.

@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/internal/graph"
-	spec "github.com/cplieger/deadset-spec/v6"
+	spec "github.com/cplieger/deadset-spec/v7"
 )
 
 // retained is what one class's detector recorded over a shared analysis.
@@ -451,6 +451,33 @@ func TestEncodingReflectionReachesTheTypesStoredInAContainerArgument(t *testing.
 	}
 }
 
+func TestEncodingReflectionReachesTheTypesAnArgumentWritesOrConverts(t *testing.T) {
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-argument-reach.txtar", Options{}), EncodingReflection)
+	reachRefs := func(typeName string, members ...string) []string {
+		return qualify("example.com/reach", typeName, members...)
+	}
+
+	for _, test := range []struct {
+		reached  string
+		typeName string
+		want     []string
+	}{
+		{reached: "a type converted to the argument's defined interface", typeName: "square", want: reachRefs("square", "Side")},
+		{reached: "a type converted to any alone", typeName: "circle"},
+		{reached: "the literal behind the address operator", typeName: "wrapper", want: reachRefs("wrapper", "V")},
+		{reached: "a value a nested literal writes into an interface position", typeName: "inner", want: reachRefs("inner", "Depth")},
+		{reached: "a type converted to error, which is no defined interface", typeName: "failure"},
+		{reached: "a decoded struct whose written pointer field the decoder reads", typeName: "target", want: reachRefs("target", "Out")},
+	} {
+		t.Run(test.typeName, func(t *testing.T) {
+			if got := membersOf(refs, test.typeName); !slices.Equal(got, test.want) {
+				t.Errorf("EncodingReflectionDetector(encoding-reflection-argument-reach.txtar) retained, for %s (%s),\ngot  %v\nwant %v",
+					test.typeName, test.reached, got, test.want)
+			}
+		})
+	}
+}
+
 func TestEncodingReflectionRetainsNothingWhereNoTypeReachesADestination(t *testing.T) {
 	shared := analysisOf(t, "encoding-reflection-quiet.txtar", Options{})
 	if got := retainedRefs(t, shared, EncodingReflection); len(got) > 0 {
@@ -799,7 +826,7 @@ func TestFormatVerbContractAloneRecordsAnOperandOfTheFormattingPackage(t *testin
 // The mechanism text of the class, as the Contract states it for this language. The
 // class implements this text; a pin bump that moves it must be read against the
 // destination table before this literal moves with it.
-const encodingReflectionMechanismSHA256 = "25902c8bf950966ab032ad8bf9c429f42a9a2b727fdd179e7b45118804f01852"
+const encodingReflectionMechanismSHA256 = "9a48e2e93a14f86f20df205c634355c1469309cf59d8866d57db425105be3a38"
 
 func TestEncodingReflectionImplementsTheContractsMechanismText(t *testing.T) {
 	body, err := spec.Contract.ReadFile("contract/exemptions.json")

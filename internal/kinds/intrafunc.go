@@ -1,6 +1,7 @@
 package kinds
 
 import (
+	"cmp"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -49,7 +50,7 @@ const panicBuiltin = "panic"
 // UnusedParameter reports a named, non-blank parameter of a function or method
 // whose body names it nowhere, on a function whose signature is free to change.
 // The body is the whole evidence, because the type checker resolves every identifier
-// of it. [intrafunc.freeSignature] decides free for every kind of this group. A
+// of it. [intrafunc.freeSignature] decides free for this kind and the result kind. A
 // published declaration of a library is free, because no caller makes a body read a
 // parameter it never names, and the breaking edit is what the fixability says. A
 // parameter used under one build configuration is used.
@@ -58,11 +59,9 @@ func UnusedParameter(in *Input) ([]Finding, error) {
 }
 
 // UnusedReceiver reports a named, non-blank method receiver the method body names
-// nowhere, under the same free-signature rule as the parameter kind.
-//
-// The fix deletes an identifier rather than changing a signature, because Go
-// permits a method with no receiver name, which is why the kind's fixability is
-// the deletable one and the parameter kind's is not.
+// nowhere, whatever fixes the method's signature: Go permits a method with no
+// receiver name, so the fix deletes an identifier and changes no signature, which
+// is why the kind's fixability is the deletable one and the parameter kind's is not.
 func UnusedReceiver(in *Input) ([]Finding, error) {
 	return in.intraFunc().parameters(unusedReceiverCode)
 }
@@ -170,16 +169,16 @@ func (in *Input) intraFunc() *intrafunc {
 }
 
 // freeSignature reports whether one declaration's signature answers only to its
-// body, the precondition of every kind of this group that reports a part of a
-// signature: it is not free when the declaration is [intrafunc.exempted],
-// [intrafunc.valued] or [intrafunc.foreign], or when its body is a stub, which
-// exists for its callers. A library's published declaration is free whatever the
-// run knows of its consumers, since no caller can make a body read a parameter;
-// [intrafunc.callersUnknown] answers for the one kind a caller outside the graph
-// decides.
+// body, the precondition of the parameter and result kinds: it is not free when the
+// declaration is [intrafunc.exempted], [intrafunc.valued] or [intrafunc.foreign],
+// when an outside interface fixes it ([Input.fixedByOutsideInterface]), or when its
+// body is a stub, which exists for its callers. A library's published declaration is
+// free whatever the run knows of its consumers, since no caller can make a body read a
+// parameter; [intrafunc.callersUnknown] answers for the one kind a caller outside the
+// graph decides.
 func (g *intrafunc) freeSignature(id graph.SymbolID, decl *ast.FuncDecl) bool {
 	switch {
-	case g.exempted[id], g.valued[id], g.foreign[id]:
+	case g.exempted[id], g.valued[id], g.foreign[id], g.in.fixedByOutsideInterface()[id]:
 		return false
 	case isStub(decl):
 		return false
@@ -217,10 +216,15 @@ func (g *intrafunc) callersUnknown(id graph.SymbolID) bool {
 // holds nothing but a call to the panic built-in. Such a body was never written to
 // read what its signature declares, so the signature answers to its callers alone.
 func isStub(decl *ast.FuncDecl) bool {
-	if decl == nil || decl.Body == nil {
+	return decl == nil || isStubBody(decl.Body)
+}
+
+// isStubBody is [isStub] for any function body, a literal's among them.
+func isStubBody(body *ast.BlockStmt) bool {
+	if body == nil {
 		return true
 	}
-	for _, stmt := range decl.Body.List {
+	for _, stmt := range body.List {
 		switch stmt := stmt.(type) {
 		case *ast.EmptyStmt:
 		case *ast.ExprStmt:
@@ -409,14 +413,7 @@ func (g *intrafunc) parameters(code string) ([]Finding, error) {
 	for i := range g.in.Per {
 		one := &g.in.Per[i]
 		for _, fn := range functions(one) {
-			if !g.freeSignature(fn.id, fn.decl) || (code == unusedParameterCode && g.twinned(fn.id, fn.decl)) {
-				continue
-			}
-			fields := fn.decl.Type.Params
-			if code == unusedReceiverCode {
-				fields = fn.decl.Recv
-			}
-			if err := g.signature(one, &fn, fields, code, held); err != nil {
+			if err := g.parametersOf(one, &fn, code, held); err != nil {
 				return nil, err
 			}
 		}
@@ -424,15 +421,104 @@ func (g *intrafunc) parameters(code string) ([]Finding, error) {
 	return g.findings(code, held.unused())
 }
 
+// literalVariables is every local variable one body declares with a function
+// literal that is no stub as its initial value, with that literal.
+func literalVariables(info *types.Info, body *ast.BlockStmt) map[types.Object]*ast.FuncLit {
+	held := make(map[types.Object]*ast.FuncLit)
+	initialize := func(names, values []ast.Expr) {
+		if len(names) != len(values) {
+			return
+		}
+		for i, value := range values {
+			lit, isLiteral := ast.Unparen(value).(*ast.FuncLit)
+			name, isName := names[i].(*ast.Ident)
+			if isLiteral && isName && !isStubBody(lit.Body) && info.Defs[name] != nil {
+				held[info.Defs[name]] = lit
+			}
+		}
+	}
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.AssignStmt:
+			if n.Tok == token.DEFINE {
+				initialize(n.Lhs, n.Rhs)
+			}
+		case *ast.ValueSpec:
+			initialize(nameExprs(n.Names), n.Values)
+		}
+		return true
+	})
+	return held
+}
+
+// nameExprs is a list of names as expressions.
+func nameExprs(names []*ast.Ident) []ast.Expr {
+	found := make([]ast.Expr, len(names))
+	for i, name := range names {
+		found[i] = name
+	}
+	return found
+}
+
+// parametersOf records the subjects of one kind in one function: its receiver, or
+// its parameters where its signature is free and the parameters of every literal
+// its body calls by name ([calledByName]), whose signatures are free whatever the
+// function's is.
+func (g *intrafunc) parametersOf(one *Configured, fn *walked, code string, held *parts) error {
+	if code == unusedReceiverCode {
+		return g.signature(one, fn, fn.decl.Recv, fn.decl.Body, code, held)
+	}
+	if g.freeSignature(fn.id, fn.decl) && !g.twinned(fn.id, fn.decl) {
+		if err := g.signature(one, fn, fn.decl.Type.Params, fn.decl.Body, code, held); err != nil {
+			return err
+		}
+	}
+	for _, lit := range calledByName(fn.info, fn.decl.Body) {
+		if err := g.signature(one, fn, lit.Type.Params, lit.Body, code, held); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// calledByName is every function literal of one body, a stub excepted, that
+// initializes a local variable the body only calls: every use of the variable is the
+// function of a call, so no use passes, stores, returns or assigns it, and the
+// literal's signature answers to its body alone.
+func calledByName(info *types.Info, body *ast.BlockStmt) []*ast.FuncLit {
+	held := literalVariables(info, body)
+	called := make(map[*ast.Ident]bool)
+	ast.Inspect(body, func(n ast.Node) bool {
+		if call, isCall := n.(*ast.CallExpr); isCall {
+			if name, isName := ast.Unparen(call.Fun).(*ast.Ident); isName {
+				called[name] = true
+			}
+		}
+		return true
+	})
+	ast.Inspect(body, func(n ast.Node) bool {
+		if name, isName := n.(*ast.Ident); isName && !called[name] {
+			delete(held, info.Uses[name])
+		}
+		return true
+	})
+	found := make([]*ast.FuncLit, 0, len(held))
+	for _, lit := range held {
+		found = append(found, lit)
+	}
+	slices.SortFunc(found, func(a, b *ast.FuncLit) int { return cmp.Compare(a.Pos(), b.Pos()) })
+	return found
+}
+
 // signature records every named, non-blank identifier of one field list and
-// whether the body reads it.
-func (g *intrafunc) signature(one *Configured, fn *walked, fields *ast.FieldList,
+// whether body reads it.
+func (g *intrafunc) signature(one *Configured, fn *walked, fields *ast.FieldList, body *ast.BlockStmt,
 	code string, held *parts,
 ) error {
 	if fields == nil {
 		return nil
 	}
-	read := readObjects(fn.info, fn.decl.Body)
+	read := readObjects(fn.info, body)
 	word := parameterSubject
 	if code == unusedReceiverCode {
 		word = receiverSubject

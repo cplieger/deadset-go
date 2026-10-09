@@ -27,3 +27,23 @@ func Conversions(in *Input) ([]graph.Conversion, error) {
 	}
 	return *in.conversions, nil
 }
+
+// ProgramConversions is [Conversions] followed by every site each loaded consumer
+// writes, in the order the scope declares the consumers. A consumer's site converts
+// the consumer's own reading of a target type, whose methods the resolver names by
+// their rendered position.
+func ProgramConversions(in *Input) ([]graph.Conversion, error) {
+	sites, err := Conversions(in)
+	if err != nil {
+		return nil, err
+	}
+	if in.programConversions == nil {
+		all := slices.Clone(sites)
+		for i := range in.Result.Consumers {
+			consumed := graph.Conversions(in.Result.Fset, in.Result.Consumers[i].Packages)
+			all = append(all, slices.DeleteFunc(consumed, func(c graph.Conversion) bool { return types.IsInterface(c.From) })...)
+		}
+		in.programConversions = &all
+	}
+	return *in.programConversions, nil
+}
