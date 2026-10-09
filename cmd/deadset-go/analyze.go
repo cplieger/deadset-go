@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/cplieger/deadset-go/internal/config"
 	"github.com/cplieger/deadset-go/internal/report"
+	"github.com/cplieger/deadset-go/internal/schema"
 	"github.com/cplieger/deadset-go/internal/suppress"
 )
 
@@ -263,7 +265,7 @@ func (a *invocation) read(templatePath string) error {
 // named, one rendering per format beside it, and the baseline where it named a path
 // for one.
 func (a *invocation) write(e *report.Envelope, recorded []suppress.Recorded, failOn config.Severity) error {
-	if err := writeAtomically(a.report, func(w io.Writer) error { return report.JSON(w, e, report.Options{}) }); err != nil {
+	if err := writeChecked(a.report, func(w io.Writer) error { return report.JSON(w, e, report.Options{}) }, checkReport); err != nil {
 		return err
 	}
 
@@ -323,6 +325,12 @@ func (a *invocation) verdict(e *report.Envelope, cfg *config.Config, stderr io.W
 // a truncated JSON document is exactly what a consumer cannot tell from a malformed
 // one, which is why every document this verb writes goes through here.
 func writeAtomically(path string, write func(w io.Writer) error) error {
+	return writeChecked(path, write, nil)
+}
+
+// writeChecked is [writeAtomically] with check reading the written document before
+// it is published, so a document check refuses is never at the path.
+func writeChecked(path string, write func(w io.Writer) error, check func(r io.Reader) error) error {
 	file, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
 	if err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
@@ -343,6 +351,11 @@ func writeAtomically(path string, write func(w io.Writer) error) error {
 	if err := file.Close(); err != nil {
 		return fmt.Errorf("close %s: %w", path, err)
 	}
+	if check != nil {
+		if err := checkFile(temporary, check); err != nil {
+			return fmt.Errorf("check %s: %w", path, err)
+		}
+	}
 	if err := os.Chmod(temporary, documentMode); err != nil {
 		return fmt.Errorf("set the mode of %s: %w", path, err)
 	}
@@ -352,11 +365,46 @@ func writeAtomically(path string, write func(w io.Writer) error) error {
 	return nil
 }
 
-// counted renders a count with its noun, so a message reads for one record as well
-// as for several.
-func counted(n int, noun string) string {
-	if n == 1 {
-		return strconv.Itoa(n) + " " + noun
+// checkFile runs check over the document at path.
+func checkFile(path string, check func(r io.Reader) error) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
 	}
-	return strconv.Itoa(n) + " " + noun + "s"
+	defer func() { _ = file.Close() }()
+	return check(bufio.NewReaderSize(file, 1<<20))
+}
+
+// errReportSchema reports a report the analyzer wrote that its own schema refuses,
+// which is a defect of the analyzer rather than of the target.
+var errReportSchema = errors.New("the report breaks the report schema")
+
+// checkReport refuses a report the published report schema does not admit, naming
+// the JSON Pointer of the first value it refuses.
+func checkReport(r io.Reader) error {
+	held, err := schema.Report()
+	if err != nil {
+		return err
+	}
+	found, err := held.Check(r)
+	if err != nil {
+		return err
+	}
+	if len(found) > 0 {
+		return fmt.Errorf("%w %s: %w", errReportSchema, held.Name(), &found[0])
+	}
+	return nil
+}
+
+// counted renders a count with its noun, so a message reads for one record as well
+// as for several. A noun ending in s takes es.
+func counted(n int, noun string) string {
+	switch {
+	case n == 1:
+		return strconv.Itoa(n) + " " + noun
+	case strings.HasSuffix(noun, "s"):
+		return strconv.Itoa(n) + " " + noun + "es"
+	default:
+		return strconv.Itoa(n) + " " + noun + "s"
+	}
 }

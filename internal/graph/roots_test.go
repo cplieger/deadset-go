@@ -189,7 +189,7 @@ func TestRootsRootsTheMembersOfAValueAPositionOfNoResolvedTypeReceives(t *testin
 
 	const pkg = "go://example.com/app#"
 	got := refsOfKind(d, RootTypeError)
-	for _, want := range []string{"returned.Write", "passed.Close", "stored.Len", "built.Step", "assigned.Shift"} {
+	for _, want := range []string{"returned.Write", "passed.Close", "stored.Len", "built.Step", "assigned.Shift", "handed.Send", "made.Build"} {
 		if !slices.Contains(got, pkg+want) {
 			t.Errorf("Roots(type-error-destinations.txtar) type-error roots %v, want %s: a skipped function hands its value to a type the compiler could not resolve",
 				got, want)

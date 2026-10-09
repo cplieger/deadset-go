@@ -304,7 +304,8 @@ func computeAnnotationCascade(in *Input) *annotationFalls {
 // writeOnlySubjects is every declaration the write-only kind reports, with its uses.
 func writeOnlySubjects(in *Input) map[graph.SymbolID]*uses {
 	exempted := make(map[graph.SymbolID]bool, len(in.Exempt))
-	for _, exemption := range in.Exempt {
+	for ix := range in.Exempt {
+		exemption := &in.Exempt[ix]
 		exempted[exemption.ID] = true
 	}
 	counted := writesAndReads(in)

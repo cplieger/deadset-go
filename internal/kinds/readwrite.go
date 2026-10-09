@@ -54,7 +54,8 @@ const enumMemberSubject = "enum-member"
 // it.
 func WriteOnlySymbol(in *Input) ([]Finding, error) {
 	exempted := make(map[graph.SymbolID]bool, len(in.Exempt))
-	for _, exemption := range in.Exempt {
+	for ix := range in.Exempt {
+		exemption := &in.Exempt[ix]
 		exempted[exemption.ID] = true
 	}
 	counted := writesAndReads(in)
@@ -108,14 +109,15 @@ func WriteOnlyRetained(in *Input) []graph.Exemption {
 	counted := writesAndReads(in)
 	seen := make(map[fact]bool)
 	var held []graph.Exemption
-	for _, exemption := range in.Exempt {
+	for ix := range in.Exempt {
+		exemption := &in.Exempt[ix]
 		symbol := in.symbol(exemption.ID)
 		one := fact{id: exemption.ID, class: exemption.Class, detail: exemption.Detail}
 		if symbol == nil || seen[one] || !writeOnlySubject(in, symbol, counted[symbol.ID], nil) {
 			continue
 		}
 		seen[one] = true
-		held = append(held, exemption)
+		held = append(held, *exemption)
 	}
 	return held
 }

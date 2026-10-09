@@ -635,3 +635,48 @@ func TestTheSuppressionRecordsAreReadInTheOrderTheGrammarResolvesThem(t *testing
 		t.Errorf("the run read the records as %v, want %v", read, want)
 	}
 }
+
+// handOffModule is a module whose store reaches a narrower interface only through a
+// call of a value of a defined function type, and whose test hands a fake of the
+// store along the same path. Every method a call selects through the narrower
+// interface is live, in production and in the test's fake alike. A third interface
+// no call selects through is the uncalled one, and the fake's method it reaches is a
+// test file's declaration a test reaches.
+func handOffModule(t *testing.T) string {
+	t.Helper()
+	return writeModule(t, map[string]string{
+		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
+		"app.go": "package main\n\n" +
+			"type Store interface {\n\tGet() string\n\tPut()\n}\n\n" +
+			"type Narrow interface{ Get() string }\n\n" +
+			"type Wire func(n Narrow) string\n\n" +
+			"type db struct{}\n\nfunc (db) Get() string { return \"x\" }\n\nfunc (db) Put() {}\n\n" +
+			"func read(n Narrow) string { return n.Get() }\n\n" +
+			"func use(w Wire, s Store) string { return w(s) }\n\n" +
+			"type Getter interface{ Get() string }\n\n" +
+			"func hold(g Getter) bool { return g != nil }\n\n" +
+			"func main() {\n\tvar s Store = db{}\n\ts.Put()\n\tprintln(use(read, s), hold(db{}))\n}\n",
+		"app_test.go": "package main\n\nimport \"testing\"\n\n" +
+			"type fake struct{}\n\nfunc (fake) Get() string { return \"f\" }\n\nfunc (fake) Put() {}\n\n" +
+			"func TestUse(t *testing.T) {\n\tif use(read, fake{}) != \"f\" {\n\t\tt.Fail()\n\t}\n}\n",
+		repositoryDocument: `{"target": {"kind": "application"}}`,
+	})
+}
+
+func TestFindingsOfKeepsAMethodReachedThroughAnInterfaceHandedOnByAFunctionValue(t *testing.T) {
+	envelope := reportOfDir(t, handOffModule(t))
+	uncalled := false
+	for i := range envelope.Findings {
+		found := &envelope.Findings[i]
+		switch found.Symbol.Ref {
+		case "go://example.com/app#Getter.Get":
+			uncalled = found.Code == "DS1203"
+		case "go://example.com/app#Store.Get", "go://example.com/app#db.Get", "go://example.com/app#fake.Get":
+			t.Errorf("findingsOf(the hand-off module) reports %s %s at %s:%d, want %s live: read selects it through Narrow",
+				found.Code, found.Symbol.Ref, found.Position.Path, found.Position.Line, found.Symbol.Ref)
+		}
+	}
+	if !uncalled {
+		t.Errorf("findingsOf(the hand-off module) = %v, want DS1203 about Getter.Get, which no call selects", findingCodes(envelope.Findings))
+	}
+}

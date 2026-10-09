@@ -76,7 +76,8 @@ func newNarrowing(in *Input) *narrowing {
 		unnarrowable: make(map[graph.SymbolID]bool, len(in.Exempt)),
 		signatures:   signatureTypes(in),
 	}
-	for _, exemption := range in.Exempt {
+	for ix := range in.Exempt {
+		exemption := &in.Exempt[ix]
 		n.unnarrowable[exemption.ID] = true
 	}
 	for i := range in.Merged.References {
@@ -108,7 +109,8 @@ func (n *narrowing) widen(r *graph.Reference) {
 // nothing reads.
 func (n *narrowing) holdWriteOnly() {
 	exempted := make(map[graph.SymbolID]bool, len(n.in.Exempt))
-	for _, exemption := range n.in.Exempt {
+	for ix := range n.in.Exempt {
+		exemption := &n.in.Exempt[ix]
 		exempted[exemption.ID] = true
 	}
 	counted := writesAndReads(n.in)
@@ -482,23 +484,17 @@ func UnreachableExport(in *Input) ([]Finding, error) {
 	return found, nil
 }
 
-// unreachableExport reports whether one candidate is this kind's population, which is
-// the unused-exported population of a package nothing outside can import.
-//
-// Every arm yields the candidate to the kind that makes the more specific claim about
-// it, so one declaration is reported once. The arms are the unused-declaration rule's
-// own, in its order, because this kind is that rule's answer for an unimportable
-// package: a test whose every subject is dead, a member of a container that is itself
-// dead, an interface or one of its methods, a subject of the read-and-write kinds, a
-// declaration carrying a deprecation marker, a declaration only a test file
-// references, and a field of a struct.
+// unreachableExport reports whether one candidate is this kind's population: the
+// unused-exported population of a package nothing outside can import. Every arm is
+// the unused-declaration rule's own, in its order, yielding the candidate to the
+// kind that makes the more specific claim, so one declaration is reported once.
 func (in *Input) unreachableExport(candidate *graph.Candidate, symbol *graph.Symbol) bool {
 	switch {
 	case !symbol.Exported:
 		return false
 	case candidate.UnreferencedTest:
 		return in.unreferencedTestExport(candidate, symbol)
-	case in.importable(symbol.PkgPath), candidate.TestOfDeadCode:
+	case in.importable(symbol.PkgPath), candidate.TestOfDeadCode, testFile(symbol):
 		return false
 	case in.deadParent(symbol):
 		return false

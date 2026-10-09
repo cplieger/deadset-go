@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -787,5 +788,126 @@ func TestAnalyzeReadsTheScopeDocumentTheInvocationNames(t *testing.T) {
 	}
 	if want := []string{"go://example.com/app#Forgotten"}; !slices.Equal(exported, want) {
 		t.Errorf("the report reports %v under DS1001, want %v: the consumer's reference holds the other live", exported, want)
+	}
+}
+
+// testSupportAssertionModule is a module whose test-support package, a package only
+// tests import, asserts an interface nothing else names as a type, so the assertion
+// is a candidate of the production sweep and the run reports it under DS1204.
+func testSupportAssertionModule(t *testing.T) string {
+	t.Helper()
+	return writeModule(t, map[string]string{
+		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
+		"app.go": "package main\n\nfunc main() {}\n",
+		"app_test.go": "package main\n\nimport (\n\t\"testing\"\n\n\t\"example.com/app/internal/testsupport\"\n)\n\n" +
+			"func TestFake(t *testing.T) {\n\tif testsupport.New().Get() != \"f\" {\n\t\tt.Fail()\n\t}\n}\n",
+		"internal/testsupport/support.go": "package testsupport\n\ntype Store interface{ Get() string }\n\n" +
+			"type Fake struct{}\n\nfunc (Fake) Get() string { return \"f\" }\n\nvar _ Store = Fake{}\n\n" +
+			"func New() Fake { return Fake{} }\n",
+		repositoryDocument: `{"target": {"kind": "application"}}`,
+	})
+}
+
+func TestAnalyzeWritesASchemaValidDS1204InTestSupportCode(t *testing.T) {
+	ran := runAnalyze(t, testSupportAssertionModule(t))
+	if ran.code != exitFindings {
+		t.Fatalf("analyze(a test-support assertion) = %d, want %d; stderr:\n%s", ran.code, exitFindings, ran.stderr)
+	}
+
+	body, err := os.ReadFile(ran.reportPath)
+	if err != nil {
+		t.Fatalf("read the report: %v", err)
+	}
+	if err := checkReport(bytes.NewReader(body)); err != nil {
+		t.Errorf("checkReport(the report analyze wrote) = %v, want the report schema to admit it", err)
+	}
+	var document struct {
+		Findings []map[string]json.RawMessage `json:"findings"`
+	}
+	if err := json.Unmarshal(body, &document); err != nil {
+		t.Fatalf("decode the report: %v", err)
+	}
+	reported := 0
+	for _, found := range document.Findings {
+		if string(found["code"]) != `"DS1204"` {
+			continue
+		}
+		reported++
+		if relation, held := found["liveness_relation"]; held {
+			t.Errorf("the DS1204 finding carries liveness_relation %s, want none", relation)
+		}
+	}
+	if reported != 1 {
+		t.Errorf("the report holds %d DS1204 findings, want the test-support assertion's one", reported)
+	}
+}
+
+func TestCheckReportNamesTheValueTheSchemaRefuses(t *testing.T) {
+	ran := runAnalyze(t, testSupportAssertionModule(t))
+	body, err := os.ReadFile(ran.reportPath)
+	if err != nil {
+		t.Fatalf("Setup: read the report: %v", err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(body, &document); err != nil {
+		t.Fatalf("Setup: decode the report: %v", err)
+	}
+	findings, _ := document["findings"].([]any)
+	at := -1
+	for i, one := range findings {
+		if found, _ := one.(map[string]any); found["code"] == "DS1204" {
+			found["liveness_relation"] = "reachability"
+			at = i
+		}
+	}
+	if at < 0 {
+		t.Fatalf("Setup: the report holds no DS1204 finding: %s", body)
+	}
+	planted, err := json.Marshal(document)
+	if err != nil {
+		t.Fatalf("Setup: encode the planted report: %v", err)
+	}
+
+	err = checkReport(bytes.NewReader(planted))
+	if want := "/findings/" + strconv.Itoa(at) + ": not:"; !errors.Is(err, errReportSchema) ||
+		!strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "liveness_relation") {
+		t.Errorf("checkReport(a DS1204 carrying a relation) = %v, want errReportSchema naming %q and the member", err, want)
+	}
+}
+
+func TestWriteCheckedPublishesNothingTheCheckRefuses(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "report.json")
+	refused := errors.New("the check refused")
+	err := writeChecked(path, func(w io.Writer) error {
+		_, err := w.Write([]byte("{}\n"))
+		return err
+	}, func(io.Reader) error { return refused })
+	if !errors.Is(err, refused) {
+		t.Errorf("writeChecked() with a refusing check = %v, want the check's error", err)
+	}
+	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
+		t.Errorf("the directory holds %d entries after a refused check, want none", len(entries))
+	}
+}
+
+func TestCountedRendersThePluralOfTheNoun(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		noun string
+		want string
+		n    int
+	}{
+		{noun: "exemption class", n: 1, want: "1 exemption class"},
+		{noun: "exemption class", n: 2, want: "2 exemption classes"},
+		{noun: "stale suppression", n: 3, want: "3 stale suppressions"},
+		{noun: "symbol", n: 0, want: "0 symbols"},
+	} {
+		if got := counted(tc.n, tc.noun); got != tc.want {
+			t.Errorf("counted(%d, %q) = %q, want %q", tc.n, tc.noun, got, tc.want)
+		}
 	}
 }

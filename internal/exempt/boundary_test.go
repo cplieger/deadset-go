@@ -152,11 +152,9 @@ func TestEncodingReflectionNamesTheConsumersWrapper(t *testing.T) {
 	}
 }
 
-// Every site a class publishes is a file of the target, whatever module the program
-// spans: the site is rendered relative to the target root, and a consumer's own file
-// has no rendering there. A class that walked a consumer's calls would end the run
-// rather than record one.
-func TestEveryExemptionOfATwoModuleProgramNamesASiteOfTheTarget(t *testing.T) {
+// Every site a class publishes is relative to the root of the module whose file holds
+// it, the target's or the loaded consumer's the exemption names.
+func TestEveryExemptionOfATwoModuleProgramNamesASiteInsideItsModule(t *testing.T) {
 	shared := analysisOf(t, consumerArchive, Options{})
 
 	found, err := shared.compute(t, false)
@@ -168,46 +166,89 @@ func TestEveryExemptionOfATwoModuleProgramNamesASiteOfTheTarget(t *testing.T) {
 	}
 	for _, e := range found {
 		if filepath.IsAbs(e.Site.Filename) || strings.HasPrefix(e.Site.Filename, "..") {
-			t.Errorf("Compute(%s) recorded %s at %s, want a path inside the target root",
+			t.Errorf("Compute(%s) recorded %s at %s, want a path inside the root of its module",
 				consumerArchive, e.ID, e.Site)
 		}
 	}
 }
 
-// Under a production run the evidence of a test file holds nothing, and the mode's
-// classification of a loaded consumer's test references does not change that: it says
-// which references count as production, while an exemption's site is a file of the
-// target and never a consumer's test file. Reading the classification as a second way
-// for test-file evidence to hold would retain under a production sweep what a test
-// alone marshals.
-func TestEvidenceOfATestFileHoldsUnderNeitherProductionClassification(t *testing.T) {
+// consumerSiteArchive is the fixture whose consumer imports the target and encodes the
+// target's values in its own files.
+const consumerSiteArchive = "encoding-reflection-consumer-site.txtar"
+
+// Evidence a consumer's file carries is a site of that consumer: the class renders it
+// against the consumer's root and names the consumer, rather than ending the run on a
+// file outside the target root.
+func TestEncodingReflectionRendersAConsumersEvidenceAgainstTheConsumersRoot(t *testing.T) {
+	shared := analysisOf(t, consumerSiteArchive, Options{})
+	found, err := shared.detect(t, EncodingReflection)
+	if err != nil {
+		t.Fatalf("EncodingReflectionDetector(%s) = %v, want the consumer's evidence recorded", consumerSiteArchive, err)
+	}
+	symbols := shared.inventory(t)
+	refs := make(map[graph.SymbolID]string, len(symbols))
+	for i := range symbols {
+		refs[symbols[i].ID] = symbols[i].Ref
+	}
+	sites := make(map[string]string)
+	for _, e := range found {
+		sites[refs[e.ID]] = e.Consumer + " " + e.Site.Filename
+	}
+	for ref, want := range map[string]string{
+		"go://example.com/target#Record.Name":  "example.com/httpwire wire.go",
+		"go://example.com/target#Record.Count": "example.com/httpwire wire.go",
+		"go://example.com/target#Probe.Label":  "example.com/httpwire wire_test.go",
+	} {
+		if got := sites[ref]; got != want {
+			t.Errorf("EncodingReflectionDetector(%s) records %s at %q, want %q", consumerSiteArchive, ref, got, want)
+		}
+	}
+
+	held, err := shared.compute(t, true)
+	if err != nil {
+		t.Fatalf("Compute(%s) under a production run = %v", consumerSiteArchive, err)
+	}
+	for _, e := range held {
+		if refs[e.ID] == "go://example.com/target#Probe.Label" {
+			t.Errorf("Compute(%s) under a production run holds %s by the consumer's test file %s, want nothing",
+				consumerSiteArchive, refs[e.ID], e.Site)
+		}
+	}
+}
+
+// Under a production run the evidence a test file of the target carries holds
+// nothing, whatever the mode says of a consumer's tests. A loaded consumer's test file
+// is classified as the mode classifies that file's references.
+func TestEvidenceOfATestFileHoldsAsTheModeClassifiesThatFile(t *testing.T) {
 	for _, test := range []struct {
-		name string
-		mode graph.Mode
-		want bool
+		name         string
+		mode         graph.Mode
+		targetTest   bool
+		consumerTest bool
 	}{
-		{name: "the plain mode", mode: graph.Mode{}, want: true},
+		{name: "the_plain_mode", mode: graph.Mode{}, targetTest: true, consumerTest: true},
+		{name: "the_plain_mode_consumer_tests_production", mode: graph.Mode{ConsumerTestsProduction: true}, targetTest: true, consumerTest: true},
+		{name: "a_production_run", mode: graph.Mode{Production: true}},
 		{
-			name: "the plain mode where a consumer's tests count as production",
-			mode: graph.Mode{ConsumerTestsProduction: true},
-			want: true,
-		},
-		{name: "a production run", mode: graph.Mode{Production: true}, want: false},
-		{
-			name: "a production run where a consumer's tests count as production",
-			mode: graph.Mode{Production: true, ConsumerTestsProduction: true},
-			want: false,
+			name: "a_production_run_consumer_tests_production",
+			mode: graph.Mode{Production: true, ConsumerTestsProduction: true}, consumerTest: true,
 		},
 	} {
-		t.Run(strings.ReplaceAll(test.name, " ", "_"), func(t *testing.T) {
+		t.Run(test.name, func(t *testing.T) {
 			site := token.Position{Filename: "app_test.go", Line: 9, Column: 2}
-			if got := holdsInMode(site, test.mode); got != test.want {
-				t.Errorf("holdsInMode(%s, %+v) = %t, want %t", site, test.mode, got, test.want)
+			if got := holdsInMode(&graph.Exemption{Site: site}, test.mode); got != test.targetTest {
+				t.Errorf("holdsInMode(the target's %s, %+v) = %t, want %t", site, test.mode, got, test.targetTest)
 			}
-			source := token.Position{Filename: "app.go", Line: 9, Column: 2}
-			if got := holdsInMode(source, test.mode); !got {
-				t.Errorf("holdsInMode(%s, %+v) = %t, want true: a source file's evidence holds under every mode",
-					source, test.mode, got)
+			consumed := &graph.Exemption{Consumer: "example.com/consumer", Site: site}
+			if got := holdsInMode(consumed, test.mode); got != test.consumerTest {
+				t.Errorf("holdsInMode(the consumer's %s, %+v) = %t, want %t", site, test.mode, got, test.consumerTest)
+			}
+			for _, consumer := range []string{"", "example.com/consumer"} {
+				source := &graph.Exemption{Consumer: consumer, Site: token.Position{Filename: "app.go", Line: 9, Column: 2}}
+				if got := holdsInMode(source, test.mode); !got {
+					t.Errorf("holdsInMode(%q app.go, %+v) = false, want true: a source file's evidence holds under every mode",
+						consumer, test.mode)
+				}
 			}
 		})
 	}

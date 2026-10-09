@@ -9,7 +9,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"go/token"
 	"io"
 	"io/fs"
 	"os"
@@ -909,8 +908,10 @@ func inInventoryOrder(merged *graph.Merged, swept, writeOnly []graph.Exemption) 
 		return swept
 	}
 	held := make(map[graph.SymbolID][]graph.Exemption)
-	for _, e := range slices.Concat(swept, writeOnly) {
-		held[e.ID] = append(held[e.ID], e)
+	all := slices.Concat(swept, writeOnly)
+	for ix := range all {
+		e := &all[ix]
+		held[e.ID] = append(held[e.ID], *e)
 	}
 	ordered := make([]graph.Exemption, 0, len(swept)+len(writeOnly))
 	for i := range merged.Symbols {
@@ -1620,23 +1621,29 @@ func classNames(classes []exempt.Class) string {
 // one line per symbol and nothing is re-sorted.
 func retainedLines(refs map[graph.SymbolID]string, retained []graph.Exemption) []string {
 	var lines []string
-	for i, held := range retained {
+	for i := range retained {
+		held := &retained[i]
 		if i == 0 || held.ID != retained[i-1].ID {
 			lines = append(lines, refs[held.ID])
 		}
-		lines[len(lines)-1] += "\t" + held.Class + "\t" + evidenceSite(held.Site) + "\t" + held.Detail
+		lines[len(lines)-1] += "\t" + held.Class + "\t" + evidenceSite(held) + "\t" + held.Detail
 	}
 	return lines
 }
 
 // evidenceSite renders the position an exemption recorded, and renders a class
 // that recorded none as nothing: an empty field is what says no site exists, where
-// a position's own spelling of an empty value would read as a file named "-".
-func evidenceSite(site token.Position) string {
-	if site.Filename == "" {
+// a position's own spelling of an empty value would read as a file named "-". A
+// loaded consumer's file is prefixed with that consumer's module path, the way a
+// trimmed Go build names a file of a module.
+func evidenceSite(e *graph.Exemption) string {
+	if e.Site.Filename == "" {
 		return ""
 	}
-	return site.String()
+	if e.Consumer != "" {
+		return e.Consumer + "/" + e.Site.String()
+	}
+	return e.Site.String()
 }
 
 // rootLines renders one line per root the matrix holds, in the order the merge

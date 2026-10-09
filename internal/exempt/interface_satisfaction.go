@@ -311,7 +311,7 @@ func satisfying(from types.Type, to *types.Interface) []answer {
 //
 //nolint:gocritic // slices.SortFunc fixes a comparator's parameters to values.
 func byHeldSymbol(a, b graph.Exemption) int {
-	if c := graph.ByPosition(a.Site, b.Site); c != 0 {
+	if c := bySite(&a, &b); c != 0 {
 		return c
 	}
 	if c := strings.Compare(string(a.ID), string(b.ID)); c != 0 {
@@ -327,6 +327,6 @@ func byHeldSymbol(a, b graph.Exemption) int {
 //
 //nolint:gocritic // slices.CompactFunc fixes a comparator's parameters to values.
 func sameExemption(a, b graph.Exemption) bool {
-	return a.ID == b.ID && a.Class == b.Class && a.Site == b.Site && a.Detail == b.Detail &&
+	return a.ID == b.ID && a.Class == b.Class && a.Consumer == b.Consumer && a.Site == b.Site && a.Detail == b.Detail &&
 		a.Holder == b.Holder && a.Via == b.Via
 }

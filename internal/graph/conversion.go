@@ -269,7 +269,7 @@ func (s *conversionScan) call(c *ast.CallExpr) {
 		}
 		return
 	}
-	sig, ok := tv.Type.(*types.Signature)
+	sig, ok := tv.Type.Underlying().(*types.Signature)
 	if !ok {
 		return
 	}

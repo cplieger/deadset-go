@@ -191,7 +191,7 @@ func (d *rootDetection) rootArguments(info *types.Info, call *ast.CallExpr) {
 		d.rootInto(info, []types.Type{fun}, call.Args)
 		return
 	}
-	sig, isSignature := types.Unalias(fun).(*types.Signature)
+	sig, isSignature := underlying(fun).(*types.Signature)
 	for i, arg := range call.Args {
 		if fun == nil || unresolved(fun) || isSignature && unresolved(parameterType(sig, i, call.Ellipsis.IsValid())) {
 			d.rootReached(info.TypeOf(arg))
@@ -256,7 +256,7 @@ func typesOf(info *types.Info, exprs []ast.Expr) []types.Type {
 // rootReached roots the members of the type of a value an unresolved position
 // receives, or of each result of a function value, which that position may call.
 func (d *rootDetection) rootReached(t types.Type) {
-	if sig, isFunc := types.Unalias(t).(*types.Signature); isFunc {
+	if sig, isFunc := underlying(t).(*types.Signature); isFunc {
 		for _, result := range tupleTypes(sig.Results()) {
 			d.rootMembers(result)
 		}

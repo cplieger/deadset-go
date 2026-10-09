@@ -65,6 +65,11 @@ type Exemption struct {
 	// retains through an interface the inventory declares.
 	Via SymbolID
 
+	// Consumer is the module path of the loaded consumer whose file holds the
+	// evidence, empty for a file of the target. Site is relative to that module's
+	// root.
+	Consumer string
+
 	Site token.Position // last, so the counted fields of a position end the value
 }
 
@@ -233,7 +238,8 @@ func (g *Graph) sweep(in *SweepInput) *sweep {
 func (g *Graph) using(in *SweepInput) *Graph {
 	uses := slices.Clone(in.Uses)
 	held := make(map[int]bool)
-	for _, e := range in.Exempt {
+	for ix := range in.Exempt {
+		e := &in.Exempt[ix]
 		if e.Holder != "" {
 			uses = append(uses, Use{From: e.Holder, To: e.ID})
 			if at := g.at(e.ID); at != outside {
@@ -280,7 +286,8 @@ func (g *Graph) positions(ids []SymbolID) []bool {
 // is [sweep.retained]'s answer.
 func (g *Graph) exempted(exempt []Exemption) []bool {
 	ids := make([]SymbolID, 0, len(exempt))
-	for _, e := range exempt {
+	for ix := range exempt {
+		e := &exempt[ix]
 		if e.Holder == "" {
 			ids = append(ids, e.ID)
 		}
@@ -307,9 +314,10 @@ type sweep struct {
 // held nothing back.
 func (s *sweep) retained(exempt []Exemption, with *sweep) []Exemption {
 	held := make(map[SymbolID][]Exemption)
-	for _, e := range exempt {
-		if at := s.g.at(e.ID); at != outside && s.dead[at] && !with.dead[at] && with.holds(&e) {
-			held[e.ID] = append(held[e.ID], e)
+	for ix := range exempt {
+		e := &exempt[ix]
+		if at := s.g.at(e.ID); at != outside && s.dead[at] && !with.dead[at] && with.holds(e) {
+			held[e.ID] = append(held[e.ID], *e)
 		}
 	}
 	if len(held) == 0 {
@@ -586,7 +594,8 @@ func TestReferencesOf(evidence []Exemption) TestEvidence {
 	}
 	seen := make(map[fact]bool, len(evidence))
 	counts := make(map[SymbolID]int, len(evidence))
-	for _, e := range evidence {
+	for ix := range evidence {
+		e := &evidence[ix]
 		if f := (fact{id: e.ID, class: e.Class, detail: e.Detail}); !seen[f] {
 			seen[f] = true
 			counts[e.ID]++
