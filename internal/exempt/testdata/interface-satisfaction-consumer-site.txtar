@@ -1,0 +1,42 @@
+A target module and a declared consumer that imports it. The consumer converts a
+value of the target's type to an interface the consumer declares, so the method that
+answers it is retained by evidence written in the consumer's file, rendered against
+the consumer's own root.
+
+-- target/go.mod --
+module example.com/target
+
+go 1.27.0
+-- target/item.go --
+// Package target declares the type its consumer converts.
+package target
+
+// Item is named by the consumer through the consumer's interface.
+type Item struct{}
+
+// Name answers the consumer's interface.
+func (Item) Name() string { return "item" }
+
+// Tag answers no interface a site converts Item to.
+func (Item) Tag() string { return "tag" }
+-- httpwire/go.mod --
+module example.com/httpwire
+
+go 1.27.0
+
+require example.com/target v0.0.0
+
+replace example.com/target => ../target
+-- httpwire/wire.go --
+// Package httpwire names the target's values through its own interface.
+package httpwire
+
+import "example.com/target"
+
+type named interface{ Name() string }
+
+// Label names one target value.
+func Label() string {
+	var n named = target.Item{}
+	return n.Name()
+}

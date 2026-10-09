@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/internal/config"
-	spec "github.com/cplieger/deadset-spec/v6"
+	spec "github.com/cplieger/deadset-spec/v7"
 )
 
 // usageExitCode is the code every refusal this package makes maps to.

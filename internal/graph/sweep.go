@@ -474,11 +474,12 @@ func (s *sweep) decide() {
 // makes rather than those the mode counts: a production sweep counts none, so the
 // mode's set would leave the rule unable to fire in the only mode where it can.
 func (s *sweep) admitTestsOfDeadCode() {
+	shared := s.sharedSupport()
 	for i := range s.g.symbols {
 		if !s.g.test[i] || !s.g.subject[i] || s.exempt[i] || s.marked[i] {
 			continue
 		}
-		if targets, live := s.targetsOf(i); targets > 0 && live == 0 {
+		if targets, live := s.targetsOf(i, shared); targets > 0 && live == 0 {
 			s.dead[i] = true
 			s.testOfDeadCode[i] = true
 		}
@@ -534,10 +535,44 @@ func (s *sweep) reachedCountingTests() []bool {
 	return reached
 }
 
-// targetsOf counts the production declarations one test declaration references,
-// and how many of them are not candidates.
-func (s *sweep) targetsOf(at int) (targets, live int) {
+// sharedSupport marks every declaration of test-support code that a test referencing
+// a live target symbol also references: it counts as a live target symbol of every
+// test that references it.
+func (s *sweep) sharedSupport() []bool {
+	shared := make([]bool, len(s.g.symbols))
+	for i := range s.g.symbols {
+		if !s.g.test[i] {
+			continue
+		}
+		if _, live := s.targetsOf(i, nil); live == 0 {
+			continue
+		}
+		for _, e := range s.g.out[i] {
+			if s.supportCode(e.to) {
+				shared[e.to] = true
+			}
+		}
+	}
+	return shared
+}
+
+// supportCode reports whether one symbol is a declaration of test-support code
+// rather than of a test file.
+func (s *sweep) supportCode(at int) bool {
+	_, inTestFile := IsTestFile(s.g.symbols[at].Pos.Filename)
+	return s.g.symbols[at].TestSupport && !inTestFile
+}
+
+// targetsOf counts the target symbols one test declaration references, and how many
+// of them are not candidates: its production declarations, and each declaration of
+// test-support code shared marks, which counts as live.
+func (s *sweep) targetsOf(at int, shared []bool) (targets, live int) {
 	for _, e := range s.g.out[at] {
+		if e.to < len(shared) && shared[e.to] {
+			targets++
+			live++
+			continue
+		}
 		if s.g.test[e.to] || !s.g.subject[e.to] {
 			continue
 		}

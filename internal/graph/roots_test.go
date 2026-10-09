@@ -15,7 +15,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/internal/load"
-	spec "github.com/cplieger/deadset-spec/v6"
+	spec "github.com/cplieger/deadset-spec/v7"
 	"golang.org/x/tools/go/packages"
 )
 

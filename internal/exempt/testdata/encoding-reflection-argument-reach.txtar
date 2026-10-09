@@ -1,0 +1,67 @@
+A command whose encoder arguments reach types of their own: a value of an interface
+the command defines, a nested literal behind the address operator, and an error. A
+decoder fills a struct whose written pointer field holds the value it decodes into.
+
+-- go.mod --
+module example.com/reach
+
+go 1.27.0
+-- main.go --
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type shape interface {
+	area() int
+}
+
+type square struct {
+	Side int
+}
+
+func (square) area() int { return 1 }
+
+type circle struct {
+	Radius int
+}
+
+type wrapper struct {
+	V any
+}
+
+type inner struct {
+	Depth int
+}
+
+type failure struct {
+	Code int
+}
+
+func (f *failure) Error() string { return "failure" }
+
+func fail() error { return &failure{Code: 1} }
+
+type target struct {
+	Out   *result
+	Spare *result
+	Label string
+}
+
+type result struct {
+	N int
+}
+
+func main() {
+	var s shape = square{Side: 2}
+	var c any = circle{Radius: 3}
+	out, _ := json.Marshal(s)
+	nested, _ := json.Marshal(&wrapper{V: []any{inner{Depth: 1}}})
+	plain, _ := json.Marshal(fail())
+	var r result
+	t := target{Out: &r, Label: "x"}
+	_ = json.Unmarshal(nil, &t)
+	fmt.Println(string(out), string(nested), string(plain), c != nil, r.N, t.Spare == nil, t.Label, s.area())
+}

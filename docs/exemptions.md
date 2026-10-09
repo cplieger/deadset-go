@@ -50,11 +50,11 @@ The empty interface is the one parameter type this rule reads. A value handed to
 
 Retains every method that satisfies an interface a value of the method's receiver type reaches.
 
-The evidence is the conversion set, every site where a value of a concrete type reaches a position typed as an interface. Such a site is an explicit conversion or a satisfaction assertion, an assignment, an argument, a return value, or an element stored in an interface-typed container. For each such pair of concrete type and interface, the methods of the type that answer what the interface requires are retained at that site.
+The evidence is the conversion set, every site in the target or in a loaded consumer where a value of a concrete type reaches a position typed as an interface. Such a site is an explicit conversion or a satisfaction assertion, an assignment, an argument, a return value, or an element stored in an interface-typed container. For each such pair of concrete type and interface, the methods of the type that answer what the interface requires are retained at that site.
 
 A method answering an interface method no call site invokes is not retained, and `DS1203` reports it with that interface method. Each retention is a use by the declaration that holds the site, so it holds only while that declaration is live. A satisfaction assertion is a use by the type it asserts, so it keeps nothing of a type only dead code builds.
 
-A value converted to a defined interface that a package outside the program declares is held by that package, which may assert another interface on it. So the value also keeps the methods by which it, or a pointer to it, satisfies another interface of that package, exported or not, or an interface type literal its source writes. An exported interface of a package in its import closure counts too.
+A value converted to a defined interface that a package outside the program declares is held by that package, which may assert another interface on it. So the value also keeps the methods by which it, or a pointer to it, satisfies an interface that package's source asserts. An asserted interface is one a type assertion or a type switch case names, whichever package declares it. An interface that package declares and never asserts keeps nothing.
 
 A type whose values never reach an interface retains nothing whatever it happens to implement, because no caller can dispatch to it through an interface the program never builds.
 

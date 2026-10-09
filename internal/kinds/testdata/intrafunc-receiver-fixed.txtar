@@ -1,0 +1,33 @@
+Methods whose signatures something fixes, each naming a receiver its body never
+reads: a stub, a method interface satisfaction retains and a method used as a value.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+import "fmt"
+
+// clock is converted to below.
+type clock interface {
+	tick() int
+}
+
+// fake names a receiver in every method and reads it in none.
+type fake struct{}
+
+func (f *fake) reset() {}
+
+func (f *fake) tick() int { return 1 }
+
+func (f *fake) name() string { return "fake" }
+
+func main() {
+	f := &fake{}
+	var c clock = f
+	f.reset()
+	label := f.name
+	fmt.Println(c.tick(), label())
+}

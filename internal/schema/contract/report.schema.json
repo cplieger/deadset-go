@@ -773,7 +773,8 @@
             "certain": {
               "description": "How many findings at the confidence certain the minimum withheld: always 0, because no minimum withholds a certain finding.",
               "type": "integer",
-              "minimum": 0
+              "minimum": 0,
+              "maximum": 0
             },
             "probable": {
               "description": "How many findings at the confidence probable the minimum withheld, which is 0 unless the minimum is certain.",

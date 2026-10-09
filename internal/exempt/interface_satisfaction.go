@@ -12,13 +12,14 @@ import (
 
 // InterfaceSatisfactionDetector retains every method that satisfies an interface
 // a value of the method's receiver type reaches, as types.Implements decides at each
-// conversion site, and what a package outside the program declaring that interface
-// can assert on the value ([outsideAssertions]). Each retention is a use by the
-// declaration holding the site, and an assertion's is a use by the asserted type, so
-// the assertion and the methods fall with a type only dead code builds. A method
-// satisfying two interfaces at two sites is retained once per site.
+// conversion site of the target or of a loaded consumer, and what a package outside
+// the program declaring that interface asserts on the value ([outsideAssertions]).
+// Each retention is a use by the declaration holding the site, and an assertion's is
+// a use by the asserted type, so the assertion and the methods fall with a type only
+// dead code builds. A method satisfying two interfaces at two sites is retained once
+// per site.
 func InterfaceSatisfactionDetector(in *Input) ([]graph.Exemption, error) {
-	sites, err := Conversions(in)
+	sites, err := ProgramConversions(in)
 	if err != nil {
 		return nil, err
 	}
@@ -137,14 +138,14 @@ func (s *spans) retain(in *Input, c *graph.Conversion, retained []graph.Exemptio
 	if len(methods) == 0 {
 		return retained, nil
 	}
-	site, err := in.Resolve.Render(c.Site)
+	consumer, site, err := in.Resolve.Site(c.Site)
 	if err != nil {
 		return nil, err
 	}
 	holder, asserted := s.holderOf(in, c)
 	if asserted != "" && holder != "" {
 		retained = append(retained, graph.Exemption{
-			ID: asserted, Class: string(InterfaceSatisfaction), Site: site,
+			ID: asserted, Class: string(InterfaceSatisfaction), Consumer: consumer, Site: site,
 			Detail: "asserts " + c.Name, Holder: holder,
 		})
 	}
@@ -155,40 +156,41 @@ func (s *spans) retain(in *Input, c *graph.Conversion, retained []graph.Exemptio
 		}
 		via, _ := in.Resolve.Object(m.answers)
 		retained = append(retained, graph.Exemption{
-			ID:     id,
-			Class:  string(InterfaceSatisfaction),
-			Site:   site,
-			Detail: "satisfies " + c.Name,
-			Holder: holder,
-			Via:    via,
+			ID:       id,
+			Class:    string(InterfaceSatisfaction),
+			Consumer: consumer,
+			Site:     site,
+			Detail:   "satisfies " + c.Name,
+			Holder:   holder,
+			Via:      via,
 		})
 	}
 	pkg, asserts := s.outside.of(c.Interface)
 	if !asserts {
 		return retained, nil
 	}
-	detail := "satisfies what " + pkg.Path() + " can assert through " + c.Name
+	detail := "satisfies what " + pkg.Path() + " asserts through " + c.Name
 	for _, method := range s.outside.methods(c.From, pkg) {
 		if slices.ContainsFunc(methods, func(m answer) bool { return m.method == method }) {
 			continue
 		}
 		if id, inventoried := in.Resolve.Object(method); inventoried {
 			retained = append(retained, graph.Exemption{
-				ID: id, Class: string(InterfaceSatisfaction), Site: site, Detail: detail, Holder: holder,
+				ID: id, Class: string(InterfaceSatisfaction), Consumer: consumer, Site: site, Detail: detail,
+				Holder: holder,
 			})
 		}
 	}
 	return retained, nil
 }
 
-// outsideAssertions answers what code outside the program can assert on a value it
-// holds through a defined interface its own package declares: every interface that
-// package declares, exported or not, or writes as a literal, and every exported
-// interface a package it imports at any depth declares.
+// outsideAssertions answers what code outside the program asserts on a value it
+// holds through a defined interface its own package declares: every interface a type
+// assertion or a type switch case of that package's source names
+// ([assertable.asserted]).
 type outsideAssertions struct {
 	program   map[string]bool
 	assert    *assertable
-	sets      map[string][]*types.Interface    // by package path
 	methodsOf map[outsideKey][]types.Object    // the methods retained, by type and package
 	names     map[*types.Named]map[string]bool // the names a type or a pointer to it declares
 }
@@ -208,7 +210,6 @@ func newOutsideAssertions(in *Input) *outsideAssertions {
 	return &outsideAssertions{
 		program:   program,
 		assert:    assertableOf(in),
-		sets:      make(map[string][]*types.Interface),
 		methodsOf: make(map[outsideKey][]types.Object),
 		names:     make(map[*types.Named]map[string]bool),
 	}
@@ -225,7 +226,7 @@ func (o *outsideAssertions) of(iface types.Type) (*types.Package, bool) {
 }
 
 // methods is every method by which a value of t, or a pointer to it, implements an
-// interface code of pkg can assert, each the declaration a deletion would remove.
+// interface code of pkg asserts, each the declaration a deletion would remove.
 func (o *outsideAssertions) methods(t types.Type, pkg *types.Package) []types.Object {
 	named, isNamed := definedType(t)
 	if !isNamed {
@@ -240,7 +241,7 @@ func (o *outsideAssertions) methods(t types.Type, pkg *types.Package) []types.Ob
 		names = declaredMethodNames(named)
 		o.names[named] = names
 	}
-	satisfied := satisfiedMethods(named, names, o.interfaces(pkg))
+	satisfied := satisfiedMethods(named, names, o.assert.asserted(pkg))
 	var held []types.Object
 	for selection := range types.NewMethodSet(types.NewPointer(named)).Methods() {
 		if satisfied[selection.Obj().Name()] {
@@ -248,16 +249,6 @@ func (o *outsideAssertions) methods(t types.Type, pkg *types.Package) []types.Ob
 		}
 	}
 	o.methodsOf[key] = held
-	return held
-}
-
-// interfaces is what code of one package can assert, computed once per package.
-func (o *outsideAssertions) interfaces(pkg *types.Package) []*types.Interface {
-	if held, known := o.sets[pkg.Path()]; known {
-		return held
-	}
-	held := append(slices.Clone(o.assert.ownInterfaces(pkg)), o.assert.importedBy(pkg).interfaces...)
-	o.sets[pkg.Path()] = held
 	return held
 }
 

@@ -63,6 +63,8 @@ Test-support code is a package only tests reach, through its own test files or t
 
 A test declaration whose set of referenced target production declarations is not empty and every member of which is reported dead. A test that references one live target declaration is never reported, and the message says so. A reported test joins the dead component of the declarations it references, so the report names the test beside the code it exercises. A test-file declaration nothing reaches that is no such test is reported under the code a production declaration of its shape carries.
 
+Test-support code that a test of live code also references counts as live for every test that references it.
+
 ### DS1006 deprecated-unused
 
 A declaration carrying a `Deprecated:` paragraph in its doc comment that no production file references, which is the residue of a finished migration. It is reported under this code rather than under the unused-exported, unused-unexported or unused-member code.
@@ -76,6 +78,8 @@ A declaration carrying a `Deprecated:` paragraph in its doc comment that no prod
 | `DS1103` | `unreachable-export` | on | `deny` | `deletable` |
 
 A narrowing is reported only where every reference that can exist is one the run loaded. A `main` package, an external test package and a package under an `internal` tree are closed whatever the run knows about consumers. A published package is closed only where the configuration declares the consumer set complete and every declared consumer loaded. So a library with no consumer information receives narrowing findings over its `internal` tree and its `main` packages and none on its published API.
+
+A method that matches a method of an exported interface declared outside the target is never narrowed. That interface fixes its name.
 
 A declared cross-language edge counts as a reference from outside the symbol's own package. So a narrowing finding on a symbol an edge names is published as a pending evaluation rather than as a finding, as [How the analysis decides](analysis.md#cross-language-edges) describes.
 
@@ -215,10 +219,11 @@ Every configured root and every configured root pattern that named no symbol of 
 
 The six kinds are one family behind one switch, and `"DS18": "allow"` in the severity section turns off all of them. `Overlaps` is the vocabulary's own list of external rules that report the same kind, carried on every finding, so a project already running one of them silences whichever side it prefers.
 
-Three of the six edit a signature, and each reports only where the signature is free to change. A signature is not free in six cases:
+Two of the six, `DS1801` and `DS1803`, edit a signature, and each reports only where the signature is free to change. A signature is not free in seven cases:
 
 - An exemption class retained the declaration, on evidence in any file, a test file included.
 - The function is used as a value rather than called.
+- The method has the name and signature of a method of an exported interface declared outside the target.
 - The linker or a foreign caller names it.
 - The test driver runs it as a test, a benchmark, a fuzz test or `TestMain`.
 - A type error roots it, because the code the error left unresolved may fix the signature.
@@ -226,15 +231,17 @@ Three of the six edit a signature, and each reports only where the signature is 
 
 A fuzz target passed to `Fuzz` is used as a value.
 
-A published declaration of a library is free whatever the run knows about the library's consumers, because a parameter or a receiver a body never names is one no caller can make it read. The fixability of each kind says what the edit costs on such a declaration.
+A published declaration of a library is free whatever the run knows about the library's consumers, because a parameter a body never names is one no caller can make it read. The fixability of each kind says what the edit costs on such a declaration.
 
 ### DS1801 unused-parameter
 
 A named, non-blank parameter of a function or method whose body names it nowhere, on a function whose signature is free. A parameter declared with the blank identifier, and one the signature leaves unnamed, name nothing and are no subject. A parameter used under one build configuration is used, so a configuration whose constraint excludes the body that reads it reports nothing.
 
+A function literal that initializes a local variable has a free signature when every use of the variable calls it. Its unread parameters are then reported too.
+
 ### DS1802 unused-receiver
 
-A named, non-blank method receiver the method body names nowhere, under the same free-signature rule. The fix deletes an identifier rather than changing a signature, because Go permits a method with no receiver name, which is why this kind is `deletable` where the parameter kind is `manual`.
+A named, non-blank method receiver the method body names nowhere, whatever fixes the method's signature. The fix deletes an identifier rather than changing a signature, because Go permits a method with no receiver name, which is why this kind is `deletable` where the parameter kind is `manual`.
 
 ### DS1803 unused-result
 

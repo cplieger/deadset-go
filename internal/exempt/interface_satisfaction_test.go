@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/internal/graph"
-	spec "github.com/cplieger/deadset-spec/v6"
+	spec "github.com/cplieger/deadset-spec/v7"
 	"golang.org/x/tools/txtar"
 )
 
@@ -525,9 +525,9 @@ func TestInterfaceSatisfactionHoldsWhatAnAssertionReachesFromATestFileOutsideAPr
 }
 
 // A value converted to an interface a package outside the program declares is held
-// by that package, which may assert another interface on it: one the package
-// declares, exported or not, an interface type literal its source writes, or an
-// exported interface of a package it imports. A value converted to the program's own
+// by that package, which keeps the methods of every interface a type assertion or a
+// type switch case of its source names, whichever package declares it. A case of an
+// expression switch asserts nothing. A value converted to the program's own
 // interface keeps what that interface requires and nothing more.
 func TestInterfaceSatisfactionRetainsWhatAnOutsideHolderCanAssert(t *testing.T) {
 	refs := retainedRefs(t, analysisOf(t, "interface-satisfaction-outside.txtar", Options{}), InterfaceSatisfaction)
@@ -538,7 +538,7 @@ func TestInterfaceSatisfactionRetainsWhatAnOutsideHolderCanAssert(t *testing.T) 
 		want     []string
 	}{
 		{desc: "converted by pointer", typeName: "recorder", want: qualify("example.com/assert", "recorder",
-			"Accept", "Close", "Flush", "Reset", "SetDeadline", "Write")},
+			"Accept", "Close", "Flush", "Reset", "SetDeadline", "Stop", "Write")},
 		{desc: "converted by value", typeName: "stamp", want: qualify("example.com/assert", "stamp", "Flush", "Write")},
 		{desc: "converted to the program's own interface", typeName: "quiet", want: qualify("example.com/assert", "quiet", "Write")},
 	} {
@@ -548,5 +548,31 @@ func TestInterfaceSatisfactionRetainsWhatAnOutsideHolderCanAssert(t *testing.T) 
 					test.typeName, test.desc, got, test.want)
 			}
 		})
+	}
+}
+
+// A conversion written in a loaded consumer's file retains the target's method as
+// evidence of that consumer: the record names the consumer and renders the site
+// against the consumer's root, never against the target's.
+func TestInterfaceSatisfactionRendersAConsumersSiteAgainstTheConsumersRoot(t *testing.T) {
+	const archive = "interface-satisfaction-consumer-site.txtar"
+	shared := analysisOf(t, archive, Options{})
+	found, err := shared.detect(t, InterfaceSatisfaction)
+	if err != nil {
+		t.Fatalf("InterfaceSatisfactionDetector(%s) = %v, want the consumer's site recorded", archive, err)
+	}
+	symbols := shared.inventory(t)
+	refs := make(map[graph.SymbolID]string, len(symbols))
+	for i := range symbols {
+		refs[symbols[i].ID] = symbols[i].Ref
+	}
+	var got []string
+	for _, e := range found {
+		got = append(got, refs[e.ID]+" "+e.Consumer+" "+e.Site.String())
+	}
+
+	want := []string{"go://example.com/target#Item.Name example.com/httpwire wire.go:10:16"}
+	if !slices.Equal(got, want) {
+		t.Errorf("InterfaceSatisfactionDetector(%s) recorded\ngot  %q\nwant %q", archive, got, want)
 	}
 }
