@@ -14,8 +14,7 @@ import (
 
 // The boundary of the analysed program: a struct value handed to an empty-interface
 // parameter of a function the program does not declare has left the analysis, and
-// evidence a test file carries does not hold under a production run. A site renders
-// against the target root alone, so the call walks read the target's packages.
+// evidence a test file carries does not hold under a production run.
 
 // boundary is the edge of the analysed program over one loaded configuration: the
 // declarations the program holds, and the parameters of its own functions a value
@@ -468,15 +467,16 @@ func parameterNamed(info *types.Info, arg ast.Expr) *types.Var {
 	return used
 }
 
-// holdsInMode reports whether the evidence one exemption found at site holds under
-// the run's mode: every exemption in the plain mode, and in a production one only an
-// exemption whose evidence a test file does not carry. A site is a file of the target,
-// so Mode.ConsumerTestsProduction, which classifies a consumer's test references,
-// reaches no exemption.
-func holdsInMode(site token.Position, m graph.Mode) bool {
+// holdsInMode reports whether the evidence one exemption found holds under the run's
+// mode: every exemption in the plain mode, and in a production one an exemption whose
+// evidence no test file carries, or a loaded consumer's test file the mode classifies
+// as production, as it classifies that file's references.
+func holdsInMode(e *graph.Exemption, m graph.Mode) bool {
 	if !m.Production {
 		return true
 	}
-	_, test := graph.IsTestFile(site.Filename)
-	return !test
+	if _, test := graph.IsTestFile(e.Site.Filename); !test {
+		return true
+	}
+	return e.Consumer != "" && m.ConsumerTestsProduction
 }

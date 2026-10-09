@@ -1,7 +1,9 @@
 Functions a type error skips, each handing a value, or a function returning one,
 to a position whose type the compiler could not resolve, beside a type no
 skipped function hands anywhere and a type one assigns to a resolved position in
-the same statement.
+the same statement. Two of the functions reach the unresolved position through a
+value of a defined function type: one calls it with a value, one hands it to an
+unresolved callee.
 
 -- go.mod --
 module example.com/app
@@ -53,6 +55,30 @@ func paired() {
 	var unknown Gone
 	known, unknown = resolved{}, assigned{}
 	_, _ = known, unknown
+}
+
+type handed struct{}
+
+func (handed) Send() {}
+
+type made struct{}
+
+func (made) Build() {}
+
+type sink func(v Lost)
+
+type factory func() made
+
+func newMade() made { return made{} }
+
+func viaSink(s sink) {
+	s(handed{})
+	lost()
+}
+
+func viaFactory() {
+	var f factory = newMade
+	gone(f)
 }
 
 func main() {

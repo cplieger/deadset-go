@@ -143,11 +143,6 @@ func UncalledInterfaceMethod(in *Input) ([]Finding, error) {
 //
 // An assertion a test file writes is not reported, on the rule every kind applies
 // to a declaration whose liveness a production sweep cannot judge.
-//
-// The subject is a root rather than a candidate, a blank declaration being live by
-// the rule that an initializer nothing can name still runs. The relation the finding
-// carries is reference counting, which is the relation under which nothing names the
-// assertion.
 func UnusedSatisfactionAssertion(in *Input) ([]Finding, error) {
 	if in == nil {
 		return nil, nil
@@ -167,7 +162,6 @@ func UnusedSatisfactionAssertion(in *Input) ([]Finding, error) {
 		}
 		one.Symbol.Kind = satisfactionAssertionSubject
 		one.Symbol.Ref, one.Symbol.Name = iface.Ref, iface.Name
-		one.Relation = graph.ReferenceCounting
 		one.Details.Implementations = facts.implementationsOf(asserted.Interface)
 		found = append(found, one)
 	}

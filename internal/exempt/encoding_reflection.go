@@ -610,7 +610,7 @@ func (f *encodingFlow) retain(t types.Type, at token.Pos, d *destination) error 
 // resolves by name, the methods an outside package can name, and, where it reads
 // fields, the exported fields and every field carrying a tag, because a tagged field
 // is named by its tag and not by its visibility.
-func (f *encodingFlow) members(named *types.Named, site token.Position, d *destination) {
+func (f *encodingFlow) members(named *types.Named, site evidence, d *destination) {
 	origin := named.Origin()
 	every, satisfying := f.outsideMethods(named, d.reach)
 	for m := range origin.Methods() {
@@ -626,7 +626,7 @@ func (f *encodingFlow) members(named *types.Named, site token.Position, d *desti
 // fields records the fields of one struct a destination reads, and those of each
 // struct type with no name a field it visits holds, whose fields are symbols of the
 // type that holds the struct.
-func (f *encodingFlow) fields(st *types.Struct, site token.Position, d *destination) {
+func (f *encodingFlow) fields(st *types.Struct, site evidence, d *destination) {
 	for i := range st.NumFields() {
 		field := st.Field(i)
 		visited := (field.Exported() || st.Tag(i) != "") && !d.reach.keys.skips(st.Tag(i))
@@ -1067,7 +1067,7 @@ func concreteTypes(reached []*types.Named) []*types.Named {
 }
 
 // retention accumulates one class's exemptions. A class records a symbol the run
-// reasons about, at a site a file of the target holds, at most once per site;
+// reasons about at most once per site;
 // every class file of this package builds one of these rather than its own map.
 type retention struct {
 	in    *Input
@@ -1079,7 +1079,7 @@ type retention struct {
 // exemptionKey identifies one symbol held back at one site.
 type exemptionKey struct {
 	id   graph.SymbolID
-	site string
+	site evidence
 }
 
 // newRetention prepares the accumulation of one class over one input.
@@ -1089,29 +1089,38 @@ func newRetention(in *Input, class Class) *retention {
 
 // record keeps one exemption, unless the symbol is not one the run reasons about
 // or this class already recorded the symbol at this site.
-func (r *retention) record(obj types.Object, site token.Position, detail string) {
+func (r *retention) record(obj types.Object, site evidence, detail string) {
 	id, held := r.in.Resolve.Object(obj)
 	if !held {
 		return
 	}
-	key := exemptionKey{id: id, site: site.String()}
+	key := exemptionKey{id: id, site: site}
 	if r.seen[key] {
 		return
 	}
 	r.seen[key] = true
 	r.found = append(r.found, graph.Exemption{
-		ID:     id,
-		Class:  string(r.class),
-		Site:   site,
-		Detail: detail,
+		ID:       id,
+		Class:    string(r.class),
+		Consumer: site.consumer,
+		Site:     site.at,
+		Detail:   detail,
 	})
 }
 
-// site renders one position. Every position the load compiled is a position of
-// the target, so one the resolver cannot render is a failure of the run rather
-// than a site to pass over.
-func (r *retention) site(pos token.Pos) (token.Position, error) {
-	return r.in.Resolve.Render(pos)
+// evidence is where one piece of evidence is written: a position of the target, or
+// of the loaded consumer consumer names, relative to that consumer's root.
+type evidence struct {
+	consumer string
+	at       token.Position
+}
+
+// site renders one position. Every position the load compiled is a file of the
+// target or of a loaded consumer, so one the resolver cannot render is a failure of
+// the run rather than a site to pass over.
+func (r *retention) site(pos token.Pos) (evidence, error) {
+	consumer, at, err := r.in.Resolve.Site(pos)
+	return evidence{consumer: consumer, at: at}, err
 }
 
 // exemptions returns what the class recorded, ordered by site and then by symbol.

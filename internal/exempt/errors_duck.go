@@ -146,7 +146,7 @@ func (s *errorsDuckScan) sites(conversions []graph.Conversion) ([]errorsDuckSite
 		sites = append(sites, errorsDuckSite{from: c.From, at: at})
 	}
 	rank := func(at token.Position) int {
-		if holdsInMode(at, s.in.Mode) {
+		if holdsInMode(&graph.Exemption{Site: at}, s.in.Mode) {
 			return 0
 		}
 		return 1

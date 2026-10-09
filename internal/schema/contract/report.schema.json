@@ -1,0 +1,793 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "deadset report envelope",
+  "description": "One report per analyzer invocation, and one report per merge over analyzer reports. The document is strict JSON, decoded by each language's standard library with a closed key list: a key this schema does not declare fails the decode. Every member is required and every array is present even when empty, so a reader never distinguishes an absent array from an empty one. Field order is the order this schema lists the properties in, and every array is ordered by the canonical key grammar/merge.md defines, so two runs over an unchanged tree write the same bytes and no timestamp, duration or host detail appears anywhere in the document. The finding object is declared once, in finding.schema.json, and referenced from the two places a finding appears: findings and the finding an edge evaluation carries. That reference is the one cross-file reference in this contract, because a finding is one document with one owner. A report an analyzer writes names that analyzer in analyzer; a report a merge writes names the merging product there, carries merged_from with one entry per input report, and holds no edge evaluation whose state is dead.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "contract_version",
+    "analyzer",
+    "target",
+    "configurations",
+    "configurations_not_built",
+    "consumers",
+    "findings",
+    "edge_evaluations",
+    "stale_suppressions",
+    "declared_gaps",
+    "excluded_by_cgo",
+    "test_file_rules",
+    "type_error_skips",
+    "notes",
+    "unanswered_questions",
+    "conventions_applied",
+    "totals"
+  ],
+  "properties": {
+    "schema_version": {
+      "description": "The version of this schema the document is written to. A merge admits a report whose schema_version is in the range the caller accepts and refuses one that is not, naming both; contract.json's schema_versions lists every value this contract version admits.",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "contract_version": {
+      "description": "The contract version the product named in analyzer implements, as contract.json's contract_version spells it, and the same value that product names in its resolved configuration. It is stated once, here, so a merged report carries the merging product's version and an input report's stays in that input report.",
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "analyzer": {
+      "description": "The product that wrote this document: an analyzer for a report of one analysis, the merging product for a merged report. A merge refuses an input report whose conformance block is absent or whose conformance result is not pass, naming the analyzer, so the block is required rather than optional.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "languages", "schema_versions_accepted", "conformance"],
+      "properties": {
+        "name": {
+          "description": "The product's name: lowercase words joined by single hyphens. It is the last component of the canonical key, the name a declared gap and a stale-suppression record carry when a merge keeps them, and the name a merge states when it refuses a report.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+        },
+        "version": {
+          "description": "The version of the product that ran.",
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$"
+        },
+        "languages": {
+          "description": "The languages the product analyzed in this run, drawn from the languages field of kinds.json. An analyzer names the languages it claims; a merge names the union of the languages its input reports named.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": ["go", "ts"]
+          }
+        },
+        "schema_versions_accepted": {
+          "description": "Every schema_version the product reads. An analyzer names the versions it can decode; a merge names the range it admitted its input reports under, so a reader of a merged report knows which versions the admission step allowed.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+          }
+        },
+        "conformance": {
+          "description": "The product's result over the conformance corpus, copied from the results document its corpus runner wrote. A product whose result is not pass is refused before it runs.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["corpus_version", "result", "digest"],
+          "properties": {
+            "corpus_version": {
+              "description": "The corpus_version of corpus.json the product answered.",
+              "type": "string",
+              "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+            },
+            "result": {
+              "description": "The product's result over the whole corpus: fail when any fixture failed, pass otherwise. A declared gap never lowers it.",
+              "type": "string",
+              "enum": ["pass", "fail"]
+            },
+            "digest": {
+              "description": "sha256: followed by the lowercase hexadecimal SHA-256 of the bytes of the results document the corpus runner wrote, so a reader holding that file recomputes it.",
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          }
+        }
+      }
+    },
+    "merged_from": {
+      "description": "One entry per input report a merge read, ordered by name compared bytewise. No two entries share a name, because a merge refuses two input reports of one analyzer name. A report an analyzer writes omits this member; a merged report carries it, so the version and the artifact digest of every analyzer that ran is in the document the merge produced.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "version", "digest"],
+        "properties": {
+          "name": {
+            "description": "The analyzer's name, as its own report's analyzer.name spells it.",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+          },
+          "version": {
+            "description": "The analyzer's version, as its own report's analyzer.version spells it.",
+            "type": "string",
+            "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$"
+          },
+          "digest": {
+            "description": "sha256: followed by the lowercase hexadecimal SHA-256 of the analyzer artifact that ran. No input report carries it, because an analyzer does not attest its own artifact, so a merge takes it from its caller, the product that ran the analyzer.",
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "target": {
+      "description": "What was analyzed. One target per report, and a merged report names the same target as every report it merged.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "root", "identity"],
+      "properties": {
+        "kind": {
+          "description": "Whether the target is an application, whose every caller is in the analyzed graph, or a library, whose published API has callers outside it. The configuration declares it and the analysis never infers it.",
+          "type": "string",
+          "enum": ["application", "library"]
+        },
+        "root": {
+          "description": "The target's directory, relative to the directory the run was invoked from, with / as the separator on every platform, no leading ./ and no trailing /. A dot is the run directory itself. Never an absolute path: a host path in the report would make two runs over the same tree on two machines write different bytes.",
+          "type": "string",
+          "pattern": "^(?:\\.|(?:[^/\\\\.\\r\\n][^/\\\\\\r\\n]*|\\.[^/\\\\.\\r\\n][^/\\\\\\r\\n]*|\\.\\.[^/\\\\\\r\\n]+)(?:/(?:[^/\\\\.\\r\\n][^/\\\\\\r\\n]*|\\.[^/\\\\.\\r\\n][^/\\\\\\r\\n]*|\\.\\.[^/\\\\\\r\\n]+))*)$"
+        },
+        "identity": {
+          "description": "The name the target publishes itself under: its module path where the language has one, its package name otherwise. A target holding more than one language has one identity, the one the invoking product resolved, and every analyzer report of that target carries it, so a merged report names the same target as every report it merged. It names the target and is not a symbol scope: each symbol reference carries the scope grammar/symbol-ref.md gives its own language, so in a target holding Go and TypeScript a TypeScript reference keeps its package name.",
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "configurations": {
+      "description": "The build matrix the analysis ran, one entry per configuration, ordered by id compared bytewise. An entry takes one of two shapes, the shape of the thing that decides what the analyzed language builds: a platform, which is an operating system and an architecture with the build tags in effect, or a project, which is one compiler configuration file. An entry carries one shape or the other and never a member of both, so a reader tells the two apart by the members present. A symbol is reported only when it is dead in every entry, and each finding names the configurations in which it holds. A configuration the analysis derived and could not build is named by configurations_not_built rather than here, so this array is the matrix the analysis ran.",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "description": "One configuration of the matrix the analysis ran, in exactly one of the two shapes the array admits.",
+        "oneOf": [
+          {
+            "description": "A platform configuration: an operating system, an architecture and the build tags in effect.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "os", "arch", "tags"],
+            "properties": {
+              "id": {
+                "description": "The name this report uses for the configuration, as the configuration document spells it. Every finding's configurations list names ids from this array. A configuration the analysis derived rather than read from the configuration document is identified by its operating system and its architecture joined by a hyphen, with each of its tags appended after a further hyphen in the order the configuration lists them: linux-amd64, linux-amd64-integration.",
+                "type": "string",
+                "minLength": 1
+              },
+              "os": {
+                "description": "The target operating system, as the toolchain names it.",
+                "type": "string",
+                "minLength": 1
+              },
+              "arch": {
+                "description": "The target architecture, as the toolchain names it.",
+                "type": "string",
+                "minLength": 1
+              },
+              "tags": {
+                "description": "The build tags in effect for the configuration, ordered bytewise. Empty when the configuration sets none.",
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          },
+          {
+            "description": "A project configuration: one compiler configuration file the analysis built the target from.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "project"],
+            "properties": {
+              "id": {
+                "description": "The name this report uses for the configuration, as the configuration document spells it. Every finding's configurations list names ids from this array. A configuration the analysis derived rather than read from the configuration document is identified by the compiler configuration file's path relative to the target root, as project spells it: tsconfig.json, packages/app/tsconfig.json.",
+                "type": "string",
+                "minLength": 1
+              },
+              "project": {
+                "description": "The compiler configuration file the analysis built this configuration from, as a path relative to the target root, with / as the separator on every platform, no leading ./ and no trailing /. It names a file rather than a directory, and never an absolute path or a path leading out of the target root, because a host path in the report would make two runs over the same tree on two machines write different bytes.",
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^(?:[^/\\\\.\\r\\n][^/\\\\\\r\\n]*|\\.[^/\\\\.\\r\\n][^/\\\\\\r\\n]*|\\.\\.[^/\\\\\\r\\n]+)(?:/(?:[^/\\\\.\\r\\n][^/\\\\\\r\\n]*|\\.[^/\\\\.\\r\\n][^/\\\\\\r\\n]*|\\.\\.[^/\\\\\\r\\n]+))*$"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "configurations_not_built": {
+      "description": "Every configuration the analysis derived from the target tree, could not build, and dropped from the matrix, one entry per configuration, ordered by id compared bytewise. An entry carries the shape its entry of configurations would have carried, a platform or a project, and the first line of the error that dropped it. An identifier here names no entry of configurations, because a configuration is either in the matrix the analysis ran or dropped from it, so a finding's configurations list never names one. The array holds only derived configurations: a configuration the configuration document declared is the maintainer's assertion, and a run that cannot build one ends with the configuration exit code rather than analysing the rest. Empty for a run that built every configuration it derived, and for a language whose analysis has no build matrix.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "description": "One configuration the analysis derived and dropped, in the shape its entry of the matrix would have taken plus the error that dropped it.",
+        "oneOf": [
+          {
+            "description": "A platform configuration the analysis derived and could not build.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "os", "arch", "tags", "error"],
+            "properties": {
+              "id": {
+                "description": "The name this report uses for the configuration, spelled as the identifier of a derived platform configuration is spelled: the operating system and the architecture joined by a hyphen, with each tag appended after a further hyphen in the order the configuration lists them.",
+                "type": "string",
+                "minLength": 1
+              },
+              "os": {
+                "description": "The target operating system, as the toolchain names it.",
+                "type": "string",
+                "minLength": 1
+              },
+              "arch": {
+                "description": "The target architecture, as the toolchain names it.",
+                "type": "string",
+                "minLength": 1
+              },
+              "tags": {
+                "description": "The build tags in effect for the configuration, ordered bytewise. Empty when the configuration sets none.",
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "error": {
+                "description": "The first line of the error the load reported for this configuration, on one line and never empty, so a reader sees why the guess was dropped without running the load again. It names no absolute path and no other host detail, because two runs over the same tree on two machines write the same bytes.",
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[^\\r\\n]+$"
+              }
+            }
+          },
+          {
+            "description": "A project configuration the analysis derived and could not build.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "project", "error"],
+            "properties": {
+              "id": {
+                "description": "The name this report uses for the configuration, spelled as the identifier of a derived project configuration is spelled: the compiler configuration file's path relative to the target root, as project spells it.",
+                "type": "string",
+                "minLength": 1
+              },
+              "project": {
+                "description": "The compiler configuration file this configuration would have been built from, as a path relative to the target root, with / as the separator on every platform, no leading ./ and no trailing /. It names a file rather than a directory, and never an absolute path or a path leading out of the target root, because a host path in the report would make two runs over the same tree on two machines write different bytes.",
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^(?:[^/\\\\.\\r\\n][^/\\\\\\r\\n]*|\\.[^/\\\\.\\r\\n][^/\\\\\\r\\n]*|\\.\\.[^/\\\\\\r\\n]+)(?:/(?:[^/\\\\.\\r\\n][^/\\\\\\r\\n]*|\\.[^/\\\\.\\r\\n][^/\\\\\\r\\n]*|\\.\\.[^/\\\\\\r\\n]+))*$"
+              },
+              "error": {
+                "description": "The first line of the error the load reported for this configuration, on one line and never empty, so a reader sees why the guess was dropped without running the load again. It names no absolute path and no other host detail, because two runs over the same tree on two machines write the same bytes.",
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^[^\\r\\n]+$"
+              }
+            }
+          }
+        ]
+      }
+    },
+    "consumers": {
+      "description": "The consumer set the analysis loaded beside the target, which decides the reachability class of a library's findings about its published API, a member of a type the published API names included: every declared consumer loaded gives certain, a declared consumer that was not loaded gives probable, and no consumer information for a library gives possible. A finding about a library's internals is certain whatever this set holds.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["declared", "loaded", "unavailable"],
+      "properties": {
+        "declared": {
+          "description": "How many consumers the configuration declared. It equals the length of loaded plus the length of unavailable.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "loaded": {
+          "description": "One entry per consumer the analysis loaded, ordered by id compared bytewise. A reference from any of them keeps a target symbol live, and each finding names the ones that were loaded.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "role", "path"],
+            "properties": {
+              "id": {
+                "description": "The name the consumer publishes itself under: its module path where the language has one, its package name otherwise. The value a finding's consumers_loaded list names.",
+                "type": "string",
+                "minLength": 1
+              },
+              "role": {
+                "description": "The role the scope document gave the module, in the vocabulary scope.schema.json declares. Every entry of this array was loaded as a consumer of the target.",
+                "type": "string",
+                "enum": ["consumer"]
+              },
+              "path": {
+                "description": "The directory the consumer was loaded from, as the scope document named it.",
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        "unavailable": {
+          "description": "One entry per consumer the configuration declared and the analysis did not load, ordered by id compared bytewise. A non-empty array caps the reachability class of a finding about the target's published API at probable.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "role", "reason"],
+            "properties": {
+              "id": {
+                "description": "The name the configuration declared the consumer under.",
+                "type": "string",
+                "minLength": 1
+              },
+              "role": {
+                "description": "The role the configuration gave the module. Every entry of this array was declared as a consumer of the target.",
+                "type": "string",
+                "enum": ["consumer"]
+              },
+              "reason": {
+                "description": "Why the consumer was not loaded, in one sentence for a reader of the report: the configuration excluded it, or it declared no path. Required, so an unavailable consumer is never a bare name.",
+                "type": "string",
+                "minLength": 1,
+                "pattern": "[^ \\t\\r\\n]"
+              }
+            }
+          }
+        }
+      }
+    },
+    "findings": {
+      "description": "One record per reported finding, ordered by the canonical key grammar/merge.md defines: path from position.path, line from position.line, column from position.column, code from code, the symbol reference from symbol.ref, and the name of the analyzer whose report carried the record, which an analyzer's own report supplies from this envelope's analyzer.name and a merged report keeps on the record. A finding about a document rather than a source declaration carries the document's path with the line and column of the entry that declares the subject where one exists, and line 1, column 1 otherwise. A finding an edge evaluation carries appears in no findings array, so it is neither reported nor suppressed, and a finding a suppression holds back appears in none either, because a matched suppression marks its symbol live before the sweep.",
+      "type": "array",
+      "items": {
+        "description": "The finding object, declared once in finding.schema.json and referenced rather than restated, with one further constraint that holds only here: a reported finding carries an empty retained_by, because a symbol an exemption held back is not reported. The same object with a populated retained_by is what a retained-symbol listing writes, which is not a findings array.",
+        "$ref": "finding.schema.json",
+        "properties": {
+          "retained_by": { "maxItems": 0 }
+        }
+      }
+    },
+    "edge_evaluations": {
+      "description": "One record per declared cross-language edge side the product enumerated, ordered by edge, then side, then the name of the analyzer that carried the record, each compared bytewise, then by the bytewise comparison of the records' compact encodings in the property order of this schema. An analyzer reads only the sides of an edge that carry its own language and never resolves the paired symbol. A side holds more than one record when more than one analyzer claims its language, so the array is not deduplicated. A merged report carries every evaluation whose state is live or absent and none whose state is dead, because the merge resolves each dead evaluation into a promotion, a drop or a stale-edge finding.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["edge", "side", "symbol", "state"],
+        "properties": {
+          "edge": {
+            "description": "The identifier of the edge this record evaluates, as the edges document at the target root spells it.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)*$"
+          },
+          "side": {
+            "description": "Which side of the edge the record evaluates: provides, the side a paired symbol uses, or used_by, the side that uses it.",
+            "type": "string",
+            "enum": ["provides", "used_by"]
+          },
+          "symbol": {
+            "description": "The stable symbol reference the edge names on this side, in the grammar grammar/symbol-ref.md states, which is the single owner of that form.",
+            "type": "string"
+          },
+          "state": {
+            "description": "This side's verdict: live when the product enumerates the symbol and holds no finding for it, dead when it enumerates the symbol and holds a finding only a live paired symbol could cancel, absent when it does not enumerate the symbol at all. A side no product evaluated has no record here and is not absent, because nothing looked.",
+            "type": "string",
+            "enum": ["live", "dead", "absent"]
+          },
+          "finding": {
+            "description": "The pending finding: the finding the product would have reported about the symbol's declaration itself, present exactly when the state is dead and absent for every other state. A finding about a part of the declaration, a parameter, a receiver, a result, a statement, a case or a store, is decided inside the declaration whatever uses it, so no paired symbol can cancel it: it is never pending, and the product reports it in findings whatever the state. It appears nowhere else in the report. A merge resolves it by the paired side's state, and a report that holds one is a report with a pending finding.",
+            "$ref": "finding.schema.json"
+          },
+          "analyzer": {
+            "description": "The name of the analyzer whose report carried this record. A report an analyzer writes omits it, because this envelope's analyzer.name is that name; a merged report carries it, because the order of this array turns on it and a side may hold a record from more than one analyzer.",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+          }
+        },
+        "if": {
+          "properties": {
+            "state": { "const": "dead" }
+          }
+        },
+        "then": {
+          "required": ["finding"]
+        },
+        "else": {
+          "not": { "required": ["finding"] }
+        }
+      }
+    },
+    "stale_suppressions": {
+      "description": "One record per suppression that matches no current finding, at either mechanism and in the baseline alike, ordered by the canonical key: path, line and column from position, the code, the symbol reference from symbol, and the name of the analyzer whose report carried the record. A text line renders a record with the fixed token suppression as its kind, the record's symbol as its name, its message verbatim, the position from position, the confidence certain and the code DS1703. A run that holds at least one record here exits with the findings code whatever the configuration holds. A merge carries every record from every input report without deduplication.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "mechanism", "entry", "position", "symbol", "message"],
+        "properties": {
+          "code": {
+            "description": "The code of a stale suppression, which is DS1703 for every record here: the kind is fixed on at deny, and no flag, severity setting or per-mechanism exception reduces it below a finding.",
+            "type": "string",
+            "const": "DS1703"
+          },
+          "mechanism": {
+            "description": "Which document held the suppression: inline for a directive in the source, ignore for an entry in the ignore file, baseline for a row in the baseline.",
+            "type": "string",
+            "enum": ["inline", "ignore", "baseline"]
+          },
+          "entry": {
+            "description": "The suppression in the four-key form the ignore file and the baseline share, so one shape carries a record of any mechanism. For an inline directive, code is the code the directive named, path is the file that holds it, reason is the text after its separator, and symbol is present when the directive bound to a declaration.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["code", "path", "reason"],
+            "properties": {
+              "code": {
+                "description": "The issue-kind code the suppression named, rendered exactly as a text line, a configuration key and a SARIF rule identifier render it. A code in this shape that names no live kind in kinds.json can match nothing and is why a record can be stale.",
+                "type": "string",
+                "pattern": "^DS[0-9]{4}$"
+              },
+              "symbol": {
+                "description": "The stable symbol reference the suppression named, in the grammar grammar/symbol-ref.md states. Present on an ignore entry and a baseline row, which name one; absent on an inline directive, which is scoped by its position instead.",
+                "type": "string"
+              },
+              "path": {
+                "description": "The path of the file the suppression scopes to, relative to the target root, with / as the separator, no leading ./, no trailing / and never absolute.",
+                "type": "string",
+                "pattern": "^(\\.?[A-Za-z0-9_@-][A-Za-z0-9_@.-]*)(/\\.?[A-Za-z0-9_@-][A-Za-z0-9_@.-]*)*$"
+              },
+              "reason": {
+                "description": "The reason the suppression carries: a maintainer's adjudication for a directive or an ignore entry, and the provenance the analyzer wrote for a baseline row. A suppression carrying none is reported under its own code and binds nothing, so every record here has one.",
+                "type": "string",
+                "minLength": 1,
+                "pattern": "[^ \\t\\r\\n]"
+              }
+            }
+          },
+          "position": {
+            "description": "The suppression's own site, which is where the record is reported: the directive's line for an inline directive, and the line and column of the brace that opens the entry for an ignore entry or a baseline row.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "line", "column"],
+            "properties": {
+              "path": {
+                "description": "The path of the document that holds the suppression, relative to the target root, with / as the separator, no leading ./, no trailing / and never absolute.",
+                "type": "string",
+                "pattern": "^(\\.?[A-Za-z0-9_@-][A-Za-z0-9_@.-]*)(/\\.?[A-Za-z0-9_@-][A-Za-z0-9_@.-]*)*$"
+              },
+              "line": {
+                "description": "The 1-based line of the suppression in that document.",
+                "type": "integer",
+                "minimum": 1
+              },
+              "column": {
+                "description": "The 1-based column of the suppression in that line: the first character of the comment for an inline directive, and the opening brace for an ignore entry or a baseline row. It counts the unit finding.schema.json fixes for a position column.",
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          "symbol": {
+            "description": "The stable symbol reference the record is about, which a text line renders as its name: the declaration the suppression bound to, or the file form of the document that holds the suppression when it bound to no declaration.",
+            "type": "string"
+          },
+          "message": {
+            "description": "Why the suppression is stale, in one sentence a text line renders verbatim: the mechanism and the code it named, and where the symbol reports a different code, that code, so the maintainer corrects the code rather than hunting for it.",
+            "type": "string",
+            "minLength": 1,
+            "pattern": "[^ \\t\\r\\n]"
+          },
+          "analyzer": {
+            "description": "The name of the analyzer whose report carried this record. A report an analyzer writes omits it, because this envelope's analyzer.name is that name; a merged report carries it, because the canonical key's last component distinguishes records drawn from different reports.",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+          }
+        }
+      }
+    },
+    "declared_gaps": {
+      "description": "Every capability the product declines, one row per fixture and capability, copied from the declared-gap file the product commits. The rows are ordered by the canonical key, for which a gap supplies no path, line, column, code or symbol reference and only the name of the analyzer whose report carried it; rows equal on every component are ordered by the bytewise comparison of their compact encodings in the property order of this schema, which is fixture, then symbol, then capability. A merge carries every row from every input report without deduplication.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fixture", "capability", "reason"],
+        "properties": {
+          "fixture": {
+            "description": "The name of the fixture the gap applies to, as its expectation file spells it.",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+          },
+          "symbol": {
+            "description": "The logical name of one expectation in the fixture, when the gap is narrower than the fixture. Absent, the gap covers every expectation in the fixture that exercises the capability.",
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
+          },
+          "capability": {
+            "description": "The capability declined: an issue-kind code from a live row of kinds.json, or an exemption class from exemptions.json.",
+            "type": "string",
+            "pattern": "^(DS[0-9]{4}|[a-z][a-z0-9]*(-[a-z0-9]+)*)$"
+          },
+          "reason": {
+            "description": "Why the product does not implement the capability, in one or two sentences for a reader of the report. Required on every row, so a gap is never a bare entry.",
+            "type": "string",
+            "minLength": 1,
+            "pattern": "[^ \\t\\r\\n]"
+          },
+          "analyzer": {
+            "description": "The name of the analyzer whose report carried this row. A report an analyzer writes omits it, because this envelope's analyzer.name is that name; a merged report carries it, because the canonical key's last component distinguishes rows drawn from different reports.",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+          }
+        }
+      }
+    },
+    "excluded_by_cgo": {
+      "description": "Every source file the toolchain ignored solely for importing the C pseudo-package under the cgo-disabled load, ordered bytewise. Such a file is never reported as built under no configuration, and references made only from these files are outside the reference set of this run, which is the declared limit the report states rather than prose. Empty for a language with no such construct.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "description": "A source file path, relative to the target root, with / as the separator, no leading ./, no trailing / and never absolute.",
+        "type": "string",
+        "pattern": "^(\\.?[A-Za-z0-9_@-][A-Za-z0-9_@.-]*)(/\\.?[A-Za-z0-9_@-][A-Za-z0-9_@.-]*)*$"
+      }
+    },
+    "test_file_rules": {
+      "description": "The rules by which the run classified a file as a test file, each with the number of files it matched, ordered by rule compared bytewise, then by the bytewise comparison of the entries' compact encodings in the property order of this schema. A report an analyzer writes holds one entry per rule; a merged report holds one entry per distinct entry, so two analyzers that count one rule differently contribute two entries. A file the analysis classified as test-support code, which grammar/analysis.md defines, is counted under the rule test-support, the one rule name an analyzer writes for a classification no file-name pattern made. A reader compares the counts against the tree to see which convention decided the production and test reference split.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["rule", "matched"],
+        "properties": {
+          "rule": {
+            "description": "The rule's name: lowercase words joined by single hyphens, naming the language convention or the configured pattern it applies.",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+          },
+          "matched": {
+            "description": "How many files the rule classified as test files in this run.",
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "type_error_skips": {
+      "description": "One entry per type error the compiler reported inside a function or a file-level statement the analysis therefore did not evaluate, ordered by path compared bytewise, then by line, then by the bytewise comparison of the entries' compact encodings in the property order of this schema. grammar/analysis.md states what a skip withholds. A merged report holds one entry per distinct entry. Empty for a run in which no type error skipped anything.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "line", "message"],
+        "properties": {
+          "path": {
+            "description": "The file holding the error, relative to the target root, with / as the separator, no leading ./, no trailing / and never absolute.",
+            "type": "string",
+            "pattern": "^(\\.?[A-Za-z0-9_@-][A-Za-z0-9_@.-]*)(/\\.?[A-Za-z0-9_@-][A-Za-z0-9_@.-]*)*$"
+          },
+          "line": {
+            "description": "The line of the error's position, counted from 1.",
+            "type": "integer",
+            "minimum": 1
+          },
+          "message": {
+            "description": "The compiler's message for the error, on one line and never empty. It names no absolute path and no other host detail.",
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[^\\r\\n]+$"
+          }
+        }
+      }
+    },
+    "notes": {
+      "description": "One entry per hint the analysis has about the run's setup, ordered by kind, then by path, each compared bytewise, then by the bytewise comparison of the entries' compact encodings in the property order of this schema. A note is no finding: it fails no run, no reporter counts it and no suppression applies to it, and the findings beside it are reported as they would be without it. A merged report holds one entry per distinct entry. Empty for a run with no hint.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "path", "key", "message"],
+        "properties": {
+          "kind": {
+            "description": "What the note is about, from a closed set. published-package: a package of an application that no other package of the target imports and that outside programs may import, which grammar/analysis.md defines.",
+            "type": "string",
+            "enum": ["published-package"]
+          },
+          "path": {
+            "description": "The directory the note is about, relative to the target root, with / as the separator, no leading ./, no trailing / and never absolute.",
+            "type": "string",
+            "pattern": "^(\\.?[A-Za-z0-9_@-][A-Za-z0-9_@.-]*)(/\\.?[A-Za-z0-9_@-][A-Za-z0-9_@.-]*)*$"
+          },
+          "key": {
+            "description": "The configuration key that settles the note, as a dotted path of contract/config.schema.json.",
+            "type": "string",
+            "enum": ["roots.patterns"]
+          },
+          "message": {
+            "description": "The note in words, on one line and never empty, naming what the analysis could not tell and the key that tells it.",
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[^\\r\\n]+$"
+          }
+        }
+      }
+    },
+    "unanswered_questions": {
+      "description": "One entry per configuration in which at least one question the analysis asked its type checker went unanswered, ordered by configuration compared bytewise, then by the bytewise comparison of the entries' compact encodings in the property order of this schema. grammar/analysis.md states what an unanswered question holds. A merged report holds one entry per distinct entry, so two analyzers that count one configuration differently contribute two entries. Empty for a run whose every question was answered.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["configuration", "questions", "declarations"],
+        "properties": {
+          "configuration": {
+            "description": "The id of the entry of configurations the questions were asked in.",
+            "type": "string",
+            "minLength": 1
+          },
+          "questions": {
+            "description": "How many questions went unanswered in the configuration.",
+            "type": "integer",
+            "minimum": 1
+          },
+          "declarations": {
+            "description": "How many declarations the unanswered questions held, each counted once: a declaration held is reported by no finding in the configuration.",
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "conventions_applied": {
+      "description": "One entry per convention row the analysis applied, ordered by name, then by manifest, each compared bytewise, then by the bytewise comparison of the entries' compact encodings in the property order of this schema. grammar/analysis.md states when a row applies. A merged report holds one entry per distinct entry. Empty for a run that applied no row, and for a language whose analyzer carries no convention table.",
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "package", "version", "manifest"],
+        "properties": {
+          "name": {
+            "description": "The row's name: lowercase words joined by single hyphens, the name ts.disabled_conventions spells to disable the row.",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+          },
+          "package": {
+            "description": "The enabling package the row names.",
+            "type": "string",
+            "minLength": 1
+          },
+          "version": {
+            "description": "The enabling package's version as its installed manifest names it.",
+            "type": "string",
+            "minLength": 1
+          },
+          "manifest": {
+            "description": "The manifest that declares the enabling package as a dependency, relative to the target root, with / as the separator, no leading ./ and never absolute.",
+            "type": "string",
+            "pattern": "^(\\.?[A-Za-z0-9_@-][A-Za-z0-9_@.-]*)(/\\.?[A-Za-z0-9_@-][A-Za-z0-9_@.-]*)*$"
+          }
+        }
+      }
+    },
+    "totals": {
+      "description": "The counts a summary line prints, so a reader compares them without counting records. A merge recomputes each of them over the merged arrays, except the counts grammar/merge.md sums over the input reports because no merged array holds what they count.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "findings",
+        "by_severity",
+        "deletable_lines",
+        "suppressions_in_effect",
+        "reasons_recorded",
+        "stale_suppressions",
+        "pending",
+        "omitted",
+        "withheld"
+      ],
+      "properties": {
+        "findings": {
+          "description": "How many findings the report holds, which equals the length of findings plus omitted.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "by_severity": {
+          "description": "How many of those findings carry each severity, by the severities kinds.json declares. The exit code is a function of these counts and the lowest severity the configuration fails on.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["allow", "warn", "deny"],
+          "properties": {
+            "allow": {
+              "description": "How many findings carry the allow severity: always 0, because a finding at allow is withheld.",
+              "type": "integer",
+              "minimum": 0
+            },
+            "warn": {
+              "description": "How many findings carry the warn severity, which fails a run only where the configuration lowers the failing severity to it.",
+              "type": "integer",
+              "minimum": 0
+            },
+            "deny": {
+              "description": "How many findings carry the deny severity.",
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "deletable_lines": {
+          "description": "The number of source lines a reader deletes by acting on every finding the run produced: the sum of deletable_lines over the distinct components the run's root findings name, each component counted once however many of its root members the run reports, the findings a configured maximum leaves out of findings included, as by_severity counts them. A component minted for a subject that belongs to no dead component contributes 0.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "suppressions_in_effect": {
+          "description": "How many suppression records bound to a symbol that would otherwise have produced a finding under the record's code. It is where a suppressed finding is visible, because no record for it appears in findings or in any output rendered from findings. A record bound to a symbol whose finding the configuration withholds, by setting the severity of its code to allow, by setting a minimum confidence the finding does not reach, or by withholding in either way a root finding of the component the finding's component.id names, is dormant rather than in effect and is not counted here, so turning a kind off or raising the confidence floor never turns its adjudications into findings.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "reasons_recorded": {
+          "description": "How many directives, ignore entries and baseline rows carry a reason.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "stale_suppressions": {
+          "description": "How many suppressions matched no current finding, which equals the length of stale_suppressions.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "pending": {
+          "description": "How many pending findings the report holds, which equals the number of edge evaluations whose state is dead. A report with at least one exits with the pending code and is not an answer on its own; a merged report holds none.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "omitted": {
+          "description": "How many findings the configured maximum finding count kept out of findings and out of every output rendered from it. A truncation a reader cannot see is what this count exists to prevent.",
+          "type": "integer",
+          "minimum": 0
+        },
+        "withheld": {
+          "description": "How many findings analysis.min_confidence withheld, per confidence: each finding this run does not report because its confidence is below the minimum, counted once at the confidence this run assigns it, so lowering the minimum to a level shows the findings counted at that level and every level above it. A finding a suppression would bind at that minimum is not counted, and neither is one whose severity is allow. Every count is 0 under the minimum possible. A merge sums each count over its input reports, because no merged array holds the findings counted.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "certain",
+            "probable",
+            "possible"
+          ],
+          "properties": {
+            "certain": {
+              "description": "How many findings at the confidence certain the minimum withheld: always 0, because no minimum withholds a certain finding.",
+              "type": "integer",
+              "minimum": 0
+            },
+            "probable": {
+              "description": "How many findings at the confidence probable the minimum withheld, which is 0 unless the minimum is certain.",
+              "type": "integer",
+              "minimum": 0
+            },
+            "possible": {
+              "description": "How many findings at the confidence possible the minimum withheld.",
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    }
+  }
+}

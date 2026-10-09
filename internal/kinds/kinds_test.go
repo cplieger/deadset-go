@@ -515,9 +515,17 @@ func TestTheKindsOfThePackageAgreeOnWhichCodeReportsADeclarationNothingReference
 }
 
 // livenessAbsentKinds is the subject kinds the finding schema forbids a liveness
-// relation on, read from the branch that states the rule by the members it is written
-// with rather than by the position of that branch.
+// relation on.
 func livenessAbsentKinds(t *testing.T) []string {
+	t.Helper()
+	kinds, _ := livenessAbsentArms(t)
+	return kinds
+}
+
+// livenessAbsentArms is the two arms of the finding schema's liveness-absence rule,
+// the subject kinds and the codes, read from the branch that states the rule by the
+// members it is written with rather than by the position of that branch.
+func livenessAbsentArms(t *testing.T) (subjectKinds, codes []string) {
 	t.Helper()
 
 	const schemaPath = "contract/finding.schema.json"
@@ -527,6 +535,9 @@ func livenessAbsentKinds(t *testing.T) []string {
 	}
 	type condition struct {
 		Properties struct {
+			Code struct {
+				Enum []string `json:"enum"`
+			} `json:"code"`
 			Symbol struct {
 				Properties struct {
 					Kind struct {
@@ -556,18 +567,28 @@ func livenessAbsentKinds(t *testing.T) []string {
 		if !slices.Contains(branch.Then.Not.Required, "liveness_relation") {
 			continue
 		}
-		var named []string
 		for _, arm := range append(branch.If.AnyOf, branch.If.condition) {
-			named = append(named, arm.Properties.Symbol.Properties.Kind.Enum...)
+			subjectKinds = append(subjectKinds, arm.Properties.Symbol.Properties.Kind.Enum...)
+			codes = append(codes, arm.Properties.Code.Enum...)
 		}
-		if len(named) == 0 {
-			t.Fatalf("Setup: %s forbids a liveness relation under no subject kind, so this test pins nothing",
-				schemaPath)
+		if len(subjectKinds) == 0 || len(codes) == 0 {
+			t.Fatalf("Setup: %s forbids a liveness relation under subject kinds %v and codes %v, want both arms, so this test pins nothing",
+				schemaPath, subjectKinds, codes)
 		}
-		return named
+		return subjectKinds, codes
 	}
 	t.Fatalf("Setup: %s states no branch forbidding a liveness relation", schemaPath)
-	return nil
+	return nil, nil
+}
+
+func TestTheHeldLiveTableIsTheContractsCodeList(t *testing.T) {
+	t.Parallel()
+
+	_, codes := livenessAbsentArms(t)
+	slices.Sort(codes)
+	if got := slices.Sorted(maps.Keys(heldLive)); !slices.Equal(got, codes) {
+		t.Errorf("the held-live table names the codes %v, want %v, the codes the Contract carries no liveness relation on", got, codes)
+	}
 }
 
 func TestTheShapeTableIsTheContractsLivenessAbsenceList(t *testing.T) {

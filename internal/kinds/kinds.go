@@ -173,13 +173,11 @@ type Finding struct {
 	Relation   graph.Relation
 
 	// Live reports that no liveness relation decided this finding, so a report
-	// carries none. Two subjects answer that way: a declaration the sweep judged
-	// live, which the narrowing kinds, the unused-satisfaction-assertion kind and
-	// the write-only kind all claim something about, and a subject that is no
-	// declaration of the inventory at all, which a relation over declarations has
-	// nothing to say about. Relation then holds the relation a reader of a document
-	// that still requires the member reads, and a reporter writing a document that
-	// does not omits the member.
+	// carries none: a declaration the sweep judged live, a finding under a code of
+	// [heldLive], and a subject that is no declaration of the inventory at all.
+	// Relation then holds the relation a reader of a document that still requires
+	// the member reads, and a reporter writing a document that does not omits the
+	// member.
 	Live bool
 
 	TestOnly        bool
@@ -649,6 +647,19 @@ var shapes = map[string]shape{
 	configuredDeclarationSubject: shapeRow,
 }
 
+// heldLive is every code the Contract names as reporting a subject the analysis
+// holds live, so no relation decided the finding whatever the sweep judged the
+// subject: a blank assertion in a package only tests reach is a candidate, and its
+// finding still carries no relation. A test pins the keys equal to the Contract's
+// list; DS1104 is a TypeScript kind and is listed so the two stay equal.
+var heldLive = map[string]bool{
+	unnecessaryExportCode:           true,
+	unnecessaryExposureCode:         true,
+	"DS1104":                        true,
+	unusedSatisfactionAssertionCode: true,
+	writeOnlyCode:                   true,
+}
+
 // AboutDocumentRow reports whether one finding's subject is a row of a document: a
 // file, a dependency, a module directive, a suppression record, a configured root, a
 // configured declaration or a declared edge. No suppression record binds to one.
@@ -662,16 +673,12 @@ func shapeOf(subjectKind string) shape {
 }
 
 // LivenessAbsent reports whether one finding carries no liveness relation, which the
-// Contract decides two ways and this answers both: the subject is a part of a
-// declaration or a row of a document, which no relation over declarations answers
-// for, and the subject is a declaration the sweep judged live, which every kind
-// claiming something other than deadness reports.
-//
-// It is exported because the analyzer and the Contract answer this one question, so
-// a test compares this predicate against the condition the finding schema states
-// rather than against a copy of it.
+// Contract decides two ways: the subject is a part of a declaration or a row of a
+// document, or the code is one of [heldLive]'s. A finding read back from a document
+// that names no relation answers through Live. It is exported so a test compares it
+// against the condition the finding schema states rather than against a copy of it.
 func LivenessAbsent(found *Finding) bool {
-	return shapeOf(found.Symbol.Kind) != shapeDeclaration || found.Live
+	return shapeOf(found.Symbol.Kind) != shapeDeclaration || heldLive[found.Code] || found.Live
 }
 
 // key is one finding's identity: the position of the thing it names, rendered the way
@@ -792,13 +799,12 @@ func checkMessage(found *Finding) error {
 }
 
 // complete fills everything the Contract requires of a finding whatever its kind,
-// so no emitter decides any of it; the subject's shape is read from the table. A
-// declaration carries the relation that decided it (none where the sweep judged it
-// live), its reachability class and its dead component; a part or a document row
-// carries no relation, the certain class and a component of its own. The confidence
-// is the class capped by the kind's ceiling and the component's cap, the severity
-// is the configuration's, the overlap is the vocabulary's list so a message names no
-// other tool, and a finding in a generated file carries no fixability.
+// so no emitter decides any of it. A declaration carries the relation that decided
+// it (none where the sweep judged it live or the code is one of [heldLive]'s), its
+// reachability class and its dead component; a part or a document row carries no
+// relation, the certain class and a component of its own. The confidence is capped
+// by the kind's ceiling and the component's cap, and a finding in a generated file
+// carries no fixability.
 func (in *Input) complete(found *Finding, row *catalog.Row) {
 	held := in.index()
 	found.Kind = row.Name
@@ -807,7 +813,11 @@ func (in *Input) complete(found *Finding, row *catalog.Row) {
 		found.Symbol.Kind = symbolKinds[held.kindOf(found.id)]
 	}
 	if shapeOf(found.Symbol.Kind) == shapeDeclaration {
-		found.relation(held.candidates[found.id])
+		if heldLive[row.Code] {
+			found.relation(nil)
+		} else {
+			found.relation(held.candidates[found.id])
+		}
 		found.Class = in.ClassOf(found.id)
 		found.Component = held.componentOf(found.id)
 	} else {
@@ -1005,7 +1015,8 @@ func (x *index) holdSweep(swept *graph.Result) {
 			x.components[member] = component
 		}
 	}
-	for _, exemption := range swept.Retained {
+	for ix := range swept.Retained {
+		exemption := &swept.Retained[ix]
 		x.retained[exemption.ID] = true
 	}
 }
