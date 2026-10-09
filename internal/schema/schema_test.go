@@ -33,11 +33,11 @@ func TestTheEmbeddedSchemasAreTheContracts(t *testing.T) {
 }
 
 // compiled compiles one of the Contract's schemas from the published tree.
-func compiled(t *testing.T, name string) *Schema {
+func compiled(t *testing.T, name string) *validator {
 	t.Helper()
-	s, err := Compile(spec.Contract, name)
+	s, err := compile(spec.Contract, name)
 	if err != nil {
-		t.Fatalf("Setup: Compile(%s) = %v", name, err)
+		t.Fatalf("Setup: compile(%s) = %v", name, err)
 	}
 	return s
 }
@@ -50,8 +50,8 @@ func TestEveryContractSchemaCompiles(t *testing.T) {
 		t.Fatalf("Setup: list the Contract's schemas: %v, %d found", err, len(names))
 	}
 	for _, name := range names {
-		if _, err := Compile(spec.Contract, name); err != nil {
-			t.Errorf("Compile(%s) = %v, want the compiled schema", name, err)
+		if _, err := compile(spec.Contract, name); err != nil {
+			t.Errorf("compile(%s) = %v, want the compiled schema", name, err)
 		}
 	}
 	if _, err := Report(); err != nil {
@@ -151,8 +151,8 @@ func TestCompileRefusesAKeywordItDoesNotEvaluate(t *testing.T) {
 	t.Parallel()
 
 	fsys := fstest.MapFS{"one.schema.json": {Data: []byte(`{"type": "string", "format": "uri", "x-owner": "a", "description": "d"}`)}}
-	if _, err := Compile(fsys, "one.schema.json"); !errors.Is(err, ErrSchema) || !strings.Contains(err.Error(), `"format"`) {
-		t.Errorf("Compile(a schema naming format) = %v, want ErrSchema naming the keyword", err)
+	if _, err := compile(fsys, "one.schema.json"); !errors.Is(err, errSchema) || !strings.Contains(err.Error(), `"format"`) {
+		t.Errorf("compile(a schema naming format) = %v, want errSchema naming the keyword", err)
 	}
 }
 
@@ -166,7 +166,7 @@ func TestCheckStopsAtTheFirstMemberHoldingAViolation(t *testing.T) {
 			"b": {"type": "string"}
 		}
 	}`)}}
-	s, err := Compile(fsys, "one.schema.json")
+	s, err := compile(fsys, "one.schema.json")
 	if err != nil {
 		t.Fatalf("Setup: Compile = %v", err)
 	}
@@ -201,11 +201,11 @@ func TestCheckStopsAtTheFirstMemberHoldingAViolation(t *testing.T) {
 func TestCheckRefusesTrailingData(t *testing.T) {
 	t.Parallel()
 
-	s, err := Compile(fstest.MapFS{"one.schema.json": {Data: []byte(`{"type": "object"}`)}}, "one.schema.json")
+	s, err := compile(fstest.MapFS{"one.schema.json": {Data: []byte(`{"type": "object"}`)}}, "one.schema.json")
 	if err != nil {
 		t.Fatalf("Setup: Compile = %v", err)
 	}
-	if _, err := s.Check(strings.NewReader(`{} {}`)); !errors.Is(err, ErrDocument) {
-		t.Errorf("Check(two values) = %v, want ErrDocument", err)
+	if _, err := s.Check(strings.NewReader(`{} {}`)); !errors.Is(err, errDocument) {
+		t.Errorf("Check(two values) = %v, want errDocument", err)
 	}
 }

@@ -40,20 +40,20 @@ const (
 	objectType  = "object"
 )
 
-// ErrSchema reports a schema this package cannot compile.
-var ErrSchema = errors.New("schema: the schema cannot be compiled")
+// errSchema reports a schema this package cannot compile.
+var errSchema = errors.New("schema: the schema cannot be compiled")
 
 // Report is the compiled report schema, compiled on first use.
-var Report = sync.OnceValues(func() (*Schema, error) { return Compile(contract, reportSchema) })
+var Report = sync.OnceValues(func() (*validator, error) { return compile(contract, reportSchema) })
 
-// Schema is one compiled schema document.
-type Schema struct {
+// validator is one compiled schema document.
+type validator struct {
 	root *node
 	name string
 }
 
 // Name is the path the schema was compiled from.
-func (s *Schema) Name() string { return s.name }
+func (s *validator) Name() string { return s.name }
 
 // node is one compiled schema. A boolean schema is a node holding only never or
 // nothing, and a $ref is a node holding the node it names.
@@ -106,15 +106,15 @@ type compiler struct {
 	built map[string]*node
 }
 
-// Compile compiles the schema document at name in fsys, reading every document a
+// compile compiles the schema document at name in fsys, reading every document a
 // $ref names relative to it.
-func Compile(fsys fs.FS, name string) (*Schema, error) {
+func compile(fsys fs.FS, name string) (*validator, error) {
 	c := &compiler{fsys: fsys, docs: make(map[string]any), built: make(map[string]*node)}
 	root, err := c.at(name, "")
 	if err != nil {
 		return nil, err
 	}
-	return &Schema{root: root, name: name}, nil
+	return &validator{root: root, name: name}, nil
 }
 
 // at compiles the schema at one JSON Pointer of one document.
@@ -129,7 +129,7 @@ func (c *compiler) at(doc, pointer string) (*node, error) {
 	}
 	value, err := resolvePointer(raw, pointer)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s: %w", ErrSchema, key, err)
+		return nil, fmt.Errorf("%w: %s: %w", errSchema, key, err)
 	}
 	n := &node{}
 	c.built[key] = n
@@ -146,11 +146,11 @@ func (c *compiler) document(name string) (any, error) {
 	}
 	body, err := fs.ReadFile(c.fsys, name)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrSchema, err)
+		return nil, fmt.Errorf("%w: %w", errSchema, err)
 	}
 	value, err := decode(body)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s: %w", ErrSchema, name, err)
+		return nil, fmt.Errorf("%w: %s: %w", errSchema, name, err)
 	}
 	c.docs[name] = value
 	return value, nil
@@ -194,8 +194,8 @@ func (c *compiler) fill(n *node, doc, pointer string, value any) error {
 				continue
 			}
 			err := c.keyword(n, doc, pointer+"/"+escape(keyword), keyword, v[keyword])
-			if err != nil && !errors.Is(err, ErrSchema) {
-				err = fmt.Errorf("%w: %s#%s: %w", ErrSchema, doc, pointer, err)
+			if err != nil && !errors.Is(err, errSchema) {
+				err = fmt.Errorf("%w: %s#%s: %w", errSchema, doc, pointer, err)
 			}
 			if err != nil {
 				return err
@@ -203,7 +203,7 @@ func (c *compiler) fill(n *node, doc, pointer string, value any) error {
 		}
 		return nil
 	default:
-		return fmt.Errorf("%w: %s#%s is neither an object nor a boolean", ErrSchema, doc, pointer)
+		return fmt.Errorf("%w: %s#%s is neither an object nor a boolean", errSchema, doc, pointer)
 	}
 }
 

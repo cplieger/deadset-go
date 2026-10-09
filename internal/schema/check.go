@@ -30,8 +30,8 @@ func (v *Error) Error() string {
 	return fmt.Sprintf("%s: %s: %s", at, v.Keyword, v.Reason)
 }
 
-// ErrDocument reports a document that is not one JSON value.
-var ErrDocument = errors.New("schema: the document is not one JSON value")
+// errDocument reports a document that is not one JSON value.
+var errDocument = errors.New("schema: the document is not one JSON value")
 
 // Check reads one JSON document and returns what the schema refuses in it. An
 // object or array whose schema constrains only its members is checked member by
@@ -39,18 +39,18 @@ var ErrDocument = errors.New("schema: the document is not one JSON value")
 // at the first member holding a violation without reading the rest. The
 // violations returned are that member's, in document order; none means the
 // document is an instance.
-func (s *Schema) Check(r io.Reader) ([]Error, error) {
+func (s *validator) Check(r io.Reader) ([]Error, error) {
 	dec := json.NewDecoder(r)
 	dec.UseNumber()
 	found, err := s.root.stream(dec, "")
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrDocument, err)
+		return nil, fmt.Errorf("%w: %w", errDocument, err)
 	}
 	if len(found) > 0 {
 		return found, nil
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		return nil, fmt.Errorf("%w: data follows the value", ErrDocument)
+		return nil, fmt.Errorf("%w: data follows the value", errDocument)
 	}
 	return found, nil
 }
