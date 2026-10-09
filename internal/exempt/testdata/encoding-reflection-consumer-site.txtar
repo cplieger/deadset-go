@@ -1,0 +1,94 @@
+A target module and a declared consumer that imports it. The consumer declares a
+heap whose Pop method answers the heap package's interface and returns a value of
+the target's type through its interface-typed result, so code outside the analysis
+receives the value and the evidence that keeps the type's fields is written in the
+consumer's file. That evidence is rendered against the consumer's own root. A test
+file of the consumer declares a second heap returning a second target type, which is
+evidence a production run holds only where the consumer's tests count as production.
+
+-- target/go.mod --
+module example.com/target
+
+go 1.27.0
+-- target/record.go --
+// Package target declares the types its consumer encodes.
+package target
+
+// Record is encoded by the consumer's production code.
+type Record struct {
+	Name  string `json:"name"`
+	Count int
+}
+
+// Probe is encoded only by the consumer's tests.
+type Probe struct {
+	Label string `json:"label"`
+}
+-- httpwire/go.mod --
+module example.com/httpwire
+
+go 1.27.0
+
+require example.com/target v0.0.0
+
+replace example.com/target => ../target
+-- httpwire/wire.go --
+// Package httpwire queues the target's values.
+package httpwire
+
+import (
+	"container/heap"
+
+	"example.com/target"
+)
+
+// Queue queues one target value.
+func Queue(r *target.Record) int {
+	q := &queue{}
+	heap.Push(q, r)
+	return q.Len()
+}
+
+type queue []*target.Record
+
+func (q queue) Len() int           { return len(q) }
+func (q queue) Less(i, j int) bool { return q[i].Count < q[j].Count }
+func (q queue) Swap(i, j int)      { q[i], q[j] = q[j], q[i] }
+func (q *queue) Push(x any)        { v, _ := x.(*target.Record); *q = append(*q, v) }
+func (q *queue) Pop() any {
+	old := *q
+	v := old[len(old)-1]
+	*q = old[:len(old)-1]
+	return v
+}
+-- httpwire/wire_test.go --
+package httpwire
+
+import (
+	"container/heap"
+	"testing"
+
+	"example.com/target"
+)
+
+type probes []target.Probe
+
+func (q probes) Len() int           { return len(q) }
+func (q probes) Less(i, j int) bool { return q[i].Label < q[j].Label }
+func (q probes) Swap(i, j int)      { q[i], q[j] = q[j], q[i] }
+func (q *probes) Push(x any)        { v, _ := x.(target.Probe); *q = append(*q, v) }
+func (q *probes) Pop() any {
+	old := *q
+	v := old[len(old)-1]
+	*q = old[:len(old)-1]
+	return v
+}
+
+func TestQueues(t *testing.T) {
+	q, p := &queue{}, &probes{}
+	heap.Push(q, &target.Record{Name: "r"})
+	heap.Push(p, target.Probe{Label: "p"})
+	if q.Len() != 1 || p.Len() != 1 {
+		t.Fatal("not queued")
+	}
+}

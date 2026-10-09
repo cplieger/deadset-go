@@ -175,4 +175,6 @@ Four rules bind all three mechanisms:
 
 A run that needs more memory than the machine makes available prints one line on stderr: `memory exhausted: at least N GB were needed, M GB are available`. N is the heap the run was about to need, rounded up, and M is the memory available to it, rounded down, both in decimal gigabytes. M is read from the tightest cgroup limit of the process and its parents, less their working set, or else from the system's available memory.
 
+A run whose own report breaks the contract's report schema also exits 3. The report is not written, and the error names the JSON Pointer of the first value the schema refuses.
+
 Codes 2 and 3 end a run before any verdict exists. Codes 4, 1 and 0 are verdicts about a complete report, and the highest applicable code wins. Under the default `reporters.fail_on`, `deny`, a `warn` finding never fails a run.

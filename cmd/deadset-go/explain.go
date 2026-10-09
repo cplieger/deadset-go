@@ -309,7 +309,7 @@ func writeRetained(held *strings.Builder, retained []graph.Exemption) {
 	fmt.Fprintf(held, "  held back by: %s\n", counted(len(retained), "exemption class"))
 	for i := range retained {
 		one := &retained[i]
-		fmt.Fprintf(held, "  class: %s\t%s\t%s\n", one.Class, evidenceSite(one.Site), one.Detail)
+		fmt.Fprintf(held, "  class: %s\t%s\t%s\n", one.Class, evidenceSite(one), one.Detail)
 	}
 }
 

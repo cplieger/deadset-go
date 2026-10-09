@@ -18,8 +18,17 @@ import (
 // Only a declaration the inventory holds is resolved, because the inventory is
 // what decides which declarations the analysis reasons about.
 type Resolver struct {
-	pos     *positions
-	symbols map[token.Pos]SymbolID
+	pos       *positions
+	symbols   map[token.Pos]SymbolID
+	sites     map[site]SymbolID
+	reread    map[token.Pos]SymbolID // Object's answers for a second reading of a target file
+	consumers []consumerPositions
+}
+
+// consumerPositions renders the files of one loaded consumer against its own root.
+type consumerPositions struct {
+	pos *positions
+	id  string
 }
 
 // NewResolver prepares the resolver of one loaded configuration, rendering
@@ -41,6 +50,13 @@ func NewResolver(r *load.Result, targetRoot string, read ReadFile, symbols []Sym
 		pos:     newPositions(r.Fset, targetRoot, read),
 		symbols: make(map[token.Pos]SymbolID, len(symbols)),
 	}
+	for i := range r.Consumers {
+		if module := consumerModule(&r.Consumers[i]); module != nil {
+			rs.consumers = append(rs.consumers, consumerPositions{
+				id: r.Consumers[i].ID, pos: newPositions(r.Fset, module.Dir, read),
+			})
+		}
+	}
 	if err := rs.index(r.Packages, symbols); err != nil {
 		return nil, err
 	}
@@ -61,6 +77,7 @@ func (rs *Resolver) index(pkgs []*packages.Package, symbols []Symbol) error {
 		s := &symbols[i]
 		sites[site{file: s.Pos.Filename, line: s.Pos.Line, col: s.Pos.Column}] = s.ID
 	}
+	rs.sites = sites
 
 	var failure error
 	var failed token.Position
@@ -103,12 +120,30 @@ func (rs *Resolver) hold(obj types.Object, sites map[site]SymbolID) (token.Posit
 
 // Object returns the identifier of the declaration obj is declared at. A nil
 // object, and one declared outside the target root or at a position no symbol of
-// the inventory holds, name none.
+// the inventory holds, name none. An object of a consumer's own reading of a target
+// package, which a load that holds the target twice parses into the file set a
+// second time, names the declaration its rendered position names.
 func (rs *Resolver) Object(obj types.Object) (SymbolID, bool) {
 	if obj == nil {
 		return "", false
 	}
-	return rs.At(obj.Pos())
+	if id, held := rs.At(obj.Pos()); held || len(rs.consumers) == 0 {
+		return id, held
+	}
+	if id, known := rs.reread[obj.Pos()]; known {
+		return id, id != ""
+	}
+	id := SymbolID("")
+	if q := rs.pos.fset.Position(obj.Pos()); q.IsValid() && rs.pos.relative(q.Filename) != "" {
+		if at, err := rs.pos.render(obj.Pos()); err == nil {
+			id = rs.sites[site{file: at.Filename, line: at.Line, col: at.Column}]
+		}
+	}
+	if rs.reread == nil {
+		rs.reread = make(map[token.Pos]SymbolID)
+	}
+	rs.reread[obj.Pos()] = id
+	return id, id != ""
 }
 
 // At returns the identifier of the declaration written at pos. A position no
@@ -125,4 +160,26 @@ func (rs *Resolver) At(pos token.Pos) (SymbolID, bool) {
 // units. Every file it reads it reads once.
 func (rs *Resolver) Render(pos token.Pos) (token.Position, error) {
 	return rs.pos.render(pos)
+}
+
+// Site renders the position a piece of evidence is written at: against the target
+// root for a file of the target, and against a loaded consumer's root for a file of
+// that consumer, whose module path it returns. A consumer whose root lies under the
+// target root holds the files under its own.
+func (rs *Resolver) Site(pos token.Pos) (consumer string, at token.Position, err error) {
+	name := rs.pos.fset.Position(pos).Filename
+	held, owner := rs.pos, ""
+	if rs.pos.relative(name) == "" {
+		held = nil
+	}
+	for _, c := range rs.consumers {
+		if c.pos.relative(name) != "" && (held == nil || len(c.pos.root) > len(held.root)) {
+			held, owner = c.pos, c.id
+		}
+	}
+	if held == nil {
+		held = rs.pos
+	}
+	at, err = held.render(pos)
+	return owner, at, err
 }

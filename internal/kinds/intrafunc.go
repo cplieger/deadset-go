@@ -143,10 +143,12 @@ func (in *Input) intraFunc() *intrafunc {
 		valued:   make(map[graph.SymbolID]bool),
 		twins:    platformTwins(in),
 	}
-	for _, exemption := range in.Exempt {
+	for ix := range in.Exempt {
+		exemption := &in.Exempt[ix]
 		g.exempted[exemption.ID] = true
 	}
-	for _, exemption := range in.TestEvidence {
+	for ix := range in.TestEvidence {
+		exemption := &in.TestEvidence[ix]
 		g.exempted[exemption.ID] = true
 	}
 	if in.Merged != nil {

@@ -195,11 +195,12 @@ func Compute(in *Input, detectors map[Class]Detector) (held, testEvidence []grap
 		if detectErr != nil {
 			return nil, nil, fmt.Errorf("exempt: %s: %w", class, detectErr)
 		}
-		for _, e := range retained {
-			if holdsInMode(e.Site, in.Mode) {
-				found = append(found, e)
+		for i := range retained {
+			e := &retained[i]
+			if holdsInMode(e, in.Mode) {
+				found = append(found, *e)
 			} else {
-				evidence = append(evidence, e)
+				evidence = append(evidence, *e)
 			}
 		}
 	}
@@ -225,13 +226,14 @@ type fact struct {
 func firstPerFact(found []graph.Exemption) []graph.Exemption {
 	seen := make(map[fact]bool, len(found))
 	kept := found[:0]
-	for _, e := range found {
+	for ix := range found {
+		e := &found[ix]
 		stated := fact{id: e.ID, class: e.Class, detail: e.Detail, holder: e.Holder}
 		if seen[stated] {
 			continue
 		}
 		seen[stated] = true
-		kept = append(kept, e)
+		kept = append(kept, *e)
 	}
 	return kept
 }
@@ -241,13 +243,22 @@ func firstPerFact(found []graph.Exemption) []graph.Exemption {
 //
 //nolint:gocritic // slices.SortStableFunc fixes a comparator's parameters to values.
 func byEvidence(a, b graph.Exemption) int {
-	if c := graph.ByPosition(a.Site, b.Site); c != 0 {
+	if c := bySite(&a, &b); c != 0 {
 		return c
 	}
 	if c := strings.Compare(a.Class, b.Class); c != 0 {
 		return c
 	}
 	return strings.Compare(string(a.ID), string(b.ID))
+}
+
+// bySite orders two exemptions by the site their evidence was found at: the
+// target's files first, then each consumer's by module path.
+func bySite(a, b *graph.Exemption) int {
+	if c := strings.Compare(a.Consumer, b.Consumer); c != 0 {
+		return c
+	}
+	return graph.ByPosition(a.Site, b.Site)
 }
 
 // resolveObject returns the declaration an identifier or a selector expression
