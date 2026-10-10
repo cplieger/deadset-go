@@ -32,7 +32,6 @@ func TestLiveKindReadsTheVocabularysDefaults(t *testing.T) {
 
 	for _, row := range publishedKinds(t) {
 		want := kind{
-			code:     row.Code,
 			severity: Severity(row.DefaultSeverity),
 			enabled:  row.DefaultEnabled,
 		}

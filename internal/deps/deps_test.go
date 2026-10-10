@@ -10,9 +10,9 @@ func TestModuleFileReadsEveryRequireDirectiveWithItsLine(t *testing.T) {
 	f := moduleFileOf(t, extract(t, "directives.txtar"))
 
 	want := []Requirement{
-		{Path: "example.com/direct", Version: "v1.2.3", Site: at(8, 2)},
-		{Path: "example.com/indirect", Version: "v0.4.0", Indirect: true, Site: at(9, 2)},
-		{Path: "example.com/quoted", Version: "v1.0.0", Site: at(12, 9)},
+		{Path: "example.com/direct", Site: at(8, 2)},
+		{Path: "example.com/indirect", Indirect: true, Site: at(9, 2)},
+		{Path: "example.com/quoted", Site: at(12, 9)},
 	}
 	if !slices.Equal(f.Requires, want) {
 		t.Errorf("ModuleFile(directives.txtar).Requires = %+v, want %+v", f.Requires, want)

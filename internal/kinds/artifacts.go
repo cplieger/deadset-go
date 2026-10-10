@@ -239,7 +239,7 @@ func targetRoot(per []Configured) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("%w: the load names no directory for the target's own module",
-		ErrInput)
+		errInput)
 }
 
 // targetModule is the module path of the target, which scopes the reference of
@@ -255,7 +255,7 @@ func targetModule(per []Configured) (string, error) {
 			}
 		}
 	}
-	return "", fmt.Errorf("%w: the load names no module path for the target", ErrInput)
+	return "", fmt.Errorf("%w: the load names no module path for the target", errInput)
 }
 
 // relativeToSlash renders path relative to base with forward slashes, falling back
@@ -295,7 +295,7 @@ func readIgnored(path, relative, pkgPath string) (ignoredFile, bool, error) {
 	}
 	if expression == nil {
 		return ignoredFile{}, false, fmt.Errorf("%w: %s declares no build constraint and no configuration built it",
-			ErrEmitter, relative)
+			errEmitter, relative)
 	}
 	if builtByHand(expression) {
 		return ignoredFile{}, false, nil

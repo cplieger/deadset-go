@@ -36,8 +36,8 @@ func baselineOutcomesOf(t *testing.T, document string) []entryOutcome {
 	records, refusals, err := Baseline(writeBaselineFile(t, document), nil)
 	switch {
 	case err != nil:
-		if !errors.Is(err, ErrMalformed) {
-			t.Fatalf("Baseline(%s) error = %v, want one satisfying errors.Is(err, ErrMalformed)", document, err)
+		if !errors.Is(err, errMalformed) {
+			t.Fatalf("Baseline(%s) error = %v, want one satisfying errors.Is(err, errMalformed)", document, err)
 		}
 		return []entryOutcome{outcomeMalformed}
 	case len(refusals) > 0:
@@ -121,8 +121,8 @@ func TestBaselineAndTheIgnoreFileRefuseEachOtherMember(t *testing.T) {
 			if err := os.WriteFile(path, []byte(held.document), 0o600); err != nil {
 				t.Fatalf("Setup: write %s: %v", path, err)
 			}
-			if err := held.read(path); !errors.Is(err, ErrMalformed) {
-				t.Errorf("reading %s = %v, want an error satisfying errors.Is(err, ErrMalformed): "+
+			if err := held.read(path); !errors.Is(err, errMalformed) {
+				t.Errorf("reading %s = %v, want an error satisfying errors.Is(err, errMalformed): "+
 					"each document has its own closed key list", name, err)
 			}
 		})
@@ -243,8 +243,8 @@ func TestWriteBaselineRefusesADocumentWhoseRowsWouldCarryNoReason(t *testing.T) 
 		t.Run(name, func(t *testing.T) {
 			var written bytes.Buffer
 			err := WriteBaseline(&written, held.findings, held.provenance)
-			if !errors.Is(err, ErrProvenance) {
-				t.Fatalf("WriteBaseline(%s) = %v, want an error satisfying errors.Is(err, ErrProvenance)", name, err)
+			if !errors.Is(err, errProvenance) {
+				t.Fatalf("WriteBaseline(%s) = %v, want an error satisfying errors.Is(err, errProvenance)", name, err)
 			}
 			if written.Len() != 0 {
 				t.Errorf("WriteBaseline(%s) wrote %s, want nothing", name, written.String())

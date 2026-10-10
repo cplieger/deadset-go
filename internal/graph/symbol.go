@@ -27,9 +27,9 @@ var (
 	// reader the enumeration needs.
 	ErrIncompleteLoad = errors.New("graph: incomplete load result")
 
-	// ErrNoTargetPackage reports a load carrying no package the enumeration can
+	// errNoTargetPackage reports a load carrying no package the enumeration can
 	// walk, which leaves the target without a declaration to reason about.
-	ErrNoTargetPackage = errors.New("graph: the load carries no package to enumerate")
+	errNoTargetPackage = errors.New("graph: the load carries no package to enumerate")
 )
 
 // SymbolKind names what a symbol is. String is the spelling a report and a
@@ -142,7 +142,7 @@ func Symbols(r *load.Result, targetRoot string, read ReadFile) ([]Symbol, error)
 		if len(r.Packages) == 0 {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("%w: %s", ErrNoTargetPackage, targetRoot)
+		return nil, fmt.Errorf("%w: %s", errNoTargetPackage, targetRoot)
 	}
 
 	e.resolveReceivers()

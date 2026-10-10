@@ -108,8 +108,8 @@ func TestTheClassOfADeclarationNoConsumerCanReachIsCertainWithoutAnyConsumerInfo
 		t.Run(name, func(t *testing.T) {
 			in := handInput(libraryConfig())
 
-			if got := in.ClassOf(one.id); got != one.want {
-				t.Errorf("ClassOf(%s) = %q for %s of a library with no consumer information, want %q",
+			if got := in.classOf(one.id); got != one.want {
+				t.Errorf("classOf(%s) = %q for %s of a library with no consumer information, want %q",
 					one.id, got, name, one.want)
 			}
 		})
@@ -132,8 +132,8 @@ func TestTheClassOfATypeParameterOfAFunctionIsCertainWithNoConsumerInformation(t
 	}
 
 	container := narrowedIDOf(t, in, "go://example.com/app/api#Convert")
-	if got := in.ClassOf(container); got != Possible {
-		t.Errorf("ClassOf(the function that declares the type parameter) = %q, want %q: the type parameter's class is the parameter's own rule and not its container's",
+	if got := in.classOf(container); got != Possible {
+		t.Errorf("classOf(the function that declares the type parameter) = %q, want %q: the type parameter's class is the parameter's own rule and not its container's",
 			got, Possible)
 	}
 }
@@ -155,8 +155,8 @@ func TestTheCorpusConversionFixtureIsCertainWithItsConsumerLoaded(t *testing.T) 
 	}
 
 	dead := narrowedIDOf(t, in, "go://example.com/target#DeadExport")
-	if got := in.ClassOf(dead); got != Certain {
-		t.Errorf("ClassOf(%s) = %q with the fixture's consumer loaded and the set not declared complete, want %q",
+	if got := in.classOf(dead); got != Certain {
+		t.Errorf("classOf(%s) = %q with the fixture's consumer loaded and the set not declared complete, want %q",
 			"go://example.com/target#DeadExport", got, Certain)
 	}
 
@@ -297,8 +297,8 @@ func TestTheClassOfADeclarationOfAMainPackageIsCertain(t *testing.T) {
 			continue
 		}
 		found = true
-		if got := in.ClassOf(id); got != Certain {
-			t.Errorf("ClassOf(%s) = %q for a declaration of a main package, want %q", ref, got, Certain)
+		if got := in.classOf(id); got != Certain {
+			t.Errorf("classOf(%s) = %q for a declaration of a main package, want %q", ref, got, Certain)
 		}
 	}
 	if !found {
@@ -313,8 +313,8 @@ func TestTheClassOfADeclarationOfATestFileIsCertain(t *testing.T) {
 	in := inputOf(t, "declarations-test-of-dead-code.txtar", libraryConfig(), Consumers{})
 
 	test := narrowedIDOf(t, in, "go://example.com/app/catalog#TestDeadOnly")
-	if got := in.ClassOf(test); got != Certain {
-		t.Errorf("ClassOf(TestDeadOnly) = %q for a test function of a published package's own test file, want %q",
+	if got := in.classOf(test); got != Certain {
+		t.Errorf("classOf(TestDeadOnly) = %q for a test function of a published package's own test file, want %q",
 			got, Certain)
 	}
 }
@@ -340,8 +340,8 @@ func TestTheClassOfAFieldOfAnUnexposedUnexportedTypeIsCertain(t *testing.T) {
 	} {
 		t.Run(member, func(t *testing.T) {
 			ref := "go://example.com/app/shape#" + member
-			if got := in.ClassOf(narrowedIDOf(t, in, ref)); got != want {
-				t.Errorf("ClassOf(%s) = %q in a library with no consumer information, want %q", ref, got, want)
+			if got := in.classOf(narrowedIDOf(t, in, ref)); got != want {
+				t.Errorf("classOf(%s) = %q in a library with no consumer information, want %q", ref, got, want)
 			}
 		})
 	}

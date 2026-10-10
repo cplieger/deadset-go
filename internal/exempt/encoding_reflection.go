@@ -302,7 +302,7 @@ const (
 // ([storedTypes]), and a promoted method is retained where the embedded type is.
 func EncodingReflectionDetector(in *Input) ([]graph.Exemption, error) {
 	assert := assertableOf(in)
-	conversions, err := ProgramConversions(in)
+	conversions, err := programConversions(in)
 	if err != nil {
 		return nil, fmt.Errorf("encoding-reflection: %w", err)
 	}
@@ -489,7 +489,7 @@ func (f *encodingFlow) ownTypes(info *types.Info, arg ast.Expr) []types.Type {
 }
 
 // convertedTo is every concrete type the program converts to one defined interface
-// type, at the sites [ProgramConversions] records.
+// type, at the sites [programConversions] records.
 func (f *encodingFlow) convertedTo(iface *types.Named) []types.Type {
 	var found []types.Type
 	for i := range f.conversions {
@@ -698,7 +698,7 @@ func (f *encodingFlow) walkConversions() error {
 	if len(f.targets) == 0 {
 		return nil
 	}
-	conversions, err := Conversions(f.kept.in)
+	conversions, err := conversionsOf(f.kept.in)
 	if err != nil {
 		return fmt.Errorf("encoding-reflection: %w", err)
 	}

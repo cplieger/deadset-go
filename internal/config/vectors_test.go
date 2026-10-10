@@ -319,9 +319,9 @@ func TestPublishedRefusedConfigurations(t *testing.T) {
 			if !errors.As(err, &refusal) {
 				t.Fatalf("Resolve(%s) = error %v, want a *config.Error", row.File, err)
 			}
-			if want := refusedKey(t, schema, document, row.InstancePath); refusal.Key != want {
-				t.Errorf("Resolve(%s) named %q, want %q, for the instance path %q the schema refuses",
-					row.File, refusal.Key, want, row.InstancePath)
+			if want := refusedKey(t, schema, document, row.InstancePath); !strings.Contains(refusal.Error(), want) {
+				t.Errorf("Resolve(%s) = %q, want the message to name %q, for the instance path %q the schema refuses",
+					row.File, refusal.Error(), want, row.InstancePath)
 			}
 		})
 	}
@@ -347,9 +347,6 @@ func assertRefused(t *testing.T, name string, expected []byte, err error) {
 	if want.ExitCode != usageExitCode {
 		t.Errorf("case %s expects exit code %d, and every *config.Error maps to %d",
 			name, want.ExitCode, usageExitCode)
-	}
-	if refusal.Key != want.Names {
-		t.Errorf("Resolve(%s) named %q, want %q", name, refusal.Key, want.Names)
 	}
 	if !strings.Contains(refusal.Error(), want.Names) {
 		t.Errorf("Resolve(%s) = %q, want the message to name %q", name, refusal.Error(), want.Names)

@@ -66,7 +66,7 @@ const (
 // refused rather than written with a key that service would recompute differently.
 func SARIF(w io.Writer, e *Envelope, opts Options) error {
 	if opts.Read == nil {
-		return fmt.Errorf("%w: a SARIF rendering reads the source lines its line fingerprint hashes", ErrOptions)
+		return fmt.Errorf("%w: a SARIF rendering reads the source lines its line fingerprint hashes", errOptions)
 	}
 	rules := rulesOf(e.Analyzer.Languages)
 	index := make(map[string]int, len(rules))

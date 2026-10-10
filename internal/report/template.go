@@ -187,7 +187,7 @@ func octalEscape(quoted string) bool {
 // anything is written, so a template that fails writes no partial output.
 func Template(w io.Writer, e *Envelope, opts Options) error {
 	if opts.Template == nil {
-		return fmt.Errorf("%w: a template rendering needs a template", ErrOptions)
+		return fmt.Errorf("%w: a template rendering needs a template", errOptions)
 	}
 	document, err := encoded(e, "")
 	if err != nil {
@@ -204,7 +204,7 @@ func (t *ParsedTemplate) execute(w io.Writer, document []byte) error {
 	}
 	var rendered bytes.Buffer
 	if err := t.parsed.Execute(&rendered, data); err != nil {
-		return fmt.Errorf("%w: render the template: %w", ErrOptions, err)
+		return fmt.Errorf("%w: render the template: %w", errOptions, err)
 	}
 	if _, err := w.Write(rendered.Bytes()); err != nil {
 		return fmt.Errorf("report: write the template rendering: %w", err)

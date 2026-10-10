@@ -186,16 +186,15 @@ func analyzeSynthesized(ctx context.Context, sink failureSink, base, name string
 }
 
 // writeSynthesized generates one recorded run's module under a directory of its own
-// and returns the base the run is invoked from and the module's size.
-func writeSynthesized(t *testing.T, recorded *benchmarkRun) (base string, size moduleSize) {
+// and returns the module's size.
+func writeSynthesized(t *testing.T, recorded *benchmarkRun) moduleSize {
 	t.Helper()
 
-	base = t.TempDir()
-	dir := filepath.Join(base, recorded.Name)
+	dir := filepath.Join(t.TempDir(), recorded.Name)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		t.Fatalf("Setup: create %s: %v", dir, err)
 	}
-	return base, synthesizeModule(t, dir,
+	return synthesizeModule(t, dir,
 		recorded.Generator.Packages, recorded.Generator.FilesPerPackage, recorded.Generator.DeclarationsPerFile)
 }
 
@@ -217,7 +216,7 @@ func TestTheBenchmarkRecordNamesWhatTheGeneratorProduces(t *testing.T) {
 	for i := range record.Runs {
 		recorded := &record.Runs[i]
 		t.Run(recorded.Name, func(t *testing.T) {
-			_, size := writeSynthesized(t, recorded)
+			size := writeSynthesized(t, recorded)
 			if size != recorded.Size {
 				t.Errorf("the generator of the %s run produced %+v, want the recorded %+v (regenerate the record with %s)",
 					recorded.Name, size, recorded.Size, recordCommand)

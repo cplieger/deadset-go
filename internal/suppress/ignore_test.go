@@ -54,8 +54,8 @@ func outcomesOf(t *testing.T, document string) []entryOutcome {
 	records, refusals, err := IgnoreFile(writeIgnoreFile(t, document), nil)
 	switch {
 	case err != nil:
-		if !errors.Is(err, ErrMalformed) {
-			t.Fatalf("IgnoreFile(%s) error = %v, want one satisfying errors.Is(err, ErrMalformed)", document, err)
+		if !errors.Is(err, errMalformed) {
+			t.Fatalf("IgnoreFile(%s) error = %v, want one satisfying errors.Is(err, errMalformed)", document, err)
 		}
 		return []entryOutcome{outcomeMalformed}
 	case len(refusals) > 0:
@@ -314,6 +314,8 @@ func TestIgnoreFileRefusesTheDocumentsTheGrammarRefuses(t *testing.T) {
 		"no ignore array":                     `{"description": "nothing to adjudicate."}`,
 		"an ignore array of the wrong type":   `{"ignore": {"code": "DS1001"}}`,
 		"a second value after the document":   `{"ignore": []} {"ignore": []}`,
+		"a bracket after the document":        `{"ignore": []}]`,
+		"a brace after the document":          `{"ignore": []}}`,
 		"a document that is not an object":    `[{"code": "DS1001"}]`,
 		"a comment, which strict JSON has no": "{\n  // the reason lives in the entry\n  \"ignore\": []\n}",
 		"a trailing comma":                    `{"ignore": [],}`,
@@ -322,15 +324,15 @@ func TestIgnoreFileRefusesTheDocumentsTheGrammarRefuses(t *testing.T) {
 	for name, document := range cases {
 		t.Run(name, func(t *testing.T) {
 			records, refusals, err := IgnoreFile(writeIgnoreFile(t, document), nil)
-			if !errors.Is(err, ErrMalformed) {
-				t.Fatalf("IgnoreFile(%s) error = %v, want one satisfying errors.Is(err, ErrMalformed)", document, err)
+			if !errors.Is(err, errMalformed) {
+				t.Fatalf("IgnoreFile(%s) error = %v, want one satisfying errors.Is(err, errMalformed)", document, err)
 			}
 			if records != nil || refusals != nil {
 				t.Errorf("IgnoreFile(%s) returned %d records and %d refusals with its error, want none of either", document, len(records), len(refusals))
 			}
-			var malformed *MalformedError
+			var malformed *malformedError
 			if !errors.As(err, &malformed) {
-				t.Fatalf("IgnoreFile(%s) error = %v, want one errors.As reads as *MalformedError", document, err)
+				t.Fatalf("IgnoreFile(%s) error = %v, want one errors.As reads as *malformedError", document, err)
 			}
 			if malformed.Site.Filename != IgnoreFileName || malformed.Mechanism != MechanismIgnore {
 				t.Errorf("IgnoreFile(%s) refused at %s under mechanism %s, want %s and %s",
@@ -345,7 +347,7 @@ func TestIgnoreFileReportsADocumentItCannotRead(t *testing.T) {
 	if err == nil {
 		t.Fatal("IgnoreFile over a directory error = nil, want one naming the path")
 	}
-	if errors.Is(err, os.ErrNotExist) || errors.Is(err, ErrMalformed) {
+	if errors.Is(err, os.ErrNotExist) || errors.Is(err, errMalformed) {
 		t.Errorf("IgnoreFile over a directory error = %v, want neither an absent document nor a malformed one", err)
 	}
 }

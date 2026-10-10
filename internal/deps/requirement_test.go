@@ -13,7 +13,7 @@ func TestUnusedRequirementsReportsADirectRequirementNoImportNeeds(t *testing.T) 
 	f, result := targetOf(t, "unused-requirement.txtar")
 
 	got := UnusedRequirements(f, result)
-	want := []Requirement{{Path: "example.com/unused", Version: "v1.0.0", Site: at(6, 2)}}
+	want := []Requirement{{Path: "example.com/unused", Site: at(6, 2)}}
 	if !slices.Equal(got, want) {
 		t.Errorf("UnusedRequirements(unused-requirement.txtar) = %+v, want %+v", got, want)
 	}

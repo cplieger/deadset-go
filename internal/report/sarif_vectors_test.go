@@ -1,4 +1,4 @@
-package report
+package report_test
 
 import (
 	"bytes"
@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/internal/report"
+	"github.com/cplieger/deadset-go/internal/reporttest"
 	spec "github.com/cplieger/deadset-spec/v7"
 )
 
@@ -71,7 +73,7 @@ func TestPublishedSARIFVectors(t *testing.T) {
 			read := vectorSources(t, dir)
 
 			var written bytes.Buffer
-			renderErr := SARIF(&written, &envelope, Options{Read: read})
+			renderErr := report.SARIF(&written, &envelope, report.Options{Read: read})
 
 			if exit := vectorFile(t, dir, "expected_exit"); exit != nil {
 				if got := strings.TrimSpace(string(exit)); got != "3" {
@@ -110,11 +112,11 @@ func vectorFile(t *testing.T, dir, name string) []byte {
 
 // vectorEnvelope decodes a case's report through the reader a report document this
 // analyzer writes goes through.
-func vectorEnvelope(t *testing.T, dir string) Envelope {
+func vectorEnvelope(t *testing.T, dir string) report.Envelope {
 	t.Helper()
 
-	var envelope Envelope
-	if err := json.Unmarshal(vectorFile(t, dir, "report.json"), &envelope); err != nil {
+	envelope, err := reporttest.Read(vectorFile(t, dir, "report.json"))
+	if err != nil {
 		t.Fatalf("Setup: decode %s/report.json: %v", dir, err)
 	}
 	return envelope

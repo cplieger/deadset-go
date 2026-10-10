@@ -76,22 +76,22 @@ func sameDiagnostic(a, b Diagnostic) bool {
 	return a.Position != "" || a.Package == b.Package
 }
 
-// SetupClass names one class of setup failure: a file or a component the analysis
+// setupClass names one class of setup failure: a file or a component the analysis
 // needs and the project does not provide.
-type SetupClass string
+type setupClass string
 
 // The setup-failure classes a load answers, and the one a caller answers from the
 // derived matrix.
 const (
-	MissingModule       SetupClass = "missing-module"
-	IncompleteModuleSum SetupClass = "incomplete-module-sum"
-	TestBuildTag        SetupClass = "test-build-tag"
-	MissingConsumer     SetupClass = "missing-consumer"
+	MissingModule       setupClass = "missing-module"
+	incompleteModuleSum setupClass = "incomplete-module-sum"
+	TestBuildTag        setupClass = "test-build-tag"
+	missingConsumer     setupClass = "missing-consumer"
 )
 
 // SetupFailure is one setup failure: its class and what is missing, with the fix.
 type SetupFailure struct {
-	Class  SetupClass
+	Class  setupClass
 	Detail string
 }
 
@@ -139,7 +139,7 @@ func setupFailures(diagnostics []Diagnostic, expected []string) *SetupError {
 		switch {
 		case strings.Contains(d.Message, missingSumEntry):
 			module, _, _ := strings.Cut(strings.SplitN(d.Message, missingSumEntry, 2)[1], " ")
-			failures = append(failures, SetupFailure{Class: IncompleteModuleSum, Detail: fmt.Sprintf(
+			failures = append(failures, SetupFailure{Class: incompleteModuleSum, Detail: fmt.Sprintf(
 				"%s: the module sum file holds no checksum for the module providing %s; run go mod tidy in the module that requires it",
 				at, module,
 			)})

@@ -233,16 +233,16 @@ func TestInlineEndsTheReadOnADirectiveNameTheGrammarDoesNotDefine(t *testing.T) 
 	result, root, symbols := loaded(t, "malformed.txtar")
 	records, refusals, err := Inline(result, resolverOf(t, result, root, symbols), symbols)
 
-	if !errors.Is(err, ErrMalformed) {
-		t.Fatalf("Inline(malformed.txtar) error = %v, want one satisfying errors.Is(err, ErrMalformed)", err)
+	if !errors.Is(err, errMalformed) {
+		t.Fatalf("Inline(malformed.txtar) error = %v, want one satisfying errors.Is(err, errMalformed)", err)
 	}
 	if records != nil || refusals != nil {
 		t.Errorf("Inline(malformed.txtar) returned %d records and %d refusals with its error, want none of either", len(records), len(refusals))
 	}
 
-	var malformed *MalformedError
+	var malformed *malformedError
 	if !errors.As(err, &malformed) {
-		t.Fatalf("Inline(malformed.txtar) error = %v, want one errors.As reads as *MalformedError", err)
+		t.Fatalf("Inline(malformed.txtar) error = %v, want one errors.As reads as *malformedError", err)
 	}
 	if malformed.Site.Filename != "catalog.go" || malformed.Site.Line != 3 {
 		t.Errorf("Inline(malformed.txtar) refused at %s, want catalog.go:3", malformed.Site)

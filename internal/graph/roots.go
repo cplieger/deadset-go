@@ -86,12 +86,6 @@ type RootOptions struct {
 // symbol.
 type Unmatched struct {
 	Source string
-
-	// Config is the place in the matrix of the build configuration the string
-	// matched nothing in. One detection fills none of it, because a detection is
-	// of one configuration; [Merge] is what fills it, and
-	// [Matrix.UnmatchedEverywhere] is what reads it.
-	Config int
 }
 
 // Roots returns every root of one configuration, and every configured string
@@ -300,7 +294,7 @@ func (d *rootDetection) linknames(p *packages.Package, f *ast.File) error {
 	}
 	for _, group := range f.Comments {
 		for _, c := range group.List {
-			local, qualified, ok := LinknameDirective(c.Text)
+			local, qualified, ok := linknameDirective(c.Text)
 			if !ok {
 				continue
 			}

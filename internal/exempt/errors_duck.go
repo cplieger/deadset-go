@@ -10,30 +10,18 @@ import (
 )
 
 // ErrorsDuckTypingDetector retains, on every type a value of which reaches a
-// position typed as error, the methods the standard error helpers reach by duck
-// typing: a method whose name and signature match one of Is(error) bool,
-// As(any) bool, Unwrap() error and Unwrap() []error. The helpers call through no
-// declared interface, so such a method carries no reference for the graph to
-// hold, and the conversion set is the only evidence the program gives that the
-// helpers can ever be handed a value of the type.
-//
-// The signature decides as much as the name. A method named Is whose parameter is
-// not error implements the program's own comparison rather than the helper's
-// contract, errors.Is will never call it, and it is not retained.
-//
-// Three cases the mechanism leaves open are decided here, each as the rule it is.
-// The interface reached must be error itself rather than an interface that embeds
-// error, because a wider reading retains the four forms on a type the program only
-// ever uses through an interface of its own. A type converted at several sites
-// retains each method once, at the first site by rendered position, because the
-// exemption states why the method is live and one reason is the whole answer; the
-// rendered position is what orders it, since a token.Pos orders two files by the
-// order the load happened to parse them in.
+// position typed as error itself, the methods the error helpers call by duck typing
+// and so through no reference: Is(error) bool, As(any) bool, Unwrap() error and
+// Unwrap() []error, matched by name and signature, so an Is taking no error is the
+// program's own and stays judged. An interface embedding error does not count: a
+// type used only through an interface of its own retains nothing. A type converted
+// at several sites retains each method once, at its first site by rendered position,
+// since a token.Pos follows the load's parse order.
 func ErrorsDuckTypingDetector(in *Input) ([]graph.Exemption, error) {
 	scan := &errorsDuckScan{in: in, held: make(map[graph.SymbolID]struct{})}
 	scan.build()
 
-	conversions, err := Conversions(in)
+	conversions, err := conversionsOf(in)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +108,7 @@ func (s *errorsDuckScan) signature(params, results []types.Type) *types.Signatur
 }
 
 // tuple builds the unnamed tuple of one signature's parameters or results.
-func (s *errorsDuckScan) tuple(list []types.Type) *types.Tuple {
+func (*errorsDuckScan) tuple(list []types.Type) *types.Tuple {
 	vars := make([]*types.Var, 0, len(list))
 	for _, t := range list {
 		vars = append(vars, types.NewVar(token.NoPos, nil, "", t))
@@ -209,7 +197,7 @@ func (s *errorsDuckScan) form(method *types.Func) (string, bool) {
 // named returns the defined type a conversion's concrete type names, through a
 // pointer and through an instantiation, and nil when the type is not a defined
 // one. A generic type's origin is what carries the methods a file declares.
-func (s *errorsDuckScan) named(t types.Type) *types.Named {
+func (*errorsDuckScan) named(t types.Type) *types.Named {
 	if p, ok := t.(*types.Pointer); ok {
 		t = p.Elem()
 	}

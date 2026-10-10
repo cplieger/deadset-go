@@ -494,7 +494,7 @@ func analyzeShared(t *testing.T, in *Input) *sharedAnalysis {
 	}
 	fresh(analyzed.Production)
 	for ref, id := range in.index().byRef {
-		held.classes[ref] = in.ClassOf(id)
+		held.classes[ref] = in.classOf(id)
 	}
 	return held
 }

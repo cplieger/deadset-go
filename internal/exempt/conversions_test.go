@@ -70,19 +70,19 @@ func compareGolden(t *testing.T, name, subject, got string) {
 
 func TestConversionsGoldenTableOverEverySyntacticShape(t *testing.T) {
 	in := inputOf(t, "conversion-shapes.txtar", Options{})
-	sites, err := Conversions(in)
+	sites, err := conversionsOf(in)
 	if err != nil {
-		t.Fatalf("Conversions(conversion-shapes.txtar) error: %v", err)
+		t.Fatalf("conversionsOf(conversion-shapes.txtar) error: %v", err)
 	}
 	compareGolden(t, "conversion-shapes.golden",
-		"Conversions(conversion-shapes.txtar)", renderConversions(t, in, sites))
+		"conversionsOf(conversion-shapes.txtar)", renderConversions(t, in, sites))
 }
 
 func TestConversionsRecordsNeitherAnAssertionNorATypeSwitchNorADeclaration(t *testing.T) {
 	in := inputOf(t, "conversion-shapes.txtar", Options{})
-	sites, err := Conversions(in)
+	sites, err := conversionsOf(in)
 	if err != nil {
-		t.Fatalf("Conversions(conversion-shapes.txtar) error: %v", err)
+		t.Fatalf("conversionsOf(conversion-shapes.txtar) error: %v", err)
 	}
 
 	// NotConversions holds one type assertion, one two-case type switch, one short
@@ -93,24 +93,24 @@ func TestConversionsRecordsNeitherAnAssertionNorATypeSwitchNorADeclaration(t *te
 	rendered := renderConversions(t, in, sites)
 	got := linesInFunction(t, rendered, "NotConversions")
 	if len(got) != 1 {
-		t.Errorf("Conversions(conversion-shapes.txtar) recorded %d sites in NotConversions:\n%s\nwant 1, the explicit conversion",
+		t.Errorf("conversionsOf(conversion-shapes.txtar) recorded %d sites in NotConversions:\n%s\nwant 1, the explicit conversion",
 			len(got), strings.Join(got, "\n"))
 	}
 }
 
 func TestConversionsIsIndependentOfTheOrderItIsCalledIn(t *testing.T) {
 	in := inputOf(t, "conversion-shapes.txtar", Options{})
-	first, err := Conversions(in)
+	first, err := conversionsOf(in)
 	if err != nil {
-		t.Fatalf("Conversions(conversion-shapes.txtar) first call error: %v", err)
+		t.Fatalf("conversionsOf(conversion-shapes.txtar) first call error: %v", err)
 	}
-	second, err := Conversions(in)
+	second, err := conversionsOf(in)
 	if err != nil {
-		t.Fatalf("Conversions(conversion-shapes.txtar) second call error: %v", err)
+		t.Fatalf("conversionsOf(conversion-shapes.txtar) second call error: %v", err)
 	}
 	want, got := renderConversions(t, in, first), renderConversions(t, in, second)
 	if got != want {
-		t.Errorf("Conversions(conversion-shapes.txtar) twice differs\n--- first\n%s\n+++ second\n%s", want, got)
+		t.Errorf("conversionsOf(conversion-shapes.txtar) twice differs\n--- first\n%s\n+++ second\n%s", want, got)
 	}
 }
 
@@ -123,12 +123,12 @@ func TestConversionsRefusesAnInputCarryingNoFileSet(t *testing.T) {
 		{name: "no load result", in: &Input{}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			sites, err := Conversions(test.in)
+			sites, err := conversionsOf(test.in)
 			if err == nil {
-				t.Fatalf("Conversions(%s) = %v, nil, want an error", test.name, sites)
+				t.Fatalf("conversionsOf(%s) = %v, nil, want an error", test.name, sites)
 			}
 			if !errors.Is(err, graph.ErrIncompleteLoad) {
-				t.Errorf("Conversions(%s) error = %v, want one matching graph.ErrIncompleteLoad", test.name, err)
+				t.Errorf("conversionsOf(%s) error = %v, want one matching graph.ErrIncompleteLoad", test.name, err)
 			}
 		})
 	}

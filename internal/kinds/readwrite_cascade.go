@@ -353,7 +353,7 @@ func fallsWithAnnotation(in *Input, symbol *graph.Symbol) bool {
 	case graph.KindPackage, graph.KindFile, graph.KindField, graph.KindTypeParam, graph.KindMethod, graph.KindInterfaceMethod:
 		return false
 	}
-	return in.ClassOf(symbol.ID) == Certain
+	return in.classOf(symbol.ID) == Certain
 }
 
 // holderOf is the subject whose annotation or writes hold one reference's position.

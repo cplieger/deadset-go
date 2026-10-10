@@ -53,7 +53,7 @@ func loadConsumers(ctx context.Context, fset *token.FileSet, doc *scope.Document
 		}
 		if held[one.ID] {
 			return nil, fmt.Errorf("%w: %s: the scope declares module %s twice",
-				ErrConsumer, declared.Path, one.ID)
+				errConsumer, declared.Path, one.ID)
 		}
 		held[one.ID] = true
 		loaded = append(loaded, one)
@@ -65,7 +65,7 @@ func loadConsumers(ctx context.Context, fset *token.FileSet, doc *scope.Document
 // this target's run cannot count.
 func loadConsumer(ctx context.Context, fset *token.FileSet, doc *scope.Document, c Configuration, declared scope.Module, main *packages.Module) (Consumer, error) {
 	if _, err := os.Stat(declared.Path); err != nil {
-		return Consumer{}, &SetupError{Failures: []SetupFailure{{Class: MissingConsumer, Detail: fmt.Sprintf(
+		return Consumer{}, &SetupError{Failures: []SetupFailure{{Class: missingConsumer, Detail: fmt.Sprintf(
 			"the declared consumer %s does not exist; check it out at that path and install its dependencies",
 			declared.Path,
 		)}}}
@@ -83,7 +83,7 @@ func loadConsumer(ctx context.Context, fset *token.FileSet, doc *scope.Document,
 	if setup, failed := errors.AsType[*SetupError](err); failed {
 		consumer := &SetupError{}
 		for _, one := range setup.Failures {
-			consumer.Failures = append(consumer.Failures, SetupFailure{Class: MissingConsumer, Detail: fmt.Sprintf(
+			consumer.Failures = append(consumer.Failures, SetupFailure{Class: missingConsumer, Detail: fmt.Sprintf(
 				"the declared consumer %s does not load (%s); check it out at that path and install its dependencies",
 				declared.Path, one.Detail,
 			)})
@@ -100,15 +100,15 @@ func loadConsumer(ctx context.Context, fset *token.FileSet, doc *scope.Document,
 
 	module := mainModule(pkgs)
 	if module == nil || module.Path == "" {
-		return Consumer{}, fmt.Errorf("%w: %s: the load reports no module for it", ErrConsumer, declared.Path)
+		return Consumer{}, fmt.Errorf("%w: %s: the load reports no module for it", errConsumer, declared.Path)
 	}
 	if declared.ID != "" && declared.ID != module.Path {
 		return Consumer{}, fmt.Errorf("%w: %s: the scope declares module %s and the directory holds %s",
-			ErrConsumer, declared.Path, declared.ID, module.Path)
+			errConsumer, declared.Path, declared.ID, module.Path)
 	}
 	if main != nil && module.Path == main.Path {
 		return Consumer{}, fmt.Errorf("%w: %s: it is the target module %s",
-			ErrConsumer, declared.Path, main.Path)
+			errConsumer, declared.Path, main.Path)
 	}
 	if err := resolvesTarget(pkgs, declared.Path, main); err != nil {
 		return Consumer{}, err
@@ -145,7 +145,7 @@ func resolvesTarget(pkgs []*packages.Package, path string, main *packages.Module
 		return nil
 	}
 	return fmt.Errorf("%w: %s: it resolves %s at %s rather than at %s. A consumer reaches the target through a replace directive in its own module file or through a workspace the scope declares",
-		ErrConsumer, path, main.Path, resolved, main.Dir)
+		errConsumer, path, main.Path, resolved, main.Dir)
 }
 
 // sameDir reports whether two paths name one directory, comparing them lexically

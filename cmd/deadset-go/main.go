@@ -459,12 +459,6 @@ type stages struct {
 	merged *graph.Merged
 	refs   map[graph.SymbolID]string
 
-	// derived is the matrix the derivation answered, and nil where the
-	// configuration listed the build configurations itself. A kind that claims
-	// something about every configuration of the target reads it, because a
-	// matrix the run derived is not every configuration the target builds.
-	derived *matrix.Derived
-
 	root string
 
 	// configurations is the build matrix the run analyzed, in the order every
@@ -642,7 +636,6 @@ func stagesOf(ctx context.Context, resolved *resolution) (stages, error) {
 	return stages{
 		matrix:         x,
 		refs:           refs,
-		derived:        derived,
 		root:           targetRoot,
 		configurations: configurations,
 		identifiers:    identifiers(configurations),
@@ -1258,7 +1251,6 @@ func inputOf(ctx context.Context, resolved *resolution, analyzed *analysis, gene
 		Marks:         analyzed.marks,
 		Refusals:      analyzed.refusals,
 		Deps:          &module,
-		Derived:       analyzed.stages.derived,
 		Unmatched:     analyzed.stages.unmatched,
 		RootsDocument: rootsDocument(resolved),
 		Edges:         declared,

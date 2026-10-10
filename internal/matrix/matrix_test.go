@@ -20,55 +20,51 @@ func TestDeriveEmitsOneConfigurationPerAtomAndNeverTheirProduct(t *testing.T) {
 		archive     string
 		wantIDs     []string
 		wantGuessed []string
-		wantAtoms   Atoms
-		wantUnbuilt []File
+		wantAtoms   atomSet
+		wantUnbuilt []string
 	}{
 		{
 			name:        "three_platform_atoms_derive_four_configurations",
 			archive:     "three-platforms.txtar",
 			wantIDs:     []string{"linux-amd64", "darwin-amd64", "windows-amd64", "linux-arm64"},
 			wantGuessed: []string{"darwin-amd64", "windows-amd64", "linux-arm64"},
-			wantAtoms:   Atoms{OS: []string{"darwin", "linux", "windows"}, Arch: []string{"arm64"}},
+			wantAtoms:   atomSet{OS: []string{"darwin", "linux", "windows"}, Arch: []string{"arm64"}},
 		},
 		{
-			name:      "a_boolean_constraint_the_atoms_do_not_satisfy_is_unreachable",
-			archive:   "boolean.txtar",
-			wantIDs:   []string{"linux-amd64"},
-			wantAtoms: Atoms{OS: []string{"linux"}, Arch: []string{"amd64"}},
-			wantUnbuilt: []File{
-				{Path: "guard.go", Constraint: "linux && !amd64"},
-			},
+			name:        "a_boolean_constraint_the_atoms_do_not_satisfy_is_unreachable",
+			archive:     "boolean.txtar",
+			wantIDs:     []string{"linux-amd64"},
+			wantAtoms:   atomSet{OS: []string{"linux"}, Arch: []string{"amd64"}},
+			wantUnbuilt: []string{"guard.go"},
 		},
 		{
 			name:        "a_tag_a_source_file_names_derives_the_host_carrying_it_and_a_tag_only_tests_name_derives_nothing",
 			archive:     "custom-tags.txtar",
 			wantIDs:     []string{"linux-amd64", "linux-amd64-cgo"},
 			wantGuessed: []string{"linux-amd64-cgo"},
-			wantAtoms:   Atoms{Tags: []string{"cgo", "integration"}},
-			wantUnbuilt: []File{{Path: "app_integration_test.go", Constraint: "integration"}},
+			wantAtoms:   atomSet{Tags: []string{"cgo", "integration"}},
+			wantUnbuilt: []string{"app_integration_test.go"},
 		},
 		{
 			name:        "an_atom_named_only_in_a_directory_no_configuration_builds_is_collected",
 			archive:     "vanished-dir.txtar",
 			wantIDs:     []string{"linux-amd64", "plan9-amd64"},
 			wantGuessed: []string{"plan9-amd64"},
-			wantAtoms:   Atoms{OS: []string{"plan9"}},
+			wantAtoms:   atomSet{OS: []string{"plan9"}},
 		},
 		{
 			name:        "a_legacy_line_a_blank_line_separates_from_the_code_carries_its_constraint",
 			archive:     "legacy-lines.txtar",
 			wantIDs:     []string{"linux-amd64", "openbsd-amd64", "linux-arm64"},
 			wantGuessed: []string{"openbsd-amd64", "linux-arm64"},
-			wantAtoms:   Atoms{OS: []string{"openbsd"}, Arch: []string{"arm64"}},
-			wantUnbuilt: []File{
-				{Path: "combined.go", Constraint: "openbsd && arm64"},
-			},
+			wantAtoms:   atomSet{OS: []string{"openbsd"}, Arch: []string{"arm64"}},
+			wantUnbuilt: []string{"combined.go"},
 		},
 		{
 			name:      "no_path_the_toolchain_builds_nothing_from_is_read",
 			archive:   "walk-skips.txtar",
 			wantIDs:   []string{"linux-amd64"},
-			wantAtoms: Atoms{},
+			wantAtoms: atomSet{},
 		},
 	}
 
@@ -76,9 +72,14 @@ func TestDeriveEmitsOneConfigurationPerAtomAndNeverTheirProduct(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			derived, err := derive(extract(t, tc.archive), fixtureHost())
+			dir := extract(t, tc.archive)
+			derived, err := derive(dir, fixtureHost())
 			if err != nil {
 				t.Fatalf("derive(%s) = error %v, want the derived matrix", tc.archive, err)
+			}
+			files, err := collect(dir)
+			if err != nil {
+				t.Fatalf("collect(%s) = error %v, want the files", tc.archive, err)
 			}
 			if got := identifiers(derived.Configurations); !reflect.DeepEqual(got, tc.wantIDs) {
 				t.Errorf("derive(%s) derived %v, want %v", tc.archive, got, tc.wantIDs)
@@ -88,11 +89,11 @@ func TestDeriveEmitsOneConfigurationPerAtomAndNeverTheirProduct(t *testing.T) {
 			if got := derived.Guessed; !slices.Equal(got, tc.wantGuessed) {
 				t.Errorf("derive(%s) guessed %v, want %v", tc.archive, got, tc.wantGuessed)
 			}
-			if got := derived.Atoms; !sameAtoms(got, tc.wantAtoms) {
-				t.Errorf("derive(%s) collected %+v, want %+v", tc.archive, got, tc.wantAtoms)
+			if got := atomsOf(files); !sameAtoms(got, tc.wantAtoms) {
+				t.Errorf("atomsOf(%s) collected %+v, want %+v", tc.archive, got, tc.wantAtoms)
 			}
-			if got := derived.Unreachable; !slices.Equal(got, tc.wantUnbuilt) {
-				t.Errorf("derive(%s) recorded unreachable %+v, want %+v", tc.archive, got, tc.wantUnbuilt)
+			if got := unreachableUnder(files, derived.Configurations); !slices.Equal(got, tc.wantUnbuilt) {
+				t.Errorf("unreachableUnder(%s) = %+v, want %+v", tc.archive, got, tc.wantUnbuilt)
 			}
 		})
 	}
@@ -108,7 +109,7 @@ func TestDeriveNamesATestFileOnlyATestTagBuilds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("derive(custom-tags.txtar) = error %v, want the derived matrix", err)
 	}
-	want := []TaggedTest{{Path: "app_integration_test.go", Tags: []string{"integration"}}}
+	want := []taggedTest{{Path: "app_integration_test.go", Tags: []string{"integration"}}}
 	if !reflect.DeepEqual(derived.TaggedTests, want) {
 		t.Errorf("derive(custom-tags.txtar).TaggedTests = %+v, want %+v", derived.TaggedTests, want)
 	}
@@ -128,8 +129,12 @@ func TestDeriveMakesABooleanConstraintReachableOnceTheAtomItNeedsAppears(t *test
 	if got := identifiers(derived.Configurations); !reflect.DeepEqual(got, want) {
 		t.Errorf("derive(boolean.txtar plus an arm64 file) derived %v, want %v", got, want)
 	}
-	if got := derived.Unreachable; len(got) != 0 {
-		t.Errorf("derive(boolean.txtar plus an arm64 file) recorded unreachable %+v, want none: linux-arm64 builds the guard", got)
+	files, err := collect(dir)
+	if err != nil {
+		t.Fatalf("collect(boolean.txtar plus an arm64 file) = error %v, want the files", err)
+	}
+	if got := unreachableUnder(files, derived.Configurations); len(got) != 0 {
+		t.Errorf("unreachableUnder(boolean.txtar plus an arm64 file) = %+v, want none: linux-arm64 builds the guard", got)
 	}
 }
 
@@ -264,7 +269,7 @@ func toolchainSelects(t *testing.T, root, relative string, c load.Configuration)
 
 // sameAtoms compares two atom sets, reading an absent list and an empty one as
 // the same thing.
-func sameAtoms(got, want Atoms) bool {
+func sameAtoms(got, want atomSet) bool {
 	return slices.Equal(got.OS, want.OS) && slices.Equal(got.Arch, want.Arch) &&
 		slices.Equal(got.Tags, want.Tags)
 }

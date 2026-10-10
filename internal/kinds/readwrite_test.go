@@ -166,10 +166,10 @@ func TestEnumGroupMembersReadsAnIotaGroupTheWayTheExemptionDoes(t *testing.T) {
 	in := inputOf(t, "readwrite-enum.txtar", libraryConfig(), Consumers{})
 
 	var named []string
-	for id, owner := range EnumGroupMembers(in) {
+	for id, owner := range enumGroupMembers(in) {
 		symbol := in.symbol(id)
 		if symbol == nil {
-			t.Fatalf("EnumGroupMembers names %s, which the inventory does not hold", id)
+			t.Fatalf("enumGroupMembers names %s, which the inventory does not hold", id)
 		}
 		named = append(named, symbol.Name+" of "+owner)
 	}
@@ -180,7 +180,7 @@ func TestEnumGroupMembersReadsAnIotaGroupTheWayTheExemptionDoes(t *testing.T) {
 		"stateBusy of state", "stateIdle of state",
 	}
 	if !slices.Equal(named, want) {
-		t.Errorf("EnumGroupMembers over readwrite-enum.txtar = %v, want %v", named, want)
+		t.Errorf("enumGroupMembers over readwrite-enum.txtar = %v, want %v", named, want)
 	}
 }
 

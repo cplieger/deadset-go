@@ -164,10 +164,10 @@ func TestExitCodeForMapsEveryWiredFailure(t *testing.T) {
 		err  error
 		want int
 	}{
-		{name: "a_malformed_configuration_is_a_usage_error", err: &config.Error{Kind: config.KindMalformed, Key: "reporters.sort", Message: "malformed"}, want: codes["usage"]},
-		{name: "an_unimplemented_key_is_a_usage_error", err: &config.Error{Kind: config.KindUnimplementedKey, Key: "reporters.fail_under", Message: "not implemented"}, want: codes["usage"]},
-		{name: "a_missing_target_kind_is_a_usage_error", err: &config.Error{Kind: config.KindMissingTargetKind, Key: "target.kind", Message: "not set"}, want: codes["usage"]},
-		{name: "a_wrapped_refusal_is_a_usage_error", err: errors.Join(errors.New("resolve"), &config.Error{Kind: config.KindMalformed, Message: "malformed"}), want: codes["usage"]},
+		{name: "a_malformed_configuration_is_a_usage_error", err: &config.Error{Message: "malformed"}, want: codes["usage"]},
+		{name: "an_unimplemented_key_is_a_usage_error", err: &config.Error{Message: "not implemented"}, want: codes["usage"]},
+		{name: "a_missing_target_kind_is_a_usage_error", err: &config.Error{Message: "not set"}, want: codes["usage"]},
+		{name: "a_wrapped_refusal_is_a_usage_error", err: errors.Join(errors.New("resolve"), &config.Error{Message: "malformed"}), want: codes["usage"]},
 		{name: "a_configured_template_directory_the_target_does_not_hold_is_a_usage_error", err: fmt.Errorf("exempt: %s: %w: absent", exempt.TemplateField, exempt.ErrTemplateDir), want: codes["usage"]},
 		{name: "a_matrix_holding_no_configuration_is_a_usage_error", err: fmt.Errorf("%w: %s", load.ErrNoConfiguration, "/src/app"), want: codes["usage"]},
 		{name: "a_matrix_the_merge_cannot_key_a_configuration_of_is_a_usage_error", err: fmt.Errorf("%w: %d configurations, at most 64", graph.ErrMatrix, 65), want: codes["usage"]},

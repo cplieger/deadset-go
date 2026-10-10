@@ -394,8 +394,8 @@ func TestTheSarifRenderingNeedsAReader(t *testing.T) {
 	envelope := built(t, &in)
 
 	err := SARIF(&strings.Builder{}, &envelope, Options{})
-	if !errors.Is(err, ErrOptions) {
-		t.Errorf("SARIF(no reader) = error %v, want one carrying ErrOptions", err)
+	if !errors.Is(err, errOptions) {
+		t.Errorf("SARIF(no reader) = error %v, want one carrying errOptions", err)
 	}
 }
 

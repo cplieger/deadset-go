@@ -1,5 +1,7 @@
 package report
 
+import "github.com/cplieger/deadset-go/internal/reportdoc"
+
 // The document below is the Contract's SARIF mapping in Go: one field per property
 // the mapping emits, in the order the mapping lists them, so two runs over an
 // unchanged tree write the same bytes. A property the mapping states is never
@@ -65,8 +67,8 @@ type sarifURIBase struct {
 
 //nolint:govet // fieldalignment: the field order is the mapping's property order, which the document writes
 type sarifRunProperties struct {
-	Totals   wireTotals `json:"totals"`
-	Withheld string     `json:"withheld,omitempty"`
+	Totals   reportdoc.Totals `json:"totals"`
+	Withheld string           `json:"withheld,omitempty"`
 }
 
 //nolint:govet // fieldalignment: the field order is the mapping's property order, which the document writes
@@ -121,17 +123,17 @@ type sarifFingerprints struct {
 //
 //nolint:govet // fieldalignment: the field order is the report schema's member order
 type sarifResultProperties struct {
-	Language          string        `json:"language"`
-	Symbol            wireSubject   `json:"symbol"`
-	ReachabilityClass string        `json:"reachability_class"`
-	Confidence        string        `json:"confidence"`
-	LivenessRelation  string        `json:"liveness_relation,omitempty"`
-	TestOnly          bool          `json:"test_only"`
-	Generated         bool          `json:"generated"`
-	Component         wireComponent `json:"component"`
-	RetainedBy        []string      `json:"retained_by"`
-	Configurations    []string      `json:"configurations"`
-	ConsumersLoaded   []string      `json:"consumers_loaded"`
-	Fixability        string        `json:"fixability"`
-	Details           wireDetails   `json:"details"`
+	Language          string              `json:"language"`
+	Symbol            reportdoc.Subject   `json:"symbol"`
+	ReachabilityClass string              `json:"reachability_class"`
+	Confidence        string              `json:"confidence"`
+	LivenessRelation  string              `json:"liveness_relation,omitempty"`
+	TestOnly          bool                `json:"test_only"`
+	Generated         bool                `json:"generated"`
+	Component         reportdoc.Component `json:"component"`
+	RetainedBy        []string            `json:"retained_by"`
+	Configurations    []string            `json:"configurations"`
+	ConsumersLoaded   []string            `json:"consumers_loaded"`
+	Fixability        string              `json:"fixability"`
+	Details           reportdoc.Details   `json:"details"`
 }
