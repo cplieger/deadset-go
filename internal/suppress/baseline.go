@@ -26,11 +26,11 @@ const baselineDescription = "Recorded findings: a run fails only on a finding th
 // reason is the analyzer's own name and version.
 const reasonPrefix = "recorded by "
 
-// ErrProvenance reports a request to write a baseline whose rows would carry no
+// errProvenance reports a request to write a baseline whose rows would carry no
 // reason: a row with no code, symbol or path, or an analyzer identity with no name
 // or no version. The grammar requires a reason on every row, so a document that
 // could not carry one is refused rather than written.
-var ErrProvenance = errors.New("suppress: a baseline row would carry no reason")
+var errProvenance = errors.New("suppress: a baseline row would carry no reason")
 
 // baselineShape is the baseline's document, which shares the ignore file's record
 // shape so that one decoder and one matcher serve both and a row can be moved into
@@ -93,7 +93,7 @@ func baselineRecords(body []byte, sites []token.Position, symbols []graph.Symbol
 		return nil, nil, err
 	}
 	if wire.Baseline == nil {
-		return nil, nil, &MalformedError{Site: documentSite(held), Text: held.file, Want: held.arrayWant, Mechanism: held.mechanism}
+		return nil, nil, &malformedError{Site: documentSite(held), Text: held.file, Want: held.arrayWant, Mechanism: held.mechanism}
 	}
 
 	return records(*wire.Baseline, sites, declarationRefs(symbols), held)
@@ -128,19 +128,19 @@ func (p Provenance) reason() string { return reasonPrefix + p.Analyzer + " " + p
 // reason, so a row is never read as a maintainer's judgement. Which findings the
 // rows record is the caller's: the fixpoint of a baseline write decides them. A
 // finding missing a value a row needs, and an identity
-// missing its name or version, are [ErrProvenance]: the grammar requires a reason
+// missing its name or version, are [errProvenance]: the grammar requires a reason
 // on every row, and a document that could not carry one is refused rather than
 // written.
 func WriteBaseline(w io.Writer, findings []Recorded, p Provenance) error {
 	if p.Analyzer == "" || p.Version == "" {
-		return fmt.Errorf("%w: the analyzer identity names %q at version %q", ErrProvenance, p.Analyzer, p.Version)
+		return fmt.Errorf("%w: the analyzer identity names %q at version %q", errProvenance, p.Analyzer, p.Version)
 	}
 	rows := make([]wireRow, 0, len(findings))
 	for i := range findings {
 		found := &findings[i]
 		if found.Code == "" || found.Symbol == "" || found.Path == "" {
 			return fmt.Errorf("%w: a finding names code %q, symbol %q and path %q",
-				ErrProvenance, found.Code, found.Symbol, found.Path)
+				errProvenance, found.Code, found.Symbol, found.Path)
 		}
 		rows = append(rows, wireRow{
 			Code:   found.Code,

@@ -2,148 +2,24 @@ package report
 
 import (
 	"bytes"
-	"encoding/json"
-	"fmt"
 	"slices"
 
-	"github.com/cplieger/deadset-go/internal/config"
-	"github.com/cplieger/deadset-go/internal/graph"
 	"github.com/cplieger/deadset-go/internal/kinds"
+	"github.com/cplieger/deadset-go/internal/reportdoc"
 )
 
-// The document below is the Contract's report schema in Go: one field per member,
-// in the order the schema declares the members, with the JSON name the schema
-// gives each. Every member the schema requires is written whatever its value, and
-// every optional member carries omitempty, so an absent member is one the analysis
-// has nothing to say about.
-//
-// The finding of the findings pass carries no JSON name of its own, so the shapes
-// here are what the document rests on. Three optional members of a finding's
-// symbol (the container's reference, the visibility, and the path inside the
-// package's type information), the member list of a component, and the name of the
-// analyzer that carried a record are absent from the shapes below because the
-// findings pass carries no field for any of them.
-//
-// The liveness relation is the one member whose presence is a claim rather than a
-// value: a finding about a subject the sweep judged live is a finding no relation
-// decided, so the member is absent on exactly those and present on every other. A
-// document that named a relation there would say a relation decided what none did.
-
-// wireEnvelope is one report document.
-type wireEnvelope struct {
-	SchemaVersion          string                      `json:"schema_version"`
-	ContractVersion        string                      `json:"contract_version"`
-	Analyzer               wireAnalyzer                `json:"analyzer"`
-	Target                 wireTarget                  `json:"target"`
-	Configurations         []wireConfiguration         `json:"configurations"`
-	ConfigurationsNotBuilt []wireConfigurationNotBuilt `json:"configurations_not_built"`
-	Consumers              wireConsumers               `json:"consumers"`
-	Findings               []wireFinding               `json:"findings"`
-	EdgeEvaluations        []wireEvaluation            `json:"edge_evaluations"`
-	StaleSuppressions      []wireStaleSuppression      `json:"stale_suppressions"`
-	DeclaredGaps           []wireDeclaredGap           `json:"declared_gaps"`
-	ExcludedByCgo          []string                    `json:"excluded_by_cgo"`
-	TestFileRules          []wireTestFileRule          `json:"test_file_rules"`
-	TypeErrorSkips         []wireTypeErrorSkipRecord   `json:"type_error_skips"`
-	Notes                  []wireNoteRecord            `json:"notes"`
-	UnansweredQuestions    []wireUnansweredRecord      `json:"unanswered_questions"`
-	ConventionsApplied     []wireConventionRecord      `json:"conventions_applied"`
-	Totals                 wireTotals                  `json:"totals"`
+func wireTypeErrorSkip(s TypeErrorSkip) reportdoc.TypeErrorSkip {
+	return reportdoc.TypeErrorSkip{Path: s.Path, Line: s.Line, Message: s.Message}
 }
 
-//nolint:govet // fieldalignment: the field order is the schema's member order, which the document writes
-type wireTypeErrorSkipRecord struct {
-	Path    string `json:"path"`
-	Line    int    `json:"line"`
-	Message string `json:"message"`
+func wireNote(n Note) reportdoc.Note { return reportdoc.Note(n) }
+
+func wireUnansweredQuestion(q UnansweredQuestion) reportdoc.UnansweredQuestion {
+	return reportdoc.UnansweredQuestion(q)
 }
 
-type wireNoteRecord struct {
-	Kind    string `json:"kind"`
-	Path    string `json:"path"`
-	Key     string `json:"key"`
-	Message string `json:"message"`
-}
-
-type wireUnansweredRecord struct {
-	Configuration string `json:"configuration"`
-	Questions     int    `json:"questions"`
-	Declarations  int    `json:"declarations"`
-}
-
-type wireConventionRecord struct {
-	Name     string `json:"name"`
-	Package  string `json:"package"`
-	Version  string `json:"version"`
-	Manifest string `json:"manifest"`
-}
-
-func wireTypeErrorSkip(s TypeErrorSkip) wireTypeErrorSkipRecord {
-	return wireTypeErrorSkipRecord{Path: s.Path, Line: s.Line, Message: s.Message}
-}
-
-func wireNote(n Note) wireNoteRecord { return wireNoteRecord(n) }
-
-func wireUnansweredQuestion(q UnansweredQuestion) wireUnansweredRecord {
-	return wireUnansweredRecord(q)
-}
-
-func wireConventionApplied(c ConventionApplied) wireConventionRecord { return wireConventionRecord(c) }
-
-//nolint:govet // fieldalignment: the field order is the schema's member order, which the document writes
-type wireAnalyzer struct {
-	Name                   string          `json:"name"`
-	Version                string          `json:"version"`
-	Languages              []string        `json:"languages"`
-	SchemaVersionsAccepted []string        `json:"schema_versions_accepted"`
-	Conformance            wireConformance `json:"conformance"`
-}
-
-type wireConformance struct {
-	CorpusVersion string `json:"corpus_version"`
-	Result        string `json:"result"`
-	Digest        string `json:"digest"`
-}
-
-type wireTarget struct {
-	Kind     string `json:"kind"`
-	Root     string `json:"root"`
-	Identity string `json:"identity"`
-}
-
-type wireConfiguration struct {
-	ID   string   `json:"id"`
-	OS   string   `json:"os"`
-	Arch string   `json:"arch"`
-	Tags []string `json:"tags"`
-}
-
-//nolint:govet // fieldalignment: the field order is the schema's member order, which the document writes
-type wireConfigurationNotBuilt struct {
-	ID    string   `json:"id"`
-	OS    string   `json:"os"`
-	Arch  string   `json:"arch"`
-	Tags  []string `json:"tags"`
-	Error string   `json:"error"`
-}
-
-//nolint:govet // fieldalignment: the field order is the schema's member order, which the document writes
-type wireConsumers struct {
-	Declared    int                      `json:"declared"`
-	Loaded      []wireLoadedConsumer     `json:"loaded"`
-	Unavailable []wireUnavailableConsume `json:"unavailable"`
-}
-
-type wireLoadedConsumer struct {
-	ID   string `json:"id"`
-	Role string `json:"role"`
-	Path string `json:"path"`
-}
-
-type wireUnavailableConsume struct {
-	ID     string `json:"id"`
-	Role   string `json:"role"`
-	Reason string `json:"reason"`
+func wireConventionApplied(c ConventionApplied) reportdoc.ConventionApplied {
+	return reportdoc.ConventionApplied(c)
 }
 
 // consumerRole is the role every entry of both consumer lists carries: the schema
@@ -151,181 +27,27 @@ type wireUnavailableConsume struct {
 // the target.
 const consumerRole = "consumer"
 
-//nolint:govet // fieldalignment: the field order is the schema's member order, which the document writes
-type wireFinding struct {
-	Code              string        `json:"code"`
-	Kind              string        `json:"kind"`
-	Language          string        `json:"language"`
-	Position          wirePosition  `json:"position"`
-	Symbol            wireSubject   `json:"symbol"`
-	ReachabilityClass string        `json:"reachability_class"`
-	Confidence        string        `json:"confidence"`
-	LivenessRelation  string        `json:"liveness_relation,omitempty"`
-	TestOnly          bool          `json:"test_only"`
-	Generated         bool          `json:"generated"`
-	Component         wireComponent `json:"component"`
-	RetainedBy        []string      `json:"retained_by"`
-	Configurations    []string      `json:"configurations"`
-	ConsumersLoaded   []string      `json:"consumers_loaded"`
-	Fixability        string        `json:"fixability"`
-	Severity          string        `json:"severity"`
-	Message           string        `json:"message"`
-	Details           wireDetails   `json:"details"`
-}
-
-type wirePosition struct {
-	Path    string `json:"path"`
-	Line    int    `json:"line"`
-	Column  int    `json:"column"`
-	EndLine int    `json:"end_line"`
-}
-
-//nolint:govet // fieldalignment: the field order is the schema's member order, which the document writes
-type wireSubject struct {
-	Ref       string `json:"ref"`
-	Kind      string `json:"kind"`
-	Name      string `json:"name"`
-	Exported  *bool  `json:"exported,omitempty"`
-	SizeLines int    `json:"size_lines"`
-}
-
-//nolint:govet // fieldalignment: the field order is the schema's member order, which the document writes
-type wireComponent struct {
-	ID             string           `json:"id"`
-	Root           bool             `json:"root"`
-	SymbolCount    int              `json:"symbol_count"`
-	DeletableLines int              `json:"deletable_lines"`
-	Members        []wirePositioned `json:"members,omitempty"`
-}
-
 // wireSubjectOf is one finding's subject as a document writes it.
-func wireSubjectOf(s *kinds.Subject) wireSubject {
-	return wireSubject{Ref: s.Ref, Kind: s.Kind, Name: s.Name, Exported: s.Exported, SizeLines: s.SizeLines}
-}
-
-// subject is one finding's subject read back from the document.
-func (w *wireSubject) subject() kinds.Subject {
-	return kinds.Subject{Ref: w.Ref, Kind: w.Kind, Name: w.Name, Exported: w.Exported, SizeLines: w.SizeLines}
+func wireSubjectOf(s *kinds.Subject) reportdoc.Subject {
+	return reportdoc.Subject{Ref: s.Ref, Kind: s.Kind, Name: s.Name, Exported: s.Exported, SizeLines: s.SizeLines}
 }
 
 // wireComponentOf is one component as a document writes it: the count of the lines
 // its deletion removes and not the spans that count was taken over, and the member
 // list where the run lists a component in full.
-func wireComponentOf(c *kinds.Component) wireComponent {
-	held := wireComponent{ID: c.ID, Root: c.Root, SymbolCount: c.SymbolCount, DeletableLines: c.DeletableLines}
+func wireComponentOf(c *kinds.Component) reportdoc.Component {
+	held := reportdoc.Component{ID: c.ID, Root: c.Root, SymbolCount: c.SymbolCount, DeletableLines: c.DeletableLines}
 	for i := range c.Members {
 		one := &c.Members[i]
 		held.Members = append(held.Members,
-			wirePositioned{Ref: one.Ref, Name: one.Name, Position: wirePositionOf(&one.Position)})
+			reportdoc.Positioned{Ref: one.Ref, Name: one.Name, Position: wirePositionOf(&one.Position)})
 	}
 	return held
 }
 
-// wirePositioned is one symbol a finding names beside its subject: the reference,
-// the display name a text line renders, and where the symbol is.
-type wirePositioned struct {
-	Ref      string       `json:"ref"`
-	Name     string       `json:"name"`
-	Position wirePosition `json:"position"`
-}
-
-// wireDetails is one finding's per-kind members, in the schema's member order.
-type wireDetails struct {
-	NarrowerVisibility string            `json:"narrower_visibility,omitempty"`
-	Implementations    []wirePositioned  `json:"implementations,omitzero"`
-	WritePositions     []wirePosition    `json:"write_positions,omitempty"`
-	ExcludedBy         string            `json:"excluded_by,omitempty"`
-	DependencyClass    string            `json:"dependency_class,omitempty"`
-	Replacement        string            `json:"replacement,omitempty"`
-	Mechanism          string            `json:"mechanism,omitempty"`
-	Entry              *wireDetailsEntry `json:"entry,omitempty"`
-	Overlap            []string          `json:"overlap,omitempty"`
-	RemovesLastUseOf   []string          `json:"removes_last_use_of,omitempty"`
-}
-
-// wireDetailsEntry is the suppression record a finding about one reports, where a
-// member the record lacks is absent rather than empty: that absence is what the
-// reason-free and the unscoped kinds report, and the schema admits no empty spelling
-// of either member. The array of stale records writes the same four keys with the
-// path and the reason required, which is why it has a shape of its own.
-type wireDetailsEntry struct {
-	Code   string `json:"code"`
-	Symbol string `json:"symbol,omitempty"`
-	Path   string `json:"path,omitempty"`
-	Reason string `json:"reason,omitempty"`
-}
-
-//nolint:govet // fieldalignment: the field order is the schema's member order, which the document writes
-type wireEvaluation struct {
-	Edge    string       `json:"edge"`
-	Side    string       `json:"side"`
-	Symbol  string       `json:"symbol"`
-	State   string       `json:"state"`
-	Finding *wireFinding `json:"finding,omitempty"`
-}
-
-//nolint:govet // fieldalignment: the field order is the schema's member order, which the document writes
-type wireStaleSuppression struct {
-	Code      string                  `json:"code"`
-	Mechanism string                  `json:"mechanism"`
-	Entry     wireSuppressionEntry    `json:"entry"`
-	Position  wireSuppressionPosition `json:"position"`
-	Symbol    string                  `json:"symbol"`
-	Message   string                  `json:"message"`
-}
-
-type wireSuppressionEntry struct {
-	Code   string `json:"code"`
-	Symbol string `json:"symbol,omitempty"`
-	Path   string `json:"path"`
-	Reason string `json:"reason"`
-}
-
-type wireSuppressionPosition struct {
-	Path   string `json:"path"`
-	Line   int    `json:"line"`
-	Column int    `json:"column"`
-}
-
-type wireDeclaredGap struct {
-	Fixture    string `json:"fixture"`
-	Symbol     string `json:"symbol,omitempty"`
-	Capability string `json:"capability"`
-	Reason     string `json:"reason"`
-}
-
 // wireDeclaredGapOf is one declared gap as a document writes it.
-func wireDeclaredGapOf(g *DeclaredGap) wireDeclaredGap {
-	return wireDeclaredGap{Fixture: g.Fixture, Symbol: g.Symbol, Capability: g.Capability, Reason: g.Reason}
-}
-
-type wireTestFileRule struct {
-	Rule    string `json:"rule"`
-	Matched int    `json:"matched"`
-}
-
-type wireTotals struct {
-	Findings             int            `json:"findings"`
-	BySeverity           wireBySeverity `json:"by_severity"`
-	DeletableLines       int            `json:"deletable_lines"`
-	SuppressionsInEffect int            `json:"suppressions_in_effect"`
-	ReasonsRecorded      int            `json:"reasons_recorded"`
-	StaleSuppressions    int            `json:"stale_suppressions"`
-	Pending              int            `json:"pending"`
-	Omitted              int            `json:"omitted"`
-	Withheld             wireWithheld   `json:"withheld"`
-}
-
-type wireWithheld struct {
-	Certain  int `json:"certain"`
-	Probable int `json:"probable"`
-	Possible int `json:"possible"`
-}
-
-type wireBySeverity struct {
-	Allow int `json:"allow"`
-	Warn  int `json:"warn"`
-	Deny  int `json:"deny"`
+func wireDeclaredGapOf(g *DeclaredGap) reportdoc.DeclaredGap {
+	return reportdoc.DeclaredGap{Fixture: g.Fixture, Symbol: g.Symbol, Capability: g.Capability, Reason: g.Reason}
 }
 
 // MarshalJSON writes the envelope as the Contract's report document, so a path that
@@ -338,77 +60,57 @@ func (e *Envelope) MarshalJSON() ([]byte, error) {
 	return bytes.TrimSuffix(written, []byte("\n")), err
 }
 
-// UnmarshalJSON reads one report document this analyzer wrote, refusing a member
-// the schema does not declare: an unknown member is a document from a schema
-// version or a product this envelope does not model, including the members a
-// merged report alone carries, and reading one as though the member were absent
-// would lose what it says.
-func (e *Envelope) UnmarshalJSON(data []byte) error {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	var read wireEnvelope
-	if err := decoder.Decode(&read); err != nil {
-		return fmt.Errorf("report: decode a report document: %w", err)
-	}
-	held, err := read.envelope()
-	if err != nil {
-		return err
-	}
-	*e = held
-	return nil
-}
-
 // wire is the envelope as the document declares it.
-func (e *Envelope) wire() wireEnvelope {
-	held := wireEnvelope{
+func (e *Envelope) wire() reportdoc.Envelope {
+	held := reportdoc.Envelope{
 		SchemaVersion:   e.SchemaVersion,
 		ContractVersion: e.ContractVersion,
-		Analyzer: wireAnalyzer{
+		Analyzer: reportdoc.Analyzer{
 			Name:                   e.Analyzer.Name,
 			Version:                e.Analyzer.Version,
 			Languages:              list(e.Analyzer.Languages),
 			SchemaVersionsAccepted: list(e.Analyzer.SchemaVersionsAccepted),
-			Conformance: wireConformance{
+			Conformance: reportdoc.Conformance{
 				CorpusVersion: e.Analyzer.Conformance.CorpusVersion,
 				Result:        e.Analyzer.Conformance.Result,
 				Digest:        e.Analyzer.Conformance.Digest,
 			},
 		},
-		Target:                 wireTarget{Kind: e.Target.Kind, Root: e.Target.Root, Identity: e.Target.Identity},
-		Configurations:         make([]wireConfiguration, 0, len(e.Configurations)),
-		ConfigurationsNotBuilt: make([]wireConfigurationNotBuilt, 0, len(e.ConfigurationsNotBuilt)),
+		Target:                 reportdoc.Target{Kind: e.Target.Kind, Root: e.Target.Root, Identity: e.Target.Identity},
+		Configurations:         make([]reportdoc.Configuration, 0, len(e.Configurations)),
+		ConfigurationsNotBuilt: make([]reportdoc.ConfigurationNotBuilt, 0, len(e.ConfigurationsNotBuilt)),
 		Consumers:              wireConsumersOf(&e.Consumers),
-		Findings:               make([]wireFinding, 0, len(e.Findings)),
-		EdgeEvaluations:        make([]wireEvaluation, 0, len(e.EdgeEvaluations)),
-		StaleSuppressions:      make([]wireStaleSuppression, 0, len(e.StaleSuppressions)),
-		DeclaredGaps:           make([]wireDeclaredGap, 0, len(e.DeclaredGaps)),
+		Findings:               make([]reportdoc.Finding, 0, len(e.Findings)),
+		EdgeEvaluations:        make([]reportdoc.Evaluation, 0, len(e.EdgeEvaluations)),
+		StaleSuppressions:      make([]reportdoc.StaleSuppression, 0, len(e.StaleSuppressions)),
+		DeclaredGaps:           make([]reportdoc.DeclaredGap, 0, len(e.DeclaredGaps)),
 		ExcludedByCgo:          list(e.ExcludedByCgo),
-		TestFileRules:          make([]wireTestFileRule, 0, len(e.TestFileRules)),
-		TypeErrorSkips:         make([]wireTypeErrorSkipRecord, 0, len(e.TypeErrorSkips)),
-		Notes:                  make([]wireNoteRecord, 0, len(e.Notes)),
-		UnansweredQuestions:    make([]wireUnansweredRecord, 0, len(e.UnansweredQuestions)),
-		ConventionsApplied:     make([]wireConventionRecord, 0, len(e.ConventionsApplied)),
-		Totals: wireTotals{
+		TestFileRules:          make([]reportdoc.TestFileRule, 0, len(e.TestFileRules)),
+		TypeErrorSkips:         make([]reportdoc.TypeErrorSkip, 0, len(e.TypeErrorSkips)),
+		Notes:                  make([]reportdoc.Note, 0, len(e.Notes)),
+		UnansweredQuestions:    make([]reportdoc.UnansweredQuestion, 0, len(e.UnansweredQuestions)),
+		ConventionsApplied:     make([]reportdoc.ConventionApplied, 0, len(e.ConventionsApplied)),
+		Totals: reportdoc.Totals{
 			Findings:             e.Totals.Findings,
-			BySeverity:           wireBySeverity(e.Totals.BySeverity),
+			BySeverity:           reportdoc.BySeverity(e.Totals.BySeverity),
 			DeletableLines:       e.Totals.DeletableLines,
 			SuppressionsInEffect: e.Totals.SuppressionsInEffect,
 			ReasonsRecorded:      e.Totals.ReasonsRecorded,
 			StaleSuppressions:    e.Totals.StaleSuppressions,
 			Pending:              e.Totals.Pending,
 			Omitted:              e.Totals.Omitted,
-			Withheld:             wireWithheld(e.Totals.Withheld),
+			Withheld:             reportdoc.Withheld(e.Totals.Withheld),
 		},
 	}
 	for i := range e.Configurations {
 		one := &e.Configurations[i]
-		held.Configurations = append(held.Configurations, wireConfiguration{
+		held.Configurations = append(held.Configurations, reportdoc.Configuration{
 			ID: one.ID, OS: one.OS, Arch: one.Arch, Tags: list(one.Tags),
 		})
 	}
 	for i := range e.ConfigurationsNotBuilt {
 		one := &e.ConfigurationsNotBuilt[i]
-		held.ConfigurationsNotBuilt = append(held.ConfigurationsNotBuilt, wireConfigurationNotBuilt{
+		held.ConfigurationsNotBuilt = append(held.ConfigurationsNotBuilt, reportdoc.ConfigurationNotBuilt{
 			ID: one.ID, OS: one.OS, Arch: one.Arch, Tags: list(one.Tags), Error: one.Error,
 		})
 	}
@@ -426,7 +128,7 @@ func (e *Envelope) wire() wireEnvelope {
 		held.DeclaredGaps = append(held.DeclaredGaps, wireDeclaredGapOf(one))
 	}
 	for _, rule := range e.TestFileRules {
-		held.TestFileRules = append(held.TestFileRules, wireTestFileRule{Rule: rule.Rule, Matched: rule.Matched})
+		held.TestFileRules = append(held.TestFileRules, reportdoc.TestFileRule{Rule: rule.Rule, Matched: rule.Matched})
 	}
 	for _, one := range e.TypeErrorSkips {
 		held.TypeErrorSkips = append(held.TypeErrorSkips, wireTypeErrorSkip(one))
@@ -444,26 +146,26 @@ func (e *Envelope) wire() wireEnvelope {
 }
 
 // wireConsumersOf is the consumer object as the document declares it.
-func wireConsumersOf(held *Consumers) wireConsumers {
-	written := wireConsumers{
+func wireConsumersOf(held *Consumers) reportdoc.Consumers {
+	written := reportdoc.Consumers{
 		Declared:    held.Declared,
-		Loaded:      make([]wireLoadedConsumer, 0, len(held.Loaded)),
-		Unavailable: make([]wireUnavailableConsume, 0, len(held.Unavailable)),
+		Loaded:      make([]reportdoc.LoadedConsumer, 0, len(held.Loaded)),
+		Unavailable: make([]reportdoc.UnavailableConsumer, 0, len(held.Unavailable)),
 	}
 	for _, one := range held.Loaded {
 		written.Loaded = append(written.Loaded,
-			wireLoadedConsumer{ID: one.ID, Role: consumerRole, Path: one.Path})
+			reportdoc.LoadedConsumer{ID: one.ID, Role: consumerRole, Path: one.Path})
 	}
 	for _, one := range held.Unavailable {
 		written.Unavailable = append(written.Unavailable,
-			wireUnavailableConsume{ID: one.ID, Role: consumerRole, Reason: one.Reason})
+			reportdoc.UnavailableConsumer{ID: one.ID, Role: consumerRole, Reason: one.Reason})
 	}
 	return written
 }
 
 // wireFindingOf is one finding as the document declares it.
-func wireFindingOf(found *kinds.Finding) wireFinding {
-	return wireFinding{
+func wireFindingOf(found *kinds.Finding) reportdoc.Finding {
+	return reportdoc.Finding{
 		Code:              found.Code,
 		Kind:              found.Kind,
 		Language:          found.Language,
@@ -498,14 +200,14 @@ func relationWritten(found *kinds.Finding) string {
 }
 
 // wirePositionOf is one position as the document declares it.
-func wirePositionOf(at *kinds.Position) wirePosition {
-	return wirePosition{Path: at.Path, Line: at.Line, Column: at.Column, EndLine: at.EndLine}
+func wirePositionOf(at *kinds.Position) reportdoc.Position {
+	return reportdoc.Position{Path: at.Path, Line: at.Line, Column: at.Column, EndLine: at.EndLine}
 }
 
 // wireDetailsOf is one finding's per-kind members, each written only where the
 // kind sets it.
-func wireDetailsOf(details *kinds.Details) wireDetails {
-	held := wireDetails{
+func wireDetailsOf(details *kinds.Details) reportdoc.Details {
+	held := reportdoc.Details{
 		NarrowerVisibility: details.NarrowerVisibility,
 		ExcludedBy:         details.ExcludedBy,
 		DependencyClass:    details.DependencyClass,
@@ -515,7 +217,7 @@ func wireDetailsOf(details *kinds.Details) wireDetails {
 		RemovesLastUseOf:   slices.Clone(details.RemovesLastUseOf),
 	}
 	if details.Entry != nil {
-		held.Entry = &wireDetailsEntry{
+		held.Entry = &reportdoc.DetailsEntry{
 			Code:   details.Entry.Code,
 			Symbol: details.Entry.Symbol,
 			Path:   details.Entry.Path,
@@ -523,11 +225,11 @@ func wireDetailsOf(details *kinds.Details) wireDetails {
 		}
 	}
 	if details.Implementations != nil {
-		held.Implementations = make([]wirePositioned, 0, len(details.Implementations))
+		held.Implementations = make([]reportdoc.Positioned, 0, len(details.Implementations))
 	}
 	for _, one := range details.Implementations {
 		held.Implementations = append(held.Implementations,
-			wirePositioned{Ref: one.Ref, Name: one.Name, Position: wirePositionOf(&one.Position)})
+			reportdoc.Positioned{Ref: one.Ref, Name: one.Name, Position: wirePositionOf(&one.Position)})
 	}
 	for i := range details.WritePositions {
 		held.WritePositions = append(held.WritePositions, wirePositionOf(&details.WritePositions[i]))
@@ -536,8 +238,8 @@ func wireDetailsOf(details *kinds.Details) wireDetails {
 }
 
 // wireEvaluationOf is one edge evaluation as the document declares it.
-func wireEvaluationOf(held *EdgeEvaluation) wireEvaluation {
-	written := wireEvaluation{Edge: held.Edge, Side: held.Side, Symbol: held.Symbol, State: held.State}
+func wireEvaluationOf(held *EdgeEvaluation) reportdoc.Evaluation {
+	written := reportdoc.Evaluation{Edge: held.Edge, Side: held.Side, Symbol: held.Symbol, State: held.State}
 	if held.Finding != nil {
 		pending := wireFindingOf(held.Finding)
 		written.Finding = &pending
@@ -547,17 +249,17 @@ func wireEvaluationOf(held *EdgeEvaluation) wireEvaluation {
 
 // wireStaleSuppressionOf is one stale-suppression record as the document declares
 // it.
-func wireStaleSuppressionOf(held *StaleSuppression) wireStaleSuppression {
-	return wireStaleSuppression{
+func wireStaleSuppressionOf(held *StaleSuppression) reportdoc.StaleSuppression {
+	return reportdoc.StaleSuppression{
 		Code:      held.Code,
 		Mechanism: held.Mechanism,
-		Entry: wireSuppressionEntry{
+		Entry: reportdoc.SuppressionEntry{
 			Code:   held.Entry.Code,
 			Symbol: held.Entry.Symbol,
 			Path:   held.Entry.Path,
 			Reason: held.Entry.Reason,
 		},
-		Position: wireSuppressionPosition{
+		Position: reportdoc.SuppressionPosition{
 			Path:   held.Position.Path,
 			Line:   held.Position.Line,
 			Column: held.Position.Column,
@@ -565,227 +267,6 @@ func wireStaleSuppressionOf(held *StaleSuppression) wireStaleSuppression {
 		Symbol:  held.Symbol,
 		Message: held.Message,
 	}
-}
-
-// envelope is the document read back, so a rendering of the result writes the bytes
-// it was read from.
-func (w *wireEnvelope) envelope() (Envelope, error) {
-	held := Envelope{
-		SchemaVersion:   w.SchemaVersion,
-		ContractVersion: w.ContractVersion,
-		Analyzer: Analyzer{
-			Name:                   w.Analyzer.Name,
-			Version:                w.Analyzer.Version,
-			Languages:              list(w.Analyzer.Languages),
-			SchemaVersionsAccepted: list(w.Analyzer.SchemaVersionsAccepted),
-			Conformance:            Conformance(w.Analyzer.Conformance),
-		},
-		Target:                 Target(w.Target),
-		Configurations:         make([]Configuration, 0, len(w.Configurations)),
-		ConfigurationsNotBuilt: make([]ConfigurationNotBuilt, 0, len(w.ConfigurationsNotBuilt)),
-		Findings:               make([]kinds.Finding, 0, len(w.Findings)),
-		EdgeEvaluations:        make([]EdgeEvaluation, 0, len(w.EdgeEvaluations)),
-		StaleSuppressions:      make([]StaleSuppression, 0, len(w.StaleSuppressions)),
-		DeclaredGaps:           make([]DeclaredGap, 0, len(w.DeclaredGaps)),
-		ExcludedByCgo:          list(w.ExcludedByCgo),
-		TestFileRules:          make([]graph.TestFileRule, 0, len(w.TestFileRules)),
-		Totals: Totals{
-			Findings:             w.Totals.Findings,
-			BySeverity:           BySeverity(w.Totals.BySeverity),
-			DeletableLines:       w.Totals.DeletableLines,
-			SuppressionsInEffect: w.Totals.SuppressionsInEffect,
-			ReasonsRecorded:      w.Totals.ReasonsRecorded,
-			StaleSuppressions:    w.Totals.StaleSuppressions,
-			Pending:              w.Totals.Pending,
-			Omitted:              w.Totals.Omitted,
-			Withheld:             Withheld(w.Totals.Withheld),
-		},
-	}
-	held.Consumers = Consumers{
-		Declared:    w.Consumers.Declared,
-		Loaded:      make([]LoadedConsumer, 0, len(w.Consumers.Loaded)),
-		Unavailable: make([]UnavailableConsumer, 0, len(w.Consumers.Unavailable)),
-	}
-	for _, one := range w.Consumers.Loaded {
-		held.Consumers.Loaded = append(held.Consumers.Loaded, LoadedConsumer{ID: one.ID, Path: one.Path})
-	}
-	for _, one := range w.Consumers.Unavailable {
-		held.Consumers.Unavailable = append(held.Consumers.Unavailable,
-			UnavailableConsumer{ID: one.ID, Reason: one.Reason})
-	}
-	for i := range w.Configurations {
-		one := &w.Configurations[i]
-		held.Configurations = append(held.Configurations,
-			Configuration{ID: one.ID, OS: one.OS, Arch: one.Arch, Tags: list(one.Tags)})
-	}
-	for i := range w.ConfigurationsNotBuilt {
-		one := &w.ConfigurationsNotBuilt[i]
-		held.ConfigurationsNotBuilt = append(held.ConfigurationsNotBuilt, ConfigurationNotBuilt{
-			ID: one.ID, OS: one.OS, Arch: one.Arch, Tags: list(one.Tags), Error: one.Error,
-		})
-	}
-	for i := range w.Findings {
-		found, err := w.Findings[i].finding()
-		if err != nil {
-			return Envelope{}, err
-		}
-		held.Findings = append(held.Findings, found)
-	}
-	for i := range w.EdgeEvaluations {
-		evaluated, err := w.EdgeEvaluations[i].evaluation()
-		if err != nil {
-			return Envelope{}, err
-		}
-		held.EdgeEvaluations = append(held.EdgeEvaluations, evaluated)
-	}
-	for i := range w.StaleSuppressions {
-		held.StaleSuppressions = append(held.StaleSuppressions, w.StaleSuppressions[i].staleSuppression())
-	}
-	for _, one := range w.DeclaredGaps {
-		held.DeclaredGaps = append(held.DeclaredGaps, DeclaredGap(one))
-	}
-	for _, rule := range w.TestFileRules {
-		held.TestFileRules = append(held.TestFileRules, graph.TestFileRule(rule))
-	}
-	held.TypeErrorSkips = readBack(w.TypeErrorSkips, func(one wireTypeErrorSkipRecord) TypeErrorSkip {
-		return TypeErrorSkip{Path: one.Path, Line: one.Line, Message: one.Message}
-	})
-	held.Notes = readBack(w.Notes, func(one wireNoteRecord) Note { return Note(one) })
-	held.UnansweredQuestions = readBack(w.UnansweredQuestions, func(one wireUnansweredRecord) UnansweredQuestion {
-		return UnansweredQuestion(one)
-	})
-	held.ConventionsApplied = readBack(w.ConventionsApplied, func(one wireConventionRecord) ConventionApplied {
-		return ConventionApplied(one)
-	})
-	return held, nil
-}
-
-// readBack converts every record of one array of the document, into an empty
-// rather than a nil slice so a document read back writes the array it held.
-func readBack[W, T any](records []W, convert func(W) T) []T {
-	held := make([]T, 0, len(records))
-	for _, one := range records {
-		held = append(held, convert(one))
-	}
-	return held
-}
-
-// finding is one finding read back from the document.
-func (w *wireFinding) finding() (kinds.Finding, error) {
-	relation, err := relationOf(w.LivenessRelation)
-	if err != nil {
-		return kinds.Finding{}, err
-	}
-	return kinds.Finding{
-		Code:            w.Code,
-		Kind:            w.Kind,
-		Language:        w.Language,
-		Position:        kinds.Position(w.Position),
-		Symbol:          w.Symbol.subject(),
-		Class:           kinds.Class(w.ReachabilityClass),
-		Confidence:      kinds.Class(w.Confidence),
-		Relation:        relation,
-		Live:            w.LivenessRelation == "",
-		TestOnly:        w.TestOnly,
-		Generated:       w.Generated,
-		Component:       w.Component.component(),
-		RetainedBy:      list(w.RetainedBy),
-		Configurations:  list(w.Configurations),
-		ConsumersLoaded: list(w.ConsumersLoaded),
-		Fixability:      w.Fixability,
-		Severity:        config.Severity(w.Severity),
-		Message:         w.Message,
-		Details:         w.Details.details(),
-	}, nil
-}
-
-// component is one finding's component read back from the document, which carries
-// no spans.
-func (w *wireComponent) component() kinds.Component {
-	held := kinds.Component{ID: w.ID, Root: w.Root, SymbolCount: w.SymbolCount, DeletableLines: w.DeletableLines}
-	for _, member := range w.Members {
-		held.Members = append(held.Members, kinds.Positioned{
-			Ref: member.Ref, Name: member.Name, Position: kinds.Position(member.Position),
-		})
-	}
-	return held
-}
-
-// details is one finding's per-kind members read back from the document.
-func (w *wireDetails) details() kinds.Details {
-	held := kinds.Details{
-		NarrowerVisibility: w.NarrowerVisibility,
-		ExcludedBy:         w.ExcludedBy,
-		DependencyClass:    w.DependencyClass,
-		Replacement:        w.Replacement,
-		Mechanism:          w.Mechanism,
-		Overlap:            slices.Clone(w.Overlap),
-		RemovesLastUseOf:   slices.Clone(w.RemovesLastUseOf),
-	}
-	if w.Entry != nil {
-		held.Entry = &kinds.Entry{
-			Code:   w.Entry.Code,
-			Symbol: w.Entry.Symbol,
-			Path:   w.Entry.Path,
-			Reason: w.Entry.Reason,
-		}
-	}
-	if w.Implementations != nil {
-		held.Implementations = make([]kinds.Positioned, 0, len(w.Implementations))
-	}
-	for _, one := range w.Implementations {
-		held.Implementations = append(held.Implementations,
-			kinds.Positioned{Ref: one.Ref, Name: one.Name, Position: kinds.Position(one.Position)})
-	}
-	for _, at := range w.WritePositions {
-		held.WritePositions = append(held.WritePositions, kinds.Position(at))
-	}
-	return held
-}
-
-// evaluation is one edge evaluation read back from the document.
-func (w *wireEvaluation) evaluation() (EdgeEvaluation, error) {
-	held := EdgeEvaluation{Edge: w.Edge, Side: w.Side, Symbol: w.Symbol, State: w.State}
-	if w.Finding == nil {
-		return held, nil
-	}
-	pending, err := w.Finding.finding()
-	if err != nil {
-		return EdgeEvaluation{}, err
-	}
-	held.Finding = &pending
-	return held, nil
-}
-
-// staleSuppression is one stale-suppression record read back from the document.
-func (w *wireStaleSuppression) staleSuppression() StaleSuppression {
-	return StaleSuppression{
-		Code:      w.Code,
-		Mechanism: w.Mechanism,
-		Entry:     SuppressionEntry(w.Entry),
-		Position:  SuppressionPosition(w.Position),
-		Symbol:    w.Symbol,
-		Message:   w.Message,
-	}
-}
-
-// relationOf is the liveness relation one document spells, and a refusal for a
-// spelling the vocabulary does not hold: reading an unknown relation as the first
-// of the two would put a relation in the envelope that the document does not name.
-//
-// A document that names none is a finding about a live subject, which the reader
-// marks live rather than giving a relation, so the first of the two is the value
-// the field holds and the mark is what says it decided nothing.
-func relationOf(spelled string) (graph.Relation, error) {
-	if spelled == "" {
-		return graph.ReferenceCounting, nil
-	}
-	for _, relation := range []graph.Relation{graph.ReferenceCounting, graph.Reachability} {
-		if relation.String() == spelled {
-			return relation, nil
-		}
-	}
-	return 0, fmt.Errorf("report: decode a report document: %q names no liveness relation", spelled)
 }
 
 // list is one copy of a string list, and an empty list where it holds none: the

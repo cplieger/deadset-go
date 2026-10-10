@@ -31,7 +31,6 @@ import (
 	"github.com/cplieger/deadset-go/internal/edges"
 	"github.com/cplieger/deadset-go/internal/graph"
 	"github.com/cplieger/deadset-go/internal/load"
-	"github.com/cplieger/deadset-go/internal/matrix"
 	"github.com/cplieger/deadset-go/internal/suppress"
 )
 
@@ -47,16 +46,16 @@ const (
 const generatedFixability = "none"
 
 var (
-	// ErrInput reports a findings pass with nothing to read: no input, or no
+	// errInput reports a findings pass with nothing to read: no input, or no
 	// resolved configuration to read the severity map from.
-	ErrInput = errors.New("kinds: incomplete input")
+	errInput = errors.New("kinds: incomplete input")
 
-	// ErrEmitter reports a finding an emitter returned that the Contract cannot
+	// errEmitter reports a finding an emitter returned that the Contract cannot
 	// carry: a message that is not one sentence, a code that is not the
 	// emitter's own, a second finding about one declaration, or a finding about
 	// a symbol an exemption retained. Each is a defect in an emitter rather than
 	// a row of a report, so the pass fails instead of publishing it.
-	ErrEmitter = errors.New("kinds: emitter defect")
+	errEmitter = errors.New("kinds: emitter defect")
 )
 
 // Class is the reachability class of the Contract: what the analysis knows about
@@ -270,16 +269,6 @@ type Input struct {
 	// the dependency kinds read, and nil where the run did not read it.
 	Deps *deps.File
 
-	// Derived is the matrix the derivation answered, and nil where the
-	// configuration named the build configurations itself.
-	//
-	// No kind reads it: the kind that claims something about every configuration
-	// of a target gates on the configuration listing them and declaring the set
-	// complete, and reads the files each configuration ignored. What the run
-	// derived is what the report's declared gaps name, so the field carries the
-	// derivation to the envelope and no further.
-	Derived *matrix.Derived
-
 	// Unmatched is every configured root the roots pass matched nothing with,
 	// which is a configuration naming something that no longer exists.
 	Unmatched []graph.Unmatched
@@ -417,7 +406,7 @@ var readsThePass = map[string]bool{
 // finding at one key fails the pass whichever phase produced it.
 func Compute(in *Input, emitters map[string]Emitter) (Result, error) {
 	if in == nil || in.Config == nil {
-		return Result{}, fmt.Errorf("%w: no resolved configuration", ErrInput)
+		return Result{}, fmt.Errorf("%w: no resolved configuration", errInput)
 	}
 
 	if err := checkTable(emitters); err != nil {
@@ -492,7 +481,7 @@ func (in *Input) emitterOf(row *catalog.Row, emitters map[string]Emitter) (Emitt
 func (in *Input) runKind(emit Emitter, row *catalog.Row, reported map[string]string) ([]Finding, error) {
 	produced, err := emit(in)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s: %w", ErrEmitter, row.Code, err)
+		return nil, fmt.Errorf("%w: %s: %w", errEmitter, row.Code, err)
 	}
 	completed := make([]Finding, 0, len(produced))
 	for i := range produced {
@@ -601,7 +590,7 @@ func checkTable(emitters map[string]Emitter) error {
 	for _, code := range slices.Sorted(maps.Keys(emitters)) {
 		if _, live := catalog.Kind(code); !live {
 			return fmt.Errorf("%w: an emitter is registered under %s, which names no live kind",
-				ErrEmitter, code)
+				errEmitter, code)
 		}
 	}
 	return nil
@@ -730,7 +719,7 @@ func key(found *Finding) string {
 // finding is the shape's, which admit decides.
 func (in *Input) resolve(found *Finding, code string, reported map[string]string) error {
 	if found.Code != code {
-		return fmt.Errorf("%w: the %s emitter returned a %s finding", ErrEmitter, code, found.Code)
+		return fmt.Errorf("%w: the %s emitter returned a %s finding", errEmitter, code, found.Code)
 	}
 	if err := checkMessage(found); err != nil {
 		return err
@@ -738,7 +727,7 @@ func (in *Input) resolve(found *Finding, code string, reported map[string]string
 	at := key(found)
 	if first, twice := reported[at]; twice {
 		return fmt.Errorf("%w: %s reports %s at %s, which %s already reports",
-			ErrEmitter, found.Code, found.Symbol.Ref, at, first)
+			errEmitter, found.Code, found.Symbol.Ref, at, first)
 	}
 	if err := in.admit(found); err != nil {
 		return err
@@ -763,21 +752,21 @@ func (in *Input) admit(found *Finding) error {
 	case shapeRow:
 		if found.Symbol.Ref == "" {
 			return fmt.Errorf("%w: %s reports a %s and names no reference",
-				ErrEmitter, found.Code, found.Symbol.Kind)
+				errEmitter, found.Code, found.Symbol.Kind)
 		}
 	case shapePart:
 		if in.index().byRef[found.Symbol.Ref] == "" {
 			return fmt.Errorf("%w: %s reports a %s of %q, which names no declaration of the inventory",
-				ErrEmitter, found.Code, found.Symbol.Kind, found.Symbol.Ref)
+				errEmitter, found.Code, found.Symbol.Kind, found.Symbol.Ref)
 		}
 	default:
 		if found.id == "" {
 			return fmt.Errorf("%w: %s names no declaration of the inventory: %q",
-				ErrEmitter, found.Code, found.Symbol.Ref)
+				errEmitter, found.Code, found.Symbol.Ref)
 		}
 		if in.index().retained[found.id] {
 			return fmt.Errorf("%w: %s reports %s, which an exemption retained",
-				ErrEmitter, found.Code, found.Symbol.Ref)
+				errEmitter, found.Code, found.Symbol.Ref)
 		}
 	}
 	return nil
@@ -790,13 +779,13 @@ func checkMessage(found *Finding) error {
 	switch {
 	case found.Message == "":
 		return fmt.Errorf("%w: %s reports %s with no message",
-			ErrEmitter, found.Code, found.Symbol.Ref)
+			errEmitter, found.Code, found.Symbol.Ref)
 	case strings.ContainsAny(found.Message, "\r\n"):
 		return fmt.Errorf("%w: %s holds a line break in its message: %q",
-			ErrEmitter, found.Code, found.Message)
+			errEmitter, found.Code, found.Message)
 	case strings.HasSuffix(found.Message, "."):
 		return fmt.Errorf("%w: %s ends its message in a full stop: %q",
-			ErrEmitter, found.Code, found.Message)
+			errEmitter, found.Code, found.Message)
 	}
 	return nil
 }
@@ -821,7 +810,7 @@ func (in *Input) complete(found *Finding, row *catalog.Row) {
 		} else {
 			found.relation(held.candidates[found.id])
 		}
-		found.Class = in.ClassOf(found.id)
+		found.Class = in.classOf(found.id)
 		found.Component = held.componentOf(found.id)
 	} else {
 		found.relation(nil)

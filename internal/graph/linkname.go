@@ -9,7 +9,7 @@ import (
 // declaration to a name outside its own package.
 var linknameDirectives = [...]string{"//go:linkname", "//go:linknamestd"}
 
-// LinknameDirective reads one comment as a linkname directive, and returns the
+// linknameDirective reads one comment as a linkname directive, and returns the
 // name of the declaration it binds and the qualified name it binds that
 // declaration to.
 //
@@ -21,7 +21,7 @@ var linknameDirectives = [...]string{"//go:linkname", "//go:linknamestd"}
 // directive marks the declaration as one another package may reach by its object
 // symbol name, and remote is empty. The directive binds only in a file importing
 // unsafe, which is read from the file rather than from the comment.
-func LinknameDirective(text string) (local, remote string, ok bool) {
+func linknameDirective(text string) (local, remote string, ok bool) {
 	fields := strings.Fields(text)
 	if len(fields) < 2 || len(fields) > 3 || !slices.Contains(linknameDirectives[:], fields[0]) {
 		return "", "", false

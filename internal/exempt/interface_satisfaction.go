@@ -19,7 +19,7 @@ import (
 // dead code builds. A method satisfying two interfaces at two sites is retained once
 // per site.
 func InterfaceSatisfactionDetector(in *Input) ([]graph.Exemption, error) {
-	sites, err := ProgramConversions(in)
+	sites, err := programConversions(in)
 	if err != nil {
 		return nil, err
 	}

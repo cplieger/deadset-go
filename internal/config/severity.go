@@ -14,11 +14,10 @@ const severitySection = "severity"
 // prefix and two digits, where a code carries four.
 const familyKeyLength = 4
 
-// kind is one issue kind this analyzer ships, as resolution reads it: the code
-// the vocabulary assigns it, the severity a configuration naming neither the code
-// nor its family resolves to, and whether the kind reports at all.
+// kind is one issue kind this analyzer ships, as resolution reads it: the severity
+// a configuration naming neither the code nor its family resolves to, and whether
+// the kind reports at all.
 type kind struct {
-	code     string
 	severity Severity
 	enabled  bool
 }
@@ -36,7 +35,7 @@ func liveKind(code string) (kind, bool) {
 	if !live {
 		return kind{}, false
 	}
-	return kind{code: row.Code, severity: Severity(row.DefaultSeverity), enabled: row.DefaultEnabled}, true
+	return kind{severity: Severity(row.DefaultSeverity), enabled: row.DefaultEnabled}, true
 }
 
 // namesLiveKind reports whether one severity key names at least one issue kind

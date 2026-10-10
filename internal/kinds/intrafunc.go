@@ -512,7 +512,7 @@ func calledByName(info *types.Info, body *ast.BlockStmt) []*ast.FuncLit {
 
 // signature records every named, non-blank identifier of one field list and
 // whether body reads it.
-func (g *intrafunc) signature(one *Configured, fn *walked, fields *ast.FieldList, body *ast.BlockStmt,
+func (*intrafunc) signature(one *Configured, fn *walked, fields *ast.FieldList, body *ast.BlockStmt,
 	code string, held *parts,
 ) error {
 	if fields == nil {
@@ -583,7 +583,7 @@ func (g *intrafunc) results() ([]Finding, error) {
 
 // resultsOf records every result of one function and whether any call site of it
 // uses that result.
-func (g *intrafunc) resultsOf(one *Configured, fn *walked, sites []*callSite, held *parts) error {
+func (*intrafunc) resultsOf(one *Configured, fn *walked, sites []*callSite, held *parts) error {
 	results := fn.decl.Type.Results
 	if results == nil {
 		return nil

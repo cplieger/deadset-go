@@ -40,7 +40,7 @@ func hasText(phrase string) func(error) bool {
 
 // memberRefused matches a refusal of one member, naming it.
 func memberRefused(named string) func(error) bool {
-	return func(err error) bool { return errors.Is(err, ErrMember) && strings.Contains(err.Error(), named) }
+	return func(err error) bool { return errors.Is(err, errMember) && strings.Contains(err.Error(), named) }
 }
 
 // isSyntaxError matches the decoder's refusal of malformed JSON.
@@ -61,9 +61,9 @@ func TestReadResolvesTheTargetAndItsConsumers(t *testing.T) {
   "consumers": [ { "role": "consumer", "path": "../consumer" } ]
 }`)
 
-	got, err := Read(path)
+	got, err := read(path)
 	if err != nil {
-		t.Fatalf("Read(%s) = _, %v, want no error", path, err)
+		t.Fatalf("read(%s) = _, %v, want no error", path, err)
 	}
 
 	want := Document{
@@ -73,7 +73,7 @@ func TestReadResolvesTheTargetAndItsConsumers(t *testing.T) {
 		},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("Read(%s) = %+v, want %+v", path, got, want)
+		t.Errorf("read(%s) = %+v, want %+v", path, got, want)
 	}
 }
 
@@ -108,12 +108,12 @@ func TestReadResolvesTheWorkspaceTheDocumentNames(t *testing.T) {
 			body += `}`
 			dir, path := writeDocument(t, body)
 
-			got, err := Read(path)
+			got, err := read(path)
 			if err != nil {
-				t.Fatalf("Read(%s) with body %s = _, %v, want no error", path, body, err)
+				t.Fatalf("read(%s) with body %s = _, %v, want no error", path, body, err)
 			}
 			if want := test.want(dir); got.Workspace != want {
-				t.Errorf("Read(%s) with body %s .Workspace = %q, want %q", path, body, got.Workspace, want)
+				t.Errorf("read(%s) with body %s .Workspace = %q, want %q", path, body, got.Workspace, want)
 			}
 		})
 	}
@@ -123,15 +123,15 @@ func TestReadKeepsAnAbsolutePathAsWritten(t *testing.T) {
 	absolute := filepath.Join(t.TempDir(), "elsewhere")
 	_, path := writeDocument(t, `{"target": {"path": `+strconv.Quote(absolute)+`}}`)
 
-	got, err := Read(path)
+	got, err := read(path)
 	if err != nil {
-		t.Fatalf("Read(%s) = _, %v, want no error", path, err)
+		t.Fatalf("read(%s) = _, %v, want no error", path, err)
 	}
 	if got.Target.Path != absolute {
-		t.Errorf("Read(%s).Target.Path = %q, want %q", path, got.Target.Path, absolute)
+		t.Errorf("read(%s).Target.Path = %q, want %q", path, got.Target.Path, absolute)
 	}
 	if got.Consumers != nil {
-		t.Errorf("Read(%s).Consumers = %v, want nil", path, got.Consumers)
+		t.Errorf("read(%s).Consumers = %v, want nil", path, got.Consumers)
 	}
 }
 
@@ -141,9 +141,9 @@ func TestReadAcceptsADocumentThatLeavesEveryRoleOut(t *testing.T) {
   "consumers": [ { "path": "consumer" } ]
 }`)
 
-	got, err := Read(path)
+	got, err := read(path)
 	if err != nil {
-		t.Fatalf("Read(%s) = _, %v, want no error", path, err)
+		t.Fatalf("read(%s) = _, %v, want no error", path, err)
 	}
 	// A module's role is where it sits in the document, so a document that states
 	// none is a document that states nothing the reader has to reconcile.
@@ -167,57 +167,57 @@ func TestReadRefusals(t *testing.T) {
 		"undeclared document key": {
 			body: `{"target": {"path": "app"}, "roots": ["x"]}`,
 			want: memberRefused("roots"),
-			desc: "ErrMember naming roots",
+			desc: "errMember naming roots",
 		},
 		"undeclared module key": {
 			body: `{"target": {"path": "app", "kind": "library"}}`,
 			want: memberRefused("target.kind"),
-			desc: "ErrMember naming target.kind",
+			desc: "errMember naming target.kind",
 		},
 		"a declared key spelled in another case": {
 			body: `{"target": {"path": "app"}, "Consumers": [{"path": "c"}]}`,
 			want: memberRefused("Consumers"),
-			desc: "ErrMember naming Consumers",
+			desc: "errMember naming Consumers",
 		},
 		"a module key spelled in another case": {
 			body: `{"target": {"Path": "app"}}`,
 			want: memberRefused("target.Path"),
-			desc: "ErrMember naming target.Path",
+			desc: "errMember naming target.Path",
 		},
 		"a key written twice": {
 			body: `{"target": {"path": "app", "path": "other"}}`,
 			want: memberRefused("target.path"),
-			desc: "ErrMember naming target.path",
+			desc: "errMember naming target.path",
 		},
 		"a null id": {
 			body: `{"target": {"id": null, "path": "app"}}`,
 			want: memberRefused("target.id"),
-			desc: "ErrMember naming target.id",
+			desc: "errMember naming target.id",
 		},
 		"a null consumer": {
 			body: `{"target": {"path": "app"}, "consumers": [null]}`,
 			want: memberRefused("consumers[0]"),
-			desc: "ErrMember naming consumers[0]",
+			desc: "errMember naming consumers[0]",
 		},
 		"a null consumer list": {
 			body: `{"target": {"path": "app"}, "consumers": null}`,
 			want: memberRefused("consumers"),
-			desc: "ErrMember naming consumers",
+			desc: "errMember naming consumers",
 		},
 		"an empty target id": {
 			body: `{"target": {"id": "", "path": "app"}}`,
 			want: memberRefused("empty id"),
-			desc: "ErrMember naming the empty id",
+			desc: "errMember naming the empty id",
 		},
 		"an empty consumer id": {
 			body: `{"target": {"path": "app"}, "consumers": [{"id": "", "path": "c"}]}`,
 			want: memberRefused("empty id"),
-			desc: "ErrMember naming the empty id",
+			desc: "errMember naming the empty id",
 		},
 		"an empty workspace": {
 			body: `{"target": {"path": "app"}, "workspace": ""}`,
 			want: memberRefused("workspace"),
-			desc: "ErrMember naming the workspace",
+			desc: "errMember naming the workspace",
 		},
 		"no target": {
 			body: `{"consumers": [{"path": "consumer"}]}`,
@@ -231,18 +231,18 @@ func TestReadRefusals(t *testing.T) {
 		},
 		"target declaring the consumer role": {
 			body: `{"target": {"role": "consumer", "path": "app"}}`,
-			want: is(ErrRole),
-			desc: "ErrRole",
+			want: is(errRole),
+			desc: "errRole",
 		},
 		"consumer declaring the target role": {
 			body: `{"target": {"path": "app"}, "consumers": [{"role": "target", "path": "c"}]}`,
-			want: is(ErrRole),
-			desc: "ErrRole",
+			want: is(errRole),
+			desc: "errRole",
 		},
 		"unknown role": {
 			body: `{"target": {"role": "producer", "path": "app"}}`,
-			want: is(ErrRole),
-			desc: "ErrRole",
+			want: is(errRole),
+			desc: "errRole",
 		},
 		"consumer with an empty path": {
 			body: `{"target": {"path": "app"}, "consumers": [{"path": ""}]}`,
@@ -252,8 +252,18 @@ func TestReadRefusals(t *testing.T) {
 
 		"trailing content": {
 			body: `{"target": {"path": "app"}} {"target": {"path": "other"}}`,
-			want: is(ErrTrailingContent),
-			desc: "ErrTrailingContent",
+			want: is(errTrailingContent),
+			desc: "errTrailingContent",
+		},
+		"a bracket after the document": {
+			body: `{"target": {"path": "app"}}]`,
+			want: is(errTrailingContent),
+			desc: "errTrailingContent",
+		},
+		"a brace after the document": {
+			body: `{"target": {"path": "app"}}}`,
+			want: is(errTrailingContent),
+			desc: "errTrailingContent",
 		},
 		"an array rather than an object": {
 			body: `["app"]`,
@@ -270,12 +280,12 @@ func TestReadRefusals(t *testing.T) {
 	for name, test := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, path := writeDocument(t, test.body)
-			got, err := Read(path)
+			got, err := read(path)
 			if !test.want(err) {
-				t.Errorf("Read(%s) with body %s = _, %v, want %s", path, test.body, err, test.desc)
+				t.Errorf("read(%s) with body %s = _, %v, want %s", path, test.body, err, test.desc)
 			}
 			if !reflect.DeepEqual(got, Document{}) {
-				t.Errorf("Read(%s) = %+v, want the zero Document", path, got)
+				t.Errorf("read(%s) = %+v, want the zero Document", path, got)
 			}
 		})
 	}
@@ -284,13 +294,13 @@ func TestReadRefusals(t *testing.T) {
 func TestReadRefusesAnAbsentDocument(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing.json")
 
-	_, err := Read(path)
+	_, err := read(path)
 
 	if !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("Read(%s) = _, %v, want an error matching fs.ErrNotExist", path, err)
+		t.Errorf("read(%s) = _, %v, want an error matching fs.ErrNotExist", path, err)
 	}
 	if err != nil && !strings.Contains(err.Error(), path) {
-		t.Errorf("Read(%s) error = %q, want it to name the path", path, err)
+		t.Errorf("read(%s) error = %q, want it to name the path", path, err)
 	}
 }
 
@@ -300,10 +310,10 @@ func TestReadRefusesADocumentAboveTheSizeBound(t *testing.T) {
 	padding := strings.Repeat("p", maxDocumentBytes)
 	_, path := writeDocument(t, `{"target": {"id": "`+padding+`", "path": "app"}}`)
 
-	_, err := Read(path)
+	_, err := read(path)
 
-	if !errors.Is(err, ErrTooLarge) {
-		t.Errorf("Read(oversize document) = _, %v, want an error matching ErrTooLarge", err)
+	if !errors.Is(err, errTooLarge) {
+		t.Errorf("read(oversize document) = _, %v, want an error matching errTooLarge", err)
 	}
 }
 
@@ -313,9 +323,9 @@ func TestReadAcceptsADocumentAtTheSizeBound(t *testing.T) {
 	padding := strings.Repeat("p", maxDocumentBytes-len(prefix)-len(suffix))
 	_, path := writeDocument(t, prefix+padding+suffix)
 
-	got, err := Read(path)
+	got, err := read(path)
 	if err != nil {
-		t.Fatalf("Read(document of exactly %d bytes) = _, %v, want no error", maxDocumentBytes, err)
+		t.Fatalf("read(document of exactly %d bytes) = _, %v, want no error", maxDocumentBytes, err)
 	}
 	if got.Target.ID != padding {
 		t.Errorf("Target.ID has %d characters, want %d", len(got.Target.ID), len(padding))
@@ -378,7 +388,7 @@ func TestForDirRefusals(t *testing.T) {
 }
 
 // publishedScope writes one published document as a scope document in a fresh
-// directory, so Read reads it through the production path.
+// directory, so read reads it through the production path.
 func publishedScope(t *testing.T, name string) (dir, path string) {
 	t.Helper()
 	body, err := spec.Examples.ReadFile(name)
@@ -399,8 +409,8 @@ func TestReadAcceptsEveryPublishedScopeDocument(t *testing.T) {
 	for _, entry := range entries {
 		t.Run(strings.TrimSuffix(entry.Name(), ".json"), func(t *testing.T) {
 			_, path := publishedScope(t, "examples/scope/"+entry.Name())
-			if _, err := Read(path); err != nil {
-				t.Errorf("Read(examples/scope/%s) = _, %v, want no error", entry.Name(), err)
+			if _, err := read(path); err != nil {
+				t.Errorf("read(examples/scope/%s) = _, %v, want no error", entry.Name(), err)
 			}
 		})
 	}
@@ -409,9 +419,9 @@ func TestReadAcceptsEveryPublishedScopeDocument(t *testing.T) {
 func TestReadResolvesThePublishedDocumentNamingEveryMember(t *testing.T) {
 	dir, path := publishedScope(t, "examples/scope/target-and-consumers.json")
 
-	got, err := Read(path)
+	got, err := read(path)
 	if err != nil {
-		t.Fatalf("Read(target-and-consumers.json) = _, %v, want no error", err)
+		t.Fatalf("read(target-and-consumers.json) = _, %v, want no error", err)
 	}
 	want := Document{
 		Workspace: filepath.Join(dir, "go.work"),
@@ -422,7 +432,7 @@ func TestReadResolvesThePublishedDocumentNamingEveryMember(t *testing.T) {
 		},
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("Read(target-and-consumers.json) = %+v, want %+v", got, want)
+		t.Errorf("read(target-and-consumers.json) = %+v, want %+v", got, want)
 	}
 }
 
@@ -448,9 +458,9 @@ func TestReadRefusesEveryPublishedScopeNegative(t *testing.T) {
 		refused++
 		t.Run(strings.TrimSuffix(row.File, ".json"), func(t *testing.T) {
 			_, path := publishedScope(t, "examples/negatives/"+row.File)
-			got, err := Read(path)
+			got, err := read(path)
 			if err == nil {
-				t.Errorf("Read(examples/negatives/%s) = %+v, nil, want a refusal", row.File, got)
+				t.Errorf("read(examples/negatives/%s) = %+v, nil, want a refusal", row.File, got)
 			}
 		})
 	}

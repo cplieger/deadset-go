@@ -136,11 +136,11 @@ type Input struct {
 	// there, which is how a class names the symbol it retains.
 	Resolve *graph.Resolver
 
-	// conversions is the conversion set [Conversions] computed first, which every
+	// conversions is the conversion set [conversionsOf] computed first, which every
 	// later class reads rather than walking the program again.
 	conversions *[]graph.Conversion
 
-	// programConversions is [ProgramConversions]' answer, computed on first use.
+	// programConversions is [programConversions]' answer, computed on first use.
 	programConversions *[]graph.Conversion
 
 	// assert is what the packages outside the program can assert, read from their

@@ -38,17 +38,17 @@ const (
 )
 
 var (
-	// ErrConfiguration reports a configuration missing its identifier, its
+	// errConfiguration reports a configuration missing its identifier, its
 	// operating system or its architecture.
-	ErrConfiguration = errors.New("load: incomplete configuration")
+	errConfiguration = errors.New("load: incomplete configuration")
 
-	// ErrConsumer reports a declared consumer whose references a configuration
+	// errConsumer reports a declared consumer whose references a configuration
 	// cannot count: a module whose identity
 	// disagrees with the scope, or one whose own module graph resolves the target
 	// somewhere other than the target's own directory. Each is refused rather
 	// than passed over, because a run that counted no reference from a declared
 	// consumer would report the symbols that consumer uses.
-	ErrConsumer = errors.New("load: unusable consumer")
+	errConsumer = errors.New("load: unusable consumer")
 )
 
 // Configuration is one build configuration of the matrix.
@@ -86,7 +86,7 @@ type Result struct {
 	// Programs holds the target's files run on their own under the ignore tag,
 	// which no package of the target compiles and every stage but the root
 	// detection leaves alone.
-	Programs []Program
+	Programs []program
 
 	// ExcludedByCgo holds the target-relative paths, forward slashes, of the
 	// files the toolchain ignored for importing "C" that the opaque-C check could
@@ -114,7 +114,7 @@ func HostConfiguration() Configuration {
 // them, returns a *[SetupError]. Any other error in the toolchain's metadata, then any
 // error a package checked as [typeCheck] states reports, returns a *[Error] with a
 // zero Result, so no finding is computed from a partial load. A consumer that cannot
-// be loaded or counted against this target returns [ErrConsumer]. Load makes no
+// be loaded or counted against this target returns [errConsumer]. Load makes no
 // network request, runs no compiler and pins the toolchain settings that decide what
 // loads, so it needs no C toolchain. One module's packages load once per
 // configuration, so a declaration of the target renders to one position.
@@ -123,7 +123,7 @@ func Load(ctx context.Context, doc scope.Document, c Configuration) (Result, err
 		return Result{}, fmt.Errorf("load %s: %w", c.ID, err)
 	}
 	if c.ID == "" || c.OS == "" || c.Arch == "" {
-		return Result{}, fmt.Errorf("%w: id=%q os=%q arch=%q", ErrConfiguration, c.ID, c.OS, c.Arch)
+		return Result{}, fmt.Errorf("%w: id=%q os=%q arch=%q", errConfiguration, c.ID, c.OS, c.Arch)
 	}
 
 	target := doc.Target.Path

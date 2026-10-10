@@ -25,7 +25,7 @@ const (
 // TestPublishedTemplateVectors renders every published case and compares its bytes
 // with the case's expected.txt, or holds the template to the outcome its
 // expected_exit names: refused at parse, or a rendering that fails, carries
-// ErrOptions and writes nothing.
+// errOptions and writes nothing.
 func TestPublishedTemplateVectors(t *testing.T) {
 	t.Parallel()
 
@@ -61,8 +61,8 @@ func TestPublishedTemplateVectors(t *testing.T) {
 			var out bytes.Buffer
 			err = parsed.execute(&out, document)
 			if wantExit == renderingFailed {
-				if !errors.Is(err, ErrOptions) || out.Len() != 0 {
-					t.Errorf("render(%q) = %v and wrote %q, want a failure carrying ErrOptions and nothing written",
+				if !errors.Is(err, errOptions) || out.Len() != 0 {
+					t.Errorf("render(%q) = %v and wrote %q, want a failure carrying errOptions and nothing written",
 						text, err, out.String())
 				}
 				return

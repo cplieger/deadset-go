@@ -553,7 +553,7 @@ func TestMergeCarriesEveryConfigurationsUnmatchedStrings(t *testing.T) {
 		t.Fatalf("Merge = _, %v, want no error", err)
 	}
 
-	want := []Unmatched{{Source: "first", Config: 0}, {Source: "second", Config: 1}}
+	want := []Unmatched{{Source: "first"}, {Source: "second"}}
 	if !reflect.DeepEqual(merged.Unmatched, want) {
 		t.Errorf("Merge over two configurations returned unmatched %+v, want %+v", merged.Unmatched, want)
 	}
@@ -630,8 +630,8 @@ func TestConfigSetHoldsEveryConfigurationInTheMatrixAndNoneOutsideIt(t *testing.
 				t.Errorf("ConfigSet(%d).Indexes() = %v, want %v", test.set, got, test.want)
 			}
 			for _, config := range []int{-1, maxConfigurations, maxConfigurations + 1} {
-				if test.set.Has(config) {
-					t.Errorf("ConfigSet(%d).Has(%d) = true, want false", test.set, config)
+				if test.set.has(config) {
+					t.Errorf("ConfigSet(%d).has(%d) = true, want false", test.set, config)
 				}
 			}
 		})

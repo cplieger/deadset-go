@@ -8,15 +8,15 @@ import (
 	"github.com/cplieger/deadset-go/internal/graph"
 )
 
-// State is one edge side's verdict, in the spelling a report carries.
-type State string
+// state is one edge side's verdict, in the spelling a report carries.
+type state string
 
 // The three states. A side this analyzer evaluated has one of them; a side of
 // another language has no record at all and is not absent, because nothing looked.
 const (
-	StateLive   State = "live"   // the symbol is enumerated and no finding is held for it
-	StateDead   State = "dead"   // the symbol is enumerated and a finding is held for it
-	StateAbsent State = "absent" // no symbol is enumerated under the reference
+	StateLive   state = "live"   // the symbol is enumerated and no finding is held for it
+	StateDead   state = "dead"   // the symbol is enumerated and a finding is held for it
+	StateAbsent state = "absent" // no symbol is enumerated under the reference
 )
 
 // Evaluation is one record of a report's edge_evaluations array: which declared
@@ -32,7 +32,7 @@ type Evaluation struct {
 	Edge    string
 	Symbol  string
 	Side    edges.Side
-	State   State
+	State   state
 }
 
 // Evaluate publishes one record per declared edge side this analyzer enumerated,

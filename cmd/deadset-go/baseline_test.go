@@ -9,7 +9,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/report"
+	"github.com/cplieger/deadset-go/internal/reporttest"
 	"github.com/cplieger/deadset-go/internal/suppress"
 	spec "github.com/cplieger/deadset-spec/v7"
 )
@@ -53,8 +53,8 @@ func TestPublishedBaselineVectors(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Setup: read %s/report.json: %v", dir, err)
 			}
-			var envelope report.Envelope
-			if err := json.Unmarshal(body, &envelope); err != nil {
+			envelope, err := reporttest.Read(body)
+			if err != nil {
 				t.Fatalf("Setup: decode %s/report.json: %v", dir, err)
 			}
 

@@ -45,7 +45,7 @@ func (c Class) lower(other Class) Class {
 	return other
 }
 
-// ClassOf is the reachability class of one declaration under this run. Test-support
+// classOf is the reachability class of one declaration under this run. Test-support
 // code test code references is possible unless the test-of-dead-code kind reports it.
 // Any other is certain where no reference can come from outside the graph: no
 // declaration, an unexported one, a test file's, a function's type parameter, an
@@ -53,7 +53,7 @@ func (c Class) lower(other Class) Class {
 // internal tree or a member [Input.hiddenMember] reports. A library's importable export
 // is certain where every declared consumer loaded, probable where some did not, and
 // possible with no consumer information, whether or not the set is declared complete.
-func (in *Input) ClassOf(id graph.SymbolID) Class {
+func (in *Input) classOf(id graph.SymbolID) Class {
 	symbol := in.symbol(id)
 	candidate := in.candidateOf(id)
 	switch {
@@ -97,7 +97,7 @@ func (in *Input) componentCap(id graph.SymbolID) Class {
 	}
 	least := Certain
 	for _, root := range component.Roots {
-		least = least.lower(in.ClassOf(root))
+		least = least.lower(in.classOf(root))
 	}
 	held.caps[component.Index] = least
 	return least

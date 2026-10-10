@@ -13,6 +13,7 @@ import (
 
 	"github.com/cplieger/deadset-go/internal/kinds"
 	"github.com/cplieger/deadset-go/internal/report"
+	"github.com/cplieger/deadset-go/internal/reporttest"
 	spec "github.com/cplieger/deadset-spec/v7"
 )
 
@@ -430,14 +431,9 @@ func TestReportOfRoundTripsThroughTheJSONDocumentItWrites(t *testing.T) {
 
 	// The decode is strict: a member the envelope does not declare is a member this
 	// analyzer should not be writing, whatever the schema would accept.
-	decoder := json.NewDecoder(bytes.NewReader(written.Bytes()))
-	decoder.DisallowUnknownFields()
-	var decoded report.Envelope
-	if err := decoder.Decode(&decoded); err != nil {
+	decoded, err := reporttest.Read(written.Bytes())
+	if err != nil {
 		t.Fatalf("decode the document this run wrote: %v\n%s", err, written.String())
-	}
-	if decoder.More() {
-		t.Errorf("the run wrote more than one JSON document")
 	}
 
 	var again bytes.Buffer
@@ -851,8 +847,8 @@ func TestReportOfWritesAnEmptyImplementationListForAnInterfaceNothingImplements(
 	}
 
 	// The reader keeps the empty list, so a document read back writes it again.
-	var decoded report.Envelope
-	if err := json.Unmarshal(written.Bytes(), &decoded); err != nil {
+	decoded, err := reporttest.Read(written.Bytes())
+	if err != nil {
 		t.Fatalf("decode the document this run wrote: %v", err)
 	}
 	var again bytes.Buffer

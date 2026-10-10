@@ -239,8 +239,8 @@ func TestComputeRefusesAMessageAReporterCannotCarry(t *testing.T) {
 			reported.Message = message
 
 			_, err := Compute(in, map[string]Emitter{unusedExportedCode: emitterOf(reported)})
-			if !errors.Is(err, ErrEmitter) {
-				t.Errorf("Compute() with a message %s = %v, want an ErrEmitter refusal", name, err)
+			if !errors.Is(err, errEmitter) {
+				t.Errorf("Compute() with a message %s = %v, want an errEmitter refusal", name, err)
 			}
 		})
 	}
@@ -251,8 +251,8 @@ func TestComputeRefusesACodeThatIsNotTheEmittersOwn(t *testing.T) {
 	reported := oneFinding(in, unusedUnexportedCode, exportedID)
 
 	_, err := Compute(in, map[string]Emitter{unusedExportedCode: emitterOf(reported)})
-	if !errors.Is(err, ErrEmitter) {
-		t.Errorf("Compute() = %v, want an ErrEmitter refusal: the %s emitter returned a %s finding",
+	if !errors.Is(err, errEmitter) {
+		t.Errorf("Compute() = %v, want an errEmitter refusal: the %s emitter returned a %s finding",
 			err, unusedExportedCode, unusedUnexportedCode)
 	}
 }
@@ -263,8 +263,8 @@ func TestComputeRefusesAnEmitterRegisteredUnderACodeTheVocabularyDoesNotHold(t *
 	in := handInput(applicationConfig())
 
 	_, err := Compute(in, map[string]Emitter{retired: emitterOf()})
-	if !errors.Is(err, ErrEmitter) {
-		t.Errorf("Compute() = %v, want an ErrEmitter refusal: %s names no live kind", err, retired)
+	if !errors.Is(err, errEmitter) {
+		t.Errorf("Compute() = %v, want an errEmitter refusal: %s names no live kind", err, retired)
 	}
 }
 
@@ -276,8 +276,8 @@ func TestComputeRefusesTwoFindingsAboutOneDeclaration(t *testing.T) {
 		testOnlyUseCode:      emitterOf(oneFinding(in, testOnlyUseCode, exportedID)),
 		unusedUnexportedCode: emitterOf(oneFinding(in, unusedUnexportedCode, helperID)),
 	})
-	if !errors.Is(err, ErrEmitter) {
-		t.Errorf("Compute() = %v, want an ErrEmitter refusal: two kinds report %s", err, exportedRef)
+	if !errors.Is(err, errEmitter) {
+		t.Errorf("Compute() = %v, want an errEmitter refusal: two kinds report %s", err, exportedRef)
 	}
 }
 
@@ -292,8 +292,8 @@ func TestComputeRefusesAFindingAboutASymbolAnExemptionRetained(t *testing.T) {
 	_, err := Compute(in, map[string]Emitter{
 		unusedExportedCode: emitterOf(oneFinding(in, unusedExportedCode, exportedID)),
 	})
-	if !errors.Is(err, ErrEmitter) {
-		t.Errorf("Compute() = %v, want an ErrEmitter refusal: an exemption retained %s", err, exportedRef)
+	if !errors.Is(err, errEmitter) {
+		t.Errorf("Compute() = %v, want an errEmitter refusal: an exemption retained %s", err, exportedRef)
 	}
 }
 
@@ -306,8 +306,8 @@ func TestComputeRefusesAFindingAboutNoDeclarationOfTheInventory(t *testing.T) {
 	}
 
 	_, err := Compute(in, map[string]Emitter{unusedExportedCode: emitterOf(reported)})
-	if !errors.Is(err, ErrEmitter) {
-		t.Errorf("Compute() = %v, want an ErrEmitter refusal: the inventory holds no such declaration", err)
+	if !errors.Is(err, errEmitter) {
+		t.Errorf("Compute() = %v, want an errEmitter refusal: the inventory holds no such declaration", err)
 	}
 }
 
@@ -321,8 +321,8 @@ func TestComputeRefusesAFindingAboutADeclarationAnEmitterNamesByItsReferenceAlon
 	}
 
 	_, err := Compute(in, map[string]Emitter{unusedExportedCode: emitterOf(reported)})
-	if !errors.Is(err, ErrEmitter) {
-		t.Errorf("Compute(a finding naming %s by reference alone) = %v, want an ErrEmitter refusal: a report's own reference does not identify a declaration, because a blank declaration shares the reference of its container",
+	if !errors.Is(err, errEmitter) {
+		t.Errorf("Compute(a finding naming %s by reference alone) = %v, want an errEmitter refusal: a report's own reference does not identify a declaration, because a blank declaration shares the reference of its container",
 			exportedRef, err)
 	}
 }
@@ -445,8 +445,8 @@ func TestComputeMarksAFindingInAGeneratedFileAsOneNoMechanicalEditActsOn(t *test
 }
 
 func TestComputeRefusesAPassWithNoResolvedConfiguration(t *testing.T) {
-	if _, err := Compute(&Input{}, nil); !errors.Is(err, ErrInput) {
-		t.Errorf("Compute() with no configuration = %v, want an ErrInput refusal", err)
+	if _, err := Compute(&Input{}, nil); !errors.Is(err, errInput) {
+		t.Errorf("Compute() with no configuration = %v, want an errInput refusal", err)
 	}
 }
 
@@ -853,8 +853,8 @@ func TestComputeRefusesTwoFindingsAboutOneSubjectThatIsNoDeclaration(t *testing.
 	twice := requirementFinding()
 
 	_, err := Compute(in, map[string]Emitter{unusedDependencyCode: emitterOf(twice, twice)})
-	if !errors.Is(err, ErrEmitter) {
-		t.Errorf("Compute(%s reporting one requirement twice) = %v, want an ErrEmitter refusal: %s is reported twice",
+	if !errors.Is(err, errEmitter) {
+		t.Errorf("Compute(%s reporting one requirement twice) = %v, want an errEmitter refusal: %s is reported twice",
 			unusedDependencyCode, err, requirementRef)
 	}
 }
@@ -874,8 +874,8 @@ func TestComputeRefusesAFindingAboutADeclarationKindTheInventoryDoesNotHold(t *t
 			}
 
 			_, err := Compute(in, map[string]Emitter{unusedExportedCode: emitterOf(reported)})
-			if !errors.Is(err, ErrEmitter) {
-				t.Errorf("Compute(%s subject the inventory does not hold) = %v, want an ErrEmitter refusal",
+			if !errors.Is(err, errEmitter) {
+				t.Errorf("Compute(%s subject the inventory does not hold) = %v, want an errEmitter refusal",
 					kind, err)
 			}
 		})
@@ -888,8 +888,8 @@ func TestComputeRefusesARowThatNamesNoRecord(t *testing.T) {
 	unnamed.Symbol.Ref = ""
 
 	_, err := Compute(in, map[string]Emitter{unusedDependencyCode: emitterOf(unnamed)})
-	if !errors.Is(err, ErrEmitter) {
-		t.Errorf("Compute(%s naming no reference) = %v, want an ErrEmitter refusal: a %s row is found by the record it names, because its position names the document",
+	if !errors.Is(err, errEmitter) {
+		t.Errorf("Compute(%s naming no reference) = %v, want an errEmitter refusal: a %s row is found by the record it names, because its position names the document",
 			unusedDependencyCode, err, dependencySubject)
 	}
 }
@@ -905,8 +905,8 @@ func TestComputeRefusesAPartOfADeclarationTheInventoryDoesNotHold(t *testing.T) 
 		"parameter limit is never read in the body")
 
 	_, err := Compute(in, map[string]Emitter{unusedParameterCode: emitterOf(orphan)})
-	if !errors.Is(err, ErrEmitter) {
-		t.Errorf("Compute(a %s of a declaration the inventory does not hold) = %v, want an ErrEmitter refusal: a part belongs to a declaration and names it by reference",
+	if !errors.Is(err, errEmitter) {
+		t.Errorf("Compute(a %s of a declaration the inventory does not hold) = %v, want an errEmitter refusal: a part belongs to a declaration and names it by reference",
 			parameterSubject, err)
 	}
 }

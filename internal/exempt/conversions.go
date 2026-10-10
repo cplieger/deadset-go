@@ -8,7 +8,7 @@ import (
 	"github.com/cplieger/deadset-go/internal/graph"
 )
 
-// Conversions returns every site in the loaded configuration where a value of a
+// conversionsOf returns every site in the loaded configuration where a value of a
 // concrete type reaches a position typed as an interface, in the order
 // [graph.Conversions] returns them. A site converting an interface value is the
 // interface kinds' subject rather than an exemption's, so it is not here.
@@ -16,7 +16,7 @@ import (
 // The set narrows interface satisfaction to the types a program converts. Three
 // classes read it: interface satisfaction, errors duck typing and the format verbs.
 // It is computed once per input, and a caller reads the slice without changing it.
-func Conversions(in *Input) ([]graph.Conversion, error) {
+func conversionsOf(in *Input) ([]graph.Conversion, error) {
 	if in == nil || in.Result == nil || in.Result.Fset == nil {
 		return nil, fmt.Errorf("%w: no file set", graph.ErrIncompleteLoad)
 	}
@@ -28,12 +28,12 @@ func Conversions(in *Input) ([]graph.Conversion, error) {
 	return *in.conversions, nil
 }
 
-// ProgramConversions is [Conversions] followed by every site each loaded consumer
+// programConversions is [conversionsOf] followed by every site each loaded consumer
 // writes, in the order the scope declares the consumers. A consumer's site converts
 // the consumer's own reading of a target type, whose methods the resolver names by
 // their rendered position.
-func ProgramConversions(in *Input) ([]graph.Conversion, error) {
-	sites, err := Conversions(in)
+func programConversions(in *Input) ([]graph.Conversion, error) {
+	sites, err := conversionsOf(in)
 	if err != nil {
 		return nil, err
 	}

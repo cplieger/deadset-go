@@ -1,7 +1,5 @@
 package graph
 
-import "slices"
-
 // outside is the position of a symbol the inventory does not hold.
 const outside = -1
 
@@ -29,10 +27,6 @@ type counts struct {
 // calls is how the modules outside the target reference one symbol: from a
 // consumer's production files, from a consumer's test files, or from neither.
 type calls struct {
-	// by names the consumers that reference the symbol, each once, in the order
-	// their module paths sort.
-	by []string
-
 	fromProductionFile bool
 	fromTestFile       bool
 }
@@ -103,9 +97,6 @@ func New(symbols []Symbol, refs []Reference, roots []Root) *Graph {
 	for i := range refs {
 		g.add(&refs[i])
 	}
-	for i := range g.consumed {
-		slices.Sort(g.consumed[i].by)
-	}
 	for _, r := range roots {
 		if at := g.at(r.ID); at != outside {
 			g.rooted = append(g.rooted, rooted{at: at, kind: r.Kind})
@@ -133,9 +124,6 @@ func (g *Graph) add(r *Reference) {
 			g.consumed[to].fromTestFile = true
 		} else {
 			g.consumed[to].fromProductionFile = true
-		}
-		if !slices.Contains(g.consumed[to].by, r.Consumer) {
-			g.consumed[to].by = append(g.consumed[to].by, r.Consumer)
 		}
 	}
 	if from := g.at(r.From); from != outside {
@@ -178,22 +166,6 @@ func (g *Graph) counted(at int, m Mode) (production, test int) {
 		return c.production + c.consumerTest, c.test - c.consumerTest
 	}
 	return c.production, c.test
-}
-
-// ConsumersOf names the loaded consumers whose references reach the symbol id
-// names, in the order their module paths sort, and nothing for a symbol no
-// consumer references.
-//
-// It is the per-symbol half of the consumer answer: which of the consumers a run
-// loaded actually use this declaration, where the run's loaded set says which were
-// available to. A test reference is in the set whatever a mode counts, because the
-// question is which module names the symbol.
-func (g *Graph) ConsumersOf(id SymbolID) []string {
-	at := g.at(id)
-	if at == outside {
-		return nil
-	}
-	return slices.Clone(g.consumed[at].by)
 }
 
 // consumedIn reports whether a loaded consumer's reference to the symbol at at is

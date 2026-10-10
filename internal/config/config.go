@@ -51,13 +51,13 @@ const (
 	Possible Confidence = "possible"
 )
 
-// GeneratedFiles is whether declarations in generated files are analyzed.
-type GeneratedFiles string
+// generatedFiles is whether declarations in generated files are analyzed.
+type generatedFiles string
 
 // The generated-file choices.
 const (
-	ExcludeGenerated GeneratedFiles = "exclude"
-	IncludeGenerated GeneratedFiles = "include"
+	ExcludeGenerated generatedFiles = "exclude"
+	IncludeGenerated generatedFiles = "include"
 )
 
 // ConsumerTests is how a reference from a consumer's test file counts.
@@ -127,14 +127,14 @@ type Config struct {
 	ContractVersion string              `json:"contract_version"`
 	Target          Target              `json:"target"`
 	Analysis        Analysis            `json:"analysis"`
-	Consumers       Consumers           `json:"consumers"`
+	Consumers       consumers           `json:"consumers"`
 	Roots           Roots               `json:"roots"`
 	Severity        map[string]Severity `json:"severity"`
-	Exemptions      Exemptions          `json:"exemptions"`
+	Exemptions      exemptions          `json:"exemptions"`
 	Reporters       Reporters           `json:"reporters"`
-	Providers       Providers           `json:"providers"`
-	Go              Go                  `json:"go"`
-	TS              TS                  `json:"ts"`
+	Providers       providers           `json:"providers"`
+	Go              goSettings          `json:"go"`
+	TS              tsSettings          `json:"ts"`
 }
 
 // Target is what is being analyzed.
@@ -148,10 +148,10 @@ type Target struct {
 type Analysis struct {
 	Languages      []Language      `json:"languages"`
 	MinConfidence  Confidence      `json:"min_confidence"`
-	GeneratedFiles GeneratedFiles  `json:"generated_files"`
+	GeneratedFiles generatedFiles  `json:"generated_files"`
 	ConsumerTests  ConsumerTests   `json:"consumer_tests"`
 	Configurations []Configuration `json:"configurations"`
-	Matrix         Matrix          `json:"matrix"`
+	Matrix         matrix          `json:"matrix"`
 	TemplateDirs   []string        `json:"template_dirs"`
 
 	TemplateDelimiters TemplateDelimiters `json:"template_delimiters"`
@@ -167,13 +167,13 @@ type TemplateDelimiters struct {
 	Right string `json:"right"`
 }
 
-// Matrix carries the declarations about the build matrix.
-type Matrix struct {
+// matrix carries the declarations about the build matrix.
+type matrix struct {
 	Complete bool `json:"complete"`
 }
 
-// Consumers carries the declarations about the consumer set.
-type Consumers struct {
+// consumers carries the declarations about the consumer set.
+type consumers struct {
 	Complete bool `json:"complete"`
 }
 
@@ -182,8 +182,8 @@ type Roots struct {
 	Patterns []string `json:"patterns"`
 }
 
-// Exemptions switches computed exemption classes off.
-type Exemptions struct {
+// exemptions switches computed exemption classes off.
+type exemptions struct {
 	Disabled []string `json:"disabled"`
 }
 
@@ -198,19 +198,19 @@ type Reporters struct {
 	FailOn      Severity `json:"fail_on"`
 }
 
-// Providers names the analyzers the orchestrator runs. This package validates and
+// providers names the analyzers the orchestrator runs. This package validates and
 // prints the section; nothing in the Go analysis reads it.
-type Providers struct {
-	Analyzers []Provider `json:"analyzers"`
+type providers struct {
+	Analyzers []provider `json:"analyzers"`
 }
 
-// Provider is one entry of the provider list, in one of two shapes: an installed
+// provider is one entry of the provider list, in one of two shapes: an installed
 // analyzer names Name, Languages and Command alone, and an acquirable one also
 // names Source, Version and Digest. Those three are nil where the entry does not
 // name them, so the shape an entry takes is read from the members it names.
 //
 //nolint:govet // fieldalignment: the field order is the schema's key order, which Print writes
-type Provider struct {
+type provider struct {
 	Name      string     `json:"name"`
 	Languages []Language `json:"languages"`
 	Command   string     `json:"command"`
@@ -219,13 +219,13 @@ type Provider struct {
 	Digest    *string    `json:"digest,omitempty"`
 }
 
-// Go is the section the Go analyzer owns. It declares no key in this Contract
+// goSettings is the section the Go analyzer owns. It declares no key in this Contract
 // version and resolves to the empty object.
-type Go struct{}
+type goSettings struct{}
 
-// TS is the section the TypeScript analyzer owns. This package validates and
+// tsSettings is the section the TypeScript analyzer owns. This package validates and
 // prints it; nothing in the Go analysis reads it.
-type TS struct {
+type tsSettings struct {
 	TestFiles              []string            `json:"test_files"`
 	EntryFiles             []string            `json:"entry_files"`
 	ComponentExtensions    []string            `json:"component_extensions"`
@@ -265,17 +265,17 @@ func Default() Config {
 			GeneratedFiles: ExcludeGenerated,
 			ConsumerTests:  TestReference,
 			Configurations: []Configuration{},
-			Matrix:         Matrix{Complete: false},
+			Matrix:         matrix{Complete: false},
 			TemplateDirs:   []string{},
 			TemplateDelimiters: TemplateDelimiters{
 				Left:  defaultLeftDelimiter,
 				Right: defaultRightDelimiter,
 			},
 		},
-		Consumers:  Consumers{Complete: false},
+		Consumers:  consumers{Complete: false},
 		Roots:      Roots{Patterns: []string{}},
 		Severity:   map[string]Severity{},
-		Exemptions: Exemptions{Disabled: []string{}},
+		Exemptions: exemptions{Disabled: []string{}},
 		Reporters: Reporters{
 			Formats:     []Format{Text},
 			Sort:        ByPosition,
@@ -283,11 +283,11 @@ func Default() Config {
 			MaxFindings: 0,
 			FailOn:      Deny,
 		},
-		Providers: Providers{Analyzers: []Provider{
+		Providers: providers{Analyzers: []provider{
 			{Name: "deadset-go", Languages: []Language{GoLanguage}, Command: "deadset-go"},
 			{Name: "deadset-ts", Languages: []Language{TSLanguage}, Command: "deadset-ts"},
 		}},
-		TS: TS{
+		TS: tsSettings{
 			TestFiles:              slices.Clone(defaultTestFiles),
 			EntryFiles:             []string{},
 			ComponentExtensions:    slices.Clone(defaultComponentExtensions),
@@ -346,44 +346,9 @@ type Inputs struct {
 	Central         []byte
 }
 
-// ErrorKind names which refusal an Error carries.
-type ErrorKind uint8
-
-// The refusals. Every one exits with the usage code.
-const (
-	// KindMalformed is a document that is not one JSON instance of the closed
-	// key list: a syntax error, a value of the wrong type, a value outside the
-	// closed set a key declares, or a member written twice at one level.
-	KindMalformed ErrorKind = iota
-	// KindUnimplementedKey is a key the closed key list does not declare, or a
-	// severity key naming a kind whose severity the Contract fixes.
-	KindUnimplementedKey
-	// KindMissingTargetKind is a resolved configuration no source supplied a
-	// target kind for.
-	KindMissingTargetKind
-)
-
-// String names the kind.
-func (k ErrorKind) String() string {
-	switch k {
-	case KindMalformed:
-		return "malformed"
-	case KindUnimplementedKey:
-		return "unimplemented key"
-	case KindMissingTargetKind:
-		return "missing target kind"
-	default:
-		return "unknown"
-	}
-}
-
-// Error is every refusal this package makes. Key is the key or field the message
-// names, spelled as the document spells it, and is empty when the refusal names
-// none.
+// Error is every refusal this package makes. Every one exits with the usage code.
 type Error struct {
-	Key     string
 	Message string
-	Kind    ErrorKind
 }
 
 // Error returns the message, which names the key and the source that carried it.
@@ -396,7 +361,7 @@ func malformed(label, path, format string, args ...any) *Error {
 	if path != "" {
 		message = fmt.Sprintf("%s: %s: %s", label, path, detail)
 	}
-	return &Error{Kind: KindMalformed, Key: path, Message: message}
+	return &Error{Message: message}
 }
 
 // unimplementedKey refuses a key the closed key list does not declare, naming
@@ -410,9 +375,5 @@ func unimplementedKey(label, path string) *Error {
 	default:
 		fmt.Fprintf(&hint, ". The nearest implemented key is %q", nearest)
 	}
-	return &Error{
-		Kind:    KindUnimplementedKey,
-		Key:     path,
-		Message: fmt.Sprintf("%s: key %q is not implemented%s", label, path, hint.String()),
-	}
+	return &Error{Message: fmt.Sprintf("%s: key %q is not implemented%s", label, path, hint.String())}
 }

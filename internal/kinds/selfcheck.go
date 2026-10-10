@@ -109,7 +109,7 @@ func refusalMessage(refused *suppress.Refusal) (string, error) {
 		return written(refused.Mechanism) + " for " + refused.Code + " names a symbol and no path", nil
 	default:
 		return "", fmt.Errorf("%w: a suppression is refused under %s, which is no refusal of the grammar",
-			ErrEmitter, refused.Reported)
+			errEmitter, refused.Reported)
 	}
 }
 
@@ -263,7 +263,7 @@ func (in *Input) dormant(mark *suppress.Record) bool {
 	if least.rank() == 0 {
 		return false
 	}
-	return in.ClassOf(mark.Bound).lower(Class(row.MaxClass)).rank() < least.rank()
+	return in.classOf(mark.Bound).lower(Class(row.MaxClass)).rank() < least.rank()
 }
 
 // collapsed turns the stale records into one finding per site, each naming every

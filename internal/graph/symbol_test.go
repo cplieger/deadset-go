@@ -407,7 +407,7 @@ func TestSymbolsRefusesAnIncompleteRequest(t *testing.T) {
 			result:  &load.Result{Fset: result.Fset, Packages: []*packages.Package{{PkgPath: "example.com/app", TypesInfo: &types.Info{}}}},
 			root:    root,
 			read:    os.ReadFile,
-			wantErr: ErrNoTargetPackage,
+			wantErr: errNoTargetPackage,
 		},
 	}
 	for _, tc := range cases {

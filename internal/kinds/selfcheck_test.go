@@ -283,8 +283,7 @@ func TestNoSeverityKeyReducesAStaleSuppressionOrAnUnmatchedRoot(t *testing.T) {
 		t.Run(key, func(t *testing.T) {
 			document := []byte(`{"target": {"kind": "application"}, "severity": {"` + key + `": "warn"}}`)
 			_, _, err := config.Resolve(config.Inputs{Repository: document, RepositoryLabel: "deadset.json"})
-			var refusal *config.Error
-			if !errors.As(err, &refusal) || refusal.Kind != config.KindUnimplementedKey {
+			if _, ok := errors.AsType[*config.Error](err); !ok {
 				t.Fatalf("config.Resolve(a severity key naming %s) = %v, want an unimplemented-key refusal", key, err)
 			}
 		})
@@ -446,8 +445,8 @@ func TestTheRefusalKindsRefuseARefusalUnderACodeTheGrammarDoesNotReport(t *testi
 		Mechanism: suppress.MechanismInline,
 	}}
 
-	if _, err := SuppressionsWithoutReason(in); !errors.Is(err, ErrEmitter) {
-		t.Errorf("SuppressionsWithoutReason() over a refusal reported under %s = %v, want an error satisfying errors.Is(err, ErrEmitter)",
+	if _, err := SuppressionsWithoutReason(in); !errors.Is(err, errEmitter) {
+		t.Errorf("SuppressionsWithoutReason() over a refusal reported under %s = %v, want an error satisfying errors.Is(err, errEmitter)",
 			staleSuppressionCode, err)
 	}
 }

@@ -35,7 +35,7 @@ type doc struct {
 	Exemptions      *docExemptions      `json:"exemptions"`
 	Reporters       *docReporters       `json:"reporters"`
 	Providers       *docProviders       `json:"providers"`
-	Go              *Go                 `json:"go"`
+	Go              *goSettings         `json:"go"`
 	TS              *docTS              `json:"ts"`
 	Provenance      map[string]string   `json:"provenance"`
 }
@@ -47,7 +47,7 @@ type docTarget struct {
 type docAnalysis struct {
 	Languages          *[]Language         `json:"languages"`
 	MinConfidence      *Confidence         `json:"min_confidence"`
-	GeneratedFiles     *GeneratedFiles     `json:"generated_files"`
+	GeneratedFiles     *generatedFiles     `json:"generated_files"`
 	ConsumerTests      *ConsumerTests      `json:"consumer_tests"`
 	Configurations     *[]Configuration    `json:"configurations"`
 	Matrix             *docMatrix          `json:"matrix"`
@@ -80,7 +80,7 @@ type docReporters struct {
 }
 
 type docProviders struct {
-	Analyzers *[]Provider `json:"analyzers"`
+	Analyzers *[]provider `json:"analyzers"`
 }
 
 type docTS struct {
@@ -164,7 +164,7 @@ func Resolve(in Inputs) (Config, Provenance, error) {
 	resolveAnalysis(&cfg, provenance, sources)
 	resolveReporters(&cfg, provenance, sources)
 	resolveSetting(&cfg.Providers.Analyzers, "providers.analyzers", provenance, sources,
-		func(d *doc) *[]Provider { return d.Providers.Analyzers })
+		func(d *doc) *[]provider { return d.Providers.Analyzers })
 	resolveTS(&cfg, provenance, sources)
 	resolveSeverity(&cfg, provenance, sources)
 
@@ -231,9 +231,9 @@ func decode(data []byte, label string) (*doc, *Error) {
 	return decodeChecked(data, label)
 }
 
-// decodeChecked decodes a document whose member names are already known to be
-// declared, refusing an unimplemented key under DisallowUnknownFields and then
-// every constraint the decoder cannot express.
+// decodeChecked decodes a document already known to hold one value whose member
+// names are declared, refusing an unimplemented key under DisallowUnknownFields
+// and then every constraint the decoder cannot express.
 func decodeChecked(data []byte, label string) (*doc, *Error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
@@ -244,9 +244,6 @@ func decodeChecked(data []byte, label string) (*doc, *Error) {
 			return nil, malformed(label, mistyped.Field, "holds %s, want %s", mistyped.Value, jsonTypeOf(mistyped.Type))
 		}
 		return nil, malformed(label, "", "%s", err)
-	}
-	if dec.More() {
-		return nil, malformed(label, "", "want one JSON object, a second value follows it")
 	}
 	document.fill()
 	if refusal := validate(&document, label); refusal != nil {
@@ -309,7 +306,7 @@ func resolveAnalysis(cfg *Config, p Provenance, sources []source) {
 	resolveSetting(&cfg.Analysis.MinConfidence, "analysis.min_confidence", p, sources,
 		func(d *doc) *Confidence { return d.Analysis.MinConfidence })
 	resolveSetting(&cfg.Analysis.GeneratedFiles, "analysis.generated_files", p, sources,
-		func(d *doc) *GeneratedFiles { return d.Analysis.GeneratedFiles })
+		func(d *doc) *generatedFiles { return d.Analysis.GeneratedFiles })
 	resolveSetting(&cfg.Analysis.ConsumerTests, "analysis.consumer_tests", p, sources,
 		func(d *doc) *ConsumerTests { return d.Analysis.ConsumerTests })
 	resolveSetting(&cfg.Analysis.Configurations, "analysis.configurations", p, sources,
@@ -414,8 +411,6 @@ func checkLabels(p Provenance) error {
 // kind for, naming the field and the two sources searched.
 func missingTargetKind(in *Inputs) *Error {
 	return &Error{
-		Kind: KindMissingTargetKind,
-		Key:  "target.kind",
 		Message: fmt.Sprintf(
 			"target.kind is not set, it has no default and is never inferred: searched %s and %s",
 			describeSource("the repository configuration", in.Repository, in.RepositoryLabel),
@@ -579,7 +574,7 @@ const providerShapes = "an entry names name, languages and command, " +
 
 // validateProviders checks the provider list: every entry takes one of the two
 // shapes, and no two entries share a name, the later one named by the refusal.
-func validateProviders(providers *[]Provider, label string) *Error {
+func validateProviders(providers *[]provider, label string) *Error {
 	if providers == nil {
 		return nil
 	}
@@ -598,7 +593,7 @@ func validateProviders(providers *[]Provider, label string) *Error {
 }
 
 // validateProvider checks one provider entry, at naming its place in the list.
-func validateProvider(entry *Provider, at, label string) *Error {
+func validateProvider(entry *provider, at, label string) *Error {
 	if !analyzerNamePattern.MatchString(entry.Name) {
 		return malformed(label, at+".name", "%q is not lowercase words joined by single hyphens", entry.Name)
 	}
@@ -777,11 +772,7 @@ func noLiveKind(code string) string {
 // unimplementedSeverityKey refuses one severity key, naming why the key is not a
 // setting rather than the nearest key, which for a code is never informative.
 func unimplementedSeverityKey(label, path, reason string) *Error {
-	return &Error{
-		Kind:    KindUnimplementedKey,
-		Key:     path,
-		Message: fmt.Sprintf("%s: key %q is not implemented: %s", label, path, reason),
-	}
+	return &Error{Message: fmt.Sprintf("%s: key %q is not implemented: %s", label, path, reason)}
 }
 
 // fixedByContract returns every code whose severity the Contract fixes that one

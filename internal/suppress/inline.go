@@ -86,7 +86,7 @@ type directive struct {
 // line two above with a blank line or a doc-comment line between, not a line
 // below, so a directive anywhere else is a record bound to nothing. A directive
 // that lacks only its reason is a [Refusal]; a comment in the namespace that is
-// neither is a [MalformedError], and no record or refusal comes back with it.
+// neither is a [malformedError], and no record or refusal comes back with it.
 //
 // Every position is rendered the way a report carries it, so a file the target
 // root does not hold ends the read rather than being passed over. The resolver is
@@ -113,7 +113,7 @@ func Inline(r *load.Result, resolve *graph.Resolver, symbols []graph.Symbol) ([]
 		case verdictNoReason:
 			refusals = append(refusals, d.refuse()...)
 		case verdictNone, verdictMalformed:
-			return nil, nil, &MalformedError{
+			return nil, nil, &malformedError{
 				Text:      d.text,
 				Want:      directiveForm,
 				Site:      d.at,

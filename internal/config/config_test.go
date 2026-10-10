@@ -167,35 +167,10 @@ func TestOriginString(t *testing.T) {
 	}
 }
 
-func TestErrorKindString(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		kind config.ErrorKind
-		want string
-	}{
-		{name: "malformed", kind: config.KindMalformed, want: "malformed"},
-		{name: "unimplemented_key", kind: config.KindUnimplementedKey, want: "unimplemented key"},
-		{name: "missing_target_kind", kind: config.KindMissingTargetKind, want: "missing target kind"},
-		{name: "outside_the_declared_kinds", kind: config.ErrorKind(9), want: "unknown"},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			if got := tc.kind.String(); got != tc.want {
-				t.Errorf("ErrorKind(%d).String() = %q, want %q", tc.kind, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestErrorCarriesItsMessage(t *testing.T) {
 	t.Parallel()
 
-	refusal := &config.Error{Kind: config.KindMalformed, Key: "target.kind", Message: "deadset.json: target.kind: bad"}
+	refusal := &config.Error{Message: "deadset.json: target.kind: bad"}
 	if got := refusal.Error(); got != refusal.Message {
 		t.Errorf("(&Error{Message: %q}).Error() = %q, want the message", refusal.Message, got)
 	}
