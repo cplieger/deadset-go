@@ -11,5 +11,5 @@ go 1.27.1
 -- lib.go --
 package selfcheckdormant
 
-//deadset:ignore DS1002 -- in effect until a minimum confidence the finding cannot reach
+//deadset:ignore DS1001 -- in effect until a minimum confidence the finding cannot reach
 func Exported() string { return "e" }

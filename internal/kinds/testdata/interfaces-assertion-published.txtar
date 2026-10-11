@@ -1,0 +1,40 @@
+Satisfaction assertions in a library: one of an exported interface of an
+importable package, one of an unexported interface, and one of an exported
+interface under an internal tree. Nothing names any of the three as a type.
+
+-- go.mod --
+module example.com/lib
+
+go 1.27.0
+-- lib.go --
+package lib
+
+import "example.com/lib/internal/inner"
+
+type Published interface {
+	Do()
+}
+
+type hidden interface {
+	hide()
+}
+
+type impl struct{}
+
+func (impl) Do() {}
+
+func (impl) hide() {}
+
+func (impl) Run() {}
+
+var _ Published = impl{}
+
+var _ hidden = impl{}
+
+var _ inner.Runner = impl{}
+-- internal/inner/inner.go --
+package inner
+
+type Runner interface {
+	Run()
+}

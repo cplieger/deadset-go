@@ -1,13 +1,9 @@
 package matrix
 
 import (
-	"go/build"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
-
-	"github.com/cplieger/deadset-go/internal/load"
 )
 
 // platformList is every platform the toolchain builds, one operating system and
@@ -97,33 +93,17 @@ var (
 	}
 )
 
-// aliases maps an operating system to the name a build expression may still use
-// for the system it grew out of, which the toolchain answers for it.
-var aliases = map[string]string{
-	"android": "linux",
-	"illumos": "solaris",
-	"ios":     "darwin",
-}
-
-// unixOS is the set of operating systems the unix build tag stands for.
-var unixOS = []string{
-	"aix", "android", "darwin", "dragonfly", "freebsd", "hurd",
-	"illumos", "ios", "linux", "netbsd", "openbsd", "solaris",
-}
-
 // The tags the toolchain answers from its own environment rather than from a
 // configuration's tag list.
 const (
 	unixTag       = "unix"
-	cgoTag        = "cgo"
 	gcCompiler    = "gc"
 	gccgoCompiler = "gccgo"
 
 	// boringcryptoTag is the older spelling of one experiment tag, which the
 	// toolchain rewrites before consulting its experiment list.
-	boringcryptoTag        = "boringcrypto"
-	boringcryptoExperiment = "goexperiment.boringcrypto"
-	experimentPrefix       = "goexperiment."
+	boringcryptoTag  = "boringcrypto"
+	experimentPrefix = "goexperiment."
 
 	// releasePrefix opens a language release tag, which every toolchain at or
 	// above that release satisfies.
@@ -218,29 +198,4 @@ func partner(candidates []string, preferred string) (string, bool) {
 		return preferred, true
 	}
 	return candidates[0], true
-}
-
-// satisfies returns the function that answers whether configuration c satisfies
-// one build tag. It is the toolchain's own rule with cgo disabled: every
-// configuration loads with the C toolchain out of the way, so the cgo tag holds
-// only where the configuration itself names it.
-func satisfies(c load.Configuration) func(tag string) bool {
-	return func(tag string) bool {
-		switch {
-		case tag == c.OS, tag == c.Arch, tag == runtime.Compiler:
-			return true
-		case tag == aliases[c.OS]:
-			return true
-		case tag == unixTag:
-			return slices.Contains(unixOS, c.OS)
-		case slices.Contains(c.Tags, tag):
-			return true
-		case tag == cgoTag:
-			return false
-		case tag == boringcryptoTag:
-			tag = boringcryptoExperiment
-		}
-		return slices.Contains(build.Default.ReleaseTags, tag) ||
-			slices.Contains(build.Default.ToolTags, tag)
-	}
 }

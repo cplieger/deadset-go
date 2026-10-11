@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -137,7 +138,7 @@ func TestInterfaceSatisfactionNamesTheInterfaceAndTheSiteItWasFoundAt(t *testing
 		Holder: symbolRef(t, in, "go://example.com/conservative#Sum").ID,
 		Via:    symbolRef(t, in, "go://example.com/conservative#Counter.Count").ID,
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("InterfaceSatisfactionDetector(unconverted-implementation.txtar) = %+v, want %+v", got, want)
 	}
 }
@@ -574,5 +575,44 @@ func TestInterfaceSatisfactionRendersAConsumersSiteAgainstTheConsumersRoot(t *te
 	want := []string{"go://example.com/target#Item.Name example.com/httpwire wire.go:10:16"}
 	if !slices.Equal(got, want) {
 		t.Errorf("InterfaceSatisfactionDetector(%s) recorded\ngot  %q\nwant %q", archive, got, want)
+	}
+}
+
+func TestAPublishedParameterOutsideTheTargetIsHeldByTheTypeItConverts(t *testing.T) {
+	in := inputOf(t, "published-outside-parameter.txtar", Options{PublishedAPI: true})
+	found := retainedBy(t, in, "published-outside-parameter.txtar")
+
+	read := symbolRef(t, in, "go://example.com/published#Source.Read").ID
+	source := symbolRef(t, in, "go://example.com/published#Source").ID
+	for i := range found {
+		if found[i].ID == read && found[i].Holder == source && found[i].Site.Filename == "published.go" {
+			return
+		}
+	}
+	t.Errorf("InterfaceSatisfactionDetector(published-outside-parameter.txtar) = %+v, want Source.Read retained at Source by the promoted ReadFrom", found)
+}
+
+// A value passed as an interface-typed argument to a function declared outside the
+// program keeps each method by which it implements an interface the source of the
+// callee's package asserts, the interface's package standing for a call through an
+// interface value. A package the callee hands the value on to is not read.
+func TestInterfaceSatisfactionRetainsWhatAnOutsideCalleesPackageAsserts(t *testing.T) {
+	refs := retainedRefs(t, analysisOf(t, "interface-satisfaction-callee.txtar", Options{}), InterfaceSatisfaction)
+
+	for _, test := range []struct {
+		typeName string
+		want     []string
+	}{
+		{typeName: "direct", want: qualify("example.com/callee", "direct", "Close", "Read")},
+		{typeName: "dispatched", want: qualify("example.com/callee", "dispatched", "Close", "Read")},
+		{typeName: "forwarded", want: qualify("example.com/callee", "forwarded", "Read")},
+		{typeName: "drained", want: qualify("example.com/callee", "drained", "Read")},
+	} {
+		t.Run(test.typeName, func(t *testing.T) {
+			if got := membersOf(refs, test.typeName); !slices.Equal(got, test.want) {
+				t.Errorf("InterfaceSatisfactionDetector(interface-satisfaction-callee.txtar) retained, for %s,\ngot  %v\nwant %v",
+					test.typeName, got, test.want)
+			}
+		})
 	}
 }

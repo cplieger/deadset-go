@@ -167,6 +167,17 @@ func TestReferencesRecordsTheEnclosingDeclaration(t *testing.T) {
 	}
 }
 
+func TestReferencesRecordWhatARepeatedListNamesFromEachConstantRepeatingIt(t *testing.T) {
+	a := analyze(t, "constant-groups.txtar")
+
+	if got := a.count("running", "phase", RefTypeUse); got != 1 {
+		t.Errorf("References(constant-groups.txtar) holds %d type uses of phase from running, want 1: running repeats the typed list of idle", got)
+	}
+	if got := a.count("tail", "phase", RefTypeUse); got != 0 {
+		t.Errorf("References(constant-groups.txtar) holds %d type uses of phase from tail, want none: tail writes a list of its own", got)
+	}
+}
+
 func TestReferencesResolvesEveryEndToASymbol(t *testing.T) {
 	a := analyze(t, "reference-kinds.txtar")
 	if len(a.refs) == 0 {
@@ -585,7 +596,13 @@ func (a analysis) refNames(prefix string) map[SymbolID]string {
 // a table states one shape's reads without depending on the order two reads at one
 // position are kept in.
 func (a analysis) fieldReads() map[string][]string {
-	names := a.refNames(comparisonsPackage)
+	return a.fieldReadsIn(comparisonsPackage)
+}
+
+// fieldReadsIn is fieldReads over the fixture whose one package's references carry
+// the prefix.
+func (a analysis) fieldReadsIn(prefix string) map[string][]string {
+	names := a.refNames(prefix)
 	kinds := a.kinds()
 	reads := make(map[string][]string)
 	for _, r := range a.refs {
@@ -681,6 +698,47 @@ func TestReferencesRecordsAComparisonsReadsAtTheComparisonSite(t *testing.T) {
 					from, got, want)
 			}
 		})
+	}
+}
+
+func TestReferencesRecordsAReadOfEveryFieldAStructConversionReads(t *testing.T) {
+	reads := analyze(t, "struct-conversions.txtar").fieldReadsIn("go://example.com/conversions#")
+
+	cases := map[string][]string{
+		"byValue": {
+			"outerA.arr", "outerA.arr.a", "outerA.ch", "outerA.ch.c", "outerA.fn", "outerA.gen", "outerA.hook",
+			"outerA.index", "outerA.index.k", "outerA.items", "outerA.items.p", "outerA.ptr", "outerA.ptr.deep", "outerA.s",
+			"outerB.arr", "outerB.arr.a", "outerB.ch", "outerB.ch.c", "outerB.fn", "outerB.gen", "outerB.hook",
+			"outerB.index", "outerB.index.k", "outerB.items", "outerB.items.p", "outerB.ptr", "outerB.ptr.deep", "outerB.s",
+		},
+		"byPointer":          {"dst.name", "src.name"},
+		"byNamedPointer":     nil,
+		"byIdentity":         nil,
+		"toParam":            {"from.title"},
+		"toWire":             {"pair.left", "wire.left"},
+		"instantiateOperand": nil,
+		"toInterface":        nil,
+	}
+	for from, want := range cases {
+		t.Run(from, func(t *testing.T) {
+			if got := reads[from]; !slices.Equal(got, want) {
+				t.Errorf("References(struct-conversions.txtar) recorded %s reading the fields %v, want %v",
+					from, got, want)
+			}
+		})
+	}
+}
+
+func TestReferencesReadAFieldThroughEveryIdenticalStructLiteral(t *testing.T) {
+	reads := analyze(t, "struct-identity.txtar").fieldReadsIn("go://example.com/identity#")
+
+	if got, want := reads["use"], []string{"holder.X.C"}; !slices.Equal(got, want) {
+		t.Errorf("References(struct-identity.txtar) recorded use reading the fields %v, want %v: an identical literal's field and nothing of the tagged twin or the named type", got, want)
+	}
+	for from, fields := range reads {
+		if slices.Contains(fields, "holder.Y.c") {
+			t.Errorf("References(struct-identity.txtar) recorded %s reading holder.Y.c, whose unexported field another package's literal of the same spelling does not share", from)
+		}
 	}
 }
 

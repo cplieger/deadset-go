@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/bits"
 	"slices"
+	"strings"
 )
 
 // ErrMatrix reports a matrix the merge cannot key a configuration of.
@@ -305,7 +306,11 @@ func (x *Matrix) Sweep(in *SweepInput, evidence TestEvidence) Result {
 		r.Candidates = append(r.Candidates, c)
 	}
 
-	r.Components = union.componentsOf(dead, testOfDeadCode, unreferencedTest)
+	reachable := make([]bool, len(x.merged.Symbols))
+	for i := range x.merged.Symbols {
+		reachable[i] = r.LiveUnder[x.merged.Symbols[i].ID].Has(Reachability)
+	}
+	r.Components = union.componentsOf(dead, testOfDeadCode, unreferencedTest, reachable)
 	r.Retained = x.retained(in.Exempt, per)
 	r.Suppressed = x.suppressed(per)
 	return r
@@ -447,16 +452,26 @@ func (x *Matrix) suppressed(per []Result) []SymbolID {
 }
 
 // exemptionKey is what makes two exemptions of a matrix one record: the symbol,
-// the class, the detail and the holder, which is the key the exemption classes
+// the class, the detail and the holders, which is the key the exemption classes
 // themselves deduplicate one configuration's records on.
 type exemptionKey struct {
-	id     SymbolID
-	class  string
-	detail string
-	holder SymbolID
+	id        SymbolID
+	class     string
+	detail    string
+	holder    SymbolID
+	coHolders string
 }
 
 // keyOf keys one exemption.
 func keyOf(e *Exemption) exemptionKey {
-	return exemptionKey{id: e.ID, class: e.Class, detail: e.Detail, holder: e.Holder}
+	return exemptionKey{id: e.ID, class: e.Class, detail: e.Detail, holder: e.Holder, coHolders: JoinedIDs(e.CoHolders)}
+}
+
+// JoinedIDs spells a list of identifiers as one comparable value.
+func JoinedIDs(ids []SymbolID) string {
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = string(id)
+	}
+	return strings.Join(parts, "\x00")
 }

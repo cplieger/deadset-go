@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"go/build/constraint"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -30,7 +32,6 @@ var errMultipleConstraints = errors.New("matrix: file declares more than one bui
 type fileConstraint struct {
 	name constraint.Expr // what the name implies, nil where it implies nothing
 	decl constraint.Expr // what the file declares, nil where it declares nothing
-	path string          // target-relative, forward slashes
 }
 
 // expr returns the one expression the file's two halves make, and nil for a file
@@ -64,6 +65,45 @@ func collectTags(expression constraint.Expr, into map[string]bool) {
 	}
 }
 
+// ignoreTag is the toolchain's conventional tag for a file kept out of ordinary
+// package builds and run by hand.
+const ignoreTag = "ignore"
+
+// maxFreeTags bounds the assignments OnlyUnderIgnore enumerates. An expression
+// naming more tags is answered as holding without ignore, which keeps its file in
+// the analysis.
+const maxFreeTags = 12
+
+// OnlyUnderIgnore reports whether expression holds only when the ignore tag is set:
+// no assignment of the other tags it names satisfies it with ignore unset. Each
+// other tag is read as free, platform tags included, so an expression that holds
+// without ignore under no real platform still answers false.
+func OnlyUnderIgnore(expression constraint.Expr) bool {
+	if expression == nil {
+		return false
+	}
+	named := make(map[string]bool)
+	collectTags(expression, named)
+	if !named[ignoreTag] {
+		return false
+	}
+	delete(named, ignoreTag)
+	if len(named) > maxFreeTags {
+		return false
+	}
+	free := slices.Sorted(maps.Keys(named))
+	for assignment := range 1 << len(free) {
+		set := make(map[string]bool, len(free))
+		for i, tag := range free {
+			set[tag] = assignment&(1<<i) != 0
+		}
+		if expression.Eval(func(tag string) bool { return set[tag] }) {
+			return false
+		}
+	}
+	return true
+}
+
 // readConstraint reads the build constraint of the Go file at path, which sits
 // under root and is recorded relative to it.
 func readConstraint(root, path string) (fileConstraint, error) {
@@ -77,7 +117,6 @@ func readConstraint(root, path string) (fileConstraint, error) {
 		return fileConstraint{}, fmt.Errorf("%s: %w", relative, err)
 	}
 	return fileConstraint{
-		path: relative,
 		name: nameConstraint(filepath.Base(path)),
 		decl: declared,
 	}, nil

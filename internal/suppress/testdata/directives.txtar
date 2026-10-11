@@ -1,7 +1,7 @@
 One package whose comments cover every placement the grammar decides: a
-directive on the line above a declaration of each shape, and a directive on every
-other line, which binds nothing. Each directive carries its case as its reason, so
-a test names a case rather than a line number.
+directive on the line above a declaration of each shape, a directive after the code
+on a line, and a directive on every other line, which binds nothing. Each directive
+carries its case as its reason, so a test names a case rather than a line number.
 
 -- go.mod --
 module example.com/directives
@@ -58,6 +58,18 @@ func Best[T any](values []T) T { return values[0] }
 
 func Trailing() int { return limit } //deadset:ignore DS1001 -- on the declaration's own line
 
+const TrailingFirst = 1 //deadset:ignore DS1001 -- after the first of two declarations on consecutive lines
+const TrailingSecond = 2
+
+var tail = struct{ A int }{
+	A: 1} //deadset:ignore DS1002 -- after code on the line above a declaration
+var belowTail = tail.A
+
+var brace = struct{ A int }{
+	A: 1,
+} //deadset:ignore DS1002 -- after a closing brace on the line above a declaration
+var belowBrace = brace.A
+
 func Below() int { return first + second + bound }
 //deadset:ignore DS1001 -- on the line directly below a declaration
 
@@ -79,7 +91,7 @@ package directives
 func Wrapped(
 	//deadset:ignore DS1801 -- above a parameter inside a wrapped parameter list
 	chunk []byte,
-	size int,
+	size int, //deadset:ignore DS1801 -- after a parameter on its own line of a wrapped parameter list
 ) (
 	//deadset:ignore DS1803 -- above a result inside a wrapped result list
 	count int,

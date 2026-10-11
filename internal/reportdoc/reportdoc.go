@@ -198,6 +198,7 @@ type Details struct {
 	NarrowerVisibility string        `json:"narrower_visibility,omitempty"`
 	Implementations    []Positioned  `json:"implementations,omitzero"`
 	WritePositions     []Position    `json:"write_positions,omitempty"`
+	NameLiteral        *Position     `json:"name_literal,omitempty"`
 	ExcludedBy         string        `json:"excluded_by,omitempty"`
 	DependencyClass    string        `json:"dependency_class,omitempty"`
 	Replacement        string        `json:"replacement,omitempty"`

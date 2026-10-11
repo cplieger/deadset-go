@@ -7,6 +7,7 @@ const outside = -1
 // referenced, and whether a test file made the reference.
 type edge struct {
 	to   int
+	gate int // one past the index of the gate in [Graph.gates] the edge waits on, 0 for none
 	test bool
 }
 
@@ -53,6 +54,7 @@ type Graph struct {
 	test     []bool   // per symbol, test code declares it: a test file or a test-support package
 	subject  []bool   // per symbol, the sweep judges its liveness
 	rooted   []rooted
+	gates    [][]int // per gate, the positions of the symbols that must all be reached before an edge waiting on it is followed
 }
 
 // New indexes the outputs of Symbols, References and Roots.

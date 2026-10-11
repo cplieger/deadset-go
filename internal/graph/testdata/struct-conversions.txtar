@@ -1,0 +1,81 @@
+One package writing every shape of a conversion between struct types, one function
+per shape: struct to struct with nested type literals, an unnamed pointer pair, a
+type parameter on either side, an identity conversion, a named pointer type, and a
+conversion to an interface, which reads nothing.
+
+-- go.mod --
+module example.com/conversions
+
+go 1.27.1
+-- conversions.go --
+package conversions
+
+type shared struct{ hidden int }
+
+type box[T any] struct{ v T }
+
+type outerA struct {
+	s     shared
+	arr   [1]struct{ a int }
+	ch    chan struct{ c int }
+	items []struct{ p int }
+	index map[string]struct{ k int }
+	ptr   *struct{ deep int }
+	gen   box[struct{ g int }]
+	fn    func(struct{ arg int }) struct{ res int }
+	hook  interface{ get() struct{ z int } }
+}
+
+type outerB struct {
+	s     shared `json:"s"`
+	arr   [1]struct{ a int }
+	ch    chan struct{ c int }
+	items []struct{ p int }
+	index map[string]struct{ k int }
+	ptr   *struct{ deep int }
+	gen   box[struct{ g int }]
+	fn    func(struct{ arg int }) struct{ res int }
+	hook  interface{ get() struct{ z int } }
+}
+
+func byValue(a outerA) outerB { return outerB(a) }
+
+type src struct{ name string }
+
+type dst struct{ name string }
+
+func byPointer(s *src) *dst { return (*dst)(s) }
+
+type namedPointer *dst
+
+func byNamedPointer(s *src) any { return any(s) }
+
+type record struct{ x int }
+
+type plain record
+
+func byIdentity(r *record) *plain { return (*plain)(r) }
+
+type from struct{ title string }
+
+type wireT struct{ title string }
+
+func toParam[T ~struct{ title string }](f from) T { return T(f) }
+
+func instantiateParam(f from) wireT { return toParam[wireT](f) }
+
+type pair struct{ left string }
+
+type wire struct{ left string }
+
+func toWire[P ~struct{ left string }](p P) wire { return wire(p) }
+
+func forward[Q ~struct{ left string }](q Q) wire { return toWire(q) }
+
+func instantiateOperand(p pair) wire { return forward(p) }
+
+type boxed struct{ hidden int }
+
+func toInterface(b boxed) any { return any(b) }
+
+var _ namedPointer

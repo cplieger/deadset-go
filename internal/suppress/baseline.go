@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"go/token"
 	"io"
+	"strings"
 
 	"github.com/cplieger/deadset-go/internal/graph"
 )
@@ -121,21 +122,59 @@ type Provenance struct {
 // reason is what a row this provenance writes carries.
 func (p Provenance) reason() string { return reasonPrefix + p.Analyzer + " " + p.Version }
 
-// WriteBaseline writes a baseline document to w holding one row per recorded
-// finding, in the order given.
+// Row is one row of a baseline document as written, reason included. A member the
+// document leaves out is nil, so a write keeps it left out.
 //
-// The document adjudicates nothing. Every row carries the provenance as its
-// reason, so a row is never read as a maintainer's judgement. Which findings the
-// rows record is the caller's: the fixpoint of a baseline write decides them. A
-// finding missing a value a row needs, and an identity
-// missing its name or version, are [errProvenance]: the grammar requires a reason
-// on every row, and a document that could not carry one is refused rather than
-// written.
-func WriteBaseline(w io.Writer, findings []Recorded, p Provenance) error {
+//nolint:govet // fieldalignment: a Row converts to a wireRow, whose field order is the written member order
+type Row struct {
+	Code   string
+	Symbol string
+	Path   *string
+	Reason *string
+}
+
+// OtherSchemeRows is every row of the baseline document at path whose reference is
+// of another language's scheme, in document order, which a write keeps as the
+// document held them. An absent document holds none, and one that does not decode is
+// [malformedError].
+func OtherSchemeRows(path string) ([]Row, error) {
+	held := baselineShape()
+	body, _, err := document(path, held)
+	if body == nil || err != nil {
+		return nil, err
+	}
+	var wire wireBaseline
+	if err := decodeDocument(body, &wire, held); err != nil {
+		return nil, err
+	}
+	if wire.Baseline == nil {
+		return nil, &malformedError{Site: documentSite(held), Text: held.file, Want: held.arrayWant, Mechanism: held.mechanism}
+	}
+	var kept []Row
+	for _, raw := range *wire.Baseline {
+		one, err := decodeRecord(raw, documentSite(held), held)
+		if err != nil {
+			return nil, err
+		}
+		if !strings.HasPrefix(*one.Symbol, ownScheme) {
+			kept = append(kept, Row{Code: *one.Code, Symbol: *one.Symbol, Path: one.Path, Reason: one.Reason})
+		}
+	}
+	return kept, nil
+}
+
+// WriteBaseline writes a baseline document to w holding one row per recorded
+// finding, in the order given, each carrying the provenance as its reason so no row
+// reads as a maintainer's judgement, then every row of another language's scheme the
+// document keeps, so the go:// rows come first whichever analyzer writes last. A
+// finding missing a value a row needs, and an identity missing its name or version,
+// are [errProvenance].
+func WriteBaseline(w io.Writer, findings []Recorded, p Provenance, others []Row) error {
 	if p.Analyzer == "" || p.Version == "" {
 		return fmt.Errorf("%w: the analyzer identity names %q at version %q", errProvenance, p.Analyzer, p.Version)
 	}
-	rows := make([]wireRow, 0, len(findings))
+	reason := p.reason()
+	rows := make([]wireRow, 0, len(findings)+len(others))
 	for i := range findings {
 		found := &findings[i]
 		if found.Code == "" || found.Symbol == "" || found.Path == "" {
@@ -145,9 +184,12 @@ func WriteBaseline(w io.Writer, findings []Recorded, p Provenance) error {
 		rows = append(rows, wireRow{
 			Code:   found.Code,
 			Symbol: found.Symbol,
-			Path:   found.Path,
-			Reason: p.reason(),
+			Path:   &found.Path,
+			Reason: &reason,
 		})
+	}
+	for _, other := range others {
+		rows = append(rows, wireRow(other))
 	}
 
 	enc := json.NewEncoder(w)
@@ -171,9 +213,11 @@ type wireWritten struct {
 
 // wireRow is one written row, whose field order is the member order of an entry of
 // the ignore file, so the two documents read the same.
+//
+//nolint:govet // fieldalignment: encoding/json writes fields in declaration order, which is the member order
 type wireRow struct {
-	Code   string `json:"code"`
-	Symbol string `json:"symbol"`
-	Path   string `json:"path"`
-	Reason string `json:"reason"`
+	Code   string  `json:"code"`
+	Symbol string  `json:"symbol"`
+	Path   *string `json:"path,omitempty"`
+	Reason *string `json:"reason,omitempty"`
 }

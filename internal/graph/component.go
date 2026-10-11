@@ -38,8 +38,13 @@ type Component struct {
 	Index int
 
 	// DeletableLines is the number of distinct source lines the deletion removes:
-	// the lines Spans covers, a line two of them share counted once.
+	// the lines Spans covers, a line two of them share counted once, and 0 for a
+	// held component.
 	DeletableLines int
+
+	// Held reports a component of declarations no mechanical edit deletes, as
+	// grammar/analysis.md "Positional members" states ([Graph.heldSet]).
+	Held bool
 }
 
 // Span is the run of source lines one declaration occupies: its file, and its
@@ -133,26 +138,24 @@ func (c *Component) List(mode Cascade) Listing {
 	return l
 }
 
-// componentsOf groups the symbols dead marks into dead components, orders the
-// components by their first root cycle, and computes each one's size. Both
-// arguments carry one flag per symbol of the graph, in the graph's own order: which
-// symbols are dead, and which of those a sweep admitted by the test-of-dead-code
-// rule.
-//
-// The dead set arrives rather than being read from a sweep, because over a matrix
-// of build configurations the set is the intersection of what several sweeps
-// answered while the edges are this graph's, which is every configuration's: a
-// report lists one dead component once, and a reference under any configuration is
-// a reference, so a member or an edge one configuration alone holds belongs to the
-// one component the same as any other.
-func (g *Graph) componentsOf(dead, testOfDeadCode, unreferencedTest []bool) []Component {
+// componentsOf groups the dead symbols into dead components, ordered by their first
+// root cycle, and sizes each, every flag slice being per symbol of the graph. The
+// dead set arrives rather than being read from a sweep, because over a matrix it is
+// the intersection of several sweeps while the edges are every configuration's.
+// reachable makes a constant a live dependent. A held and an unheld declaration share
+// no component, and an unheld dead declaration shares one with each of its dead
+// dependents, a joint that decides no root.
+func (g *Graph) componentsOf(dead, testOfDeadCode, unreferencedTest, reachable []bool) []Component {
 	at, adj, place := g.deadSubgraph(dead, testOfDeadCode, unreferencedTest)
 	if len(at) == 0 {
 		return nil
 	}
+	held := g.heldSet(dead, reachable, place)
+	adj = withinHeld(adj, at, held)
+	joints := g.joints(at, place, held)
 	cycleOf, cycles := connected(adj)
 	edges, into := condense(adj, cycleOf, len(cycles))
-	clusterOf, count := clusters(adj, cycleOf, order(edges, cycles), len(cycles))
+	clusterOf, count := clusters(adj, joints, cycleOf, order(edges, cycles), len(cycles))
 
 	components := make([]Component, count)
 	for index := range components {
@@ -170,18 +173,125 @@ func (g *Graph) componentsOf(dead, testOfDeadCode, unreferencedTest []bool) []Co
 		if into[cycle] == 0 && !contained {
 			component.Roots = append(component.Roots, id)
 		}
+		component.Held = component.Held || held[i]
 	}
 	for index := range components {
-		components[index].DeletableLines = DistinctLines(components[index].Spans)
+		if !components[index].Held {
+			components[index].DeletableLines = DistinctLines(components[index].Spans)
+		}
 	}
 	return components
+}
+
+// dependentsOf is, per symbol, the positions of the dependents
+// [Symbol.Dependents] names, and per symbol the positions of the symbols that name
+// it as one.
+func (g *Graph) dependentsOf() (dependents, dependedOn [][]int) {
+	dependents = make([][]int, len(g.symbols))
+	dependedOn = make([][]int, len(g.symbols))
+	for i := range g.symbols {
+		for _, id := range g.symbols[i].Dependents {
+			if j := g.at(id); j != outside {
+				dependents[i] = append(dependents[i], j)
+				dependedOn[j] = append(dependedOn[j], i)
+			}
+		}
+	}
+	return dependents, dependedOn
+}
+
+// heldSet flags the dead declarations of the subgraph no mechanical edit deletes:
+// each positional member, a dead declaration with a dependent reachability holds
+// live, then each dead declaration a held one references, contains or is contained
+// by, and each dead declaration a held one is a dependent of, until none joins. A
+// dependent no component holds, test code the sweep does not report, counts as
+// live: no edit deletes it with the member.
+func (g *Graph) heldSet(dead, reachable []bool, place []int) []bool {
+	held := make([]bool, len(g.symbols))
+	dependents, dependedOn := g.dependentsOf()
+	var queue []int
+	hold := func(i int) {
+		if place[i] != outside && dead[i] && !held[i] {
+			held[i] = true
+			queue = append(queue, i)
+		}
+	}
+	live := func(j int) bool { return !dead[j] || reachable[j] || place[j] == outside }
+	for i := range g.symbols {
+		if place[i] != outside && slices.ContainsFunc(dependents[i], live) {
+			hold(i)
+		}
+	}
+	if len(queue) == 0 {
+		return held
+	}
+	children := make([][]int, len(g.symbols))
+	for i, p := range g.parent {
+		if p != outside {
+			children[p] = append(children[p], i)
+		}
+	}
+	for len(queue) > 0 {
+		i := queue[len(queue)-1]
+		queue = queue[:len(queue)-1]
+		for _, j := range g.heldWith(i, children, dependedOn) {
+			hold(j)
+		}
+	}
+	return held
+}
+
+// heldWith is every symbol a held declaration holds: each it references, its
+// container, its members, and each declaration it is a dependent of.
+func (g *Graph) heldWith(i int, children, dependedOn [][]int) []int {
+	with := make([]int, 0, len(g.out[i])+len(children[i])+len(dependedOn[i])+1)
+	for _, e := range g.out[i] {
+		with = append(with, e.to)
+	}
+	if p := g.parent[i]; p != outside {
+		with = append(with, p)
+	}
+	with = append(with, children[i]...)
+	return append(with, dependedOn[i]...)
+}
+
+// withinHeld drops every edge of the subgraph between a held declaration and one
+// that is not held: such a reference joins nothing.
+func withinHeld(adj [][]int, at []int, held []bool) [][]int {
+	kept := make([][]int, len(adj))
+	for from, targets := range adj {
+		for _, to := range targets {
+			if held[at[from]] == held[at[to]] {
+				kept[from] = append(kept[from], to)
+			}
+		}
+	}
+	return kept
+}
+
+// joints pairs, by subgraph position, each dead declaration that is not held with
+// each of its dead dependents that is not held either: deleting the first alone
+// changes the second's value, so one component holds both.
+func (g *Graph) joints(at, place []int, held []bool) [][2]int {
+	var pairs [][2]int
+	for from, i := range at {
+		if held[i] {
+			continue
+		}
+		for _, id := range g.symbols[i].Dependents {
+			if j := g.at(id); j != outside && place[j] != outside && !held[j] {
+				pairs = append(pairs, [2]int{from, place[j]})
+			}
+		}
+	}
+	return pairs
 }
 
 // clusters numbers the dead components: two cycles joined by a reference belong to
 // one, because the root cycles reaching either reach both. A component is numbered
 // by the place its first cycle takes in the order the cycles are worked in, which
 // puts every root cycle ahead of the cycles it reaches.
-func clusters(adj [][]int, cycleOf, sequence []int, cycles int) (clusterOf []int, count int) {
+func clusters(adj [][]int, joints [][2]int, cycleOf, sequence []int, cycles int) (clusterOf []int, count int) {
 	parent := make([]int, cycles)
 	for c := range parent {
 		parent[c] = c
@@ -197,6 +307,9 @@ func clusters(adj [][]int, cycleOf, sequence []int, cycles int) (clusterOf []int
 		for _, to := range targets {
 			parent[find(cycleOf[from])] = find(cycleOf[to])
 		}
+	}
+	for _, joint := range joints {
+		parent[find(cycleOf[joint[0]])] = find(cycleOf[joint[1]])
 	}
 
 	numbered := make(map[int]int, cycles)

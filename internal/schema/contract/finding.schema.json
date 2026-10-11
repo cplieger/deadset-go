@@ -138,7 +138,7 @@
       "type": "boolean"
     },
     "component": {
-      "description": "The dead component the subject belongs to: its root members and every dead symbol that falls with them, a symbol falling with a root when it is dead only through it. A component is a weakly connected part of the dead symbols: a dead symbol, every dead symbol it references and every dead symbol that references it belong to one component, so two roots whose deletions share a dead symbol are root members of one component. A declaration of a test file is a member only when it is reported under DS1005; no other test-file declaration belongs to a component, so its references join no two components and make no member a non-root, and a cluster only tests reach is rooted at a declaration outside the test files. A finding about a symbol that falls with a root names that root's component, so every finding one deletion removes carries one identifier, a report is worked from its roots, and one deletion removes a cluster. A finding whose subject belongs to no dead component, being a declaration the analysis holds live, a part of a declaration or a row of a document, names a component the analyzer mints for that subject alone: one root member, the subject, with symbol_count 1 and deletable_lines 0. A component minted for an interface of test-support code that test code references holds the interface's members as well, which fall with it, so its symbol_count counts them and its deletable_lines stays 0.",
+      "description": "The dead component the subject belongs to: its root members and every dead symbol that falls with them, a symbol falling with a root when it is dead only through it. A component is a weakly connected part of the dead symbols: a dead symbol, every dead symbol it references and every dead symbol that references it belong to one component, so two roots whose deletions share a dead symbol are root members of one component. Two dead declarations belong to one component as well where the second is a dependent of the first that grammar/analysis.md \"Fixability\" names and the first is not held, because deleting the first alone changes the second's value. That joint is no reference, so it makes no member a non-root member. A declaration that rule holds, a positional member, a dead declaration a held declaration references, or a dead declaration of which a held declaration is a dependent, shares no component with a dead symbol that is not held: the held declarations form components of their own over the references among them, which remove no line. A declaration of a test file is a member only when it is reported under DS1005; no other test-file declaration belongs to a component, so its references join no two components and make no member a non-root, and a cluster only tests reach is rooted at a declaration outside the test files. A finding about a symbol that falls with a root names that root's component, so every finding one deletion removes carries one identifier, a report is worked from its roots, and one deletion removes a cluster. A finding whose subject belongs to no dead component, being a declaration the analysis holds live, a part of a declaration or a row of a document, names a component the analyzer mints for that subject alone: one root member, the subject, with symbol_count 1 and deletable_lines 0. A component minted for an interface of test-support code that test code references holds the interface's members as well, which fall with it, so its symbol_count counts them and its deletable_lines stays 0.",
       "type": "object",
       "additionalProperties": false,
       "required": ["id", "root", "symbol_count", "deletable_lines"],
@@ -158,7 +158,7 @@
           "minimum": 1
         },
         "deletable_lines": {
-          "description": "The number of source lines the deletion of the component removes: the number of distinct source lines the declarations symbol_count counts span, each from its first line to its last, so a line two of them share, such as a field's line inside its struct, counts once. A component minted for a subject that belongs to no dead component removes no line, so its value is 0 whatever the subject spans.",
+          "description": "The number of source lines the deletion of the component removes: the number of distinct source lines the declarations symbol_count counts span, each from its first line to its last, so a line two of them share, such as a field's line inside its struct, counts once. A component minted for a subject that belongs to no dead component, and a component of the declarations grammar/analysis.md \"Fixability\" holds, remove no line, so the value is 0 whatever the subject spans.",
           "type": "integer",
           "minimum": 0
         },
@@ -203,7 +203,7 @@
       }
     },
     "fixability": {
-      "description": "What a mechanical edit may do with the finding, drawn from the fixabilities field of contract/kinds.json: deletable, narrowable, manual, or none where nothing mechanical acts on it.",
+      "description": "What a mechanical edit may do with the finding, drawn from the fixabilities field of contract/kinds.json: the fixability that file gives the finding's kind, a value the kind's finding_fixabilities lists where grammar/analysis.md gives the finding that value, or none for a finding in a generated file. The values are deletable, narrowable, manual, and none where nothing mechanical acts on the finding.",
       "type": "string",
       "enum": ["deletable", "narrowable", "manual", "none"]
     },
@@ -349,6 +349,10 @@
             "type": "string",
             "minLength": 1
           }
+        },
+        "name_literal": {
+          "description": "The position of the first string literal in a production file of the target whose value equals the subject's name, or for a package-level constant the name of its defined type, which lowered the finding's reachability class to possible, so a reader sees which text a source-reading tool may find the declaration by. Carried only under the codes the name-literal rule of grammar/analysis.md lists, and only where that rule lowered the class. A SARIF result carries it as a related location.",
+          "$ref": "#/$defs/position"
         }
       }
     }
@@ -646,6 +650,46 @@
               "anyOf": [
                 {
                   "required": ["overlap"]
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["code"],
+        "properties": {
+          "code": {
+            "enum": ["DS1001", "DS1002", "DS1004", "DS1006", "DS1101", "DS1102", "DS1103"]
+          }
+        }
+      },
+      "then": {
+        "if": {
+          "required": ["details"],
+          "properties": {
+            "details": {
+              "required": ["name_literal"]
+            }
+          }
+        },
+        "then": {
+          "properties": {
+            "reachability_class": {
+              "const": "possible"
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "details": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": ["name_literal"]
                 }
               ]
             }

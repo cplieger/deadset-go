@@ -70,7 +70,7 @@ Keys this analyzer reads nothing from. It validates each one and prints it in th
 | `ts.lifecycle_contracts` | array of objects | `[]` | The TypeScript analyzer's: one framework's lifecycle contract per entry, naming its `components`, its `bases` and the `members` the framework calls |
 | `ts.serializers` | array of declaration entries | `[]` | The TypeScript analyzer's: the declarations whose call reads its arguments' data members by name |
 
-A declaration entry names one declaration by `symbol`, by `module` and `name`, or by `global`. The contract's [configuration schema](https://github.com/cplieger/deadset-spec/blob/v6.1.1/contract/config.schema.json) states each shape. `go` is the section this analyzer owns, and it declares no key in this contract version.
+A declaration entry names one declaration by `symbol`, by `module` and `name`, or by `global`. The contract's [configuration schema](https://github.com/cplieger/deadset-spec/blob/v7.0.0-dev.3/contract/config.schema.json) states each shape. `go` is the section this analyzer owns, and it declares no key in this contract version.
 
 A pattern in `roots.patterns` is matched against the reference of every symbol the analysis enumerates. In a pattern, `*` matches any run of characters including the solidus. `?` matches exactly one character, counted as a Unicode code point, and no other character is special. An entry holding neither wildcard matches only the symbol whose reference it spells exactly. An entry that matches nothing is reported as `DS1704`.
 
@@ -106,7 +106,7 @@ The rest belong to the invocation and commit nothing to a configuration file:
 
 - `--report` names the path the JSON report is written to.
 - `--format` names one rendering written beside the report, and repeats. Naming any format replaces the default `text` rendering, so add `--format=text` to keep it.
-- `--template` names the file the template rendering reads. The file holds a template in the contract's [template subset](https://github.com/cplieger/deadset-spec/blob/v6.1.1/contract/grammar/template.md), which runs over the JSON report and names its members as the report spells them. A file that cannot be read or does not parse refuses the invocation with 2 before any analysis, and a rendering that fails exits 3 with the report already written.
+- `--template` names the file the template rendering reads. The file holds a template in the contract's [template subset](https://github.com/cplieger/deadset-spec/blob/v7.0.0-dev.3/contract/grammar/template.md), which runs over the JSON report and names its members as the report spells them. A file that cannot be read or does not parse refuses the invocation with 2 before any analysis, and a rendering that fails exits 3 with the report already written.
 - `--baseline-write` names the path a baseline recording the findings of the target is written to.
 - `--exit-code=off` writes every document and exits clean.
 
@@ -116,7 +116,7 @@ No verb accepts a flag that asks for a source edit. A flag whose name carries `f
 
 ## Suppressing a finding
 
-Three mechanisms, all of them requiring a reason. The grammar is stated in full in the contract's [suppression page](https://github.com/cplieger/deadset-spec/blob/v6.1.1/contract/grammar/suppression.md).
+Three mechanisms, all of them requiring a reason. The grammar is stated in full in the contract's [suppression page](https://github.com/cplieger/deadset-spec/blob/v7.0.0-dev.3/contract/grammar/suppression.md).
 
 ### Inline directive
 
@@ -125,6 +125,15 @@ An inline directive is the first token of a `//` line comment above or beside th
 ```go
 //deadset:ignore DS1001 -- Kept for the v3 API promise; removing it is a major bump.
 ```
+
+| Where the directive sits | What it binds |
+| --- | --- |
+| Alone on the line immediately above the line where a declaration begins | That declaration |
+| After the code on the line where a declaration begins | That declaration |
+| Alone on the line immediately above a parameter or result on a later line of a wrapped signature | The function that declares the parameter or result |
+| After a parameter or result on a later line of a wrapped signature, on that line | The function that declares the parameter or result |
+
+A directive anywhere else binds nothing and is reported as a stale suppression. That covers a directive two lines up, one below the declaration, one beside code where no declaration begins, and one above another comment.
 
 Both `//deadset:ignore` and `// deadset:ignore` parse to the same directive. The separator is exactly `--`, and the reason is everything after it to the end of the line.
 
@@ -148,17 +157,19 @@ The ignore file is `deadset-ignore.json` at the target root. An absent file is a
 
 An entry matches only when its code, its symbol reference and its path all equal the finding's own. An entry supports no glob, regular expression, bare name or substring match. So an adjudication written for one symbol in one file masks nothing else.
 
+An entry can also keep a `DS1601` or `DS1605` finding about a requirement or a `replace` directive of `go.mod`, named by the `symbol.ref` and `position.path` the finding carries. An entry or a baseline row whose `symbol` starts with `ts://` belongs to the TypeScript analyzer: this analyzer checks its form, and it binds nothing here and is never reported stale here.
+
 ### Baseline
 
 The baseline is `deadset-baseline.json` at the target root, written by `--baseline-write` and read back by a later run. It records a finding set so that only a finding absent from it fails the run, which is a ratchet on the total rather than an adjudication of any one finding. The write analyzes the target with no baseline read, then again with the rows recorded so far read back. Each round records the findings it exposes and removes every row it reports stale, and the write stops when a round records and removes nothing.
 
-The document read back on the tree it was written from then reports no finding a row can withhold and no stale row. No row is recorded for a finding about a row of a document, which no record binds to. Such a finding fails a run after the baseline is written as it did before.
+The document read back on the tree it was written from then reports no finding a row can withhold and no stale row. No row is recorded for a finding about a file, a suppression record or a configured root, which no record binds to. Such a finding fails a run after the baseline is written as it did before. A dependency finding gets its row. A write keeps every `ts://` row the document holds, after the `go://` rows, so the two analyzers can share one baseline.
 
 ### Rules for all three
 
 Four rules bind all three mechanisms:
 
-- A record binds to a declaration. A part of a declaration, which is a parameter, a receiver, a result, a statement, a store or a case, is suppressed through the declaration its own reference names. The record withholds the part's finding without marking that declaration live. A directive for a parameter declared on the function's first line sits above the function. One for a parameter on a later line of a wrapped signature sits above that parameter, inside the list. A finding about a record of a document, rather than about a declaration of the program, has no suppression at all. Such a record is a requirement or a `replace` directive of the module file, a file no configuration built, a suppression record or a configured root. An entry naming one matches nothing and is reported as `DS1703`. The remedy there is the change the finding names, `go mod tidy` for an unused requirement and deleting a `replace` that redirects nothing, or setting the severity of its code to `allow`.
+- A record binds to a declaration. A part of a declaration, which is a parameter, a receiver, a result, a statement, a store or a case, is suppressed through the declaration its own reference names. The record withholds the part's finding without marking that declaration live. A directive for a parameter declared on the function's first line sits above the function. One for a parameter on a later line of a wrapped signature sits above that parameter, inside the list. A finding about a file no configuration built, a suppression record or a configured root has no suppression at all. An entry naming one matches nothing and is reported as `DS1703`. The remedy there is the change the finding names, or setting the severity of its code to `allow`. A finding about a requirement or a `replace` directive of the module file is kept only by an ignore entry or a baseline row, never by a directive. Its other remedies are `go mod tidy` for an unused requirement and deleting a `replace` that redirects nothing.
 - A record with no reason is refused and reported as `DS1701`. The refusal binds nothing, so the finding it was meant to cover stays reported beside it.
 - An ignore entry or baseline row naming a symbol and no path is refused and reported as `DS1702`. A record lacking both is two findings at one position.
 - A record that matched no current finding is reported as `DS1703` and fails the run.

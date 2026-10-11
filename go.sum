@@ -1,5 +1,5 @@
-github.com/cplieger/deadset-spec/v7 v7.0.0-dev.2 h1:2XZ/prQOftvUH2CbrClxgk9dQducfSOUm1xHw8uQBo4=
-github.com/cplieger/deadset-spec/v7 v7.0.0-dev.2/go.mod h1:OMwDC+/ryuwwuL81JeM2CdI1dwav6AwkKn6UUDgvqFM=
+github.com/cplieger/deadset-spec/v7 v7.0.0-dev.3 h1:yN38LHDCGAQx9FjfRhC2bOye0R6DxoWfqpw0+YBg5NE=
+github.com/cplieger/deadset-spec/v7 v7.0.0-dev.3/go.mod h1:OMwDC+/ryuwwuL81JeM2CdI1dwav6AwkKn6UUDgvqFM=
 github.com/google/go-cmp v0.6.0 h1:ofyhxvXcZhMsU5ulbFiLKl/XBFqE1GSq7atu8tAmTRI=
 github.com/google/go-cmp v0.6.0/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
 github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 h1:1EYB5IzjZawrrnELUi78f9fPu57HuXjmddZPjrls/28=

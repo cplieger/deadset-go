@@ -11,10 +11,7 @@
 // constraint only where they happen to, no configuration being invented to
 // satisfy one, and a configuration no file in the tree names is never derived.
 // The completeness of a matrix is the configuration document's assertion
-// (analysis.matrix.complete), which derivation neither reads nor sets. The
-// findings pass reads Unreachable for DS1501 and reports nothing from it unless
-// the configuration declares the matrix complete, because a file derivation
-// could not reach is no evidence that nothing builds it.
+// (analysis.matrix.complete), which derivation neither reads nor sets.
 package matrix
 
 import (
@@ -51,19 +48,6 @@ type Derived struct {
 	// never one: a target that does not build where the run is has nothing to
 	// analyse.
 	Guessed []string
-
-	// TaggedTests holds every test file no configuration of the derived matrix
-	// builds whose constraint names a tag only test files name, each with the
-	// tags it names. A tag only tests need derives no configuration: building
-	// those tests is a configuration the project declares.
-	TaggedTests []taggedTest
-}
-
-// taggedTest is one test file no configuration of the derived matrix builds,
-// because its constraint names a tag only test files name.
-type taggedTest struct {
-	Path string   // target-relative, forward slashes
-	Tags []string // the test-only tags its constraint names, sorted
 }
 
 // Derive reads the module tree rooted at root and returns the matrix its build
@@ -83,75 +67,25 @@ func derive(root string, host load.Configuration) (Derived, error) {
 	if err != nil {
 		return Derived{}, err
 	}
-	atoms := atomsOf(files)
-	testOnly := testOnlyTags(files, atoms)
-	deriving := atoms
-	deriving.Tags = slices.DeleteFunc(slices.Clone(atoms.Tags), func(tag string) bool { return testOnly[tag] })
-	configurations := configurationsOf(host, deriving)
+	configurations := configurationsOf(host, atomsOf(files))
 	return Derived{
 		Configurations: configurations,
 		Guessed:        guessedIn(configurations, host),
-		TaggedTests:    taggedTests(files, unreachableUnder(files, configurations), testOnly),
 	}, nil
 }
 
-// testOnlyTags is every tag of atoms that test files name and no other file does.
-func testOnlyTags(files []fileConstraint, atoms atomSet) map[string]bool {
-	inTests, elsewhere := make(map[string]bool), make(map[string]bool)
-	for _, file := range files {
-		if isTestFile(file.path) {
-			collectTags(file.expr(), inTests)
-		} else {
-			collectTags(file.expr(), elsewhere)
-		}
-	}
-	held := make(map[string]bool)
-	for _, tag := range atoms.Tags {
-		if inTests[tag] && !elsewhere[tag] {
-			held[tag] = true
-		}
-	}
-	return held
-}
-
-// taggedTests is every unreachable test file whose constraint names a test-only tag.
-func taggedTests(files []fileConstraint, unreachable []string, testOnly map[string]bool) []taggedTest {
-	missing := make(map[string]bool, len(unreachable))
-	for _, path := range unreachable {
-		missing[path] = true
-	}
-	var held []taggedTest
-	for _, file := range files {
-		if !missing[file.path] || !isTestFile(file.path) {
-			continue
-		}
-		named := make(map[string]bool)
-		collectTags(file.expr(), named)
-		var tags []string
-		for tag := range named {
-			if testOnly[tag] {
-				tags = append(tags, tag)
-			}
-		}
-		if len(tags) > 0 {
-			slices.Sort(tags)
-			held = append(held, taggedTest{Path: file.path, Tags: tags})
-		}
-	}
-	return held
-}
-
-// isTestFile reports whether a target-relative path names a test file.
-func isTestFile(path string) bool {
-	return strings.HasSuffix(path, "_test.go")
-}
-
-// atomsOf classifies every tag the files name onto the axis it belongs to.
+// atomsOf classifies every tag the files name onto the axis it belongs to. A test
+// file's tags count as any file's. A file built only under the ignore tag names no
+// atom, and the ignore tag is never one, so no derived configuration sets it.
 func atomsOf(files []fileConstraint) atomSet {
 	named := make(map[string]bool)
 	for _, file := range files {
+		if OnlyUnderIgnore(file.expr()) {
+			continue
+		}
 		collectTags(file.expr(), named)
 	}
+	delete(named, ignoreTag)
 
 	var atoms atomSet
 	for name := range named {
@@ -230,28 +164,4 @@ func guessedIn(configurations []load.Configuration, host load.Configuration) []s
 		}
 	}
 	return guessed
-}
-
-// unreachableUnder returns the path of every file no configuration of the matrix
-// builds, in the order the tree was read.
-func unreachableUnder(files []fileConstraint, configurations []load.Configuration) []string {
-	answers := make([]func(tag string) bool, len(configurations))
-	for i, c := range configurations {
-		answers[i] = satisfies(c)
-	}
-
-	var unreachable []string
-	for _, file := range files {
-		expression := file.expr()
-		if expression == nil {
-			continue
-		}
-		built := slices.ContainsFunc(answers, func(satisfied func(tag string) bool) bool {
-			return expression.Eval(satisfied)
-		})
-		if !built {
-			unreachable = append(unreachable, file.path)
-		}
-	}
-	return unreachable
 }

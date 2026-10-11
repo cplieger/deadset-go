@@ -622,7 +622,7 @@ func TestTheShapeTableIsTheContractsLivenessAbsenceList(t *testing.T) {
 			theMergesSubject, got)
 	}
 	for kind, held := range shapes {
-		if held != shapePart && held != shapeRow {
+		if held != shapePart && held != shapeRow && held != shapeDependency {
 			t.Errorf("the shape table gives %q the declaration shape, want a part or a row: the table holds the exception rather than the rule",
 				kind)
 		}
@@ -657,8 +657,9 @@ func corpusSubjectShapes(t *testing.T) map[string]shape {
 	}
 	var document struct {
 		SubjectShapes struct {
-			Part []string `json:"part"`
-			Row  []string `json:"row"`
+			Part       []string `json:"part"`
+			Row        []string `json:"row"`
+			Dependency []string `json:"dependency"`
 		} `json:"subject_shapes"`
 	}
 	if err := json.Unmarshal(body, &document); err != nil {
@@ -675,18 +676,17 @@ func corpusSubjectShapes(t *testing.T) map[string]shape {
 	for _, kind := range document.SubjectShapes.Row {
 		held[kind] = shapeRow
 	}
+	for _, kind := range document.SubjectShapes.Dependency {
+		held[kind] = shapeDependency
+	}
 	return held
 }
 
-// TestTheShapeTableIsTheCorpusShapeTable holds this table against the reading the
-// Contract's corpus publishes of the same fact.
-//
-// The corpus publishes the table because what a suppression record can bind to follows
-// from it: a record binds to a declaration, a part is suppressed through the
-// declaration its own reference names, and a row has no suppression at all. The corpus
-// runner reads the corpus's copy so that an amendment moves it without an edit, which
-// leaves the two readings to agree, and a drift between them would change what a corpus
-// run measures without changing what any report says.
+// TestTheShapeTableIsTheCorpusShapeTable holds this table against the corpus's
+// reading of the same fact, which decides what a suppression record binds to: a
+// declaration, a part through its declaration's reference, a dependency row by its
+// reference and path, and no other row. The corpus runner reads the corpus's copy,
+// so a drift between the two would change what a corpus run measures unseen.
 func TestTheShapeTableIsTheCorpusShapeTable(t *testing.T) {
 	t.Parallel()
 

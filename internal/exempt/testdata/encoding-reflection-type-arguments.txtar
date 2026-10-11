@@ -1,0 +1,149 @@
+A command whose types reach destinations only as type arguments: a generic of a
+dependency package that imports encoding/json, through a generic function of the
+program, a generic method and a generic type; a generic of a dependency package that
+imports no decoder; reflect.TypeFor; and a generic function of the program that
+decodes into a value of its type parameter. A generic of the program's own package,
+which imports encoding/json, decodes nothing, and further generics of the program,
+a function and a generic type's method, hand their type parameter on.
+
+-- go.mod --
+module example.com/typeargs
+
+go 1.27.0
+
+require example.com/dep v0.0.0
+
+replace example.com/dep => ./dep
+-- main.go --
+package main
+
+import (
+	"encoding/json"
+	"reflect"
+
+	"example.com/dep"
+	"example.com/dep/plain"
+)
+
+type flexA int
+
+func (*flexA) UnmarshalJSON([]byte) error { return nil }
+
+type flexB int
+
+func (*flexB) UnmarshalJSON([]byte) error { return nil }
+
+type flexC int
+
+func (*flexC) UnmarshalJSON([]byte) error { return nil }
+
+type flexD int
+
+func (*flexD) UnmarshalJSON([]byte) error { return nil }
+
+type flexE int
+
+func (*flexE) UnmarshalJSON([]byte) error { return nil }
+
+type itemA struct{ F flexA }
+
+type itemB struct{ F flexB }
+
+type itemC struct{ F flexC }
+
+type other struct {
+	F flexD
+	P *int
+}
+
+type local struct{ F flexE }
+
+type flexF int
+
+func (*flexF) UnmarshalJSON([]byte) error { return nil }
+
+type flexG int
+
+func (*flexG) UnmarshalJSON([]byte) error { return nil }
+
+type flexH int
+
+func (*flexH) UnmarshalJSON([]byte) error { return nil }
+
+type held struct{ F flexF }
+
+type itemG struct{ F flexG }
+
+type itemH struct{ F flexH }
+
+func hold[T any](t T) T { return t }
+
+func outerGet[T any]() (T, error) { return get[T]() }
+
+type loader[T any] struct{}
+
+func (loader[T]) load() (T, error) { return dep.Fetch[T](nil) }
+
+type shadow struct {
+	Tagged string `json:"tagged"`
+}
+
+func get[T any]() (T, error) { return dep.Fetch[T](nil) }
+
+func decode[T any](b []byte) (T, error) {
+	var v T
+	err := json.Unmarshal(b, &v)
+	return v, err
+}
+
+func main() {
+	_, _ = get[itemA]()
+	_, _ = (&dep.Client{}).Get[itemB]()
+	_, _ = dep.Stream[itemC]{}.Next()
+	_ = plain.Keep(other{P: new(int)})
+	_ = hold(held{})
+	_, _ = outerGet[itemG]()
+	_, _ = loader[itemH]{}.load()
+	_, _ = decode[local](nil)
+	println(reflect.TypeFor[shadow]().NumField())
+}
+-- dep/go.mod --
+module example.com/dep
+
+go 1.27.0
+-- dep/dep.go --
+package dep
+
+import (
+	"encoding/json"
+	"io"
+)
+
+// Fetch decodes one value.
+func Fetch[T any](r io.Reader) (T, error) {
+	var v T
+	err := json.NewDecoder(r).Decode(&v)
+	return v, err
+}
+
+// Client fetches values.
+type Client struct{}
+
+// Get fetches one value.
+func (*Client) Get[T any]() (T, error) { return Fetch[T](nil) }
+
+// Stream yields values.
+type Stream[T any] struct{}
+
+// Next yields one value.
+func (Stream[T]) Next() (T, error) { return Fetch[T](nil) }
+-- dep/plain/plain.go --
+package plain
+
+import "strings"
+
+// Keep hands its argument back.
+func Keep[T any](t T) T { return t }
+
+// Upper is the upper case of s.
+func Upper(s string) string { return strings.ToUpper(s) }

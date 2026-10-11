@@ -1,0 +1,37 @@
+Constant groups of every shape a deletion can renumber: a repeated list, a later
+iota, an expressionless specification of two names, blank names and a group
+whose last specification writes a constant.
+
+-- go.mod --
+module example.com/groups
+
+go 1.27
+-- groups.go --
+package groups
+
+type phase uint8
+
+const (
+	idle phase = iota
+	running
+	_
+)
+
+const (
+	limit = 5
+	spare
+	fixed = 9
+)
+
+const (
+	pairA, pairB = 1, 2
+	deadPair, livePair
+)
+
+const (
+	base   = 7
+	spacer = 100
+	tail   = iota
+)
+
+const single = 3

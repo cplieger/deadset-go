@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/cplieger/deadset-go/internal/graph"
 )
 
 // sources parses and type-checks the packages outside the analysed program whose
@@ -186,9 +188,10 @@ func (a *assertable) literals(pkg *types.Package) []*types.Interface {
 }
 
 // asserted is every interface one package outside the program asserts: the interface
-// type of each type assertion and each type switch case its source writes, wherever
-// it stands and whatever value it asserts on, read from the directory the package
-// was compiled from. A case naming a type that is no interface asserts nothing.
+// type of each type assertion and each type switch case its source writes, and the
+// interface of each errors.As and errors.AsType call there, wherever it stands and
+// whatever value it asserts on, read from the directory the package was compiled
+// from. A case naming a type that is no interface asserts nothing.
 func (a *assertable) asserted(pkg *types.Package) []*types.Interface {
 	if held, known := a.assertions[pkg.Path()]; known {
 		return held
@@ -205,8 +208,8 @@ func (a *assertable) asserted(pkg *types.Package) []*types.Interface {
 	local := localizer{pkg: pkg}
 	var found []*types.Interface
 	for _, file := range source.files {
-		for _, expr := range assertedTypes(file) {
-			if iface, stated := local.assertedInterface(source.info.TypeOf(expr)); stated {
+		for _, asserted := range assertedTypes(file, source.info) {
+			if iface, stated := local.assertedInterface(asserted); stated {
 				found = append(found, iface)
 			}
 		}
@@ -215,25 +218,39 @@ func (a *assertable) asserted(pkg *types.Package) []*types.Interface {
 	return found
 }
 
-// assertedTypes is the type expression of every type assertion and every type switch
-// case one file writes. A case of an expression switch is no assertion.
-func assertedTypes(file *ast.File) []ast.Expr {
-	var found []ast.Expr
+// assertedTypes is the type every type assertion and every type switch case one file
+// writes names, and the target type of every errors.As and errors.AsType call it
+// writes. A case of an expression switch is no assertion.
+func assertedTypes(file *ast.File, info *types.Info) []types.Type {
+	var found []types.Type
 	ast.Inspect(file, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.TypeAssertExpr:
 			if n.Type != nil {
-				found = append(found, n.Type)
+				found = append(found, info.TypeOf(n.Type))
 			}
 		case *ast.TypeSwitchStmt:
-			for _, stmt := range n.Body.List {
-				if clause, isCase := stmt.(*ast.CaseClause); isCase {
-					found = append(found, clause.List...)
-				}
+			found = append(found, caseTypes(n, info)...)
+		case *ast.CallExpr:
+			if target := graph.ErrorsAsTarget(info, n); target != nil {
+				found = append(found, target)
 			}
 		}
 		return true
 	})
+	return found
+}
+
+// caseTypes is the type every case of one type switch names.
+func caseTypes(n *ast.TypeSwitchStmt, info *types.Info) []types.Type {
+	var found []types.Type
+	for _, stmt := range n.Body.List {
+		if clause, isCase := stmt.(*ast.CaseClause); isCase {
+			for _, expr := range clause.List {
+				found = append(found, info.TypeOf(expr))
+			}
+		}
+	}
 	return found
 }
 

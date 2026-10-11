@@ -1,0 +1,17 @@
+One main package whose table spells the name of an unexported constant nothing
+references, carrying a directive. The literal lowers the constant's finding to the
+class possible, so a run at the default minimum confidence withholds it.
+
+-- go.mod --
+module example.com/selfchecknames
+
+go 1.27.1
+-- main.go --
+package main
+
+var table = map[string]int{"pinned": 1}
+
+func main() { println(len(table)) }
+
+//deadset:ignore DS1002 -- a generator reads this constant by parsing the file
+const pinned = "1b85a37"

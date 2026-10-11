@@ -316,6 +316,7 @@ func EncodingReflectionDetector(in *Input) ([]graph.Exemption, error) {
 		assert:         assert,
 		satisfying:     make(map[satisfactionKey]map[string]bool),
 		methodNames:    make(map[*types.Named]map[string]bool),
+		typeArgs:       typeArgumentsOf(programPackages(in.Result)),
 	}
 	f.decode = newDecoders(f, assert.source)
 	f.edge = newBoundary(in, f.namedDestinationParameter)
@@ -329,11 +330,15 @@ func EncodingReflectionDetector(in *Input) ([]graph.Exemption, error) {
 	if err := f.walkReturns(); err != nil {
 		return nil, err
 	}
+	if err := f.walkTypeArguments(); err != nil {
+		return nil, err
+	}
 	return f.kept.exemptions(), nil
 }
 
 // encodingFlow accumulates the class over one loaded configuration.
 type encodingFlow struct {
+	typeArgs    *typeArguments
 	kept        *retention
 	edge        *boundary
 	stored      *storedTypes
@@ -418,7 +423,7 @@ func (f *encodingFlow) walkFile(info *types.Info, file *ast.File) error {
 				failed = f.arguments(info, enclosing, call.Args, &d)
 				return failed == nil
 			}
-			failed = f.crossingArguments(info, call)
+			failed = f.crossingArguments(info, enclosing, call)
 			return failed == nil
 		})
 		if failed != nil {
@@ -432,7 +437,7 @@ func (f *encodingFlow) walkFile(info *types.Info, file *ast.File) error {
 // program, which the boundary's crossing test decides argument by argument. What is
 // retained is what the boundary carries for the callee, and the detail names the
 // immediate callee, so a wrapper's caller reads the wrapper's name.
-func (f *encodingFlow) crossingArguments(info *types.Info, call *ast.CallExpr) error {
+func (f *encodingFlow) crossingArguments(info *types.Info, enclosing *types.Func, call *ast.CallExpr) error {
 	callee, _ := resolveObject(info, call.Fun).(*types.Func)
 	for i, arg := range call.Args {
 		if at, supplies := parameterAt(callee.Signature(), i); supplies && !f.edge.declares(callee) {
@@ -444,7 +449,7 @@ func (f *encodingFlow) crossingArguments(info *types.Info, call *ast.CallExpr) e
 				continue
 			}
 		}
-		if err := f.crossingArgument(info, call, i); err != nil {
+		if err := f.crossingArgument(info, enclosing, call, i); err != nil {
 			return err
 		}
 	}
@@ -452,9 +457,10 @@ func (f *encodingFlow) crossingArguments(info *types.Info, call *ast.CallExpr) e
 }
 
 // crossingArgument records what the argument at position i of one call carries out
-// of the analysed program: its own struct value, and the types it reaches of its
-// own ([encodingFlow.ownTypes]).
-func (f *encodingFlow) crossingArgument(info *types.Info, call *ast.CallExpr, i int) error {
+// of the analysed program: its own struct value, the types it reaches of its own
+// ([encodingFlow.ownTypes]), and each struct value an interface-typed local or call
+// result holds ([storedTypes.held]); a parameter's values cross at its callers' sites.
+func (f *encodingFlow) crossingArgument(info *types.Info, enclosing *types.Func, call *ast.CallExpr, i int) error {
 	out, sinks := f.edge.sinkOf(info, call, i)
 	if !sinks {
 		return nil
@@ -464,6 +470,11 @@ func (f *encodingFlow) crossingArgument(info *types.Info, call *ast.CallExpr, i 
 	flowing := f.ownTypes(info, arg)
 	if at := info.TypeOf(arg); at != nil && carriesStruct(at) {
 		flowing = append(flowing, at)
+	}
+	for _, held := range f.stored.held(info, enclosing, arg) {
+		if carriesStruct(held) {
+			flowing = append(flowing, held)
+		}
 	}
 	for _, t := range flowing {
 		if err := f.retain(t, arg.Pos(), &d); err != nil {
@@ -588,7 +599,8 @@ func (f *encodingFlow) arguments(info *types.Info, enclosing *types.Func, args [
 		if err := f.retain(at, arg.Pos(), d); err != nil {
 			return err
 		}
-		for _, stored := range append(f.stored.argument(info, enclosing, arg), f.ownTypes(info, arg)...) {
+		for _, stored := range slices.Concat(f.stored.argument(info, enclosing, arg), f.stored.value(info, enclosing, arg),
+			f.ownTypes(info, arg)) {
 			if err := f.retain(stored, arg.Pos(), d); err != nil {
 				return err
 			}
@@ -723,12 +735,16 @@ func (f *encodingFlow) retain(t types.Type, at token.Pos, d *destination) error 
 	if err != nil {
 		return err
 	}
-	reached := f.encoderReach(t)
-	if d.reach.storesOnly() {
-		reached = concreteTypes(namedTypesReached(t))
-	}
-	for _, named := range reached {
-		f.members(named, site, d)
+	// A value of a type parameter's type is a value of each type argument the
+	// program instantiates the parameter with.
+	for _, one := range append([]types.Type{t}, f.typeArgs.bindings(t)...) {
+		reached := f.encoderReach(one)
+		if d.reach.storesOnly() {
+			reached = concreteTypes(namedTypesReached(one))
+		}
+		for _, named := range reached {
+			f.members(named, site, d)
+		}
 	}
 	return nil
 }
@@ -752,17 +768,13 @@ func (f *encodingFlow) members(named *types.Named, site evidence, d *destination
 
 // fields records the fields of one struct a destination reads, and those of each
 // struct type with no name a field it visits holds, whose fields are symbols of the
-// type that holds the struct.
+// type that holds the struct. An exported, a tagged and an embedded struct field are
+// visited (https://pkg.go.dev/encoding/json#Marshal).
 func (f *encodingFlow) fields(st *types.Struct, site evidence, d *destination) {
 	for i := range st.NumFields() {
 		field := st.Field(i)
-		visited := (field.Exported() || st.Tag(i) != "") && !d.reach.keys.skips(st.Tag(i))
-		switch {
-		case d.reach.fields && visited:
-			f.kept.record(field, site, d.detail)
-		case d.reach.xmlName && field.Name() == xmlNameField && isXMLName(field.Type()):
-			f.kept.record(field, site, d.detail)
-		case d.reach.holders && visited && holdsValue(field.Type()) && f.written()[f.edge.sites.of(field)]:
+		visited := (field.Exported() || st.Tag(i) != "" || embedsStruct(field)) && !d.reach.keys.skips(st.Tag(i))
+		if f.reads(field, visited, d) {
 			f.kept.record(field, site, d.detail)
 		}
 		if !visited {
@@ -773,6 +785,25 @@ func (f *encodingFlow) fields(st *types.Struct, site evidence, d *destination) {
 			f.fields(held, site, d)
 		}
 	}
+}
+
+// reads reports whether one destination reads one field: a field it visits where it
+// reads fields, an XML decoder's XMLName, or a written holder a decoder fills through.
+func (f *encodingFlow) reads(field *types.Var, visited bool, d *destination) bool {
+	switch {
+	case d.reach.fields && visited:
+		return true
+	case d.reach.xmlName && field.Name() == xmlNameField && isXMLName(field.Type()):
+		return true
+	default:
+		return d.reach.holders && visited && holdsValue(field.Type()) && f.written()[f.edge.sites.of(field)]
+	}
+}
+
+// embedsStruct reports whether one field is an embedded struct or pointer to one,
+// whose fields an encoder promotes whether or not the embedded type is exported.
+func embedsStruct(field *types.Var) bool {
+	return field.Embedded() && isStructValue(field.Type())
 }
 
 // xmlNameField is the field an XML decoder compares with the element's name.
