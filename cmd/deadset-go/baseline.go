@@ -25,7 +25,7 @@ func baselineReader(rows *[]suppress.Recorded) func(string, []graph.Symbol) ([]s
 	}
 	return func(_ string, symbols []graph.Symbol) ([]suppress.Record, []suppress.Refusal, error) {
 		var body bytes.Buffer
-		if err := suppress.WriteBaseline(&body, *rows, baselineProvenance()); err != nil {
+		if err := suppress.WriteBaseline(&body, *rows, baselineProvenance(), nil); err != nil {
 			return nil, nil, err
 		}
 		return suppress.BaselineDocument(body.Bytes(), symbols)

@@ -14,8 +14,12 @@ type storeNode struct {
 	param int // the parameter's index, or placeNode
 }
 
-// placeNode marks a node that is no parameter.
-const placeNode = -1
+// placeNode marks a node that is no parameter, and resultNode the first result of a
+// function: result i is resultNode - i.
+const (
+	placeNode  = -1
+	resultNode = -2
+)
 
 // storedTypes is, per place of the analysed program that is an interface or holds one
 // as its element or map value, the concrete types the program stores in it. A place
@@ -26,6 +30,11 @@ type storedTypes struct {
 	direct map[storeNode][]types.Type
 	from   map[storeNode][]storeNode
 	memo   map[storeNode][]types.Type
+
+	// called is every identifier a call names as its callee, and valued every
+	// function or method of the program some other identifier uses as a value.
+	called map[*ast.Ident]bool
+	valued map[*types.Func]bool
 }
 
 // storedValue is what one expression carries into a place: a concrete type, or the
@@ -39,8 +48,9 @@ type storedValue struct {
 // them.
 type storeWalk struct {
 	*storedTypes
-	info *types.Info
-	fn   *types.Func
+	info      *types.Info
+	fn        *types.Func
+	inLiteral map[*ast.ReturnStmt]bool // the returns of the declaration's function literals
 }
 
 // storedTypesOf reads every store of the analysed program into a place that holds an
@@ -56,6 +66,8 @@ func storedTypesOf(in *Input, sites *declarationSites) *storedTypes {
 		direct: make(map[storeNode][]types.Type),
 		from:   make(map[storeNode][]storeNode),
 		memo:   make(map[storeNode][]types.Type),
+		called: make(map[*ast.Ident]bool),
+		valued: make(map[*types.Func]bool),
 	}
 	for _, p := range programPackages(in.Result) {
 		if p.TypesInfo == nil {
@@ -63,12 +75,56 @@ func storedTypesOf(in *Input, sites *declarationSites) *storedTypes {
 		}
 		for _, file := range p.Syntax {
 			for _, decl := range file.Decls {
-				w := &storeWalk{storedTypes: s, info: p.TypesInfo, fn: enclosingFunc(p.TypesInfo, decl)}
+				w := &storeWalk{
+					storedTypes: s, info: p.TypesInfo, fn: enclosingFunc(p.TypesInfo, decl),
+					inLiteral: literalReturns(decl),
+				}
 				ast.Inspect(decl, w.visit)
 			}
 		}
 	}
+	s.linkIndirect()
 	return s
+}
+
+// indirectResult is the node of result i of a call, with n results, through a
+// function value: it holds what every function or method of the program used as a
+// value returns there, because which one the value is the analysis does not follow.
+func indirectResult(i, n int) storeNode {
+	return storeNode{at: token.Position{Filename: "<indirect>", Line: n}, param: resultNode - i}
+}
+
+// linkIndirect fills each indirect result node from the results of every function
+// or method of the program used as a value.
+func (s *storedTypes) linkIndirect() {
+	for fn := range s.valued {
+		results := fn.Signature().Results()
+		for i := range results.Len() {
+			if types.IsInterface(results.At(i).Type()) {
+				w := &storeWalk{storedTypes: s}
+				w.link(indirectResult(i, results.Len()), w.result(fn, i))
+			}
+		}
+	}
+}
+
+// literalReturns is every return statement of the function literals one declaration
+// holds, which return from the literal rather than from the declared function.
+func literalReturns(decl ast.Decl) map[*ast.ReturnStmt]bool {
+	held := make(map[*ast.ReturnStmt]bool)
+	ast.Inspect(decl, func(n ast.Node) bool {
+		if lit, isLit := n.(*ast.FuncLit); isLit {
+			ast.Inspect(lit.Body, func(inner ast.Node) bool {
+				if ret, isReturn := inner.(*ast.ReturnStmt); isReturn {
+					held[ret] = true
+				}
+				return true
+			})
+			return false
+		}
+		return true
+	})
+	return held
 }
 
 // enclosingFunc is the function one declaration declares, and nil for any other.
@@ -103,6 +159,36 @@ func (s *storedTypes) argument(info *types.Info, fn *types.Func, arg ast.Expr) [
 		return nil
 	}
 	return s.reaching(node)
+}
+
+// value is the concrete types one interface-typed argument expression carries: what
+// the program stores in the variable it names, or returns from the function whose
+// call it is, and nil for anything else.
+func (s *storedTypes) value(info *types.Info, fn *types.Func, arg ast.Expr) []types.Type {
+	if s == nil {
+		return nil
+	}
+	if t := info.TypeOf(arg); t == nil || !types.IsInterface(t) {
+		return nil
+	}
+	w := &storeWalk{storedTypes: s, info: info, fn: fn}
+	if held := w.valueOf(arg); held.from != nil {
+		return s.reaching(*held.from)
+	}
+	return nil
+}
+
+// held is [storedTypes.value] for an argument that names no parameter of fn: what a
+// local or a call carries, which no caller's argument records at its own site.
+func (s *storedTypes) held(info *types.Info, fn *types.Func, arg ast.Expr) []types.Type {
+	if s == nil {
+		return nil
+	}
+	w := &storeWalk{storedTypes: s, info: info, fn: fn}
+	if _, isParam := w.parameter(parameterNamed(info, arg)); isParam {
+		return nil
+	}
+	return s.value(info, fn, arg)
 }
 
 // reaching is every concrete type stored in one node or in a node it is filled from,
@@ -169,8 +255,99 @@ func (w *storeWalk) visit(n ast.Node) bool {
 		w.valueSpec(n)
 	case *ast.CallExpr:
 		w.call(n)
+		if name := calleeIdent(n.Fun); name != nil {
+			w.called[name] = true
+		}
+	case *ast.Ident:
+		if fn, isFunc := w.info.Uses[n].(*types.Func); isFunc && !w.called[n] {
+			w.valued[fn] = true
+		}
+	case *ast.ReturnStmt:
+		w.returned(n)
 	}
 	return true
+}
+
+// returned reads the values one return statement of the declared function stores
+// in its interface-typed results.
+func (w *storeWalk) returned(ret *ast.ReturnStmt) {
+	if w.fn == nil || w.inLiteral[ret] {
+		return
+	}
+	results := w.fn.Signature().Results()
+	if len(ret.Results) != results.Len() {
+		return
+	}
+	for i, value := range ret.Results {
+		if types.IsInterface(results.At(i).Type()) {
+			w.store(w.result(w.fn, i), w.valueOf(value))
+		}
+	}
+}
+
+// result is the node of one result of one function.
+func (w *storeWalk) result(fn *types.Func, i int) storeNode {
+	return storeNode{at: w.sites.of(fn), param: resultNode - i}
+}
+
+// local is the node of an interface-typed variable one name declares or assigns,
+// a parameter and a field excepted.
+func (w *storeWalk) local(expr ast.Expr) (storeNode, bool) {
+	id, isIdent := ast.Unparen(expr).(*ast.Ident)
+	if !isIdent {
+		return storeNode{}, false
+	}
+	v, isVar := w.info.ObjectOf(id).(*types.Var)
+	if !isVar || v.IsField() || !types.IsInterface(v.Type()) {
+		return storeNode{}, false
+	}
+	if _, isParam := w.parameter(v); isParam {
+		return storeNode{}, false
+	}
+	return storeNode{at: w.sites.of(v), param: placeNode}, true
+}
+
+// fromCall links the interface-typed variables one assignment from a single call
+// declares or assigns to the results of the program function it calls.
+func (w *storeWalk) fromCall(lhs []ast.Expr, rhs ast.Expr) {
+	call, isCall := ast.Unparen(rhs).(*ast.CallExpr)
+	if !isCall {
+		return
+	}
+	results, held := w.resultsOf(call)
+	if !held || len(results) != len(lhs) {
+		return
+	}
+	for i, target := range lhs {
+		if node, isLocal := w.local(target); isLocal {
+			w.link(node, results[i])
+		}
+	}
+}
+
+// resultsOf is the result nodes of one call: of the function it names, or of the
+// function values it may call through.
+func (w *storeWalk) resultsOf(call *ast.CallExpr) ([]storeNode, bool) {
+	if callee, isFunc := resolveObject(w.info, call.Fun).(*types.Func); isFunc {
+		nodes := make([]storeNode, callee.Signature().Results().Len())
+		for i := range nodes {
+			nodes[i] = w.result(callee, i)
+		}
+		return nodes, true
+	}
+	t := w.info.TypeOf(call.Fun)
+	if t == nil {
+		return nil, false
+	}
+	sig, isSignature := t.Underlying().(*types.Signature)
+	if !isSignature {
+		return nil, false
+	}
+	nodes := make([]storeNode, sig.Results().Len())
+	for i := range nodes {
+		nodes[i] = indirectResult(i, len(nodes))
+	}
+	return nodes, true
 }
 
 // compositeLit reads the fields one struct literal sets, and the elements one
@@ -215,7 +392,13 @@ func (w *storeWalk) structLit(st *types.Struct, lit *ast.CompositeLit) {
 // assign reads the stores one assignment makes into a place, or into an index of
 // one.
 func (w *storeWalk) assign(s *ast.AssignStmt) {
-	if (s.Tok != token.ASSIGN && s.Tok != token.DEFINE) || len(s.Lhs) != len(s.Rhs) {
+	if s.Tok != token.ASSIGN && s.Tok != token.DEFINE {
+		return
+	}
+	if len(s.Rhs) == 1 {
+		w.fromCall(s.Lhs, s.Rhs[0])
+	}
+	if len(s.Lhs) != len(s.Rhs) {
 		return
 	}
 	for i, lhs := range s.Lhs {
@@ -233,6 +416,13 @@ func (w *storeWalk) assign(s *ast.AssignStmt) {
 
 // valueSpec reads the stores one variable declaration makes.
 func (w *storeWalk) valueSpec(spec *ast.ValueSpec) {
+	if len(spec.Values) == 1 {
+		names := make([]ast.Expr, 0, len(spec.Names))
+		for _, name := range spec.Names {
+			names = append(names, name)
+		}
+		w.fromCall(names, spec.Values[0])
+	}
 	if len(spec.Names) != len(spec.Values) {
 		return
 	}
@@ -368,7 +558,8 @@ func isAppend(info *types.Info, call *ast.CallExpr) bool {
 }
 
 // valueOf is what one expression carries into an interface-typed place: its concrete
-// type, or the interface-typed parameter of the enclosing function it names.
+// type, the interface-typed parameter of the enclosing function or the interface-typed
+// variable it names, or the one result of the call it is.
 func (w *storeWalk) valueOf(expr ast.Expr) storedValue {
 	t := w.info.TypeOf(expr)
 	if t == nil {
@@ -379,6 +570,14 @@ func (w *storeWalk) valueOf(expr ast.Expr) storedValue {
 	}
 	if node, isParam := w.parameter(parameterNamed(w.info, expr)); isParam {
 		return storedValue{from: &node}
+	}
+	if node, isLocal := w.local(expr); isLocal {
+		return storedValue{from: &node}
+	}
+	if call, isCall := ast.Unparen(expr).(*ast.CallExpr); isCall {
+		if results, held := w.resultsOf(call); held && len(results) == 1 {
+			return storedValue{from: &results[0]}
+		}
 	}
 	return storedValue{}
 }
@@ -421,5 +620,22 @@ func (w *storeWalk) call(call *ast.CallExpr) {
 		if holdsInterface(t) {
 			w.storeInto(storeNode{at: w.sites.of(callee), param: at}, t, arg)
 		}
+	}
+}
+
+// calleeIdent is the identifier one call's callee expression names it by: the name
+// itself, or the selector of a qualified or selected one, through an instantiation.
+func calleeIdent(fun ast.Expr) *ast.Ident {
+	switch f := ast.Unparen(fun).(type) {
+	case *ast.IndexExpr:
+		return calleeIdent(f.X)
+	case *ast.IndexListExpr:
+		return calleeIdent(f.X)
+	case *ast.SelectorExpr:
+		return f.Sel
+	case *ast.Ident:
+		return f
+	default:
+		return nil
 	}
 }

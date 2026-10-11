@@ -42,7 +42,7 @@ A root makes a symbol live under reachability. `deadset-go print-roots` prints t
 
 Every root but `published-api` and `type-error` names an actual caller, which is the runtime, the test binary, the linker, C code, `go run`, or the maintainer asserting one. A `type-error` root withholds a judgement the type error made impossible. Those are live under both relations, so a test function is never reported as unreferenced.
 
-`published-api` is the one root that only hypothesises a caller. It makes a library's exported symbol live under reachability, so the symbol's closure is not a dead component. The symbol itself stays a candidate under reference counting, which is what `DS1001` answers at the confidence the consumer model gives it.
+`published-api` is the one root that only hypothesises a caller. It makes a library's exported symbol live under reachability, so the symbol's closure is not a dead component. The symbol itself stays a candidate under reference counting, which is what `DS1001` answers at the confidence the consumer model gives it. An exported method an exported type promotes from an embedded field of any visibility is a `published-api` root as well.
 
 A configured root or pattern that names no symbol is reported as `DS1704` rather than ignored.
 
@@ -51,6 +51,8 @@ A configured root or pattern that names no symbol is reported as `DS1704` rather
 Every dead symbol lands in exactly one dead component, computed over the references between dead symbols with one edge each way between a dead member and its dead container. The dead symbols form cycles, a symbol on no cycle being a cycle of one, and a cycle no dead symbol outside it references is a root cycle. Its members whose container is not dead are the component's root members, where a deletion starts.
 
 A symbol only dead symbols reference falls with the roots that reach it and is a member of their component. A symbol two roots both reach joins the two into one component, because deleting either alone leaves a reference to it. A finding about any member names the one component, so every finding one deletion removes carries one identifier.
+
+A dead constant whose deletion changes a live constant of its group, through a repeated list or a later `iota`, is a positional member. It and each dead declaration it holds form components of their own that remove no line, and their findings carry the `manual` fixability. A wholly dead group is one component and deletes whole.
 
 A declaration of a test file is a member only when it is reported as a test of dead code or as unreferenced. A test of dead code and each declaration it references count as referencing each other, so the test is a root member with them. An unreferenced test-file declaration joins only the test-file declarations it references, so a production declaration it references stays out of its component.
 
@@ -112,6 +114,8 @@ A load fails when the toolchain reports an error while listing the configuration
 The listing is read first, and a configuration whose listing carries an error is refused with those errors before any package is type-checked. Every other dependency is type-checked for its declarations alone, so a type error inside one of its function bodies does not fail the load. That holds whether the configuration document declared the configuration or the analyzer derived it.
 
 The default matrix is derived from the target's own source rather than enumerated. The derivation walks every Go file and reads each file's `//go:build` expression together with the constraint its name implies. It collects the operating system, architecture and custom tag atoms that appear, and emits one configuration per distinct platform atom plus the host. A platform atom pairs with the host's other axis where the toolchain builds that pair and with the first axis it does build otherwise. `unix`, `gc`, `gccgo`, `boringcrypto`, the `goexperiment` tags and the release tags are not atoms.
+
+A test file's tags count as any file's, so a tag only tests name, `race` among them, derives a configuration. A file built only under the `ignore` tag names no atom, and no derived configuration sets `ignore`.
 
 A derived identifier is the operating system and the architecture joined by a hyphen, with each tag appended after a further hyphen. A malformed build expression ends the run naming the file.
 

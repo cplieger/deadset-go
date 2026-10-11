@@ -82,6 +82,13 @@ func (in *Input) classOf(id graph.SymbolID) Class {
 	}
 }
 
+// publishedAPI reports whether one declaration is published API of a library: an
+// exported production declaration of a package outside programs can import.
+func (in *Input) publishedAPI(symbol *graph.Symbol) bool {
+	return in.Config != nil && in.Config.Target.Kind == config.Library && symbol.Exported &&
+		!testFile(symbol) && in.importable(symbol.PkgPath)
+}
+
 // componentCap is the lowest reachability class among the roots of the dead
 // component one declaration falls with, which caps the confidence of every finding
 // of that component so the minimum confidence withholds or reports it whole. It is

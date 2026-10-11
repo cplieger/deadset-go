@@ -234,6 +234,10 @@ func wireDetailsOf(details *kinds.Details) reportdoc.Details {
 	for i := range details.WritePositions {
 		held.WritePositions = append(held.WritePositions, wirePositionOf(&details.WritePositions[i]))
 	}
+	if details.NameLiteral != nil {
+		at := wirePositionOf(details.NameLiteral)
+		held.NameLiteral = &at
+	}
 	return held
 }
 

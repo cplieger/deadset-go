@@ -21,11 +21,28 @@ func conversionsOf(in *Input) ([]graph.Conversion, error) {
 		return nil, fmt.Errorf("%w: no file set", graph.ErrIncompleteLoad)
 	}
 	if in.conversions == nil {
-		sites := graph.Conversions(in.Result.Fset, in.Result.Packages)
-		sites = slices.DeleteFunc(sites, func(c graph.Conversion) bool { return types.IsInterface(c.From) })
+		all, err := allConversionsOf(in)
+		if err != nil {
+			return nil, err
+		}
+		sites := slices.DeleteFunc(slices.Clone(all), func(c graph.Conversion) bool { return types.IsInterface(c.From) })
 		in.conversions = &sites
 	}
 	return *in.conversions, nil
+}
+
+// allConversionsOf is every site of the loaded configuration, a site converting an
+// interface value included, which is what a chain of sites between two interfaces
+// is read from.
+func allConversionsOf(in *Input) ([]graph.Conversion, error) {
+	if in == nil || in.Result == nil || in.Result.Fset == nil {
+		return nil, fmt.Errorf("%w: no file set", graph.ErrIncompleteLoad)
+	}
+	if in.allConversions == nil {
+		sites := graph.Conversions(in.Result.Fset, in.Result.Packages)
+		in.allConversions = &sites
+	}
+	return *in.allConversions, nil
 }
 
 // programConversions is [conversionsOf] followed by every site each loaded consumer

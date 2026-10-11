@@ -593,9 +593,6 @@ func stagesOf(ctx context.Context, resolved *resolution) (stages, error) {
 	if err != nil {
 		return stages{}, err
 	}
-	if builtErr := taggedTestsBuilt(derived); builtErr != nil {
-		return stages{}, builtErr
-	}
 	results, unbuilt, err := load.All(ctx, document, configurations, guessed(derived))
 	if err != nil {
 		return stages{}, err
@@ -1596,6 +1593,7 @@ func exemptOptions(cfg *config.Config) (exempt.Options, error) {
 		},
 		TemplateDirs:     cfg.Analysis.TemplateDirs,
 		IncludeGenerated: cfg.Analysis.GeneratedFiles == config.IncludeGenerated,
+		PublishedAPI:     cfg.Target.Kind == config.Library,
 	}, nil
 }
 

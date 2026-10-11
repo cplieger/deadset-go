@@ -126,6 +126,9 @@ func Roots(r *load.Result, targetRoot string, read ReadFile, symbols []Symbol, o
 	d.declared(symbols)
 	if opts.PublishedAPI {
 		d.publishedAPI(symbols)
+		if err := d.promoted(); err != nil {
+			return nil, nil, err
+		}
 	}
 	unmatched := d.configured(symbols, opts.Patterns)
 
@@ -369,6 +372,43 @@ func (d *rootDetection) publishedAPI(symbols []Symbol) {
 			d.add(s.ID, RootPublishedAPI, "")
 		}
 	}
+}
+
+// promoted keeps every exported method a value of an exported type of an importable
+// package selects through an embedded field of any visibility: a consumer calls it
+// as it calls a method the type declares.
+func (d *rootDetection) promoted() error {
+	for _, path := range slices.Sorted(maps.Keys(d.byPath)) {
+		if !d.published[path] {
+			continue
+		}
+		scope := d.byPath[path][0].Types.Scope()
+		for _, name := range scope.Names() {
+			typeName, isType := scope.Lookup(name).(*types.TypeName)
+			if !isType || !typeName.Exported() || types.IsInterface(typeName.Type()) {
+				continue
+			}
+			if err := d.promotedBy(typeName.Type()); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// promotedBy keeps every exported method of the target a value of t or a pointer
+// to it selects through an embedded field.
+func (d *rootDetection) promotedBy(t types.Type) error {
+	for selection := range types.NewMethodSet(types.NewPointer(t)).Methods() {
+		obj := selection.Obj()
+		if len(selection.Index()) < 2 || !obj.Exported() || obj.Pkg() == nil || d.byPath[obj.Pkg().Path()] == nil {
+			continue
+		}
+		if err := d.addAt(obj.Pos(), RootPublishedAPI); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // exportedContainers reports whether parent and every container above it is

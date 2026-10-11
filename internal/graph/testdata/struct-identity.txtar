@@ -1,0 +1,30 @@
+One package selecting a field through one spelling of an unnamed struct type whose
+identical twin another declaration spells, a twin whose tag differs, and a named
+struct of the same shape, which is identical only to itself. A second package spells
+a literal with an unexported field of the same name, which is another type.
+
+-- go.mod --
+module example.com/identity
+
+go 1.27.1
+-- identity.go --
+package identity
+
+type holder struct {
+	X      *struct{ C string }
+	Tagged *struct {
+		C string `json:"c"`
+	}
+	Named *named
+	Y      *struct{ c string }
+}
+
+type named struct{ C string }
+
+func use(p *struct{ C string }) string { return p.C }
+
+func read(h holder) string { return use(h.X) }
+-- other/other.go --
+package other
+
+func useOther(p *struct{ c string }) string { return p.c }

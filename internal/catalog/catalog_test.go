@@ -30,6 +30,7 @@ type vocabulary struct {
 		DefaultSeverity string              `json:"default_severity"`
 		MaxClass        string              `json:"max_class"`
 		Fixability      string              `json:"fixability"`
+		Findings        []string            `json:"finding_fixabilities"`
 		Overlap         map[string][]string `json:"overlap"`
 		DefaultEnabled  bool                `json:"default_enabled"`
 		Fixed           bool                `json:"fixed"`
@@ -68,20 +69,22 @@ func TestKindsIsTheVocabularysLiveRowsInItsOrder(t *testing.T) {
 	for i, row := range document.Kinds {
 		got := held[i]
 		want := Row{
-			Code:            row.Code,
-			Name:            row.Name,
-			Languages:       row.Languages,
-			DefaultSeverity: row.DefaultSeverity,
-			MaxClass:        row.MaxClass,
-			Fixability:      row.Fixability,
-			Overlap:         row.Overlap[language],
-			DefaultEnabled:  row.DefaultEnabled,
-			Fixed:           row.Fixed,
+			Code:                row.Code,
+			Name:                row.Name,
+			Languages:           row.Languages,
+			DefaultSeverity:     row.DefaultSeverity,
+			MaxClass:            row.MaxClass,
+			Fixability:          row.Fixability,
+			FindingFixabilities: row.Findings,
+			Overlap:             row.Overlap[language],
+			DefaultEnabled:      row.DefaultEnabled,
+			Fixed:               row.Fixed,
 		}
 		if got.Code != want.Code || got.Name != want.Name ||
 			!slices.Equal(got.Languages, want.Languages) ||
 			got.DefaultSeverity != want.DefaultSeverity || got.MaxClass != want.MaxClass ||
 			got.Fixability != want.Fixability || !slices.Equal(got.Overlap, want.Overlap) ||
+			!slices.Equal(got.FindingFixabilities, want.FindingFixabilities) ||
 			got.DefaultEnabled != want.DefaultEnabled || got.Fixed != want.Fixed {
 			t.Errorf("Kinds()[%d] = %+v, want %+v, the row %s publishes", i, got, want, kindsPath)
 		}

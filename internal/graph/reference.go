@@ -180,6 +180,7 @@ type referencePass struct {
 	declaring   map[string]bool           // the import paths of the packages the target declares
 	support     map[string]bool           // the import paths of the target's test-support packages
 	instances   *instantiations           // the type arguments a layout read lays a type parameter out as
+	literals    literalStructs            // the struct type literals walked, by identity
 	consumer    string                    // the module path of the consumer being walked, empty while the target is
 	file        SymbolID                  // the symbol of the file being walked, empty outside the inventory
 	syntax      *ast.File                 // the file being walked
@@ -264,6 +265,7 @@ func consumerModule(consumer *load.Consumer) *packages.Module {
 // the target, so a consumer's own packages never join that set: a consumer
 // declares nothing this analysis reasons about.
 func (p *referencePass) walk(pkgs []*packages.Package) error {
+	p.literals.add(pkgs)
 	groups := groupVariants(pkgs, p.at)
 	if p.consumer == "" {
 		p.declaring = make(map[string]bool, len(groups))
@@ -370,6 +372,7 @@ func (p *referencePass) walkTypeParams(f *ast.Field) {
 
 // walkGenDecl walks one declaration group.
 func (p *referencePass) walkGenDecl(d *ast.GenDecl) {
+	var repeated *ast.ValueSpec
 	for _, spec := range d.Specs {
 		switch s := spec.(type) {
 		case *ast.ImportSpec:
@@ -378,6 +381,55 @@ func (p *referencePass) walkGenDecl(d *ast.GenDecl) {
 			p.walkTypeSpec(s)
 		case *ast.ValueSpec:
 			p.walkValueSpec(s)
+			if d.Tok != token.CONST {
+				continue
+			}
+			if len(s.Values) > 0 {
+				repeated = s
+			} else if repeated != nil {
+				p.walkRepeated(s, repeated)
+			}
+		}
+	}
+}
+
+// walkRepeated records what a constant specification that writes no expression
+// list references through the list it repeats, and that list's type: each
+// declaration they name, from each constant the specification declares, at its
+// first name (Go specification, Constant declarations: an omitted list is the
+// textual substitution of the first preceding one).
+func (p *referencePass) walkRepeated(s, repeated *ast.ValueSpec) {
+	ids := make([]SymbolID, 0, len(s.Names))
+	for _, n := range s.Names {
+		if id, ok := p.owner(n.Pos()); ok {
+			ids = append(ids, id)
+		}
+	}
+	nodes := slices.Clone(repeated.Values)
+	if repeated.Type != nil {
+		nodes = append(nodes, repeated.Type)
+	}
+	for _, node := range nodes {
+		ast.Inspect(node, func(n ast.Node) bool {
+			ident, isIdent := n.(*ast.Ident)
+			if isIdent {
+				p.repeatedUse(ident, ids, s.Names[0].Pos())
+			}
+			return !isIdent
+		})
+	}
+}
+
+// repeatedUse records the declaration one identifier of a repeated list names, from
+// each constant of ids, at pos.
+func (p *referencePass) repeatedUse(ident *ast.Ident, ids []SymbolID, pos token.Pos) {
+	obj := p.info.Uses[ident]
+	if obj == nil {
+		return
+	}
+	if to, held := p.symbolOf(obj); held {
+		for _, id := range ids {
+			p.add(id, to, pos, p.kindOf(ident, obj))
 		}
 	}
 }
@@ -570,6 +622,7 @@ func (p *referencePass) inspectExcept(node ast.Node, encl SymbolID, skip ast.Nod
 			p.markCallee(n.Fun)
 			p.markDelete(n)
 			p.readUnsafeConversion(n, encl)
+			p.readStructConversion(n, encl)
 			p.readContainerKeys(n, encl)
 		case *ast.BinaryExpr, *ast.SwitchStmt, *ast.MapType, *ast.IndexExpr:
 			p.readComparedFields(n, encl)
@@ -775,17 +828,26 @@ func comparedStruct(t types.Type) (*types.Struct, bool) {
 }
 
 // record keeps the reference one identifier makes, unless the identifier names
-// no object or names one whose declaration is not a symbol of the target.
+// no object or names one whose declaration is not a symbol of the target. A field
+// of a struct type literal is referenced in every identical literal as well.
 func (p *referencePass) record(id *ast.Ident, encl SymbolID) {
 	obj := p.info.Uses[id]
 	if obj == nil {
 		return
 	}
+	kind := p.kindOf(id, obj)
+	if field, isField := obj.(*types.Var); isField && field.IsField() {
+		for _, twin := range p.literals.twins(field) {
+			if to, ok := p.symbolOf(twin); ok {
+				p.add(encl, to, id.Pos(), kind)
+			}
+		}
+	}
 	to, ok := p.symbolOf(obj)
 	if !ok {
 		return
 	}
-	p.add(encl, to, id.Pos(), p.kindOf(id, obj))
+	p.add(encl, to, id.Pos(), kind)
 }
 
 // reachThrough records the embedded fields one selector reaches through. A

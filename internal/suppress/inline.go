@@ -69,30 +69,21 @@ func codesOf(expression *regexp.Regexp, match []string) []string {
 // directive is one comment in the namespace: what the decision procedure made of
 // it, what it named, and where it is written.
 type directive struct {
-	text   string
-	reason string
-	codes  []string
-	at     token.Position
-	is     verdict
+	text     string
+	reason   string
+	codes    []string
+	at       token.Position
+	is       verdict
+	trailing bool // a token precedes it on its line
 }
 
-// Inline reads every inline directive of one loaded configuration and binds each
-// to the declarations written on the line below it.
-//
-// A directive names one or more codes and carries a reason, and it binds to every
-// declaration whose own first line is the line below the directive's, and to the
-// function whose wrapped signature declares a receiver, a parameter or a result on
-// that line. Nothing else binds it: not a trailing directive on the declaration's own line, not a
-// line two above with a blank line or a doc-comment line between, not a line
-// below, so a directive anywhere else is a record bound to nothing. A directive
-// that lacks only its reason is a [Refusal]; a comment in the namespace that is
-// neither is a [malformedError], and no record or refusal comes back with it.
-//
-// Every position is rendered the way a report carries it, so a file the target
-// root does not hold ends the read rather than being passed over. The resolver is
-// the run's own, over the same load and the same inventory, so a directive and the
-// declaration below it are placed by one owner and Inline reaches the filesystem
-// not at all.
+// Inline reads every inline directive of one loaded configuration and binds each to
+// the declarations it sits beside: alone on its line, to every declaration beginning
+// on the next line and the function whose wrapped signature declares a part there;
+// after a token on its line, the same on that line and never the next. A directive
+// anywhere else is a record bound to nothing, one lacking only its reason is a
+// [Refusal], and any other comment in the namespace is a [malformedError]. A file the
+// target root does not hold ends the read.
 func Inline(r *load.Result, resolve *graph.Resolver, symbols []graph.Symbol) ([]Record, []Refusal, error) {
 	directives, err := namespaced(r, resolve)
 	if err != nil {
@@ -109,7 +100,11 @@ func Inline(r *load.Result, resolve *graph.Resolver, symbols []graph.Symbol) ([]
 		d := &directives[i]
 		switch d.is {
 		case verdictDirective:
-			records = append(records, d.bind(below[site{file: d.at.Filename, line: d.at.Line + 1}])...)
+			line := d.at.Line + 1
+			if d.trailing {
+				line = d.at.Line
+			}
+			records = append(records, d.bind(below[site{file: d.at.Filename, line: line}])...)
 		case verdictNoReason:
 			refusals = append(refusals, d.refuse()...)
 		case verdictNone, verdictMalformed:
@@ -174,7 +169,7 @@ func (d *directive) refuse() []Refusal {
 // in does not reach the result: the comments are ordered by rendered position, so
 // the first malformed directive a read refuses is the first one written.
 func namespaced(r *load.Result, resolve *graph.Resolver) ([]directive, error) {
-	read := &comments{resolve: resolve, seen: make(map[token.Pos]bool)}
+	read := &comments{resolve: resolve, fset: r.Fset, seen: make(map[token.Pos]bool)}
 	for _, p := range r.Packages {
 		for _, f := range p.Syntax {
 			if err := read.file(f); err != nil {
@@ -191,6 +186,7 @@ func namespaced(r *load.Result, resolve *graph.Resolver) ([]directive, error) {
 // namespace, one per source site.
 type comments struct {
 	resolve *graph.Resolver
+	fset    *token.FileSet
 	seen    map[token.Pos]bool
 	found   []directive
 }
@@ -199,6 +195,7 @@ type comments struct {
 // position that does not render ends the read, because a comment the analysis
 // cannot place is a directive it cannot bind.
 func (c *comments) file(f *ast.File) error {
+	var first map[int]token.Pos
 	for _, group := range f.Comments {
 		for _, comment := range group.List {
 			text := lineText(comment)
@@ -211,10 +208,44 @@ func (c *comments) file(f *ast.File) error {
 			if err != nil {
 				return err
 			}
-			c.found = append(c.found, directive{text: text, reason: reason, codes: codes, at: at, is: is})
+			if first == nil {
+				first = c.firstTokens(f)
+			}
+			line := c.fset.Position(comment.Slash).Line
+			leading, held := first[line]
+			c.found = append(c.found, directive{
+				text: text, reason: reason, codes: codes, at: at, is: is,
+				trailing: held && leading < comment.Slash,
+			})
 		}
 	}
 	return nil
+}
+
+// firstTokens is, per line of one file, the earliest position at which a syntax node
+// begins or ends on it, comments left out, which is what tells a comment written
+// after code on its line from one alone on it.
+func (c *comments) firstTokens(f *ast.File) map[int]token.Pos {
+	first := make(map[int]token.Pos)
+	keep := func(pos token.Pos) {
+		if !pos.IsValid() {
+			return
+		}
+		line := c.fset.Position(pos).Line
+		if held, seen := first[line]; !seen || pos < held {
+			first[line] = pos
+		}
+	}
+	ast.Inspect(f, func(n ast.Node) bool {
+		switch n.(type) {
+		case nil, *ast.CommentGroup, *ast.Comment:
+			return false
+		}
+		keep(n.Pos())
+		keep(n.End() - 1)
+		return true
+	})
+	return first
 }
 
 // lineText is the text of one comment from its first solidus to the end of its

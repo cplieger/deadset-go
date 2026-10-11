@@ -1,6 +1,7 @@
 package suppress
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -26,6 +27,10 @@ const (
 	outcomeNoReason  entryOutcome = "DS1701"
 	outcomeUnscoped  entryOutcome = "DS1702"
 	outcomeMalformed entryOutcome = "malformed"
+
+	// outcomeOtherScheme is a well-formed record naming another language's
+	// scheme, which this reader binds, counts and reports nowhere.
+	outcomeOtherScheme entryOutcome = "another scheme's record"
 )
 
 // entryOutcomes maps one rule of the corpus vocabulary to what a reader makes of
@@ -64,6 +69,8 @@ func outcomesOf(t *testing.T, document string) []entryOutcome {
 			got = append(got, entryOutcome(refusal.Reported))
 		}
 		return got
+	case len(records) == 0:
+		return []entryOutcome{outcomeOtherScheme}
 	case len(records) != 1:
 		t.Fatalf("IgnoreFile(%s) returned %d records, want one: %+v", document, len(records), records)
 	}
@@ -71,8 +78,28 @@ func outcomesOf(t *testing.T, document string) []entryOutcome {
 }
 
 // wanted is the outcomes one corpus case declares: the code of every finding it
-// names, and the rule's own outcome where it names none.
+// names, and the rule's own outcome where it names none. A case naming another
+// language's scheme that is not malformed is that scheme's analyzer's to report.
 func wanted(c *corpusCase, outcome [2]entryOutcome) []entryOutcome {
+	held := wantedOf(c, outcome)
+	if !slices.Equal(held, []entryOutcome{outcomeMalformed}) && otherScheme(c.Input) {
+		return []entryOutcome{outcomeOtherScheme}
+	}
+	return held
+}
+
+// otherScheme reports whether one case's record names a reference of a scheme
+// other than this analyzer's.
+func otherScheme(input []byte) bool {
+	var record struct {
+		Symbol string `json:"symbol"`
+	}
+	return json.Unmarshal(input, &record) == nil && record.Symbol != "" && !strings.HasPrefix(record.Symbol, ownScheme)
+}
+
+// wantedOf is the outcomes one corpus case declares, read as the analyzer of its
+// own language reads them.
+func wantedOf(c *corpusCase, outcome [2]entryOutcome) []entryOutcome {
 	if len(c.Reports) > 0 {
 		reported := make([]entryOutcome, 0, len(c.Reports))
 		for _, code := range c.Reports {
@@ -349,5 +376,29 @@ func TestIgnoreFileReportsADocumentItCannotRead(t *testing.T) {
 	}
 	if errors.Is(err, os.ErrNotExist) || errors.Is(err, errMalformed) {
 		t.Errorf("IgnoreFile over a directory error = %v, want neither an absent document nor a malformed one", err)
+	}
+}
+
+func TestIgnoreFileLeavesEveryRecordOfAnotherSchemeToItsOwnAnalyzer(t *testing.T) {
+	document := `{"ignore": [
+  {"code": "DS1002", "symbol": "go://example.com/app#helper", "path": "main.go", "reason": "Go's own."},
+  {"code": "DS1003", "symbol": "ts://@example/app/src/a.ts#A.b", "path": "src/a.ts", "reason": "The TypeScript analyzer's."},
+  {"code": "DS1003", "symbol": "ts://@example/app/src/a.ts#A.c", "path": "src/a.ts"},
+  {"code": "DS1003", "symbol": "ts://@example/app/src/a.ts#A.d", "reason": "Unscoped, and still not this analyzer's."}
+]}`
+	records, refusals, err := IgnoreFile(writeIgnoreFile(t, document), nil)
+	if err != nil {
+		t.Fatalf("IgnoreFile(a document of two schemes) error = %v, want the records of this analyzer's scheme", err)
+	}
+	if len(records) != 1 || records[0].Symbol != "go://example.com/app#helper" {
+		t.Errorf("IgnoreFile(a document of two schemes) records = %+v, want the one go:// record", records)
+	}
+	if len(refusals) != 0 {
+		t.Errorf("IgnoreFile(a document of two schemes) refusals = %+v, want none: the other scheme's are its analyzer's to report", refusals)
+	}
+
+	malformed := `{"ignore": [{"code": "DS13", "symbol": "ts://@example/app/src/a.ts#A.b", "path": "src/a.ts", "reason": "r"}]}`
+	if _, _, err := IgnoreFile(writeIgnoreFile(t, malformed), nil); !errors.Is(err, errMalformed) {
+		t.Errorf("IgnoreFile(a malformed record of another scheme) error = %v, want errMalformed: every record is form-checked", err)
 	}
 }

@@ -466,7 +466,7 @@ func TestEncodingReflectionReachesTheTypesAnArgumentWritesOrConverts(t *testing.
 		{reached: "a type converted to any alone", typeName: "circle"},
 		{reached: "the literal behind the address operator", typeName: "wrapper", want: reachRefs("wrapper", "V")},
 		{reached: "a value a nested literal writes into an interface position", typeName: "inner", want: reachRefs("inner", "Depth")},
-		{reached: "a type converted to error, which is no defined interface", typeName: "failure"},
+		{reached: "a type the function whose call is the argument returns as an error", typeName: "failure", want: reachRefs("failure", "Code")},
 		{reached: "a decoded struct whose written pointer field the decoder reads", typeName: "target", want: reachRefs("target", "Out")},
 	} {
 		t.Run(test.typeName, func(t *testing.T) {
@@ -826,7 +826,7 @@ func TestFormatVerbContractAloneRecordsAnOperandOfTheFormattingPackage(t *testin
 // The mechanism text of the class, as the Contract states it for this language. The
 // class implements this text; a pin bump that moves it must be read against the
 // destination table before this literal moves with it.
-const encodingReflectionMechanismSHA256 = "9a48e2e93a14f86f20df205c634355c1469309cf59d8866d57db425105be3a38"
+const encodingReflectionMechanismSHA256 = "f3fbdeb95adf908029c81ef1070ac405a015f92847fd27a4c0a2eb24436c009c"
 
 func TestEncodingReflectionImplementsTheContractsMechanismText(t *testing.T) {
 	body, err := spec.Contract.ReadFile("contract/exemptions.json")
@@ -856,5 +856,71 @@ func TestEncodingReflectionImplementsTheContractsMechanismText(t *testing.T) {
 	if sum != encodingReflectionMechanismSHA256 {
 		t.Errorf("the Contract's mechanism text moved; re-read it against encoding_reflection.go's destination table before updating this literal.\nsha256 %s, want %s\ntext:\n%s",
 			sum, encodingReflectionMechanismSHA256, stated)
+	}
+}
+
+// A type passed as a type argument to a generic of a package outside the program
+// whose own imports name a decoder keeps its decoding methods, through the program's
+// own generics, a generic method and a generic type; a generic of a package naming
+// no decoder keeps nothing. A generic function of a destination package keeps what
+// that destination reads of its type argument, and a value of a type parameter's
+// type reaching a destination is a value of each type argument the program gives it.
+func TestEncodingReflectionReadsTheTypeArgumentsADestinationReaches(t *testing.T) {
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-type-arguments.txtar", Options{}), EncodingReflection)
+
+	for _, test := range []struct {
+		typeName string
+		want     []string
+	}{
+		{typeName: "flexA", want: qualify("example.com/typeargs", "flexA", "UnmarshalJSON")},
+		{typeName: "flexB", want: qualify("example.com/typeargs", "flexB", "UnmarshalJSON")},
+		{typeName: "flexC", want: qualify("example.com/typeargs", "flexC", "UnmarshalJSON")},
+		{typeName: "flexD", want: nil},
+		{typeName: "other", want: nil},
+		{typeName: "flexE", want: qualify("example.com/typeargs", "flexE", "UnmarshalJSON")},
+		{typeName: "flexF", want: nil},
+		{typeName: "flexG", want: qualify("example.com/typeargs", "flexG", "UnmarshalJSON")},
+		{typeName: "flexH", want: qualify("example.com/typeargs", "flexH", "UnmarshalJSON")},
+		{typeName: "shadow", want: qualify("example.com/typeargs", "shadow", "Tagged")},
+	} {
+		t.Run(test.typeName, func(t *testing.T) {
+			if got := membersOf(refs, test.typeName); !slices.Equal(got, test.want) {
+				t.Errorf("EncodingReflectionDetector(encoding-reflection-type-arguments.txtar) retained, for %s,\ngot  %v\nwant %v",
+					test.typeName, got, test.want)
+			}
+		})
+	}
+}
+
+// A value reaches an encoder through an empty-interface parameter of the program's
+// own function whatever its type, an embedded struct's field is read whether or not
+// the embedded type is exported, and a value a function of the program returns as an
+// interface reaches the encoder its caller hands the result to. A value returned the
+// same way and never encoded keeps nothing.
+func TestEncodingReflectionFollowsAValueThroughTheProgramsOwnInterfaces(t *testing.T) {
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-flows.txtar", Options{}), EncodingReflection)
+
+	for _, test := range []struct {
+		typeName string
+		want     []string
+	}{
+		{typeName: "raw", want: qualify("example.com/flows", "raw", "MarshalJSON")},
+		{typeName: "outer", want: qualify("example.com/flows", "outer", "inner")},
+		{typeName: "inner", want: qualify("example.com/flows", "inner", "X")},
+		{typeName: "ack", want: qualify("example.com/flows", "ack", "ID")},
+		{typeName: "unsent", want: nil},
+		{typeName: "closed", want: nil},
+		{typeName: "replied", want: qualify("example.com/flows", "replied", "OK")},
+		{typeName: "relayed", want: qualify("example.com/flows", "relayed", "ID")},
+		{typeName: "made", want: qualify("example.com/flows", "made", "ID")},
+		{typeName: "expressed", want: qualify("example.com/flows", "expressed", "ID")},
+		{typeName: "direct", want: nil},
+	} {
+		t.Run(test.typeName, func(t *testing.T) {
+			if got := membersOf(refs, test.typeName); !slices.Equal(got, test.want) {
+				t.Errorf("EncodingReflectionDetector(encoding-reflection-flows.txtar) retained, for %s,\ngot  %v\nwant %v",
+					test.typeName, got, test.want)
+			}
+		})
 	}
 }

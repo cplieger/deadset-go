@@ -236,7 +236,7 @@ func recordsOf(t *rapid.T, dir string, mechanism suppress.Mechanism, found []dra
 		}
 		var written bytes.Buffer
 		identity := suppress.Provenance{Analyzer: analyzerName, Version: "1.6.0"}
-		if err := suppress.WriteBaseline(&written, recorded, identity); err != nil {
+		if err := suppress.WriteBaseline(&written, recorded, identity, nil); err != nil {
 			t.Fatalf("suppress.WriteBaseline(%d findings) = %v, want the document", len(found), err)
 		}
 		records, refusals, err := suppress.Baseline(writeTemp(t, dir, suppress.BaselineFileName, written.String()), symbols)

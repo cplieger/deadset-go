@@ -47,6 +47,10 @@ type Row struct {
 	Fixability      string
 	Languages       []string
 
+	// FindingFixabilities is every fixability a finding of the kind may carry in
+	// place of Fixability where the analysis gives that finding another one.
+	FindingFixabilities []string
+
 	// Overlap is the external linters and rules that report the same kind in the
 	// language this analyzer reports, as the vocabulary lists them for it, and is
 	// empty for a kind the vocabulary lists none for. A finding carries the list so
@@ -74,6 +78,7 @@ func ReportsPart(code string) bool {
 func (r *Row) clone() Row {
 	held := *r
 	held.Languages = slices.Clone(r.Languages)
+	held.FindingFixabilities = slices.Clone(r.FindingFixabilities)
 	held.Overlap = slices.Clone(r.Overlap)
 	return held
 }
@@ -81,21 +86,21 @@ func (r *Row) clone() Row {
 // rows are the live issue kinds, in the vocabulary's order.
 func rows() []Row {
 	return []Row{
-		{Code: "DS1001", Name: "unused-exported", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, DefaultEnabled: true},
-		{Code: "DS1002", Name: "unused-unexported", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, DefaultEnabled: true},
-		{Code: "DS1003", Name: "unused-member", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, DefaultEnabled: true},
-		{Code: "DS1004", Name: "test-only-use", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, DefaultEnabled: true},
-		{Code: "DS1005", Name: "test-of-dead-code", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, DefaultEnabled: true},
-		{Code: "DS1006", Name: "deprecated-unused", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, DefaultEnabled: true},
+		{Code: "DS1001", Name: "unused-exported", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, FindingFixabilities: []string{fixManual}, DefaultEnabled: true},
+		{Code: "DS1002", Name: "unused-unexported", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, FindingFixabilities: []string{fixManual}, DefaultEnabled: true},
+		{Code: "DS1003", Name: "unused-member", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, FindingFixabilities: []string{fixManual}, DefaultEnabled: true},
+		{Code: "DS1004", Name: "test-only-use", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, FindingFixabilities: []string{fixManual}, DefaultEnabled: true},
+		{Code: "DS1005", Name: "test-of-dead-code", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, FindingFixabilities: []string{fixManual}, DefaultEnabled: true},
+		{Code: "DS1006", Name: "deprecated-unused", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, FindingFixabilities: []string{fixManual}, DefaultEnabled: true},
 		{Code: "DS1101", Name: "unnecessary-export", Languages: []string{"go", "ts"}, DefaultSeverity: severityWarn, MaxClass: classCertain, Fixability: fixNarrowable, DefaultEnabled: true},
 		{Code: "DS1102", Name: "unnecessary-exposure", Languages: []string{"go"}, DefaultSeverity: severityWarn, MaxClass: classCertain, Fixability: fixNarrowable, DefaultEnabled: true},
-		{Code: "DS1103", Name: "unreachable-export", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, DefaultEnabled: true},
+		{Code: "DS1103", Name: "unreachable-export", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, FindingFixabilities: []string{fixManual}, DefaultEnabled: true},
 		{Code: "DS1104", Name: "redundant-export-keyword", Languages: []string{"ts"}, DefaultSeverity: severityWarn, MaxClass: classCertain, Fixability: fixNarrowable, DefaultEnabled: true},
-		{Code: "DS1201", Name: "unused-interface", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, DefaultEnabled: true},
+		{Code: "DS1201", Name: "unused-interface", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, FindingFixabilities: []string{fixManual}, DefaultEnabled: true},
 		{Code: "DS1203", Name: "uncalled-interface-method", Languages: []string{"go", "ts"}, DefaultSeverity: severityWarn, MaxClass: classCertain, Fixability: fixManual, DefaultEnabled: true},
 		{Code: "DS1204", Name: "unused-satisfaction-assertion", Languages: []string{"go"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, DefaultEnabled: true},
 		{Code: "DS1301", Name: "write-only-symbol", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, DefaultEnabled: true},
-		{Code: "DS1302", Name: "unused-enum-member", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, DefaultEnabled: true},
+		{Code: "DS1302", Name: "unused-enum-member", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, FindingFixabilities: []string{fixManual}, DefaultEnabled: true},
 		{Code: "DS1303", Name: "unused-type-parameter", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, DefaultEnabled: true},
 		{Code: "DS1501", Name: "file-never-built", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, DefaultEnabled: true},
 		{Code: "DS1502", Name: "file-never-imported", Languages: []string{"go", "ts"}, DefaultSeverity: severityDeny, MaxClass: classCertain, Fixability: fixDeletable, DefaultEnabled: true},

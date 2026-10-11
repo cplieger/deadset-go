@@ -411,7 +411,7 @@
       }
     },
     "stale_suppressions": {
-      "description": "One record per suppression that matches no current finding, at either mechanism and in the baseline alike, ordered by the canonical key: path, line and column from position, the code, the symbol reference from symbol, and the name of the analyzer whose report carried the record. A text line renders a record with the fixed token suppression as its kind, the record's symbol as its name, its message verbatim, the position from position, the confidence certain and the code DS1703. A run that holds at least one record here exits with the findings code whatever the configuration holds. A merge carries every record from every input report without deduplication.",
+      "description": "One record per suppression record that is stale, as grammar/suppression.md defines it, at either mechanism and in the baseline alike, ordered by the canonical key: path, line and column from position, the code, the symbol reference from symbol, and the name of the analyzer whose report carried the record. A text line renders a record with the fixed token suppression as its kind, the record's symbol as its name, its message verbatim, the position from position, the confidence certain and the code DS1703. A run that holds at least one record here exits with the findings code whatever the configuration holds. A merge carries every record from every input report without deduplication.",
       "type": "array",
       "items": {
         "type": "object",
@@ -736,12 +736,12 @@
           "minimum": 0
         },
         "suppressions_in_effect": {
-          "description": "How many suppression records bound to a symbol that would otherwise have produced a finding under the record's code. It is where a suppressed finding is visible, because no record for it appears in findings or in any output rendered from findings. A record bound to a symbol whose finding the configuration withholds, by setting the severity of its code to allow, by setting a minimum confidence the finding does not reach, or by withholding in either way a root finding of the component the finding's component.id names, is dormant rather than in effect and is not counted here, so turning a kind off or raising the confidence floor never turns its adjudications into findings.",
+          "description": "How many suppression records bound to a symbol or a dependency row that would otherwise have produced a finding under the record's code. It is where a suppressed finding is visible, because no record for it appears in findings or in any output rendered from findings. A record bound to a symbol whose finding the configuration withholds, by setting the severity of its code to allow, by setting a minimum confidence the finding does not reach, or by withholding in either way a root finding of the component the finding's component.id names, is dormant rather than in effect and is not counted here, so turning a kind off or raising the confidence floor never turns its adjudications into findings.",
           "type": "integer",
           "minimum": 0
         },
         "reasons_recorded": {
-          "description": "How many directives, ignore entries and baseline rows carry a reason.",
+          "description": "How many directives, ignore entries and baseline rows carry a reason, an entry or a row counted only by the analyzer of the language its reference names.",
           "type": "integer",
           "minimum": 0
         },

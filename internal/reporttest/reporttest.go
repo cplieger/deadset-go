@@ -214,6 +214,10 @@ func detailsOf(w *reportdoc.Details) kinds.Details {
 	for _, at := range w.WritePositions {
 		held.WritePositions = append(held.WritePositions, kinds.Position(at))
 	}
+	if w.NameLiteral != nil {
+		at := kinds.Position(*w.NameLiteral)
+		held.NameLiteral = &at
+	}
 	return held
 }
 

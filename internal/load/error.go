@@ -80,12 +80,10 @@ func sameDiagnostic(a, b Diagnostic) bool {
 // needs and the project does not provide.
 type setupClass string
 
-// The setup-failure classes a load answers, and the one a caller answers from the
-// derived matrix.
+// The setup-failure classes a load answers.
 const (
 	MissingModule       setupClass = "missing-module"
 	incompleteModuleSum setupClass = "incomplete-module-sum"
-	TestBuildTag        setupClass = "test-build-tag"
 	missingConsumer     setupClass = "missing-consumer"
 )
 

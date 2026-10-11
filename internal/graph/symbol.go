@@ -88,6 +88,12 @@ type Symbol struct {
 	PkgPath string
 	Parent  SymbolID // the container's ID; empty for a package
 
+	// Dependents are, for a constant of a parenthesized constant declaration, the
+	// other constants of the group whose value its specification's deletion
+	// changes or leaves undefined, as grammar/analysis.md "Positional members"
+	// states, blank names left out ([enumeration.constantDependents]).
+	Dependents []SymbolID
+
 	// Pos is rendered: Filename is target-relative with forward slashes and
 	// Column counts UTF-16 code units rather than the bytes Go reports.
 	Pos     token.Position
@@ -132,6 +138,8 @@ func Symbols(r *load.Result, targetRoot string, read ReadFile) ([]Symbol, error)
 		seen:    make(map[token.Pos]SymbolID),
 		refs:    make(map[SymbolID]string),
 		typeIDs: make(map[string]SymbolID),
+
+		dependents: make(map[SymbolID][]SymbolID),
 	}
 	for _, g := range groupVariants(r.Packages, e.pos) {
 		if err := e.walkPackage(g); err != nil {
@@ -146,6 +154,9 @@ func Symbols(r *load.Result, targetRoot string, read ReadFile) ([]Symbol, error)
 	}
 
 	e.resolveReceivers()
+	for i := range e.symbols {
+		e.symbols[i].Dependents = e.dependents[e.symbols[i].ID]
+	}
 	slices.SortFunc(e.symbols, bySite)
 	return e.symbols, nil
 }
@@ -219,12 +230,94 @@ func syntaxFiles(p *packages.Package, pos *positions) []*ast.File {
 
 // enumeration accumulates the symbols of one loaded configuration.
 type enumeration struct {
-	pos     *positions
-	seen    map[token.Pos]SymbolID // one declaration per source site
-	refs    map[SymbolID]string    // a symbol's reference, for a container to lend
-	typeIDs map[string]SymbolID    // import path and type name to that type's symbol
-	pending []receiverOwner
-	symbols []Symbol
+	pos        *positions
+	seen       map[token.Pos]SymbolID  // one declaration per source site
+	refs       map[SymbolID]string     // a symbol's reference, for a container to lend
+	typeIDs    map[string]SymbolID     // import path and type name to that type's symbol
+	dependents map[SymbolID][]SymbolID // a constant's dependents, applied once the walk ends
+	pending    []receiverOwner
+	symbols    []Symbol
+}
+
+// constantDependents records the dependents of every constant one parenthesized
+// constant declaration holds: a specification's dependents are each later
+// specification repeating the list it writes, each later one whose list, written
+// or repeated, uses iota, and itself where it repeats a list and declares several
+// names. A constant has its specification's, so the group is decided per
+// specification.
+func (e *enumeration) constantDependents(p *packages.Package, d *ast.GenDecl) {
+	specs := e.constantSpecs(p, d)
+	for i, s := range specs {
+		var dependents []SymbolID
+		repeating := s.writes
+		for j := i + 1; j < len(specs); j++ {
+			repeating = repeating && !specs[j].writes
+			if repeating || specs[j].iota {
+				dependents = append(dependents, specs[j].names...)
+			}
+		}
+		if !s.writes && s.declared > 1 {
+			dependents = append(dependents, s.names...)
+		}
+		for _, id := range s.names {
+			e.depend(id, dependents)
+		}
+	}
+}
+
+// constantSpec is one specification of a constant declaration as its dependents
+// read it: the constants it declares by name, how many names it declares, whether
+// it writes an expression list, and whether the list it writes or repeats uses iota.
+type constantSpec struct {
+	names    []SymbolID
+	declared int
+	writes   bool
+	iota     bool
+}
+
+// constantSpecs reads the specifications of one constant declaration.
+func (e *enumeration) constantSpecs(p *packages.Package, d *ast.GenDecl) []constantSpec {
+	specs := make([]constantSpec, 0, len(d.Specs))
+	usesIota := false
+	for _, one := range d.Specs {
+		v, ok := one.(*ast.ValueSpec)
+		if !ok {
+			continue
+		}
+		held := constantSpec{writes: len(v.Values) > 0, declared: len(v.Names)}
+		if held.writes {
+			usesIota = slices.ContainsFunc(v.Values, func(x ast.Expr) bool { return mentionsIota(p.TypesInfo, x) })
+		}
+		held.iota = usesIota
+		for _, n := range v.Names {
+			if id, seen := e.seen[n.Pos()]; seen && n.Name != "_" {
+				held.names = append(held.names, id)
+			}
+		}
+		specs = append(specs, held)
+	}
+	return specs
+}
+
+// depend records the dependents of one constant, itself left out.
+func (e *enumeration) depend(id SymbolID, dependents []SymbolID) {
+	for _, dependent := range dependents {
+		if dependent != id && !slices.Contains(e.dependents[id], dependent) {
+			e.dependents[id] = append(e.dependents[id], dependent)
+		}
+	}
+}
+
+// mentionsIota reports whether an expression names the predeclared iota.
+func mentionsIota(info *types.Info, x ast.Expr) bool {
+	found := false
+	ast.Inspect(x, func(n ast.Node) bool {
+		if ident, isIdent := n.(*ast.Ident); isIdent && info.Uses[ident] == types.Universe.Lookup("iota") {
+			found = true
+		}
+		return !found
+	})
+	return found
 }
 
 // receiverOwner records a method whose container is a type the walk may not have
@@ -402,7 +495,13 @@ func (e *enumeration) walkGenDecl(p *packages.Package, d *ast.GenDecl, pkgID Sym
 		}
 		return nil
 	case token.CONST:
-		return e.walkValueSpecs(p, d.Specs, KindConst, pkgID)
+		if err := e.walkValueSpecs(p, d.Specs, KindConst, pkgID); err != nil {
+			return err
+		}
+		if d.Lparen.IsValid() {
+			e.constantDependents(p, d)
+		}
+		return nil
 	case token.VAR:
 		return e.walkValueSpecs(p, d.Specs, KindVar, pkgID)
 	default:

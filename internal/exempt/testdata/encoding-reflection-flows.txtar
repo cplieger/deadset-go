@@ -1,0 +1,141 @@
+A command handing values to encoding/json three indirect ways: through an
+empty-interface parameter of its own function, as a named type that is no struct;
+as a struct embedding an unexported struct; and as a value a function of its own
+returns as an interface, held in a variable the encoder is then given. A fourth
+value is returned the same way and never encoded, and so is a value a function literal returns inside a
+function whose own result is encoded. A value a function used as a value returns
+reaches the encoder a call through a function value hands its result to, and one held
+in a variable reaches an empty-interface parameter of a dependency's function. A bound
+method value and a method expression are function values too, and a method only ever
+called directly, whose result is never encoded, keeps nothing.
+
+-- go.mod --
+module example.com/flows
+
+go 1.27.0
+
+require example.com/sink v0.0.0
+
+replace example.com/sink => ./sink
+-- main.go --
+package main
+
+import (
+	"encoding/json"
+	"os"
+
+	"example.com/sink"
+)
+
+type raw []byte
+
+func (r raw) MarshalJSON() ([]byte, error) { return r, nil }
+
+func reencode(from any) ([]byte, error) { return json.Marshal(from) }
+
+type inner struct {
+	X int `json:"x"`
+}
+
+type outer struct{ inner }
+
+type ack struct {
+	ID string `json:"id"`
+}
+
+type unsent struct {
+	ID string `json:"id"`
+}
+
+func handle() (any, error) { return ack{ID: "x"}, nil }
+
+func drop() any { return unsent{ID: "y"} }
+
+type closed struct {
+	ID string `json:"id"`
+}
+
+func wrap() any {
+	f := func() any { return closed{ID: "z"} }
+	return f
+}
+
+type replied struct {
+	OK bool `json:"ok"`
+}
+
+type relayed struct {
+	ID string `json:"id"`
+}
+
+type handler func() (any, error)
+
+func answer() (any, error) { return replied{OK: true}, nil }
+
+var handlers = map[string]handler{"answer": answer}
+
+func dispatch(name string) {
+	body, err := handlers[name]()
+	if err != nil {
+		return
+	}
+	_, _ = json.Marshal(body)
+}
+
+func relay() any { return relayed{ID: "r"} }
+
+func forward() {
+	v := relay()
+	sink.Write(v)
+}
+
+type provider struct{}
+
+type made struct {
+	ID string `json:"id"`
+}
+
+func (provider) Make() any { return made{ID: "m"} }
+
+type maker struct{}
+
+type expressed struct {
+	ID string `json:"id"`
+}
+
+func (maker) Build() any { return expressed{ID: "e"} }
+
+type direct struct {
+	ID string `json:"id"`
+}
+
+func (maker) Plain() any { return direct{ID: "d"} }
+
+func viaValues() {
+	makeValue := provider{}.Make
+	_, _ = json.Marshal(makeValue())
+	build := maker.Build
+	_, _ = json.Marshal(build(maker{}))
+	println(maker{}.Plain() != nil)
+}
+
+func main() {
+	viaValues()
+	dispatch("answer")
+	forward()
+	_, _ = reencode(raw("{}"))
+	_, _ = json.Marshal(outer{inner{1}})
+	v, _ := handle()
+	_ = json.NewEncoder(os.Stdout).Encode(v)
+	println(drop() != nil)
+	_, _ = json.Marshal(wrap())
+}
+-- sink/go.mod --
+module example.com/sink
+
+go 1.27.0
+-- sink/sink.go --
+package sink
+
+// Write takes any value.
+func Write(v any) { _ = v }

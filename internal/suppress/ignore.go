@@ -10,6 +10,7 @@ import (
 	"io/fs"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/cplieger/deadset-go/internal/graph"
 )
@@ -18,6 +19,11 @@ import (
 // is fixed too, the target root, so the path a finding carries for the document
 // is this name and nothing has to be made relative.
 const IgnoreFileName = "deadset-ignore.json"
+
+// ownScheme opens every reference of this analyzer's language. A record naming
+// another scheme belongs to the analyzer of that language, which reads the same
+// document.
+const ownScheme = "go://"
 
 // The forms a malformed value of an entry is told to take.
 const (
@@ -154,7 +160,8 @@ func records(raw []json.RawMessage, sites []token.Position, bound map[reference]
 }
 
 // record reads one entry or row: the records it bound, or the refusals it carries,
-// or the malformed value that ends the run.
+// or the malformed value that ends the run. A well-formed record of another
+// language's scheme is none of these: it binds, counts and is reported nowhere here.
 func record(body []byte, at token.Position, bound map[reference][]graph.Symbol, held *shape) ([]Record, []Refusal, error) {
 	wire, err := decodeRecord(body, at, held)
 	if err != nil {
@@ -162,6 +169,9 @@ func record(body []byte, at token.Position, bound map[reference][]graph.Symbol, 
 	}
 	code, symbol := *wire.Code, *wire.Symbol
 	path, reason := value(wire.Path), value(wire.Reason)
+	if !strings.HasPrefix(symbol, ownScheme) {
+		return nil, nil, nil
+	}
 
 	if refused := refusals(wire, at, held); len(refused) > 0 {
 		return nil, refused, nil

@@ -289,8 +289,12 @@ func (a *invocation) write(e *report.Envelope, recorded []suppress.Recorded, fai
 	if a.baselineWrite == "" {
 		return nil
 	}
+	others, err := suppress.OtherSchemeRows(a.baselineWrite)
+	if err != nil {
+		return err
+	}
 	return writeAtomically(a.baselineWrite, func(w io.Writer) error {
-		return suppress.WriteBaseline(w, recorded, suppress.Provenance{Analyzer: name, Version: version()})
+		return suppress.WriteBaseline(w, recorded, suppress.Provenance{Analyzer: name, Version: version()}, others)
 	})
 }
 
