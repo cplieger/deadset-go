@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/bits"
 	"slices"
+	"strings"
 )
 
 // ErrMatrix reports a matrix the merge cannot key a configuration of.
@@ -22,8 +23,8 @@ const maxConfigurations = 64
 // per configuration, at the configuration's place in the matrix.
 type ConfigSet uint64
 
-// Has reports whether the set holds the configuration at index config.
-func (s ConfigSet) Has(config int) bool {
+// has reports whether the set holds the configuration at index config.
+func (s ConfigSet) has(config int) bool {
 	if config < 0 || config >= maxConfigurations {
 		return false
 	}
@@ -34,7 +35,7 @@ func (s ConfigSet) Has(config int) bool {
 func (s ConfigSet) Indexes() []int {
 	found := make([]int, 0, bits.OnesCount64(uint64(s)))
 	for config := range maxConfigurations {
-		if s.Has(config) {
+		if s.has(config) {
 			found = append(found, config)
 		}
 	}
@@ -65,9 +66,11 @@ type Configured struct {
 //
 // Symbols holds every declaration any configuration declares, once per source
 // position, ordered by site the way one configuration's enumeration is, each
-// carrying the set of configurations it exists in. References, Roots and Unmatched
-// hold every configuration's own, each carrying the configuration it was seen in,
-// so the set one configuration contributed is recoverable from the whole.
+// carrying the set of configurations it exists in. References and Roots hold every
+// configuration's own, each carrying the configuration it was seen in, so the set
+// one configuration contributed is recoverable from the whole. Unmatched holds one
+// row per configuration that left a string unmatched, with no configuration: only
+// how many configurations left it is read.
 type Merged struct {
 	Symbols        []Symbol
 	References     []Reference
@@ -123,11 +126,7 @@ func Merge(per []Configured) (Merged, error) {
 			r.Config = config
 			m.Roots = append(m.Roots, r)
 		}
-		for i := range one.Unmatched {
-			u := one.Unmatched[i]
-			u.Config = config
-			m.Unmatched = append(m.Unmatched, u)
-		}
+		m.Unmatched = append(m.Unmatched, one.Unmatched...)
 	}
 	slices.SortFunc(m.Symbols, bySite)
 	return m, nil
@@ -174,7 +173,7 @@ func NewMatrix(m *Merged) *Matrix {
 func restrict(m *Merged, config int) Configured {
 	var one Configured
 	for i := range m.Symbols {
-		if m.Symbols[i].Configs.Has(config) {
+		if m.Symbols[i].Configs.has(config) {
 			one.Symbols = append(one.Symbols, m.Symbols[i])
 		}
 	}
@@ -307,7 +306,11 @@ func (x *Matrix) Sweep(in *SweepInput, evidence TestEvidence) Result {
 		r.Candidates = append(r.Candidates, c)
 	}
 
-	r.Components = union.componentsOf(dead, testOfDeadCode, unreferencedTest)
+	reachable := make([]bool, len(x.merged.Symbols))
+	for i := range x.merged.Symbols {
+		reachable[i] = r.LiveUnder[x.merged.Symbols[i].ID].Has(Reachability)
+	}
+	r.Components = union.componentsOf(dead, testOfDeadCode, unreferencedTest, reachable)
 	r.Retained = x.retained(in.Exempt, per)
 	r.Suppressed = x.suppressed(per)
 	return r
@@ -329,7 +332,7 @@ func (x *Matrix) Sweep(in *SweepInput, evidence TestEvidence) Result {
 func (x *Matrix) intersect(union *Graph, s *Symbol, held []map[SymbolID]Candidate, m Mode) (Candidate, bool) {
 	c := Candidate{ID: s.ID, Relation: ReferenceCounting, Configs: 0, TestOfDeadCode: true, UnreferencedTest: true}
 	for config := range x.merged.Configurations {
-		if !s.Configs.Has(config) {
+		if !s.Configs.has(config) {
 			continue
 		}
 		found, candidate := held[config][s.ID]
@@ -449,16 +452,26 @@ func (x *Matrix) suppressed(per []Result) []SymbolID {
 }
 
 // exemptionKey is what makes two exemptions of a matrix one record: the symbol,
-// the class, the detail and the holder, which is the key the exemption classes
+// the class, the detail and the holders, which is the key the exemption classes
 // themselves deduplicate one configuration's records on.
 type exemptionKey struct {
-	id     SymbolID
-	class  string
-	detail string
-	holder SymbolID
+	id        SymbolID
+	class     string
+	detail    string
+	holder    SymbolID
+	coHolders string
 }
 
 // keyOf keys one exemption.
 func keyOf(e *Exemption) exemptionKey {
-	return exemptionKey{id: e.ID, class: e.Class, detail: e.Detail, holder: e.Holder}
+	return exemptionKey{id: e.ID, class: e.Class, detail: e.Detail, holder: e.Holder, coHolders: JoinedIDs(e.CoHolders)}
+}
+
+// JoinedIDs spells a list of identifiers as one comparable value.
+func JoinedIDs(ids []SymbolID) string {
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = string(id)
+	}
+	return strings.Join(parts, "\x00")
 }

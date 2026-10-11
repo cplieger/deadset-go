@@ -94,9 +94,9 @@ func TestLinknameDirectiveReadsBothNames(t *testing.T) {
 	}
 	for name, test := range cases {
 		t.Run(name, func(t *testing.T) {
-			local, remote, ok := LinknameDirective(test.text)
+			local, remote, ok := linknameDirective(test.text)
 			if local != test.wantLocal || remote != test.wantRemote || ok != test.wantOK {
-				t.Errorf("LinknameDirective(%q) = %q, %q, %t, want %q, %q, %t",
+				t.Errorf("linknameDirective(%q) = %q, %q, %t, want %q, %q, %t",
 					test.text, local, remote, ok, test.wantLocal, test.wantRemote, test.wantOK)
 			}
 		})

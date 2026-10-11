@@ -39,12 +39,14 @@ func outcomes() map[string][2]verdict {
 		"reason-separator":  {verdictDirective, verdictMalformed},
 		"reason-required":   {verdictDirective, verdictNoReason},
 		"line-above":        {verdictDirective, verdictDirective},
+		"trailing":          {verdictDirective, verdictDirective},
 	}
 }
 
-// lineAbove is the only line offset the grammar accepts: the comment sits on the
-// line immediately above the declaration it targets.
-const lineAbove = -1
+// boundOffsets are the line offsets the grammar accepts: a comment alone on the line
+// immediately above the declaration it targets, and one after the code on the line
+// the declaration begins on.
+var boundOffsets = []int{-1, 0}
 
 func TestPublishedGrammarCarriesEveryInlineExpression(t *testing.T) {
 	page := readPage(t, grammarPage)
@@ -80,7 +82,7 @@ func TestClassifyDecidesEveryPublishedCorpusCase(t *testing.T) {
 				t.Errorf("classify(%q) = %v with codes %v and reason %q, want at least one code and a reason: %s",
 					in.Comment, is, codes, reason, c.Reason)
 			}
-			if got := is == verdictDirective && in.LineOffset == lineAbove; got != c.Accepted {
+			if got := is == verdictDirective && slices.Contains(boundOffsets, in.LineOffset); got != c.Accepted {
 				t.Errorf("the comment %q at line offset %d is a bound suppression = %t, want %t: %s",
 					in.Comment, in.LineOffset, got, c.Accepted, c.Reason)
 			}
@@ -146,7 +148,11 @@ func TestInlineBindsADirectiveToEveryDeclarationOnTheLineBelowIt(t *testing.T) {
 		"two lines above the function, with a blank line between":                  {""},
 		"above the doc comment, which is not a token of the declaration":           {""},
 		"above the line that opens the group":                                      {""},
-		"on the declaration's own line":                                            {""},
+		"on the declaration's own line":                                            {pkg + "Trailing"},
+		"after the first of two declarations on consecutive lines":                 {pkg + "TrailingFirst"},
+		"after code on the line above a declaration":                               {""},
+		"after a closing brace on the line above a declaration":                    {""},
+		"after a parameter on its own line of a wrapped parameter list":            {pkg + "Wrapped"},
 		"on the line directly below a declaration":                                 {""},
 		"above a local, which the inventory holds no declaration for":              {""},
 		"above the package clause, which no declaration of the language begins at": {""},
@@ -233,16 +239,16 @@ func TestInlineEndsTheReadOnADirectiveNameTheGrammarDoesNotDefine(t *testing.T) 
 	result, root, symbols := loaded(t, "malformed.txtar")
 	records, refusals, err := Inline(result, resolverOf(t, result, root, symbols), symbols)
 
-	if !errors.Is(err, ErrMalformed) {
-		t.Fatalf("Inline(malformed.txtar) error = %v, want one satisfying errors.Is(err, ErrMalformed)", err)
+	if !errors.Is(err, errMalformed) {
+		t.Fatalf("Inline(malformed.txtar) error = %v, want one satisfying errors.Is(err, errMalformed)", err)
 	}
 	if records != nil || refusals != nil {
 		t.Errorf("Inline(malformed.txtar) returned %d records and %d refusals with its error, want none of either", len(records), len(refusals))
 	}
 
-	var malformed *MalformedError
+	var malformed *malformedError
 	if !errors.As(err, &malformed) {
-		t.Fatalf("Inline(malformed.txtar) error = %v, want one errors.As reads as *MalformedError", err)
+		t.Fatalf("Inline(malformed.txtar) error = %v, want one errors.As reads as *malformedError", err)
 	}
 	if malformed.Site.Filename != "catalog.go" || malformed.Site.Line != 3 {
 		t.Errorf("Inline(malformed.txtar) refused at %s, want catalog.go:3", malformed.Site)

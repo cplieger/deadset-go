@@ -1071,6 +1071,59 @@ func TestSweepRecordsAHeldExemptionAsRetainingOnlyWhileItsHolderIsLive(t *testin
 	}
 }
 
+func TestSweepRetainsAnExemptionWithCoHoldersOnlyWhileEveryHolderIsLive(t *testing.T) {
+	b := newGraphBuilder(t).add("entry", "second", "deadHolder", "keptByBoth", "keptWithADead")
+	b.root("entry", RootMain)
+	b.root("second", RootMain)
+	exemptions := []Exemption{
+		{ID: b.id("keptByBoth"), Class: "interface-satisfaction", Holder: b.id("entry"), CoHolders: []SymbolID{b.id("second")}},
+		{ID: b.id("keptWithADead"), Class: "interface-satisfaction", Holder: b.id("entry"), CoHolders: []SymbolID{b.id("deadHolder")}},
+	}
+	r := b.graph().Sweep(&SweepInput{Exempt: exemptions})
+
+	if got, want := b.candidates(r), []string{"deadHolder reference-counting", "keptWithADead reachability"}; !slices.Equal(got, want) {
+		t.Errorf("Sweep() with co-held exemptions returned candidates %v, want %v", got, want)
+	}
+	components := []grouped{{members: "deadHolder keptWithADead", roots: "deadHolder", lines: 2}}
+	if got := b.groups(r); !slices.Equal(got, components) {
+		t.Errorf("Sweep() with co-held exemptions returned components %+v, want %+v", got, components)
+	}
+	if len(r.Retained) != 1 || r.Retained[0].ID != b.id("keptByBoth") {
+		t.Errorf("Sweep() with co-held exemptions retained %+v, want keptByBoth alone", r.Retained)
+	}
+}
+
+func TestSweepCreditsAnExemptionWithASymbolAMarkItMadeStaleNamesToo(t *testing.T) {
+	b := newGraphBuilder(t).add("entry", "kept")
+	b.root("entry", RootMain)
+	r := b.graph().Sweep(&SweepInput{
+		Exempt: []Exemption{{ID: b.id("kept"), Class: "interface-satisfaction", Holder: b.id("entry")}},
+		Marked: []SymbolID{b.id("kept")},
+	})
+
+	if len(r.Suppressed) != 0 {
+		t.Errorf("Sweep() suppressed %v, want nothing: the exemption holds the symbol, so the mark is stale", r.Suppressed)
+	}
+	if len(r.Retained) != 1 || r.Retained[0].ID != b.id("kept") {
+		t.Errorf("Sweep() retained %+v, want the exemption the stale mark leaves the symbol to", r.Retained)
+	}
+}
+
+func TestSweepCountsAHolderReachabilityHoldsLiveAsHoldingItsExemption(t *testing.T) {
+	b := newGraphBuilder(t).add("Published", "kept")
+	b.root("Published", RootPublishedAPI)
+	r := b.graph().Sweep(&SweepInput{
+		Exempt: []Exemption{{ID: b.id("kept"), Class: "interface-satisfaction", Holder: b.id("Published")}},
+	})
+
+	if got, want := b.candidates(r), []string{"Published reference-counting"}; !slices.Equal(got, want) {
+		t.Errorf("Sweep() returned candidates %v, want %v", got, want)
+	}
+	if len(r.Retained) != 1 || r.Retained[0].ID != b.id("kept") {
+		t.Errorf("Sweep() retained %+v, want kept: its holder is a published root nothing references", r.Retained)
+	}
+}
+
 func TestMatrixSweepRecordsTheHolderOfAFactThatRetained(t *testing.T) {
 	b := newGraphBuilder(t).add("entry", "deadHolder", "method")
 	b.root("entry", RootMain)

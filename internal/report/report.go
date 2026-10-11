@@ -12,8 +12,8 @@
 // The envelope is an analyzer's own report. Two members belong to a merged report
 // alone and are absent here: the list of input reports a merge read, and the
 // analyzer name a merge keeps on each record, which this document states once in
-// [Envelope.Analyzer]. Reading a merged report is the merging product's job, so
-// [Envelope.UnmarshalJSON] refuses one.
+// [Envelope.Analyzer]. Reading a report back is a test's job and lives in
+// reporttest; reading a merged report is the merging product's.
 //
 // Nothing in this package validates a rendering against the JSON schema that
 // governs it, and the schema is not embedded here: the schema lives with the
@@ -36,7 +36,7 @@ import (
 // SchemaVersion is the version of the report schema this package writes a
 // document to. An analyzer names every version it reads in the analyzer object,
 // and that list holds this one.
-const SchemaVersion = "8.0.0"
+const SchemaVersion = "8.1.0"
 
 // staleSuppressionCode is the code of a stale suppression, which is the one code
 // whose records the envelope carries outside its finding list.
@@ -56,11 +56,11 @@ var (
 	// admits.
 	ErrInput = errors.New("report: incomplete input")
 
-	// ErrOptions reports a reporter asked to render without what it needs: the
+	// errOptions reports a reporter asked to render without what it needs: the
 	// SARIF reporter with no reader for the source lines its fingerprint hashes,
 	// and the template reporter with no template or with one that names
 	// something the envelope does not carry.
-	ErrOptions = errors.New("report: incomplete options")
+	errOptions = errors.New("report: incomplete options")
 )
 
 // Analyzer is the product that wrote a report: the name it mints every identifier

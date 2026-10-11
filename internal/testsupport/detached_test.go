@@ -15,7 +15,7 @@ type recorder struct {
 	failures []string
 }
 
-func (r *recorder) Helper() {}
+func (*recorder) Helper() {}
 
 func (r *recorder) Fatalf(format string, args ...any) {
 	r.failures = append(r.failures, fmt.Sprintf(format, args...))

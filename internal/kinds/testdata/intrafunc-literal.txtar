@@ -1,0 +1,25 @@
+Function literals held in local variables: one the body only calls, one a var
+declaration holds that the body only calls, one it also passes on, one it
+reassigns, and a stub it only calls.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+import "fmt"
+
+func apply(f func(string) int) int { return f("a") }
+
+func main() {
+	called := func(name string, n int) int { return n }
+	var declared = func(name string, n int) int { return n }
+	passed := func(name string) int { return 1 }
+	replaced := func(name string) int { return 2 }
+	replaced = func(name string) int { return 3 }
+	var stub = func(name string) {}
+	stub("s")
+	fmt.Println(called("c", 1), declared("d", 2), apply(passed), passed("p"), replaced("r"))
+}

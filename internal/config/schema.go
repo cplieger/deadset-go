@@ -3,6 +3,8 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
 	"maps"
 	"regexp"
 	"slices"
@@ -302,8 +304,8 @@ func checkDocument(data []byte, label string) *Error {
 	if err := walkValue(dec, "", schemaRoot(), label); err != nil {
 		return err
 	}
-	if dec.More() {
-		return malformed(label, "", "want one JSON object, a second value follows it")
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return malformed(label, "", "want one JSON object and nothing after it")
 	}
 	return nil
 }

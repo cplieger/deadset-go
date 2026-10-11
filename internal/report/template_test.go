@@ -45,8 +45,8 @@ func TestTheTemplateFailsOnAnAbsentField(t *testing.T) {
 	var held strings.Builder
 	parsed := parsedTemplate(t, "{{ .totals.findings }} {{ .invented }}\n")
 	err := Template(&held, &envelope, Options{Template: parsed})
-	if !errors.Is(err, ErrOptions) {
-		t.Fatalf("Template(a template naming an absent field) = error %v, want one carrying ErrOptions", err)
+	if !errors.Is(err, errOptions) {
+		t.Fatalf("Template(a template naming an absent field) = error %v, want one carrying errOptions", err)
 	}
 	if !strings.Contains(err.Error(), "invented") {
 		t.Errorf("Template(a template naming an absent field) = error %q, want one naming the field", err)
@@ -63,8 +63,8 @@ func TestTheTemplateNeedsATemplate(t *testing.T) {
 	in := minimalInput()
 	envelope := built(t, &in)
 
-	if err := Template(&strings.Builder{}, &envelope, Options{}); !errors.Is(err, ErrOptions) {
-		t.Errorf("Template(no template) = error %v, want one carrying ErrOptions", err)
+	if err := Template(&strings.Builder{}, &envelope, Options{}); !errors.Is(err, errOptions) {
+		t.Errorf("Template(no template) = error %v, want one carrying errOptions", err)
 	}
 }
 
@@ -133,8 +133,8 @@ func TestTheTemplateFailsWhatItCannotRender(t *testing.T) {
 
 			var out strings.Builder
 			err := parsedTemplate(t, text).execute(&out, document)
-			if !errors.Is(err, ErrOptions) || out.Len() != 0 {
-				t.Errorf("render(%q) = %v and wrote %q, want a failure carrying ErrOptions and nothing written",
+			if !errors.Is(err, errOptions) || out.Len() != 0 {
+				t.Errorf("render(%q) = %v and wrote %q, want a failure carrying errOptions and nothing written",
 					text, err, out.String())
 			}
 		})

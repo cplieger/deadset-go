@@ -459,7 +459,7 @@ func (b *graphBuilder) describe(r Result) string {
 
 // lineTotal is the number of distinct source lines a set of symbols occupies,
 // counted by naming every line each of them runs over.
-func (b *graphBuilder) lineTotal(g *Graph, ids []SymbolID) int {
+func (*graphBuilder) lineTotal(g *Graph, ids []SymbolID) int {
 	covered := map[token.Position]bool{}
 	for _, id := range ids {
 		symbol := g.symbols[g.at(id)]
@@ -707,30 +707,22 @@ func (d drawnLoad) build(t *rapid.T) *graphBuilder {
 }
 
 // counts answers what the mode counts the slow way, over the names a draw
-// produced: how many references each declaration carries, which declarations a
-// consumer's counted reference calls, and which consumers reference each
-// declaration whatever the mode.
-func (d drawnLoad) counts() (referenced map[string]int, called map[string]bool, by map[string][]string) {
-	referenced, called, by = map[string]int{}, map[string]bool{}, map[string][]string{}
+// produced: how many references each declaration carries, and which declarations a
+// consumer's counted reference calls.
+func (d drawnLoad) counts() (referenced map[string]int, called map[string]bool) {
+	referenced, called = map[string]int{}, map[string]bool{}
 	for _, e := range d.edges {
 		referenced[drawn(e[1])]++
 	}
 	for _, c := range d.consumed {
 		name := drawn(c.at)
-		module := drawnConsumer(c.consumer)
-		if !slices.Contains(by[name], module) {
-			by[name] = append(by[name], module)
-		}
 		if c.test && d.mode.Production && !d.mode.ConsumerTestsProduction {
 			continue
 		}
 		referenced[name]++
 		called[name] = true
 	}
-	for name := range by {
-		slices.Sort(by[name])
-	}
-	return referenced, called, by
+	return referenced, called
 }
 
 // reachable answers reachability the slow way: every declaration a consumer's
@@ -784,7 +776,7 @@ func TestProperty03AReferenceFromAnyLoadedModulePreventsTheFinding(t *testing.T)
 		g := b.graph()
 		r := g.Sweep(&SweepInput{Mode: d.mode})
 
-		referenced, called, by := d.counts()
+		referenced, called := d.counts()
 		reached := d.reachable(called)
 
 		want := []string{}
@@ -814,9 +806,6 @@ func TestProperty03AReferenceFromAnyLoadedModulePreventsTheFinding(t *testing.T)
 			case referenced[name] == 0 && set.Has(ReferenceCounting):
 				t.Fatalf("%s carries no counted reference and is live under %s\n%s",
 					name, ReferenceCounting, describeLoad(d))
-			}
-			if got := g.ConsumersOf(b.id(name)); !slices.Equal(got, by[name]) {
-				t.Fatalf("ConsumersOf(%s) = %v, want %v\n%s", name, got, by[name], describeLoad(d))
 			}
 		}
 	})

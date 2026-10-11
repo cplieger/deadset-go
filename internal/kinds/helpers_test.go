@@ -16,7 +16,7 @@ import (
 	"github.com/cplieger/deadset-go/internal/load"
 	"github.com/cplieger/deadset-go/internal/scope"
 	"github.com/cplieger/deadset-go/internal/testsupport"
-	spec "github.com/cplieger/deadset-spec/v6"
+	spec "github.com/cplieger/deadset-spec/v7"
 	"golang.org/x/tools/txtar"
 )
 
@@ -494,7 +494,7 @@ func analyzeShared(t *testing.T, in *Input) *sharedAnalysis {
 	}
 	fresh(analyzed.Production)
 	for ref, id := range in.index().byRef {
-		held.classes[ref] = in.ClassOf(id)
+		held.classes[ref] = in.classOf(id)
 	}
 	return held
 }

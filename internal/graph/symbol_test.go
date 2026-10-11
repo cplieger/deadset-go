@@ -8,6 +8,7 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -122,6 +123,44 @@ func render(symbols []Symbol) string {
 			s.Kind, s.Ref, s.Name, s.Parent, s.Exported, s.Blank)
 	}
 	return b.String()
+}
+
+func TestSymbolsNamesTheDependentsOfEveryConstantOfAGroup(t *testing.T) {
+	symbols := symbolsOf(t, "constant-groups.txtar")
+	names := make(map[SymbolID]string, len(symbols))
+	for _, s := range symbols {
+		names[s.ID] = s.Name
+	}
+	got := make(map[string]string)
+	for _, s := range symbols {
+		if s.Kind != KindConst || s.Blank {
+			continue
+		}
+		dependents := make([]string, len(s.Dependents))
+		for i, id := range s.Dependents {
+			dependents[i] = names[id]
+		}
+		slices.Sort(dependents)
+		got[s.Name] = strings.Join(dependents, " ")
+	}
+	want := map[string]string{
+		"idle":     "running",
+		"running":  "",
+		"limit":    "spare",
+		"spare":    "",
+		"fixed":    "",
+		"pairA":    "deadPair livePair",
+		"pairB":    "deadPair livePair",
+		"deadPair": "livePair",
+		"livePair": "deadPair",
+		"base":     "tail",
+		"spacer":   "tail",
+		"tail":     "",
+		"single":   "",
+	}
+	if !maps.Equal(got, want) {
+		t.Errorf("Symbols(constant-groups.txtar) dependents = %v, want %v", got, want)
+	}
 }
 
 func TestSymbolsGoldenTableOverEveryKind(t *testing.T) {
@@ -407,7 +446,7 @@ func TestSymbolsRefusesAnIncompleteRequest(t *testing.T) {
 			result:  &load.Result{Fset: result.Fset, Packages: []*packages.Package{{PkgPath: "example.com/app", TypesInfo: &types.Info{}}}},
 			root:    root,
 			read:    os.ReadFile,
-			wantErr: ErrNoTargetPackage,
+			wantErr: errNoTargetPackage,
 		},
 	}
 	for _, tc := range cases {

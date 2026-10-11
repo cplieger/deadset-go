@@ -148,7 +148,7 @@ func writeOnlySubject(in *Input, symbol *graph.Symbol, u *uses, exempted map[gra
 // unused-unexported kinds for a constant of an enumerated type, which report no
 // member of an iota group.
 func UnusedEnumMember(in *Input) ([]Finding, error) {
-	members := EnumGroupMembers(in)
+	members := enumGroupMembers(in)
 	referenced := referencedSymbols(in)
 
 	var found []Finding
@@ -328,7 +328,7 @@ func referencedSymbols(in *Input) map[graph.SymbolID]bool {
 	return named
 }
 
-// EnumGroupMembers answers which constants of the inventory are members of an
+// enumGroupMembers answers which constants of the inventory are members of an
 // enumerated type, each with the name of the type that declares it.
 //
 // The enumerated type is a defined type whose constants are declared in an iota
@@ -344,7 +344,7 @@ func referencedSymbols(in *Input) map[graph.SymbolID]bool {
 // A constant is a member when one build configuration declares it in such a
 // group, because a group a constraint excludes from one configuration is still
 // the group the source writes.
-func EnumGroupMembers(in *Input) map[graph.SymbolID]string {
+func enumGroupMembers(in *Input) map[graph.SymbolID]string {
 	members := make(map[graph.SymbolID]string)
 	for i := range in.Per {
 		scan := &enumScan{per: &in.Per[i], owners: make(map[string]string), members: members}

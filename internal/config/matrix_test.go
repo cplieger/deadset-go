@@ -115,12 +115,8 @@ func TestResolveRefusesAFlagSuppliedMatrixEntryNamingAnUndeclaredMember(t *testi
 			flags := `{"analysis.configurations": [` + tc.entry + `]}`
 			_, _, err := config.Resolve(labelled(flags, `{"target": {"kind": "application"}}`, "",
 				map[string]string{"analysis.configurations": "--configurations"}))
-			var refusal *config.Error
-			if !errors.As(err, &refusal) {
+			if _, ok := errors.AsType[*config.Error](err); !ok {
 				t.Fatalf("Resolve(a flag supplying %s) = error %v, want a *config.Error", tc.entry, err)
-			}
-			if refusal.Kind != config.KindMalformed {
-				t.Errorf("Resolve(a flag supplying %s) = kind %v, want %v", tc.entry, refusal.Kind, config.KindMalformed)
 			}
 		})
 	}

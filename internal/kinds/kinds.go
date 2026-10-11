@@ -31,7 +31,6 @@ import (
 	"github.com/cplieger/deadset-go/internal/edges"
 	"github.com/cplieger/deadset-go/internal/graph"
 	"github.com/cplieger/deadset-go/internal/load"
-	"github.com/cplieger/deadset-go/internal/matrix"
 	"github.com/cplieger/deadset-go/internal/suppress"
 )
 
@@ -46,17 +45,22 @@ const (
 // generated file, which is nothing: the next run of the generator rewrites it.
 const generatedFixability = "none"
 
-var (
-	// ErrInput reports a findings pass with nothing to read: no input, or no
-	// resolved configuration to read the severity map from.
-	ErrInput = errors.New("kinds: incomplete input")
+// manualFixability is what a mechanical edit may do with a finding about a
+// declaration whose deletion changes the value of a live one: nothing but what a
+// maintainer decides.
+const manualFixability = "manual"
 
-	// ErrEmitter reports a finding an emitter returned that the Contract cannot
+var (
+	// errInput reports a findings pass with nothing to read: no input, or no
+	// resolved configuration to read the severity map from.
+	errInput = errors.New("kinds: incomplete input")
+
+	// errEmitter reports a finding an emitter returned that the Contract cannot
 	// carry: a message that is not one sentence, a code that is not the
 	// emitter's own, a second finding about one declaration, or a finding about
 	// a symbol an exemption retained. Each is a defect in an emitter rather than
 	// a row of a report, so the pass fails instead of publishing it.
-	ErrEmitter = errors.New("kinds: emitter defect")
+	errEmitter = errors.New("kinds: emitter defect")
 )
 
 // Class is the reachability class of the Contract: what the analysis knows about
@@ -113,6 +117,10 @@ type Component struct {
 	SymbolCount    int
 	DeletableLines int
 	Root           bool
+
+	// Held reports a component no mechanical edit deletes, whose findings carry
+	// the manual fixability where their kind lists it.
+	Held bool
 }
 
 // Positioned is one symbol a finding names beside its subject, with its position.
@@ -144,6 +152,7 @@ type Details struct {
 	NarrowerVisibility string       // the visibility the references support
 	Implementations    []Positioned // the concrete implementations of an interface, empty and not nil where it has none
 	WritePositions     []Position   // every position a subject is written at
+	NameLiteral        *Position    // the literal spelling the subject's name, or a constant's type's, that lowered its class
 	ExcludedBy         string       // the build constraint that excluded a file
 	DependencyClass    string       // the section that declares a dependency
 	Replacement        string       // the right-hand side of a module directive
@@ -198,6 +207,10 @@ type Finding struct {
 	// a report's own symbol reference is not one: a blank declaration shares the
 	// reference of its container.
 	id graph.SymbolID
+
+	// ceiling caps the reachability class [Input.complete] gives the finding, for an
+	// emitter whose subject's class is not its declaration's own; no class caps nothing.
+	ceiling Class
 }
 
 // Consumers is what the run knows about the target's consumers: the ones the scope
@@ -270,16 +283,6 @@ type Input struct {
 	// the dependency kinds read, and nil where the run did not read it.
 	Deps *deps.File
 
-	// Derived is the matrix the derivation answered, and nil where the
-	// configuration named the build configurations itself.
-	//
-	// No kind reads it: the kind that claims something about every configuration
-	// of a target gates on the configuration listing them and declaring the set
-	// complete, and reads the files each configuration ignored. What the run
-	// derived is what the report's declared gaps name, so the field carries the
-	// derivation to the envelope and no further.
-	Derived *matrix.Derived
-
 	// Unmatched is every configured root the roots pass matched nothing with,
 	// which is a configuration naming something that no longer exists.
 	Unmatched []graph.Unmatched
@@ -303,15 +306,18 @@ type Input struct {
 	// indexed is what a lookup over the inventory needs, built on first use.
 	indexed *index
 
+	// fixed is [Input.fixedByOutsideInterface]'s answer, built on first use.
+	fixed map[graph.SymbolID]bool
+
 	// withheld names every record of Marks, by its place in that slice, whose code
-	// and declaration matched a finding this pass produced, so the pass withheld
-	// that finding. A pass records it and the kind that reports a record which
-	// withheld nothing reads it, which is what makes staleness one question asked
-	// once over every kind rather than one answer per kind.
+	// and declaration matched a finding this pass produced, with each finding the
+	// pass withheld through it. A pass records it and the kind that reports a record
+	// which withheld nothing reads it, which is what makes staleness one question
+	// asked once over every kind rather than one answer per kind.
 	//
 	// It is the pass's own answer and is rebuilt by each pass, so a second pass over
 	// one input inherits nothing from the first.
-	withheld map[int]bool
+	withheld map[int][]heldFinding
 
 	// dialed is what the configuration dials withhold beyond the findings they
 	// name, which the pass computes between its two phases.
@@ -414,19 +420,20 @@ var readsThePass = map[string]bool{
 // finding at one key fails the pass whichever phase produced it.
 func Compute(in *Input, emitters map[string]Emitter) (Result, error) {
 	if in == nil || in.Config == nil {
-		return Result{}, fmt.Errorf("%w: no resolved configuration", ErrInput)
+		return Result{}, fmt.Errorf("%w: no resolved configuration", errInput)
 	}
 
 	if err := checkTable(emitters); err != nil {
 		return Result{}, err
 	}
-	in.withheld = make(map[int]bool, len(in.Marks))
+	in.withheld = make(map[int][]heldFinding, len(in.Marks))
 	reported := make(map[string]string)
 	published := kindsOfCatalog()
 	findings, err := in.phase(published, emitters, reported, false)
 	if err != nil {
 		return Result{}, err
 	}
+	capComponents(findings)
 	if withholding := in.withholdComponents(published, emitters, findings); withholding != nil {
 		return Result{}, withholding
 	}
@@ -439,6 +446,28 @@ func Compute(in *Input, emitters map[string]Emitter) (Result, error) {
 	kept, withheld := in.reportable(findings)
 	slices.SortStableFunc(kept, Compare)
 	return Result{Findings: kept, Withheld: withheld}, nil
+}
+
+// capComponents lowers every finding of a dead component to the lowest confidence
+// among the component's root findings. [Input.componentCap] reads only the roots'
+// classes, so a cap a root's own finding carries, the name-literal one, would
+// otherwise split the component and the dials would withhold a certain member.
+func capComponents(findings []Finding) {
+	least := make(map[string]Class)
+	for i := range findings {
+		found := &findings[i]
+		if !found.Component.Root {
+			continue
+		}
+		if floor, seen := least[found.Component.ID]; !seen || found.Confidence.rank() < floor.rank() {
+			least[found.Component.ID] = found.Confidence
+		}
+	}
+	for i := range findings {
+		if floor, seen := least[findings[i].Component.ID]; seen {
+			findings[i].Confidence = findings[i].Confidence.lower(floor)
+		}
+	}
 }
 
 // phase runs the emitters of one phase, in the vocabulary's order, and returns what
@@ -489,7 +518,7 @@ func (in *Input) emitterOf(row *catalog.Row, emitters map[string]Emitter) (Emitt
 func (in *Input) runKind(emit Emitter, row *catalog.Row, reported map[string]string) ([]Finding, error) {
 	produced, err := emit(in)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s: %w", ErrEmitter, row.Code, err)
+		return nil, fmt.Errorf("%w: %s: %w", errEmitter, row.Code, err)
 	}
 	completed := make([]Finding, 0, len(produced))
 	for i := range produced {
@@ -509,39 +538,13 @@ func (in *Input) runKind(emit Emitter, row *catalog.Row, reported map[string]str
 	return completed, nil
 }
 
-// withhold reports whether a suppression record withholds one finding, and records
-// every record that did.
-//
-// This is the half of suppression the sweep cannot take. A record marks its symbol
-// live before the sweep, which is the whole answer for a kind that reports a dead
-// declaration, and nothing at all for a kind that reports a declaration the analysis
-// holds live: a narrowing candidate, a write-only member and an unused parameter are
-// all referenced, so the mark changes nothing about them and the finding has to be
-// withheld where it is produced.
-//
-// A record binds to a declaration, so the declaration a finding is withheld through
-// is the finding's own where the subject is a declaration of the inventory, and the
-// declaration the part belongs to where the subject is a part of one, which the
-// subject names by reference. A row of a document is a record rather than a
-// declaration of the program, so nothing binds to one and no finding about one is
-// withheld: its remedy is the change the finding names or the severity the
-// configuration gives its code.
-//
-// A record reaches the finding two ways and either is enough, which pairs is what
-// decides.
-//
-// A finding is withheld by at most one record. Several may reach it, an inline
-// directive and an ignore entry naming one code at one declaration for instance, and
-// the first of them in the run's reading order is the one in effect: the records are
-// read as inline directives by position, then the ignore file in document order, then
-// the baseline, and Marks carries them in that order. A later record changes nothing
-// when it is deleted, which is what the stale-suppression kind is for, and it reads
-// what this recorded.
-//
-// A withheld finding leaves the pass and is counted nowhere. It is not what the
-// configured minimum confidence omitted, which is the number a capped report accounts
-// for; it is a finding a maintainer adjudicated, which the two suppression totals of
-// the envelope are what report.
+// withhold reports whether a suppression record withholds one finding, recording
+// each finding against the first record in Marks' reading order that pairs with it:
+// a record's mark changes nothing for a finding about a declaration the analysis
+// holds live or about a part, so the finding is withheld where it is produced. A
+// dependency row is withheld by a record naming its reference and path; any other
+// row of a document binds no record. A withheld finding is counted nowhere: the
+// suppression totals of the envelope report it.
 func (in *Input) withhold(found *Finding) bool {
 	if shapeOf(found.Symbol.Kind) == shapeRow {
 		return false
@@ -550,10 +553,17 @@ func (in *Input) withhold(found *Finding) bool {
 		if !pairs(&in.Marks[i], found) {
 			continue
 		}
-		in.withheld[i] = true
+		in.withheld[i] = append(in.withheld[i], heldFinding{confidence: found.Confidence, component: found.Component.ID})
 		return true
 	}
 	return false
+}
+
+// heldFinding is what the dials read of one finding a record withheld: its
+// confidence and its dead component.
+type heldFinding struct {
+	confidence Class
+	component  string
 }
 
 // pairs reports whether one suppression record is a record of one finding.
@@ -598,7 +608,7 @@ func checkTable(emitters map[string]Emitter) error {
 	for _, code := range slices.Sorted(maps.Keys(emitters)) {
 		if _, live := catalog.Kind(code); !live {
 			return fmt.Errorf("%w: an emitter is registered under %s, which names no live kind",
-				ErrEmitter, code)
+				errEmitter, code)
 		}
 	}
 	return nil
@@ -621,10 +631,15 @@ const (
 	// subject, so no relation over declarations answers for it.
 	shapePart
 
-	// shapeRow is a row of a document: a requirement or a directive of the module
-	// file, a file no configuration compiled, a suppression record, a configured
-	// root. The analysis enumerates no declaration for it at all.
+	// shapeRow is a row of a document: a file no configuration compiled, a
+	// suppression record, a configured root. The analysis enumerates no
+	// declaration for it at all, and no suppression record binds to it.
 	shapeRow
+
+	// shapeDependency is a row of a document a suppression record binds to by its
+	// reference and path: a requirement or a directive of the module file. It is a
+	// row in every other respect.
+	shapeDependency
 )
 
 // shapes is the shape of every subject kind that is not a declaration, which is the
@@ -638,8 +653,8 @@ var shapes = map[string]shape{
 	resultSubject:      shapePart,
 	statementSubject:   shapePart,
 	storeSubject:       shapePart,
-	dependencySubject:  shapeRow,
-	directiveSubject:   shapeRow,
+	dependencySubject:  shapeDependency,
+	directiveSubject:   shapeDependency,
 	fileSubject:        shapeRow,
 	rootSubject:        shapeRow,
 	suppressionSubject: shapeRow,
@@ -660,11 +675,19 @@ var heldLive = map[string]bool{
 	writeOnlyCode:                   true,
 }
 
-// AboutDocumentRow reports whether one finding's subject is a row of a document: a
-// file, a dependency, a module directive, a suppression record, a configured root, a
-// configured declaration or a declared edge. No suppression record binds to one.
+// AboutDocumentRow reports whether one finding's subject is a row of a document no
+// suppression record binds to: a file, a suppression record, a configured root, a
+// configured declaration or a declared edge. A dependency row is bound by its
+// reference and path, so it is not one.
 func AboutDocumentRow(found *Finding) bool {
 	return shapeOf(found.Symbol.Kind) == shapeRow
+}
+
+// aboutRow reports whether one finding's subject is a row of any document, a
+// dependency row included.
+func aboutRow(found *Finding) bool {
+	held := shapeOf(found.Symbol.Kind)
+	return held == shapeRow || held == shapeDependency
 }
 
 // shapeOf is the shape of a finding about one kind of subject.
@@ -703,7 +726,7 @@ func LivenessAbsent(found *Finding) bool {
 func key(found *Finding) string {
 	at := found.Position.Path + ":" + strconv.Itoa(found.Position.Line) +
 		":" + strconv.Itoa(found.Position.Column)
-	if shapeOf(found.Symbol.Kind) != shapeRow {
+	if !aboutRow(found) {
 		return at
 	}
 	record := at + " " + found.Code + " " + found.Symbol.Ref
@@ -727,7 +750,7 @@ func key(found *Finding) string {
 // finding is the shape's, which admit decides.
 func (in *Input) resolve(found *Finding, code string, reported map[string]string) error {
 	if found.Code != code {
-		return fmt.Errorf("%w: the %s emitter returned a %s finding", ErrEmitter, code, found.Code)
+		return fmt.Errorf("%w: the %s emitter returned a %s finding", errEmitter, code, found.Code)
 	}
 	if err := checkMessage(found); err != nil {
 		return err
@@ -735,7 +758,7 @@ func (in *Input) resolve(found *Finding, code string, reported map[string]string
 	at := key(found)
 	if first, twice := reported[at]; twice {
 		return fmt.Errorf("%w: %s reports %s at %s, which %s already reports",
-			ErrEmitter, found.Code, found.Symbol.Ref, at, first)
+			errEmitter, found.Code, found.Symbol.Ref, at, first)
 	}
 	if err := in.admit(found); err != nil {
 		return err
@@ -757,24 +780,24 @@ func (in *Input) resolve(found *Finding, code string, reported map[string]string
 // declaration is no claim about the part.
 func (in *Input) admit(found *Finding) error {
 	switch shapeOf(found.Symbol.Kind) {
-	case shapeRow:
+	case shapeRow, shapeDependency:
 		if found.Symbol.Ref == "" {
 			return fmt.Errorf("%w: %s reports a %s and names no reference",
-				ErrEmitter, found.Code, found.Symbol.Kind)
+				errEmitter, found.Code, found.Symbol.Kind)
 		}
 	case shapePart:
 		if in.index().byRef[found.Symbol.Ref] == "" {
 			return fmt.Errorf("%w: %s reports a %s of %q, which names no declaration of the inventory",
-				ErrEmitter, found.Code, found.Symbol.Kind, found.Symbol.Ref)
+				errEmitter, found.Code, found.Symbol.Kind, found.Symbol.Ref)
 		}
 	default:
 		if found.id == "" {
 			return fmt.Errorf("%w: %s names no declaration of the inventory: %q",
-				ErrEmitter, found.Code, found.Symbol.Ref)
+				errEmitter, found.Code, found.Symbol.Ref)
 		}
 		if in.index().retained[found.id] {
 			return fmt.Errorf("%w: %s reports %s, which an exemption retained",
-				ErrEmitter, found.Code, found.Symbol.Ref)
+				errEmitter, found.Code, found.Symbol.Ref)
 		}
 	}
 	return nil
@@ -787,13 +810,13 @@ func checkMessage(found *Finding) error {
 	switch {
 	case found.Message == "":
 		return fmt.Errorf("%w: %s reports %s with no message",
-			ErrEmitter, found.Code, found.Symbol.Ref)
+			errEmitter, found.Code, found.Symbol.Ref)
 	case strings.ContainsAny(found.Message, "\r\n"):
 		return fmt.Errorf("%w: %s holds a line break in its message: %q",
-			ErrEmitter, found.Code, found.Message)
+			errEmitter, found.Code, found.Message)
 	case strings.HasSuffix(found.Message, "."):
 		return fmt.Errorf("%w: %s ends its message in a full stop: %q",
-			ErrEmitter, found.Code, found.Message)
+			errEmitter, found.Code, found.Message)
 	}
 	return nil
 }
@@ -804,7 +827,8 @@ func checkMessage(found *Finding) error {
 // reachability class and its dead component; a part or a document row carries no
 // relation, the certain class and a component of its own. The confidence is capped
 // by the kind's ceiling and the component's cap, and a finding in a generated file
-// carries no fixability.
+// carries no fixability. A finding about a declaration of a held component carries
+// the manual one where its kind lists it.
 func (in *Input) complete(found *Finding, row *catalog.Row) {
 	held := in.index()
 	found.Kind = row.Name
@@ -818,7 +842,7 @@ func (in *Input) complete(found *Finding, row *catalog.Row) {
 		} else {
 			found.relation(held.candidates[found.id])
 		}
-		found.Class = in.ClassOf(found.id)
+		found.Class = in.classOf(found.id).lower(found.ceiling)
 		found.Component = held.componentOf(found.id)
 	} else {
 		found.relation(nil)
@@ -828,9 +852,13 @@ func (in *Input) complete(found *Finding, row *catalog.Row) {
 	if in.Config != nil && in.Config.Reporters.Cascade == config.CascadeFull {
 		found.Component.Members = held.membersOf(found)
 	}
+	in.capNameLiteral(found)
 	found.Confidence = found.Class.lower(Class(row.MaxClass)).lower(in.componentCap(found.id))
 	found.Severity = in.Config.EffectiveSeverity(row.Code)
 	found.Fixability = row.Fixability
+	if found.Component.Held && slices.Contains(row.FindingFixabilities, manualFixability) {
+		found.Fixability = manualFixability
+	}
 	found.RetainedBy = []string{}
 	found.ConsumersLoaded = slices.Clone(in.Consumers.Loaded)
 	if found.ConsumersLoaded == nil {
@@ -902,7 +930,7 @@ func (in *Input) configurationsOf(found *Finding) []string {
 	held := in.index()
 	var id graph.SymbolID
 	switch shapeOf(found.Symbol.Kind) {
-	case shapeRow:
+	case shapeRow, shapeDependency:
 		return append(make([]string, 0, len(in.Matrix)), in.Matrix...)
 	case shapePart:
 		id = held.byRef[found.Symbol.Ref]
@@ -950,6 +978,11 @@ type index struct {
 	// few and the walk is the whole tree's.
 	deprecated map[graph.SymbolID]bool
 	enumerated map[graph.SymbolID]string
+
+	// literals is every production string literal of the target by its value, and
+	// constTypes each constant's defined type, both read on first use.
+	literals   map[string][]literalSite
+	constTypes map[graph.SymbolID]graph.SymbolID
 
 	// falling is the write-only kind's annotation cascade, computed on first use.
 	falling *annotationFalls
@@ -1138,6 +1171,7 @@ func (x *index) componentOf(id graph.SymbolID) Component {
 		SymbolCount:    len(component.Members),
 		DeletableLines: component.DeletableLines,
 		Root:           slices.Contains(component.Roots, id),
+		Held:           component.Held,
 	}
 }
 

@@ -9,9 +9,9 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/report"
+	"github.com/cplieger/deadset-go/internal/reporttest"
 	"github.com/cplieger/deadset-go/internal/suppress"
-	spec "github.com/cplieger/deadset-spec/v6"
+	spec "github.com/cplieger/deadset-spec/v7"
 )
 
 // baselineVectorRoot is where the pinned Contract publishes the baseline vectors.
@@ -53,15 +53,15 @@ func TestPublishedBaselineVectors(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Setup: read %s/report.json: %v", dir, err)
 			}
-			var envelope report.Envelope
-			if err := json.Unmarshal(body, &envelope); err != nil {
+			envelope, err := reporttest.Read(body)
+			if err != nil {
 				t.Fatalf("Setup: decode %s/report.json: %v", dir, err)
 			}
 
 			rows, _ := recordRound(envelope.Findings, nil, nil)
 			var written bytes.Buffer
 			provenance := suppress.Provenance{Analyzer: envelope.Analyzer.Name, Version: envelope.Analyzer.Version}
-			if err := suppress.WriteBaseline(&written, rows, provenance); err != nil {
+			if err := suppress.WriteBaseline(&written, rows, provenance, nil); err != nil {
 				t.Fatalf("WriteBaseline(%s) = %v, want the document", name, err)
 			}
 
@@ -163,5 +163,33 @@ func TestAnalyzeReadsBackTheBaselineItWroteWithNoStaleRow(t *testing.T) {
 	}
 	if !slices.Equal(reported, []string{unmatchedRoot}) {
 		t.Errorf("analyze over the baseline it wrote reports %v, want only the %s no row can withhold", reported, unmatchedRoot)
+	}
+}
+
+func TestAnalyzeWritesItsOwnRowsAndKeepsTheOtherSchemesRows(t *testing.T) {
+	dir := baselineFixpointModule(t)
+	baseline := path.Join(dir, suppress.BaselineFileName)
+	const other = `{"code": "DS1301", "symbol": "ts://@example/app/src/a.ts#A.b", "path": "src/a.ts", "reason": "recorded by deadset-ts 7.0.0"}`
+	if err := os.WriteFile(baseline, []byte(`{"baseline": [`+other+`]}`), 0o600); err != nil {
+		t.Fatalf("Setup: write %s: %v", baseline, err)
+	}
+	runAnalyze(t, dir, "--baseline-write="+baseline)
+
+	body, err := os.ReadFile(baseline)
+	if err != nil {
+		t.Fatalf("read the baseline %s: %v", baseline, err)
+	}
+	got := baselineVectorRows(t, baseline, body)
+	symbols := make([]string, len(got))
+	for i := range got {
+		symbols[i] = got[i].Symbol
+	}
+	want := []string{
+		"go://example.com/app#spare", "go://example.com/app#feed", "go://example.com/app#feed",
+		"go://example.com/app#spare.field", "ts://@example/app/src/a.ts#A.b",
+	}
+	if !slices.Equal(symbols, want) {
+		t.Errorf("analyze --baseline-write over a document holding a ts:// row wrote the rows %q, want %q: this analyzer's rows, then the other scheme's as the document held them",
+			symbols, want)
 	}
 }

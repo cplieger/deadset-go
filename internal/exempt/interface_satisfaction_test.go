@@ -5,12 +5,13 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/cplieger/deadset-go/internal/graph"
-	spec "github.com/cplieger/deadset-spec/v6"
+	spec "github.com/cplieger/deadset-spec/v7"
 	"golang.org/x/tools/txtar"
 )
 
@@ -137,7 +138,7 @@ func TestInterfaceSatisfactionNamesTheInterfaceAndTheSiteItWasFoundAt(t *testing
 		Holder: symbolRef(t, in, "go://example.com/conservative#Sum").ID,
 		Via:    symbolRef(t, in, "go://example.com/conservative#Counter.Count").ID,
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("InterfaceSatisfactionDetector(unconverted-implementation.txtar) = %+v, want %+v", got, want)
 	}
 }
@@ -525,9 +526,9 @@ func TestInterfaceSatisfactionHoldsWhatAnAssertionReachesFromATestFileOutsideAPr
 }
 
 // A value converted to an interface a package outside the program declares is held
-// by that package, which may assert another interface on it: one the package
-// declares, exported or not, an interface type literal its source writes, or an
-// exported interface of a package it imports. A value converted to the program's own
+// by that package, which keeps the methods of every interface a type assertion or a
+// type switch case of its source names, whichever package declares it. A case of an
+// expression switch asserts nothing. A value converted to the program's own
 // interface keeps what that interface requires and nothing more.
 func TestInterfaceSatisfactionRetainsWhatAnOutsideHolderCanAssert(t *testing.T) {
 	refs := retainedRefs(t, analysisOf(t, "interface-satisfaction-outside.txtar", Options{}), InterfaceSatisfaction)
@@ -538,7 +539,7 @@ func TestInterfaceSatisfactionRetainsWhatAnOutsideHolderCanAssert(t *testing.T) 
 		want     []string
 	}{
 		{desc: "converted by pointer", typeName: "recorder", want: qualify("example.com/assert", "recorder",
-			"Accept", "Close", "Flush", "Reset", "SetDeadline", "Write")},
+			"Accept", "Close", "Flush", "Reset", "SetDeadline", "Stop", "Write")},
 		{desc: "converted by value", typeName: "stamp", want: qualify("example.com/assert", "stamp", "Flush", "Write")},
 		{desc: "converted to the program's own interface", typeName: "quiet", want: qualify("example.com/assert", "quiet", "Write")},
 	} {
@@ -546,6 +547,71 @@ func TestInterfaceSatisfactionRetainsWhatAnOutsideHolderCanAssert(t *testing.T) 
 			if got := membersOf(refs, test.typeName); !slices.Equal(got, test.want) {
 				t.Errorf("InterfaceSatisfactionDetector(interface-satisfaction-outside.txtar) retained, for %s (%s),\ngot  %v\nwant %v",
 					test.typeName, test.desc, got, test.want)
+			}
+		})
+	}
+}
+
+// A conversion written in a loaded consumer's file retains the target's method as
+// evidence of that consumer: the record names the consumer and renders the site
+// against the consumer's root, never against the target's.
+func TestInterfaceSatisfactionRendersAConsumersSiteAgainstTheConsumersRoot(t *testing.T) {
+	const archive = "interface-satisfaction-consumer-site.txtar"
+	shared := analysisOf(t, archive, Options{})
+	found, err := shared.detect(t, InterfaceSatisfaction)
+	if err != nil {
+		t.Fatalf("InterfaceSatisfactionDetector(%s) = %v, want the consumer's site recorded", archive, err)
+	}
+	symbols := shared.inventory(t)
+	refs := make(map[graph.SymbolID]string, len(symbols))
+	for i := range symbols {
+		refs[symbols[i].ID] = symbols[i].Ref
+	}
+	var got []string
+	for _, e := range found {
+		got = append(got, refs[e.ID]+" "+e.Consumer+" "+e.Site.String())
+	}
+
+	want := []string{"go://example.com/target#Item.Name example.com/httpwire wire.go:10:16"}
+	if !slices.Equal(got, want) {
+		t.Errorf("InterfaceSatisfactionDetector(%s) recorded\ngot  %q\nwant %q", archive, got, want)
+	}
+}
+
+func TestAPublishedParameterOutsideTheTargetIsHeldByTheTypeItConverts(t *testing.T) {
+	in := inputOf(t, "published-outside-parameter.txtar", Options{PublishedAPI: true})
+	found := retainedBy(t, in, "published-outside-parameter.txtar")
+
+	read := symbolRef(t, in, "go://example.com/published#Source.Read").ID
+	source := symbolRef(t, in, "go://example.com/published#Source").ID
+	for i := range found {
+		if found[i].ID == read && found[i].Holder == source && found[i].Site.Filename == "published.go" {
+			return
+		}
+	}
+	t.Errorf("InterfaceSatisfactionDetector(published-outside-parameter.txtar) = %+v, want Source.Read retained at Source by the promoted ReadFrom", found)
+}
+
+// A value passed as an interface-typed argument to a function declared outside the
+// program keeps each method by which it implements an interface the source of the
+// callee's package asserts, the interface's package standing for a call through an
+// interface value. A package the callee hands the value on to is not read.
+func TestInterfaceSatisfactionRetainsWhatAnOutsideCalleesPackageAsserts(t *testing.T) {
+	refs := retainedRefs(t, analysisOf(t, "interface-satisfaction-callee.txtar", Options{}), InterfaceSatisfaction)
+
+	for _, test := range []struct {
+		typeName string
+		want     []string
+	}{
+		{typeName: "direct", want: qualify("example.com/callee", "direct", "Close", "Read")},
+		{typeName: "dispatched", want: qualify("example.com/callee", "dispatched", "Close", "Read")},
+		{typeName: "forwarded", want: qualify("example.com/callee", "forwarded", "Read")},
+		{typeName: "drained", want: qualify("example.com/callee", "drained", "Read")},
+	} {
+		t.Run(test.typeName, func(t *testing.T) {
+			if got := membersOf(refs, test.typeName); !slices.Equal(got, test.want) {
+				t.Errorf("InterfaceSatisfactionDetector(interface-satisfaction-callee.txtar) retained, for %s,\ngot  %v\nwant %v",
+					test.typeName, got, test.want)
 			}
 		})
 	}

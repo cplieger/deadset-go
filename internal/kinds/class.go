@@ -45,7 +45,7 @@ func (c Class) lower(other Class) Class {
 	return other
 }
 
-// ClassOf is the reachability class of one declaration under this run. Test-support
+// classOf is the reachability class of one declaration under this run. Test-support
 // code test code references is possible unless the test-of-dead-code kind reports it.
 // Any other is certain where no reference can come from outside the graph: no
 // declaration, an unexported one, a test file's, a function's type parameter, an
@@ -53,7 +53,7 @@ func (c Class) lower(other Class) Class {
 // internal tree or a member [Input.hiddenMember] reports. A library's importable export
 // is certain where every declared consumer loaded, probable where some did not, and
 // possible with no consumer information, whether or not the set is declared complete.
-func (in *Input) ClassOf(id graph.SymbolID) Class {
+func (in *Input) classOf(id graph.SymbolID) Class {
 	symbol := in.symbol(id)
 	candidate := in.candidateOf(id)
 	switch {
@@ -82,6 +82,13 @@ func (in *Input) ClassOf(id graph.SymbolID) Class {
 	}
 }
 
+// publishedAPI reports whether one declaration is published API of a library: an
+// exported production declaration of a package outside programs can import.
+func (in *Input) publishedAPI(symbol *graph.Symbol) bool {
+	return in.Config != nil && in.Config.Target.Kind == config.Library && symbol.Exported &&
+		!testFile(symbol) && in.importable(symbol.PkgPath)
+}
+
 // componentCap is the lowest reachability class among the roots of the dead
 // component one declaration falls with, which caps the confidence of every finding
 // of that component so the minimum confidence withholds or reports it whole. It is
@@ -97,7 +104,7 @@ func (in *Input) componentCap(id graph.SymbolID) Class {
 	}
 	least := Certain
 	for _, root := range component.Roots {
-		least = least.lower(in.ClassOf(root))
+		least = least.lower(in.classOf(root))
 	}
 	held.caps[component.Index] = least
 	return least

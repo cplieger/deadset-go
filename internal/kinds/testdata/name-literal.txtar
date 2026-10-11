@@ -1,0 +1,65 @@
+A command whose generated table spells the names of declarations: an unexported
+constant nothing references, and an exported type an internal package uses only
+itself, whose constants a generator reads through the type's name. Beside them, a
+constant only its own value spells, one only a test file spells, and a variable an
+import path spells.
+
+-- go.mod --
+module example.com/names
+
+go 1.27.1
+-- main.go --
+package main
+
+import (
+	"fmt"
+	"sort"
+
+	"example.com/names/internal/wire"
+)
+
+var table = map[string]int{"spelled": 1, "Kind": 2, "Label": 3}
+
+func main() {
+	keys := make([]string, 0, len(table))
+	for k := range table {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	fmt.Println(keys, wire.Describe())
+}
+-- names.go --
+package main
+
+import _ "strings"
+
+const spelled = 1
+
+const selfSpelled = "selfSpelled"
+
+const testSpelled = 2
+
+var strings int
+-- internal/wire/wire.go --
+package wire
+
+import "fmt"
+
+type Kind int
+
+const (
+	KindA Kind = iota
+	KindB
+)
+
+// Label names one kind.
+func (k Kind) Label() string { return fmt.Sprint(int(k)) }
+
+// Describe names both kinds.
+func Describe() string { return fmt.Sprint(KindA.Label(), KindB) }
+-- main_test.go --
+package main
+
+import "testing"
+
+func TestNames(t *testing.T) { t.Log("testSpelled") }

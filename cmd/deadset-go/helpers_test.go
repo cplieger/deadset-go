@@ -185,7 +185,6 @@ func detachedSet(sink failureSink, set *findingSet) findingSet {
 	loaded := set.loaded
 	loaded.merged = testsupport.Detached(sink, set.loaded.merged)
 	loaded.refs = testsupport.Detached(sink, set.loaded.refs)
-	loaded.derived = testsupport.Detached(sink, set.loaded.derived)
 	loaded.configurations = testsupport.Detached(sink, set.loaded.configurations)
 	loaded.identifiers = testsupport.Detached(sink, set.loaded.identifiers)
 	loaded.declared = testsupport.Detached(sink, set.loaded.declared)

@@ -238,7 +238,7 @@ func TestUnreachableExportReachesCertainWithNoConsumerInformation(t *testing.T) 
 				f.Symbol.Ref, f.Details.NarrowerVisibility)
 		}
 		if class := shared.classOf(t, f.Symbol.Ref); class != Certain {
-			t.Errorf("ClassOf(%s) = %q, want %q with no consumer information",
+			t.Errorf("classOf(%s) = %q, want %q with no consumer information",
 				f.Symbol.Ref, class, Certain)
 		}
 	}

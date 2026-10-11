@@ -11,7 +11,7 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/cplieger/deadset-spec/v6"
+	"github.com/cplieger/deadset-spec/v7"
 )
 
 func TestTheEmbeddedSchemasAreTheContracts(t *testing.T) {
@@ -162,7 +162,7 @@ func TestCheckStopsAtTheFirstMemberHoldingAViolation(t *testing.T) {
 	fsys := fstest.MapFS{"one.schema.json": {Data: []byte(`{
 		"type": "object", "additionalProperties": false, "required": ["a", "b"],
 		"properties": {
-			"a": {"type": "array", "items": {"type": "integer", "minimum": 1}},
+			"a": {"type": "array", "items": {"type": "integer", "minimum": 1, "maximum": 3}},
 			"b": {"type": "string"}
 		}
 	}`)}}
@@ -177,6 +177,7 @@ func TestCheckStopsAtTheFirstMemberHoldingAViolation(t *testing.T) {
 	}{
 		{name: "instance", document: `{"a": [1, 2], "b": "x"}`},
 		{name: "second_item", document: `{"a": [1, 0, -1], "b": 2}`, want: []Error{{Keyword: "minimum", InstancePath: "/a/1"}}},
+		{name: "above_maximum", document: `{"a": [3, 4], "b": "x"}`, want: []Error{{Keyword: "maximum", InstancePath: "/a/1"}}},
 		{name: "member_type", document: `{"a": [1], "b": 2}`, want: []Error{{Keyword: "type", InstancePath: "/b"}}},
 		{name: "required", document: `{"a": []}`, want: []Error{{Keyword: "required", InstancePath: ""}}},
 		{name: "unknown", document: `{"a": [], "c": 1, "b": "x"}`, want: []Error{{Keyword: "additionalProperties", InstancePath: ""}}},

@@ -30,6 +30,7 @@ const (
 const (
 	labelImplementation = "implementation"
 	labelWrite          = "write"
+	labelName           = "name"
 	labelMember         = "member"
 )
 
@@ -66,7 +67,7 @@ const (
 // refused rather than written with a key that service would recompute differently.
 func SARIF(w io.Writer, e *Envelope, opts Options) error {
 	if opts.Read == nil {
-		return fmt.Errorf("%w: a SARIF rendering reads the source lines its line fingerprint hashes", ErrOptions)
+		return fmt.Errorf("%w: a SARIF rendering reads the source lines its line fingerprint hashes", errOptions)
 	}
 	rules := rulesOf(e.Analyzer.Languages)
 	index := make(map[string]int, len(rules))
@@ -217,7 +218,7 @@ func staleResult(stale *StaleSuppression, index map[string]int, hashes *lineHash
 
 // relatedLocations is every position a finding names beyond its own, numbered from
 // one in the order the mapping fixes: the implementations of an interface, the
-// positions a subject is written at, then every member of a component the run lists
+// positions a subject is written at, the literal spelling its name, then every member of a component the run lists
 // in full other than the finding's own declaration, the member with both its
 // reference and its path.
 func relatedLocations(found *kinds.Finding) []sarifLocation {
@@ -238,6 +239,9 @@ func relatedLocations(found *kinds.Finding) []sarifLocation {
 	}
 	for _, at := range found.Details.WritePositions {
 		add(labelWrite, at.Path, at.Line, at.Column, at.EndLine)
+	}
+	if at := found.Details.NameLiteral; at != nil {
+		add(labelName, at.Path, at.Line, at.Column, at.EndLine)
 	}
 	for _, one := range found.Component.Members {
 		if one.Ref != found.Symbol.Ref || one.Position.Path != found.Position.Path {

@@ -427,13 +427,6 @@ func TestPropertyAnUnimplementedKeyIsNamedRatherThanIgnored(t *testing.T) {
 		if !errors.As(err, &refusal) {
 			t.Fatalf("Resolve(a document naming %q) = error %v, want a *config.Error", path, err)
 		}
-		if refusal.Kind != config.KindUnimplementedKey {
-			t.Fatalf("Resolve(a document naming %q) = kind %v, want %v",
-				path, refusal.Kind, config.KindUnimplementedKey)
-		}
-		if refusal.Key != path {
-			t.Fatalf("Resolve(a document naming %q) named %q, want %q", path, refusal.Key, path)
-		}
 		if !strings.Contains(refusal.Error(), path) {
 			t.Fatalf("Resolve(a document naming %q) = %q, want the message to name the key",
 				path, refusal.Error())

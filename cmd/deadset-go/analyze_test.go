@@ -15,7 +15,8 @@ import (
 
 	"github.com/cplieger/deadset-go/internal/config"
 	"github.com/cplieger/deadset-go/internal/report"
-	spec "github.com/cplieger/deadset-spec/v6"
+	"github.com/cplieger/deadset-go/internal/reporttest"
+	spec "github.com/cplieger/deadset-spec/v7"
 )
 
 // analyzed is one run of the analyze verb over dir: the verb is invoked from the
@@ -58,8 +59,8 @@ func envelopeAt(t *testing.T, path string) report.Envelope {
 	if err != nil {
 		t.Fatalf("read the report %s: %v", path, err)
 	}
-	var envelope report.Envelope
-	if err := json.Unmarshal(body, &envelope); err != nil {
+	envelope, err := reporttest.Read(body)
+	if err != nil {
 		t.Fatalf("decode the report %s: %v", path, err)
 	}
 	return envelope

@@ -3,7 +3,8 @@ interface a dependency module declares, which holds them and asserts further
 interfaces on them: one by pointer and one by value. The dependency asserts an
 exported and an unexported interface of its own, two interface type literals, one of
 which names a type the dependency declares, and an exported and an unexported
-interface of a package it imports. A third value goes to an interface the command
+interface of a package it imports, an interface in a case of a type switch, and in a
+case of an expression switch a value of type error, which asserts nothing. A third value goes to an interface the command
 declares, which nothing outside the program holds. The dependency is a module the
 command requires and replaces with a directory of its own, so the archive loads with
 no network access.
@@ -39,6 +40,10 @@ func (*recorder) Label() string { return "recorder" }
 
 func (*recorder) Spare() string { return "spare" }
 
+func (*recorder) Stop() {}
+
+func (*recorder) Error() string { return "recorder" }
+
 type stamp struct{}
 
 func (stamp) Write(p []byte) (int, error) { return len(p), nil }
@@ -70,7 +75,11 @@ go 1.27.0
 // Package host writes through a value its caller hands it.
 package host
 
-import "example.com/host/base"
+import (
+	"io"
+
+	"example.com/host/base"
+)
 
 // Request is what a writer may accept.
 type Request struct{}
@@ -109,6 +118,24 @@ func Serve(w Writer) error {
 	base.Describe(w)
 	_, err := w.Write(nil)
 	return err
+}
+
+type stopper interface {
+	Stop()
+}
+
+// Stop stops v where it implements stopper, and reports whether err ends the input.
+func Stop(v any, err error) bool {
+	switch s := v.(type) {
+	case *Request:
+	case stopper:
+		s.Stop()
+	}
+	switch err {
+	case io.EOF:
+		return true
+	}
+	return false
 }
 -- host/base/base.go --
 // Package base holds the interfaces the host builds on.

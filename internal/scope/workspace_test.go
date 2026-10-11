@@ -33,7 +33,7 @@ func writeWorkspace(t *testing.T, dir string, entries ...string) string {
 		}
 	}
 	body += ")\n"
-	if err := os.WriteFile(filepath.Join(dir, WorkspaceFileName), []byte(body), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, workspaceFileName), []byte(body), 0o600); err != nil {
 		t.Fatalf("Setup: write the workspace file: %v", err)
 	}
 	return dir
@@ -48,7 +48,7 @@ func TestResolveReadsTheWorkspaceTheTargetIsAMemberOf(t *testing.T) {
 	}
 
 	want := Document{
-		Workspace: filepath.Join(dir, WorkspaceFileName),
+		Workspace: filepath.Join(dir, workspaceFileName),
 		Target:    Module{Path: filepath.Join(dir, "library")},
 		Consumers: []Module{
 			{Path: filepath.Join(dir, "consumer")},
@@ -189,7 +189,7 @@ func TestResolveRefusesAMalformedWorkspace(t *testing.T) {
 	if err := os.MkdirAll(target, 0o750); err != nil {
 		t.Fatalf("Setup: create %s: %v", target, err)
 	}
-	file := filepath.Join(dir, WorkspaceFileName)
+	file := filepath.Join(dir, workspaceFileName)
 	// A use block the file never closes: the toolchain refuses to read it, and
 	// the refusal is what a run has to end on, because a workspace it cannot read
 	// is a consumer set it cannot know.
@@ -199,8 +199,8 @@ func TestResolveRefusesAMalformedWorkspace(t *testing.T) {
 
 	got, err := Resolve(t.Context(), target, "")
 
-	if !errors.Is(err, ErrWorkspace) {
-		t.Fatalf("Resolve(%s, no document) = _, %v, want an error matching ErrWorkspace", target, err)
+	if !errors.Is(err, errWorkspace) {
+		t.Fatalf("Resolve(%s, no document) = _, %v, want an error matching errWorkspace", target, err)
 	}
 	if !strings.Contains(err.Error(), file) {
 		t.Errorf("Resolve(%s, no document) error = %q, want it to name %s", target, err, file)
@@ -223,7 +223,7 @@ func TestResolveRefusesAnAbsentTarget(t *testing.T) {
 func TestReadWorkspaceKeepsTheOrderTheFileLists(t *testing.T) {
 	dir := workspaceTree(t, "./c", "./a", "./b")
 
-	got, err := readWorkspace(t.Context(), filepath.Join(dir, WorkspaceFileName))
+	got, err := readWorkspace(t.Context(), filepath.Join(dir, workspaceFileName))
 	if err != nil {
 		t.Fatalf("readWorkspace(%s) = _, %v, want no error", dir, err)
 	}
@@ -242,21 +242,21 @@ func TestWorkspaceFileFindsTheNearestFile(t *testing.T) {
 		t.Fatalf("Setup: create %s: %v", deeper, err)
 	}
 	for _, dir := range []string{outer, inner} {
-		if err := os.WriteFile(filepath.Join(dir, WorkspaceFileName), []byte("go 1.27.1\n"), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, workspaceFileName), []byte("go 1.27.1\n"), 0o600); err != nil {
 			t.Fatalf("Setup: write the workspace file in %s: %v", dir, err)
 		}
 	}
 
 	got, found := workspaceFile(deeper)
 
-	if !found || got != filepath.Join(inner, WorkspaceFileName) {
-		t.Errorf("workspaceFile(%s) = %q, %t, want %q, true", deeper, got, found, filepath.Join(inner, WorkspaceFileName))
+	if !found || got != filepath.Join(inner, workspaceFileName) {
+		t.Errorf("workspaceFile(%s) = %q, %t, want %q, true", deeper, got, found, filepath.Join(inner, workspaceFileName))
 	}
 }
 
 func TestWorkspaceFileIgnoresADirectoryOfThatName(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, WorkspaceFileName), 0o750); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, workspaceFileName), 0o750); err != nil {
 		t.Fatalf("Setup: create the directory: %v", err)
 	}
 

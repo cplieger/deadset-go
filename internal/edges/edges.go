@@ -9,7 +9,7 @@
 // merge's.
 //
 // Nothing here reports a finding. A document the grammar refuses is a
-// [MalformedError] before any finding exists, and a well-formed edge naming a
+// [malformedError] before any finding exists, and a well-formed edge naming a
 // symbol the analyzer enumerates nothing under is an evaluation rather than a
 // refusal.
 package edges
@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"go/token"
+	"io"
 	"io/fs"
 	"os"
 	"regexp"
@@ -42,10 +43,10 @@ const (
 	referenceWant = "a stable symbol reference naming one symbol exactly, <language>://<scope>#<fragment>"
 )
 
-// ErrMalformed reports a document the grammar refuses before any finding exists.
-// Every [MalformedError] carries it, so a caller maps the whole class to the usage
+// errMalformed reports a document the grammar refuses before any finding exists.
+// Every [malformedError] carries it, so a caller maps the whole class to the usage
 // exit code with errors.Is and reads the site with errors.As.
-var ErrMalformed = errors.New("edges: malformed edges document")
+var errMalformed = errors.New("edges: malformed edges document")
 
 // referenceShape is the shape an edge's reference takes: a lowercase language tag,
 // the three characters ://, a scope holding no fragment separator, then the
@@ -66,22 +67,21 @@ type Side string
 // exists because used_by uses it.
 const (
 	Provides Side = "provides"
-	UsedBy   Side = "used_by"
+	usedBy   Side = "used_by"
 )
 
-// Edge is one declared pair: its identifier, why it was declared, and the symbol
-// each side names.
+// Edge is one declared pair: its identifier and the symbol each side names. Why
+// it was declared is for whoever reads the document next, and the analysis does
+// not read it.
 type Edge struct {
 	ID       string // the identifier every evaluation of this edge names
-	Because  string // why the pair exists, for whoever reads the document next
 	Provides string // the reference of the symbol the other side uses
 	UsedBy   string // the reference of the symbol that uses it
 }
 
 // Document is the declared edges of one target, in document order.
 type Document struct {
-	Description string // what a file header comment would have carried
-	Edges       []Edge
+	Edges []Edge
 }
 
 // Reference is one side of one edge: which edge, which side, and the symbol that
@@ -92,10 +92,10 @@ type Reference struct {
 	Symbol string
 }
 
-// MalformedError is one document, one edge or one value the grammar refuses before
+// malformedError is one document, one edge or one value the grammar refuses before
 // any finding is produced, because it is a declaration the analysis cannot carry
 // out.
-type MalformedError struct {
+type malformedError struct {
 	// Err is the decoder's own error, and is nil where the grammar refused a
 	// value the decoder accepted.
 	Err  error
@@ -106,7 +106,7 @@ type MalformedError struct {
 
 // Error names the site, the text at fault and the form expected, so a caller that
 // prints the error prints everything a maintainer needs to correct the document.
-func (e *MalformedError) Error() string {
+func (e *malformedError) Error() string {
 	at := e.Site.Filename
 	if e.Site.Line > 0 {
 		at = fmt.Sprintf("%s:%d:%d", at, e.Site.Line, e.Site.Column)
@@ -121,11 +121,11 @@ func (e *MalformedError) Error() string {
 // Unwrap returns the class every malformed document carries and, where a decoder
 // refused the document, the error it returned, so a caller maps the class to the
 // usage code with errors.Is and still reaches the cause.
-func (e *MalformedError) Unwrap() []error {
+func (e *malformedError) Unwrap() []error {
 	if e.Err == nil {
-		return []error{ErrMalformed}
+		return []error{errMalformed}
 	}
-	return []error{ErrMalformed, e.Err}
+	return []error{errMalformed, e.Err}
 }
 
 // wireEdge is the closed key list of one edge. Every key the document declares
@@ -153,7 +153,7 @@ type wireDocument struct {
 // The document is strict JSON with a closed key list at both levels: an undeclared
 // key, a value of the wrong type, a member written twice at any depth, a missing
 // identifier or reference, an identifier outside its published form and a
-// reference naming more than one symbol are each a [MalformedError], and no edge
+// reference naming more than one symbol are each a [malformedError], and no edge
 // comes back with one.
 //
 // A reference is checked for the shape that decides whether it names one symbol,
@@ -179,13 +179,13 @@ func Read(path string) (*Document, error) {
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&wire); err != nil {
-		return nil, &MalformedError{Err: err, Site: documentSite(), Text: FileName, Want: documentWant}
+		return nil, &malformedError{Err: err, Site: documentSite(), Text: FileName, Want: documentWant}
 	}
 	if wire.Edges == nil {
-		return nil, &MalformedError{Site: documentSite(), Text: FileName, Want: documentWant}
+		return nil, &malformedError{Site: documentSite(), Text: FileName, Want: documentWant}
 	}
 
-	held := &Document{Description: wire.Description}
+	held := &Document{}
 	for i, raw := range *wire.Edges {
 		at := documentSite()
 		if i < len(sites) {
@@ -203,7 +203,7 @@ func Read(path string) (*Document, error) {
 // decodeEdge reads one edge and refuses every defect that ends the run.
 func decodeEdge(body []byte, at token.Position) (Edge, error) {
 	refuse := func(err error, text, want string) (Edge, error) {
-		return Edge{}, &MalformedError{Err: err, Site: at, Text: text, Want: want}
+		return Edge{}, &malformedError{Err: err, Site: at, Text: text, Want: want}
 	}
 
 	var wire wireEdge
@@ -228,7 +228,6 @@ func decodeEdge(body []byte, at token.Position) (Edge, error) {
 	}
 	return Edge{
 		ID:       *wire.ID,
-		Because:  value(wire.Because),
 		Provides: *wire.Provides,
 		UsedBy:   *wire.UsedBy,
 	}, nil
@@ -290,21 +289,13 @@ func (d *Document) Own(language string) []Reference {
 		for _, side := range [...]struct {
 			side   Side
 			symbol string
-		}{{Provides, edge.Provides}, {UsedBy, edge.UsedBy}} {
+		}{{Provides, edge.Provides}, {usedBy, edge.UsedBy}} {
 			if strings.HasPrefix(side.symbol, tag) {
 				own = append(own, Reference{Edge: edge.ID, Side: side.side, Symbol: side.symbol})
 			}
 		}
 	}
 	return own
-}
-
-// value is the string a key holds, and the empty string where the key is absent.
-func value(held *string) string {
-	if held == nil {
-		return ""
-	}
-	return *held
 }
 
 // documentSite names the document itself, for a defect no edge position describes.
@@ -339,10 +330,10 @@ func edgeSites(body []byte) ([]token.Position, error) {
 	if err := w.value(dec, roleDocument); err != nil {
 		return nil, err
 	}
-	if dec.More() {
-		return nil, &MalformedError{
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return nil, &malformedError{
 			Site: documentSite(),
-			Text: "a second value after the document",
+			Text: "content after the document",
 			Want: documentWant,
 		}
 	}
@@ -386,7 +377,7 @@ func (w *walk) object(dec *json.Decoder, at role) error {
 			return w.refuse(dec, fmt.Errorf("want a member name, got %v", tok))
 		}
 		if seen[name] {
-			return &MalformedError{
+			return &malformedError{
 				Site: w.at(dec.InputOffset()),
 				Text: fmt.Sprintf("the member %s is written twice, so neither value is chosen", strconv.Quote(name)),
 				Want: documentWant,
@@ -434,7 +425,7 @@ func member(at role, name string) role {
 // refuse reports a document the token walk could not read, at the position it
 // stopped at.
 func (w *walk) refuse(dec *json.Decoder, err error) error {
-	return &MalformedError{
+	return &malformedError{
 		Err:  err,
 		Site: w.at(dec.InputOffset()),
 		Text: FileName,

@@ -162,6 +162,10 @@ func UnusedSatisfactionAssertion(in *Input) ([]Finding, error) {
 		}
 		one.Symbol.Kind = satisfactionAssertionSubject
 		one.Symbol.Ref, one.Symbol.Name = iface.Ref, iface.Name
+		// A program the run does not hold may name a published interface, whatever consumers loaded.
+		if in.publishedAPI(iface) {
+			one.ceiling = Possible
+		}
 		one.Details.Implementations = facts.implementationsOf(asserted.Interface)
 		found = append(found, one)
 	}

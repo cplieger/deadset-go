@@ -11,15 +11,15 @@ import (
 	"path/filepath"
 )
 
-// WorkspaceFileName is the name of the file that lists the modules of a Go
+// workspaceFileName is the name of the file that lists the modules of a Go
 // workspace.
-const WorkspaceFileName = "go.work"
+const workspaceFileName = "go.work"
 
 // goCommand is the toolchain the workspace is read through.
 const goCommand = "go"
 
-// ErrWorkspace reports a workspace file the toolchain refused to read.
-var ErrWorkspace = errors.New("scope: unreadable workspace")
+// errWorkspace reports a workspace file the toolchain refused to read.
+var errWorkspace = errors.New("scope: unreadable workspace")
 
 // Resolve is the scope of one run, from the first source that names one:
 //
@@ -35,7 +35,7 @@ var ErrWorkspace = errors.New("scope: unreadable workspace")
 // workspace is read through.
 func Resolve(ctx context.Context, dir, document string) (Document, error) {
 	if document != "" {
-		return Read(document)
+		return read(document)
 	}
 	doc, found, err := forWorkspace(ctx, dir)
 	if err != nil {
@@ -91,7 +91,7 @@ func forWorkspace(ctx context.Context, dir string) (Document, bool, error) {
 // cannot decide which file one target's run reads.
 func workspaceFile(dir string) (string, bool) {
 	for at := dir; ; {
-		file := filepath.Join(at, WorkspaceFileName)
+		file := filepath.Join(at, workspaceFileName)
 		if info, err := os.Stat(file); err == nil && !info.IsDir() {
 			return file, true
 		}
@@ -122,7 +122,7 @@ func readWorkspace(ctx context.Context, file string) ([]string, error) {
 	// reads.
 	var document workJSON
 	if decoded := json.Unmarshal(printed, &document); decoded != nil {
-		return nil, fmt.Errorf("%w: %s: %w", ErrWorkspace, file, decoded)
+		return nil, fmt.Errorf("%w: %s: %w", errWorkspace, file, decoded)
 	}
 
 	base := filepath.Dir(file)
@@ -154,7 +154,7 @@ func printWorkspace(ctx context.Context, file string) ([]byte, error) {
 	cmd.Stdout = &printed
 	cmd.Stderr = &diagnostic
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("%w: %s: %s: %w", ErrWorkspace, file, trimmed(&diagnostic), err)
+		return nil, fmt.Errorf("%w: %s: %s: %w", errWorkspace, file, trimmed(&diagnostic), err)
 	}
 	return printed.Bytes(), nil
 }

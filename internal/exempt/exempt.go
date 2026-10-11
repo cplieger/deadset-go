@@ -116,6 +116,10 @@ type Options struct {
 	// class retains nothing and each finding in such a file is marked as one no
 	// mechanical edit may act on.
 	IncludeGenerated bool
+
+	// PublishedAPI states that the target is a library, whose published API a
+	// program outside the analysis can call ([publishedConversions]).
+	PublishedAPI bool
 }
 
 // Delimiters are the pair that opens and closes an action of a template, as the
@@ -136,9 +140,18 @@ type Input struct {
 	// there, which is how a class names the symbol it retains.
 	Resolve *graph.Resolver
 
-	// conversions is the conversion set [Conversions] computed first, which every
+	// conversions is the conversion set [conversionsOf] computed first, which every
 	// later class reads rather than walking the program again.
 	conversions *[]graph.Conversion
+
+	// allConversions is [allConversionsOf]'s answer, computed on first use.
+	allConversions *[]graph.Conversion
+
+	// programConversions is [programConversions]' answer, computed on first use.
+	programConversions *[]graph.Conversion
+
+	// published is [publishedConversions]' answer, computed on first use.
+	published *[]graph.Conversion
 
 	// assert is what the packages outside the program can assert, read from their
 	// source on first use and shared by every class that asks ([assertableOf]).
@@ -211,13 +224,14 @@ func Compute(in *Input, detectors map[Class]Detector) (held, testEvidence []grap
 }
 
 // fact is what one exemption states, with the site left out: this class holds
-// this symbol for this reason while this holder is live. A class that finds the
+// this symbol for this reason while these holders are live. A class that finds the
 // same fact at several sites found it once.
 type fact struct {
-	id     graph.SymbolID
-	class  string
-	detail string
-	holder graph.SymbolID
+	id        graph.SymbolID
+	class     string
+	detail    string
+	holder    graph.SymbolID
+	coHolders string
 }
 
 // firstPerFact keeps one exemption per distinct fact, the first of each in the
@@ -228,7 +242,7 @@ func firstPerFact(found []graph.Exemption) []graph.Exemption {
 	kept := found[:0]
 	for ix := range found {
 		e := &found[ix]
-		stated := fact{id: e.ID, class: e.Class, detail: e.Detail, holder: e.Holder}
+		stated := fact{id: e.ID, class: e.Class, detail: e.Detail, holder: e.Holder, coHolders: graph.JoinedIDs(e.CoHolders)}
 		if seen[stated] {
 			continue
 		}

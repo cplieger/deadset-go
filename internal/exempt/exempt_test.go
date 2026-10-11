@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/internal/graph"
-	spec "github.com/cplieger/deadset-spec/v6"
+	spec "github.com/cplieger/deadset-spec/v7"
 	"golang.org/x/tools/txtar"
 )
 
@@ -296,24 +296,17 @@ func TestComputeKeepsOneRecordPerHolderForAMethodConvertedAtSeveralSites(t *test
 	// states that once per holder, at its earliest site, so Assigned's two sites
 	// are one record; the conversion to io.WriteCloser is a second reason on the
 	// same symbol and class, so it is a record of its own. The blank assertion's
-	// holder is the asserted type, which holds the assertion record too. io holds
-	// the writer it is handed and may assert io.Closer on it, so Close is kept at
-	// each io.Writer site as well.
-	const closable = " satisfies what io can assert through io.Writer"
+	// holder is the asserted type, which holds the assertion record too. io never
+	// asserts io.Closer, so an io.Writer site keeps Close for nothing.
 	want := []string{
 		"(*Sink).Write interface-satisfaction a.go:20:43 satisfies io.Writer",
-		"(*Sink).Close interface-satisfaction a.go:20:43" + closable,
 		"(*Sink).Write interface-satisfaction a.go:24:20 satisfies io.Writer",
-		"(*Sink).Close interface-satisfaction a.go:24:20" + closable,
 		"(*Sink).Write interface-satisfaction a.go:30:44 satisfies io.WriteCloser",
 		"(*Sink).Close interface-satisfaction a.go:30:44 satisfies io.WriteCloser",
 		"(*Sink).Write interface-satisfaction b.go:6:19 satisfies io.Writer",
-		"(*Sink).Close interface-satisfaction b.go:6:19" + closable,
 		"_ interface-satisfaction b.go:6:19 asserts io.Writer",
 		"(*Sink).Write interface-satisfaction b.go:9:55 satisfies io.Writer",
-		"(*Sink).Close interface-satisfaction b.go:9:55" + closable,
 		"(*Sink).Write interface-satisfaction b.go:12:43 satisfies io.Writer",
-		"(*Sink).Close interface-satisfaction b.go:12:43" + closable,
 	}
 	if got := retainedClauses(symbols, found); !slices.Equal(got, want) {
 		t.Errorf("Compute(several-sites.txtar) retained\n%v\nwant\n%v", got, want)

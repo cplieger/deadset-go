@@ -17,7 +17,7 @@ import (
 // constrains it on, which no configuration sets.
 const ignoreTag = "ignore"
 
-// Program is one file of the target that its build constraint keeps out of the
+// program is one file of the target that its build constraint keeps out of the
 // configuration unless the ignore tag is set, and that declares package main: a
 // program of its own, run with go run, that no package of the target compiles.
 //
@@ -25,14 +25,13 @@ const ignoreTag = "ignore"
 // recorded, so every declaration of the target the file names resolves to the
 // object the target's own packages declare. The check may have reported errors,
 // and what it resolved is recorded all the same.
-type Program struct {
-	File *ast.File
+type program struct {
 	Info *types.Info
 }
 
 // checkPrograms finds and checks every program of the target's packages under
 // configuration c, in the order of their paths.
-func checkPrograms(ctx context.Context, fset *token.FileSet, target string, pkgs []*packages.Package, c Configuration) []Program {
+func checkPrograms(ctx context.Context, fset *token.FileSet, target string, pkgs []*packages.Package, c Configuration) []program {
 	paths := programPaths(pkgs, c)
 	if len(paths) == 0 {
 		return nil
@@ -40,7 +39,7 @@ func checkPrograms(ctx context.Context, fset *token.FileSet, target string, pkgs
 	imports := newCgoImporter(ctx, fset, target, c, pkgs)
 	sizes := types.SizesFor(gcCompiler, c.Arch)
 	version := mainModuleVersion(pkgs)
-	held := make([]Program, 0, len(paths))
+	held := make([]program, 0, len(paths))
 	for _, path := range paths {
 		f, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
 		if err != nil || f.Name.Name != mainPackageName {
@@ -55,7 +54,7 @@ func checkPrograms(ctx context.Context, fset *token.FileSet, target string, pkgs
 		// The errors are dropped by the Error function above: a program the
 		// configuration cannot fully check still names what it resolved.
 		_, _ = conf.Check(mainPackageName, fset, []*ast.File{f}, info)
-		held = append(held, Program{File: f, Info: info})
+		held = append(held, program{Info: info})
 	}
 	return held
 }

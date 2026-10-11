@@ -126,12 +126,12 @@ func newBoundary(in *Input, destination destinationTest) *boundary {
 	return b
 }
 
-// crossing reports whether the argument at position arg of one call carries a value
-// out of the analysed program, and names the callee it leaves through: the callee
-// does not belong to the program or forwards the parameter on, the parameter is typed
-// as the empty interface, the variadic one included, and the value is a struct or a
-// pointer to one, or a slice, an array or a map of such values.
-func (b *boundary) crossing(info *types.Info, call *ast.CallExpr, arg int) (crossingOut, bool) {
+// sinkOf reports whether the argument at position arg of one call is passed for a
+// parameter at which a value leaves the analysed program, and names the callee it
+// leaves through: the callee does not belong to the program or forwards the
+// parameter on, and the parameter is typed as the empty interface, the variadic one
+// included. A struct value carried there crosses out ([carriesStruct]).
+func (b *boundary) sinkOf(info *types.Info, call *ast.CallExpr, arg int) (crossingOut, bool) {
 	if arg >= len(call.Args) {
 		return crossingOut{}, false
 	}
@@ -149,10 +149,6 @@ func (b *boundary) crossing(info *types.Info, call *ast.CallExpr, arg int) (cros
 	}
 	sink, crosses := sinkAt(sinks, at)
 	if !crosses {
-		return crossingOut{}, false
-	}
-	flows := info.TypeOf(call.Args[arg])
-	if flows == nil || !carriesStruct(flows) {
 		return crossingOut{}, false
 	}
 	return crossingOut{callee: fn, reach: sink.reach}, true

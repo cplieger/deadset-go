@@ -186,3 +186,47 @@ func retainedUnder(in *Input, class string) []string {
 	}
 	return names
 }
+
+func TestUnusedSatisfactionAssertion_aPublishedInterfaceOfALibraryIsPossibleWhateverTheConsumers(t *testing.T) {
+	everyLoaded := Consumers{Declared: []string{"example.com/consumer"}, Loaded: []string{"example.com/consumer"}, Complete: true}
+	// The three assertions are roots of the one component of the type they assert, so
+	// every finding of it carries the confidence of the published one.
+	cases := map[string]struct {
+		resolved   config.Config
+		consumers  Consumers
+		want       map[string]Class
+		confidence Class
+	}{
+		"a library with no consumer information": {
+			resolved:   libraryConfig(),
+			want:       map[string]Class{"Published": Possible, "hidden": Certain, "Runner": Certain},
+			confidence: Possible,
+		},
+		"a library whose every declared consumer loaded": {
+			resolved:   libraryConfig(),
+			consumers:  everyLoaded,
+			want:       map[string]Class{"Published": Possible, "hidden": Certain, "Runner": Certain},
+			confidence: Possible,
+		},
+		"an application": {
+			resolved:   applicationConfig(),
+			want:       map[string]Class{"Published": Certain, "hidden": Certain, "Runner": Certain},
+			confidence: Certain,
+		},
+	}
+	for description, tc := range cases {
+		t.Run(description, func(t *testing.T) {
+			in := inputOf(t, "interfaces-assertion-published.txtar", tc.resolved, tc.consumers)
+
+			result := computed(t, in, interfaceEmitters())
+
+			for name, want := range tc.want {
+				found := findingOf(t, result.Findings, unusedSatisfactionAssertionCode, name)
+				if found.Class != want || found.Confidence != tc.confidence {
+					t.Errorf("UnusedSatisfactionAssertion over the assertion of %s gives class %s and confidence %s, want class %s and confidence %s",
+						name, found.Class, found.Confidence, want, tc.confidence)
+				}
+			}
+		})
+	}
+}

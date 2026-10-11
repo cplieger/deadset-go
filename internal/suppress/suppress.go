@@ -5,7 +5,7 @@
 //
 // Nothing here emits a finding and nothing here ends a run. A reader returns the
 // records the suppressions resolve to, the refusals the grammar reports as
-// findings of their own, and a [MalformedError] for a directive or a document
+// findings of their own, and a [malformedError] for a directive or a document
 // the grammar refuses before any finding exists.
 //
 // The findings pass reads four things from a record: the declaration it bound,
@@ -33,10 +33,10 @@ const (
 	codeUnscoped = "DS1702" // an entry that names a symbol and no path
 )
 
-// ErrMalformed reports a suppression the grammar refuses before any finding
-// exists. Every [MalformedError] carries it, so a caller maps the whole class to
+// errMalformed reports a suppression the grammar refuses before any finding
+// exists. Every [malformedError] carries it, so a caller maps the whole class to
 // the usage exit code with errors.Is and reads the site with errors.As.
-var ErrMalformed = errors.New("suppress: malformed suppression")
+var errMalformed = errors.New("suppress: malformed suppression")
 
 // Mechanism names where a suppression is written. The spelling is the one a
 // finding carries.
@@ -99,11 +99,11 @@ type Refusal struct {
 	Mechanism Mechanism
 }
 
-// MalformedError is one directive, one entry or one document the grammar refuses
+// malformedError is one directive, one entry or one document the grammar refuses
 // before any finding is produced, because it is an instruction the analysis
 // cannot carry out: read as prose the instruction would do nothing, and if the
 // finding it was meant to cover has already gone, nothing would say so.
-type MalformedError struct {
+type malformedError struct {
 	// Err is the decoder's own error, and is nil where the grammar refused a
 	// value the decoder accepted.
 	Err       error
@@ -116,7 +116,7 @@ type MalformedError struct {
 // Error names the mechanism, the site, the text at fault and the form expected,
 // so a caller that prints the error prints everything a maintainer needs to
 // correct the suppression.
-func (e *MalformedError) Error() string {
+func (e *malformedError) Error() string {
 	at := e.Site.Filename
 	if e.Site.Line > 0 {
 		at = fmt.Sprintf("%s:%d:%d", at, e.Site.Line, e.Site.Column)
@@ -131,9 +131,9 @@ func (e *MalformedError) Error() string {
 // Unwrap returns the class every malformed suppression carries and, where a
 // decoder refused the document, the error it returned, so a caller maps the
 // class to the usage code with errors.Is and still reaches the cause.
-func (e *MalformedError) Unwrap() []error {
+func (e *malformedError) Unwrap() []error {
 	if e.Err == nil {
-		return []error{ErrMalformed}
+		return []error{errMalformed}
 	}
-	return []error{ErrMalformed, e.Err}
+	return []error{errMalformed, e.Err}
 }

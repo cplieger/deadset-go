@@ -680,3 +680,32 @@ func TestFindingsOfKeepsAMethodReachedThroughAnInterfaceHandedOnByAFunctionValue
 		t.Errorf("findingsOf(the hand-off module) = %v, want DS1203 about Getter.Get, which no call selects", findingCodes(envelope.Findings))
 	}
 }
+
+// causeModule is a module whose test cancels a context with a cause of a test file's
+// type, which reaches error as the argument of the cancel function, so the Error
+// method the cause's log line calls is live.
+func causeModule(t *testing.T) string {
+	t.Helper()
+	return writeModule(t, map[string]string{
+		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
+		"app.go": "package main\n\nimport (\n\t\"context\"\n\t\"fmt\"\n)\n\n" +
+			"func report(ctx context.Context) { fmt.Println(context.Cause(ctx)) }\n\n" +
+			"func main() { report(context.Background()) }\n",
+		"app_test.go": "package main\n\nimport (\n\t\"context\"\n\t\"testing\"\n)\n\n" +
+			"type shutdown struct{}\n\nfunc (shutdown) Error() string { return \"shutdown\" }\n\n" +
+			"func TestReport(t *testing.T) {\n\tctx, cancel := context.WithCancelCause(t.Context())\n\tcancel(shutdown{})\n\treport(ctx)\n}\n",
+		repositoryDocument: `{"target": {"kind": "application"}}`,
+	})
+}
+
+func TestFindingsOfKeepsTheErrorMethodOfATestFilesCancelCause(t *testing.T) {
+	envelope := reportOfDir(t, causeModule(t))
+	for i := range envelope.Findings {
+		found := &envelope.Findings[i]
+		switch found.Symbol.Ref {
+		case "go://example.com/app#shutdown.Error", "go://example.com/app#shutdown":
+			t.Errorf("findingsOf(the cancel-cause module) reports %s %s at %s:%d, want it live: the value reaches error",
+				found.Code, found.Symbol.Ref, found.Position.Path, found.Position.Line)
+		}
+	}
+}

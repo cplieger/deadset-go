@@ -48,25 +48,13 @@ type narrowing struct {
 	signatures map[graph.SymbolID][]graph.SymbolID
 }
 
-// newNarrowing folds every reference of the inventory into the spread of the
-// declaration it names, and keys the declarations whose references are not the whole
-// story.
-//
-// Three things are not. An exemption class stands for a mechanism that reaches a
-// declaration by a name, which is the name a narrowing would take away; the
-// write-only kind claims a declaration nothing reads is deletable, which is the more
-// specific answer about it than a narrower visibility; and a method that satisfies an
-// interface the target names as a type keeps its name from that interface, whatever
-// the references to it are.
-//
-// A declared cross-language edge is not one of them. It stands for a consumer in
-// another language, and the narrowing finding about a declaration an edge names is
-// reported here and then published as the pending finding of that edge's evaluation,
-// which is the answer a merge resolves against the paired side.
-//
-// The exemptions are the sweep's own, because an exemption on a declaration every
-// relation found live is only in what the sweep was given and that is the one a
-// narrowing has to ask about.
+// newNarrowing folds every reference into the spread of the declaration it names,
+// and keys as unnarrowable the declarations whose references are not the whole
+// story: one an exemption retains (the sweep's own set, which holds exemptions on
+// live declarations too), one the write-only kind reports, a method satisfying an
+// interface the target uses as a type, and a method an outside interface fixes
+// ([Input.fixedByOutsideInterface]). A declared cross-language edge is a reference
+// from outside, and its narrowing finding becomes the edge's pending evaluation.
 func newNarrowing(in *Input) *narrowing {
 	n := &narrowing{
 		in:           in,
@@ -85,6 +73,9 @@ func newNarrowing(in *Input) *narrowing {
 	}
 	n.holdWriteOnly()
 	n.holdInterfaceSatisfying()
+	for id := range in.fixedByOutsideInterface() {
+		n.unnarrowable[id] = true
+	}
 	return n
 }
 

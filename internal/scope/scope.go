@@ -17,8 +17,8 @@ import (
 
 // Role values a scope document declares for a module.
 const (
-	RoleTarget   = "target"
-	RoleConsumer = "consumer"
+	roleTarget   = "target"
+	roleConsumer = "consumer"
 )
 
 // maxDocumentBytes bounds a scope document, which names one target and its
@@ -29,20 +29,20 @@ var (
 	// ErrNoTarget reports a document that names no target path.
 	ErrNoTarget = errors.New("scope: no target path")
 
-	// ErrRole reports a module whose declared role is not the one its position
+	// errRole reports a module whose declared role is not the one its position
 	// in the document gives it.
-	ErrRole = errors.New("scope: invalid role")
+	errRole = errors.New("scope: invalid role")
 
-	// ErrTooLarge reports a document above the size bound.
-	ErrTooLarge = errors.New("scope: document too large")
+	// errTooLarge reports a document above the size bound.
+	errTooLarge = errors.New("scope: document too large")
 
-	// ErrTrailingContent reports bytes after the document's closing brace.
-	ErrTrailingContent = errors.New("scope: trailing content after document")
+	// errTrailingContent reports bytes after the document's closing brace.
+	errTrailingContent = errors.New("scope: trailing content after document")
 
-	// ErrMember reports a member the closed key list refuses: a key it does not
+	// errMember reports a member the closed key list refuses: a key it does not
 	// declare, compared as bytes so a key spelled in another case is undeclared, a
 	// key written twice in one object, a null value, or an empty id or workspace.
-	ErrMember = errors.New("scope: refused member")
+	errMember = errors.New("scope: refused member")
 
 	// errNotDirectory reports a target path that exists and is not a directory.
 	errNotDirectory = errors.New("not a directory")
@@ -91,15 +91,15 @@ type wireDocument struct {
 	Consumers []wireModule `json:"consumers"`
 }
 
-// Read decodes the scope document at path. Decoding is strict: an undeclared key
+// read decodes the scope document at path. Decoding is strict: an undeclared key
 // is an error, trailing content after the document is an error, and a relative
 // path inside the document resolves against the document's own directory.
 //
-// Read returns [ErrNoTarget], [ErrRole], [ErrMember], [ErrTooLarge] or
-// [ErrTrailingContent] for a document it refuses, an error satisfying
+// read returns [ErrNoTarget], [errRole], [errMember], [errTooLarge] or
+// [errTrailingContent] for a document it refuses, an error satisfying
 // errors.Is(err, fs.ErrNotExist) when the document is absent, and a
 // *json.SyntaxError or *json.UnmarshalTypeError for one it cannot decode.
-func Read(path string) (Document, error) {
+func read(path string) (Document, error) {
 	body, err := readBounded(path)
 	if err != nil {
 		return Document{}, err
@@ -114,8 +114,8 @@ func Read(path string) (Document, error) {
 	if err := dec.Decode(&wire); err != nil {
 		return Document{}, fmt.Errorf("scope: decode %s: %w", path, err)
 	}
-	if dec.More() {
-		return Document{}, fmt.Errorf("%w: %s", ErrTrailingContent, path)
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return Document{}, fmt.Errorf("%w: %s", errTrailingContent, path)
 	}
 
 	return resolve(&wire, filepath.Dir(path))
@@ -164,7 +164,7 @@ func readBounded(path string) ([]byte, error) {
 		return nil, fmt.Errorf("scope: read %s: %w", path, err)
 	}
 	if len(body) > maxDocumentBytes {
-		return nil, fmt.Errorf("%w: %s exceeds %d bytes", ErrTooLarge, path, maxDocumentBytes)
+		return nil, fmt.Errorf("%w: %s exceeds %d bytes", errTooLarge, path, maxDocumentBytes)
 	}
 	return body, nil
 }
@@ -174,11 +174,11 @@ func resolve(wire *wireDocument, base string) (Document, error) {
 	if wire.Target.Path == "" {
 		return Document{}, ErrNoTarget
 	}
-	if wire.Target.Role != "" && wire.Target.Role != RoleTarget {
-		return Document{}, fmt.Errorf("%w: target declares role %q", ErrRole, wire.Target.Role)
+	if wire.Target.Role != "" && wire.Target.Role != roleTarget {
+		return Document{}, fmt.Errorf("%w: target declares role %q", errRole, wire.Target.Role)
 	}
 
-	target, err := resolveModule(wire.Target, RoleTarget, base)
+	target, err := resolveModule(wire.Target, roleTarget, base)
 	if err != nil {
 		return Document{}, err
 	}
@@ -187,7 +187,7 @@ func resolve(wire *wireDocument, base string) (Document, error) {
 	if wire.Workspace != nil {
 		workspace := *wire.Workspace
 		if workspace == "" {
-			return Document{}, fmt.Errorf("%w: workspace is empty, which names no file", ErrMember)
+			return Document{}, fmt.Errorf("%w: workspace is empty, which names no file", errMember)
 		}
 		if !filepath.IsAbs(workspace) {
 			workspace = filepath.Join(base, workspace)
@@ -196,10 +196,10 @@ func resolve(wire *wireDocument, base string) (Document, error) {
 	}
 
 	for _, w := range wire.Consumers {
-		if w.Role != "" && w.Role != RoleConsumer {
-			return Document{}, fmt.Errorf("%w: consumer %s declares role %q", ErrRole, w.Path, w.Role)
+		if w.Role != "" && w.Role != roleConsumer {
+			return Document{}, fmt.Errorf("%w: consumer %s declares role %q", errRole, w.Path, w.Role)
 		}
-		consumer, err := resolveModule(w, RoleConsumer, base)
+		consumer, err := resolveModule(w, roleConsumer, base)
 		if err != nil {
 			return Document{}, err
 		}
@@ -218,7 +218,7 @@ func resolveModule(w wireModule, role, base string) (Module, error) {
 	if w.ID != nil {
 		if *w.ID == "" {
 			return Module{}, fmt.Errorf("%w: %s %s declares an empty id. Leave the name to the load by omitting it",
-				ErrMember, role, w.Path)
+				errMember, role, w.Path)
 		}
 		id = *w.ID
 	}

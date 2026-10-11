@@ -277,12 +277,13 @@ func TestTheRuleDescribesTheKind(t *testing.T) {
 		},
 		{
 			code:  "DS1802",
-			short: "A named method receiver with no reference inside the method body, on a method whose signature is free to change.",
-			full: "A named method receiver with no reference inside the method body, on a method whose signature is free to change. " +
+			short: "A named method receiver with no reference inside the method body.",
+			full: "A named method receiver with no reference inside the method body. " +
 				"Go permits a method with no receiver name, so the fix deletes an identifier and changes no signature.",
-			help: "A named method receiver with no reference inside the method body, on a method whose signature is free to change. " +
+			help: "A named method receiver with no reference inside the method body. " +
 				"Go permits a method with no receiver name, so the fix deletes an identifier and changes no signature.\n\n" +
-				"The same free-signature rule as unused-parameter, applied to the receiver.",
+				"None beyond the rule. Deleting a receiver name changes no signature, so a method retained by interface " +
+				"satisfaction, a method used as a value and a stub are reported as any other method is.",
 		},
 	}
 	for _, tc := range tests {
@@ -393,8 +394,8 @@ func TestTheSarifRenderingNeedsAReader(t *testing.T) {
 	envelope := built(t, &in)
 
 	err := SARIF(&strings.Builder{}, &envelope, Options{})
-	if !errors.Is(err, ErrOptions) {
-		t.Errorf("SARIF(no reader) = error %v, want one carrying ErrOptions", err)
+	if !errors.Is(err, errOptions) {
+		t.Errorf("SARIF(no reader) = error %v, want one carrying errOptions", err)
 	}
 }
 

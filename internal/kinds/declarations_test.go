@@ -181,13 +181,21 @@ func TestAConversionInLiveCodeRetainsAMethodADeadDeclarationConvertsFirst(t *tes
 	}
 }
 
-func TestAnAssertionInsideAMethodRetainsItWhileTheConversionThatReachesItIsLive(t *testing.T) {
+// An assertion is held by its own declaration as well as by the one converting the
+// value, so a method whose only caller is an assertion it writes itself is dead
+// under reachability, and the method main calls through the conversion is not.
+func TestAnAssertionInsideTheMethodItRetainsHoldsNothing(t *testing.T) {
 	result := analysisOf(t, "declarations-asserted-inside.txtar", asApplication, Consumers{}).findings(t, everyKind)
 
+	closed := findingOf(t, result.Findings, unreachableExportCode, "(*wrapper).Close")
+	if closed.Relation != graph.Reachability {
+		t.Errorf("the pass reports (*wrapper).Close under %v, want reachability: main holds the conversion and only Close holds the assertion",
+			closed.Relation)
+	}
 	for i := range result.Findings {
-		if name := result.Findings[i].Symbol.Name; name == "(*wrapper).Close" || name == "(*wrapper).Write" {
-			t.Errorf("the pass reports %s about %s, want nothing: main converts the wrapper to io.Writer, and the assertion to io.Closer reaches it",
-				result.Findings[i].Code, name)
+		if result.Findings[i].Symbol.Name == "(*wrapper).Write" {
+			t.Errorf("the pass reports %s about (*wrapper).Write, want nothing: main converts the wrapper to io.Writer and calls it",
+				result.Findings[i].Code)
 		}
 	}
 }
@@ -388,5 +396,39 @@ func TestTestSupportCodeATestReferencesIsReportedAtPossible(t *testing.T) {
 	}
 	if got := summary(result.Findings); len(got) != 3 {
 		t.Errorf("the pass over declarations-test-support-possible.txtar reports %v, want the three findings above alone", got)
+	}
+}
+
+func TestCapNameLiteral_lowersADeclarationAStringLiteralSpellsToPossible(t *testing.T) {
+	resolved := applicationConfig()
+	resolved.Analysis.MinConfidence = config.Possible
+	result := computed(t, inputOf(t, "name-literal.txtar", resolved, Consumers{}), packageEmitters())
+
+	cases := map[string]struct {
+		code    string
+		class   Class
+		literal int
+	}{
+		"spelled":     {code: unusedUnexportedCode, class: Possible, literal: 10},
+		"Kind":        {code: unnecessaryExportCode, class: Possible, literal: 10},
+		"KindA":       {code: unnecessaryExportCode, class: Possible, literal: 10},
+		"selfSpelled": {code: unusedUnexportedCode, class: Certain},
+		"testSpelled": {code: unusedUnexportedCode, class: Certain},
+		"strings":     {code: unusedUnexportedCode, class: Certain},
+		"Kind.Label":  {code: unnecessaryExportCode, class: Certain},
+	}
+	for name, want := range cases {
+		t.Run(name, func(t *testing.T) {
+			found := findingOf(t, result.Findings, want.code, name)
+			if found.Class != want.class || found.Confidence != want.class {
+				t.Errorf("%s %s has class %s and confidence %s, want %s for both", want.code, name, found.Class, found.Confidence, want.class)
+			}
+			switch at := found.Details.NameLiteral; {
+			case want.literal == 0 && at != nil:
+				t.Errorf("%s %s names the literal at %+v, want none", want.code, name, *at)
+			case want.literal != 0 && (at == nil || at.Path != "main.go" || at.Line != want.literal):
+				t.Errorf("%s %s names the literal at %+v, want main.go:%d", want.code, name, at, want.literal)
+			}
+		})
 	}
 }

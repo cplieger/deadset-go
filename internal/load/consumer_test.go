@@ -151,8 +151,8 @@ func TestLoadRefusesAConsumerItCannotCount(t *testing.T) {
 			stableToolchain(t)
 			got, err := Load(t.Context(), test.declared(t), HostConfiguration())
 
-			if !errors.Is(err, ErrConsumer) {
-				t.Fatalf("Load() = _, %v, want an error matching ErrConsumer", err)
+			if !errors.Is(err, errConsumer) {
+				t.Fatalf("Load() = _, %v, want an error matching errConsumer", err)
 			}
 			for _, text := range test.wantText {
 				if !strings.Contains(err.Error(), text) {
@@ -210,8 +210,8 @@ func assertMissingConsumer(t *testing.T, what string, err error, want ...string)
 		t.Fatalf("Load(%s) = _, %v, want a *load.SetupError", what, err)
 	}
 	for _, one := range setup.Failures {
-		if one.Class != MissingConsumer {
-			t.Errorf("Load(%s) failed with the class %q, want %q", what, one.Class, MissingConsumer)
+		if one.Class != missingConsumer {
+			t.Errorf("Load(%s) failed with the class %q, want %q", what, one.Class, missingConsumer)
 		}
 		for _, text := range want {
 			if !strings.Contains(one.Line(), text) {

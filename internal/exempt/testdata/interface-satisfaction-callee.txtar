@@ -1,0 +1,93 @@
+A command that passes values as io.Reader arguments to functions a dependency module
+declares. The package of one callee asserts io.Closer on what it is handed, and so
+does the package of an interface whose method is called through an interface value.
+A second package of the dependency only forwards the value to the first, and the
+standard library's io.ReadAll asserts nothing of the kind on it.
+
+-- go.mod --
+module example.com/callee
+
+go 1.27.0
+
+require example.com/sink v0.0.0
+
+replace example.com/sink => ./sink
+-- main.go --
+package main
+
+import (
+	"io"
+
+	"example.com/sink"
+	"example.com/sink/forward"
+)
+
+type direct struct{}
+
+func (*direct) Read([]byte) (int, error) { return 0, io.EOF }
+
+func (*direct) Close() error { return nil }
+
+type dispatched struct{}
+
+func (*dispatched) Read([]byte) (int, error) { return 0, io.EOF }
+
+func (*dispatched) Close() error { return nil }
+
+type forwarded struct{}
+
+func (*forwarded) Read([]byte) (int, error) { return 0, io.EOF }
+
+func (*forwarded) Close() error { return nil }
+
+type drained struct{}
+
+func (*drained) Read([]byte) (int, error) { return 0, io.EOF }
+
+func (*drained) Close() error { return nil }
+
+func main() {
+	sink.Take(&direct{})
+	var t sink.Taker = sink.New()
+	t.Take(&dispatched{})
+	forward.Pass(&forwarded{})
+	_, _ = io.ReadAll(&drained{})
+}
+-- sink/go.mod --
+module example.com/sink
+
+go 1.27.0
+-- sink/sink.go --
+package sink
+
+import "io"
+
+// Take closes what it is handed when it can.
+func Take(r io.Reader) {
+	if c, ok := r.(io.Closer); ok {
+		_ = c.Close()
+	}
+}
+
+// Taker takes a reader.
+type Taker interface {
+	Take(r io.Reader)
+}
+
+type taker struct{}
+
+func (taker) Take(r io.Reader) { Take(r) }
+
+// New returns a Taker.
+func New() Taker { return taker{} }
+-- sink/forward/forward.go --
+package forward
+
+import (
+	"io"
+
+	"example.com/sink"
+)
+
+// Pass hands the reader on.
+func Pass(r io.Reader) { sink.Take(r) }

@@ -46,7 +46,7 @@ func walk(dec *json.Decoder, s *shape, at string) error {
 	}
 	switch token {
 	case nil:
-		return fmt.Errorf("%w: %s is null. A document that leaves a member to its default omits it", ErrMember, at)
+		return fmt.Errorf("%w: %s is null. A document that leaves a member to its default omits it", errMember, at)
 	case json.Delim('{'):
 		if s != nil && s.members == nil {
 			s = nil
@@ -83,14 +83,14 @@ func walkObject(dec *json.Decoder, s *shape, at string) error {
 			path = at + "." + name
 		}
 		if seen[name] {
-			return fmt.Errorf("%w: %s is written twice, so neither value is chosen", ErrMember, path)
+			return fmt.Errorf("%w: %s is written twice, so neither value is chosen", errMember, path)
 		}
 		seen[name] = true
 		var member *shape
 		if s != nil {
 			declared, ok := s.members[name]
 			if !ok {
-				return fmt.Errorf("%w: %s is not a key the scope document declares", ErrMember, path)
+				return fmt.Errorf("%w: %s is not a key the scope document declares", errMember, path)
 			}
 			member = declared
 		}

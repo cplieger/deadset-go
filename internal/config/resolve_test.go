@@ -200,11 +200,8 @@ func TestResolveRefusesAMissingTargetKind(t *testing.T) {
 			if !errors.As(err, &refusal) {
 				t.Fatalf("Resolve(%s) = error %v, want a *config.Error", tc.name, err)
 			}
-			if refusal.Kind != config.KindMissingTargetKind {
-				t.Errorf("Resolve(%s) = kind %v, want %v", tc.name, refusal.Kind, config.KindMissingTargetKind)
-			}
-			if refusal.Key != "target.kind" {
-				t.Errorf("Resolve(%s) named %q, want %q", tc.name, refusal.Key, "target.kind")
+			if !strings.Contains(refusal.Error(), "target.kind") {
+				t.Errorf("Resolve(%s) = %q, want the message to name %q", tc.name, refusal.Error(), "target.kind")
 			}
 			assertMessageNames(t, tc.name, refusal, tc.names)
 		})
@@ -336,11 +333,8 @@ func TestResolveRefusesAnUnimplementedKey(t *testing.T) {
 			if !errors.As(err, &refusal) {
 				t.Fatalf("Resolve(%s) = error %v, want a *config.Error", tc.name, err)
 			}
-			if refusal.Kind != config.KindUnimplementedKey {
-				t.Errorf("Resolve(%s) = kind %v, want %v", tc.name, refusal.Kind, config.KindUnimplementedKey)
-			}
-			if refusal.Key != tc.key {
-				t.Errorf("Resolve(%s) named %q, want %q", tc.name, refusal.Key, tc.key)
+			if !strings.Contains(refusal.Error(), tc.key) {
+				t.Errorf("Resolve(%s) = %q, want the message to name %q", tc.name, refusal.Error(), tc.key)
 			}
 			assertMessageNames(t, tc.name, refusal, tc.names)
 		})
@@ -425,11 +419,8 @@ func TestResolveRefusesADuplicateMember(t *testing.T) {
 			if !errors.As(err, &refusal) {
 				t.Fatalf("Resolve(%s) = error %v, want a *config.Error", tc.name, err)
 			}
-			if refusal.Kind != config.KindMalformed {
-				t.Errorf("Resolve(%s) = kind %v, want %v", tc.name, refusal.Kind, config.KindMalformed)
-			}
-			if refusal.Key != tc.key {
-				t.Errorf("Resolve(%s) named %q, want %q", tc.name, refusal.Key, tc.key)
+			if !strings.Contains(refusal.Error(), tc.key) {
+				t.Errorf("Resolve(%s) = %q, want the message to name %q", tc.name, refusal.Error(), tc.key)
 			}
 			assertMessageNames(t, tc.name, refusal, []string{"twice"})
 		})
@@ -534,11 +525,8 @@ func TestResolveRefusesANullWhereverItSits(t *testing.T) {
 			if !errors.As(err, &refusal) {
 				t.Fatalf("Resolve(%s) = error %v, want a *config.Error", tc.name, err)
 			}
-			if refusal.Kind != config.KindMalformed {
-				t.Errorf("Resolve(%s) = kind %v, want %v", tc.name, refusal.Kind, config.KindMalformed)
-			}
-			if refusal.Key != tc.key {
-				t.Errorf("Resolve(%s) named %q, want %q", tc.name, refusal.Key, tc.key)
+			if !strings.Contains(refusal.Error(), tc.key) {
+				t.Errorf("Resolve(%s) = %q, want the message to name %q", tc.name, refusal.Error(), tc.key)
 			}
 			assertMessageNames(t, tc.name, refusal, []string{"null"})
 		})
@@ -809,6 +797,16 @@ func TestResolveRefusesAMalformedDocument(t *testing.T) {
 			key:        "",
 		},
 		{
+			name:       "a_bracket_after_the_document",
+			repository: `{"target": {"kind": "library"}}]`,
+			says:       []string{"nothing after it"},
+		},
+		{
+			name:       "a_brace_after_the_document",
+			repository: `{"target": {"kind": "library"}}}`,
+			says:       []string{"nothing after it"},
+		},
+		{
 			name:       "a_document_that_is_not_an_object",
 			repository: `["target"]`,
 			key:        "",
@@ -824,11 +822,8 @@ func TestResolveRefusesAMalformedDocument(t *testing.T) {
 			if !errors.As(err, &refusal) {
 				t.Fatalf("Resolve(%s) = error %v, want a *config.Error", tc.name, err)
 			}
-			if refusal.Kind != config.KindMalformed {
-				t.Errorf("Resolve(%s) = kind %v, want %v", tc.name, refusal.Kind, config.KindMalformed)
-			}
-			if refusal.Key != tc.key {
-				t.Errorf("Resolve(%s) named %q, want %q", tc.name, refusal.Key, tc.key)
+			if !strings.Contains(refusal.Error(), tc.key) {
+				t.Errorf("Resolve(%s) = %q, want the message to name %q", tc.name, refusal.Error(), tc.key)
 			}
 			assertMessageNames(t, tc.name, refusal, append([]string{"deadset.json"}, tc.says...))
 		})
@@ -991,13 +986,9 @@ func TestResolveRefusesEveryEnumeratedSettingsMalformedValue(t *testing.T) {
 			if !errors.As(err, &refusal) {
 				t.Fatalf("Resolve(%s = %v) = error %v, want a *config.Error", setting.at, setting.value, err)
 			}
-			if refusal.Kind != config.KindMalformed {
-				t.Errorf("Resolve(%s = %v) = kind %v, want %v",
-					setting.at, setting.value, refusal.Kind, config.KindMalformed)
-			}
-			if refusal.Key != setting.names {
-				t.Errorf("Resolve(%s = %v) named %q, want %q",
-					setting.at, setting.value, refusal.Key, setting.names)
+			if !strings.Contains(refusal.Error(), setting.names) {
+				t.Errorf("Resolve(%s = %v) = %q, want the message to name %q",
+					setting.at, setting.value, refusal.Error(), setting.names)
 			}
 			assertMessageNames(t, setting.names, refusal, []string{valueOutsideEveryClosedSet})
 		})
@@ -1157,13 +1148,8 @@ func TestResolveRefusesAFlagSuppliedDeclarationNamingAnUndeclaredMember(t *testi
 			flags := `{"` + tc.setting + `": ` + tc.value + `}`
 			_, _, err := config.Resolve(labelled(flags, `{"target": {"kind": "application"}}`, "",
 				map[string]string{tc.setting: "--" + tc.name}))
-			var refusal *config.Error
-			if !errors.As(err, &refusal) {
+			if _, ok := errors.AsType[*config.Error](err); !ok {
 				t.Fatalf("Resolve(a flag supplying %s = %s) = error %v, want a *config.Error", tc.setting, tc.value, err)
-			}
-			if refusal.Kind != config.KindMalformed {
-				t.Errorf("Resolve(a flag supplying %s = %s) = kind %v, want %v",
-					tc.setting, tc.value, refusal.Kind, config.KindMalformed)
 			}
 		})
 	}
@@ -1246,8 +1232,8 @@ func TestResolveRefusesAProviderEntryOfNeitherShape(t *testing.T) {
 			if !errors.As(err, &refusal) {
 				t.Fatalf("Resolve(%s) = error %v, want a *config.Error", tc.name, err)
 			}
-			if refusal.Key != tc.key {
-				t.Errorf("Resolve(%s) named %q, want %q", tc.name, refusal.Key, tc.key)
+			if !strings.Contains(refusal.Error(), tc.key) {
+				t.Errorf("Resolve(%s) = %q, want the message to name %q", tc.name, refusal.Error(), tc.key)
 			}
 			assertMessageNames(t, tc.name, refusal, []string{"deadset.json", tc.key})
 		})

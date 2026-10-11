@@ -77,6 +77,10 @@ type reach struct {
 
 	// xmlName is whether an XML decoder compares the value's XMLName field.
 	xmlName bool
+
+	// holders is whether a decoder reads a field of a pointer, interface or map
+	// type the program writes, to decode into the value the field holds.
+	holders bool
 }
 
 // tagKeys is a set of the struct tag keys an encoder names a field by.
@@ -122,6 +126,7 @@ func (r reach) union(other reach) reach {
 		methods: r.methods | other.methods,
 		fields:  r.fields || other.fields,
 		xmlName: r.xmlName || other.xmlName,
+		holders: r.holders || other.holders,
 	}
 	switch {
 	case !r.fields:
@@ -154,13 +159,14 @@ func joinPackages(held, other []*types.Package) []*types.Package {
 func (r reach) covers(other reach) bool {
 	widened := r.union(other)
 	return widened.methods == r.methods && widened.fields == r.fields && len(widened.outside) == len(r.outside) &&
-		len(widened.contained) == len(r.contained) && widened.keys == r.keys && widened.xmlName == r.xmlName
+		len(widened.contained) == len(r.contained) && widened.keys == r.keys && widened.xmlName == r.xmlName &&
+		widened.holders == r.holders
 }
 
 // storesOnly reports whether every destination of this reach is a standard
 // container, which hands the value back unchanged and so reads nothing beneath it.
 func (r reach) storesOnly() bool {
-	return len(r.contained) > 0 && r.methods == 0 && !r.fields && !r.xmlName && len(r.outside) == 0
+	return len(r.contained) > 0 && r.methods == 0 && !r.fields && !r.xmlName && !r.holders && len(r.outside) == 0
 }
 
 // methodsResolvedByName are the methods a destination resolves by name on a value it
@@ -215,7 +221,7 @@ func entryPoint(pkg, name string, resolved methodReach, unknownMembers bool) rea
 	case hasAnyPrefix(name, decodingEntryPoints[:]):
 		return reach{
 			methods: resolved &^ reachEncoding, fields: unknownMembers && jsonPackages[pkg], keys: key,
-			xmlName: pkg == xmlPackage,
+			xmlName: pkg == xmlPackage, holders: true,
 		}
 	default:
 		return reach{methods: resolved, fields: true, keys: key, xmlName: pkg == xmlPackage}
@@ -296,7 +302,12 @@ const (
 // ([storedTypes]), and a promoted method is retained where the embedded type is.
 func EncodingReflectionDetector(in *Input) ([]graph.Exemption, error) {
 	assert := assertableOf(in)
+	conversions, err := programConversions(in)
+	if err != nil {
+		return nil, fmt.Errorf("encoding-reflection: %w", err)
+	}
 	f := &encodingFlow{
+		conversions:    conversions,
 		kept:           newRetention(in, EncodingReflection),
 		targets:        conversionTargets(in.Result.Packages),
 		unknownMembers: namesFunction(in, jsonPackages, unknownMemberRefusals),
@@ -305,6 +316,7 @@ func EncodingReflectionDetector(in *Input) ([]graph.Exemption, error) {
 		assert:         assert,
 		satisfying:     make(map[satisfactionKey]map[string]bool),
 		methodNames:    make(map[*types.Named]map[string]bool),
+		typeArgs:       typeArgumentsOf(programPackages(in.Result)),
 	}
 	f.decode = newDecoders(f, assert.source)
 	f.edge = newBoundary(in, f.namedDestinationParameter)
@@ -318,11 +330,15 @@ func EncodingReflectionDetector(in *Input) ([]graph.Exemption, error) {
 	if err := f.walkReturns(); err != nil {
 		return nil, err
 	}
+	if err := f.walkTypeArguments(); err != nil {
+		return nil, err
+	}
 	return f.kept.exemptions(), nil
 }
 
 // encodingFlow accumulates the class over one loaded configuration.
 type encodingFlow struct {
+	typeArgs    *typeArguments
 	kept        *retention
 	edge        *boundary
 	stored      *storedTypes
@@ -333,7 +349,9 @@ type encodingFlow struct {
 	satisfying  map[satisfactionKey]map[string]bool // the method names retained
 	methodNames map[*types.Named]map[string]bool    // the names a type or a pointer to it declares
 	decode      *decoders
+	writes      map[token.Position]bool // the fields the program writes, on first use
 	targets     []interfaceTarget
+	conversions []graph.Conversion // the program's, consumers' included
 
 	// unknownMembers is whether the program makes a JSON decoder refuse a document
 	// naming a member the type lacks.
@@ -405,7 +423,7 @@ func (f *encodingFlow) walkFile(info *types.Info, file *ast.File) error {
 				failed = f.arguments(info, enclosing, call.Args, &d)
 				return failed == nil
 			}
-			failed = f.crossingArguments(info, call)
+			failed = f.crossingArguments(info, enclosing, call)
 			return failed == nil
 		})
 		if failed != nil {
@@ -419,7 +437,7 @@ func (f *encodingFlow) walkFile(info *types.Info, file *ast.File) error {
 // program, which the boundary's crossing test decides argument by argument. What is
 // retained is what the boundary carries for the callee, and the detail names the
 // immediate callee, so a wrapper's caller reads the wrapper's name.
-func (f *encodingFlow) crossingArguments(info *types.Info, call *ast.CallExpr) error {
+func (f *encodingFlow) crossingArguments(info *types.Info, enclosing *types.Func, call *ast.CallExpr) error {
 	callee, _ := resolveObject(info, call.Fun).(*types.Func)
 	for i, arg := range call.Args {
 		if at, supplies := parameterAt(callee.Signature(), i); supplies && !f.edge.declares(callee) {
@@ -431,16 +449,136 @@ func (f *encodingFlow) crossingArguments(info *types.Info, call *ast.CallExpr) e
 				continue
 			}
 		}
-		out, crosses := f.edge.crossing(info, call, i)
-		if !crosses {
-			continue
-		}
-		d := destination{detail: "passed to " + out.callee.FullName(), reach: out.reach}
-		if err := f.retain(info.TypeOf(arg), arg.Pos(), &d); err != nil {
+		if err := f.crossingArgument(info, enclosing, call, i); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// crossingArgument records what the argument at position i of one call carries out
+// of the analysed program: its own struct value, the types it reaches of its own
+// ([encodingFlow.ownTypes]), and each struct value an interface-typed local or call
+// result holds ([storedTypes.held]); a parameter's values cross at its callers' sites.
+func (f *encodingFlow) crossingArgument(info *types.Info, enclosing *types.Func, call *ast.CallExpr, i int) error {
+	out, sinks := f.edge.sinkOf(info, call, i)
+	if !sinks {
+		return nil
+	}
+	arg := call.Args[i]
+	d := destination{detail: "passed to " + out.callee.FullName(), reach: out.reach}
+	flowing := f.ownTypes(info, arg)
+	if at := info.TypeOf(arg); at != nil && carriesStruct(at) {
+		flowing = append(flowing, at)
+	}
+	for _, held := range f.stored.held(info, enclosing, arg) {
+		if carriesStruct(held) {
+			flowing = append(flowing, held)
+		}
+	}
+	for _, t := range flowing {
+		if err := f.retain(t, arg.Pos(), &d); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ownTypes is what one argument of a destination reaches beyond its static type:
+// the types of the values its own composite literals write into interface-typed
+// positions ([literalValues]), and for an argument of a defined interface type every
+// type the program converts to that interface. A conversion to an interface type
+// with no name, any among them, adds nothing, and neither does one to error, which
+// is predeclared rather than defined (Go specification, "Types").
+func (f *encodingFlow) ownTypes(info *types.Info, arg ast.Expr) []types.Type {
+	found := literalValues(info, arg)
+	named, defined := types.Unalias(info.TypeOf(arg)).(*types.Named)
+	if defined && named.Obj().Pkg() != nil && types.IsInterface(named) {
+		found = append(found, f.convertedTo(named)...)
+	}
+	return found
+}
+
+// convertedTo is every concrete type the program converts to one defined interface
+// type, at the sites [programConversions] records.
+func (f *encodingFlow) convertedTo(iface *types.Named) []types.Type {
+	var found []types.Type
+	for i := range f.conversions {
+		if c := &f.conversions[i]; types.Identical(c.Interface, iface) {
+			found = append(found, c.From)
+		}
+	}
+	return found
+}
+
+// literalValues is the type of each value one expression's composite literal writes
+// into an interface-typed position, a struct field, a slice or array element, or a
+// map key or value, read through parentheses, conversions and the address operator,
+// and so on through each composite literal it nests at any position.
+func literalValues(info *types.Info, expr ast.Expr) []types.Type {
+	lit, isLiteral := literalOf(info, expr).(*ast.CompositeLit)
+	if !isLiteral {
+		return nil
+	}
+	t := info.TypeOf(lit)
+	if t == nil {
+		return nil
+	}
+	var found []types.Type
+	write := func(position types.Type, value ast.Expr) {
+		if held := info.TypeOf(value); position != nil && types.IsInterface(position) && held != nil && !types.IsInterface(held) {
+			found = append(found, held)
+		}
+		found = append(found, literalValues(info, value)...)
+	}
+	under := types.Unalias(t).Underlying()
+	if p, pointer := under.(*types.Pointer); pointer {
+		under = p.Elem().Underlying()
+	}
+	for i, elt := range lit.Elts {
+		key, value := ast.Expr(nil), elt
+		if kv, keyed := elt.(*ast.KeyValueExpr); keyed {
+			key, value = kv.Key, kv.Value
+		}
+		switch u := under.(type) {
+		case *types.Struct:
+			var set types.Type
+			if field := literalField(info, u, elt, i); field != nil {
+				set = field.Type()
+			}
+			write(set, value)
+		case *types.Map:
+			write(u.Key(), key)
+			write(u.Elem(), value)
+		case *types.Slice:
+			write(u.Elem(), value)
+		case *types.Array:
+			write(u.Elem(), value)
+		}
+	}
+	return found
+}
+
+// literalOf is the expression one argument holds, read through parentheses, type
+// conversions and the address operator.
+func literalOf(info *types.Info, expr ast.Expr) ast.Expr {
+	for {
+		switch e := ast.Unparen(expr).(type) {
+		case *ast.UnaryExpr:
+			if e.Op != token.AND {
+				return e
+			}
+			expr = e.X
+		case *ast.CallExpr:
+			tv, held := info.Types[e.Fun]
+			if !held || !tv.IsType() || len(e.Args) != 1 {
+				return e
+			}
+			expr = e.Args[0]
+		default:
+			return e
+		}
+	}
 }
 
 // arguments records the types the arguments of one destination call in the body of
@@ -461,7 +599,8 @@ func (f *encodingFlow) arguments(info *types.Info, enclosing *types.Func, args [
 		if err := f.retain(at, arg.Pos(), d); err != nil {
 			return err
 		}
-		for _, stored := range f.stored.argument(info, enclosing, arg) {
+		for _, stored := range slices.Concat(f.stored.argument(info, enclosing, arg), f.stored.value(info, enclosing, arg),
+			f.ownTypes(info, arg)) {
 			if err := f.retain(stored, arg.Pos(), d); err != nil {
 				return err
 			}
@@ -571,7 +710,7 @@ func (f *encodingFlow) walkConversions() error {
 	if len(f.targets) == 0 {
 		return nil
 	}
-	conversions, err := Conversions(f.kept.in)
+	conversions, err := conversionsOf(f.kept.in)
 	if err != nil {
 		return fmt.Errorf("encoding-reflection: %w", err)
 	}
@@ -596,12 +735,16 @@ func (f *encodingFlow) retain(t types.Type, at token.Pos, d *destination) error 
 	if err != nil {
 		return err
 	}
-	reached := f.encoderReach(t)
-	if d.reach.storesOnly() {
-		reached = concreteTypes(namedTypesReached(t))
-	}
-	for _, named := range reached {
-		f.members(named, site, d)
+	// A value of a type parameter's type is a value of each type argument the
+	// program instantiates the parameter with.
+	for _, one := range append([]types.Type{t}, f.typeArgs.bindings(t)...) {
+		reached := f.encoderReach(one)
+		if d.reach.storesOnly() {
+			reached = concreteTypes(namedTypesReached(one))
+		}
+		for _, named := range reached {
+			f.members(named, site, d)
+		}
 	}
 	return nil
 }
@@ -625,15 +768,13 @@ func (f *encodingFlow) members(named *types.Named, site evidence, d *destination
 
 // fields records the fields of one struct a destination reads, and those of each
 // struct type with no name a field it visits holds, whose fields are symbols of the
-// type that holds the struct.
+// type that holds the struct. An exported, a tagged and an embedded struct field are
+// visited (https://pkg.go.dev/encoding/json#Marshal).
 func (f *encodingFlow) fields(st *types.Struct, site evidence, d *destination) {
 	for i := range st.NumFields() {
 		field := st.Field(i)
-		visited := (field.Exported() || st.Tag(i) != "") && !d.reach.keys.skips(st.Tag(i))
-		switch {
-		case d.reach.fields && visited:
-			f.kept.record(field, site, d.detail)
-		case d.reach.xmlName && field.Name() == xmlNameField && isXMLName(field.Type()):
+		visited := (field.Exported() || st.Tag(i) != "" || embedsStruct(field)) && !d.reach.keys.skips(st.Tag(i))
+		if f.reads(field, visited, d) {
 			f.kept.record(field, site, d.detail)
 		}
 		if !visited {
@@ -644,6 +785,25 @@ func (f *encodingFlow) fields(st *types.Struct, site evidence, d *destination) {
 			f.fields(held, site, d)
 		}
 	}
+}
+
+// reads reports whether one destination reads one field: a field it visits where it
+// reads fields, an XML decoder's XMLName, or a written holder a decoder fills through.
+func (f *encodingFlow) reads(field *types.Var, visited bool, d *destination) bool {
+	switch {
+	case d.reach.fields && visited:
+		return true
+	case d.reach.xmlName && field.Name() == xmlNameField && isXMLName(field.Type()):
+		return true
+	default:
+		return d.reach.holders && visited && holdsValue(field.Type()) && f.written()[f.edge.sites.of(field)]
+	}
+}
+
+// embedsStruct reports whether one field is an embedded struct or pointer to one,
+// whose fields an encoder promotes whether or not the embedded type is exported.
+func embedsStruct(field *types.Var) bool {
+	return field.Embedded() && isStructValue(field.Type())
 }
 
 // xmlNameField is the field an XML decoder compares with the element's name.
@@ -1127,4 +1287,83 @@ func (r *retention) site(pos token.Pos) (evidence, error) {
 func (r *retention) exemptions() []graph.Exemption {
 	slices.SortFunc(r.found, byEvidence)
 	return r.found
+}
+
+// holdsValue reports whether a field of type t holds the value a decoder decodes
+// into: a pointer, an interface or a map.
+func holdsValue(t types.Type) bool {
+	switch types.Unalias(t).Underlying().(type) {
+	case *types.Pointer, *types.Interface, *types.Map:
+		return true
+	default:
+		return false
+	}
+}
+
+// written is every field the program writes, keyed by where it is declared: a field
+// a composite literal sets, keyed or positional, and a field an assignment stores
+// into.
+func (f *encodingFlow) written() map[token.Position]bool {
+	if f.writes != nil {
+		return f.writes
+	}
+	f.writes = make(map[token.Position]bool)
+	for _, p := range programPackages(f.kept.in.Result) {
+		if p.TypesInfo == nil {
+			continue
+		}
+		for _, file := range p.Syntax {
+			for _, field := range fieldsWritten(p.TypesInfo, file) {
+				f.writes[f.edge.sites.of(field)] = true
+			}
+		}
+	}
+	return f.writes
+}
+
+// fieldsWritten is every field one file writes: by a composite literal, keyed or
+// positional, and by an assignment.
+func fieldsWritten(info *types.Info, file *ast.File) []*types.Var {
+	var found []*types.Var
+	selected := func(expr ast.Expr) {
+		if sel, isSelector := ast.Unparen(expr).(*ast.SelectorExpr); isSelector {
+			found = append(found, selectedField(info, sel))
+		}
+	}
+	ast.Inspect(file, func(n ast.Node) bool {
+		switch n := n.(type) {
+		case *ast.CompositeLit:
+			if st, isStruct := types.Unalias(info.TypeOf(n)).Underlying().(*types.Struct); isStruct {
+				for i, elt := range n.Elts {
+					found = append(found, literalField(info, st, elt, i))
+				}
+			}
+		case *ast.AssignStmt:
+			for _, lhs := range n.Lhs {
+				selected(lhs)
+			}
+		}
+		return true
+	})
+	return slices.DeleteFunc(found, func(field *types.Var) bool { return field == nil })
+}
+
+// literalField is the field one element of a struct literal sets.
+func literalField(info *types.Info, st *types.Struct, elt ast.Expr, at int) *types.Var {
+	kv, keyed := elt.(*ast.KeyValueExpr)
+	if !keyed {
+		if at < st.NumFields() {
+			return st.Field(at)
+		}
+		return nil
+	}
+	ident, named := kv.Key.(*ast.Ident)
+	if !named {
+		return nil
+	}
+	field, isVar := info.Uses[ident].(*types.Var)
+	if !isVar || !field.IsField() {
+		return nil
+	}
+	return field
 }

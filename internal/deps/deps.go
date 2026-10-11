@@ -51,8 +51,7 @@ type Module struct {
 
 // Requirement is one require directive.
 type Requirement struct {
-	Path    string
-	Version string
+	Path string
 
 	Site     token.Position // the directive's line in the module file
 	Indirect bool           // the directive carries the indirect comment
@@ -179,7 +178,6 @@ func (d *modDocument) file(s sites) File {
 		module := Module{Path: require.Path, Version: require.Version}
 		f.Requires = append(f.Requires, Requirement{
 			Path:     require.Path,
-			Version:  require.Version,
 			Indirect: require.Indirect,
 			Site:     s.require(module),
 		})

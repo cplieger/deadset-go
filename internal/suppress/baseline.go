@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"go/token"
 	"io"
+	"strings"
 
 	"github.com/cplieger/deadset-go/internal/graph"
 )
@@ -26,11 +27,11 @@ const baselineDescription = "Recorded findings: a run fails only on a finding th
 // reason is the analyzer's own name and version.
 const reasonPrefix = "recorded by "
 
-// ErrProvenance reports a request to write a baseline whose rows would carry no
+// errProvenance reports a request to write a baseline whose rows would carry no
 // reason: a row with no code, symbol or path, or an analyzer identity with no name
 // or no version. The grammar requires a reason on every row, so a document that
 // could not carry one is refused rather than written.
-var ErrProvenance = errors.New("suppress: a baseline row would carry no reason")
+var errProvenance = errors.New("suppress: a baseline row would carry no reason")
 
 // baselineShape is the baseline's document, which shares the ignore file's record
 // shape so that one decoder and one matcher serve both and a row can be moved into
@@ -93,7 +94,7 @@ func baselineRecords(body []byte, sites []token.Position, symbols []graph.Symbol
 		return nil, nil, err
 	}
 	if wire.Baseline == nil {
-		return nil, nil, &MalformedError{Site: documentSite(held), Text: held.file, Want: held.arrayWant, Mechanism: held.mechanism}
+		return nil, nil, &malformedError{Site: documentSite(held), Text: held.file, Want: held.arrayWant, Mechanism: held.mechanism}
 	}
 
 	return records(*wire.Baseline, sites, declarationRefs(symbols), held)
@@ -121,33 +122,74 @@ type Provenance struct {
 // reason is what a row this provenance writes carries.
 func (p Provenance) reason() string { return reasonPrefix + p.Analyzer + " " + p.Version }
 
-// WriteBaseline writes a baseline document to w holding one row per recorded
-// finding, in the order given.
+// Row is one row of a baseline document as written, reason included. A member the
+// document leaves out is nil, so a write keeps it left out.
 //
-// The document adjudicates nothing. Every row carries the provenance as its
-// reason, so a row is never read as a maintainer's judgement. Which findings the
-// rows record is the caller's: the fixpoint of a baseline write decides them. A
-// finding missing a value a row needs, and an identity
-// missing its name or version, are [ErrProvenance]: the grammar requires a reason
-// on every row, and a document that could not carry one is refused rather than
-// written.
-func WriteBaseline(w io.Writer, findings []Recorded, p Provenance) error {
-	if p.Analyzer == "" || p.Version == "" {
-		return fmt.Errorf("%w: the analyzer identity names %q at version %q", ErrProvenance, p.Analyzer, p.Version)
+//nolint:govet // fieldalignment: a Row converts to a wireRow, whose field order is the written member order
+type Row struct {
+	Code   string
+	Symbol string
+	Path   *string
+	Reason *string
+}
+
+// OtherSchemeRows is every row of the baseline document at path whose reference is
+// of another language's scheme, in document order, which a write keeps as the
+// document held them. An absent document holds none, and one that does not decode is
+// [malformedError].
+func OtherSchemeRows(path string) ([]Row, error) {
+	held := baselineShape()
+	body, _, err := document(path, held)
+	if body == nil || err != nil {
+		return nil, err
 	}
-	rows := make([]wireRow, 0, len(findings))
+	var wire wireBaseline
+	if err := decodeDocument(body, &wire, held); err != nil {
+		return nil, err
+	}
+	if wire.Baseline == nil {
+		return nil, &malformedError{Site: documentSite(held), Text: held.file, Want: held.arrayWant, Mechanism: held.mechanism}
+	}
+	var kept []Row
+	for _, raw := range *wire.Baseline {
+		one, err := decodeRecord(raw, documentSite(held), held)
+		if err != nil {
+			return nil, err
+		}
+		if !strings.HasPrefix(*one.Symbol, ownScheme) {
+			kept = append(kept, Row{Code: *one.Code, Symbol: *one.Symbol, Path: one.Path, Reason: one.Reason})
+		}
+	}
+	return kept, nil
+}
+
+// WriteBaseline writes a baseline document to w holding one row per recorded
+// finding, in the order given, each carrying the provenance as its reason so no row
+// reads as a maintainer's judgement, then every row of another language's scheme the
+// document keeps, so the go:// rows come first whichever analyzer writes last. A
+// finding missing a value a row needs, and an identity missing its name or version,
+// are [errProvenance].
+func WriteBaseline(w io.Writer, findings []Recorded, p Provenance, others []Row) error {
+	if p.Analyzer == "" || p.Version == "" {
+		return fmt.Errorf("%w: the analyzer identity names %q at version %q", errProvenance, p.Analyzer, p.Version)
+	}
+	reason := p.reason()
+	rows := make([]wireRow, 0, len(findings)+len(others))
 	for i := range findings {
 		found := &findings[i]
 		if found.Code == "" || found.Symbol == "" || found.Path == "" {
 			return fmt.Errorf("%w: a finding names code %q, symbol %q and path %q",
-				ErrProvenance, found.Code, found.Symbol, found.Path)
+				errProvenance, found.Code, found.Symbol, found.Path)
 		}
 		rows = append(rows, wireRow{
 			Code:   found.Code,
 			Symbol: found.Symbol,
-			Path:   found.Path,
-			Reason: p.reason(),
+			Path:   &found.Path,
+			Reason: &reason,
 		})
+	}
+	for _, other := range others {
+		rows = append(rows, wireRow(other))
 	}
 
 	enc := json.NewEncoder(w)
@@ -171,9 +213,11 @@ type wireWritten struct {
 
 // wireRow is one written row, whose field order is the member order of an entry of
 // the ignore file, so the two documents read the same.
+//
+//nolint:govet // fieldalignment: encoding/json writes fields in declaration order, which is the member order
 type wireRow struct {
-	Code   string `json:"code"`
-	Symbol string `json:"symbol"`
-	Path   string `json:"path"`
-	Reason string `json:"reason"`
+	Code   string  `json:"code"`
+	Symbol string  `json:"symbol"`
+	Path   *string `json:"path,omitempty"`
+	Reason *string `json:"reason,omitempty"`
 }

@@ -59,7 +59,7 @@ func newGraphBuilder(sink failureSink) *graphBuilder {
 }
 
 // declare keeps one declaration.
-func (b *graphBuilder) declare(d handSymbol) *graphBuilder {
+func (b *graphBuilder) declare(d handSymbol) {
 	b.sink.Helper()
 	if _, held := b.ids[d.name]; held {
 		b.sink.Fatalf("the hand-built graph declares %s twice", d.name)
@@ -85,7 +85,6 @@ func (b *graphBuilder) declare(d handSymbol) *graphBuilder {
 		EndLine: end,
 		Kind:    d.kind,
 	})
-	return b
 }
 
 // place is the first and last line one declaration occupies: the next lines of
@@ -144,7 +143,7 @@ func (b *graphBuilder) addTest(names ...string) *graphBuilder {
 
 // ref keeps one reference from one declaration to another. Test agrees with the
 // referencing declaration's file, which is how the reference pass records it.
-func (b *graphBuilder) ref(from, to string) *graphBuilder {
+func (b *graphBuilder) ref(from, to string) {
 	b.sink.Helper()
 	fromID := b.id(from)
 	b.refs = append(b.refs, Reference{
@@ -154,7 +153,6 @@ func (b *graphBuilder) ref(from, to string) *graphBuilder {
 		Kind: RefCall,
 		Test: strings.Contains(string(fromID), handTestFile),
 	})
-	return b
 }
 
 // The consumer modules a hand-built graph's outside references come from.
@@ -166,7 +164,7 @@ const (
 // refFromConsumer keeps one reference to a declaration from a loaded consumer
 // module, made by one of that consumer's production files or by one of its test
 // files, which is what the reference pass records for a module outside the target.
-func (b *graphBuilder) refFromConsumer(consumer, to string, test bool) *graphBuilder {
+func (b *graphBuilder) refFromConsumer(consumer, to string, test bool) {
 	b.sink.Helper()
 	b.outside++
 	file := "consumer.go"
@@ -180,13 +178,12 @@ func (b *graphBuilder) refFromConsumer(consumer, to string, test bool) *graphBui
 		Kind:     RefCall,
 		Test:     test,
 	})
-	return b
 }
 
 // refFromOutside keeps one reference to a declaration from a declaration the
 // inventory does not hold and no consumer made, which is the contrast to a
 // consumer's reference: it counts, and it names no caller.
-func (b *graphBuilder) refFromOutside(to string) *graphBuilder {
+func (b *graphBuilder) refFromOutside(to string) {
 	b.sink.Helper()
 	b.outside++
 	b.refs = append(b.refs, Reference{
@@ -194,12 +191,11 @@ func (b *graphBuilder) refFromOutside(to string) *graphBuilder {
 		To:   b.id(to),
 		Kind: RefCall,
 	})
-	return b
 }
 
 // refToOutside keeps one reference from a declaration to a symbol the inventory
 // does not hold.
-func (b *graphBuilder) refToOutside(from string) *graphBuilder {
+func (b *graphBuilder) refToOutside(from string) {
 	b.sink.Helper()
 	b.outside++
 	b.refs = append(b.refs, Reference{
@@ -207,21 +203,18 @@ func (b *graphBuilder) refToOutside(from string) *graphBuilder {
 		To:   SymbolID(fmt.Sprintf("../consumer/consumer.go:%d:1", b.outside)),
 		Kind: RefCall,
 	})
-	return b
 }
 
 // root keeps one root of the given kind on a declared symbol.
-func (b *graphBuilder) root(name string, kind RootKind) *graphBuilder {
+func (b *graphBuilder) root(name string, kind RootKind) {
 	b.sink.Helper()
 	b.roots = append(b.roots, Root{ID: b.id(name), Kind: kind})
-	return b
 }
 
 // rootOutside keeps one root on a symbol the inventory does not hold.
-func (b *graphBuilder) rootOutside(kind RootKind) *graphBuilder {
+func (b *graphBuilder) rootOutside(kind RootKind) {
 	b.outside++
 	b.roots = append(b.roots, Root{ID: SymbolID(fmt.Sprintf("absent.go:%d:1", b.outside)), Kind: kind})
-	return b
 }
 
 // id returns the identifier of one declared symbol.

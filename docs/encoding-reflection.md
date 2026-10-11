@@ -22,4 +22,8 @@ A value reaches through a pointer, a slice, an array, a map key or value and an 
 
 A field that is an interface, or holds interface elements or map values, reaches the types the program stores in it. A store is a composite literal, an assignment, an `append` or an index assignment. A stored parameter stands for every argument the program's calls pass for it. An argument holding interface elements or map values reaches the stored types the same way. It may be a literal, a variable, a parameter or a field selector.
 
+A composite literal argument reaches the type of each value it writes into an interface-typed position, and so does each literal it nests. An argument of a defined interface type reaches every type the program converts to that interface. A conversion to `any` reaches nothing by itself. Both hold for an argument a function of the program forwards to a destination.
+
+A decoding entry point also reads each pointer, interface or map field the program writes. It decodes into the value that field holds.
+
 A method is retained where the defined type declares it, so a method promoted from an embedded type is retained where the embedded type is reached.

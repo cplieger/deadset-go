@@ -10,13 +10,15 @@ import (
 
 // dialed is what the two configuration dials withhold beyond the findings they
 // name: the dead components a root finding of which they withhold, by identifier,
-// those the severity dial withholds among them, and the symbols a suppression
-// record bound to is dormant for, because the record's finding would fall in one
-// of those components.
+// those the severity dial withholds among them, the symbols a suppression record
+// bound to is dormant for, because the record's finding would fall in one of those
+// components, and the places in Marks of the records a finding of a kind the
+// severity sets to allow pairs with, an unbound dependency record among them.
 type dialed struct {
 	components map[string]bool
 	allowed    map[string]bool
 	dormant    map[graph.SymbolID]bool
+	paired     map[int]bool
 }
 
 // withholdComponents answers which dead components the dials withhold, from the
@@ -37,6 +39,7 @@ func (in *Input) withholdComponents(published []catalog.Row, emitters map[string
 		components: make(map[string]bool),
 		allowed:    make(map[string]bool),
 		dormant:    make(map[graph.SymbolID]bool),
+		paired:     make(map[int]bool),
 	}
 	least := Class(in.Config.Analysis.MinConfidence)
 	for i := range first {
@@ -47,8 +50,13 @@ func (in *Input) withholdComponents(published []catalog.Row, emitters map[string
 
 	held := in.index()
 	minted, marks := held.minted, in.withheld
-	in.withheld = make(map[int]bool, len(in.Marks))
-	defer func() { held.minted, in.withheld = minted, marks }()
+	in.withheld = make(map[int][]heldFinding, len(in.Marks))
+	defer func() {
+		for at, found := range in.withheld {
+			in.dialed.paired[at] = len(found) > 0
+		}
+		held.minted, in.withheld = minted, marks
+	}()
 	for i := range published {
 		row := &published[i]
 		emit, carried := emitters[row.Code]

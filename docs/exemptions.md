@@ -1,6 +1,6 @@
 # Exemption classes
 
-An exemption is a named reason for which deadset-go keeps a symbol the reference graph alone would report. Every class is computed from Go type information rather than configured, so a project writes no suppression for a symbol a class covers. deadset-go implements the nine classes the deadset contract declares for Go. The class vocabulary and its detection rules are stated once in the contract's [exemptions page](https://github.com/cplieger/deadset-spec/blob/v6.1.1/docs/exemptions.md), and this page states what each class does here.
+An exemption is a named reason for which deadset-go keeps a symbol the reference graph alone would report. Every class is computed from Go type information rather than configured, so a project writes no suppression for a symbol a class covers. deadset-go implements the nine classes the deadset contract declares for Go. The class vocabulary and its detection rules are stated once in the contract's [exemptions page](https://github.com/cplieger/deadset-spec/blob/v7.0.0-dev.3/docs/exemptions.md), and this page states what each class does here.
 
 ## Reading the retained set
 
@@ -50,11 +50,13 @@ The empty interface is the one parameter type this rule reads. A value handed to
 
 Retains every method that satisfies an interface a value of the method's receiver type reaches.
 
-The evidence is the conversion set, every site where a value of a concrete type reaches a position typed as an interface. Such a site is an explicit conversion or a satisfaction assertion, an assignment, an argument, a return value, or an element stored in an interface-typed container. For each such pair of concrete type and interface, the methods of the type that answer what the interface requires are retained at that site.
+The evidence is the conversion set, every site in the target or in a loaded consumer where a value of a concrete type reaches a position typed as an interface. Such a site is an explicit conversion or a satisfaction assertion, an assignment, an argument, a return value, or an element stored in an interface-typed container. For each such pair of concrete type and interface, the methods of the type that answer what the interface requires are retained at that site.
 
-A method answering an interface method no call site invokes is not retained, and `DS1203` reports it with that interface method. Each retention is a use by the declaration that holds the site, so it holds only while that declaration is live. A satisfaction assertion is a use by the type it asserts, so it keeps nothing of a type only dead code builds.
+An assertion naming an interface, `errors.As` and `errors.AsType` included, adds a site for each type that implements it and whose value reaches the operand's interface. In a library whose run loads no consumer, a published parameter of an interface type adds one for each type an outside program can hold.
 
-A value converted to a defined interface that a package outside the program declares is held by that package, which may assert another interface on it. So the value also keeps the methods by which it, or a pointer to it, satisfies another interface of that package, exported or not, or an interface type literal its source writes. An exported interface of a package in its import closure counts too.
+A method answering an interface method no call site invokes is not retained, and `DS1203` reports it with that interface method. Each retention is a use by the declaration that holds the site, so it holds only while that declaration is live. An assertion's site is held by the assertion's declaration as well. A satisfaction assertion is a use by the type it asserts, so it keeps nothing of a type only dead code builds.
+
+A value converted to a defined interface that a package outside the program declares is held by that package, which may assert another interface on it. So the value also keeps the methods by which it, or a pointer to it, satisfies an interface that package's source asserts. An asserted interface is one a type assertion, a type switch case, or an `errors.As` or `errors.AsType` call names, whichever package declares it. An interface that package declares and never asserts keeps nothing.
 
 A type whose values never reach an interface retains nothing whatever it happens to implement, because no caller can dispatch to it through an interface the program never builds.
 
@@ -86,7 +88,7 @@ An operand reaches through a pointer, a slice, an array and a map, because the m
 
 Retains the methods the standard error helpers reach by duck typing, on every type a value of which reaches a position typed as `error`. Such a method's name and signature match `Is(error) bool`, `As(any) bool`, `Unwrap() error` or `Unwrap() []error`.
 
-The signature decides as much as the name. A method named `Is` whose parameter is not `error` implements the program's own comparison rather than the helper's contract, `errors.Is` never calls it, and it is not retained. The interface reached must be `error` itself rather than an interface that embeds it, so a type the program only ever uses through an interface of its own retains nothing here.
+The signature decides as much as the name. A method named `Is` whose parameter is not `error` implements the program's own comparison rather than the helper's contract, `errors.Is` never calls it, and it is not retained. A type reaching an interface of the program's own also counts where a chain of conversions leads from it to `error`, while every declaration holding the chain is live.
 
 ### enum-group
 

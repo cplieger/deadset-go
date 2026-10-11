@@ -3,10 +3,12 @@ package kinds
 import (
 	"errors"
 	"go/token"
+	"maps"
 	"path/filepath"
 	"slices"
 	"testing"
 
+	"github.com/cplieger/deadset-go/internal/catalog"
 	"github.com/cplieger/deadset-go/internal/config"
 	"github.com/cplieger/deadset-go/internal/graph"
 	"github.com/cplieger/deadset-go/internal/suppress"
@@ -55,7 +57,7 @@ func suppressed(t *testing.T, archive string, resolved config.Config) *Input {
 func boundMarks(marks []suppress.Record) []graph.SymbolID {
 	bound := make([]graph.SymbolID, 0, len(marks))
 	for i := range marks {
-		if marks[i].Bound != "" {
+		if marks[i].Bound != "" && !catalog.ReportsPart(marks[i].Code) {
 			bound = append(bound, marks[i].Bound)
 		}
 	}
@@ -283,8 +285,7 @@ func TestNoSeverityKeyReducesAStaleSuppressionOrAnUnmatchedRoot(t *testing.T) {
 		t.Run(key, func(t *testing.T) {
 			document := []byte(`{"target": {"kind": "application"}, "severity": {"` + key + `": "warn"}}`)
 			_, _, err := config.Resolve(config.Inputs{Repository: document, RepositoryLabel: "deadset.json"})
-			var refusal *config.Error
-			if !errors.As(err, &refusal) || refusal.Kind != config.KindUnimplementedKey {
+			if _, ok := errors.AsType[*config.Error](err); !ok {
 				t.Fatalf("config.Resolve(a severity key naming %s) = %v, want an unimplemented-key refusal", key, err)
 			}
 		})
@@ -446,8 +447,8 @@ func TestTheRefusalKindsRefuseARefusalUnderACodeTheGrammarDoesNotReport(t *testi
 		Mechanism: suppress.MechanismInline,
 	}}
 
-	if _, err := SuppressionsWithoutReason(in); !errors.Is(err, ErrEmitter) {
-		t.Errorf("SuppressionsWithoutReason() over a refusal reported under %s = %v, want an error satisfying errors.Is(err, ErrEmitter)",
+	if _, err := SuppressionsWithoutReason(in); !errors.Is(err, errEmitter) {
+		t.Errorf("SuppressionsWithoutReason() over a refusal reported under %s = %v, want an error satisfying errors.Is(err, errEmitter)",
 			staleSuppressionCode, err)
 	}
 }
@@ -780,5 +781,72 @@ func TestUnmatchedRootsIsPositionedInTheDocumentThatDeclaredTheRoot(t *testing.T
 					got.Path, got.Line, got.Column, want)
 			}
 		})
+	}
+}
+
+func TestStaleSuppressionsReadsDormancyFromTheFindingsARecordMatches(t *testing.T) {
+	bothStale := []string{
+		"inline directive for DS1001 matches no current finding",
+		"inline directive for DS1801 matches no current finding",
+	}
+	cases := map[string]struct {
+		severity map[string]config.Severity
+		stale    []string
+		inEffect int
+	}{
+		"every code at its default": {
+			stale:    []string{bothStale[0], bothStale[1], bothStale[1]},
+			inEffect: 3,
+		},
+		"the dead caller's code set to allow, which withholds the helper's component": {
+			severity: map[string]config.Severity{"DS1002": config.Allow},
+			stale:    []string{bothStale[0], bothStale[1], bothStale[1]},
+			inEffect: 2,
+		},
+		"the helper record's own code set to allow": {
+			severity: map[string]config.Severity{"DS1801": config.Allow},
+			stale:    []string{bothStale[0]},
+			inEffect: 1,
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			resolved := config.Default()
+			resolved.Target.Kind = config.Library
+			resolved.Severity = tc.severity
+			in := suppressed(t, "selfcheck-match.txtar", resolved)
+			emitters := intraFuncEmitters()
+			maps.Copy(emitters, declarationEmitters())
+			emitters[staleSuppressionCode] = StaleSuppressions
+
+			result := computed(t, in, emitters)
+
+			var stale []string
+			for i := range result.Findings {
+				switch found := &result.Findings[i]; found.Code {
+				case staleSuppressionCode:
+					stale = append(stale, found.Message)
+				case unusedParameterCode:
+					t.Errorf("the pass reports %s %s, which a record in effect withholds", found.Code, found.Symbol.Name)
+				}
+			}
+			if !slices.Equal(stale, tc.stale) {
+				t.Errorf("StaleSuppressions() = %v, want %v", stale, tc.stale)
+			}
+			if inEffect, _ := Totals(in); inEffect != tc.inEffect {
+				t.Errorf("Totals() = %d in effect, want %d", inEffect, tc.inEffect)
+			}
+		})
+	}
+}
+
+func TestStaleSuppressionsLeavesARecordDormantWhoseFindingANameLiteralLowers(t *testing.T) {
+	in := suppressed(t, "selfcheck-name-literal.txtar", applicationConfig())
+
+	if got := staleFindings(t, in); len(got) != 0 {
+		t.Errorf("StaleSuppressions() = %+v, want no finding: the record bound the constant", got)
+	}
+	if inEffect, reasons := Totals(in); inEffect != 0 || reasons != 1 {
+		t.Errorf("Totals() = %d in effect and %d reasons, want 0 and 1: the finding the record holds back is possible, below the default minimum", inEffect, reasons)
 	}
 }

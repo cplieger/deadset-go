@@ -23,9 +23,15 @@ type Conversion struct {
 	From      types.Type
 	Interface types.Type
 	To        *types.Interface
+	Callee    *types.Package // on an argument site, the package declaring the function called
 	Name      string
-	Site      token.Pos
-	Held      token.Pos // on an assertion-derived site, a conversion of From into an interface, one derived site per declaration converting it: the assertion is reached only while that declaration runs
+
+	// Held is, on a site an assertion derives, the position of the assertion and
+	// of every site it derives from: the derived site holds only while every
+	// declaration holding one of them is live. Empty on a site the source writes.
+	Held []token.Pos
+
+	Site token.Pos
 }
 
 // Conversions returns every conversion site of one loaded configuration's
@@ -34,8 +40,8 @@ type Conversion struct {
 // reached.
 //
 // A type assertion takes a value out of an interface, so it is no site itself; a
-// concrete type the set converts that implements both the operand's interface and
-// the asserted one reaches the asserted interface there.
+// concrete type whose value reaches the operand's interface and that implements the
+// asserted one reaches the asserted interface there ([conversionScan.asserted]).
 func Conversions(fset *token.FileSet, pkgs []*packages.Package) []Conversion {
 	s := &conversionScan{fset: fset}
 	walked := make(map[string]bool)
@@ -86,8 +92,9 @@ func SortedSyntax(p *packages.Package, fset *token.FileSet) []*ast.File {
 // conversionScan accumulates the conversion sites of one loaded configuration.
 type conversionScan struct {
 	fset       *token.FileSet
-	info       *types.Info  // the type information of the variant compiling the file being walked
-	results    []types.Type // the result types of the enclosing function
+	info       *types.Info    // the type information of the variant compiling the file being walked
+	callee     *types.Package // the package of the call whose arguments are being recorded
+	results    []types.Type   // the result types of the enclosing function
 	sites      []Conversion
 	holders    []token.Pos // per site, the start of the top-level declaration or specification holding it
 	assertions []assertion
@@ -117,10 +124,13 @@ type assertion struct {
 	operand *types.Interface
 	to      types.Type
 	site    token.Pos
+	holder  token.Pos
 }
 
 // bySite orders two conversions by position, then by the type converted and the
 // interface reached.
+//
+//nolint:gocritic // slices.SortFunc fixes a comparator's parameters to values.
 func (s *conversionScan) bySite(a, b Conversion) int {
 	p, q := s.fset.Position(a.Site), s.fset.Position(b.Site)
 	if c := strings.Compare(p.Filename, q.Filename); c != 0 {
@@ -274,6 +284,9 @@ func (s *conversionScan) call(c *ast.CallExpr) {
 		return
 	}
 	s.errorsAs(c)
+	held := s.callee
+	s.callee = s.calleePackage(c.Fun)
+	defer func() { s.callee = held }()
 	// One call supplying every parameter from one multi-valued operand.
 	if len(c.Args) == 1 && !c.Ellipsis.IsValid() {
 		if tuple, ok := s.typeOf(c.Args[0]).(*types.Tuple); ok {
@@ -288,32 +301,53 @@ func (s *conversionScan) call(c *ast.CallExpr) {
 	}
 }
 
+// calleePackage is the package that declares the function or method a call names,
+// the interface's package for a call through an interface value, and nil for a call
+// of a function value.
+func (s *conversionScan) calleePackage(fun ast.Expr) *types.Package {
+	name := calleeName(fun)
+	if name == nil {
+		return nil
+	}
+	if fn, isFunc := s.info.Uses[name].(*types.Func); isFunc {
+		return fn.Pkg()
+	}
+	return nil
+}
+
 // errorsAs keeps a call of errors.As or errors.AsType as the assertion of an error
 // to the target type it is, which the standard library makes by reflection.
 func (s *conversionScan) errorsAs(c *ast.CallExpr) {
-	name := calleeName(c.Fun)
-	fn, isFunc := s.info.Uses[name].(*types.Func)
-	if name == nil || !isFunc || fn.Pkg() == nil || fn.Pkg().Path() != "errors" {
-		return
-	}
-	var target types.Type
-	switch fn.Name() {
-	case "As":
-		if len(c.Args) == 2 {
-			if pointer, isPointer := s.typeOf(c.Args[1]).(*types.Pointer); isPointer {
-				target = pointer.Elem()
-			}
-		}
-	case "AsType":
-		if inst, instantiated := s.info.Instances[name]; instantiated && inst.TypeArgs.Len() == 1 {
-			target = inst.TypeArgs.At(0)
-		}
-	}
+	target := ErrorsAsTarget(s.info, c)
 	if target == nil || interfaceOf(target) == nil {
 		return
 	}
 	errorType, _ := types.Universe.Lookup("error").Type().Underlying().(*types.Interface)
-	s.assertions = append(s.assertions, assertion{operand: errorType, to: target, site: c.Pos()})
+	s.assertions = append(s.assertions, assertion{operand: errorType, to: target, site: c.Pos(), holder: s.holder})
+}
+
+// ErrorsAsTarget is the type a call of errors.As or errors.AsType asserts its error
+// to: what the second argument of errors.As points to, and the type argument of
+// errors.AsType. It is nil for any other call.
+func ErrorsAsTarget(info *types.Info, c *ast.CallExpr) types.Type {
+	name := calleeName(c.Fun)
+	fn, isFunc := info.Uses[name].(*types.Func)
+	if name == nil || !isFunc || fn.Pkg() == nil || fn.Pkg().Path() != "errors" {
+		return nil
+	}
+	switch fn.Name() {
+	case "As":
+		if len(c.Args) == 2 {
+			if pointer, isPointer := info.TypeOf(c.Args[1]).(*types.Pointer); isPointer {
+				return pointer.Elem()
+			}
+		}
+	case "AsType":
+		if inst, instantiated := info.Instances[name]; instantiated && inst.TypeArgs.Len() == 1 {
+			return inst.TypeArgs.At(0)
+		}
+	}
+	return nil
 }
 
 // calleeName is the identifier a call names its function by, through a package
@@ -521,7 +555,7 @@ func (s *conversionScan) keep(dst, from types.Type, pos token.Pos) {
 	if iface == nil || !concrete(from) {
 		return
 	}
-	s.sites = append(s.sites, Conversion{From: from, Interface: dst, To: iface, Name: spell(dst), Site: pos})
+	s.sites = append(s.sites, Conversion{From: from, Interface: dst, To: iface, Name: spell(dst), Site: pos, Callee: s.callee})
 	s.holders = append(s.holders, s.holder)
 }
 
@@ -697,7 +731,7 @@ func (s *conversionScan) assert(operand, asserted ast.Expr) {
 	if from == nil || interfaceOf(to) == nil {
 		return
 	}
-	s.assertions = append(s.assertions, assertion{operand: from, to: to, site: asserted.Pos()})
+	s.assertions = append(s.assertions, assertion{operand: from, to: to, site: asserted.Pos(), holder: s.holder})
 }
 
 // typeSwitch keeps every interface case of one type switch.
@@ -722,109 +756,6 @@ func (s *conversionScan) typeSwitch(ts *ast.TypeSwitchStmt) {
 			}
 		}
 	}
-}
-
-// asserted returns the sites the scan's assertions reach: every concrete type the
-// conversion set holds, at every assertion whose operand's interface and asserted
-// interface it implements both.
-func (s *conversionScan) asserted() []Conversion {
-	held := s.concreteTypes()
-	implementing := make(map[string][]heldType)
-	var reached []Conversion
-	for _, a := range s.assertions {
-		to := interfaceOf(a.to)
-		if to.NumMethods() == 0 {
-			continue
-		}
-		pair := identity(a.operand) + "\x00" + identity(a.to)
-		both, computed := implementing[pair]
-		if !computed {
-			both = implementingBoth(held, a.operand, to)
-			implementing[pair] = both
-		}
-		for _, h := range both {
-			site := a.site
-			if h.testOnly.IsValid() {
-				site = h.testOnly
-			}
-			for _, held := range h.held {
-				reached = append(reached, Conversion{From: h.from, Interface: a.to, To: to, Name: spell(a.to), Site: site, Held: held})
-			}
-		}
-	}
-	return reached
-}
-
-// heldType is one concrete type the scan's sites convert. testOnly is its first
-// site when a test file holds every one of them, and no position otherwise: an
-// assertion reaching the type then reaches it only while the tests run, so the
-// derived site is that test file's. held is the first site of each holder that
-// converts it, test-file holders only when testOnly is set.
-type heldType struct {
-	from     types.Type
-	held     []token.Pos
-	testOnly token.Pos
-}
-
-// implementingBoth keeps the types of held that implement both interfaces.
-func implementingBoth(held []heldType, a, b *types.Interface) []heldType {
-	var both []heldType
-	for _, h := range held {
-		if types.Implements(h.from, a) && types.Implements(h.from, b) {
-			both = append(both, h)
-		}
-	}
-	return both
-}
-
-// concreteTypes lists, once each in the order of their first sites, every type the
-// scan's sites convert that is not an interface, with the first site of each holder
-// that converts it.
-func (s *conversionScan) concreteTypes() []heldType {
-	held, index := s.heldTypes()
-	seen := make(map[string]bool)
-	for i := range s.sites {
-		c := &s.sites[i]
-		key := identity(c.From)
-		at, kept := index[key]
-		if !kept {
-			continue
-		}
-		if _, test := IsTestFile(s.fset.Position(c.Site).Filename); test != held[at].testOnly.IsValid() {
-			continue
-		}
-		if holder := fmt.Sprintf("%s\x00%d", key, s.holders[i]); !seen[holder] {
-			seen[holder] = true
-			held[at].held = append(held[at].held, c.Site)
-		}
-	}
-	return held
-}
-
-// heldTypes lists the types concreteTypes does, each without its holders, and the
-// index of each by identity.
-func (s *conversionScan) heldTypes() (held []heldType, index map[string]int) {
-	index = make(map[string]int)
-	for i := range s.sites {
-		c := &s.sites[i]
-		if types.IsInterface(c.From) {
-			continue
-		}
-		key := identity(c.From)
-		_, test := IsTestFile(s.fset.Position(c.Site).Filename)
-		at, seen := index[key]
-		switch {
-		case !seen && test:
-			index[key] = len(held)
-			held = append(held, heldType{from: c.From, testOnly: c.Site})
-		case !seen:
-			index[key] = len(held)
-			held = append(held, heldType{from: c.From})
-		case !test:
-			held[at].testOnly = token.NoPos
-		}
-	}
-	return held, index
 }
 
 // identity spells one type so that two types share a spelling only when they are

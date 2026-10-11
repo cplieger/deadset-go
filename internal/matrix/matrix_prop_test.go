@@ -12,12 +12,12 @@ import (
 // drawnAtoms draws one atom set: names of both platform axes taken from the ones
 // the toolchain reserves, and tags from a small closed set, each axis distinct
 // and sorted the way collection leaves it.
-func drawnAtoms(t *rapid.T) Atoms {
+func drawnAtoms(t *rapid.T) atomSet {
 	systems := append(slices.Sorted(maps.Keys(platforms())), retiredOS...)
 	arches := append(slices.Sorted(maps.Keys(architectures())), retiredArch...)
 	tags := []string{"integration", "cgo", "purego", "netgo", "osusergo"}
 
-	atoms := Atoms{
+	atoms := atomSet{
 		OS:   rapid.SliceOfNDistinct(rapid.SampledFrom(systems), 0, 4, rapid.ID).Draw(t, "the operating-system atoms"),
 		Arch: rapid.SliceOfNDistinct(rapid.SampledFrom(arches), 0, 4, rapid.ID).Draw(t, "the architecture atoms"),
 		Tags: rapid.SliceOfNDistinct(rapid.SampledFrom(tags), 0, 3, rapid.ID).Draw(t, "the tag atoms"),

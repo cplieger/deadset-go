@@ -61,6 +61,12 @@ type Exemption struct {
 	// holds the symbol live whatever else is.
 	Holder SymbolID
 
+	// CoHolders are the further declarations holding the evidence where the class
+	// derives it from sites several declarations hold. The exemption is then a
+	// use by each holder, and it holds the symbol reachable only while the holder
+	// and every co-holder are.
+	CoHolders []SymbolID
+
 	// Via is the interface method a retained method answers, where the class
 	// retains through an interface the inventory declares.
 	Via SymbolID
@@ -173,11 +179,13 @@ type Result struct {
 	Suppressed []SymbolID
 }
 
-// withoutExemptions is the input with the exemptions withdrawn, which the sweep
-// that answers which exemptions took effect runs under.
-func (in *SweepInput) withoutExemptions() *SweepInput {
+// withoutExemptions is the input with the exemptions withdrawn, and with them every
+// mark that held nothing back, which the sweep that answers which exemptions took
+// effect runs under: a mark an exemption made stale leaves the symbol to it.
+func (in *SweepInput) withoutExemptions(suppressed []SymbolID) *SweepInput {
 	out := *in
 	out.Exempt = nil
+	out.Marked = slices.DeleteFunc(slices.Clone(in.Marked), func(id SymbolID) bool { return !slices.Contains(suppressed, id) })
 	return &out
 }
 
@@ -191,18 +199,19 @@ func (in *SweepInput) withoutMarks() *SweepInput {
 
 // Sweep answers which symbols of one graph are dead under the input's mode, which
 // relation found each, which dead component each belongs to, and which exemptions
-// and marks held a symbol back. Which exemptions took effect, and which marks, is
-// answered by one further sweep each with only that set withdrawn: withdrawing both
-// at once would credit an exemption with a symbol a mark held back. The
-// candidates, components and relations are the first sweep's.
+// and marks held a symbol back. Which marks took effect is answered by one further
+// sweep with the marks withdrawn, and which exemptions by one with the exemptions
+// and the marks that took no effect withdrawn: withdrawing every mark would credit
+// an exemption with a symbol a mark held back. The candidates, components and
+// relations are the first sweep's.
 func (g *Graph) Sweep(in *SweepInput) Result {
 	swept := g.sweep(in)
 	r := swept.result()
-	if len(in.Exempt) > 0 {
-		r.Retained = g.sweep(in.withoutExemptions()).retained(in.Exempt, swept)
-	}
 	if len(in.Marked) > 0 {
 		r.Suppressed = g.sweep(in.withoutMarks()).suppressed(in.Marked)
+	}
+	if len(in.Exempt) > 0 {
+		r.Retained = g.sweep(in.withoutExemptions(r.Suppressed)).retained(in.Exempt, swept)
 	}
 	return r
 }
@@ -236,17 +245,7 @@ func (g *Graph) sweep(in *SweepInput) *sweep {
 // its holder. The graph itself is unchanged, so one graph answers any number of
 // inputs.
 func (g *Graph) using(in *SweepInput) *Graph {
-	uses := slices.Clone(in.Uses)
-	held := make(map[int]bool)
-	for ix := range in.Exempt {
-		e := &in.Exempt[ix]
-		if e.Holder != "" {
-			uses = append(uses, Use{From: e.Holder, To: e.ID})
-			if at := g.at(e.ID); at != outside {
-				held[at] = true
-			}
-		}
-	}
+	uses, gates, gated, held := g.heldUses(in)
 	if len(uses) == 0 {
 		return g
 	}
@@ -259,15 +258,89 @@ func (g *Graph) using(in *SweepInput) *Graph {
 	derived.rooted = slices.DeleteFunc(slices.Clone(g.rooted), func(r rooted) bool {
 		return r.kind == RootBlank && held[r.at]
 	})
-	for _, use := range uses {
+	derived.gates = append(slices.Clip(g.gates), gated...)
+	for i, use := range uses {
 		from := g.at(use.From)
 		if from == outside {
 			continue
 		}
 		_, test := IsTestFile(g.symbols[from].Pos.Filename)
 		derived.add(&Reference{From: use.From, To: use.To, Test: test})
+		if gates[i] > 0 {
+			last := len(derived.out[from]) - 1
+			derived.out[from][last].gate = len(g.gates) + gates[i]
+		}
 	}
 	return &derived
+}
+
+// heldUses is the input's inferred uses and one use by each holder of each held
+// exemption, with, per use, one past the index in gated of the gate it waits on, 0
+// for none, and the symbols a held exemption names.
+func (g *Graph) heldUses(in *SweepInput) (uses []Use, gates []int, gated [][]int, held map[int]bool) {
+	uses = slices.Clone(in.Uses)
+	gates = make([]int, len(uses))
+	held = make(map[int]bool)
+	for ix := range in.Exempt {
+		e := &in.Exempt[ix]
+		if e.Holder == "" {
+			continue
+		}
+		gate := 0
+		if len(e.CoHolders) > 0 {
+			gated = append(gated, g.gateOf(e))
+			gate = len(gated)
+		}
+		for _, holder := range append([]SymbolID{e.Holder}, e.CoHolders...) {
+			uses = append(uses, Use{From: holder, To: e.ID})
+			gates = append(gates, gate)
+		}
+		if at := g.at(e.ID); at != outside {
+			held[at] = true
+		}
+	}
+	return uses, gates, gated, held
+}
+
+// gateOf is the positions of the declarations holding one exemption, each held in
+// the inventory. A holder outside it is no declaration a sweep decides, so it
+// never closes the gate.
+func (g *Graph) gateOf(e *Exemption) []int {
+	var held []int
+	for _, holder := range append([]SymbolID{e.Holder}, e.CoHolders...) {
+		if at := g.at(holder); at != outside {
+			held = append(held, at)
+		}
+	}
+	return held
+}
+
+// open reports whether every symbol a gate waits on is reached.
+func (g *Graph) open(reached []bool, gate int) bool {
+	for _, at := range g.gates[gate-1] {
+		if !reached[at] {
+			return false
+		}
+	}
+	return true
+}
+
+// closure follows every edge out of the queue's symbols that skip does not refuse,
+// an edge waiting on a gate only once every symbol of the gate is reached. Every
+// holder of a gate has an edge waiting on it, and a symbol is reached before it is
+// expanded, so the last holder expanded finds the gate open.
+func (g *Graph) closure(reached []bool, queue []int, skip func(e edge) bool) {
+	for len(queue) > 0 {
+		at := queue[len(queue)-1]
+		queue = queue[:len(queue)-1]
+		for _, e := range g.out[at] {
+			if reached[e.to] || skip(e) || (e.gate > 0 && !g.open(reached, e.gate)) {
+				continue
+			}
+			reached[e.to] = true
+			queue = append(queue, e.to)
+		}
+	}
 }
 
 // positions returns one flag per symbol, set for each symbol the identifiers
@@ -330,10 +403,17 @@ func (s *sweep) retained(exempt []Exemption, with *sweep) []Exemption {
 	return found
 }
 
-// holds reports whether one exemption's holder, if it has one, is live.
+// holds reports whether one exemption's holder, if it has one, and each of its
+// co-holders is live. A holder reachability holds live counts though reference
+// counting finds it dead: a published declaration nothing loaded references still
+// runs when an outside program calls it, and so does what it holds.
 func (s *sweep) holds(e *Exemption) bool {
-	at := s.g.at(e.Holder)
-	return e.Holder == "" || at == outside || !s.dead[at]
+	for _, holder := range append([]SymbolID{e.Holder}, e.CoHolders...) {
+		if at := s.g.at(holder); holder != "" && at != outside && s.dead[at] && !s.live[at].Has(Reachability) {
+			return false
+		}
+	}
+	return true
 }
 
 // suppressed lists the marks that name a symbol this sweep, run without them,
@@ -441,17 +521,7 @@ func (s *sweep) callerSeed(reached []bool) []int {
 // walk follows the references out of a seed's closure. Outside the held seed's
 // closure a production sweep skips the references a test file made.
 func (s *sweep) walk(reached []bool, queue []int, held bool) {
-	for len(queue) > 0 {
-		at := queue[len(queue)-1]
-		queue = queue[:len(queue)-1]
-		for _, e := range s.g.out[at] {
-			if reached[e.to] || (!held && s.in.Mode.Production && e.test) {
-				continue
-			}
-			reached[e.to] = true
-			queue = append(queue, e.to)
-		}
-	}
+	s.g.closure(reached, queue, func(e edge) bool { return !held && s.in.Mode.Production && e.test })
 }
 
 // decide keeps as a candidate every symbol the sweep judges that at least one
@@ -474,11 +544,12 @@ func (s *sweep) decide() {
 // makes rather than those the mode counts: a production sweep counts none, so the
 // mode's set would leave the rule unable to fire in the only mode where it can.
 func (s *sweep) admitTestsOfDeadCode() {
+	shared := s.sharedSupport()
 	for i := range s.g.symbols {
 		if !s.g.test[i] || !s.g.subject[i] || s.exempt[i] || s.marked[i] {
 			continue
 		}
-		if targets, live := s.targetsOf(i); targets > 0 && live == 0 {
+		if targets, live := s.targetsOf(i, shared); targets > 0 && live == 0 {
 			s.dead[i] = true
 			s.testOfDeadCode[i] = true
 		}
@@ -524,20 +595,48 @@ func (s *sweep) reachedCountingTests() []bool {
 			seed(i)
 		}
 	}
-	for len(queue) > 0 {
-		at := queue[len(queue)-1]
-		queue = queue[:len(queue)-1]
-		for _, e := range s.g.out[at] {
-			seed(e.to)
-		}
-	}
+	s.g.closure(reached, queue, func(e edge) bool { return s.testOfDeadCode[e.to] })
 	return reached
 }
 
-// targetsOf counts the production declarations one test declaration references,
-// and how many of them are not candidates.
-func (s *sweep) targetsOf(at int) (targets, live int) {
+// sharedSupport marks every declaration of test-support code that a test referencing
+// a live target symbol also references: it counts as a live target symbol of every
+// test that references it.
+func (s *sweep) sharedSupport() []bool {
+	shared := make([]bool, len(s.g.symbols))
+	for i := range s.g.symbols {
+		if !s.g.test[i] {
+			continue
+		}
+		if _, live := s.targetsOf(i, nil); live == 0 {
+			continue
+		}
+		for _, e := range s.g.out[i] {
+			if s.supportCode(e.to) {
+				shared[e.to] = true
+			}
+		}
+	}
+	return shared
+}
+
+// supportCode reports whether one symbol is a declaration of test-support code
+// rather than of a test file.
+func (s *sweep) supportCode(at int) bool {
+	_, inTestFile := IsTestFile(s.g.symbols[at].Pos.Filename)
+	return s.g.symbols[at].TestSupport && !inTestFile
+}
+
+// targetsOf counts the target symbols one test declaration references, and how many
+// of them are not candidates: its production declarations, and each declaration of
+// test-support code shared marks, which counts as live.
+func (s *sweep) targetsOf(at int, shared []bool) (targets, live int) {
 	for _, e := range s.g.out[at] {
+		if e.to < len(shared) && shared[e.to] {
+			targets++
+			live++
+			continue
+		}
 		if s.g.test[e.to] || !s.g.subject[e.to] {
 			continue
 		}
@@ -574,7 +673,11 @@ func (s *sweep) result() Result {
 			UnreferencedTest: s.unreferencedTest[i],
 		})
 	}
-	r.Components = s.g.componentsOf(s.dead, s.testOfDeadCode, s.unreferencedTest)
+	reachable := make([]bool, len(s.live))
+	for i := range s.live {
+		reachable[i] = s.live[i].Has(Reachability)
+	}
+	r.Components = s.g.componentsOf(s.dead, s.testOfDeadCode, s.unreferencedTest, reachable)
 	return r
 }
 

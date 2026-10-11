@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"go/token"
+	"io"
 	"io/fs"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/cplieger/deadset-go/internal/graph"
 )
@@ -17,6 +19,11 @@ import (
 // is fixed too, the target root, so the path a finding carries for the document
 // is this name and nothing has to be made relative.
 const IgnoreFileName = "deadset-ignore.json"
+
+// ownScheme opens every reference of this analyzer's language. A record naming
+// another scheme belongs to the analyzer of that language, which reads the same
+// document.
+const ownScheme = "go://"
 
 // The forms a malformed value of an entry is told to take.
 const (
@@ -84,7 +91,7 @@ type wireIgnore struct {
 // The document is strict JSON with a closed key list at both levels: an
 // undeclared key, a value of the wrong type, a member written twice at any depth,
 // a missing code or symbol and a value outside its published form are each
-// [MalformedError], and no record or refusal comes back with one.
+// [malformedError], and no record or refusal comes back with one.
 func IgnoreFile(path string, symbols []graph.Symbol) ([]Record, []Refusal, error) {
 	held := ignoreShape()
 	body, sites, err := document(path, held)
@@ -97,7 +104,7 @@ func IgnoreFile(path string, symbols []graph.Symbol) ([]Record, []Refusal, error
 		return nil, nil, err
 	}
 	if wire.Ignore == nil {
-		return nil, nil, &MalformedError{Site: documentSite(held), Text: held.file, Want: held.arrayWant, Mechanism: held.mechanism}
+		return nil, nil, &malformedError{Site: documentSite(held), Text: held.file, Want: held.arrayWant, Mechanism: held.mechanism}
 	}
 
 	return records(*wire.Ignore, sites, declarationRefs(symbols), held)
@@ -127,7 +134,7 @@ func decodeDocument(body []byte, wire any, held *shape) error {
 	dec := json.NewDecoder(bytes.NewReader(body))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(wire); err != nil {
-		return &MalformedError{Err: err, Site: documentSite(held), Text: held.file, Want: held.arrayWant, Mechanism: held.mechanism}
+		return &malformedError{Err: err, Site: documentSite(held), Text: held.file, Want: held.arrayWant, Mechanism: held.mechanism}
 	}
 	return nil
 }
@@ -153,7 +160,8 @@ func records(raw []json.RawMessage, sites []token.Position, bound map[reference]
 }
 
 // record reads one entry or row: the records it bound, or the refusals it carries,
-// or the malformed value that ends the run.
+// or the malformed value that ends the run. A well-formed record of another
+// language's scheme is none of these: it binds, counts and is reported nowhere here.
 func record(body []byte, at token.Position, bound map[reference][]graph.Symbol, held *shape) ([]Record, []Refusal, error) {
 	wire, err := decodeRecord(body, at, held)
 	if err != nil {
@@ -161,6 +169,9 @@ func record(body []byte, at token.Position, bound map[reference][]graph.Symbol, 
 	}
 	code, symbol := *wire.Code, *wire.Symbol
 	path, reason := value(wire.Path), value(wire.Reason)
+	if !strings.HasPrefix(symbol, ownScheme) {
+		return nil, nil, nil
+	}
 
 	if refused := refusals(wire, at, held); len(refused) > 0 {
 		return nil, refused, nil
@@ -190,7 +201,7 @@ func record(body []byte, at token.Position, bound map[reference][]graph.Symbol, 
 // a value outside its published form.
 func decodeRecord(body []byte, at token.Position, held *shape) (*wireEntry, error) {
 	refuse := func(err error, text, want string) (*wireEntry, error) {
-		return nil, &MalformedError{Err: err, Site: at, Text: text, Want: want, Mechanism: held.mechanism}
+		return nil, &malformedError{Err: err, Site: at, Text: text, Want: want, Mechanism: held.mechanism}
 	}
 
 	var wire wireEntry
@@ -316,10 +327,10 @@ func recordSites(body []byte, held *shape) ([]token.Position, error) {
 	if err := w.value(dec, roleDocument); err != nil {
 		return nil, err
 	}
-	if dec.More() {
-		return nil, &MalformedError{
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return nil, &malformedError{
 			Site:      documentSite(held),
-			Text:      "a second value after the document",
+			Text:      "content after the document",
 			Want:      held.arrayWant,
 			Mechanism: held.mechanism,
 		}
@@ -364,7 +375,7 @@ func (w *walk) object(dec *json.Decoder, at role) error {
 			return w.refuse(dec, fmt.Errorf("want a member name, got %v", tok))
 		}
 		if seen[name] {
-			return &MalformedError{
+			return &malformedError{
 				Site:      w.at(dec.InputOffset()),
 				Text:      fmt.Sprintf("the member %s is written twice, so neither value is chosen", strconv.Quote(name)),
 				Want:      w.held.arrayWant,
@@ -413,7 +424,7 @@ func (w *walk) member(at role, name string) role {
 // refuse reports a document the token walk could not read, at the position it
 // stopped at.
 func (w *walk) refuse(dec *json.Decoder, err error) error {
-	return &MalformedError{
+	return &malformedError{
 		Err:       err,
 		Site:      w.at(dec.InputOffset()),
 		Text:      w.held.file,

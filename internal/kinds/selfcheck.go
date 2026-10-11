@@ -109,38 +109,15 @@ func refusalMessage(refused *suppress.Refusal) (string, error) {
 		return written(refused.Mechanism) + " for " + refused.Code + " names a symbol and no path", nil
 	default:
 		return "", fmt.Errorf("%w: a suppression is refused under %s, which is no refusal of the grammar",
-			ErrEmitter, refused.Reported)
+			errEmitter, refused.Reported)
 	}
 }
 
-// StaleSuppressions reports every suppression that matched no current finding, at
-// either mechanism and in the baseline alike.
-//
-// A record is stale when it withheld nothing: it bound to no declaration, or it bound
-// one and the finding its code names was never held back from the report. A record in
-// effect for nothing is a claim nobody checks, so the kind is fixed on at deny and no
-// configuration reduces it.
-//
-// The kind reads what the pass withheld, so it runs after every other emitter of the
-// pass. A pass that ran no other emitter leaves it the sweep's answer alone, which is
-// every record that held a dead declaration back.
-//
-// A record naming a code this analyzer reports nothing under, a retired code, is
-// stale whatever it bound: nothing can match it. It is not dormant either, because
-// nothing silenced it.
-//
-// A record bound to a symbol whose code the configuration silences is dormant
-// instead: neither in effect nor stale, and reported by nothing. Silencing a kind
-// must not fail a run over the adjudications that turning it back on would need, so
-// both ways of silencing one count, the severity set to allow and a confidence the
-// configured minimum excludes.
-//
-// The records one row binds are stale together or not at all, so a row binding a
-// declaration whose finding it withheld is not reported for another it also binds.
-//
-// Several stale records at one site are one finding naming every code, because one
-// directive above a line that declares several symbols is one record per symbol and
-// a maintainer edits one line.
+// StaleSuppressions reports every record that is neither in effect ([Input.inEffect])
+// nor dormant ([Input.dormant]). It reads what the pass withheld, so it runs after
+// every other emitter; a record naming a retired code is stale whatever it bound. The
+// records one row binds are stale together or not at all, and the stale records of
+// one site are one finding naming every code, because a maintainer edits one line.
 func StaleSuppressions(in *Input) ([]Finding, error) {
 	if in == nil || in.Config == nil {
 		return nil, nil
@@ -154,7 +131,7 @@ func StaleSuppressions(in *Input) ([]Finding, error) {
 	held := make(map[recordKey]bool, len(in.Marks))
 	for i := range in.Marks {
 		mark := &in.Marks[i]
-		if in.dormant(mark) || in.inEffect(i, suppressed) {
+		if matched := in.inEffect(i, suppressed); matched || in.dormant(i, matched) {
 			held[keyOf(mark)] = true
 			continue
 		}
@@ -179,37 +156,45 @@ func keyOf(mark *suppress.Record) recordKey {
 	return recordKey{site: mark.Site, code: mark.Code, symbol: mark.Symbol}
 }
 
-// inEffect reports whether the record at one place in Marks held a finding back.
-//
-// One question with two answers, because the finding a record withholds is held back
-// in two places. A record naming a kind about liveness never produces its finding at
-// all: the mark made the symbol live before the sweep ran, so the sweep's own answer
-// about which marks held a symbol back is the only record there is of it. A record
-// naming any other kind is bound to a declaration the analysis holds live, whose
-// finding an emitter produces and the pass withholds, so the pass's own record of what
-// it withheld is the answer.
-//
-// The sweep's answer is read under a code this analyzer reports, because a record
-// naming a retired code can match nothing whatever it bound.
-//
-// One finding is held back by one record, so the sweep's answer is read for the first
-// record of the reading order that bound the declaration under the code and no other:
-// the sweep answers per declaration and several records may bind one, and a record
-// that changes nothing when it is deleted is what this kind reports. The pass's own
-// answer needs no such test, because the pass withholds a finding once and records the
-// one record that did it.
+// inEffect reports whether the record at one place in Marks matched a finding,
+// whether or not a dial then withholds it. A record the pass withheld a finding
+// through matched it. A liveness record's finding is never produced, because its mark
+// made the symbol live before the sweep, so the sweep's answer of which marks held a
+// symbol back stands for it: read for a live code that is no part kind, whose shape
+// is the declaration's own, and for the first record in Marks' reading order that
+// bound the declaration under the code.
 func (in *Input) inEffect(at int, suppressed map[graph.SymbolID]bool) bool {
-	if in.withheld[at] {
+	if len(in.withheld[at]) > 0 {
 		return true
 	}
 	mark := &in.Marks[at]
 	if mark.Bound == "" || !suppressed[mark.Bound] {
 		return false
 	}
-	if _, live := catalog.Kind(mark.Code); !live {
+	if _, live := catalog.Kind(mark.Code); !live || catalog.ReportsPart(mark.Code) {
+		return false
+	}
+	if code := in.wouldBeCode(mark.Bound); code != "" && shapeCodes[mark.Code] && code != mark.Code {
 		return false
 	}
 	return in.firstToBind(at)
+}
+
+// shapeCodes are the liveness codes the shape of a declaration alone decides.
+var shapeCodes = map[string]bool{unusedExportedCode: true, unusedUnexportedCode: true, unusedMemberCode: true}
+
+// wouldBeCode is the shape code, unused exported, unused unexported or unused
+// member, that one marked declaration's finding carries with the marks withdrawn,
+// and the empty string where the shape decides no such code. A record naming
+// another shape code than the declaration's is in effect for nothing; a record naming
+// any other liveness code is left to the sweep, whose answer for a marked declaration
+// is the only one there is.
+func (in *Input) wouldBeCode(id graph.SymbolID) string {
+	symbol := in.symbol(id)
+	if symbol == nil {
+		return ""
+	}
+	return in.shapeCode(symbol)
 }
 
 // firstToBind reports whether no record before this one in the run's reading order
@@ -239,31 +224,46 @@ func (in *Input) staleInput() *graph.Result {
 	return in.Sweep
 }
 
-// dormant reports whether one bound record is silent rather than in effect or
-// stale: the configuration silences the code it names, the finding that code
-// would produce for the symbol it bound falls below the configured minimum
-// confidence, or that finding falls in a component whose root finding either dial
-// withholds.
-//
-// An unbound record is never dormant. Nothing silenced it: it names a site that
-// resolves to no declaration, which is a claim about code that has gone whatever
-// the configuration holds.
-func (in *Input) dormant(mark *suppress.Record) bool {
-	if mark.Bound == "" {
-		return false
-	}
+// dormant reports whether the record at one place in Marks is silent rather than in
+// effect or stale. A record that matched findings is dormant when the configuration
+// withholds every one, by severity, by confidence or with its dead component; a
+// liveness record's finding was never produced, so it is read as the bound
+// declaration's class, a name literal's cap included, and the component
+// [Input.dormantNear] joins it to. A record that matched nothing is dormant only while
+// its own code is set to allow: bound, or paired with a finding that kind produced.
+func (in *Input) dormant(at int, matched bool) bool {
+	mark := &in.Marks[at]
 	row, live := catalog.Kind(mark.Code)
 	if !live {
 		return false
 	}
-	if in.Config.EffectiveSeverity(mark.Code) == config.Allow || in.dialed.dormant[mark.Bound] {
+	if in.dialed.paired[at] {
 		return true
 	}
-	least := Class(in.Config.Analysis.MinConfidence)
-	if least.rank() == 0 {
+	if mark.Bound == "" {
 		return false
 	}
-	return in.ClassOf(mark.Bound).lower(Class(row.MaxClass)).rank() < least.rank()
+	if in.Config.EffectiveSeverity(mark.Code) == config.Allow {
+		return true
+	}
+	if !matched {
+		return false
+	}
+	least := Class(in.Config.Analysis.MinConfidence)
+	if held := in.withheld[at]; len(held) > 0 {
+		return !slices.ContainsFunc(held, func(found heldFinding) bool {
+			return found.confidence.rank() >= least.rank() &&
+				!in.dialed.components[found.component] && !in.dialed.allowed[found.component]
+		})
+	}
+	if in.dialed.dormant[mark.Bound] {
+		return true
+	}
+	class := in.classOf(mark.Bound).lower(Class(row.MaxClass))
+	if in.nameLiteral(mark.Bound, mark.Code) != nil {
+		class = Possible
+	}
+	return least.rank() != 0 && class.rank() < least.rank()
 }
 
 // collapsed turns the stale records into one finding per site, each naming every
@@ -378,7 +378,7 @@ func Totals(in *Input) (inEffect, reasons int) {
 		if mark.Reason != "" {
 			sites[token.Position{Filename: mark.Site.Filename, Line: mark.Site.Line, Column: mark.Site.Column}] = true
 		}
-		if !in.dormant(mark) && in.inEffect(i, suppressed) {
+		if in.inEffect(i, suppressed) && !in.dormant(i, true) {
 			inEffect++
 		}
 	}

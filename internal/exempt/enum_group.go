@@ -129,7 +129,7 @@ func (s *enumGroupScan) groups() error {
 // specification naming iota anywhere in a value expression. A specification that
 // carries no expression repeats the previous one, so a block with one such
 // specification is a group throughout.
-func (s *enumGroupScan) mentionsIota(group *ast.GenDecl) bool {
+func (*enumGroupScan) mentionsIota(group *ast.GenDecl) bool {
 	found := false
 	for _, spec := range group.Specs {
 		value, ok := spec.(*ast.ValueSpec)
@@ -323,7 +323,7 @@ func (s *enumGroupScan) decoded(p *packages.Package, call *ast.CallExpr) error {
 
 // decoder names the decoder one call calls, and an empty string for every other
 // call. A method is named by its receiver's defined type and its own name.
-func (s *enumGroupScan) decoder(p *packages.Package, call *ast.CallExpr) string {
+func (*enumGroupScan) decoder(p *packages.Package, call *ast.CallExpr) string {
 	called, ok := resolveObject(p.TypesInfo, call.Fun).(*types.Func)
 	if !ok || called.Pkg() == nil {
 		return ""
@@ -350,7 +350,7 @@ func (s *enumGroupScan) decoder(p *packages.Package, call *ast.CallExpr) string 
 // reach names every defined type a value of t carries: t itself when it is
 // defined, and every type reachable through a pointer, an element, a map key or
 // value, or a struct field.
-func (s *enumGroupScan) reach(t types.Type) []string {
+func (*enumGroupScan) reach(t types.Type) []string {
 	var keys []string
 	seen := make(map[types.Type]struct{})
 	var walk func(types.Type)

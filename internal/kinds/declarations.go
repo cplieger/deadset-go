@@ -111,7 +111,7 @@ func (in *Input) unusedDeclarations(code string) []Finding {
 
 // codeOf is the one code the unused-declaration kinds report a candidate under, or
 // the empty string, so their precedence is one rule. Test-support code test code
-// references is test-only at the class [Input.ClassOf] gives it, deprecated or not. A
+// references is test-only at the class [Input.classOf] gives it, deprecated or not. A
 // deprecation outranks a test reference, which the finding's test-only field still
 // records, and a test reference outranks the unreferenced kinds. A struct field is the
 // member kind, so a method of a live type is an unused declaration. The populations
@@ -264,7 +264,7 @@ func (in *Input) readOrWriteSubject(candidate *graph.Candidate, symbol *graph.Sy
 func (in *Input) enumMembers() map[graph.SymbolID]string {
 	held := in.index()
 	if held.enumerated == nil {
-		held.enumerated = EnumGroupMembers(in)
+		held.enumerated = enumGroupMembers(in)
 	}
 	return held.enumerated
 }

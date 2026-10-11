@@ -428,12 +428,12 @@ func TestLoadRefusals(t *testing.T) {
 		"configuration with no identifier": {
 			doc:     func(t *testing.T) scope.Document { return fixtureScope(t, "clean") },
 			config:  Configuration{OS: runtime.GOOS, Arch: runtime.GOARCH},
-			wantErr: ErrConfiguration,
+			wantErr: errConfiguration,
 		},
 		"configuration with no architecture": {
 			doc:     func(t *testing.T) scope.Document { return fixtureScope(t, "clean") },
 			config:  Configuration{ID: "linux-amd64", OS: "linux"},
-			wantErr: ErrConfiguration,
+			wantErr: errConfiguration,
 		},
 		"target with no path": {
 			doc:     func(*testing.T) scope.Document { return scope.Document{} },

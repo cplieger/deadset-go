@@ -68,6 +68,7 @@ type node struct {
 	pattern  *regexp.Regexp
 	minLen   int
 	minimum  *big.Rat
+	maximum  *big.Rat
 
 	required   []string
 	properties map[string]*node
@@ -223,6 +224,8 @@ func (c *compiler) keyword(n *node, doc, at, keyword string, value any) (err err
 		n.minLen, err = count(value)
 	case "minimum":
 		n.minimum, err = number(value)
+	case "maximum":
+		n.maximum, err = number(value)
 	case "minItems":
 		n.minItems, err = count(value)
 	case "maxItems":

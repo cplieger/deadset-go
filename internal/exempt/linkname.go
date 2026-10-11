@@ -68,8 +68,16 @@ func LinknameCgoAsmPluginDetector(in *Input) ([]graph.Exemption, error) {
 // linkname accumulates one configuration's exemptions of the class.
 type linkname struct {
 	in     *Input
-	found  map[graph.Exemption]struct{}
+	found  map[linknameFact]struct{}
 	loaded []*packages.Package
+}
+
+// linknameFact is one retention the class records: the symbol, the rendered site of
+// the evidence and the clause.
+type linknameFact struct {
+	id     graph.SymbolID
+	detail string
+	site   token.Position
 }
 
 // newLinkname keeps every type-checked package of one configuration, in one
@@ -77,7 +85,7 @@ type linkname struct {
 func newLinkname(in *Input) *linkname {
 	d := &linkname{
 		in:     in,
-		found:  make(map[graph.Exemption]struct{}),
+		found:  make(map[linknameFact]struct{}),
 		loaded: make([]*packages.Package, 0, len(in.Result.Packages)),
 	}
 	for _, p := range in.Result.Packages {
@@ -103,8 +111,8 @@ func (d *linkname) mechanisms(p *packages.Package) error {
 // the symbol and the clause, and once per symbol, site and clause.
 func (d *linkname) exemptions() []graph.Exemption {
 	found := make([]graph.Exemption, 0, len(d.found))
-	for e := range d.found {
-		found = append(found, e)
+	for f := range d.found {
+		found = append(found, graph.Exemption{ID: f.id, Class: string(LinknameCgoAsmPlugin), Site: f.site, Detail: f.detail})
 	}
 	slices.SortFunc(found, func(a, b graph.Exemption) int {
 		return cmp.Or(
@@ -150,12 +158,7 @@ func (d *linkname) linkable(obj types.Object) (graph.SymbolID, bool) {
 // assembly file names one: the file is not parsed, so its directives have no
 // position in the file set.
 func (d *linkname) at(id graph.SymbolID, site token.Position, detail string) {
-	d.found[graph.Exemption{
-		ID:     id,
-		Class:  string(LinknameCgoAsmPlugin),
-		Site:   site,
-		Detail: detail,
-	}] = struct{}{}
+	d.found[linknameFact{id: id, site: site, detail: detail}] = struct{}{}
 }
 
 // assembly retains every declaration a TEXT directive of one of the package's own

@@ -24,7 +24,7 @@ import (
 	"github.com/cplieger/deadset-go/internal/load"
 	"github.com/cplieger/deadset-go/internal/report"
 	"github.com/cplieger/deadset-go/internal/suppress"
-	spec "github.com/cplieger/deadset-spec/v6"
+	spec "github.com/cplieger/deadset-spec/v7"
 	"golang.org/x/tools/txtar"
 )
 
@@ -85,6 +85,7 @@ type corpusExpectation struct {
 	Confidence        string           `json:"confidence"`
 	ReachabilityClass string           `json:"reachability_class"`
 	LivenessRelation  string           `json:"liveness_relation"`
+	Fixability        string           `json:"fixability"`
 	Configurations    []string         `json:"configurations"`
 	RetainedBy        []string         `json:"retained_by"`
 	Details           *corpusDetails   `json:"details"`
@@ -114,7 +115,12 @@ type corpusDetails struct {
 	Replacement        string   `json:"replacement,omitempty"`
 	Mechanism          string   `json:"mechanism,omitempty"`
 	Edge               string   `json:"edge,omitempty"`
+	NameLiteral        string   `json:"name_literal,omitempty"`
 	Overlap            []string `json:"overlap,omitempty"`
+
+	// nameLiteralAt is where the rendering's manifest declares NameLiteral, which
+	// [resolvedSites] fills; the logical name is what a row spells and echoes.
+	nameLiteralAt site
 }
 
 // corpusFixtureFile is one fixture's expectation file: the renderings it has, the
@@ -132,6 +138,8 @@ type corpusFixtureFile struct {
 	ClosedWorld            []string                               `json:"closed_world"`
 	EdgeEvaluations        []corpusEdgeEvaluation                 `json:"edge_evaluations"`
 	MinConfidence          string                                 `json:"min_confidence"`
+	Severity               map[string]config.Severity             `json:"severity"`
+	SuppressionsInEffect   *int                                   `json:"suppressions_in_effect"`
 	ConsumerTests          string                                 `json:"consumer_tests"`
 	TypeErrorSkips         []string                               `json:"type_error_skips"`
 	Notes                  []corpusNote                           `json:"notes"`
@@ -176,9 +184,12 @@ func (shapes *corpusSubjectShapes) suppressible(subjectKind string) bool {
 }
 
 // corpusManifest is one rendering's manifest: the build matrix a run derives from the
-// rendering, and the file and line this rendering declares each logical name on.
+// rendering, the derived configurations it drops where the manifest names them, and
+// the file and line this rendering declares each logical name on. NotBuilt is nil
+// where the manifest omits the member, which compares nothing.
 type corpusManifest struct {
 	Configurations []string              `json:"configurations"`
+	NotBuilt       []string              `json:"configurations_not_built"`
 	Symbols        map[string]corpusSite `json:"symbols"`
 }
 
@@ -247,6 +258,7 @@ type reportedAnswer struct {
 	Confidence        string           `json:"confidence,omitempty"`
 	ReachabilityClass string           `json:"reachability_class,omitempty"`
 	LivenessRelation  string           `json:"liveness_relation,omitempty"`
+	Fixability        string           `json:"fixability,omitempty"`
 	Configurations    []string         `json:"configurations,omitempty"`
 	RetainedBy        []string         `json:"retained_by,omitempty"`
 	Details           *corpusDetails   `json:"details,omitempty"`
@@ -299,6 +311,8 @@ type answered struct {
 	evaluations    []kinds.Evaluation
 	typeErrorSkips []graph.TypeErrorSkip
 	notes          []report.Note
+	notBuilt       []string
+	inEffect       int
 }
 
 // TestConformanceCorpus is this analyzer's run of the Conformance Corpus: for every
@@ -530,12 +544,16 @@ func answerSetupFailure(t *testing.T, fixtureName string, want *corpusSetupFailu
 	return row
 }
 
-// recordDifferences compares the report's type-error skips and notes with the ones
-// the fixture names: every named skip resolves to at least one record at its file and
-// line, every named note to exactly one record of its kind and path, and every record
-// to a name, because both members are exhaustive.
+// recordDifferences compares the report's suppressions in effect with the count the
+// fixture names, and its type-error skips, notes and dropped configurations with the
+// ones the fixture names: every named skip resolves to at least one record at its
+// file and line, every named note to exactly one record of its kind and path, and
+// every record to a name, because those members are exhaustive.
 func recordDifferences(fixture *corpusFixtureFile, manifest *corpusManifest, held *answered) ([]string, error) {
 	var differ []string
+	if want := fixture.SuppressionsInEffect; want != nil && *want != held.inEffect {
+		differ = append(differ, fmt.Sprintf("want %d suppressions in effect, got %d", *want, held.inEffect))
+	}
 	named := make(map[site]bool, len(fixture.TypeErrorSkips))
 	for _, logical := range fixture.TypeErrorSkips {
 		at, known := manifest.Symbols[logical]
@@ -566,6 +584,9 @@ func recordDifferences(fixture *corpusFixtureFile, manifest *corpusManifest, hel
 		if count != 1 {
 			differ = append(differ, fmt.Sprintf("want one %s note about %s, got %d", want.Kind, want.Path, count))
 		}
+	}
+	if manifest.NotBuilt != nil && !slices.Equal(manifest.NotBuilt, held.notBuilt) {
+		differ = append(differ, fmt.Sprintf("want configurations_not_built %v, got %v", manifest.NotBuilt, held.notBuilt))
 	}
 	for _, note := range held.notes {
 		if !slices.ContainsFunc(fixture.Notes, func(want corpusNote) bool { return want.Kind == note.Kind && want.Path == note.Path }) {
@@ -781,6 +802,9 @@ func answerFrom(expected *corpusExpectation, found *kinds.Finding) reportedAnswe
 	if expected.LivenessRelation != "" && !found.Live {
 		actual.LivenessRelation = found.Relation.String()
 	}
+	if expected.Fixability != "" {
+		actual.Fixability = found.Fixability
+	}
 	if len(expected.Configurations) > 0 {
 		actual.Configurations = slices.Clone(found.Configurations)
 	}
@@ -840,6 +864,10 @@ func detailsOf(expected *corpusDetails, found *kinds.Details) *corpusDetails {
 	if expected.Mechanism != "" {
 		actual.Mechanism = found.Mechanism
 	}
+	if at := found.NameLiteral; expected.NameLiteral != "" && at != nil &&
+		(site{File: at.Path, Line: at.Line}) == expected.nameLiteralAt {
+		actual.NameLiteral = expected.NameLiteral
+	}
 	if len(expected.Overlap) > 0 {
 		actual.Overlap = slices.Clone(found.Overlap)
 	}
@@ -855,7 +883,7 @@ func detailsOf(expected *corpusDetails, found *kinds.Details) *corpusDetails {
 // names.
 func (d *corpusDetails) empty() bool {
 	return d.NarrowerVisibility == "" && d.ExcludedBy == "" && d.DependencyClass == "" &&
-		d.Replacement == "" && d.Mechanism == "" && d.Edge == "" && len(d.Overlap) == 0
+		d.Replacement == "" && d.Mechanism == "" && d.Edge == "" && d.NameLiteral == "" && len(d.Overlap) == 0
 }
 
 // differences is one line naming every member the expectation states and the answer
@@ -868,6 +896,7 @@ func differences(expected *corpusExpectation, actual *reportedAnswer) string {
 		{"symbol_kind", expected.SymbolKind, actual.SymbolKind},
 		{"reachability_class", expected.ReachabilityClass, actual.ReachabilityClass},
 		{"liveness_relation", expected.LivenessRelation, actual.LivenessRelation},
+		{"fixability", expected.Fixability, actual.Fixability},
 	} {
 		if one.want != "" && one.want != one.got {
 			held = append(held, fmt.Sprintf("%s want %q got %q", one.member, one.want, one.got))
@@ -922,6 +951,7 @@ func detailsDifferences(expected, actual *corpusDetails) []string {
 		{"details.replacement", expected.Replacement, actual.Replacement},
 		{"details.mechanism", expected.Mechanism, actual.Mechanism},
 		{"details.edge", expected.Edge, actual.Edge},
+		{"details.name_literal", expected.NameLiteral, actual.NameLiteral},
 	} {
 		if one.want != "" && one.want != one.got {
 			held = append(held, fmt.Sprintf("%s want %q got %q", one.member, one.want, one.got))
@@ -1185,6 +1215,9 @@ func corpusRunOf(rendering, document string, fixture *corpusFixtureFile,
 	if fixture.MinConfidence != "" {
 		held.config.Analysis.MinConfidence = config.Confidence(fixture.MinConfidence)
 	}
+	if len(fixture.Severity) > 0 {
+		held.config.Severity = maps.Clone(fixture.Severity)
+	}
 	switch tests := config.ConsumerTests(fixture.ConsumerTests); tests {
 	case "":
 	case config.TestReference, config.ProductionReference:
@@ -1264,7 +1297,12 @@ func analyzeRendering(ctx context.Context, run *corpusRun) (answered, error) {
 		evaluations:    set.evaluations,
 		typeErrorSkips: set.loaded.typeErrorSkips,
 		notes:          notesOf(run.config.Target.Kind, &set.loaded),
+		inEffect:       set.suppressions.InEffect,
 	}
+	for i := range set.loaded.unbuilt {
+		held.notBuilt = append(held.notBuilt, set.loaded.unbuilt[i].Configuration.ID)
+	}
+	slices.Sort(held.notBuilt)
 	for _, found := range set.result.Findings {
 		if found.Code == staleSuppression {
 			held.stale = append(held.stale, found)
@@ -1375,8 +1413,26 @@ func resolvedSites(fixture *corpusFixtureFile, manifest *corpusManifest) (map[st
 				logical, held.File, targetSection)
 		}
 		sites[logical] = site{File: within, Line: held.Line}
+		if details := fixture.Expect[i].Details; details != nil && details.NameLiteral != "" {
+			at, err := targetSite(manifest, details.NameLiteral)
+			if err != nil {
+				return nil, err
+			}
+			details.nameLiteralAt = at
+		}
 	}
 	return sites, nil
+}
+
+// targetSite is where the rendering's manifest declares one logical name, relative to
+// the target root.
+func targetSite(manifest *corpusManifest, logical string) (site, error) {
+	held, known := manifest.Symbols[logical]
+	within, inside := strings.CutPrefix(held.File, targetSection+"/")
+	if !known || !inside || held.Line == 0 {
+		return site{}, fmt.Errorf("the manifest carries no target file and line for %s, which is a defect in the corpus", logical)
+	}
+	return site{File: within, Line: held.Line}, nil
 }
 
 // extractRendering writes one rendering into dir, which is the scratch copy the run
@@ -1813,14 +1869,6 @@ func TestTheBinaryReportsTheConformanceRecordItCommitted(t *testing.T) {
 	}
 }
 
-// TestAnswerFromRendersEveryMemberAnExpectationNames pins the vocabulary the runner
-// answers in, member by member, over a finding carrying every one of them.
-//
-// The corpus decides which members its own fixtures name, and today no fixture with a
-// Go rendering names the liveness relation on a row this analyzer reports, so the
-// rendering of each member is pinned here rather than by whichever fixtures the pin
-// happens to reach. A member the expectation does not name is not answered at all,
-// which is the other half of the rule.
 // TestTheCorpusRunDeclaresTheWorldTheFixtureNames pins what the runner configures
 // from an expectation file's closed-world member, which is the one thing the corpus
 // asks a runner to translate rather than to copy.
@@ -1990,6 +2038,14 @@ func TestIgnoreDocumentAtKeepsTheRenderingsOwnRecords(t *testing.T) {
 	}
 }
 
+// TestAnswerFromRendersEveryMemberAnExpectationNames pins the vocabulary the runner
+// answers in, member by member, over a finding carrying every one of them.
+//
+// The corpus decides which members its own fixtures name, and today no fixture with a
+// Go rendering names the liveness relation on a row this analyzer reports, so the
+// rendering of each member is pinned here rather than by whichever fixtures the pin
+// happens to reach. A member the expectation does not name is not answered at all,
+// which is the other half of the rule.
 func TestAnswerFromRendersEveryMemberAnExpectationNames(t *testing.T) {
 	t.Parallel()
 
@@ -1999,6 +2055,7 @@ func TestAnswerFromRendersEveryMemberAnExpectationNames(t *testing.T) {
 		Class:          kinds.Certain,
 		Confidence:     kinds.Probable,
 		Relation:       graph.ReferenceCounting,
+		Fixability:     "narrowable",
 		Configurations: []string{"linux-amd64"},
 		Component:      kinds.Component{ID: "deadset-go/c-1", SymbolCount: 4, DeletableLines: 7, Root: true},
 		Details: kinds.Details{
@@ -2045,6 +2102,7 @@ func TestAnswerFromRendersEveryMemberAnExpectationNames(t *testing.T) {
 			expected: corpusExpectation{
 				Report: "DS1101", Confidence: "probable", SymbolKind: "function",
 				ReachabilityClass: "certain", LivenessRelation: "reference-counting",
+				Fixability:     "narrowable",
 				Configurations: []string{"linux-amd64"},
 				Details: &corpusDetails{
 					NarrowerVisibility: "file",
@@ -2055,6 +2113,7 @@ func TestAnswerFromRendersEveryMemberAnExpectationNames(t *testing.T) {
 			want: reportedAnswer{
 				Report: "DS1101", Confidence: "probable", SymbolKind: "function",
 				ReachabilityClass: "certain", LivenessRelation: "reference-counting",
+				Fixability:     "narrowable",
 				Configurations: []string{"linux-amd64"},
 				Details: &corpusDetails{
 					NarrowerVisibility: "file",

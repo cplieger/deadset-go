@@ -11,7 +11,7 @@ import (
 
 	"github.com/cplieger/deadset-go/internal/config"
 	"github.com/cplieger/deadset-go/internal/suppress"
-	spec "github.com/cplieger/deadset-spec/v6"
+	spec "github.com/cplieger/deadset-spec/v7"
 )
 
 // intraFuncEmitters is the table of the intra-function group, which is what a pass
@@ -85,6 +85,37 @@ func TestUnusedReceiverReportsAReceiverNoBodyReads(t *testing.T) {
 	if got := subjectsOf(result.Findings, unusedReceiverCode); !slices.Equal(got, want) {
 		t.Errorf("the pass over intrafunc-receiver.txtar reports %v under %s, want %v",
 			got, unusedReceiverCode, want)
+	}
+}
+
+func TestUnusedReceiverReportsAReceiverWhateverFixesTheSignature(t *testing.T) {
+	t.Parallel()
+
+	result := analysisOf(t, "intrafunc-receiver-fixed.txtar", asApplication, Consumers{}).findings(t, intraFunctionKinds)
+
+	want := []string{
+		"main.go:13:7 receiver f of go://example.com/app#fake.reset",
+		"main.go:15:7 receiver f of go://example.com/app#fake.tick",
+		"main.go:17:7 receiver f of go://example.com/app#fake.name",
+	}
+	if got := subjectsOf(result.Findings, unusedReceiverCode); !slices.Equal(got, want) {
+		t.Errorf("the pass over intrafunc-receiver-fixed.txtar reports %v under %s, want %v",
+			got, unusedReceiverCode, want)
+	}
+}
+
+func TestUnusedParameterReportsALiteralOnlyCalledByName(t *testing.T) {
+	t.Parallel()
+
+	result := analysisOf(t, "intrafunc-literal.txtar", asApplication, Consumers{}).findings(t, intraFunctionKinds)
+
+	want := []string{
+		"main.go:8:17 parameter name of go://example.com/app#main",
+		"main.go:9:22 parameter name of go://example.com/app#main",
+	}
+	if got := subjectsOf(result.Findings, unusedParameterCode); !slices.Equal(got, want) {
+		t.Errorf("the pass over intrafunc-literal.txtar reports %v under %s, want %v: only a literal every use calls is free",
+			got, unusedParameterCode, want)
 	}
 }
 
