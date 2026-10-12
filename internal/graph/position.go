@@ -44,6 +44,12 @@ func (p *positions) base(pos token.Pos) string {
 	return filepath.Base(p.fset.Position(pos).Filename)
 }
 
+// dir returns the directory of the file holding pos, as the file set names it
+// before any line directive.
+func (p *positions) dir(pos token.Pos) string {
+	return filepath.Dir(p.fset.PositionFor(pos, false).Filename)
+}
+
 // render converts pos into the position a report carries.
 func (p *positions) render(pos token.Pos) (token.Position, error) {
 	q := p.fset.Position(pos)

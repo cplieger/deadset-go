@@ -26,6 +26,7 @@ const (
 type Chains struct {
 	hops   map[string][]int // by the method set of the interface a site's value has
 	routes map[string][][]int
+	keys   map[*types.Interface]string // methodSetKey's answers, which spell every signature
 	sites  []Conversion
 }
 
@@ -33,15 +34,15 @@ type Chains struct {
 // names the declaration holding the site at an index: two sites one declaration
 // holds between the same two interfaces are one hop.
 func NewChains(sites []Conversion, holder func(i int) string) *Chains {
-	c := &Chains{sites: sites, hops: make(map[string][]int), routes: make(map[string][][]int)}
+	c := &Chains{sites: sites, hops: make(map[string][]int), routes: make(map[string][][]int), keys: make(map[*types.Interface]string)}
 	seen := make(map[string]bool)
 	for i := range sites {
 		from := interfaceOf(sites[i].From)
 		if from == nil || sites[i].To == nil {
 			continue
 		}
-		key := methodSetKey(from)
-		hop := key + "\x00" + methodSetKey(sites[i].To) + "\x00" + holder(i)
+		key := c.key(from)
+		hop := key + "\x00" + c.key(sites[i].To) + "\x00" + holder(i)
 		if !seen[hop] {
 			seen[hop] = true
 			c.hops[key] = append(c.hops[key], i)
@@ -67,7 +68,7 @@ func (c *Chains) Routes(from, to *types.Interface) [][]token.Pos {
 
 // indexRoutes is [Chains.Routes] as indices of the set, memoized per pair.
 func (c *Chains) indexRoutes(from, to *types.Interface) [][]int {
-	start, goal := methodSetKey(from), methodSetKey(to)
+	start, goal := c.key(from), c.key(to)
 	pair := start + "\x00\x00" + goal
 	if held, known := c.routes[pair]; known {
 		return held
@@ -103,7 +104,7 @@ func (s *chainSearch) from(at string, path []int) {
 		if s.capped {
 			return
 		}
-		next := methodSetKey(s.chains.sites[hop].To)
+		next := s.chains.key(s.chains.sites[hop].To)
 		extended := append(slices.Clip(path), hop)
 		switch {
 		case next == s.goal:
@@ -118,6 +119,16 @@ func (s *chainSearch) from(at string, path []int) {
 			delete(s.onPath, next)
 		}
 	}
+}
+
+// key is [methodSetKey] of iface, computed once per interface.
+func (c *Chains) key(iface *types.Interface) string {
+	if held, known := c.keys[iface]; known {
+		return held
+	}
+	spelled := methodSetKey(iface)
+	c.keys[iface] = spelled
+	return spelled
 }
 
 // methodSetKey spells an interface's method set, so two interfaces share a key
@@ -212,7 +223,7 @@ func (s *conversionScan) asserted() []Conversion {
 	}
 	run := derivation{
 		scan: s, chains: chains, names: names,
-		implements: make(map[string]bool), seen: make(map[string]bool), counts: make(map[string]int),
+		implements: make(map[implementsPair]bool), seen: make(map[string]bool), counts: make(map[string]int),
 	}
 	for len(queue) > 0 {
 		e := queue[0]
@@ -231,7 +242,7 @@ func (s *conversionScan) asserted() []Conversion {
 type derivation struct {
 	scan       *conversionScan
 	chains     *Chains
-	implements map[string]bool
+	implements map[implementsPair]bool
 	seen       map[string]bool // the derived sites kept, by type, interface and holders
 	counts     map[string]int  // the derived sites kept, by type and interface
 	names      []string
@@ -261,10 +272,16 @@ func (r *derivation) derive(e *derivable, assertion int) []derivable {
 	return added
 }
 
+// implementsPair is one type, by its identity, and one assertion, by its index.
+type implementsPair struct {
+	key       string
+	assertion int
+}
+
 // implementsOnce answers types.Implements for one type and one assertion's
 // interface, each pair once.
-func implementsOnce(held map[string]bool, key string, assertion int, from types.Type, to *types.Interface) bool {
-	pair := key + "\x00" + strconv.Itoa(assertion)
+func implementsOnce(held map[implementsPair]bool, key string, assertion int, from types.Type, to *types.Interface) bool {
+	pair := implementsPair{key: key, assertion: assertion}
 	answer, known := held[pair]
 	if !known {
 		answer = types.Implements(from, to)

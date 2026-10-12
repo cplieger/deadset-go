@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"errors"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -259,5 +261,436 @@ func TestAnalyzeEndsTheRunOnADeclaredConfigurationsSetupFailure(t *testing.T) {
 	}
 	if !strings.HasPrefix(run.stderr, "setup failure: missing-module: ") {
 		t.Errorf("analyze() wrote to stderr %q, want the setup failure's line", run.stderr)
+	}
+}
+
+// A method an interface assertion holds under one configuration, and that a file
+// constraint removes from another, leaves the other configuration's sweep with a
+// fact about a symbol its graph does not hold. That sweep answers over its own
+// graph rather than gating an edge the graph shares with the base sweep.
+func TestAnalyzeAnswersWhereAnAssertionHoldsAMethodOneConfigurationLacks(t *testing.T) {
+	assertion := "\tif c, ok := w.(io.Closer); ok {\n\t\t_ = c.Close()\n\t}\n"
+	dir := writeModule(t, map[string]string{
+		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
+		"app.go": "package main\n\nimport (\n\t\"io\"\n\t\"os\"\n)\n\n" +
+			"func closeOne(w io.Writer) {\n" + assertion + "}\n\n" +
+			"func closeOther(w io.Writer) {\n" + assertion + "}\n\n" +
+			"func main() {\n\tcloseOne(os.Stdout)\n\tcloseOther(os.Stdout)\n}\n",
+		"sys.go": "//go:build !windows\n\npackage main\n\ntype sysWriter struct{}\n\n" +
+			"func (sysWriter) Write(p []byte) (int, error) { return len(p), nil }\n\n" +
+			"func (sysWriter) Close() error { return nil }\n\n" +
+			"func init() { closeOne(sysWriter{}) }\n",
+		"app_windows.go":   "package main\n\nfunc windowsOnly() {}\n",
+		repositoryDocument: `{"target": {"kind": "application"}}`,
+	})
+
+	run := runAnalyze(t, dir)
+	if run.code != exitFindings {
+		t.Fatalf("analyze(a method held under one configuration alone) = %d, want %d: %s", run.code, exitFindings, run.stderr)
+	}
+	var found []string
+	for _, f := range envelopeAt(t, run.reportPath).Findings {
+		found = append(found, f.Symbol.Ref)
+	}
+	if want := []string{"go://example.com/app#windowsOnly"}; !slices.Equal(found, want) {
+		t.Errorf("analyze() reported %v, want %v: the assertion holds sysWriter's methods", found, want)
+	}
+}
+
+// twoModuleTree writes a target that is no module root and holds two modules, a
+// requiring b through a replace and carrying a replace over a module nothing loads,
+// and b carrying a requirement nothing imports, a package nothing imports whose one
+// declaration is the last use of a module, and a file no configuration builds. The
+// modules b requires sit in a directory the module walk does not search.
+func twoModuleTree(t *testing.T) string {
+	t.Helper()
+
+	return writeModule(t, map[string]string{
+		"a/go.mod": "module example.com/a\n\ngo 1.27.1\n\nrequire example.com/b v0.0.0\n\n" +
+			"replace example.com/b => ../b\n\nreplace example.com/absent v1.0.0 => ../absent\n",
+		"a/main.go": "package main\n\nimport (\n\t\"fmt\"\n\n\t\"example.com/b\"\n)\n\n" +
+			"func main() {\n\tb.Used()\n\tvar s fmt.Stringer = b.Named{}\n\tprintln(s.String())\n}\n\nfunc unusedA() {}\n",
+		"b/go.mod": "module example.com/b\n\ngo 1.27.1\n\nrequire (\n\texample.com/c v0.0.0\n\texample.com/d v0.0.0\n)\n\n" +
+			"replace example.com/c => ../_deps/c\n\nreplace example.com/d => ../_deps/d\n",
+		"b/b.go": "package b\n\n// Used is what a calls.\nfunc Used() {}\n\n// Unused is called by nothing.\nfunc Unused() {}\n\n" +
+			"// Named is what a converts to fmt.Stringer.\ntype Named struct{}\n\n// String is held by that conversion.\nfunc (Named) String() string { return \"\" }\n",
+		"b/never.go":       "//go:build never\n\npackage b\n\nfunc never() {}\n",
+		"b/extra/extra.go": "package extra\n\nimport \"example.com/c\"\n\n// Dead is called by nothing.\nfunc Dead() { c.F() }\n",
+		"_deps/c/go.mod":   "module example.com/c\n\ngo 1.27.1\n",
+		"_deps/c/c.go":     "package c\n\n// F is what Dead calls.\nfunc F() {}\n",
+		"_deps/d/go.mod":   "module example.com/d\n\ngo 1.27.1\n",
+		"_deps/d/d.go":     "package d\n",
+		repositoryDocument: `{"target": {"kind": "application"}}`,
+	})
+}
+
+// A target that is no module root is every module below it: one report names each
+// module's declarations relative to the target, a reference from one module to
+// another, or a conversion of one module's type in another, holds the declaration
+// it names live, and each module file's directives are read against that module's
+// own build list.
+func TestAnalyzeReportsEveryModuleUnderATargetThatIsNoModuleRoot(t *testing.T) {
+	dir := twoModuleTree(t)
+
+	run := runAnalyze(t, dir)
+	if run.code != exitFindings {
+		t.Fatalf("analyze(a tree of two modules) = %d, want %d: %s", run.code, exitFindings, run.stderr)
+	}
+	envelope := envelopeAt(t, run.reportPath)
+	var found []string
+	for _, f := range envelope.Findings {
+		found = append(found, f.Code+" "+f.Symbol.Ref+" "+f.Position.Path+" "+strings.Join(f.Details.RemovesLastUseOf, ","))
+	}
+	want := []string{
+		"DS1605 go://example.com/a#example.com/absent@v1.0.0:replace a/go.mod ",
+		"DS1002 go://example.com/a#unusedA a/main.go ",
+		"DS1001 go://example.com/b#Unused b/b.go ",
+		"DS1502 go://example.com/b/extra#extra.go:file b/extra/extra.go ",
+		"DS1001 go://example.com/b/extra#Dead b/extra/extra.go example.com/c",
+		"DS1601 go://example.com/b#example.com/d:require b/go.mod ",
+		"DS1605 go://example.com/b#example.com/d:replace b/go.mod ",
+		"DS1002 go://example.com/b#never b/never.go ",
+	}
+	if !slices.Equal(found, want) {
+		t.Errorf("analyze() reported\n%q\nwant\n%q", found, want)
+	}
+	if envelope.Target.Identity != "example.com/a" || envelope.Target.Root != "." {
+		t.Errorf("the report names the target %+v, want root . and the first module's path", envelope.Target)
+	}
+}
+
+// Two modules of one target can declare one module path, so one import path names
+// a package of each. Each module is judged as it is alone: an enumerated type, a
+// constant of a type the other module enumerates, a method of a type the other
+// module also declares, a package nothing imports and a package only a test imports
+// keep the findings they would have alone.
+func TestAnalyzeJudgesTwoModulesOfOnePathEachAsItIsAlone(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"x/go.mod": "module example\n\ngo 1.27.1\n",
+		"x/main.go": "package main\n\nimport (\n\t\"fmt\"\n\n\t\"example/extra\"\n\t\"example/util\"\n)\n\n" +
+			"type Color int\n\nconst (\n\tRed Color = iota\n\tBlue\n)\n\n" +
+			"func (c Color) String() string { return \"c\" }\n\n" +
+			"type Mode int\n\nconst (\n\tSlow Mode = iota\n\tQuick\n)\n\n" +
+			"type Box struct{}\n\nfunc (Box) Spare() {}\n\n" +
+			"func main() {\n\tfmt.Println(Red, Slow, Quick, Box{})\n\tutil.Help()\n\textra.Run()\n}\n",
+		"x/util/util.go":   "package util\n\n// Help is what main calls.\nfunc Help() {}\n",
+		"x/extra/extra.go": "package extra\n\n// Run is what main calls.\nfunc Run() {}\n",
+		"y/go.mod":         "module example\n\ngo 1.27.1\n",
+		"y/main.go": "package main\n\ntype Color int\n\nconst (\n\tGreen Color = iota\n\tPink\n)\n\n" +
+			"type Mode int\n\nconst Fast Mode = 1\n\ntype Box struct{}\n\nfunc main() { println(int(Green)) }\n",
+		"y/main_test.go":   "package main\n\nimport (\n\t\"testing\"\n\n\t\"example/util\"\n)\n\nfunc TestHelp(t *testing.T) { util.Help() }\n",
+		"y/util/util.go":   "package util\n\n// Help is what a test calls.\nfunc Help() {}\n",
+		"y/extra/extra.go": "package extra\n\n// Run is called by nothing.\nfunc Run() {}\n",
+		repositoryDocument: `{"target": {"kind": "application"}}`,
+	})
+
+	run := runAnalyze(t, dir)
+	if run.code != exitFindings {
+		t.Fatalf("analyze(two modules of one path) = %d, want %d: %s", run.code, exitFindings, run.stderr)
+	}
+	envelope := envelopeAt(t, run.reportPath)
+	var found []string
+	for _, f := range envelope.Findings {
+		found = append(found, f.Code+" "+f.Symbol.Ref+" "+f.Position.Path)
+	}
+	want := []string{
+		"DS1101 go://example#Color x/main.go",
+		"DS1802 go://example#Color.String x/main.go",
+		"DS1101 go://example#Mode x/main.go",
+		"DS1101 go://example#Slow x/main.go",
+		"DS1101 go://example#Quick x/main.go",
+		"DS1101 go://example#Box x/main.go",
+		"DS1103 go://example#Box.Spare x/main.go",
+		"DS1502 go://example/extra#extra.go:file y/extra/extra.go",
+		"DS1001 go://example/extra#Run y/extra/extra.go",
+		"DS1101 go://example#Color y/main.go",
+		"DS1101 go://example#Green y/main.go",
+		"DS1302 go://example#Pink y/main.go",
+		"DS1103 go://example#Mode y/main.go",
+		"DS1103 go://example#Fast y/main.go",
+		"DS1103 go://example#Box y/main.go",
+	}
+	if !slices.Equal(found, want) {
+		t.Errorf("analyze() reported\n%v\nwant\n%v", found, want)
+	}
+	var noted []string
+	for _, n := range envelope.Notes {
+		noted = append(noted, n.Path)
+	}
+	if want := []string{"y/extra"}; !slices.Equal(noted, want) {
+		t.Errorf("analyze() noted %v, want %v: only y's extra is imported by nothing", noted, want)
+	}
+}
+
+// A library module and a main module of one module path: the library's exported
+// declarations are its published API, whatever the main package of that path is.
+func TestAnalyzePublishesALibraryBesideAMainPackageOfItsPath(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"x/go.mod":         "module example\n\ngo 1.27.1\n",
+		"x/main.go":        "package main\n\nfunc helper() {}\n\nfunc main() { helper() }\n",
+		"y/go.mod":         "module example\n\ngo 1.27.1\n",
+		"y/lib.go":         "package example\n\n// Exported is published.\nfunc Exported() { internalOnly() }\n\nfunc internalOnly() {}\n\nfunc unused() {}\n",
+		"y/lib_test.go":    "package example\n\nimport \"testing\"\n\nfunc TestExported(t *testing.T) { Exported() }\n",
+		repositoryDocument: `{"target": {"kind": "library"}}`,
+	})
+
+	analyzed := runAnalyze(t, dir)
+	if analyzed.code != exitFindings {
+		t.Fatalf("analyze(a library beside a main package of its path) = %d, want %d: %s", analyzed.code, exitFindings, analyzed.stderr)
+	}
+	var found []string
+	for _, f := range envelopeAt(t, analyzed.reportPath).Findings {
+		found = append(found, f.Code+" "+f.Symbol.Ref+" "+f.Position.Path)
+	}
+	if want := []string{"DS1002 go://example#unused y/lib.go"}; !slices.Equal(found, want) {
+		t.Errorf("analyze() reported %v, want %v", found, want)
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := run(t.Context(), []string{"print-roots", "--target=."}, &stdout, &stderr); code != exitClean {
+		t.Fatalf("print-roots = %d, want %d: %s", code, exitClean, stderr.String())
+	}
+	want := []string{"go://example#main\tmain", "go://example#Exported\tpublished-api", "go://example#TestExported\ttest"}
+	if got := strings.Split(strings.TrimSpace(stdout.String()), "\n"); !slices.Equal(got, want) {
+		t.Errorf("print-roots printed %q, want %q", got, want)
+	}
+}
+
+// Each module of a target reads its imports anew, so the standard library a second
+// module sees is a reading of its own: an interface of it fixes the second module's
+// method and an assertion in it retains the second module's method, as for the first.
+func TestAnalyzeJudgesEachModuleAgainstItsOwnReadingOfItsImports(t *testing.T) {
+	source := "package main\n\nimport (\n\t\"io\"\n\t\"os\"\n)\n\ntype T struct{}\n\n" +
+		"func (T) WriteTo(w io.Writer) (int64, error) { return 0, nil }\n\ntype R struct{}\n\n" +
+		"func (R) Read([]byte) (int, error) { return 0, io.EOF }\n\n" +
+		"func (R) WriteTo(io.Writer) (int64, error) { return 0, nil }\n\n" +
+		"func main() {\n\t_, _ = T{}.WriteTo(nil)\n\tvar r io.Reader = R{}\n\t_, _ = io.Copy(os.Stdout, r)\n}\n"
+	dir := writeModule(t, map[string]string{
+		"x/go.mod":         "module example.com/x\n\ngo 1.27.1\n",
+		"x/main.go":        source,
+		"y/go.mod":         "module example.com/y\n\ngo 1.27.1\n",
+		"y/main.go":        source,
+		repositoryDocument: `{"target": {"kind": "application"}}`,
+	})
+
+	run := runAnalyze(t, dir)
+	if run.code != exitClean {
+		t.Fatalf("analyze(two modules reading one standard library) = %d, want %d: %s", run.code, exitClean, run.stderr)
+	}
+	var found []string
+	for _, f := range envelopeAt(t, run.reportPath).Findings {
+		found = append(found, f.Code+" "+f.Symbol.Ref)
+	}
+	want := []string{
+		"DS1101 go://example.com/x#T", "DS1101 go://example.com/x#R",
+		"DS1101 go://example.com/y#T", "DS1101 go://example.com/y#R",
+	}
+	if !slices.Equal(found, want) {
+		t.Errorf("analyze() reported %v, want %v", found, want)
+	}
+	if got := retainedIn(t, dir); !slices.Contains(got, "go://example.com/y#R.WriteTo\tinterface-satisfaction\ty/main.go:20:20\tsatisfies what io asserts through io.Reader") {
+		t.Errorf("print-retained printed %q, want y's R.WriteTo retained by what io asserts", got)
+	}
+}
+
+// workspaceTree writes a module root whose workspace also lists a module below it,
+// which the root's main package calls.
+func workspaceTree(t *testing.T) string {
+	t.Helper()
+
+	return writeModule(t, map[string]string{
+		"go.work":                   "go 1.27.1\n\nuse (\n\t.\n\t./sub\n)\n",
+		"go.mod":                    "module example.com/app\n\ngo 1.27.1\n\nrequire example.com/sub v0.0.0\n",
+		"main.go":                   "package main\n\nimport \"example.com/sub\"\n\nfunc main() { sub.Used() }\n",
+		"sub/go.mod":                "module example.com/sub\n\ngo 1.27.1\n",
+		"sub/sub.go":                "package sub\n\n// Used is what main calls.\nfunc Used() {}\n\n// Unused is called by nothing.\nfunc Unused() {}\n",
+		repositoryDocument:          `{"target": {"kind": "application"}}`,
+		"sub/" + repositoryDocument: `{"target": {"kind": "application"}}`,
+	})
+}
+
+// A module the workspace listing the target lists below the target is a module of
+// the target: its declarations are judged with the target's, rather than its
+// references counted as a consumer's.
+func TestAnalyzeReportsAWorkspaceMemberBelowTheTarget(t *testing.T) {
+	dir := workspaceTree(t)
+
+	run := runAnalyze(t, dir)
+	if run.code != exitFindings {
+		t.Fatalf("analyze(a workspace with a member below the target) = %d, want %d: %s", run.code, exitFindings, run.stderr)
+	}
+	envelope := envelopeAt(t, run.reportPath)
+	var found []string
+	for _, f := range envelope.Findings {
+		found = append(found, f.Symbol.Ref+" "+f.Position.Path)
+	}
+	if want := []string{"go://example.com/sub#Unused sub/sub.go"}; !slices.Equal(found, want) {
+		t.Errorf("analyze() reported %v, want %v", found, want)
+	}
+	if envelope.Target.Identity != "example.com/app" || envelope.Consumers.Declared != 0 {
+		t.Errorf("the report names the target %+v and %d consumers, want example.com/app and none",
+			envelope.Target, envelope.Consumers.Declared)
+	}
+}
+
+// A workspace member run on its own, from its own directory, builds through the
+// workspace above it and names no path outside the run directory: the other member
+// there is no consumer the report could name.
+func TestAnalyzeAWorkspaceMemberFromItsOwnDirectory(t *testing.T) {
+	dir := filepath.Join(workspaceTree(t), "sub")
+
+	run := runAnalyze(t, dir)
+	if run.code != exitFindings {
+		t.Fatalf("analyze(a workspace member from its own directory) = %d, want %d: %s", run.code, exitFindings, run.stderr)
+	}
+	envelope := envelopeAt(t, run.reportPath)
+	var found []string
+	for _, f := range envelope.Findings {
+		found = append(found, f.Symbol.Ref+" "+f.Position.Path)
+	}
+	if !slices.Contains(found, "go://example.com/sub#Unused sub.go") {
+		t.Errorf("analyze() reported %v, want sub#Unused at sub.go", found)
+	}
+	if envelope.Target.Root != "." || envelope.Target.Identity != "example.com/sub" || envelope.Consumers.Declared != 0 {
+		t.Errorf("the report names the target %+v and %d consumers, want root ., example.com/sub and none",
+			envelope.Target, envelope.Consumers.Declared)
+	}
+}
+
+// retainedIn is what print-retained prints for the target at dir, one line each.
+func retainedIn(t *testing.T, dir string) []string {
+	t.Helper()
+
+	t.Chdir(dir)
+	var stdout, stderr bytes.Buffer
+	if code := run(t.Context(), []string{"print-retained", "--target=."}, &stdout, &stderr); code != exitClean {
+		t.Fatalf("print-retained = %d, want %d: %s", code, exitClean, stderr.String())
+	}
+	return strings.Split(strings.TrimSpace(stdout.String()), "\n")
+}
+
+// A type each of two modules of one module path declares, spelled alike by both,
+// keeps the methods each module's own conversions retain.
+func TestRetainsForTwoModulesOfOnePathEachTypeItsOwnMethods(t *testing.T) {
+	failing := "package main\n\nimport (\n\t\"fmt\"\n\t\"io\"\n\t\"net/http\"\n\t\"os\"\n)\n\ntype E struct{}\n\n" +
+		"func (E) Error() string { return \"\" }\n\nfunc (E) Timeout() bool { return true }\n\n" +
+		"func (E) Temporary() bool { return true }\n\ntype R struct{}\n\n" +
+		"func (R) Read([]byte) (int, error) { return 0, io.EOF }\n\n" +
+		"func (R) WriteTo(io.Writer) (int64, error) { return 0, nil }\n\n" +
+		"func main() {\n\tvar err error = E{}\n\tvar r io.Reader = R{}\n\tfmt.Println(err)\n\t_, _ = io.Copy(os.Stdout, r)\n\t_ = http.ErrAbortHandler\n}\n"
+	dir := writeModule(t, map[string]string{
+		"x/go.mod":         "module example\n\ngo 1.27.1\n",
+		"x/main.go":        failing,
+		"y/go.mod":         "module example\n\ngo 1.27.1\n",
+		"y/main.go":        failing,
+		repositoryDocument: `{"target": {"kind": "application"}}`,
+	})
+
+	var want []string
+	for _, module := range []string{"x", "y"} {
+		at := "\tinterface-satisfaction\t" + module + "/main.go:"
+		want = append(want,
+			"go://example#E.Error"+at+"25:18\tsatisfies error",
+			"go://example#E.Timeout"+at+"25:18\tsatisfies what net asserts through error as Error",
+			"go://example#E.Temporary"+at+"25:18\tsatisfies what net asserts through error as Error",
+			"go://example#R.Read"+at+"26:20\tsatisfies io.Reader",
+			"go://example#R.WriteTo"+at+"26:20\tsatisfies what io asserts through io.Reader",
+		)
+	}
+	if got := retainedIn(t, dir); !slices.Equal(got, want) {
+		t.Errorf("print-retained printed\n%q\nwant\n%q", got, want)
+	}
+}
+
+// A published type of each of two library modules of one module path is held by an
+// outside program, each type spelled alike. An outside program may import several
+// modules of the target, so a published parameter of one holds the other's type too.
+func TestRetainsAPublishedTypeBesideAnotherModuleOfItsPath(t *testing.T) {
+	published := "package example\n\nimport \"fmt\"\n\n// T is published.\ntype T struct{}\n\n" +
+		"func (T) String() string { return \"\" }\n\n// NewT is published.\nfunc NewT() T { return T{} }\n\n" +
+		"// Print is published.\nfunc Print(s fmt.Stringer) { fmt.Println(s) }\n"
+	dir := writeModule(t, map[string]string{
+		"x/go.mod":         "module example\n\ngo 1.27.1\n",
+		"x/x.go":           published,
+		"y/go.mod":         "module example\n\ngo 1.27.1\n",
+		"y/y.go":           published,
+		repositoryDocument: `{"target": {"kind": "library"}}`,
+	})
+
+	got := retainedIn(t, dir)
+	if len(got) != 2 {
+		t.Fatalf("print-retained printed %q, want one T.String of each module", got)
+	}
+	for i, site := range []string{"x/x.go:14:12", "y/y.go:14:12"} {
+		if !strings.HasPrefix(got[i], "go://example#T.String\t") || !strings.Contains(got[i], "\t"+site+"\tsatisfies fmt.Stringer") {
+			t.Errorf("print-retained printed %q, want T.String retained at %s", got[i], site)
+		}
+	}
+}
+
+// Under a complete matrix a file of the second module that no configuration builds
+// is reported at its path under the target root.
+func TestAnalyzeReportsANeverBuiltFileOfTheSecondModule(t *testing.T) {
+	dir := twoModuleTree(t)
+	host := load.HostConfiguration()
+	writeDocument(t, dir, repositoryDocument, `{"target": {"kind": "application"}, "analysis": {"configurations": [`+
+		`{"id": "`+host.ID+`", "os": "`+runtime.GOOS+`", "arch": "`+runtime.GOARCH+`"}], "matrix": {"complete": true}}}`)
+
+	run := runAnalyze(t, dir)
+	if run.code != exitFindings {
+		t.Fatalf("analyze(a tree of two modules under a complete matrix) = %d, want %d: %s", run.code, exitFindings, run.stderr)
+	}
+	var found []string
+	for _, f := range envelopeAt(t, run.reportPath).Findings {
+		if f.Code == "DS1501" {
+			found = append(found, f.Symbol.Ref+" "+f.Position.Path)
+		}
+	}
+	if want := []string{"go://example.com/b#never.go:file b/never.go"}; !slices.Equal(found, want) {
+		t.Errorf("analyze() reported the never-built files %v, want %v", found, want)
+	}
+}
+
+// The scope's name for a target that no module is rooted at is the identity the
+// report carries, so a report of another language over the same target names it
+// alike.
+func TestAnalyzeNamesATargetNoModuleIsRootedAtAsTheScopeDoes(t *testing.T) {
+	dir := twoModuleTree(t)
+	writeDocument(t, dir, "scope.json", `{"target": {"id": "whole", "path": "."}}`)
+
+	run := runAnalyze(t, dir, "--scope="+filepath.Join(dir, "scope.json"))
+	if run.code != exitFindings {
+		t.Fatalf("analyze(a scoped tree of two modules) = %d, want %d: %s", run.code, exitFindings, run.stderr)
+	}
+	if got := envelopeAt(t, run.reportPath).Target.Identity; got != "whole" {
+		t.Errorf("the report names the target %q, want the scope's name %q", got, "whole")
+	}
+}
+
+// One module of the target can build another of its modules from a copy outside the
+// target, as a requirement the module cache resolves does: the copy shares the
+// package paths and declares nothing of the target, so the run answers and a
+// declaration only the copy's callers name is reported.
+func TestAnalyzeReadsAModuleTheTargetAlsoBuildsFromACopyOutsideIt(t *testing.T) {
+	root := writeModule(t, map[string]string{
+		"target/a/go.mod":              "module example.com/a\n\ngo 1.27.1\n\nrequire example.com/b v0.0.0\n\nreplace example.com/b => ../../copy/b\n",
+		"target/a/main.go":             "package main\n\nimport \"example.com/b\"\n\nfunc main() { b.Used() }\n",
+		"target/b/go.mod":              "module example.com/b\n\ngo 1.27.1\n",
+		"target/b/b.go":                "package b\n\n// Used is what the copy's callers call.\nfunc Used() {}\n",
+		"copy/b/go.mod":                "module example.com/b\n\ngo 1.27.1\n",
+		"copy/b/b.go":                  "package b\n\n// Used is what a calls.\nfunc Used() {}\n",
+		"target/" + repositoryDocument: `{"target": {"kind": "application"}}`,
+	})
+
+	run := runAnalyze(t, filepath.Join(root, "target"))
+	if run.code != exitFindings {
+		t.Fatalf("analyze(a module built from a copy outside the target) = %d, want %d: %s", run.code, exitFindings, run.stderr)
+	}
+	var found []string
+	for _, f := range envelopeAt(t, run.reportPath).Findings {
+		found = append(found, f.Symbol.Ref)
+	}
+	if want := []string{"go://example.com/b#Used"}; !slices.Equal(found, want) {
+		t.Errorf("analyze() reported %v, want %v: a calls the copy's Used", found, want)
 	}
 }

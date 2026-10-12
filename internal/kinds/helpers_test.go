@@ -190,7 +190,7 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 		if err != nil {
 			t.Fatalf("Setup: graph.Roots(%s): %v", c.ID, err)
 		}
-		graph.ClassifyTestSupport(result, symbols, roots, rootOptions.PublishedAPI)
+		graph.ClassifyTestSupport(result, root, symbols, roots, rootOptions.PublishedAPI)
 		references, _, err := graph.References(result, root, os.ReadFile, symbols)
 		if err != nil {
 			t.Fatalf("Setup: graph.References(%s): %v", c.ID, err)
@@ -237,6 +237,7 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 	generated := generatedPaths(t, per)
 	return &Input{
 		Config:       &resolved,
+		Root:         doc.Target.Path,
 		Merged:       &merged,
 		Sweep:        &swept,
 		Refs:         refs,

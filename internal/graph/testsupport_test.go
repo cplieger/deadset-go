@@ -27,7 +27,7 @@ func classifiedSupport(t *testing.T, library bool) (support, marked []string) {
 	if err != nil {
 		t.Fatalf("Setup: Roots(test-support.txtar): %v", err)
 	}
-	ClassifyTestSupport(result, symbols, roots, library)
+	ClassifyTestSupport(result, root, symbols, roots, library)
 	for i := range symbols {
 		_, inTestFile := IsTestFile(symbols[i].Pos.Filename)
 		if symbols[i].TestSupport && !inTestFile && symbols[i].Kind == KindFunc {

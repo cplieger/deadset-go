@@ -461,6 +461,10 @@ type stages struct {
 
 	root string
 
+	// identity is the name the scope gives the target, empty where it gives
+	// none.
+	identity string
+
 	// configurations is the build matrix the run analyzed, in the order every
 	// configuration index reaches this command in, and identifiers is the
 	// identifier of each in the same order.
@@ -589,7 +593,10 @@ func stagesOf(ctx context.Context, resolved *resolution) (stages, error) {
 	if err != nil {
 		return stages{}, err
 	}
-	configurations, derived, err := matrixOf(&resolved.config, document.Target.Path)
+	if resolved.scope == "" {
+		document.Consumers = nameable(document.Consumers)
+	}
+	configurations, derived, err := matrixOf(ctx, &resolved.config, document.Target.Path)
 	if err != nil {
 		return stages{}, err
 	}
@@ -634,6 +641,7 @@ func stagesOf(ctx context.Context, resolved *resolution) (stages, error) {
 		matrix:         x,
 		refs:           refs,
 		root:           targetRoot,
+		identity:       document.Target.ID,
 		configurations: configurations,
 		identifiers:    identifiers(configurations),
 		per:            per,
@@ -695,7 +703,7 @@ func passesOf(result *load.Result, targetRoot string, rootOptions graph.RootOpti
 	if err != nil {
 		return configured{}, graph.Configured{}, nil, err
 	}
-	graph.ClassifyTestSupport(result, symbols, roots, rootOptions.PublishedAPI)
+	graph.ClassifyTestSupport(result, targetRoot, symbols, roots, rootOptions.PublishedAPI)
 	references, rules, err := graph.References(result, targetRoot, os.ReadFile, symbols)
 	if err != nil {
 		return configured{}, graph.Configured{}, nil, err
@@ -737,7 +745,7 @@ func greatestPerRule(held, next []graph.TestFileRule) []graph.TestFileRule {
 // The derivation itself is returned beside the configurations, and is nil where the
 // configuration listed them: a stage that claims something about every
 // configuration of the target needs to know which of the two it is reading.
-func matrixOf(cfg *config.Config, targetRoot string) ([]load.Configuration, *matrix.Derived, error) {
+func matrixOf(ctx context.Context, cfg *config.Config, targetRoot string) ([]load.Configuration, *matrix.Derived, error) {
 	if platforms := cfg.Analysis.Platforms(); len(platforms) > 0 {
 		configurations := make([]load.Configuration, len(platforms))
 		for i, p := range platforms {
@@ -745,7 +753,7 @@ func matrixOf(cfg *config.Config, targetRoot string) ([]load.Configuration, *mat
 		}
 		return configurations, nil, nil
 	}
-	derived, err := matrix.Derive(targetRoot)
+	derived, err := matrix.Derive(ctx, targetRoot)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1229,7 +1237,7 @@ func findingsOf(ctx context.Context, resolved *resolution, options *exempt.Optio
 // answered: the stages, the exemptions, the production sweep, the suppression
 // records, the module file, the derived matrix and the declared edges.
 func inputOf(ctx context.Context, resolved *resolution, analyzed *analysis, generated map[string]bool) (*kinds.Input, error) {
-	module, err := deps.ModuleFile(ctx, analyzed.stages.root)
+	modules, err := moduleFilesOf(ctx, analyzed.stages.per)
 	if err != nil {
 		return nil, err
 	}
@@ -1247,7 +1255,8 @@ func inputOf(ctx context.Context, resolved *resolution, analyzed *analysis, gene
 		Generated:     func(path string) bool { return generated[path] },
 		Marks:         analyzed.marks,
 		Refusals:      analyzed.refusals,
-		Deps:          &module,
+		Root:          analyzed.stages.root,
+		Modules:       modules,
 		Unmatched:     analyzed.stages.unmatched,
 		RootsDocument: rootsDocument(resolved),
 		Edges:         declared,
@@ -1256,6 +1265,24 @@ func inputOf(ctx context.Context, resolved *resolution, analyzed *analysis, gene
 		Consumers:     consumersOf(&resolved.config, analyzed.stages.per),
 		Mode:          analyzed.mode,
 	}, nil
+}
+
+// moduleFilesOf reads the module file of every unit the run loaded, in unit
+// order. Every configuration loads the same units, so the first one names them.
+func moduleFilesOf(ctx context.Context, per []configured) ([]kinds.ModuleFile, error) {
+	if len(per) == 0 {
+		return nil, nil
+	}
+	units := per[0].result.Units
+	files := make([]kinds.ModuleFile, 0, len(units))
+	for i := range units {
+		file, err := deps.ModuleFile(ctx, units[i].Dir)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, kinds.ModuleFile{Dir: units[i].Dir, Path: units[i].Path, File: file})
+	}
+	return files, nil
 }
 
 // rootsDocument is the document that supplied the configured roots, as a path
@@ -1375,24 +1402,48 @@ func targetOf(resolved *resolution, loaded *stages) (report.Target, error) {
 	if err != nil {
 		return report.Target{}, err
 	}
-	identity, err := identityOf(loaded.per)
+	identity, err := identityOf(loaded)
 	if err != nil {
 		return report.Target{}, err
 	}
 	return report.Target{Kind: string(resolved.config.Target.Kind.Of(config.GoLanguage)), Root: root, Identity: identity}, nil
 }
 
-// identityOf is the module path the loaded target publishes itself under, which is
-// the scope every symbol reference of the target carries.
-func identityOf(per []configured) (string, error) {
-	for i := range per {
-		for _, p := range per[i].result.Packages {
-			if p.Module != nil && p.Module.Path != "" {
-				return p.Module.Path, nil
-			}
+// identityOf is the name the loaded target publishes itself under: the path of
+// the module rooted at the target root, else the name the scope gives the target,
+// else the path of the first unit in directory order.
+func identityOf(loaded *stages) (string, error) {
+	var units []load.Unit
+	if len(loaded.per) > 0 {
+		units = loaded.per[0].result.Units
+	}
+	for i := range units {
+		if filepath.Clean(units[i].Dir) == filepath.Clean(loaded.root) && units[i].Path != "" {
+			return units[i].Path, nil
+		}
+	}
+	if loaded.identity != "" {
+		return loaded.identity, nil
+	}
+	for i := range units {
+		if units[i].Path != "" {
+			return units[i].Path, nil
 		}
 	}
 	return "", errors.New("the loaded target names no module path, which a report identifies it by")
+}
+
+// nameable is the consumers a workspace lists that a report can name, those under
+// the run directory. The workspace still decides how each module builds, so one
+// above the run directory changes the build and not the report.
+func nameable(consumers []scope.Module) []scope.Module {
+	var held []scope.Module
+	for _, consumer := range consumers {
+		if _, err := relativeToRunDirectory(consumer.Path); err == nil {
+			held = append(held, consumer)
+		}
+	}
+	return held
 }
 
 // relativeToRunDirectory is one absolute path of the run, relative to the directory

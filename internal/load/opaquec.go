@@ -34,29 +34,21 @@ const (
 	wildcard = "..."
 )
 
-// checkOpaqueC type-checks every loaded package that ignored a file solely for
-// importing "C" a second time, from that package's original sources, with the C
-// pseudo-package opaque, and returns the target-relative paths, forward slashes,
-// of the files that stayed excluded.
-//
-// A package the check accepts is updated in place rather than replaced, because
-// the packages of a load hold one another in their own import maps and a second
-// value for one of them would leave the two disagreeing. What the update changes
-// is the syntax, the types, the type information and the imports, together with
-// the file lists that say which files those came from; the identifier, the import
-// path, the name, the module and the file set are the load's and stay so.
-//
-// Nothing of the C half is analyzed. The mode declares an empty package for "C",
-// so a C declaration is no symbol of anything and a C expression has no recorded
-// type; what the check adds is the Go declarations, the Go references and the
-// directives those files carry.
-func checkOpaqueC(ctx context.Context, fset *token.FileSet, target string, pkgs []*packages.Package, cgo map[string]bool, c Configuration) []string {
+// checkOpaqueC type-checks again, from its original sources with the C
+// pseudo-package opaque, every loaded package that ignored a file solely for
+// importing "C", and returns the target-relative slash paths of the files that
+// stayed excluded; a package it loads on demand resolves from the unit's directory
+// under the unit's workspace setting. An accepted package is updated in place,
+// because the load's packages hold one another in their import maps: its syntax,
+// types, type information, imports and file lists change, and its identity does
+// not. No C declaration becomes a symbol; only the Go half is analyzed.
+func checkOpaqueC(ctx context.Context, fset *token.FileSet, target string, from unitDir, pkgs []*packages.Package, cgo map[string]bool, c Configuration) []string {
 	if len(cgo) == 0 {
 		return nil
 	}
 	o := &opaqueCheck{
 		fset:     fset,
-		imports:  newCgoImporter(ctx, fset, target, c, pkgs),
+		imports:  newCgoImporter(ctx, fset, from, c, pkgs),
 		parsed:   make(map[string]*ast.File),
 		excluded: make(map[string]bool, len(cgo)),
 		sizes:    types.SizesFor(gcCompiler, c.Arch),
@@ -423,22 +415,22 @@ type cgoImporter struct {
 	fset    *token.FileSet
 	known   map[string]*packages.Package
 	refused map[string]bool
-	target  string
+	from    unitDir
 	c       Configuration
 }
 
 // newCgoImporter indexes every package the load type-checked, by import path, and
-// answers anything else from the target's own directory.
+// answers anything else from the unit's own directory.
 //
 // A package and its test variants share one import path and an import of that path
 // names the package itself, so a variant is never indexed.
-func newCgoImporter(ctx context.Context, fset *token.FileSet, target string, c Configuration, pkgs []*packages.Package) *cgoImporter {
+func newCgoImporter(ctx context.Context, fset *token.FileSet, from unitDir, c Configuration, pkgs []*packages.Package) *cgoImporter {
 	im := &cgoImporter{
 		ctx:     ctx,
 		fset:    fset,
 		known:   make(map[string]*packages.Package),
 		refused: make(map[string]bool),
-		target:  target,
+		from:    from,
 		c:       c,
 	}
 	packages.Visit(pkgs, nil, im.keep)
@@ -489,8 +481,8 @@ func (im *cgoImporter) resolve(path string) (*packages.Package, error) {
 	cfg := &packages.Config{
 		Mode:       metadataMode,
 		Context:    im.ctx,
-		Dir:        im.target,
-		Env:        loadEnv(im.c, workspaceOff),
+		Dir:        im.from.dir,
+		Env:        loadEnv(im.c, im.from.workspace),
 		BuildFlags: buildFlags(im.c.Tags),
 	}
 	pkgs, err := packages.Load(cfg, path)

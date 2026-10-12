@@ -203,7 +203,7 @@ func (g *intrafunc) twinned(id graph.SymbolID, decl *ast.FuncDecl) bool {
 // consumer set loaded whole is every caller only where the configuration says so.
 func (g *intrafunc) callersUnknown(id graph.SymbolID) bool {
 	symbol := g.in.symbol(id)
-	if symbol == nil || !symbol.Exported || !g.in.importable(symbol.PkgPath) {
+	if symbol == nil || !symbol.Exported || !g.in.importable(symbol) {
 		return false
 	}
 	if g.in.Config == nil || g.in.Config.Target.Kind.Of(config.GoLanguage) != config.Library {

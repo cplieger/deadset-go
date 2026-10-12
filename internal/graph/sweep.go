@@ -265,8 +265,9 @@ func (g *Graph) using(in *SweepInput) *Graph {
 			continue
 		}
 		_, test := IsTestFile(g.symbols[from].Pos.Filename)
-		derived.add(&Reference{From: use.From, To: use.To, Test: test})
-		if gates[i] > 0 {
+		// An unappended use leaves another edge last, the base graph's or another
+		// use's, so only an edge this call appended may be gated.
+		if derived.add(&Reference{From: use.From, To: use.To, Test: test}) && gates[i] > 0 {
 			last := len(derived.out[from]) - 1
 			derived.out[from][last].gate = len(g.gates) + gates[i]
 		}

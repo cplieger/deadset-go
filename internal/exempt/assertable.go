@@ -87,10 +87,10 @@ func (s *sources) parseDir(pkg *types.Package, dir string) []*ast.File {
 type assertable struct {
 	in         *Input
 	source     *sources
-	own        map[string][]*types.Interface // by package path
-	imported   map[string]importedSet        // by package path
-	assertions map[string][]*types.Interface // by package path
-	selfNamed  map[string]map[string]bool    // by package path, the names [assertable.assertsOwn] reads
+	own        map[*types.Package][]*types.Interface // per reading of a package, as each states its types
+	imported   map[*types.Package]importedSet
+	assertions map[*types.Package][]*types.Interface
+	selfNamed  map[string]map[string]bool // by package path, the names [assertable.assertsOwn] reads
 }
 
 // importedSet is what the packages one package imports at any depth can name: their
@@ -106,9 +106,9 @@ func assertableOf(in *Input) *assertable {
 		in.assert = &assertable{
 			in:         in,
 			source:     newSources(in),
-			own:        make(map[string][]*types.Interface),
-			imported:   make(map[string]importedSet),
-			assertions: make(map[string][]*types.Interface),
+			own:        make(map[*types.Package][]*types.Interface),
+			imported:   make(map[*types.Package]importedSet),
+			assertions: make(map[*types.Package][]*types.Interface),
 			selfNamed:  make(map[string]map[string]bool),
 		}
 	}
@@ -118,18 +118,18 @@ func assertableOf(in *Input) *assertable {
 // ownInterfaces is every interface one package declares, exported or not, and every
 // interface type literal its source writes.
 func (a *assertable) ownInterfaces(pkg *types.Package) []*types.Interface {
-	if held, known := a.own[pkg.Path()]; known {
+	if held, known := a.own[pkg]; known {
 		return held
 	}
 	held := append(declaredInterfaces(pkg, true), a.literals(pkg)...)
-	a.own[pkg.Path()] = held
+	a.own[pkg] = held
 	return held
 }
 
 // importedBy is what the packages one package imports at any depth can name, the
 // package itself counted for the template engines alone.
 func (a *assertable) importedBy(pkg *types.Package) importedSet {
-	if held, known := a.imported[pkg.Path()]; known {
+	if held, known := a.imported[pkg]; known {
 		return held
 	}
 	held := importedSet{templates: templatePackages[pkg.Path()]}
@@ -150,7 +150,7 @@ func (a *assertable) importedBy(pkg *types.Package) importedSet {
 			}
 		}
 	}
-	a.imported[pkg.Path()] = held
+	a.imported[pkg] = held
 	return held
 }
 
@@ -195,10 +195,10 @@ func (a *assertable) literals(pkg *types.Package) []*types.Interface {
 // whatever value it asserts on, read from the directory the package was compiled
 // from. A case naming a type that is no interface asserts nothing.
 func (a *assertable) asserted(pkg *types.Package) []*types.Interface {
-	if held, known := a.assertions[pkg.Path()]; known {
+	if held, known := a.assertions[pkg]; known {
 		return held
 	}
-	a.assertions[pkg.Path()] = nil
+	a.assertions[pkg] = nil
 	dir, located := packageDir(a.in.Result.Fset, pkg)
 	if !located {
 		return nil
@@ -216,7 +216,7 @@ func (a *assertable) asserted(pkg *types.Package) []*types.Interface {
 			}
 		}
 	}
-	a.assertions[pkg.Path()] = found
+	a.assertions[pkg] = found
 	return found
 }
 

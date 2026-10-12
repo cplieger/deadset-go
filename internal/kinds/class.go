@@ -67,7 +67,7 @@ func (in *Input) classOf(id graph.SymbolID) Class {
 		return Certain
 	case testFile(symbol):
 		return Certain
-	case !in.importable(symbol.PkgPath):
+	case !in.importable(symbol):
 		return Certain
 	case in.hiddenMember(symbol):
 		return Certain
@@ -86,7 +86,7 @@ func (in *Input) classOf(id graph.SymbolID) Class {
 // exported production declaration of a package outside programs can import.
 func (in *Input) publishedAPI(symbol *graph.Symbol) bool {
 	return in.Config != nil && in.Config.Target.Kind.Of(config.GoLanguage) == config.Library && symbol.Exported &&
-		!testFile(symbol) && in.importable(symbol.PkgPath)
+		!testFile(symbol) && in.importable(symbol)
 }
 
 // componentCap is the lowest reachability class among the roots of the dead
@@ -133,14 +133,15 @@ func (in *Input) everyDeclaredLoaded() bool {
 	return true
 }
 
-// importable reports whether anything outside the target module can import one
-// package: not a main package, not an external test package, and not under an
-// internal tree, which for a target analyzed alone is every internal package.
-func (in *Input) importable(pkgPath string) bool {
-	if in.index().mains[pkgPath] || strings.HasSuffix(pkgPath, testPackageSuffix) {
+// importable reports whether anything outside the target module can import the
+// package declaring symbol: not a main package, not an external test package, and
+// not under an internal tree, which for a target analyzed alone is every internal
+// package.
+func (in *Input) importable(symbol *graph.Symbol) bool {
+	if in.index().mains[in.packageOf(symbol)] || strings.HasSuffix(symbol.PkgPath, testPackageSuffix) {
 		return false
 	}
-	return !slices.Contains(strings.Split(pkgPath, "/"), internalElement)
+	return !slices.Contains(strings.Split(symbol.PkgPath, "/"), internalElement)
 }
 
 // consumersLoaded reports whether the configuration declares the consumer set

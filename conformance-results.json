@@ -7,8 +7,8 @@
   },
   "result": "pass",
   "totals": {
-    "fixtures": 124,
-    "pass": 124,
+    "fixtures": 127,
+    "pass": 127,
     "gap": 0,
     "fail": 0
   },
@@ -1647,6 +1647,34 @@
             "retained_by": [
               "enum-group"
             ]
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "enum-group-outside-type",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "rttFailed",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "rttUntested",
+          "result": "pass",
+          "actual": {
+            "report": "DS1302",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         }
       ],
@@ -6844,6 +6872,65 @@
       "unexpected": []
     },
     {
+      "fixture": "target-of-several-modules",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Unused",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "UnusedReplace",
+          "result": "pass",
+          "actual": {
+            "report": "DS1605",
+            "symbol_kind": "module-directive",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "details": {
+              "replacement": "../absent"
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Used",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "unusedA",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
       "fixture": "test-build-tags-derive-configurations",
       "result": "pass",
       "expectations": [
@@ -8889,6 +8976,27 @@
             "details": {
               "dependency_class": "require"
             }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "workspace-member-target",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "unused",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
           },
           "suppression": {
             "suppressed": true,

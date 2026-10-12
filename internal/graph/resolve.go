@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/token"
 	"go/types"
+	"path/filepath"
 
 	"github.com/cplieger/deadset-go/internal/load"
 	"golang.org/x/tools/go/packages"
@@ -21,8 +22,10 @@ type Resolver struct {
 	pos       *positions
 	symbols   map[token.Pos]SymbolID
 	sites     map[site]SymbolID
-	reread    map[token.Pos]SymbolID // Object's answers for a second reading of a target file
+	reread    map[token.Pos]SymbolID    // Object's answers for a second reading of a target file
+	dirs      map[*types.Package]string // TypeKey's directory of each package, on first use
 	consumers []consumerPositions
+	rereads   bool // the load reads a target file twice: a consumer or a second unit does
 }
 
 // consumerPositions renders the files of one loaded consumer against its own root.
@@ -57,6 +60,7 @@ func NewResolver(r *load.Result, targetRoot string, read ReadFile, symbols []Sym
 			})
 		}
 	}
+	rs.rereads = len(rs.consumers) > 0 || len(r.Units) > 1
 	if err := rs.index(r.Packages, symbols); err != nil {
 		return nil, err
 	}
@@ -120,14 +124,14 @@ func (rs *Resolver) hold(obj types.Object, sites map[site]SymbolID) (token.Posit
 
 // Object returns the identifier of the declaration obj is declared at. A nil
 // object, and one declared outside the target root or at a position no symbol of
-// the inventory holds, name none. An object of a consumer's own reading of a target
-// package, which a load that holds the target twice parses into the file set a
-// second time, names the declaration its rendered position names.
+// the inventory holds, name none. An object of a second reading of a target package,
+// which a consumer's load or another unit's parses into the file set, names the
+// declaration its rendered position names.
 func (rs *Resolver) Object(obj types.Object) (SymbolID, bool) {
 	if obj == nil {
 		return "", false
 	}
-	if id, held := rs.At(obj.Pos()); held || len(rs.consumers) == 0 {
+	if id, held := rs.At(obj.Pos()); held || !rs.rereads {
 		return id, held
 	}
 	if id, known := rs.reread[obj.Pos()]; known {
@@ -153,6 +157,49 @@ func (rs *Resolver) Object(obj types.Object) (SymbolID, bool) {
 func (rs *Resolver) At(pos token.Pos) (SymbolID, bool) {
 	id, held := rs.symbols[pos]
 	return id, held
+}
+
+// Inside reports whether pos is written in a file under the target root, which is
+// what Render can render. It reads no source.
+func (rs *Resolver) Inside(pos token.Pos) bool {
+	q := rs.pos.fset.Position(pos)
+	return q.IsValid() && rs.pos.relative(q.Filename) != ""
+}
+
+// TypeKey spells t as one type's identity across the variants of a load: the
+// spelling types.TypeString gives, each package qualified by its import path and
+// the directory its declarations are read from. Two readings of one package's
+// files spell alike, and two packages of one import path read from two
+// directories, two modules of the target declaring one module path among them,
+// do not.
+func (rs *Resolver) TypeKey(t types.Type) string {
+	return types.TypeString(t, rs.PackageKey)
+}
+
+// PackageKey is the qualifier [Resolver.TypeKey] spells p with.
+func (rs *Resolver) PackageKey(p *types.Package) string {
+	return p.Path() + "\x00" + rs.packageDir(p)
+}
+
+// packageDir is the directory of the file declaring the first object of p's scope
+// that has a position, and the empty string for a package declaring none.
+func (rs *Resolver) packageDir(p *types.Package) string {
+	if dir, known := rs.dirs[p]; known {
+		return dir
+	}
+	dir := ""
+	scope := p.Scope()
+	for _, name := range scope.Names() {
+		if at := rs.pos.fset.PositionFor(scope.Lookup(name).Pos(), false); at.IsValid() {
+			dir = filepath.Dir(at.Filename)
+			break
+		}
+	}
+	if rs.dirs == nil {
+		rs.dirs = make(map[*types.Package]string)
+	}
+	rs.dirs[p] = dir
+	return dir
 }
 
 // Render converts pos into the position a report carries: a path relative to the

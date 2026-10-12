@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 )
 
 // workspaceFileName is the name of the file that lists the modules of a Go
@@ -48,14 +49,12 @@ func Resolve(ctx context.Context, dir, document string) (Document, error) {
 }
 
 // forWorkspace builds the scope from the workspace that governs dir: the module
-// whose directory dir names is the target, and every other module the workspace
-// lists is a consumer.
+// whose directory dir names is the target, a listed module below it is a module of
+// the target the load reads beside it, and every other listed module is a consumer.
 //
 // It reports false when no workspace file governs dir, and when the workspace
-// lists no module at dir, because a workspace the target is not a member of
-// decides nothing about the target. The directory has to be a listed module
-// itself: a directory below one is part of that module rather than the module the
-// workspace names, and the analysis of a subtree declares its own scope.
+// lists no module at dir: a workspace the target is not a member of decides nothing
+// about it, and a directory below a listed module is part of that module.
 func forWorkspace(ctx context.Context, dir string) (Document, bool, error) {
 	target, err := existingDir(dir)
 	if err != nil {
@@ -76,12 +75,44 @@ func forWorkspace(ctx context.Context, dir string) (Document, bool, error) {
 			doc.Target = Module{Path: path}
 			continue
 		}
+		if below(target, path) {
+			continue
+		}
 		doc.Consumers = append(doc.Consumers, Module{Path: path})
 	}
 	if doc.Target.Path == "" {
 		return Document{}, false, nil
 	}
 	return doc, true, nil
+}
+
+// Governing returns the workspace file that governs dir and reports whether that
+// file lists dir as one of its modules, which is when the toolchain run in dir
+// builds through it. No file, and a file not listing dir, report false.
+func Governing(ctx context.Context, dir string) (file string, member bool, err error) {
+	file, found := workspaceFile(dir)
+	if !found {
+		return "", false, nil
+	}
+	used, err := readWorkspace(ctx, file)
+	if err != nil {
+		return "", false, err
+	}
+	return file, slices.Contains(used, filepath.Clean(dir)), nil
+}
+
+// Members returns every module the workspace file that governs dir lists, when
+// that file lists dir among them, and nothing otherwise.
+func Members(ctx context.Context, dir string) ([]string, error) {
+	file, found := workspaceFile(dir)
+	if !found {
+		return nil, nil
+	}
+	used, err := readWorkspace(ctx, file)
+	if err != nil || !slices.Contains(used, filepath.Clean(dir)) {
+		return nil, err
+	}
+	return used, nil
 }
 
 // workspaceFile returns the workspace file that governs dir, which is the one in
@@ -179,4 +210,10 @@ type workJSON struct {
 // path holds is what the load reports, so a scope never states it twice.
 type workUse struct {
 	DiskPath string
+}
+
+// below reports whether path is a directory strictly under dir.
+func below(dir, path string) bool {
+	rel, err := filepath.Rel(dir, path)
+	return err == nil && rel != "." && filepath.IsLocal(rel)
 }

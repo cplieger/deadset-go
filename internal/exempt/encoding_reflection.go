@@ -348,7 +348,8 @@ type encodingFlow struct {
 	satisfying  map[satisfactionKey]map[string]bool // the method names retained
 	methodNames map[*types.Named]map[string]bool    // the names a type or a pointer to it declares
 	decode      *decoders
-	writes      map[token.Position]bool // the fields the program writes, on first use
+	writes      map[token.Position]bool       // the fields the program writes, on first use
+	reached     map[types.Type][]*types.Named // encoderReach's answers, which spell every type they meet
 	targets     []interfaceTarget
 	conversions []graph.Conversion // the program's, consumers' included
 
@@ -1160,6 +1161,9 @@ func typesReached(t types.Type) ([]*types.Named, []*types.Struct) {
 // joins once, and a generic type instantiated twice joins once per instantiation,
 // because the members of the two carry different types.
 func (f *encodingFlow) encoderReach(t types.Type) []*types.Named {
+	if held, known := f.reached[t]; known {
+		return held
+	}
 	found := f.encodedTypes(t)
 	seen := make(map[string]bool, len(found))
 	for _, named := range found {
@@ -1175,6 +1179,10 @@ func (f *encodingFlow) encoderReach(t types.Type) []*types.Named {
 			found = append(found, next)
 		}
 	}
+	if f.reached == nil {
+		f.reached = make(map[types.Type][]*types.Named)
+	}
+	f.reached[t] = found
 	return found
 }
 

@@ -9,6 +9,7 @@
 package graph
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"go/ast"
@@ -172,15 +173,18 @@ func bySite(a, b Symbol) int {
 	return strings.Compare(a.Ref, b.Ref)
 }
 
-// variantGroup holds every loaded package that shares one import path: the
-// package itself and the test variants that type-check its files again.
+// variantGroup holds every loaded package that shares one import path and one
+// directory: the package itself and the test variants that type-check its files
+// again. Two modules of the target can declare one module path, so the import path
+// alone names two packages.
 type variantGroup struct {
 	anchor  *ast.File
 	pkgPath string
+	dir     string
 	pkgs    []*packages.Package
 }
 
-// groupVariants gathers the loaded packages by import path, and orders the groups
+// groupVariants gathers the loaded packages by import path and directory, and orders the groups
 // and the variants inside each so one configuration is walked in one order. A
 // package the type checker did not check and a package with no syntax tree carry
 // no declaration and are left out. The anchor is the file whose name sorts first
@@ -196,10 +200,12 @@ func groupVariants(pkgs []*packages.Package, pos *positions) []variantGroup {
 		if len(files) == 0 {
 			continue
 		}
-		g := byPath[p.PkgPath]
+		dir := pos.dir(files[0].FileStart)
+		key := p.PkgPath + "\x00" + dir
+		g := byPath[key]
 		if g == nil {
-			g = &variantGroup{pkgPath: p.PkgPath}
-			byPath[p.PkgPath] = g
+			g = &variantGroup{pkgPath: p.PkgPath, dir: dir}
+			byPath[key] = g
 		}
 		g.pkgs = append(g.pkgs, p)
 		for _, f := range files {
@@ -214,7 +220,9 @@ func groupVariants(pkgs []*packages.Package, pos *positions) []variantGroup {
 		slices.SortFunc(g.pkgs, func(a, b *packages.Package) int { return strings.Compare(a.ID, b.ID) })
 		groups = append(groups, *g)
 	}
-	slices.SortFunc(groups, func(a, b variantGroup) int { return strings.Compare(a.pkgPath, b.pkgPath) })
+	slices.SortFunc(groups, func(a, b variantGroup) int {
+		return cmp.Or(strings.Compare(a.pkgPath, b.pkgPath), strings.Compare(a.dir, b.dir))
+	})
 	return groups
 }
 
@@ -233,7 +241,7 @@ type enumeration struct {
 	pos        *positions
 	seen       map[token.Pos]SymbolID  // one declaration per source site
 	refs       map[SymbolID]string     // a symbol's reference, for a container to lend
-	typeIDs    map[string]SymbolID     // import path and type name to that type's symbol
+	typeIDs    map[string]SymbolID     // [typeKey] to that type's symbol
 	dependents map[SymbolID][]SymbolID // a constant's dependents, applied once the walk ends
 	pending    []receiverOwner
 	symbols    []Symbol
@@ -323,7 +331,7 @@ func mentionsIota(info *types.Info, x ast.Expr) bool {
 // receiverOwner records a method whose container is a type the walk may not have
 // reached yet.
 type receiverOwner struct {
-	owner string
+	owner string // the [typeKey] of the receiver's type
 	index int
 }
 
@@ -474,7 +482,7 @@ func (e *enumeration) walkFunc(p *packages.Package, d *ast.FuncDecl, pkgID Symbo
 	// variant contributed and appends nothing, so recording a receiver then would
 	// name whichever symbol was appended last.
 	if owner != "" && len(e.symbols) > before {
-		e.pending = append(e.pending, receiverOwner{index: len(e.symbols) - 1, owner: owner})
+		e.pending = append(e.pending, receiverOwner{index: len(e.symbols) - 1, owner: typeKey(p.PkgPath, e.pos.dir(d.Name.Pos()), owner)})
 	}
 	return e.walkTypeParams(d.Type.TypeParams, &decl, id)
 }
@@ -544,7 +552,7 @@ func (e *enumeration) walkTypeSpec(p *packages.Package, s *ast.TypeSpec, pkgID S
 	if err != nil {
 		return err
 	}
-	e.typeIDs[typeKey(p.PkgPath, s.Name.Name)] = id
+	e.typeIDs[typeKey(p.PkgPath, e.pos.dir(s.Name.Pos()), s.Name.Name)] = id
 
 	switch t := s.Type.(type) {
 	case *ast.StructType:
@@ -643,14 +651,14 @@ func (e *enumeration) walkTypeParams(list *ast.FieldList, owner *declaration, ow
 // package is known.
 func (e *enumeration) resolveReceivers() {
 	for _, m := range e.pending {
-		if id, ok := e.typeIDs[typeKey(e.symbols[m.index].PkgPath, m.owner)]; ok {
+		if id, ok := e.typeIDs[m.owner]; ok {
 			e.symbols[m.index].Parent = id
 		}
 	}
 }
 
-// typeKey names one type of one package.
-func typeKey(pkgPath, name string) string { return pkgPath + " " + name }
+// typeKey names one type of the package of that import path read from dir.
+func typeKey(pkgPath, dir, name string) string { return pkgPath + "\x00" + dir + "\x00" + name }
 
 // isInterface reports whether a type name denotes an interface, however the
 // declaration spells it: a literal interface type, a defined type over one, or

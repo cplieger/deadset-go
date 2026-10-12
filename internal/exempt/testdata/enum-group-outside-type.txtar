@@ -1,0 +1,31 @@
+One iota group whose constants carry a type the standard library declares, which
+has a String method and which a conversion from an integer produces. The type is
+not one the target declares, so the group is no enumeration of the target and
+neither its members nor the other constant of that type is retained.
+
+-- go.mod --
+module example.com/enumoutside
+
+go 1.27.1
+-- rtt.go --
+package enumoutside
+
+import (
+	"math"
+	"time"
+)
+
+const (
+	rttFailed = time.Duration(math.MaxInt64 - iota)
+	rttUntested
+)
+
+const timeout = 5 * time.Second
+
+// Measure returns a duration converted from an integer, or the failure value.
+func Measure(n int64) (time.Duration, time.Duration) {
+	if n < 0 {
+		return rttFailed, timeout
+	}
+	return time.Duration(n), timeout
+}

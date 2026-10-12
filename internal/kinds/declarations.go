@@ -2,6 +2,8 @@ package kinds
 
 import (
 	"go/ast"
+	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -146,7 +148,7 @@ func (in *Input) shapeCode(symbol *graph.Symbol) string {
 		return unusedMemberCode
 	case !symbol.Exported:
 		return unusedUnexportedCode
-	case !in.importable(symbol.PkgPath):
+	case !in.importable(symbol):
 		return ""
 	default:
 		return unusedExportedCode
@@ -287,21 +289,23 @@ func testFile(symbol *graph.Symbol) bool {
 // whatever another configuration that compiles none of its importers says.
 func (in *Input) testSupport(symbol *graph.Symbol) bool {
 	support := false
+	dir := filepath.Join(in.Root, filepath.FromSlash(path.Dir(symbol.Pos.Filename)))
 	for _, one := range in.Per {
 		switch {
 		case one.Result == nil:
-		case one.Result.TestSupport[symbol.PkgPath]:
+		case one.Result.TestSupport[one.Result.PackageKey(symbol.PkgPath, dir)]:
 			support = true
-		case loads(one.Result, symbol.PkgPath):
+		case loads(one.Result, one.Result.PackageKey(symbol.PkgPath, dir)):
 			return false
 		}
 	}
 	return support
 }
 
-// loads reports whether one configuration loaded the package at path.
-func loads(r *load.Result, path string) bool {
-	return slices.ContainsFunc(r.Packages, func(p *packages.Package) bool { return p.PkgPath == path })
+// loads reports whether one configuration loaded the package of that
+// [load.Result.PackageKey].
+func loads(r *load.Result, key string) bool {
+	return slices.ContainsFunc(r.Packages, func(p *packages.Package) bool { return r.KeyOf(p) == key })
 }
 
 // deprecations is every declaration of the inventory carrying a deprecation
