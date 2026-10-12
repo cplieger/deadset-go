@@ -266,6 +266,7 @@ func (s *spans) retainOutside(in *Input, c *graph.Conversion, pkg *types.Package
 // ([assertable.asserted]); and on an error, the interfaces holding error's method
 // that a package declares and asserts itself ([outsideAssertions.ofError]).
 type outsideAssertions struct {
+	resolve   *graph.Resolver
 	program   map[string]bool
 	assert    *assertable
 	methodsOf map[outsideKey][]types.Object    // the methods retained, by type and package
@@ -294,6 +295,7 @@ func newOutsideAssertions(in *Input) *outsideAssertions {
 		program[p.PkgPath] = true
 	}
 	return &outsideAssertions{
+		resolve:   in.Resolve,
 		program:   program,
 		assert:    assertableOf(in),
 		methodsOf: make(map[outsideKey][]types.Object),
@@ -313,7 +315,7 @@ func (o *outsideAssertions) ofError(t types.Type) []errorAnswer {
 	if !isNamed {
 		return nil
 	}
-	key := types.TypeString(t, nil)
+	key := o.resolve.TypeKey(t)
 	if held, known := o.errorsOf[key]; known {
 		return held
 	}
@@ -388,7 +390,7 @@ func (o *outsideAssertions) methods(t types.Type, pkg *types.Package) []types.Ob
 	if !isNamed {
 		return nil
 	}
-	key := outsideKey{t: types.TypeString(named, nil), pkg: pkg.Path()}
+	key := outsideKey{t: o.resolve.TypeKey(named), pkg: pkg.Path()}
 	if held, known := o.methodsOf[key]; known {
 		return held
 	}

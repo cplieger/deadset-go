@@ -702,8 +702,8 @@ func TestValue(t testing.T) {}
 func TestDeclaredRootsOnlyAFunctionNamedMainOrInit(t *testing.T) {
 	const target = "example.com/app"
 	d := &rootDetection{
-		mains: map[string]bool{target: true},
-		found: make(map[Root]struct{}),
+		classes: map[string][]packageClass{target: {{main: true}}},
+		found:   make(map[Root]struct{}),
 	}
 
 	d.declared([]Symbol{

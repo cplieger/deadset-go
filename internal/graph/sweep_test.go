@@ -1176,3 +1176,19 @@ func TestSweepCountsAnInferredUseAsAReferenceItsSourceMakes(t *testing.T) {
 		t.Errorf("Sweep() with an inferred use returned components %+v, want %+v", got, components)
 	}
 }
+
+func TestSweepLeavesTheGraphUngatedByACoHeldExemptionOnASymbolItDoesNotHold(t *testing.T) {
+	b := newGraphBuilder(t).add("entry", "second", "callee")
+	b.root("entry", RootMain)
+	b.ref("entry", "callee")
+	g := b.graph()
+	in := &SweepInput{Exempt: []Exemption{{
+		ID: "go://example.com/app#absent", Class: "interface-satisfaction",
+		Holder: b.id("entry"), CoHolders: []SymbolID{b.id("second")},
+	}}}
+	g.Sweep(in)
+
+	if got := b.candidates(g.Sweep(&SweepInput{})); !slices.Equal(got, []string{"second reference-counting"}) {
+		t.Errorf("Sweep() after a sweep with the exemption returned candidates %v, want [second reference-counting]", got)
+	}
+}

@@ -80,7 +80,7 @@ func withModuleFile(t *testing.T, archive string, resolved config.Config,
 	if err != nil {
 		t.Fatalf("Setup: deps.ModuleFile(%s): %v", dir, err)
 	}
-	in.Deps = &file
+	in.Modules = []ModuleFile{{Dir: in.Root, Path: in.Per[0].Result.Units[0].Path, File: file}}
 	return in
 }
 
@@ -519,7 +519,7 @@ func TestUnusedReplaceSpellsAReferenceAndAReplacementEachItsOwnWay(t *testing.T)
 	t.Parallel()
 
 	in := withModuleFile(t, "artifacts-dependency.txtar", applicationConfig(), twoConfigurations()...)
-	in.Deps.Replaces = append(in.Deps.Replaces, deps.Replacement{
+	in.Modules[0].File.Replaces = append(in.Modules[0].File.Replaces, deps.Replacement{
 		Old:  deps.Module{Path: "example.com/vanished"},
 		New:  deps.Module{Path: "../vendored"},
 		Site: token.Position{Filename: "go.mod", Line: 30, Column: 1},

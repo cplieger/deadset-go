@@ -15,6 +15,8 @@
 package matrix
 
 import (
+	"context"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -50,22 +52,30 @@ type Derived struct {
 	Guessed []string
 }
 
-// Derive reads the module tree rooted at root and returns the matrix its build
-// constraints and the host configuration imply.
+// Derive reads the tree of every module a load of root reads, [load.Units], and
+// returns the matrix their build constraints and the host configuration imply.
 //
 // A file whose build constraint does not parse, or which declares more than one,
 // ends derivation with that file named: the toolchain refuses such a file too, so
 // deriving a matrix from the rest would describe a tree that does not build.
-func Derive(root string) (Derived, error) {
-	return derive(root, load.HostConfiguration())
+func Derive(ctx context.Context, root string) (Derived, error) {
+	return derive(ctx, root, load.HostConfiguration())
 }
 
 // derive is Derive with the host configuration supplied, which is what lets a
 // test state the identifiers it expects rather than compute them.
-func derive(root string, host load.Configuration) (Derived, error) {
-	files, err := collect(root)
+func derive(ctx context.Context, root string, host load.Configuration) (Derived, error) {
+	units, err := load.Units(ctx, root)
 	if err != nil {
-		return Derived{}, err
+		return Derived{}, fmt.Errorf("read the build constraints under %s: %w", root, err)
+	}
+	var files []fileConstraint
+	for _, unit := range units {
+		held, err := collect(root, unit)
+		if err != nil {
+			return Derived{}, err
+		}
+		files = append(files, held...)
 	}
 	configurations := configurationsOf(host, atomsOf(files))
 	return Derived{

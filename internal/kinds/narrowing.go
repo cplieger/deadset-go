@@ -192,7 +192,7 @@ func (n *narrowing) scopeOf(to *graph.Symbol, r *graph.Reference) narrowScope {
 // consumer set complete and every declared consumer loaded, because the callers of a
 // published package are otherwise unknown.
 func (in *Input) closed(symbol *graph.Symbol) bool {
-	return !in.importable(symbol.PkgPath) || in.consumersLoaded()
+	return !in.importable(symbol) || in.consumersLoaded()
 }
 
 // narrowable reports whether one declaration is a subject of the two narrowing
@@ -296,7 +296,7 @@ func UnnecessaryExposure(in *Input) ([]Finding, error) {
 	subjects := n.subjects()
 	found := make([]Finding, 0, len(subjects))
 	for _, symbol := range subjects {
-		if !in.importable(symbol.PkgPath) || n.reach[symbol.ID] != scopeModule ||
+		if !in.importable(symbol) || n.reach[symbol.ID] != scopeModule ||
 			n.namedBySignatureReachedFrom(symbol, scopeOutside) {
 			continue
 		}
@@ -485,7 +485,7 @@ func (in *Input) unreachableExport(candidate *graph.Candidate, symbol *graph.Sym
 		return false
 	case candidate.UnreferencedTest:
 		return in.unreferencedTestExport(candidate, symbol)
-	case in.importable(symbol.PkgPath), candidate.TestOfDeadCode, testFile(symbol):
+	case in.importable(symbol), candidate.TestOfDeadCode, testFile(symbol):
 		return false
 	case in.deadParent(symbol):
 		return false

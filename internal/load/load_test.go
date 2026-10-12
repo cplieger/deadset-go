@@ -540,3 +540,186 @@ func TestLoadReadsAPackageTheConfigurationBuildsNoFileOfTheSameOnAColdBuildCache
 		t.Errorf("Load(testdata/unbuilt) carries %v for the built package, want its one file", p)
 	}
 }
+
+// cgoDependencyScope writes a target that imports a dependency, reached through a
+// replace so nothing is fetched, whose only Go file the given constraint line
+// heads, and returns the target's scope.
+func cgoDependencyScope(t *testing.T, header string) scope.Document {
+	t.Helper()
+	root := t.TempDir()
+	files := map[string]string{
+		"app/go.mod": "module example.com/app\n\ngo 1.27.1\n\n" +
+			"require example.com/dep v0.0.0\n\nreplace example.com/dep => ../dep\n",
+		"app/app.go": "package app\n\nimport \"example.com/dep\"\n\n" +
+			"// Size reads the dependency.\nfunc Size() int { return dep.Size() }\n",
+		"dep/go.mod": "module example.com/dep\n\ngo 1.27.1\n",
+		"dep/dep.go": header + "package dep\n\n// #define SIZE 4\nimport \"C\"\n\n" +
+			"// Size is what the target reads.\nfunc Size() int { return int(C.SIZE) }\n",
+	}
+	for name, body := range files {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			t.Fatalf("Setup: create %s: %v", filepath.Dir(path), err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatalf("Setup: write %s: %v", path, err)
+		}
+	}
+	doc, err := scope.ForDir(filepath.Join(root, "app"))
+	if err != nil {
+		t.Fatalf("Setup: scope.ForDir(%s) = _, %v, want no error", root, err)
+	}
+	return doc
+}
+
+// A dependency whose Go files a load excludes only because it disables cgo is a
+// package the configuration builds, so the load answers, and the target's reference
+// to a declaration it lost is a type error of the target.
+func TestLoadReadsADependencyCgoAloneExcludes(t *testing.T) {
+	stableToolchain(t)
+	t.Setenv("GOCACHE", t.TempDir())
+
+	got, err := Load(t.Context(), cgoDependencyScope(t, ""), HostConfiguration())
+	if err != nil {
+		t.Fatalf("Load(a target importing a cgo-only dependency) = _, %v, want no error", err)
+	}
+	p := findPackage(got, "example.com/app")
+	if p == nil {
+		t.Fatalf("Load() reported no example.com/app package, ids = %v", packageIDs(got))
+	}
+	if len(p.TypeErrors) == 0 {
+		t.Errorf("Load() recorded no type error in example.com/app, want the one naming dep.Size")
+	}
+}
+
+// A dependency a constraint other than cgo excludes is no package the configuration
+// builds, so the load still fails on it.
+func TestLoadFailsOnADependencyAnotherConstraintExcludes(t *testing.T) {
+	stableToolchain(t)
+	t.Setenv("GOCACHE", t.TempDir())
+
+	_, err := Load(t.Context(), cgoDependencyScope(t, "//go:build never\n\n"), HostConfiguration())
+	if failure, ok := errors.AsType[*Error](err); !ok || len(failure.Diagnostics) == 0 {
+		t.Errorf("Load(a target importing a dependency no configuration builds) = _, %v, want a *Error with its diagnostics", err)
+	}
+}
+
+// writeTree writes files under a fresh temporary directory and returns it.
+func writeTree(t *testing.T, files map[string]string) string {
+	t.Helper()
+	root := t.TempDir()
+	for name, body := range files {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			t.Fatalf("Setup: create %s: %v", filepath.Dir(path), err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatalf("Setup: write %s: %v", path, err)
+		}
+	}
+	return root
+}
+
+// workspaceTree is a go.work listing two modules, app requiring lib through the
+// workspace alone: no replace and no module sum, so only a workspace build
+// resolves it.
+func workspaceTree(t *testing.T) string {
+	t.Helper()
+	return writeTree(t, map[string]string{
+		"go.work":     "go 1.27.1\n\nuse (\n\t./app\n\t./lib\n)\n",
+		"app/go.mod":  "module example.com/app\n\ngo 1.27.1\n\nrequire example.com/lib v0.0.0\n",
+		"app/main.go": "package main\n\nimport \"example.com/lib\"\n\nfunc main() { lib.Used() }\n",
+		"lib/go.mod":  "module example.com/lib\n\ngo 1.27.1\n",
+		"lib/lib.go":  "package lib\n\n// Used is what app calls.\nfunc Used() {}\n",
+	})
+}
+
+// A module a go.work lists loads through that workspace, as the toolchain builds it
+// there, and the workspace's other members are its dependencies rather than its own
+// code.
+func TestLoadReadsAMemberThroughTheWorkspaceThatListsIt(t *testing.T) {
+	stableToolchain(t)
+	root := workspaceTree(t)
+	doc, err := scope.ForDir(filepath.Join(root, "app"))
+	if err != nil {
+		t.Fatalf("Setup: scope.ForDir = _, %v", err)
+	}
+
+	got, err := Load(t.Context(), doc, HostConfiguration())
+	if err != nil {
+		t.Fatalf("Load(a workspace member requiring another member) = _, %v, want no error", err)
+	}
+	if p := findPackage(got, "example.com/app"); p == nil || p.Module == nil || !p.Module.Main {
+		t.Errorf("Load() carries %v for example.com/app, want a package of the main module", p)
+	}
+	packages.Visit(got.Packages, nil, func(p *packages.Package) {
+		if p.PkgPath == "example.com/lib" && (p.Module == nil || p.Module.Main) {
+			t.Errorf("Load() carries example.com/lib with module %+v, want a dependency", p.Module)
+		}
+	})
+	if len(got.Units) != 1 {
+		t.Errorf("Load() read %d units, want the one module the target is", len(got.Units))
+	}
+}
+
+// A target that is no module root holds every module below it, each loaded from
+// its own directory, and a directory no build reads is not searched.
+func TestLoadReadsEveryModuleUnderATargetThatIsNoModuleRoot(t *testing.T) {
+	stableToolchain(t)
+	root := writeTree(t, map[string]string{
+		"a/go.mod":                  "module example.com/a\n\ngo 1.27.1\n\nrequire example.com/b v0.0.0\n\nreplace example.com/b => ../b\n",
+		"a/main.go":                 "package main\n\nimport \"example.com/b\"\n\nfunc main() { b.Used() }\n",
+		"b/go.mod":                  "module example.com/b\n\ngo 1.27.1\n",
+		"b/b.go":                    "package b\n\n// Used is what a calls.\nfunc Used() {}\n",
+		"node_modules/x/go.mod":     "module example.com/x\n\ngo 1.27.1\n",
+		"node_modules/x/x.go":       "package x\n",
+		"b/testdata/fixture/go.mod": "module example.com/fixture\n\ngo 1.27.1\n",
+		"vendor/v/go.mod":           "module example.com/v\n\ngo 1.27.1\n",
+		"vendor/v/v.go":             "package v\n",
+		".hidden/h/go.mod":          "module example.com/h\n\ngo 1.27.1\n",
+		".hidden/h/h.go":            "package h\n",
+		"_ignored/i/go.mod":         "module example.com/i\n\ngo 1.27.1\n",
+		"_ignored/i/i.go":           "package i\n",
+	})
+	doc, err := scope.ForDir(root)
+	if err != nil {
+		t.Fatalf("Setup: scope.ForDir = _, %v", err)
+	}
+
+	got, err := Load(t.Context(), doc, HostConfiguration())
+	if err != nil {
+		t.Fatalf("Load(a tree of two modules) = _, %v, want no error", err)
+	}
+	var units []string
+	for _, u := range got.Units {
+		units = append(units, u.Path)
+	}
+	if want := []string{"example.com/a", "example.com/b"}; !slices.Equal(units, want) {
+		t.Errorf("Load() read the units %v, want %v", units, want)
+	}
+	for _, path := range []string{"example.com/a", "example.com/b"} {
+		if p := findPackage(got, path); p == nil || p.Module == nil || !p.Module.Main {
+			t.Errorf("Load() carries %v for %s, want a package of a main module", p, path)
+		}
+	}
+}
+
+// A directory a module file above it governs is a directory of that module, and a
+// module nested below it is no module of the target: the target is its own unit.
+func TestUnitsOfADirectoryAModuleAboveGovernsIsTheDirectory(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"go.mod":           "module example.com/r\n\ngo 1.27.1\n",
+		"sub/sub.go":       "package sub\n",
+		"sub/tool/go.mod":  "module example.com/tool\n\ngo 1.27.1\n",
+		"sub/tool/main.go": "package main\n\nfunc main() {}\n",
+	})
+	target := filepath.Join(root, "sub")
+
+	got, err := Units(t.Context(), target)
+	if err != nil {
+		t.Fatalf("Units(a directory of an enclosing module) = _, %v, want no error", err)
+	}
+	if want := []string{target}; !slices.Equal(got, want) {
+		t.Errorf("Units() = %v, want %v", got, want)
+	}
+}

@@ -29,7 +29,7 @@ go install github.com/cplieger/deadset-go/cmd/deadset-go@latest
 
 ## Usage
 
-deadset-go loads packages with the `go` toolchain on your `PATH` and never downloads a module, so run `go mod download` in the module and in every consumer first. Then create a `deadset.json` at the module root that says whether the module is an `application` or a `library`, and run `analyze` there:
+deadset-go loads packages with the `go` toolchain on your `PATH` and never downloads a module, so run `go mod download` in the module and in every consumer first. Then create a `deadset.json` at the module root that says whether the module is an `application` or a `library`, and run `analyze` there. Run it in a directory that no `go.mod` governs, and it analyzes every module below that directory in one report. A module listed in a `go.work` is loaded through that workspace, as `go build` loads it there, and the other modules that workspace lists below it are analyzed with it:
 
 ```sh
 echo '{ "target": { "kind": "application" } }' > deadset.json
@@ -113,7 +113,7 @@ The report follows the [deadset contract](https://github.com/cplieger/deadset-sp
 
 ## Related projects
 
-deadset-go implements the [deadset contract](https://github.com/cplieger/deadset-spec), which fixes the issue codes, the report schema and the exit codes. It passes all 124 of the contract's conformance fixtures that carry a Go rendering, and every report names that result.
+deadset-go implements the [deadset contract](https://github.com/cplieger/deadset-spec), which fixes the issue codes, the report schema and the exit codes. It passes all 127 of the contract's conformance fixtures that carry a Go rendering, and every report names that result.
 
 - [deadset-ts](https://github.com/cplieger/deadset-ts) is the same analysis for TypeScript and JavaScript.
 - [deadset](https://github.com/cplieger/deadset) runs both analyzers as one command and merges their reports, resolving the references between Go and TypeScript code.

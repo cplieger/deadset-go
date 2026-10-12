@@ -109,11 +109,12 @@ func New(symbols []Symbol, refs []Reference, roots []Root) *Graph {
 
 // add keeps one reference in the adjacency, in the count of references made to its
 // target, and where a loaded consumer made it, in the record that a module outside
-// the target calls the symbol.
-func (g *Graph) add(r *Reference) {
+// the target calls the symbol. It reports whether it appended an edge to From's
+// adjacency.
+func (g *Graph) add(r *Reference) bool {
 	to := g.at(r.To)
 	if to == outside {
-		return
+		return false
 	}
 	if r.Test {
 		g.made[to].test++
@@ -128,9 +129,12 @@ func (g *Graph) add(r *Reference) {
 			g.consumed[to].fromProductionFile = true
 		}
 	}
-	if from := g.at(r.From); from != outside {
-		g.out[from] = append(g.out[from], edge{to: to, test: r.Test})
+	from := g.at(r.From)
+	if from == outside {
+		return false
 	}
+	g.out[from] = append(g.out[from], edge{to: to, test: r.Test})
+	return true
 }
 
 // at returns the position of the symbol id names, or outside when the inventory

@@ -73,7 +73,7 @@ func TestDeriveEmitsOneConfigurationPerAtomAndNeverTheirProduct(t *testing.T) {
 			t.Parallel()
 
 			dir := extract(t, tc.archive)
-			derived, err := derive(dir, fixtureHost())
+			derived, err := derive(t.Context(), dir, fixtureHost())
 			if err != nil {
 				t.Fatalf("derive(%s) = error %v, want the derived matrix", tc.archive, err)
 			}
@@ -108,7 +108,7 @@ func TestDeriveReadsTestFileTagsAndNoIgnoreOnlyFile(t *testing.T) {
 	write(t, filepath.Join(dir, "golden.go"), []byte("//go:build ignore && golden\n\npackage app\n"))
 	write(t, filepath.Join(dir, "either.go"), []byte("//go:build ignore || extra\n\npackage app\n"))
 
-	derived, err := derive(dir, fixtureHost())
+	derived, err := derive(t.Context(), dir, fixtureHost())
 	if err != nil {
 		t.Fatalf("derive(boolean.txtar plus tagged files) = error %v, want the derived matrix", err)
 	}
@@ -157,7 +157,7 @@ func TestDeriveMakesABooleanConstraintReachableOnceTheAtomItNeedsAppears(t *test
 	dir := extract(t, "boolean.txtar")
 	write(t, filepath.Join(dir, "serve_arm64.go"), []byte("package app\n\n// Wide is the wide path.\nconst Wide = true\n"))
 
-	derived, err := derive(dir, fixtureHost())
+	derived, err := derive(t.Context(), dir, fixtureHost())
 	if err != nil {
 		t.Fatalf("derive(boolean.txtar plus an arm64 file) = error %v, want the derived matrix", err)
 	}
@@ -173,7 +173,7 @@ func TestDeriveMakesABooleanConstraintReachableOnceTheAtomItNeedsAppears(t *test
 func TestDeriveDerivesTheHostConfigurationOfTheRunningBinary(t *testing.T) {
 	t.Parallel()
 
-	derived, err := Derive(extract(t, "walk-skips.txtar"))
+	derived, err := Derive(t.Context(), extract(t, "walk-skips.txtar"))
 	if err != nil {
 		t.Fatalf("Derive(walk-skips.txtar) = error %v, want the derived matrix", err)
 	}
@@ -212,7 +212,7 @@ func TestDeriveRefusesAFileTheToolchainWouldRefuse(t *testing.T) {
 			dir := extract(t, "boolean.txtar")
 			write(t, filepath.Join(dir, "refused.go"), []byte(tc.content))
 
-			_, err := derive(dir, fixtureHost())
+			_, err := derive(t.Context(), dir, fixtureHost())
 			if err == nil {
 				t.Fatalf("derive(a file carrying %q) = no error, want the file refused", tc.content)
 			}
@@ -243,7 +243,7 @@ func TestDeriveAgreesWithTheToolchainOnEveryFileOfEveryConfiguration(t *testing.
 
 			root := extract(t, archive)
 			files := pathedFiles(t, root)
-			derived, err := derive(root, fixtureHost())
+			derived, err := derive(t.Context(), root, fixtureHost())
 			if err != nil {
 				t.Fatalf("derive(%s) = error %v, want the derived matrix", archive, err)
 			}

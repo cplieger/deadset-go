@@ -79,15 +79,17 @@ func outsideInterfaceMethods(r *load.Result) map[string][]*types.Func {
 			}
 		}
 	}
-	seen := make(map[string]bool)
+	// Each module of the target reads its imports anew, and a method is identical
+	// only to its own reading's signature, so every reading is indexed.
+	seen := make(map[*types.Package]bool)
 	found := make(map[string][]*types.Func)
 	for len(queue) > 0 {
 		pkg := queue[0]
 		queue = queue[1:]
-		if seen[pkg.Path()] {
+		if seen[pkg] {
 			continue
 		}
-		seen[pkg.Path()] = true
+		seen[pkg] = true
 		queue = append(queue, pkg.Imports()...)
 		if !target[pkg.Path()] {
 			indexExportedInterfaces(pkg, found)

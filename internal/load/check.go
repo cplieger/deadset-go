@@ -10,6 +10,7 @@ import (
 	"go/types"
 	"os"
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -25,19 +26,16 @@ const (
 	signatureParse = parser.AllErrors | parser.SkipObjectResolution
 )
 
-// typeCheck type-checks every package reachable from roots, each after the
-// packages it imports, and records what each reported in its Errors. A package of
-// the main module, a package of module (the target module in a consumer's load,
-// empty otherwise) and any package importing one of those are checked whole, their
-// syntax and type information kept for the analysis to walk. Every other package is
-// checked for its declarations alone, function bodies skipped and only its types
-// kept. A type error in a package of the main module, or of module, is recorded in
-// the package's TypeErrors alone and fails nothing, because the analysis skips the
-// declaration that holds it; a type error in any other package checked for its
-// declarations is no error of the program and is dropped.
-func typeCheck(ctx context.Context, fset *token.FileSet, roots []*packages.Package, arch, module string) error {
+// typeCheck type-checks every package reachable from roots, each after its imports,
+// recording what each reported in its Errors. A package of the main module, or of
+// modules (the target's in a consumer's load), and any package importing one is
+// checked whole, its syntax and type information kept; every other package for its
+// declarations alone. A type error in one of the first is recorded in TypeErrors
+// and fails nothing, because the analysis skips the declaration holding it; one in
+// any other package is no error of the program and is dropped.
+func typeCheck(ctx context.Context, fset *token.FileSet, roots []*packages.Package, arch string, modules []string) error {
 	return check(ctx, fset, roots, arch, func(p *packages.Package) bool {
-		return p.Module != nil && (module == "" && p.Module.Main || module != "" && p.Module.Path == module)
+		return p.Module != nil && (len(modules) == 0 && p.Module.Main || slices.Contains(modules, p.Module.Path))
 	}, true)
 }
 

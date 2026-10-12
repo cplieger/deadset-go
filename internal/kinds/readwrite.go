@@ -410,7 +410,7 @@ func (s *enumScan) constant(p *packages.Package, name *ast.Ident, register bool)
 	if !isNamed {
 		return
 	}
-	key := types.TypeString(named, nil)
+	key := s.per.Resolve.TypeKey(named)
 	owner, held := s.owners[key]
 	if !held {
 		if !register {

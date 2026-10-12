@@ -64,6 +64,11 @@ func TestEnumGroupRetainsEveryMemberOfAGroupWhoseValuesCanArriveByConversion(t *
 			want:    []string{},
 		},
 		{
+			name:    "a_group_of_a_type_the_target_does_not_declare",
+			archive: "enum-group-outside-type.txtar",
+			want:    []string{},
+		},
+		{
 			name:    "a_const_block_naming_iota_nowhere_is_no_group",
 			archive: "enum-group-no-iota.txtar",
 			want:    []string{},

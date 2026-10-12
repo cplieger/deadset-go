@@ -139,14 +139,9 @@ func neverBuilt(in *Input) ([]ignoredFile, error) {
 		return nil, nil
 	}
 	cgo := excludedByCgo(in.Per)
-	root, err := targetRoot(in.Per)
-	if err != nil {
-		return nil, err
-	}
-
 	files := make([]ignoredFile, 0, len(ignored))
 	for _, path := range slices.Sorted(maps.Keys(ignored)) {
-		relative := relativeToSlash(root, path)
+		relative := relativeToSlash(in.Root, path)
 		if cgo[relative] {
 			continue
 		}
@@ -224,39 +219,6 @@ func excludedByCgo(per []Configured) map[string]bool {
 		}
 	}
 	return excluded
-}
-
-// targetRoot is the directory the target's module is rooted at, which is what the
-// positions of a report are relative to.
-func targetRoot(per []Configured) (string, error) {
-	for _, one := range per {
-		if one.Result == nil {
-			continue
-		}
-		for _, p := range one.Result.Packages {
-			if p.Module != nil && p.Module.Main && p.Module.Dir != "" {
-				return p.Module.Dir, nil
-			}
-		}
-	}
-	return "", fmt.Errorf("%w: the load names no directory for the target's own module",
-		errInput)
-}
-
-// targetModule is the module path of the target, which scopes the reference of
-// every subject the module file declares.
-func targetModule(per []Configured) (string, error) {
-	for _, one := range per {
-		if one.Result == nil {
-			continue
-		}
-		for _, p := range one.Result.Packages {
-			if p.Module != nil && p.Module.Main && p.Module.Path != "" {
-				return p.Module.Path, nil
-			}
-		}
-	}
-	return "", fmt.Errorf("%w: the load names no module path for the target", errInput)
 }
 
 // relativeToSlash renders path relative to base with forward slashes, falling back
@@ -513,7 +475,7 @@ func FileNeverImported(in *Input) ([]Finding, error) {
 	var found []Finding
 	for i := range in.Merged.Symbols {
 		symbol := &in.Merged.Symbols[i]
-		if symbol.Kind != graph.KindFile || !unreached[symbol.PkgPath] {
+		if symbol.Kind != graph.KindFile || !unreached[in.packageOf(symbol)] {
 			continue
 		}
 		one, held := in.finding(symbol.ID, fileNeverImportedCode,
@@ -526,15 +488,12 @@ func FileNeverImported(in *Input) ([]Finding, error) {
 	return found, nil
 }
 
-// unreachedPackages is every import path of the target that no import reaches, no
-// root names, and whose every declaration is a candidate of the sweep. A package
-// whose files declare nothing is in the set when nothing imports it, because
-// nothing compiles those files into anything a program runs.
-//
-// A declaration the sweep did not judge dead keeps the package's files out of the
-// set whatever held it live, which for a package nothing imports is an exemption: a
-// use no reference names reaches that declaration, so the file it is written in
-// does not fall.
+// unreachedPackages is every package of the target, by [index.packageKey], that no
+// import reaches, no root names, and whose every declaration is a candidate of the
+// sweep, a package whose files declare nothing among them. A declaration the sweep
+// did not judge dead keeps the package's files out of the set whatever held it
+// live, which for a package nothing imports is an exemption: a use no reference
+// names reaches that declaration, so the file it is written in does not fall.
 func unreachedPackages(in *Input) map[string]bool {
 	imported := in.importedPackages()
 	rooted := in.rootedPackages()
@@ -545,25 +504,25 @@ func unreachedPackages(in *Input) map[string]bool {
 		symbol := &in.Merged.Symbols[i]
 		switch {
 		case symbol.Kind == graph.KindFile:
-			files[symbol.PkgPath] = true
+			files[in.packageOf(symbol)] = true
 		case symbol.Kind == graph.KindPackage:
 		case in.candidateOf(symbol.ID) == nil:
-			live[symbol.PkgPath]++
+			live[in.packageOf(symbol)]++
 		}
 	}
 
 	unreached := make(map[string]bool, len(files))
-	for pkgPath := range files {
-		if imported[pkgPath] || rooted[pkgPath] || in.index().mains[pkgPath] {
+	for pkg := range files {
+		if imported[pkg] || rooted[pkg] || in.index().mains[pkg] {
 			continue
 		}
-		unreached[pkgPath] = live[pkgPath] == 0
+		unreached[pkg] = live[pkg] == 0
 	}
 	return unreached
 }
 
-// importedPackages is every package of the target an import from outside it
-// reaches.
+// importedPackages is every package of the target, by [index.packageKey], an
+// import from outside it reaches.
 //
 // An import is a reference to the package symbol the inventory holds for the
 // imported package, which is the edge the reference pass records at an import
@@ -577,28 +536,28 @@ func (in *Input) importedPackages() map[string]bool {
 		if to == nil || to.Kind != graph.KindPackage {
 			continue
 		}
-		if from := in.symbol(ref.From); from != nil && from.PkgPath == to.PkgPath {
+		if from := in.symbol(ref.From); from != nil && in.packageOf(from) == in.packageOf(to) {
 			continue
 		}
-		imported[to.PkgPath] = true
+		imported[in.packageOf(to)] = true
 	}
 	return imported
 }
 
-// rootedPackages is every package of the target holding a declaration a root
-// names.
+// rootedPackages is every package of the target, by [index.packageKey], holding a
+// declaration a root names.
 func (in *Input) rootedPackages() map[string]bool {
 	rooted := make(map[string]bool)
 	for _, root := range in.Merged.Roots {
 		if symbol := in.symbol(root.ID); symbol != nil {
-			rooted[symbol.PkgPath] = true
+			rooted[in.packageOf(symbol)] = true
 		}
 	}
 	return rooted
 }
 
-// UnusedDependency reports a direct requirement of the module file whose module
-// provides no package any package of the target imports.
+// UnusedDependency reports a direct requirement of a module file whose module
+// provides no package any package of that file's module imports.
 //
 // A requirement marked indirect is never reported: it carries no import by
 // construction and pins a transitive version under module graph pruning, so
@@ -606,39 +565,38 @@ func (in *Input) rootedPackages() map[string]bool {
 // configuration of the matrix agrees, because a requirement one configuration
 // imports is used.
 func UnusedDependency(in *Input) ([]Finding, error) {
-	unused := unusedRequirements(in)
-	if len(unused) == 0 {
-		return nil, nil
-	}
-	module, err := targetModule(in.Per)
-	if err != nil {
-		return nil, err
-	}
-
-	found := make([]Finding, 0, len(unused))
-	for _, require := range unused {
-		one := findingAt(unusedDependencyCode, Subject{
-			Ref:       moduleFragment(module, require.Path+":"+requireSection),
-			Kind:      dependencySubject,
-			Name:      require.Path,
-			SizeLines: 1,
-		}, directivePosition(require.Site),
-			"no package of the target imports a package this required module provides")
-		one.Details.DependencyClass = requireSection
-		found = append(found, one)
+	var found []Finding
+	for i := range in.Modules {
+		m := &in.Modules[i]
+		for _, require := range unusedRequirements(in, m) {
+			one := findingAt(unusedDependencyCode, Subject{
+				Ref:       moduleFragment(m.Path, require.Path+":"+requireSection),
+				Kind:      dependencySubject,
+				Name:      require.Path,
+				SizeLines: 1,
+			}, in.directivePosition(m, require.Site),
+				"no package of the target imports a package this required module provides")
+			one.Details.DependencyClass = requireSection
+			found = append(found, one)
+		}
 	}
 	return found, nil
 }
 
-// unusedRequirements is every direct requirement every configuration of the run
-// found unused, in the order the module file declares them.
-func unusedRequirements(in *Input) []deps.Requirement {
-	if in == nil || in.Deps == nil || len(in.Per) == 0 {
-		return nil
-	}
-	unused := deps.UnusedRequirements(*in.Deps, in.Per[0].Result)
-	for _, one := range in.Per[1:] {
-		also := deps.UnusedRequirements(*in.Deps, one.Result)
+// unusedRequirements is every direct requirement of one module file every
+// configuration of the run found unused, in the order the file declares them.
+func unusedRequirements(in *Input, m *ModuleFile) []deps.Requirement {
+	var unused []deps.Requirement
+	for i, one := range in.Per {
+		unit := unitOf(one.Result, m.Dir)
+		if unit == nil {
+			return nil
+		}
+		also := deps.UnusedRequirements(m.File, unit)
+		if i == 0 {
+			unused = also
+			continue
+		}
 		unused = slices.DeleteFunc(unused, func(require deps.Requirement) bool {
 			return !slices.ContainsFunc(also, func(other deps.Requirement) bool {
 				return other.Path == require.Path
@@ -649,45 +607,46 @@ func unusedRequirements(in *Input) []deps.Requirement {
 }
 
 // UnusedReplace reports a replace directive whose replaced module is absent from
-// the build list, which is the one case in which the directive redirects nothing.
+// its module's build list, which is the one case in which the directive redirects
+// nothing.
 //
 // It is reported only where every configuration of the matrix agrees, because a
 // module one configuration loads is in the build list.
 func UnusedReplace(in *Input) ([]Finding, error) {
-	noop := noopReplacements(in)
-	if len(noop) == 0 {
-		return nil, nil
-	}
-	module, err := targetModule(in.Per)
-	if err != nil {
-		return nil, err
-	}
-
-	found := make([]Finding, 0, len(noop))
-	for _, replace := range noop {
-		named := referenceSpelling(replace.Old)
-		one := findingAt(unusedReplaceCode, Subject{
-			Ref:       moduleFragment(module, named+replaceSelector),
-			Kind:      directiveSubject,
-			Name:      named,
-			SizeLines: 1,
-		}, directivePosition(replace.Site),
-			"the module this directive replaces is absent from the build list")
-		one.Details.Replacement = moduleFileSpelling(replace.New)
-		found = append(found, one)
+	var found []Finding
+	for i := range in.Modules {
+		m := &in.Modules[i]
+		for _, replace := range noopReplacements(in, m) {
+			named := referenceSpelling(replace.Old)
+			one := findingAt(unusedReplaceCode, Subject{
+				Ref:       moduleFragment(m.Path, named+replaceSelector),
+				Kind:      directiveSubject,
+				Name:      named,
+				SizeLines: 1,
+			}, in.directivePosition(m, replace.Site),
+				"the module this directive replaces is absent from the build list")
+			one.Details.Replacement = moduleFileSpelling(replace.New)
+			found = append(found, one)
+		}
 	}
 	return found, nil
 }
 
-// noopReplacements is every replace directive every configuration of the run found
-// to redirect nothing, in the order the module file declares them.
-func noopReplacements(in *Input) []deps.Replacement {
-	if in == nil || in.Deps == nil || len(in.Per) == 0 {
-		return nil
-	}
-	noop := deps.NoopReplacements(*in.Deps, in.Per[0].Result)
-	for _, one := range in.Per[1:] {
-		also := deps.NoopReplacements(*in.Deps, one.Result)
+// noopReplacements is every replace directive of one module file every
+// configuration of the run found to redirect nothing, in the order the file
+// declares them.
+func noopReplacements(in *Input, m *ModuleFile) []deps.Replacement {
+	var noop []deps.Replacement
+	for i, one := range in.Per {
+		unit := unitOf(one.Result, m.Dir)
+		if unit == nil {
+			return nil
+		}
+		also := deps.NoopReplacements(m.File, unit)
+		if i == 0 {
+			noop = also
+			continue
+		}
 		noop = slices.DeleteFunc(noop, func(replace deps.Replacement) bool {
 			return !slices.ContainsFunc(also, func(other deps.Replacement) bool {
 				return other.Old == replace.Old && other.New == replace.New
@@ -695,6 +654,15 @@ func noopReplacements(in *Input) []deps.Replacement {
 		})
 	}
 	return noop
+}
+
+// unitOf is one configuration's load narrowed to the unit rooted at dir, and nil
+// where the configuration loaded no such unit.
+func unitOf(r *load.Result, dir string) *load.Result {
+	if r == nil {
+		return nil
+	}
+	return r.Unit(dir)
 }
 
 // referenceSpelling renders one module the way a symbol reference names it: the
@@ -718,19 +686,19 @@ func moduleFileSpelling(m deps.Module) string {
 	return m.Path + versionGap + m.Version
 }
 
-// moduleFragment is the reference of one subject the target's module file
-// declares: the target's module as the scope, and the fragment the subject's own
+// moduleFragment is the reference of one subject a module file of the target
+// declares: that file's module as the scope, and the fragment the subject's own
 // grammar spells. The scope comes from the reference of a package so that the
 // language prefix has one owner.
 func moduleFragment(module, fragment string) string {
 	return graph.Ref(graph.KindPackage, module, nil) + fragment
 }
 
-// positionOf renders the position of a directive of the module file, which spans
-// the one line it is written on.
-func directivePosition(site token.Position) Position {
+// directivePosition renders the position of a directive of one module file,
+// relative to the target root, which spans the one line it is written on.
+func (in *Input) directivePosition(m *ModuleFile, site token.Position) Position {
 	return Position{
-		Path:    site.Filename,
+		Path:    relativeToSlash(in.Root, filepath.Join(m.Dir, site.Filename)),
 		Line:    site.Line,
 		Column:  site.Column,
 		EndLine: site.Line,
@@ -782,16 +750,29 @@ func lastUses(in *Input) map[graph.SymbolID][]string {
 	}
 	union := make(map[graph.SymbolID][]string)
 	for _, one := range in.Per {
-		for id, modules := range deps.LastUses(one.Result, one.Resolve, in.Sweep.Candidates) {
-			for _, module := range modules {
-				if !slices.Contains(union[id], module) {
-					union[id] = append(union[id], module)
-				}
-			}
+		if one.Result == nil {
+			continue
+		}
+		// A last use is a module's last use inside one unit, whose own module
+		// file is what the deletion leaves requiring it.
+		for i := range one.Result.Units {
+			unit := one.Result.Unit(one.Result.Units[i].Dir)
+			joinLastUses(union, deps.LastUses(unit, one.Resolve, in.Sweep.Candidates))
 		}
 	}
 	for id := range union {
 		slices.Sort(union[id])
 	}
 	return union
+}
+
+// joinLastUses adds each module of found to its candidate's entry of union, once.
+func joinLastUses(union, found map[graph.SymbolID][]string) {
+	for id, modules := range found {
+		for _, module := range modules {
+			if !slices.Contains(union[id], module) {
+				union[id] = append(union[id], module)
+			}
+		}
+	}
 }

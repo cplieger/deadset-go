@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"go/token"
 	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -29,6 +30,10 @@ const metadataMode = packages.NeedName | packages.NeedFiles | packages.NeedCompi
 
 // loadPattern matches every package of the target directory's module tree.
 const loadPattern = "./..."
+
+// goFileExt is the extension of a Go source file, which IgnoredFiles lists among
+// assembly and C sources.
+const goFileExt = ".go"
 
 // The spelling of the test binary a test load synthesizes: a main package whose
 // import path is the tested package's path with this suffix.
@@ -68,6 +73,12 @@ type Result struct {
 	// every file a stage of the analysis meets is a file of the target.
 	Packages []*packages.Package
 
+	// Units holds one entry per module of the target, in [Units] order, each
+	// with its share of Packages. A reference from one unit to another is to a
+	// dependency of the first loaded from the second's directory, which is a
+	// second reading of the second's files.
+	Units []Unit
+
 	// Consumers holds one entry per declared consumer, in the order the scope
 	// declares them. A consumer's packages are kept apart from the target's
 	// because the two answer different questions: the declarations a run reports
@@ -77,7 +88,7 @@ type Result struct {
 
 	Fset *token.FileSet // one FileSet for the whole configuration
 
-	// TestSupport holds the import paths of the target's test-support packages:
+	// TestSupport holds the [Result.PackageKey] of the target's test-support packages:
 	// packages only tests reach, which every stage judges as test code. The load
 	// leaves it empty and [graph.ClassifyTestSupport] fills it, because the
 	// classification turns on the target kind and the roots.
@@ -87,6 +98,8 @@ type Result struct {
 	// which no package of the target compiles and every stage but the root
 	// detection leaves alone.
 	Programs []program
+
+	shared map[string]bool // the import paths [Result.PackageKey] joins a directory to
 
 	// ExcludedByCgo holds the target-relative paths, forward slashes, of the
 	// files the toolchain ignored for importing "C" that the opaque-C check could
@@ -108,16 +121,14 @@ func HostConfiguration() Configuration {
 	}
 }
 
-// Load resolves configuration c of doc's target and of every consumer doc
-// declares; cancelling ctx stops it. A file or a component the analysis needs and
-// the project does not provide, a declared consumer absent from its path among
-// them, returns a *[SetupError]. Any other error in the toolchain's metadata, then any
-// error a package checked as [typeCheck] states reports, returns a *[Error] with a
-// zero Result, so no finding is computed from a partial load. A consumer that cannot
-// be loaded or counted against this target returns [errConsumer]. Load makes no
-// network request, runs no compiler and pins the toolchain settings that decide what
-// loads, so it needs no C toolchain. One module's packages load once per
-// configuration, so a declaration of the target renders to one position.
+// Load resolves configuration c of every unit of doc's target ([Units]) and every
+// consumer doc declares; cancelling ctx stops it. A file or component the project
+// lacks, a declared consumer absent from its path among them, returns a
+// *[SetupError]; any other metadata or [typeCheck] error returns a *[Error] and a
+// zero Result, so no finding comes from a partial load; an unusable consumer returns
+// [errConsumer]. Load makes no network request, runs no compiler and pins the
+// settings that decide what loads. A unit another unit builds from its directory is
+// read twice, and the resolver joins the two readings by rendered site.
 func Load(ctx context.Context, doc scope.Document, c Configuration) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, fmt.Errorf("load %s: %w", c.ID, err)
@@ -134,48 +145,69 @@ func Load(ctx context.Context, doc scope.Document, c Configuration) (Result, err
 		return Result{}, fmt.Errorf("load %s: target %s: %w", c.ID, target, err)
 	}
 
-	fset := token.NewFileSet()
-	// The target's own module file decides the target's versions, so its load
-	// never reads a workspace, the ambient one included.
-	pkgs, diagnostics, err := loadPackages(ctx, fset, target, c, workspaceOff, "")
-	if _, setup := errors.AsType[*SetupError](err); setup {
+	dirs, err := Units(ctx, target)
+	if err != nil {
+		return Result{}, fmt.Errorf("load %s: find the modules under %s: %w", c.ID, target, err)
+	}
+	r := Result{Configuration: c, Fset: token.NewFileSet()}
+	for _, dir := range dirs {
+		if failed := r.loadUnit(ctx, target, dir); failed != nil {
+			return Result{}, failed
+		}
+	}
+	slices.Sort(r.ExcludedByCgo)
+	r.ExcludedByCgo = slices.Compact(r.ExcludedByCgo)
+	r.markShared()
+
+	r.Consumers, err = loadConsumers(ctx, r.Fset, &doc, c, r.Units)
+	if err != nil {
 		return Result{}, err
 	}
+	return r, nil
+}
+
+// loadUnit loads the unit whose toolchain runs from dir into r, as [Load] loads every unit.
+// The unit's own module file decides its versions, through the workspace that
+// lists it where one governs dir, and never through the ambient setting.
+func (r *Result) loadUnit(ctx context.Context, target, dir string) error {
+	c := r.Configuration
+	workspace, err := unitWorkspace(ctx, dir)
 	if err != nil {
-		return Result{}, fmt.Errorf("load %s: %s: %w", c.ID, target, err)
+		return fmt.Errorf("load %s: %s: %w", c.ID, dir, err)
+	}
+	pkgs, diagnostics, err := loadPackages(ctx, r.Fset, dir, c, workspace, nil)
+	if _, setup := errors.AsType[*SetupError](err); setup {
+		return err
+	}
+	if err != nil {
+		return fmt.Errorf("load %s: %s: %w", c.ID, dir, err)
 	}
 	if len(diagnostics) > 0 {
-		return Result{}, &Error{Configuration: c.ID, Diagnostics: diagnostics}
+		return &Error{Configuration: c.ID, Diagnostics: diagnostics}
 	}
 
 	pkgs = withoutTestBinaries(pkgs)
 	cgo, err := cgoOnly(pkgs, c)
 	if err != nil {
-		return Result{}, fmt.Errorf("load %s: %w", c.ID, err)
+		return fmt.Errorf("load %s: %w", c.ID, err)
 	}
-	excluded := checkOpaqueC(ctx, fset, target, pkgs, cgo, c)
-	programs := checkPrograms(ctx, fset, target, pkgs, c)
-
-	consumers, err := loadConsumers(ctx, fset, &doc, c, pkgs)
-	if err != nil {
-		return Result{}, err
+	from := unitDir{dir: dir, workspace: workspace}
+	r.ExcludedByCgo = append(r.ExcludedByCgo, checkOpaqueC(ctx, r.Fset, target, from, pkgs, cgo, c)...)
+	r.Programs = append(r.Programs, checkPrograms(ctx, r.Fset, from, pkgs, c)...)
+	r.Packages = append(r.Packages, pkgs...)
+	unit := Unit{Dir: dir, Packages: pkgs}
+	if module := mainModule(pkgs); module != nil {
+		unit.Path = module.Path
 	}
-
-	return Result{
-		Configuration: c,
-		Packages:      pkgs,
-		Consumers:     consumers,
-		Fset:          fset,
-		ExcludedByCgo: excluded,
-		Programs:      programs,
-	}, nil
+	r.Units = append(r.Units, unit)
+	return nil
 }
 
 // loadPackages resolves and type-checks every package of the module rooted at dir
 // under configuration c, with workspace as the child toolchain's GOWORK setting and
-// module as the further module [typeCheck] checks whole. A load that reports errors
+// modules as the further modules [typeCheck] checks whole. A load that reports errors
 // returns them as diagnostics and no packages.
-func loadPackages(ctx context.Context, fset *token.FileSet, dir string, c Configuration, workspace, module string) ([]*packages.Package, []Diagnostic, error) {
+func loadPackages(ctx context.Context, fset *token.FileSet, dir string, c Configuration, workspace string, modules []string) ([]*packages.Package, []Diagnostic, error) {
 	cfg := &packages.Config{
 		Mode:       metadataMode,
 		Context:    ctx,
@@ -188,10 +220,11 @@ func loadPackages(ctx context.Context, fset *token.FileSet, dir string, c Config
 	if err != nil {
 		return nil, nil, err
 	}
-	for _, p := range pkgs {
-		if unbuilt(p) {
-			p.Errors = nil
-		}
+	if workspace != workspaceOff && len(modules) == 0 {
+		demoteOtherMembers(pkgs, dir)
+	}
+	if err := dropUnbuiltErrors(pkgs, c); err != nil {
+		return nil, nil, err
 	}
 	if diagnostics := collect(pkgs); len(diagnostics) > 0 {
 		if failure := setupFailures(diagnostics, expectedModules(ctx, dir, c, workspace, pkgs)); failure != nil {
@@ -199,7 +232,7 @@ func loadPackages(ctx context.Context, fset *token.FileSet, dir string, c Config
 		}
 		return nil, diagnostics, nil
 	}
-	if err := typeCheck(ctx, fset, pkgs, c.Arch, module); err != nil {
+	if err := typeCheck(ctx, fset, pkgs, c.Arch, modules); err != nil {
 		return nil, nil, err
 	}
 	if diagnostics := collect(pkgs); len(diagnostics) > 0 {
@@ -220,6 +253,53 @@ func unbuilt(p *packages.Package) bool {
 	return len(p.Errors) > 0 && !slices.ContainsFunc(p.Errors, func(e packages.Error) bool {
 		return e.Kind != packages.ListError || e.Pos != ""
 	})
+}
+
+// dropUnbuiltErrors clears the errors of every package reachable from pkgs that
+// [unbuilt] or [unbuiltForCgo] reports, and returns the first error reading a
+// file's imports met.
+func dropUnbuiltErrors(pkgs []*packages.Package, c Configuration) error {
+	var failed error
+	packages.Visit(pkgs, nil, func(p *packages.Package) {
+		if unbuilt(p) {
+			p.Errors = nil
+			return
+		}
+		cgo, err := unbuiltForCgo(p, c)
+		if err != nil && failed == nil {
+			failed = err
+		}
+		if cgo {
+			p.Errors = nil
+		}
+	})
+	return failed
+}
+
+// unbuiltForCgo reports whether one package, of any module, has no Go file only
+// because [loadEnv] disables cgo: every Go file it ignored imports "C" and the
+// configuration selects it with cgo enabled. The configuration builds such a
+// package, so its positionless error is the analysis's own setting and no error
+// of the program. Its declarations are absent from the load, so a reference to
+// one is a type error [typeCheck] handles as it handles any other.
+func unbuiltForCgo(p *packages.Package, c Configuration) (bool, error) {
+	if len(p.GoFiles) > 0 || len(p.CompiledGoFiles) > 0 || len(p.Errors) == 0 ||
+		slices.ContainsFunc(p.Errors, func(e packages.Error) bool { return e.Kind != packages.ListError || e.Pos != "" }) {
+		return false, nil
+	}
+	ctxt := cgoEnabledContext(c)
+	found := false
+	for _, file := range p.IgnoredFiles {
+		if filepath.Ext(file) != goFileExt {
+			continue
+		}
+		alone, err := excludedByCgoAlone(&ctxt, file)
+		if err != nil || !alone {
+			return false, err
+		}
+		found = true
+	}
+	return found, nil
 }
 
 // loadEnv is the environment every load of configuration c runs the toolchain

@@ -73,7 +73,7 @@ func cgoEnabledContext(c Configuration) build.Context {
 func excludedByCgoAlone(ctxt *build.Context, path string) (bool, error) {
 	// IgnoredFiles carries every ignored file, assembly and C sources included;
 	// only a Go file can import "C".
-	if filepath.Ext(path) != ".go" {
+	if filepath.Ext(path) != goFileExt {
 		return false, nil
 	}
 	imports, err := importsCgo(path)

@@ -19,20 +19,20 @@ const moduleFile = "go.mod"
 var unbuiltDirs = []string{"testdata", "vendor"}
 
 // collect reads the build constraint of every Go file in the module tree rooted
-// at root, in the order the walk meets them.
+// at unit, in the order the walk meets them, each named relative to root.
 //
 // The walk is the toolchain's own reading of a directory rather than a loaded
 // package set, which is what lets it see a directory whose every file one
 // configuration excludes: such a directory holds no package for that
 // configuration and a load reports nothing at all for it.
-func collect(root string) ([]fileConstraint, error) {
+func collect(root, unit string) ([]fileConstraint, error) {
 	var files []fileConstraint
 	walk := func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if entry.IsDir() {
-			if path != root && (unbuilt(entry.Name()) || startsAnotherModule(path)) {
+			if path != unit && (unbuilt(entry.Name()) || startsAnotherModule(path)) {
 				return fs.SkipDir
 			}
 			return nil
@@ -47,8 +47,8 @@ func collect(root string) ([]fileConstraint, error) {
 		files = append(files, file)
 		return nil
 	}
-	if err := filepath.WalkDir(root, walk); err != nil {
-		return nil, fmt.Errorf("read the build constraints under %s: %w", root, err)
+	if err := filepath.WalkDir(unit, walk); err != nil {
+		return nil, fmt.Errorf("read the build constraints under %s: %w", unit, err)
 	}
 	return files, nil
 }

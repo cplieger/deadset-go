@@ -1,6 +1,7 @@
 package exempt
 
 import (
+	"cmp"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -38,29 +39,14 @@ const (
 	enumGroupByDecode
 )
 
-// EnumGroupDetector retains every member of an enumerated type whose values can
-// arrive by conversion rather than by name, so that a member reached only by value
-// is never reported.
-//
-// The enumerated type is a defined type whose constants are declared in an iota
-// group: a const block in which at least one specification's value expression
-// mentions iota, the specifications that repeat the previous expression included,
-// grouped by the defined type the constants carry. The class fires when the type
-// declares a String, MarshalText, UnmarshalText, MarshalJSON or UnmarshalJSON
-// method, when a value of it is produced by a conversion whose operand is an
-// integer that is not a constant of the type, or when a value of it is the target
-// of a decoder. Every constant of a type that fires is retained, including one
-// declared outside the iota group, because a value that arrives by conversion can
-// equal any of them.
-//
-// Three cases the mechanism leaves open are decided here, each as the rule it is.
-// A conversion method is matched by name alone, because the mechanism names the five
-// methods and a type whose String method carries another signature still spells a
-// value as text somewhere. A decoder's target carries an enumerated type when one
-// is reachable from the target's type through pointers, elements, map keys and
-// values and struct fields, because decoding a container writes every field it
-// holds. And a constant declared with the blank identifier names no member and is
-// retained by nothing.
+// EnumGroupDetector retains every constant of an enumerated type whose values can
+// arrive by conversion rather than by name: a defined type the target declares,
+// with constants in an iota group, that declares a String, MarshalText,
+// UnmarshalText, MarshalJSON or UnmarshalJSON method, is produced by converting a
+// non-constant integer, or is a decoder's target (the Contract's enum-group class).
+// A conversion method matches by name alone, a decoder's target carries every type
+// reachable through pointers, elements, map keys and values and fields, and a
+// blank constant is retained by nothing.
 func EnumGroupDetector(in *Input) ([]graph.Exemption, error) {
 	scan := &enumGroupScan{in: in, byKey: make(map[string]*enumGroupType)}
 	if err := scan.groups(); err != nil {
@@ -84,6 +70,7 @@ type enumGroupScan struct {
 type enumGroupType struct {
 	best    *enumGroupEvidence
 	held    map[graph.SymbolID]struct{}
+	spelled string // the type as types.TypeString spells it, the order of the exemptions
 	members []enumGroupMember
 	named   []*types.Named // the type as each package variant type-checked it
 }
@@ -178,13 +165,15 @@ func (s *enumGroupScan) constant(p *packages.Package, name *ast.Ident, register 
 	if !ok {
 		return nil
 	}
-	key := types.TypeString(named, nil)
+	key := s.in.Resolve.TypeKey(named)
 	enum := s.byKey[key]
 	if enum == nil {
-		if !register {
+		// A type declared outside the target is not an enumeration the target
+		// declares: its methods and its other constants are outside facts.
+		if !register || !s.in.Resolve.Inside(named.Obj().Pos()) {
 			return nil
 		}
-		enum = &enumGroupType{held: make(map[graph.SymbolID]struct{})}
+		enum = &enumGroupType{held: make(map[graph.SymbolID]struct{}), spelled: types.TypeString(named, nil)}
 		s.byKey[key] = enum
 		s.keys = append(s.keys, key)
 	}
@@ -277,7 +266,7 @@ func (s *enumGroupScan) integerConversion(p *packages.Package, call *ast.CallExp
 	if !ok {
 		return nil
 	}
-	enum := s.byKey[types.TypeString(named, nil)]
+	enum := s.byKey[s.in.Resolve.TypeKey(named)]
 	if enum == nil {
 		return nil
 	}
@@ -350,7 +339,7 @@ func (*enumGroupScan) decoder(p *packages.Package, call *ast.CallExpr) string {
 // reach names every defined type a value of t carries: t itself when it is
 // defined, and every type reachable through a pointer, an element, a map key or
 // value, or a struct field.
-func (*enumGroupScan) reach(t types.Type) []string {
+func (s *enumGroupScan) reach(t types.Type) []string {
 	var keys []string
 	seen := make(map[types.Type]struct{})
 	var walk func(types.Type)
@@ -363,7 +352,7 @@ func (*enumGroupScan) reach(t types.Type) []string {
 		}
 		seen[t] = struct{}{}
 		if named, ok := t.(*types.Named); ok {
-			keys = append(keys, types.TypeString(named, nil))
+			keys = append(keys, s.in.Resolve.TypeKey(named))
 			walk(named.Underlying())
 			return
 		}
@@ -407,7 +396,11 @@ func (s *enumGroupScan) record(enum *enumGroupType, rank int, pos token.Pos, det
 // fired, ordered by the defined type and then by the member's own declaration.
 func (s *enumGroupScan) exemptions() []graph.Exemption {
 	var found []graph.Exemption
-	for _, key := range slices.Sorted(slices.Values(s.keys)) {
+	keys := slices.Clone(s.keys)
+	slices.SortFunc(keys, func(a, b string) int {
+		return cmp.Or(cmp.Compare(s.byKey[a].spelled, s.byKey[b].spelled), cmp.Compare(a, b))
+	})
+	for _, key := range keys {
 		enum := s.byKey[key]
 		if enum.best == nil {
 			continue

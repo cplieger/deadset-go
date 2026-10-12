@@ -2,7 +2,10 @@ package graph
 
 import (
 	"go/token"
+	"go/types"
 	"maps"
+	"path"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -27,27 +30,30 @@ const (
 	outsideUser = " consumer"
 )
 
-// ClassifyTestSupport records the target's test-support packages in r.TestSupport and
-// marks their declarations in symbols. That is the largest set of non-main packages of
-// the target, none a test package by name and none holding a root, that a test reaches
-// and that nothing outside the set imports or references except a test file. A
-// package's own test files are outside it. A reference is a resolved name, so a call
-// through an interface method references no implementation. An init function, a blank
-// declaration and a test are no root here. A library's package is one only under an
-// internal tree, because outside programs may import any other.
-func ClassifyTestSupport(r *load.Result, symbols []Symbol, roots []Root, library bool) {
+// ClassifyTestSupport records the target's test-support packages in r.TestSupport, by
+// [load.Result.PackageKey], and marks their declarations in symbols, whose positions
+// are relative to targetRoot. That is the largest set of non-main, non-test, unrooted
+// packages of the target a test reaches and only test files, a package's own among
+// them, and members import or reference. A reference is a resolved name, so an
+// interface call references no implementation; an init function, a blank declaration
+// and a test are no root here. A library's package is one only under an internal tree,
+// because outside programs may import any other.
+func ClassifyTestSupport(r *load.Result, targetRoot string, symbols []Symbol, roots []Root, library bool) {
 	candidates := make(map[string]bool)
 	for _, p := range r.Packages {
 		if p.Module != nil && p.Module.Main && supportCandidate(p, library) {
-			candidates[p.PkgPath] = true
+			candidates[r.KeyOf(p)] = true
 		}
 	}
-	for path := range rootedPackages(symbols, roots) {
-		delete(candidates, path)
+	keyOf := func(s *Symbol) string {
+		return r.PackageKey(s.PkgPath, filepath.Join(targetRoot, filepath.FromSlash(path.Dir(s.Pos.Filename))))
+	}
+	for key := range rootedPackages(symbols, roots, keyOf) {
+		delete(candidates, key)
 	}
 	r.TestSupport = largestSupport(candidates, usersOf(r, candidates))
 	for i := range symbols {
-		symbols[i].TestSupport = r.TestSupport[symbols[i].PkgPath]
+		symbols[i].TestSupport = r.TestSupport[keyOf(&symbols[i])]
 	}
 }
 
@@ -58,12 +64,12 @@ func supportCandidate(p *packages.Package, library bool) bool {
 		(!library || slices.Contains(strings.Split(p.PkgPath, "/"), internalElement))
 }
 
-// rootedPackages is the import path of every package that declares a root of a
-// kind that keeps a package out of test-support code.
-func rootedPackages(symbols []Symbol, roots []Root) map[string]bool {
+// rootedPackages is the key of every package that declares a root of a kind
+// that keeps a package out of test-support code.
+func rootedPackages(symbols []Symbol, roots []Root, keyOf func(*Symbol) string) map[string]bool {
 	pkgOf := make(map[SymbolID]string, len(symbols))
 	for i := range symbols {
-		pkgOf[symbols[i].ID] = symbols[i].PkgPath
+		pkgOf[symbols[i].ID] = keyOf(&symbols[i])
 	}
 	rooted := make(map[string]bool)
 	for _, root := range roots {
@@ -71,18 +77,19 @@ func rootedPackages(symbols []Symbol, roots []Root) map[string]bool {
 		case RootInit, RootBlank, RootTest:
 			continue
 		}
-		if path, held := pkgOf[root.ID]; held {
-			rooted[path] = true
+		if key, held := pkgOf[root.ID]; held {
+			rooted[key] = true
 		}
 	}
 	return rooted
 }
 
 // usersOf is, per candidate, every user that imports it or references one of its
-// declarations from outside it: the package path of a target file that is not a
+// declarations from outside it: the package key of a target file that is not a
 // test file, testUser for a test file of the target or of a consumer, and
 // outsideUser for any other file of a consumer.
 func usersOf(r *load.Result, candidates map[string]bool) map[string]map[string]bool {
+	keys := packageKeys(r)
 	users := make(map[string]map[string]bool, len(candidates))
 	add := func(to, from string) {
 		if !candidates[to] || to == from {
@@ -95,26 +102,42 @@ func usersOf(r *load.Result, candidates map[string]bool) map[string]map[string]b
 	}
 	for _, p := range r.Packages {
 		if p.Module != nil && p.Module.Main {
-			addUses(r.Fset, p, p.PkgPath, add)
+			addUses(r.Fset, p, keys, r.KeyOf(p), add)
 		}
 	}
 	for _, consumer := range r.Consumers {
 		for _, p := range consumer.Packages {
-			addUses(r.Fset, p, outsideUser, add)
+			addUses(r.Fset, p, keys, outsideUser, add)
 		}
 	}
 	return users
 }
 
+// packageKeys is the [load.Result.PackageKey] of every package the load reads,
+// the target's dependencies and its consumers' included, by its types.
+func packageKeys(r *load.Result) map[*types.Package]string {
+	keys := make(map[*types.Package]string)
+	record := func(p *packages.Package) {
+		if p.Types != nil {
+			keys[p.Types] = r.KeyOf(p)
+		}
+	}
+	packages.Visit(r.Packages, nil, record)
+	for _, consumer := range r.Consumers {
+		packages.Visit(consumer.Packages, nil, record)
+	}
+	return keys
+}
+
 // addUses records every import and every resolved name of one package against the
 // user its file is: testUser for a test file and production for any other.
-func addUses(fset *token.FileSet, p *packages.Package, production string, add func(to, from string)) {
+func addUses(fset *token.FileSet, p *packages.Package, keys map[*types.Package]string, production string, add func(to, from string)) {
 	files := fileUsers{fset: fset, production: production, of: make(map[*token.File]string)}
 	for _, f := range p.Syntax {
 		user := files.at(f.FileStart)
 		for _, spec := range f.Imports {
-			if path, err := strconv.Unquote(spec.Path.Value); err == nil {
-				add(path, user)
+			if imported, err := strconv.Unquote(spec.Path.Value); err == nil {
+				add(importKey(p, keys, imported), user)
 			}
 		}
 	}
@@ -123,9 +146,25 @@ func addUses(fset *token.FileSet, p *packages.Package, production string, add fu
 	}
 	for id, object := range p.TypesInfo.Uses {
 		if object.Pkg() != nil {
-			add(object.Pkg().Path(), files.at(id.Pos()))
+			add(typesKey(keys, object.Pkg()), files.at(id.Pos()))
 		}
 	}
+}
+
+// importKey is the key of the package p imports by that path.
+func importKey(p *packages.Package, keys map[*types.Package]string, imported string) string {
+	if dep := p.Imports[imported]; dep != nil && dep.Types != nil {
+		return typesKey(keys, dep.Types)
+	}
+	return imported
+}
+
+// typesKey is the key of pkg, its import path where the load read no such package.
+func typesKey(keys map[*types.Package]string, pkg *types.Package) string {
+	if key, held := keys[pkg]; held {
+		return key
+	}
+	return pkg.Path()
 }
 
 // fileUsers is the user each file of one package is, computed once per file.

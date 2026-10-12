@@ -21,6 +21,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"path"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -32,6 +34,7 @@ import (
 	"github.com/cplieger/deadset-go/internal/graph"
 	"github.com/cplieger/deadset-go/internal/load"
 	"github.com/cplieger/deadset-go/internal/suppress"
+	"golang.org/x/tools/go/packages"
 )
 
 // The constants of every finding this analyzer produces: the language it analyzes,
@@ -230,6 +233,13 @@ type Configured struct {
 	Symbols []graph.Symbol
 }
 
+// ModuleFile is the module file of one unit of the target.
+type ModuleFile struct {
+	Dir  string // the unit's root, absolute
+	Path string // the module path the file declares
+	File deps.File
+}
+
 // Input is what every kind reads. A findings pass runs on one goroutine.
 type Input struct {
 	// Config is the resolved configuration, which decides which kinds report and
@@ -279,9 +289,13 @@ type Input struct {
 	Marks    []suppress.Record
 	Refusals []suppress.Refusal
 
-	// Deps is the target's module file as the toolchain reports it, which is what
-	// the dependency kinds read, and nil where the run did not read it.
-	Deps *deps.File
+	// Root is the target root, which every position a kind reports is relative
+	// to.
+	Root string
+
+	// Modules is every module file of the target as the toolchain reports it,
+	// in unit order, which is what the dependency kinds read.
+	Modules []ModuleFile
 
 	// Unmatched is every configured root the roots pass matched nothing with,
 	// which is a configuration naming something that no longer exists.
@@ -909,11 +923,11 @@ func Compare(a, b Finding) int {
 
 // generated reports whether one path is a generated file, and false where the run
 // carries no rule for it.
-func (in *Input) generated(path string) bool {
+func (in *Input) generated(file string) bool {
 	if in.Generated == nil {
 		return false
 	}
-	return in.Generated(path)
+	return in.Generated(file)
 }
 
 // configurationsOf names the build configurations one finding holds under, which the
@@ -962,7 +976,8 @@ type index struct {
 	components map[graph.SymbolID]*graph.Component
 	retained   map[graph.SymbolID]bool
 	byRef      map[string]graph.SymbolID
-	mains      map[string]bool
+	mains      map[string]bool     // by [index.packageKey]
+	dirs       map[string][]string // each import path's target-relative package directories
 	children   map[graph.SymbolID][]graph.SymbolID
 
 	// caps is each dead component's confidence cap by its index, computed on first use.
@@ -1002,12 +1017,13 @@ func (in *Input) index() *index {
 		retained:   make(map[graph.SymbolID]bool),
 		byRef:      make(map[string]graph.SymbolID),
 		mains:      make(map[string]bool),
+		dirs:       make(map[string][]string),
 		children:   make(map[graph.SymbolID][]graph.SymbolID),
 		caps:       make(map[int]Class),
 	}
 	held.holdInventory(in.Merged)
 	held.holdSweep(in.Sweep)
-	held.holdPackages(in.Per)
+	held.holdPackages(in.Per, in.Root)
 	in.indexed = held
 	return held
 }
@@ -1054,19 +1070,57 @@ func (x *index) holdSweep(swept *graph.Result) {
 	}
 }
 
-// holdPackages records which import paths name a main package, which nothing
-// outside the module can import.
-func (x *index) holdPackages(per []Configured) {
-	for _, one := range per {
-		if one.Result == nil {
-			continue
+// holdPackages records the directories of each import path, and which packages
+// are main packages, which nothing outside the module can import.
+func (x *index) holdPackages(per []Configured, root string) {
+	eachPackage(per, func(p *packages.Package) {
+		if dir := packageDir(p, root); dir != "" && !slices.Contains(x.dirs[p.PkgPath], dir) {
+			x.dirs[p.PkgPath] = append(x.dirs[p.PkgPath], dir)
 		}
-		for _, p := range one.Result.Packages {
-			if p.Name == mainPackageName {
-				x.mains[p.PkgPath] = true
+	})
+	eachPackage(per, func(p *packages.Package) {
+		if p.Name == mainPackageName {
+			x.mains[x.packageKey(p.PkgPath, packageDir(p, root))] = true
+		}
+	})
+}
+
+// eachPackage calls visit for every target package of every configuration.
+func eachPackage(per []Configured, visit func(*packages.Package)) {
+	for _, one := range per {
+		if one.Result != nil {
+			for _, p := range one.Result.Packages {
+				visit(p)
 			}
 		}
 	}
+}
+
+// packageDir is the directory of p's first file relative to root, with forward
+// slashes, as a symbol's position names its file.
+func packageDir(p *packages.Package, root string) string {
+	if len(p.GoFiles) == 0 {
+		return ""
+	}
+	rel, err := filepath.Rel(root, filepath.Dir(p.GoFiles[0]))
+	if err != nil {
+		return ""
+	}
+	return filepath.ToSlash(rel)
+}
+
+// packageKey names one package of the target: its import path, and where two
+// modules of the target declare that path, its directory too.
+func (x *index) packageKey(pkgPath, dir string) string {
+	if len(x.dirs[pkgPath]) <= 1 {
+		return pkgPath
+	}
+	return pkgPath + "\x00" + dir
+}
+
+// packageOf is the [index.packageKey] of the package declaring symbol.
+func (in *Input) packageOf(symbol *graph.Symbol) string {
+	return in.index().packageKey(symbol.PkgPath, path.Dir(symbol.Pos.Filename))
 }
 
 // symbol is the declaration of the inventory one identifier names, or nil where the

@@ -43,14 +43,14 @@ func notesOf(kind config.TargetKind, loaded *stages) []report.Note {
 		result := &loaded.per[i].result
 		for _, p := range result.Packages {
 			if p.Module != nil && p.Module.Main {
-				addImports(imported, p)
+				addImports(imported, p, result)
 				addPublishable(directories, loaded.root, p, result)
 			}
 		}
 	}
 	var notes []report.Note
-	for path, directory := range directories {
-		if imported[path] {
+	for key, directory := range directories {
+		if imported[key] {
 			continue
 		}
 		notes = append(notes, report.Note{
@@ -64,13 +64,19 @@ func notesOf(kind config.TargetKind, loaded *stages) []report.Note {
 	return notes
 }
 
-// addImports records every package one package's files import, other than the
-// package itself and its external test package's subject.
-func addImports(imported map[string]bool, p *packages.Package) {
+// addImports records every package one package's files import, by
+// [load.Result.KeyOf], other than the package itself and its external test
+// package's subject.
+func addImports(imported map[string]bool, p *packages.Package, result *load.Result) {
 	for _, f := range p.Syntax {
 		for _, spec := range f.Imports {
 			path, err := strconv.Unquote(spec.Path.Value)
-			if err == nil && path != p.PkgPath && path+testPackageSuffix != p.PkgPath {
+			if err != nil || path == p.PkgPath || path+testPackageSuffix == p.PkgPath {
+				continue
+			}
+			if dep := p.Imports[path]; dep != nil {
+				imported[result.KeyOf(dep)] = true
+			} else {
 				imported[path] = true
 			}
 		}
@@ -78,14 +84,14 @@ func addImports(imported map[string]bool, p *packages.Package) {
 }
 
 // addPublishable records the directory of one package outside programs could
-// import, relative to the target's root.
+// import, relative to the target's root, by [load.Result.KeyOf].
 func addPublishable(directories map[string]string, root string, p *packages.Package, result *load.Result) {
 	if !publishable(p, result) {
 		return
 	}
 	relative, err := filepath.Rel(root, filepath.Dir(p.GoFiles[0]))
 	if err == nil && filepath.IsLocal(relative) {
-		directories[p.PkgPath] = filepath.ToSlash(relative)
+		directories[result.KeyOf(p)] = filepath.ToSlash(relative)
 	}
 }
 
@@ -94,6 +100,6 @@ func addPublishable(directories map[string]string, root string, p *packages.Pack
 // is neither a test variant nor test support.
 func publishable(p *packages.Package, result *load.Result) bool {
 	return p.ForTest == "" && p.Name != mainPackageName && len(p.GoFiles) > 0 &&
-		!strings.HasSuffix(p.PkgPath, testPackageSuffix) && !result.TestSupport[p.PkgPath] &&
+		!strings.HasSuffix(p.PkgPath, testPackageSuffix) && !result.TestSupport[result.KeyOf(p)] &&
 		!slices.Contains(strings.Split(p.PkgPath, "/"), internalElement)
 }

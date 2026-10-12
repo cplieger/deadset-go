@@ -6,6 +6,8 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"path"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -172,13 +174,15 @@ type referencePass struct {
 	at          *positions  // renders the file being walked, which is pos while the target is walked
 	info        *types.Info // the type information of the variant that compiles the file being walked
 	symbols     map[site]SymbolID
-	packages    map[string]SymbolID       // the inventory's package symbol per import path, which an import resolves to
-	ids         map[token.Pos]SymbolID    // one resolved position, resolved once; empty for a position no symbol declares
-	kinds       map[token.Pos]RefKind     // the kind a parent node fixes for an identifier below it
-	callees     map[token.Pos]bool        // the identifiers a call expression names as its callee
-	reached     map[string]int            // per source file, by the path the toolchain named, the variants that compile it
-	declaring   map[string]bool           // the import paths of the packages the target declares
-	support     map[string]bool           // the import paths of the target's test-support packages
+	packages    map[string]SymbolID // the inventory's package symbol per package key, which an import resolves to
+	pkgKeys     map[*types.Package]string
+	ids         map[token.Pos]SymbolID // one resolved position, resolved once; empty for a position no symbol declares
+	kinds       map[token.Pos]RefKind  // the kind a parent node fixes for an identifier below it
+	callees     map[token.Pos]bool     // the identifiers a call expression names as its callee
+	reached     map[string]int         // per source file, by the path the toolchain named, the variants that compile it
+	declaring   map[string]bool        // the import paths of the packages the target declares
+	support     map[string]bool        // the target's test-support packages, by keyOf
+	keyOf       func(*packages.Package) string
 	instances   *instantiations           // the type arguments a layout read lays a type parameter out as
 	literals    literalStructs            // the struct type literals walked, by identity
 	consumer    string                    // the module path of the consumer being walked, empty while the target is
@@ -211,6 +215,8 @@ func newReferencePass(r *load.Result, targetRoot string, read ReadFile, symbols 
 		callees:   make(map[token.Pos]bool),
 		reached:   make(map[string]int),
 		support:   r.TestSupport,
+		keyOf:     r.KeyOf,
+		pkgKeys:   packageKeys(r),
 		instances: instantiationsOf(r.Packages),
 	}
 	p.at = p.pos
@@ -218,7 +224,7 @@ func newReferencePass(r *load.Result, targetRoot string, read ReadFile, symbols 
 		s := &symbols[i]
 		p.symbols[site{file: s.Pos.Filename, line: s.Pos.Line, col: s.Pos.Column}] = s.ID
 		if s.Kind == KindPackage {
-			p.packages[s.PkgPath] = s.ID
+			p.packages[r.PackageKey(s.PkgPath, filepath.Join(targetRoot, filepath.FromSlash(path.Dir(s.Pos.Filename))))] = s.ID
 		}
 	}
 	return p, nil
@@ -312,7 +318,7 @@ func (p *referencePass) walkFile(pkg *packages.Package, f *ast.File) error {
 	switch {
 	case p.test:
 		p.testFiles++
-	case p.consumer == "" && p.support[pkg.PkgPath]:
+	case p.consumer == "" && p.support[p.keyOf(pkg)]:
 		p.test = true
 		p.supportFile++
 	}
@@ -458,7 +464,7 @@ func (p *referencePass) walkImport(spec *ast.ImportSpec) {
 	if name == nil || name.Imported() == nil {
 		return
 	}
-	to, held := p.packages[name.Imported().Path()]
+	to, held := p.packages[typesKey(p.pkgKeys, name.Imported())]
 	if !held {
 		return
 	}
@@ -1351,6 +1357,11 @@ func (p *referencePass) owner(pos token.Pos) (SymbolID, bool) {
 // language itself declares resolve to nothing without a position being read.
 func (p *referencePass) symbolOf(obj types.Object) (SymbolID, bool) {
 	if obj.Pkg() == nil || !p.declaring[obj.Pkg().Path()] {
+		return "", false
+	}
+	// One module of the target can require another from the module cache, whose
+	// copy shares the package paths and declares nothing of the target.
+	if q := p.pos.fset.Position(obj.Pos()); q.IsValid() && p.pos.relative(q.Filename) == "" {
 		return "", false
 	}
 	return p.symbolAt(obj.Pos())

@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"go/types"
 	"maps"
+	"path"
 	"slices"
 	"strconv"
 	"strings"
@@ -108,8 +109,7 @@ func Roots(r *load.Result, targetRoot string, read ReadFile, symbols []Symbol, o
 		pos:        newPositions(r.Fset, targetRoot, read),
 		byPosition: make(map[token.Position]SymbolID, len(symbols)),
 		byID:       make(map[SymbolID]Symbol, len(symbols)),
-		mains:      make(map[string]bool),
-		published:  make(map[string]bool),
+		classes:    make(map[string][]packageClass),
 		byPath:     make(map[string][]*packages.Package),
 		found:      make(map[Root]struct{}),
 	}
@@ -161,8 +161,7 @@ type rootDetection struct {
 	pos        *positions
 	byPosition map[token.Position]SymbolID // a rendered position to the declaration at it
 	byID       map[SymbolID]Symbol
-	mains      map[string]bool                // import path of a main package
-	published  map[string]bool                // import path a consumer outside the module can import
+	classes    map[string][]packageClass      // by import path, one per variant group
 	byPath     map[string][]*packages.Package // import path to its type-checked variants
 	found      map[Root]struct{}
 }
@@ -233,24 +232,49 @@ func (d *rootDetection) index(groups []variantGroup) {
 	}
 }
 
-// classify records what one import path is: a main package, whose declarations no
-// consumer can import, or an importable package of the module.
+// classify records what one variant group's package is: a main package, whose
+// declarations no consumer can import, or an importable package of the module.
 //
 // A path holding an internal element is importable only inside the module, so
 // nothing outside decides its liveness.
 func (d *rootDetection) classify(g variantGroup) {
-	name := ""
+	var checked *types.Package
 	for _, p := range g.pkgs {
 		if p.Types != nil {
-			name = p.Types.Name()
+			checked = p.Types
 			break
 		}
 	}
-	if name == mainPackage {
-		d.mains[g.pkgPath] = true
-		return
+	class := packageClass{
+		types: checked,
+		dir:   path.Dir(d.pos.relative(d.pos.fset.Position(g.anchor.FileStart).Filename)),
+		main:  checked != nil && checked.Name() == mainPackage,
 	}
-	d.published[g.pkgPath] = !slices.Contains(strings.Split(g.pkgPath, "/"), internalElement)
+	class.published = !class.main && !slices.Contains(strings.Split(g.pkgPath, "/"), internalElement)
+	d.classes[g.pkgPath] = append(d.classes[g.pkgPath], class)
+}
+
+// packageClass is what one variant group's package is.
+type packageClass struct {
+	types     *types.Package
+	dir       string // the target-relative directory of the group's anchor file
+	main      bool   // a main package, whose declarations no consumer can import
+	published bool   // a package a consumer outside the module can import
+}
+
+// classOf is the class of the package declaring s. Where two packages share s's
+// import path, it is the one whose directory holds s's file.
+func (d *rootDetection) classOf(s *Symbol) packageClass {
+	classes := d.classes[s.PkgPath]
+	if len(classes) == 1 {
+		return classes[0]
+	}
+	for _, class := range classes {
+		if class.dir == path.Dir(s.Pos.Filename) {
+			return class
+		}
+	}
+	return packageClass{}
 }
 
 // walkFile reads one file's test functions, linkname directives and cgo exports.
@@ -348,7 +372,7 @@ func (d *rootDetection) declared(symbols []Symbol) {
 		switch {
 		case s.Name == initFunction:
 			d.add(s.ID, RootInit, "")
-		case s.Name == mainFunction && d.mains[s.PkgPath]:
+		case s.Name == mainFunction && d.classOf(s).main:
 			d.add(s.ID, RootMain, "")
 		}
 	}
@@ -366,7 +390,7 @@ func (d *rootDetection) publishedAPI(symbols []Symbol) {
 		_, test := IsTestFile(s.Pos.Filename)
 		switch {
 		case !s.Exported || s.Kind == KindTypeParam:
-		case !d.published[s.PkgPath] || test:
+		case !d.classOf(s).published || test:
 		case !d.exportedContainers(s.Parent):
 		default:
 			d.add(s.ID, RootPublishedAPI, "")
@@ -378,19 +402,27 @@ func (d *rootDetection) publishedAPI(symbols []Symbol) {
 // package selects through an embedded field of any visibility: a consumer calls it
 // as it calls a method the type declares.
 func (d *rootDetection) promoted() error {
-	for _, path := range slices.Sorted(maps.Keys(d.byPath)) {
-		if !d.published[path] {
+	for _, pkgPath := range slices.Sorted(maps.Keys(d.classes)) {
+		for _, class := range d.classes[pkgPath] {
+			if class.published && class.types != nil {
+				if err := d.promotedIn(class.types.Scope()); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// promotedIn is [rootDetection.promoted] over one package's scope.
+func (d *rootDetection) promotedIn(scope *types.Scope) error {
+	for _, name := range scope.Names() {
+		typeName, isType := scope.Lookup(name).(*types.TypeName)
+		if !isType || !typeName.Exported() || types.IsInterface(typeName.Type()) {
 			continue
 		}
-		scope := d.byPath[path][0].Types.Scope()
-		for _, name := range scope.Names() {
-			typeName, isType := scope.Lookup(name).(*types.TypeName)
-			if !isType || !typeName.Exported() || types.IsInterface(typeName.Type()) {
-				continue
-			}
-			if err := d.promotedBy(typeName.Type()); err != nil {
-				return err
-			}
+		if err := d.promotedBy(typeName.Type()); err != nil {
+			return err
 		}
 	}
 	return nil

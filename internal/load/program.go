@@ -29,14 +29,14 @@ type program struct {
 	Info *types.Info
 }
 
-// checkPrograms finds and checks every program of the target's packages under
+// checkPrograms finds and checks every program of one unit's packages under
 // configuration c, in the order of their paths.
-func checkPrograms(ctx context.Context, fset *token.FileSet, target string, pkgs []*packages.Package, c Configuration) []program {
+func checkPrograms(ctx context.Context, fset *token.FileSet, from unitDir, pkgs []*packages.Package, c Configuration) []program {
 	paths := programPaths(pkgs, c)
 	if len(paths) == 0 {
 		return nil
 	}
-	imports := newCgoImporter(ctx, fset, target, c, pkgs)
+	imports := newCgoImporter(ctx, fset, from, c, pkgs)
 	sizes := types.SizesFor(gcCompiler, c.Arch)
 	version := mainModuleVersion(pkgs)
 	held := make([]program, 0, len(paths))
@@ -74,7 +74,7 @@ func programPaths(pkgs []*packages.Package, c Configuration) []string {
 			continue
 		}
 		for _, path := range p.IgnoredFiles {
-			if seen[path] || filepath.Ext(path) != ".go" {
+			if seen[path] || filepath.Ext(path) != goFileExt {
 				continue
 			}
 			seen[path] = true

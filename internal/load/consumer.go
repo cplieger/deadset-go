@@ -39,15 +39,20 @@ type Consumer struct {
 // through the workspace the scope declares; a consumer that reaches a copy of the
 // target somewhere else counts no reference against the target being analyzed, so
 // it is refused rather than counted as zero.
-func loadConsumers(ctx context.Context, fset *token.FileSet, doc *scope.Document, c Configuration, target []*packages.Package) ([]Consumer, error) {
+func loadConsumers(ctx context.Context, fset *token.FileSet, doc *scope.Document, c Configuration, units []Unit) ([]Consumer, error) {
 	if len(doc.Consumers) == 0 {
 		return nil, nil
 	}
-	main := mainModule(target)
+	var mains []*packages.Module
+	for i := range units {
+		if main := mainModule(units[i].Packages); main != nil {
+			mains = append(mains, main)
+		}
+	}
 	loaded := make([]Consumer, 0, len(doc.Consumers))
 	held := make(map[string]bool, len(doc.Consumers))
 	for _, declared := range doc.Consumers {
-		one, err := loadConsumer(ctx, fset, doc, c, declared, main)
+		one, err := loadConsumer(ctx, fset, doc, c, declared, mains)
 		if err != nil {
 			return nil, err
 		}
@@ -63,7 +68,7 @@ func loadConsumers(ctx context.Context, fset *token.FileSet, doc *scope.Document
 
 // loadConsumer resolves one declared consumer, and refuses one whose references
 // this target's run cannot count.
-func loadConsumer(ctx context.Context, fset *token.FileSet, doc *scope.Document, c Configuration, declared scope.Module, main *packages.Module) (Consumer, error) {
+func loadConsumer(ctx context.Context, fset *token.FileSet, doc *scope.Document, c Configuration, declared scope.Module, mains []*packages.Module) (Consumer, error) {
 	if _, err := os.Stat(declared.Path); err != nil {
 		return Consumer{}, &SetupError{Failures: []SetupFailure{{Class: missingConsumer, Detail: fmt.Sprintf(
 			"the declared consumer %s does not exist; check it out at that path and install its dependencies",
@@ -75,11 +80,11 @@ func loadConsumer(ctx context.Context, fset *token.FileSet, doc *scope.Document,
 	if doc.Workspace != "" {
 		workspace = doc.Workspace
 	}
-	targetModule := ""
-	if main != nil {
-		targetModule = main.Path
+	targetModules := make([]string, 0, len(mains))
+	for _, main := range mains {
+		targetModules = append(targetModules, main.Path)
 	}
-	pkgs, diagnostics, err := loadPackages(ctx, fset, declared.Path, c, workspace, targetModule)
+	pkgs, diagnostics, err := loadPackages(ctx, fset, declared.Path, c, workspace, targetModules)
 	if setup, failed := errors.AsType[*SetupError](err); failed {
 		consumer := &SetupError{}
 		for _, one := range setup.Failures {
@@ -97,23 +102,35 @@ func loadConsumer(ctx context.Context, fset *token.FileSet, doc *scope.Document,
 		return Consumer{}, &Error{Configuration: c.ID, Module: declared.Path, Diagnostics: diagnostics}
 	}
 	pkgs = withoutTestBinaries(pkgs)
-
-	module := mainModule(pkgs)
-	if module == nil || module.Path == "" {
-		return Consumer{}, fmt.Errorf("%w: %s: the load reports no module for it", errConsumer, declared.Path)
-	}
-	if declared.ID != "" && declared.ID != module.Path {
-		return Consumer{}, fmt.Errorf("%w: %s: the scope declares module %s and the directory holds %s",
-			errConsumer, declared.Path, declared.ID, module.Path)
-	}
-	if main != nil && module.Path == main.Path {
-		return Consumer{}, fmt.Errorf("%w: %s: it is the target module %s",
-			errConsumer, declared.Path, main.Path)
-	}
-	if err := resolvesTarget(pkgs, declared.Path, main); err != nil {
+	module, err := consumerModuleOf(pkgs, declared, mains)
+	if err != nil {
 		return Consumer{}, err
 	}
-	return Consumer{ID: module.Path, Packages: pkgs}, nil
+	return Consumer{ID: module, Packages: pkgs}, nil
+}
+
+// consumerModuleOf returns the module path of one loaded consumer, and refuses a
+// consumer whose module disagrees with the scope, is a module of the target, or
+// resolves a module of the target at another directory.
+func consumerModuleOf(pkgs []*packages.Package, declared scope.Module, mains []*packages.Module) (string, error) {
+	module := mainModule(pkgs)
+	if module == nil || module.Path == "" {
+		return "", fmt.Errorf("%w: %s: the load reports no module for it", errConsumer, declared.Path)
+	}
+	if declared.ID != "" && declared.ID != module.Path {
+		return "", fmt.Errorf("%w: %s: the scope declares module %s and the directory holds %s",
+			errConsumer, declared.Path, declared.ID, module.Path)
+	}
+	for _, main := range mains {
+		if module.Path == main.Path {
+			return "", fmt.Errorf("%w: %s: it is the target module %s",
+				errConsumer, declared.Path, main.Path)
+		}
+		if err := resolvesTarget(pkgs, declared.Path, main); err != nil {
+			return "", err
+		}
+	}
+	return module.Path, nil
 }
 
 // resolvesTarget refuses a consumer whose module graph holds the target module at

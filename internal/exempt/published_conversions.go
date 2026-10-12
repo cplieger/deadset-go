@@ -23,7 +23,7 @@ func publishedConversions(in *Input) []graph.Conversion {
 		return nil
 	}
 	if in.published == nil {
-		scan := newPublishedScan(in.Result.Packages)
+		scan := newPublishedScan(in.Result.Packages, in.Resolve)
 		sites := scan.sites()
 		in.published = &sites
 	}
@@ -33,15 +33,16 @@ func publishedConversions(in *Input) []graph.Conversion {
 // publishedScan reads one configuration's target packages for what an outside
 // program can hold and where it can hand a value over.
 type publishedScan struct {
-	target     map[string]bool       // the import paths of the target's packages
-	holdable   map[string]types.Type // by type string
-	reached    map[string]bool       // the types the published API reaches, by type string
+	resolve    *graph.Resolver
+	target     map[string]bool       // the target's packages, by [graph.Resolver.PackageKey]
+	holdable   map[string]types.Type // by [graph.Resolver.TypeKey]
+	reached    map[string]bool       // the types the published API reaches, by [graph.Resolver.TypeKey]
 	functions  map[*types.Func]bool  // the published functions read
 	typeParams map[*types.TypeParam]bool
 	queue      []types.Type         // holdable types not yet read
 	parameters []publishedParameter // every published parameter and type parameter
 	published  []*packages.Package  // the packages of the published API
-	order      []string             // holdable type strings in the order they joined
+	order      []string             // holdable type keys in the order they joined
 }
 
 // publishedParameter is one position an outside program hands a value to: a
@@ -54,9 +55,10 @@ type publishedParameter struct {
 	outside bool
 }
 
-// newPublishedScan indexes the target's packages, each import path once.
-func newPublishedScan(pkgs []*packages.Package) *publishedScan {
+// newPublishedScan indexes the target's packages, each once.
+func newPublishedScan(pkgs []*packages.Package, resolve *graph.Resolver) *publishedScan {
 	s := &publishedScan{
+		resolve:    resolve,
 		target:     make(map[string]bool),
 		holdable:   make(map[string]types.Type),
 		reached:    make(map[string]bool),
@@ -65,11 +67,11 @@ func newPublishedScan(pkgs []*packages.Package) *publishedScan {
 	}
 	seen := make(map[string]bool)
 	for _, p := range graph.SortedPackages(pkgs) {
-		if p.Types == nil || p.Module == nil || !p.Module.Main || p.ForTest != "" || seen[p.PkgPath] {
+		if p.Types == nil || p.Module == nil || !p.Module.Main || p.ForTest != "" || seen[resolve.PackageKey(p.Types)] {
 			continue
 		}
-		seen[p.PkgPath] = true
-		s.target[p.PkgPath] = true
+		seen[resolve.PackageKey(p.Types)] = true
+		s.target[resolve.PackageKey(p.Types)] = true
 		if publishedPackage(p) {
 			s.published = append(s.published, p)
 		}
@@ -147,7 +149,7 @@ func (s *publishedScan) hold(t types.Type) {
 		return
 	}
 	t = types.Unalias(t)
-	key := types.TypeString(t, nil)
+	key := s.resolve.TypeKey(t)
 	if _, held := s.holdable[key]; held {
 		return
 	}
@@ -272,7 +274,7 @@ func (s *publishedScan) function(fn *types.Func, sig *types.Signature) {
 		return
 	}
 	s.functions[fn] = true
-	outside := fn.Pkg() == nil || !s.target[fn.Pkg().Path()]
+	outside := fn.Pkg() == nil || !s.target[s.resolve.PackageKey(fn.Pkg())]
 	for v := range sig.Results().Variables() {
 		s.hold(v.Type())
 	}
@@ -313,7 +315,7 @@ func (s *publishedScan) reach(t types.Type) {
 		return
 	}
 	t = types.Unalias(t)
-	key := types.TypeString(t, nil)
+	key := s.resolve.TypeKey(t)
 	if s.reached[key] {
 		return
 	}
@@ -389,7 +391,7 @@ func (s *publishedScan) candidates() []*types.Named {
 			t = types.Unalias(pointer.Elem())
 		}
 		named, isNamed := t.(*types.Named)
-		if !isNamed || named.Obj().Pkg() == nil || !s.target[named.Obj().Pkg().Path()] || types.IsInterface(named) {
+		if !isNamed || named.Obj().Pkg() == nil || !s.target[s.resolve.PackageKey(named.Obj().Pkg())] || types.IsInterface(named) {
 			continue
 		}
 		named = named.Origin()
