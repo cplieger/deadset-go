@@ -84,7 +84,7 @@ func printedDefault(t *testing.T) map[string]any {
 	t.Helper()
 
 	cfg := config.Default()
-	cfg.Target.Kind = config.Library
+	cfg.Target.Kind = config.OneKind(config.Library)
 	var printed bytes.Buffer
 	if err := config.Print(&printed, cfg, config.Provenance{}); err != nil {
 		t.Fatalf("Print(Default()) = error %v, want the default configuration", err)
@@ -120,8 +120,8 @@ func TestDefaultAppliesEveryDeclaredDefault(t *testing.T) {
 func TestDefaultLeavesTheTargetKindUnset(t *testing.T) {
 	t.Parallel()
 
-	if got := config.Default().Target.Kind; got != "" {
-		t.Errorf("Default().Target.Kind = %q, want it unset: the field has no default", got)
+	if got := config.Default().Target.Kind; got.IsSet() {
+		t.Errorf("Default().Target.Kind = %+v, want it unset: the field has no default", got)
 	}
 }
 

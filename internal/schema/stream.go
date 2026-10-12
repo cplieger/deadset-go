@@ -95,6 +95,7 @@ func (n *node) streamObject(dec *json.Decoder, at string) ([]Error, error) {
 			found = append(found, missing(name, at))
 		}
 	}
+	n.checkMembers(len(seen), at, &found)
 	return found, nil
 }
 

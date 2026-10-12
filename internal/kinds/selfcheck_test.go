@@ -812,7 +812,7 @@ func TestStaleSuppressionsReadsDormancyFromTheFindingsARecordMatches(t *testing.
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			resolved := config.Default()
-			resolved.Target.Kind = config.Library
+			resolved.Target.Kind = config.OneKind(config.Library)
 			resolved.Severity = tc.severity
 			in := suppressed(t, "selfcheck-match.txtar", resolved)
 			emitters := intraFuncEmitters()

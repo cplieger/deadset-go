@@ -308,7 +308,7 @@ func TestABaselineWriteKeepsTheOtherSchemesRowsAfterItsOwn(t *testing.T) {
   {"code": "DS1002", "symbol": "go://example.com/app#gone", "path": "main.go", "reason": "recorded by deadset-go 1.6.0"},
   {"code": "DS1601", "symbol": "ts://@example/app/package.json#left-pad:dependency", "path": "package.json", "reason": "recorded by deadset-ts 7.0.0"}
 ]}`)
-	others, err := OtherSchemeRows(held)
+	others, err := OtherSchemeRows(held, OwnScheme)
 	if err != nil {
 		t.Fatalf("OtherSchemeRows(a document of two schemes) error = %v", err)
 	}
@@ -338,7 +338,7 @@ func TestABaselineWriteKeepsAnOtherSchemeRowsMissingMembersMissing(t *testing.T)
   {"code": "DS1003", "symbol": "ts://web/src/a.ts#A.b", "path": "web/src/a.ts"},
   {"code": "DS1003", "symbol": "ts://web/src/a.ts#A.c", "reason": ""}
 ]}`)
-	others, err := OtherSchemeRows(held)
+	others, err := OtherSchemeRows(held, OwnScheme)
 	if err != nil {
 		t.Fatalf("OtherSchemeRows(rows missing a reason and a path) error = %v", err)
 	}
@@ -374,7 +374,7 @@ func TestABaselineWriteRefusesADocumentItCannotReadTheOtherSchemesRowsOf(t *test
 		{name: "not JSON", body: `{`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if rows, err := OtherSchemeRows(writeBaselineFile(t, tc.body)); err == nil {
+			if rows, err := OtherSchemeRows(writeBaselineFile(t, tc.body), OwnScheme); err == nil {
 				t.Errorf("OtherSchemeRows(%s) = %v, nil, want an error so the write leaves the document as it is", tc.body, rows)
 			}
 		})

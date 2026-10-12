@@ -95,7 +95,7 @@ func envelopeOfDir(t *testing.T, dir string, kind config.TargetKind) (Envelope, 
 	t.Helper()
 
 	resolved := config.Default()
-	resolved.Target.Kind = kind
+	resolved.Target.Kind = config.OneKind(kind)
 	configuration := load.Configuration{ID: fixtureOS + "-" + fixtureArch, OS: fixtureOS, Arch: fixtureArch}
 
 	doc, err := scope.ForDir(dir)

@@ -3,9 +3,12 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"os"
 	"path"
+	"path/filepath"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -26,8 +29,11 @@ type baselineVectorRow struct {
 }
 
 // TestPublishedBaselineVectors records the rows of one round from every published
-// case's report, writes them as this analyzer writes a baseline, and compares the
-// rows with the case's expected baseline, row by row and in order.
+// case's report and writes them as this analyzer writes a baseline, over the
+// document the case places at the target root where it has one. The rows are
+// compared with the case's expected baseline row by row, in order and member for
+// member, then the document byte for byte, or the write is refused with the case's
+// exit code and leaves the document as it was.
 func TestPublishedBaselineVectors(t *testing.T) {
 	t.Parallel()
 
@@ -48,34 +54,103 @@ func TestPublishedBaselineVectors(t *testing.T) {
 	for _, name := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			dir := path.Join(baselineVectorRoot, name)
-			body, err := spec.Vectors.ReadFile(path.Join(dir, "report.json"))
-			if err != nil {
-				t.Fatalf("Setup: read %s/report.json: %v", dir, err)
-			}
-			envelope, err := reporttest.Read(body)
-			if err != nil {
-				t.Fatalf("Setup: decode %s/report.json: %v", dir, err)
-			}
-
-			rows, _ := recordRound(envelope.Findings, nil, nil)
-			var written bytes.Buffer
-			provenance := suppress.Provenance{Analyzer: envelope.Analyzer.Name, Version: envelope.Analyzer.Version}
-			if err := suppress.WriteBaseline(&written, rows, provenance, nil); err != nil {
-				t.Fatalf("WriteBaseline(%s) = %v, want the document", name, err)
-			}
-
-			got := baselineVectorRows(t, "the written baseline", written.Bytes())
-			expected, err := spec.Vectors.ReadFile(path.Join(dir, "expected.json"))
-			if err != nil {
-				t.Fatalf("Setup: read %s/expected.json: %v", dir, err)
-			}
-			want := baselineVectorRows(t, dir+"/expected.json", expected)
-			if !slices.Equal(got, want) {
-				t.Errorf("the rows one round records from %s = %+v, want %+v", name, got, want)
-			}
+			runBaselineVector(t, path.Join(baselineVectorRoot, name))
 		})
 	}
+}
+
+// runBaselineVector runs one published baseline case.
+func runBaselineVector(t *testing.T, dir string) {
+	t.Helper()
+
+	body := vectorFile(t, dir, "report.json")
+	envelope, err := reporttest.Read(body)
+	if err != nil {
+		t.Fatalf("Setup: decode %s/report.json: %v", dir, err)
+	}
+	if len(envelope.Analyzer.Languages) != 1 {
+		t.Fatalf("Setup: %s/report.json names the languages %v, want the one language of the round", dir, envelope.Analyzer.Languages)
+	}
+	existing, expected, refused := vectorFile(t, dir, "existing.json"), vectorFile(t, dir, "expected.json"), vectorFile(t, dir, "expected-error.json")
+	if (expected == nil) == (refused == nil) || (refused != nil && existing == nil) {
+		t.Fatalf("Setup: %s carries existing.json = %t, expected.json = %t and expected-error.json = %t, "+
+			"want exactly one of the last two, and existing.json beside expected-error.json",
+			dir, existing != nil, expected != nil, refused != nil)
+	}
+	target := filepath.Join(t.TempDir(), suppress.BaselineFileName)
+	if existing != nil {
+		if err := os.WriteFile(target, existing, 0o600); err != nil {
+			t.Fatalf("Setup: write %s: %v", target, err)
+		}
+	}
+
+	rows, _ := recordRound(envelope.Findings, nil, nil)
+	provenance := suppress.Provenance{Analyzer: envelope.Analyzer.Name, Version: envelope.Analyzer.Version}
+	err = writeBaseline(target, rows, provenance, envelope.Analyzer.Languages[0]+"://")
+	written, readErr := os.ReadFile(target)
+	if readErr != nil {
+		t.Fatalf("read the baseline %s: %v", target, readErr)
+	}
+	if refused != nil {
+		var want struct {
+			ExitCode int `json:"exit_code"`
+		}
+		if err := json.Unmarshal(refused, &want); err != nil {
+			t.Fatalf("Setup: decode %s/expected-error.json: %v", dir, err)
+		}
+		if err == nil || want.ExitCode != exitFailure {
+			t.Errorf("the write over %s/existing.json = %v, ending the run with %d, want it refused with exit code %d",
+				dir, err, exitFailure, want.ExitCode)
+		}
+		if !bytes.Equal(written, existing) {
+			t.Errorf("the refused write over %s/existing.json left\n%s\nwant the document as it was\n%s", dir, written, existing)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("the write of %s = %v, want the document", dir, err)
+	}
+	if got, want := vectorRowMembers(t, "the written baseline", written), vectorRowMembers(t, dir+"/expected.json", expected); !reflect.DeepEqual(got, want) {
+		t.Errorf("the rows one round records from %s = %+v, want %+v", dir, got, want)
+	}
+	if !bytes.Equal(written, expected) {
+		t.Errorf("the baseline one round writes from %s =\n%s\nwant the bytes of %s/expected.json\n%s", dir, written, dir, expected)
+	}
+}
+
+// vectorFile reads one file of a published baseline case, or nil when the case has
+// none.
+func vectorFile(t *testing.T, dir, name string) []byte {
+	t.Helper()
+
+	body, err := spec.Vectors.ReadFile(path.Join(dir, name))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		t.Fatalf("Setup: read %s/%s: %v", dir, name, err)
+	}
+	return body
+}
+
+// vectorRowMembers decodes the rows of one baseline document, each by the members it
+// holds, so a member a row leaves out compares as left out.
+func vectorRowMembers(t *testing.T, what string, body []byte) []map[string]any {
+	t.Helper()
+
+	var document struct {
+		Description string           `json:"description"`
+		Baseline    []map[string]any `json:"baseline"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&document); err != nil {
+		t.Fatalf("decode %s: %v", what, err)
+	}
+	if document.Baseline == nil {
+		return []map[string]any{}
+	}
+	return document.Baseline
 }
 
 // baselineVectorRows decodes the rows of one baseline document.

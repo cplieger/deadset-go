@@ -606,7 +606,7 @@ func stagesOf(ctx context.Context, resolved *resolution) (stages, error) {
 	targetRoot := document.Target.Path
 	rootOptions := graph.RootOptions{
 		Patterns:     resolved.config.Roots.Patterns,
-		PublishedAPI: resolved.config.Target.Kind == config.Library,
+		PublishedAPI: resolved.config.Target.Kind.Of(config.GoLanguage) == config.Library,
 	}
 	per := make([]configured, len(results))
 	passes := make([]graph.Configured, len(results))
@@ -1349,7 +1349,7 @@ func reportOf(ctx context.Context, resolved *resolution, options *exempt.Options
 		ExcludedByCgo:          excludedByCgo(set.loaded.per),
 		TestFileRules:          set.loaded.testFileRules,
 		TypeErrorSkips:         typeErrorSkipsReported(set.loaded.typeErrorSkips),
-		Notes:                  notesOf(resolved.config.Target.Kind, &set.loaded),
+		Notes:                  notesOf(resolved.config.Target.Kind.Of(config.GoLanguage), &set.loaded),
 		Suppressions:           set.suppressions,
 	})
 	return envelope, set.loaded.unbuilt, err
@@ -1379,7 +1379,7 @@ func targetOf(resolved *resolution, loaded *stages) (report.Target, error) {
 	if err != nil {
 		return report.Target{}, err
 	}
-	return report.Target{Kind: string(resolved.config.Target.Kind), Root: root, Identity: identity}, nil
+	return report.Target{Kind: string(resolved.config.Target.Kind.Of(config.GoLanguage)), Root: root, Identity: identity}, nil
 }
 
 // identityOf is the module path the loaded target publishes itself under, which is
@@ -1593,7 +1593,7 @@ func exemptOptions(cfg *config.Config) (exempt.Options, error) {
 		},
 		TemplateDirs:     cfg.Analysis.TemplateDirs,
 		IncludeGenerated: cfg.Analysis.GeneratedFiles == config.IncludeGenerated,
-		PublishedAPI:     cfg.Target.Kind == config.Library,
+		PublishedAPI:     cfg.Target.Kind.Of(config.GoLanguage) == config.Library,
 	}, nil
 }
 

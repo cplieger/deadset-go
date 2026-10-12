@@ -157,6 +157,9 @@ type Input struct {
 	// source on first use and shared by every class that asks ([assertableOf]).
 	assert *assertable
 
+	// outside is [outsideClosure]'s answer, computed on first use.
+	outside *[]*types.Package
+
 	// Symbols is the inventory, for a class that reads a declaration's own
 	// properties rather than resolving an object.
 	Symbols []graph.Symbol

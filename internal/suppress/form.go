@@ -19,9 +19,9 @@ var (
 
 	// pathForm is a path inside the target: relative to the target root, the
 	// solidus as the separator on every platform, no leading ./, no trailing
-	// solidus, no segment that is . or .., never absolute, never a backslash
-	// separator, no carriage return or line feed.
-	pathForm = regexp.MustCompile(`^(?:[^/\\.\r\n][^/\\\r\n]*|\.[^/\\.\r\n][^/\\\r\n]*|\.\.[^/\\\r\n]+)(?:/(?:[^/\\.\r\n][^/\\\r\n]*|\.[^/\\.\r\n][^/\\\r\n]*|\.\.[^/\\\r\n]+))*$`)
+	// solidus, no segment that is . or .., never absolute, no control character;
+	// any other character a file name holds, a backslash among them.
+	pathForm = regexp.MustCompile(`^(?:[^/.\x00-\x1f\x7f][^/\x00-\x1f\x7f]*|\.[^/.\x00-\x1f\x7f][^/\x00-\x1f\x7f]*|\.\.[^/\x00-\x1f\x7f]+)(?:/(?:[^/.\x00-\x1f\x7f][^/\x00-\x1f\x7f]*|\.[^/.\x00-\x1f\x7f][^/\x00-\x1f\x7f]*|\.\.[^/\x00-\x1f\x7f]+))*$`)
 )
 
 // referenceBlock is one named building block the grammar of the stable symbol
@@ -67,7 +67,7 @@ var referenceForms = [...]string{
 	`^ts://TS_PACKAGE/TS_FILE#TS_HEAD(?:\.TS_MEMBER)+$`,
 	`^ts://TS_PACKAGE/TS_FILE#TS_HEAD(?:\.TS_MEMBER)+:static$`,
 	`^ts://TS_PACKAGE/TS_FILE#TS_HEAD(?:\.TS_MEMBER)*(?::static)?<TS_IDENT>$`,
-	`^ts://TS_PACKAGE/package\.json#TS_PACKAGE:(?:dependency|dev-dependency|peer-dependency)$`,
+	`^ts://TS_PACKAGE/(?:[^/#\r\n]+/)*package\.json#TS_PACKAGE:(?:dependency|dev-dependency|peer-dependency)$`,
 }
 
 // referenceExpressions are the forms with every block substituted, compiled once.

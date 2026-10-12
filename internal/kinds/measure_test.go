@@ -48,7 +48,7 @@ func measured(t *testing.T, dir string, kind config.TargetKind) (*Input, Result)
 		t.Skipf("%s is not on this machine: %v", dir, err)
 	}
 	resolved := config.Default()
-	resolved.Target.Kind = kind
+	resolved.Target.Kind = config.OneKind(kind)
 	in := inputOfDir(t, dir, resolved, Consumers{})
 
 	result, err := Compute(in, packageEmitters())

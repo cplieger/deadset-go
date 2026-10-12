@@ -1,5 +1,5 @@
 {
-  "corpus_version": "5.0.0",
+  "corpus_version": "5.2.0",
   "product": {
     "name": "deadset-go",
     "version": "0.0.0-devel",
@@ -7,8 +7,8 @@
   },
   "result": "pass",
   "totals": {
-    "fixtures": 120,
-    "pass": 120,
+    "fixtures": 124,
+    "pass": 124,
     "gap": 0,
     "fail": 0
   },
@@ -1826,6 +1826,111 @@
       "unexpected": []
     },
     {
+      "fixture": "errors-astype-in-a-dependency",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "DelayDirective",
+          "result": "pass",
+          "actual": {
+            "report": "DS1703",
+            "symbol_kind": "suppression",
+            "confidence": "certain",
+            "details": {
+              "mechanism": "inline"
+            }
+          }
+        },
+        {
+          "symbol": "flaky.Error",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "interface-satisfaction"
+            ]
+          }
+        },
+        {
+          "symbol": "flaky.IsTransient",
+          "result": "pass",
+          "actual": {
+            "report": "DS1103",
+            "symbol_kind": "method",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "note.Error",
+          "result": "pass",
+          "actual": {
+            "report": "DS1103",
+            "symbol_kind": "method",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "note.IsTransient",
+          "result": "pass",
+          "actual": {
+            "report": "DS1103",
+            "symbol_kind": "method",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "upstream.Delay",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "interface-satisfaction"
+            ]
+          }
+        },
+        {
+          "symbol": "upstream.Hint",
+          "result": "pass",
+          "actual": {
+            "report": "DS1103",
+            "symbol_kind": "method",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "upstream.IsTransient",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "interface-satisfaction"
+            ]
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
       "fixture": "errors-duck-typing-through-an-interface",
       "result": "pass",
       "expectations": [
@@ -2298,6 +2403,53 @@
           "result": "pass",
           "actual": {
             "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "ignore-entry-windows-path",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "SolidusEntry",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "WindowsEntry",
+          "result": "pass",
+          "actual": {
+            "report": "DS1703",
+            "symbol_kind": "suppression",
+            "confidence": "certain",
+            "details": {
+              "mechanism": "ignore"
+            }
+          }
+        },
+        {
+          "symbol": "kept",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "spare",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         }
       ],
@@ -6619,6 +6771,73 @@
             "details": {
               "mechanism": "inline"
             }
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "target-kind-per-language-go-application",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "ClientFile",
+          "result": "pass",
+          "actual": {
+            "report": "DS1502",
+            "symbol_kind": "file",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          }
+        },
+        {
+          "symbol": "Fetch",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Run",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "target-kind-per-language-go-library",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "ClientFile",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Fetch",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Run",
+          "result": "pass",
+          "actual": {
+            "report": "none"
           }
         }
       ],

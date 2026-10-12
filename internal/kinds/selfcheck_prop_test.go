@@ -148,7 +148,7 @@ func inventoryOf(found []drawnFinding) []graph.Symbol {
 // drawn set and nothing else.
 func inputOfRecords(records []suppress.Record, symbols []graph.Symbol, suppressed []graph.SymbolID) *Input {
 	resolved := config.Default()
-	resolved.Target.Kind = config.Application
+	resolved.Target.Kind = config.OneKind(config.Application)
 	return &Input{
 		Config: &resolved,
 		Merged: &graph.Merged{Symbols: symbols},

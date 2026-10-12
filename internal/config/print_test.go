@@ -158,7 +158,7 @@ func TestPrintWritesEveryProvenanceValueTheContractAccepts(t *testing.T) {
 func TestPrintWritesAnEmptyArrayForAnAbsentOne(t *testing.T) {
 	t.Parallel()
 
-	cfg := config.Config{Target: config.Target{Kind: config.Library}}
+	cfg := config.Config{Target: config.Target{Kind: config.OneKind(config.Library)}}
 	var out bytes.Buffer
 	if err := config.Print(&out, cfg, config.Provenance{}); err != nil {
 		t.Fatalf("Print(a configuration with no arrays) = error %v, want the configuration", err)
@@ -172,7 +172,7 @@ func TestPrintWritesTheCharactersAPageEscapesAsThemselves(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.Config{
-		Target: config.Target{Kind: config.Library},
+		Target: config.Target{Kind: config.OneKind(config.Library)},
 		Analysis: config.Analysis{
 			TemplateDelimiters: config.TemplateDelimiters{Left: "<%", Right: "%>"},
 		},
@@ -194,7 +194,7 @@ func TestPrintDoesNotMutateItsArgument(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.Config{
-		Target: config.Target{Kind: config.Library},
+		Target: config.Target{Kind: config.OneKind(config.Library)},
 		Analysis: config.Analysis{Configurations: []config.Configuration{
 			{Platform: &config.Platform{ID: "a", OS: "linux", Arch: "amd64"}},
 		}},
@@ -212,7 +212,7 @@ func TestPrintReportsAWriteFailure(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.Default()
-	cfg.Target.Kind = config.Library
+	cfg.Target.Kind = config.OneKind(config.Library)
 	err := config.Print(refusingWriter{}, cfg, config.Provenance{})
 	if !errors.Is(err, errRefusingWriter) {
 		t.Errorf("Print(a writer that refuses) = %v, want it to be %v", err, errRefusingWriter)

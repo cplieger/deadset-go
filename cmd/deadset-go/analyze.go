@@ -289,12 +289,20 @@ func (a *invocation) write(e *report.Envelope, recorded []suppress.Recorded, fai
 	if a.baselineWrite == "" {
 		return nil
 	}
-	others, err := suppress.OtherSchemeRows(a.baselineWrite)
+	return writeBaseline(a.baselineWrite, recorded, baselineProvenance(), suppress.OwnScheme)
+}
+
+// writeBaseline writes the baseline document at path: the rows a write of the
+// scheme's rows recorded and every row of another scheme the document there holds.
+// A document it cannot read, a row of either scheme included, is refused before
+// anything is written, so the document stays as it was.
+func writeBaseline(path string, recorded []suppress.Recorded, p suppress.Provenance, scheme string) error {
+	others, err := suppress.OtherSchemeRows(path, scheme)
 	if err != nil {
 		return err
 	}
-	return writeAtomically(a.baselineWrite, func(w io.Writer) error {
-		return suppress.WriteBaseline(w, recorded, suppress.Provenance{Analyzer: name, Version: version()}, others)
+	return writeAtomically(path, func(w io.Writer) error {
+		return suppress.WriteBaseline(w, recorded, p, others)
 	})
 }
 

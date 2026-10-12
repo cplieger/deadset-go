@@ -912,3 +912,28 @@ func TestCountedRendersThePluralOfTheNoun(t *testing.T) {
 		}
 	}
 }
+
+// A package at the target root of an application that nothing imports is named by
+// its note as the root itself, a single dot, and the report carrying that note
+// passes the run's own schema check.
+func TestAnalyzeNamesAPublishablePackageAtTheRootAsADot(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"go.mod":           "module example.com/lib\n\ngo 1.27.1\n",
+		"lib.go":           "// Package lib is imported by nothing in its module.\npackage lib\n\n// Answer is what an outside program calls.\nfunc Answer() int { return 42 }\n",
+		"cmd/tool/main.go": "package main\n\nfunc main() {}\n",
+		repositoryDocument: `{"target": {"kind": "application"}}`,
+	})
+	got := runAnalyze(t, dir)
+	if want := contractExitCodes(t)["findings"]; got.code != want {
+		t.Fatalf("analyze over a root package nothing imports = %d, want %d for its unreferenced function\nstderr: %s",
+			got.code, want, got.stderr)
+	}
+	envelope := envelopeAt(t, got.reportPath)
+	var paths []string
+	for _, note := range envelope.Notes {
+		paths = append(paths, note.Kind+" "+note.Path)
+	}
+	if want := []string{publishedPackageNote + " ."}; !slices.Equal(paths, want) {
+		t.Errorf("analyze over a root package nothing imports wrote the notes %q, want %q", paths, want)
+	}
+}

@@ -7,6 +7,8 @@
 package config
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"slices"
 	"strings"
@@ -14,7 +16,7 @@ import (
 
 // ContractVersion is the Contract version this package implements. It is the
 // resolved value of contract_version when no source supplies one.
-const ContractVersion = "7.0.0"
+const ContractVersion = "7.2.0"
 
 // defaultTestFiles is the documented default of ts.test_files.
 var defaultTestFiles = []string{"**/*.test.{ts,tsx,mts,cts}", "**/*.test-d.{ts,tsx,mts,cts}", "**/*.spec-d.{ts,tsx,mts,cts}", "**/*.spec.*", "**/__tests__/**", "**/__mocks__/**", "**/test-d/**"}
@@ -39,6 +41,165 @@ const (
 	Application TargetKind = "application"
 	Library     TargetKind = "library"
 )
+
+// TargetKinds is the target.kind setting: one kind for every language, or one
+// kind per language, held in the shape its source wrote it in. The zero value is
+// the setting no source supplied.
+type TargetKinds struct {
+	golang, ts  TargetKind
+	perLanguage bool
+}
+
+// OneKind is target.kind written as one kind for every language.
+func OneKind(kind TargetKind) TargetKinds {
+	return TargetKinds{golang: kind, ts: kind}
+}
+
+// kindPerLanguage is target.kind written as an object naming each language's kind.
+func kindPerLanguage(goKind, tsKind TargetKind) TargetKinds {
+	return TargetKinds{golang: goKind, ts: tsKind, perLanguage: true}
+}
+
+// IsSet reports whether a source supplied the setting.
+func (k TargetKinds) IsSet() bool { return k.golang != "" }
+
+// Of is the kind of one language's code, empty where the setting is unset.
+func (k TargetKinds) Of(language Language) TargetKind {
+	if language == TSLanguage {
+		return k.ts
+	}
+	return k.golang
+}
+
+// languageKinds is target.kind written per language, its members in the schema's
+// order.
+type languageKinds struct {
+	Go TargetKind `json:"go"`
+	TS TargetKind `json:"ts"`
+}
+
+// kindError refuses one value of target.kind, path naming the value at fault. The
+// label of the document that holds it is added where the document is decoded.
+type kindError struct {
+	path       string
+	detail     string
+	undeclared bool
+}
+
+func (r *kindError) Error() string { return r.path + ": " + r.detail }
+
+// MarshalJSON writes the setting in the shape its source wrote it in.
+func (k TargetKinds) MarshalJSON() ([]byte, error) {
+	if k.perLanguage {
+		return json.Marshal(languageKinds{Go: k.golang, TS: k.ts})
+	}
+	return json.Marshal(k.golang)
+}
+
+// UnmarshalJSON reads either shape, refusing a value of neither shape, a member the
+// object form does not declare, a language it leaves out and a value that is no
+// kind, in that order, the languages in the vocabulary's order, as a *kindError.
+func (k *TargetKinds) UnmarshalJSON(data []byte) error {
+	var one string
+	if json.Unmarshal(data, &one) == nil {
+		if refusal := checkKind(targetKindPath, data); refusal != nil {
+			return refusal
+		}
+		*k = OneKind(TargetKind(one))
+		return nil
+	}
+	var members map[string]json.RawMessage
+	if json.Unmarshal(data, &members) != nil || members == nil {
+		return &kindError{
+			path:   targetKindPath,
+			detail: fmt.Sprintf("holds %s, want %s or an object naming the kind of go and of ts", jsonKindOf(data), spellKinds()),
+		}
+	}
+	if refusal := checkLanguageMembers(data, members); refusal != nil {
+		return refusal
+	}
+	kinds := make([]TargetKind, 0, len(kindLanguages))
+	for _, language := range kindLanguages {
+		value := members[string(language)]
+		if refusal := checkKind(targetKindPath+"."+string(language), value); refusal != nil {
+			return refusal
+		}
+		var kind TargetKind
+		_ = json.Unmarshal(value, &kind)
+		kinds = append(kinds, kind)
+	}
+	*k = kindPerLanguage(kinds[0], kinds[1])
+	return nil
+}
+
+// targetKindPath is the dotted path of the target.kind setting.
+const targetKindPath = "target.kind"
+
+// kindLanguages are the languages target.kind's object form names, in the order
+// the vocabulary lists them.
+var kindLanguages = []Language{GoLanguage, TSLanguage}
+
+// checkLanguageMembers refuses the first member of target.kind's object form, in
+// document order, that names no language, then the first language it leaves out.
+func checkLanguageMembers(data []byte, members map[string]json.RawMessage) *kindError {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	_, _ = dec.Token()
+	for dec.More() {
+		token, _ := dec.Token()
+		name, _ := token.(string)
+		if !slices.Contains(kindLanguages, Language(name)) {
+			return &kindError{path: targetKindPath + "." + name, undeclared: true}
+		}
+		var skipped json.RawMessage
+		_ = dec.Decode(&skipped)
+	}
+	for _, language := range kindLanguages {
+		if _, held := members[string(language)]; !held {
+			return &kindError{path: targetKindPath + "." + string(language), detail: "is not set: " +
+				"a target kind written per language names the kind of every language, go and ts"}
+		}
+	}
+	return nil
+}
+
+// checkKind refuses an encoded value at path that is no target kind. A null decodes
+// into a string as nothing at all, so it is refused by its spelling.
+func checkKind(path string, data json.RawMessage) *kindError {
+	var value string
+	if jsonKindOf(data) != aString || json.Unmarshal(data, &value) != nil {
+		return &kindError{path: path, detail: fmt.Sprintf("holds %s, want %s", jsonKindOf(data), spellKinds())}
+	}
+	if TargetKind(value) != Application && TargetKind(value) != Library {
+		return &kindError{path: path, detail: fmt.Sprintf("%q is not one of %s", value, spellKinds())}
+	}
+	return nil
+}
+
+// spellKinds lists the target kinds as a refusal names them.
+func spellKinds() string { return spell([]TargetKind{Application, Library}) }
+
+// aString is how a refusal names the JSON string type.
+const aString = "a string"
+
+// jsonKindOf names the JSON type of one encoded value for a refusal.
+func jsonKindOf(data []byte) string {
+	switch trimmed := bytes.TrimSpace(data); {
+	case len(trimmed) == 0:
+		return "nothing"
+	case trimmed[0] == '[':
+		return "an array"
+	case trimmed[0] == '{':
+		return "an object"
+	case trimmed[0] == '"':
+		return aString
+	case string(trimmed) == "null":
+		return "null"
+	case string(trimmed) == "true" || string(trimmed) == "false":
+		return "a Boolean"
+	default:
+		return "a number"
+	}
+}
 
 // Confidence is the lowest reachability class a finding must reach to be
 // reported.
@@ -139,7 +300,7 @@ type Config struct {
 
 // Target is what is being analyzed.
 type Target struct {
-	Kind TargetKind `json:"kind"`
+	Kind TargetKinds `json:"kind"`
 }
 
 // Analysis is how the analysis is scoped and filtered.
@@ -255,7 +416,7 @@ type LifecycleContract struct {
 }
 
 // Default returns the configuration every documented default states. Target.Kind
-// is empty: the field has no default and is never inferred.
+// is unset: the field has no default and is never inferred.
 func Default() Config {
 	return Config{
 		ContractVersion: ContractVersion,

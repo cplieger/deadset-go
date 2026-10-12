@@ -1,11 +1,13 @@
 package suppress
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"go/token"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/cplieger/deadset-go/internal/graph"
@@ -134,10 +136,10 @@ type Row struct {
 }
 
 // OtherSchemeRows is every row of the baseline document at path whose reference is
-// of another language's scheme, in document order, which a write keeps as the
-// document held them. An absent document holds none, and one that does not decode is
-// [malformedError].
-func OtherSchemeRows(path string) ([]Row, error) {
+// not of scheme, the scheme of the rows the write records, in document order, which
+// a write keeps as the document held them. An absent document holds none, and one
+// that does not decode, a row of either scheme included, is [malformedError].
+func OtherSchemeRows(path, scheme string) ([]Row, error) {
 	held := baselineShape()
 	body, _, err := document(path, held)
 	if body == nil || err != nil {
@@ -156,7 +158,7 @@ func OtherSchemeRows(path string) ([]Row, error) {
 		if err != nil {
 			return nil, err
 		}
-		if !strings.HasPrefix(*one.Symbol, ownScheme) {
+		if !strings.HasPrefix(*one.Symbol, scheme) {
 			kept = append(kept, Row{Code: *one.Code, Symbol: *one.Symbol, Path: one.Path, Reason: one.Reason})
 		}
 	}
@@ -165,8 +167,9 @@ func OtherSchemeRows(path string) ([]Row, error) {
 
 // WriteBaseline writes a baseline document to w holding one row per recorded
 // finding, in the order given, each carrying the provenance as its reason so no row
-// reads as a maintainer's judgement, then every row of another language's scheme the
-// document keeps, so the go:// rows come first whichever analyzer writes last. A
+// reads as a maintainer's judgement, and every row of another language's scheme the
+// document keeps. The go:// rows come ahead of the ts:// rows, each scheme's rows in
+// the order given, so the document is the same whichever analyzer writes last. A
 // finding missing a value a row needs, and an identity missing its name or version,
 // are [errProvenance].
 func WriteBaseline(w io.Writer, findings []Recorded, p Provenance, others []Row) error {
@@ -191,6 +194,7 @@ func WriteBaseline(w io.Writer, findings []Recorded, p Provenance, others []Row)
 	for _, other := range others {
 		rows = append(rows, wireRow(other))
 	}
+	slices.SortStableFunc(rows, func(a, b wireRow) int { return cmp.Compare(schemeRank(a.Symbol), schemeRank(b.Symbol)) })
 
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
@@ -202,6 +206,20 @@ func WriteBaseline(w io.Writer, findings []Recorded, p Provenance, others []Row)
 		return fmt.Errorf("suppress: write %s: %w", BaselineFileName, err)
 	}
 	return nil
+}
+
+// schemeOrder is the order a written document holds the rows of each scheme in.
+var schemeOrder = []string{OwnScheme, "ts://"}
+
+// schemeRank is the place of a reference's scheme in [schemeOrder], a scheme it does
+// not list after every one it does.
+func schemeRank(symbol string) int {
+	for rank, scheme := range schemeOrder {
+		if strings.HasPrefix(symbol, scheme) {
+			return rank
+		}
+	}
+	return len(schemeOrder)
 }
 
 // wireWritten is the document WriteBaseline produces, whose field order is the

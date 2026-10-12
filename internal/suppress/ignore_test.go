@@ -94,7 +94,7 @@ func otherScheme(input []byte) bool {
 	var record struct {
 		Symbol string `json:"symbol"`
 	}
-	return json.Unmarshal(input, &record) == nil && record.Symbol != "" && !strings.HasPrefix(record.Symbol, ownScheme)
+	return json.Unmarshal(input, &record) == nil && record.Symbol != "" && !strings.HasPrefix(record.Symbol, OwnScheme)
 }
 
 // wantedOf is the outcomes one corpus case declares, read as the analyzer of its
@@ -400,5 +400,50 @@ func TestIgnoreFileLeavesEveryRecordOfAnotherSchemeToItsOwnAnalyzer(t *testing.T
 	malformed := `{"ignore": [{"code": "DS13", "symbol": "ts://@example/app/src/a.ts#A.b", "path": "src/a.ts", "reason": "r"}]}`
 	if _, _, err := IgnoreFile(writeIgnoreFile(t, malformed), nil); !errors.Is(err, errMalformed) {
 		t.Errorf("IgnoreFile(a malformed record of another scheme) error = %v, want errMalformed: every record is form-checked", err)
+	}
+}
+
+// A dependency of a manifest nested below the target root in a package with no
+// name is spelled with the manifest's path, as a source file of that package is, and
+// an entry copying the reference reads as the other analyzer's record.
+func TestIgnoreFileReadsTheReferenceOfANestedManifestsDependency(t *testing.T) {
+	for _, symbol := range []string{
+		"ts://./static-src/package.json#html-validate:dev-dependency",
+		"ts://./package.json#html-validate:dev-dependency",
+		"ts://@example/app/package.json#lodash:dependency",
+	} {
+		t.Run(symbol, func(t *testing.T) {
+			document := `{"ignore": [{"code": "DS1601", "symbol": "` + symbol + `", "path": "static-src/package.json", "reason": "Run by hand."}]}`
+			records, refusals, err := IgnoreFile(writeIgnoreFile(t, document), nil)
+			if err != nil || len(records) != 0 || len(refusals) != 0 {
+				t.Errorf("IgnoreFile(an entry naming %s) = %+v, %+v, %v, want the record left to its analyzer", symbol, records, refusals, err)
+			}
+		})
+	}
+	for _, symbol := range []string{
+		"ts://./static-src#html-validate:dev-dependency",
+		"ts://./static-src/package.json/#html-validate:dev-dependency",
+		"ts://./static-src/manifest.json#html-validate:dev-dependency",
+	} {
+		t.Run(symbol, func(t *testing.T) {
+			document := `{"ignore": [{"code": "DS1601", "symbol": "` + symbol + `", "path": "static-src/package.json", "reason": "Run by hand."}]}`
+			if _, _, err := IgnoreFile(writeIgnoreFile(t, document), nil); !errors.Is(err, errMalformed) {
+				t.Errorf("IgnoreFile(an entry naming %s) error = %v, want errMalformed: the scope ends in package.json", symbol, err)
+			}
+		})
+	}
+}
+
+// An entry's path takes every character a file name can hold but a control
+// character, so a route file's path is read and one holding a tab is refused.
+func TestIgnoreFileReadsAPathOfAnyFileNameButOneHoldingAControlCharacter(t *testing.T) {
+	entry := func(path string) string {
+		return `{"ignore": [{"code": "DS1002", "symbol": "ts://./src/routes/(app)/+layout.svelte.ts#load", "path": "` + path + `", "reason": "Run by hand."}]}`
+	}
+	if _, _, err := IgnoreFile(writeIgnoreFile(t, entry("src/routes/(app)/[id]/$page café.ts")), nil); err != nil {
+		t.Errorf("IgnoreFile(a route file's path) error = %v, want the entry read", err)
+	}
+	if _, _, err := IgnoreFile(writeIgnoreFile(t, entry(`src/a\tb.ts`)), nil); !errors.Is(err, errMalformed) {
+		t.Errorf("IgnoreFile(a path holding a tab) error = %v, want errMalformed", err)
 	}
 }

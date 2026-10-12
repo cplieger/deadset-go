@@ -141,7 +141,7 @@ func TestPrintRefusesAMatrixEntryOfNoSingleShape(t *testing.T) {
 			t.Parallel()
 
 			cfg := config.Default()
-			cfg.Target.Kind = config.Application
+			cfg.Target.Kind = config.OneKind(config.Application)
 			cfg.Analysis.Configurations = []config.Configuration{tc.entry}
 			var printed bytes.Buffer
 			if err := config.Print(&printed, cfg, config.Provenance{}); err == nil {

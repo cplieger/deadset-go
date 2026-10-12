@@ -153,7 +153,7 @@ func TestResolveWithoutARepositoryConfiguration(t *testing.T) {
 	}
 
 	want := config.Default()
-	want.Target.Kind = config.Application
+	want.Target.Kind = config.OneKind(config.Application)
 	if !reflect.DeepEqual(cfg, want) {
 		t.Errorf("Resolve(central only) = %+v, want the documented defaults with the declared kind %+v", cfg, want)
 	}
@@ -162,6 +162,74 @@ func TestResolveWithoutARepositoryConfiguration(t *testing.T) {
 	}
 	if got := provenance["reporters.formats"]; got.Source != config.SourceDefault {
 		t.Errorf("Resolve(central only) provenance[reporters.formats] = %q, want the default", got)
+	}
+}
+
+// A target kind written per language is refused for the first fault in the order
+// the key states: a member written twice, then an undeclared member in document
+// order, then a language left out, then a refused value, null included.
+func TestResolveRefusesATargetKindPerLanguageInTheKeysOrder(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		kind  string
+		names string
+	}{
+		{name: "twice_after_an_undeclared_member", kind: `{"py": "library", "go": "library", "go": "application"}`, names: "target.kind.go: member"},
+		{name: "undeclared_after_a_null_member", kind: `{"go": null, "py": "library"}`, names: `"target.kind.py"`},
+		{name: "undeclared_after_a_refused_value", kind: `{"ts": "service", "rb": "library"}`, names: `"target.kind.rb"`},
+		{name: "missing_after_a_null_member", kind: `{"ts": null}`, names: "target.kind.go: is not set"},
+		{name: "null_member_of_a_full_object", kind: `{"go": "library", "ts": null}`, names: "target.kind.ts: holds null"},
+		{name: "a_number", kind: `1`, names: "target.kind: holds a number"},
+		{name: "a_member_of_another_type", kind: `{"go": ["library"], "ts": "library"}`, names: "target.kind.go: holds an array"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, _, err := config.Resolve(labelled("", `{"target": {"kind": `+tc.kind+`}}`, "", nil))
+			var refusal *config.Error
+			if !errors.As(err, &refusal) {
+				t.Fatalf("Resolve(target.kind = %s) = error %v, want a *config.Error", tc.kind, err)
+			}
+			if !strings.Contains(refusal.Error(), tc.names) || !strings.Contains(refusal.Error(), "deadset.json") {
+				t.Errorf("Resolve(target.kind = %s) = %q, want the message to name %s and deadset.json", tc.kind, refusal.Error(), tc.names)
+			}
+		})
+	}
+}
+
+// Each language reads its own member of a target kind written per language, and
+// both members of one written as one kind.
+func TestTargetKindsOfEachLanguage(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name   string
+		kind   string
+		goKind config.TargetKind
+		tsKind config.TargetKind
+	}{
+		{name: "per_language", kind: `{"go": "application", "ts": "library"}`, goKind: config.Application, tsKind: config.Library},
+		{name: "per_language_reversed", kind: `{"ts": "application", "go": "library"}`, goKind: config.Library, tsKind: config.Application},
+		{name: "one_kind", kind: `"library"`, goKind: config.Library, tsKind: config.Library},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg, _, err := config.Resolve(labelled("", `{"target": {"kind": `+tc.kind+`}}`, "", nil))
+			if err != nil {
+				t.Fatalf("Resolve(target.kind = %s) = error %v, want it resolved", tc.kind, err)
+			}
+			if got := cfg.Target.Kind.Of(config.GoLanguage); got != tc.goKind {
+				t.Errorf("Resolve(target.kind = %s).Target.Kind.Of(go) = %q, want %q", tc.kind, got, tc.goKind)
+			}
+			if got := cfg.Target.Kind.Of(config.TSLanguage); got != tc.tsKind {
+				t.Errorf("Resolve(target.kind = %s).Target.Kind.Of(ts) = %q, want %q", tc.kind, got, tc.tsKind)
+			}
+		})
 	}
 }
 
@@ -876,6 +944,12 @@ func collectEnums(t *testing.T, declaration map[string]any, at string, into *[]e
 	if _, held := declaration["enum"]; held && at != "" {
 		*into = append(*into, enumeratedSetting{at: at, value: valueOutsideEveryClosedSet, names: at})
 	}
+	shapes, _ := declaration["oneOf"].([]any)
+	for _, shape := range shapes {
+		if branch, isObject := shape.(map[string]any); isObject {
+			collectShapeEnums(t, branch, at, into)
+		}
+	}
 	if entry, isObject := declaration["items"].(map[string]any); isObject {
 		if _, held := entry["enum"]; held {
 			*into = append(*into, enumeratedSetting{
@@ -905,6 +979,33 @@ func collectEnums(t *testing.T, declaration map[string]any, at string, into *[]e
 			value: valueOutsideEveryClosedSet,
 			names: joinTestKey(at, sample),
 		})
+	}
+}
+
+// collectShapeEnums appends one case per closed set one shape of a oneOf declares:
+// the shape itself, or one member of an object shape, its sibling members written
+// with a value their own set holds so the case is refused for that member alone.
+func collectShapeEnums(t *testing.T, shape map[string]any, at string, into *[]enumeratedSetting) {
+	t.Helper()
+
+	if _, held := shape["enum"]; held {
+		*into = append(*into, enumeratedSetting{at: at, value: valueOutsideEveryClosedSet, names: at})
+	}
+	members := declaredMembers(t, shape, "properties", at)
+	for name, member := range members {
+		if _, held := member["enum"]; !held {
+			continue
+		}
+		value := make(map[string]any, len(members))
+		for sibling, declaration := range members {
+			allowed, _ := declaration["enum"].([]any)
+			if len(allowed) == 0 {
+				t.Fatalf("config.schema.json: %s.%s declares no closed set, so this test builds no value for it", at, sibling)
+			}
+			value[sibling] = allowed[0]
+		}
+		value[name] = valueOutsideEveryClosedSet
+		*into = append(*into, enumeratedSetting{at: at, value: value, names: joinTestKey(at, name)})
 	}
 }
 
@@ -965,7 +1066,7 @@ func TestResolveRefusesEveryEnumeratedSettingsMalformedValue(t *testing.T) {
 	// joins the table above without a test edit; one this derivation stops
 	// reaching fails here.
 	for _, want := range []string{
-		"target.kind", "analysis.languages[0]", "analysis.min_confidence", "analysis.generated_files",
+		"target.kind", "target.kind.go", "target.kind.ts", "analysis.languages[0]", "analysis.min_confidence", "analysis.generated_files",
 		"analysis.consumer_tests", "severity.DS1101", "reporters.formats[0]", "reporters.sort",
 		"reporters.cascade", "reporters.fail_on",
 	} {
