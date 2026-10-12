@@ -261,7 +261,7 @@ func TestTheSignatureKindsReportAPublishedDeclarationOfALibrary(t *testing.T) {
 
 			result := analysisOf(t, "intrafunc-published.txtar", test.setup, Consumers{}).findings(t, intraFunctionKinds)
 
-			kind := test.setup.resolved().Target.Kind
+			kind := test.setup.resolved().Target.Kind.Of(config.GoLanguage)
 			if got := subjectsOf(result.Findings, unusedParameterCode); !slices.Equal(got, wantParameters) {
 				t.Errorf("the pass over intrafunc-published.txtar as %s reports %v under %s, want %v",
 					kind, got, unusedParameterCode, wantParameters)
@@ -343,7 +343,7 @@ func TestTheUnusedResultKindReportsOnlyWhereEveryCallSiteIsLoaded(t *testing.T) 
 
 			if got := subjectsOf(result.Findings, unusedResultCode); !slices.Equal(got, test.want) {
 				t.Errorf("the pass over intrafunc-outofgraph.txtar as %s reports %v under %s, want %v",
-					test.setup.resolved().Target.Kind, got, unusedResultCode, test.want)
+					test.setup.resolved().Target.Kind.Of(config.GoLanguage), got, unusedResultCode, test.want)
 			}
 		})
 	}
@@ -597,7 +597,7 @@ func TestMeasureTheIntraFunctionKindsOverRealModules(t *testing.T) {
 				t.Skipf("%s is not on this machine: %v", one.dir, err)
 			}
 			resolved := config.Default()
-			resolved.Target.Kind = one.kind
+			resolved.Target.Kind = config.OneKind(one.kind)
 			in := inputOfDir(t, one.dir, resolved, Consumers{})
 
 			found := computed(t, in, intraFuncEmitters()).Findings

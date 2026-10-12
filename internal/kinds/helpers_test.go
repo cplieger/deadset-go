@@ -53,7 +53,7 @@ func fixtureConfiguration() load.Configuration {
 // in the graph.
 func applicationConfig() config.Config {
 	resolved := config.Default()
-	resolved.Target.Kind = config.Application
+	resolved.Target.Kind = config.OneKind(config.Application)
 	return resolved
 }
 
@@ -62,7 +62,7 @@ func applicationConfig() config.Config {
 // test reads what each kind decides rather than what the minimum withholds.
 func libraryConfig() config.Config {
 	resolved := config.Default()
-	resolved.Target.Kind = config.Library
+	resolved.Target.Kind = config.OneKind(config.Library)
 	resolved.Analysis.MinConfidence = config.Possible
 	return resolved
 }
@@ -170,7 +170,7 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 	mode := graph.Mode{Production: true}
 	rootOptions := graph.RootOptions{
 		Patterns:     resolved.Roots.Patterns,
-		PublishedAPI: resolved.Target.Kind == config.Library,
+		PublishedAPI: resolved.Target.Kind.Of(config.GoLanguage) == config.Library,
 	}
 
 	per := make([]Configured, len(configurations))

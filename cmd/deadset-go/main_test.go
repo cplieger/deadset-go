@@ -461,8 +461,8 @@ func TestPrintConfigNamesTheSourceOfEverySetting(t *testing.T) {
 	}
 
 	printed := decodePrinted(t, stdout.Bytes())
-	if printed.Target.Kind != config.Library {
-		t.Errorf("run(%q) printed target.kind = %q, want %q from the repository configuration", args, printed.Target.Kind, config.Library)
+	if printed.Target.Kind != config.OneKind(config.Library) {
+		t.Errorf("run(%q) printed target.kind = %q, want %q from the repository configuration", args, printed.Target.Kind.Of(config.GoLanguage), config.Library)
 	}
 	if printed.Reporters.Sort != config.BySize {
 		t.Errorf("run(%q) printed reporters.sort = %q, want %q: the repository configuration outranks the central one", args, printed.Reporters.Sort, config.BySize)
@@ -635,8 +635,8 @@ func TestPrintConfigReadsTheDocumentTheInvocationNames(t *testing.T) {
 	}
 
 	printed := decodePrinted(t, stdout.Bytes())
-	if printed.Target.Kind != config.Library {
-		t.Errorf("run(%q) printed target.kind = %q, want %q: --config names the repository configuration to read", args, printed.Target.Kind, config.Library)
+	if printed.Target.Kind != config.OneKind(config.Library) {
+		t.Errorf("run(%q) printed target.kind = %q, want %q: --config names the repository configuration to read", args, printed.Target.Kind.Of(config.GoLanguage), config.Library)
 	}
 	if got, want := printed.Provenance["target.kind"], "repository: "+named; got != want {
 		t.Errorf("run(%q) printed provenance[target.kind] = %q, want %q", args, got, want)

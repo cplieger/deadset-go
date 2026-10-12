@@ -71,6 +71,7 @@ type node struct {
 	maximum  *big.Rat
 
 	required   []string
+	minProps   int
 	properties map[string]*node
 	patterns   []patternNode
 	additional *node
@@ -236,6 +237,8 @@ func (c *compiler) keyword(n *node, doc, at, keyword string, value any) (err err
 		n.unique, _ = value.(bool)
 	case "required":
 		n.required, err = stringList(value)
+	case "minProperties":
+		n.minProps, err = count(value)
 	default:
 		return c.applicator(n, doc, at, keyword, value)
 	}

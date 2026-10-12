@@ -58,6 +58,8 @@ A method answering an interface method no call site invokes is not retained, and
 
 A value converted to a defined interface that a package outside the program declares is held by that package, which may assert another interface on it. So the value also keeps the methods by which it, or a pointer to it, satisfies an interface that package's source asserts. An asserted interface is one a type assertion, a type switch case, or an `errors.As` or `errors.AsType` call names, whichever package declares it. An interface that package declares and never asserts keeps nothing.
 
+A value converted to `error` may reach a dependency that asserts its own error interface on it, as a retry loop does with `errors.AsType[Transient](err)` on the error a callback returns. So the value also keeps the methods by which it satisfies a non-generic defined interface that embeds `error` or declares `Error() string`, where a package outside the program declares that interface and that package's own source asserts it. The type converted is the one that counts: a value of a type keeps no method only a pointer to it has, since the assertion cannot match that value. Only such a package's source is read for this, and only its assertions of that interface count.
+
 A type whose values never reach an interface retains nothing whatever it happens to implement, because no caller can dispatch to it through an interface the program never builds.
 
 A method satisfying two interfaces at two sites is retained twice, once per site, so the retained set shows every conversion that depends on the method. A type registered as a flag value, or used as a writer, a round tripper or a sort interface, is an ordinary member of the conversion set.

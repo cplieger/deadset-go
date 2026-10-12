@@ -578,6 +578,35 @@ func TestInterfaceSatisfactionRendersAConsumersSiteAgainstTheConsumersRoot(t *te
 	}
 }
 
+// A type converted to error keeps each method by which it implements an interface
+// holding error's method that a package outside the program declares and asserts in
+// its own source, through errors.AsType, errors.As or a type switch case, exported
+// or not. An interface that package never asserts, one only another package
+// asserts, a type that never reaches error, and a value whose pointer alone
+// implements the interface keep nothing on that account. A value handed through an
+// outside interface keeps what that package asserts through errors.AsType on
+// another value.
+func TestInterfaceSatisfactionRetainsWhatAnOutsidePackageAssertsOnAnError(t *testing.T) {
+	refs := retainedRefs(t, analysisOf(t, "interface-satisfaction-error-assertions.txtar", Options{}), InterfaceSatisfaction)
+
+	for _, test := range []struct {
+		typeName string
+		want     []string
+	}{
+		{typeName: "upstream", want: qualify("example.com/errs", "upstream", "Code", "Delay", "Error", "IsTransient")},
+		{typeName: "note", want: qualify("example.com/errs", "note", "Show")},
+		{typeName: "flaky", want: qualify("example.com/errs", "flaky", "Error")},
+		{typeName: "probe", want: qualify("example.com/errs", "probe", "Error", "Report", "Retry")},
+	} {
+		t.Run(test.typeName, func(t *testing.T) {
+			if got := membersOf(refs, test.typeName); !slices.Equal(got, test.want) {
+				t.Errorf("InterfaceSatisfactionDetector(interface-satisfaction-error-assertions.txtar) retained, for %s,\ngot  %v\nwant %v",
+					test.typeName, got, test.want)
+			}
+		})
+	}
+}
+
 func TestAPublishedParameterOutsideTheTargetIsHeldByTheTypeItConverts(t *testing.T) {
 	in := inputOf(t, "published-outside-parameter.txtar", Options{PublishedAPI: true})
 	found := retainedBy(t, in, "published-outside-parameter.txtar")

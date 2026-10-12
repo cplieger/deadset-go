@@ -1,0 +1,177 @@
+A command hands a retry module errors and a reporter. The module declares
+interfaces holding the Error method and asserts some of them in its own source,
+through errors.AsType, errors.As and a type switch case, on the errors it gets
+back; one it declares and never asserts. Its base package declares an interface
+holding the Error method that only the retry package asserts, under a name the
+retry package also declares and never asserts. A second type
+implements an asserted interface and enters only an interface the command
+declares. A third reaches error as a value while only a pointer to it implements
+an asserted interface. A reporter goes to an interface the module declares, and the module
+asserts an interface on the error the reporter returns through errors.AsType. The
+module is one the command requires and replaces with a directory of its own.
+
+-- go.mod --
+module example.com/errs
+
+go 1.27.0
+
+require example.com/retry v0.0.0
+
+replace example.com/retry => ./retry
+-- main.go --
+package main
+
+import (
+	"errors"
+	"fmt"
+
+	"example.com/retry"
+)
+
+func main() {
+	fmt.Println(retry.Do(fetch) != nil)
+	fmt.Println(retry.Do(once) != nil)
+	describe(note{})
+	retry.Watch(&probe{})
+}
+
+type upstream struct {
+	err error
+}
+
+func (u *upstream) Error() string { return u.err.Error() }
+
+func (*upstream) IsTransient() bool { return true }
+
+func (*upstream) Delay() int { return 1 }
+
+func (*upstream) Hint() string { return "later" }
+
+func (*upstream) Code() int { return 503 }
+
+func (*upstream) Timeout() bool { return false }
+
+func fetch() error { return &upstream{err: errors.New("busy")} }
+
+type flaky struct{}
+
+func (flaky) Error() string { return "flaky" }
+
+func (*flaky) IsTransient() bool { return true }
+
+func once() error { return flaky{} }
+
+type shower interface{ Show() }
+
+type note struct{}
+
+func (note) Show() {}
+
+func (note) Error() string { return "note" }
+
+func (note) IsTransient() bool { return false }
+
+func describe(s shower) { s.Show() }
+
+type probe struct{}
+
+func (*probe) Report() error { return nil }
+
+func (*probe) Error() string { return "probe" }
+
+func (*probe) Retry() bool { return true }
+-- retry/go.mod --
+module example.com/retry
+
+go 1.27.0
+-- retry/retry.go --
+// Package retry calls a function until it succeeds or fails for good.
+package retry
+
+import (
+	"errors"
+
+	"example.com/retry/base"
+)
+
+// Transient is an error that may pass.
+type Transient interface {
+	error
+	IsTransient() bool
+}
+
+// Delayed is an error that names how long to wait.
+type Delayed interface {
+	Error() string
+	Delay() int
+}
+
+// Hinted is an error that carries a hint, which nothing here asks for.
+type Hinted interface {
+	error
+	Hint() string
+}
+
+type coded interface {
+	error
+	Code() int
+}
+
+// Timeout is an error that timed out, which nothing here asks for: the assertion
+// below names the base package's interface of the same name.
+type Timeout interface {
+	error
+	Timeout() bool
+}
+
+// Do calls fn until it returns nil or an error that will not pass.
+func Do(fn func() error) error {
+	for range 3 {
+		err := fn()
+		if err == nil {
+			return nil
+		}
+		if t, ok := errors.AsType[Transient](err); !ok || !t.IsTransient() {
+			return err
+		}
+		var d Delayed
+		if errors.As(err, &d) {
+			_ = d.Delay()
+		}
+		switch e := err.(type) {
+		case coded:
+			_ = e.Code()
+		}
+		if b, ok := err.(base.Timeout); ok {
+			_ = b.Timeout()
+		}
+	}
+	return errors.New("gave up")
+}
+
+// Reporter reports what it saw.
+type Reporter interface {
+	Report() error
+}
+
+// Retrier is an error that says whether to try again.
+type Retrier interface {
+	error
+	Retry() bool
+}
+
+// Watch asks r for its report and whether to try again.
+func Watch(r Reporter) {
+	if t, ok := errors.AsType[Retrier](r.Report()); ok {
+		_ = t.Retry()
+	}
+}
+-- retry/base/base.go --
+// Package base holds an error interface the retry package asserts.
+package base
+
+// Timeout is an error that says whether it timed out.
+type Timeout interface {
+	error
+	Timeout() bool
+}

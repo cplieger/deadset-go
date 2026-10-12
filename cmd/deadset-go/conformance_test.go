@@ -133,7 +133,7 @@ type corpusFixtureFile struct {
 	Name                   string                                 `json:"name"`
 	Description            string                                 `json:"description"`
 	Languages              []string                               `json:"languages"`
-	TargetKind             string                                 `json:"target_kind"`
+	TargetKind             config.TargetKinds                     `json:"target_kind"`
 	Consumers              []string                               `json:"consumers"`
 	ClosedWorld            []string                               `json:"closed_world"`
 	EdgeEvaluations        []corpusEdgeEvaluation                 `json:"edge_evaluations"`
@@ -1158,14 +1158,16 @@ func findingsUnder(findings []kinds.Finding, at site, code string) []kinds.Findi
 }
 
 // staleFor reports whether the run held a stale-suppression record for one entry,
-// read from the array the report carries those records in.
+// read from the array the report carries those records in. The path is compared
+// too, since another entry naming the same code and symbol under another path is
+// another record.
 func staleFor(records []kinds.Finding, entry ignoreEntry) bool {
 	for i := range records {
 		found := &records[i]
 		if found.Details.Entry == nil {
 			continue
 		}
-		if found.Details.Entry.Code == entry.Code && found.Details.Entry.Symbol == entry.Symbol {
+		if found.Details.Entry.Code == entry.Code && found.Details.Entry.Symbol == entry.Symbol && found.Details.Entry.Path == entry.Path {
 			return true
 		}
 	}
@@ -1205,12 +1207,10 @@ func corpusRunOf(rendering, document string, fixture *corpusFixtureFile,
 		return corpusRun{}, errors.New("the expectation file names configured declarations, " +
 			"which a fixture names only for the language the key belongs to, and no key of the go section names a declaration")
 	}
-	switch config.TargetKind(fixture.TargetKind) {
-	case config.Application, config.Library:
-		held.config.Target.Kind = config.TargetKind(fixture.TargetKind)
-	default:
-		return corpusRun{}, fmt.Errorf("the expectation file names the target kind %q", fixture.TargetKind)
+	if !fixture.TargetKind.IsSet() {
+		return corpusRun{}, errors.New("the expectation file names no target kind")
 	}
+	held.config.Target.Kind = fixture.TargetKind
 
 	if fixture.MinConfidence != "" {
 		held.config.Analysis.MinConfidence = config.Confidence(fixture.MinConfidence)
@@ -1296,7 +1296,7 @@ func analyzeRendering(ctx context.Context, run *corpusRun) (answered, error) {
 		retained:       retainedAt(&set),
 		evaluations:    set.evaluations,
 		typeErrorSkips: set.loaded.typeErrorSkips,
-		notes:          notesOf(run.config.Target.Kind, &set.loaded),
+		notes:          notesOf(run.config.Target.Kind.Of(config.GoLanguage), &set.loaded),
 		inEffect:       set.suppressions.InEffect,
 	}
 	for i := range set.loaded.unbuilt {
@@ -1919,7 +1919,7 @@ func TestTheCorpusRunDeclaresTheWorldTheFixtureNames(t *testing.T) {
 		t.Run(one.name, func(t *testing.T) {
 			t.Parallel()
 
-			fixture := corpusFixtureFile{TargetKind: string(config.Library), ClosedWorld: one.world}
+			fixture := corpusFixtureFile{TargetKind: config.OneKind(config.Library), ClosedWorld: one.world}
 			run, err := corpusRunOf("rendering", "", &fixture, &manifest)
 			if err != nil {
 				t.Fatalf("corpusRunOf(a fixture declaring %v) = error %v, want the run it is answered under",
@@ -1967,12 +1967,12 @@ func TestTheCorpusRunRefusesAWorldTheCorpusDoesNotCarry(t *testing.T) {
 	}{
 		{
 			name:    "a_fact_outside_the_closed_set",
-			fixture: corpusFixtureFile{TargetKind: string(config.Library), ClosedWorld: []string{"platforms"}},
+			fixture: corpusFixtureFile{TargetKind: config.OneKind(config.Library), ClosedWorld: []string{"platforms"}},
 			want:    `"platforms"`,
 		},
 		{
 			name:     "an_identifier_naming_no_architecture",
-			fixture:  corpusFixtureFile{TargetKind: string(config.Library), ClosedWorld: []string{worldMatrix}},
+			fixture:  corpusFixtureFile{TargetKind: config.OneKind(config.Library), ClosedWorld: []string{worldMatrix}},
 			manifest: corpusManifest{Configurations: []string{"linux"}},
 			want:     `"linux"`,
 		},

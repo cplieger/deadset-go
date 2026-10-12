@@ -28,8 +28,8 @@ var contractVersionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 
 // projectPathPattern is the spelling the configuration file of a project entry of the
 // build matrix takes: a path below the target root, its segments joined by /, none of
-// them empty, . or .., and none holding a backslash or a line break.
-var projectPathPattern = regexp.MustCompile(`^(?:[^/\\.\r\n][^/\\\r\n]*|\.[^/\\.\r\n][^/\\\r\n]*|\.\.[^/\\\r\n]+)(?:/(?:[^/\\.\r\n][^/\\\r\n]*|\.[^/\\.\r\n][^/\\\r\n]*|\.\.[^/\\\r\n]+))*$`)
+// them empty, . or .., and none holding a control character.
+var projectPathPattern = regexp.MustCompile(`^(?:[^/.\x00-\x1f\x7f][^/\x00-\x1f\x7f]*|\.[^/.\x00-\x1f\x7f][^/\x00-\x1f\x7f]*|\.\.[^/\x00-\x1f\x7f]+)(?:/(?:[^/.\x00-\x1f\x7f][^/\x00-\x1f\x7f]*|\.[^/.\x00-\x1f\x7f][^/\x00-\x1f\x7f]*|\.\.[^/\x00-\x1f\x7f]+))*$`)
 
 // typescriptReferencePattern is the spelling the symbol member of a declaration
 // entry takes: a stable symbol reference in the TypeScript form.
@@ -79,6 +79,12 @@ const (
 	// source supplies it whole. The delimiter pair is the one the key list
 	// declares.
 	keyObject
+	// keyChoice is one setting whose value takes one of several shapes, members
+	// holding what its object shapes declare. Its own decoding checks the members,
+	// so the walk refuses only a member one object writes twice.
+	keyChoice
+	// keyChoiceMember is a value inside a keyChoice setting, null included.
+	keyChoiceMember
 )
 
 // keyNode is one node of the closed key list. members holds a section's declared
@@ -99,7 +105,10 @@ func schemaRoot() keyNode {
 	return keyNode{kind: keySection, members: map[string]keyNode{
 		"contract_version": {kind: keyLeaf},
 		"target": {kind: keySection, members: map[string]keyNode{
-			"kind": {kind: keyLeaf},
+			"kind": {kind: keyChoice, members: map[string]keyNode{
+				"go": {kind: keyLeaf},
+				"ts": {kind: keyLeaf},
+			}},
 		}},
 		"analysis": {kind: keySection, members: map[string]keyNode{
 			"languages":       {kind: keyLeaf},
@@ -179,9 +188,13 @@ func declarationList() keyNode {
 }
 
 // member returns the node one member name resolves to. A member of an open
-// object, and any member below a setting, resolves to a leaf, so the walk
-// descends far enough to find a repeated member at any depth.
+// object, and any member below a setting, resolves to a leaf, and any member below
+// a choice to a choice member, so the walk descends far enough to find a repeated
+// member at any depth.
 func (n keyNode) member(name string) (keyNode, bool) {
+	if n.kind == keyChoice || n.kind == keyChoiceMember {
+		return keyNode{kind: keyChoiceMember}, true
+	}
 	if n.kind == keySection || n.kind == keyList || n.kind == keyObject {
 		child, declared := n.members[name]
 		return child, declared
@@ -230,7 +243,7 @@ func settingPaths() []string {
 func collectSettings(node keyNode, at string, paths *[]string) {
 	for name, child := range node.members {
 		path := joinKey(at, name)
-		if child.kind == keyLeaf || child.kind == keyList || child.kind == keyObject {
+		if child.kind == keyLeaf || child.kind == keyList || child.kind == keyObject || child.kind == keyChoice {
 			*paths = append(*paths, path)
 			continue
 		}
@@ -319,7 +332,7 @@ func walkValue(dec *json.Decoder, at string, node keyNode, label string) *Error 
 	if err != nil {
 		return malformed(label, at, "%s", err)
 	}
-	if token == nil {
+	if token == nil && node.kind != keyChoiceMember {
 		if at == "" {
 			return malformed(label, "", "want one JSON object, got null")
 		}
@@ -376,8 +389,11 @@ func walkObject(dec *json.Decoder, at string, node keyNode, label string) *Error
 // holds scalars.
 func walkArray(dec *json.Decoder, at string, node keyNode, label string) *Error {
 	entry := keyNode{kind: keyLeaf}
-	if node.kind == keyList {
+	switch node.kind {
+	case keyList:
 		entry = keyNode{kind: keySection, members: node.members}
+	case keyChoice, keyChoiceMember:
+		entry = keyNode{kind: keyChoiceMember}
 	}
 	for index := 0; dec.More(); index++ {
 		path := at + "[" + strconv.Itoa(index) + "]"

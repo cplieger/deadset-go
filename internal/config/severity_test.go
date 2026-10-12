@@ -120,7 +120,7 @@ func TestFamilyPrefix(t *testing.T) {
 // severity object and the consumer declaration a case carries.
 func configFor(of TargetKind, consumersComplete bool, severity map[string]Severity) Config {
 	cfg := Default()
-	cfg.Target.Kind = of
+	cfg.Target.Kind = OneKind(of)
 	cfg.Consumers.Complete = consumersComplete
 	if severity != nil {
 		cfg.Severity = severity

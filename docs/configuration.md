@@ -22,7 +22,9 @@ Required. The analysis branches on this field alone and never on whether the tar
 
 | Key | Type | Default | What it does |
 | --- | --- | --- | --- |
-| `target.kind` | `application` or `library` | none | Whether every caller is in the analyzed graph, or the published API has callers outside it |
+| `target.kind` | `application` or `library`, or an object naming the kind of `go` and of `ts` | none | Whether every caller is in the analyzed graph, or the published API has callers outside it |
+
+A repository that holds Go and TypeScript code of different kinds writes the object, for example `{"go": "application", "ts": "library"}`, and names both languages. deadset-go reads the `go` member. A string is the kind of both languages.
 
 The analysis.
 

@@ -216,9 +216,10 @@ func checkFiles(pkg *types.Package, fset *token.FileSet, files []*ast.File) *typ
 	}
 	fallback := importer.Default()
 	info := &types.Info{
-		Defs:  make(map[*ast.Ident]types.Object),
-		Uses:  make(map[*ast.Ident]types.Object),
-		Types: make(map[ast.Expr]types.TypeAndValue),
+		Defs:      make(map[*ast.Ident]types.Object),
+		Uses:      make(map[*ast.Ident]types.Object),
+		Types:     make(map[ast.Expr]types.TypeAndValue),
+		Instances: make(map[*ast.Ident]types.Instance),
 	}
 	config := types.Config{
 		Importer: importerFunc(func(path string) (*types.Package, error) {

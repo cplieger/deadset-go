@@ -156,7 +156,7 @@ func TestTheClassAndTheSeverityAreIndependentDials(t *testing.T) {
 		}).Draw(t, "the target kind"))
 
 		first := config.Default()
-		first.Target.Kind = kind
+		first.Target.Kind = config.OneKind(kind)
 		first.Analysis.MinConfidence = config.Possible
 		first.Consumers.Complete = consumers.Complete
 		first.Severity = drawnSeverities(t, "the first run")
@@ -179,9 +179,9 @@ func TestTheClassAndTheSeverityAreIndependentDials(t *testing.T) {
 
 		// The consumer set and the target kind move, and the severity map does not.
 		third := first
-		third.Target.Kind = config.TargetKind(rapid.SampledFrom([]string{
+		third.Target.Kind = config.OneKind(config.TargetKind(rapid.SampledFrom([]string{
 			string(config.Application), string(config.Library),
-		}).Draw(t, "the target kind of the third run"))
+		}).Draw(t, "the target kind of the third run")))
 		otherConsumers := drawnConsumers(t, "the third run")
 		third.Consumers.Complete = otherConsumers.Complete
 		_, movedClasses := dials(t, propInput(symbols, third, otherConsumers))

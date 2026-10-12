@@ -41,7 +41,7 @@ type doc struct {
 }
 
 type docTarget struct {
-	Kind *TargetKind `json:"kind"`
+	Kind *TargetKinds `json:"kind"`
 }
 
 type docAnalysis struct {
@@ -168,7 +168,7 @@ func Resolve(in Inputs) (Config, Provenance, error) {
 	resolveTS(&cfg, provenance, sources)
 	resolveSeverity(&cfg, provenance, sources)
 
-	if cfg.Target.Kind == "" {
+	if !cfg.Target.Kind.IsSet() {
 		return Config{}, nil, missingTargetKind(&in)
 	}
 	if err := checkLabels(provenance); err != nil {
@@ -243,6 +243,12 @@ func decodeChecked(data []byte, label string) (*doc, *Error) {
 		if errors.As(err, &mistyped) && mistyped.Field != "" {
 			return nil, malformed(label, mistyped.Field, "holds %s, want %s", mistyped.Value, jsonTypeOf(mistyped.Type))
 		}
+		if kind, isKind := errors.AsType[*kindError](err); isKind {
+			if kind.undeclared {
+				return nil, unimplementedKey(label, kind.path)
+			}
+			return nil, malformed(label, kind.path, "%s", kind.detail)
+		}
 		return nil, malformed(label, "", "%s", err)
 	}
 	document.fill()
@@ -261,7 +267,7 @@ func jsonTypeOf(target reflect.Type) string {
 		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
 		return "an integer written as an optional minus sign and digits alone"
 	case reflect.String:
-		return "a string"
+		return aString
 	case reflect.Bool:
 		return "a Boolean"
 	case reflect.Slice, reflect.Array:
@@ -289,8 +295,8 @@ func resolveSetting[T any](into *T, path string, p Provenance, sources []source,
 func resolveRoot(cfg *Config, p Provenance, sources []source) {
 	resolveSetting(&cfg.ContractVersion, "contract_version", p, sources,
 		func(d *doc) *string { return d.ContractVersion })
-	resolveSetting(&cfg.Target.Kind, "target.kind", p, sources,
-		func(d *doc) *TargetKind { return d.Target.Kind })
+	resolveSetting(&cfg.Target.Kind, targetKindPath, p, sources,
+		func(d *doc) *TargetKinds { return d.Target.Kind })
 	resolveSetting(&cfg.Consumers.Complete, "consumers.complete", p, sources,
 		func(d *doc) *bool { return d.Consumers.Complete })
 	resolveSetting(&cfg.Roots.Patterns, "roots.patterns", p, sources,
@@ -434,7 +440,6 @@ func describeSource(named string, data []byte, label string) string {
 func validate(d *doc, label string) *Error {
 	return firstError(
 		validateContractVersion(d.ContractVersion, label),
-		enum(label, "target.kind", d.Target.Kind, Application, Library),
 		validateAnalysis(d.Analysis, label),
 		arrayOf(label, "roots.patterns", d.Roots.Patterns, 0),
 		validateSeverity(d.Severity, label),

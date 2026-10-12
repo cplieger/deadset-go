@@ -29,16 +29,11 @@ func contractDocument(t *testing.T, name string) map[string]any {
 }
 
 // schemaNode builds one node of the closed key list from the Contract's
-// configuration schema: an object declaring members is a section, one the schema
-// marks as a setting is a setting written as an object, an object leaving its
-// member names to a pattern is an open object, an array of objects is a list, and
-// everything else holds one value. A list whose entries take one of several shapes
-// declares the members of every shape.
-//
-// The mark is what tells the two objects apart, and it is the schema's own
-// statement of the difference, read rather than inferred: a higher-ranked source
-// replaces a marked object whole and names it in one provenance entry, where a
-// section's keys are replaced one by one and named one entry each.
+// configuration schema: an object declaring members is a section, or a setting
+// written as an object where the schema's x-setting mark says so; an object leaving
+// its member names to a pattern is an open object; a key whose value takes one of
+// several shapes is a choice; an array of objects is a list, declaring the members
+// of every shape its entries take; anything else holds one value.
 func schemaNode(t *testing.T, at string, declaration map[string]any) keyNode {
 	t.Helper()
 
@@ -52,6 +47,9 @@ func schemaNode(t *testing.T, at string, declaration map[string]any) keyNode {
 	if _, held := declaration["patternProperties"]; held {
 		return keyNode{kind: keyMap}
 	}
+	if shapes, held := declaration["oneOf"].([]any); held {
+		return keyNode{kind: keyChoice, members: shapeMembers(t, at, objectShapes(shapes))}
+	}
 	entry, isObject := declaration["items"].(map[string]any)
 	if !isObject {
 		return keyNode{kind: keyLeaf}
@@ -63,6 +61,17 @@ func schemaNode(t *testing.T, at string, declaration map[string]any) keyNode {
 		return keyNode{kind: keyList, members: shapeMembers(t, at, shapes)}
 	}
 	return keyNode{kind: keyLeaf}
+}
+
+// objectShapes is every shape of a oneOf that declares members.
+func objectShapes(shapes []any) []any {
+	var found []any
+	for _, shape := range shapes {
+		if declared, isObject := shape.(map[string]any); isObject && declared["properties"] != nil {
+			found = append(found, shape)
+		}
+	}
+	return found
 }
 
 // shapeMembers builds the members the shapes of one list's entries declare between
@@ -377,13 +386,14 @@ func TestDeclaredKeysCoverEverySetting(t *testing.T) {
 	for _, unwanted := range []string{
 		"severity", "analysis.configurations[].id", "analysis.matrix",
 		"analysis.template_delimiters.left", "analysis.template_delimiters.right",
+		"target.kind.go", "target.kind.ts",
 	} {
 		if slices.Contains(settingPaths(), unwanted) {
 			t.Errorf("settingPaths() = %v, want it to omit %q, which holds no value of its own",
 				settingPaths(), unwanted)
 		}
 	}
-	for _, want := range []string{"analysis.configurations", "analysis.template_delimiters"} {
+	for _, want := range []string{"analysis.configurations", "analysis.template_delimiters", "target.kind"} {
 		if !slices.Contains(settingPaths(), want) {
 			t.Errorf("settingPaths() = %v, want it to contain %q, which one source supplies whole",
 				settingPaths(), want)
@@ -406,6 +416,8 @@ func TestDeclaresSetting(t *testing.T) {
 		{name: "one_entry_of_a_list_is_not", path: "analysis.configurations[0].id", want: false},
 		{name: "a_setting_written_as_an_object", path: "analysis.template_delimiters", want: true},
 		{name: "one_member_of_that_object_is_not", path: "analysis.template_delimiters.left", want: false},
+		{name: "a_setting_of_several_shapes", path: "target.kind", want: true},
+		{name: "one_member_of_its_object_shape_is_not", path: "target.kind.ts", want: false},
 		{name: "a_section_is_not_a_setting", path: "analysis", want: false},
 		{name: "a_section_declaring_no_member_is_not", path: "go", want: false},
 		{name: "the_severity_object_is_not_a_setting", path: "severity", want: false},

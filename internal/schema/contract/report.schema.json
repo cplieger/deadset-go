@@ -124,20 +124,49 @@
       }
     },
     "target": {
-      "description": "What was analyzed. One target per report, and a merged report names the same target as every report it merged.",
+      "description": "What was analyzed. One target per report: a merged report names the root and the identity every report it merged names, and the kind each of those reports gives each language it covers.",
       "type": "object",
       "additionalProperties": false,
       "required": ["kind", "root", "identity"],
+      "if": {
+        "properties": {
+          "kind": { "const": "mixed" }
+        }
+      },
+      "then": {
+        "required": ["language_kinds"]
+      },
+      "else": {
+        "not": { "required": ["language_kinds"] }
+      },
       "properties": {
         "kind": {
-          "description": "Whether the target is an application, whose every caller is in the analyzed graph, or a library, whose published API has callers outside it. The configuration declares it and the analysis never infers it.",
+          "description": "The target kind the configuration resolved, for the languages this report covers, the languages analyzer.languages names: application, whose every caller is in the analyzed graph, or library, whose published API has callers outside it, where every one of those languages has that kind, and mixed where they do not, language_kinds then naming the kind of each. A report of one language therefore carries that language's kind, whichever shape the configuration wrote it in. The configuration declares it and the analysis never infers it.",
           "type": "string",
-          "enum": ["application", "library"]
+          "enum": ["application", "library", "mixed"]
+        },
+        "language_kinds": {
+          "description": "The kind of each language this report covers, present exactly when kind is mixed: one member per language analyzer.languages names and no other, so its members are not all one kind, written in the order this schema lists them as every member of a report is.",
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 2,
+          "properties": {
+            "go": {
+              "description": "The kind of the target's Go code.",
+              "type": "string",
+              "enum": ["application", "library"]
+            },
+            "ts": {
+              "description": "The kind of the target's TypeScript code.",
+              "type": "string",
+              "enum": ["application", "library"]
+            }
+          }
         },
         "root": {
-          "description": "The target's directory, relative to the directory the run was invoked from, with / as the separator on every platform, no leading ./ and no trailing /. A dot is the run directory itself. Never an absolute path: a host path in the report would make two runs over the same tree on two machines write different bytes.",
+          "description": "The target's directory, relative to the directory the run was invoked from, in the path form contract/finding.schema.json states for relative_path: segments joined by /, none of them empty, . or .., so never absolute, with no leading ./ and no trailing /; no control character, U+0000 to U+001F or U+007F; every other character, a space, a backslash, which is no separator, a +, a $, a bracket, a parenthesis or one outside ASCII, written as it is. A dot is the run directory itself. Never an absolute path: a host path in the report would make two runs over the same tree on two machines write different bytes.",
           "type": "string",
-          "pattern": "^(?:\\.|(?:[^/\\\\.\\r\\n][^/\\\\\\r\\n]*|\\.[^/\\\\.\\r\\n][^/\\\\\\r\\n]*|\\.\\.[^/\\\\\\r\\n]+)(?:/(?:[^/\\\\.\\r\\n][^/\\\\\\r\\n]*|\\.[^/\\\\.\\r\\n][^/\\\\\\r\\n]*|\\.\\.[^/\\\\\\r\\n]+))*)$"
+          "pattern": "^(?:\\.|(?:[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.\\.[^/\\x00-\\x1f\\x7f]+)(?:/(?:[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.\\.[^/\\x00-\\x1f\\x7f]+))*)$"
         },
         "identity": {
           "description": "The name the target publishes itself under: its module path where the language has one, its package name otherwise. A target holding more than one language has one identity, the one the invoking product resolved, and every analyzer report of that target carries it, so a merged report names the same target as every report it merged. It names the target and is not a symbol scope: each symbol reference carries the scope grammar/symbol-ref.md gives its own language, so in a target holding Go and TypeScript a TypeScript reference keeps its package name.",
@@ -198,10 +227,10 @@
                 "minLength": 1
               },
               "project": {
-                "description": "The compiler configuration file the analysis built this configuration from, as a path relative to the target root, with / as the separator on every platform, no leading ./ and no trailing /. It names a file rather than a directory, and never an absolute path or a path leading out of the target root, because a host path in the report would make two runs over the same tree on two machines write different bytes.",
+                "description": "The compiler configuration file the analysis built this configuration from, as a path relative to the target root, in the path form contract/finding.schema.json states for relative_path: segments joined by /, none of them empty, . or .., so never absolute, with no leading ./ and no trailing /; no control character, U+0000 to U+001F or U+007F; every other character, a space, a backslash, which is no separator, a +, a $, a bracket, a parenthesis or one outside ASCII, written as it is. It names a file rather than a directory, and never an absolute path or a path leading out of the target root, because a host path in the report would make two runs over the same tree on two machines write different bytes.",
                 "type": "string",
                 "minLength": 1,
-                "pattern": "^(?:[^/\\\\.\\r\\n][^/\\\\\\r\\n]*|\\.[^/\\\\.\\r\\n][^/\\\\\\r\\n]*|\\.\\.[^/\\\\\\r\\n]+)(?:/(?:[^/\\\\.\\r\\n][^/\\\\\\r\\n]*|\\.[^/\\\\.\\r\\n][^/\\\\\\r\\n]*|\\.\\.[^/\\\\\\r\\n]+))*$"
+                "pattern": "^(?:[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.\\.[^/\\x00-\\x1f\\x7f]+)(?:/(?:[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.\\.[^/\\x00-\\x1f\\x7f]+))*$"
               }
             }
           }
@@ -265,10 +294,10 @@
                 "minLength": 1
               },
               "project": {
-                "description": "The compiler configuration file this configuration would have been built from, as a path relative to the target root, with / as the separator on every platform, no leading ./ and no trailing /. It names a file rather than a directory, and never an absolute path or a path leading out of the target root, because a host path in the report would make two runs over the same tree on two machines write different bytes.",
+                "description": "The compiler configuration file this configuration would have been built from, as a path relative to the target root, in the path form contract/finding.schema.json states for relative_path: segments joined by /, none of them empty, . or .., so never absolute, with no leading ./ and no trailing /; no control character, U+0000 to U+001F or U+007F; every other character, a space, a backslash, which is no separator, a +, a $, a bracket, a parenthesis or one outside ASCII, written as it is. It names a file rather than a directory, and never an absolute path or a path leading out of the target root, because a host path in the report would make two runs over the same tree on two machines write different bytes.",
                 "type": "string",
                 "minLength": 1,
-                "pattern": "^(?:[^/\\\\.\\r\\n][^/\\\\\\r\\n]*|\\.[^/\\\\.\\r\\n][^/\\\\\\r\\n]*|\\.\\.[^/\\\\\\r\\n]+)(?:/(?:[^/\\\\.\\r\\n][^/\\\\\\r\\n]*|\\.[^/\\\\.\\r\\n][^/\\\\\\r\\n]*|\\.\\.[^/\\\\\\r\\n]+))*$"
+                "pattern": "^(?:[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.\\.[^/\\x00-\\x1f\\x7f]+)(?:/(?:[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.\\.[^/\\x00-\\x1f\\x7f]+))*$"
               },
               "error": {
                 "description": "The first line of the error the load reported for this configuration, on one line and never empty, so a reader sees why the guess was dropped without running the load again. It names no absolute path and no other host detail, because two runs over the same tree on two machines write the same bytes.",
@@ -444,9 +473,9 @@
                 "type": "string"
               },
               "path": {
-                "description": "The path of the file the suppression scopes to, relative to the target root, with / as the separator, no leading ./, no trailing / and never absolute.",
+                "description": "The path of the file the suppression scopes to, relative to the target root, in the path form: segments joined by /, none of them empty, . or .., so never absolute, with no leading ./ and no trailing /; no control character, U+0000 to U+001F or U+007F; every other character, a space, a backslash, which is no separator, a +, a $, a bracket, a parenthesis or one outside ASCII, written as it is.",
                 "type": "string",
-                "pattern": "^(\\.?[A-Za-z0-9_@-][A-Za-z0-9_@.-]*)(/\\.?[A-Za-z0-9_@-][A-Za-z0-9_@.-]*)*$"
+                "pattern": "^(?:[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.\\.[^/\\x00-\\x1f\\x7f]+)(?:/(?:[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.\\.[^/\\x00-\\x1f\\x7f]+))*$"
               },
               "reason": {
                 "description": "The reason the suppression carries: a maintainer's adjudication for a directive or an ignore entry, and the provenance the analyzer wrote for a baseline row. A suppression carrying none is reported under its own code and binds nothing, so every record here has one.",
@@ -463,9 +492,9 @@
             "required": ["path", "line", "column"],
             "properties": {
               "path": {
-                "description": "The path of the document that holds the suppression, relative to the target root, with / as the separator, no leading ./, no trailing / and never absolute.",
+                "description": "The path of the document that holds the suppression, relative to the target root, in the path form: segments joined by /, none of them empty, . or .., so never absolute, with no leading ./ and no trailing /; no control character, U+0000 to U+001F or U+007F; every other character, a space, a backslash, which is no separator, a +, a $, a bracket, a parenthesis or one outside ASCII, written as it is.",
                 "type": "string",
-                "pattern": "^(\\.?[A-Za-z0-9_@-][A-Za-z0-9_@.-]*)(/\\.?[A-Za-z0-9_@-][A-Za-z0-9_@.-]*)*$"
+                "pattern": "^(?:[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.\\.[^/\\x00-\\x1f\\x7f]+)(?:/(?:[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.\\.[^/\\x00-\\x1f\\x7f]+))*$"
               },
               "line": {
                 "description": "The 1-based line of the suppression in that document.",
@@ -539,9 +568,9 @@
       "type": "array",
       "uniqueItems": true,
       "items": {
-        "description": "A source file path, relative to the target root, with / as the separator, no leading ./, no trailing / and never absolute.",
+        "description": "A source file path, relative to the target root, in the path form: segments joined by /, none of them empty, . or .., so never absolute, with no leading ./ and no trailing /; no control character, U+0000 to U+001F or U+007F; every other character, a space, a backslash, which is no separator, a +, a $, a bracket, a parenthesis or one outside ASCII, written as it is.",
         "type": "string",
-        "pattern": "^(\\.?[A-Za-z0-9_@-][A-Za-z0-9_@.-]*)(/\\.?[A-Za-z0-9_@-][A-Za-z0-9_@.-]*)*$"
+        "pattern": "^(?:[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.\\.[^/\\x00-\\x1f\\x7f]+)(?:/(?:[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.\\.[^/\\x00-\\x1f\\x7f]+))*$"
       }
     },
     "test_file_rules": {
@@ -576,9 +605,9 @@
         "required": ["path", "line", "message"],
         "properties": {
           "path": {
-            "description": "The file holding the error, relative to the target root, with / as the separator, no leading ./, no trailing / and never absolute.",
+            "description": "The file holding the error, relative to the target root, in the path form: segments joined by /, none of them empty, . or .., so never absolute, with no leading ./ and no trailing /; no control character, U+0000 to U+001F or U+007F; every other character, a space, a backslash, which is no separator, a +, a $, a bracket, a parenthesis or one outside ASCII, written as it is.",
             "type": "string",
-            "pattern": "^(\\.?[A-Za-z0-9_@-][A-Za-z0-9_@.-]*)(/\\.?[A-Za-z0-9_@-][A-Za-z0-9_@.-]*)*$"
+            "pattern": "^(?:[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.\\.[^/\\x00-\\x1f\\x7f]+)(?:/(?:[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.\\.[^/\\x00-\\x1f\\x7f]+))*$"
           },
           "line": {
             "description": "The line of the error's position, counted from 1.",
@@ -609,9 +638,9 @@
             "enum": ["published-package"]
           },
           "path": {
-            "description": "The directory the note is about, relative to the target root, with / as the separator, no leading ./, no trailing / and never absolute.",
+            "description": "The directory the note is about, relative to the target root, in the path form: segments joined by /, none of them empty, . or .., so never absolute, with no leading ./ and no trailing /; no control character, U+0000 to U+001F or U+007F; every other character, a space, a backslash, which is no separator, a +, a $, a bracket, a parenthesis or one outside ASCII, written as it is; the target root itself is a single dot, so a note about the package at the root names it as .",
             "type": "string",
-            "pattern": "^(\\.?[A-Za-z0-9_@-][A-Za-z0-9_@.-]*)(/\\.?[A-Za-z0-9_@-][A-Za-z0-9_@.-]*)*$"
+            "pattern": "^(?:\\.|(?:[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.\\.[^/\\x00-\\x1f\\x7f]+)(?:/(?:[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.\\.[^/\\x00-\\x1f\\x7f]+))*)$"
           },
           "key": {
             "description": "The configuration key that settles the note, as a dotted path of contract/config.schema.json.",
@@ -679,9 +708,9 @@
             "minLength": 1
           },
           "manifest": {
-            "description": "The manifest that declares the enabling package as a dependency, relative to the target root, with / as the separator, no leading ./ and never absolute.",
+            "description": "The manifest that declares the enabling package as a dependency, relative to the target root, in the path form: segments joined by /, none of them empty, . or .., so never absolute, with no leading ./ and no trailing /; no control character, U+0000 to U+001F or U+007F; every other character, a space, a backslash, which is no separator, a +, a $, a bracket, a parenthesis or one outside ASCII, written as it is.",
             "type": "string",
-            "pattern": "^(\\.?[A-Za-z0-9_@-][A-Za-z0-9_@.-]*)(/\\.?[A-Za-z0-9_@-][A-Za-z0-9_@.-]*)*$"
+            "pattern": "^(?:[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.\\.[^/\\x00-\\x1f\\x7f]+)(?:/(?:[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.\\.[^/\\x00-\\x1f\\x7f]+))*$"
           }
         }
       }

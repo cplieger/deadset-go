@@ -90,6 +90,7 @@ type assertable struct {
 	own        map[string][]*types.Interface // by package path
 	imported   map[string]importedSet        // by package path
 	assertions map[string][]*types.Interface // by package path
+	selfNamed  map[string]map[string]bool    // by package path, the names [assertable.assertsOwn] reads
 }
 
 // importedSet is what the packages one package imports at any depth can name: their
@@ -108,6 +109,7 @@ func assertableOf(in *Input) *assertable {
 			own:        make(map[string][]*types.Interface),
 			imported:   make(map[string]importedSet),
 			assertions: make(map[string][]*types.Interface),
+			selfNamed:  make(map[string]map[string]bool),
 		}
 	}
 	return in.assert
@@ -216,6 +218,45 @@ func (a *assertable) asserted(pkg *types.Package) []*types.Interface {
 	}
 	a.assertions[pkg.Path()] = found
 	return found
+}
+
+// assertsOwn reports whether the source of the package declaring one defined
+// interface asserts that interface itself, by type assertion, type switch case,
+// errors.As or errors.AsType ([assertedTypes]). Each package's source is read once,
+// and only when asked.
+func (a *assertable) assertsOwn(iface *types.Named) bool {
+	pkg := iface.Obj().Pkg()
+	names, known := a.selfNamed[pkg.Path()]
+	if !known {
+		names = a.ownAsserted(pkg)
+		a.selfNamed[pkg.Path()] = names
+	}
+	return names[iface.Obj().Name()]
+}
+
+// ownAsserted is the name of every package-level type of one package outside the
+// program that the package's own source asserts.
+func (a *assertable) ownAsserted(pkg *types.Package) map[string]bool {
+	names := make(map[string]bool)
+	dir, located := packageDir(a.in.Result.Fset, pkg)
+	if !located {
+		return names
+	}
+	source := a.source.read(pkg, dir)
+	if !source.ok {
+		return names
+	}
+	for _, file := range source.files {
+		for _, asserted := range assertedTypes(file, source.info) {
+			named, isNamed := types.Unalias(asserted).(*types.Named)
+			if !isNamed || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != pkg.Path() ||
+				named.Obj().Parent() != named.Obj().Pkg().Scope() {
+				continue
+			}
+			names[named.Obj().Name()] = true
+		}
+	}
+	return names
 }
 
 // assertedTypes is the type every type assertion and every type switch case one file

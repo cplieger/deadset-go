@@ -199,6 +199,47 @@ func TestCheckStopsAtTheFirstMemberHoldingAViolation(t *testing.T) {
 	}
 }
 
+// minProperties refuses an object with fewer members than it names, whether the
+// object is checked as it is read or decoded whole under an applicator.
+func TestMinPropertiesRefusesAnObjectWithTooFewMembers(t *testing.T) {
+	t.Parallel()
+
+	fsys := fstest.MapFS{"one.schema.json": {Data: []byte(`{
+		"type": "object",
+		"properties": {
+			"streamed": {"type": "object", "minProperties": 2},
+			"decoded": {"type": "object", "minProperties": 2, "not": {"required": ["x"]}}
+		}
+	}`)}}
+	s, err := compile(fsys, "one.schema.json")
+	if err != nil {
+		t.Fatalf("Setup: Compile = %v", err)
+	}
+	for _, tc := range []struct {
+		name     string
+		document string
+		want     []Error
+	}{
+		{name: "enough", document: `{"streamed": {"a": 1, "b": 2}, "decoded": {"a": 1, "b": 2}}`},
+		{name: "streamed_short", document: `{"streamed": {"a": 1}}`, want: []Error{{Keyword: "minProperties", InstancePath: "/streamed"}}},
+		{name: "decoded_short", document: `{"decoded": {}}`, want: []Error{{Keyword: "minProperties", InstancePath: "/decoded"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			found, err := s.Check(strings.NewReader(tc.document))
+			if err != nil {
+				t.Fatalf("Check(%s) = %v", tc.document, err)
+			}
+			got := make([]Error, len(found))
+			for i, v := range found {
+				got[i] = Error{Keyword: v.Keyword, InstancePath: v.InstancePath}
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("Check(%s) = %v, want %v", tc.document, found, tc.want)
+			}
+		})
+	}
+}
+
 func TestCheckRefusesTrailingData(t *testing.T) {
 	t.Parallel()
 

@@ -12,12 +12,11 @@ import (
 
 // InterfaceSatisfactionDetector retains every method that satisfies an interface
 // a value of the method's receiver type reaches, as types.Implements decides at each
-// conversion site of the target or of a loaded consumer, and what a package outside
-// the program declaring that interface asserts on the value ([outsideAssertions]).
-// Each retention is a use by the declaration holding the site, and an assertion's is
-// a use by the asserted type, so the assertion and the methods fall with a type only
-// dead code builds. A method satisfying two interfaces at two sites is retained once
-// per site.
+// conversion site of the target or of a loaded consumer, and what code outside the
+// program can assert on the value ([outsideAssertions]). Each retention is a use by
+// the declaration holding the site, and an assertion's is a use by the asserted
+// type, so the assertion and the methods fall with a type only dead code builds. A
+// method satisfying two interfaces at two sites is retained once per site.
 func InterfaceSatisfactionDetector(in *Input) ([]graph.Exemption, error) {
 	sites, err := programConversions(in)
 	if err != nil {
@@ -198,7 +197,33 @@ func (s *spans) retain(in *Input, c *graph.Conversion, retained []graph.Exemptio
 	for _, pkg := range s.outsidePackages(c) {
 		retained = s.retainOutside(in, c, pkg, methods, &held, retained)
 	}
+	if types.Identical(c.To, errorInterface) && !types.IsInterface(c.From) {
+		retained = s.retainErrorAssertions(in, c, methods, &held, retained)
+	}
 	return retained, nil
+}
+
+// errorInterface is the method set of the predeclared error type.
+var errorInterface, _ = types.Universe.Lookup("error").Type().Underlying().(*types.Interface)
+
+// retainErrorAssertions appends, for a site converting a type to error, each method
+// by which the type implements an interface holding error's method that a package
+// outside the program declares and its own source asserts ([outsideAssertions.ofError]),
+// the methods error already retained excepted.
+func (s *spans) retainErrorAssertions(in *Input, c *graph.Conversion, methods []answer, held *graph.Exemption, retained []graph.Exemption) []graph.Exemption {
+	for _, one := range s.outside.ofError(c.From) {
+		if slices.ContainsFunc(methods, func(m answer) bool { return m.method == one.method }) {
+			continue
+		}
+		if id, inventoried := in.Resolve.Object(one.method); inventoried {
+			retention := *held
+			retention.ID = id
+			retention.Detail = "satisfies what " + one.asserted.Obj().Pkg().Path() + " asserts through " + c.Name +
+				" as " + one.asserted.Obj().Name()
+			retained = append(retained, retention)
+		}
+	}
+	return retained
 }
 
 // outsidePackages are the packages outside the program whose assertions one site
@@ -238,12 +263,22 @@ func (s *spans) retainOutside(in *Input, c *graph.Conversion, pkg *types.Package
 // outsideAssertions answers what code outside the program asserts on a value it
 // holds through a defined interface its own package declares: every interface a type
 // assertion or a type switch case of that package's source names
-// ([assertable.asserted]).
+// ([assertable.asserted]); and on an error, the interfaces holding error's method
+// that a package declares and asserts itself ([outsideAssertions.ofError]).
 type outsideAssertions struct {
 	program   map[string]bool
 	assert    *assertable
 	methodsOf map[outsideKey][]types.Object    // the methods retained, by type and package
 	names     map[*types.Named]map[string]bool // the names a type or a pointer to it declares
+	errorsOf  map[string][]errorAnswer         // [outsideAssertions.ofError], by exact type
+	holding   *[]*types.Named                  // [outsideAssertions.errorHolders], on first use
+}
+
+// errorAnswer is one method of a type and the interface holding error's method
+// whose assertion retains it.
+type errorAnswer struct {
+	method   types.Object
+	asserted *types.Named
 }
 
 // outsideKey is one converted type and one package outside the program holding it.
@@ -263,7 +298,77 @@ func newOutsideAssertions(in *Input) *outsideAssertions {
 		assert:    assertableOf(in),
 		methodsOf: make(map[outsideKey][]types.Object),
 		names:     make(map[*types.Named]map[string]bool),
+		errorsOf:  make(map[string][]errorAnswer),
 	}
+}
+
+// ofError is every method by which t, exactly as a site converts it to error,
+// implements a defined interface holding error's method that a package outside the
+// program declares and asserts in its own source, as code there may assert it on
+// the error the program hands it. Only the source of a package declaring such an
+// interface that t implements is read, and an interface declaring no method beyond
+// Error is skipped, since the error site already retains Error.
+func (o *outsideAssertions) ofError(t types.Type) []errorAnswer {
+	named, isNamed := definedType(t)
+	if !isNamed {
+		return nil
+	}
+	key := types.TypeString(t, nil)
+	if held, known := o.errorsOf[key]; known {
+		return held
+	}
+	names, known := o.names[named]
+	if !known {
+		names = declaredMethodNames(named)
+		o.names[named] = names
+	}
+	var held []errorAnswer
+	for _, holder := range o.errorHolders() {
+		iface, _ := holder.Underlying().(*types.Interface)
+		if iface.NumMethods() <= 1 || !namesEvery(names, iface) || !types.Implements(t, iface) || !o.assert.assertsOwn(holder) {
+			continue
+		}
+		for _, one := range satisfying(t, iface) {
+			held = append(held, errorAnswer{method: one.method, asserted: holder})
+		}
+	}
+	o.errorsOf[key] = held
+	return held
+}
+
+// errorHolders is every non-generic defined interface whose method set holds
+// error's that a package of the program's import closure outside the program
+// declares, by package path and name.
+func (o *outsideAssertions) errorHolders() []*types.Named {
+	if o.holding != nil {
+		return *o.holding
+	}
+	var found []*types.Named
+	for _, pkg := range outsideClosure(o.assert.in) {
+		scope := pkg.Scope()
+		for _, name := range scope.Names() {
+			if named, holds := errorHolder(scope.Lookup(name)); holds {
+				found = append(found, named)
+			}
+		}
+	}
+	o.holding = &found
+	return found
+}
+
+// errorHolder is the defined type one package-level object declares, where it is a
+// non-generic interface whose method set holds error's.
+func errorHolder(obj types.Object) (*types.Named, bool) {
+	typeName, isType := obj.(*types.TypeName)
+	if !isType || typeName.IsAlias() {
+		return nil, false
+	}
+	named, isNamed := typeName.Type().(*types.Named)
+	if !isNamed || named.TypeParams().Len() > 0 {
+		return nil, false
+	}
+	iface, isInterface := named.Underlying().(*types.Interface)
+	return named, isInterface && iface.IsMethodSet() && types.Implements(iface, errorInterface)
 }
 
 // of is the package that declares one interface a site names, where that interface

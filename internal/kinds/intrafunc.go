@@ -206,7 +206,7 @@ func (g *intrafunc) callersUnknown(id graph.SymbolID) bool {
 	if symbol == nil || !symbol.Exported || !g.in.importable(symbol.PkgPath) {
 		return false
 	}
-	if g.in.Config == nil || g.in.Config.Target.Kind != config.Library {
+	if g.in.Config == nil || g.in.Config.Target.Kind.Of(config.GoLanguage) != config.Library {
 		return false
 	}
 	return !g.in.consumersLoaded()

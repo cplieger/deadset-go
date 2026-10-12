@@ -20,10 +20,10 @@ import (
 // is this name and nothing has to be made relative.
 const IgnoreFileName = "deadset-ignore.json"
 
-// ownScheme opens every reference of this analyzer's language. A record naming
+// OwnScheme opens every reference of this analyzer's language. A record naming
 // another scheme belongs to the analyzer of that language, which reads the same
 // document.
-const ownScheme = "go://"
+const OwnScheme = "go://"
 
 // The forms a malformed value of an entry is told to take.
 const (
@@ -169,7 +169,7 @@ func record(body []byte, at token.Position, bound map[reference][]graph.Symbol, 
 	}
 	code, symbol := *wire.Code, *wire.Symbol
 	path, reason := value(wire.Path), value(wire.Reason)
-	if !strings.HasPrefix(symbol, ownScheme) {
+	if !strings.HasPrefix(symbol, OwnScheme) {
 		return nil, nil, nil
 	}
 

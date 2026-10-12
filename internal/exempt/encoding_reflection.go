@@ -344,7 +344,6 @@ type encodingFlow struct {
 	stored      *storedTypes
 	closures    map[string]*importClosure // by package path, computed on first use
 	assert      *assertable
-	outside     *[]*types.Package                   // the program's outside imports, on first use
 	byName      map[string][]interfaceMethod        // their interfaces' methods, on first use
 	satisfying  map[satisfactionKey]map[string]bool // the method names retained
 	methodNames map[*types.Named]map[string]bool    // the names a type or a pointer to it declares
@@ -897,15 +896,21 @@ func (f *encodingFlow) closureOf(pkg *types.Package) *importClosure {
 	return closure
 }
 
-// outsidePackages is every package the program's import closure holds that is
-// neither the target's nor a loaded consumer's, ordered by path.
+// outsidePackages is [outsideClosure] over the flow's input.
 func (f *encodingFlow) outsidePackages() []*types.Package {
-	if f.outside != nil {
-		return *f.outside
+	return outsideClosure(f.kept.in)
+}
+
+// outsideClosure is every package the program's import closure holds that is
+// neither the target's nor a loaded consumer's, ordered by path, computed once per
+// input.
+func outsideClosure(in *Input) []*types.Package {
+	if in.outside != nil {
+		return *in.outside
 	}
 	own := make(map[string]bool)
 	var queue []*types.Package
-	for _, p := range programPackages(f.kept.in.Result) {
+	for _, p := range programPackages(in.Result) {
 		if p.Types != nil {
 			own[p.PkgPath] = true
 			queue = append(queue, p.Types)
@@ -928,7 +933,7 @@ func (f *encodingFlow) outsidePackages() []*types.Package {
 		}
 	}
 	slices.SortFunc(found, func(a, b *types.Package) int { return strings.Compare(a.Path(), b.Path()) })
-	f.outside = &found
+	in.outside = &found
 	return found
 }
 
