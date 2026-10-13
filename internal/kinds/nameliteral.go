@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/cplieger/deadset-go/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
 )
 
 // nameLiteralCodes are the candidate and visibility kinds about a package-level

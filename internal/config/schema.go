@@ -170,7 +170,8 @@ func schemaRoot() keyNode {
 				"bases":      declarationList(),
 				"members":    {kind: keyLeaf},
 			}},
-			"serializers": declarationList(),
+			"serializers":    declarationList(),
+			"roots_complete": {kind: keyLeaf},
 		}},
 		"provenance": {kind: keyMap},
 	}}

@@ -3,7 +3,7 @@ package report
 import (
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/config"
 )
 
 // fixtureGoldens are the fixtures a text and a JSON rendering are committed for: one

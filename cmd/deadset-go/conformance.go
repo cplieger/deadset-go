@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	deadsetgo "github.com/cplieger/deadset-go"
-	"github.com/cplieger/deadset-go/internal/report"
+	deadsetgo "github.com/cplieger/deadset-go/v2"
+	"github.com/cplieger/deadset-go/v2/internal/report"
 )
 
 // The two documents this analyzer commits about its own conformance, at the root of
@@ -22,7 +22,7 @@ const (
 // read, because no document of the Contract is read at run time; a test pins it equal
 // to the published value, the two committed documents are refused where either names
 // another version, and the pages that state it are pinned to it.
-const corpusVersion = "5.2.0"
+const corpusVersion = "6.0.0"
 
 // gapsDocument is the shape of the declared-gap document this analyzer reads of its
 // own: the corpus version answered and the declined capabilities.

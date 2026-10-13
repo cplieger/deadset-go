@@ -1,0 +1,20 @@
+A command declaring two fields nothing reads, one of which a callee outside the
+analysed program fills from a document.
+
+-- go.mod --
+module example.com/filled
+
+go 1.27.1
+-- main.go --
+package main
+
+type request struct {
+	Name  string
+	Extra string
+	Spare string
+}
+
+func main() {
+	var r request
+	println(r.Name)
+}

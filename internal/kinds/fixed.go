@@ -3,8 +3,8 @@ package kinds
 import (
 	"go/types"
 
-	"github.com/cplieger/deadset-go/internal/graph"
-	"github.com/cplieger/deadset-go/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 )
 
 // fixedByOutsideInterface is every method of the target whose name and signature are

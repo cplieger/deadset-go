@@ -5,11 +5,11 @@ import (
 	"context"
 	"slices"
 
-	"github.com/cplieger/deadset-go/internal/exempt"
-	"github.com/cplieger/deadset-go/internal/graph"
-	"github.com/cplieger/deadset-go/internal/kinds"
-	"github.com/cplieger/deadset-go/internal/report"
-	"github.com/cplieger/deadset-go/internal/suppress"
+	"github.com/cplieger/deadset-go/v2/internal/exempt"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/report"
+	"github.com/cplieger/deadset-go/v2/internal/suppress"
 )
 
 // baselineMechanism is the mechanism a stale-suppression record of a baseline row

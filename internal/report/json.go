@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/cplieger/deadset-go/internal/jsondoc"
+	"github.com/cplieger/deadset-go/v2/internal/jsondoc"
 )
 
 // jsonIndent is the indentation of the report document: two spaces, so the bytes of

@@ -13,10 +13,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cplieger/deadset-go/internal/deps"
-	"github.com/cplieger/deadset-go/internal/graph"
-	"github.com/cplieger/deadset-go/internal/load"
-	"github.com/cplieger/deadset-go/internal/matrix"
+	"github.com/cplieger/deadset-go/v2/internal/deps"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/matrix"
 )
 
 // The codes of the kinds whose subject is a non-code artifact: a source file, a

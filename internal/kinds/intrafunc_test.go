@@ -9,9 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/config"
-	"github.com/cplieger/deadset-go/internal/suppress"
-	spec "github.com/cplieger/deadset-spec/v7"
+	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/suppress"
+	spec "github.com/cplieger/deadset-spec/v8"
 )
 
 // intraFuncEmitters is the table of the intra-function group, which is what a pass
@@ -154,6 +155,8 @@ func TestDeadStoreReportsEveryStoreNoReadReaches(t *testing.T) {
 	want := []string{
 		"main.go:5:2 store count of go://example.com/app#overwritten",
 		"main.go:14:2 store count of go://example.com/app#trailing",
+		"main.go:28:2 store count of go://example.com/app#captured",
+		"main.go:40:2 store seen of go://example.com/app#immediate",
 		"signature.go:6:10 store err of go://example.com/app#scraped",
 		"signature.go:8:10 store err of go://example.com/app#scraped",
 		"signature.go:30:2 store n of go://example.com/app#rebound",
@@ -648,5 +651,65 @@ func TestAMethodATypeErrorRootsHasNoSignatureFreeToChange(t *testing.T) {
 	if !slices.Equal(reported, want) {
 		t.Errorf("the pass reports %s about %v, want %v: the interface the skipped open returns into may fix Filter's signature",
 			unusedParameterCode, reported, want)
+	}
+}
+
+func TestDeadStoreReportsStoresTheBodysOwnGraphDoesNotOrder(t *testing.T) {
+	t.Parallel()
+
+	result := analysisOf(t, "intrafunc-store-flow.txtar", asApplication, Consumers{}).findings(t, intraFunctionKinds)
+
+	want := []string{
+		"main.go:8:2 store n of go://example.com/app#",
+		"main.go:8:5 store err of go://example.com/app#",
+		"main.go:14:2 store n of go://example.com/app#handler",
+		"main.go:21:3 store x of go://example.com/app#masked",
+		"main.go:35:6 store err of go://example.com/app#handle",
+		"main.go:47:2 store total of go://example.com/app#looped",
+		"main.go:64:2 store k of go://example.com/app#counted",
+	}
+	if got := subjectsOf(result.Findings, deadStoreCode); !slices.Equal(got, want) {
+		t.Errorf("the pass over intrafunc-store-flow.txtar reports %v under %s, want %v",
+			got, deadStoreCode, want)
+	}
+}
+
+func TestUnusedParameterReportsALiteralCalledWhereItIsWritten(t *testing.T) {
+	t.Parallel()
+
+	result := analysisOf(t, "intrafunc-literal-callee.txtar", asApplication, Consumers{}).findings(t, intraFunctionKinds)
+
+	want := []string{
+		"main.go:5:14 parameter n of go://example.com/app#",
+		"main.go:9:10 parameter i of go://example.com/app#main",
+		"main.go:11:13 parameter label of go://example.com/app#main",
+		"main.go:12:7 parameter n of go://example.com/app#main",
+	}
+	if got := subjectsOf(result.Findings, unusedParameterCode); !slices.Equal(got, want) {
+		t.Errorf("the pass over intrafunc-literal-callee.txtar reports %v under %s, want %v",
+			got, unusedParameterCode, want)
+	}
+}
+
+func TestUnusedUnexportedReportsALocalConstantOrTypeItsBodyNeverReferences(t *testing.T) {
+	t.Parallel()
+
+	result := analysisOf(t, "declarations-locals.txtar", asApplication, Consumers{}).findings(t, declarationKinds)
+
+	want := []string{
+		"main.go:4:8 constant width of go://example.com/app#",
+		"main.go:10:8 constant unused of go://example.com/app#shapes",
+		"main.go:11:7 type label of go://example.com/app#shapes",
+		"main.go:14:7 type node of go://example.com/app#shapes",
+		"main.go:16:8 constant derived of go://example.com/app#shapes",
+	}
+	if got := subjectsOf(result.Findings, unusedUnexportedCode); !slices.Equal(got, want) {
+		t.Fatalf("the pass over declarations-locals.txtar reports %v under %s, want %v",
+			got, unusedUnexportedCode, want)
+	}
+	found := findingOf(t, result.Findings, unusedUnexportedCode, "unused")
+	if found.Live || found.Relation != graph.ReferenceCounting || found.Confidence != Certain {
+		t.Errorf("%s about the local constant unused carries live %t, relation %s, confidence %s, want a reference-counting finding at %s",
+			unusedUnexportedCode, found.Live, found.Relation, found.Confidence, Certain)
 	}
 }

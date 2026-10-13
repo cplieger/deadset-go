@@ -15,8 +15,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/load"
-	"github.com/cplieger/deadset-go/internal/scope"
+	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/txtar"
 )

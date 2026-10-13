@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/testsupport"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport"
 )
 
 func TestMemoBuildsEachKeyOnceForEveryTestAskingForIt(t *testing.T) {

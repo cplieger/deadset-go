@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/config"
-	"github.com/cplieger/deadset-go/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/kinds"
 )
 
 // TestTheJSONRenderingsWriteMarkupCharactersAsThemselves pins the string encoding of

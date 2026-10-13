@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 )
 
 // configured returns what the three passes would have returned for each of

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 )
 
 // unbuildableWindows is the identifier of the configuration the fixture below
@@ -301,7 +301,8 @@ func TestAnalyzeAnswersWhereAnAssertionHoldsAMethodOneConfigurationLacks(t *test
 // requiring b through a replace and carrying a replace over a module nothing loads,
 // and b carrying a requirement nothing imports, a package nothing imports whose one
 // declaration is the last use of a module, and a file no configuration builds. The
-// modules b requires sit in a directory the module walk does not search.
+// modules b requires sit in a directory the module walk does not search. The run
+// reports every class, because no build links the package nothing imports.
 func twoModuleTree(t *testing.T) string {
 	t.Helper()
 
@@ -320,7 +321,7 @@ func twoModuleTree(t *testing.T) string {
 		"_deps/c/c.go":     "package c\n\n// F is what Dead calls.\nfunc F() {}\n",
 		"_deps/d/go.mod":   "module example.com/d\n\ngo 1.27.1\n",
 		"_deps/d/d.go":     "package d\n",
-		repositoryDocument: `{"target": {"kind": "application"}}`,
+		repositoryDocument: `{"target": {"kind": "application"}, "analysis": {"min_confidence": "possible"}}`,
 	})
 }
 
@@ -363,7 +364,7 @@ func TestAnalyzeReportsEveryModuleUnderATargetThatIsNoModuleRoot(t *testing.T) {
 // a package of each. Each module is judged as it is alone: an enumerated type, a
 // constant of a type the other module enumerates, a method of a type the other
 // module also declares, a package nothing imports and a package only a test imports
-// keep the findings they would have alone.
+// keep the findings they would have alone, every class reported.
 func TestAnalyzeJudgesTwoModulesOfOnePathEachAsItIsAlone(t *testing.T) {
 	dir := writeModule(t, map[string]string{
 		"x/go.mod": "module example\n\ngo 1.27.1\n",
@@ -381,7 +382,7 @@ func TestAnalyzeJudgesTwoModulesOfOnePathEachAsItIsAlone(t *testing.T) {
 		"y/main_test.go":   "package main\n\nimport (\n\t\"testing\"\n\n\t\"example/util\"\n)\n\nfunc TestHelp(t *testing.T) { util.Help() }\n",
 		"y/util/util.go":   "package util\n\n// Help is what a test calls.\nfunc Help() {}\n",
 		"y/extra/extra.go": "package extra\n\n// Run is called by nothing.\nfunc Run() {}\n",
-		repositoryDocument: `{"target": {"kind": "application"}}`,
+		repositoryDocument: `{"target": {"kind": "application"}, "analysis": {"min_confidence": "possible"}}`,
 	})
 
 	run := runAnalyze(t, dir)
@@ -409,6 +410,8 @@ func TestAnalyzeJudgesTwoModulesOfOnePathEachAsItIsAlone(t *testing.T) {
 		"DS1103 go://example#Mode y/main.go",
 		"DS1103 go://example#Fast y/main.go",
 		"DS1103 go://example#Box y/main.go",
+		"DS1005 go://example#TestHelp y/main_test.go",
+		"DS1004 go://example/util#Help y/util/util.go",
 	}
 	if !slices.Equal(found, want) {
 		t.Errorf("analyze() reported\n%v\nwant\n%v", found, want)

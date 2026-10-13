@@ -1,0 +1,80 @@
+Stores a function body's own graph does not order: function literals of
+package-level initializers, a blank one and a named one; range variables a loop
+body overwrites, a range key a later read reaches, and one no read after the loop
+reaches; and a variable a closure names, overwritten before the closure is written
+and stored to after it, in a straight line and in a loop.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+func get(i int) (int, error) { return i, nil }
+
+func mask(s string) string { return s + "*" }
+
+var _ = func() bool {
+	n, err := get(1)
+	n, err = get(2)
+	return n > 0 && err == nil
+}()
+
+var handler = func() int {
+	n := 1
+	n = 2
+	return n
+}
+
+func masked(xs []string) {
+	for _, x := range xs {
+		x = mask(x)
+	}
+}
+
+func last(xs []string) int {
+	k := -1
+	for k = range xs {
+	}
+	return k
+}
+
+func transaction(f func() error) error { return f() }
+
+func handle() error {
+	id, err := get(1)
+	user, err := get(2)
+	if err != nil {
+		return err
+	}
+	return transaction(func() error {
+		_, err = get(id + user)
+		return err
+	})
+}
+
+func looped(xs []int) func() int {
+	total := 0
+	var f func() int
+	for _, x := range xs {
+		total = x
+		f = func() int { return total }
+		total = 0
+	}
+	return f
+}
+
+func main() {
+	masked(nil)
+	println(handler(), last(nil), handle(), looped(nil) == nil, counted(nil))
+}
+
+func counted(xs []string) int {
+	n := 0
+	k := 5
+	for k = range xs {
+		n += k
+	}
+	return n
+}

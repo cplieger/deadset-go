@@ -1,0 +1,24 @@
+Function literals that are the callee of the call they are written in: under a go
+statement, under a defer statement, called in place, one reading its parameter, a
+stub, and one in a package-level initializer.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+import "fmt"
+
+var _ = func(n int) bool { return true }(1)
+
+func main() {
+	done := make(chan bool)
+	go func(i int) { done <- true }(1)
+	<-done
+	defer func(label string) { fmt.Println("done") }("main")
+	func(n int) { fmt.Println("now") }(2)
+	func(n int) { fmt.Println(n) }(3)
+	func(n int) {}(4)
+}

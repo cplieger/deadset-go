@@ -5,12 +5,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/config"
-	"github.com/cplieger/deadset-go/internal/exempt"
-	"github.com/cplieger/deadset-go/internal/graph"
-	"github.com/cplieger/deadset-go/internal/kinds"
-	"github.com/cplieger/deadset-go/internal/load"
-	"github.com/cplieger/deadset-go/internal/scope"
+	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/exempt"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/txtar"
 )
 

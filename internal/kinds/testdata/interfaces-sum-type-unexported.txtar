@@ -1,0 +1,53 @@
+An unexported interface whose method set holds an unexported method, which
+restricts no implementor outside its package, beside an exported one of the same
+shape, and an unexported interface an exported sealed one embeds. The program calls
+one method of the first two through the interface and no method of the third.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- main.go --
+package main
+
+type shape interface {
+	name() string
+	sides() int
+}
+
+// Shape is a fixed set of shapes.
+type Shape interface {
+	Name() string
+	sealed()
+}
+
+type coded interface {
+	Code() string
+}
+
+// Failure is a fixed set of failures.
+type Failure interface {
+	coded
+	failure()
+}
+
+type square struct{}
+
+func (square) name() string { return "square" }
+
+func (square) sides() int { return 4 }
+
+func (square) Name() string { return "square" }
+
+func (square) sealed() { println("sealed") }
+
+func (square) Code() string { return "square" }
+
+func (square) failure() { println("failure") }
+
+func main() {
+	var s shape = square{}
+	var t Shape = square{}
+	var f Failure = square{}
+	println(s.name(), t.Name(), f != nil)
+}

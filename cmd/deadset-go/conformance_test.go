@@ -18,13 +18,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/config"
-	"github.com/cplieger/deadset-go/internal/graph"
-	"github.com/cplieger/deadset-go/internal/kinds"
-	"github.com/cplieger/deadset-go/internal/load"
-	"github.com/cplieger/deadset-go/internal/report"
-	"github.com/cplieger/deadset-go/internal/suppress"
-	spec "github.com/cplieger/deadset-spec/v7"
+	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/report"
+	"github.com/cplieger/deadset-go/v2/internal/suppress"
+	spec "github.com/cplieger/deadset-spec/v8"
 	"golang.org/x/tools/txtar"
 )
 
@@ -56,11 +56,12 @@ const (
 // nothing at the resolved position.
 const reportNone = "none"
 
-// The two facts about the world a fixture declares, which is the closed set the
+// The facts about the world a fixture declares, which is the closed set the
 // expectation file's closed_world member draws from.
 const (
 	worldConsumers = "consumers"
 	worldMatrix    = "matrix"
+	worldRoots     = "roots"
 )
 
 // staleSuppression is the issue kind that reports an entry matching no current
@@ -1243,9 +1244,11 @@ func corpusRunOf(rendering, document string, fixture *corpusFixtureFile,
 			}
 			held.config.Analysis.Matrix.Complete = true
 			held.config.Analysis.Configurations = declared
+		case worldRoots:
+			// Go carries no key for it: the corpus reads the fact as stated already.
 		default:
 			return corpusRun{}, fmt.Errorf("the expectation file declares the closed-world fact %q, "+
-				"and the corpus draws that member from %q and %q", fact, worldConsumers, worldMatrix)
+				"and the corpus draws that member from %q, %q and %q", fact, worldConsumers, worldMatrix, worldRoots)
 		}
 	}
 	return held, nil

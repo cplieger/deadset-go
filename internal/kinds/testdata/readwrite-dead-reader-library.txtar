@@ -1,0 +1,17 @@
+A library whose published variable only an unexported function nothing references
+writes and reads.
+
+-- go.mod --
+module example.com/lib
+
+go 1.27.1
+-- lib.go --
+package lib
+
+// Shared is published.
+var Shared string
+
+func scratch() string {
+	Shared = "x"
+	return Shared
+}

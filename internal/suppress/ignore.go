@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cplieger/deadset-go/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
 )
 
 // IgnoreFileName is the name the grammar fixes for the ignore file. The location

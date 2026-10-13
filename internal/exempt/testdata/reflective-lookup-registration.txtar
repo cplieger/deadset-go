@@ -1,0 +1,44 @@
+A package registering a controller with a dependency's router by method names, and
+handing the same strings with a value to a function of its own. The dependency is a
+module the target requires and replaces with a directory of its own.
+
+-- go.mod --
+module example.com/routes
+
+go 1.27.0
+
+require example.com/web v0.0.0
+
+replace example.com/web => ./web
+-- routes.go --
+package routes
+
+import "example.com/web"
+
+type api struct{}
+
+func (a *api) Login()  {}
+func (a *api) Logout() {}
+func (a *api) Update() {}
+func (a *api) Unused() {}
+func (a *api) Local()  {}
+func (a *api) lower()  {}
+
+// Register routes the controller's methods.
+func Register() {
+	web.Router("/api/login", &api{}, "post:Login")
+	web.Router("/api/logout", &api{}, "get,post:Logout;put:Update", "lower")
+	own(&api{}, "Local")
+}
+
+func own(v any, names ...string) { _, _ = v, names }
+-- web/go.mod --
+module example.com/web
+
+go 1.27.0
+-- web/web.go --
+// Package web routes requests to controller methods by name.
+package web
+
+// Router maps a path to the methods of c the mappings name.
+func Router(path string, c any, mappings ...string) { _, _, _ = path, c, mappings }

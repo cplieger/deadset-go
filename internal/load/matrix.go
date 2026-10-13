@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/cplieger/deadset-go/internal/scope"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 )
 
 // ErrNoConfiguration reports a matrix holding no configuration. A run over none

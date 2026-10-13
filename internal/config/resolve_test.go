@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/config"
 )
 
 // labelled returns the inputs one case supplies, with the file names a refusal

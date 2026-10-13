@@ -4,8 +4,8 @@ import (
 	"cmp"
 	"slices"
 
-	"github.com/cplieger/deadset-go/internal/edges"
-	"github.com/cplieger/deadset-go/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/edges"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
 )
 
 // state is one edge side's verdict, in the spelling a report carries.

@@ -1,0 +1,61 @@
+A package encoding types that encode themselves. Pointed encodes itself through a
+method with a pointer receiver and is encoded through a pointer; Copied has the same
+method and is encoded as a value, which the encoder cannot call the method on; Valued
+encodes itself through a method with a value receiver and is held as a map value;
+Outer embeds a type that encodes itself, whose method it promotes.
+
+-- go.mod --
+module example.com/selfenc
+
+go 1.27.0
+-- selfenc.go --
+package selfenc
+
+import "encoding/json"
+
+// Pointed encodes itself through a pointer.
+type Pointed struct {
+	ID     int
+	Hidden int
+	Unit   Unit
+}
+
+// Unit is reached only through a field of Pointed.
+type Unit struct {
+	Label string
+}
+
+func (p *Pointed) MarshalJSON() ([]byte, error) { return json.Marshal(map[string]int{"id": p.ID}) }
+
+// Copied has a pointer-receiver encoding method and is encoded as a value.
+type Copied struct {
+	Shown int
+}
+
+func (c *Copied) MarshalJSON() ([]byte, error) { return []byte("0"), nil }
+
+// Valued encodes itself through a value receiver.
+type Valued struct {
+	Kept int
+}
+
+func (v Valued) MarshalJSON() ([]byte, error) { return []byte("0"), nil }
+
+// Self is embedded by Outer and promotes its encoding method.
+type Self struct{}
+
+func (Self) MarshalJSON() ([]byte, error) { return []byte("0"), nil }
+
+// Outer promotes Self's encoding method.
+type Outer struct {
+	Self
+	Covered int
+}
+
+// Encode encodes every value above.
+func Encode() {
+	_, _ = json.Marshal(&Pointed{})
+	_, _ = json.Marshal(Copied{})
+	_, _ = json.Marshal(map[string]Valued{})
+	_, _ = json.Marshal(Outer{})
+}

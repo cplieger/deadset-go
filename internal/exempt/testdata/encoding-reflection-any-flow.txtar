@@ -1,0 +1,183 @@
+A package whose values reach an encoder through containers of interface values and
+through interface method results, and a dependency module whose functions receive
+values of the package: one sends them on, one fills them from a document through an
+interface it declares, and one fills them and prints them. The dependency is a module
+the target requires and replaces with a directory of its own, so the archive loads
+with no network access.
+
+-- go.mod --
+module example.com/flow
+
+go 1.27.0
+
+require example.com/plugin v0.0.0
+
+replace example.com/plugin => ./plugin
+-- flow.go --
+package flow
+
+import (
+	"encoding/json"
+	"io"
+
+	"example.com/plugin"
+)
+
+// Kernel reaches the encoder in a map literal a function returns as any.
+type Kernel struct {
+	OS string
+}
+
+func payload() any { return map[string]any{"kernels": []Kernel{{OS: "linux"}}} }
+
+// EncodePayload encodes what payload returns.
+func EncodePayload(w io.Writer) error { return json.NewEncoder(w).Encode(payload()) }
+
+// Result carries any value in Data.
+type Result struct {
+	Data any
+}
+
+// Node reaches the encoder in a map literal assigned to Result.Data.
+type Node struct {
+	Label string
+}
+
+// EncodeResult encodes a result whose data holds a node.
+func EncodeResult(w io.Writer) error {
+	ret := &Result{}
+	ret.Data = map[string]any{"node": Node{Label: "n"}}
+	return json.NewEncoder(w).Encode(ret)
+}
+
+// Source returns a resource as any.
+type Source interface {
+	Resource() (any, error)
+}
+
+// Deployment is what the implementation of Source returns.
+type Deployment struct {
+	Replicas int
+}
+
+type cluster struct{}
+
+func (cluster) Resource() (any, error) { return &Deployment{Replicas: 1}, nil }
+
+// Pod is what the other implementation of Source returns through a call of two results.
+type Pod struct {
+	Phase string
+}
+
+type pods struct{}
+
+func findPod() (*Pod, error) { return &Pod{Phase: "running"}, nil }
+
+func (pods) Resource() (any, error) { return findPod() }
+
+// EncodePod encodes what the pod source returns.
+func EncodePod(w io.Writer) error {
+	var s Source = pods{}
+	resource, err := s.Resource()
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(w).Encode(resource)
+}
+
+// EncodeResource encodes what a source returns.
+func EncodeResource(w io.Writer) error {
+	var s Source = cluster{}
+	resource, err := s.Resource()
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(w).Encode(resource)
+}
+
+// Body reaches the dependency in a map held by a variable.
+type Body struct {
+	Text string
+}
+
+// SendBody sends a map holding a body.
+func SendBody() {
+	body := map[string]any{"body": Body{Text: "t"}}
+	plugin.Send(body)
+}
+
+// Request is filled by the dependency's binder.
+type Request struct {
+	Name  string `json:"name"`
+	Extra string `json:"extra"`
+}
+
+// Shown is filled by the dependency's decoder that also prints.
+type Shown struct {
+	Note string
+}
+
+// Bind fills a request and a shown value.
+func Bind(c *plugin.Context) string {
+	var req Request
+	var shown Shown
+	if err := c.BindJSON(&req); err != nil {
+		return ""
+	}
+	if err := c.DecodeAndPrint(&shown); err != nil {
+		return ""
+	}
+	return req.Name
+}
+
+// Relayed is filled through a function of this package that forwards to the binder.
+type Relayed struct {
+	Code int
+}
+
+func bindInto(c *plugin.Context, v any) error { return c.BindJSON(v) }
+
+// BindRelayed fills a relayed value.
+func BindRelayed(c *plugin.Context) error { return bindInto(c, &Relayed{}) }
+-- plugin/go.mod --
+module example.com/plugin
+
+go 1.27.0
+-- plugin/plugin.go --
+// Package plugin sends and fills values.
+package plugin
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+// Send hands v to the network.
+func Send(v any) { _ = v }
+
+// Binding fills a value from a body.
+type Binding interface {
+	Bind(body []byte, v any) error
+}
+
+type jsonBinding struct{}
+
+func (jsonBinding) Bind(body []byte, v any) error { return json.Unmarshal(body, v) }
+
+// Context is one request.
+type Context struct {
+	body    []byte
+	binding Binding
+}
+
+// BindJSON fills v from the body through the context's binding.
+func (c *Context) BindJSON(v any) error { return c.binding.Bind(c.body, v) }
+
+// DecodeAndPrint fills v from the body and prints it.
+func (c *Context) DecodeAndPrint(v any) error {
+	if err := json.Unmarshal(c.body, v); err != nil {
+		return err
+	}
+	fmt.Println(v)
+	return nil
+}

@@ -1,0 +1,46 @@
+An application that stores values in interface-typed fields, of a named struct and
+of the struct type of a table of cases, and hands each field it reads back to an
+encoder, once through its own wrapper that captures the value in a closure. A field
+holds every value the program stores in it, so a value stored in the field of
+another struct that nothing hands on is read by nothing.
+
+-- go.mod --
+module example.com/fields
+
+go 1.27.1
+-- main.go --
+package main
+
+import (
+	"encoding/json"
+	"os"
+)
+
+type holder struct{ value any }
+
+type box struct{ value any }
+
+// Stored is held in a named struct's field.
+type Stored struct{ Name string }
+
+// Tabled is held in a table of cases.
+type Tabled struct{ Label string }
+
+// Kept is held in a field nothing hands on.
+type Kept struct{ Note string }
+
+type option func() error
+
+func encode(v any) option {
+	return func() error { return json.NewEncoder(os.Stdout).Encode(v) }
+}
+
+func main() {
+	h := holder{value: Stored{Name: "a"}}
+	_ = json.NewEncoder(os.Stdout).Encode(h.value)
+	for _, tc := range []struct{ value any }{{value: Tabled{Label: "b"}}} {
+		_ = encode(tc.value)()
+	}
+	k := box{value: Kept{Note: "c"}}
+	println(k.value != nil)
+}

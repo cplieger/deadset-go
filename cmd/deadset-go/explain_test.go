@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 )
 
 // explained is one run of the explain verb: what it wrote to each stream and the

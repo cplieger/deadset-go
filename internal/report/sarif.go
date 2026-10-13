@@ -8,10 +8,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cplieger/deadset-go/internal/catalog"
-	"github.com/cplieger/deadset-go/internal/config"
-	"github.com/cplieger/deadset-go/internal/graph"
-	"github.com/cplieger/deadset-go/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/catalog"
+	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/kinds"
 )
 
 // The document's own fixed values: the schema every producer names, the version of

@@ -14,8 +14,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/load"
-	spec "github.com/cplieger/deadset-spec/v7"
+	"github.com/cplieger/deadset-go/v2/internal/load"
+	spec "github.com/cplieger/deadset-spec/v8"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -351,10 +351,10 @@ func TestRootsMatchesAConfiguredStringAgainstASymbolReference(t *testing.T) {
 			if !slices.Equal(d.unmatched, wantUnmatched) {
 				t.Errorf("Roots(root-patterns.txtar, %q) unmatched = %v, want %v", test.pattern, d.unmatched, wantUnmatched)
 			}
-			// The fixture's blank declaration is the one root that is not
-			// configured, so any other kind is a string matched as the wrong one.
+			// The fixture's command and blank declaration are the roots that are
+			// not configured, so any other kind is a string matched as the wrong one.
 			for _, r := range d.roots {
-				if r.Kind != test.kind && r.Kind != RootBlank {
+				if r.Kind != test.kind && r.Kind != RootBlank && r.Kind != RootMain {
 					t.Errorf("Roots(root-patterns.txtar, %q) returned a root of kind %s, want %s", test.pattern, r.Kind, test.kind)
 				}
 			}

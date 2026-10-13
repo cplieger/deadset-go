@@ -4,8 +4,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/cplieger/deadset-go/internal/catalog"
-	"github.com/cplieger/deadset-go/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/catalog"
+	"github.com/cplieger/deadset-go/v2/internal/config"
 )
 
 // The workflow commands an annotation is written as. A finding at or above the

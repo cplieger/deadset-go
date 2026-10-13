@@ -27,7 +27,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cplieger/deadset-go/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
 )
 
 // FileName is the name the Contract fixes for the document, at the target root.

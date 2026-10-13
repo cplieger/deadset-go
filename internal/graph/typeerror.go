@@ -4,10 +4,11 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"maps"
 	"slices"
 	"strings"
 
-	"github.com/cplieger/deadset-go/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -31,11 +32,12 @@ type skippedDecl struct {
 	err  types.Error
 }
 
-// skippedDecls pairs every type error of the target's packages with its declaration.
-func skippedDecls(r *load.Result) []skippedDecl {
+// skippedDecls pairs every type error of the target's packages with its declaration,
+// leaving out the packages another configuration type-checks.
+func skippedDecls(r *load.Result, checkedElsewhere map[string]bool) []skippedDecl {
 	var held []skippedDecl
 	for _, p := range r.Packages {
-		if p.Module == nil || !p.Module.Main || len(p.TypeErrors) == 0 {
+		if p.Module == nil || !p.Module.Main || len(p.TypeErrors) == 0 || checkedElsewhere[r.KeyOf(p)] {
 			continue
 		}
 		for _, e := range p.TypeErrors {
@@ -61,12 +63,13 @@ func enclosingDecl(files []*ast.File, pos token.Pos) ast.Decl {
 }
 
 // TypeErrorSkips lists every type error of one configuration's target, each with
-// the declaration it skipped. A package and its test variant check one file twice,
-// so an error may be listed twice; the report holds each once.
-func TypeErrorSkips(r *load.Result, targetRoot string) []TypeErrorSkip {
+// the declaration it skipped, but none of a package checkedElsewhere holds. A package
+// and its test variant check one file twice, so an error may be listed twice; the
+// report holds each once.
+func TypeErrorSkips(r *load.Result, targetRoot string, checkedElsewhere map[string]bool) []TypeErrorSkip {
 	pos := newPositions(r.Fset, targetRoot, nil)
 	var held []TypeErrorSkip
-	for _, one := range skippedDecls(r) {
+	for _, one := range skippedDecls(r, checkedElsewhere) {
 		at := r.Fset.Position(one.err.Pos)
 		path := pos.relative(at.Filename)
 		if path == "" {
@@ -82,14 +85,48 @@ func TypeErrorSkips(r *load.Result, targetRoot string) []TypeErrorSkip {
 	return held
 }
 
+// CheckedElsewhere is, per result in the order given, the [load.Result.PackageKey]
+// of every package of the target with a type error there that another result
+// type-checks without one. Such a package is judged by the configurations that
+// build it.
+func CheckedElsewhere(results []load.Result) []map[string]bool {
+	failed := make([]map[string]bool, len(results))
+	clean := make(map[string]bool)
+	for i := range results {
+		failed[i] = typeFailed(&results[i])
+		for _, p := range results[i].Packages {
+			if key := results[i].KeyOf(p); p.Module != nil && p.Module.Main && !failed[i][key] {
+				clean[key] = true
+			}
+		}
+	}
+	for i := range failed {
+		maps.DeleteFunc(failed[i], func(key string, _ bool) bool { return !clean[key] })
+	}
+	return failed
+}
+
+// typeFailed is the [load.Result.PackageKey] of every package of the target with a
+// type error in r, in any of its variants.
+func typeFailed(r *load.Result) map[string]bool {
+	failed := make(map[string]bool)
+	for _, p := range r.Packages {
+		if p.Module != nil && p.Module.Main && len(p.TypeErrors) > 0 {
+			failed[r.KeyOf(p)] = true
+		}
+	}
+	return failed
+}
+
 // typeErrors roots every declaration a type error skipped, because the skip only
 // withholds: nothing is reported about the declaration and every reference in it
 // the compiler resolved still counts. A selector the compiler could not resolve on
 // an operand whose type it knows could have named any member of that type, and a
 // value reaching a position whose type it could not resolve could reach an
-// interface, so every method and field of the type is rooted too.
-func (d *rootDetection) typeErrors(r *load.Result) {
-	for _, one := range skippedDecls(r) {
+// interface, so every method and field of the type is rooted too. A package another
+// configuration type-checks holds no such root ([CheckedElsewhere]).
+func (d *rootDetection) typeErrors(r *load.Result, checkedElsewhere map[string]bool) {
+	for _, one := range skippedDecls(r, checkedElsewhere) {
 		if !d.rootDeclared(one.decl) {
 			continue
 		}

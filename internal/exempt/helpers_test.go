@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/graph"
-	"github.com/cplieger/deadset-go/internal/load"
-	"github.com/cplieger/deadset-go/internal/scope"
-	"github.com/cplieger/deadset-go/internal/testsupport"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport"
 	"golang.org/x/tools/txtar"
 )
 

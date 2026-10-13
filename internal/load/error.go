@@ -3,6 +3,8 @@ package load
 import (
 	"cmp"
 	"fmt"
+	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -10,8 +12,18 @@ import (
 // Diagnostic is one error a load reported, at the position the toolchain named.
 type Diagnostic struct {
 	Package  string // the package the error was reported against, empty when none
-	Position string // file:line:col as the toolchain rendered it, empty when none
+	Position string // file:line:col, relative to the target root where the toolchain wrote a relative one, empty when none
 	Message  string
+}
+
+// rebased is one position the toolchain rendered, below prefix where the toolchain
+// wrote it relative to the directory it ran in, which for a module below the target
+// root is not the root every position of a run is relative to.
+func rebased(position, prefix string) string {
+	if position == "" || prefix == "" || filepath.IsAbs(position) {
+		return position
+	}
+	return path.Join(prefix, filepath.ToSlash(position))
 }
 
 // Error reports every diagnostic one configuration's load produced. A load that
@@ -75,6 +87,31 @@ func sameDiagnostic(a, b Diagnostic) bool {
 	}
 	return a.Position != "" || a.Package == b.Package
 }
+
+// listError is a failure of the go command listing one module's packages, which
+// reports no package to read diagnostics from: a module file the toolchain refuses
+// or a requirement it cannot resolve offline.
+type listError struct {
+	err error
+}
+
+// Error renders the go command's failure without the progress line it prints for
+// each module it tries to fetch, which names no failure.
+func (e *listError) Error() string {
+	head, stderr, found := strings.Cut(e.err.Error(), "stderr: ")
+	if !found {
+		return e.err.Error()
+	}
+	var kept []string
+	for line := range strings.SplitSeq(stderr, "\n") {
+		if strings.TrimSpace(line) != "" && !strings.HasPrefix(line, "go: downloading ") {
+			kept = append(kept, line)
+		}
+	}
+	return head + "stderr: " + strings.Join(kept, "\n")
+}
+
+func (e *listError) Unwrap() error { return e.err }
 
 // setupClass names one class of setup failure: a file or a component the analysis
 // needs and the project does not provide.

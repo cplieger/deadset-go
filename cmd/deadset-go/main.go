@@ -1,6 +1,6 @@
 // Command deadset-go reports unused symbols in a Go module and its declared
 // consumers. It implements the deadset Contract published at
-// github.com/cplieger/deadset-spec/v7, and no verb edits a source file.
+// github.com/cplieger/deadset-spec/v8, and no verb edits a source file.
 package main
 
 import (
@@ -18,20 +18,20 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cplieger/deadset-go/internal/catalog"
-	"github.com/cplieger/deadset-go/internal/config"
-	"github.com/cplieger/deadset-go/internal/deps"
-	"github.com/cplieger/deadset-go/internal/edges"
-	"github.com/cplieger/deadset-go/internal/exempt"
-	"github.com/cplieger/deadset-go/internal/graph"
-	"github.com/cplieger/deadset-go/internal/jsondoc"
-	"github.com/cplieger/deadset-go/internal/kinds"
-	"github.com/cplieger/deadset-go/internal/load"
-	"github.com/cplieger/deadset-go/internal/matrix"
-	"github.com/cplieger/deadset-go/internal/memory"
-	"github.com/cplieger/deadset-go/internal/report"
-	"github.com/cplieger/deadset-go/internal/scope"
-	"github.com/cplieger/deadset-go/internal/suppress"
+	"github.com/cplieger/deadset-go/v2/internal/catalog"
+	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/deps"
+	"github.com/cplieger/deadset-go/v2/internal/edges"
+	"github.com/cplieger/deadset-go/v2/internal/exempt"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/jsondoc"
+	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/matrix"
+	"github.com/cplieger/deadset-go/v2/internal/memory"
+	"github.com/cplieger/deadset-go/v2/internal/report"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
+	"github.com/cplieger/deadset-go/v2/internal/suppress"
 )
 
 // name is this analyzer's name wherever a document names a product.
@@ -593,8 +593,9 @@ func stagesOf(ctx context.Context, resolved *resolution) (stages, error) {
 	if err != nil {
 		return stages{}, err
 	}
+	var readers []scope.Module
 	if resolved.scope == "" {
-		document.Consumers = nameable(document.Consumers)
+		document.Consumers, readers = nameable(document.Consumers)
 	}
 	configurations, derived, err := matrixOf(ctx, &resolved.config, document.Target.Path)
 	if err != nil {
@@ -603,6 +604,11 @@ func stagesOf(ctx context.Context, resolved *resolution) (stages, error) {
 	results, unbuilt, err := load.All(ctx, document, configurations, guessed(derived))
 	if err != nil {
 		return stages{}, err
+	}
+	for i := range results {
+		if failed := results[i].AddReaders(ctx, document.Workspace, readers); failed != nil {
+			return stages{}, failed
+		}
 	}
 	// The matrix of the run is what the target BUILDS, so a derived configuration
 	// the load dropped leaves it: no finding names a configuration nothing was
@@ -619,13 +625,21 @@ func stagesOf(ctx context.Context, resolved *resolution) (stages, error) {
 	passes := make([]graph.Configured, len(results))
 	var rules []graph.TestFileRule
 	var skips []graph.TypeErrorSkip
+	var elsewhere []map[string]bool
+	if derived != nil {
+		elsewhere = graph.CheckedElsewhere(results)
+	}
 	for i := range results {
 		var classified []graph.TestFileRule
-		if per[i], passes[i], classified, err = passesOf(&results[i], targetRoot, rootOptions); err != nil {
+		options := rootOptions
+		if elsewhere != nil {
+			options.CheckedElsewhere = elsewhere[i]
+		}
+		if per[i], passes[i], classified, err = passesOf(&results[i], targetRoot, options); err != nil {
 			return stages{}, err
 		}
 		rules = greatestPerRule(rules, classified)
-		skips = append(skips, graph.TypeErrorSkips(&results[i], targetRoot)...)
+		skips = append(skips, graph.TypeErrorSkips(&results[i], targetRoot, options.CheckedElsewhere)...)
 	}
 
 	merged, err := graph.Merge(passes)
@@ -928,6 +942,9 @@ type analysis struct {
 	// testEvidence is [preparation.testEvidence].
 	testEvidence []graph.Exemption
 
+	// filled is [preparation.filled].
+	filled map[graph.SymbolID]bool
+
 	// marks is every suppression record the run read, bound or not, and refusals
 	// is what the grammar refused with a finding of its own. The bound records
 	// seeded the sweep below, which is what makes a record that held nothing back
@@ -973,6 +990,7 @@ func analysisOf(ctx context.Context, resolved *resolution, options *exempt.Optio
 		per:          per,
 		exemptions:   exemptions,
 		testEvidence: held.testEvidence,
+		filled:       held.filled,
 		marks:        marks,
 		refusals:     refusals,
 		mode:         mode,
@@ -998,6 +1016,10 @@ type preparation struct {
 	// does not hold and the sweep counts as test references.
 	testEvidence []graph.Exemption
 
+	// filled is every field a callee outside the program fills and no configuration's
+	// classes retain ([exempt.FilledFields]).
+	filled map[graph.SymbolID]bool
+
 	// uses are the references from each uncalled interface method to the methods
 	// implementing it.
 	uses []graph.Use
@@ -1020,14 +1042,20 @@ func preparedOf(ctx context.Context, resolved *resolution, options *exempt.Optio
 	if err != nil {
 		return nil, err
 	}
-	held := &preparation{stages: loaded, per: make([]kinds.Configured, len(loaded.per)), mode: mode, held: true}
+	held := &preparation{
+		stages: loaded, per: make([]kinds.Configured, len(loaded.per)), mode: mode, held: true,
+		filled: make(map[graph.SymbolID]bool),
+	}
 	for i := range loaded.per {
-		resolver, computed, evidence, exemptErr := exemptionsOf(&held.stages.per[i], loaded.root, options, mode)
+		resolver, computed, evidence, filled, exemptErr := exemptionsOf(&held.stages.per[i], loaded.root, options, mode)
 		if exemptErr != nil {
 			return nil, exemptErr
 		}
 		held.exemptions = append(held.exemptions, computed...)
 		held.testEvidence = append(held.testEvidence, evidence...)
+		for j := range filled {
+			held.filled[filled[j].ID] = true
+		}
 		held.per[i] = kinds.Configured{
 			Result:  &held.stages.per[i].result,
 			Resolve: resolver,
@@ -1113,17 +1141,17 @@ func bound(marks []suppress.Record) []graph.SymbolID {
 	return marked
 }
 
-// exemptionsOf computes the exemptions of one configuration and returns the
-// resolver they were computed through, which is also what a kind reading one
-// configuration's positions reads.
+// exemptionsOf computes the exemptions of one configuration and the fields a callee
+// outside the program fills, and returns the resolver they were computed through,
+// which is also what a kind reading one configuration's positions reads.
 func exemptionsOf(one *configured, targetRoot string, options *exempt.Options, mode graph.Mode) (
-	resolver *graph.Resolver, exemptions, testEvidence []graph.Exemption, err error,
+	resolver *graph.Resolver, exemptions, testEvidence, filled []graph.Exemption, err error,
 ) {
 	resolver, err = graph.NewResolver(&one.result, targetRoot, os.ReadFile, one.symbols)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
-	exemptions, testEvidence, err = exempt.Compute(&exempt.Input{
+	in := &exempt.Input{
 		Result:  &one.result,
 		Resolve: resolver,
 		Symbols: one.symbols,
@@ -1131,11 +1159,12 @@ func exemptionsOf(one *configured, targetRoot string, options *exempt.Options, m
 		Read:    os.ReadFile,
 		Options: *options,
 		Mode:    mode,
-	}, detectors)
-	if err != nil {
-		return nil, nil, nil, err
 	}
-	return resolver, exemptions, testEvidence, nil
+	exemptions, testEvidence, err = exempt.Compute(in, detectors)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	return resolver, exemptions, testEvidence, exempt.FilledFields(in), nil
 }
 
 // findingSet is what one findings pass produced: the findings a report publishes
@@ -1252,6 +1281,7 @@ func inputOf(ctx context.Context, resolved *resolution, analyzed *analysis, gene
 		Refs:          analyzed.stages.refs,
 		Exempt:        analyzed.exemptions,
 		TestEvidence:  analyzed.testEvidence,
+		Filled:        analyzed.filled,
 		Generated:     func(path string) bool { return generated[path] },
 		Marks:         analyzed.marks,
 		Refusals:      analyzed.refusals,
@@ -1433,17 +1463,18 @@ func identityOf(loaded *stages) (string, error) {
 	return "", errors.New("the loaded target names no module path, which a report identifies it by")
 }
 
-// nameable is the consumers a workspace lists that a report can name, those under
-// the run directory. The workspace still decides how each module builds, so one
-// above the run directory changes the build and not the report.
-func nameable(consumers []scope.Module) []scope.Module {
-	var held []scope.Module
+// nameable splits the consumers a workspace lists into those a report can name, the
+// ones under the run directory, and the others, whose references the run still counts
+// as readers. The workspace decides how each module builds either way.
+func nameable(consumers []scope.Module) (named, readers []scope.Module) {
 	for _, consumer := range consumers {
 		if _, err := relativeToRunDirectory(consumer.Path); err == nil {
-			held = append(held, consumer)
+			named = append(named, consumer)
+		} else {
+			readers = append(readers, consumer)
 		}
 	}
-	return held
+	return named, readers
 }
 
 // relativeToRunDirectory is one absolute path of the run, relative to the directory

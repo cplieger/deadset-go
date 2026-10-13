@@ -2,12 +2,14 @@ package load
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
-	"github.com/cplieger/deadset-go/internal/scope"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -28,6 +30,18 @@ type Unit struct {
 	// Packages holds the unit's own packages and test variants, a subset of
 	// [Result.Packages] in the same order.
 	Packages []*packages.Package
+
+	// UnanalysedConsumer reports a unit whose module a [droppedModule]'s module
+	// file requires, so code the run did not analyze may import its exports.
+	UnanalysedConsumer bool
+}
+
+// droppedModule is one module found below the target that did not load, a module the
+// walk found or a [Result.Nested] consumer: its directory and the error its load
+// returned.
+type droppedModule struct {
+	Err error
+	Dir string
 }
 
 // Units returns the directory of every module a load of target reads, each the
@@ -198,4 +212,163 @@ func demoteOtherMembers(pkgs []*packages.Package, dir string) {
 		dependency.Main = false
 		p.Module = &dependency
 	})
+}
+
+// walkedUnits reports whether the units of target are modules the walk found below
+// it, rather than its own module and the members its workspace lists, which the
+// target names.
+func walkedUnits(target string, dirs []string) bool {
+	return !isModuleRoot(target) && !governedFromAbove(target) && !slices.ContainsFunc(dirs, func(dir string) bool {
+		return sameDir(dir, target)
+	})
+}
+
+// droppable reports whether one unit's load error is about the project, a setup
+// failure, the diagnostics of a load or the go command refusing to list it, rather
+// than about the run.
+func droppable(err error) bool {
+	_, setup := errors.AsType[*SetupError](err)
+	_, diagnosed := errors.AsType[*Error](err)
+	_, listed := errors.AsType[*listError](err)
+	return setup || diagnosed || listed
+}
+
+// unitPrefix is dir relative to target with forward slashes, empty for the target
+// itself.
+func unitPrefix(target, dir string) string {
+	rel, err := filepath.Rel(target, dir)
+	if err != nil || rel == "." || !filepath.IsLocal(rel) {
+		return ""
+	}
+	return filepath.ToSlash(rel)
+}
+
+// markUnanalysedConsumers flags every unit whose module the module file of a dropped
+// module requires, and every unit where that file cannot be read, because then it
+// may require any of them.
+func (r *Result) markUnanalysedConsumers(ctx context.Context) {
+	for _, dropped := range r.Dropped {
+		required, readable := requiredModules(ctx, dropped.Dir)
+		for i := range r.Units {
+			if !readable || slices.Contains(required, r.Units[i].Path) {
+				r.Units[i].UnanalysedConsumer = true
+			}
+		}
+	}
+}
+
+// requiredModules is the path of every module the module file in dir requires, and
+// false where the file cannot be read.
+func requiredModules(ctx context.Context, dir string) ([]string, bool) {
+	file, readable := printedModuleFile(ctx, dir, moduleFileEnv())
+	required := make([]string, 0, len(file.Require))
+	for _, one := range file.Require {
+		required = append(required, one.Path)
+	}
+	return required, readable
+}
+
+// moduleFileEnv is the environment a module file outside any configuration's load is
+// printed under, pinned as [loadEnv] pins it.
+func moduleFileEnv() []string {
+	return append(os.Environ(), "GOWORK="+workspaceOff, "GOFLAGS=")
+}
+
+// nestedModules is the directory of every module rooted below target, under the
+// directories [Units] searches and those an underscore starts, that is not a unit of
+// the load, in directory order.
+func nestedModules(target string, units []Unit) ([]string, error) {
+	var dirs []string
+	err := filepath.WalkDir(target, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() {
+			return nil
+		}
+		// The go tool's wildcard skips an underscore directory, and a module of its own
+		// below one, an example module among them, still builds against the target.
+		if name := entry.Name(); path != target && !strings.HasPrefix(name, "_") && unsearched(name) {
+			return fs.SkipDir
+		}
+		if path != target && isModuleRoot(path) && !slices.ContainsFunc(units, func(u Unit) bool { return sameDir(u.Dir, path) }) {
+			dirs = append(dirs, path)
+		}
+		return nil
+	})
+	return dirs, err
+}
+
+// underscoredPackages is the pattern of every directory of the module rooted at dir
+// that holds a non-test Go file below a directory an underscore starts, outside every
+// module below dir, in directory order. The go tool's wildcard matches none of them, even
+// with the underscore directory as its root, so each is named by its own path.
+func underscoredPackages(dir string) ([]string, error) {
+	var patterns []string
+	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || path == dir {
+			return err
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return skippedBelowUnderscore(entry.Name(), path)
+		}
+		if !underscoredSource(rel) {
+			return nil
+		}
+		if pattern := "./" + filepath.ToSlash(filepath.Dir(rel)); !slices.Contains(patterns, pattern) {
+			patterns = append(patterns, pattern)
+		}
+		return nil
+	})
+	return patterns, err
+}
+
+// skippedBelowUnderscore is [fs.SkipDir] for a directory [underscoredPackages] does not
+// enter: one no module of a target lives in, unless an underscore starts its name,
+// and the root of a module of its own.
+func skippedBelowUnderscore(name, path string) error {
+	if !strings.HasPrefix(name, "_") && unsearched(name) || isModuleRoot(path) {
+		return fs.SkipDir
+	}
+	return nil
+}
+
+// underscoredSource reports whether the relative path rel names a non-test Go file
+// some directory of which an underscore starts.
+func underscoredSource(rel string) bool {
+	if filepath.Ext(rel) != ".go" || strings.HasSuffix(rel, "_test.go") {
+		return false
+	}
+	return slices.ContainsFunc(strings.Split(filepath.ToSlash(filepath.Dir(rel)), "/"), func(element string) bool {
+		return strings.HasPrefix(element, "_")
+	})
+}
+
+// replacedUnits is every unit whose module the module file in dir requires and
+// replaces with that unit's own directory, which is how a module below the target
+// builds against the target's tree rather than a published version of it.
+func replacedUnits(ctx context.Context, dir string, units []Unit) []Unit {
+	file, readable := printedModuleFile(ctx, dir, moduleFileEnv())
+	if !readable {
+		return nil
+	}
+	var held []Unit
+	for _, unit := range units {
+		required := slices.ContainsFunc(file.Require, func(r moduleRequire) bool { return r.Path == unit.Path })
+		replaced := slices.ContainsFunc(file.Replace, func(r moduleReplace) bool {
+			replacement := r.New.Path
+			if !filepath.IsAbs(replacement) {
+				replacement = filepath.Join(dir, replacement)
+			}
+			return r.Old.Path == unit.Path && r.New.Version == "" && sameDir(replacement, unit.Dir)
+		})
+		if unit.Path != "" && required && replaced {
+			held = append(held, unit)
+		}
+	}
+	return held
 }

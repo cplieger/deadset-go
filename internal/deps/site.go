@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cplieger/deadset-go/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
 )
 
 // The three punctuation tokens of the grammar that carry a meaning of their own.

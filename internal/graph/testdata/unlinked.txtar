@@ -1,0 +1,70 @@
+An application whose command links one package, a package only its own test
+binary links, a package nothing imports, and a pair of packages only the first
+of which nothing imports, and a package only a blank import of a program under the
+ignore tag links. Each carries an init function, and the package nothing imports a
+blank declaration.
+
+-- go.mod --
+module example.com/unlinked
+
+go 1.27.1
+-- main.go --
+package main
+
+import "example.com/unlinked/used"
+
+func main() { used.Run() }
+-- used/used.go --
+package used
+
+func init() {}
+
+func Run() {}
+-- tested/tested.go --
+package tested
+
+func init() {}
+
+func Value() int { return 1 }
+-- tested/tested_test.go --
+package tested
+
+import "testing"
+
+func TestValue(t *testing.T) {
+	if Value() != 1 {
+		t.Fail()
+	}
+}
+-- unused/unused.go --
+package unused
+
+func init() { register() }
+
+func register() {}
+
+var _ = register
+-- orphan/orphan.go --
+package orphan
+
+import "example.com/unlinked/leaf"
+
+func init() { leaf.Hook() }
+-- leaf/leaf.go --
+package leaf
+
+func init() {}
+
+func Hook() {}
+-- driver/driver.go --
+package driver
+
+func init() {}
+-- register.go --
+//go:build ignore
+
+package main
+
+import _ "example.com/unlinked/driver"
+
+func main() {}

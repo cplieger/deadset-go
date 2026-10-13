@@ -45,7 +45,7 @@ type TypeErrorSkip struct {
 type Note struct {
 	Kind    string `json:"kind"`
 	Path    string `json:"path"`
-	Key     string `json:"key"`
+	Key     string `json:"key,omitempty"`
 	Message string `json:"message"`
 }
 

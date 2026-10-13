@@ -7,8 +7,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cplieger/deadset-go/internal/graph"
-	"github.com/cplieger/deadset-go/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -37,9 +37,14 @@ func UnusedExported(in *Input) ([]Finding, error) {
 }
 
 // UnusedUnexported reports an unexported declaration that is not a member of a
-// type and that nothing references.
+// type and that nothing references, and a constant or a type a function body
+// declares that nothing in the body references.
 func UnusedUnexported(in *Input) ([]Finding, error) {
-	return in.unusedDeclarations(unusedUnexportedCode), nil
+	locals, err := in.intraFunc().unusedLocals()
+	if err != nil {
+		return nil, err
+	}
+	return append(in.unusedDeclarations(unusedUnexportedCode), locals...), nil
 }
 
 // UnusedMember reports a struct field that nothing references and whose container
@@ -112,8 +117,7 @@ func (in *Input) unusedDeclarations(code string) []Finding {
 }
 
 // codeOf is the one code the unused-declaration kinds report a candidate under, or
-// the empty string, so their precedence is one rule. Test-support code test code
-// references is test-only at the class [Input.classOf] gives it, deprecated or not. A
+// the empty string, so their precedence is one rule. A
 // deprecation outranks a test reference, which the finding's test-only field still
 // records, and a test reference outranks the unreferenced kinds. A struct field is the
 // member kind, so a method of a live type is an unused declaration. The populations
@@ -129,8 +133,6 @@ func (in *Input) codeOf(candidate *graph.Candidate) string {
 		return ""
 	case candidate.UnreferencedTest:
 		return in.shapeCode(symbol)
-	case in.supportReferenced(candidate, symbol):
-		return testOnlyUseCode
 	case candidate.ProductionRefs == 0 && in.deprecations()[candidate.ID]:
 		return deprecatedAndUnusedCode
 	case candidate.ProductionRefs == 0 && candidate.TestRefs > 0:
@@ -158,15 +160,18 @@ func (in *Input) shapeCode(symbol *graph.Symbol) string {
 // outsideTheRule reports whether another rule, or none, judges a candidate: a test
 // of dead code, a blank declaration, which falls with what it asserts, or a test
 // file's declaration that something reaches, a member of a dead parent, an
-// interface's declaration, and a read-or-write kind's subject.
+// interface's declaration but an interface method only tests call, and a
+// read-or-write kind's subject.
 func (in *Input) outsideTheRule(candidate *graph.Candidate, symbol *graph.Symbol) bool {
 	switch {
 	case candidate.TestOfDeadCode || symbol.Blank || (testFile(symbol) && !candidate.UnreferencedTest):
 		return true
 	case in.deadParent(symbol):
 		return true
+	case interfaceDeclaration(symbol.Kind):
+		return !in.testCalledInterfaceMethod(candidate, symbol)
 	default:
-		return interfaceDeclaration(symbol.Kind) || in.readOrWriteSubject(candidate, symbol)
+		return in.readOrWriteSubject(candidate, symbol)
 	}
 }
 
@@ -180,13 +185,6 @@ func (in *Input) deadParent(symbol *graph.Symbol) bool {
 	}
 	container := in.symbol(symbol.Parent)
 	return container == nil || !testFile(container) || parent.UnreferencedTest || parent.TestOfDeadCode
-}
-
-// supportReferenced reports whether one candidate is a declaration of test-support
-// code that test code references and that the test-of-dead-code kind does not
-// report. Such a declaration belongs to no dead component.
-func (in *Input) supportReferenced(candidate *graph.Candidate, symbol *graph.Symbol) bool {
-	return !candidate.TestOfDeadCode && candidate.TestRefs > 0 && !testFile(symbol) && in.testSupport(symbol)
 }
 
 // unusedMessage is what one unused-declaration finding says, in the reader's words:

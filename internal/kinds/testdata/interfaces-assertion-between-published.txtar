@@ -1,0 +1,32 @@
+Satisfaction assertions on an exported interface of an importable package: one of
+an exported type, one of an unexported type. Nothing names the interface as a type.
+A command imports the package for its effects, so an application links it.
+
+-- go.mod --
+module example.com/lib
+
+go 1.27.0
+-- lib.go --
+package lib
+
+type Published interface {
+	Do()
+}
+
+type Exported struct{}
+
+func (*Exported) Do() {}
+
+type hidden struct{}
+
+func (hidden) Do() {}
+
+var _ Published = (*Exported)(nil)
+
+var _ Published = hidden{}
+-- cmd/app/main.go --
+package main
+
+import _ "example.com/lib"
+
+func main() {}

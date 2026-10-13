@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/graph"
-	spec "github.com/cplieger/deadset-spec/v7"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
+	spec "github.com/cplieger/deadset-spec/v8"
 	"golang.org/x/tools/txtar"
 )
 

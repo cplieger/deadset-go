@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/config"
-	"github.com/cplieger/deadset-go/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
 )
 
 // interfaceEmitters is the three interface rules as the composition root's table
@@ -39,6 +39,14 @@ func TestInterfaceKinds_reportEachShapeOnceUnderItsOwnCode(t *testing.T) {
 		},
 		"an interface whose method set holds an unexported method": {
 			archive: "interfaces-sum-type.txtar",
+			want:    nil,
+		},
+		"an unexported interface whose method set holds an unexported method, beside an exported one": {
+			archive: "interfaces-sum-type-unexported.txtar",
+			want:    []string{"DS1203 shape.sides"},
+		},
+		"a method only a test calls through the interface, which the test-only kind reports": {
+			archive: "interfaces-test-called.txtar",
 			want:    nil,
 		},
 		"a marker method whose every implementation carries an empty body": {
@@ -228,5 +236,86 @@ func TestUnusedSatisfactionAssertion_aPublishedInterfaceOfALibraryIsPossibleWhat
 				}
 			}
 		})
+	}
+}
+
+func TestTestOnlyUse_reportsAnInterfaceMethodOnlyATestCallsThroughTheInterface(t *testing.T) {
+	t.Parallel()
+
+	in := inputOf(t, "interfaces-test-called.txtar", applicationConfig(), Consumers{})
+	emitters := interfaceEmitters()
+	emitters[testOnlyUseCode] = TestOnlyUse
+
+	result := computed(t, in, emitters)
+
+	if got, want := summary(result.Findings), []string{"DS1004 Store.Count"}; !slices.Equal(got, want) {
+		t.Fatalf("the interface kinds and the test-only kind over interfaces-test-called.txtar report %v, want %v",
+			got, want)
+	}
+	found := findingOf(t, result.Findings, testOnlyUseCode, "Store.Count")
+	if found.Symbol.Kind != "interface-method" || !found.TestOnly {
+		t.Errorf("%s about Store.Count carries subject kind %q and test-only %t, want an interface method only tests reference",
+			testOnlyUseCode, found.Symbol.Kind, found.TestOnly)
+	}
+}
+
+func TestUnusedSatisfactionAssertion_anAssertionBetweenPublishedTypesOfALibraryIsNotReported(t *testing.T) {
+	cases := map[string]struct {
+		resolved config.Config
+		want     []int
+	}{
+		"a library, whose published type states the promise to its importers": {
+			resolved: libraryConfig(),
+			want:     []int{17},
+		},
+		"an application, which has no importers": {
+			resolved: applicationConfig(),
+			want:     []int{15, 17},
+		},
+	}
+	for description, tc := range cases {
+		t.Run(description, func(t *testing.T) {
+			in := inputOf(t, "interfaces-assertion-between-published.txtar", tc.resolved, Consumers{})
+
+			result := computed(t, in, map[string]Emitter{unusedSatisfactionAssertionCode: UnusedSatisfactionAssertion})
+
+			var got []int
+			for i := range result.Findings {
+				got = append(got, result.Findings[i].Position.Line)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("UnusedSatisfactionAssertion over interfaces-assertion-between-published.txtar reports at lines %v, want %v",
+					got, tc.want)
+			}
+		})
+	}
+}
+
+// An assertion an exemption retains is live, so no satisfaction-assertion finding
+// names it, and the run reports rather than refusing an emitter defect.
+func TestUnusedSatisfactionAssertion_anAssertionAnExemptionRetainedIsNotReported(t *testing.T) {
+	in := inputOf(t, "interfaces-assertion-retained.txtar", applicationConfig(), Consumers{})
+
+	result := computed(t, in, map[string]Emitter{unusedSatisfactionAssertionCode: UnusedSatisfactionAssertion})
+
+	if len(result.Findings) != 0 {
+		t.Errorf("UnusedSatisfactionAssertion over interfaces-assertion-retained.txtar reports %v, want nothing", result.Findings)
+	}
+}
+
+func TestInterfaceImplementations_keepsTheImplementationsOfAMethodATestCalls(t *testing.T) {
+	t.Parallel()
+
+	in := inputOf(t, "interfaces-test-called.txtar", applicationConfig(), Consumers{})
+
+	uncalled, uses := InterfaceImplementations(in)
+
+	var names []string
+	for id := range uncalled {
+		names = append(names, in.symbol(id).Name)
+	}
+	if len(names) != 0 || len(uses) != 0 {
+		t.Errorf("InterfaceImplementations(interfaces-test-called.txtar) answers uncalled %v and %d uses, want none: a test reaches Store.Count's implementation through it",
+			names, len(uses))
 	}
 }

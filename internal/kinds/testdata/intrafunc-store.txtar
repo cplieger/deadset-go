@@ -1,6 +1,7 @@
 A function that overwrites a local before anything reads it, a function whose last
 store nothing reads, a function every store of which a read reaches, and a function
-whose local a closure reads after the store. A further file stores to results and a
+that overwrites a local a closure written after both stores reads, then stores to it
+after the closure. A further file stores to results and a
 parameter: results a return naming values overwrites, results a bare return reads, a
 result a deferred closure reads, and a parameter stored after its last read; and to a
 pointer a pointer method is called through, beside a value a pointer method takes
@@ -35,15 +36,34 @@ func threaded() int {
 	return count
 }
 
-// captured hands its local to a closure, which reads it where no graph orders the
-// call, so nothing reports a store to it.
+// captured overwrites its local before a closure reads it, then stores to it after
+// the closure is written, which a call no graph orders may read.
 func captured() func() int {
 	count := 1
 	count = 2
-	return func() int { return count }
+	read := func() int { return count }
+	count = 3
+	return read
+}
+
+// immediate calls a closure where it writes it, which reads its local there and
+// nowhere later, so the store after the call reaches no read.
+func immediate() {
+	seen := 0
+	func() { println(seen) }()
+	seen = 1
+}
+
+// spawned starts a closure in a goroutine, which may read its local at any time.
+func spawned() {
+	seen := 0
+	go func() { println(seen) }()
+	seen = 1
 }
 
 func main() {
+	immediate()
+	spawned()
 	println(overwritten(), trailing(), threaded(), captured()())
 	println(scraped(true))
 	println(bare())

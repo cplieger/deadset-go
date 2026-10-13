@@ -1,6 +1,6 @@
 package deps
 
-import "github.com/cplieger/deadset-go/internal/load"
+import "github.com/cplieger/deadset-go/v2/internal/load"
 
 // UnusedRequirements returns the require directives of f whose module provides no
 // package this configuration's load imports, in the order the module file

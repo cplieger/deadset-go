@@ -6,8 +6,9 @@ import (
 	"go/token"
 	"go/types"
 	"slices"
+	"strings"
 
-	"github.com/cplieger/deadset-go/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
 )
 
 // lookup is one call that resolves a declaration by name at run time: the callee
@@ -72,18 +73,130 @@ func ReflectiveLookupDetector(in *Input) ([]graph.Exemption, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(calls) == 0 {
-		return nil, nil
+	out, err := registeredMethods(in)
+	if err != nil {
+		return nil, err
 	}
-
-	index := newNameIndex(in)
-	seen := make(map[string]struct{})
-	var out []graph.Exemption
-	for i := range calls {
-		out = append(out, calls[i].retains(index, seen)...)
+	if len(calls) > 0 {
+		index := newNameIndex(in)
+		seen := make(map[string]struct{})
+		for i := range calls {
+			out = append(out, calls[i].retains(index, seen)...)
+		}
 	}
 	slices.SortFunc(out, byEvidence)
 	return out, nil
+}
+
+// registeredMethods is the class's second rule, for a router that registers a handler
+// by its method name: it retains every exported method of a defined type T of the
+// program whose name a constant string argument spells, in a call of a function or method
+// outside the analysed program that also passes a value of T or *T. Each item of the
+// string separated by ";" spells one name, after an optional prefix ending in ":", the
+// verbs a route maps to the method.
+func registeredMethods(in *Input) ([]graph.Exemption, error) {
+	own := programPaths(in)
+	var out []graph.Exemption
+	for _, p := range in.Result.Packages {
+		if p.TypesInfo == nil {
+			continue
+		}
+		for _, file := range p.Syntax {
+			var failed error
+			ast.Inspect(file, func(n ast.Node) bool {
+				call, isCall := n.(*ast.CallExpr)
+				if failed != nil || !isCall {
+					return failed == nil
+				}
+				var found []graph.Exemption
+				found, failed = registrationOf(in, p.TypesInfo, call, own)
+				out = append(out, found...)
+				return failed == nil
+			})
+			if failed != nil {
+				return nil, failed
+			}
+		}
+	}
+	return out, nil
+}
+
+// registrationOf is what one call retains under [registeredMethods].
+func registrationOf(in *Input, info *types.Info, call *ast.CallExpr, own map[string]bool) ([]graph.Exemption, error) {
+	callee, isFunc := resolveObject(info, call.Fun).(*types.Func)
+	if !isFunc || callee.Pkg() == nil || own[callee.Pkg().Path()] {
+		return nil, nil
+	}
+	names, receivers := registrationArguments(info, call, own)
+	if len(names) == 0 || len(receivers) == 0 {
+		return nil, nil
+	}
+	site, err := in.Resolve.Render(call.Pos())
+	if err != nil {
+		return nil, err
+	}
+	var out []graph.Exemption
+	for _, named := range receivers {
+		set := types.NewMethodSet(types.NewPointer(named))
+		for _, name := range names {
+			selection := set.Lookup(nil, name)
+			if selection == nil {
+				continue
+			}
+			if id, held := in.Resolve.Object(selection.Obj()); held {
+				out = append(out, graph.Exemption{
+					ID: id, Class: string(ReflectiveLookup), Site: site,
+					Detail: "named by a string passed with " + named.Obj().Name() + " to " + callee.FullName(),
+				})
+			}
+		}
+	}
+	return out, nil
+}
+
+// registrationArguments is the method names the constant string arguments of one call
+// spell, and the defined types of the program its other arguments are values of.
+func registrationArguments(info *types.Info, call *ast.CallExpr, own map[string]bool) (names []string, receivers []*types.Named) {
+	for _, arg := range call.Args {
+		tv := info.Types[ast.Unparen(arg)]
+		if tv.Value != nil && tv.Value.Kind() == constant.String {
+			names = append(names, spelledMethods(constant.StringVal(tv.Value))...)
+			continue
+		}
+		if named, defined := definedReceiver(tv.Type); defined && own[named.Obj().Pkg().Path()] {
+			receivers = append(receivers, named)
+		}
+	}
+	return names, receivers
+}
+
+// spelledMethods is every exported identifier one string spells under
+// [registeredMethods].
+func spelledMethods(value string) []string {
+	var names []string
+	for item := range strings.SplitSeq(value, ";") {
+		name := strings.TrimSpace(item[strings.LastIndex(item, ":")+1:])
+		if token.IsIdentifier(name) && token.IsExported(name) {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// definedReceiver is the defined type a value of t, or the value a pointer of t points
+// to, has, where it is no interface.
+func definedReceiver(t types.Type) (*types.Named, bool) {
+	if t == nil {
+		return nil, false
+	}
+	if p, isPointer := types.Unalias(t).(*types.Pointer); isPointer {
+		t = p.Elem()
+	}
+	named, isNamed := types.Unalias(t).(*types.Named)
+	if !isNamed || named.Obj().Pkg() == nil || types.IsInterface(named) {
+		return nil, false
+	}
+	return named, true
 }
 
 // allLookupCalls returns every recognised lookup the target makes with a constant

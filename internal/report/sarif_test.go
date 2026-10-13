@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/catalog"
-	"github.com/cplieger/deadset-go/internal/config"
-	"github.com/cplieger/deadset-go/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/catalog"
+	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/kinds"
 )
 
 // sarifOf renders one envelope as SARIF and decodes the log, so a test reads the
@@ -271,9 +271,15 @@ func TestTheRuleDescribesTheKind(t *testing.T) {
 			code:  "DS1002",
 			short: "An unexported symbol with no reference in the target.",
 			full: "An unexported symbol with no reference in the target. " +
-				"A symbol referenced only from its own declaration site counts as unreferenced.",
+				"A symbol referenced only from its own declaration site counts as unreferenced. " +
+				"In TypeScript a name an import declaration binds, or an `import x = require()` declaration that is not exported, is such a symbol of its file, reported at the binding when nothing in the file reads it: a use in a type position, in a local export or in a type, a link or a `@see` tag of a doc comment reads it, and so does JSX the compiler turns into calls of a factory it names. " +
+				"A binding of a declaration file or of a component file is not judged, nor one of a generated file while generated files are excluded. " +
+				"In Go a constant or a type a function body declares, a function literal's body included, that nothing in that body names outside its own specification is reported under this code, under the reference of the enclosing declaration, as `grammar/symbol-ref.md` states for a declaration inside a function body, at the local declaration's own position, with `symbol.kind` `constant` or `type` and the liveness relation `reference-counting`.",
 			help: "An unexported symbol with no reference in the target. " +
-				"A symbol referenced only from its own declaration site counts as unreferenced.",
+				"A symbol referenced only from its own declaration site counts as unreferenced. " +
+				"In TypeScript a name an import declaration binds, or an `import x = require()` declaration that is not exported, is such a symbol of its file, reported at the binding when nothing in the file reads it: a use in a type position, in a local export or in a type, a link or a `@see` tag of a doc comment reads it, and so does JSX the compiler turns into calls of a factory it names. " +
+				"A binding of a declaration file or of a component file is not judged, nor one of a generated file while generated files are excluded. " +
+				"In Go a constant or a type a function body declares, a function literal's body included, that nothing in that body names outside its own specification is reported under this code, under the reference of the enclosing declaration, as `grammar/symbol-ref.md` states for a declaration inside a function body, at the local declaration's own position, with `symbol.kind` `constant` or `type` and the liveness relation `reference-counting`.",
 		},
 		{
 			code:  "DS1802",

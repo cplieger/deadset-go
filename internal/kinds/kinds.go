@@ -27,13 +27,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cplieger/deadset-go/internal/catalog"
-	"github.com/cplieger/deadset-go/internal/config"
-	"github.com/cplieger/deadset-go/internal/deps"
-	"github.com/cplieger/deadset-go/internal/edges"
-	"github.com/cplieger/deadset-go/internal/graph"
-	"github.com/cplieger/deadset-go/internal/load"
-	"github.com/cplieger/deadset-go/internal/suppress"
+	"github.com/cplieger/deadset-go/v2/internal/catalog"
+	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/deps"
+	"github.com/cplieger/deadset-go/v2/internal/edges"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/suppress"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -214,6 +214,20 @@ type Finding struct {
 	// ceiling caps the reachability class [Input.complete] gives the finding, for an
 	// emitter whose subject's class is not its declaration's own; no class caps nothing.
 	ceiling Class
+
+	// local marks a finding about a declaration a function body makes, which the
+	// inventory does not hold: the enclosing declaration's reference names it, as it
+	// names a part, and reference counting inside the body decided it.
+	local bool
+}
+
+// shape is the shape of one finding's subject, a local declaration being shaped
+// as the part of the enclosing declaration its reference makes it.
+func (f *Finding) shape() shape {
+	if f.local {
+		return shapePart
+	}
+	return shapeOf(f.Symbol.Kind)
 }
 
 // Consumers is what the run knows about the target's consumers: the ones the scope
@@ -276,6 +290,10 @@ type Input struct {
 	// makes still fixes the signature it reaches, so the intra-function kinds read
 	// it beside Exempt.
 	TestEvidence []graph.Exemption
+
+	// Filled is every field a callee outside the analysed program fills from a
+	// document and may read, which nothing retains ([Input.capFilled]).
+	Filled map[graph.SymbolID]bool
 
 	// Generated reports whether one target-relative path is a generated file.
 	Generated func(path string) bool
@@ -661,12 +679,14 @@ const (
 // on. Every kind absent from it is a declaration, so the table holds the exception
 // rather than the rule and a test pins its keys equal to the Contract's list.
 var shapes = map[string]shape{
-	caseSubject:        shapePart,
-	parameterSubject:   shapePart,
-	receiverSubject:    shapePart,
-	resultSubject:      shapePart,
-	statementSubject:   shapePart,
-	storeSubject:       shapePart,
+	caseSubject:      shapePart,
+	parameterSubject: shapePart,
+	receiverSubject:  shapePart,
+	resultSubject:    shapePart,
+	statementSubject: shapePart,
+	storeSubject:     shapePart,
+	// A TypeScript import binding, listed so the keys stay the Contract's list.
+	"import":           shapePart,
 	dependencySubject:  shapeDependency,
 	directiveSubject:   shapeDependency,
 	fileSubject:        shapeRow,
@@ -793,7 +813,7 @@ func (in *Input) resolve(found *Finding, code string, reported map[string]string
 // declaration it belongs to stays whatever held it live, and an exemption over that
 // declaration is no claim about the part.
 func (in *Input) admit(found *Finding) error {
-	switch shapeOf(found.Symbol.Kind) {
+	switch found.shape() {
 	case shapeRow, shapeDependency:
 		if found.Symbol.Ref == "" {
 			return fmt.Errorf("%w: %s reports a %s and names no reference",
@@ -850,7 +870,12 @@ func (in *Input) complete(found *Finding, row *catalog.Row) {
 	if found.Symbol.Kind == "" {
 		found.Symbol.Kind = symbolKinds[held.kindOf(found.id)]
 	}
-	if shapeOf(found.Symbol.Kind) == shapeDeclaration {
+	switch {
+	case found.local:
+		found.Live, found.Relation = false, graph.ReferenceCounting
+		found.Class = Certain
+		found.Component = held.componentOf("")
+	case shapeOf(found.Symbol.Kind) == shapeDeclaration:
 		if heldLive[row.Code] {
 			found.relation(nil)
 		} else {
@@ -858,7 +883,7 @@ func (in *Input) complete(found *Finding, row *catalog.Row) {
 		}
 		found.Class = in.classOf(found.id).lower(found.ceiling)
 		found.Component = held.componentOf(found.id)
-	} else {
+	default:
 		found.relation(nil)
 		found.Class = Certain
 		found.Component = held.componentOf("")
@@ -867,6 +892,7 @@ func (in *Input) complete(found *Finding, row *catalog.Row) {
 		found.Component.Members = held.membersOf(found)
 	}
 	in.capNameLiteral(found)
+	in.capFilled(found)
 	found.Confidence = found.Class.lower(Class(row.MaxClass)).lower(in.componentCap(found.id))
 	found.Severity = in.Config.EffectiveSeverity(row.Code)
 	found.Fixability = row.Fixability
@@ -943,7 +969,7 @@ func (in *Input) generated(file string) bool {
 func (in *Input) configurationsOf(found *Finding) []string {
 	held := in.index()
 	var id graph.SymbolID
-	switch shapeOf(found.Symbol.Kind) {
+	switch found.shape() {
 	case shapeRow, shapeDependency:
 		return append(make([]string, 0, len(in.Matrix)), in.Matrix...)
 	case shapePart:
@@ -1001,6 +1027,16 @@ type index struct {
 
 	// falling is the write-only kind's annotation cascade, computed on first use.
 	falling *annotationFalls
+
+	// unlinked is every package no build links in any configuration that loads it,
+	// by [index.packageKey], and unanalysed every unit by its target-relative
+	// directory, flagged where it has an unanalysed consumer. Both are computed on
+	// first use and nil until then.
+	unlinked   map[string]bool
+	unanalysed map[string]bool
+	// interfaces is what the interface kinds read, computed on first use by a kind
+	// that judges an interface method outside them.
+	interfaces *interfaceFacts
 
 	minted int
 }

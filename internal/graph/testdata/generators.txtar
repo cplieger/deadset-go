@@ -1,0 +1,117 @@
+A module whose go:generate directives name generator inputs in each spelling the
+roots read, a go-fuzz file under the gofuzz tag beside a negated one, and go-swagger
+annotations on a type, its fields and a function.
+
+-- go.mod --
+module example.com/gen
+
+go 1.27.1
+-- main.go --
+package main
+
+import (
+	"example.com/gen/api"
+	"example.com/gen/app"
+)
+
+func main() {
+	app.Run()
+	api.Serve()
+}
+-- app/app.go --
+package app
+
+//go:generate stringer -type=Color,Shape
+//go:generate go run golang.org/x/tools/cmd/stringer -type Size
+//go:generate mockgen -destination=mock.go -package=app . Store,Cache
+//go:generate go tool mockgen -typed example.com/gen/other Remote
+
+func Run() {}
+
+type Color int
+
+type Shape int
+
+type Size int
+
+type Unlisted int
+
+type Store interface{ Get() }
+
+type Cache interface{ Put() }
+
+type Spare interface{ Drop() }
+-- app/ports.go --
+package app
+
+//go:generate go run go.uber.org/mock/mockgen@v0.5.0 -source=$GOFILE -destination=mock_ports.go -package=app
+
+type Port interface{ Open() }
+
+type Adapter struct{}
+-- app/flags.go --
+package app
+
+//go:generate stringer -linecomment -type=Kind
+//go:generate enumer -json -text -type Level
+//go:generate go run -mod mod golang.org/x/tools/cmd/stringer -type=Mode
+//go:generate mockgen -source "spaced file.go" -destination=mock_spaced.go -package=app
+
+type Kind int
+
+type Level int
+
+type Mode int
+-- app/spaced file.go --
+package app
+
+type Spaced interface{ Walk() }
+-- other/other.go --
+package other
+
+type Remote interface{ Call() }
+
+type Local interface{ Serve() }
+-- fuzz/fuzz.go --
+//go:build gofuzz
+
+package fuzz
+
+func Fuzz(data []byte) int { return len(data) }
+
+func FuzzParse(data []byte) int { return len(data) }
+
+func FuzzText(data string) int { return len(data) }
+
+func Fuzzy(data []byte) int { return len(data) }
+-- fuzz/plain.go --
+//go:build !gofuzz
+
+package fuzz
+
+func FuzzNegated(data []byte) int { return len(data) }
+-- api/api.go --
+package api
+
+func Serve() {}
+
+// notFoundResponse is what a missing message answers.
+//
+// swagger:response notFoundResponse
+type notFoundResponse struct {
+	// in: body
+	Body struct {
+		Message string
+	}
+}
+
+//swagger:model
+type item struct{ ID int }
+
+// plain carries no directive.
+type plain struct{ Field int }
+
+// handler serves one route.
+//
+// swagger:route GET /items items
+func handler() {}

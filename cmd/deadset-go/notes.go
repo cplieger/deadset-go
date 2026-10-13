@@ -6,16 +6,19 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cplieger/deadset-go/internal/config"
-	"github.com/cplieger/deadset-go/internal/load"
-	"github.com/cplieger/deadset-go/internal/report"
+	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/report"
 	"golang.org/x/tools/go/packages"
 )
 
-// The note this analyzer writes about a package an application may publish.
+// The notes this analyzer writes: about a package an application may publish, with
+// the key that settles it, and about a module below the target that did not load,
+// which no key settles.
 const (
 	publishedPackageNote = "published-package"
 	publishedPackageKey  = "roots.patterns"
+	droppedModuleNote    = "module-not-loaded"
 )
 
 // The package name nothing imports, the import path suffix of an external test
@@ -26,16 +29,17 @@ const (
 	internalElement   = "internal"
 )
 
-// notesOf is every hint the run has about its setup: one published-package note per
-// package of an application that is not a main package, not under an internal tree,
-// and that no file of another package of the target imports, under any
-// configuration. Outside programs may import such a package, and only the user knows
-// whether they do. A library's packages are its published API already, and a run
-// that declares consumers has stated which outside programs there are, so neither
-// carries such a note.
+// notesOf is every hint the run has about its setup: one module-not-loaded note per
+// module the walk found below the target that did not load under some configuration,
+// and one published-package note per non-main package of an application outside an
+// internal tree that no other package of the target, program or [load.Result.Nested]
+// consumer imports under any configuration, which outside programs may import. A
+// library's packages are its published API already, and a run that declares
+// consumers has named the outside programs, so neither carries such a note.
 func notesOf(kind config.TargetKind, loaded *stages) []report.Note {
+	notes := droppedNotes(loaded)
 	if kind != config.Application || len(loaded.declared) > 0 {
-		return nil
+		return notes
 	}
 	imported := make(map[string]bool)
 	directories := make(map[string]string)
@@ -47,8 +51,8 @@ func notesOf(kind config.TargetKind, loaded *stages) []report.Note {
 				addPublishable(directories, loaded.root, p, result)
 			}
 		}
+		addReaderImports(imported, result)
 	}
-	var notes []report.Note
 	for key, directory := range directories {
 		if imported[key] {
 			continue
@@ -60,6 +64,31 @@ func notesOf(kind config.TargetKind, loaded *stages) []report.Note {
 			Message: "package " + directory + " is imported by no other package of the target, and outside programs may import it: " +
 				publishedPackageKey + " roots its published declarations if they do",
 		})
+	}
+	return notes
+}
+
+// droppedNotes is one note per module directory below the target root some
+// configuration dropped, naming the first failure that dropped it. A dropped
+// workspace reader outside the root has no path a note can carry.
+func droppedNotes(loaded *stages) []report.Note {
+	var notes []report.Note
+	seen := make(map[string]bool)
+	for i := range loaded.per {
+		for _, dropped := range loaded.per[i].result.Dropped {
+			relative, err := filepath.Rel(loaded.root, dropped.Dir)
+			if err != nil || !filepath.IsLocal(relative) || seen[relative] {
+				continue
+			}
+			seen[relative] = true
+			directory := filepath.ToSlash(relative)
+			notes = append(notes, report.Note{
+				Kind: droppedModuleNote,
+				Path: directory,
+				Message: "module " + directory + " is below the target and does not load, so the run does not analyze it, " +
+					"and an export of a module it requires is possible: " + firstLine(dropped.Err.Error()),
+			})
+		}
 	}
 	return notes
 }
@@ -79,6 +108,21 @@ func addImports(imported map[string]bool, p *packages.Package, result *load.Resu
 			} else {
 				imported[path] = true
 			}
+		}
+	}
+}
+
+// addReaderImports records every package a nested consumer or a program of result
+// imports.
+func addReaderImports(imported map[string]bool, result *load.Result) {
+	for _, consumer := range result.Nested {
+		for _, p := range consumer.Packages {
+			addImports(imported, p, result)
+		}
+	}
+	for _, program := range result.Programs {
+		for _, path := range program.Imports {
+			imported[path] = true
 		}
 	}
 }

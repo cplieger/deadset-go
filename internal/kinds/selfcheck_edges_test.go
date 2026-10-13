@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/config"
-	"github.com/cplieger/deadset-go/internal/edges"
+	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/edges"
 )
 
 // edged is the harness input over one archive with the target's edges document read,

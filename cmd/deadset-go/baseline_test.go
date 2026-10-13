@@ -12,9 +12,9 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/reporttest"
-	"github.com/cplieger/deadset-go/internal/suppress"
-	spec "github.com/cplieger/deadset-spec/v7"
+	"github.com/cplieger/deadset-go/v2/internal/reporttest"
+	"github.com/cplieger/deadset-go/v2/internal/suppress"
+	spec "github.com/cplieger/deadset-spec/v8"
 )
 
 // baselineVectorRoot is where the pinned Contract publishes the baseline vectors.
@@ -64,10 +64,7 @@ func runBaselineVector(t *testing.T, dir string) {
 	t.Helper()
 
 	body := vectorFile(t, dir, "report.json")
-	envelope, err := reporttest.Read(body)
-	if err != nil {
-		t.Fatalf("Setup: decode %s/report.json: %v", dir, err)
-	}
+	envelope := reporttest.MustRead(t, dir+"/report.json", body)
 	if len(envelope.Analyzer.Languages) != 1 {
 		t.Fatalf("Setup: %s/report.json names the languages %v, want the one language of the round", dir, envelope.Analyzer.Languages)
 	}
@@ -86,7 +83,7 @@ func runBaselineVector(t *testing.T, dir string) {
 
 	rows, _ := recordRound(envelope.Findings, nil, nil)
 	provenance := suppress.Provenance{Analyzer: envelope.Analyzer.Name, Version: envelope.Analyzer.Version}
-	err = writeBaseline(target, rows, provenance, envelope.Analyzer.Languages[0]+"://")
+	err := writeBaseline(target, rows, provenance, envelope.Analyzer.Languages[0]+"://")
 	written, readErr := os.ReadFile(target)
 	if readErr != nil {
 		t.Fatalf("read the baseline %s: %v", target, readErr)

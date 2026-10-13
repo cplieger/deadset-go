@@ -1,6 +1,8 @@
 One module: a command, a production package with an interface and its own test,
 and beside them every shape of package only tests reach and every shape that
-production code or a root reaches as well.
+production code or a root reaches as well. A package only tests reach carries test
+evidence, an import of the testing package in a file that is no test file, except
+the two that only tests reach without it.
 
 -- go.mod --
 module example.com/support
@@ -37,18 +39,23 @@ import (
 	"testing"
 
 	"example.com/support/fake"
+	"example.com/support/plain"
 	"example.com/support/store"
 )
 
 func TestCount(t *testing.T) {
-	if store.Count(fake.New()) != 1 {
+	if store.Count(fake.Must(t, fake.New())) != plain.One() {
 		t.Error("count")
 	}
 }
 -- fake/fake.go --
 package fake
 
-import "example.com/support/chain"
+import (
+	"testing"
+
+	"example.com/support/chain"
+)
 
 // Memory implements store.Store.
 type Memory struct{}
@@ -58,6 +65,17 @@ func (Memory) Len() int { return chain.One() }
 
 // New returns a fake store.
 func New() Memory { return Memory{} }
+
+// Must marks its caller as a test helper.
+func Must(t testing.TB, m Memory) Memory {
+	t.Helper()
+	return m
+}
+-- plain/plain.go --
+package plain
+
+// One is called by a test alone, and its package imports no testing package.
+func One() int { return 1 }
 -- chain/chain.go --
 package chain
 
@@ -68,20 +86,38 @@ package own
 
 // Helper is called by this package's own test alone.
 func Helper() int { return 2 }
+-- internal/own/check.go --
+package own
+
+import "testing"
+
+// Check fails a test whose value is not two.
+func Check(t testing.TB, v int) {
+	if v != 2 {
+		t.Error("not two")
+	}
+}
 -- internal/own/own_test.go --
 package own
 
 import "testing"
 
 func TestHelper(t *testing.T) {
-	if Helper() != 2 {
-		t.Error("helper")
-	}
+	Check(t, Helper())
 }
 -- withinit/withinit.go --
 package withinit
 
+import "testing"
+
 var started int
+
+// Skip skips a test that runs before the package started.
+func Skip(t testing.TB) {
+	if started == 0 {
+		t.Skip("not started")
+	}
+}
 
 func init() { started = 1 }
 
@@ -99,6 +135,7 @@ import (
 )
 
 func TestStarted(t *testing.T) {
+	withinit.Skip(t)
 	if withinit.Started() != 1 {
 		t.Error("started")
 	}
@@ -106,7 +143,16 @@ func TestStarted(t *testing.T) {
 -- register/register.go --
 package register
 
+import "testing"
+
 var registered bool
+
+// Registered fails a test that runs before the package registered.
+func Registered(t testing.TB) {
+	if !registered {
+		t.Error("not registered")
+	}
+}
 
 func init() { registered = true }
 -- register/register_test.go --
@@ -115,10 +161,10 @@ package register_test
 import (
 	"testing"
 
-	_ "example.com/support/register"
+	"example.com/support/register"
 )
 
-func TestRegistered(t *testing.T) {}
+func TestRegistered(t *testing.T) { register.Registered(t) }
 -- configured/configured.go --
 package configured
 

@@ -6,8 +6,19 @@ import (
 	"go/token"
 	"go/types"
 	"path/filepath"
+	"slices"
 	"strconv"
+
+	"github.com/cplieger/deadset-go/v2/internal/graph"
 )
+
+// FilledFields is every field the last Compute over in found that a function or
+// method outside the analysed program fills from a document and may read, and nothing
+// else retains under that class, each with the site of the call. It retains nothing:
+// a finding about such a field is reported at the class possible.
+func FilledFields(in *Input) []graph.Exemption {
+	return in.filled
+}
 
 // decoders answers which parameters of a function only decode into the value they
 // are given: the body uses the parameter at least once, and every use is an
@@ -148,6 +159,39 @@ func decodingOnly(r reach) bool {
 	return r.methods&^reachDecoding == 0 && !r.fields && len(r.outside) == 0 && len(r.contained) == 0
 }
 
+// readsFields reports whether the body of fn hands the parameter at one position, unchanged
+// or converted to an interface type, to a destination that reads fields: a destination
+// of this class that does, or a function of a package the format-verb class reads. A
+// body the analysis cannot read hands it to none.
+func (d *decoders) readsFields(fn *types.Func, at int) bool {
+	decl, info := d.body(fn)
+	if decl == nil || decl.Body == nil || info == nil {
+		return false
+	}
+	defined, ok := info.Defs[decl.Name].(*types.Func)
+	if !ok || at >= defined.Signature().Params().Len() {
+		return false
+	}
+	param := defined.Signature().Params().At(at)
+	reads := false
+	ast.Inspect(decl.Body, func(n ast.Node) bool {
+		call, isCall := n.(*ast.CallExpr)
+		if reads || !isCall {
+			return !reads
+		}
+		callee, isFunc := resolveObject(info, call.Fun).(*types.Func)
+		if !isFunc || callee.Pkg() == nil || !slices.ContainsFunc(call.Args, func(arg ast.Expr) bool {
+			return usedParameter(info, arg) == param
+		}) {
+			return true
+		}
+		dest, named := d.flow.encodingDestination(callee)
+		reads = (named && dest.reach.fields) || formattingPackages[callee.Pkg().Path()]
+		return !reads
+	})
+	return reads
+}
+
 // usedParameter is the variable an argument names, unchanged or converted to an
 // interface type, and nil for any other argument.
 func usedParameter(info *types.Info, arg ast.Expr) *types.Var {
@@ -262,3 +306,7 @@ type importerFunc func(path string) (*types.Package, error)
 
 // Import resolves one import path.
 func (f importerFunc) Import(path string) (*types.Package, error) { return f(path) }
+
+// formattingPackages are the packages whose functions the format-verb class reads,
+// which print the fields of a value they are given.
+var formattingPackages = map[string]bool{formatPackage: true, logPackage: true, testingPackage: true, slogPackage: true}

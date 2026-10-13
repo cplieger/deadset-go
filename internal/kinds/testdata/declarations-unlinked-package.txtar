@@ -1,0 +1,35 @@
+An application whose command links one package, beside a package and an internal
+package nothing imports, each registering itself from an init function.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+import "example.com/app/used"
+
+func main() { used.Run() }
+-- used/used.go --
+package used
+
+func Run() {}
+
+func Spare() {}
+-- driver/driver.go --
+package driver
+
+func init() { register(New) }
+
+func register(func() *Driver) {}
+
+type Driver struct{}
+
+func New() *Driver { return &Driver{} }
+-- internal/plugin/plugin.go --
+package plugin
+
+func init() { load() }
+
+func load() {}

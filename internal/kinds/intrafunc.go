@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cplieger/deadset-go/internal/config"
-	"github.com/cplieger/deadset-go/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/inspect"
 	"golang.org/x/tools/go/analysis/passes/unreachable"
@@ -53,7 +53,8 @@ const panicBuiltin = "panic"
 // of it. [intrafunc.freeSignature] decides free for this kind and the result kind. A
 // published declaration of a library is free, because no caller makes a body read a
 // parameter it never names, and the breaking edit is what the fixability says. A
-// parameter used under one build configuration is used.
+// parameter used under one build configuration is used. A function literal is free
+// where it is called by name or is the callee of the call it is written in.
 func UnusedParameter(in *Input) ([]Finding, error) {
 	return in.intraFunc().parameters(unusedParameterCode)
 }
@@ -87,11 +88,13 @@ func UnreachableStatement(in *Input) ([]Finding, error) {
 }
 
 // DeadStore reports a write to a local variable that no read reaches on any path of
-// the function's control-flow graph before the next store or the end of the body.
-// The subject is a variable the body or its signature declares, never a
-// package-level variable or a field, and a return naming no value reads every named
-// result. A variable a store to which may be read where the graph cannot see is no
-// subject ([escaped]). Every call but the panic built-in is assumed to return.
+// the function's control-flow graph before the next store or the end of the body,
+// in every function body and every function literal, a literal of a package-level
+// variable's initializer included. The subject is a variable the body or its
+// signature declares, never a package-level variable or a field, and a return naming
+// no value reads every named result. A variable a store to which may be read where
+// the graph cannot see is no subject ([escaped]). Every call but the panic built-in
+// is assumed to return.
 func DeadStore(in *Input) ([]Finding, error) {
 	return in.intraFunc().deadStores()
 }
@@ -154,7 +157,7 @@ func (in *Input) intraFunc() *intrafunc {
 		for i := range in.Merged.Roots {
 			root := &in.Merged.Roots[i]
 			switch root.Kind {
-			case graph.RootLinkname, graph.RootCgoExport, graph.RootTest, graph.RootTypeError:
+			case graph.RootLinkname, graph.RootCgoExport, graph.RootTest, graph.RootTypeError, graph.RootFuzz:
 				g.foreign[root.ID] = true
 			}
 		}
@@ -351,26 +354,43 @@ func (g *intrafunc) unjudged(symbol *graph.Symbol, id graph.SymbolID) bool {
 
 // walked is one function the run compiled: its declaration, the type information
 // of the variant that compiled it, and the identifier of the declaration the
-// inventory holds for it.
+// inventory holds for it. A package-level variable's initializer is walked too,
+// with no declaration and the initializer as its value, for the function literals
+// it holds.
 type walked struct {
-	decl *ast.FuncDecl
-	info *types.Info
-	id   graph.SymbolID
+	decl  *ast.FuncDecl
+	value ast.Expr
+	info  *types.Info
+	id    graph.SymbolID
 }
 
-// functions is every function declaration with a body that one build configuration
-// compiled, each read from one variant of its package, in the order the walk met
-// them.
+// root is the syntax one walked function's parts are read from.
+func (fn *walked) root() ast.Node {
+	if fn.decl != nil {
+		return fn.decl.Body
+	}
+	return fn.value
+}
+
+// compiledFile is one file one build configuration compiled, with the type
+// information of the variant the walk reads it from.
+type compiledFile struct {
+	file *ast.File
+	info *types.Info
+}
+
+// compiledFiles is every file one build configuration compiled, in the order the
+// walk meets them.
 //
 // A file several package variants compile is walked once, because the bodies are
 // the same bytes and the answer is about the body. The variant the walk reads is
 // the first by package identifier, which is the choice the exemption classes make
 // over the same question.
-func functions(one *Configured) []walked {
+func compiledFiles(one *Configured) []compiledFile {
 	if one.Result == nil || one.Resolve == nil {
 		return nil
 	}
-	var found []walked
+	var found []compiledFile
 	seen := make(map[string]bool)
 	for _, p := range graph.SortedPackages(one.Result.Packages) {
 		if p.TypesInfo == nil {
@@ -382,7 +402,62 @@ func functions(one *Configured) []walked {
 				continue
 			}
 			seen[name] = true
-			found = append(found, declaredFunctions(one, p.TypesInfo, f)...)
+			found = append(found, compiledFile{file: f, info: p.TypesInfo})
+		}
+	}
+	return found
+}
+
+// functions is every function declaration with a body that one build configuration
+// compiled, each read from one variant of its package, in the order the walk met
+// them.
+func functions(one *Configured) []walked {
+	files := compiledFiles(one)
+	found := make([]walked, 0, len(files))
+	for _, compiled := range files {
+		found = append(found, declaredFunctions(one, compiled.info, compiled.file)...)
+	}
+	return found
+}
+
+// initializers is every package-level variable initializer that holds a function
+// literal, under the variable it initializes, which for a blank variable is the
+// declaration the inventory holds for that blank.
+func initializers(one *Configured) []walked {
+	var found []walked
+	for _, compiled := range compiledFiles(one) {
+		for _, decl := range compiled.file.Decls {
+			group, isGroup := decl.(*ast.GenDecl)
+			if !isGroup || group.Tok != token.VAR {
+				continue
+			}
+			for _, spec := range group.Specs {
+				found = append(found, initializersOf(one, compiled.info, spec)...)
+			}
+		}
+	}
+	return found
+}
+
+// initializersOf is every value of one variable specification that holds a
+// function literal, each under the name it initializes, or under the first name
+// where one call initializes them all.
+func initializersOf(one *Configured, info *types.Info, spec ast.Spec) []walked {
+	values, isValues := spec.(*ast.ValueSpec)
+	if !isValues || len(values.Names) == 0 {
+		return nil
+	}
+	var found []walked
+	for i, value := range values.Values {
+		if len(literalBodies(value)) == 0 {
+			continue
+		}
+		name := values.Names[0]
+		if len(values.Names) == len(values.Values) {
+			name = values.Names[i]
+		}
+		if id, inventoried := one.Resolve.At(name.Pos()); inventoried {
+			found = append(found, walked{value: value, info: info, id: id})
 		}
 	}
 	return found
@@ -414,6 +489,14 @@ func (g *intrafunc) parameters(code string) ([]Finding, error) {
 		one := &g.in.Per[i]
 		for _, fn := range functions(one) {
 			if err := g.parametersOf(one, &fn, code, held); err != nil {
+				return nil, err
+			}
+		}
+		if code == unusedReceiverCode {
+			continue
+		}
+		for _, fn := range initializers(one) {
+			if err := g.calledLiterals(one, &fn, code, held); err != nil {
 				return nil, err
 			}
 		}
@@ -462,8 +545,8 @@ func nameExprs(names []*ast.Ident) []ast.Expr {
 
 // parametersOf records the subjects of one kind in one function: its receiver, or
 // its parameters where its signature is free and the parameters of every literal
-// its body calls by name ([calledByName]), whose signatures are free whatever the
-// function's is.
+// its body calls by name ([calledByName]) or calls where it is written
+// ([calledWhereWritten]), whose signatures are free whatever the function's is.
 func (g *intrafunc) parametersOf(one *Configured, fn *walked, code string, held *parts) error {
 	if code == unusedReceiverCode {
 		return g.signature(one, fn, fn.decl.Recv, fn.decl.Body, code, held)
@@ -478,7 +561,35 @@ func (g *intrafunc) parametersOf(one *Configured, fn *walked, code string, held 
 			return err
 		}
 	}
+	return g.calledLiterals(one, fn, code, held)
+}
+
+// calledLiterals records the parameters of every literal one walked function calls
+// where it is written.
+func (g *intrafunc) calledLiterals(one *Configured, fn *walked, code string, held *parts) error {
+	for _, lit := range calledWhereWritten(fn.root()) {
+		if err := g.signature(one, fn, lit.Type.Params, lit.Body, code, held); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// calledWhereWritten is every function literal inside one node, a stub excepted,
+// that is the callee of the call it is written in, the call of a go or a defer
+// statement included: no other expression holds the literal, so nothing but its
+// body answers for its signature.
+func calledWhereWritten(root ast.Node) []*ast.FuncLit {
+	var found []*ast.FuncLit
+	ast.Inspect(root, func(n ast.Node) bool {
+		if call, isCall := n.(*ast.CallExpr); isCall {
+			if lit, isLiteral := ast.Unparen(call.Fun).(*ast.FuncLit); isLiteral && !isStubBody(lit.Body) {
+				found = append(found, lit)
+			}
+		}
+		return true
+	})
+	return found
 }
 
 // calledByName is every function literal of one body, a stub excepted, that
@@ -670,27 +781,10 @@ func (s *callSite) uses(index, count int) bool {
 
 // callsPerFunction is every call of every declaration of the inventory that one
 // build configuration compiled, keyed by the declaration called.
-//
-// A file several package variants compile is walked once, for the reason functions
-// gives.
 func callsPerFunction(one *Configured) map[graph.SymbolID][]*callSite {
 	calls := make(map[graph.SymbolID][]*callSite)
-	if one.Result == nil || one.Resolve == nil {
-		return calls
-	}
-	seen := make(map[string]bool)
-	for _, p := range graph.SortedPackages(one.Result.Packages) {
-		if p.TypesInfo == nil {
-			continue
-		}
-		for _, f := range p.Syntax {
-			name := one.Result.Fset.Position(f.FileStart).Filename
-			if seen[name] {
-				continue
-			}
-			seen[name] = true
-			collectCalls(one, p.TypesInfo, f, calls)
-		}
+	for _, compiled := range compiledFiles(one) {
+		collectCalls(one, compiled.info, compiled.file, calls)
 	}
 	return calls
 }
@@ -976,8 +1070,8 @@ func (g *intrafunc) deadStores() ([]Finding, error) {
 		if one.Result == nil || one.Resolve == nil {
 			continue
 		}
-		for _, fn := range functions(one) {
-			for _, body := range bodies(fn.decl) {
+		for _, fn := range append(functions(one), initializers(one)...) {
+			for _, body := range bodies(&fn) {
 				if err := g.storesOf(one, &fn, &body, held); err != nil {
 					return nil, err
 				}
@@ -995,12 +1089,21 @@ type functionBody struct {
 	body      *ast.BlockStmt
 }
 
-// bodies is every body one function declaration holds: its own, and the body of
-// each function literal written inside it. A literal has a control flow of its
-// own, so its stores are answered over a graph of its own.
-func bodies(decl *ast.FuncDecl) []functionBody {
-	found := []functionBody{{recv: decl.Recv, signature: decl.Type, body: decl.Body}}
-	ast.Inspect(decl.Body, func(n ast.Node) bool {
+// bodies is every body one walked function holds: a declaration's own, and the
+// body of each function literal written inside it. A literal has a control flow of
+// its own, so its stores are answered over a graph of its own.
+func bodies(fn *walked) []functionBody {
+	var found []functionBody
+	if fn.decl != nil {
+		found = append(found, functionBody{recv: fn.decl.Recv, signature: fn.decl.Type, body: fn.decl.Body})
+	}
+	return append(found, literalBodies(fn.root())...)
+}
+
+// literalBodies is the body of every function literal written inside one node.
+func literalBodies(root ast.Node) []functionBody {
+	var found []functionBody
+	ast.Inspect(root, func(n ast.Node) bool {
 		if literal, isLiteral := n.(*ast.FuncLit); isLiteral {
 			found = append(found, functionBody{signature: literal.Type, body: literal.Body})
 		}

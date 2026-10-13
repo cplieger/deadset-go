@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/graph"
-	spec "github.com/cplieger/deadset-spec/v7"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
+	spec "github.com/cplieger/deadset-spec/v8"
 )
 
 // retained is what one class's detector recorded over a shared analysis.
@@ -195,7 +195,7 @@ func TestEncodingReflectionRetainsTheMethodsAnEncoderResolvesByName(t *testing.T
 		{
 			destination: "the JSON encoder",
 			typeName:    "Marshalled",
-			want:        methodRefs("Marshalled", "AppendText", "MarshalJSON", "MarshalJSONTo", "MarshalText", "Name"),
+			want:        methodRefs("Marshalled", "AppendText", "MarshalJSON", "MarshalJSONTo", "MarshalText"),
 		},
 		{
 			destination: "the JSON decoder",
@@ -205,17 +205,17 @@ func TestEncodingReflectionRetainsTheMethodsAnEncoderResolvesByName(t *testing.T
 		{
 			destination: "the XML encoder",
 			typeName:    "Element",
-			want:        methodRefs("Element", "MarshalXML", "MarshalXMLAttr", "Name"),
+			want:        methodRefs("Element", "MarshalXML", "MarshalXMLAttr"),
 		},
 		{
 			destination: "the gob encoder",
 			typeName:    "Record",
-			want:        methodRefs("Record", "GobEncode", "MarshalBinary", "Name"),
+			want:        methodRefs("Record", "GobEncode", "MarshalBinary"),
 		},
 		{
 			destination: "a wrapper that forwards its erased parameter to the JSON encoder",
 			typeName:    "Wrapped",
-			want:        methodRefs("Wrapped", "MarshalJSON", "Name"),
+			want:        methodRefs("Wrapped", "MarshalJSON"),
 		},
 		{
 			destination: "an entry point that names neither direction",
@@ -826,7 +826,7 @@ func TestFormatVerbContractAloneRecordsAnOperandOfTheFormattingPackage(t *testin
 // The mechanism text of the class, as the Contract states it for this language. The
 // class implements this text; a pin bump that moves it must be read against the
 // destination table before this literal moves with it.
-const encodingReflectionMechanismSHA256 = "f3fbdeb95adf908029c81ef1070ac405a015f92847fd27a4c0a2eb24436c009c"
+const encodingReflectionMechanismSHA256 = "b6ad1b004034cc9a6c0e498b7165946745ee041041868e0dd2fb1b373480ede3"
 
 func TestEncodingReflectionImplementsTheContractsMechanismText(t *testing.T) {
 	body, err := spec.Contract.ReadFile("contract/exemptions.json")
@@ -922,5 +922,182 @@ func TestEncodingReflectionFollowsAValueThroughTheProgramsOwnInterfaces(t *testi
 					test.typeName, got, test.want)
 			}
 		})
+	}
+}
+
+// anyFlowRefs spells the references of one type's members in the any-flow fixture.
+func anyFlowRefs(typeName string, members ...string) []string {
+	return qualify("example.com/flow", typeName, members...)
+}
+
+// A value stored in a container of interface values reaches what reads the container:
+// a map literal a function returns as any, a map literal assigned to an any field, and
+// a map held by a variable and handed to an outside function. A call through an
+// interface method returns what the program's implementation of it returns.
+func TestEncodingReflectionFollowsContainersAndInterfaceMethodResults(t *testing.T) {
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-any-flow.txtar", Options{}), EncodingReflection)
+
+	for _, test := range []struct {
+		how      string
+		typeName string
+		want     []string
+	}{
+		{how: "a map literal a function returns as any", typeName: "Kernel", want: anyFlowRefs("Kernel", "OS")},
+		{how: "a map literal assigned to an any field", typeName: "Node", want: anyFlowRefs("Node", "Label")},
+		{how: "an interface method's implementation", typeName: "Deployment", want: anyFlowRefs("Deployment", "Replicas")},
+		{how: "a call of two results an implementation returns", typeName: "Pod", want: anyFlowRefs("Pod", "Phase")},
+		{how: "a map variable handed to an outside function", typeName: "Body", want: anyFlowRefs("Body", "Text")},
+	} {
+		t.Run(strings.ReplaceAll(test.how, " ", "_"), func(t *testing.T) {
+			if got := membersOf(refs, test.typeName); !slices.Equal(got, test.want) {
+				t.Errorf("EncodingReflectionDetector(encoding-reflection-any-flow.txtar) retained, for %s reaching the encoder through %s,\ngot  %v\nwant %v",
+					test.typeName, test.how, got, test.want)
+			}
+		})
+	}
+}
+
+// A function outside the program whose name says it fills its argument, and whose own
+// body hands it to no reader of fields, retains no field of the value: the fields it
+// fills are the class's filled fields, reported at possible. One that also prints its
+// argument reads every field.
+func TestEncodingReflectionFillsTheFieldsADecodingCalleeOutsideReceives(t *testing.T) {
+	in := inputOf(t, "encoding-reflection-any-flow.txtar", Options{})
+	found, err := EncodingReflectionDetector(in)
+	if err != nil {
+		t.Fatalf("EncodingReflectionDetector(encoding-reflection-any-flow.txtar) error: %v", err)
+	}
+	refOf := make(map[graph.SymbolID]string, len(in.Symbols))
+	for i := range in.Symbols {
+		refOf[in.Symbols[i].ID] = in.Symbols[i].Ref
+	}
+	var kept, filled []string
+	for _, e := range found {
+		kept = append(kept, refOf[e.ID])
+	}
+	for _, e := range FilledFields(in) {
+		filled = append(filled, refOf[e.ID]+" "+e.Detail)
+	}
+	slices.Sort(kept)
+	kept = slices.Compact(kept)
+
+	if got := membersOf(kept, "Request"); len(got) != 0 {
+		t.Errorf("EncodingReflectionDetector retained %v of Request, which only a filling callee receives; want none", got)
+	}
+	if got, want := membersOf(kept, "Shown"), anyFlowRefs("Shown", "Note"); !slices.Equal(got, want) {
+		t.Errorf("EncodingReflectionDetector retained %v of Shown, which a callee that also prints receives; want %v", got, want)
+	}
+	if got := membersOf(kept, "Relayed"); len(got) != 0 {
+		t.Errorf("EncodingReflectionDetector retained %v of Relayed, which a function forwarding to a filling callee receives; want none", got)
+	}
+	want := []string{
+		"go://example.com/flow#Relayed.Code passed to example.com/flow.bindInto",
+		"go://example.com/flow#Request.Extra decoded by (*example.com/plugin.Context).BindJSON",
+		"go://example.com/flow#Request.Name decoded by (*example.com/plugin.Context).BindJSON",
+	}
+	slices.Sort(filled)
+	if !slices.Equal(filled, want) {
+		t.Errorf("FilledFields(encoding-reflection-any-flow.txtar) = %q, want %q", filled, want)
+	}
+}
+
+// selfEncodingRefs spells the references of one type's members in the self-encoding
+// fixture.
+func selfEncodingRefs(typeName string, members ...string) []string {
+	return qualify("example.com/selfenc", typeName, members...)
+}
+
+// An encoder calls the encoding method of a type that has one instead of walking its
+// fields, so it reads none of them and walks no further: a pointer-receiver method
+// counts only where every value the walk meets is addressable, and a promoted method
+// counts on the type that embeds it.
+func TestEncodingReflectionReadsNoFieldOfATypeThatEncodesItself(t *testing.T) {
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-self-encoding.txtar", Options{}), EncodingReflection)
+
+	for _, test := range []struct {
+		how      string
+		typeName string
+		want     []string
+	}{
+		{how: "encoded through a pointer", typeName: "Pointed", want: selfEncodingRefs("Pointed", "MarshalJSON")},
+		{how: "reached only through a type that encodes itself", typeName: "Unit", want: nil},
+		{how: "encoded as a value with a pointer-receiver method", typeName: "Copied", want: selfEncodingRefs("Copied", "MarshalJSON", "Shown")},
+		{how: "a map value with a value-receiver method", typeName: "Valued", want: selfEncodingRefs("Valued", "MarshalJSON")},
+		{how: "promoting an embedded type's method", typeName: "Outer", want: nil},
+	} {
+		t.Run(strings.ReplaceAll(test.how, " ", "_"), func(t *testing.T) {
+			if got := membersOf(refs, test.typeName); !slices.Equal(got, test.want) {
+				t.Errorf("EncodingReflectionDetector(encoding-reflection-self-encoding.txtar) retained, for %s %s,\ngot  %v\nwant %v",
+					test.typeName, test.how, got, test.want)
+			}
+		})
+	}
+}
+
+// An assertion to an interface of a struct field's value that reflection reads
+// converts every exported field type of the struct that implements the interface, so
+// it retains the methods by which each does; an unexported field cannot be read so,
+// and a value reflection holds that is no field is no field walk.
+func TestEncodingReflectionRetainsWhatAFieldWalkAssertsEachFieldTo(t *testing.T) {
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-field-walk.txtar", Options{}), EncodingReflection)
+
+	want := []string{"go://example.com/walk#discord.Validate", "go://example.com/walk#slack.Validate"}
+	var got []string
+	for _, ref := range refs {
+		if strings.Contains(ref, ".Validate") || strings.Contains(ref, ".Unused") {
+			got = append(got, ref)
+		}
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("EncodingReflectionDetector(encoding-reflection-field-walk.txtar) retained methods %v, want %v", got, want)
+	}
+}
+
+// An assertion the checker records no type for, in a package with type errors, is
+// passed over by the field walk rather than failing the analysis.
+func TestEncodingReflectionFieldWalkPassesOverAnAssertionWithNoType(t *testing.T) {
+	if _, err := analysisOf(t, "encoding-reflection-field-walk-undefined.txtar", Options{}).detect(t, EncodingReflection); err != nil {
+		t.Errorf("EncodingReflectionDetector(encoding-reflection-field-walk-undefined.txtar) = %v, want no error", err)
+	}
+}
+
+func TestEncodingReflectionRetainsOnlyTheFieldsEveryTemplateTheProgramReadsNames(t *testing.T) {
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-template-inventory.txtar", Options{}), EncodingReflection)
+
+	var got []string
+	for _, ref := range refs {
+		if strings.Contains(ref, "#Page.") || strings.Contains(ref, "#Nav.") || strings.Contains(ref, "#Report.") ||
+			strings.Contains(ref, "#Widget.") || strings.Contains(ref, "#Card.") {
+			got = append(got, ref)
+		}
+	}
+	want := []string{
+		"go://example.com/site#Nav.Label",
+		"go://example.com/site#Page.Nav",
+		"go://example.com/site#Page.Title",
+		"go://example.com/site/handed#Card.Back",
+		"go://example.com/site/handed#Card.Front",
+		"go://example.com/site/report#Report.Count",
+		"go://example.com/site/report#Report.Total",
+		"go://example.com/site/script#Widget.ID",
+		"go://example.com/site/script#Widget.Label",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("EncodingReflectionDetector(encoding-reflection-template-inventory.txtar) retained fields %v, want %v", got, want)
+	}
+}
+
+func TestEncodingReflectionFollowsAValueReadBackFromAnInterfaceField(t *testing.T) {
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-field-read.txtar", Options{}), EncodingReflection)
+
+	var got []string
+	for _, ref := range refs {
+		if strings.Contains(ref, ".Name") || strings.Contains(ref, ".Label") || strings.Contains(ref, ".Note") {
+			got = append(got, ref)
+		}
+	}
+	want := []string{"go://example.com/fields#Stored.Name", "go://example.com/fields#Tabled.Label"}
+	if !slices.Equal(got, want) {
+		t.Errorf("EncodingReflectionDetector(encoding-reflection-field-read.txtar) retained %v, want %v", got, want)
 	}
 }

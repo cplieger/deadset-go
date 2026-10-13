@@ -21,8 +21,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cplieger/deadset-go/internal/graph"
-	"github.com/cplieger/deadset-go/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 )
 
 // Class names one exemption class of the vocabulary. The spelling is the one a
@@ -159,6 +159,10 @@ type Input struct {
 
 	// outside is [outsideClosure]'s answer, computed on first use.
 	outside *[]*types.Package
+
+	// filled is what the encoding-reflection class found only a filling callee
+	// retains ([FilledFields]).
+	filled []graph.Exemption
 
 	// Symbols is the inventory, for a class that reads a declaration's own
 	// properties rather than resolving an object.

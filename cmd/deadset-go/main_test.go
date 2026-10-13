@@ -14,11 +14,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/config"
-	"github.com/cplieger/deadset-go/internal/exempt"
-	"github.com/cplieger/deadset-go/internal/graph"
-	"github.com/cplieger/deadset-go/internal/load"
-	spec "github.com/cplieger/deadset-spec/v7"
+	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/exempt"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
+	spec "github.com/cplieger/deadset-spec/v8"
 )
 
 // TestMain creates the directory the shared fixture modules are written under, runs
@@ -1405,5 +1406,21 @@ func TestPrintRetainedOverAMatrixNamesWhatAnyConfigurationRetained(t *testing.T)
 	want := "go://example.com/app#Tier.String\tformat-verb-contract\tplatform_windows.go:12:14\tformatted by fmt.Println\n"
 	if got := stdout.String(); got != want {
 		t.Errorf("run(%q) stdout =\n%s\nwant\n%s", args, got, want)
+	}
+}
+
+// A workspace member under the run directory is a consumer the report names, and one
+// outside it is a reader whose references still count.
+func TestNameableSplitsTheWorkspaceMembersByWhetherTheReportCanNameThem(t *testing.T) {
+	invoked, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Setup: os.Getwd = _, %v", err)
+	}
+	inside := scope.Module{Path: filepath.Join(invoked, "testdata")}
+	outside := scope.Module{Path: t.TempDir()}
+
+	named, readers := nameable([]scope.Module{inside, outside})
+	if !slices.Equal(named, []scope.Module{inside}) || !slices.Equal(readers, []scope.Module{outside}) {
+		t.Errorf("nameable() = %v, %v, want [%v] and [%v]", named, readers, inside, outside)
 	}
 }

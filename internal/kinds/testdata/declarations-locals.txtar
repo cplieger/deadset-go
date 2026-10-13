@@ -1,0 +1,31 @@
+Constants and types function bodies declare: one of each nothing references, one of
+each the body references, a type only its own declaration references, a constant
+only another unreferenced constant references, a blank constant, and a constant of
+a function literal of a package-level initializer.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+var _ = func() int {
+	const width = 4
+	const height = 2
+	return height
+}()
+
+func shapes() int {
+	const unused = 1
+	type label string
+	const used = 2
+	type count int
+	type node struct{ next *node }
+	const base = 3
+	const derived = base * 2
+	const _ = 5
+	return int(count(used))
+}
+
+func main() { println(shapes()) }

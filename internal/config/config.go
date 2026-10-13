@@ -16,7 +16,7 @@ import (
 
 // ContractVersion is the Contract version this package implements. It is the
 // resolved value of contract_version when no source supplies one.
-const ContractVersion = "7.2.0"
+const ContractVersion = "8.0.0"
 
 // defaultTestFiles is the documented default of ts.test_files.
 var defaultTestFiles = []string{"**/*.test.{ts,tsx,mts,cts}", "**/*.test-d.{ts,tsx,mts,cts}", "**/*.spec-d.{ts,tsx,mts,cts}", "**/*.spec.*", "**/__tests__/**", "**/__mocks__/**", "**/test-d/**"}
@@ -394,6 +394,7 @@ type tsSettings struct {
 	InjectionRegistrations []Declaration       `json:"injection_registrations"`
 	LifecycleContracts     []LifecycleContract `json:"lifecycle_contracts"`
 	Serializers            []Declaration       `json:"serializers"`
+	RootsComplete          bool                `json:"roots_complete"`
 }
 
 // Declaration names one TypeScript declaration in exactly one of three shapes:
@@ -456,6 +457,7 @@ func Default() Config {
 			InjectionRegistrations: []Declaration{},
 			LifecycleContracts:     []LifecycleContract{},
 			Serializers:            []Declaration{},
+			RootsComplete:          false,
 		},
 	}
 }

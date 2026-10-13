@@ -1,0 +1,29 @@
+A package that does not type-check: an assertion of a value of a type the imported
+package does not declare, which the checker leaves without a type, and an assertion
+of a field reflection reads to a type the package does not declare.
+
+-- go.mod --
+module example.com/walk
+
+go 1.27.0
+-- walk.go --
+package walk
+
+import (
+	"errors"
+	"reflect"
+)
+
+type config struct{ Name string }
+
+// Read asserts what a value of an undeclared type returns.
+func Read(source errors.Source) bool {
+	_, isMissing := source.Next().(errors.Missing)
+	return isMissing
+}
+
+// At asserts a field reflection reads to a type the imported package never declares.
+func At(c *config, i int) bool {
+	_, isMissing := reflect.ValueOf(c).Elem().Field(i).Interface().(errors.Missing)
+	return isMissing
+}

@@ -38,18 +38,18 @@ func classifiedSupport(t *testing.T, library bool) (support, marked []string) {
 	return slices.Sorted(maps.Keys(result.TestSupport)), marked
 }
 
-// Test-support code is the largest set of packages only tests reach: a fake a test
-// imports, though production code calls the method it implements through an
-// interface; a package only the fake imports; a package only its own test file
-// uses; a package whose init function and blank declaration run when it is loaded;
-// and a package a test imports for its init alone. A configured root, a production
-// import, a production blank import and a package no test reaches each keep a
-// package out.
+// Test-support code is the largest set of packages only tests reach that carry test
+// evidence: a fake a test imports, though production code calls the method it
+// implements through an interface; a package only its own test file uses, one of its
+// files importing the testing package; a package whose init function and blank
+// declaration run when it is loaded; and a package a test imports for its init. A
+// package with no test evidence, which only the fake or only a test imports, a
+// configured root, a production import, a production blank import and a package no
+// test reaches each keep a package out.
 func TestClassifyTestSupportIsTheLargestSetOnlyTestsReach(t *testing.T) {
 	support, marked := classifiedSupport(t, false)
 
 	want := []string{
-		"example.com/support/chain",
 		"example.com/support/fake",
 		"example.com/support/internal/own",
 		"example.com/support/register",
@@ -58,7 +58,7 @@ func TestClassifyTestSupportIsTheLargestSetOnlyTestsReach(t *testing.T) {
 	if !slices.Equal(support, want) {
 		t.Errorf("ClassifyTestSupport(test-support.txtar, application) = %v, want %v", support, want)
 	}
-	if wantMarked := []string{"Helper", "New", "One", "Started", "init", "init"}; !slices.Equal(marked, wantMarked) {
+	if wantMarked := []string{"Check", "Helper", "Must", "New", "Registered", "Skip", "Started", "init", "init"}; !slices.Equal(marked, wantMarked) {
 		t.Errorf("ClassifyTestSupport(test-support.txtar, application) marked the functions %v, want %v", marked, wantMarked)
 	}
 }

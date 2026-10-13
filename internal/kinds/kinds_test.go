@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/catalog"
-	"github.com/cplieger/deadset-go/internal/config"
-	"github.com/cplieger/deadset-go/internal/graph"
-	spec "github.com/cplieger/deadset-spec/v7"
+	"github.com/cplieger/deadset-go/v2/internal/catalog"
+	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
+	spec "github.com/cplieger/deadset-spec/v8"
 )
 
 // The declarations every hand-built input of this file holds: one exported
@@ -336,7 +336,7 @@ func TestTheKeyOfEveryFindingAboutADeclarationIsThatDeclarationsIdentifier(t *te
 
 		for i := range result.Findings {
 			found := &result.Findings[i]
-			if shapeOf(found.Symbol.Kind) != shapeDeclaration {
+			if found.shape() != shapeDeclaration {
 				continue
 			}
 			measured++

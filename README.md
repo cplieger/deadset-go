@@ -1,6 +1,6 @@
 # deadset-go
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/cplieger/deadset-go.svg)](https://pkg.go.dev/github.com/cplieger/deadset-go)
+[![Go Reference](https://pkg.go.dev/badge/github.com/cplieger/deadset-go/v2.svg)](https://pkg.go.dev/github.com/cplieger/deadset-go/v2)
 [![Go version](https://img.shields.io/github/go-mod/go-version/cplieger/deadset-go)](https://github.com/cplieger/deadset-go/blob/main/go.mod)
 [![Mutation](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cplieger/deadset-go/badges/mutation.json)](https://github.com/cplieger/deadset-go/issues?q=label%3Agremlins-tracker)
 
@@ -24,7 +24,7 @@ Consider [`deadcode`](https://pkg.go.dev/golang.org/x/tools/cmd/deadcode) if you
 ## Install
 
 ```sh
-go install github.com/cplieger/deadset-go/cmd/deadset-go@latest
+go install github.com/cplieger/deadset-go/v2/cmd/deadset-go@latest
 ```
 
 ## Usage
@@ -113,7 +113,7 @@ The report follows the [deadset contract](https://github.com/cplieger/deadset-sp
 
 ## Related projects
 
-deadset-go implements the [deadset contract](https://github.com/cplieger/deadset-spec), which fixes the issue codes, the report schema and the exit codes. It passes all 127 of the contract's conformance fixtures that carry a Go rendering, and every report names that result.
+deadset-go implements the [deadset contract](https://github.com/cplieger/deadset-spec), which fixes the issue codes, the report schema and the exit codes. It passes all 158 of the contract's conformance fixtures that carry a Go rendering, and every report names that result.
 
 - [deadset-ts](https://github.com/cplieger/deadset-ts) is the same analysis for TypeScript and JavaScript.
 - [deadset](https://github.com/cplieger/deadset) runs both analyzers as one command and merges their reports, resolving the references between Go and TypeScript code.

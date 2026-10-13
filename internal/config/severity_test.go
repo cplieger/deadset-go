@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/catalog"
+	"github.com/cplieger/deadset-go/v2/internal/catalog"
 )
 
 // intraFunctionFamily is the family prefix addressing the kinds that report dead

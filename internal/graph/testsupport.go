@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cplieger/deadset-go/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -33,11 +33,11 @@ const (
 // ClassifyTestSupport records the target's test-support packages in r.TestSupport, by
 // [load.Result.PackageKey], and marks their declarations in symbols, whose positions
 // are relative to targetRoot. That is the largest set of non-main, non-test, unrooted
-// packages of the target a test reaches and only test files, a package's own among
-// them, and members import or reference. A reference is a resolved name, so an
-// interface call references no implementation; an init function, a blank declaration
-// and a test are no root here. A library's package is one only under an internal tree,
-// because outside programs may import any other.
+// packages of the target that carry test evidence, which a test reaches and only test
+// files, a package's own among them, and members import or reference. A reference is a
+// resolved name, so an interface call references no implementation; an init function,
+// a blank declaration and a test are no root here. A library's package is one only
+// under an internal tree, because outside programs may import any other.
 func ClassifyTestSupport(r *load.Result, targetRoot string, symbols []Symbol, roots []Root, library bool) {
 	candidates := make(map[string]bool)
 	for _, p := range r.Packages {
@@ -58,10 +58,12 @@ func ClassifyTestSupport(r *load.Result, targetRoot string, symbols []Symbol, ro
 }
 
 // supportCandidate reports whether one package of the main module could be test
-// support: a non-main, non-test package, under an internal tree for a library.
+// support: a non-main, non-test package whose files other than its test files import
+// the testing package, under an internal tree for a library. A package only tests
+// reach that carries no such evidence is production code a test happens to use.
 func supportCandidate(p *packages.Package, library bool) bool {
 	return p.ForTest == "" && p.Name != mainPackage && !strings.HasSuffix(p.PkgPath, testPackageSuffix) &&
-		(!library || slices.Contains(strings.Split(p.PkgPath, "/"), internalElement))
+		p.Imports[testingPath] != nil && (!library || slices.Contains(strings.Split(p.PkgPath, "/"), internalElement))
 }
 
 // rootedPackages is the key of every package that declares a root of a kind
@@ -105,7 +107,7 @@ func usersOf(r *load.Result, candidates map[string]bool) map[string]map[string]b
 			addUses(r.Fset, p, keys, r.KeyOf(p), add)
 		}
 	}
-	for _, consumer := range r.Consumers {
+	for _, consumer := range r.Referencing() {
 		for _, p := range consumer.Packages {
 			addUses(r.Fset, p, keys, outsideUser, add)
 		}
@@ -123,7 +125,7 @@ func packageKeys(r *load.Result) map[*types.Package]string {
 		}
 	}
 	packages.Visit(r.Packages, nil, record)
-	for _, consumer := range r.Consumers {
+	for _, consumer := range r.Referencing() {
 		packages.Visit(consumer.Packages, nil, record)
 	}
 	return keys

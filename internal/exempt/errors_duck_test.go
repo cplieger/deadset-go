@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
 )
 
 func TestErrorsDuckTypingRetainsTheHelperFormsOnATypeReachableAsAnError(t *testing.T) {

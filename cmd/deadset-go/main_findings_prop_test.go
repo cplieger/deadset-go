@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/kinds"
 	"pgregory.net/rapid"
 )
 

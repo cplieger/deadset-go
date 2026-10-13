@@ -12,20 +12,22 @@ import (
 // whether the language's own rule classifies a declaration as a test
 // declaration, so a hand-built graph carries the same flag a loaded one does.
 const (
-	handFile     = "hand.go"
-	handTestFile = "hand_test.go"
-	handPackage  = "example.com/hand"
+	handFile        = "hand.go"
+	handTestFile    = "hand_test.go"
+	handSupportFile = "support/support.go"
+	handPackage     = "example.com/hand"
 )
 
 // handSymbol is one symbol of a hand-built graph: what a sweep reads of a
 // Symbol, being the file that declares it, its line span and its container.
 type handSymbol struct {
-	name   string // what a test names the symbol by; no sweep reads it
-	parent string // the container's name, empty at package level
-	lines  int    // the declaration's line span, one when zero
-	kind   SymbolKind
-	inTest bool
-	nested bool // the declaration's lines lie inside its container's, as a field's lie inside its struct
+	name    string // what a test names the symbol by; no sweep reads it
+	parent  string // the container's name, empty at package level
+	lines   int    // the declaration's line span, one when zero
+	kind    SymbolKind
+	inTest  bool
+	support bool // a declaration of test-support code, in its own file
+	nested  bool // the declaration's lines lie inside its container's, as a field's lie inside its struct
 }
 
 // graphBuilder assembles the symbols, the references and the roots of one graph
@@ -66,8 +68,11 @@ func (b *graphBuilder) declare(d handSymbol) {
 	}
 
 	file := handFile
-	if d.inTest {
+	switch {
+	case d.inTest:
 		file = handTestFile
+	case d.support:
+		file = handSupportFile
 	}
 	parent := b.parentOf(d)
 	line, end := b.place(d, file, parent)
@@ -76,14 +81,15 @@ func (b *graphBuilder) declare(d handSymbol) {
 	b.ids[d.name] = id
 	b.named[id] = d.name
 	b.symbols = append(b.symbols, Symbol{
-		ID:      id,
-		Ref:     "hand://" + d.name,
-		Name:    d.name,
-		PkgPath: handPackage,
-		Parent:  parent,
-		Pos:     token.Position{Filename: file, Line: line, Column: 1},
-		EndLine: end,
-		Kind:    d.kind,
+		ID:          id,
+		Ref:         "hand://" + d.name,
+		Name:        d.name,
+		PkgPath:     handPackage,
+		Parent:      parent,
+		Pos:         token.Position{Filename: file, Line: line, Column: 1},
+		EndLine:     end,
+		Kind:        d.kind,
+		TestSupport: d.support,
 	})
 }
 
@@ -141,17 +147,28 @@ func (b *graphBuilder) addTest(names ...string) *graphBuilder {
 	return b
 }
 
+// addSupport declares one function per name in a file of test-support code.
+func (b *graphBuilder) addSupport(names ...string) *graphBuilder {
+	b.sink.Helper()
+	for _, name := range names {
+		b.declare(handSymbol{name: name, support: true})
+	}
+	return b
+}
+
 // ref keeps one reference from one declaration to another. Test agrees with the
-// referencing declaration's file, which is how the reference pass records it.
+// referencing declaration's file, a file of test-support code being test code, which
+// is how the reference pass records it.
 func (b *graphBuilder) ref(from, to string) {
 	b.sink.Helper()
 	fromID := b.id(from)
+	file, _, _ := strings.Cut(string(fromID), ":")
 	b.refs = append(b.refs, Reference{
 		From: fromID,
 		To:   b.id(to),
-		Pos:  token.Position{Filename: strings.Split(string(fromID), ":")[0], Line: 1, Column: 1},
+		Pos:  token.Position{Filename: file, Line: 1, Column: 1},
 		Kind: RefCall,
-		Test: strings.Contains(string(fromID), handTestFile),
+		Test: file == handTestFile || file == handSupportFile,
 	})
 }
 

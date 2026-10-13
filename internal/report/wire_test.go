@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/config"
-	"github.com/cplieger/deadset-go/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/kinds"
 )
 
 // TestTheDocumentWritesEveryRequiredMember pins that every member the schema requires

@@ -1,6 +1,6 @@
 package report
 
-import "github.com/cplieger/deadset-go/internal/reportdoc"
+import "github.com/cplieger/deadset-go/v2/internal/reportdoc"
 
 // The document below is the Contract's SARIF mapping in Go: one field per property
 // the mapping emits, in the order the mapping lists them, so two runs over an

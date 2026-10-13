@@ -6,7 +6,7 @@ import (
 	"testing"
 	"unsafe"
 
-	"github.com/cplieger/deadset-go/internal/testsupport"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport"
 )
 
 // recorder is a sink that keeps every diagnostic rather than ending the test, so a

@@ -3,7 +3,7 @@ package config
 import (
 	"strings"
 
-	"github.com/cplieger/deadset-go/internal/catalog"
+	"github.com/cplieger/deadset-go/v2/internal/catalog"
 )
 
 // severitySection is the name of the severity object, whose member names the

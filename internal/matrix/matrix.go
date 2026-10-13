@@ -20,7 +20,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cplieger/deadset-go/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 )
 
 // idSeparator joins the parts of a configuration identifier.

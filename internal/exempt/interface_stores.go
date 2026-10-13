@@ -1,9 +1,12 @@
 package exempt
 
 import (
+	"cmp"
 	"go/ast"
 	"go/token"
 	"go/types"
+	"maps"
+	"slices"
 )
 
 // storeNode is one place the analysed program stores interface values in, keyed by
@@ -35,10 +38,13 @@ type storedTypes struct {
 	// function or method of the program some other identifier uses as a value.
 	called map[*ast.Ident]bool
 	valued map[*types.Func]bool
+
+	// abstract is every interface method a call takes a result of.
+	abstract map[*types.Func]bool
 }
 
-// storedValue is what one expression carries into a place: a concrete type, or the
-// node whose values it carries.
+// storedValue is what one expression carries into a place: a concrete type, the node
+// whose values it carries, or both for a container of interface values.
 type storedValue struct {
 	concrete types.Type
 	from     *storeNode
@@ -62,12 +68,13 @@ type storeWalk struct {
 // passes adds nothing.
 func storedTypesOf(in *Input, sites *declarationSites) *storedTypes {
 	s := &storedTypes{
-		sites:  sites,
-		direct: make(map[storeNode][]types.Type),
-		from:   make(map[storeNode][]storeNode),
-		memo:   make(map[storeNode][]types.Type),
-		called: make(map[*ast.Ident]bool),
-		valued: make(map[*types.Func]bool),
+		sites:    sites,
+		direct:   make(map[storeNode][]types.Type),
+		from:     make(map[storeNode][]storeNode),
+		memo:     make(map[storeNode][]types.Type),
+		called:   make(map[*ast.Ident]bool),
+		valued:   make(map[*types.Func]bool),
+		abstract: make(map[*types.Func]bool),
 	}
 	for _, p := range programPackages(in.Result) {
 		if p.TypesInfo == nil {
@@ -84,7 +91,91 @@ func storedTypesOf(in *Input, sites *declarationSites) *storedTypes {
 		}
 	}
 	s.linkIndirect()
+	s.linkImplementations(programNamedTypes(in))
 	return s
+}
+
+func isAbstract(fn *types.Func) bool {
+	recv := fn.Signature().Recv()
+	return recv != nil && types.IsInterface(recv.Type())
+}
+
+// linkImplementations fills each interface-typed result of an interface method a call
+// takes a result of from the same result of every method of the program's defined
+// types implementing it, because the call stands for each of them.
+func (s *storedTypes) linkImplementations(named []*types.Named) {
+	methods := slices.SortedFunc(maps.Keys(s.abstract), func(a, b *types.Func) int { return cmp.Compare(a.Pos(), b.Pos()) })
+	w := &storeWalk{storedTypes: s}
+	for _, method := range methods {
+		iface, returns := returnsInterface(method)
+		if !returns {
+			continue
+		}
+		for _, t := range named {
+			if impl, implements := implementation(t, iface, method); implements {
+				w.linkResults(method, impl)
+			}
+		}
+	}
+}
+
+// returnsInterface is the interface one interface method is declared by, where the
+// method is written in a file and one of its results is an interface.
+func returnsInterface(method *types.Func) (*types.Interface, bool) {
+	iface, isInterface := method.Signature().Recv().Type().Underlying().(*types.Interface)
+	if !method.Pos().IsValid() || !isInterface {
+		return nil, false
+	}
+	return iface, slices.ContainsFunc(slices.Collect(method.Signature().Results().Variables()),
+		func(v *types.Var) bool { return types.IsInterface(v.Type()) })
+}
+
+// linkResults fills each interface-typed result of one interface method from the same
+// result of one implementation.
+func (w *storeWalk) linkResults(method, impl *types.Func) {
+	results := method.Signature().Results()
+	for i := range results.Len() {
+		if types.IsInterface(results.At(i).Type()) {
+			w.link(w.result(method, i), w.result(impl, i))
+		}
+	}
+}
+
+// implementation is the method of t, or of a pointer to it, that implements one
+// method of iface, where either implements iface.
+func implementation(t *types.Named, iface *types.Interface, method *types.Func) (*types.Func, bool) {
+	for _, held := range []types.Type{t, types.NewPointer(t)} {
+		if !types.Implements(held, iface) {
+			continue
+		}
+		obj, _, _ := types.LookupFieldOrMethod(held, false, method.Pkg(), method.Name())
+		impl, isFunc := obj.(*types.Func)
+		return impl, isFunc
+	}
+	return nil, false
+}
+
+// programNamedTypes is every non-generic defined type the analysed program declares at
+// package level that is not an interface, in package and then name order.
+func programNamedTypes(in *Input) []*types.Named {
+	var found []*types.Named
+	for _, p := range programPackages(in.Result) {
+		if p.Types == nil {
+			continue
+		}
+		scope := p.Types.Scope()
+		for _, name := range scope.Names() {
+			typeName, isType := scope.Lookup(name).(*types.TypeName)
+			if !isType || typeName.IsAlias() {
+				continue
+			}
+			named, isNamed := typeName.Type().(*types.Named)
+			if isNamed && named.TypeParams().Len() == 0 && !types.IsInterface(named) {
+				found = append(found, named)
+			}
+		}
+	}
+	return found
 }
 
 // indirectResult is the node of result i of a call, with n results, through a
@@ -275,12 +366,41 @@ func (w *storeWalk) returned(ret *ast.ReturnStmt) {
 		return
 	}
 	results := w.fn.Signature().Results()
+	if len(ret.Results) == 1 && results.Len() > 1 {
+		w.returnedCall(results, ret.Results[0])
+		return
+	}
 	if len(ret.Results) != results.Len() {
 		return
 	}
 	for i, value := range ret.Results {
 		if types.IsInterface(results.At(i).Type()) {
 			w.store(w.result(w.fn, i), w.valueOf(value))
+		}
+	}
+}
+
+// returnedCall reads the values a return statement whose one operand is a call of
+// several results stores in the declared function's interface-typed results: each
+// result of the call at the same position.
+func (w *storeWalk) returnedCall(results *types.Tuple, value ast.Expr) {
+	call, isCall := ast.Unparen(value).(*ast.CallExpr)
+	if !isCall {
+		return
+	}
+	held, isTuple := w.info.TypeOf(call).(*types.Tuple)
+	nodes, resolved := w.resultsOf(call)
+	if !isTuple || !resolved || held.Len() != results.Len() || len(nodes) != results.Len() {
+		return
+	}
+	for i := range results.Len() {
+		if !types.IsInterface(results.At(i).Type()) {
+			continue
+		}
+		if t := held.At(i).Type(); !types.IsInterface(t) {
+			w.store(w.result(w.fn, i), storedValue{concrete: t})
+		} else {
+			w.link(w.result(w.fn, i), nodes[i])
 		}
 	}
 }
@@ -329,6 +449,9 @@ func (w *storeWalk) fromCall(lhs []ast.Expr, rhs ast.Expr) {
 // function values it may call through.
 func (w *storeWalk) resultsOf(call *ast.CallExpr) ([]storeNode, bool) {
 	if callee, isFunc := resolveObject(w.info, call.Fun).(*types.Func); isFunc {
+		if isAbstract(callee) {
+			w.abstract[callee] = true
+		}
 		nodes := make([]storeNode, callee.Signature().Results().Len())
 		for i := range nodes {
 			nodes[i] = w.result(callee, i)
@@ -558,14 +681,18 @@ func isAppend(info *types.Info, call *ast.CallExpr) bool {
 }
 
 // valueOf is what one expression carries into an interface-typed place: its concrete
-// type, the interface-typed parameter of the enclosing function or the interface-typed
-// variable it names, or the one result of the call it is.
+// type, with what it holds where it is a container of interface values
+// ([storeWalk.carrier]), the interface-typed parameter of the enclosing function or the
+// interface-typed variable it names, or the one result of the call it is.
 func (w *storeWalk) valueOf(expr ast.Expr) storedValue {
 	t := w.info.TypeOf(expr)
 	if t == nil {
 		return storedValue{}
 	}
 	if !types.IsInterface(t) {
+		if node, carries := w.carrier(expr); carries {
+			return storedValue{concrete: t, from: &node}
+		}
 		return storedValue{concrete: t}
 	}
 	if node, isParam := w.parameter(parameterNamed(w.info, expr)); isParam {
@@ -579,18 +706,38 @@ func (w *storeWalk) valueOf(expr ast.Expr) storedValue {
 			return storedValue{from: &results[0]}
 		}
 	}
+	if node, isField := w.fieldRead(expr); isField {
+		return storedValue{from: &node}
+	}
 	return storedValue{}
+}
+
+// fieldRead is the node of the field one selector expression reads.
+func (w *storeWalk) fieldRead(expr ast.Expr) (storeNode, bool) {
+	sel, isSelector := ast.Unparen(expr).(*ast.SelectorExpr)
+	if !isSelector {
+		return storeNode{}, false
+	}
+	selection := w.info.Selections[sel]
+	if selection == nil || selection.Kind() != types.FieldVal {
+		return storeNode{}, false
+	}
+	field, isField := selection.Obj().(*types.Var)
+	if !isField {
+		return storeNode{}, false
+	}
+	return storeNode{at: w.sites.of(field), param: placeNode}, true
 }
 
 // store records one value stored in a node. A value of an unnamed basic type carries
 // no member, so it is not kept.
 func (w *storeWalk) store(node storeNode, value storedValue) {
-	switch {
-	case value.concrete != nil:
+	if value.concrete != nil {
 		if _, basic := types.Unalias(value.concrete).(*types.Basic); !basic {
 			w.direct[node] = append(w.direct[node], value.concrete)
 		}
-	case value.from != nil:
+	}
+	if value.from != nil {
 		w.link(node, *value.from)
 	}
 }

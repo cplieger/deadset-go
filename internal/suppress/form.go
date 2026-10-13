@@ -64,9 +64,11 @@ var referenceForms = [...]string{
 	`^ts://TS_PACKAGE/TS_FILE#$`,
 	`^ts://TS_PACKAGE/TS_FILE#TS_HEAD$`,
 	`^ts://TS_PACKAGE/TS_FILE#(?:TS_QUOTED\.)?TS_HEAD:alias$`,
+	`^ts://TS_PACKAGE/TS_FILE#TS_HEAD:import$`,
 	`^ts://TS_PACKAGE/TS_FILE#TS_HEAD(?:\.TS_MEMBER)+$`,
 	`^ts://TS_PACKAGE/TS_FILE#TS_HEAD(?:\.TS_MEMBER)+:static$`,
 	`^ts://TS_PACKAGE/TS_FILE#TS_HEAD(?:\.TS_MEMBER)*(?::static)?<TS_IDENT>$`,
+	`^ts://TS_PACKAGE/TS_FILE#(?:TS_HEAD(?:\.TS_MEMBER)*(?::static)?)?\(TS_IDENT\)$`,
 	`^ts://TS_PACKAGE/(?:[^/#\r\n]+/)*package\.json#TS_PACKAGE:(?:dependency|dev-dependency|peer-dependency)$`,
 }
 

@@ -24,7 +24,7 @@ import (
 	"go/token"
 	"strconv"
 
-	"github.com/cplieger/deadset-go/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
 )
 
 // The codes a refused suppression is reported under.

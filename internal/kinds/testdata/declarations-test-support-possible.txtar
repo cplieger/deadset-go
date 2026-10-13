@@ -1,5 +1,5 @@
-A command and a package only the command's test imports: a deprecated function the
-test calls, a struct type the test names whose field and method nothing references,
+A command and a package only the command's test imports, which imports the testing
+package: a deprecated function the test calls, a struct type the test names whose field and method nothing references,
 and an interface the test names with two methods.
 
 -- go.mod --
@@ -21,17 +21,22 @@ import (
 
 func TestSupport(t *testing.T) {
 	var sink support.Sink
-	if support.Old() != 1 || sink != nil || (support.Fake{}) != (support.Fake{}) {
+	if support.Old(t) != 1 || sink != nil || (support.Fake{}) != (support.Fake{}) {
 		t.Error("support")
 	}
 }
 -- support/support.go --
 package support
 
+import "testing"
+
 // Old is called by a test alone.
 //
 // Deprecated: nothing replaces it.
-func Old() int { return 1 }
+func Old(t testing.TB) int {
+	t.Helper()
+	return 1
+}
 
 // Fake is named by a test alone.
 type Fake struct {
