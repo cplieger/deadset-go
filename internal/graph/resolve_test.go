@@ -10,7 +10,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 )
 
 // resolved is one archive's load, enumeration and resolver.

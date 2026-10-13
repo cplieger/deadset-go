@@ -630,12 +630,17 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["kind", "path", "key", "message"],
+        "required": ["kind", "path", "message"],
+        "allOf": [
+          {"if": {"properties": {"kind": {"const": "published-package"}}}, "then": {"required": ["key"]}},
+          {"if": {"properties": {"kind": {"const": "unmapped-entry"}}}, "then": {"required": ["key"]}},
+          {"if": {"properties": {"kind": {"const": "module-not-loaded"}}}, "then": {"not": {"required": ["key"]}}}
+        ],
         "properties": {
           "kind": {
-            "description": "What the note is about, from a closed set. published-package: a package of an application that no other package of the target imports and that outside programs may import, which grammar/analysis.md defines.",
+            "description": "What the note is about, from a closed set. module-not-loaded: a Go module below the target root that the run dropped because it does not load, which grammar/analysis.md defines. published-package: a package of an application that no other package of the target imports and that outside programs may import, which grammar/analysis.md defines. unmapped-entry: a manifest entry that reads back to no source file of the target, which grammar/analysis.md defines.",
             "type": "string",
-            "enum": ["published-package"]
+            "enum": ["module-not-loaded", "published-package", "unmapped-entry"]
           },
           "path": {
             "description": "The directory the note is about, relative to the target root, in the path form: segments joined by /, none of them empty, . or .., so never absolute, with no leading ./ and no trailing /; no control character, U+0000 to U+001F or U+007F; every other character, a space, a backslash, which is no separator, a +, a $, a bracket, a parenthesis or one outside ASCII, written as it is; the target root itself is a single dot, so a note about the package at the root names it as .",
@@ -643,12 +648,12 @@
             "pattern": "^(?:\\.|(?:[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.\\.[^/\\x00-\\x1f\\x7f]+)(?:/(?:[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.\\.[^/\\x00-\\x1f\\x7f]+))*)$"
           },
           "key": {
-            "description": "The configuration key that settles the note, as a dotted path of contract/config.schema.json.",
+            "description": "The configuration key that settles the note, as a dotted path of contract/config.schema.json: present on a published-package and an unmapped-entry note, and absent on a module-not-loaded note, which no key settles.",
             "type": "string",
-            "enum": ["roots.patterns"]
+            "enum": ["roots.patterns", "ts.entry_files"]
           },
           "message": {
-            "description": "The note in words, on one line and never empty, naming what the analysis could not tell and the key that tells it.",
+            "description": "The note in words, on one line and never empty, naming what the analysis could not tell and the key that tells it where one does.",
             "type": "string",
             "minLength": 1,
             "pattern": "^[^\\r\\n]+$"

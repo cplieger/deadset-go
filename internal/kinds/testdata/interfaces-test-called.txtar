@@ -1,0 +1,38 @@
+An interface whose one method production code calls through it and whose other
+method only a test calls through it.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- store/store.go --
+package store
+
+type Store interface {
+	Get(k string) string
+	Count() int
+}
+
+type memory struct{ m map[string]string }
+
+func New() Store { return &memory{m: map[string]string{}} }
+
+func (s *memory) Get(k string) string { return s.m[k] }
+
+func (s *memory) Count() int { return len(s.m) }
+-- store/store_test.go --
+package store
+
+import "testing"
+
+func TestCount(t *testing.T) {
+	if New().Count() != 0 {
+		t.Fatal("a new store holds a value")
+	}
+}
+-- main.go --
+package main
+
+import "example.com/app/store"
+
+func main() { println(store.New().Get("a")) }

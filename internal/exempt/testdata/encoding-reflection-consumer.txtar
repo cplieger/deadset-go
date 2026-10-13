@@ -200,10 +200,13 @@ func Count(v any) int {
 // Tag takes a concrete parameter, so no value crosses into it.
 func Tag(name string) string { return "name=" + name }
 
+// layout is a variable, so the template Render parses is none the analysis reads.
+var layout = "{{.Name}}"
+
 // Render hands its own parameter typed as the empty interface to a template engine,
 // which selects a method by the same syntax it selects a field with.
 func Render(w io.Writer, v any) error {
-	return template.Must(template.New("wire").Parse("{{.Name}}")).Execute(w, v)
+	return template.Must(template.New("wire").Parse(layout)).Execute(w, v)
 }
 
 // Both hands its own parameter to the rendering wrapper and then to an encoder, so

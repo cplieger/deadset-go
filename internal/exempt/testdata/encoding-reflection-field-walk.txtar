@@ -1,0 +1,49 @@
+A package that reads a field of a struct by reflection and asserts the field's value
+to an interface, and a second assertion of a value reflection holds that is no field.
+
+-- go.mod --
+module example.com/walk
+
+go 1.27.0
+-- walk.go --
+package walk
+
+import "reflect"
+
+type provider interface {
+	Validate() error
+}
+
+type discord struct{ URL string }
+
+func (d *discord) Validate() error { return nil }
+
+func (d *discord) Unused() {}
+
+type slack struct{}
+
+func (s *slack) Validate() error { return nil }
+
+type plain struct{}
+
+func (plain) Validate() error { return nil }
+
+type config struct {
+	Discord *discord
+	Slack   *slack
+	hidden  *discord
+}
+
+// At returns the provider at one field index.
+func At(c *config, i int) provider {
+	field := reflect.ValueOf(c).Elem().Field(i)
+	if field.IsNil() {
+		return nil
+	}
+	return field.Interface().(provider)
+}
+
+// Whole asserts a value reflection holds that is no field.
+func Whole(p plain) provider {
+	return reflect.ValueOf(p).Interface().(provider)
+}

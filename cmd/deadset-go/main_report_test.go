@@ -11,10 +11,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/kinds"
-	"github.com/cplieger/deadset-go/internal/report"
-	"github.com/cplieger/deadset-go/internal/reporttest"
-	spec "github.com/cplieger/deadset-spec/v7"
+	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/report"
+	"github.com/cplieger/deadset-go/v2/internal/reporttest"
+	spec "github.com/cplieger/deadset-spec/v8"
 )
 
 // The Contract page that publishes the expression a finding line is defined by, and
@@ -847,10 +847,7 @@ func TestReportOfWritesAnEmptyImplementationListForAnInterfaceNothingImplements(
 	}
 
 	// The reader keeps the empty list, so a document read back writes it again.
-	decoded, err := reporttest.Read(written.Bytes())
-	if err != nil {
-		t.Fatalf("decode the document this run wrote: %v", err)
-	}
+	decoded := reporttest.MustRead(t, "the document this run wrote", written.Bytes())
 	var again bytes.Buffer
 	if err := report.JSON(&again, &decoded, report.Options{}); err != nil {
 		t.Fatalf("report.JSON() over the decoded envelope = %v", err)

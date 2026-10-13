@@ -10,12 +10,13 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"testing"
 
-	"github.com/cplieger/deadset-go/internal/config"
-	"github.com/cplieger/deadset-go/internal/graph"
-	"github.com/cplieger/deadset-go/internal/kinds"
-	"github.com/cplieger/deadset-go/internal/report"
-	"github.com/cplieger/deadset-go/internal/reportdoc"
+	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/report"
+	"github.com/cplieger/deadset-go/v2/internal/reportdoc"
 )
 
 // subjectOf is one finding's subject read back from the document.
@@ -39,6 +40,17 @@ func Read(data []byte) (report.Envelope, error) {
 		return report.Envelope{}, errors.New("reporttest: decode a report document: content after the document")
 	}
 	return envelopeOf(&read)
+}
+
+// MustRead is [Read] for a test that cannot go on without the document: it ends the
+// test, naming what it read, when the document does not read back.
+func MustRead(t testing.TB, what string, data []byte) report.Envelope {
+	t.Helper()
+	envelope, err := Read(data)
+	if err != nil {
+		t.Fatalf("decode %s: %v", what, err)
+	}
+	return envelope
 }
 
 // envelopeOf is the document read back, so a rendering of the result writes the bytes

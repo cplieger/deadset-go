@@ -91,6 +91,7 @@ type docTS struct {
 	InjectionRegistrations *[]Declaration       `json:"injection_registrations"`
 	LifecycleContracts     *[]LifecycleContract `json:"lifecycle_contracts"`
 	Serializers            *[]Declaration       `json:"serializers"`
+	RootsComplete          *bool                `json:"roots_complete"`
 }
 
 // fill allocates the sections the document omits, so reading one setting never
@@ -360,6 +361,8 @@ func resolveTS(cfg *Config, p Provenance, sources []source) {
 		func(d *doc) *[]LifecycleContract { return d.TS.LifecycleContracts })
 	resolveSetting(&cfg.TS.Serializers, "ts.serializers", p, sources,
 		func(d *doc) *[]Declaration { return d.TS.Serializers })
+	resolveSetting(&cfg.TS.RootsComplete, "ts.roots_complete", p, sources,
+		func(d *doc) *bool { return d.TS.RootsComplete })
 	for index := range cfg.TS.LifecycleContracts {
 		contract := &cfg.TS.LifecycleContracts[index]
 		contract.Components = orEmpty(contract.Components)

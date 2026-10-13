@@ -7,8 +7,9 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"slices"
 
-	"github.com/cplieger/deadset-go/internal/scope"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -16,7 +17,8 @@ import (
 // the ambient one included.
 const workspaceOff = "off"
 
-// Consumer is one loaded consumer module's contribution to a configuration.
+// Consumer is one loaded consumer module's contribution to a configuration: a
+// declared consumer, or a [Result.Nested] one.
 type Consumer struct {
 	// ID is the consumer's module path as its own module file declares it, which
 	// is the identifier a finding names among the consumers a run loaded.
@@ -66,6 +68,148 @@ func loadConsumers(ctx context.Context, fset *token.FileSet, doc *scope.Document
 	return loaded, nil
 }
 
+// Referencing is every loaded consumer whose references the run counts: each declared
+// one, then each nested one.
+func (r *Result) Referencing() []Consumer {
+	return slices.Concat(r.Consumers, r.Nested)
+}
+
+// loadNested loads every module below the target that builds against a unit's own
+// directory ([replacedUnits]) as a consumer of it, in directory order, and returns
+// each one that does not load as dropped, then each unit's underscored packages.
+func loadNested(ctx context.Context, fset *token.FileSet, doc *scope.Document, c Configuration, units []Unit) ([]Consumer, []droppedModule, error) {
+	target := doc.Target.Path
+	dirs, err := nestedModules(target, units)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load %s: find the modules under %s: %w", c.ID, target, err)
+	}
+	var held nestedLoads
+	for _, dir := range dirs {
+		consumed := replacedUnits(ctx, dir, units)
+		declared := slices.ContainsFunc(doc.Consumers, func(m scope.Module) bool { return sameDir(m.Path, dir) })
+		if len(consumed) == 0 || declared {
+			continue
+		}
+		if err := held.load(ctx, fset, dir, c, workspaceOff, unitPaths(consumed), unitPrefix(target, dir)); err != nil {
+			return nil, nil, err
+		}
+	}
+	for i := range units {
+		if err := held.underscored(ctx, fset, c, target, &units[i]); err != nil {
+			return nil, nil, err
+		}
+	}
+	return held.loaded, held.dropped, nil
+}
+
+// nestedLoads accumulates the [Result.Nested] consumers and the modules dropped
+// while loading them.
+type nestedLoads struct {
+	loaded  []Consumer
+	dropped []droppedModule
+}
+
+// underscored loads the packages of unit's own module below an underscore directory
+// ([underscoredPackages]), an example tree among them, as a nested consumer of the
+// unit. No build of the module compiles them, so where they do not load together
+// each loads alone, and one that does not load counts nothing.
+func (n *nestedLoads) underscored(ctx context.Context, fset *token.FileSet, c Configuration, target string, unit *Unit) error {
+	if unit.Path == "" {
+		return nil
+	}
+	patterns, err := underscoredPackages(unit.Dir)
+	if err != nil || len(patterns) == 0 {
+		return err
+	}
+	workspace, err := unitWorkspace(ctx, unit.Dir)
+	if err != nil {
+		return fmt.Errorf("load %s: %s: %w", c.ID, unit.Dir, err)
+	}
+	try := func(patterns []string) (bool, error) {
+		pkgs, diagnostics, err := loadPackages(ctx, fset, unit.Dir, c, workspace, []string{unit.Path}, unitPrefix(target, unit.Dir), patterns...)
+		switch {
+		case err == nil && len(diagnostics) == 0:
+			n.loaded = append(n.loaded, Consumer{ID: unit.Path, Packages: withoutTestBinaries(pkgs)})
+			return true, nil
+		case err == nil || droppable(err) && ctx.Err() == nil:
+			return false, nil
+		default:
+			return false, fmt.Errorf("load %s: %s: %w", c.ID, unit.Dir, err)
+		}
+	}
+	if loaded, err := try(patterns); loaded || err != nil || len(patterns) == 1 {
+		return err
+	}
+	for _, pattern := range patterns {
+		if _, err := try([]string{pattern}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// AddReaders loads every module of readers whose module file requires a unit of r,
+// through the workspace file at workspace, as a [Result.Nested] consumer, in the
+// order given, and drops one that does not load. A caller passes the modules a
+// workspace lists that it counts the references of without naming them.
+func (r *Result) AddReaders(ctx context.Context, workspace string, readers []scope.Module) error {
+	if workspace == "" {
+		workspace = workspaceOff
+	}
+	var held nestedLoads
+	for _, reader := range readers {
+		required, _ := requiredModules(ctx, reader.Path)
+		consumed := slices.DeleteFunc(unitPaths(r.Units), func(path string) bool { return !slices.Contains(required, path) })
+		if len(consumed) == 0 {
+			continue
+		}
+		if err := held.load(ctx, r.Fset, reader.Path, r.Configuration, workspace, consumed, ""); err != nil {
+			return err
+		}
+	}
+	r.Nested = append(r.Nested, held.loaded...)
+	r.Dropped = append(r.Dropped, held.dropped...)
+	r.markUnanalysedConsumers(ctx)
+	return nil
+}
+
+// load loads the module rooted at dir as a nested consumer of the units whose module
+// paths modules lists, dropping it where it does not load. A module below the target
+// is named by prefix, its target-relative directory, which a note may carry.
+func (n *nestedLoads) load(ctx context.Context, fset *token.FileSet, dir string, c Configuration, workspace string, modules []string, prefix string) error {
+	pkgs, diagnostics, err := loadPackages(ctx, fset, dir, c, workspace, modules, prefix)
+	if len(diagnostics) > 0 {
+		name := prefix
+		if name == "" {
+			name = dir
+		}
+		err = &Error{Configuration: c.ID, Module: name, Diagnostics: diagnostics}
+	}
+	switch {
+	case err == nil:
+	case droppable(err) && ctx.Err() == nil:
+		n.dropped = append(n.dropped, droppedModule{Dir: dir, Err: err})
+		return nil
+	default:
+		return fmt.Errorf("load %s: %s: %w", c.ID, dir, err)
+	}
+	pkgs = withoutTestBinaries(pkgs)
+	if module := mainModule(pkgs); module != nil {
+		n.loaded = append(n.loaded, Consumer{ID: module.Path, Packages: pkgs})
+	}
+	return nil
+}
+
+func unitPaths(units []Unit) []string {
+	paths := make([]string, 0, len(units))
+	for i := range units {
+		if units[i].Path != "" {
+			paths = append(paths, units[i].Path)
+		}
+	}
+	return paths
+}
+
 // loadConsumer resolves one declared consumer, and refuses one whose references
 // this target's run cannot count.
 func loadConsumer(ctx context.Context, fset *token.FileSet, doc *scope.Document, c Configuration, declared scope.Module, mains []*packages.Module) (Consumer, error) {
@@ -84,7 +228,7 @@ func loadConsumer(ctx context.Context, fset *token.FileSet, doc *scope.Document,
 	for _, main := range mains {
 		targetModules = append(targetModules, main.Path)
 	}
-	pkgs, diagnostics, err := loadPackages(ctx, fset, declared.Path, c, workspace, targetModules)
+	pkgs, diagnostics, err := loadPackages(ctx, fset, declared.Path, c, workspace, targetModules, "")
 	if setup, failed := errors.AsType[*SetupError](err); failed {
 		consumer := &SetupError{}
 		for _, one := range setup.Failures {

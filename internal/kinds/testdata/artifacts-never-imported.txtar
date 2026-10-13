@@ -1,9 +1,10 @@
 A package no import reaches and no root names, whose every declaration the sweep
 found dead, beside a package one reference reaches, the main package that reaches
 it, a package whose exported declaration is a root under a library target and not
-under an application, a package an init function roots, and two main packages
-declaring no main function: one whose exported function a host looks up, and one
-holding nothing exported at all.
+under an application, a package an init function roots, which the main package
+imports for its effects, a package whose init function never runs because nothing
+imports it, and two main packages declaring no main function: one whose exported
+function a host looks up, and one holding nothing exported at all.
 
 -- go.mod --
 module example.com/app
@@ -12,7 +13,10 @@ go 1.27.0
 -- main.go --
 package main
 
-import "example.com/app/internal/live"
+import (
+	"example.com/app/internal/live"
+	_ "example.com/app/internal/setup"
+)
 
 func main() {
 	_ = live.Count()
@@ -39,6 +43,12 @@ package api
 func Published() int { return 6 }
 -- internal/setup/setup.go --
 package setup
+
+var registered int
+
+func init() { registered = 1 }
+-- internal/unrun/unrun.go --
+package unrun
 
 var registered int
 

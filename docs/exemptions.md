@@ -131,6 +131,8 @@ Retains the declarations a constant string names at a reflective lookup call, on
 
 The evidence is a string equal to an identifier beside a call, rather than a type relation. So this is the weakest class, and every exemption it records names a site a maintainer can go and read. A call whose name argument is not a constant retains nothing, because the class declines to guess rather than retaining every declaration a lookup might reach.
 
+A router that registers a handler by its method name resolves the method the same way. So a call of a function or method outside the analyzed program that passes a value of a type `T`, or a pointer to one, retains each exported method of `T` that a constant string argument of the same call names. Each item of the string separated by `;` names one method, after an optional prefix ending in `:`, so `"get,post:Login;put:Update"` names `Login` and `Update`.
+
 ## What no class answers
 
 Two reasons a maintainer may have for keeping a symbol are answered by something other than an exemption:

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cplieger/deadset-go/internal/report"
-	"github.com/cplieger/deadset-go/internal/testsupport"
+	"github.com/cplieger/deadset-go/v2/internal/report"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport"
 )
 
 // failureSink is what a fixture helper needs of the test that calls it: mark itself a

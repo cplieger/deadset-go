@@ -49,15 +49,17 @@ The kind reports nothing for a library whose published API is open world, becaus
 
 An unexported declaration that is not a member of a type and that no reference names.
 
+A constant or a type a function body declares, a function literal's body included, is reported here when nothing in that body names it outside its own declaration. Such a declaration has no reference of its own, so the finding carries the enclosing declaration's reference and the local declaration's own position.
+
 ### DS1003 unused-member
 
 A struct field no reference names, whose container the analysis did not also find dead. A member of a dead container falls with the container and is reported inside the container's dead component rather than on its own.
 
 ### DS1004 test-only-use
 
-A declaration no production file references and at least one test file does. It is the unused-exported or unused-unexported answer for a symbol whose only callers are tests, reported once under this code, because the symbol and its tests are deleted in one change.
+A declaration no production file references and at least one test file does. It is the unused-exported or unused-unexported answer for a symbol whose only callers are tests, reported once under this code, because the symbol and its tests are deleted in one change. An interface method only test code calls through the interface is reported here too, unless the `DS1203` exemptions cover it, and the methods implementing it stay live while the test reaches them through it.
 
-Test-support code is a package only tests reach, through its own test files or through other such packages. In a library, only a package under an `internal` tree can be test-support code. A package holding a root other than an `init`, `blank` or `test` root never is. A declaration of test-support code that a test references is reported here at the `possible` class, which the default minimum confidence withholds. An interface of it is reported under `DS1201` instead.
+Test-support code is a package only tests reach, through its own test files or through other such packages, one of whose files other than its test files imports `testing`. A package only tests reach that imports no `testing` is production code a test uses, reported here like any other. In a library, only a package under an `internal` tree can be test-support code. A package holding a root other than an `init`, `blank` or `test` root never is. Test-support code is test code, so a declaration of it that a reference names is never reported here. One that nothing references is reported under the code its shape selects.
 
 ### DS1005 test-of-dead-code
 
@@ -109,13 +111,13 @@ An interface declaration no symbol names as a type. The finding names the concre
 
 ### DS1203 uncalled-interface-method
 
-A method an interface declares that no call site invokes and no expression selects through the interface, whatever the number of implementations. A method selected as a value is selected through the interface and counts as invoked. A call on a value of a concrete type invokes that type's own method and not this one. Each method implementing it that nothing else keeps is reported under the code its own references select, as a member of this finding's component.
+A method an interface declares that no call site of production code invokes and no expression of it selects through the interface, whatever the number of implementations. A method only test code calls through the interface is `DS1004`'s. A method selected as a value is selected through the interface and counts as invoked. A call on a value of a concrete type invokes that type's own method and not this one. Each method implementing it that nothing else keeps is reported under the code its own references select, as a member of this finding's component.
 
-Two shapes are exempt. Every method of an interface whose method set holds an unexported method, because such a method set exists to fix which types implement the interface rather than to be called through it. And a marker method, being a method whose every implementation in the target carries a body with no statement. An implementation the target does not declare is a body this analysis cannot read, which leaves the method not a marker.
+Two shapes are exempt. Every method of an exported interface whose method set holds an unexported method, a method of an interface it embeds included, because such a method set exists to fix which types outside the package implement the interface rather than to be called through it. An unexported interface restricts no implementor outside its package, so a method only it holds is judged. And a marker method, being a method whose every implementation in the target carries a body with no statement. An implementation the target does not declare is a body this analysis cannot read, which leaves the method not a marker.
 
 ### DS1204 unused-satisfaction-assertion
 
-A compile-time satisfaction assertion is a package-level declaration of the blank identifier whose declared type is an interface of the target and whose value is of a concrete type. The kind reports one where nothing other than such an assertion names that interface as a type. The methods the assertion retains stay retained, so the finding names the one declaration a maintainer deletes. Two assertions of one interface are two findings.
+A compile-time satisfaction assertion is a package-level declaration of the blank identifier whose declared type is an interface of the target and whose value is of a concrete type. The kind reports one where nothing other than such an assertion names that interface as a type. The methods the assertion retains stay retained, so the finding names the one declaration a maintainer deletes. Two assertions of one interface are two findings. In a library, an assertion whose interface and concrete type are both published API is not reported, because it states to every importer a promise of that API.
 
 ## DS1300 to DS1399: reads and writes
 
@@ -129,7 +131,7 @@ A compile-time satisfaction assertion is a package-level declaration of the blan
 
 A package-level variable or a struct field the references store into and never read, which means at least one write and no reference of any other kind. The finding names every write position. Its message says when only test files read the subject, and names any type parameter, import or declaration the deletion also removes. Such a declaration is one whose every use is in a reported subject's type or writes, and no finding is reported about it. A constant cannot be written and is no subject. A variable a function declares is the dead-store kind's subject instead.
 
-The subject is a live declaration, because a write is a reference and holds the symbol live. The kind asks whether anything reads the declaration, which is the question the liveness relations do not ask. A loaded consumer's write counts as a read. A type argument of a type parameter constrained by `comparable` has every field read, as a comparison of it does.
+The subject is a live declaration, because a write is a reference and holds the symbol live. The kind asks whether anything reads the declaration, which is the question the liveness relations do not ask. A loaded consumer's write counts as a read. A read from a declaration nothing references, found dead at `certain`, is no read, so a variable live code writes and only such a declaration reads is reported. A type argument of a type parameter constrained by `comparable` has every field read, as a comparison of it does.
 
 ### DS1302 unused-enum-member
 
@@ -237,7 +239,7 @@ A published declaration of a library is free whatever the run knows about the li
 
 A named, non-blank parameter of a function or method whose body names it nowhere, on a function whose signature is free. A parameter declared with the blank identifier, and one the signature leaves unnamed, name nothing and are no subject. A parameter used under one build configuration is used, so a configuration whose constraint excludes the body that reads it reports nothing.
 
-A function literal that initializes a local variable has a free signature when every use of the variable calls it. Its unread parameters are then reported too.
+A function literal that initializes a local variable has a free signature when every use of the variable calls it, and so does a literal that is the callee of the call it is written in, under `go` or `defer` or in place. Its unread parameters are then reported too.
 
 ### DS1802 unused-receiver
 
@@ -255,11 +257,11 @@ A statement control flow cannot reach. The rule is the toolchain's own unreachab
 
 ### DS1807 dead-store
 
-A write to a local variable no read reaches, decided by a liveness walk over the control-flow graph of one function body. No path from the store reaches a read before the next store to the same variable or the end of the body.
+A write to a local variable no read reaches, decided by a liveness walk over the control-flow graph of one function body. No path from the store reaches a read before the next store to the same variable or the end of the body. Each function literal is a body of its own, a literal of a package-level variable's initializer included, and its findings carry that variable's reference, or the package's for a blank variable. A range statement stores its key and value at the start of every iteration.
 
 The subject is a variable the body or its signature declares, so a parameter, a named result and a receiver are subjects too. A return naming no value reads every named result. A package-level variable and a field are not subjects, which `DS1301` answers for.
 
-Four constructs take a variable out of the population, each because a store to it may be read where the graph cannot see. Its address is taken, or a function literal of the body names it. A method with a pointer receiver is selected on it while it is not a pointer, and no embedded pointer field carries the selection. A selector or an index on it is assigned to. A call is assumed to return, apart from a call to the `panic` built-in.
+Two constructs take a variable out of the population, each because a store to it may be read where the graph cannot see. Its address is taken, or a method with a pointer receiver is selected on it while it is not a pointer and no embedded pointer field carries the selection. A selector or an index on it that is assigned to reads it. A function literal reads every variable it names where it is written, and a store a literal naming the variable may precede on some path, a literal of an earlier loop iteration included, is not reported, because a call of the literal may read it. A call is assumed to return, apart from a call to the `panic` built-in.
 
 ### DS1809 unreachable-case
 

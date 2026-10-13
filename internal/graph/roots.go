@@ -8,13 +8,14 @@ import (
 	"go/types"
 	"maps"
 	"path"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/cplieger/deadset-go/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -34,6 +35,9 @@ const (
 	RootPattern                      // a pattern from the configuration
 	RootTypeError                    // a declaration a type error skipped, or what its unresolved expression could reach
 	RootProgram                      // a declaration a file run on its own under the ignore tag names
+	RootGenerate                     // a declaration a go:generate directive names as a generator's input
+	RootFuzz                         // a go-fuzz entry point of a file the gofuzz tag selects
+	RootSwagger                      // a declaration a go-swagger directive of its doc comment names
 )
 
 var rootNames = [...]string{
@@ -48,6 +52,9 @@ var rootNames = [...]string{
 	RootPattern:      "pattern",
 	RootTypeError:    "type-error",
 	RootProgram:      "program",
+	RootGenerate:     "go-generate",
+	RootFuzz:         "go-fuzz",
+	RootSwagger:      "swagger",
 }
 
 // String returns the kind's spelling, and a numbered form for a value outside the
@@ -78,6 +85,11 @@ type Root struct {
 // ? matches exactly one character. A string holding neither is exact and names
 // the symbol whose reference it spells.
 type RootOptions struct {
+	// CheckedElsewhere holds the [load.Result.PackageKey] of every package whose type
+	// errors root nothing, because another configuration of a derived matrix
+	// type-checks it ([CheckedElsewhere]).
+	CheckedElsewhere map[string]bool
+
 	Patterns     []string // roots.patterns from the resolved configuration
 	PublishedAPI bool     // the target is a library, so its published API is rooted
 }
@@ -121,8 +133,14 @@ func Roots(r *load.Result, targetRoot string, read ReadFile, symbols []Symbol, o
 	if err := d.walk(r); err != nil {
 		return nil, nil, err
 	}
-	d.typeErrors(r)
+	d.typeErrors(r, opts.CheckedElsewhere)
 	d.programs(r)
+	if !opts.PublishedAPI {
+		unlinked := UnlinkedPackages(r)
+		d.unlinked = func(s *Symbol) bool {
+			return unlinked[r.PackageKey(s.PkgPath, filepath.Join(targetRoot, filepath.FromSlash(path.Dir(s.Pos.Filename))))]
+		}
+	}
 	d.declared(symbols)
 	if opts.PublishedAPI {
 		d.publishedAPI(symbols)
@@ -158,6 +176,7 @@ func rootOrder(symbols []Symbol) func(a, b Root) int {
 
 // rootDetection accumulates the roots of one loaded configuration.
 type rootDetection struct {
+	unlinked   func(*Symbol) bool // whether no build links an application's package declaring a symbol
 	pos        *positions
 	byPosition map[token.Position]SymbolID // a rendered position to the declaration at it
 	byID       map[SymbolID]Symbol
@@ -277,11 +296,19 @@ func (d *rootDetection) classOf(s *Symbol) packageClass {
 	return packageClass{}
 }
 
-// walkFile reads one file's test functions, linkname directives and cgo exports.
+// walkFile reads one file's test functions, linkname, generate and swagger directives,
+// cgo exports and go-fuzz entry points.
 func (d *rootDetection) walkFile(p *packages.Package, f *ast.File) error {
 	if err := d.linknames(p, f); err != nil {
 		return err
 	}
+	if err := d.generatorInputs(p, f); err != nil {
+		return err
+	}
+	if err := d.swaggerDeclarations(f); err != nil {
+		return err
+	}
+	fuzz := goFuzzFile(f)
 
 	_, test := IsTestFile(d.pos.base(f.FileStart))
 	cgo := importsPath(f, cgoImport)
@@ -299,6 +326,8 @@ func (d *rootDetection) walkFile(p *packages.Package, f *ast.File) error {
 			err = d.addAt(fn.Name.Pos(), RootTest)
 		case cgo && cgoExported(fn):
 			err = d.addAt(fn.Name.Pos(), RootCgoExport)
+		case fuzz && goFuzzEntry(p, fn):
+			err = d.addAt(fn.Name.Pos(), RootFuzz)
 		}
 		if err != nil {
 			return err
@@ -359,18 +388,21 @@ func (d *rootDetection) linked(objs []types.Object) error {
 	return nil
 }
 
-// declared keeps the classes the enumeration alone decides.
+// declared keeps the classes the enumeration alone decides. An init function and a
+// blank declaration run because their package is linked, so in a package no build
+// links neither is a root.
 func (d *rootDetection) declared(symbols []Symbol) {
 	for i := range symbols {
 		s := &symbols[i]
-		if s.Blank {
+		linked := d.unlinked == nil || !d.unlinked(s)
+		if s.Blank && linked {
 			d.add(s.ID, RootBlank, "")
 		}
 		if s.Kind != KindFunc {
 			continue
 		}
 		switch {
-		case s.Name == initFunction:
+		case s.Name == initFunction && linked:
 			d.add(s.ID, RootInit, "")
 		case s.Name == mainFunction && d.classOf(s).main:
 			d.add(s.ID, RootMain, "")

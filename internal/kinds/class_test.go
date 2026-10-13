@@ -9,8 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/config"
-	"github.com/cplieger/deadset-go/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 )
 
 // theConsumer is the consumer identifier every class case of this file names.
@@ -344,5 +345,20 @@ func TestTheClassOfAFieldOfAnUnexposedUnexportedTypeIsCertain(t *testing.T) {
 				t.Errorf("classOf(%s) = %q in a library with no consumer information, want %q", ref, got, want)
 			}
 		})
+	}
+}
+
+func TestAnUnanalysedConsumerIsReadFromTheInnermostUnitWhateverTheMapOrder(t *testing.T) {
+	in := &Input{Root: "/r", Per: []Configured{{Result: &load.Result{Units: []load.Unit{
+		{Dir: "/r", UnanalysedConsumer: true},
+		{Dir: "/r/x"},
+	}}}}}
+	for range 64 {
+		if in.unanalysedConsumer(&graph.Symbol{Pos: token.Position{Filename: "x/a.go"}}) {
+			t.Fatal("unanalysedConsumer(x/a.go) = true with the root unit flagged and unit x not, want false")
+		}
+		if !in.unanalysedConsumer(&graph.Symbol{Pos: token.Position{Filename: "a.go"}}) {
+			t.Fatal("unanalysedConsumer(a.go) = false with the root unit flagged, want true")
+		}
 	}
 }

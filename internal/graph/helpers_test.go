@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/testsupport"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport"
 )
 
 // sharedAnalysis is what one archive's load answers for the linux-amd64

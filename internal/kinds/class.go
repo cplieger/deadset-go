@@ -3,11 +3,12 @@ package kinds
 import (
 	"go/types"
 	"iter"
+	"path/filepath"
 	"slices"
 	"strings"
 
-	"github.com/cplieger/deadset-go/internal/config"
-	"github.com/cplieger/deadset-go/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
 )
 
 // internalElement is the path element that makes a package importable only from
@@ -45,21 +46,20 @@ func (c Class) lower(other Class) Class {
 	return other
 }
 
-// classOf is the reachability class of one declaration under this run. Test-support
-// code test code references is possible unless the test-of-dead-code kind reports it.
-// Any other is certain where no reference can come from outside the graph: no
-// declaration, an unexported one, a test file's, a function's type parameter, an
-// application's, and an exported one in a main package, an external test package, an
-// internal tree or a member [Input.hiddenMember] reports. A library's importable export
-// is certain where every declared consumer loaded, probable where some did not, and
-// possible with no consumer information, whether or not the set is declared complete.
+// classOf is the reachability class of one declaration under this run: possible for
+// a declaration of an importable package of an application that no build links, in a
+// run that declares no consumer, and for an importable export of a module a dropped
+// module requires. Otherwise it is certain for every application subject, an
+// unexported, test-file or non-importable declaration, a function's type parameter
+// and a member [Input.hiddenMember] reports; a library's other export is certain where
+// every declared consumer loaded, probable where some did not, and possible with no
+// consumer information.
 func (in *Input) classOf(id graph.SymbolID) Class {
 	symbol := in.symbol(id)
-	candidate := in.candidateOf(id)
 	switch {
 	case symbol == nil:
 		return Certain
-	case candidate != nil && in.supportReferenced(candidate, symbol):
+	case in.unlinkedApplicationPackage(symbol):
 		return Possible
 	case !symbol.Exported:
 		return Certain
@@ -71,6 +71,8 @@ func (in *Input) classOf(id graph.SymbolID) Class {
 		return Certain
 	case in.hiddenMember(symbol):
 		return Certain
+	case in.unanalysedConsumer(symbol):
+		return Possible
 	case in.Config == nil || in.Config.Target.Kind.Of(config.GoLanguage) != config.Library:
 		return Certain
 	case in.everyConsumerLoaded():
@@ -80,6 +82,90 @@ func (in *Input) classOf(id graph.SymbolID) Class {
 	default:
 		return Possible
 	}
+}
+
+// unlinkedApplicationPackage reports whether an importable package of an
+// application that no build links declares one symbol, in a run that declares no
+// consumer: outside programs may import it, so every declaration of it is possible.
+func (in *Input) unlinkedApplicationPackage(symbol *graph.Symbol) bool {
+	if in.Config == nil || in.Config.Target.Kind.Of(config.GoLanguage) != config.Application ||
+		len(in.Consumers.Declared) > 0 || testFile(symbol) || !in.importable(symbol) {
+		return false
+	}
+	held := in.index()
+	if held.unlinked == nil {
+		held.unlinked = unlinkedPackages(in.Per, in.Root, held)
+	}
+	return held.unlinked[in.packageOf(symbol)]
+}
+
+// unlinkedPackages is every package no build links in any configuration that loads
+// it, by [index.packageKey].
+func unlinkedPackages(per []Configured, root string, x *index) map[string]bool {
+	unlinked := make(map[string]bool)
+	linked := make(map[string]bool)
+	for _, one := range per {
+		if one.Result == nil {
+			continue
+		}
+		none := graph.UnlinkedPackages(one.Result)
+		for _, p := range one.Result.Packages {
+			if p.ForTest != "" {
+				continue
+			}
+			key := x.packageKey(p.PkgPath, packageDir(p, root))
+			if none[one.Result.KeyOf(p)] {
+				unlinked[key] = true
+			} else {
+				linked[key] = true
+			}
+		}
+	}
+	for key := range linked {
+		delete(unlinked, key)
+	}
+	return unlinked
+}
+
+// unanalysedConsumer reports whether the unit declaring one symbol has, under some
+// configuration, a module the run dropped requiring it ([load.Unit]).
+func (in *Input) unanalysedConsumer(symbol *graph.Symbol) bool {
+	held := in.index()
+	if held.unanalysed == nil {
+		held.unanalysed = unanalysedUnits(in.Per, in.Root)
+	}
+	depth, flagged := -1, false
+	for unit, consumed := range held.unanalysed {
+		length := len(unit)
+		if unit == "." {
+			length = 0
+		} else if !strings.HasPrefix(symbol.Pos.Filename, unit+"/") {
+			continue
+		}
+		if length > depth {
+			depth, flagged = length, consumed
+		}
+	}
+	return flagged
+}
+
+// unanalysedUnits is every unit of every configuration by its directory relative to
+// root, flagged where some configuration gave it an unanalysed consumer.
+func unanalysedUnits(per []Configured, root string) map[string]bool {
+	units := make(map[string]bool)
+	for _, one := range per {
+		if one.Result == nil {
+			continue
+		}
+		for _, unit := range one.Result.Units {
+			rel, err := filepath.Rel(root, unit.Dir)
+			if err == nil {
+				dir := filepath.ToSlash(rel)
+				units[dir] = units[dir] || unit.UnanalysedConsumer
+			}
+		}
+	}
+	return units
 }
 
 // publishedAPI reports whether one declaration is published API of a library: an

@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"slices"
 
-	"github.com/cplieger/deadset-go/internal/kinds"
-	"github.com/cplieger/deadset-go/internal/reportdoc"
+	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/reportdoc"
 )
 
 func wireTypeErrorSkip(s TypeErrorSkip) reportdoc.TypeErrorSkip {

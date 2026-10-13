@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/cplieger/deadset-go/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -79,7 +79,10 @@ func writeOnly(in *Input, symbol *graph.Symbol, u *uses, exempted map[graph.Symb
 		return Finding{}, false
 	}
 	read := " and never read"
-	if u.testReads > 0 {
+	switch {
+	case u.deadReads > 0:
+		read = " and read only from declarations nothing references"
+	case u.testReads > 0:
 		read = " and read only from test files"
 	}
 	cascade := append(writeCascade(in, symbol, u.writes), in.annotationCascade().named[symbol.ID]...)
@@ -123,12 +126,13 @@ func WriteOnlyRetained(in *Input) []graph.Exemption {
 }
 
 // writeOnlySubject reports whether the counted references store into one
-// declaration of the inventory and never read it.
+// declaration of the inventory and never read it, where a read from a declaration
+// nothing references leaves it a subject only beside a write from one something does.
 func writeOnlySubject(in *Input, symbol *graph.Symbol, u *uses, exempted map[graph.SymbolID]bool) bool {
 	switch {
 	case !writableSubject(in, symbol), exempted[symbol.ID], in.candidateOf(symbol.ID) != nil:
 		return false
-	case u == nil, len(u.writes) == 0, u.reads > 0:
+	case u == nil, len(u.writes) == 0, u.reads > 0, u.deadReads > 0 && u.liveWrites == 0:
 		return false
 	}
 	return true
@@ -225,6 +229,8 @@ type uses struct {
 	production int
 	test       int
 	testReads  int
+	deadReads  int
+	liveWrites int
 }
 
 // writesAndReads divides every reference the run's mode counts by whether it
@@ -244,27 +250,50 @@ func writesAndReads(in *Input) map[graph.SymbolID]*uses {
 			held = &uses{}
 			counted[r.To] = held
 		}
-		test := in.testReference(r)
-		if in.uncounted(r) {
-			held.testReads += readCount(r)
-			continue
-		}
-		if test {
-			held.test++
-		} else {
-			held.production++
-		}
-		// A loaded consumer's write counts as a read, because deleting the
-		// subject and its writes would break code the target does not own.
-		if r.Kind != graph.RefWrite || r.Consumer != "" {
-			held.reads++
-			continue
-		}
-		if at := positionAt(r.Pos); !slices.Contains(held.writes, at) {
-			held.writes = append(held.writes, at)
-		}
+		held.count(in, r)
 	}
 	return counted
+}
+
+// count adds one reference the run's mode classifies.
+func (u *uses) count(in *Input, r *graph.Reference) {
+	if in.uncounted(r) {
+		u.testReads += readCount(r)
+		return
+	}
+	if in.testReference(r) {
+		u.test++
+	} else {
+		u.production++
+	}
+	// A loaded consumer's write counts as a read, because deleting the
+	// subject and its writes would break code the target does not own.
+	switch {
+	case r.Kind != graph.RefWrite && in.deadReader(r):
+		u.deadReads++
+		return
+	case r.Kind != graph.RefWrite || r.Consumer != "":
+		u.reads++
+		return
+	}
+	if !in.deadReader(r) {
+		u.liveWrites++
+	}
+	if at := positionAt(r.Pos); !slices.Contains(u.writes, at) {
+		u.writes = append(u.writes, at)
+	}
+}
+
+// deadReader reports whether one reference comes from a declaration of the target
+// that nothing references, and that is dead at the class certain: the finding's
+// relation is reference counting, under which that declaration is dead, so its
+// read is no read. A reader dead at a weaker class may be live, so its read counts.
+func (in *Input) deadReader(r *graph.Reference) bool {
+	if r.Consumer != "" || r.From == "" || r.From == r.To {
+		return false
+	}
+	reader := in.candidateOf(r.From)
+	return reader != nil && reader.Relation == graph.ReferenceCounting && in.classOf(r.From) == Certain
 }
 
 // testReference reports whether the mode classifies one reference as a test

@@ -5,9 +5,9 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/config"
-	"github.com/cplieger/deadset-go/internal/kinds"
-	spec "github.com/cplieger/deadset-spec/v7"
+	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	spec "github.com/cplieger/deadset-spec/v8"
 )
 
 // contractCodes reads the exit codes contract/exit-codes.json publishes, keyed by

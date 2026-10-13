@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cplieger/deadset-go/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -122,8 +122,8 @@ func References(r *load.Result, targetRoot string, read ReadFile, symbols []Symb
 	if err := p.walk(r.Packages); err != nil {
 		return nil, nil, err
 	}
-	for i := range r.Consumers {
-		if err := p.walkConsumer(&r.Consumers[i], read); err != nil {
+	for _, consumer := range r.Referencing() {
+		if err := p.walkConsumer(&consumer, read); err != nil {
 			return nil, nil, err
 		}
 	}

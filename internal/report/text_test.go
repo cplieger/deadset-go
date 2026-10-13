@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/config"
-	"github.com/cplieger/deadset-go/internal/kinds"
-	spec "github.com/cplieger/deadset-spec/v7"
+	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	spec "github.com/cplieger/deadset-spec/v8"
 )
 
 // textLinePage is the Contract page that publishes the expression the text format is

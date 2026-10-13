@@ -1,0 +1,39 @@
+An application whose init writes four variables: one only a function nothing
+references reads, one a live function reads, one only a function reachable from
+nothing but referenced reads, and one an unreferenced function both writes and
+reads.
+
+-- go.mod --
+module example.com/reader
+
+go 1.27.1
+-- main.go --
+package main
+
+var (
+	pattern  string
+	greeting string
+	cycled   string
+	local    string
+)
+
+func init() {
+	pattern = "a"
+	greeting = "b"
+	cycled = "c"
+}
+
+func valid(s string) bool { return s == pattern }
+
+func greet() string { return greeting }
+
+func first() string { return second() + cycled }
+
+func second() string { return first() }
+
+func scratch() string {
+	local = "d"
+	return local
+}
+
+func main() { println(greet()) }

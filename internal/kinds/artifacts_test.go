@@ -7,10 +7,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/config"
-	"github.com/cplieger/deadset-go/internal/deps"
-	"github.com/cplieger/deadset-go/internal/graph"
-	"github.com/cplieger/deadset-go/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/deps"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 )
 
 // The two configurations the never-built fixture is analyzed under, neither of
@@ -269,7 +269,7 @@ func TestFileNeverImportedReportsEveryFileOfAPackageNothingReaches(t *testing.T)
 		got = append(got, result.Findings[i].Position.Path)
 	}
 	slices.Sort(got)
-	want := []string{"api/api.go", "internal/orphan/helper.go", "internal/orphan/orphan.go"}
+	want := []string{"api/api.go", "internal/orphan/helper.go", "internal/orphan/orphan.go", "internal/unrun/unrun.go"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("a pass over a target holding one unreached package reports %v under %s, want %v",
 			got, fileNeverImportedCode, want)

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/config"
-	spec "github.com/cplieger/deadset-spec/v7"
+	"github.com/cplieger/deadset-go/v2/internal/config"
+	spec "github.com/cplieger/deadset-spec/v8"
 	"pgregory.net/rapid"
 )
 
@@ -76,6 +76,7 @@ func settingGenerators() map[string]*rapid.Generator[any] {
 		"ts.injection_registrations": rapid.SliceOfN(declarationEntry(), 0, 3).AsAny(),
 		"ts.lifecycle_contracts":     rapid.SliceOfN(lifecycleContractEntry(), 0, 2).AsAny(),
 		"ts.serializers":             rapid.SliceOfN(declarationEntry(), 0, 3).AsAny(),
+		"ts.roots_complete":          rapid.Bool().AsAny(),
 	}
 }
 

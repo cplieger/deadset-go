@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/load"
-	"github.com/cplieger/deadset-go/internal/scope"
-	spec "github.com/cplieger/deadset-spec/v7"
+	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
+	spec "github.com/cplieger/deadset-spec/v8"
 	"golang.org/x/tools/txtar"
 )
 

@@ -1,6 +1,7 @@
 One module whose two packages carry references a configured root or a pattern
 can name: two functions, a type with a member of each kind, a blank declaration
-that borrows the package's reference, and a nested package.
+that borrows the package's reference, and a nested package. A command links the
+first package, so its blank declaration runs.
 
 -- go.mod --
 module example.com/patterns
@@ -24,6 +25,12 @@ type Box struct {
 func (b Box) Open() int { return b.Lid }
 
 var _ = Beta()
+-- cmd/app/main.go --
+package main
+
+import _ "example.com/patterns"
+
+func main() {}
 -- inner/inner.go --
 package inner
 

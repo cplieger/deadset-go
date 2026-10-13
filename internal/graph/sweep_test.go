@@ -1012,6 +1012,29 @@ func TestSweepAdmitsEveryTestFileDeclarationNoRootReaches(t *testing.T) {
 	}
 }
 
+func TestSweepHoldsTestSupportCodeAReferenceNamesLive(t *testing.T) {
+	b := newGraphBuilder(t).add("entry", "live", "onlyTested").addTest("TestLive").
+		addSupport("calledHelper", "deepHelper", "unusedHelper", "strandedHelper")
+	b.root("entry", RootMain)
+	b.root("TestLive", RootTest)
+	b.ref("entry", "live")
+	b.ref("TestLive", "calledHelper")
+	b.ref("calledHelper", "deepHelper")
+	b.ref("deepHelper", "live")
+	b.ref("deepHelper", "onlyTested")
+	b.ref("unusedHelper", "strandedHelper")
+	r := b.graph().Sweep(&SweepInput{Mode: Mode{Production: true}})
+
+	// Every helper a reference names is test code test code uses, whether or not a
+	// test reaches it, so none is a candidate, while the production declaration
+	// only helpers call is one, and the helper calling it also calls live code, so
+	// it tests no dead code. The helper nothing references keeps its own verdict.
+	want := []string{"onlyTested reference-counting", "unusedHelper reference-counting"}
+	if got := b.candidates(r); !slices.Equal(got, want) {
+		t.Errorf("Sweep() reported %v, want %v", got, want)
+	}
+}
+
 func TestMatrixSweepHoldsATestFileDeclarationTestEvidenceNamesLiveWithWhatItReaches(t *testing.T) {
 	b := newGraphBuilder(t).add("entry").addTest("TestLive", "write", "writeHelper", "unusedHelper")
 	b.root("entry", RootMain)
@@ -1031,6 +1054,24 @@ func TestMatrixSweepHoldsATestFileDeclarationTestEvidenceNamesLiveWithWhatItReac
 	if got := b.unreferencedFlags(r); !maps.Equal(got, want) {
 		t.Errorf("Sweep() with test evidence for write admitted %v as unreferenced test-file declarations, want %v",
 			got, want)
+	}
+}
+
+func TestMatrixSweepHoldsTestSupportCodeTestEvidenceNamesLive(t *testing.T) {
+	b := newGraphBuilder(t).add("entry").addTest("TestLive").addSupport("Get", "Spare")
+	b.root("entry", RootMain)
+	b.root("TestLive", RootTest)
+	merged, err := Merge(b.configured(1, func(int, string) bool { return true }))
+	if err != nil {
+		t.Fatalf("Merge = _, %v, want no error", err)
+	}
+	evidence := TestReferencesOf([]Exemption{{ID: b.id("Get"), Class: "interface-satisfaction"}})
+	r := NewMatrix(&merged).Sweep(&SweepInput{Mode: Mode{Production: true}}, evidence)
+
+	// Test evidence is a test reference, so the test-support method it names is
+	// test code a test uses, and the one nothing names stays a candidate.
+	if got, want := b.candidates(r), []string{"Spare reference-counting"}; !slices.Equal(got, want) {
+		t.Errorf("Sweep() with test evidence for Get reported %v, want %v", got, want)
 	}
 }
 

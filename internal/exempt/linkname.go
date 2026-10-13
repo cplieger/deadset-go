@@ -11,7 +11,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/cplieger/deadset-go/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"golang.org/x/tools/go/packages"
 )
 

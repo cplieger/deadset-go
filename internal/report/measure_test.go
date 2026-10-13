@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/config"
 )
 
 // measureVariable gates the measurements of this file. They run the whole analysis over

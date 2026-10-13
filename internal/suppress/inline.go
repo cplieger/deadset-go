@@ -7,8 +7,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cplieger/deadset-go/internal/graph"
-	"github.com/cplieger/deadset-go/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 )
 
 // The three expressions the grammar fixes, applied to the text of each line

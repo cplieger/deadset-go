@@ -9,6 +9,7 @@ import (
 	"go/types"
 	"path/filepath"
 	"slices"
+	"strconv"
 
 	"golang.org/x/tools/go/packages"
 )
@@ -27,6 +28,10 @@ const ignoreTag = "ignore"
 // and what it resolved is recorded all the same.
 type program struct {
 	Info *types.Info
+
+	// Imports is the path of every package the file imports, a blank or dot import's
+	// included, whose initialization runs whenever the program does.
+	Imports []string
 }
 
 // checkPrograms finds and checks every program of one unit's packages under
@@ -54,7 +59,13 @@ func checkPrograms(ctx context.Context, fset *token.FileSet, from unitDir, pkgs 
 		// The errors are dropped by the Error function above: a program the
 		// configuration cannot fully check still names what it resolved.
 		_, _ = conf.Check(mainPackageName, fset, []*ast.File{f}, info)
-		held = append(held, program{Info: info})
+		var imported []string
+		for _, spec := range f.Imports {
+			if path, err := strconv.Unquote(spec.Path.Value); err == nil {
+				imported = append(imported, path)
+			}
+		}
+		held = append(held, program{Info: info, Imports: imported})
 	}
 	return held
 }

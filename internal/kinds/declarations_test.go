@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/config"
-	"github.com/cplieger/deadset-go/internal/graph"
-	"github.com/cplieger/deadset-go/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 )
 
 func TestTheUnusedKindsReportEveryDeadDeclarationOfTheFixtureAndNothingLive(t *testing.T) {
@@ -362,11 +362,11 @@ func TestAPackageAProductionFileImportsUnderOneConfigurationIsNotTestSupport(t *
 	}
 }
 
-// A declaration of test-support code a test references is reported under the test-only
-// kind at the possible class, a deprecated one included, and an interface under the
-// unused-interface kind instead. Each finding is in a component minted for it, holding
-// the subject and the dead members that fall with it and deleting no line.
-func TestTestSupportCodeATestReferencesIsReportedAtPossible(t *testing.T) {
+// Test-support code is test code: a declaration of it a test references is reported
+// under no code at any minimum confidence, a deprecated one and an interface included,
+// and a method of it nothing references is reported under the unused code its
+// visibility selects, at certain.
+func TestTestSupportCodeATestReferencesIsTestCode(t *testing.T) {
 	resolved := applicationConfig()
 	resolved.Analysis.MinConfidence = config.Possible
 	in := inputOf(t, "declarations-test-support-possible.txtar", resolved, Consumers{})
@@ -374,28 +374,13 @@ func TestTestSupportCodeATestReferencesIsReportedAtPossible(t *testing.T) {
 	emitters[unusedInterfaceCode] = UnusedInterface
 	result := computed(t, in, emitters)
 
-	for _, test := range []struct {
-		code, name string
-		members    int
-	}{
-		{code: testOnlyUseCode, name: "Old", members: 1},
-		{code: testOnlyUseCode, name: "Fake", members: 3},
-		{code: unusedInterfaceCode, name: "Sink", members: 3},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			found := findingOf(t, result.Findings, test.code, test.name)
-			if found.Class != Possible || found.Confidence != Possible {
-				t.Errorf("%s about %s has class %s and confidence %s, want possible and possible",
-					test.code, test.name, found.Class, found.Confidence)
-			}
-			if c := found.Component; !c.Root || c.SymbolCount != test.members || c.DeletableLines != 0 {
-				t.Errorf("%s about %s has component root=%t symbols=%d lines=%d, want root=true symbols=%d lines=0",
-					test.code, test.name, c.Root, c.SymbolCount, c.DeletableLines, test.members)
-			}
-		})
+	found := findingOf(t, result.Findings, unusedExportedCode, "Fake.Get")
+	if found.Class != Certain || found.Confidence != Certain {
+		t.Errorf("%s about Fake.Get has class %s and confidence %s, want certain and certain",
+			unusedExportedCode, found.Class, found.Confidence)
 	}
-	if got := summary(result.Findings); len(got) != 3 {
-		t.Errorf("the pass over declarations-test-support-possible.txtar reports %v, want the three findings above alone", got)
+	if got := summary(result.Findings); len(got) != 1 {
+		t.Errorf("the pass over declarations-test-support-possible.txtar reports %v, want the finding about Fake.Get alone", got)
 	}
 }
 
@@ -428,6 +413,34 @@ func TestCapNameLiteral_lowersADeclarationAStringLiteralSpellsToPossible(t *test
 				t.Errorf("%s %s names the literal at %+v, want none", want.code, name, *at)
 			case want.literal != 0 && (at == nil || at.Path != "main.go" || at.Line != want.literal):
 				t.Errorf("%s %s names the literal at %+v, want main.go:%d", want.code, name, at, want.literal)
+			}
+		})
+	}
+}
+
+// An application's package no build links is dead with every declaration of it, its
+// init function included, at the possible class, because outside programs may import
+// it, and an internal one at certain. A linked package's export keeps certain.
+func TestUnlinkedApplicationPackageIsReportedAtPossible(t *testing.T) {
+	resolved := applicationConfig()
+	resolved.Analysis.MinConfidence = config.Possible
+	result := computed(t, inputOf(t, "declarations-unlinked-package.txtar", resolved, Consumers{}), declarationEmitters())
+
+	for _, test := range []struct {
+		code, name string
+		class      Class
+	}{
+		{code: unusedExportedCode, name: "Spare", class: Certain},
+		{code: unusedExportedCode, name: "Driver", class: Possible},
+		{code: unusedExportedCode, name: "New", class: Possible},
+		{code: unusedUnexportedCode, name: "register", class: Possible},
+		{code: unusedUnexportedCode, name: "init", class: Possible},
+		{code: unusedUnexportedCode, name: "load", class: Certain},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			found := findingOf(t, result.Findings, test.code, test.name)
+			if found.Confidence != test.class {
+				t.Errorf("%s about %s has confidence %s, want %s", test.code, test.name, found.Confidence, test.class)
 			}
 		})
 	}

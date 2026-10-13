@@ -6,7 +6,7 @@ import (
 	"go/types"
 	"path/filepath"
 
-	"github.com/cplieger/deadset-go/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -53,10 +53,10 @@ func NewResolver(r *load.Result, targetRoot string, read ReadFile, symbols []Sym
 		pos:     newPositions(r.Fset, targetRoot, read),
 		symbols: make(map[token.Pos]SymbolID, len(symbols)),
 	}
-	for i := range r.Consumers {
-		if module := consumerModule(&r.Consumers[i]); module != nil {
+	for _, consumer := range r.Referencing() {
+		if module := consumerModule(&consumer); module != nil {
 			rs.consumers = append(rs.consumers, consumerPositions{
-				id: r.Consumers[i].ID, pos: newPositions(r.Fset, module.Dir, read),
+				id: consumer.ID, pos: newPositions(r.Fset, module.Dir, read),
 			})
 		}
 	}

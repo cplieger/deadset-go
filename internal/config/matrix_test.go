@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/config"
 )
 
 // mixedMatrix is a repository configuration whose build matrix lists both shapes,

@@ -14,7 +14,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cplieger/deadset-go/internal/scope"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -79,6 +79,18 @@ type Result struct {
 	// second reading of the second's files.
 	Units []Unit
 
+	// Nested holds one entry per module that is no declared consumer and whose
+	// references count as a declared consumer's do: each module below a target the
+	// walk does not search that builds against a unit's directory, in directory order,
+	// then each unit's packages below an underscore directory, then each workspace
+	// reader [Result.AddReaders] appends.
+	Nested []Consumer
+
+	// Dropped holds every module the walk found below the target, and every
+	// module Nested would hold, that did not load. A unit one of them requires has
+	// it as a consumer the run did not analyze.
+	Dropped []droppedModule
+
 	// Consumers holds one entry per declared consumer, in the order the scope
 	// declares them. A consumer's packages are kept apart from the target's
 	// because the two answer different questions: the declarations a run reports
@@ -123,12 +135,12 @@ func HostConfiguration() Configuration {
 
 // Load resolves configuration c of every unit of doc's target ([Units]) and every
 // consumer doc declares; cancelling ctx stops it. A file or component the project
-// lacks, a declared consumer absent from its path among them, returns a
-// *[SetupError]; any other metadata or [typeCheck] error returns a *[Error] and a
-// zero Result, so no finding comes from a partial load; an unusable consumer returns
-// [errConsumer]. Load makes no network request, runs no compiler and pins the
-// settings that decide what loads. A unit another unit builds from its directory is
-// read twice, and the resolver joins the two readings by rendered site.
+// lacks returns a *[SetupError], any other metadata or [typeCheck] error a *[Error],
+// an unusable consumer [errConsumer], each with a zero Result; a walked or nested
+// module that does not load is dropped into [Result.Dropped] instead while a unit is
+// left. Load makes no network request, runs no compiler and pins the settings that
+// decide what loads. A unit another unit builds from its directory is read twice,
+// and the resolver joins the two readings by rendered site.
 func Load(ctx context.Context, doc scope.Document, c Configuration) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, fmt.Errorf("load %s: %w", c.ID, err)
@@ -149,21 +161,47 @@ func Load(ctx context.Context, doc scope.Document, c Configuration) (Result, err
 	if err != nil {
 		return Result{}, fmt.Errorf("load %s: find the modules under %s: %w", c.ID, target, err)
 	}
+	walked := walkedUnits(target, dirs)
 	r := Result{Configuration: c, Fset: token.NewFileSet()}
-	for _, dir := range dirs {
-		if failed := r.loadUnit(ctx, target, dir); failed != nil {
-			return Result{}, failed
-		}
+	if failed := r.loadUnits(ctx, target, dirs, walked); failed != nil {
+		return Result{}, failed
 	}
 	slices.Sort(r.ExcludedByCgo)
 	r.ExcludedByCgo = slices.Compact(r.ExcludedByCgo)
 	r.markShared()
+
+	if !walked {
+		if r.Nested, r.Dropped, err = loadNested(ctx, r.Fset, &doc, c, r.Units); err != nil {
+			return Result{}, err
+		}
+	}
+	r.markUnanalysedConsumers(ctx)
 
 	r.Consumers, err = loadConsumers(ctx, r.Fset, &doc, c, r.Units)
 	if err != nil {
 		return Result{}, err
 	}
 	return r, nil
+}
+
+// loadUnits loads every unit of dirs into r, dropping a walked unit that does not
+// load, and returns the error that ends the load, the first drop's where no unit is
+// left.
+func (r *Result) loadUnits(ctx context.Context, target string, dirs []string, walked bool) error {
+	for _, dir := range dirs {
+		failed := r.loadUnit(ctx, target, dir)
+		switch {
+		case failed == nil:
+		case walked && droppable(failed) && ctx.Err() == nil:
+			r.Dropped = append(r.Dropped, droppedModule{Dir: dir, Err: failed})
+		default:
+			return failed
+		}
+	}
+	if len(r.Units) == 0 && len(r.Dropped) > 0 {
+		return r.Dropped[0].Err
+	}
+	return nil
 }
 
 // loadUnit loads the unit whose toolchain runs from dir into r, as [Load] loads every unit.
@@ -175,7 +213,7 @@ func (r *Result) loadUnit(ctx context.Context, target, dir string) error {
 	if err != nil {
 		return fmt.Errorf("load %s: %s: %w", c.ID, dir, err)
 	}
-	pkgs, diagnostics, err := loadPackages(ctx, r.Fset, dir, c, workspace, nil)
+	pkgs, diagnostics, err := loadPackages(ctx, r.Fset, dir, c, workspace, nil, unitPrefix(target, dir))
 	if _, setup := errors.AsType[*SetupError](err); setup {
 		return err
 	}
@@ -203,11 +241,15 @@ func (r *Result) loadUnit(ctx context.Context, target, dir string) error {
 	return nil
 }
 
-// loadPackages resolves and type-checks every package of the module rooted at dir
-// under configuration c, with workspace as the child toolchain's GOWORK setting and
+// loadPackages resolves and type-checks every package of the module rooted at dir,
+// or the packages patterns names there, under configuration c, with workspace as the child toolchain's GOWORK setting and
 // modules as the further modules [typeCheck] checks whole. A load that reports errors
-// returns them as diagnostics and no packages.
-func loadPackages(ctx context.Context, fset *token.FileSet, dir string, c Configuration, workspace string, modules []string) ([]*packages.Package, []Diagnostic, error) {
+// returns them as diagnostics and no packages, each position the toolchain wrote
+// relative to dir rewritten below prefix.
+func loadPackages(ctx context.Context, fset *token.FileSet, dir string, c Configuration, workspace string, modules []string, prefix string, patterns ...string) ([]*packages.Package, []Diagnostic, error) {
+	if len(patterns) == 0 {
+		patterns = []string{loadPattern}
+	}
 	cfg := &packages.Config{
 		Mode:       metadataMode,
 		Context:    ctx,
@@ -216,9 +258,9 @@ func loadPackages(ctx context.Context, fset *token.FileSet, dir string, c Config
 		Env:        loadEnv(c, workspace),
 		BuildFlags: buildFlags(c.Tags),
 	}
-	pkgs, err := packages.Load(cfg, loadPattern)
+	pkgs, err := packages.Load(cfg, patterns...)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, &listError{err: err}
 	}
 	if workspace != workspaceOff && len(modules) == 0 {
 		demoteOtherMembers(pkgs, dir)
@@ -226,7 +268,7 @@ func loadPackages(ctx context.Context, fset *token.FileSet, dir string, c Config
 	if err := dropUnbuiltErrors(pkgs, c); err != nil {
 		return nil, nil, err
 	}
-	if diagnostics := collect(pkgs); len(diagnostics) > 0 {
+	if diagnostics := collect(pkgs, prefix); len(diagnostics) > 0 {
 		if failure := setupFailures(diagnostics, expectedModules(ctx, dir, c, workspace, pkgs)); failure != nil {
 			return nil, nil, failure
 		}
@@ -235,7 +277,7 @@ func loadPackages(ctx context.Context, fset *token.FileSet, dir string, c Config
 	if err := typeCheck(ctx, fset, pkgs, c.Arch, modules); err != nil {
 		return nil, nil, err
 	}
-	if diagnostics := collect(pkgs); len(diagnostics) > 0 {
+	if diagnostics := collect(pkgs, prefix); len(diagnostics) > 0 {
 		return nil, diagnostics, nil
 	}
 	return pkgs, nil, nil
@@ -353,14 +395,15 @@ func buildFlags(tags []string) []string {
 
 // collect walks every package reachable from roots, dependencies and test
 // variants included, and returns every error any of them reported in a
-// deterministic order.
-func collect(roots []*packages.Package) []Diagnostic {
+// deterministic order, a position the toolchain wrote relative to the directory it
+// ran in rewritten below prefix.
+func collect(roots []*packages.Package, prefix string) []Diagnostic {
 	var diagnostics []Diagnostic
 	packages.Visit(roots, nil, func(p *packages.Package) {
 		for _, e := range p.Errors {
 			diagnostics = append(diagnostics, Diagnostic{
 				Package:  p.ID,
-				Position: e.Pos,
+				Position: rebased(e.Pos, prefix),
 				Message:  e.Msg,
 			})
 		}

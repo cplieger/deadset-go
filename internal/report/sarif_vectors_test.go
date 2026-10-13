@@ -13,9 +13,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/report"
-	"github.com/cplieger/deadset-go/internal/reporttest"
-	spec "github.com/cplieger/deadset-spec/v7"
+	"github.com/cplieger/deadset-go/v2/internal/report"
+	"github.com/cplieger/deadset-go/v2/internal/reporttest"
+	spec "github.com/cplieger/deadset-spec/v8"
 )
 
 // sarifVectorRoot is where the pinned Contract publishes the SARIF vectors.
@@ -115,10 +115,7 @@ func vectorFile(t *testing.T, dir, name string) []byte {
 func vectorEnvelope(t *testing.T, dir string) report.Envelope {
 	t.Helper()
 
-	envelope, err := reporttest.Read(vectorFile(t, dir, "report.json"))
-	if err != nil {
-		t.Fatalf("Setup: decode %s/report.json: %v", dir, err)
-	}
+	envelope := reporttest.MustRead(t, dir+"/report.json", vectorFile(t, dir, "report.json"))
 	return envelope
 }
 

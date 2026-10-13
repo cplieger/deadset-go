@@ -11,7 +11,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cplieger/deadset-go/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
 )
 
 // sources parses and type-checks the packages outside the analysed program whose

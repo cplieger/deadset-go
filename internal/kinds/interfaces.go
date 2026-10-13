@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cplieger/deadset-go/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -73,24 +73,12 @@ func UnusedInterface(in *Input) ([]Finding, error) {
 }
 
 // UncalledInterfaceMethod reports a method an interface declares that no call site
-// invokes and no expression selects through the interface, whatever the number of
-// implementations. A method selected as a value is selected through the interface,
-// so it is invoked for this rule, while a call on a value of a concrete type
-// invokes that type's own method and not this one.
-//
-// Two shapes are exempt. Every method of an interface whose method set holds an
-// unexported method is exempt, because such a method set exists to fix which types
-// implement the interface rather than to be called through it. And a marker method
-// is exempt, being a method whose every implementation in the target carries a body
-// with no statement; an implementation the target does not declare is a body this
-// analysis cannot read, which leaves the method not a marker.
-//
-// A method of an interface that is itself a candidate is not reported here: such an
-// interface is reported as unused and its members belong to its component. A method
-// nothing but a test file invokes through the interface is not reported here
-// either, because being referenced only from test files is the more specific fact
-// about it, and neither is a method an interface a test file declares declares,
-// whose liveness a production sweep cannot judge.
+// of production code invokes and no expression selects through the interface,
+// whatever the number of implementations; a call on a concrete value invokes that
+// type's own method. [interfaceFacts.exempt] owns the exempt shapes. A method of an
+// interface that is itself a candidate falls with the interface, one only test code
+// invokes is [Input.testCalledInterfaceMethod]'s, and one an interface of a test file
+// declares is not judged by a production sweep.
 func UncalledInterfaceMethod(in *Input) ([]Finding, error) {
 	if in == nil || in.Sweep == nil {
 		return nil, nil
@@ -104,7 +92,7 @@ func UncalledInterfaceMethod(in *Input) ([]Finding, error) {
 		if symbol == nil || symbol.Kind != graph.KindInterfaceMethod || testFile(symbol) {
 			continue
 		}
-		if in.candidateOf(symbol.Parent) != nil || facts.exempt(symbol.Parent, candidate.ID) {
+		if in.candidateOf(symbol.Parent) != nil || facts.exempt(candidate.ID) || testOnly(candidate) {
 			continue
 		}
 		one, held := in.finding(candidate.ID, uncalledInterfaceMethodCode, uncalledInterfaceMethodMessage)
@@ -112,7 +100,6 @@ func UncalledInterfaceMethod(in *Input) ([]Finding, error) {
 			continue
 		}
 		one.Relation = candidate.Relation
-		one.TestOnly = testOnly(candidate)
 		one.Details.Implementations = facts.implementationsOf(symbol.Parent)
 		found = append(found, one)
 	}
@@ -120,29 +107,13 @@ func UncalledInterfaceMethod(in *Input) ([]Finding, error) {
 }
 
 // UnusedSatisfactionAssertion reports a compile-time satisfaction assertion, a
-// package-level declaration of the blank identifier whose declared type is an
-// interface of the target and whose value is of a concrete type, when nothing other
-// than such an assertion names that interface as a type.
-//
-// The assertion is the subject, under the vocabulary's own value for one rather than
-// under the variable the language spells it as, so the methods it retains stay
-// retained: the exemption that holds them names the assertion as its site, and this
-// finding names the declaration a maintainer deletes. Two assertions of one interface
-// are two findings, because neither is the use that would make the interface worth
-// keeping.
-//
-// The subject is named by the interface the assertion asserts, at the assertion's
-// own position. A blank declaration has no reference of its own: every one of them
-// is named the blank identifier and they all render as the reference of the package
-// that holds them, so a reference minted at one names the package as well and an
-// adjudication written against it would name two declarations. The interface has a
-// reference, and it is what the assertion is about, so the finding carries the
-// interface's reference and the interface's display name while its position names
-// the declaration to delete. Two assertions of one interface in one file are told
-// apart by their positions.
-//
-// An assertion a test file writes is not reported, on the rule every kind applies
-// to a declaration whose liveness a production sweep cannot judge.
+// package-level blank declaration typed as an interface of the target with a value of
+// a concrete type, when nothing but such assertions names that interface as a type.
+// Each assertion is one finding at its own position under the interface's reference
+// and name, because every blank declaration renders as its package's reference. An
+// assertion of a test file or one an exemption retained is not reported, and neither
+// is a library's assertion whose interface and type are both published API, a promise
+// it states to every importer.
 func UnusedSatisfactionAssertion(in *Input) ([]Finding, error) {
 	if in == nil {
 		return nil, nil
@@ -152,7 +123,8 @@ func UnusedSatisfactionAssertion(in *Input) ([]Finding, error) {
 	var found []Finding
 	for _, asserted := range facts.assertions {
 		symbol, iface := in.symbol(asserted.Var), in.symbol(asserted.Interface)
-		if symbol == nil || iface == nil || testFile(symbol) || facts.usedAsType[asserted.Interface] {
+		if symbol == nil || iface == nil || testFile(symbol) || facts.usedAsType[asserted.Interface] ||
+			in.index().retained[asserted.Var] {
 			continue
 		}
 		one, held := in.finding(asserted.Var, unusedSatisfactionAssertionCode,
@@ -164,6 +136,9 @@ func UnusedSatisfactionAssertion(in *Input) ([]Finding, error) {
 		one.Symbol.Ref, one.Symbol.Name = iface.Ref, iface.Name
 		// A program the run does not hold may name a published interface, whatever consumers loaded.
 		if in.publishedAPI(iface) {
+			if concrete := in.symbol(facts.assertedType[asserted]); concrete != nil && in.publishedAPI(concrete) {
+				continue
+			}
 			one.ceiling = Possible
 		}
 		one.Details.Implementations = facts.implementationsOf(asserted.Interface)
@@ -188,19 +163,21 @@ type implementationCount struct {
 
 // interfaceFacts is what the three interface kinds read, computed over the matrix
 // inventory and the type information of every configuration: the concrete
-// implementations of every interface the target declares, which interfaces fix
-// their implementors, how each of their methods is implemented, which methods a
-// call site reaches through the interface, the satisfaction assertions, and which
-// interfaces something other than an assertion names as a type.
+// implementations of every interface the target declares, which methods a sealed
+// method set holds, how each method is implemented, which methods a call site
+// reaches through the interface, the satisfaction assertions, and which interfaces
+// something other than an assertion names as a type.
 type interfaceFacts struct {
 	implementations map[graph.SymbolID]map[graph.SymbolID]Positioned
 	ordered         map[graph.SymbolID][]Positioned
-	sumType         map[graph.SymbolID]bool
+	sealed          map[graph.SymbolID]bool
 	counted         map[graph.SymbolID]*implementationCount
 	reached         map[graph.SymbolID]bool
+	called          map[graph.SymbolID]bool
 	usedAsType      map[graph.SymbolID]bool
 	typeUsedBy      map[graph.SymbolID][]graph.SymbolID
 	asserted        map[assertion]bool
+	assertedType    map[assertion]graph.SymbolID
 	implementors    map[graph.SymbolID][]graph.SymbolID
 	declaredBy      map[graph.SymbolID]graph.SymbolID
 	assertions      []assertion
@@ -213,12 +190,14 @@ func interfacesOf(in *Input) *interfaceFacts {
 	f := &interfaceFacts{
 		implementations: make(map[graph.SymbolID]map[graph.SymbolID]Positioned),
 		ordered:         make(map[graph.SymbolID][]Positioned),
-		sumType:         make(map[graph.SymbolID]bool),
+		sealed:          make(map[graph.SymbolID]bool),
 		counted:         make(map[graph.SymbolID]*implementationCount),
 		reached:         make(map[graph.SymbolID]bool),
+		called:          make(map[graph.SymbolID]bool),
 		usedAsType:      make(map[graph.SymbolID]bool),
 		typeUsedBy:      make(map[graph.SymbolID][]graph.SymbolID),
 		asserted:        make(map[assertion]bool),
+		assertedType:    make(map[assertion]graph.SymbolID),
 		implementors:    make(map[graph.SymbolID][]graph.SymbolID),
 		declaredBy:      make(map[graph.SymbolID]graph.SymbolID),
 	}
@@ -233,8 +212,8 @@ func interfacesOf(in *Input) *interfaceFacts {
 }
 
 // references reads the matrix's reference set once: which interface methods a call
-// site invokes or selects through the interface, and which declaration names each
-// interface as a type.
+// site the mode counts invokes or selects through the interface, and which
+// declaration names each interface as a type.
 //
 // A selection through an interface value names the method the interface declares
 // rather than the method of the concrete type behind it, which is why a direct call
@@ -248,7 +227,8 @@ func (f *interfaceFacts) references(in *Input, refs []graph.Reference) {
 		}
 		switch {
 		case to.Kind == graph.KindInterfaceMethod && selects(reference.Kind):
-			f.reached[reference.To] = true
+			f.called[reference.To] = true
+			f.reached[reference.To] = f.reached[reference.To] || !in.uncounted(reference)
 		case to.Kind == graph.KindInterface && namesAsType(reference.Kind):
 			f.typeUsedBy[reference.To] = append(f.typeUsedBy[reference.To], reference.From)
 		}
@@ -288,7 +268,9 @@ func (f *interfaceFacts) configuration(in *Input, one *Configured) {
 	}
 	d := declaredIn(one)
 	for _, declared := range d.interfaces {
-		f.sumType[declared.id] = f.sumType[declared.id] || restrictsImplementors(declared.iface)
+		if symbol := in.symbol(declared.id); symbol != nil && symbol.Exported && restrictsImplementors(declared.iface) {
+			f.seal(one, declared.iface)
+		}
 		for _, concrete := range d.concrete {
 			recv, satisfies := implementing(concrete.typ, declared.iface)
 			if !satisfies {
@@ -372,8 +354,10 @@ func (f *interfaceFacts) assertionsIn(in *Input, one *Configured, d *declared) {
 		if !inventoried {
 			continue
 		}
-		f.asserted[assertion{Var: declaration, Interface: id}] = true
-		f.addImplementation(in, id, concreteOf(one, value))
+		asserted, concrete := assertion{Var: declaration, Interface: id}, concreteOf(one, value)
+		f.asserted[asserted] = true
+		f.assertedType[asserted] = concrete
+		f.addImplementation(in, id, concrete)
 	}
 }
 
@@ -407,28 +391,58 @@ func (f *interfaceFacts) settle() {
 	}
 }
 
-// exempt reports whether one method of one interface is not reported: because a
-// call site reaches it through the interface, because the interface's method set
-// fixes its implementors, or because the method is a marker.
-func (f *interfaceFacts) exempt(iface, method graph.SymbolID) bool {
-	if f.reached[method] || f.sumType[iface] {
+// seal records every method of one exported interface whose method set fixes its
+// implementors outside the package ([restrictsImplementors]), a method an embedded
+// interface declares included, because the exported method set is what restricts.
+func (f *interfaceFacts) seal(one *Configured, iface *types.Interface) {
+	for method := range iface.Methods() {
+		if id, held := one.Resolve.Object(method); held {
+			f.sealed[id] = true
+		}
+	}
+}
+
+// exempt reports whether one method of an interface is not reported: because a call
+// site the mode counts reaches it through the interface, because an exported
+// interface's method set that fixes its implementors holds it ([interfaceFacts.seal]),
+// or because the method is a marker, whose every implementation in the target has a
+// body with no statement; one the target does not declare has no body to read.
+func (f *interfaceFacts) exempt(method graph.SymbolID) bool {
+	if f.reached[method] || f.sealed[method] {
 		return true
 	}
 	counted := f.counted[method]
 	return counted != nil && counted.implementations > 0 && counted.empty == counted.implementations
 }
 
+// testCalledInterfaceMethod reports whether one candidate is an interface method
+// only test code invokes through the interface and that the uncalled-method kind's
+// precondition does not exempt, which the test-only kind reports as it reports any
+// declaration only tests reference. A method of an interface that is itself a
+// candidate falls with the interface.
+func (in *Input) testCalledInterfaceMethod(candidate *graph.Candidate, symbol *graph.Symbol) bool {
+	if symbol.Kind != graph.KindInterfaceMethod || !testOnly(candidate) || in.candidateOf(symbol.Parent) != nil {
+		return false
+	}
+	held := in.index()
+	if held.interfaces == nil {
+		held.interfaces = interfacesOf(in)
+	}
+	return !held.interfaces.exempt(candidate.ID)
+}
+
 // InterfaceImplementations answers, before any sweep, which interface methods of
-// the target the rule of DS1203 holds for and its precondition does not exempt, and
-// a use of each method implementing one by that interface method, so an
-// implementation nothing else keeps belongs to the interface method's dead
-// component. It reads the inventory, the references and the type information alone.
+// the target no call site of any file reaches through the interface and the DS1203
+// precondition does not exempt, and a use of each method implementing one by that
+// interface method, so an implementation nothing else keeps belongs to the interface
+// method's dead component. A method a test calls keeps its implementations, which the
+// test reaches through it. It reads the inventory, the references and the types alone.
 func InterfaceImplementations(in *Input) (uncalled map[graph.SymbolID]bool, uses []graph.Use) {
 	facts := interfacesOf(in)
 	uncalled = make(map[graph.SymbolID]bool)
-	for method, iface := range facts.declaredBy {
+	for method := range facts.declaredBy {
 		symbol := in.symbol(method)
-		if symbol == nil || testFile(symbol) || facts.exempt(iface, method) {
+		if symbol == nil || testFile(symbol) || facts.exempt(method) || facts.called[method] {
 			continue
 		}
 		uncalled[method] = true

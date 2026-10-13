@@ -39,3 +39,24 @@ func TestReflectiveLookupDetectorWithoutALookup(t *testing.T) {
 			retainedRows(t, symbols, got))
 	}
 }
+
+// A string a call to a function outside the program passes beside a value of a type
+// names that type's exported methods, item by item after the verbs a route gives
+// them; a call of the program's own function names nothing.
+func TestReflectiveLookupRetainsTheMethodsARegistrationNames(t *testing.T) {
+	shared := analysisOf(t, "reflective-lookup-registration.txtar", Options{})
+	symbols := shared.inventory(t)
+
+	got, err := shared.detect(t, ReflectiveLookup)
+	if err != nil {
+		t.Fatalf("ReflectiveLookupDetector(reflective-lookup-registration.txtar) error: %v", err)
+	}
+	want := []string{
+		"(*api).Login reflective-lookup routes.go:16:2 named by a string passed with api to example.com/web.Router",
+		"(*api).Logout reflective-lookup routes.go:17:2 named by a string passed with api to example.com/web.Router",
+		"(*api).Update reflective-lookup routes.go:17:2 named by a string passed with api to example.com/web.Router",
+	}
+	if rows := retainedRows(t, symbols, got); !slices.Equal(rows, want) {
+		t.Errorf("ReflectiveLookupDetector(reflective-lookup-registration.txtar) = %q, want %q", rows, want)
+	}
+}

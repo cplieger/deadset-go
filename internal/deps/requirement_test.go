@@ -5,8 +5,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/load"
-	"github.com/cplieger/deadset-go/internal/scope"
+	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 )
 
 func TestUnusedRequirementsReportsADirectRequirementNoImportNeeds(t *testing.T) {

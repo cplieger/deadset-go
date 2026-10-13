@@ -71,6 +71,7 @@ Keys this analyzer reads nothing from. It validates each one and prints it in th
 | `ts.injection_registrations` | array of declaration entries | `[]` | The TypeScript analyzer's: the declarations whose call registers a class with a dependency-injection container |
 | `ts.lifecycle_contracts` | array of objects | `[]` | The TypeScript analyzer's: one framework's lifecycle contract per entry, naming its `components`, its `bases` and the `members` the framework calls |
 | `ts.serializers` | array of declaration entries | `[]` | The TypeScript analyzer's: the declarations whose call reads its arguments' data members by name |
+| `ts.roots_complete` | boolean | `false` | The TypeScript analyzer's: whether the roots the analysis finds are every root the target has, so a finding under reachability alone is `certain` rather than `probable` |
 
 A declaration entry names one declaration by `symbol`, by `module` and `name`, or by `global`. The contract's [configuration schema](https://github.com/cplieger/deadset-spec/blob/v7.0.0-dev.3/contract/config.schema.json) states each shape. `go` is the section this analyzer owns, and it declares no key in this contract version.
 

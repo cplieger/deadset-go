@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/exempt"
-	"github.com/cplieger/deadset-go/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/exempt"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
 )
 
 func TestWriteOnlySymbolNamesEveryWritePositionOfAVariableNothingReads(t *testing.T) {
@@ -35,6 +35,26 @@ func TestWriteOnlySymbolNamesEveryWritePositionOfAVariableNothingReads(t *testin
 			t.Errorf("WriteOnlySymbol with Production=false names write position %s:%d:%d ending on line %d, want line %d",
 				p.Path, p.Line, p.Column, p.EndLine, p.Line)
 		}
+	}
+}
+
+func TestWriteOnlySymbolCountsNoReadFromADeclarationNothingReferences(t *testing.T) {
+	found := analysisOf(t, "readwrite-dead-reader.txtar", asApplication, Consumers{}).
+		findingsUnder(t, writeOnlyKind, true).Findings
+	if names := namesUnder(found, writeOnlyCode); !slices.Equal(names, []string{"pattern"}) {
+		t.Fatalf("WriteOnlySymbol over readwrite-dead-reader.txtar reports %v, want [pattern]", names)
+	}
+	pattern := findingOf(t, found, writeOnlyCode, "pattern")
+	if want := "variable pattern is written once and read only from declarations nothing references"; pattern.Message != want {
+		t.Errorf("WriteOnlySymbol reports pattern with message %q, want %q", pattern.Message, want)
+	}
+}
+
+func TestWriteOnlySymbolReportsNothingThatOnlyADeclarationNothingReferencesWrites(t *testing.T) {
+	found := analysisOf(t, "readwrite-dead-reader-library.txtar", asLibrary, Consumers{}).
+		findingsUnder(t, writeOnlyKind, true).Findings
+	if names := namesUnder(found, writeOnlyCode); len(names) != 0 {
+		t.Errorf("WriteOnlySymbol over readwrite-dead-reader-library.txtar reports %v, want nothing", names)
 	}
 }
 

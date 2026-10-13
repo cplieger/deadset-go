@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/internal/memory"
-	spec "github.com/cplieger/deadset-spec/v7"
+	"github.com/cplieger/deadset-go/v2/internal/memory"
+	spec "github.com/cplieger/deadset-spec/v8"
 )
 
 // memoryExhaustionLine is the line the Contract's exit-code table states for a run

@@ -1,0 +1,34 @@
+A package whose constant names a signal one platform's syscall package lacks, so
+the windows configuration type-checks it with an error the linux one does not
+report, beside a package with an error under both.
+
+-- go.mod --
+module example.com/platform
+
+go 1.27.1
+-- main.go --
+package main
+
+import (
+	"example.com/platform/broken"
+	"example.com/platform/sig"
+)
+
+func main() {
+	sig.Watch()
+	broken.Run()
+}
+-- sig/sig.go --
+package sig
+
+import "syscall"
+
+const Reload = syscall.SIGUSR1
+
+func Watch() {}
+-- broken/broken.go --
+package broken
+
+const Missing = undefinedEverywhere
+
+func Run() {}

@@ -10,7 +10,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cplieger/deadset-go/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
 )
 
 // BaselineFileName is the name the grammar fixes for the baseline. The location is

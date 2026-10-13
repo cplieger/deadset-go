@@ -490,7 +490,7 @@ func (im *cgoImporter) resolve(path string) (*packages.Package, error) {
 		im.refused[path] = true
 		return nil, err
 	}
-	if len(collect(pkgs)) == 0 {
+	if len(collect(pkgs, "")) == 0 {
 		if err := typeCheckDeclarations(im.ctx, im.fset, pkgs, im.c.Arch); err != nil {
 			im.refused[path] = true
 			return nil, err

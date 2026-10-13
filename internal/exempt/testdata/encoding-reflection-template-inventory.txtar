@@ -1,0 +1,104 @@
+An application that renders a page through templates it embeds, every one of which
+the analysis reads: the templates name the page's title and its navigation's label,
+so those fields are read and the page's body and the navigation's address are not.
+Three more commands render through a template set the analysis cannot read whole:
+a computed file name beside a constant text, a script element html/template encodes a value inside whole,
+and a set another function may parse more into. Every field of what they render is
+read.
+
+-- go.mod --
+module example.com/site
+
+go 1.27.1
+-- main.go --
+package main
+
+import (
+	"embed"
+	"html/template"
+	"os"
+)
+
+//go:embed templates
+var files embed.FS
+
+var pages = template.Must(template.ParseFS(files, "templates/*.html"))
+
+// Page is what the page template renders.
+type Page struct {
+	Title string
+	Body  string
+	Nav   Nav
+}
+
+// Nav is the page's navigation.
+type Nav struct {
+	Label string
+	URL   string
+}
+
+func main() {
+	_ = pages.Execute(os.Stdout, Page{Title: "t", Body: "b", Nav: Nav{Label: "l", URL: "u"}})
+}
+-- templates/page.html --
+<h1>{{.Title}}</h1>
+{{template "nav" .Nav}}
+-- templates/nav.html --
+{{define "nav"}}<a>{{.Label}}</a>{{end}}
+-- report/main.go --
+package main
+
+import (
+	"os"
+	"text/template"
+)
+
+// Report is what the computed template renders.
+type Report struct {
+	Count int
+	Total int
+}
+
+func main() {
+	t := template.Must(template.Must(template.New("r").Parse("{{.Count}}")).ParseFiles(os.Args[1]))
+	_ = t.Execute(os.Stdout, Report{Count: 1, Total: 2})
+}
+-- script/main.go --
+package main
+
+import (
+	"html/template"
+	"os"
+)
+
+// Widget is what a script element of the template encodes whole.
+type Widget struct {
+	ID    int
+	Label string
+}
+
+var page = template.Must(template.New("w").Parse(`<script>var w = {{.ID}};</script>`))
+
+func main() { _ = page.Execute(os.Stdout, Widget{ID: 1, Label: "x"}) }
+-- handed/main.go --
+package main
+
+import (
+	"os"
+	"text/template"
+)
+
+// Card is rendered by a template another function may add to.
+type Card struct {
+	Front string
+	Back  string
+}
+
+var cards = template.Must(template.New("c").Parse("{{.Front}}"))
+
+func extend(t *template.Template) { _, _ = t.Parse("{{.Back}}") }
+
+func main() {
+	extend(cards)
+	_ = cards.Execute(os.Stdout, Card{Front: "f", Back: "b"})
+}

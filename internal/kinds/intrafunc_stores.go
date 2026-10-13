@@ -10,11 +10,12 @@ import (
 )
 
 // deadStoresIn is every store of one function body that no read reaches, in the
-// order the body writes them, by a liveness walk over the body's control-flow
-// graph. The population is the variables the body and its signature declare,
-// which the language makes ordinary local variables, less the ones [escaped]
-// names because a construct reaches them behind the graph's back. A return naming
-// no value reads every named result.
+// order the body writes them, by a liveness walk over the body's control-flow graph.
+// The population is the variables the body and its signature declare, less the ones
+// [escaped] names. A return naming no value reads every named result. A function
+// literal reads every variable it names where it is written, and a store a literal
+// naming its variable may precede on some path is never dead, since a call of the
+// literal the graph does not order may read it ([flow.settleCaptures]).
 func deadStoresIn(info *types.Info, fn *functionBody) []*ast.Ident {
 	subjects := localVariables(info, fn.body)
 	for _, name := range fieldNames(fn.recv, fn.signature.Params, fn.signature.Results) {
@@ -41,6 +42,7 @@ func deadStoresIn(info *types.Info, fn *functionBody) []*ast.Ident {
 	graph := cfg.New(fn.body, mayReturn(info))
 	flow := newFlow(info, graph, subjects, results)
 	flow.settle()
+	flow.settleCaptures()
 	return flow.dead()
 }
 
@@ -92,11 +94,9 @@ func fieldNames(lists ...*ast.FieldList) []*ast.Ident {
 // escaped is every variable of one body a store to which may be read where the
 // control-flow graph cannot see it.
 //
-// Four constructs put a variable there. Its address is taken, so any holder of the
-// pointer reads it. A function literal names it, so a call the graph does not
-// order reads it. A method with a pointer receiver is selected on it, which takes
-// its address implicitly. A selector, an index or a dereference on it is assigned
-// to, which reads the variable to address the part being written.
+// Two constructs put a variable there. Its address is taken, so any holder of the
+// pointer reads it. A method with a pointer receiver is selected on it, which takes
+// its address implicitly.
 func escaped(info *types.Info, body *ast.BlockStmt, subjects map[types.Object]bool) map[types.Object]bool {
 	scan := &escapeScan{info: info, subjects: subjects, out: make(map[types.Object]bool)}
 	ast.Inspect(body, scan.visit)
@@ -119,8 +119,6 @@ func (s *escapeScan) visit(n ast.Node) bool {
 		if n.Op == token.AND {
 			s.escape(addressed(n.X))
 		}
-	case *ast.FuncLit:
-		s.captured(n)
 	case *ast.SelectorExpr:
 		if selectsPointerMethod(s.info, n) {
 			s.escape(n.X)
@@ -137,16 +135,6 @@ func (s *escapeScan) escape(expr ast.Expr) {
 	}
 	if object := s.info.Uses[name]; object != nil && s.subjects[object] {
 		s.out[object] = true
-	}
-}
-
-// captured takes every variable of the population one function literal names out
-// of it: the call the literal becomes is one no graph of the enclosing body orders.
-func (s *escapeScan) captured(literal *ast.FuncLit) {
-	for object := range readObjects(s.info, literal.Body) {
-		if s.subjects[object] {
-			s.out[object] = true
-		}
 	}
 }
 
@@ -211,6 +199,13 @@ func mayReturn(info *types.Info) func(*ast.CallExpr) bool {
 type access struct {
 	object types.Object
 	name   *ast.Ident // the identifier a store is written at, nil for a read
+
+	// capture marks the read a function literal makes of a variable it names.
+	capture bool
+
+	// shielded marks a store a capture of its variable may precede, which
+	// [flow.settleCaptures] decides.
+	shielded bool
 }
 
 // flow is the liveness walk over one body's control-flow graph: the accesses of
@@ -222,7 +217,10 @@ type flow struct {
 	liveIn   []map[types.Object]bool
 }
 
-// newFlow reads every block of one graph into the accesses its nodes make.
+// newFlow reads every block of one graph into the accesses its nodes make. The
+// graph places a range statement's key and value before the loop, read once; the
+// language stores them at the start of every iteration, so they are stores of the
+// range body's first block instead.
 func newFlow(info *types.Info, graph *cfg.CFG, subjects map[types.Object]bool, results []types.Object) *flow {
 	f := &flow{
 		blocks:   graph.Blocks,
@@ -230,16 +228,93 @@ func newFlow(info *types.Info, graph *cfg.CFG, subjects map[types.Object]bool, r
 		liveIn:   make([]map[types.Object]bool, len(graph.Blocks)),
 		index:    make(map[*cfg.Block]int, len(graph.Blocks)),
 	}
+	iterated := make(map[ast.Node]bool)
+	for _, block := range graph.Blocks {
+		for _, target := range rangeTargets(block) {
+			iterated[target] = true
+		}
+	}
 	for at, block := range graph.Blocks {
 		f.index[block] = at
 		f.liveIn[at] = make(map[types.Object]bool)
 		reader := &accessReader{info: info, subjects: subjects, results: results}
+		for _, target := range rangeTargets(block) {
+			reader.store(target)
+		}
 		for _, node := range block.Nodes {
-			reader.node(node)
+			if !iterated[node] {
+				reader.node(node)
+			}
 		}
 		f.accesses[at] = reader.made
 	}
 	return f
+}
+
+// rangeTargets is the key and the value one range statement stores, where one
+// block is the first block of that statement's body.
+func rangeTargets(block *cfg.Block) []ast.Expr {
+	loop, isRange := block.Stmt.(*ast.RangeStmt)
+	if !isRange || block.Kind != cfg.KindRangeBody {
+		return nil
+	}
+	var targets []ast.Expr
+	for _, target := range []ast.Expr{loop.Key, loop.Value} {
+		if target != nil {
+			targets = append(targets, target)
+		}
+	}
+	return targets
+}
+
+// settleCaptures marks every store that a capture of its variable precedes on some
+// path, by a forward walk to the fixed point of which variables a literal has named
+// on entering each block.
+func (f *flow) settleCaptures() {
+	capturedIn := make([]map[types.Object]bool, len(f.blocks))
+	for at := range f.blocks {
+		capturedIn[at] = make(map[types.Object]bool)
+	}
+	for changed := true; changed; {
+		changed = false
+		for at, block := range f.blocks {
+			out := f.marked(at, capturedIn[at])
+			for _, next := range block.Succs {
+				changed = joined(capturedIn[f.index[next]], out) || changed
+			}
+		}
+	}
+}
+
+func joined(into, from map[types.Object]bool) bool {
+	grew := false
+	for object := range from {
+		if !into[object] {
+			into[object] = true
+			grew = true
+		}
+	}
+	return grew
+}
+
+// marked walks one block's accesses forward from the variables captured entering
+// it, marks each store a capture precedes, and returns the variables captured
+// leaving it.
+func (f *flow) marked(at int, in map[types.Object]bool) map[types.Object]bool {
+	captured := make(map[types.Object]bool, len(in))
+	for object := range in {
+		captured[object] = true
+	}
+	for i := range f.accesses[at] {
+		one := &f.accesses[at][i]
+		switch {
+		case one.capture:
+			captured[one.object] = true
+		case one.name != nil && captured[one.object]:
+			one.shielded = true
+		}
+	}
+	return captured
 }
 
 // settle iterates the liveness equations to their fixed point: a variable is live
@@ -298,7 +373,7 @@ func (f *flow) dead() []*ast.Ident {
 				live[one.object] = true
 				continue
 			}
-			if !live[one.object] {
+			if !live[one.object] && !one.shielded {
 				found = append(found, one.name)
 			}
 			delete(live, one.object)
@@ -308,7 +383,6 @@ func (f *flow) dead() []*ast.Ident {
 	return found
 }
 
-// sameLive reports whether two liveness sets hold the same variables.
 func sameLive(a, b map[types.Object]bool) bool {
 	if len(a) != len(b) {
 		return false
@@ -421,19 +495,55 @@ func (r *accessReader) storeAt(name *ast.Ident, object types.Object) {
 	r.made = append(r.made, access{object: object, name: name})
 }
 
-// reads records a read of every variable of the population one expression names.
+// reads records a read of every variable of the population one expression names,
+// and a capture of every one a function literal inside it names, except a literal
+// called where it is written outside a go or defer statement, which runs there.
 func (r *accessReader) reads(n ast.Node) {
 	if n == nil {
 		return
 	}
+	immediate := immediateLiterals(n)
+	var inside []bool
 	ast.Inspect(n, func(held ast.Node) bool {
-		name, isName := held.(*ast.Ident)
-		if !isName {
+		if held == nil {
+			inside = inside[:len(inside)-1]
 			return true
 		}
-		if object := r.info.Uses[name]; object != nil && r.subjects[object] {
-			r.made = append(r.made, access{object: object})
+		lit, literal := held.(*ast.FuncLit)
+		captured := literal && !immediate[lit] || len(inside) > 0 && inside[len(inside)-1]
+		inside = append(inside, captured)
+		if name, isName := held.(*ast.Ident); isName {
+			if object := r.info.Uses[name]; object != nil && r.subjects[object] {
+				r.made = append(r.made, access{object: object, capture: captured})
+			}
 		}
 		return true
 	})
+}
+
+// immediateLiterals is every function literal under n that is the callee of the call
+// it is written in, true outside a go or defer statement, where it runs at the call.
+func immediateLiterals(n ast.Node) map[*ast.FuncLit]bool {
+	immediate := make(map[*ast.FuncLit]bool)
+	ast.Inspect(n, func(held ast.Node) bool {
+		switch held := held.(type) {
+		case *ast.GoStmt:
+			immediate[calledLiteral(held.Call)] = false
+		case *ast.DeferStmt:
+			immediate[calledLiteral(held.Call)] = false
+		case *ast.CallExpr:
+			if lit := calledLiteral(held); lit != nil {
+				if _, seen := immediate[lit]; !seen {
+					immediate[lit] = true
+				}
+			}
+		}
+		return true
+	})
+	return immediate
+}
+
+func calledLiteral(call *ast.CallExpr) *ast.FuncLit {
+	lit, _ := ast.Unparen(call.Fun).(*ast.FuncLit)
+	return lit
 }

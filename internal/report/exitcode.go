@@ -1,6 +1,6 @@
 package report
 
-import "github.com/cplieger/deadset-go/internal/config"
+import "github.com/cplieger/deadset-go/v2/internal/config"
 
 // The verdict codes one report yields, which are the codes
 // contract/exit-codes.json names for a run that produced an answer. The codes for

@@ -4,7 +4,7 @@ import (
 	"go/types"
 	"slices"
 
-	"github.com/cplieger/deadset-go/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
 )
 
 // The codes of the narrowing kinds.
@@ -196,24 +196,19 @@ func (in *Input) closed(symbol *graph.Symbol) bool {
 }
 
 // narrowable reports whether one declaration is a subject of the two narrowing
-// kinds: an exported declaration of a closed world that a reference names, that the
-// sweep found live, and that nothing beyond the reference set speaks for.
-//
-// Three kinds of declaration are not subjects whatever their references are, because
-// for each of them the exported name answers to something other than the references.
-// A type parameter is exported by its name and no consumer can write it, because a
-// caller supplies a type argument by position. An interface method's exportedness is
-// its interface's contract, so unexporting it changes the method set every
-// implementing type must provide. A struct field's exportedness is what an encoder,
-// a template and a reflective lookup read it by, and those name it by string where
-// no reference does.
+// kinds: an exported production declaration of a closed world that a reference names,
+// that the sweep found live, and that nothing beyond the reference set speaks for.
+// A type parameter, an interface method and a struct field never are: a caller
+// supplies a type argument by position, an interface method's exportedness is its
+// implementors' contract, and an encoder, a template or a reflective lookup names a
+// field by string where no reference does.
 func (n *narrowing) narrowable(symbol *graph.Symbol) bool {
 	switch {
 	case !symbol.Exported, unnarrowableKind(symbol.Kind):
 		return false
 	case n.unnarrowable[symbol.ID]:
 		return false
-	case !n.in.closed(symbol), n.in.candidateOf(symbol.ID) != nil:
+	case !n.in.closed(symbol), n.in.candidateOf(symbol.ID) != nil, n.in.testSupport(symbol):
 		return false
 	default:
 		return n.named[symbol.ID] > 0

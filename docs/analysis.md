@@ -29,22 +29,27 @@ A root makes a symbol live under reachability. `deadset-go print-roots` prints t
 | Root | What the analysis reads |
 | --- | --- |
 | `main` | The `main` function of a `main` package |
-| `init` | Every `init` function |
+| `init` | Every `init` function, except in an application's package no build links |
 | `test` | A test, benchmark, example or fuzz function of a test file, under the signature rule the toolchain applies |
 | `linkname` | A function or variable named on either side of a `//go:linkname` or `//go:linknamestd` directive in a file importing `"unsafe"`: the local name in the file's own package, and the qualified name in the loaded package whose import path it spells |
 | `cgo-export` | A function under an `//export` directive in a file importing `"C"` |
-| `blank` | A declaration made with the blank identifier, whose initializer still runs |
+| `blank` | A declaration made with the blank identifier, whose initializer still runs, except in an application's package no build links |
 | `published-api` | An exported symbol of a non-internal package, when the target is declared a library |
 | `configured` | An exact symbol reference from `roots.patterns` |
 | `pattern` | A pattern from `roots.patterns` |
 | `type-error` | A declaration a type error skipped, and every member of a type its unresolved code could name or reach |
 | `program` | A declaration named by a `package main` file that only the `ignore` build tag includes, which `go run` runs on its own |
+| `go-generate` | A declaration a `//go:generate` directive names as a generator's input: the types a `stringer` or `enumer` directive's `-type` flag lists, the interfaces a `mockgen` directive lists after the package it reads, or every interface of the file its `-source` flag names, with each method of an input interface |
+| `go-fuzz` | A function `Fuzz` or `Fuzz<Name>` of type `func([]byte) int` in a file whose build constraint names the `gofuzz` tag |
+| `swagger` | A declaration whose doc comment holds a `swagger:` directive, with every field of a struct type it declares |
 
-Every root but `published-api` and `type-error` names an actual caller, which is the runtime, the test binary, the linker, C code, `go run`, or the maintainer asserting one. A `type-error` root withholds a judgement the type error made impossible. Those are live under both relations, so a test function is never reported as unreferenced.
+Every root but `published-api` and `type-error` names an actual caller, which is the runtime, the test binary, the linker, C code, `go run`, a generator, go-fuzz, or the maintainer asserting one. A `type-error` root withholds a judgement the type error made impossible. Those are live under both relations, so a test function is never reported as unreferenced.
 
 `published-api` is the one root that only hypothesises a caller. It makes a library's exported symbol live under reachability, so the symbol's closure is not a dead component. The symbol itself stays a candidate under reference counting, which is what `DS1001` answers at the confidence the consumer model gives it. An exported method an exported type promotes from an embedded field of any visibility is a `published-api` root as well.
 
 A configured root or pattern that names no symbol is reported as `DS1704` rather than ignored.
+
+In an application, a package that no `main` package, test, program or consumer the run loads imports, directly or through other packages, is linked into no build, so its `init` functions and blank declarations never run and root nothing. The package is dead with every declaration in it.
 
 ## Dead components and what falls with a deletion
 
@@ -58,7 +63,7 @@ A declaration of a test file is a member only when it is reported as a test of d
 
 No other test-file declaration belongs to a component, so its references join no two components and make no production declaration a non-root. A cluster only tests reach is rooted at a declaration outside the test files.
 
-A declaration of test-support code that a test references is in a component of its own that removes no line. One that nothing references is in a dead component, as production code is.
+Test-support code is test code: a declaration of it that a reference names is live and in no component. One that nothing references is in a dead component, as production code is.
 
 The count is the component's members and the line total the distinct lines they span. `reporters.cascade` set to `full` lists every member of every component as well as the roots, under the finding's `component.members`, and a SARIF result carries each member other than its own symbol as a related location. A finding whose subject is in no dead component names a component of that subject alone, with no line deleted. Such a subject is a declaration the analysis holds live, a part of a declaration or a row of a document.
 
@@ -72,7 +77,7 @@ Every finding carries a `reachability_class`, which is what the analysis knows a
 | --- | --- |
 | `certain` | Every caller that can exist is in the analyzed graph. That is an application, or a library whose scope document declares consumers that all loaded |
 | `probable` | The scope document declares consumers and not every one of them loaded |
-| `possible` | The target is a library and the run has no consumer information |
+| `possible` | The target is a library and the run has no consumer information, or the symbol is in an application's importable package no build links, outside an `internal` tree, and the run declares no consumer, or it is an export of a module a dropped module requires |
 
 `analysis.min_confidence` filters on `confidence`, so `certain` reports only findings whose every caller is visible.
 
@@ -109,6 +114,8 @@ A configuration the analyzer derived from a platform atom of the target's own so
 
 The host's own configuration is never dropped, so a target that does not build on the host ends the run with exit 3.
 
+A derived configuration in which a package of the target has a type error that another configuration type-checks without one roots nothing for that error and lists none of its errors: the configurations that build the package judge it.
+
 A load fails when the toolchain reports an error while listing the configuration's packages, or when a package of the target, of a declared consumer, or one importing either, does not parse. It also fails when one of those packages outside the target does not type-check. A type error in a package of the target skips the declaration holding it, and the report lists the skip in `type_error_skips`.
 
 The listing is read first, and a configuration whose listing carries an error is refused with those errors before any package is type-checked. Every other dependency is type-checked for its declarations alone, so a type error inside one of its function bodies does not fail the load. That holds whether the configuration document declared the configuration or the analyzer derived it.
@@ -120,6 +127,12 @@ A test file's tags count as any file's, so a tag only tests name, `race` among t
 A derived identifier is the operating system and the architecture joined by a hyphen, with each tag appended after a further hyphen. A malformed build expression ends the run naming the file.
 
 A derived matrix is never complete. It satisfies a Boolean constraint only where its atoms happen to, and a configuration no file in the tree names is never derived. The platform entries of `analysis.configurations` replace the derivation, and `analysis.matrix.complete` declares that the listed platforms are every configuration the target builds, which is the precondition `DS1501` needs. A project entry names a TypeScript compiler configuration file, and this analyzer ignores it, so a configuration listing only project entries leaves the Go matrix derived and incomplete.
+
+## Modules below the target
+
+A target whose root holds no module file is every module below it. One of those modules that does not load is dropped and named in a `module-not-loaded` note, and every module it requires reports its exports at `possible`, because code the run did not read may call them. When no module is left the first failure ends the run with exit 3, as it does for the target's own module and for a module its workspace lists.
+
+Below a target root that holds a module file, a module of its own that requires a module of the target through a `replace` naming that module's directory builds against the target's tree, so it is loaded as a consumer: its references count and nothing of it is reported. One that does not load is dropped the same way. A directory whose name starts with an underscore is searched too, and the packages of the target's own module below one, which `./...` skips, an `_examples` tree among them, are loaded as a consumer the same way; one whose imports do not resolve counts nothing. Every position a setup failure names is relative to the target root.
 
 ## cgo files, with the C half opaque
 

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/cplieger/deadset-go/internal/jsondoc"
+	"github.com/cplieger/deadset-go/v2/internal/jsondoc"
 )
 
 // printDocument is the resolved configuration as it is written: the closed key

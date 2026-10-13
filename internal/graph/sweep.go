@@ -237,6 +237,7 @@ func (g *Graph) sweep(in *SweepInput) *sweep {
 	s.decide()
 	s.admitTestsOfDeadCode()
 	s.admitUnreferencedTests()
+	s.keepReferencedSupport()
 	return s
 }
 
@@ -574,6 +575,18 @@ func (s *sweep) admitUnreferencedTests() {
 		}
 		s.dead[i] = true
 		s.unreferencedTest[i] = true
+	}
+}
+
+// keepReferencedSupport holds live every declaration of test-support code that a
+// reference or test evidence names and that is no test of dead code: test-support
+// code is test code, and a reference from test code keeps it live.
+func (s *sweep) keepReferencedSupport() {
+	for i := range s.g.symbols {
+		referenced := s.g.made[i].test+s.g.made[i].production > 0 || s.in.tested[s.g.symbols[i].ID] > 0
+		if s.dead[i] && !s.testOfDeadCode[i] && s.supportCode(i) && referenced {
+			s.dead[i] = false
+		}
 	}
 }
 

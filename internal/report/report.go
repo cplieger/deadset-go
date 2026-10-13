@@ -28,15 +28,15 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cplieger/deadset-go/internal/config"
-	"github.com/cplieger/deadset-go/internal/graph"
-	"github.com/cplieger/deadset-go/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/kinds"
 )
 
 // SchemaVersion is the version of the report schema this package writes a
 // document to. An analyzer names every version it reads in the analyzer object,
 // and that list holds this one.
-const SchemaVersion = "8.2.0"
+const SchemaVersion = "9.0.0"
 
 // staleSuppressionCode is the code of a stale suppression, which is the one code
 // whose records the envelope carries outside its finding list.
@@ -212,8 +212,8 @@ type TypeErrorSkip struct {
 }
 
 // Note is one hint about the run's setup the analysis cannot decide: its kind, the
-// target-relative directory it is about, the configuration key that settles it and
-// the hint in words.
+// target-relative directory it is about, the configuration key that settles it,
+// empty where none does, and the hint in words.
 type Note struct {
 	Kind    string
 	Path    string
