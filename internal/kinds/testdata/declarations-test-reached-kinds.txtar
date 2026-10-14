@@ -1,0 +1,52 @@
+A command and its test, and a package only that test imports whose files import no
+testing package: an interface the test alone names as a type, a deprecated function
+the test alone calls, a type the test alone names whose method calls an unexported
+function, and a function nothing calls.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+func main() { println(run()) }
+
+func run() int { return 1 }
+-- main_test.go --
+package main
+
+import (
+	"testing"
+
+	"example.com/app/samples"
+)
+
+func TestRun(t *testing.T) {
+	var d samples.Doer
+	var _ samples.Fake
+	if d != nil || run() != samples.Old() {
+		t.Fail()
+	}
+}
+-- samples/samples.go --
+package samples
+
+// Doer is named by a test alone.
+type Doer interface{ Do() int }
+
+// Old is called by a test alone.
+//
+// Deprecated: nothing replaces it.
+func Old() int { return 1 }
+
+// Fake is named by a test alone.
+type Fake struct{}
+
+// Run is called by nothing.
+func (Fake) Run() int { return helper() }
+
+func helper() int { return 3 }
+
+// Spare is called by nothing.
+func Spare() int { return 2 }

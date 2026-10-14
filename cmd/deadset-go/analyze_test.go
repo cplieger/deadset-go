@@ -798,10 +798,10 @@ func testSupportAssertionModule(t *testing.T) string {
 		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
 		"app.go": "package main\n\nfunc main() {}\n",
 		"app_test.go": "package main\n\nimport (\n\t\"testing\"\n\n\t\"example.com/app/internal/testsupport\"\n)\n\n" +
-			"func TestFake(t *testing.T) {\n\tif testsupport.New().Get() != \"f\" {\n\t\tt.Fail()\n\t}\n}\n",
-		"internal/testsupport/support.go": "package testsupport\n\ntype Store interface{ Get() string }\n\n" +
+			"func TestFake(t *testing.T) {\n\tif testsupport.New(t).Get() != \"f\" {\n\t\tt.Fail()\n\t}\n}\n",
+		"internal/testsupport/support.go": "package testsupport\n\nimport \"testing\"\n\ntype Store interface{ Get() string }\n\n" +
 			"type Fake struct{}\n\nfunc (Fake) Get() string { return \"f\" }\n\nvar _ Store = Fake{}\n\n" +
-			"func New() Fake { return Fake{} }\n",
+			"func New(t testing.TB) Fake { t.Helper(); return Fake{} }\n",
 		repositoryDocument: `{"target": {"kind": "application"}}`,
 	})
 }

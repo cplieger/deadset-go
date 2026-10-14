@@ -101,10 +101,15 @@ type Result struct {
 	Fset *token.FileSet // one FileSet for the whole configuration
 
 	// TestSupport holds the [Result.PackageKey] of the target's test-support packages:
-	// packages only tests reach, which every stage judges as test code. The load
-	// leaves it empty and [graph.ClassifyTestSupport] fills it, because the
-	// classification turns on the target kind and the roots.
+	// packages only tests reach that carry test evidence, which every stage judges as
+	// test code. The load leaves it empty and [graph.ClassifyTestSupport] fills it,
+	// because the classification turns on the target kind and the roots.
 	TestSupport map[string]bool
+
+	// TestReached holds, by the same key, the target's packages only tests reach that
+	// are not test support, which stay production code. A package with test evidence
+	// is one when a member of this set imports it. [graph.ClassifyTestSupport] fills it.
+	TestReached map[string]bool
 
 	// Programs holds the target's files run on their own under the ignore tag,
 	// which no package of the target compiles and every stage but the root

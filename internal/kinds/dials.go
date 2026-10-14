@@ -43,7 +43,7 @@ func (in *Input) withholdComponents(published []catalog.Row, emitters map[string
 	}
 	least := Class(in.Config.Analysis.MinConfidence)
 	for i := range first {
-		if found := &first[i]; found.Confidence.rank() < least.rank() {
+		if found := &first[i]; found.componentConfidence().rank() < least.rank() {
 			in.withholdRoot(found, false)
 		}
 	}
@@ -101,38 +101,59 @@ func (in *Input) withholdRoot(found *Finding, allowed bool) {
 // dormantNear records the symbols a suppression record bound to is dormant for:
 // every member of a withheld component, and every symbol a record held back that
 // a reference or a container joins to one, which without the record would be dead
-// and a member of that component.
+// and a member of that component. The declarations [testUseFacts.dead] holds, which
+// the minimum withholds one by one, count the same way, but only for a symbol one
+// of them references or contains, since only that symbol would join the set.
 func (in *Input) dormantNear() {
-	if len(in.dialed.components) == 0 {
+	members, testUsed := in.withheldMembers(), in.testUsedWithheld()
+	if len(members) == 0 && len(testUsed) == 0 {
 		return
 	}
-	members := in.withheldMembers()
 	for id := range members {
+		in.dialed.dormant[id] = true
+	}
+	for id := range testUsed {
 		in.dialed.dormant[id] = true
 	}
 	heldBack := make(map[graph.SymbolID]bool, len(in.staleInput().Suppressed))
 	for _, id := range in.staleInput().Suppressed {
 		heldBack[id] = true
 	}
+	// joined reads a, held back, against b, which references or contains it.
 	joined := func(a, b graph.SymbolID) {
-		if heldBack[a] && members[b] {
+		if heldBack[a] && (members[b] || testUsed[b]) {
 			in.dialed.dormant[a] = true
 		}
 		if heldBack[b] && members[a] {
 			in.dialed.dormant[b] = true
 		}
 	}
+	in.eachJoin(joined)
+}
+
+// eachJoin calls joined with each referenced symbol and its referrer, and each
+// contained symbol and its container, of the merged inventory.
+func (in *Input) eachJoin(joined func(a, b graph.SymbolID)) {
 	if in.Merged == nil {
 		return
 	}
 	for i := range in.Merged.References {
-		joined(in.Merged.References[i].From, in.Merged.References[i].To)
+		joined(in.Merged.References[i].To, in.Merged.References[i].From)
 	}
 	for i := range in.Merged.Symbols {
 		if symbol := &in.Merged.Symbols[i]; symbol.Parent != "" {
 			joined(symbol.ID, symbol.Parent)
 		}
 	}
+}
+
+// testUsedWithheld is [testUseFacts.dead] where the minimum withholds its findings,
+// and empty where the minimum is possible.
+func (in *Input) testUsedWithheld() map[graph.SymbolID]bool {
+	if Class(in.Config.Analysis.MinConfidence).rank() <= Possible.rank() {
+		return nil
+	}
+	return in.testUse().dead
 }
 
 // withheldMembers is every member of a component the dials withhold.

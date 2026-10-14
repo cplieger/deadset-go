@@ -68,8 +68,8 @@ func TestUnusedParameterReportsEveryParameterNoBodyReads(t *testing.T) {
 	result := analysisOf(t, "intrafunc-parameter.txtar", asApplication, Consumers{}).findings(t, intraFunctionKinds)
 
 	want := []string{
-		"main.go:4:24 parameter label of go://example.com/app#scaled",
-		"main.go:26:25 parameter label of go://example.com/app#dropped",
+		"main.go:4:24 parameter label of go://example.com/app#scaled(label)",
+		"main.go:26:25 parameter label of go://example.com/app#dropped(label)",
 	}
 	if got := subjectsOf(result.Findings, unusedParameterCode); !slices.Equal(got, want) {
 		t.Errorf("the pass over intrafunc-parameter.txtar reports %v under %s, want %v",
@@ -111,8 +111,8 @@ func TestUnusedParameterReportsALiteralOnlyCalledByName(t *testing.T) {
 	result := analysisOf(t, "intrafunc-literal.txtar", asApplication, Consumers{}).findings(t, intraFunctionKinds)
 
 	want := []string{
-		"main.go:8:17 parameter name of go://example.com/app#main",
-		"main.go:9:22 parameter name of go://example.com/app#main",
+		"main.go:8:17 parameter name of go://example.com/app#main(name)",
+		"main.go:9:22 parameter name of go://example.com/app#main(name)",
 	}
 	if got := subjectsOf(result.Findings, unusedParameterCode); !slices.Equal(got, want) {
 		t.Errorf("the pass over intrafunc-literal.txtar reports %v under %s, want %v: only a literal every use calls is free",
@@ -190,7 +190,7 @@ func TestTheSignatureKindsApplyEveryExemptionOfTheContractByName(t *testing.T) {
 
 	result := analysisOf(t, "intrafunc-exemptions.txtar", asApplication, Consumers{}).findings(t, intraFunctionKinds)
 
-	want := []string{"main.go:39:23 parameter label of go://example.com/app#plain"}
+	want := []string{"main.go:39:23 parameter label of go://example.com/app#plain(label)"}
 	if got := subjectsOf(result.Findings, unusedParameterCode); !slices.Equal(got, want) {
 		t.Errorf("the pass over intrafunc-exemptions.txtar reports %v under %s, want %v: a signature no caller outside the graph fixes is the only one reported",
 			got, unusedParameterCode, want)
@@ -207,11 +207,11 @@ func TestUnusedParameterReportsNoParameterTheTestDriverFixes(t *testing.T) {
 		name string
 		at   string
 	}{
-		{name: "TestMain", at: "main_test.go:10:15 parameter m of go://example.com/app#TestMain"},
-		{name: "test", at: "main_test.go:14:18 parameter t of go://example.com/app#TestCompute"},
-		{name: "benchmark", at: "main_test.go:22:23 parameter b of go://example.com/app#BenchmarkCompute"},
-		{name: "fuzz_test", at: "main_test.go:26:18 parameter f of go://example.com/app#FuzzCompute"},
-		{name: "fuzz_target", at: "testsupport/testsupport.go:11:13 parameter t of go://example.com/app/testsupport#Target"},
+		{name: "TestMain", at: "main_test.go:10:15 parameter m of go://example.com/app#TestMain(m)"},
+		{name: "test", at: "main_test.go:14:18 parameter t of go://example.com/app#TestCompute(t)"},
+		{name: "benchmark", at: "main_test.go:22:23 parameter b of go://example.com/app#BenchmarkCompute(b)"},
+		{name: "fuzz_test", at: "main_test.go:26:18 parameter f of go://example.com/app#FuzzCompute(f)"},
+		{name: "fuzz_target", at: "testsupport/testsupport.go:11:13 parameter t of go://example.com/app/testsupport#Target(t)"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -228,7 +228,7 @@ func TestUnusedParameterReportsATestSupportFunctionTheTestDriverDoesNotRun(t *te
 
 	result := analysisOf(t, "intrafunc-test-driver.txtar", asApplication, Consumers{}).findings(t, intraFunctionKinds)
 
-	want := []string{"testsupport/testsupport.go:6:12 parameter t of go://example.com/app/testsupport#Check"}
+	want := []string{"testsupport/testsupport.go:6:12 parameter t of go://example.com/app/testsupport#Check(t)"}
 	if got := subjectsOf(result.Findings, unusedParameterCode); !slices.Equal(got, want) {
 		t.Errorf("the pass over intrafunc-test-driver.txtar reports %v under %s, want %v",
 			got, unusedParameterCode, want)
@@ -252,9 +252,9 @@ func TestTheSignatureKindsReportAPublishedDeclarationOfALibrary(t *testing.T) {
 		{name: "an application, whose every caller is in the graph", setup: asApplication},
 	}
 	wantParameters := []string{
-		"api/api.go:4:24 parameter label of go://example.com/app/api#Scaled",
-		"api/api.go:9:24 parameter label of go://example.com/app/api#scaled",
-		"api/writer.go:15:20 parameter limit of go://example.com/app/api#Sink.Held",
+		"api/api.go:4:24 parameter label of go://example.com/app/api#Scaled(label)",
+		"api/api.go:9:24 parameter label of go://example.com/app/api#scaled(label)",
+		"api/writer.go:15:20 parameter limit of go://example.com/app/api#Sink.Held(limit)",
 	}
 	wantReceivers := []string{"api/writer.go:15:7 receiver s of go://example.com/app/api#Sink.Held"}
 
@@ -370,8 +370,8 @@ func TestASuppressionBoundToADeclarationSilencesTheFindingAboutItsPart(t *testin
 	after := computed(t, in, intraFuncEmitters())
 
 	wantBefore := []string{
-		"main.go:4:24 parameter label of go://example.com/app#scaled",
-		"main.go:9:25 parameter label of go://example.com/app#tripled",
+		"main.go:4:24 parameter label of go://example.com/app#scaled(label)",
+		"main.go:9:25 parameter label of go://example.com/app#tripled(label)",
 	}
 	if got := subjectsOf(before.Findings, unusedParameterCode); !slices.Equal(got, wantBefore) {
 		t.Fatalf("the pass with no suppression reports %v under %s, want %v",
@@ -475,8 +475,8 @@ func TestUnusedParameterReportsOneFindingPerParameterOfOneSignature(t *testing.T
 	found := analysisOf(t, "intrafunc-twoparts.txtar", asApplication, Consumers{}).findings(t, intraFunctionKinds).Findings
 
 	want := []string{
-		"main.go:9:25 parameter low of go://example.com/app#counter.limit",
-		"main.go:9:30 parameter high of go://example.com/app#counter.limit",
+		"main.go:9:25 parameter low of go://example.com/app#counter.limit(low)",
+		"main.go:9:30 parameter high of go://example.com/app#counter.limit(high)",
 	}
 	if got := subjectsOf(found, unusedParameterCode); !slices.Equal(got, want) {
 		t.Errorf("the kind reports %v under %s, want %v: each part of a signature is a subject of its own",
@@ -629,7 +629,7 @@ func TestUnusedParameterReportsNothingAboutAFunctionDeclaredOncePerPlatform(t *t
 	result := analysisOf(t, "intrafunc-platform-twins.txtar", asApplication, Consumers{}).findings(t, intraFunctionKinds)
 
 	for code, want := range map[string][]string{
-		unusedParameterCode: {"main.go:9:24 parameter mode of go://example.com/app#solo"},
+		unusedParameterCode: {"main.go:9:24 parameter mode of go://example.com/app#solo(mode)"},
 		unusedReceiverCode:  {"open_linux.go:5:7 receiver d of go://example.com/app#disk.free"},
 	} {
 		if got := subjectsOf(result.Findings, code); !slices.Equal(got, want) {
@@ -647,7 +647,7 @@ func TestAMethodATypeErrorRootsHasNoSignatureFreeToChange(t *testing.T) {
 			reported = append(reported, result.Findings[i].Symbol.Ref+" "+result.Findings[i].Symbol.Name)
 		}
 	}
-	want := []string{"go://example.com/app#plain.Use x"}
+	want := []string{"go://example.com/app#plain.Use(x) x"}
 	if !slices.Equal(reported, want) {
 		t.Errorf("the pass reports %s about %v, want %v: the interface the skipped open returns into may fix Filter's signature",
 			unusedParameterCode, reported, want)
@@ -680,10 +680,10 @@ func TestUnusedParameterReportsALiteralCalledWhereItIsWritten(t *testing.T) {
 	result := analysisOf(t, "intrafunc-literal-callee.txtar", asApplication, Consumers{}).findings(t, intraFunctionKinds)
 
 	want := []string{
-		"main.go:5:14 parameter n of go://example.com/app#",
-		"main.go:9:10 parameter i of go://example.com/app#main",
-		"main.go:11:13 parameter label of go://example.com/app#main",
-		"main.go:12:7 parameter n of go://example.com/app#main",
+		"main.go:5:14 parameter n of go://example.com/app#(n)",
+		"main.go:9:10 parameter i of go://example.com/app#main(i)",
+		"main.go:11:13 parameter label of go://example.com/app#main(label)",
+		"main.go:12:7 parameter n of go://example.com/app#main(n)",
 	}
 	if got := subjectsOf(result.Findings, unusedParameterCode); !slices.Equal(got, want) {
 		t.Errorf("the pass over intrafunc-literal-callee.txtar reports %v under %s, want %v",

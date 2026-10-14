@@ -1,0 +1,59 @@
+A command and its test, a directive holding a test-only use, a package only that test imports whose files import no
+testing package, and a helper package that imports the testing package and calls a
+function of the first package and a helper of the first package only that function
+calls.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+func main() { println(run()) }
+
+func run() int { return 1 }
+-- main_test.go --
+package main
+
+import (
+	"testing"
+
+	"example.com/app/samples"
+	"example.com/app/testkit"
+)
+
+func TestRun(t *testing.T) {
+	if run()+testkit.Start(t) != samples.Sample()+2 {
+		t.Fail()
+	}
+}
+-- samples/samples.go --
+package samples
+
+// Sample is called by a test alone.
+//
+//deadset:ignore DS1004 -- kept for the test that reads it
+func Sample() int { return 1 }
+
+// Spare is called by nothing.
+func Spare() int { return 2 }
+
+// Seeded is called by the test helper alone.
+func Seeded() int { return seed() }
+
+func seed() int { return 3 }
+-- testkit/testkit.go --
+package testkit
+
+import (
+	"testing"
+
+	"example.com/app/samples"
+)
+
+// Start is what the test calls.
+func Start(t testing.TB) int {
+	t.Helper()
+	return samples.Seeded() - 1
+}

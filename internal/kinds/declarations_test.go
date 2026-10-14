@@ -445,3 +445,153 @@ func TestUnlinkedApplicationPackageIsReportedAtPossible(t *testing.T) {
 		})
 	}
 }
+
+// Production code only tests reach that carries no test evidence is reported, but
+// only at possible: its test-only use, every finding that exists only because of it,
+// the helper it keeps and the test of dead code that calls it, while a declaration of
+// it nothing references keeps certain.
+func TestProductionCodeOnlyTestsReachIsReportedAtPossible(t *testing.T) {
+	resolved := applicationConfig()
+	resolved.Analysis.MinConfidence = config.Possible
+	result := computed(t, inputOf(t, "declarations-test-reached.txtar", resolved, Consumers{}), declarationEmitters())
+
+	cases := []struct {
+		code, name        string
+		class, confidence Class
+	}{
+		{testOnlyUseCode, "Sample", Possible, Possible},
+		{testOnlyUseCode, "Seeded", Possible, Possible},
+		{unusedUnexportedCode, "seed", Possible, Possible},
+		{testOfDeadCodeCode, "Start", Certain, Possible},
+		{unusedExportedCode, "Spare", Certain, Certain},
+	}
+	for _, want := range cases {
+		t.Run(want.name, func(t *testing.T) {
+			found := findingOf(t, result.Findings, want.code, want.name)
+			if found.Class != want.class || found.Confidence != want.confidence {
+				t.Errorf("%s %s has class %s and confidence %s, want %s and %s",
+					want.code, want.name, found.Class, found.Confidence, want.class, want.confidence)
+			}
+		})
+	}
+	if got := summary(result.Findings); len(got) != len(cases) {
+		t.Errorf("the pass reports %v, want the %d findings above alone", got, len(cases))
+	}
+}
+
+// A declaration only dead code references in production is a test-only use where a
+// test of live code references it, and keeps its unreferenced kind where only a test
+// of dead code does.
+func TestADeclarationATestOfLiveCodeKeepsIsATestOnlyUse(t *testing.T) {
+	result := computed(t, inputOf(t, "declarations-test-kept.txtar", applicationConfig(), Consumers{}), declarationEmitters())
+
+	kept := findingOf(t, result.Findings, testOnlyUseCode, "FixedNow")
+	if want := "variable is referenced only from test files and from declarations that are themselves dead"; kept.Message != want {
+		t.Errorf("DS1004 FixedNow says %q, want %q", kept.Message, want)
+	}
+	findingOf(t, result.Findings, unusedExportedCode, "Frozen")
+	findingOf(t, result.Findings, testOfDeadCodeCode, "TestStale")
+}
+
+// Under an internal tree a declaration a test of live code keeps is the test-only
+// use alone, and one only a test of dead code reads is the unreachable export.
+func TestADeclarationATestOfLiveCodeKeepsIsNoUnreachableExport(t *testing.T) {
+	emitters := declarationEmitters()
+	emitters[unreachableExportCode] = UnreachableExport
+	result := computed(t, inputOf(t, "declarations-test-kept-internal.txtar", applicationConfig(), Consumers{}), emitters)
+
+	findingOf(t, result.Findings, testOnlyUseCode, "FixedNow")
+	findingOf(t, result.Findings, unreachableExportCode, "Frozen")
+}
+
+// Every kind a test's use of production code only tests reach decides reports that
+// declaration at possible, and a declaration nothing references at certain.
+func TestEveryKindOfProductionCodeOnlyTestsReachIsAtPossible(t *testing.T) {
+	resolved := applicationConfig()
+	resolved.Analysis.MinConfidence = config.Possible
+	emitters := declarationEmitters()
+	emitters[unusedInterfaceCode] = UnusedInterface
+	result := computed(t, inputOf(t, "declarations-test-reached-kinds.txtar", resolved, Consumers{}), emitters)
+
+	cases := []struct {
+		code, name string
+		class      Class
+	}{
+		{unusedInterfaceCode, "Doer", Possible},
+		{deprecatedAndUnusedCode, "Old", Possible},
+		{unusedUnexportedCode, "helper", Possible},
+		{unusedExportedCode, "Spare", Certain},
+	}
+	for _, want := range cases {
+		t.Run(want.name, func(t *testing.T) {
+			found := findingOf(t, result.Findings, want.code, want.name)
+			if found.Class != want.class || found.Confidence != want.class {
+				t.Errorf("%s %s has class %s and confidence %s, want %s",
+					want.code, want.name, found.Class, found.Confidence, want.class)
+			}
+		})
+	}
+}
+
+// A dead root beside production code only tests reach keeps its own class, and so
+// does what only it reaches, though it shares a dead declaration with that code.
+func TestADeadRootBesideProductionCodeOnlyTestsReachKeepsItsClass(t *testing.T) {
+	resolved := applicationConfig()
+	resolved.Analysis.MinConfidence = config.Possible
+	result := computed(t, inputOf(t, "declarations-test-reached-beside-a-dead-root.txtar", resolved, Consumers{}), declarationEmitters())
+
+	cases := []struct {
+		code, name        string
+		class, confidence Class
+	}{
+		{unusedExportedCode, "Legacy", Certain, Certain},
+		{unusedUnexportedCode, "only", Certain, Certain},
+		{unusedExportedCode, "Shared", Possible, Possible},
+		{unusedUnexportedCode, "shared", Possible, Possible},
+		{testOnlyUseCode, "Make", Possible, Possible},
+		{testOfDeadCodeCode, "TestMake", Certain, Possible},
+	}
+	for _, want := range cases {
+		t.Run(want.name, func(t *testing.T) {
+			found := findingOf(t, result.Findings, want.code, want.name)
+			if found.Class != want.class || found.Confidence != want.confidence {
+				t.Errorf("%s %s has class %s and confidence %s, want %s and %s",
+					want.code, want.name, found.Class, found.Confidence, want.class, want.confidence)
+			}
+		})
+	}
+}
+
+// A test of dead code that also tests a dead declaration outside production code
+// only tests reach keeps its own confidence, so it is never withheld while that
+// declaration, which it references, is reported.
+func TestATestOfDeadCodeBesideADeadRootKeepsItsConfidence(t *testing.T) {
+	result := computed(t, inputOf(t, "declarations-test-reached-and-dead-root-tested.txtar", applicationConfig(), Consumers{}), declarationEmitters())
+
+	if found := findingOf(t, result.Findings, testOfDeadCodeCode, "TestBoth"); found.Confidence != Certain {
+		t.Errorf("DS1005 TestBoth has confidence %s, want certain", found.Confidence)
+	}
+}
+
+// Under the default minimum a dead root beside production code only tests reach is
+// reported with what only it reaches, and the rest of its component is withheld.
+func TestADeadRootBesideProductionCodeOnlyTestsReachIsReportedByDefault(t *testing.T) {
+	result := computed(t, inputOf(t, "declarations-test-reached-beside-a-dead-root.txtar", applicationConfig(), Consumers{}), declarationEmitters())
+
+	if got, want := summary(result.Findings), []string{unusedExportedCode + " Legacy", unusedUnexportedCode + " only"}; !slices.Equal(got, want) {
+		t.Errorf("the pass reports %v, want %v", got, want)
+	}
+}
+
+// Under the default minimum the findings of production code only tests reach are
+// withheld, and the one about a declaration nothing references is reported.
+func TestProductionCodeOnlyTestsReachIsWithheldByDefault(t *testing.T) {
+	result := computed(t, inputOf(t, "declarations-test-reached.txtar", applicationConfig(), Consumers{}), declarationEmitters())
+
+	if got, want := summary(result.Findings), []string{unusedExportedCode + " Spare"}; !slices.Equal(got, want) {
+		t.Errorf("the pass reports %v, want %v", got, want)
+	}
+	if len(result.Withheld) != 4 {
+		t.Errorf("the pass withholds %v, want the four findings of the component Sample and Seeded root", summary(result.Withheld))
+	}
+}

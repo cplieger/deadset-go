@@ -1,0 +1,50 @@
+A command calling one function of a package, a function of that package nothing
+calls and one a helper package calls, both calling one unexported function, and a
+test of the helper alone; the helper package imports no testing package.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+import "example.com/app/core"
+
+func main() { println(core.Live()) }
+-- main_test.go --
+package main
+
+import (
+	"testing"
+
+	"example.com/app/helpers"
+)
+
+func TestMake(t *testing.T) {
+	if helpers.Make() != 1 {
+		t.Fail()
+	}
+}
+-- core/core.go --
+package core
+
+// Live is what the command calls.
+func Live() int { return 0 }
+
+// Legacy is called by nothing.
+func Legacy() int { return shared() + only() }
+
+// Shared is called by the helper alone.
+func Shared() int { return shared() }
+
+func shared() int { return 1 }
+
+func only() int { return 2 }
+-- helpers/helpers.go --
+package helpers
+
+import "example.com/app/core"
+
+// Make is called by the test alone.
+func Make() int { return core.Shared() }

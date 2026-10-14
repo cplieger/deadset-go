@@ -215,6 +215,12 @@ type Finding struct {
 	// emitter whose subject's class is not its declaration's own; no class caps nothing.
 	ceiling Class
 
+	// testUsed marks a finding [Input.testUse] lowers to possible, and untested is the
+	// confidence it would carry otherwise, which is what its component's cap and the
+	// dials read: the lowering is the finding's own and no other member's.
+	testUsed bool
+	untested Class
+
 	// local marks a finding about a declaration a function body makes, which the
 	// inventory does not hold: the enclosing declaration's reference names it, as it
 	// names a part, and reference counting inside the body decided it.
@@ -228,6 +234,16 @@ func (f *Finding) shape() shape {
 		return shapePart
 	}
 	return shapeOf(f.Symbol.Kind)
+}
+
+// DeclarationRef is the reference of the declaration a finding's subject is or is a
+// part of. A parameter has a reference of its own, under its holder's.
+func (f *Finding) DeclarationRef() string {
+	if f.Symbol.Kind != parameterSubject {
+		return f.Symbol.Ref
+	}
+	holder, _ := graph.ParameterHolder(f.Symbol.Ref)
+	return holder
 }
 
 // Consumers is what the run knows about the target's consumers: the ones the scope
@@ -491,15 +507,38 @@ func capComponents(findings []Finding) {
 		if !found.Component.Root {
 			continue
 		}
-		if floor, seen := least[found.Component.ID]; !seen || found.Confidence.rank() < floor.rank() {
-			least[found.Component.ID] = found.Confidence
+		if floor, seen := least[found.Component.ID]; !seen || found.componentConfidence().rank() < floor.rank() {
+			least[found.Component.ID] = found.componentConfidence()
 		}
 	}
 	for i := range findings {
 		if floor, seen := least[findings[i].Component.ID]; seen {
 			findings[i].Confidence = findings[i].Confidence.lower(floor)
+			findings[i].untested = findings[i].untested.lower(floor)
 		}
 	}
+}
+
+// componentConfidence is the confidence a finding gives its component's cap and the
+// dials: its own, but for the lowering [Input.capTestUsed] made.
+func (f *Finding) componentConfidence() Class {
+	if f.testUsed {
+		return f.untested
+	}
+	return f.Confidence
+}
+
+// capTestUsed lowers a finding about a declaration of [testUseFacts.dead] to possible,
+// its class too unless it is a test of dead code, whose class is its own.
+func (in *Input) capTestUsed(found *Finding, row *catalog.Row) {
+	if found.id == "" || found.local || heldLive[row.Code] || !in.testUse().dead[found.id] {
+		return
+	}
+	found.testUsed, found.untested = true, found.Confidence
+	if row.Code != testOfDeadCodeCode {
+		found.Class = found.Class.lower(Possible)
+	}
+	found.Confidence = found.Confidence.lower(Possible)
 }
 
 // phase runs the emitters of one phase, in the vocabulary's order, and returns what
@@ -598,31 +637,14 @@ type heldFinding struct {
 	component  string
 }
 
-// pairs reports whether one suppression record is a record of one finding.
-//
-// A record reaches a finding two ways and either is enough. It marked the finding's
-// own declaration, which is how a directive above a declaration reaches every
-// finding about that declaration and about its parts, and it is the only way a
-// directive reaches one: a directive names a position and the declaration below it
-// is whatever begins there. Or it names the code, the reference and the path of the
-// finding, which is how an entry and a baseline row are matched, each of the three
-// exactly and none of them by pattern.
-//
-// The second way is not the first with more steps, and two findings need it. A
-// finding whose subject is no declaration of the inventory has no declaration for a
-// record to mark: the subject of a satisfaction assertion is the interface it names,
-// which is declared wherever it is declared, so an entry copied from that finding
-// names the interface's reference beside the assertion's file and resolves to no one
-// declaration at all. And a finding about a part of a declaration names that
-// declaration by reference, so an entry copied from it reaches the part through the
-// reference rather than through a mark the part never took.
-//
-// The path is matched against the finding's own position rather than against the file
-// the record's reference is declared in, which is what the grammar states and the
-// only reading under which an assertion and its interface may live in two files. An
-// entry naming a file other than the one the finding is reported in matches nothing
-// and is stale, which is what keeps an adjudication written for one file from masking
-// a same-named symbol in another.
+// pairs reports whether one suppression record is a record of one finding: it marked
+// the finding's own declaration, as a directive does, or it names the finding's code,
+// reference and path exactly, as an entry and a baseline row do. A satisfaction
+// assertion's subject and a part are reachable only the second way. A record naming a
+// declaration reaches every part of it; one naming a parameter's own reference reaches
+// that parameter alone. The path is the finding's position, not the reference's file,
+// so an assertion and its interface may live in two files and an entry for one file
+// never masks a same-named symbol in another.
 func pairs(mark *suppress.Record, found *Finding) bool {
 	if mark.Code != found.Code {
 		return false
@@ -630,7 +652,7 @@ func pairs(mark *suppress.Record, found *Finding) bool {
 	if mark.Bound != "" && mark.Bound == found.id {
 		return true
 	}
-	return mark.Symbol == found.Symbol.Ref && mark.Path == found.Position.Path
+	return (mark.Symbol == found.Symbol.Ref || mark.Symbol == found.DeclarationRef()) && mark.Path == found.Position.Path
 }
 
 // checkTable refuses a table registering an emitter under a code the vocabulary
@@ -820,7 +842,7 @@ func (in *Input) admit(found *Finding) error {
 				errEmitter, found.Code, found.Symbol.Kind)
 		}
 	case shapePart:
-		if in.index().byRef[found.Symbol.Ref] == "" {
+		if in.index().byRef[found.DeclarationRef()] == "" {
 			return fmt.Errorf("%w: %s reports a %s of %q, which names no declaration of the inventory",
 				errEmitter, found.Code, found.Symbol.Kind, found.Symbol.Ref)
 		}
@@ -894,6 +916,7 @@ func (in *Input) complete(found *Finding, row *catalog.Row) {
 	in.capNameLiteral(found)
 	in.capFilled(found)
 	found.Confidence = found.Class.lower(Class(row.MaxClass)).lower(in.componentCap(found.id))
+	in.capTestUsed(found, row)
 	found.Severity = in.Config.EffectiveSeverity(row.Code)
 	found.Fixability = row.Fixability
 	if found.Component.Held && slices.Contains(row.FindingFixabilities, manualFixability) {
@@ -973,7 +996,7 @@ func (in *Input) configurationsOf(found *Finding) []string {
 	case shapeRow, shapeDependency:
 		return append(make([]string, 0, len(in.Matrix)), in.Matrix...)
 	case shapePart:
-		id = held.byRef[found.Symbol.Ref]
+		id = held.byRef[found.DeclarationRef()]
 	default:
 		id = found.id
 	}
@@ -1037,6 +1060,7 @@ type index struct {
 	// interfaces is what the interface kinds read, computed on first use by a kind
 	// that judges an interface method outside them.
 	interfaces *interfaceFacts
+	testUse    *testUseFacts
 
 	minted int
 }

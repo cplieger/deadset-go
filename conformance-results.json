@@ -7,8 +7,8 @@
   },
   "result": "pass",
   "totals": {
-    "fixtures": 158,
-    "pass": 158,
+    "fixtures": 162,
+    "pass": 162,
     "gap": 0,
     "fail": 0
   },
@@ -8596,6 +8596,71 @@
       "unexpected": []
     },
     {
+      "fixture": "test-kept-declaration-beside-dead-production-references",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "FixedNow",
+          "result": "pass",
+          "actual": {
+            "report": "DS1004",
+            "symbol_kind": "variable",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reachability",
+            "component": {
+              "root": false
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Stale",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "TestClock",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "deadOnly",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "symbol_kind": "variable",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reachability",
+            "component": {
+              "root": false
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
       "fixture": "test-of-dead-code",
       "result": "pass",
       "expectations": [
@@ -9481,8 +9546,8 @@
           "actual": {
             "report": "DS1004",
             "symbol_kind": "function",
-            "confidence": "certain",
-            "reachability_class": "certain",
+            "confidence": "possible",
+            "reachability_class": "possible",
             "liveness_relation": "reference-counting"
           },
           "suppression": {
@@ -9496,8 +9561,8 @@
           "actual": {
             "report": "DS1004",
             "symbol_kind": "function",
-            "confidence": "certain",
-            "reachability_class": "certain",
+            "confidence": "possible",
+            "reachability_class": "possible",
             "liveness_relation": "reference-counting"
           },
           "suppression": {
@@ -9526,7 +9591,7 @@
           "actual": {
             "report": "DS1005",
             "symbol_kind": "function",
-            "confidence": "certain",
+            "confidence": "possible",
             "reachability_class": "certain",
             "liveness_relation": "reference-counting"
           },
@@ -9537,6 +9602,220 @@
         },
         {
           "symbol": "run",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "test-support-without-test-evidence-by-default",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Sample",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Seeded",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Spare",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Start",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "run",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "test-used-code-beside-a-dead-root",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Legacy",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "component": {
+              "root": true
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Live",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Make",
+          "result": "pass",
+          "actual": {
+            "report": "DS1004",
+            "symbol_kind": "function",
+            "confidence": "possible",
+            "reachability_class": "possible",
+            "liveness_relation": "reference-counting",
+            "component": {
+              "root": true
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Shared",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "symbol_kind": "function",
+            "confidence": "possible",
+            "reachability_class": "possible",
+            "liveness_relation": "reachability",
+            "component": {
+              "root": false
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "TestMake",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "symbol_kind": "function",
+            "confidence": "possible",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "component": {
+              "root": true
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "shared",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "symbol_kind": "function",
+            "confidence": "possible",
+            "reachability_class": "possible",
+            "liveness_relation": "reachability",
+            "component": {
+              "root": false
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "test-used-code-beside-a-dead-root-by-default",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Legacy",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "component": {
+              "root": true
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Live",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Make",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Shared",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "TestMake",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "shared",
           "result": "pass",
           "actual": {
             "report": "none"

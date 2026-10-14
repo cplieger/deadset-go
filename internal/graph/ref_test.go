@@ -60,6 +60,9 @@ var goForms = map[string]string{
 	"file":    `^go://[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*#[^/\\:#\r\n]+\.go:file$`,
 	"require": `^go://[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*#[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*(?:@[A-Za-z0-9.+-]+)?:require$`,
 	"replace": `^go://[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*#[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*(?:@[A-Za-z0-9.+-]+)?:replace$`,
+	"parameter": `^go://[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*#(?:(?:[A-Za-z_]|[^\x00-\x7F])(?:[A-Za-z0-9_]|[^\x00-\x7F])*` +
+		`(?:\.(?:[A-Za-z_]|[^\x00-\x7F])(?:[A-Za-z0-9_]|[^\x00-\x7F])*)?)?` +
+		`\((?:[A-Za-z_]|[^\x00-\x7F])(?:[A-Za-z0-9_]|[^\x00-\x7F])*\)$`,
 }
 
 // corpusForms maps a corpus form to the expression that accepts it; several
@@ -75,6 +78,7 @@ var corpusForms = map[string]string{
 	"file":             "file",
 	"require":          "require",
 	"replace":          "replace",
+	"parameter":        "parameter",
 }
 
 // emitterInput is what Ref is called with to produce one corpus case.
@@ -110,6 +114,14 @@ var emitted = map[string]emitterInput{
 	"go://example.com/app/internal/legacy#render_windows.go:file": {KindFile, "example.com/app/internal/legacy", []string{"render_windows.go"}},
 }
 
+// emittedParameters gives, for each accepted Go parameter case, the holder's
+// reference and the parameter's name ParameterRef is called with.
+var emittedParameters = map[string][2]string{
+	"go://example.com/app#Catalog.ResolveAlias(name)": {"go://example.com/app#Catalog.ResolveAlias", "name"},
+	"go://example.com/app#Resolve(limit)":             {"go://example.com/app#Resolve", "limit"},
+	"go://example.com/app#(line)":                     {"go://example.com/app#", "line"},
+}
+
 // notEmitted are the forms the published grammar defines for a subject no
 // symbol kind of this enumeration reaches: the directives of a module file.
 var notEmitted = []string{"require", "replace"}
@@ -137,6 +149,15 @@ func TestRefEmitsEveryAcceptedCorpusCase(t *testing.T) {
 			continue
 		}
 		t.Run(c.Input, func(t *testing.T) {
+			if parts, parameter := emittedParameters[c.Input]; parameter {
+				if got := ParameterRef(parts[0], parts[1]); got != c.Input {
+					t.Errorf("ParameterRef(%q, %q) = %q, want %q", parts[0], parts[1], got, c.Input)
+				}
+				if holder, named := ParameterHolder(c.Input); !named || holder != parts[0] {
+					t.Errorf("ParameterHolder(%q) = %q, %t, want %q, true", c.Input, holder, named, parts[0])
+				}
+				return
+			}
 			in, declared := emitted[c.Input]
 			if slices.Contains(notEmitted, c.Form) {
 				if declared {
@@ -164,6 +185,11 @@ func TestRefTableCoversNothingTheCorpusRefuses(t *testing.T) {
 	for input := range emitted {
 		if !accepted[input] {
 			t.Errorf("the emitter table declares %q, which the published corpus does not accept", input)
+		}
+	}
+	for input := range emittedParameters {
+		if !accepted[input] {
+			t.Errorf("the parameter table declares %q, which the published corpus does not accept", input)
 		}
 	}
 }

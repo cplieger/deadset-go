@@ -260,7 +260,7 @@ func (in *Input) dormant(at int, matched bool) bool {
 		return true
 	}
 	class := in.classOf(mark.Bound).lower(Class(row.MaxClass))
-	if in.nameLiteral(mark.Bound, mark.Code) != nil {
+	if in.nameLiteral(mark.Bound, mark.Code) != nil || in.testReachedUse(mark.Bound, mark.Code) {
 		class = Possible
 	}
 	return least.rank() != 0 && class.rank() < least.rank()

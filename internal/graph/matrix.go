@@ -349,6 +349,7 @@ func (x *Matrix) intersect(union *Graph, s *Symbol, held []map[SymbolID]Candidat
 		if !found.UnreferencedTest {
 			c.UnreferencedTest = false
 		}
+		c.KeptByTests = c.KeptByTests || found.KeptByTests
 	}
 	if c.Configs == 0 {
 		return Candidate{}, false

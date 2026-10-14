@@ -1,0 +1,44 @@
+A command calling one function of a package, two variables only a function nothing
+calls reads in production, a test of live code reading the first, and a test of
+that dead function alone reading the second.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+import "example.com/app/clock"
+
+func main() { println(clock.Now()) }
+-- clock/clock.go --
+package clock
+
+// Now is what the command calls.
+func Now() int64 { return 1 }
+
+// FixedNow is read by a test of live code and by Stale.
+var FixedNow int64 = 1664379699000
+
+// Frozen is read by a test of Stale alone and by Stale.
+var Frozen int64 = 2
+
+// Stale is called by nothing but its test.
+func Stale() int64 { return FixedNow + Frozen }
+-- clock/clock_test.go --
+package clock
+
+import "testing"
+
+func TestClock(t *testing.T) {
+	if Now() > FixedNow {
+		t.Fail()
+	}
+}
+
+func TestStale(t *testing.T) {
+	if Stale() != Frozen {
+		t.Fail()
+	}
+}
