@@ -63,6 +63,30 @@ func TestClassifyTestSupportIsTheLargestSetOnlyTestsReach(t *testing.T) {
 	}
 }
 
+// An import of a package of a test library is test evidence as the testing
+// package's is, and one of a module whose path only starts with a library's is not.
+func TestClassifyTestSupportCountsTestLibraryImportsAsEvidence(t *testing.T) {
+	result, root := loadDir(t, extract(t, "test-support-libraries.txtar"), "linux", "amd64")
+	symbols, err := Symbols(result, root, os.ReadFile)
+	if err != nil {
+		t.Fatalf("Setup: Symbols(test-support-libraries.txtar): %v", err)
+	}
+	roots, _, err := Roots(result, root, os.ReadFile, symbols, RootOptions{})
+	if err != nil {
+		t.Fatalf("Setup: Roots(test-support-libraries.txtar): %v", err)
+	}
+	ClassifyTestSupport(result, root, symbols, roots, false)
+
+	if got, want := slices.Sorted(maps.Keys(result.TestSupport)), []string{
+		"example.com/libs/asserted", "example.com/libs/matched", "example.com/libs/tooled",
+	}; !slices.Equal(got, want) {
+		t.Errorf("ClassifyTestSupport(test-support-libraries.txtar) test support = %v, want %v", got, want)
+	}
+	if got, want := slices.Sorted(maps.Keys(result.TestReached)), []string{"example.com/libs/lookalike"}; !slices.Equal(got, want) {
+		t.Errorf("ClassifyTestSupport(test-support-libraries.txtar) test reached = %v, want %v", got, want)
+	}
+}
+
 // A library's package outside an internal tree is importable by outside programs,
 // so only the internal one stays test-support code.
 func TestClassifyTestSupportKeepsALibrarysImportablePackagesOut(t *testing.T) {

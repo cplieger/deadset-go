@@ -60,8 +60,9 @@ func gigabytes(tenths uint64) string {
 // Start governs this process's memory for the life of ctx with sources, read in
 // order, and ends the run by calling cancel with an *[ExhaustedError] when it cannot
 // fit. The first reading is applied before Start returns, so a run that cannot fit
-// is cancelled before it starts. Where no source answers that reading the governor
-// sets nothing at all, and a machine whose memory cannot be read runs as it would
+// is cancelled before it starts. A memory limit the process started with bounds the
+// ceiling as a source does. Where neither answers that reading the governor sets
+// nothing at all, and a machine whose memory cannot be read runs as it would
 // without it. The returned function stops the governor and restores the limit and
 // the collection target it found; call it before the process exits.
 func Start(ctx context.Context, cancel context.CancelCauseFunc, sources []Source) (stop func()) {
@@ -69,13 +70,15 @@ func Start(ctx context.Context, cancel context.CancelCauseFunc, sources []Source
 }
 
 func start(ctx context.Context, cancel context.CancelCauseFunc, sources []Source, every time.Duration) (stop func()) {
-	g := &governor{sources: sources, cancel: cancel, samples: newSamples()}
+	// A negative limit reads the current one without changing it; the collection
+	// target has no such read, so it is set to the default and put back.
+	g := &governor{sources: sources, cancel: cancel, samples: newSamples(), previousLimit: debug.SetMemoryLimit(-1)}
+	if g.previousLimit > 0 && g.previousLimit < math.MaxInt64 {
+		g.callerLimit = uint64(g.previousLimit)
+	}
 	if _, read := g.ceiling(); !read {
 		return func() {}
 	}
-	// A negative limit reads the current one without changing it; the collection
-	// target has no such read, so it is set to the default and put back.
-	g.previousLimit = debug.SetMemoryLimit(-1)
 	g.previousGOGC = debug.SetGCPercent(defaultGOGC)
 	debug.SetGCPercent(g.previousGOGC)
 	g.gogc = g.previousGOGC
@@ -119,6 +122,7 @@ type governor struct {
 	sources       []Source
 	samples       []metrics.Sample
 	previousLimit int64
+	callerLimit   uint64 // the memory limit the process started with, 0 where none was set
 	previousGOGC  int
 	gogc          int
 	window        cpuWindow
@@ -159,11 +163,16 @@ func (g *governor) read() (live, held uint64) {
 }
 
 // ceiling is the most memory this process may hold: what it holds now plus the
-// least headroom any source reports, and false where no source answers.
+// least headroom any source reports, and false where no source answers. A memory
+// limit the process started with (GOMEMLIMIT) is one more bound, so a run never
+// raises the limit its caller set.
 func (g *governor) ceiling() (uint64, bool) {
 	_, held := g.read()
 	var least uint64
 	answered := false
+	if g.callerLimit > 0 {
+		least, answered = g.callerLimit-min(held, g.callerLimit), true
+	}
 	for _, source := range g.sources {
 		if room, ok := source(); ok && (!answered || room < least) {
 			least, answered = room, true

@@ -1,0 +1,98 @@
+A command and its test, and four packages only that test imports: three import a
+package of a test library, each library a stand-in module the module file replaces
+with a directory of the archive, and one imports a module whose path only starts
+with a library's.
+
+-- go.mod --
+module example.com/libs
+
+go 1.27.1
+
+require (
+	github.com/onsi/gomega v1.0.0
+	github.com/stretchr/testify v1.0.0
+	github.com/stretchr/testifyish v1.0.0
+	gotest.tools/v3 v3.0.0
+)
+
+replace (
+	github.com/onsi/gomega => ./stand-ins/gomega
+	github.com/stretchr/testify => ./stand-ins/testify
+	github.com/stretchr/testifyish => ./stand-ins/testifyish
+	gotest.tools/v3 => ./stand-ins/gotesttools
+)
+-- main.go --
+package main
+
+func main() {}
+-- main_test.go --
+package main
+
+import (
+	"testing"
+
+	"example.com/libs/asserted"
+	"example.com/libs/lookalike"
+	"example.com/libs/matched"
+	"example.com/libs/tooled"
+)
+
+func TestAll(t *testing.T) {
+	_ = asserted.Check() + matched.Check() + tooled.Check() + lookalike.Check()
+}
+-- asserted/asserted.go --
+package asserted
+
+import "github.com/stretchr/testify/assert"
+
+func Check() int { return assert.Version }
+-- matched/matched.go --
+package matched
+
+import "github.com/onsi/gomega"
+
+func Check() int { return gomega.Version }
+-- tooled/tooled.go --
+package tooled
+
+import "gotest.tools/v3/assert"
+
+func Check() int { return assert.Version }
+-- lookalike/lookalike.go --
+package lookalike
+
+import "github.com/stretchr/testifyish"
+
+func Check() int { return testifyish.Version }
+-- stand-ins/testify/go.mod --
+module github.com/stretchr/testify
+
+go 1.27.1
+-- stand-ins/testify/assert/assert.go --
+package assert
+
+const Version = 1
+-- stand-ins/gomega/go.mod --
+module github.com/onsi/gomega
+
+go 1.27.1
+-- stand-ins/gomega/gomega.go --
+package gomega
+
+const Version = 1
+-- stand-ins/gotesttools/go.mod --
+module gotest.tools/v3
+
+go 1.27.1
+-- stand-ins/gotesttools/assert/assert.go --
+package assert
+
+const Version = 1
+-- stand-ins/testifyish/go.mod --
+module github.com/stretchr/testifyish
+
+go 1.27.1
+-- stand-ins/testifyish/testifyish.go --
+package testifyish
+
+const Version = 1

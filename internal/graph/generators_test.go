@@ -14,14 +14,21 @@ import (
 // root names under one configuration, and the reference of every symbol loaded.
 func generatorRoots(t *testing.T, c load.Configuration, kind RootKind) (named, held map[string]bool) {
 	t.Helper()
-	result, root := loadDirUnder(t.Context(), t, extract(t, "generators.txtar"), c)
+	return archiveRoots(t, "generators.txtar", c, kind)
+}
+
+// archiveRoots is the references of the roots of one kind of an archive loaded under
+// one configuration, and the references of every symbol it holds.
+func archiveRoots(t *testing.T, archive string, c load.Configuration, kind RootKind) (named, held map[string]bool) {
+	t.Helper()
+	result, root := loadDirUnder(t.Context(), t, extract(t, archive), c)
 	symbols, err := Symbols(result, root, os.ReadFile)
 	if err != nil {
-		t.Fatalf("Symbols(generators.txtar) error: %v", err)
+		t.Fatalf("Symbols(%s) error: %v", archive, err)
 	}
 	roots, _, err := Roots(result, root, os.ReadFile, symbols, RootOptions{})
 	if err != nil {
-		t.Fatalf("Roots(generators.txtar) error: %v", err)
+		t.Fatalf("Roots(%s) error: %v", archive, err)
 	}
 	d := detection{symbols: symbols, roots: roots}
 	named = make(map[string]bool)

@@ -6,6 +6,7 @@ import (
 	"go/types"
 	"path"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -256,8 +257,9 @@ func (d *rootDetection) interfacesOf(p *packages.Package, file string) []types.O
 	return held
 }
 
-// goFuzzFile reports whether f's build constraint selects it under the gofuzz tag:
-// the tag appears in it and not under a negation.
+// goFuzzFile reports whether a go-fuzz build may compile f: its build constraint
+// holds with the gofuzz tag set, for some setting of its other tags. A fuzz build sets
+// the tag, and a file whose constraint names no gofuzz tag compiles either way.
 func goFuzzFile(f *ast.File) bool {
 	for _, group := range f.Comments {
 		if group.Pos() > f.Package {
@@ -267,26 +269,57 @@ func goFuzzFile(f *ast.File) bool {
 			if !constraint.IsGoBuild(c.Text) && !constraint.IsPlusBuild(c.Text) {
 				continue
 			}
-			if expr, err := constraint.Parse(c.Text); err == nil && namesTag(expr, goFuzzTag) {
-				return true
+			if expr, err := constraint.Parse(c.Text); err == nil && !holdsWithTag(expr, goFuzzTag) {
+				return false
 			}
 		}
 	}
-	return false
+	return true
 }
 
-// namesTag reports whether tag appears in expr outside every negation.
-func namesTag(expr constraint.Expr, tag string) bool {
-	switch e := expr.(type) {
-	case *constraint.TagExpr:
-		return e.Tag == tag
-	case *constraint.AndExpr:
-		return namesTag(e.X, tag) || namesTag(e.Y, tag)
-	case *constraint.OrExpr:
-		return namesTag(e.X, tag) || namesTag(e.Y, tag)
-	default:
-		return false
+// maxConstraintTags bounds the tags holdsWithTag enumerates the settings of; a
+// constraint naming more is read as one that holds.
+const maxConstraintTags = 16
+
+// holdsWithTag reports whether expr is true with tag set for some setting of the
+// other tags it names.
+func holdsWithTag(expr constraint.Expr, tag string) bool {
+	var others []string
+	seen := map[string]bool{tag: true}
+	var collect func(constraint.Expr)
+	collect = func(e constraint.Expr) {
+		switch e := e.(type) {
+		case *constraint.TagExpr:
+			if !seen[e.Tag] {
+				seen[e.Tag] = true
+				others = append(others, e.Tag)
+			}
+		case *constraint.NotExpr:
+			collect(e.X)
+		case *constraint.AndExpr:
+			collect(e.X)
+			collect(e.Y)
+		case *constraint.OrExpr:
+			collect(e.X)
+			collect(e.Y)
+		}
 	}
+	collect(expr)
+	if len(others) > maxConstraintTags {
+		return true
+	}
+	for setting := range 1 << len(others) {
+		if expr.Eval(func(name string) bool {
+			if name == tag {
+				return true
+			}
+			at := slices.Index(others, name)
+			return at >= 0 && setting&(1<<at) != 0
+		}) {
+			return true
+		}
+	}
+	return false
 }
 
 // goFuzzEntry reports whether fn is a go-fuzz entry point: Fuzz or a name it opens

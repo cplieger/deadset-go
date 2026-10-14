@@ -96,6 +96,28 @@ func TestTickRaisesGOGCAndSetsTheLimitUnderHeadroom(t *testing.T) {
 	}
 }
 
+func TestStartKeepsTheLimitTheProcessStartedWith(t *testing.T) {
+	keepGCSettings(t)
+	const callerLimit = 4 << 30
+	debug.SetMemoryLimit(callerLimit)
+	ctx, cancel := context.WithCancelCause(t.Context())
+	defer cancel(nil)
+
+	stop := start(ctx, cancel, []Source{func() (uint64, bool) { return 1 << 40, true }}, time.Hour)
+	got := debug.SetMemoryLimit(-1)
+	stop()
+
+	if got > callerLimit {
+		t.Errorf("start under a %d-byte memory limit with a terabyte of headroom set the limit to %d, want at most %d", callerLimit, got, callerLimit)
+	}
+	if got < callerLimit*8/10 {
+		t.Errorf("start under a %d-byte memory limit set the limit to %d, want 85 %% of it", callerLimit, got)
+	}
+	if ctx.Err() != nil {
+		t.Errorf("start under a %d-byte memory limit cancelled the run: %v", callerLimit, context.Cause(ctx))
+	}
+}
+
 func TestTickKeepsCollectionOffWhereTheProcessTurnedItOff(t *testing.T) {
 	keepGCSettings(t)
 	g := &governor{sources: []Source{func() (uint64, bool) { return 1 << 40, true }}, cancel: func(error) {}, samples: newSamples(), previousGOGC: -1, gogc: -1}

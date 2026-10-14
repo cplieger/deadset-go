@@ -7,12 +7,17 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"io/fs"
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 
 	"golang.org/x/tools/go/packages"
 )
+
+// mainFunction is the name of the function a program starts at.
+const mainFunction = "main"
 
 // ignoreTag is the tag the toolchain's convention for a file run by hand
 // constrains it on, which no configuration sets.
@@ -37,7 +42,79 @@ type program struct {
 // checkPrograms finds and checks every program of one unit's packages under
 // configuration c, in the order of their paths.
 func checkPrograms(ctx context.Context, fset *token.FileSet, from unitDir, pkgs []*packages.Package, c Configuration) []program {
-	paths := programPaths(pkgs, c)
+	return checkProgramFiles(ctx, fset, from, pkgs, c, programPaths(pkgs, c))
+}
+
+// checkScripts checks, each alone against the packages pkgs loaded, every script of
+// the dropped module rooted at dir: a file run with go run on its own, which no build
+// of its package compiles because a sibling file declares main as well. A package a
+// script imports that pkgs do not hold is loaded from dir, so the script's own module
+// file decides it.
+func checkScripts(ctx context.Context, fset *token.FileSet, dir string, pkgs []*packages.Package, c Configuration) []program {
+	return checkProgramFiles(ctx, fset, unitDir{dir: dir, workspace: workspaceOff}, pkgs, c, scriptPaths(dir, c))
+}
+
+// scriptPaths lists, sorted, every Go file below the module root dir, in no nested
+// module and no directory [Units] leaves unsearched, other than a test file, that
+// configuration c builds with or without the ignore tag and that declares a function
+// main with no receiver in package main, where another such file shares its directory.
+func scriptPaths(dir string, c Configuration) []string {
+	without := cgoEnabledContext(c)
+	with := cgoEnabledContext(c)
+	with.BuildTags = append(with.BuildTags, ignoreTag)
+	byDir := make(map[string][]string)
+	_ = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+		switch {
+		case err != nil:
+			return nil
+		case entry.IsDir() && path != dir && (unsearched(entry.Name()) || isModuleRoot(path)):
+			return filepath.SkipDir
+		case !entry.IsDir() && isScript(&without, &with, path):
+			parent := filepath.Dir(path)
+			byDir[parent] = append(byDir[parent], path)
+		}
+		return nil
+	})
+	var paths []string
+	for _, held := range byDir {
+		if len(held) > 1 {
+			paths = append(paths, held...)
+		}
+	}
+	slices.Sort(paths)
+	return paths
+}
+
+// isScript reports whether the file at path is a Go file other than a test file that
+// the context without or the context with builds and that declares main.
+func isScript(without, with *build.Context, path string) bool {
+	if filepath.Ext(path) != goFileExt || strings.HasSuffix(path, "_test.go") {
+		return false
+	}
+	parent, name := filepath.Split(path)
+	built, err := without.MatchFile(parent, name)
+	if err == nil && !built {
+		built, err = with.MatchFile(parent, name)
+	}
+	return err == nil && built && declaresMain(path)
+}
+
+// declaresMain reports whether the file at path declares package main and a function
+// main with no receiver.
+func declaresMain(path string) bool {
+	f, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
+	if err != nil || f.Name.Name != mainPackageName {
+		return false
+	}
+	return slices.ContainsFunc(f.Decls, func(decl ast.Decl) bool {
+		fn, ok := decl.(*ast.FuncDecl)
+		return ok && fn.Recv == nil && fn.Name.Name == mainFunction
+	})
+}
+
+// checkProgramFiles checks each file of paths that declares package main alone under
+// configuration c, against pkgs and what loads from from.
+func checkProgramFiles(ctx context.Context, fset *token.FileSet, from unitDir, pkgs []*packages.Package, c Configuration, paths []string) []program {
 	if len(paths) == 0 {
 		return nil
 	}

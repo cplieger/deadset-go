@@ -376,12 +376,37 @@ func (in *Input) testUse() *testUseFacts {
 		out[ref.From] = append(out[ref.From], ref.To)
 	}
 	in.walkTestUse(facts, out)
-	for i := range in.Sweep.Candidates {
-		if test := &in.Sweep.Candidates[i]; test.TestOfDeadCode && everyDeadTargetIn(out[test.ID], in.deadProduction, facts.dead) {
-			facts.dead[test.ID] = true
+	for admitted := true; admitted; {
+		admitted = false
+		for i := range in.Sweep.Candidates {
+			test := &in.Sweep.Candidates[i]
+			if test.TestOfDeadCode && !facts.dead[test.ID] && everyDeadTargetIn(out[test.ID], in.deadProduction, facts.dead) {
+				facts.dead[test.ID] = true
+				in.walkAdmittedTest(facts, out, test.ID)
+				admitted = true
+			}
 		}
 	}
 	return facts
+}
+
+// walkAdmittedTest adds to facts.dead every dead declaration one admitted test of
+// dead code reaches through out or holds as its container, a test file's helpers
+// included, so a reported finding is never about a declaration the withheld test
+// needs. A production declaration it adds can admit a further test.
+func (in *Input) walkAdmittedTest(facts *testUseFacts, out map[graph.SymbolID][]graph.SymbolID, test graph.SymbolID) {
+	queue := []graph.SymbolID{test}
+	children := in.index().children
+	for len(queue) > 0 {
+		id := queue[len(queue)-1]
+		queue = queue[:len(queue)-1]
+		for _, to := range slices.Concat(out[id], children[id]) {
+			if candidate := in.candidateOf(to); candidate != nil && !candidate.TestOfDeadCode && !facts.dead[to] {
+				facts.dead[to] = true
+				queue = append(queue, to)
+			}
+		}
+	}
 }
 
 // deadProduction reports whether one declaration is a dead production declaration:

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "deadset report envelope",
-  "description": "One report per analyzer invocation, and one report per merge over analyzer reports. The document is strict JSON, decoded by each language's standard library with a closed key list: a key this schema does not declare fails the decode. Every member is required and every array is present even when empty, so a reader never distinguishes an absent array from an empty one. Field order is the order this schema lists the properties in, and every array is ordered by the canonical key grammar/merge.md defines, so two runs over an unchanged tree write the same bytes and no timestamp, duration or host detail appears anywhere in the document. The finding object is declared once, in finding.schema.json, and referenced from the two places a finding appears: findings and the finding an edge evaluation carries. That reference is the one cross-file reference in this contract, because a finding is one document with one owner. A report an analyzer writes names that analyzer in analyzer; a report a merge writes names the merging product there, carries merged_from with one entry per input report, and holds no edge evaluation whose state is dead.",
+  "description": "One report per analyzer invocation, and one report per merge over analyzer reports. The document is strict JSON, decoded by each language's standard library with a closed key list: a key this schema does not declare fails the decode. Every member is required and every array is present even when empty, so a reader never distinguishes an absent array from an empty one. Field order is the order this schema lists the properties in, and every array is ordered by the canonical key grammar/merge.md defines, so two runs over an unchanged tree write the same bytes and no timestamp, duration or host detail appears anywhere in the document. The finding object is declared once, in finding.schema.json, and referenced from the two places a finding appears: findings and the finding an edge evaluation carries. That reference, and the one to the positioned symbol a components entry lists, are the cross-file references in this contract, because a finding is one document with one owner. A report an analyzer writes names that analyzer in analyzer; a report a merge writes names the merging product there, carries merged_from with one entry per input report, and holds no edge evaluation whose state is dead.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -176,7 +176,7 @@
       }
     },
     "configurations": {
-      "description": "The build matrix the analysis ran, one entry per configuration, ordered by id compared bytewise. An entry takes one of two shapes, the shape of the thing that decides what the analyzed language builds: a platform, which is an operating system and an architecture with the build tags in effect, or a project, which is one compiler configuration file. An entry carries one shape or the other and never a member of both, so a reader tells the two apart by the members present. A symbol is reported only when it is dead in every entry, and each finding names the configurations in which it holds. A configuration the analysis derived and could not build is named by configurations_not_built rather than here, so this array is the matrix the analysis ran.",
+      "description": "The build matrix the analysis ran, one entry per configuration, ordered by id compared bytewise. An entry takes one of two shapes, the shape of the thing that decides what the analyzed language builds: a platform, which is an operating system and an architecture with the build tags in effect, or a project, which is one compiler configuration file. An entry carries one shape or the other and never a member of both, so a reader tells the two apart by the members present. A symbol is reported only when it is dead in every entry, and each finding names the configurations in which it holds. Nor is a symbol reported that a configuration compiles a reference to from a declaration that is not reported, because deleting it would break that configuration's build, and neither is any declaration a reference from one so kept names, until no declaration joins. In the run that counts no test reference, a reference a test file makes does not count for this. A configuration the analysis derived and could not build is named by configurations_not_built rather than here, so this array is the matrix the analysis ran.",
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
@@ -386,6 +386,28 @@
         "$ref": "finding.schema.json",
         "properties": {
           "retained_by": { "maxItems": 0 }
+        }
+      }
+    },
+    "components": {
+      "description": "Each component a finding of the report names, with its members, listed once, present where the run is configured to list a component in full and absent otherwise: one entry per distinct component.id the findings carry, the findings an edge evaluation carries counted after the report's own findings, in the order of the first finding naming each. A finding names its component's identifier and counts, and its members are read from the entry of that identifier.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "members"],
+        "properties": {
+          "id": {
+            "description": "The component.id of the findings this entry lists the members of.",
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*/c-[0-9]+$"
+          },
+          "members": {
+            "description": "Every symbol of the component, in the canonical order contract/grammar/merge.md fixes.",
+            "type": "array",
+            "uniqueItems": true,
+            "items": { "$ref": "finding.schema.json#/$defs/positioned_symbol" }
+          }
         }
       }
     },
@@ -634,13 +656,14 @@
         "allOf": [
           {"if": {"properties": {"kind": {"const": "published-package"}}}, "then": {"required": ["key"]}},
           {"if": {"properties": {"kind": {"const": "unmapped-entry"}}}, "then": {"required": ["key"]}},
-          {"if": {"properties": {"kind": {"const": "module-not-loaded"}}}, "then": {"not": {"required": ["key"]}}}
+          {"if": {"properties": {"kind": {"const": "module-not-loaded"}}}, "then": {"not": {"required": ["key"]}}},
+          {"if": {"properties": {"kind": {"const": "computed-load"}}}, "then": {"not": {"required": ["key"]}}}
         ],
         "properties": {
           "kind": {
-            "description": "What the note is about, from a closed set. module-not-loaded: a Go module below the target root that the run dropped because it does not load, which grammar/analysis.md defines. published-package: a package of an application that no other package of the target imports and that outside programs may import, which grammar/analysis.md defines. unmapped-entry: a manifest entry that reads back to no source file of the target, which grammar/analysis.md defines.",
+            "description": "What the note is about, from a closed set. computed-load: a TypeScript load by a computed path the analysis cannot resolve, which grammar/analysis.md defines. module-not-loaded: a Go module below the target root that the run dropped because it does not load, which grammar/analysis.md defines. published-package: a package of an application that no other package of the target imports and that outside programs may import, which grammar/analysis.md defines. unmapped-entry: a manifest entry that reads back to no source file of the target, which grammar/analysis.md defines.",
             "type": "string",
-            "enum": ["module-not-loaded", "published-package", "unmapped-entry"]
+            "enum": ["computed-load", "module-not-loaded", "published-package", "unmapped-entry"]
           },
           "path": {
             "description": "The directory the note is about, relative to the target root, in the path form: segments joined by /, none of them empty, . or .., so never absolute, with no leading ./ and no trailing /; no control character, U+0000 to U+001F or U+007F; every other character, a space, a backslash, which is no separator, a +, a $, a bracket, a parenthesis or one outside ASCII, written as it is; the target root itself is a single dot, so a note about the package at the root names it as .",
@@ -648,7 +671,7 @@
             "pattern": "^(?:\\.|(?:[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.\\.[^/\\x00-\\x1f\\x7f]+)(?:/(?:[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.[^/.\\x00-\\x1f\\x7f][^/\\x00-\\x1f\\x7f]*|\\.\\.[^/\\x00-\\x1f\\x7f]+))*)$"
           },
           "key": {
-            "description": "The configuration key that settles the note, as a dotted path of contract/config.schema.json: present on a published-package and an unmapped-entry note, and absent on a module-not-loaded note, which no key settles.",
+            "description": "The configuration key that settles the note, as a dotted path of contract/config.schema.json: present on a published-package and an unmapped-entry note, and absent on a computed-load and a module-not-loaded note, which no key settles.",
             "type": "string",
             "enum": ["roots.patterns", "ts.entry_files"]
           },

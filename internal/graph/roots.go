@@ -26,7 +26,7 @@ type RootKind uint8
 const (
 	RootMain         RootKind = iota // main in a main package
 	RootInit                         // every init
-	RootTest                         // a test, benchmark, example or fuzz function of a test file
+	RootTest                         // a test, benchmark, example or fuzz function of a test file, or a method a suite runner calls
 	RootLinkname                     // a name a go:linkname directive gives the linker
 	RootCgoExport                    // a function under an //export directive in a file importing "C"
 	RootBlank                        // a declaration with the blank identifier
@@ -36,8 +36,9 @@ const (
 	RootTypeError                    // a declaration a type error skipped, or what its unresolved expression could reach
 	RootProgram                      // a declaration a file run on its own under the ignore tag names
 	RootGenerate                     // a declaration a go:generate directive names as a generator's input
-	RootFuzz                         // a go-fuzz entry point of a file the gofuzz tag selects
+	RootFuzz                         // a go-fuzz entry point of a file a go-fuzz build may compile
 	RootSwagger                      // a declaration a go-swagger directive of its doc comment names
+	RootSwagRoute                    // a function a swag route annotation of its doc comment documents
 )
 
 var rootNames = [...]string{
@@ -55,6 +56,7 @@ var rootNames = [...]string{
 	RootGenerate:     "go-generate",
 	RootFuzz:         "go-fuzz",
 	RootSwagger:      "swagger",
+	RootSwagRoute:    "swag-route",
 }
 
 // String returns the kind's spelling, and a numbered form for a value outside the
@@ -124,6 +126,7 @@ func Roots(r *load.Result, targetRoot string, read ReadFile, symbols []Symbol, o
 		classes:    make(map[string][]packageClass),
 		byPath:     make(map[string][]*packages.Package),
 		found:      make(map[Root]struct{}),
+		inputDirs:  make(map[string]bool),
 	}
 	for i := range symbols {
 		d.byPosition[symbols[i].Pos] = symbols[i].ID
@@ -142,6 +145,7 @@ func Roots(r *load.Result, targetRoot string, read ReadFile, symbols []Symbol, o
 		}
 	}
 	d.declared(symbols)
+	d.generatorPackageInputs(symbols)
 	if opts.PublishedAPI {
 		d.publishedAPI(symbols)
 		if err := d.promoted(); err != nil {
@@ -182,6 +186,7 @@ type rootDetection struct {
 	byID       map[SymbolID]Symbol
 	classes    map[string][]packageClass      // by import path, one per variant group
 	byPath     map[string][]*packages.Package // import path to its type-checked variants
+	inputDirs  map[string]bool                // target-relative directories of generatorPackages
 	found      map[Root]struct{}
 }
 
@@ -296,8 +301,8 @@ func (d *rootDetection) classOf(s *Symbol) packageClass {
 	return packageClass{}
 }
 
-// walkFile reads one file's test functions, linkname, generate and swagger directives,
-// cgo exports and go-fuzz entry points.
+// walkFile reads one file's test functions and suite runs, linkname, generate and
+// swagger directives, swag routes, cgo exports and go-fuzz entry points.
 func (d *rootDetection) walkFile(p *packages.Package, f *ast.File) error {
 	if err := d.linknames(p, f); err != nil {
 		return err
@@ -308,20 +313,34 @@ func (d *rootDetection) walkFile(p *packages.Package, f *ast.File) error {
 	if err := d.swaggerDeclarations(f); err != nil {
 		return err
 	}
-	fuzz := goFuzzFile(f)
+	if err := d.suiteMethods(p, f); err != nil {
+		return err
+	}
+	d.generatorPackages(f)
+	return d.functionRoots(p, f)
+}
 
+// functionRoots reads one file's test functions, swag routes, cgo exports and go-fuzz
+// entry points.
+func (d *rootDetection) functionRoots(p *packages.Package, f *ast.File) error {
+	fuzz := goFuzzFile(f)
 	_, test := IsTestFile(d.pos.base(f.FileStart))
 	cgo := importsPath(f, cgoImport)
 	for _, decl := range f.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
-		// Neither class reaches a method: a test function is called by the
-		// generated test main and an exported function by C, and neither has a
-		// receiver to call it on.
-		if !ok || fn.Recv != nil {
+		if !ok {
 			continue
 		}
 		var err error
+		if swagRoute(fn.Doc) {
+			err = d.addAt(fn.Name.Pos(), RootSwagRoute)
+		}
 		switch {
+		case err != nil:
+		// None of the classes below reaches a method: a test function is called by
+		// the generated test main, an exported function by C and an entry point by
+		// the fuzzer, and none has a receiver to call it on.
+		case fn.Recv != nil:
 		case test && testFunction(p, fn):
 			err = d.addAt(fn.Name.Pos(), RootTest)
 		case cgo && cgoExported(fn):
@@ -534,14 +553,16 @@ const (
 	cgoImport       = `"C"`
 	unsafeImport    = `"unsafe"`
 	exportDirective = "//export "
+	testPrefix      = "Test"
+	benchmarkPrefix = "Benchmark"
 )
 
 // testFamilies are the name prefixes the toolchain runs from a test file, each
 // with the testing type its function takes a pointer to. TestMain takes M, and
 // the toolchain runs it as an ordinary test when it takes T instead.
 var testFamilies = [...]struct{ prefix, param string }{
-	{"Test", "T"},
-	{"Benchmark", "B"},
+	{testPrefix, "T"},
+	{benchmarkPrefix, "B"},
 	{"Fuzz", "F"},
 }
 

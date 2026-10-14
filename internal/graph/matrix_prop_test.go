@@ -104,7 +104,8 @@ func verdictLines(b *graphBuilder, candidates []Candidate) []string {
 
 // Property dead-code-suite/P11: over a matrix of any size and any per-configuration
 // reference set, a declaration is reported when and only when every configuration
-// it exists in reports it, a declaration one configuration alone holds is analyzed
+// it exists in reports it and no configuration compiles a reference to it from a
+// declaration the matrix keeps, a declaration one configuration alone holds is analyzed
 // under that configuration rather than skipped, a reference under any configuration
 // keeps the declaration from the stronger claim, and each report names exactly the
 // configurations the declaration exists in.
@@ -142,7 +143,7 @@ func TestProperty11MatrixIntersectionReportsOnlyWhatIsDeadEverywhere(t *testing.
 			}
 		}
 
-		want := make([]string, 0, len(merged.Symbols))
+		lines := make(map[SymbolID]string, len(merged.Symbols))
 		for i := range merged.Symbols {
 			name := b.named[merged.Symbols[i].ID]
 			var configs []int
@@ -162,7 +163,28 @@ func TestProperty11MatrixIntersectionReportsOnlyWhatIsDeadEverywhere(t *testing.
 				}
 			}
 			if everywhere {
-				want = append(want, fmt.Sprintf("%s %s %v", name, relation, configs))
+				lines[merged.Symbols[i].ID] = fmt.Sprintf("%s %s %v", name, relation, configs)
+			}
+		}
+		// A declaration some configuration compiles a reference to from a kept
+		// declaration stays, until no declaration joins.
+		for kept := true; kept; {
+			kept = false
+			for config := range d.configs {
+				for _, ref := range per[config].References {
+					if _, fromDead := lines[ref.From]; !fromDead && (!in.Mode.Production || !ref.Test) {
+						if _, toDead := lines[ref.To]; toDead {
+							delete(lines, ref.To)
+							kept = true
+						}
+					}
+				}
+			}
+		}
+		want := make([]string, 0, len(lines))
+		for i := range merged.Symbols {
+			if line, dead := lines[merged.Symbols[i].ID]; dead {
+				want = append(want, line)
 			}
 		}
 		if got := verdictLines(b, r.Candidates); !slices.Equal(got, want) {

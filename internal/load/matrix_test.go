@@ -3,6 +3,8 @@ package load
 import (
 	"context"
 	"errors"
+	"go/ast"
+	"path/filepath"
 	"slices"
 	"testing"
 )
@@ -65,6 +67,34 @@ func TestAllResolvesEveryConfigurationInTheOrderTheMatrixLists(t *testing.T) {
 		if !slices.Equal(names, selected) {
 			t.Errorf("All(testdata/platform)[%s] compiled %v, want %v", r.Configuration.ID, names, selected)
 		}
+	}
+}
+
+func TestAllParsesAFileEveryConfigurationCompilesOnce(t *testing.T) {
+	stableToolchain(t)
+
+	results, _, err := All(t.Context(), fixtureScope(t, "platform"), matrix(), nil)
+	if err != nil {
+		t.Fatalf("All(testdata/platform) = _, _, %v, want no error", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("All(testdata/platform) returned %d configurations, want 2", len(results))
+	}
+	if results[0].Fset != results[1].Fset {
+		t.Error("All(testdata/platform) gave each configuration its own file set, want one shared by the matrix")
+	}
+	shared := func(r Result) *ast.File {
+		pkg := findPackage(r, "example.com/platform")
+		for i, name := range pkg.CompiledGoFiles {
+			if filepath.Base(name) == "app.go" {
+				return pkg.Syntax[i]
+			}
+		}
+		return nil
+	}
+	first, second := shared(results[0]), shared(results[1])
+	if first == nil || first != second {
+		t.Errorf("All(testdata/platform) parsed app.go into %p and %p, want one tree every configuration shares", first, second)
 	}
 }
 

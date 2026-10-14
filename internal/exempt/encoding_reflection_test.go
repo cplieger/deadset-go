@@ -138,9 +138,9 @@ func TestEncodingReflectionRetainsWhatEachDestinationReads(t *testing.T) {
 			want:        nil,
 		},
 		{
-			destination: "sort.Interface",
+			destination: "a conversion to sort.Interface, which interface satisfaction answers",
 			typeName:    "SortPayload",
-			want:        flowRefs("SortPayload", "Describe", "Extra", "Len", "Less", "Names", "Swap", "secret"),
+			want:        nil,
 		},
 		{
 			destination: "a structured-logging call",
@@ -826,7 +826,7 @@ func TestFormatVerbContractAloneRecordsAnOperandOfTheFormattingPackage(t *testin
 // The mechanism text of the class, as the Contract states it for this language. The
 // class implements this text; a pin bump that moves it must be read against the
 // destination table before this literal moves with it.
-const encodingReflectionMechanismSHA256 = "b6ad1b004034cc9a6c0e498b7165946745ee041041868e0dd2fb1b373480ede3"
+const encodingReflectionMechanismSHA256 = "0d21d9f289afc332464089179240ab836ccebb9c9d5f29e5d6c556c0031959ac"
 
 func TestEncodingReflectionImplementsTheContractsMechanismText(t *testing.T) {
 	body, err := spec.Contract.ReadFile("contract/exemptions.json")
@@ -1099,5 +1099,65 @@ func TestEncodingReflectionFollowsAValueReadBackFromAnInterfaceField(t *testing.
 	want := []string{"go://example.com/fields#Stored.Name", "go://example.com/fields#Tabled.Label"}
 	if !slices.Equal(got, want) {
 		t.Errorf("EncodingReflectionDetector(encoding-reflection-field-read.txtar) retained %v, want %v", got, want)
+	}
+}
+
+// A template set the analysis reads whole retains the methods its templates name, the
+// methods the engine prints a value through, and the members of what a named method
+// returns that the templates name. A set holding an event-handler attribute is read as
+// one it cannot read whole, and so is a set a function forwards its parameter to,
+// which still reads what the methods it calls return.
+func TestEncodingReflectionRetainsOnlyTheMethodsEveryTemplateTheProgramReadsNames(t *testing.T) {
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-template-methods.txtar", Options{}), EncodingReflection)
+
+	want := []string{
+		"go://example.com/view#Status.String",
+		"go://example.com/view#User.Name",
+		"go://example.com/view#View.Shown",
+		"go://example.com/view#View.State",
+		"go://example.com/view#View.User",
+		"go://example.com/view/handler#Gadget.ID",
+		"go://example.com/view/handler#Gadget.Label",
+		"go://example.com/view/handler#Gadget.Spare",
+		"go://example.com/view/wrapped#Card.Owner",
+		"go://example.com/view/wrapped#Owner.Handle",
+	}
+	if !slices.Equal(refs, want) {
+		t.Errorf("EncodingReflectionDetector(encoding-reflection-template-methods.txtar) retained\ngot  %v\nwant %v", refs, want)
+	}
+}
+
+// A context a log/slog call is given is no value it logs, whatever the context holds.
+func TestEncodingReflectionReadsNoFieldOfALoggingCallsContext(t *testing.T) {
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-log-context.txtar", Options{}), EncodingReflection)
+
+	var got []string
+	for _, ref := range refs {
+		if strings.Contains(ref, ".Hidden") || strings.Contains(ref, ".Shown") || strings.Contains(ref, ".Outputs") {
+			got = append(got, ref)
+		}
+	}
+	if want := []string{"go://example.com/logctx#Logged.Shown"}; !slices.Equal(got, want) {
+		t.Errorf("EncodingReflectionDetector(encoding-reflection-log-context.txtar) retained %v, want %v", got, want)
+	}
+}
+
+// A program that finds methods by reflection somewhere keeps the exported methods of
+// the values whose reflection may reach a finder, and only fields where a reflect call
+// heads a chain that finds none and ends outside reflection.
+func TestEncodingReflectionKeepsMethodsOnlyWhereReflectionMayFindThem(t *testing.T) {
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-method-finder-flow.txtar", Options{}), EncodingReflection)
+
+	want := []string{
+		"go://example.com/finder#Declared.Name",
+		"go://example.com/finder#Held.Grow",
+		"go://example.com/finder#Held.Size",
+		"go://example.com/finder#Named.Name",
+		"go://example.com/finder#Runner.Run",
+		"go://example.com/finder#Runner.Speed",
+		"go://example.com/finder#Split.Name",
+	}
+	if !slices.Equal(refs, want) {
+		t.Errorf("EncodingReflectionDetector(encoding-reflection-method-finder-flow.txtar) retained\ngot  %v\nwant %v", refs, want)
 	}
 }

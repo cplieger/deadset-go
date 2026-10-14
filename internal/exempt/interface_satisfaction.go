@@ -173,27 +173,17 @@ func (s *spans) retain(in *Input, c *graph.Conversion, retained []graph.Exemptio
 			Detail: "asserts " + c.Name, Holder: holder,
 		})
 	}
+	held := graph.Exemption{
+		Class: string(InterfaceSatisfaction), Consumer: consumer, Site: site,
+		Detail: "satisfies " + c.Name, Holder: holder, CoHolders: coHolders,
+	}
 	for _, m := range methods {
-		id, inventoried := in.Resolve.Object(m.method)
-		if !inventoried {
-			continue
-		}
-		via, _ := in.Resolve.Object(m.answers)
-		retained = append(retained, graph.Exemption{
-			ID:        id,
-			Class:     string(InterfaceSatisfaction),
-			Consumer:  consumer,
-			Site:      site,
-			Detail:    "satisfies " + c.Name,
-			Holder:    holder,
-			CoHolders: coHolders,
-			Via:       via,
-		})
+		retained = retainAnswer(in, &m, &held, retained)
 	}
 	if generic {
 		return retained, nil
 	}
-	held := graph.Exemption{Class: string(InterfaceSatisfaction), Consumer: consumer, Site: site, Holder: holder, CoHolders: coHolders}
+	held.Detail = ""
 	for _, pkg := range s.outsidePackages(c) {
 		retained = s.retainOutside(in, c, pkg, methods, &held, retained)
 	}
@@ -201,6 +191,29 @@ func (s *spans) retain(in *Input, c *graph.Conversion, retained []graph.Exemptio
 		retained = s.retainErrorAssertions(in, c, methods, &held, retained)
 	}
 	return retained, nil
+}
+
+// retainAnswer appends what one answering method retains as base states it: the
+// method, and each embedded field it is promoted through.
+func retainAnswer(in *Input, m *answer, base *graph.Exemption, retained []graph.Exemption) []graph.Exemption {
+	held := *base
+	held.Via, _ = in.Resolve.Object(m.answers)
+	for _, member := range append([]types.Object{m.method}, fieldObjects(m.through)...) {
+		if id, inventoried := in.Resolve.Object(member); inventoried {
+			held.ID = id
+			retained = append(retained, held)
+		}
+	}
+	return retained
+}
+
+// fieldObjects is each field as an object.
+func fieldObjects(fields []*types.Var) []types.Object {
+	objects := make([]types.Object, len(fields))
+	for i, field := range fields {
+		objects[i] = field
+	}
+	return objects
 }
 
 // errorInterface is the method set of the predeclared error type.
@@ -433,10 +446,12 @@ func typeDeclaration(in *Input, t types.Type) graph.SymbolID {
 	return id
 }
 
-// answer is one method of a type and the interface method it answers.
+// answer is one method of a type and the interface method it answers, and the
+// embedded fields the method is promoted through, outermost first.
 type answer struct {
 	method  types.Object
 	answers types.Object
+	through []*types.Var
 }
 
 // satisfying returns the method of from that answers each method to requires, in
@@ -450,9 +465,28 @@ func satisfying(from types.Type, to *types.Interface) []answer {
 		if sel == nil {
 			continue
 		}
-		methods = append(methods, answer{method: sel.Obj(), answers: m})
+		methods = append(methods, answer{method: sel.Obj(), answers: m, through: embeddedPath(from, sel.Index())})
 	}
 	return methods
+}
+
+// embeddedPath is the embedded field each index of a promoted selection but the last
+// selects, starting at from.
+func embeddedPath(from types.Type, index []int) []*types.Var {
+	path := make([]*types.Var, 0, max(len(index)-1, 0))
+	at := from
+	for _, i := range index[:max(len(index)-1, 0)] {
+		if pointer, isPointer := types.Unalias(at).Underlying().(*types.Pointer); isPointer {
+			at = pointer.Elem()
+		}
+		st, isStruct := types.Unalias(at).Underlying().(*types.Struct)
+		if !isStruct || i >= st.NumFields() {
+			return path
+		}
+		path = append(path, st.Field(i))
+		at = st.Field(i).Type()
+	}
+	return path
 }
 
 // byHeldSymbol orders two exemptions by site, then by the symbol retained, the

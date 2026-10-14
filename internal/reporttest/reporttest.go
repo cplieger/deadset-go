@@ -110,15 +110,19 @@ func envelopeOf(w *reportdoc.Envelope) (report.Envelope, error) {
 			ID: one.ID, OS: one.OS, Arch: one.Arch, Tags: list(one.Tags), Error: one.Error,
 		})
 	}
+	listed := make(map[string][]reportdoc.Positioned, len(w.Components))
+	for _, one := range w.Components {
+		listed[one.ID] = one.Members
+	}
 	for i := range w.Findings {
-		found, err := findingOf(&w.Findings[i])
+		found, err := listedFindingOf(&w.Findings[i], listed)
 		if err != nil {
 			return report.Envelope{}, err
 		}
 		held.Findings = append(held.Findings, found)
 	}
 	for i := range w.EdgeEvaluations {
-		evaluated, err := evaluationOf(&w.EdgeEvaluations[i])
+		evaluated, err := evaluationOf(&w.EdgeEvaluations[i], listed)
 		if err != nil {
 			return report.Envelope{}, err
 		}
@@ -154,6 +158,16 @@ func readBack[W, T any](records []W, convert func(W) T) []T {
 		held = append(held, convert(one))
 	}
 	return held
+}
+
+// listedFindingOf is one finding read back with the members the document lists
+// for its component, where it lists them.
+func listedFindingOf(w *reportdoc.Finding, listed map[string][]reportdoc.Positioned) (kinds.Finding, error) {
+	one := *w
+	if members, held := listed[one.Component.ID]; held {
+		one.Component.Members = members
+	}
+	return findingOf(&one)
 }
 
 // findingOf is one finding read back from the document.
@@ -234,12 +248,12 @@ func detailsOf(w *reportdoc.Details) kinds.Details {
 }
 
 // evaluationOf is one edge evaluation read back from the document.
-func evaluationOf(w *reportdoc.Evaluation) (report.EdgeEvaluation, error) {
+func evaluationOf(w *reportdoc.Evaluation, listed map[string][]reportdoc.Positioned) (report.EdgeEvaluation, error) {
 	held := report.EdgeEvaluation{Edge: w.Edge, Side: w.Side, Symbol: w.Symbol, State: w.State}
 	if w.Finding == nil {
 		return held, nil
 	}
-	pending, err := findingOf(w.Finding)
+	pending, err := listedFindingOf(w.Finding, listed)
 	if err != nil {
 		return report.EdgeEvaluation{}, err
 	}

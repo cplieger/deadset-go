@@ -1,0 +1,41 @@
+One module whose handlers carry swag annotations: a method and a function each
+documented by a route annotation, in a line comment and in a block comment, and
+methods whose comments carry another annotation, a longer word, or the annotation
+inside a line.
+
+-- go.mod --
+module example.com/swag
+
+go 1.27.1
+-- main.go --
+package main
+
+type Handler struct{}
+
+// postAlias documents an alias route.
+//
+// @Summary Post an alias
+// @Router /alias [post]
+func (h *Handler) postAlias() {}
+
+/*
+listAll documents a listing route.
+
+	@Router	/all [get]
+*/
+func listAll() {}
+
+// summarized carries no route.
+//
+// @Summary Only a summary
+func (h *Handler) summarized() {}
+
+// longer carries a longer word.
+//
+// @RouterGroup /x
+func (h *Handler) longer() {}
+
+// inline names the annotation inside a line: see @Router /x [get].
+func (h *Handler) inline() {}
+
+func main() { _ = Handler{} }

@@ -1,0 +1,30 @@
+A command that discards the results of two functions of a package, one of which a
+file run on its own under the ignore tag calls and reads.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+import "example.com/app/tally"
+
+func main() {
+	tally.Count()
+	tally.Spare()
+}
+-- tally/tally.go --
+package tally
+
+func Count() int { return 1 }
+
+func Spare() int { return 2 }
+-- tool.go --
+//go:build ignore
+
+package main
+
+import "example.com/app/tally"
+
+func main() { println(tally.Count()) }

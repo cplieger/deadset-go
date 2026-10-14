@@ -1,0 +1,41 @@
+One module: go-fuzz entry points in a file with no build constraint, in one whose
+constraint does not name the gofuzz tag, in two whose constraints hold with the tag set
+on some platform though they negate it somewhere, and in one whose constraint holds only
+without the tag.
+
+-- go.mod --
+module example.com/fuzzing
+
+go 1.27.1
+-- main.go --
+package main
+
+func main() {}
+-- fuzz/plain.go --
+package fuzz
+
+func FuzzPlain(data []byte) int { return len(data) }
+-- fuzz/linux.go --
+//go:build linux
+
+package fuzz
+
+func FuzzLinux(data []byte) int { return len(data) }
+-- fuzz/negated.go --
+//go:build !(gofuzz && linux)
+
+package fuzz
+
+func FuzzNegated(data []byte) int { return len(data) }
+-- fuzz/mixed.go --
+//go:build (gofuzz && linux) || (!gofuzz && windows)
+
+package fuzz
+
+func FuzzMixed(data []byte) int { return len(data) }
+-- fuzz/excluded.go --
+//go:build !gofuzz && linux
+
+package fuzz
+
+func FuzzExcluded(data []byte) int { return len(data) }

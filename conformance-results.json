@@ -7,8 +7,8 @@
   },
   "result": "pass",
   "totals": {
-    "fixtures": 162,
-    "pass": 162,
+    "fixtures": 178,
+    "pass": 178,
     "gap": 0,
     "fail": 0
   },
@@ -50,6 +50,36 @@
           "result": "pass",
           "actual": {
             "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "build-constraint-compiled-reference",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "platform",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "spare",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "configurations": [
+              "windows-amd64"
+            ]
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         }
       ],
@@ -165,15 +195,7 @@
           "symbol": "TestPublished",
           "result": "pass",
           "actual": {
-            "report": "DS1005",
-            "symbol_kind": "function",
-            "confidence": "possible",
-            "reachability_class": "certain",
-            "liveness_relation": "reference-counting"
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none"
           }
         }
       ],
@@ -1168,6 +1190,65 @@
           "suppression": {
             "suppressed": true,
             "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "dropped-module-scripts",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "All",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Spare",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "symbol_kind": "method",
+            "confidence": "possible",
+            "reachability_class": "possible",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "embedded-field-supplies-a-published-interface",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "AddAddon",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "confidence": "possible",
+            "reachability_class": "possible"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Decoder.Base",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "interface-satisfaction"
+            ]
           }
         }
       ],
@@ -3049,6 +3130,35 @@
       "unexpected": []
     },
     {
+      "fixture": "go-fuzz-entry-without-a-tag",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "FuzzParse",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "FuzzText",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
       "fixture": "go-generate-inputs",
       "result": "pass",
       "expectations": [
@@ -3107,6 +3217,56 @@
           "result": "pass",
           "actual": {
             "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "go-generate-package-inputs",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Edges",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Fields",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Name",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "User",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "helper",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         }
       ],
@@ -3377,6 +3537,120 @@
             "component": {
               "root": true
             }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "interface-conversion-retains-only-its-methods",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Beats",
+          "result": "pass",
+          "actual": {
+            "report": "DS1101",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "details": {
+              "narrower_visibility": "file"
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Beats.Len",
+          "result": "pass",
+          "actual": {
+            "report": "DS1103",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Beats.Less",
+          "result": "pass",
+          "actual": {
+            "report": "DS1103",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Beats.Sorted",
+          "result": "pass",
+          "actual": {
+            "report": "DS1103",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Beats.Swap",
+          "result": "pass",
+          "actual": {
+            "report": "DS1103",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Items",
+          "result": "pass",
+          "actual": {
+            "report": "DS1101",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "details": {
+              "narrower_visibility": "file"
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Items.Len",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "interface-satisfaction"
+            ]
+          }
+        },
+        {
+          "symbol": "Items.Unrelated",
+          "result": "pass",
+          "actual": {
+            "report": "DS1103",
+            "confidence": "certain",
+            "reachability_class": "certain"
           },
           "suppression": {
             "suppressed": true,
@@ -3987,6 +4261,84 @@
           "result": "pass",
           "actual": {
             "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "logging-context-is-no-logged-value",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Context",
+          "result": "pass",
+          "actual": {
+            "report": "DS1101",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "details": {
+              "narrower_visibility": "file"
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Logged",
+          "result": "pass",
+          "actual": {
+            "report": "DS1101",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "details": {
+              "narrower_visibility": "file"
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Logged.Shown",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "Payload",
+          "result": "pass",
+          "actual": {
+            "report": "DS1101",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "details": {
+              "narrower_visibility": "file"
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Payload.Hidden",
+          "result": "pass",
+          "actual": {
+            "report": "DS1003",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         }
       ],
@@ -7242,6 +7594,95 @@
       "unexpected": []
     },
     {
+      "fixture": "reflection-method-finder-per-call",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Held",
+          "result": "pass",
+          "actual": {
+            "report": "DS1101",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "details": {
+              "narrower_visibility": "file"
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Held.Grow",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "Named",
+          "result": "pass",
+          "actual": {
+            "report": "DS1101",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "details": {
+              "narrower_visibility": "file"
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Named.Describe",
+          "result": "pass",
+          "actual": {
+            "report": "DS1103",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Runner",
+          "result": "pass",
+          "actual": {
+            "report": "DS1101",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "details": {
+              "narrower_visibility": "file"
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Runner.Run",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection",
+              "reflective-lookup"
+            ]
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
       "fixture": "reflective-lookup-plugin-symbol",
       "result": "pass",
       "expectations": [
@@ -7792,6 +8233,49 @@
       "unexpected": []
     },
     {
+      "fixture": "suite-runner-methods",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Spare",
+          "result": "pass",
+          "actual": {
+            "report": "DS1103",
+            "symbol_kind": "method",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "TestInherited",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "TestState",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "read",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
       "fixture": "suppression-dormancy",
       "result": "pass",
       "expectations": [
@@ -7948,6 +8432,35 @@
             "details": {
               "mechanism": "inline"
             }
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "swag-route-annotation",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "postAlias",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "summarized",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "symbol_kind": "method",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         }
       ],
@@ -8127,6 +8640,173 @@
             "confidence": "certain",
             "reachability_class": "certain",
             "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "template-event-handler-reads-every-member",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Gadget",
+          "result": "pass",
+          "actual": {
+            "report": "DS1101",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "details": {
+              "narrower_visibility": "file"
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Gadget.Label",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "Gadget.Spare",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "template-retains-only-named-methods",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Status",
+          "result": "pass",
+          "actual": {
+            "report": "DS1101",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "details": {
+              "narrower_visibility": "file"
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Status.Code",
+          "result": "pass",
+          "actual": {
+            "report": "DS1103",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Status.String",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "User",
+          "result": "pass",
+          "actual": {
+            "report": "DS1101",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "details": {
+              "narrower_visibility": "file"
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "User.Email",
+          "result": "pass",
+          "actual": {
+            "report": "DS1003",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "User.Name",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "View",
+          "result": "pass",
+          "actual": {
+            "report": "DS1101",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "details": {
+              "narrower_visibility": "file"
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "View.Shown",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "View.WithSuccess",
+          "result": "pass",
+          "actual": {
+            "report": "DS1103",
+            "confidence": "certain",
+            "reachability_class": "certain"
           },
           "suppression": {
             "suppressed": true,
@@ -8743,6 +9423,59 @@
       "unexpected": []
     },
     {
+      "fixture": "test-of-published-api-at-possible",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "TestSpare",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "TestUnmarshal",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Unmarshal",
+          "result": "pass",
+          "actual": {
+            "report": "DS1004",
+            "confidence": "possible",
+            "reachability_class": "possible"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "spare",
+          "result": "pass",
+          "actual": {
+            "report": "DS1004",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
       "fixture": "test-only-reference",
       "result": "pass",
       "expectations": [
@@ -8766,6 +9499,73 @@
           "result": "pass",
           "actual": {
             "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "test-reached-code-test-file-helpers",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Sample",
+          "result": "pass",
+          "actual": {
+            "report": "DS1004",
+            "symbol_kind": "function",
+            "confidence": "possible",
+            "reachability_class": "possible",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "TestSample",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "symbol_kind": "function",
+            "confidence": "possible",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "base",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "symbol_kind": "variable",
+            "confidence": "possible",
+            "reachability_class": "possible",
+            "liveness_relation": "reachability"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "helper",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "symbol_kind": "function",
+            "confidence": "possible",
+            "reachability_class": "possible",
+            "liveness_relation": "reachability"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         }
       ],
@@ -8857,6 +9657,35 @@
         },
         {
           "symbol": "want",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "test-support-go-test-library-evidence",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "One",
+          "result": "pass",
+          "actual": {
+            "report": "DS1004",
+            "symbol_kind": "function",
+            "confidence": "possible",
+            "reachability_class": "possible",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Positive",
           "result": "pass",
           "actual": {
             "report": "none"
@@ -10859,6 +11688,39 @@
             "reachability_class": "certain",
             "details": {
               "dependency_class": "require"
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "unused-result-read-by-a-program",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Count",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Spare",
+          "result": "pass",
+          "actual": {
+            "report": "DS1803",
+            "symbol_kind": "result",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "details": {
+              "overlap": [
+                "unparam"
+              ]
             }
           },
           "suppression": {

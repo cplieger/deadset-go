@@ -40,11 +40,19 @@ type sinkParameter struct {
 	at    int
 }
 
-// destinationTest reports whether one parameter of one function is a destination the
-// calling class names by itself, and where it is, what that destination reads of the
-// methods of a value it is given. It is the base case the forwarding fixpoint starts
-// from and the source of every retained set the fixpoint carries.
-type destinationTest func(fn *types.Func, at int) (reach, bool)
+// destinationTest reports whether one parameter of one function, called at one site,
+// is a destination the calling class names by itself, and where it is, what that
+// destination reads of the methods of a value it is given. It is the base case the
+// forwarding fixpoint starts from and the source of every retained set the fixpoint
+// carries.
+type destinationTest func(fn *types.Func, at int, site callSite) (reach, bool)
+
+// callSite is one call in the body of a declaration of the program.
+type callSite struct {
+	info *types.Info
+	decl ast.Node
+	call *ast.CallExpr
+}
 
 // crossingOut is what one argument's crossing out of the analysed program retains:
 // the callee the value leaves through, which is what an exemption's detail names, and
@@ -110,7 +118,7 @@ func newBoundary(in *Input, destination destinationTest) *boundary {
 		joined = false
 		for i := range candidates {
 			for _, forwarded := range candidates[i].forwards {
-				reads, reaches := b.reaches(forwarded.to, forwarded.at, destination)
+				reads, reaches := b.reaches(forwarded.to, forwarded.at, forwarded.site, destination)
 				if !reaches {
 					continue
 				}
@@ -183,9 +191,9 @@ func (b *boundary) declares(fn *types.Func) bool {
 // reaches reports whether one parameter of one function is somewhere a value leaves
 // the program through, a destination the calling class names or a parameter this
 // boundary already carries, and what is read of the value there.
-func (b *boundary) reaches(fn *types.Func, at int, destination destinationTest) (reach, bool) {
+func (b *boundary) reaches(fn *types.Func, at int, site callSite, destination destinationTest) (reach, bool) {
 	if destination != nil {
-		if reads, named := destination(fn, at); named {
+		if reads, named := destination(fn, at, site); named {
 			return reads, true
 		}
 	}
@@ -237,11 +245,13 @@ type forwardingFunc struct {
 }
 
 // forwardedParameter is one parameter a function hands on: the function it goes to,
-// the forwarding function's own parameter position, and the position it arrives at.
+// the forwarding function's own parameter position, the position it arrives at, and
+// the call that hands it on.
 type forwardedParameter struct {
-	to  *types.Func
-	own int
-	at  int
+	to   *types.Func
+	site callSite
+	own  int
+	at   int
 }
 
 // forwardingParameters returns every function of the program that hands a parameter
@@ -293,7 +303,8 @@ func forwardedParametersOf(sites *declarationSites, declared programFunction) (f
 			if !supplies {
 				continue
 			}
-			w.forwards = append(w.forwards, forwardedParameter{to: to, own: held, at: at})
+			site := callSite{info: info, decl: declared.decl, call: call}
+			w.forwards = append(w.forwards, forwardedParameter{to: to, site: site, own: held, at: at})
 		}
 		return true
 	})

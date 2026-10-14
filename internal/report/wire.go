@@ -45,6 +45,26 @@ func wireComponentOf(c *kinds.Component) reportdoc.Component {
 	return held
 }
 
+// wireFindingsOf is the findings as a document writes them, and the members of each
+// component listed in full, once per component in the order of its first finding.
+func wireFindingsOf(findings []kinds.Finding) ([]reportdoc.Finding, []reportdoc.ComponentMembers) {
+	written := make([]reportdoc.Finding, 0, len(findings))
+	var components []reportdoc.ComponentMembers
+	listed := make(map[string]bool)
+	for i := range findings {
+		found := wireFindingOf(&findings[i])
+		if members := found.Component.Members; members != nil {
+			if !listed[found.Component.ID] {
+				listed[found.Component.ID] = true
+				components = append(components, reportdoc.ComponentMembers{ID: found.Component.ID, Members: members})
+			}
+			found.Component.Members = nil
+		}
+		written = append(written, found)
+	}
+	return written, components
+}
+
 // wireDeclaredGapOf is one declared gap as a document writes it.
 func wireDeclaredGapOf(g *DeclaredGap) reportdoc.DeclaredGap {
 	return reportdoc.DeclaredGap{Fixture: g.Fixture, Symbol: g.Symbol, Capability: g.Capability, Reason: g.Reason}
@@ -80,7 +100,6 @@ func (e *Envelope) wire() reportdoc.Envelope {
 		Configurations:         make([]reportdoc.Configuration, 0, len(e.Configurations)),
 		ConfigurationsNotBuilt: make([]reportdoc.ConfigurationNotBuilt, 0, len(e.ConfigurationsNotBuilt)),
 		Consumers:              wireConsumersOf(&e.Consumers),
-		Findings:               make([]reportdoc.Finding, 0, len(e.Findings)),
 		EdgeEvaluations:        make([]reportdoc.Evaluation, 0, len(e.EdgeEvaluations)),
 		StaleSuppressions:      make([]reportdoc.StaleSuppression, 0, len(e.StaleSuppressions)),
 		DeclaredGaps:           make([]reportdoc.DeclaredGap, 0, len(e.DeclaredGaps)),
@@ -114,9 +133,7 @@ func (e *Envelope) wire() reportdoc.Envelope {
 			ID: one.ID, OS: one.OS, Arch: one.Arch, Tags: list(one.Tags), Error: one.Error,
 		})
 	}
-	for i := range e.Findings {
-		held.Findings = append(held.Findings, wireFindingOf(&e.Findings[i]))
-	}
+	held.Findings, held.Components = wireFindingsOf(e.Findings)
 	for i := range e.EdgeEvaluations {
 		held.EdgeEvaluations = append(held.EdgeEvaluations, wireEvaluationOf(&e.EdgeEvaluations[i]))
 	}

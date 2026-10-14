@@ -294,9 +294,10 @@ func (x *Matrix) Sweep(in *SweepInput, evidence TestEvidence) Result {
 	dead := make([]bool, len(x.merged.Symbols))
 	testOfDeadCode := make([]bool, len(x.merged.Symbols))
 	unreferencedTest := make([]bool, len(x.merged.Symbols))
+	compiled := x.compiledReferences(held, in.Mode)
 	for i := range x.merged.Symbols {
 		c, candidate := x.intersect(union, &x.merged.Symbols[i], held, in.Mode)
-		if !candidate {
+		if !candidate || compiled[c.ID] {
 			continue
 		}
 		c.TestRefs += evidence[c.ID]
@@ -314,6 +315,56 @@ func (x *Matrix) Sweep(in *SweepInput, evidence TestEvidence) Result {
 	r.Retained = x.retained(in.Exempt, per)
 	r.Suppressed = x.suppressed(per)
 	return r
+}
+
+// compiledReferences is every declaration dead in each configuration it exists in
+// that a configuration compiles a reference to from a declaration the matrix keeps,
+// until no declaration joins. Deleting one would break that configuration's build: a
+// file behind a build constraint is dead only where no kept declaration calls it.
+func (x *Matrix) compiledReferences(held []map[SymbolID]Candidate, m Mode) map[SymbolID]bool {
+	dead := x.deadEverywhere(held)
+	kept := make(map[SymbolID]bool)
+	for changed := true; changed; {
+		changed = false
+		for _, g := range x.per {
+			changed = g.keepCompiled(dead, kept, m) || changed
+		}
+	}
+	return kept
+}
+
+// deadEverywhere is every declaration a candidate in each configuration it exists in.
+func (x *Matrix) deadEverywhere(held []map[SymbolID]Candidate) map[SymbolID]bool {
+	dead := make(map[SymbolID]bool)
+	for i := range x.merged.Symbols {
+		s := &x.merged.Symbols[i]
+		everywhere := s.Configs != 0
+		for config := range x.merged.Configurations {
+			if _, candidate := held[config][s.ID]; s.Configs.has(config) && !candidate {
+				everywhere = false
+			}
+		}
+		dead[s.ID] = everywhere
+	}
+	return dead
+}
+
+// keepCompiled adds to kept every declaration of dead one configuration's graph
+// references from a declaration outside dead or already kept, and reports whether
+// one joined. A production sweep counts no reference a test file made.
+func (g *Graph) keepCompiled(dead, kept map[SymbolID]bool, m Mode) bool {
+	changed := false
+	for from := range g.symbols {
+		if id := g.symbols[from].ID; !g.subject[from] || (dead[id] && !kept[id]) {
+			continue
+		}
+		for _, e := range g.out[from] {
+			if to := g.symbols[e.to].ID; (!m.Production || !e.test) && dead[to] && !kept[to] {
+				kept[to], changed = true, true
+			}
+		}
+	}
+	return changed
 }
 
 // intersect answers whether one declaration is dead in every configuration of the

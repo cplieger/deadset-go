@@ -20,6 +20,7 @@ type Envelope struct {
 	ConfigurationsNotBuilt []ConfigurationNotBuilt `json:"configurations_not_built"`
 	Consumers              Consumers               `json:"consumers"`
 	Findings               []Finding               `json:"findings"`
+	Components             []ComponentMembers      `json:"components,omitempty"`
 	EdgeEvaluations        []Evaluation            `json:"edge_evaluations"`
 	StaleSuppressions      []StaleSuppression      `json:"stale_suppressions"`
 	DeclaredGaps           []DeclaredGap           `json:"declared_gaps"`
@@ -174,7 +175,8 @@ type Subject struct {
 	SizeLines int    `json:"size_lines"`
 }
 
-// Component is a finding's dead component.
+// Component is a finding's dead component. Members is written only in a SARIF
+// result's properties; a report document lists them in [Envelope.Components].
 //
 //nolint:govet // fieldalignment: the field order is the schema's member order, which the document writes
 type Component struct {
@@ -183,6 +185,13 @@ type Component struct {
 	SymbolCount    int          `json:"symbol_count"`
 	DeletableLines int          `json:"deletable_lines"`
 	Members        []Positioned `json:"members,omitempty"`
+}
+
+// ComponentMembers is one dead component a finding names, with its members, which a
+// report lists once rather than under each finding of the component.
+type ComponentMembers struct {
+	ID      string       `json:"id"`
+	Members []Positioned `json:"members"`
 }
 
 // Positioned is one symbol a finding names beside its subject: the reference,
