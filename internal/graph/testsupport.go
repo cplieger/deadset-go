@@ -71,11 +71,29 @@ func supportCandidate(p *packages.Package, library bool) bool {
 		(!library || slices.Contains(strings.Split(p.PkgPath, "/"), internalElement))
 }
 
+// testLibraries are the module paths of the assertion, runner and comparison
+// libraries whose import is test evidence as the testing package's is; a package
+// below one of them counts too.
+var testLibraries = [...]string{
+	"github.com/google/go-cmp",
+	"github.com/onsi/ginkgo",
+	"github.com/onsi/gomega",
+	"github.com/stretchr/testify",
+	"gotest.tools",
+}
+
 // carriesTestEvidence reports whether one package's files other than its test files
-// import the testing package. A package only tests reach that carries no such
-// evidence is production code a test happens to use.
+// import the testing package or a package of a test library. A package only tests
+// reach that carries no such evidence is production code a test happens to use.
 func carriesTestEvidence(p *packages.Package) bool {
-	return p.Imports[testingPath] != nil
+	for imported := range p.Imports {
+		if imported == testingPath || slices.ContainsFunc(testLibraries[:], func(library string) bool {
+			return imported == library || strings.HasPrefix(imported, library+"/")
+		}) {
+			return true
+		}
+	}
+	return false
 }
 
 // rootedPackages is the key of every package that declares a root of a kind

@@ -30,7 +30,7 @@ A root makes a symbol live under reachability. `deadset-go print-roots` prints t
 | --- | --- |
 | `main` | The `main` function of a `main` package |
 | `init` | Every `init` function, except in an application's package no build links |
-| `test` | A test, benchmark, example or fuzz function of a test file, under the signature rule the toolchain applies |
+| `test` | A test, benchmark, example or fuzz function of a test file, under the signature rule the toolchain applies, and a method a suite runner calls by reflection on the suite a call passes it: testify's `suite.Run` (exported methods named `Test…`) and gocheck's `check.Suite` (`Test…`, `Benchmark…` and its set-up and tear-down methods) |
 | `linkname` | A function or variable named on either side of a `//go:linkname` or `//go:linknamestd` directive in a file importing `"unsafe"`: the local name in the file's own package, and the qualified name in the loaded package whose import path it spells |
 | `cgo-export` | A function under an `//export` directive in a file importing `"C"` |
 | `blank` | A declaration made with the blank identifier, whose initializer still runs, except in an application's package no build links |
@@ -38,12 +38,13 @@ A root makes a symbol live under reachability. `deadset-go print-roots` prints t
 | `configured` | An exact symbol reference from `roots.patterns` |
 | `pattern` | A pattern from `roots.patterns` |
 | `type-error` | A declaration a type error skipped, and every member of a type its unresolved code could name or reach |
-| `program` | A declaration named by a `package main` file that only the `ignore` build tag includes, which `go run` runs on its own |
-| `go-generate` | A declaration a `//go:generate` directive names as a generator's input: the types a `stringer` or `enumer` directive's `-type` flag lists, the interfaces a `mockgen` directive lists after the package it reads, or every interface of the file its `-source` flag names, with each method of an input interface |
-| `go-fuzz` | A function `Fuzz` or `Fuzz<Name>` of type `func([]byte) int` in a file whose build constraint names the `gofuzz` tag |
+| `program` | A declaration named by a `package main` file that only the `ignore` build tag includes, or by a script of a module below the target that does not load because several files of one directory declare `main`, each of which `go run` runs on its own |
+| `go-generate` | A declaration a `//go:generate` directive names as a generator's input: the types a `stringer` or `enumer` directive's `-type` flag lists, the interfaces a `mockgen` directive lists after the package it reads, or every interface of the file its `-source` flag names, with each method of an input interface; and every exported declaration of a package whose directory a directive passes by a relative path to `ent generate` or `entc generate`, which load that package to read its schema |
+| `go-fuzz` | A function `Fuzz` or `Fuzz<Name>` of type `func([]byte) int` in a file whose build constraint holds with the `gofuzz` tag set, a file with no constraint included, since a fuzzer that builds the entry by name sets no tag |
 | `swagger` | A declaration whose doc comment holds a `swagger:` directive, with every field of a struct type it declares |
+| `swag-route` | A function or method whose doc comment holds a swag `@Router` annotation, which swag reads to document the route |
 
-Every root but `published-api` and `type-error` names an actual caller, which is the runtime, the test binary, the linker, C code, `go run`, a generator, go-fuzz, or the maintainer asserting one. A `type-error` root withholds a judgement the type error made impossible. Those are live under both relations, so a test function is never reported as unreferenced.
+Every root but `published-api` and `type-error` names an actual caller, which is the runtime, the test binary, the linker, C code, `go run`, a generator, go-fuzz, swag, or the maintainer asserting one. A `type-error` root withholds a judgement the type error made impossible. Those are live under both relations, so a test function is never reported as unreferenced.
 
 `published-api` is the one root that only hypothesises a caller. It makes a library's exported symbol live under reachability, so the symbol's closure is not a dead component. The symbol itself stays a candidate under reference counting, which is what `DS1001` answers at the confidence the consumer model gives it. An exported method an exported type promotes from an embedded field of any visibility is a `published-api` root as well.
 
@@ -65,7 +66,7 @@ No other test-file declaration belongs to a component, so its references join no
 
 Test-support code is test code: a declaration of it that a reference names is live and in no component. One that nothing references is in a dead component, as production code is.
 
-The count is the component's members and the line total the distinct lines they span. `reporters.cascade` set to `full` lists every member of every component as well as the roots, under the finding's `component.members`, and a SARIF result carries each member other than its own symbol as a related location. A finding whose subject is in no dead component names a component of that subject alone, with no line deleted. Such a subject is a declaration the analysis holds live, a part of a declaration or a row of a document.
+The count is the component's members and the line total the distinct lines they span. `reporters.cascade` set to `full` lists every member of every component as well as the roots, once per component in the report's `components` listing that each finding names by its `component.id`, and a SARIF result carries each member other than its own symbol as a related location. A finding whose subject is in no dead component names a component of that subject alone, with no line deleted. Such a subject is a declaration the analysis holds live, a part of a declaration or a row of a document.
 
 The configuration withholds a finding by setting its kind to `allow` or by a minimum confidence the finding does not reach. When the withheld finding is a root's, every finding of its component is withheld too, whatever their severity and confidence, because a member is dead only through its root.
 
@@ -106,7 +107,7 @@ Four kinds report only where every reference that can exist is one the run loade
 
 ## Build configurations
 
-The analysis runs one load per build configuration and intersects the answers. A symbol is reported only where it is dead in every configuration, a reference counts where it holds in any configuration, and a symbol exists where it is declared in at least one. Every finding names the configurations it holds in, and the report's `configurations` member is the matrix the analysis ran.
+The analysis runs one load per build configuration and intersects the answers. A symbol is reported only where it is dead in every configuration, a reference counts where it holds in any configuration, and a symbol exists where it is declared in at least one. A symbol a configuration compiles a reference to from a declaration that stays unreported is not reported either, because deleting it would break that configuration's build, and the rule runs until no declaration joins. Every finding names the configurations it holds in, and the report's `configurations` member is the matrix the analysis ran.
 
 What a configuration that fails to load does to the run depends on who named it. A configuration the configuration document declared is an assertion that the target builds it. So a load that fails ends the run, rather than intersecting over the survivors, which would be systematically more permissive than the truth.
 

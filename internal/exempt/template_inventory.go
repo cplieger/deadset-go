@@ -7,6 +7,7 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"text/template/parse"
 )
@@ -207,8 +208,7 @@ var templateParses = map[string]bool{"Parse": true, "ParseFiles": true, "ParseGl
 // every template of the set is one the analysis read: a constant string, a constant
 // file name or pattern resolved against the target root or its file's directory, or
 // a constant pattern of an embedded file system, each of which parses, and none an
-// html/template file holding a script element, whose engine encodes a value inside
-// one whole.
+// html/template file holding a JavaScript context ([encodesWhole]).
 type inventory struct {
 	fset     *token.FileSet
 	names    map[string]bool
@@ -290,7 +290,7 @@ func (inv *inventory) files(engine string, paths []string) {
 
 // read adds the identifiers one template's text names.
 func (inv *inventory) read(engine, name string, src []byte) {
-	if engine == htmlTemplate && strings.Contains(strings.ToLower(string(src)), "<script") {
+	if engine == htmlTemplate && encodesWhole(src) {
 		inv.complete = false
 		return
 	}
@@ -304,6 +304,16 @@ func (inv *inventory) read(engine, name string, src []byte) {
 		inv.names[ref.name] = true
 	}
 	inv.parsed++
+}
+
+// eventHandler matches an HTML start tag holding an event-handler attribute.
+var eventHandler = regexp.MustCompile(`(?i)<[a-z][^>]*\son[a-z]+\s*=`)
+
+// encodesWhole reports whether an html/template source holds a JavaScript context,
+// a script element or an event-handler attribute, where the engine encodes a value
+// as JSON whole (https://pkg.go.dev/html/template#hdr-Contexts).
+func encodesWhole(src []byte) bool {
+	return strings.Contains(strings.ToLower(string(src)), "<script") || eventHandler.Match(src)
 }
 
 func globWithin(root, pattern string) []string {

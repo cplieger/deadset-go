@@ -479,6 +479,30 @@ func TestProductionCodeOnlyTestsReachIsReportedAtPossible(t *testing.T) {
 	}
 }
 
+// The helpers of a test file that only a test of production code only tests reach
+// needs are at possible with that test, so the default level reports none of them.
+func TestTestFileHelpersOfATestOfProductionCodeOnlyTestsReachAreAtPossible(t *testing.T) {
+	resolved := applicationConfig()
+	resolved.Analysis.MinConfidence = config.Possible
+	result := computed(t, inputOf(t, "declarations-test-reached-test-helpers.txtar", resolved, Consumers{}), declarationEmitters())
+
+	for _, name := range []string{"helper", "base"} {
+		t.Run(name, func(t *testing.T) {
+			if found := findingOf(t, result.Findings, unusedUnexportedCode, name); found.Confidence != Possible {
+				t.Errorf("%s %s has confidence %s, want possible", unusedUnexportedCode, name, found.Confidence)
+			}
+		})
+	}
+	if found := findingOf(t, result.Findings, testOfDeadCodeCode, "TestSample"); found.Confidence != Possible {
+		t.Errorf("%s TestSample has confidence %s, want possible", testOfDeadCodeCode, found.Confidence)
+	}
+
+	byDefault := computed(t, inputOf(t, "declarations-test-reached-test-helpers.txtar", applicationConfig(), Consumers{}), declarationEmitters())
+	if got := summary(byDefault.Findings); len(got) != 0 {
+		t.Errorf("the default pass reports %v, want nothing", got)
+	}
+}
+
 // A declaration only dead code references in production is a test-only use where a
 // test of live code references it, and keeps its unreferenced kind where only a test
 // of dead code does.

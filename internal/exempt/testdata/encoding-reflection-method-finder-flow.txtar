@@ -1,0 +1,65 @@
+A program that finds a method by reflection in one place, reads a field by name in
+another, holds a reflect.Value in a variable it returns in a third, and in a fourth and
+fifth holds one in a local variable it only reads a field of. Only the values whose
+reflection may reach a method finder keep their exported methods.
+
+-- go.mod --
+module example.com/finder
+
+go 1.27.1
+-- main.go --
+package main
+
+import "reflect"
+
+// Named is read by a field lookup alone.
+type Named struct{ Name string }
+
+func (Named) Describe() string { return "" }
+
+// Runner has a method found by name.
+type Runner struct{ Speed int }
+
+func (Runner) Run() {}
+
+// Held is reflected into a variable.
+type Held struct{ Size int }
+
+func (Held) Grow() {}
+
+// Split is reflected into a local variable whose uses find no method.
+type Split struct{ Name string }
+
+func (Split) Spare() {}
+
+// Declared is reflected into a variable declaration whose uses find no method.
+type Declared struct{ Name string }
+
+func (Declared) Spare() {}
+
+func name(v any) string { return reflect.ValueOf(v).FieldByName("Name").String() }
+
+func split(v any) string {
+	value := reflect.ValueOf(v)
+	return value.FieldByName("Name").String()
+}
+
+func declared(v any) string {
+	var value = reflect.ValueOf(v)
+	return value.FieldByName("Name").String()
+}
+
+func run(v any) { reflect.ValueOf(v).MethodByName("Run").Call(nil) }
+
+func hold(v any) reflect.Value {
+	held := reflect.ValueOf(v)
+	return held
+}
+
+func main() {
+	_ = name(Named{})
+	run(Runner{})
+	_ = hold(Held{})
+	_ = split(Split{})
+	_ = declared(Declared{})
+}

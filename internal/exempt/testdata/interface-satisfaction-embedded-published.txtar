@@ -1,0 +1,31 @@
+A library whose exported type supplies the methods of a published parameter's
+interface partly through an embedded field, and an exported type nothing converts.
+
+-- go.mod --
+module example.com/lib
+
+go 1.27.1
+-- proxy/proxy.go --
+package proxy
+
+type Addon interface {
+	Request()
+	Response()
+}
+
+type Base struct{}
+
+func (*Base) Request()  {}
+func (*Base) Response() {}
+
+func AddAddon(a Addon) { a.Request(); a.Response() }
+-- addon/addon.go --
+package addon
+
+import "example.com/lib/proxy"
+
+type Decoder struct {
+	proxy.Base
+}
+
+func (*Decoder) Response() {}

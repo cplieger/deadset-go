@@ -1,12 +1,12 @@
 One package whose types reach every destination the encoding-reflection class
 names: reflection, the comparison of two values by reflection, the three standard
-encoders, both template packages, a database scan target, a sort interface and a
-structured-logging call. Each type declares one exported method, one unexported
-method, one exported tagged field, one exported untagged field and one unexported
-tagged field, so the retained set distinguishes the four and states which
-destinations reach a method. Two further files carry the cases the class rules on:
-a value reached through a map of slices of pointers, and the writer of a template
-execution.
+encoders, both template packages, a database scan target and a structured-logging
+call, beside a conversion to the sort interface, which is no destination of the
+class. Each type declares one exported method, one unexported method, one exported
+tagged field, one exported untagged field and one unexported tagged field, so the
+retained set distinguishes the four and states which destinations reach a method.
+Two further files carry the cases the class rules on: a value reached through a map
+of slices of pointers, and the writer of a template execution.
 
 -- go.mod --
 module example.com/flow

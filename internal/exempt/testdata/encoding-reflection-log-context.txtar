@@ -1,0 +1,35 @@
+A command logging through log/slog with a context of its own type, whose map holds a
+decoded payload, and logging one value as an attribute, one call through a method
+expression, whose first argument is the receiver. The handler reads the context by
+key, so only the attribute's fields are read.
+
+-- go.mod --
+module example.com/logctx
+
+go 1.27.1
+-- main.go --
+package main
+
+import (
+	"context"
+	"log/slog"
+)
+
+// Payload is what the context's map holds.
+type Payload struct{ Hidden string }
+
+// Logged is what the attribute logs.
+type Logged struct{ Shown string }
+
+// Context carries values a step stores.
+type Context struct {
+	context.Context
+	Outputs map[string]any
+}
+
+func main() {
+	ctx := Context{Context: context.Background(), Outputs: map[string]any{"p": Payload{Hidden: "h"}}}
+	slog.InfoContext(ctx, "step", slog.Any("value", Logged{Shown: "s"}))
+	slog.Default().WarnContext(ctx, "done")
+	(*slog.Logger).ErrorContext(slog.Default(), ctx, "through a method expression")
+}

@@ -187,7 +187,7 @@ Four rules bind all three mechanisms:
 | 3 | failure | A setup failure, a load failure or a lack of memory stopped the analysis. The errors are printed and no finding list is |
 | 4 | pending | At least one pending finding, whose cross-language edge the other side has not evaluated. Such a report is an input to a merge rather than an answer |
 
-A run that needs more memory than the machine makes available prints one line on stderr: `memory exhausted: at least N GB were needed, M GB are available`. N is the heap the run was about to need, rounded up, and M is the memory available to it, rounded down, both in decimal gigabytes. M is read from the tightest cgroup limit of the process and its parents, less their working set, or else from the system's available memory.
+A run that needs more memory than the machine makes available prints one line on stderr: `memory exhausted: at least N GB were needed, M GB are available`. N is the heap the run was about to need, rounded up, and M is the memory available to it, rounded down, both in decimal gigabytes. M is read from the tightest cgroup limit of the process and its parents, less their working set, or else from the system's available memory. A Go memory limit the process starts with (`GOMEMLIMIT`) bounds M too, so a run never takes more than that limit allows.
 
 A run whose own report breaks the contract's report schema also exits 3. The report is not written, and the error names the JSON Pointer of the first value the schema refuses.
 

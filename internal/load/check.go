@@ -26,6 +26,29 @@ const (
 	signatureParse = parser.AllErrors | parser.SkipObjectResolution
 )
 
+// syntaxCache is the file set and the parsed trees of the files checked whole that
+// every configuration of one matrix shares. A parse does not depend on the
+// configuration, so a file every configuration compiles is one tree and one
+// position however many configurations check it; each configuration still records
+// its own type information over that tree.
+type syntaxCache struct {
+	fset  *token.FileSet
+	files map[syntaxKey]*parsedFile
+	mu    sync.Mutex
+}
+
+// syntaxKey is one file of one reading: the directory a load ran in and the further
+// modules it checks whole. Two readings of one file in one configuration, a unit's
+// own and a consumer's, stay two trees, as each reading is its own set of packages.
+type syntaxKey struct {
+	reading string
+	name    string
+}
+
+func newSyntaxCache() *syntaxCache {
+	return &syntaxCache{fset: token.NewFileSet(), files: make(map[syntaxKey]*parsedFile)}
+}
+
 // typeCheck type-checks every package reachable from roots, each after its imports,
 // recording what each reported in its Errors. A package of the main module, or of
 // modules (the target's in a consumer's load), and any package importing one is
@@ -33,8 +56,8 @@ const (
 // declarations alone. A type error in one of the first is recorded in TypeErrors
 // and fails nothing, because the analysis skips the declaration holding it; one in
 // any other package is no error of the program and is dropped.
-func typeCheck(ctx context.Context, fset *token.FileSet, roots []*packages.Package, arch string, modules []string) error {
-	return check(ctx, fset, roots, arch, func(p *packages.Package) bool {
+func typeCheck(ctx context.Context, trees *syntaxCache, reading string, roots []*packages.Package, arch string, modules []string) error {
+	return check(ctx, trees, reading, roots, arch, func(p *packages.Package) bool {
 		return p.Module != nil && (len(modules) == 0 && p.Module.Main || slices.Contains(modules, p.Module.Path))
 	}, true)
 }
@@ -42,13 +65,14 @@ func typeCheck(ctx context.Context, fset *token.FileSet, roots []*packages.Packa
 // typeCheckDeclarations type-checks every package reachable from roots for its
 // declarations alone, none of them whole, as typeCheck checks a dependency.
 func typeCheckDeclarations(ctx context.Context, fset *token.FileSet, roots []*packages.Package, arch string) error {
-	return check(ctx, fset, roots, arch, func(*packages.Package) bool { return false }, false)
+	trees := &syntaxCache{fset: fset}
+	return check(ctx, trees, "", roots, arch, func(*packages.Package) bool { return false }, false)
 }
 
 // check runs one load's checks: own names the packages whose type errors skip a
 // declaration rather than fail the load, and mainWhole whether the main module's
 // packages, and every package importing one, are checked whole.
-func check(ctx context.Context, fset *token.FileSet, roots []*packages.Package, arch string,
+func check(ctx context.Context, trees *syntaxCache, reading string, roots []*packages.Package, arch string,
 	own func(*packages.Package) bool, mainWhole bool,
 ) error {
 	sizes := types.SizesFor(gcCompiler, arch)
@@ -56,11 +80,12 @@ func check(ctx context.Context, fset *token.FileSet, roots []*packages.Package, 
 		return fmt.Errorf("no type sizes for architecture %q", arch)
 	}
 	c := &checker{
-		ctx:    ctx,
-		fset:   fset,
-		sizes:  sizes,
-		parsed: make(map[string]*parsedFile),
-		cpu:    make(chan struct{}, runtime.GOMAXPROCS(0)),
+		ctx:     ctx,
+		fset:    trees.fset,
+		sizes:   sizes,
+		trees:   trees,
+		reading: reading,
+		cpu:     make(chan struct{}, runtime.GOMAXPROCS(0)),
 	}
 	c.run(schedule(roots, own, mainWhole))
 	return ctx.Err()
@@ -102,15 +127,15 @@ func schedule(roots []*packages.Package, own func(*packages.Package) bool, mainW
 }
 
 // checker holds what one load's checks share: the file set, the type sizes of the
-// configuration, the parse cache of the packages checked whole, and the bound on
-// how many parses and checks run at once.
+// configuration, the parse cache of the packages checked whole and the reading it is
+// keyed under, and the bound on how many parses and checks run at once.
 type checker struct {
-	ctx    context.Context
-	fset   *token.FileSet
-	sizes  types.Sizes
-	parsed map[string]*parsedFile
-	cpu    chan struct{}
-	mu     sync.Mutex
+	ctx     context.Context
+	fset    *token.FileSet
+	sizes   types.Sizes
+	trees   *syntaxCache
+	cpu     chan struct{}
+	reading string
 }
 
 // parsedFile is one file's parse, shared by every package that compiles it.
@@ -238,21 +263,23 @@ func (c *checker) parseFiles(names []string, whole bool) ([]*ast.File, []error) 
 	return parsed, failed
 }
 
-// parse reads one file. A file of a package checked whole is parsed once per load
-// and shared by every variant that compiles it, so one source site is one
-// position. A file of a package checked for its declarations is parsed afresh and
-// its tree dropped with the check: only such a package compiles it.
+// parse reads one file. A file of a package checked whole is parsed once per reading
+// ([syntaxCache]) and shared by every variant and every configuration that compiles
+// it, so one source site is one position. A file of a package checked for its
+// declarations is parsed afresh and its tree dropped with the check: only such a
+// package compiles it.
 func (c *checker) parse(name string, whole bool) (*ast.File, error) {
 	if !whole {
 		return c.parseOnce(name, signatureParse)
 	}
-	c.mu.Lock()
-	v, held := c.parsed[name]
+	key := syntaxKey{reading: c.reading, name: name}
+	c.trees.mu.Lock()
+	v, held := c.trees.files[key]
 	if !held {
 		v = &parsedFile{ready: make(chan struct{})}
-		c.parsed[name] = v
+		c.trees.files[key] = v
 	}
-	c.mu.Unlock()
+	c.trees.mu.Unlock()
 	if held {
 		<-v.ready
 		return v.file, v.err

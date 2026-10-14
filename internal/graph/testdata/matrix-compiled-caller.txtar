@@ -1,0 +1,37 @@
+A command whose unconstrained function is live on linux alone, where a linux file
+calls it, and calls a function two constrained files declare: on windows the
+function is dead but compiled, so the windows declaration it calls must stay. A
+function only the windows file declares and nothing calls is dead there.
+
+-- go.mod --
+module example.com/compiled
+
+go 1.27.1
+-- main.go --
+package main
+
+func main() {}
+-- a.go --
+package main
+
+func Shared() { platform() }
+-- use_linux.go --
+//go:build linux
+
+package main
+
+func init() { Shared() }
+-- platform_linux.go --
+//go:build linux
+
+package main
+
+func platform() {}
+-- platform_other.go --
+//go:build !linux
+
+package main
+
+func platform() {}
+
+func spare() {}

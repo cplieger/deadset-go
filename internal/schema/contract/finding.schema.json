@@ -162,14 +162,6 @@
           "description": "The number of source lines the deletion of the component removes: the number of distinct source lines the declarations symbol_count counts span, each from its first line to its last, so a line two of them share, such as a field's line inside its struct, counts once. A component minted for a subject that belongs to no dead component, and a component of the declarations grammar/analysis.md \"Fixability\" holds, remove no line, so the value is 0 whatever the subject spans.",
           "type": "integer",
           "minimum": 0
-        },
-        "members": {
-          "description": "Every symbol of the component, this finding's own included, in the canonical order contract/grammar/merge.md fixes. Present where the run is configured to list a component in full, absent otherwise.",
-          "type": "array",
-          "uniqueItems": true,
-          "items": {
-            "$ref": "#/$defs/positioned_symbol"
-          }
         }
       }
     },

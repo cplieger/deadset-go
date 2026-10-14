@@ -1,0 +1,105 @@
+One module whose tests pass suites to two suite runners, each a stand-in module the
+module file replaces with a directory of the archive, and to a look-alike runner of
+the module itself. A suite type embeds another whose test method it promotes, and
+one suite reaches its runner only as an interface value.
+
+-- go.mod --
+module example.com/suites
+
+go 1.27.1
+
+require (
+	github.com/stretchr/testify v1.0.0
+	gopkg.in/check.v1 v1.0.0
+)
+
+replace (
+	github.com/stretchr/testify => ./stand-ins/testify
+	gopkg.in/check.v1 => ./stand-ins/check
+)
+-- suites.go --
+package suites
+
+// Run looks like a suite runner and calls nothing on its argument.
+func Run(t any, s any) {}
+-- suites_test.go --
+package suites
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/suite"
+	check "gopkg.in/check.v1"
+)
+
+type base struct{ suite.Suite }
+
+func (b *base) TestInherited() {}
+
+type Runs struct {
+	base
+}
+
+func (r *Runs) TestRuns() {}
+
+func (r *Runs) Testing() {}
+
+func (r *Runs) Helper() {}
+
+func (r *Runs) testHidden() {}
+
+type Hidden struct{ suite.Suite }
+
+func (h *Hidden) TestBehindAnInterface() {}
+
+type Alike struct{ suite.Suite }
+
+func (a *Alike) TestOfALookAlike() {}
+
+type Checked struct{}
+
+func (c *Checked) TestChecked() {}
+
+func (c *Checked) BenchmarkChecked() {}
+
+func (c *Checked) SetUpTest() {}
+
+func (c *Checked) Setup() {}
+
+var _ = check.Suite(&Checked{})
+
+func TestRun(t *testing.T) {
+	suite.Run(t, new(Runs))
+	var hidden suite.TestingSuite = &Hidden{}
+	suite.Run(t, hidden)
+	Run(t, &Alike{})
+}
+-- stand-ins/testify/go.mod --
+module github.com/stretchr/testify
+
+go 1.27.1
+-- stand-ins/testify/suite/suite.go --
+package suite
+
+import "testing"
+
+type Suite struct{ t *testing.T }
+
+func (s *Suite) T() *testing.T { return s.t }
+
+func (s *Suite) SetT(t *testing.T) { s.t = t }
+
+type TestingSuite interface {
+	T() *testing.T
+	SetT(*testing.T)
+}
+
+func Run(t *testing.T, s TestingSuite) { s.SetT(t) }
+-- stand-ins/check/go.mod --
+module gopkg.in/check.v1
+
+go 1.27.1
+-- stand-ins/check/check.go --
+package check
+
+func Suite(s any) any { return s }

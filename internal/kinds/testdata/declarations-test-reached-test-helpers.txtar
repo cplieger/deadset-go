@@ -1,0 +1,35 @@
+A command, a package only its test imports whose files import no testing package,
+and that test, which calls the package and a helper of its own test file that reads
+a variable of that file.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+func main() {}
+-- samples/samples.go --
+package samples
+
+// Sample is called by a test alone.
+func Sample() int { return 1 }
+-- main_test.go --
+package main
+
+import (
+	"testing"
+
+	"example.com/app/samples"
+)
+
+var base = 1
+
+func helper() int { return base + 1 }
+
+func TestSample(t *testing.T) {
+	if helper() != samples.Sample()+1 {
+		t.Fail()
+	}
+}

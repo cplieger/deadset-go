@@ -1,0 +1,85 @@
+An application rendering a view through a template the analysis reads whole: the
+template names one method of the view, one method whose result it reads a field of,
+and a field whose type prints itself. Another view declares a method no template
+names. A second command renders through a template whose event-handler attribute
+html/template encodes a value inside whole, and a third renders through a function that
+executes whatever value it is given.
+
+-- go.mod --
+module example.com/view
+
+go 1.27.1
+-- main.go --
+package main
+
+import (
+	"html/template"
+	"os"
+)
+
+// User is what the view's User method returns.
+type User struct {
+	Name  string
+	Email string
+}
+
+// Status prints itself.
+type Status int
+
+func (Status) String() string { return "ok" }
+
+func (Status) Code() int { return 1 }
+
+// View is what the template renders.
+type View struct{ State Status }
+
+func (View) Shown() string { return "s" }
+
+func (View) User() *User { return &User{} }
+
+func (View) WithSuccess() View { return View{} }
+
+var page = template.Must(template.New("v").Parse("{{.Shown}} {{.User.Name}} {{.State}}"))
+
+func main() { _ = page.Execute(os.Stdout, View{}) }
+-- handler/main.go --
+package main
+
+import (
+	"html/template"
+	"os"
+)
+
+// Gadget is what an event-handler attribute encodes whole.
+type Gadget struct {
+	ID    int
+	Label string
+}
+
+func (Gadget) Spare() int { return 0 }
+
+var page = template.Must(template.New("g").Parse(`<button onclick="pick({{.ID}})">x</button>`))
+
+func main() { _ = page.Execute(os.Stdout, Gadget{ID: 1, Label: "x"}) }
+-- wrapped/main.go --
+package main
+
+import (
+	"io"
+	"os"
+	"text/template"
+)
+
+// Owner is what the card's Owner method returns.
+type Owner struct{ Handle string }
+
+// Card is rendered through a function that executes whatever it is given.
+type Card struct{}
+
+func (Card) Owner() Owner { return Owner{} }
+
+func render(w io.Writer, data any) {
+	_ = template.Must(template.New("c").Parse("{{.Owner.Handle}}")).Execute(w, data)
+}
+
+func main() { render(os.Stdout, Card{}) }

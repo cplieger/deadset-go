@@ -738,6 +738,7 @@ func TestRootKindStringNamesEveryKind(t *testing.T) {
 		{RootConfigured, "configured"},
 		{RootPattern, "pattern"},
 		{RootProgram, "program"},
+		{RootSwagRoute, "swag-route"},
 		{RootKind(200), "RootKind(200)"},
 	}
 	for _, test := range cases {

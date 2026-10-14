@@ -1,0 +1,39 @@
+A command handing one type to an interface whose methods it supplies partly through
+an embedded field and partly through a field that embedding embeds in turn, and a
+further embedded field that supplies none of them.
+
+-- go.mod --
+module example.com/embedded
+
+go 1.27.1
+-- main.go --
+package main
+
+type Addon interface {
+	Request()
+	Response()
+	Close()
+}
+
+type Closer struct{}
+
+func (*Closer) Close() {}
+
+type Base struct{ Closer }
+
+func (*Base) Request() {}
+
+type Clock struct{}
+
+func (Clock) Now() int { return 0 }
+
+type Decoder struct {
+	Base
+	Clock
+}
+
+func (*Decoder) Response() {}
+
+func add(a Addon) { a.Request(); a.Response(); a.Close() }
+
+func main() { add(&Decoder{}) }

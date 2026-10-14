@@ -1,0 +1,35 @@
+A command sorting one slice type through the standard sort interface, that type
+declaring one more method, and a second slice type whose only sort sits in a
+method nothing calls.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+import "sort"
+
+type Items []int
+
+func (i Items) Len() int           { return len(i) }
+func (i Items) Less(a, b int) bool { return i[a] < i[b] }
+func (i Items) Swap(a, b int)      { i[a], i[b] = i[b], i[a] }
+func (i Items) Unrelated() int     { return len(i) }
+
+type Beats []int
+
+func (b Beats) Len() int           { return len(b) }
+func (b Beats) Less(i, j int) bool { return b[i] < b[j] }
+func (b Beats) Swap(i, j int)      { b[i], b[j] = b[j], b[i] }
+
+func (b Beats) Sorted() Beats {
+	sort.Sort(b)
+	return b
+}
+
+func main() {
+	sort.Sort(Items{3, 1})
+	println(len(Beats{1}))
+}

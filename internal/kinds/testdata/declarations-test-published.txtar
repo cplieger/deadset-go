@@ -1,0 +1,38 @@
+A library with an exported function only its test calls, an unexported function
+only its own test calls, and a test calling both.
+
+-- go.mod --
+module example.com/lib
+
+go 1.27.1
+-- lib.go --
+package lib
+
+// Unmarshal is published API nothing in the module calls.
+func Unmarshal() int { return parse() + 1 }
+
+func parse() int { return 1 }
+
+func spare() int { return 2 }
+-- lib_test.go --
+package lib
+
+import "testing"
+
+func TestUnmarshal(t *testing.T) {
+	if Unmarshal() != 2 {
+		t.Fail()
+	}
+}
+
+func TestSpare(t *testing.T) {
+	if spare() != 2 {
+		t.Fail()
+	}
+}
+
+func TestBoth(t *testing.T) {
+	if Unmarshal()+spare() != 4 {
+		t.Fail()
+	}
+}

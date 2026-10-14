@@ -56,8 +56,9 @@ func All(ctx context.Context, doc scope.Document, configurations []Configuration
 
 	results := make([]Result, 0, len(configurations))
 	var dropped []Unbuilt
+	trees := newSyntaxCache()
 	for _, c := range configurations {
-		r, err := Load(ctx, doc, c)
+		r, err := load(ctx, doc, c, trees)
 		switch {
 		case err != nil && ctx.Err() != nil:
 			return nil, nil, fmt.Errorf("load %s: %w", c.ID, context.Cause(ctx))

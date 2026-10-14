@@ -48,7 +48,7 @@ The empty interface is the one parameter type this rule reads. A value handed to
 
 ### interface-satisfaction
 
-Retains every method that satisfies an interface a value of the method's receiver type reaches.
+Retains every method that satisfies an interface a value of the method's receiver type reaches, and each embedded field a promoted method is selected through, since deleting the field removes the method.
 
 The evidence is the conversion set, every site in the target or in a loaded consumer where a value of a concrete type reaches a position typed as an interface. Such a site is an explicit conversion or a satisfaction assertion, an assignment, an argument, a return value, or an element stored in an interface-typed container. For each such pair of concrete type and interface, the methods of the type that answer what the interface requires are retained at that site.
 

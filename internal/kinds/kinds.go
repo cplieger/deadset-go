@@ -601,12 +601,41 @@ func (in *Input) runKind(emit Emitter, row *catalog.Row, reported map[string]str
 		if found.id != "" && in.annotationCascade().falls[found.id] {
 			continue
 		}
+		if row.Code == testOfDeadCodeCode && in.testsOutsideUse()[found.id] {
+			continue
+		}
 		if in.withhold(&found) {
 			continue
 		}
 		completed = append(completed, found)
 	}
 	return completed, nil
+}
+
+// testsOutsideUse is every test of dead code that references a production
+// declaration whose reachability class is possible: outside programs may call that
+// declaration, so it counts as a live target symbol and the test is no test of dead
+// code. It is computed on first use.
+func (in *Input) testsOutsideUse() map[graph.SymbolID]bool {
+	held := in.index()
+	if held.outsideUse != nil {
+		return held.outsideUse
+	}
+	held.outsideUse = make(map[graph.SymbolID]bool)
+	if in.Merged == nil {
+		return held.outsideUse
+	}
+	for i := range in.Merged.References {
+		ref := &in.Merged.References[i]
+		test, target := in.candidateOf(ref.From), in.symbol(ref.To)
+		if test == nil || !test.TestOfDeadCode || target == nil || testFile(target) || target.TestSupport {
+			continue
+		}
+		if in.classOf(ref.To) == Possible {
+			held.outsideUse[ref.From] = true
+		}
+	}
+	return held.outsideUse
 }
 
 // withhold reports whether a suppression record withholds one finding, recording
@@ -1061,6 +1090,9 @@ type index struct {
 	// that judges an interface method outside them.
 	interfaces *interfaceFacts
 	testUse    *testUseFacts
+	outsideUse map[graph.SymbolID]bool
+	// listed is each dead component's member listing by its index, on first use.
+	listed map[int][]Positioned
 
 	minted int
 }
@@ -1291,16 +1323,28 @@ func (x *index) componentOf(id graph.SymbolID) Component {
 
 // membersOf is every symbol of one finding's component, ordered by position and
 // then by reference, which is the order a full listing names them in. A component
-// minted for a subject that belongs to none holds the subject alone.
+// minted for a subject that belongs to none holds the subject alone. Every finding
+// of one dead component shares one listing, which no caller may change.
 func (x *index) membersOf(found *Finding) []Positioned {
 	component := x.components[found.id]
 	if found.id == "" || (component == nil && x.candidates[found.id] == nil) {
 		return []Positioned{{Ref: found.Symbol.Ref, Name: found.Symbol.Name, Position: found.Position}}
 	}
-	ids := x.fallen(found.id)
-	if component != nil {
-		ids = component.Members
+	if component == nil {
+		return x.listing(x.fallen(found.id))
 	}
+	if held, listed := x.listed[component.Index]; listed {
+		return held
+	}
+	if x.listed == nil {
+		x.listed = make(map[int][]Positioned)
+	}
+	x.listed[component.Index] = x.listing(component.Members)
+	return x.listed[component.Index]
+}
+
+// listing is the members of one set of symbols in the order [index.membersOf] names.
+func (x *index) listing(ids []graph.SymbolID) []Positioned {
 	members := make([]Positioned, 0, len(ids))
 	for _, id := range ids {
 		symbol := x.symbols[id]

@@ -98,7 +98,8 @@ type Result struct {
 	// module it loaded.
 	Consumers []Consumer
 
-	Fset *token.FileSet // one FileSet for the whole configuration
+	Fset  *token.FileSet // one FileSet for the whole configuration, shared by every configuration [All] loads
+	trees *syntaxCache
 
 	// TestSupport holds the [Result.PackageKey] of the target's test-support packages:
 	// packages only tests reach that carry test evidence, which every stage judges as
@@ -111,9 +112,9 @@ type Result struct {
 	// is one when a member of this set imports it. [graph.ClassifyTestSupport] fills it.
 	TestReached map[string]bool
 
-	// Programs holds the target's files run on their own under the ignore tag,
-	// which no package of the target compiles and every stage but the root
-	// detection leaves alone.
+	// Programs holds the target's files run on their own under the ignore tag, and
+	// the scripts of every dropped module, which no package of the target compiles
+	// and every stage but the root detection leaves alone.
 	Programs []program
 
 	shared map[string]bool // the import paths [Result.PackageKey] joins a directory to
@@ -147,6 +148,11 @@ func HostConfiguration() Configuration {
 // decide what loads. A unit another unit builds from its directory is read twice,
 // and the resolver joins the two readings by rendered site.
 func Load(ctx context.Context, doc scope.Document, c Configuration) (Result, error) {
+	return load(ctx, doc, c, newSyntaxCache())
+}
+
+// load is [Load] over trees, which [All] shares across the configurations of a matrix.
+func load(ctx context.Context, doc scope.Document, c Configuration, trees *syntaxCache) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, fmt.Errorf("load %s: %w", c.ID, err)
 	}
@@ -167,7 +173,7 @@ func Load(ctx context.Context, doc scope.Document, c Configuration) (Result, err
 		return Result{}, fmt.Errorf("load %s: find the modules under %s: %w", c.ID, target, err)
 	}
 	walked := walkedUnits(target, dirs)
-	r := Result{Configuration: c, Fset: token.NewFileSet()}
+	r := Result{Configuration: c, Fset: trees.fset, trees: trees}
 	if failed := r.loadUnits(ctx, target, dirs, walked); failed != nil {
 		return Result{}, failed
 	}
@@ -176,13 +182,16 @@ func Load(ctx context.Context, doc scope.Document, c Configuration) (Result, err
 	r.markShared()
 
 	if !walked {
-		if r.Nested, r.Dropped, err = loadNested(ctx, r.Fset, &doc, c, r.Units); err != nil {
+		if r.Nested, r.Dropped, err = loadNested(ctx, r.trees, &doc, c, r.Units); err != nil {
 			return Result{}, err
 		}
 	}
 	r.markUnanalysedConsumers(ctx)
+	for _, dropped := range r.Dropped {
+		r.Programs = append(r.Programs, checkScripts(ctx, r.Fset, dropped.Dir, r.Packages, c)...)
+	}
 
-	r.Consumers, err = loadConsumers(ctx, r.Fset, &doc, c, r.Units)
+	r.Consumers, err = loadConsumers(ctx, r.trees, &doc, c, r.Units)
 	if err != nil {
 		return Result{}, err
 	}
@@ -218,7 +227,7 @@ func (r *Result) loadUnit(ctx context.Context, target, dir string) error {
 	if err != nil {
 		return fmt.Errorf("load %s: %s: %w", c.ID, dir, err)
 	}
-	pkgs, diagnostics, err := loadPackages(ctx, r.Fset, dir, c, workspace, nil, unitPrefix(target, dir))
+	pkgs, diagnostics, err := loadPackages(ctx, r.trees, dir, c, workspace, nil, unitPrefix(target, dir))
 	if _, setup := errors.AsType[*SetupError](err); setup {
 		return err
 	}
@@ -251,7 +260,7 @@ func (r *Result) loadUnit(ctx context.Context, target, dir string) error {
 // modules as the further modules [typeCheck] checks whole. A load that reports errors
 // returns them as diagnostics and no packages, each position the toolchain wrote
 // relative to dir rewritten below prefix.
-func loadPackages(ctx context.Context, fset *token.FileSet, dir string, c Configuration, workspace string, modules []string, prefix string, patterns ...string) ([]*packages.Package, []Diagnostic, error) {
+func loadPackages(ctx context.Context, trees *syntaxCache, dir string, c Configuration, workspace string, modules []string, prefix string, patterns ...string) ([]*packages.Package, []Diagnostic, error) {
 	if len(patterns) == 0 {
 		patterns = []string{loadPattern}
 	}
@@ -279,7 +288,7 @@ func loadPackages(ctx context.Context, fset *token.FileSet, dir string, c Config
 		}
 		return nil, diagnostics, nil
 	}
-	if err := typeCheck(ctx, fset, pkgs, c.Arch, modules); err != nil {
+	if err := typeCheck(ctx, trees, dir+"\x00"+strings.Join(modules, "\x00"), pkgs, c.Arch, modules); err != nil {
 		return nil, nil, err
 	}
 	if diagnostics := collect(pkgs, prefix); len(diagnostics) > 0 {

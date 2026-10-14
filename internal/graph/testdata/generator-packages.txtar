@@ -1,0 +1,67 @@
+One module whose go:generate directives pass package directories to generators: ent
+run by go run receiving a schema directory beside flags with values, ent receiving its
+own directory, a type generator receiving another directory, ent receiving a name with
+no relative path, and two programs that are no package-reading generator receiving a
+relative directory, one of them writing to it.
+
+-- go.mod --
+module example.com/genpkg
+
+go 1.27.1
+-- main.go --
+package main
+
+func main() {}
+-- store/generate.go --
+package store
+
+//go:generate go run -mod=mod entgo.io/ent/cmd/ent generate --feature sql/upsert ./schema
+//go:generate go run entgo.io/ent/cmd/ent generate .
+//go:generate stringer -type=Kind ../kinds
+//go:generate go run entgo.io/ent/cmd/ent generate named
+//go:generate go run example.com/tools/cmd/gen generate ./other
+//go:generate cp seed.txt ./generated/
+-- store/schema/user.go --
+package schema
+
+// User is a schema the generator reads.
+type User struct {
+	Name string
+	note string
+}
+
+func (User) Fields() []string { return nil }
+
+func (User) fields() []string { return nil }
+
+type hidden struct{}
+
+func (hidden) Edges() []string { return nil }
+
+func Build[T any]() {}
+-- store/schema/user_test.go --
+package schema
+
+func Exported() {}
+-- store/store.go --
+package store
+
+func Open() {}
+-- kinds/kinds.go --
+package kinds
+
+type Kind int
+
+func Spare() {}
+-- named/named.go --
+package named
+
+func Named() {}
+-- store/other/other.go --
+package other
+
+func Other() {}
+-- store/generated/generated.go --
+package generated
+
+func Dead() {}

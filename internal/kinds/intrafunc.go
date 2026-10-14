@@ -127,6 +127,10 @@ type intrafunc struct {
 	// code a type error left unresolved, whose interface may fix the signature.
 	foreign map[graph.SymbolID]bool
 
+	// programmed is every declaration a program run on its own names, whose call
+	// sites in that program are outside the reference set.
+	programmed map[graph.SymbolID]bool
+
 	// valued is every declaration a reference names outside call position, which
 	// is a function used as a value: its signature is fixed by the func or
 	// interface type the value reaches.
@@ -140,11 +144,12 @@ type intrafunc struct {
 // intraFunc prepares what these kinds read, once per findings pass.
 func (in *Input) intraFunc() *intrafunc {
 	g := &intrafunc{
-		in:       in,
-		exempted: make(map[graph.SymbolID]bool, len(in.Exempt)),
-		foreign:  make(map[graph.SymbolID]bool),
-		valued:   make(map[graph.SymbolID]bool),
-		twins:    platformTwins(in),
+		in:         in,
+		exempted:   make(map[graph.SymbolID]bool, len(in.Exempt)),
+		foreign:    make(map[graph.SymbolID]bool),
+		programmed: make(map[graph.SymbolID]bool),
+		valued:     make(map[graph.SymbolID]bool),
+		twins:      platformTwins(in),
 	}
 	for ix := range in.Exempt {
 		exemption := &in.Exempt[ix]
@@ -160,6 +165,8 @@ func (in *Input) intraFunc() *intrafunc {
 			switch root.Kind {
 			case graph.RootLinkname, graph.RootCgoExport, graph.RootTest, graph.RootTypeError, graph.RootFuzz:
 				g.foreign[root.ID] = true
+			case graph.RootProgram:
+				g.programmed[root.ID] = true
 			}
 		}
 		for i := range in.Merged.References {
@@ -201,11 +208,15 @@ func (g *intrafunc) twinned(id graph.SymbolID, decl *ast.FuncDecl) bool {
 	return symbol != nil && decl != nil && len(g.twins[twinKey(symbol.PkgPath, decl)]) > 1
 }
 
-// callersUnknown reports whether one declaration is part of a library's importable
-// surface whose callers are not all in the loaded graph, the unused-result kind's
-// precondition. It reads the narrowing kinds' completeness declaration, because a
-// consumer set loaded whole is every caller only where the configuration says so.
+// callersUnknown reports whether a program names one declaration, or it is part of a
+// library's importable surface, and so its callers are not all in the loaded graph,
+// the unused-result kind's precondition. It reads the narrowing kinds' completeness
+// declaration, because a consumer set loaded whole is every caller only where the
+// configuration says so.
 func (g *intrafunc) callersUnknown(id graph.SymbolID) bool {
+	if g.programmed[id] {
+		return true
+	}
 	symbol := g.in.symbol(id)
 	if symbol == nil || !symbol.Exported || !g.in.importable(symbol) {
 		return false
