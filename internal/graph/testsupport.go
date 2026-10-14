@@ -30,40 +30,52 @@ const (
 	outsideUser = " consumer"
 )
 
-// ClassifyTestSupport records the target's test-support packages in r.TestSupport, by
-// [load.Result.PackageKey], and marks their declarations in symbols, whose positions
-// are relative to targetRoot. That is the largest set of non-main, non-test, unrooted
-// packages of the target that carry test evidence, which a test reaches and only test
-// files, a package's own among them, and members import or reference. A reference is a
-// resolved name, so an interface call references no implementation; an init function,
-// a blank declaration and a test are no root here. A library's package is one only
-// under an internal tree, because outside programs may import any other.
+// ClassifyTestSupport fills r.TestSupport, by [load.Result.PackageKey], and marks those
+// declarations in symbols (positions relative to targetRoot): the largest set of
+// non-main, non-test, unrooted packages carrying test evidence that only test files and
+// members import or reference by resolved name, so an interface call references no
+// implementation. Init functions, blank declarations and tests are no root; a library's
+// package qualifies only under an internal tree. r.TestReached is the same largest set
+// with no evidence needed, less r.TestSupport: packages only tests reach that are not
+// test support, which stay production code.
 func ClassifyTestSupport(r *load.Result, targetRoot string, symbols []Symbol, roots []Root, library bool) {
-	candidates := make(map[string]bool)
+	reached := make(map[string]bool)
+	evidenced := make(map[string]bool)
 	for _, p := range r.Packages {
 		if p.Module != nil && p.Module.Main && supportCandidate(p, library) {
-			candidates[r.KeyOf(p)] = true
+			reached[r.KeyOf(p)] = true
+			evidenced[r.KeyOf(p)] = carriesTestEvidence(p)
 		}
 	}
 	keyOf := func(s *Symbol) string {
 		return r.PackageKey(s.PkgPath, filepath.Join(targetRoot, filepath.FromSlash(path.Dir(s.Pos.Filename))))
 	}
 	for key := range rootedPackages(symbols, roots, keyOf) {
-		delete(candidates, key)
+		delete(reached, key)
 	}
-	r.TestSupport = largestSupport(candidates, usersOf(r, candidates))
+	candidates := maps.Clone(reached)
+	maps.DeleteFunc(candidates, func(key string, _ bool) bool { return !evidenced[key] })
+	users := usersOf(r, reached)
+	r.TestSupport = largestSupport(candidates, users)
+	r.TestReached = largestSupport(reached, users)
+	maps.DeleteFunc(r.TestReached, func(key string, _ bool) bool { return r.TestSupport[key] })
 	for i := range symbols {
 		symbols[i].TestSupport = r.TestSupport[keyOf(&symbols[i])]
 	}
 }
 
 // supportCandidate reports whether one package of the main module could be test
-// support: a non-main, non-test package whose files other than its test files import
-// the testing package, under an internal tree for a library. A package only tests
-// reach that carries no such evidence is production code a test happens to use.
+// support: a non-main, non-test package, under an internal tree for a library.
 func supportCandidate(p *packages.Package, library bool) bool {
 	return p.ForTest == "" && p.Name != mainPackage && !strings.HasSuffix(p.PkgPath, testPackageSuffix) &&
-		p.Imports[testingPath] != nil && (!library || slices.Contains(strings.Split(p.PkgPath, "/"), internalElement))
+		(!library || slices.Contains(strings.Split(p.PkgPath, "/"), internalElement))
+}
+
+// carriesTestEvidence reports whether one package's files other than its test files
+// import the testing package. A package only tests reach that carries no such
+// evidence is production code a test happens to use.
+func carriesTestEvidence(p *packages.Package) bool {
+	return p.Imports[testingPath] != nil
 }
 
 // rootedPackages is the key of every package that declares a root of a kind

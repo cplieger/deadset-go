@@ -135,7 +135,7 @@ func (in *Input) codeOf(candidate *graph.Candidate) string {
 		return in.shapeCode(symbol)
 	case candidate.ProductionRefs == 0 && in.deprecations()[candidate.ID]:
 		return deprecatedAndUnusedCode
-	case candidate.ProductionRefs == 0 && candidate.TestRefs > 0:
+	case testKept(candidate):
 		return testOnlyUseCode
 	default:
 		return in.shapeCode(symbol)
@@ -198,6 +198,9 @@ func (in *Input) unusedMessage(candidate *graph.Candidate, code string) string {
 	word := in.word(candidate.ID)
 	switch code {
 	case testOnlyUseCode:
+		if candidate.ProductionRefs > 0 {
+			return word + " is referenced only from test files and from declarations that are themselves dead"
+		}
 		return word + " is referenced only from test files and never from production code"
 	case deprecatedAndUnusedCode:
 		return "deprecated " + word + " has no production reference"
@@ -274,6 +277,12 @@ func testOnly(candidate *graph.Candidate) bool {
 	return candidate.ProductionRefs == 0 && candidate.TestRefs > 0
 }
 
+// testKept reports whether a candidate is a test-only use: only tests reference it,
+// or every production reference is made by dead code and a test that stays keeps it.
+func testKept(candidate *graph.Candidate) bool {
+	return testOnly(candidate) || (candidate.TestRefs > 0 && candidate.Relation == graph.Reachability && candidate.KeptByTests)
+}
+
 // testFile reports whether a test file declares one symbol, by the language's own
 // rule over the file's name.
 func testFile(symbol *graph.Symbol) bool {
@@ -286,18 +295,146 @@ func testFile(symbol *graph.Symbol) bool {
 // production import under one configuration makes the package production code,
 // whatever another configuration that compiles none of its importers says.
 func (in *Input) testSupport(symbol *graph.Symbol) bool {
-	support := false
+	return in.classifiedEverywhere(symbol, func(r *load.Result, key string) bool { return r.TestSupport[key] })
+}
+
+// testReached reports whether production code only tests reach declares one symbol:
+// every configuration that loads its package found only tests reaching it, and not
+// every one found it test-support code.
+func (in *Input) testReached(symbol *graph.Symbol) bool {
+	return !in.testSupport(symbol) && in.classifiedEverywhere(symbol, func(r *load.Result, key string) bool {
+		return r.TestSupport[key] || r.TestReached[key]
+	})
+}
+
+// classifiedEverywhere reports whether some configuration of the run classified the
+// package declaring one symbol by classified and every configuration that loads it did.
+func (in *Input) classifiedEverywhere(symbol *graph.Symbol, classified func(r *load.Result, key string) bool) bool {
+	held := false
 	dir := filepath.Join(in.Root, filepath.FromSlash(path.Dir(symbol.Pos.Filename)))
 	for _, one := range in.Per {
 		switch {
 		case one.Result == nil:
-		case one.Result.TestSupport[one.Result.PackageKey(symbol.PkgPath, dir)]:
-			support = true
+		case classified(one.Result, one.Result.PackageKey(symbol.PkgPath, dir)):
+			held = true
 		case loads(one.Result, one.Result.PackageKey(symbol.PkgPath, dir)):
 			return false
 		}
 	}
-	return support
+	return held
+}
+
+// testReachedCodes are the codes a finding about production code only tests reach
+// is reported under where a test references the declaration.
+var testReachedCodes = map[string]bool{
+	unusedExportedCode:      true,
+	unusedUnexportedCode:    true,
+	unusedMemberCode:        true,
+	testOnlyUseCode:         true,
+	deprecatedAndUnusedCode: true,
+	unusedInterfaceCode:     true,
+}
+
+// testReachedUse reports whether a record under code holds a declaration of production
+// code only tests reach that a test references, whose finding is possible whether or
+// not the record keeps the declaration live.
+func (in *Input) testReachedUse(id graph.SymbolID, code string) bool {
+	symbol := in.symbol(id)
+	return testReachedCodes[code] && symbol != nil && in.testReached(symbol) && in.testUse().referenced[id]
+}
+
+// testUseFacts is what [Input.testUse] computes once per run.
+type testUseFacts struct {
+	// dead is every dead declaration whose findings are possible because production
+	// code only tests reach is: each such declaration a test references, each dead
+	// declaration one reaches through a reference or as its container, and each test
+	// of dead code every dead target of which is one. No member references a dead
+	// declaration outside the set, so reporting the rest of its component without it
+	// deletes nothing a withheld member needs.
+	dead map[graph.SymbolID]bool
+	// referenced is every declaration a test file references.
+	referenced map[graph.SymbolID]bool
+}
+
+// testUse computes the run's [testUseFacts] on first use.
+func (in *Input) testUse() *testUseFacts {
+	held := in.index()
+	if held.testUse != nil {
+		return held.testUse
+	}
+	facts := &testUseFacts{dead: make(map[graph.SymbolID]bool), referenced: make(map[graph.SymbolID]bool)}
+	held.testUse = facts
+	if in.Merged == nil || in.Sweep == nil {
+		return facts
+	}
+	out := make(map[graph.SymbolID][]graph.SymbolID)
+	for i := range in.Merged.References {
+		ref := &in.Merged.References[i]
+		if ref.Test {
+			facts.referenced[ref.To] = true
+		}
+		out[ref.From] = append(out[ref.From], ref.To)
+	}
+	in.walkTestUse(facts, out)
+	for i := range in.Sweep.Candidates {
+		if test := &in.Sweep.Candidates[i]; test.TestOfDeadCode && everyDeadTargetIn(out[test.ID], in.deadProduction, facts.dead) {
+			facts.dead[test.ID] = true
+		}
+	}
+	return facts
+}
+
+// deadProduction reports whether one declaration is a dead production declaration:
+// a candidate outside the test files that is no test of dead code.
+func (in *Input) deadProduction(id graph.SymbolID) bool {
+	candidate, symbol := in.candidateOf(id), in.symbol(id)
+	return candidate != nil && !candidate.TestOfDeadCode && symbol != nil && !testFile(symbol)
+}
+
+// walkTestUse fills facts.dead with the dead declarations of production code only
+// tests reach that a test references, and every dead production declaration one
+// reaches through out or holds as its container.
+func (in *Input) walkTestUse(facts *testUseFacts, out map[graph.SymbolID][]graph.SymbolID) {
+	var queue []graph.SymbolID
+	add := func(id graph.SymbolID) {
+		if !facts.dead[id] && in.deadProduction(id) {
+			facts.dead[id] = true
+			queue = append(queue, id)
+		}
+	}
+	for i := range in.Sweep.Candidates {
+		id := in.Sweep.Candidates[i].ID
+		if symbol := in.symbol(id); symbol != nil && facts.referenced[id] && in.testReached(symbol) {
+			add(id)
+		}
+	}
+	children := in.index().children
+	for len(queue) > 0 {
+		id := queue[len(queue)-1]
+		queue = queue[:len(queue)-1]
+		for _, to := range out[id] {
+			add(to)
+		}
+		for _, child := range children[id] {
+			add(child)
+		}
+	}
+}
+
+// everyDeadTargetIn reports whether a test's references name at least one dead
+// production declaration and every one they name is in set.
+func everyDeadTargetIn(targets []graph.SymbolID, production func(graph.SymbolID) bool, set map[graph.SymbolID]bool) bool {
+	named := false
+	for _, to := range targets {
+		if !production(to) {
+			continue
+		}
+		if !set[to] {
+			return false
+		}
+		named = true
+	}
+	return named
 }
 
 // loads reports whether one configuration loaded the package of that

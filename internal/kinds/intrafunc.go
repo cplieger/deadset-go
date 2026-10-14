@@ -30,7 +30,8 @@ const (
 
 // The Contract's words for the subjects of these kinds. Each names a part of a
 // declaration rather than a declaration, so a finding about one carries the
-// enclosing declaration's reference and the part's own position.
+// enclosing declaration's reference, a parameter's own under it, and the part's own
+// position.
 const (
 	parameterSubject = "parameter"
 	receiverSubject  = "receiver"
@@ -315,7 +316,7 @@ func comparePositions(a, b Position) int {
 }
 
 // findings completes one finding per part, each about the part's own position and
-// the enclosing declaration's reference. A part of a declaration the sweep judged
+// the enclosing declaration's reference, or a parameter's reference under it. A part of a declaration the sweep judged
 // dead is reported beside the declaration's own finding, a part is never pending, and
 // a declaration of test code nothing references is the exception unjudged states. A
 // suppression record silences a part through the framework, as any other finding.
@@ -326,8 +327,12 @@ func (g *intrafunc) findings(code string, held []*part) ([]Finding, error) {
 		if symbol == nil || g.unjudged(symbol, one.id) {
 			continue
 		}
+		ref := symbol.Ref
+		if code == unusedParameterCode {
+			ref = graph.ParameterRef(ref, one.name)
+		}
 		finding := findingAt(code, Subject{
-			Ref:       symbol.Ref,
+			Ref:       ref,
 			Kind:      one.kind,
 			Name:      one.name,
 			SizeLines: one.position.EndLine - one.position.Line + 1,

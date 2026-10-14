@@ -1,0 +1,66 @@
+Ignore entries naming unused parameters: one naming a parameter's own reference,
+which holds that parameter alone, one naming the declaration, which holds every
+parameter of it, one naming the reference two literals of one function share, which
+holds both, and one naming a parameter the body reads, which matches nothing.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+func pair(first int, second int) int {
+	return 0
+}
+
+func whole(left int, right int) int {
+	return 1
+}
+
+func holder() {
+	func(x int) {
+		println("a")
+	}(1)
+	func(x int) {
+		println("b")
+	}(2)
+}
+
+func reads(v int) int {
+	return v
+}
+
+func main() {
+	println(pair(1, 2), whole(1, 2), reads(1))
+	holder()
+}
+-- deadset-ignore.json --
+{
+  "ignore": [
+    {
+      "code": "DS1801",
+      "symbol": "go://example.com/app#pair(first)",
+      "path": "main.go",
+      "reason": "the first operand answers a shape this program does not read"
+    },
+    {
+      "code": "DS1801",
+      "symbol": "go://example.com/app#whole",
+      "path": "main.go",
+      "reason": "both operands answer a shape this program does not read"
+    },
+    {
+      "code": "DS1801",
+      "symbol": "go://example.com/app#holder(x)",
+      "path": "main.go",
+      "reason": "each callback answers a shape this program does not read"
+    },
+    {
+      "code": "DS1801",
+      "symbol": "go://example.com/app#reads(v)",
+      "path": "main.go",
+      "reason": "the value is read, so this matches nothing"
+    }
+  ]
+}

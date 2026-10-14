@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cplieger/deadset-go/v2/internal/catalog"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 )
 
@@ -162,6 +163,7 @@ func records(raw []json.RawMessage, sites []token.Position, bound map[reference]
 // record reads one entry or row: the records it bound, or the refusals it carries,
 // or the malformed value that ends the run. A well-formed record of another
 // language's scheme is none of these: it binds, counts and is reported nowhere here.
+// A part kind's record naming a parameter binds the declaration that holds it.
 func record(body []byte, at token.Position, bound map[reference][]graph.Symbol, held *shape) ([]Record, []Refusal, error) {
 	wire, err := decodeRecord(body, at, held)
 	if err != nil {
@@ -185,6 +187,9 @@ func record(body []byte, at token.Position, bound map[reference][]graph.Symbol, 
 		Mechanism: held.mechanism,
 	}
 	names := bound[reference{ref: symbol, path: path}]
+	if holder, parameter := graph.ParameterHolder(symbol); len(names) == 0 && parameter && catalog.ReportsPart(code) {
+		names = bound[reference{ref: holder, path: path}]
+	}
 	if len(names) == 0 {
 		return []Record{one}, nil, nil
 	}

@@ -152,6 +152,11 @@ type Candidate struct {
 	// test of dead code, reaches through any reference, test files' included
 	// ([sweep.admitUnreferencedTests]). Its relation counts every reference.
 	UnreferencedTest bool
+
+	// KeptByTests reports that test code the run counting test references reaches,
+	// and that is no test of dead code, references the symbol: a test that stays
+	// keeps it, in some configuration of a matrix.
+	KeptByTests bool
 }
 
 // Result is one sweep's answer.
@@ -230,6 +235,7 @@ func (g *Graph) sweep(in *SweepInput) *sweep {
 		dead:             make([]bool, len(g.symbols)),
 		testOfDeadCode:   make([]bool, len(g.symbols)),
 		unreferencedTest: make([]bool, len(g.symbols)),
+		keptByTests:      make([]bool, len(g.symbols)),
 	}
 	s.callers()
 	s.referenceCounting()
@@ -381,6 +387,7 @@ type sweep struct {
 	dead             []bool
 	testOfDeadCode   []bool
 	unreferencedTest []bool
+	keptByTests      []bool
 }
 
 // retained lists the exemptions that name a symbol this sweep judged a candidate,
@@ -566,6 +573,7 @@ func (s *sweep) admitTestsOfDeadCode() {
 // falls with them.
 func (s *sweep) admitUnreferencedTests() {
 	reached := s.reachedCountingTests()
+	s.markKeptByTests(reached)
 	for i := range s.g.symbols {
 		if !s.g.subject[i] || s.exempt[i] || s.marked[i] || s.testOfDeadCode[i] || reached[i] {
 			continue
@@ -575,6 +583,21 @@ func (s *sweep) admitUnreferencedTests() {
 		}
 		s.dead[i] = true
 		s.unreferencedTest[i] = true
+	}
+}
+
+// markKeptByTests marks every symbol a test reference of test code that reached holds
+// names, a test of dead code's excepted.
+func (s *sweep) markKeptByTests(reached []bool) {
+	for i := range s.g.symbols {
+		if !s.g.test[i] || !reached[i] || s.testOfDeadCode[i] {
+			continue
+		}
+		for _, e := range s.g.out[i] {
+			if e.test {
+				s.keptByTests[e.to] = true
+			}
+		}
 	}
 }
 
@@ -685,6 +708,7 @@ func (s *sweep) result() Result {
 			Relation:         relation,
 			TestOfDeadCode:   s.testOfDeadCode[i],
 			UnreferencedTest: s.unreferencedTest[i],
+			KeptByTests:      s.keptByTests[i],
 		})
 	}
 	reachable := make([]bool, len(s.live))

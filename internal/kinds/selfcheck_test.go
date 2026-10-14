@@ -850,3 +850,68 @@ func TestStaleSuppressionsLeavesARecordDormantWhoseFindingANameLiteralLowers(t *
 		t.Errorf("Totals() = %d in effect and %d reasons, want 0 and 1: the finding the record holds back is possible, below the default minimum", inEffect, reasons)
 	}
 }
+
+func TestAnIgnoreEntryNamingAParameterHoldsThatParameterAlone(t *testing.T) {
+	in := suppressed(t, "selfcheck-parameter-entries.txtar", applicationConfig())
+	emitters := intraFuncEmitters()
+	emitters[staleSuppressionCode] = StaleSuppressions
+
+	result := computed(t, in, emitters)
+
+	want := []string{"main.go:3:22 parameter second of go://example.com/app#pair(second)"}
+	if got := subjectsOf(result.Findings, unusedParameterCode); !slices.Equal(got, want) {
+		t.Errorf("the pass reports %v under %s, want %v: an entry naming a parameter holds that one, "+
+			"one naming the declaration holds each, and two literals' parameters of one name share a reference",
+			got, unusedParameterCode, want)
+	}
+	var stale []string
+	for i := range result.Findings {
+		if found := &result.Findings[i]; found.Code == staleSuppressionCode {
+			stale = append(stale, found.Symbol.Ref)
+		}
+	}
+	if wantStale := []string{"go://example.com/app#reads(v)"}; !slices.Equal(stale, wantStale) {
+		t.Errorf("StaleSuppressions() names %v, want %v: an entry naming a read parameter matches nothing", stale, wantStale)
+	}
+	if inEffect, _ := Totals(in); inEffect != 3 {
+		t.Errorf("Totals() = %d in effect, want 3", inEffect)
+	}
+}
+
+func TestAnIgnoreEntryNamingAParameterIsDormantUnderAllow(t *testing.T) {
+	resolved := applicationConfig()
+	resolved.Severity = map[string]config.Severity{"DS1801": config.Allow}
+	in := suppressed(t, "selfcheck-parameter-entries.txtar", resolved)
+
+	if got := staleFindings(t, in); len(got) != 0 {
+		t.Errorf("StaleSuppressions() = %+v, want no finding: an entry naming a parameter binds its holder, "+
+			"so under allow it is dormant", got)
+	}
+}
+
+// A record holding a test-only use of production code only tests reach holds a
+// finding the default minimum withholds, so it is dormant: neither stale nor in effect.
+func TestARecordOnProductionCodeOnlyTestsReachIsDormantByDefault(t *testing.T) {
+	in := suppressed(t, "selfcheck-test-reached.txtar", applicationConfig())
+
+	if got := staleFindings(t, in); len(got) != 0 {
+		t.Errorf("StaleSuppressions() = %+v, want no finding: the record bound Sample", got)
+	}
+	if inEffect, reasons := Totals(in); inEffect != 0 || reasons != 1 {
+		t.Errorf("Totals() = %d in effect and %d reasons, want 0 and 1: the finding the record holds back is possible", inEffect, reasons)
+	}
+}
+
+// A record holding a declaration only production code only tests reach calls holds a
+// finding the default minimum withholds, so it is dormant: neither stale nor in effect.
+func TestARecordOnACalleeOfProductionCodeOnlyTestsReachIsDormantByDefault(t *testing.T) {
+	in := suppressed(t, "selfcheck-test-reached-callee.txtar", applicationConfig())
+	computed(t, in, declarationEmitters())
+
+	if got := staleFindings(t, in); len(got) != 0 {
+		t.Errorf("StaleSuppressions() = %+v, want no finding: the record bound seed", got)
+	}
+	if inEffect, reasons := Totals(in); inEffect != 0 || reasons != 1 {
+		t.Errorf("Totals() = %d in effect and %d reasons, want 0 and 1: the finding the record holds back is possible", inEffect, reasons)
+	}
+}

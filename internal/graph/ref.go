@@ -31,3 +31,21 @@ func Ref(kind SymbolKind, pkgPath string, chain []string) string {
 		return refPrefix + pkgPath + "#" + strings.Join(chain, ".")
 	}
 }
+
+// ParameterRef returns the reference of a parameter: the reference of the
+// declaration that holds it, a function literal's parameter included, followed by
+// the parameter's name in parentheses.
+func ParameterRef(holder, name string) string {
+	return holder + "(" + name + ")"
+}
+
+// ParameterHolder returns the reference of the declaration a parameter's reference
+// spells it under, and ref itself with false where ref names no parameter. Only the
+// parameter form ends with a closing parenthesis, so the last opening one starts it.
+func ParameterHolder(ref string) (string, bool) {
+	open := strings.LastIndexByte(ref, '(')
+	if open < 0 || !strings.HasSuffix(ref, ")") {
+		return ref, false
+	}
+	return ref[:open], true
+}

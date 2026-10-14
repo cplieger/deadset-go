@@ -204,7 +204,7 @@ func TestAnalyzeWritesTheBaselineFixpointAndNoDocumentRow(t *testing.T) {
 	want := []string{
 		"DS1002 go://example.com/app#spare",
 		"DS1002 go://example.com/app#feed",
-		"DS1801 go://example.com/app#feed",
+		"DS1801 go://example.com/app#feed(chunk)",
 		"DS1003 go://example.com/app#spare.field",
 	}
 	if !slices.Equal(codes, want) {
@@ -257,7 +257,7 @@ func TestAnalyzeWritesItsOwnRowsAndKeepsTheOtherSchemesRows(t *testing.T) {
 		symbols[i] = got[i].Symbol
 	}
 	want := []string{
-		"go://example.com/app#spare", "go://example.com/app#feed", "go://example.com/app#feed",
+		"go://example.com/app#spare", "go://example.com/app#feed", "go://example.com/app#feed(chunk)",
 		"go://example.com/app#spare.field", "ts://@example/app/src/a.ts#A.b",
 	}
 	if !slices.Equal(symbols, want) {

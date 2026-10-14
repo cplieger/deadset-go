@@ -488,7 +488,7 @@ func (in *Input) unreachableExport(candidate *graph.Candidate, symbol *graph.Sym
 		return false
 	case candidate.ProductionRefs == 0 && in.deprecations()[candidate.ID]:
 		return false
-	case candidate.ProductionRefs == 0 && candidate.TestRefs > 0:
+	case testKept(candidate):
 		return false
 	default:
 		return !member(symbol.Kind)

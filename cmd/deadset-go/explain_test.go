@@ -379,3 +379,21 @@ func TestExplainListsTheFindingsThatNameTheSymbolAndReportSomewhereElse(t *testi
 		}
 	}
 }
+
+func TestExplainListsTheUnusedParametersOfTheSymbol(t *testing.T) {
+	// A parameter's finding carries its own reference under the function's, so the
+	// answer about the function names it.
+	dir := writeModule(t, map[string]string{
+		"go.mod":           "module example.com/app\n\ngo 1.27.1\n",
+		"app.go":           "package main\n\nfunc scaled(value int, label string) int {\n\treturn value * 2\n}\n\nfunc main() {\n\tprintln(scaled(1, \"a\"))\n}\n",
+		repositoryDocument: `{"target": {"kind": "application"}}`,
+	})
+	got := runExplain(t, dir, "go://example.com/app#scaled")
+
+	if want := contractExitCodes(t)["clean"]; got.code != want {
+		t.Fatalf("explain over the function = %d, want %d\nstderr: %s", got.code, want, got.stderr)
+	}
+	if want := "also reported: DS1801 unused-parameter\tapp.go:3:24\tparameter label"; !strings.Contains(got.stdout, want) {
+		t.Errorf("explain stdout =\n%s\nwant it to contain %q", got.stdout, want)
+	}
+}
