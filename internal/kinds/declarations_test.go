@@ -324,9 +324,8 @@ func TestAKindReportsNothingWhereTheSeverityMapAllowsIt(t *testing.T) {
 
 // A production sweep does not hold an exemption whose evidence a test file carries,
 // so the fields of a struct the test of its own package is the only thing to marshal
-// are candidates, and the evidence counts as a test reference to each, so they report
-// as test-only use. The exemption class that would retain them fires on the same
-// fixture in the plain mode, which is where the two modes differ.
+// are candidates: the field the test writes reports as test-only use, and the field
+// nothing writes, which the encoder reads no value of, as an unused member.
 func TestTheMembersOfAStructOnlyATestFileMarshalsReportUnderAProductionSweep(t *testing.T) {
 	result := analysisOf(t, "declarations-test-evidence.txtar", asApplication, Consumers{}).findings(t, everyKind)
 	got := make(map[string]string, len(result.Findings))
@@ -335,7 +334,7 @@ func TestTheMembersOfAStructOnlyATestFileMarshalsReportUnderAProductionSweep(t *
 	}
 	want := map[string]string{
 		"go://example.com/evidence#Fixture.Name":  testOnlyUseCode,
-		"go://example.com/evidence#Fixture.Extra": testOnlyUseCode,
+		"go://example.com/evidence#Fixture.Extra": unusedMemberCode,
 		// The struct itself is live, exported in a main package, and named only
 		// from inside that package, which is the export-narrowing kind's subject
 		// rather than this test's: the table is the whole pass over the fixture.
@@ -552,6 +551,33 @@ func TestEveryKindOfProductionCodeOnlyTestsReachIsAtPossible(t *testing.T) {
 			if found.Class != want.class || found.Confidence != want.class {
 				t.Errorf("%s %s has class %s and confidence %s, want %s",
 					want.code, want.name, found.Class, found.Confidence, want.class)
+			}
+		})
+	}
+}
+
+// A field of production code only tests reach that only a test reads is under the
+// same tier, while a field of the command a test alone reads keeps its class.
+func TestAFieldOfProductionCodeOnlyTestsReachThatOnlyTestsReadIsPossible(t *testing.T) {
+	resolved := applicationConfig()
+	resolved.Analysis.MinConfidence = config.Possible
+	emitters := declarationEmitters()
+	emitters[writeOnlyCode] = WriteOnlySymbol
+	result := computed(t, inputOf(t, "declarations-test-reached-field-read-by-tests.txtar", resolved, Consumers{}), emitters)
+
+	cases := []struct {
+		name  string
+		class Class
+	}{
+		{"Volume.Initialized", Possible},
+		{"Disk.Ready", Certain},
+	}
+	for _, want := range cases {
+		t.Run(want.name, func(t *testing.T) {
+			found := findingOf(t, result.Findings, writeOnlyCode, want.name)
+			if found.Class != want.class || found.Confidence != want.class {
+				t.Errorf("%s %s has class %s and confidence %s, want %s",
+					writeOnlyCode, want.name, found.Class, found.Confidence, want.class)
 			}
 		})
 	}

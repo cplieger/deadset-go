@@ -1,0 +1,124 @@
+An application that loads its page templates through a file system a helper
+chooses: a directory on disk in development, the embedded files otherwise. The
+helper's file system is a parameter, and the loader reads each file it lists
+through Open and io.ReadAll into one shared set it parses into a map. A second
+command parses the text templates of an embedded directory through fs.Sub and
+ParseFS on a parameter. Every template either engine parses is read, so of what
+the pages render only the members their templates name are read, and the draft
+template the embedding leaves out names nothing.
+
+-- go.mod --
+module example.com/fsapp
+
+go 1.27.1
+-- views/views.go --
+package views
+
+import "embed"
+
+//go:embed *.html
+var Files embed.FS
+-- views/page.html --
+<h1>{{.Title}}</h1><p>{{.Greeting}}</p>{{template "nav.html" .}}
+-- views/nav.html --
+<nav>{{.Label}}</nav>
+-- main.go --
+package main
+
+import (
+	"html/template"
+	"io"
+	"io/fs"
+	"os"
+
+	"example.com/fsapp/views"
+)
+
+// Page is what every page template renders.
+type Page struct {
+	Title string
+	Body  string
+	Label string
+}
+
+// Greeting is named by the page template.
+func (Page) Greeting() string { return "hello" }
+
+// Farewell is named by no template.
+func (Page) Farewell() string { return "bye" }
+
+func chooseFS(dir string, embedded fs.FS) fs.FS {
+	if os.Getenv("DEV") != "" {
+		return os.DirFS(dir)
+	}
+	return embedded
+}
+
+func load(fsys fs.FS) (map[string]*template.Template, error) {
+	set := template.New("")
+	out := make(map[string]*template.Template)
+	entries, err := fs.ReadDir(fsys, ".")
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range entries {
+		file, err := fsys.Open(entry.Name())
+		if err != nil {
+			return nil, err
+		}
+		data, err := io.ReadAll(file)
+		_ = file.Close()
+		if err != nil {
+			return nil, err
+		}
+		page, err := set.New(entry.Name()).Parse(string(data))
+		if err != nil {
+			return nil, err
+		}
+		out[entry.Name()] = page
+	}
+	return out, nil
+}
+
+func main() {
+	pages, err := load(chooseFS("views", views.Files))
+	if err != nil {
+		panic(err)
+	}
+	_ = pages["page.html"].Execute(os.Stdout, Page{Title: "t", Body: "b", Label: "l"})
+}
+-- report/main.go --
+package main
+
+import (
+	"embed"
+	"io/fs"
+	"os"
+	"text/template"
+)
+
+//go:embed mail
+var content embed.FS
+
+// Mail is what the mail templates render.
+type Mail struct {
+	Subject string
+	Draft   string
+	Footer  string
+}
+
+func parseAll(fsys fs.FS) *template.Template {
+	return template.Must(template.ParseFS(fsys, "*.txt"))
+}
+
+func main() {
+	sub, err := fs.Sub(content, "mail")
+	if err != nil {
+		panic(err)
+	}
+	_ = parseAll(sub).ExecuteTemplate(os.Stdout, "welcome.txt", Mail{Subject: "s", Draft: "d", Footer: "f"})
+}
+-- report/mail/welcome.txt --
+Subject: {{.Subject}}
+-- report/mail/_draft.txt --
+{{.Draft}}

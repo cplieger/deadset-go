@@ -8,12 +8,11 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/config"
 )
 
-// The workflow commands an annotation is written as. A finding at or above the
-// failing severity is an error, so a pull request shows it as a failure, and a
-// finding below it is a warning.
+// The workflow commands an annotation is written as.
 const (
 	commandError   = "error"
 	commandWarning = "warning"
+	commandNotice  = "notice"
 )
 
 // The title and the message prefix of a type-error skip's annotation.
@@ -22,22 +21,18 @@ const (
 	typeErrorSkipMessage = "the analysis did not evaluate the function or statement holding this type error: "
 )
 
-// Annotations writes one workflow annotation per finding, one per stale
-// suppression and one warning per type-error skip.
-//
-// A stale suppression is an error whatever the rest of the severity map holds,
-// because the kind is fixed on at the failing severity. Each annotation names the
-// file, the line, the column and the last line of the subject, carries the code and
-// the kind as its title, and carries the finding's message; a value is escaped the
-// way the workflow command grammar requires, so a message or a path holding a
-// separator does not truncate the annotation.
-func Annotations(w io.Writer, e *Envelope, opts Options) error {
-	failing := normalizedFailOn(opts.FailOn)
+// Annotations writes the workflow annotations the contract's annotations grammar
+// states: one per finding, at the command its severity alone names, then one error
+// per stale suppression, one warning per type-error skip and one per note. A finding
+// and a stale suppression carry their file, line, column, last line and code and
+// kind as title; a skip its file and line; a note its directory. Every value is
+// escaped as the workflow command grammar requires.
+func Annotations(w io.Writer, e *Envelope, _ Options) error {
 	out := &sink{w: w}
 	for i := range e.Findings {
 		found := &e.Findings[i]
 		out.printf("::%s file=%s,line=%d,col=%d,endLine=%d,title=%s::%s\n",
-			commandOf(found.Severity, failing),
+			commandOf(found.Severity),
 			escapeProperty(found.Position.Path), found.Position.Line, found.Position.Column,
 			found.Position.EndLine,
 			escapeProperty(found.Code+" "+found.Kind), escapeData(found.Message))
@@ -55,16 +50,23 @@ func Annotations(w io.Writer, e *Envelope, opts Options) error {
 			commandWarning, escapeProperty(skip.Path), skip.Line, escapeProperty(typeErrorSkipTitle),
 			escapeData(typeErrorSkipMessage+skip.Message))
 	}
+	for _, note := range e.Notes {
+		out.printf("::%s file=%s,title=%s::%s\n",
+			commandWarning, escapeProperty(note.Path), escapeProperty(note.Kind), escapeData(note.Message))
+	}
 	return out.err
 }
 
-// commandOf is the workflow command one severity is annotated with under the
-// failing severity.
-func commandOf(severity, failing config.Severity) string {
-	if fails(severity, failing) {
+// commandOf is the workflow command a finding of one severity is annotated with.
+func commandOf(severity config.Severity) string {
+	switch severity {
+	case config.Deny:
 		return commandError
+	case config.Allow:
+		return commandNotice
+	default:
+		return commandWarning
 	}
-	return commandWarning
 }
 
 // kindName is the name of the kind one code names, and the code itself where the

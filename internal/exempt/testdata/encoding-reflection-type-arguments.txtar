@@ -107,6 +107,8 @@ func main() {
 	_, _ = decode[local](nil)
 	println(reflect.TypeFor[shadow]().NumField())
 }
+
+var _ = shadow{Tagged: *new(string)}
 -- dep/go.mod --
 module example.com/dep
 

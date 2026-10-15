@@ -5,10 +5,10 @@ import (
 	"syscall"
 )
 
-// PlatformSources reads the free pages the kernel can hand out at once, capped by
-// the machine's physical memory.
-func PlatformSources() []Source {
-	return []Source{freePages}
+// Platform reads the free pages the kernel can hand out at once, capped by the
+// machine's physical memory, which is its limit.
+func Platform() Machine {
+	return Machine{Sources: []Source{freePages}, Limit: memsize}
 }
 
 // freePages is the free, speculative and purgeable pages times the page size: the

@@ -2,8 +2,8 @@
 
 package memory
 
-// PlatformSources is empty where no reader is implemented, so the governor sets
+// Platform reads nothing where no reader is implemented, so the governor sets
 // nothing.
-func PlatformSources() []Source {
-	return nil
+func Platform() Machine {
+	return Machine{}
 }

@@ -1,0 +1,99 @@
+A command, a test of its volume package, and a package only that test imports whose
+files import no testing package: a fake volume the package registers as a volume,
+which the command's code initializes through its volume interface, so the fake's
+method is held live and sets a flag the test alone reads. The command's own volume
+has a flag its code sets and the test alone reads too.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+
+require example.com/spec v0.0.0
+
+replace example.com/spec => ./spec
+-- spec/go.mod --
+module example.com/spec
+
+go 1.27.1
+-- spec/spec.go --
+package spec
+
+// Describe registers a body the framework runs.
+func Describe(name string, body func()) bool { body(); return name != "" }
+-- volumes/volumes.go --
+package volumes
+
+// Artifact is what the command is handed.
+type Artifact interface{ Handle() string }
+
+// Volume is an artifact the command initializes.
+type Volume interface {
+	Artifact
+	Initialize()
+}
+
+// Disk is the command's volume.
+type Disk struct {
+	Ready bool
+}
+
+// Handle names the disk.
+func (d *Disk) Handle() string { return "disk" }
+
+// Initialize marks the disk ready.
+func (d *Disk) Initialize() { d.Ready = true }
+
+// Prepare initializes an artifact that is a volume.
+func Prepare(a Artifact) string {
+	if v, ok := a.(Volume); ok {
+		v.Initialize()
+	}
+	return a.Handle()
+}
+-- main.go --
+package main
+
+import "example.com/app/volumes"
+
+func main() { println(volumes.Prepare(&volumes.Disk{})) }
+-- volumes/volumes_test.go --
+package volumes_test
+
+import (
+	"example.com/app/fakes"
+	"example.com/app/volumes"
+	"example.com/spec"
+)
+
+var _ = spec.Describe("prepare", func() {
+	v := fakes.NewVolume()
+	d := &volumes.Disk{}
+	volumes.Prepare(v)
+	volumes.Prepare(d)
+	if !v.Initialized || !d.Ready {
+		panic("not initialized")
+	}
+})
+-- fakes/fakes.go --
+package fakes
+
+import "example.com/app/volumes"
+
+// Volume is a fake a test drives.
+type Volume struct {
+	Initialized bool
+}
+
+// NewVolume is the fake a test drives.
+func NewVolume() *Volume { return &Volume{} }
+
+var registered []volumes.Volume
+
+func init() { registered = append(registered, &Volume{}) }
+
+// Handle names the fake.
+func (v *Volume) Handle() string { return "fake" }
+
+// Initialize marks the volume initialized.
+func (v *Volume) Initialize() { v.Initialized = true }

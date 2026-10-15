@@ -319,11 +319,6 @@ type Options struct {
 	// Template is the user-supplied template as [ParseTemplate] parsed it, read
 	// by [Template] alone.
 	Template *ParsedTemplate
-
-	// FailOn is the lowest severity that fails the run, read by [Annotations]
-	// alone: a finding at or above it is an error and one below it a warning. The
-	// empty value reads as the configuration's default.
-	FailOn config.Severity
 }
 
 // BuildInput is what one run answered, from which an envelope is assembled.

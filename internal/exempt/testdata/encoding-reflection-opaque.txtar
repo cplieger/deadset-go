@@ -48,6 +48,10 @@ func (n Nested) Title() string { return n.Label }
 
 // Hand puts a value where the analysis cannot follow it.
 func Hand(p *sync.Pool, c Crossing) { p.Put(c) }
+
+var _ = Crossing{Extra: *new(int), Inner: *new(Nested), Name: *new(string), secret: *new(string)}
+
+var _ = Nested{Label: *new(string)}
 -- wrapped.go --
 package opaque
 
@@ -69,6 +73,8 @@ func respond(p *sync.Pool, v any) { p.Put(v) }
 
 // HandWrapped puts a value through the wrapper.
 func HandWrapped(p *sync.Pool, w Wrapped) { respond(p, w) }
+
+var _ = Wrapped{Extra: *new(int), Name: *new(string), secret: *new(string)}
 -- chained.go --
 package opaque
 
@@ -89,6 +95,8 @@ func relay(p *sync.Pool, v any) { respond(p, v) }
 
 // HandChained puts a value through both wrappers.
 func HandChained(p *sync.Pool, c Chained) { relay(p, c) }
+
+var _ = Chained{Extra: *new(int), Name: *new(string), secret: *new(string)}
 -- encoded.go --
 package opaque
 
@@ -109,6 +117,8 @@ func keep(v any) ([]byte, error) { return json.Marshal(v) }
 
 // HandEncoded puts a value through the encoding wrapper.
 func HandEncoded(e Encoded) ([]byte, error) { return keep(e) }
+
+var _ = Encoded{Extra: *new(int), Name: *new(string), secret: *new(string)}
 -- concrete.go --
 package opaque
 
@@ -167,6 +177,8 @@ func (p *Pointed) Describe() string { return p.Name }
 
 // HandPointed puts a pointer where the analysis cannot follow it.
 func HandPointed(pool *sync.Pool, p *Pointed) { pool.Put(p) }
+
+var _ = Pointed{Extra: *new(int), Name: *new(string), secret: *new(string)}
 -- sought.go --
 package opaque
 
@@ -229,6 +241,8 @@ func (l *Locked) Spare() {}
 
 // HandLocked puts a value where the analysis cannot follow it.
 func HandLocked(p *sync.Pool, l *Locked) { p.Put(l) }
+
+var _ = Locked{Name: *new(string)}
 -- served.go --
 package opaque
 
@@ -249,3 +263,5 @@ func (s *Served) hidden() {}
 
 // Register hands a value to the registry.
 func Register(s *Served) error { return rpc.Register(s) }
+
+var _ = Served{Name: *new(string)}

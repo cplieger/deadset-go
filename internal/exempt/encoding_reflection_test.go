@@ -826,7 +826,7 @@ func TestFormatVerbContractAloneRecordsAnOperandOfTheFormattingPackage(t *testin
 // The mechanism text of the class, as the Contract states it for this language. The
 // class implements this text; a pin bump that moves it must be read against the
 // destination table before this literal moves with it.
-const encodingReflectionMechanismSHA256 = "0d21d9f289afc332464089179240ab836ccebb9c9d5f29e5d6c556c0031959ac"
+const encodingReflectionMechanismSHA256 = "a34e889b4dd5229f0638fe366cd835a2fba5abe8aacfdb174810bad066e46bf2"
 
 func TestEncodingReflectionImplementsTheContractsMechanismText(t *testing.T) {
 	body, err := spec.Contract.ReadFile("contract/exemptions.json")
@@ -960,7 +960,7 @@ func TestEncodingReflectionFollowsContainersAndInterfaceMethodResults(t *testing
 // A function outside the program whose name says it fills its argument, and whose own
 // body hands it to no reader of fields, retains no field of the value: the fields it
 // fills are the class's filled fields, reported at possible. One that also prints its
-// argument reads every field.
+// argument reads every field the program writes, and fills the others.
 func TestEncodingReflectionFillsTheFieldsADecodingCalleeOutsideReceives(t *testing.T) {
 	in := inputOf(t, "encoding-reflection-any-flow.txtar", Options{})
 	found, err := EncodingReflectionDetector(in)
@@ -984,7 +984,7 @@ func TestEncodingReflectionFillsTheFieldsADecodingCalleeOutsideReceives(t *testi
 	if got := membersOf(kept, "Request"); len(got) != 0 {
 		t.Errorf("EncodingReflectionDetector retained %v of Request, which only a filling callee receives; want none", got)
 	}
-	if got, want := membersOf(kept, "Shown"), anyFlowRefs("Shown", "Note"); !slices.Equal(got, want) {
+	if got, want := membersOf(kept, "Shown"), anyFlowRefs("Shown", "Count"); !slices.Equal(got, want) {
 		t.Errorf("EncodingReflectionDetector retained %v of Shown, which a callee that also prints receives; want %v", got, want)
 	}
 	if got := membersOf(kept, "Relayed"); len(got) != 0 {
@@ -994,6 +994,7 @@ func TestEncodingReflectionFillsTheFieldsADecodingCalleeOutsideReceives(t *testi
 		"go://example.com/flow#Relayed.Code passed to example.com/flow.bindInto",
 		"go://example.com/flow#Request.Extra decoded by (*example.com/plugin.Context).BindJSON",
 		"go://example.com/flow#Request.Name decoded by (*example.com/plugin.Context).BindJSON",
+		"go://example.com/flow#Shown.Note passed to (*example.com/plugin.Context).DecodeAndPrint",
 	}
 	slices.Sort(filled)
 	if !slices.Equal(filled, want) {
@@ -1159,5 +1160,97 @@ func TestEncodingReflectionKeepsMethodsOnlyWhereReflectionMayFindThem(t *testing
 	}
 	if !slices.Equal(refs, want) {
 		t.Errorf("EncodingReflectionDetector(encoding-reflection-method-finder-flow.txtar) retained\ngot  %v\nwant %v", refs, want)
+	}
+}
+
+// A field a decoder fills is written for an encoder that reads it: a program that
+// decodes a value and encodes it again sends the decoded fields on, whichever of the
+// two calls the walk meets first. A field nothing writes or decodes is not kept.
+func TestEncodingReflectionReadsTheFieldsADecoderFills(t *testing.T) {
+	tests := []struct {
+		name    string
+		archive string
+		want    []string
+	}{
+		{"standard_decoder", "encoding-reflection-relayed-fields.txtar", []string{
+			"go://example.com/relayed#Event.Kind",
+			"go://example.com/relayed#Event.Seq",
+		}},
+		{"outside_callee_and_generic", "encoding-reflection-relayed-outside.txtar", []string{
+			"go://example.com/relayed#Made.Label",
+			"go://example.com/relayed#Row.Title",
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := inputOf(t, tt.archive, Options{})
+			in.Mode = graph.Mode{Production: true}
+			found, err := EncodingReflectionDetector(in)
+			if err != nil {
+				t.Fatalf("EncodingReflectionDetector(%s) error: %v", tt.archive, err)
+			}
+			refOf := make(map[graph.SymbolID]string, len(in.Symbols))
+			for i := range in.Symbols {
+				refOf[in.Symbols[i].ID] = in.Symbols[i].Ref
+			}
+			var got []string
+			for _, e := range found {
+				got = append(got, refOf[e.ID])
+			}
+			slices.Sort(got)
+			if got = slices.Compact(got); !slices.Equal(got, tt.want) {
+				t.Errorf("EncodingReflectionDetector(%s) retained %v, want %v", tt.archive, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEncodingReflectionReadsOnlyTheFieldsTheProgramWrites(t *testing.T) {
+	tests := []struct {
+		name string
+		mode graph.Mode
+		want []string
+	}{
+		{"the_plain_mode", graph.Mode{}, []string{
+			"go://example.com/written#Draft.Title",
+			"go://example.com/written#Event.Assigned",
+			"go://example.com/written#Event.Counted",
+			"go://example.com/written#Event.Keyed",
+			"go://example.com/written#Event.TestOnly",
+			"go://example.com/written#Point.X",
+			"go://example.com/written#Point.Y",
+			"go://example.com/written#Tag.Label",
+		}},
+		{"a_production_run", graph.Mode{Production: true}, []string{
+			"go://example.com/written#Draft.Title",
+			"go://example.com/written#Event.Assigned",
+			"go://example.com/written#Event.Counted",
+			"go://example.com/written#Event.Keyed",
+			"go://example.com/written#Point.X",
+			"go://example.com/written#Point.Y",
+			"go://example.com/written#Tag.Label",
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			in := inputOf(t, "encoding-reflection-written-fields.txtar", Options{})
+			in.Mode = tt.mode
+			found, err := EncodingReflectionDetector(in)
+			if err != nil {
+				t.Fatalf("EncodingReflectionDetector(encoding-reflection-written-fields.txtar) error: %v", err)
+			}
+			refOf := make(map[graph.SymbolID]string, len(in.Symbols))
+			for i := range in.Symbols {
+				refOf[in.Symbols[i].ID] = in.Symbols[i].Ref
+			}
+			var got []string
+			for _, e := range found {
+				got = append(got, refOf[e.ID])
+			}
+			slices.Sort(got)
+			if got = slices.Compact(got); !slices.Equal(got, tt.want) {
+				t.Errorf("EncodingReflectionDetector(encoding-reflection-written-fields.txtar) retained %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

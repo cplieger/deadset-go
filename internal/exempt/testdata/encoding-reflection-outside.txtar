@@ -126,6 +126,16 @@ func Run(r io.Reader) error {
 	println(describe.Version())
 	return nil
 }
+
+var _ = Service{Addr: *new(string)}
+
+var _ = Profile{Email: *new(string)}
+
+var _ = Ignored{Note: *new(string)}
+
+var _ = Discarded{Note: *new(string)}
+
+var _ = Kept{Note: *new(string)}
 -- plugin/go.mod --
 module example.com/plugin
 

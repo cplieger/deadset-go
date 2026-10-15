@@ -31,6 +31,8 @@ A composite literal argument reaches the type of each value it writes into an in
 
 A decoding entry point also reads each pointer, interface or map field the program writes. It decodes into the value that field holds.
 
+A destination that reads fields keeps only a field the program writes, by a composite literal, an assignment, an increment or a decrement, or a conversion that produces the field's struct type. A write in a test file counts only in a run that counts test references. A field a decoder of production code fills counts as written, so a value the program decodes and encodes again keeps the fields it relays. So does a field an outside callee may fill: one handed a pointer to the value, whatever its name, or a generic function that makes the value from none of its arguments. A field nothing writes that only such a callee fills is reported at the confidence `possible`. A field nothing writes or decodes is reported, because the receiver reads a value the program never gave it.
+
 An assertion to an interface of what `Interface` returns for a `reflect.Value` holding a struct field, read by `Field`, `FieldByIndex`, `FieldByName` or `FieldByNameFunc` from a value `reflect.ValueOf` gives, through `Elem` and `reflect.Indirect`, converts each exported field of that struct. It retains the methods by which each exported field type implements that interface.
 
 A method is retained where the defined type declares it, so a method promoted from an embedded type is retained where the embedded type is reached.

@@ -1,0 +1,36 @@
+An application that embeds its templates through //go:embed patterns written as
+Go string literals, one double-quoted and one back-quoted, each naming a
+directory with a space in its name. Every template is read, so of what the
+pages render only the members their templates name are read.
+
+-- go.mod --
+module example.com/quoted
+
+go 1.27.1
+-- main.go --
+package main
+
+import (
+	"embed"
+	"html/template"
+	"os"
+)
+
+//go:embed "page templates/*.html" `mail parts/*.html`
+var content embed.FS
+
+// Page is what every template renders.
+type Page struct {
+	Title  string
+	Note   string
+	Footer string
+}
+
+func main() {
+	set := template.Must(template.ParseFS(content, "page templates/*.html", "mail parts/*.html"))
+	_ = set.ExecuteTemplate(os.Stdout, "page.html", Page{Title: "t", Note: "n", Footer: "f"})
+}
+-- page templates/page.html --
+<h1>{{.Title}}</h1>{{template "note.html" .}}
+-- mail parts/note.html --
+<p>{{.Note}}</p>

@@ -1,0 +1,74 @@
+A command that loads a row through a dependency's function handed a pointer to it,
+whose name says nothing of filling, fetches a value a dependency's generic function
+makes from no argument, and encodes both, beside a status it encodes with a field
+nothing writes. Either callee may fill what it is given or makes, so the encoder
+sends what they filled. The dependency is a module the target requires and replaces
+with a directory of its own, so the archive loads with no network access.
+
+-- go.mod --
+module example.com/relayed
+
+go 1.27.0
+
+require example.com/dep v0.0.0
+
+replace example.com/dep => ./dep
+-- main.go --
+package main
+
+import (
+	"encoding/json"
+	"os"
+
+	"example.com/dep"
+)
+
+// Row is loaded by a dependency handed a pointer to it.
+type Row struct {
+	Title string `json:"title"`
+}
+
+// Made is made by a dependency's generic function.
+type Made struct {
+	Label string `json:"label"`
+}
+
+// Status is encoded with a field nothing writes.
+type Status struct {
+	Spare string `json:"spare"`
+}
+
+func main() {
+	enc := json.NewEncoder(os.Stdout)
+	var r Row
+	if dep.Get(&r, "select title from rows") != nil {
+		os.Exit(1)
+	}
+	m, err := dep.Fetch[Made]("https://example.com/")
+	if err != nil {
+		os.Exit(1)
+	}
+	_ = enc.Encode(r)
+	_ = enc.Encode(m)
+	_ = enc.Encode(Status{})
+}
+-- dep/go.mod --
+module example.com/dep
+
+go 1.27.0
+-- dep/dep.go --
+// Package dep fills and makes values where the analysis does not look.
+package dep
+
+// Get fills dest from a query.
+func Get(dest any, query string) error {
+	_, _ = dest, query
+	return nil
+}
+
+// Fetch makes a new T from a response.
+func Fetch[T any](url string) (T, error) {
+	var zero T
+	_ = url
+	return zero, nil
+}

@@ -97,6 +97,7 @@ func writeOnly(in *Input, symbol *graph.Symbol, u *uses, exempted map[graph.Symb
 	finding.Relation = graph.ReferenceCounting
 	finding.TestOnly = u.production == 0 && u.test > 0
 	finding.Details.WritePositions = slices.Clone(u.writes)
+	finding.testRead = u.testReads > 0
 	return finding, true
 }
 

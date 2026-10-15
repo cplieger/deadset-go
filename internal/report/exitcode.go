@@ -70,12 +70,6 @@ func normalizedFailOn(at config.Severity) config.Severity {
 	}
 }
 
-// fails reports whether a finding of one severity fails a run whose failing
-// severity is the normalized one given.
-func fails(severity, failing config.Severity) bool {
-	return severity == config.Deny || (failing == config.Warn && severity == config.Warn)
-}
-
 // failingFindings is how many findings of the run carry a severity at or above the
 // failing one, over the whole finding set.
 func failingFindings(counted *BySeverity, failing config.Severity) int {

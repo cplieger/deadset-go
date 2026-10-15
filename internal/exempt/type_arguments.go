@@ -184,10 +184,47 @@ func (f *encodingFlow) packageTypeArguments(info *types.Info, own map[string]boo
 	for _, id := range ids {
 		d, reaches := f.typeArgumentDestination(info.Uses[id], own, imports)
 		if !reaches {
+			if err := f.madeOutside(info, id, own); err != nil {
+				return err
+			}
 			continue
 		}
 		for arg := range info.Instances[id].TypeArgs.Types() {
 			if err := f.retain(arg, id.Pos(), &d); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// madeOutside records as filled the type arguments of one instantiated generic
+// function outside the program that bind a type parameter its results mention and
+// none of its parameters does: no argument hands the value over, so the callee makes
+// it, filling it where the analysis cannot see, as a decoding client does.
+func (f *encodingFlow) madeOutside(info *types.Info, id *ast.Ident, own map[string]bool) error {
+	fn, isFunc := info.Uses[id].(*types.Func)
+	if !isFunc || fn.Pkg() == nil || own[fn.Pkg().Path()] || namedDestinations[fn.Pkg().Path()] {
+		return nil
+	}
+	sig := fn.Signature()
+	passed := make(map[*types.TypeParam]bool)
+	for param := range sig.Params().Variables() {
+		for _, tp := range typeParamsIn(param.Type()) {
+			passed[tp] = true
+		}
+	}
+	made := make(map[*types.TypeParam]bool)
+	for result := range sig.Results().Variables() {
+		for _, tp := range typeParamsIn(result.Type()) {
+			made[tp] = !passed[tp]
+		}
+	}
+	d := destination{detail: "made by " + fn.FullName(), reach: reach{}.filling()}
+	args := info.Instances[id].TypeArgs
+	for i := range sig.TypeParams().Len() {
+		if i < args.Len() && made[sig.TypeParams().At(i)] {
+			if err := f.retain(args.At(i), id.Pos(), &d); err != nil {
 				return err
 			}
 		}

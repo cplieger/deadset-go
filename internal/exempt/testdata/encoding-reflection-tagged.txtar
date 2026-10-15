@@ -48,6 +48,8 @@ func Load(r io.Reader) (Settings, Profile, error) {
 	err := codec.Settle(r, &p)
 	return s, p, err
 }
+
+var _ = Settings{Theme: *new(string)}
 -- codec/go.mod --
 module example.com/codec
 

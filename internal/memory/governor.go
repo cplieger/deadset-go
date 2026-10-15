@@ -7,6 +7,7 @@ package memory
 import (
 	"context"
 	"math"
+	"os"
 	"runtime"
 	"runtime/debug"
 	"runtime/metrics"
@@ -18,11 +19,22 @@ import (
 // is enforced, and false where that bound does not apply here.
 type Source func() (headroom uint64, ok bool)
 
+// Machine is what the governor reads of the machine a run is on.
+type Machine struct {
+	// Limit is the memory the process may take at most: the limit of the cgroup or
+	// job holding it, else the machine's physical memory, and false where neither
+	// reads. Nil reads nothing.
+	Limit func() (uint64, bool)
+	// Sources are read on every reading, in order.
+	Sources []Source
+}
+
 // The governor's policy, in percent of the ceiling unless named otherwise.
 const (
 	interval = 50 * time.Millisecond
 
 	softLimitPercent = 85 // the runtime's memory limit
+	defaultPercent   = 70 // of the machine's limit, the soft limit a run without GOMEMLIMIT holds to
 	abortPercent     = 90 // the live heap past which the run cannot fit
 	pressurePercent  = 80 // the live heap, of the soft limit, past which a GC-bound window ends the run
 	raisedGOGC       = 400
@@ -57,24 +69,26 @@ func gigabytes(tenths uint64) string {
 	return strconv.FormatFloat(float64(tenths)/10, 'f', -1, 64)
 }
 
-// Start governs this process's memory for the life of ctx with sources, read in
-// order, and ends the run by calling cancel with an *[ExhaustedError] when it cannot
-// fit. The first reading is applied before Start returns, so a run that cannot fit
-// is cancelled before it starts. A memory limit the process started with bounds the
-// ceiling as a source does. Where neither answers that reading the governor sets
-// nothing at all, and a machine whose memory cannot be read runs as it would
-// without it. The returned function stops the governor and restores the limit and
-// the collection target it found; call it before the process exits.
-func Start(ctx context.Context, cancel context.CancelCauseFunc, sources []Source) (stop func()) {
-	return start(ctx, cancel, sources, interval)
+// Start governs this process's memory for the life of ctx with machine's readers,
+// and ends the run by calling cancel with an *[ExhaustedError] when it cannot fit,
+// before Start returns where the first reading already says so. GOMEMLIMIT bounds
+// the ceiling as a source does; without it the soft limit stays at most 70 % of the
+// machine's limit, so a raised collection target never runs unbounded. Where
+// nothing reads it sets nothing. The returned function stops the governor and
+// restores the limit and collection target it found; call it before exiting.
+func Start(ctx context.Context, cancel context.CancelCauseFunc, machine Machine) (stop func()) {
+	return start(ctx, cancel, machine, interval)
 }
 
-func start(ctx context.Context, cancel context.CancelCauseFunc, sources []Source, every time.Duration) (stop func()) {
+func start(ctx context.Context, cancel context.CancelCauseFunc, machine Machine, every time.Duration) (stop func()) {
 	// A negative limit reads the current one without changing it; the collection
 	// target has no such read, so it is set to the default and put back.
-	g := &governor{sources: sources, cancel: cancel, samples: newSamples(), previousLimit: debug.SetMemoryLimit(-1)}
+	g := &governor{sources: machine.Sources, cancel: cancel, samples: newSamples(), previousLimit: debug.SetMemoryLimit(-1)}
 	if g.previousLimit > 0 && g.previousLimit < math.MaxInt64 {
 		g.callerLimit = uint64(g.previousLimit)
+	}
+	if g.callerLimit == 0 {
+		g.machineLimit = defaultBound(machine)
 	}
 	if _, read := g.ceiling(); !read {
 		return func() {}
@@ -116,6 +130,20 @@ func start(ctx context.Context, cancel context.CancelCauseFunc, sources []Source
 	}
 }
 
+// defaultBound is the machine's limit, where the process started with no GOMEMLIMIT,
+// and 0 otherwise: GOMEMLIMIT=off reads as no limit and is still the caller's choice.
+// An empty GOMEMLIMIT is unset, as the runtime reads it
+// (https://pkg.go.dev/runtime#hdr-Environment_Variables).
+func defaultBound(machine Machine) uint64 {
+	if os.Getenv("GOMEMLIMIT") != "" || machine.Limit == nil {
+		return 0
+	}
+	if limit, read := machine.Limit(); read {
+		return limit
+	}
+	return 0
+}
+
 // governor is one run's policy state.
 type governor struct {
 	cancel        context.CancelCauseFunc
@@ -123,6 +151,7 @@ type governor struct {
 	samples       []metrics.Sample
 	previousLimit int64
 	callerLimit   uint64 // the memory limit the process started with, 0 where none was set
+	machineLimit  uint64 // the machine's limit where the process started with none, else 0
 	previousGOGC  int
 	gogc          int
 	window        cpuWindow
@@ -164,14 +193,14 @@ func (g *governor) read() (live, held uint64) {
 
 // ceiling is the most memory this process may hold: what it holds now plus the
 // least headroom any source reports, and false where no source answers. A memory
-// limit the process started with (GOMEMLIMIT) is one more bound, so a run never
-// raises the limit its caller set.
+// limit the process started with (GOMEMLIMIT), or else the machine's limit, is one
+// more bound, so a run never raises the limit its caller set.
 func (g *governor) ceiling() (uint64, bool) {
 	_, held := g.read()
 	var least uint64
 	answered := false
-	if g.callerLimit > 0 {
-		least, answered = g.callerLimit-min(held, g.callerLimit), true
+	if bound := max(g.callerLimit, g.machineLimit); bound > 0 {
+		least, answered = bound-min(held, bound), true
 	}
 	for _, source := range g.sources {
 		if room, ok := source(); ok && (!answered || room < least) {
@@ -188,6 +217,9 @@ func (g *governor) tick() bool {
 		return false
 	}
 	soft := percentOf(ceiling, softLimitPercent)
+	if g.machineLimit > 0 {
+		soft = min(soft, percentOf(g.machineLimit, defaultPercent))
+	}
 	debug.SetMemoryLimit(int64(min(soft, math.MaxInt64)))
 
 	live, _ := g.read()

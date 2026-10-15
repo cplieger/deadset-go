@@ -60,7 +60,7 @@ func TestARunThatCannotFitExitsWithTheMemoryLine(t *testing.T) {
 	noHeadroom := func() (uint64, bool) { return 0, true }
 
 	var stdout, stderr bytes.Buffer
-	code := governed([]string{"analyze", "--target=.", "--report=" + reportPath}, &stdout, &stderr, []memory.Source{noHeadroom})
+	code := governed([]string{"analyze", "--target=.", "--report=" + reportPath}, &stdout, &stderr, memory.Machine{Sources: []memory.Source{noHeadroom}})
 
 	if want := contractExitCodes(t)["failure"]; code != want {
 		t.Errorf("analyze with no memory to spare = %d, want %d\nstderr: %s", code, want, stderr.String())
@@ -108,7 +108,7 @@ func TestARunWhoseMemoryCannotBeReadIsUngoverned(t *testing.T) {
 	reportPath := filepath.Join(t.TempDir(), "report.json")
 
 	var stdout, stderr bytes.Buffer
-	code := governed([]string{"analyze", "--target=.", "--report=" + reportPath}, &stdout, &stderr, nil)
+	code := governed([]string{"analyze", "--target=.", "--report=" + reportPath}, &stdout, &stderr, memory.Machine{})
 	if want := contractExitCodes(t)["failure"]; code == want {
 		t.Errorf("analyze with no memory reader = %d, want a verdict\nstderr: %s", code, stderr.String())
 	}

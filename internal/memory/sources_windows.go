@@ -18,10 +18,11 @@ const (
 	jobObjectLimitJobMemory           = 0x200
 )
 
-// PlatformSources reads the limit of the job object holding this process, then the
-// physical memory available to the machine.
-func PlatformSources() []Source {
-	return []Source{jobLimit, availablePhysical}
+// Platform reads the limit of the job object holding this process, then the
+// physical memory available to the machine. Its limit is the job's, else the
+// machine's physical memory.
+func Platform() Machine {
+	return Machine{Sources: []Source{jobLimit, availablePhysical}, Limit: limit}
 }
 
 // memoryStatusEx is MEMORYSTATUSEX.
@@ -38,11 +39,30 @@ type memoryStatusEx struct {
 }
 
 func availablePhysical() (uint64, bool) {
+	status, ok := memoryStatus()
+	return status.availPhys, ok
+}
+
+func memoryStatus() (memoryStatusEx, bool) {
 	status := memoryStatusEx{length: uint32(unsafe.Sizeof(memoryStatusEx{}))}
 	if ok, _, _ := globalMemoryStatusEx.Call(uintptr(unsafe.Pointer(&status))); ok == 0 {
-		return 0, false
+		return memoryStatusEx{}, false
 	}
-	return status.availPhys, true
+	return status, true
+}
+
+// limit is the job object's memory limit, capped by the machine's physical
+// memory, else that physical memory.
+func limit() (uint64, bool) {
+	status, known := memoryStatus()
+	job, limited := jobMemoryLimit()
+	switch {
+	case limited && known:
+		return min(job, status.totalPhys), true
+	case limited:
+		return job, true
+	}
+	return status.totalPhys, known
 }
 
 // extendedLimitInformation is JOBOBJECT_EXTENDED_LIMIT_INFORMATION.
@@ -83,20 +103,7 @@ type processMemoryCountersEx struct {
 // A job's limit counts every process in it; the committed memory of the others is
 // not read, so a job holding several processes reads more headroom than it has.
 func jobLimit() (uint64, bool) {
-	var info extendedLimitInformation
-	ok, _, _ := queryInformationJobObject.Call(0, jobObjectExtendedLimitInformation,
-		uintptr(unsafe.Pointer(&info)), unsafe.Sizeof(info), 0)
-	if ok == 0 {
-		return 0, false
-	}
-	var limit uint64
-	limited := false
-	if info.limitFlags&jobObjectLimitProcessMemory != 0 {
-		limit, limited = uint64(info.processMemoryLimit), true
-	}
-	if info.limitFlags&jobObjectLimitJobMemory != 0 && (!limited || uint64(info.jobMemoryLimit) < limit) {
-		limit, limited = uint64(info.jobMemoryLimit), true
-	}
+	limit, limited := jobMemoryLimit()
 	if !limited {
 		return 0, false
 	}
@@ -113,4 +120,24 @@ func jobLimit() (uint64, bool) {
 		return 0, true
 	}
 	return limit - used, true
+}
+
+// jobMemoryLimit is the tighter of the job object's process and job memory
+// limits, and false outside a job that sets one.
+func jobMemoryLimit() (uint64, bool) {
+	var info extendedLimitInformation
+	ok, _, _ := queryInformationJobObject.Call(0, jobObjectExtendedLimitInformation,
+		uintptr(unsafe.Pointer(&info)), unsafe.Sizeof(info), 0)
+	if ok == 0 {
+		return 0, false
+	}
+	var limit uint64
+	limited := false
+	if info.limitFlags&jobObjectLimitProcessMemory != 0 {
+		limit, limited = uint64(info.processMemoryLimit), true
+	}
+	if info.limitFlags&jobObjectLimitJobMemory != 0 && (!limited || uint64(info.jobMemoryLimit) < limit) {
+		limit, limited = uint64(info.jobMemoryLimit), true
+	}
+	return limit, limited
 }

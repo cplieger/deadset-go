@@ -157,6 +157,16 @@ func HandPrinted(p Printed) { httpwire.Logf("wrote %v", p) }
 
 // HandCounting hands a value to the consumer's counting function.
 func HandCounting(c Counting) int { return httpwire.Tally(c) }
+
+var _ = Encoded{Extra: *new(int), Name: *new(string), secret: *new(string)}
+
+var _ = Marshalled{Extra: *new(int), Name: *new(string), secret: *new(string)}
+
+var _ = Chained{Extra: *new(int), Name: *new(string), secret: *new(string)}
+
+var _ = Rendered{Extra: *new(int), Name: *new(string), secret: *new(string)}
+
+var _ = Unioned{Extra: *new(int), Name: *new(string), secret: *new(string)}
 -- target/hidden.go --
 package target
 

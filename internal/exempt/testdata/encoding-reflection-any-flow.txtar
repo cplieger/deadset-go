@@ -112,15 +112,17 @@ type Request struct {
 	Extra string `json:"extra"`
 }
 
-// Shown is filled by the dependency's decoder that also prints.
+// Shown is filled by the dependency's decoder that also prints, and its count by
+// the program.
 type Shown struct {
-	Note string
+	Note  string
+	Count int
 }
 
 // Bind fills a request and a shown value.
 func Bind(c *plugin.Context) string {
 	var req Request
-	var shown Shown
+	shown := Shown{Count: 1}
 	if err := c.BindJSON(&req); err != nil {
 		return ""
 	}

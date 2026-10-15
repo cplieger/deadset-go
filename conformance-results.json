@@ -7,8 +7,8 @@
   },
   "result": "pass",
   "totals": {
-    "fixtures": 178,
-    "pass": 178,
+    "fixtures": 181,
+    "pass": 181,
     "gap": 0,
     "fail": 0
   },
@@ -914,10 +914,14 @@
           "symbol": "profile.Email",
           "result": "pass",
           "actual": {
-            "report": "none",
-            "retained_by": [
-              "encoding-reflection"
-            ]
+            "report": "DS1003",
+            "symbol_kind": "field",
+            "confidence": "possible",
+            "reachability_class": "possible"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         },
         {
@@ -1375,10 +1379,14 @@
           "symbol": "repo.Stars",
           "result": "pass",
           "actual": {
-            "report": "none",
-            "retained_by": [
-              "encoding-reflection"
-            ]
+            "report": "DS1003",
+            "symbol_kind": "field",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         }
       ],
@@ -1525,6 +1533,20 @@
               "encoding-reflection"
             ]
           }
+        },
+        {
+          "symbol": "Record.Spare",
+          "result": "pass",
+          "actual": {
+            "report": "DS1003",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
         }
       ],
       "unexpected": []
@@ -1579,10 +1601,14 @@
           "symbol": "audit.Note",
           "result": "pass",
           "actual": {
-            "report": "none",
-            "retained_by": [
-              "encoding-reflection"
-            ]
+            "report": "DS1003",
+            "symbol_kind": "field",
+            "confidence": "possible",
+            "reachability_class": "possible"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         },
         {
@@ -1946,6 +1972,37 @@
       "unexpected": []
     },
     {
+      "fixture": "encoding-reflection-template-file-system-read",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "page.Footer",
+          "result": "pass",
+          "actual": {
+            "report": "DS1301",
+            "symbol_kind": "field",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "page.Title",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
       "fixture": "encoding-reflection-template-set-read-whole",
       "result": "pass",
       "expectations": [
@@ -2065,10 +2122,7 @@
           "symbol": "ShadowedA",
           "result": "pass",
           "actual": {
-            "report": "none",
-            "retained_by": [
-              "encoding-reflection"
-            ]
+            "report": "none"
           }
         },
         {
@@ -7759,6 +7813,87 @@
             "report": "none",
             "retained_by": [
               "reflective-lookup"
+            ]
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "relayed-member-live-where-decoded",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Event.kind",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "Event.seq",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "Status.spare",
+          "result": "pass",
+          "actual": {
+            "report": "DS1003",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "relayed-member-live-where-filled-outside",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Kept.unread",
+          "result": "pass",
+          "actual": {
+            "report": "DS1003",
+            "confidence": "possible",
+            "reachability_class": "possible"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Made.label",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "Row.title",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
             ]
           }
         }
