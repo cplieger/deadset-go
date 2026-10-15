@@ -478,7 +478,7 @@ func (f *valueFlow) returns(call *ast.CallExpr, index int, at flowAt, depth int)
 }
 
 // bind maps the parameters of a declaration to the arguments one call passes.
-func (f *valueFlow) bind(decl flowDecl, call *ast.CallExpr, at flowAt) map[*types.Var]flowBinding {
+func (*valueFlow) bind(decl flowDecl, call *ast.CallExpr, at flowAt) map[*types.Var]flowBinding {
 	bound := make(map[*types.Var]flowBinding)
 	sel, isSelector := ast.Unparen(call.Fun).(*ast.SelectorExpr)
 	for _, one := range parametersOf(decl.info, decl.decl) {

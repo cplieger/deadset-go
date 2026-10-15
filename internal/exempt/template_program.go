@@ -93,7 +93,7 @@ func (o *templateOrigins) readNode(info *types.Info, dir, engine string, n ast.N
 }
 
 // readCall reads one call of a function or method of the engine.
-func (o *templateOrigins) readCall(info *types.Info, dir, engine string, call *ast.CallExpr, inv *inventory, called map[*ast.Ident]bool) {
+func (*templateOrigins) readCall(info *types.Info, dir, engine string, call *ast.CallExpr, inv *inventory, called map[*ast.Ident]bool) {
 	fn, isFunc := resolveObject(info, call.Fun).(*types.Func)
 	if !isFunc || !isEngineFunc(fn, engine) {
 		return

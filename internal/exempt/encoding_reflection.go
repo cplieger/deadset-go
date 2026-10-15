@@ -1111,7 +1111,7 @@ func (f *encodingFlow) reads(field *types.Var, visited bool, site evidence, d *d
 
 // readsAny reports whether one destination reads one field it visits, written or
 // not.
-func (f *encodingFlow) readsAny(field *types.Var, visited bool, d *destination) bool {
+func (*encodingFlow) readsAny(field *types.Var, visited bool, d *destination) bool {
 	return d.reach.fields && visited && (d.named == nil || d.named[field.Name()] || field.Embedded())
 }
 

@@ -144,7 +144,7 @@ func (o *templateOrigins) inventory() *inventory {
 	if o.flow == nil {
 		o.flow = newValueFlow(o.in)
 	}
-	return &inventory{root: o.root, fset: o.fset, names: make(map[string]bool), complete: true, flow: o.flow}
+	return &inventory{root: o.root, names: make(map[string]bool), complete: true, flow: o.flow}
 }
 
 // maxTemplateChain stops an origin at a cycle of variables written from each other.
@@ -222,7 +222,6 @@ var templateParses = map[string]bool{"Parse": true, "ParseFiles": true, "ParseGl
 // a constant pattern of an embedded file system, each of which parses, and none an
 // html/template file holding a JavaScript context ([encodesWhole]).
 type inventory struct {
-	fset     *token.FileSet
 	names    map[string]bool
 	flow     *valueFlow
 	root     string
