@@ -26,6 +26,11 @@ type Shipped struct {
 
 // Publish hands a value to the encoder from a source file.
 func Publish(s Shipped) ([]byte, error) { return json.Marshal(s) }
+
+var (
+	_ = Fixture{Name: "a", Extra: 1}
+	_ = Shipped{Name: "b", Extra: 2}
+)
 -- evidence_test.go --
 package evidence
 

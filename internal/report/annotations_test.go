@@ -8,14 +8,14 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
 )
 
-// TestOneAnnotationPerRecord pins that every finding and every stale suppression is
-// annotated, and nothing else is.
+// TestOneAnnotationPerRecord pins that every finding, stale suppression, type-error
+// skip and note is annotated, and nothing else is.
 func TestOneAnnotationPerRecord(t *testing.T) {
 	in := fullInput()
 	envelope := built(t, &in)
 	written := annotationLines(t, &envelope)
 
-	if want := len(envelope.Findings) + len(envelope.StaleSuppressions); len(written) != want {
+	if want := len(envelope.Findings) + len(envelope.StaleSuppressions) + len(envelope.TypeErrorSkips) + len(envelope.Notes); len(written) != want {
 		t.Fatalf("the annotation rendering wrote %d lines, want %d", len(written), want)
 	}
 	for i, line := range written {
@@ -25,37 +25,27 @@ func TestOneAnnotationPerRecord(t *testing.T) {
 	}
 }
 
-// TestTheAnnotationCommandFollowsTheFailingSeverity pins that a finding at or above
-// the failing severity is annotated as an error and one below it as a warning, and
-// that a stale suppression is annotated as a failure whatever the rest of the
-// severity map holds.
-func TestTheAnnotationCommandFollowsTheFailingSeverity(t *testing.T) {
+// TestTheAnnotationCommandFollowsTheSeverityAlone pins that a finding is annotated by
+// its own severity, deny as an error, warn as a warning and allow as a notice, and
+// that a stale suppression is annotated as an error.
+func TestTheAnnotationCommandFollowsTheSeverityAlone(t *testing.T) {
 	cases := []struct {
 		severity config.Severity
-		failOn   config.Severity
 		want     string
 	}{
-		{config.Deny, config.Deny, "::error "},
-		{config.Warn, config.Deny, "::warning "},
-		{config.Deny, config.Warn, "::error "},
-		{config.Warn, config.Warn, "::error "},
-		{config.Warn, config.Allow, "::error "},
-		{config.Warn, "", "::warning "},
+		{config.Deny, "::error "},
+		{config.Warn, "::warning "},
+		{config.Allow, "::notice "},
 	}
 	for _, one := range cases {
-		t.Run(string(one.severity)+"_under_"+string(one.failOn), func(t *testing.T) {
+		t.Run(string(one.severity), func(t *testing.T) {
 			in := minimalInput()
 			in.Result.Findings = []kinds.Finding{findingOf("DS1002", "unused-unexported", "a.go", 4, 8,
 				one.severity, "deletable", "the function has no reference in the target")}
 			envelope := built(t, &in)
 
-			var out strings.Builder
-			if err := Annotations(&out, &envelope, Options{FailOn: one.failOn}); err != nil {
-				t.Fatalf("Annotations(fail_on %q) = %v", one.failOn, err)
-			}
-			if got := out.String(); !strings.HasPrefix(got, one.want) {
-				t.Errorf("a %s finding under fail_on %q is annotated %q, want a line starting %q",
-					one.severity, one.failOn, got, one.want)
+			if got := annotationLines(t, &envelope)[0]; !strings.HasPrefix(got, one.want) {
+				t.Errorf("a %s finding is annotated %q, want a line starting %q", one.severity, got, one.want)
 			}
 		})
 	}
@@ -66,6 +56,20 @@ func TestTheAnnotationCommandFollowsTheFailingSeverity(t *testing.T) {
 	got := annotationLines(t, &envelope)[0]
 	if !strings.HasPrefix(got, "::error ") {
 		t.Errorf("a stale suppression is annotated %q, want a line starting %q", got, "::error ")
+	}
+}
+
+// TestANoteIsAWarningAnnotationAtItsDirectory pins that each note is annotated as a
+// warning naming the directory it is about, titled by its kind.
+func TestANoteIsAWarningAnnotationAtItsDirectory(t *testing.T) {
+	in := minimalInput()
+	in.Notes = []Note{{Kind: "unmapped-entry", Path: "cmd/tool", Key: "k", Message: "the entry, read back, names no file: name it"}}
+	envelope := built(t, &in)
+
+	written := annotationLines(t, &envelope)
+	want := "::warning file=cmd/tool,title=unmapped-entry::the entry, read back, names no file: name it"
+	if len(written) != 1 || written[0] != want {
+		t.Errorf("Annotations(one note) = %q, want [%q]", written, want)
 	}
 }
 
@@ -99,8 +103,7 @@ func TestTheStaleSuppressionAnnotationNamesItsKind(t *testing.T) {
 }
 
 // TestATypeErrorSkipIsAWarningAnnotation pins that each type-error skip is annotated
-// as a warning at its file and line, whatever the failing severity, naming the
-// compiler's message.
+// as a warning at its file and line, naming the compiler's message.
 func TestATypeErrorSkipIsAWarningAnnotation(t *testing.T) {
 	in := minimalInput()
 	in.TypeErrorSkips = []TypeErrorSkip{{Path: "app/main.go", Line: 9, Message: "undefined: missing"}}

@@ -101,17 +101,38 @@ func directoryOf(at *mount, cgroup string) string {
 func headroomV2(point, leaf string) (uint64, bool) {
 	var least uint64
 	found := false
-	for dir := leaf; ; dir = filepath.Dir(dir) {
+	for _, dir := range ancestry(point, leaf) {
 		if limit, limited := tightestV2(dir); limited {
 			if room, read := roomUnder(limit, filepath.Join(dir, "memory.current"), filepath.Join(dir, "memory.stat"), "inactive_file"); read && (!found || room < least) {
 				least, found = room, true
 			}
 		}
-		if dir == point || !strings.HasPrefix(dir, point) || dir == filepath.Dir(dir) {
-			break
+	}
+	return least, found
+}
+
+// limitV2 is the lowest memory.max of any cgroup v2 directory from leaf up to the
+// mount point, and false where none sets one.
+func limitV2(point, leaf string) (uint64, bool) {
+	var least uint64
+	found := false
+	for _, dir := range ancestry(point, leaf) {
+		if limit, set := readUint(filepath.Join(dir, "memory.max")); set && (!found || limit < least) {
+			least, found = limit, true
 		}
 	}
 	return least, found
+}
+
+// ancestry is leaf and each directory above it up to the mount point.
+func ancestry(point, leaf string) []string {
+	var dirs []string
+	for dir := leaf; ; dir = filepath.Dir(dir) {
+		dirs = append(dirs, dir)
+		if dir == point || !strings.HasPrefix(dir, point) || dir == filepath.Dir(dir) {
+			return dirs
+		}
+	}
 }
 
 // tightestV2 is the lower of the two limits one cgroup v2 directory sets, and
@@ -136,6 +157,20 @@ func headroomV1(dir string) (uint64, bool) {
 		return 0, false
 	}
 	return roomUnder(limit, filepath.Join(dir, "memory.usage_in_bytes"), filepath.Join(dir, "memory.stat"), "total_inactive_file")
+}
+
+// limitV1 is the memory limit of one cgroup v1 memory directory: the lower of its
+// own memory.limit_in_bytes and the hierarchical limit its ancestors set, and
+// false where neither is set.
+func limitV1(dir string) (uint64, bool) {
+	limit, set := readUint(filepath.Join(dir, "memory.limit_in_bytes"))
+	if hierarchical, read := statField(filepath.Join(dir, "memory.stat"), "hierarchical_memory_limit"); read && (!set || hierarchical < limit) {
+		limit, set = hierarchical, true
+	}
+	if !set || limit >= unlimitedV1 {
+		return 0, false
+	}
+	return limit, true
 }
 
 // roomUnder is limit minus the working set the usage file and the stat field give.
@@ -182,9 +217,14 @@ func statField(file, field string) (uint64, bool) {
 
 // memAvailable reads MemAvailable from a meminfo document, in bytes.
 func memAvailable(meminfo []byte) (uint64, bool) {
+	return meminfoField(meminfo, "MemAvailable:")
+}
+
+// meminfoField reads one field of a meminfo document, in bytes.
+func meminfoField(meminfo []byte, field string) (uint64, bool) {
 	scanner := bufio.NewScanner(bytes.NewReader(meminfo))
 	for scanner.Scan() {
-		rest, found := strings.CutPrefix(scanner.Text(), "MemAvailable:")
+		rest, found := strings.CutPrefix(scanner.Text(), field)
 		if !found {
 			continue
 		}
@@ -198,33 +238,87 @@ func memAvailable(meminfo []byte) (uint64, bool) {
 	return 0, false
 }
 
-// linuxSources are the Linux readers over a filesystem rooted at root: cgroup v2,
-// cgroup v1 and MemAvailable, each answering where its files say a bound applies.
-func linuxSources(root string) []Source {
-	read := func(name string) []byte {
-		body, err := os.ReadFile(filepath.Join(root, name))
-		if err != nil {
-			return nil
-		}
-		return body
+// linux is the Linux machine over a filesystem rooted at root: its readers are
+// cgroup v2, cgroup v1 and MemAvailable, each answering where its files say a bound
+// applies.
+func linux(root string) Machine {
+	fs := procfs{root: root}
+	return Machine{Sources: []Source{fs.headroomV2, fs.headroomV1, fs.memAvailable}, Limit: fs.limit}
+}
+
+// procfs reads the files of a Linux filesystem rooted at root.
+type procfs struct{ root string }
+
+// read is one file's body, nil where it does not read.
+func (p procfs) read(name string) []byte {
+	body, err := os.ReadFile(filepath.Join(p.root, name))
+	if err != nil {
+		return nil
 	}
-	cgroupV2 := func() (uint64, bool) {
-		v2, _ := mountsOf(read("proc/self/mountinfo"))
-		path, _ := cgroupPaths(read("proc/self/cgroup"))
-		if v2 == nil || path == "" {
-			return 0, false
-		}
-		point := filepath.Join(root, v2.point)
-		return headroomV2(point, directoryOf(&mount{root: v2.root, point: point}, path))
+	return body
+}
+
+// v2Dir is the cgroup v2 mount point and the process's directory below it.
+func (p procfs) v2Dir() (point, leaf string, ok bool) {
+	v2, _ := mountsOf(p.read("proc/self/mountinfo"))
+	group, _ := cgroupPaths(p.read("proc/self/cgroup"))
+	if v2 == nil || group == "" {
+		return "", "", false
 	}
-	cgroupV1 := func() (uint64, bool) {
-		_, v1 := mountsOf(read("proc/self/mountinfo"))
-		_, path := cgroupPaths(read("proc/self/cgroup"))
-		if v1 == nil || path == "" {
-			return 0, false
-		}
-		return headroomV1(directoryOf(&mount{root: v1.root, point: filepath.Join(root, v1.point)}, path))
+	point = filepath.Join(p.root, v2.point)
+	return point, directoryOf(&mount{root: v2.root, point: point}, group), true
+}
+
+// v1Dir is the process's cgroup v1 memory directory.
+func (p procfs) v1Dir() (string, bool) {
+	_, v1 := mountsOf(p.read("proc/self/mountinfo"))
+	_, group := cgroupPaths(p.read("proc/self/cgroup"))
+	if v1 == nil || group == "" {
+		return "", false
 	}
-	meminfo := func() (uint64, bool) { return memAvailable(read("proc/meminfo")) }
-	return []Source{cgroupV2, cgroupV1, meminfo}
+	return directoryOf(&mount{root: v1.root, point: filepath.Join(p.root, v1.point)}, group), true
+}
+
+func (p procfs) headroomV2() (uint64, bool) {
+	point, leaf, ok := p.v2Dir()
+	if !ok {
+		return 0, false
+	}
+	return headroomV2(point, leaf)
+}
+
+func (p procfs) headroomV1() (uint64, bool) {
+	dir, ok := p.v1Dir()
+	if !ok {
+		return 0, false
+	}
+	return headroomV1(dir)
+}
+
+func (p procfs) memAvailable() (uint64, bool) { return memAvailable(p.read("proc/meminfo")) }
+
+// limit is the tightest cgroup memory limit, v2 first, capped by MemTotal, else
+// MemTotal.
+func (p procfs) limit() (uint64, bool) {
+	cgroup, limited := uint64(0), false
+	if point, leaf, ok := p.v2Dir(); ok {
+		cgroup, limited = limitV2(point, leaf)
+	}
+	if dir, ok := p.v1Dir(); ok && !limited {
+		cgroup, limited = limitV1(dir)
+	}
+	physical, known := meminfoField(p.read("proc/meminfo"), "MemTotal:")
+	return tighter(cgroup, limited, physical, known)
+}
+
+// tighter is the lower of a cgroup's limit and the physical memory, each where it
+// reads, and false where neither does.
+func tighter(cgroup uint64, limited bool, physical uint64, known bool) (uint64, bool) {
+	switch {
+	case limited && known:
+		return min(cgroup, physical), true
+	case limited:
+		return cgroup, true
+	}
+	return physical, known
 }

@@ -57,9 +57,9 @@ func hold(v any) reflect.Value {
 }
 
 func main() {
-	_ = name(Named{})
-	run(Runner{})
-	_ = hold(Held{})
-	_ = split(Split{})
-	_ = declared(Declared{})
+	_ = name(Named{Name: "n"})
+	run(Runner{Speed: 1})
+	_ = hold(Held{Size: 1})
+	_ = split(Split{Name: "s"})
+	_ = declared(Declared{Name: "d"})
 }

@@ -1,0 +1,56 @@
+Two applications that load their page template through a file system as
+template-fs-flow does, each with a template the analysis cannot read: a directory
+named at run time, and delimiters set before a parse. Every member of what each
+renders is read.
+
+-- go.mod --
+module example.com/unread
+
+go 1.27.1
+-- views/views.go --
+package views
+
+import "embed"
+
+//go:embed *.html
+var Files embed.FS
+-- views/page.html --
+<h1>{{.Title}}</h1>
+-- computed/main.go --
+package main
+
+import (
+	"html/template"
+	"os"
+)
+
+// Page is rendered from a directory named at run time.
+type Page struct {
+	Title string
+	Body  string
+}
+
+func main() {
+	page := template.Must(template.ParseFS(os.DirFS(os.Args[1]), "*.html"))
+	_ = page.Execute(os.Stdout, Page{Title: "t", Body: "b"})
+}
+-- delims/main.go --
+package main
+
+import (
+	"os"
+	"text/template"
+
+	"example.com/unread/views"
+)
+
+// Card is rendered by a template parsed with other delimiters.
+type Card struct {
+	Title string
+	Back  string
+}
+
+func main() {
+	card := template.Must(template.New("page.html").Delims("[[", "]]").ParseFS(views.Files, "*.html"))
+	_ = card.Execute(os.Stdout, Card{Title: "t", Back: "b"})
+}

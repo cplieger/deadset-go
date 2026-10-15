@@ -62,3 +62,7 @@ func Store(p *sync.Pool) int {
 	p.Put(map[string]Mapped{"a": {ID: "1"}})
 	return len([]Kept{{}})
 }
+
+var _ = Record{Dash: *new(string), ID: *new(string)}
+
+var _ = Listed{Name: *new(string)}

@@ -42,3 +42,5 @@ func DecodeLoose(b []byte) (Loose, error) {
 	err := xml.Unmarshal(b, &l)
 	return l, err
 }
+
+var _ = Strict{Extra: *new(int), Name: *new(string)}

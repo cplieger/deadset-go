@@ -31,6 +31,8 @@ func (p JSONPayload) hidden() int { return p.Extra }
 
 // EncodeJSON hands a value to the encoder.
 func EncodeJSON(p JSONPayload) ([]byte, error) { return json.Marshal(p) }
+
+var _ = JSONPayload{Extra: *new(int), Name: *new(string), secret: *new(string)}
 -- xml.go --
 package flow
 
@@ -50,6 +52,8 @@ func (p XMLPayload) hidden() int { return p.Extra }
 
 // EncodeXML hands a value to the encoder.
 func EncodeXML(p XMLPayload) ([]byte, error) { return xml.Marshal(p) }
+
+var _ = XMLPayload{Extra: *new(int), Name: *new(string), secret: *new(string)}
 -- gob.go --
 package flow
 
@@ -72,6 +76,8 @@ func (p GobPayload) hidden() int { return p.Extra }
 
 // EncodeGob hands a value to the encoder through a method of the package.
 func EncodeGob(w io.Writer, p GobPayload) error { return gob.NewEncoder(w).Encode(p) }
+
+var _ = GobPayload{Extra: *new(int), Name: *new(string), secret: *new(string)}
 -- text_template.go --
 package flow
 
@@ -94,6 +100,8 @@ func (p TextPayload) hidden() int { return p.Extra }
 
 // RenderText hands a value to the engine.
 func RenderText(t *template.Template, p TextPayload) error { return t.Execute(io.Discard, p) }
+
+var _ = TextPayload{Extra: *new(int), Name: *new(string), secret: *new(string)}
 -- html_template.go --
 package flow
 
@@ -116,6 +124,8 @@ func (p HTMLPayload) hidden() int { return p.Extra }
 
 // RenderHTML hands a value to the engine.
 func RenderHTML(t *template.Template, p HTMLPayload) error { return t.Execute(io.Discard, p) }
+
+var _ = HTMLPayload{Extra: *new(int), Name: *new(string), secret: *new(string)}
 -- reflection.go --
 package flow
 
@@ -135,6 +145,8 @@ func (p ReflectPayload) hidden() int { return p.Extra }
 
 // Inspect hands a value to reflection.
 func Inspect(p ReflectPayload) string { return reflect.ValueOf(p).Kind().String() }
+
+var _ = ReflectPayload{Extra: *new(int), Name: *new(string), secret: *new(string)}
 -- sql.go --
 package flow
 
@@ -196,6 +208,10 @@ func ScanValue(row *sql.Row, p ValuePayload) error {
 	var name string
 	return row.Scan(&name, p)
 }
+
+var _ = SQLPayload{Extra: *new(int), Name: *new(string), secret: *new(string)}
+
+var _ = RowsPayload{Extra: *new(int), Name: *new(string), secret: *new(string)}
 -- sorting.go --
 package flow
 
@@ -246,6 +262,8 @@ func (p LogPayload) hidden() int { return p.Extra }
 
 // LogPayloadValue hands a value to a logging call.
 func LogPayloadValue(p LogPayload) { slog.Info("payload", "value", p) }
+
+var _ = LogPayload{Extra: *new(int), Name: *new(string), secret: *new(string)}
 -- containers.go --
 package flow
 
@@ -275,6 +293,10 @@ func (i Inner) Describe() string { return i.Label }
 
 // EncodeDeep hands a container to the encoder.
 func EncodeDeep(m map[string][]*Deep) ([]byte, error) { return json.Marshal(m) }
+
+var _ = Deep{Extra: *new(int), Inner: *new(Inner), Name: *new(string), secret: *new(string)}
+
+var _ = Inner{Label: *new(string)}
 -- writer.go --
 package flow
 
@@ -298,6 +320,7 @@ func (s *Sink) hidden() int { return s.Extra }
 // RenderInto hands the writer to the engine.
 func RenderInto(t *template.Template, s *Sink) error { return t.Execute(s, nil) }
 
+var _ = Sink{Extra: *new(int)}
 -- comparison.go --
 package flow
 
@@ -318,3 +341,5 @@ func (p ComparedPayload) hidden() int { return p.Extra }
 
 // Same compares two values field by field.
 func Same(a, b ComparedPayload) bool { return reflect.DeepEqual(a, b) }
+
+var _ = ComparedPayload{Extra: *new(int), Name: *new(string), secret: *new(string)}

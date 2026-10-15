@@ -2,7 +2,6 @@ package exempt
 
 import (
 	"go/ast"
-	"go/constant"
 	"go/token"
 	"go/types"
 	"os"
@@ -26,10 +25,13 @@ var sealedTemplateMethods = map[string]bool{
 // templateOrigins answers, for the receiver of a template execution, every
 // identifier the templates it may hold name, from the program's own syntax.
 type templateOrigins struct {
+	in      *Input
 	fset    *token.FileSet
 	inits   map[*types.Var]templateInit
 	uses    map[*types.Var]int
 	allowed map[*types.Var]int
+	flow    *valueFlow            // built on the first parse read
+	every   map[string]*inventory // [templateOrigins.everyParse]'s answer per engine
 	root    string
 }
 
@@ -45,11 +47,11 @@ type templateInit struct {
 // with one initializer, and how its uses read it.
 func newTemplateOrigins(in *Input) *templateOrigins {
 	o := &templateOrigins{
-		root: in.Root, fset: in.Result.Fset, inits: make(map[*types.Var]templateInit),
-		uses: make(map[*types.Var]int), allowed: make(map[*types.Var]int),
+		in: in, root: in.Root, fset: in.Result.Fset, inits: make(map[*types.Var]templateInit),
+		uses: make(map[*types.Var]int), allowed: make(map[*types.Var]int), every: make(map[string]*inventory),
 	}
 	if in.Options.PublishedAPI {
-		return o
+		return nil
 	}
 	for _, p := range programPackages(in.Result) {
 		if p.TypesInfo == nil {
@@ -120,19 +122,29 @@ func (o *templateOrigins) initialize(info *types.Info, dir string, name *ast.Ide
 // where each of them is a constant or a file the analysis reads
 // ([inventory]): the receiver is a variable the program reads only to execute, look
 // up or name its templates, written once by a chain of the engines' constructors,
-// parses and pass-through methods. It is nil otherwise, and for a library, whose
-// callers may execute any template.
+// parses and pass-through methods; or else every template the program parses with
+// the receiver's engine ([templateOrigins.everyParse]). It is nil otherwise, and
+// for a library, whose callers may execute any template.
 func (o *templateOrigins) executed(info *types.Info, dir string, call *ast.CallExpr) map[string]bool {
 	sel, isSelector := ast.Unparen(call.Fun).(*ast.SelectorExpr)
-	if !isSelector {
+	fn, _ := resolveObject(info, call.Fun).(*types.Func)
+	if o == nil || !isSelector || fn == nil || fn.Pkg() == nil {
 		return nil
 	}
-	inv := &inventory{root: o.root, fset: o.fset, names: make(map[string]bool), complete: true}
+	inv := o.inventory()
 	o.origin(info, dir, sel.X, inv, 0)
-	if !inv.complete || inv.parsed == 0 {
-		return nil
+	if inv.complete && inv.parsed > 0 {
+		return inv.names
 	}
-	return inv.names
+	return o.everyParse(fn.Pkg().Path())
+}
+
+// inventory is an empty inventory reading through the program's value flow.
+func (o *templateOrigins) inventory() *inventory {
+	if o.flow == nil {
+		o.flow = newValueFlow(o.in)
+	}
+	return &inventory{root: o.root, fset: o.fset, names: make(map[string]bool), complete: true, flow: o.flow}
 }
 
 // maxTemplateChain stops an origin at a cycle of variables written from each other.
@@ -212,40 +224,80 @@ var templateParses = map[string]bool{"Parse": true, "ParseFiles": true, "ParseGl
 type inventory struct {
 	fset     *token.FileSet
 	names    map[string]bool
+	flow     *valueFlow
 	root     string
 	parsed   int
 	complete bool
 }
 
-// parse reads one call that adds templates to a set of the engine at path.
+// parse reads one call that adds templates to a set of the engine at path. Each
+// argument naming a template is followed through the program's value flow
+// ([valueFlow]) to the constants, files and file systems it may be.
 func (inv *inventory) parse(info *types.Info, dir, engine, name string, call *ast.CallExpr) {
-	args, ok := constantStrings(info, call.Args)
+	at := flowAt{info: info, dir: dir}
 	switch {
-	case name == "Parse" && ok && len(args) == 1:
-		inv.read(engine, "", []byte(args[0]))
-	case name == "ParseFiles" && ok && len(args) > 0:
-		for _, file := range args {
-			inv.files(engine, inv.matching(dir, file, false))
+	case name == "Parse" && len(call.Args) == 1:
+		inv.parseText(engine, call.Args[0], at)
+	case name == "ParseFiles" && len(call.Args) > 0 && !call.Ellipsis.IsValid():
+		for _, arg := range call.Args {
+			inv.named(engine, arg, at, false)
 		}
-	case name == "ParseGlob" && ok && len(args) == 1:
-		inv.files(engine, inv.matching(dir, args[0], true))
-	case name == "ParseFS" && len(call.Args) > 1:
-		inv.parseFS(info, engine, call)
+	case name == "ParseGlob" && len(call.Args) == 1:
+		inv.named(engine, call.Args[0], at, true)
+	case name == "ParseFS" && len(call.Args) > 1 && !call.Ellipsis.IsValid():
+		inv.parseFS(engine, call, at)
 	default:
 		inv.complete = false
 	}
 }
 
-// parseFS reads one call that adds the templates of an embedded file system.
-func (inv *inventory) parseFS(info *types.Info, engine string, call *ast.CallExpr) {
-	base, embedded := inv.embeddedDir(info, call.Args[0])
-	patterns, constants := constantStrings(info, call.Args[1:])
-	if !embedded || !constants {
+// parseText reads the text one Parse call parses.
+func (inv *inventory) parseText(engine string, text ast.Expr, at flowAt) {
+	sources, ok := inv.flow.texts(text, at)
+	if !ok {
 		inv.complete = false
 		return
 	}
-	for _, pattern := range patterns {
-		inv.files(engine, globWithin(inv.root, filepath.Join(base, filepath.FromSlash(pattern))))
+	for _, source := range sources {
+		if source.file {
+			inv.files(engine, source.files)
+		} else {
+			inv.read(engine, "", []byte(source.text))
+		}
+	}
+}
+
+// named reads the files one file name or pattern argument names.
+func (inv *inventory) named(engine string, arg ast.Expr, at flowAt, pattern bool) {
+	names, ok := inv.flow.constants(arg, at)
+	if !ok {
+		inv.complete = false
+		return
+	}
+	for _, name := range names {
+		inv.files(engine, inv.matching(at.dir, name, pattern))
+	}
+}
+
+// parseFS reads one call that adds the templates of a file system
+// [valueFlow.roots] bounds, each pattern matched against the files it holds.
+func (inv *inventory) parseFS(engine string, call *ast.CallExpr, at flowAt) {
+	roots, ok := inv.flow.roots(call.Args[0], at)
+	if !ok {
+		inv.complete = false
+		return
+	}
+	for _, arg := range call.Args[1:] {
+		patterns, constants := inv.flow.constants(arg, at)
+		if !constants {
+			inv.complete = false
+			return
+		}
+		for _, root := range roots {
+			for _, pattern := range patterns {
+				inv.files(engine, root.match(pattern))
+			}
+		}
 	}
 }
 
@@ -333,38 +385,6 @@ func globWithin(root, pattern string) []string {
 func within(root, path string) bool {
 	rel, err := filepath.Rel(root, path)
 	return err == nil && filepath.IsLocal(rel)
-}
-
-// constantStrings is the value of each expression, and true where every one is a
-// constant string.
-func constantStrings(info *types.Info, exprs []ast.Expr) ([]string, bool) {
-	held := make([]string, 0, len(exprs))
-	for _, e := range exprs {
-		tv, ok := info.Types[e]
-		if !ok || tv.Value == nil || tv.Value.Kind() != constant.String {
-			return nil, false
-		}
-		held = append(held, constant.StringVal(tv.Value))
-	}
-	return held, true
-}
-
-// embeddedDir is the directory of the file declaring the package-level embed.FS
-// variable e names, against which its patterns resolve, and true where e is one.
-func (inv *inventory) embeddedDir(info *types.Info, e ast.Expr) (string, bool) {
-	id, isIdent := ast.Unparen(e).(*ast.Ident)
-	if !isIdent {
-		return "", false
-	}
-	v, isVar := info.Uses[id].(*types.Var)
-	if !isVar || v.Pkg() == nil || v.Parent() != v.Pkg().Scope() {
-		return "", false
-	}
-	named, isNamed := types.Unalias(v.Type()).(*types.Named)
-	if !isNamed || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != "embed" || named.Obj().Name() != "FS" {
-		return "", false
-	}
-	return filepath.Dir(inv.fset.Position(v.Pos()).Filename), true
 }
 
 // isTemplate reports whether t is a template of either engine, or a pointer to one.

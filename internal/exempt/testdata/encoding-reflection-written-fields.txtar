@@ -1,0 +1,66 @@
+A command that encodes values whose fields it writes in each of the ways the program
+can, beside fields it never writes, one of which only its test writes. The encoder
+reads a field the program writes, and a field nothing writes holds no value the
+program gave it.
+
+-- go.mod --
+module example.com/written
+
+go 1.27.1
+-- main.go --
+package main
+
+import (
+	"encoding/json"
+	"os"
+)
+
+// Event is encoded with fields its code writes and fields nothing writes.
+type Event struct {
+	Keyed     string
+	Assigned  string
+	Counted   int
+	Draft     Draft
+	Never     string
+	TestOnly  string
+}
+
+// Draft is converted from a value of another type, which writes its fields.
+type Draft struct {
+	Title string
+}
+
+type note struct {
+	Title string
+}
+
+// Point is written by a positional literal.
+type Point struct {
+	X, Y int
+}
+
+// Tag is written by a literal whose &Tag a slice of pointers elides.
+type Tag struct {
+	Label string
+}
+
+func main() {
+	e := Event{Keyed: "k"}
+	e.Assigned = "a"
+	e.Counted++
+	_ = json.NewEncoder(os.Stdout).Encode(e)
+	_ = json.NewEncoder(os.Stdout).Encode(Draft(note{Title: "t"}))
+	_ = json.NewEncoder(os.Stdout).Encode(Point{1, 2})
+	_ = json.NewEncoder(os.Stdout).Encode([]*Tag{{Label: "l"}})
+}
+-- main_test.go --
+package main
+
+import "testing"
+
+func TestEvent(t *testing.T) {
+	e := Event{TestOnly: "t"}
+	if e.TestOnly == "" {
+		t.Fail()
+	}
+}

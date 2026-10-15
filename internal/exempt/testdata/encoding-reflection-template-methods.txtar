@@ -42,6 +42,10 @@ func (View) WithSuccess() View { return View{} }
 var page = template.Must(template.New("v").Parse("{{.Shown}} {{.User.Name}} {{.State}}"))
 
 func main() { _ = page.Execute(os.Stdout, View{}) }
+
+var _ = User{Name: *new(string)}
+
+var _ = View{State: *new(Status)}
 -- handler/main.go --
 package main
 
@@ -83,3 +87,5 @@ func render(w io.Writer, data any) {
 }
 
 func main() { render(os.Stdout, Card{}) }
+
+var _ = Owner{Handle: ""}

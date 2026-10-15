@@ -155,19 +155,19 @@ func modeOf(cfg *config.Config, named string) graph.Mode {
 }
 
 func main() {
-	os.Exit(governed(os.Args[1:], os.Stdout, os.Stderr, memory.PlatformSources()))
+	os.Exit(governed(os.Args[1:], os.Stdout, os.Stderr, memory.Platform()))
 }
 
-// governed runs one invocation under the memory governor reading sources. An
+// governed runs one invocation under the memory governor reading machine. An
 // interrupt reaches the toolchain a load spawns through the context, so a cancelled
 // run stops rather than waiting for the packages it asked for, and the governor ends
 // a run that cannot fit by cancelling the same context.
-func governed(args []string, stdout, stderr io.Writer, sources []memory.Source) int {
+func governed(args []string, stdout, stderr io.Writer, machine memory.Machine) int {
 	signalled, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	ctx, cancel := context.WithCancelCause(signalled)
 	defer cancel(nil)
-	govern := memory.Start(ctx, cancel, sources)
+	govern := memory.Start(ctx, cancel, machine)
 	defer govern()
 	return run(ctx, args, stdout, stderr)
 }

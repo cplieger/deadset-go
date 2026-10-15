@@ -48,6 +48,12 @@ func (l Leaf) hidden() string { return l.secret }
 
 // EncodeRoot hands the argument to the encoder.
 func EncodeRoot(r Root) ([]byte, error) { return json.Marshal(r) }
+
+var _ = Root{Mid: *new(Middle)}
+
+var _ = Middle{Count: *new(int), Leaf: *new(Leaf)}
+
+var _ = Leaf{Extra: *new(int), Label: *new(string)}
 -- opaque.go --
 package reach
 
@@ -81,6 +87,10 @@ func (p Printed) Print() string { return p.Label }
 func NewRoot() Root {
 	return Root{Opaque: Opaque{Label: "o"}, Printer: Printed{Label: "p"}}
 }
+
+var _ = Opaque{Extra: *new(int)}
+
+var _ = Printed{Extra: *new(int)}
 -- embedded.go --
 package reach
 
@@ -105,6 +115,10 @@ func (e Embedded) Mark() string { return e.Tag }
 
 // EncodeWrapper hands a value carrying an embedded field to the encoder.
 func EncodeWrapper(w Wrapper) ([]byte, error) { return json.Marshal(w) }
+
+var _ = Wrapper{Count: *new(int)}
+
+var _ = Embedded{Extra: *new(int), Tag: *new(string)}
 -- generic.go --
 package reach
 
@@ -128,6 +142,10 @@ func (b Boxed) Describe() string { return b.Label }
 
 // EncodeBox hands an instantiated box to the encoder.
 func EncodeBox(b Box[Boxed]) ([]byte, error) { return json.Marshal(b) }
+
+var _ = Boxed{Extra: *new(int), Label: *new(string)}
+
+var _ = Box[Boxed]{V: Boxed{}, Count: 1}
 -- recursive.go --
 package reach
 
@@ -145,6 +163,8 @@ func (n Node) Describe() string { return n.Label }
 
 // EncodeNode hands a value that holds itself to the encoder.
 func EncodeNode(n Node) ([]byte, error) { return json.Marshal(n) }
+
+var _ = Node{Label: *new(string), Next: *new(*Node)}
 -- stored.go --
 package reach
 
@@ -210,3 +230,11 @@ func EncodeFeed() ([]byte, error) {
 	println(len([]Ignored{{}}))
 	return json.Marshal(f)
 }
+
+var _ = Appended{Extra: *new(int), Label: *new(string)}
+
+var _ = Indexed{Extra: *new(int), Label: *new(string)}
+
+var _ = Listed{Extra: *new(int), Label: *new(string)}
+
+var _ = Relayed{Extra: *new(int), Label: *new(string)}

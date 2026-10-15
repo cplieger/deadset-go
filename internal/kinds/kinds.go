@@ -221,6 +221,10 @@ type Finding struct {
 	testUsed bool
 	untested Class
 
+	// testRead marks a write-only finding whose declaration only test files read
+	// ([Input.capTestUsed]).
+	testRead bool
+
 	// local marks a finding about a declaration a function body makes, which the
 	// inventory does not hold: the enclosing declaration's reference names it, as it
 	// names a part, and reference counting inside the body decided it.
@@ -528,10 +532,18 @@ func (f *Finding) componentConfidence() Class {
 	return f.Confidence
 }
 
-// capTestUsed lowers a finding about a declaration of [testUseFacts.dead] to possible,
-// its class too unless it is a test of dead code, whose class is its own.
+// capTestUsed lowers a finding about production code only tests use to possible: a
+// declaration of [testUseFacts.dead], and a declaration of a package only tests reach
+// that a write-only finding finds read only by test files, which the sweep holds
+// live. Its class is lowered too unless it is a test of dead code, whose class is
+// its own.
 func (in *Input) capTestUsed(found *Finding, row *catalog.Row) {
-	if found.id == "" || found.local || heldLive[row.Code] || !in.testUse().dead[found.id] {
+	if found.id == "" || found.local {
+		return
+	}
+	symbol := in.symbol(found.id)
+	dead := !heldLive[row.Code] && in.testUse().dead[found.id]
+	if !dead && (!found.testRead || symbol == nil || !in.testReached(symbol)) {
 		return
 	}
 	found.testUsed, found.untested = true, found.Confidence

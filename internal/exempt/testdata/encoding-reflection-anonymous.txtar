@@ -77,3 +77,10 @@ func Build() int {
 	_ = v.U
 	return 1
 }
+
+func init() {
+	var e Envelope
+	e.Inner.Mark = *new(Mark)
+	e.Inner.Count = 1
+	_ = Envelope{Inner: e.Inner}
+}

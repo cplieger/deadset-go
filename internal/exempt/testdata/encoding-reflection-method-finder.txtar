@@ -25,3 +25,5 @@ func (f Found) hidden() int { return f.Extra }
 func Call(v Found, name string) []reflect.Value {
 	return reflect.ValueOf(v).MethodByName(name).Call(nil)
 }
+
+var _ = Found{Extra: *new(int), Name: *new(string)}

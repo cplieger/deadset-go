@@ -63,6 +63,10 @@ func (m Menu) Label() string { return m.Title }
 func Page(tpl *template.Template, w io.Writer) error {
 	return newView(tpl).Set("pagination", Pagination{}).Render(w)
 }
+
+var _ = Pagination{LastOffset: *new(int)}
+
+var _ = Menu{Title: *new(string)}
 -- local.go --
 package container
 
@@ -110,3 +114,7 @@ func Local(tpl *template.Template, w io.Writer) error {
 	_ = len(kept)
 	return tpl.Execute(w, []any{Listed{}})
 }
+
+var _ = Indexed{Name: *new(string)}
+
+var _ = Listed{Name: *new(string)}

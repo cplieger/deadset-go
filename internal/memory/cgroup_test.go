@@ -34,10 +34,10 @@ func v2Mountinfo(root string) string {
 		"30 22 0:26 " + root + " /sys/fs/cgroup rw,nosuid - cgroup2 cgroup2 rw\n"
 }
 
-// headroomOf reads one source of linuxSources over root.
+// headroomOf reads one source of the Linux machine over root.
 func headroomOf(t *testing.T, root string, source int) (uint64, bool) {
 	t.Helper()
-	return linuxSources(root)[source]()
+	return linux(root).Sources[source]()
 }
 
 const (
@@ -149,10 +149,72 @@ func TestMemAvailableIsReadInBytes(t *testing.T) {
 
 func TestNoSourceAnswersOnAMachineWithoutProc(t *testing.T) {
 	root := machine(t, map[string]string{"etc/hostname": "box\n"})
-	for i, source := range linuxSources(root) {
+	for i, source := range linux(root).Sources {
 		if got, ok := source(); ok {
 			t.Errorf("source %d on a machine without /proc = %d, true; want false", i, got)
 		}
+	}
+	if got, ok := linux(root).Limit(); ok {
+		t.Errorf("limit on a machine without /proc = %d, true; want false", got)
+	}
+}
+
+func TestMachineLimitIsTheTightestCgroupLimitElsePhysicalMemory(t *testing.T) {
+	physical := uint64(32000000) << 10
+	v1 := "31 22 0:27 / /sys/fs/cgroup/memory rw - cgroup cgroup rw,memory\n"
+	tests := []struct {
+		name  string
+		files map[string]string
+		want  uint64
+	}{
+		{"v2_parent_max", map[string]string{
+			"proc/self/mountinfo":                     v2Mountinfo("/"),
+			"proc/self/cgroup":                        "0::/user.slice/job\n",
+			"sys/fs/cgroup/user.slice/memory.max":     "17179869184\n",
+			"sys/fs/cgroup/user.slice/job/memory.max": "max\n",
+			"proc/meminfo":                            meminfo,
+		}, 16 * gib},
+		{"v2_unlimited", map[string]string{
+			"proc/self/mountinfo":      v2Mountinfo("/"),
+			"proc/self/cgroup":         "0::/\n",
+			"sys/fs/cgroup/memory.max": "max\n",
+			"proc/meminfo":             meminfo,
+		}, physical},
+		{"v2_above_physical", map[string]string{
+			"proc/self/mountinfo":      v2Mountinfo("/"),
+			"proc/self/cgroup":         "0::/\n",
+			"sys/fs/cgroup/memory.max": "137438953472\n",
+			"proc/meminfo":             meminfo,
+		}, physical},
+		{"v1_limit_in_bytes", map[string]string{
+			"proc/self/mountinfo":                        v1,
+			"proc/self/cgroup":                           "12:memory:/\n",
+			"sys/fs/cgroup/memory/memory.limit_in_bytes": "8589934592\n",
+			"sys/fs/cgroup/memory/memory.stat":           "hierarchical_memory_limit 9223372036854771712\n",
+			"proc/meminfo":                               meminfo,
+		}, 8 * gib},
+		{"v1_hierarchical", map[string]string{
+			"proc/self/mountinfo":                        v1,
+			"proc/self/cgroup":                           "12:memory:/\n",
+			"sys/fs/cgroup/memory/memory.limit_in_bytes": "9223372036854771712\n",
+			"sys/fs/cgroup/memory/memory.stat":           "hierarchical_memory_limit 4294967296\n",
+			"proc/meminfo":                               meminfo,
+		}, 4 * gib},
+		{"v1_unlimited", map[string]string{
+			"proc/self/mountinfo":                        v1,
+			"proc/self/cgroup":                           "12:memory:/\n",
+			"sys/fs/cgroup/memory/memory.limit_in_bytes": "9223372036854771712\n",
+			"proc/meminfo":                               meminfo,
+		}, physical},
+		{"no_cgroup", map[string]string{"proc/meminfo": meminfo}, physical},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := linux(machine(t, tt.files)).Limit()
+			if !ok || got != tt.want {
+				t.Errorf("machine limit = %d, %v; want %d, true", got, ok, tt.want)
+			}
+		})
 	}
 }
 

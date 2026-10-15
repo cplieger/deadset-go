@@ -82,7 +82,8 @@ type reach struct {
 	encoders methodReach
 
 	// fills is whether a decoder outside the analysed program fills the fields
-	// and may read them ([fillingNames]).
+	// and may read them ([fillingNames]); a field it fills that production code never
+	// writes is a filled field even where the decoder reads the fields.
 	fills bool
 
 	// xmlName is whether an XML decoder compares the value's XMLName field.
@@ -356,6 +357,7 @@ func EncodingReflectionDetector(in *Input) ([]graph.Exemption, error) {
 	if err := f.walkFieldAssertions(); err != nil {
 		return nil, err
 	}
+	f.keepDecoded()
 	kept := f.kept.exemptions()
 	retained := make(map[graph.SymbolID]bool, len(kept))
 	for i := range kept {
@@ -382,6 +384,10 @@ type encodingFlow struct {
 	methodNames map[*types.Named]map[string]bool    // the names a type or a pointer to it declares
 	decode      *decoders
 	writes      map[token.Position]bool       // the fields the program writes, on first use
+	production  map[token.Position]bool       // the fields its production code writes, on first use
+	everyWrite  map[token.Position]bool       // the fields any of its files writes, with production
+	decoded     map[token.Position]bool       // the fields a decoder of production code fills
+	unwritten   []unwrittenRead               // the fields a destination reads that no code writes
 	reached     map[types.Type][]*types.Named // encoderReach's answers, which spell every type they meet
 	selfEncoded map[selfEncodingKey]selfEncodedTypes
 	templates   *templateOrigins   // which templates an execution's receiver holds
@@ -424,9 +430,16 @@ var fillingNames = [...]string{"Bind", "Decode", "MustBind", "ShouldBind", "Unma
 // does not hand the parameter to a destination that reads fields
 // ([decoders.readsFields]).
 func (f *encodingFlow) fills(fn *types.Func, at int) bool {
+	return f.fillsByName(fn, at) && !f.decode.readsFields(fn, at)
+}
+
+// fillsByName reports whether fn is a function or method outside the analysed
+// program, of a package no destination rule names, whose name says it fills the
+// empty-interface parameter at one position, whatever its body reads.
+func (f *encodingFlow) fillsByName(fn *types.Func, at int) bool {
 	pkg := fn.Pkg()
 	return pkg != nil && !f.own[pkg.Path()] && !namedDestinations[pkg.Path()] && hasAnyPrefix(fn.Name(), fillingNames[:]) &&
-		slices.Contains(erasedParameters(fn.Signature()), at) && !f.decode.readsFields(fn, at)
+		slices.Contains(erasedParameters(fn.Signature()), at)
 }
 
 // filling is what a filling callee retains in place of the fields an opaque callee
@@ -733,8 +746,15 @@ func (f *encodingFlow) crossingArgument(info *types.Info, enclosing *types.Func,
 	}
 	arg := call.Args[i]
 	d := destination{detail: "passed to " + out.callee.FullName(), reach: out.reach}
-	if at, supplies := parameterAt(out.callee.Signature(), i); supplies && !f.edge.declares(out.callee) && f.fills(out.callee, at) {
-		d = destination{detail: "decoded by " + out.callee.FullName(), reach: out.reach.filling()}
+	if at, supplies := parameterAt(out.callee.Signature(), i); supplies && !f.edge.declares(out.callee) {
+		switch {
+		case f.fills(out.callee, at):
+			d = destination{detail: "decoded by " + out.callee.FullName(), reach: out.reach.filling()}
+		case f.fillsByName(out.callee, at), isPointer(info.TypeOf(arg)):
+			// A callee outside the program handed a pointer may fill the value, as a
+			// row scanner or a binder of any name does.
+			d.reach.fills = true
+		}
 	}
 	flowing := f.ownTypes(info, arg)
 	if at := info.TypeOf(arg); at != nil && carriesStruct(at) {
@@ -751,6 +771,12 @@ func (f *encodingFlow) crossingArgument(info *types.Info, enclosing *types.Func,
 		}
 	}
 	return nil
+}
+
+// isPointer reports whether t is a pointer type.
+func isPointer(t types.Type) bool {
+	_, pointer := types.Unalias(t).(*types.Pointer)
+	return pointer
 }
 
 // ownTypes is what one argument of a destination reaches beyond its static type:
@@ -1047,11 +1073,14 @@ func (f *encodingFlow) fields(st *types.Struct, site evidence, d *destination) {
 	for i := range st.NumFields() {
 		field := st.Field(i)
 		visited := (field.Exported() || st.Tag(i) != "" || embedsStruct(field)) && !d.reach.keys.skips(st.Tag(i))
+		f.noteDecoded(field, visited, site, d)
 		switch {
-		case f.reads(field, visited, d):
+		case f.reads(field, visited, site, d):
 			f.kept.record(field, site, d.detail)
 		case d.reach.fills && visited:
 			f.filled.record(field, site, d.detail)
+		case f.readsAny(field, visited, d):
+			f.unwritten = append(f.unwritten, unwrittenRead{field: field, site: site, detail: d.detail})
 		}
 		if !visited {
 			continue
@@ -1065,15 +1094,59 @@ func (f *encodingFlow) fields(st *types.Struct, site evidence, d *destination) {
 
 // reads reports whether one destination reads one field: a field it visits where it
 // reads fields and, for a template engine, a template names, an XML decoder's XMLName,
-// or a written holder a decoder fills through.
-func (f *encodingFlow) reads(field *types.Var, visited bool, d *destination) bool {
+// or a written holder a decoder fills through. A field it visits is read only where
+// production code writes it ([encodingFlow.writtenFor]) or the field is
+// embedded, which a write of a promoted field writes through: the reader of an
+// unwritten field reads a value no code of the program gave it.
+func (f *encodingFlow) reads(field *types.Var, visited bool, site evidence, d *destination) bool {
 	switch {
-	case d.reach.fields && visited && (d.named == nil || d.named[field.Name()] || field.Embedded()):
+	case f.readsAny(field, visited, d) && (field.Embedded() || f.writtenFor(site)[f.edge.sites.of(field)]):
 		return true
 	case d.reach.xmlName && field.Name() == xmlNameField && isXMLName(field.Type()):
 		return true
 	default:
 		return d.reach.holders && visited && holdsValue(field.Type()) && f.written()[f.edge.sites.of(field)]
+	}
+}
+
+// readsAny reports whether one destination reads one field it visits, written or
+// not.
+func (f *encodingFlow) readsAny(field *types.Var, visited bool, d *destination) bool {
+	return d.reach.fields && visited && (d.named == nil || d.named[field.Name()] || field.Embedded())
+}
+
+// unwrittenRead is one field a destination reads that no code the destination's site
+// stands for writes, kept where a decoder fills it ([encodingFlow.keepDecoded]).
+type unwrittenRead struct {
+	field  *types.Var
+	detail string
+	site   evidence
+}
+
+// noteDecoded records a field a decoding destination of production code fills: a
+// decoder, a function that only decodes into its argument, or a filling callee.
+func (f *encodingFlow) noteDecoded(field *types.Var, visited bool, site evidence, d *destination) {
+	if !visited || !d.reach.holders && !d.reach.fills {
+		return
+	}
+	if _, test := graph.IsTestFile(site.at.Filename); test {
+		return
+	}
+	if f.decoded == nil {
+		f.decoded = make(map[token.Position]bool)
+	}
+	f.decoded[f.edge.sites.of(field)] = true
+}
+
+// keepDecoded keeps each field a destination reads that no code writes where a decoder
+// fills it, because the value then carries what the decoded document held: a program
+// that decodes a value and encodes it again sends its fields on. It runs once every
+// destination has been walked, since a decoder may be met after the encoder.
+func (f *encodingFlow) keepDecoded() {
+	for _, u := range f.unwritten {
+		if f.decoded[f.edge.sites.of(u.field)] {
+			f.kept.record(u.field, u.site, u.detail)
+		}
 	}
 }
 
@@ -1575,8 +1648,78 @@ func (f *encodingFlow) written() map[token.Position]bool {
 	return f.writes
 }
 
+// writtenFor is every field the code a destination's site stands for writes: the
+// program's production code, and its test files too where the site is in a test file
+// or the run counts test references. A field is written by a composite literal, keyed
+// or positional, by an assignment or an increment, and, for each field of a struct
+// type a conversion produces, by the conversion.
+func (f *encodingFlow) writtenFor(site evidence) map[token.Position]bool {
+	if f.production == nil {
+		f.indexWrites()
+	}
+	if _, test := graph.IsTestFile(site.at.Filename); test || !f.kept.in.Mode.Production {
+		return f.everyWrite
+	}
+	return f.production
+}
+
+// indexWrites fills the two write sets [encodingFlow.writtenFor] reads.
+func (f *encodingFlow) indexWrites() {
+	f.production, f.everyWrite = make(map[token.Position]bool), make(map[token.Position]bool)
+	in := f.kept.in
+	for _, p := range programPackages(in.Result) {
+		if p.TypesInfo == nil {
+			continue
+		}
+		for _, file := range p.Syntax {
+			_, test := graph.IsTestFile(in.Result.Fset.Position(file.FileStart).Filename)
+			for _, field := range slices.Concat(fieldsWritten(p.TypesInfo, file), fieldsConverted(p.TypesInfo, file)) {
+				f.everyWrite[f.edge.sites.of(field)] = true
+				if !test {
+					f.production[f.edge.sites.of(field)] = true
+				}
+			}
+		}
+	}
+}
+
+// fieldsConverted is every field of each struct type a conversion in one file
+// produces from a value of another type, and of each struct a field of it holds by
+// value, each of which the conversion writes.
+func fieldsConverted(info *types.Info, file *ast.File) []*types.Var {
+	var found []*types.Var
+	ast.Inspect(file, func(n ast.Node) bool {
+		call, isCall := n.(*ast.CallExpr)
+		if !isCall || len(call.Args) != 1 {
+			return true
+		}
+		to, converts := info.Types[call.Fun]
+		from := info.TypeOf(call.Args[0])
+		if !converts || !to.IsType() || from == nil || types.Identical(to.Type, from) {
+			return true
+		}
+		found = structFields(to.Type, found, map[*types.Struct]bool{})
+		return true
+	})
+	return found
+}
+
+// structFields adds every field of the struct t is, and of each struct one of them
+// holds by value.
+func structFields(t types.Type, found []*types.Var, seen map[*types.Struct]bool) []*types.Var {
+	st, isStruct := types.Unalias(t).Underlying().(*types.Struct)
+	if !isStruct || seen[st] {
+		return found
+	}
+	seen[st] = true
+	for field := range st.Fields() {
+		found = structFields(field.Type(), append(found, field), seen)
+	}
+	return found
+}
+
 // fieldsWritten is every field one file writes: by a composite literal, keyed or
-// positional, and by an assignment.
+// positional, by an assignment and by an increment or a decrement.
 func fieldsWritten(info *types.Info, file *ast.File) []*types.Var {
 	var found []*types.Var
 	selected := func(expr ast.Expr) {
@@ -1587,19 +1730,45 @@ func fieldsWritten(info *types.Info, file *ast.File) []*types.Var {
 	ast.Inspect(file, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.CompositeLit:
-			if st, isStruct := types.Unalias(info.TypeOf(n)).Underlying().(*types.Struct); isStruct {
-				for i, elt := range n.Elts {
-					found = append(found, literalField(info, st, elt, i))
-				}
-			}
+			found = append(found, literalFields(info, n)...)
 		case *ast.AssignStmt:
 			for _, lhs := range n.Lhs {
 				selected(lhs)
 			}
+		case *ast.IncDecStmt:
+			selected(n.X)
 		}
 		return true
 	})
 	return slices.DeleteFunc(found, func(field *types.Var) bool { return field == nil })
+}
+
+// literalFields is the field each element of a struct literal sets. An element of a
+// slice, array or map of pointers may elide &T, and the literal then has the
+// pointer type.
+func literalFields(info *types.Info, lit *ast.CompositeLit) []*types.Var {
+	at := types.Unalias(info.TypeOf(lit))
+	if pointer, isPointer := at.(*types.Pointer); isPointer {
+		at = pointer.Elem()
+	}
+	st, isStruct := underlyingStruct(at)
+	if !isStruct {
+		return nil
+	}
+	found := make([]*types.Var, 0, len(lit.Elts))
+	for i, elt := range lit.Elts {
+		found = append(found, literalField(info, st, elt, i))
+	}
+	return found
+}
+
+// underlyingStruct is the struct type t is defined as, and false where t is none.
+func underlyingStruct(t types.Type) (*types.Struct, bool) {
+	if t == nil {
+		return nil, false
+	}
+	st, isStruct := t.Underlying().(*types.Struct)
+	return st, isStruct
 }
 
 // literalField is the field one element of a struct literal sets.

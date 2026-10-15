@@ -20,6 +20,8 @@ type Record struct {
 	Count int
 }
 
+var _ = Record{Count: 1}
+
 // Probe is encoded only by the consumer's tests.
 type Probe struct {
 	Label string `json:"label"`

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"os"
 	"regexp"
 	"runtime"
 	"runtime/debug"
@@ -66,7 +67,7 @@ func TestStartSetsNothingWhereNoSourceAnswers(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(t.Context())
 	defer cancel(nil)
 
-	stop := start(ctx, cancel, []Source{silent, silent}, time.Millisecond)
+	stop := start(ctx, cancel, Machine{Sources: []Source{silent, silent}}, time.Millisecond)
 	gotLimit := debug.SetMemoryLimit(-1)
 	gotGOGC := debug.SetGCPercent(gogc)
 	stop()
@@ -96,6 +97,96 @@ func TestTickRaisesGOGCAndSetsTheLimitUnderHeadroom(t *testing.T) {
 	}
 }
 
+// withoutGOMEMLIMIT runs a test as a process started with no GOMEMLIMIT.
+func withoutGOMEMLIMIT(t *testing.T) {
+	t.Helper()
+	t.Setenv("GOMEMLIMIT", "")
+	if err := os.Unsetenv("GOMEMLIMIT"); err != nil {
+		t.Fatalf("Setup: unset GOMEMLIMIT: %v", err)
+	}
+	debug.SetMemoryLimit(math.MaxInt64)
+}
+
+// startedLimit is the soft limit start sets on machine, read before stop.
+func startedLimit(t *testing.T, machine Machine) int64 {
+	t.Helper()
+	ctx, cancel := context.WithCancelCause(t.Context())
+	defer cancel(nil)
+	stop := start(ctx, cancel, machine, time.Hour)
+	got := debug.SetMemoryLimit(-1)
+	stop()
+	if ctx.Err() != nil {
+		t.Errorf("start cancelled the run: %v", context.Cause(ctx))
+	}
+	return got
+}
+
+func TestStartHoldsARunWithoutGOMEMLIMITToSeventyPercentOfTheMachine(t *testing.T) {
+	keepGCSettings(t)
+	withoutGOMEMLIMIT(t)
+	const machineLimit = 10 << 30
+	roomy := func() (uint64, bool) { return 1 << 40, true }
+	got := startedLimit(t, Machine{Sources: []Source{roomy}, Limit: func() (uint64, bool) { return machineLimit, true }})
+	if want := int64(percentOf(machineLimit, defaultPercent)); got != want {
+		t.Errorf("start without GOMEMLIMIT on a 10 GiB machine with a terabyte of headroom set the limit to %d, want %d, 70 %% of the machine", got, want)
+	}
+
+	debug.SetGCPercent(defaultGOGC)
+	g := &governor{sources: []Source{roomy}, cancel: func(error) {}, samples: newSamples(), gogc: defaultGOGC, machineLimit: machineLimit}
+	g.tick()
+	if got := debug.SetGCPercent(defaultGOGC); got != raisedGOGC {
+		t.Errorf("tick() under the machine's bound with a small live heap: GOGC %d, want %d", got, raisedGOGC)
+	}
+}
+
+func TestStartBoundsARunWhereOnlyTheMachineLimitReads(t *testing.T) {
+	keepGCSettings(t)
+	withoutGOMEMLIMIT(t)
+	const machineLimit = 10 << 30
+	silent := func() (uint64, bool) { return 0, false }
+	got := startedLimit(t, Machine{Sources: []Source{silent}, Limit: func() (uint64, bool) { return machineLimit, true }})
+	if want := int64(percentOf(machineLimit, defaultPercent)); got != want {
+		t.Errorf("start without GOMEMLIMIT where only the 10 GiB machine limit reads set the limit to %d, want %d", got, want)
+	}
+}
+
+func TestStartBoundsARunWhoseGOMEMLIMITIsEmpty(t *testing.T) {
+	keepGCSettings(t)
+	withoutGOMEMLIMIT(t)
+	t.Setenv("GOMEMLIMIT", "")
+	const machineLimit = 10 << 30
+	roomy := func() (uint64, bool) { return 1 << 40, true }
+	got := startedLimit(t, Machine{Sources: []Source{roomy}, Limit: func() (uint64, bool) { return machineLimit, true }})
+	if want := int64(percentOf(machineLimit, defaultPercent)); got != want {
+		t.Errorf("start under an empty GOMEMLIMIT on a 10 GiB machine set the limit to %d, want %d, as with none", got, want)
+	}
+}
+
+func TestStartLeavesTheBoundToAnExplicitGOMEMLIMIT(t *testing.T) {
+	const machineLimit = 10 << 30
+	roomy := func() (uint64, bool) { return 1 << 40, true }
+	machine := Machine{Sources: []Source{roomy}, Limit: func() (uint64, bool) { return machineLimit, true }}
+	tests := []struct {
+		name    string
+		env     string
+		limit   int64
+		atLeast int64
+	}{
+		{"above_the_machine", "20GiB", 20 << 30, (20 << 30) * 8 / 10},
+		{"off", "off", math.MaxInt64, 1 << 39},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			keepGCSettings(t)
+			t.Setenv("GOMEMLIMIT", tt.env)
+			debug.SetMemoryLimit(tt.limit)
+			if got := startedLimit(t, machine); got < tt.atLeast || got <= machineLimit {
+				t.Errorf("start under GOMEMLIMIT=%s on a 10 GiB machine set the limit to %d, want at least %d: the caller's limit wins", tt.env, got, tt.atLeast)
+			}
+		})
+	}
+}
+
 func TestStartKeepsTheLimitTheProcessStartedWith(t *testing.T) {
 	keepGCSettings(t)
 	const callerLimit = 4 << 30
@@ -103,7 +194,7 @@ func TestStartKeepsTheLimitTheProcessStartedWith(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(t.Context())
 	defer cancel(nil)
 
-	stop := start(ctx, cancel, []Source{func() (uint64, bool) { return 1 << 40, true }}, time.Hour)
+	stop := start(ctx, cancel, Machine{Sources: []Source{func() (uint64, bool) { return 1 << 40, true }}}, time.Hour)
 	got := debug.SetMemoryLimit(-1)
 	stop()
 
@@ -200,7 +291,7 @@ func TestStopRestoresTheSettingsItFound(t *testing.T) {
 	limit, gogc := keepGCSettings(t)
 	ctx, cancel := context.WithCancelCause(t.Context())
 	defer cancel(nil)
-	stop := start(ctx, cancel, []Source{func() (uint64, bool) { return 1 << 40, true }}, time.Millisecond)
+	stop := start(ctx, cancel, Machine{Sources: []Source{func() (uint64, bool) { return 1 << 40, true }}}, time.Millisecond)
 	if got := debug.SetMemoryLimit(-1); got == limit {
 		t.Fatalf("start with a terabyte of headroom left the limit at %d, want it set before start returns", got)
 	}

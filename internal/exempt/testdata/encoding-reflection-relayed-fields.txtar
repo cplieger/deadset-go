@@ -1,0 +1,69 @@
+A command that decodes each event of a stream and encodes it again, beside a status
+it encodes with a field nothing writes and a probe only its test decodes. A decoder
+fills the fields of the relayed event, so the encoder sends what the decoded document
+held. The status field holds no value the program gave it, and a test's decoder
+gives the probe none in a production run. The decoder is met after the encoder.
+
+-- go.mod --
+module example.com/relayed
+
+go 1.27.1
+-- main.go --
+package main
+
+import (
+	"encoding/json"
+	"os"
+)
+
+// Event is relayed: decoded and encoded again, never written by the program.
+type Event struct {
+	Kind    string `json:"kind"`
+	Seq     int    `json:"seq"`
+	Skipped string `json:"-"`
+}
+
+// Status is encoded with a field nothing writes.
+type Status struct {
+	Spare string
+}
+
+// Probe is encoded by the program and decoded only by its test.
+type Probe struct {
+	Ready bool
+}
+
+func send(enc *json.Encoder, event *Event) error {
+	return enc.Encode(event)
+}
+
+func main() {
+	enc := json.NewEncoder(os.Stdout)
+	_ = enc.Encode(Status{})
+	_ = enc.Encode(Probe{})
+	dec := json.NewDecoder(os.Stdin)
+	for {
+		var event Event
+		if dec.Decode(&event) != nil {
+			return
+		}
+		if send(enc, &event) != nil {
+			return
+		}
+	}
+}
+-- main_test.go --
+package main
+
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
+
+func TestProbe(t *testing.T) {
+	var probe Probe
+	if err := json.NewDecoder(strings.NewReader("{}")).Decode(&probe); err != nil {
+		t.Fatal(err)
+	}
+}

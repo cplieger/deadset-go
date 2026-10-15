@@ -1,0 +1,57 @@
+An application whose own page template the analysis reads, and which may render
+instead a template a dependency parses and hands out through its API. Every member
+of what it renders is read.
+
+-- go.mod --
+module example.com/themed
+
+go 1.27.1
+
+require example.com/themes v0.0.0
+
+replace example.com/themes => ./themes
+-- themes/go.mod --
+module example.com/themes
+
+go 1.27.1
+-- themes/themes.go --
+package themes
+
+import "html/template"
+
+// Default is a theme the dependency parses itself.
+func Default() *template.Template {
+	return template.Must(template.New("theme").Parse("{{.Body}}"))
+}
+-- page.html --
+<h1>{{.Title}}</h1>
+-- main.go --
+package main
+
+import (
+	"embed"
+	"html/template"
+	"os"
+
+	"example.com/themes"
+)
+
+//go:embed page.html
+var files embed.FS
+
+// Article is rendered by the program's page or the dependency's theme.
+type Article struct {
+	Title string
+	Body  string
+}
+
+func pick() *template.Template {
+	if len(os.Args) > 1 {
+		return themes.Default()
+	}
+	return template.Must(template.ParseFS(files, "page.html"))
+}
+
+func main() {
+	_ = pick().Execute(os.Stdout, Article{Title: "t", Body: "b"})
+}
