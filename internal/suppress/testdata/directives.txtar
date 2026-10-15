@@ -32,7 +32,7 @@ type Catalog struct {
 	entries []string
 }
 
-//deadset:ignore DS1001,DS1101 -- two codes above the method
+//deadset:ignore DS1001,DS1501 -- two codes above the method
 func (c *Catalog) Reset() { c.entries = nil }
 
 // Fetcher fetches one entry.
@@ -76,7 +76,7 @@ func Below() int { return first + second + bound }
 //nolint:unused // another namespace, which this grammar reads as nothing at all
 
 func normalize(name string) string {
-	//deadset:ignore DS1801 -- above a local, which the inventory holds no declaration for
+	//deadset:ignore DS1401 -- above a local, which the inventory holds no declaration for
 	local := name
 	return local
 }
@@ -89,15 +89,15 @@ package directives
 
 // Wrapped declares its parameters and its result on lines of their own.
 func Wrapped(
-	//deadset:ignore DS1801 -- above a parameter inside a wrapped parameter list
+	//deadset:ignore DS1401 -- above a parameter inside a wrapped parameter list
 	chunk []byte,
-	size int, //deadset:ignore DS1801 -- after a parameter on its own line of a wrapped parameter list
+	size int, //deadset:ignore DS1401 -- after a parameter on its own line of a wrapped parameter list
 ) (
-	//deadset:ignore DS1803 -- above a result inside a wrapped result list
+	//deadset:ignore DS1403 -- above a result inside a wrapped result list
 	count int,
 ) {
 	return size
 }
 -- aa_header.go --
-//deadset:ignore DS1502 -- above the package clause, which no declaration of the language begins at
+//deadset:ignore DS1602 -- above the package clause, which no declaration of the language begins at
 package directives

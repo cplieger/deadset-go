@@ -1,6 +1,5 @@
-// Package jsondoc encodes the JSON documents this analyzer writes: the report, its
-// renderings, the resolved configuration and the describe document, each one value
-// with a closing newline.
+// Package jsondoc encodes the resolved configuration and the describe document, each
+// one value with a closing newline.
 //
 // A string escapes what strict JSON requires and the line and paragraph separators,
 // and writes every other character as itself, `<`, `>` and `&` included: a document

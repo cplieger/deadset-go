@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -13,10 +13,13 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cplieger/atomicfile/v4"
 	"github.com/cplieger/deadset-go/v2/internal/config"
-	"github.com/cplieger/deadset-go/v2/internal/report"
-	"github.com/cplieger/deadset-go/v2/internal/schema"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
+	"github.com/cplieger/deadset-spec/v8/render"
+	"github.com/cplieger/deadset-spec/v8/report"
+	core "github.com/cplieger/deadset-spec/v8/suppress"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // analyzeUsage names every flag the verb takes, in two groups: the flags that
@@ -43,28 +46,21 @@ const (
 // documentMode is the mode every document this verb writes carries.
 const documentMode = 0o644
 
-// rendering is one rendering of a report: the reporter that writes it, and the
-// suffix the file it is written to carries.
-type rendering struct {
-	write  func(w io.Writer, e *report.Envelope, opts report.Options) error
-	suffix string
-}
-
-// renderings is every format this analyzer renders, each mapped to the reporter that
-// renders it and the suffix its file carries. A format absent from it is refused
-// rather than silently not written, so a configuration naming one is never a file a
-// maintainer goes looking for.
+// renderings is the suffix of the file each format this analyzer renders is
+// written to. A format absent from it is refused rather than silently not
+// written, so a configuration naming one is never a file a maintainer goes
+// looking for.
 //
 // A rendering is written at the report path with its suffix APPENDED, rather than
 // with the report's extension replaced: the report path is the invocation's and may
 // carry any extension or none, so appending is the one rule under which no rendering
 // can land on the report itself or on another rendering.
-var renderings = map[config.Format]rendering{
-	config.Text:     {write: report.Text, suffix: ".txt"},
-	config.JSON:     {write: report.JSON, suffix: ".json"},
-	config.GitHub:   {write: report.Annotations, suffix: ".annotations"},
-	config.SARIF:    {write: report.SARIF, suffix: ".sarif"},
-	config.Template: {write: report.Template, suffix: ".tmpl"},
+var renderings = map[vocab.Format]string{
+	vocab.FormatText:     ".txt",
+	vocab.FormatJSON:     ".json",
+	vocab.FormatGitHub:   ".annotations",
+	vocab.FormatSARIF:    ".sarif",
+	vocab.FormatTemplate: ".tmpl",
 }
 
 // formatNames lists the formats this analyzer renders, for a message that has to
@@ -79,7 +75,7 @@ func formatNames() string {
 
 // formatList is the value of the repeatable --format flag: one format per
 // occurrence, in the order the command line named them.
-type formatList []config.Format
+type formatList []vocab.Format
 
 // String renders the formats named so far, which is what the flag package prints as
 // the value of the flag.
@@ -95,7 +91,7 @@ func (l *formatList) String() string {
 // repetition: a misspelling would otherwise be a rendering nobody notices is
 // missing, and a repetition would write one file twice.
 func (l *formatList) Set(value string) error {
-	format := config.Format(value)
+	format := vocab.Format(value)
 	if _, held := renderings[format]; !held {
 		return fmt.Errorf("%q is not a format: the formats are %s", value, formatNames())
 	}
@@ -111,7 +107,7 @@ func (l *formatList) Set(value string) error {
 // of those renderings reads, the path a baseline of the run is written to, and
 // whether the exit code carries the verdict.
 type invocation struct {
-	template      *report.ParsedTemplate
+	template      *render.Template
 	report        string
 	baselineWrite string
 	formats       formatList
@@ -127,31 +123,31 @@ type invocation struct {
 // diagnostic goes to stderr and the verdict is the exit code.
 func analyze(ctx context.Context, args []string, stderr io.Writer) int {
 	asked, resolved, code := analyzeFlags(args, stderr)
-	if code != exitClean {
+	if code != vocab.ExitClean {
 		return code
 	}
 
 	options, err := exemptOptions(&resolved.config)
 	if err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
-		return exitUsage
+		return vocab.ExitUsage
 	}
 	answered, err := corpusAnswer()
 	if err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
-		return exitFailure
+		return vocab.ExitFailure
 	}
-	envelope, unbuilt, err := reportOf(ctx, &resolved, &options, answered)
+	built, unbuilt, err := reportOf(ctx, &resolved, &options, answered)
 	if err != nil {
 		return failed(ctx, stderr, err)
 	}
 	namedUnbuilt(stderr, unbuilt)
-	namedSkips(stderr, envelope.TypeErrorSkips)
+	namedSkips(stderr, built.TypeErrorSkips)
 
-	report.Sort(&envelope, resolved.config.Reporters.Sort)
-	report.Cap(&envelope, resolved.config.Reporters.MaxFindings)
+	reporters := &resolved.config.Reporters
+	report.Cap(built, reporters.MaxFindings, reporters.Sort == config.BySize)
 
-	var recorded []suppress.Recorded
+	var recorded []core.Recorded
 	if asked.baselineWrite != "" {
 		recorded, err = baselineRows(ctx, &resolved, &options, answered)
 		if err != nil {
@@ -159,11 +155,11 @@ func analyze(ctx context.Context, args []string, stderr io.Writer) int {
 		}
 	}
 
-	if err := asked.write(&envelope, recorded); err != nil {
+	if err := asked.write(ctx, built, reporters, recorded); err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
-		return exitFailure
+		return vocab.ExitFailure
 	}
-	return asked.verdict(&envelope, &resolved.config, stderr)
+	return asked.verdict(built, reporters.FailOn, stderr)
 }
 
 // analyzeFlags parses the invocation and resolves the configuration documents it
@@ -179,21 +175,21 @@ func analyzeFlags(args []string, stderr io.Writer) (asked invocation, resolved r
 		"whether the exit code carries the verdict of the run: "+exitCodeOn+" or "+exitCodeOff)
 
 	if err := flags.set.Parse(args); err != nil {
-		return invocation{}, resolution{}, exitUsage
+		return invocation{}, resolution{}, vocab.ExitUsage
 	}
 	if flags.set.NArg() != 0 {
 		fmt.Fprintf(stderr, "deadset-go: analyze takes no argument, got %q\n", flags.set.Arg(0))
 		flags.set.Usage()
-		return invocation{}, resolution{}, exitUsage
+		return invocation{}, resolution{}, vocab.ExitUsage
 	}
 	if err := asked.request(*exitCode); err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
 		flags.set.Usage()
-		return invocation{}, resolution{}, exitUsage
+		return invocation{}, resolution{}, vocab.ExitUsage
 	}
 
 	resolved, code = flags.resolution(stderr)
-	if code != exitClean {
+	if code != vocab.ExitClean {
 		return invocation{}, resolution{}, code
 	}
 	// The renderings are the invocation's where it named any and the resolved
@@ -206,9 +202,9 @@ func analyzeFlags(args []string, stderr io.Writer) (asked invocation, resolved r
 	if err := asked.read(*templatePath); err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
 		flags.set.Usage()
-		return invocation{}, resolution{}, exitUsage
+		return invocation{}, resolution{}, vocab.ExitUsage
 	}
-	return asked, resolved, exitClean
+	return asked, resolved, vocab.ExitClean
 }
 
 // request checks the half of the invocation no configuration source has a say in,
@@ -249,13 +245,13 @@ func (a *invocation) read(templatePath string) error {
 		if err != nil {
 			return err
 		}
-		parsed, err := report.ParseTemplate(string(body))
+		parsed, err := render.ParseTemplate(string(body))
 		if err != nil {
 			return fmt.Errorf("%s: %w", templatePath, err)
 		}
 		a.template = parsed
 	}
-	if slices.Contains(a.formats, config.Template) && templatePath == "" {
+	if slices.Contains(a.formats, vocab.FormatTemplate) && templatePath == "" {
 		return errors.New("the template rendering reads the template --template names, and no path was named")
 	}
 	return nil
@@ -263,24 +259,28 @@ func (a *invocation) read(templatePath string) error {
 
 // write writes every document one invocation asked for: the report at the path it
 // named, one rendering per format beside it, and the baseline where it named a path
-// for one.
-func (a *invocation) write(e *report.Envelope, recorded []suppress.Recorded) error {
-	if err := writeChecked(a.report, func(w io.Writer) error { return report.JSON(w, e, report.Options{}) }, checkReport); err != nil {
+// for one. The report is held to the report schema before anything is written.
+func (a *invocation) write(ctx context.Context, r *report.Report, reporters *config.Reporters, recorded []core.Recorded) error {
+	if err := publish(ctx, a.report, func(w io.Writer) error { return report.Encode(w, r) }); err != nil {
 		return err
 	}
 
-	// The SARIF rendering hashes the source line each of its results names, and a
-	// position of the report is target-relative, so the reader it is given is one
-	// that resolves a position against the root the report names, which is the
-	// scope's target relative to the run directory whatever the flags named.
-	targetRoot := filepath.FromSlash(e.Target.Root)
-	options := report.Options{
+	// A position of the report is target-relative, so the SARIF rendering's
+	// reader resolves it against the root the report names.
+	targetRoot := filepath.FromSlash(r.Target.Root)
+	opts := &render.Options{
 		Read:     func(path string) ([]byte, error) { return os.ReadFile(filepath.Join(targetRoot, path)) },
 		Template: a.template,
+		BySize:   reporters.Sort == config.BySize,
 	}
 	for _, format := range a.formats {
-		one := renderings[format]
-		if err := writeAtomically(a.report+one.suffix, func(w io.Writer) error { return one.write(w, e, options) }); err != nil {
+		err := publish(ctx, a.report+renderings[format], func(w io.Writer) error {
+			if err := render.Render(w, format, r, opts); err != nil || format != vocab.FormatText {
+				return err
+			}
+			return render.Summary(w, r)
+		})
+		if err != nil {
 			return err
 		}
 	}
@@ -288,20 +288,20 @@ func (a *invocation) write(e *report.Envelope, recorded []suppress.Recorded) err
 	if a.baselineWrite == "" {
 		return nil
 	}
-	return writeBaseline(a.baselineWrite, recorded, baselineProvenance(), suppress.OwnScheme)
+	return writeBaseline(ctx, a.baselineWrite, recorded, baselineProvenance())
 }
 
-// writeBaseline writes the baseline document at path: the rows a write of the
-// scheme's rows recorded and every row of another scheme the document there holds.
-// A document it cannot read, a row of either scheme included, is refused before
-// anything is written, so the document stays as it was.
-func writeBaseline(path string, recorded []suppress.Recorded, p suppress.Provenance, scheme string) error {
-	others, err := suppress.OtherSchemeRows(path, scheme)
+// writeBaseline writes the baseline document at path: the rows this write recorded
+// and every row of another scheme the document there holds. A document it cannot
+// read, a row of either scheme included, is refused before anything is written, so
+// the document stays as it was.
+func writeBaseline(ctx context.Context, path string, recorded []core.Recorded, p core.Provenance) error {
+	held, err := suppress.BaselineRows(path)
 	if err != nil {
 		return err
 	}
-	return writeAtomically(path, func(w io.Writer) error {
-		return suppress.WriteBaseline(w, recorded, p, others)
+	return publish(ctx, path, func(w io.Writer) error {
+		return core.WriteBaseline(w, recorded, p, core.OtherRows(held, suppress.OwnScheme))
 	})
 }
 
@@ -312,97 +312,38 @@ func writeBaseline(path string, recorded []suppress.Recorded, p suppress.Provena
 // a run whose code is configured off is a run whose only account of those records is
 // the message. The code the verdict would have been is named beside the clean code
 // for the same reason.
-func (a *invocation) verdict(e *report.Envelope, cfg *config.Config, stderr io.Writer) int {
-	if e.Totals.Pending > 0 {
+func (a *invocation) verdict(r *report.Report, failOn vocab.Severity, stderr io.Writer) int {
+	if r.Totals.Pending > 0 {
 		fmt.Fprintf(stderr, "deadset-go: %s: the report names a declared cross-language edge, and no merge has resolved it\n",
-			counted(e.Totals.Pending, "pending finding"))
+			counted(r.Totals.Pending, "pending finding"))
 	}
-	if e.Totals.StaleSuppressions > 0 {
-		fmt.Fprintf(stderr, "deadset-go: %s\n", counted(e.Totals.StaleSuppressions, "stale suppression"))
+	if r.Totals.StaleSuppressions > 0 {
+		fmt.Fprintf(stderr, "deadset-go: %s\n", counted(r.Totals.StaleSuppressions, "stale suppression"))
 	}
-	code := report.ExitCode(e, cfg, a.exitCodeOff)
-	if verdict := report.ExitCode(e, cfg, false); verdict != code {
-		fmt.Fprintf(stderr, "deadset-go: the exit code is configured off: the verdict of this run is %d\n", verdict)
+	answer := render.Verdict(&r.Totals, failOn)
+	if !a.exitCodeOff {
+		return answer
 	}
-	return code
+	if answer != vocab.ExitClean {
+		fmt.Fprintf(stderr, "deadset-go: the exit code is configured off: the verdict of this run is %d\n", answer)
+	}
+	return vocab.ExitClean
 }
 
-// writeAtomically writes one document at path through a temporary file in the same
-// directory, flushed to the filesystem and renamed into place.
-//
-// A run that dies partway through the write leaves no truncated document at the
-// path: a reader of the path sees the document of the previous run or none at all,
-// and the rename is what publishes this one. A report is potentially megabytes, and
-// a truncated JSON document is exactly what a consumer cannot tell from a malformed
-// one, which is why every document this verb writes goes through here.
-func writeAtomically(path string, write func(w io.Writer) error) error {
-	return writeChecked(path, write, nil)
-}
-
-// writeChecked is [writeAtomically] with check reading the written document before
-// it is published, so a document check refuses is never at the path.
-func writeChecked(path string, write func(w io.Writer) error, check func(r io.Reader) error) error {
-	file, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
-	if err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	// Every arm below removes the temporary file, and the one that runs after the
-	// rename consumed it is the one whose failure means nothing.
-	temporary := file.Name()
-	defer func() { _ = os.Remove(temporary) }()
-
-	if err := write(file); err != nil {
-		_ = file.Close()
+// publish renders one document whole and publishes it at path atomically: a
+// reader of the path sees the document of the previous run or this one, never a
+// truncated one, which a consumer could not tell from a malformed document.
+func publish(ctx context.Context, path string, write func(w io.Writer) error) error {
+	var rendered bytes.Buffer
+	if err := write(&rendered); err != nil {
 		return fmt.Errorf("render %s: %w", path, err)
 	}
-	if err := file.Sync(); err != nil {
-		_ = file.Close()
-		return fmt.Errorf("flush %s: %w", path, err)
-	}
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("close %s: %w", path, err)
-	}
-	if check != nil {
-		if err := checkFile(temporary, check); err != nil {
-			return fmt.Errorf("check %s: %w", path, err)
-		}
-	}
-	if err := os.Chmod(temporary, documentMode); err != nil {
-		return fmt.Errorf("set the mode of %s: %w", path, err)
-	}
-	if err := os.Rename(temporary, path); err != nil {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
 		return fmt.Errorf("publish %s: %w", path, err)
 	}
-	return nil
-}
-
-// checkFile runs check over the document at path.
-func checkFile(path string, check func(r io.Reader) error) error {
-	file, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = file.Close() }()
-	return check(bufio.NewReaderSize(file, 1<<20))
-}
-
-// errReportSchema reports a report the analyzer wrote that its own schema refuses,
-// which is a defect of the analyzer rather than of the target.
-var errReportSchema = errors.New("the report breaks the report schema")
-
-// checkReport refuses a report the published report schema does not admit, naming
-// the JSON Pointer of the first value it refuses.
-func checkReport(r io.Reader) error {
-	held, err := schema.Report()
-	if err != nil {
-		return err
-	}
-	found, err := held.Check(r)
-	if err != nil {
-		return err
-	}
-	if len(found) > 0 {
-		return fmt.Errorf("%w %s: %w", errReportSchema, held.Name(), &found[0])
+	if _, err := atomicfile.WriteFile(ctx, absolute, rendered.Bytes(), atomicfile.WithMode(documentMode)); err != nil {
+		return fmt.Errorf("publish %s: %w", path, err)
 	}
 	return nil
 }

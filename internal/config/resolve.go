@@ -11,6 +11,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // ErrNoSourceLabel reports a resolved setting whose source names no file or flag.
@@ -26,18 +28,18 @@ const flagsLabel = "the command-line flags"
 // document omits is distinguishable from one it sets to a zero value, which is
 // what makes resolution per setting rather than per document.
 type doc struct {
-	ContractVersion *string             `json:"contract_version"`
-	Target          *docTarget          `json:"target"`
-	Analysis        *docAnalysis        `json:"analysis"`
-	Consumers       *docConsumers       `json:"consumers"`
-	Roots           *docRoots           `json:"roots"`
-	Severity        map[string]Severity `json:"severity"`
-	Exemptions      *docExemptions      `json:"exemptions"`
-	Reporters       *docReporters       `json:"reporters"`
-	Providers       *docProviders       `json:"providers"`
-	Go              *goSettings         `json:"go"`
-	TS              *docTS              `json:"ts"`
-	Provenance      map[string]string   `json:"provenance"`
+	ContractVersion *string                   `json:"contract_version"`
+	Target          *docTarget                `json:"target"`
+	Analysis        *docAnalysis              `json:"analysis"`
+	Consumers       *docConsumers             `json:"consumers"`
+	Roots           *docRoots                 `json:"roots"`
+	Severity        map[string]vocab.Severity `json:"severity"`
+	Exemptions      *docExemptions            `json:"exemptions"`
+	Reporters       *docReporters             `json:"reporters"`
+	Providers       *docProviders             `json:"providers"`
+	Go              *goSettings               `json:"go"`
+	TS              *docTS                    `json:"ts"`
+	Provenance      map[string]string         `json:"provenance"`
 }
 
 type docTarget struct {
@@ -45,10 +47,10 @@ type docTarget struct {
 }
 
 type docAnalysis struct {
-	Languages          *[]Language         `json:"languages"`
-	MinConfidence      *Confidence         `json:"min_confidence"`
+	Languages          *[]vocab.Language   `json:"languages"`
+	MinConfidence      *vocab.Class        `json:"min_confidence"`
 	GeneratedFiles     *generatedFiles     `json:"generated_files"`
-	ConsumerTests      *ConsumerTests      `json:"consumer_tests"`
+	ConsumerTests      *consumerTests      `json:"consumer_tests"`
 	Configurations     *[]Configuration    `json:"configurations"`
 	Matrix             *docMatrix          `json:"matrix"`
 	TemplateDirs       *[]string           `json:"template_dirs"`
@@ -72,11 +74,11 @@ type docExemptions struct {
 }
 
 type docReporters struct {
-	Formats     *[]Format `json:"formats"`
-	Sort        *Sort     `json:"sort"`
-	Cascade     *Cascade  `json:"cascade"`
-	MaxFindings *int      `json:"max_findings"`
-	FailOn      *Severity `json:"fail_on"`
+	Formats     *[]vocab.Format `json:"formats"`
+	Sort        *sortOrder      `json:"sort"`
+	Cascade     *Cascade        `json:"cascade"`
+	MaxFindings *int            `json:"max_findings"`
+	FailOn      *vocab.Severity `json:"fail_on"`
 }
 
 type docProviders struct {
@@ -309,13 +311,13 @@ func resolveRoot(cfg *Config, p Provenance, sources []source) {
 // resolveAnalysis resolves the analysis section.
 func resolveAnalysis(cfg *Config, p Provenance, sources []source) {
 	resolveSetting(&cfg.Analysis.Languages, "analysis.languages", p, sources,
-		func(d *doc) *[]Language { return d.Analysis.Languages })
+		func(d *doc) *[]vocab.Language { return d.Analysis.Languages })
 	resolveSetting(&cfg.Analysis.MinConfidence, "analysis.min_confidence", p, sources,
-		func(d *doc) *Confidence { return d.Analysis.MinConfidence })
+		func(d *doc) *vocab.Class { return d.Analysis.MinConfidence })
 	resolveSetting(&cfg.Analysis.GeneratedFiles, "analysis.generated_files", p, sources,
 		func(d *doc) *generatedFiles { return d.Analysis.GeneratedFiles })
 	resolveSetting(&cfg.Analysis.ConsumerTests, "analysis.consumer_tests", p, sources,
-		func(d *doc) *ConsumerTests { return d.Analysis.ConsumerTests })
+		func(d *doc) *consumerTests { return d.Analysis.ConsumerTests })
 	resolveSetting(&cfg.Analysis.Configurations, "analysis.configurations", p, sources,
 		func(d *doc) *[]Configuration { return d.Analysis.Configurations })
 	resolveSetting(&cfg.Analysis.Matrix.Complete, "analysis.matrix.complete", p, sources,
@@ -334,15 +336,15 @@ func resolveAnalysis(cfg *Config, p Provenance, sources []source) {
 // resolveReporters resolves the reporters section.
 func resolveReporters(cfg *Config, p Provenance, sources []source) {
 	resolveSetting(&cfg.Reporters.Formats, "reporters.formats", p, sources,
-		func(d *doc) *[]Format { return d.Reporters.Formats })
+		func(d *doc) *[]vocab.Format { return d.Reporters.Formats })
 	resolveSetting(&cfg.Reporters.Sort, "reporters.sort", p, sources,
-		func(d *doc) *Sort { return d.Reporters.Sort })
+		func(d *doc) *sortOrder { return d.Reporters.Sort })
 	resolveSetting(&cfg.Reporters.Cascade, "reporters.cascade", p, sources,
 		func(d *doc) *Cascade { return d.Reporters.Cascade })
 	resolveSetting(&cfg.Reporters.MaxFindings, "reporters.max_findings", p, sources,
 		func(d *doc) *int { return d.Reporters.MaxFindings })
 	resolveSetting(&cfg.Reporters.FailOn, "reporters.fail_on", p, sources,
-		func(d *doc) *Severity { return d.Reporters.FailOn })
+		func(d *doc) *vocab.Severity { return d.Reporters.FailOn })
 }
 
 // resolveTS resolves the section the TypeScript analyzer owns.
@@ -380,7 +382,7 @@ func resolveSeverity(cfg *Config, p Provenance, sources []source) {
 			codes[code] = true
 		}
 	}
-	cfg.Severity = make(map[string]Severity, len(codes))
+	cfg.Severity = make(map[string]vocab.Severity, len(codes))
 	for _, code := range slices.Sorted(maps.Keys(codes)) {
 		path := severitySection + "." + code
 		for _, s := range sources {
@@ -465,8 +467,8 @@ func validateContractVersion(version *string, label string) *Error {
 // validateAnalysis checks the analysis section.
 func validateAnalysis(a *docAnalysis, label string) *Error {
 	return firstError(
-		arrayOf(label, "analysis.languages", a.Languages, 0, GoLanguage, TSLanguage),
-		enum(label, "analysis.min_confidence", a.MinConfidence, Certain, Probable, Possible),
+		arrayOf(label, "analysis.languages", a.Languages, 0, vocab.Go, vocab.TS),
+		enum(label, "analysis.min_confidence", a.MinConfidence, vocab.Certain, vocab.Probable, vocab.Possible),
 		enum(label, "analysis.generated_files", a.GeneratedFiles, ExcludeGenerated, IncludeGenerated),
 		enum(label, "analysis.consumer_tests", a.ConsumerTests, TestReference, ProductionReference),
 		validateConfigurations(a.Configurations, label),
@@ -561,10 +563,10 @@ func validateExemptions(e *docExemptions, label string) *Error {
 // validateReporters checks the reporters section.
 func validateReporters(r *docReporters, label string) *Error {
 	refusal := firstError(
-		arrayOf(label, "reporters.formats", r.Formats, 1, Text, JSON, GitHub, SARIF, Template),
+		arrayOf(label, "reporters.formats", r.Formats, 1, vocab.FormatText, vocab.FormatJSON, vocab.FormatGitHub, vocab.FormatSARIF, vocab.FormatTemplate),
 		enum(label, "reporters.sort", r.Sort, ByPosition, BySize),
 		enum(label, "reporters.cascade", r.Cascade, CascadeRoots, CascadeFull),
-		enum(label, "reporters.fail_on", r.FailOn, Allow, Warn, Deny),
+		enum(label, "reporters.fail_on", r.FailOn, vocab.Allow, vocab.Warn, vocab.Deny),
 	)
 	if refusal != nil {
 		return refusal
@@ -607,7 +609,7 @@ func validateProvider(entry *provider, at, label string) *Error {
 	}
 	languages := entry.Languages
 	refusal := firstError(
-		arrayOf(label, at+".languages", &languages, 1, GoLanguage, TSLanguage),
+		arrayOf(label, at+".languages", &languages, 1, vocab.Go, vocab.TS),
 		required(label, at+".command", entry.Command),
 	)
 	if refusal != nil {
@@ -746,7 +748,7 @@ func countTrue(conditions ...bool) int {
 // one two-digit family prefix, and a key naming a kind whose severity the
 // Contract fixes, or a prefix whose range holds one, is an unimplemented key
 // rather than a setting.
-func validateSeverity(severity map[string]Severity, label string) *Error {
+func validateSeverity(severity map[string]vocab.Severity, label string) *Error {
 	for _, code := range slices.Sorted(maps.Keys(severity)) {
 		path := severitySection + "." + code
 		if !severityKeyPattern.MatchString(code) {
@@ -761,7 +763,7 @@ func validateSeverity(severity map[string]Severity, label string) *Error {
 			return unimplementedSeverityKey(label, path, noLiveKind(code))
 		}
 		value := severity[code]
-		if refusal := enum(label, path, &value, Allow, Warn, Deny); refusal != nil {
+		if refusal := enum(label, path, &value, vocab.Allow, vocab.Warn, vocab.Deny); refusal != nil {
 			return refusal
 		}
 	}
@@ -771,7 +773,7 @@ func validateSeverity(severity map[string]Severity, label string) *Error {
 // noLiveKind says why a well-formed severity key that names no issue kind this
 // analyzer ships is not a setting, naming the code or the family the key spells.
 func noLiveKind(code string) string {
-	if len(code) == familyKeyLength {
+	if len(code) == vocab.FamilyKeyLength {
 		return "no issue kind this analyzer ships carries a code of the family " + code
 	}
 	return "no issue kind this analyzer ships carries the code " + code
@@ -781,22 +783,6 @@ func noLiveKind(code string) string {
 // setting rather than the nearest key, which for a code is never informative.
 func unimplementedSeverityKey(label, path, reason string) *Error {
 	return &Error{Message: fmt.Sprintf("%s: key %q is not implemented: %s", label, path, reason)}
-}
-
-// fixedByContract returns every code whose severity the Contract fixes that one
-// severity key names, in ascending code order: the code itself, or every code of
-// the family its two-digit prefix names. It returns none when the key names none.
-// A family key covers every such code, so the refusal names them all rather than
-// the first one found.
-func fixedByContract(code string) []string {
-	var fixed []string
-	for _, candidate := range fixedSeverityCodes() {
-		if code == candidate || (len(code) == 4 && strings.HasPrefix(candidate, code)) {
-			fixed = append(fixed, candidate)
-		}
-	}
-	slices.Sort(fixed)
-	return fixed
 }
 
 // spellCodes lists the codes a refusal names: one code on its own, and several

@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // ErrorsDuckTypingDetector retains, on every type reachable as an error, the methods
@@ -239,7 +240,7 @@ func (s *errorsDuckScan) conversion(c *errorsDuckSite) error {
 			at: at,
 			exemption: graph.Exemption{
 				ID:        id,
-				Class:     string(ErrorsDuckTyping),
+				Class:     string(vocab.ErrorsDuckTyping),
 				Site:      c.at,
 				Detail:    detail,
 				Holder:    c.holder,

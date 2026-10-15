@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // InterfaceSatisfactionDetector retains every method that satisfies an interface
@@ -169,12 +170,12 @@ func (s *spans) retain(in *Input, c *graph.Conversion, retained []graph.Exemptio
 	holder, coHolders, asserted := s.holderOf(in, c)
 	if asserted != "" && holder != "" {
 		retained = append(retained, graph.Exemption{
-			ID: asserted, Class: string(InterfaceSatisfaction), Consumer: consumer, Site: site,
+			ID: asserted, Class: string(vocab.InterfaceSatisfaction), Consumer: consumer, Site: site,
 			Detail: "asserts " + c.Name, Holder: holder,
 		})
 	}
 	held := graph.Exemption{
-		Class: string(InterfaceSatisfaction), Consumer: consumer, Site: site,
+		Class: string(vocab.InterfaceSatisfaction), Consumer: consumer, Site: site,
 		Detail: "satisfies " + c.Name, Holder: holder, CoHolders: coHolders,
 	}
 	for _, m := range methods {

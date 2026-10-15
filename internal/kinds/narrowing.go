@@ -5,13 +5,7 @@ import (
 	"slices"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
-)
-
-// The codes of the narrowing kinds.
-const (
-	unnecessaryExportCode   = "DS1101"
-	unnecessaryExposureCode = "DS1102"
-	unreachableExportCode   = "DS1103"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // The narrower visibilities a narrowing finding names, each the narrowest of the
@@ -271,7 +265,7 @@ func UnnecessaryExport(in *Input) ([]Finding, error) {
 		}
 		message := "exported " + in.word(symbol.ID) +
 			" is referenced only inside the " + visibility + " that declares it"
-		if one, held := n.finding(symbol, unnecessaryExportCode, visibility, message); held {
+		if one, held := n.finding(symbol, vocab.UnnecessaryExport, visibility, message); held {
 			found = append(found, one)
 		}
 	}
@@ -296,7 +290,7 @@ func UnnecessaryExposure(in *Input) ([]Finding, error) {
 			continue
 		}
 		message := "exported " + in.word(symbol.ID) + " is referenced only inside this module"
-		if one, held := n.finding(symbol, unnecessaryExposureCode, visibilityModule, message); held {
+		if one, held := n.finding(symbol, vocab.UnnecessaryExposure, visibilityModule, message); held {
 			found = append(found, one)
 		}
 	}
@@ -433,7 +427,7 @@ func typeNamesIn(held map[*types.TypeName]bool, path string, t types.Type) {
 }
 
 // finding renders one finding of a narrowing kind.
-func (n *narrowing) finding(symbol *graph.Symbol, code, visibility, message string) (Finding, bool) {
+func (n *narrowing) finding(symbol *graph.Symbol, code vocab.Code, visibility, message string) (Finding, bool) {
 	one, held := n.in.finding(symbol.ID, code, message)
 	if !held {
 		return Finding{}, false
@@ -460,7 +454,7 @@ func UnreachableExport(in *Input) ([]Finding, error) {
 		if symbol == nil || !in.unreachableExport(candidate, symbol) {
 			continue
 		}
-		one, held := in.finding(candidate.ID, unreachableExportCode,
+		one, held := in.finding(candidate.ID, vocab.UnreachableExport,
 			unreachableMessage(in, candidate))
 		if !held {
 			continue

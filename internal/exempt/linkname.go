@@ -12,6 +12,7 @@ import (
 	"unicode"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -112,7 +113,7 @@ func (d *linkname) mechanisms(p *packages.Package) error {
 func (d *linkname) exemptions() []graph.Exemption {
 	found := make([]graph.Exemption, 0, len(d.found))
 	for f := range d.found {
-		found = append(found, graph.Exemption{ID: f.id, Class: string(LinknameCgoAsmPlugin), Site: f.site, Detail: f.detail})
+		found = append(found, graph.Exemption{ID: f.id, Class: string(vocab.LinknameCgoAsmPlugin), Site: f.site, Detail: f.detail})
 	}
 	slices.SortFunc(found, func(a, b graph.Exemption) int {
 		return cmp.Or(

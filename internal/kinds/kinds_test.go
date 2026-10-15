@@ -5,15 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"go/token"
-	"maps"
 	"slices"
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/catalog"
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	spec "github.com/cplieger/deadset-spec/v8"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // The declarations every hand-built input of this file holds: one exported
@@ -95,7 +94,7 @@ func emitterOf(findings ...Finding) Emitter {
 }
 
 // oneFinding is the finding an emitter of code reports about one declaration.
-func oneFinding(in *Input, code string, id graph.SymbolID) Finding {
+func oneFinding(in *Input, code vocab.Code, id graph.SymbolID) Finding {
 	found, held := in.finding(id, code, "the declaration has no reference in the target")
 	if !held {
 		panic("the hand-built inventory holds no " + string(id))
@@ -105,30 +104,30 @@ func oneFinding(in *Input, code string, id graph.SymbolID) Finding {
 
 func TestComputeFillsEveryFieldTheContractRequiresOfAFinding(t *testing.T) {
 	in := handInput(applicationConfig())
-	reported := oneFinding(in, unusedExportedCode, exportedID)
+	reported := oneFinding(in, vocab.UnusedExported, exportedID)
 	reported.Relation = graph.ReferenceCounting
 
-	result := computed(t, in, map[string]Emitter{unusedExportedCode: emitterOf(reported)})
+	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnusedExported: emitterOf(reported)})
 
 	if len(result.Findings) != 1 {
 		t.Fatalf("Compute() returned %d findings, want 1: %v", len(result.Findings), summary(result.Findings))
 	}
 	found := result.Findings[0]
 	want := Finding{
-		Code:            unusedExportedCode,
+		Code:            vocab.UnusedExported,
 		Kind:            "unused-exported",
 		Language:        "go",
 		Position:        Position{Path: "catalog.go", Line: 14, Column: 6, EndLine: 31},
 		Symbol:          Subject{Ref: exportedRef, Kind: "function", Name: "Resolve", SizeLines: 18},
-		Class:           Certain,
-		Confidence:      Certain,
+		Class:           vocab.Certain,
+		Confidence:      vocab.Certain,
 		Relation:        graph.ReferenceCounting,
-		Component:       Component{ID: "deadset-go/c-1", Spans: handSpans, SymbolCount: 2, DeletableLines: 23, Root: true},
+		Component:       findingComponent{ID: "deadset-go/c-1", SymbolCount: 2, DeletableLines: 23, Root: true},
 		RetainedBy:      []string{},
 		Configurations:  []string{"linux-amd64", "linux-arm64"},
 		ConsumersLoaded: []string{},
 		Fixability:      "deletable",
-		Severity:        config.Deny,
+		Severity:        vocab.Deny,
 		Message:         reported.Message,
 	}
 	if diff := differences(found, want); diff != "" {
@@ -136,11 +135,10 @@ func TestComputeFillsEveryFieldTheContractRequiresOfAFinding(t *testing.T) {
 	}
 }
 
-// sameComponent reports whether two components agree member by member, the spans
-// their deletion covers included.
-func sameComponent(a, b *Component) bool {
+// sameComponent reports whether two components agree member by member.
+func sameComponent(a, b *findingComponent) bool {
 	return a.ID == b.ID && a.Root == b.Root && a.SymbolCount == b.SymbolCount &&
-		a.DeletableLines == b.DeletableLines && slices.Equal(a.Spans, b.Spans)
+		a.DeletableLines == b.DeletableLines
 }
 
 // differences names every field of a finding that is not what the Contract requires
@@ -214,11 +212,11 @@ func render(value any) string {
 
 func TestComputeReportsNoFindingOfAnAllowedKindAndNoneOfACodeWithNoEmitter(t *testing.T) {
 	resolved := applicationConfig()
-	resolved.Severity = map[string]config.Severity{unusedExportedCode: config.Allow}
+	resolved.Severity = map[string]vocab.Severity{string(vocab.UnusedExported): vocab.Allow}
 	in := handInput(resolved)
 
-	result := computed(t, in, map[string]Emitter{
-		unusedExportedCode: emitterOf(oneFinding(in, unusedExportedCode, exportedID)),
+	result := computed(t, in, map[vocab.Code]Emitter{
+		vocab.UnusedExported: emitterOf(oneFinding(in, vocab.UnusedExported, exportedID)),
 	})
 
 	if len(result.Findings) != 0 {
@@ -235,10 +233,10 @@ func TestComputeRefusesAMessageAReporterCannotCarry(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			in := handInput(applicationConfig())
-			reported := oneFinding(in, unusedExportedCode, exportedID)
+			reported := oneFinding(in, vocab.UnusedExported, exportedID)
 			reported.Message = message
 
-			_, err := Compute(in, map[string]Emitter{unusedExportedCode: emitterOf(reported)})
+			_, err := Compute(in, map[vocab.Code]Emitter{vocab.UnusedExported: emitterOf(reported)})
 			if !errors.Is(err, errEmitter) {
 				t.Errorf("Compute() with a message %s = %v, want an errEmitter refusal", name, err)
 			}
@@ -248,21 +246,21 @@ func TestComputeRefusesAMessageAReporterCannotCarry(t *testing.T) {
 
 func TestComputeRefusesACodeThatIsNotTheEmittersOwn(t *testing.T) {
 	in := handInput(applicationConfig())
-	reported := oneFinding(in, unusedUnexportedCode, exportedID)
+	reported := oneFinding(in, vocab.UnusedUnexported, exportedID)
 
-	_, err := Compute(in, map[string]Emitter{unusedExportedCode: emitterOf(reported)})
+	_, err := Compute(in, map[vocab.Code]Emitter{vocab.UnusedExported: emitterOf(reported)})
 	if !errors.Is(err, errEmitter) {
 		t.Errorf("Compute() = %v, want an errEmitter refusal: the %s emitter returned a %s finding",
-			err, unusedExportedCode, unusedUnexportedCode)
+			err, vocab.UnusedExported, vocab.UnusedUnexported)
 	}
 }
 
 func TestComputeRefusesAnEmitterRegisteredUnderACodeTheVocabularyDoesNotHold(t *testing.T) {
-	const retired = "DS1202"
+	const retired = "DS1299"
 
 	in := handInput(applicationConfig())
 
-	_, err := Compute(in, map[string]Emitter{retired: emitterOf()})
+	_, err := Compute(in, map[vocab.Code]Emitter{retired: emitterOf()})
 	if !errors.Is(err, errEmitter) {
 		t.Errorf("Compute() = %v, want an errEmitter refusal: %s names no live kind", err, retired)
 	}
@@ -271,10 +269,10 @@ func TestComputeRefusesAnEmitterRegisteredUnderACodeTheVocabularyDoesNotHold(t *
 func TestComputeRefusesTwoFindingsAboutOneDeclaration(t *testing.T) {
 	in := handInput(applicationConfig())
 
-	_, err := Compute(in, map[string]Emitter{
-		unusedExportedCode:   emitterOf(oneFinding(in, unusedExportedCode, exportedID)),
-		testOnlyUseCode:      emitterOf(oneFinding(in, testOnlyUseCode, exportedID)),
-		unusedUnexportedCode: emitterOf(oneFinding(in, unusedUnexportedCode, helperID)),
+	_, err := Compute(in, map[vocab.Code]Emitter{
+		vocab.UnusedExported:   emitterOf(oneFinding(in, vocab.UnusedExported, exportedID)),
+		vocab.TestOnlyUse:      emitterOf(oneFinding(in, vocab.TestOnlyUse, exportedID)),
+		vocab.UnusedUnexported: emitterOf(oneFinding(in, vocab.UnusedUnexported, helperID)),
 	})
 	if !errors.Is(err, errEmitter) {
 		t.Errorf("Compute() = %v, want an errEmitter refusal: two kinds report %s", err, exportedRef)
@@ -289,8 +287,8 @@ func TestComputeRefusesAFindingAboutASymbolAnExemptionRetained(t *testing.T) {
 		Detail: "implements an interface a value of its type is converted to",
 	}}
 
-	_, err := Compute(in, map[string]Emitter{
-		unusedExportedCode: emitterOf(oneFinding(in, unusedExportedCode, exportedID)),
+	_, err := Compute(in, map[vocab.Code]Emitter{
+		vocab.UnusedExported: emitterOf(oneFinding(in, vocab.UnusedExported, exportedID)),
 	})
 	if !errors.Is(err, errEmitter) {
 		t.Errorf("Compute() = %v, want an errEmitter refusal: an exemption retained %s", err, exportedRef)
@@ -300,12 +298,12 @@ func TestComputeRefusesAFindingAboutASymbolAnExemptionRetained(t *testing.T) {
 func TestComputeRefusesAFindingAboutNoDeclarationOfTheInventory(t *testing.T) {
 	in := handInput(applicationConfig())
 	reported := Finding{
-		Code:    unusedExportedCode,
+		Code:    vocab.UnusedExported,
 		Symbol:  Subject{Ref: "go://example.com/app#Absent", Name: "Absent", SizeLines: 1},
 		Message: "the declaration has no reference in the target",
 	}
 
-	_, err := Compute(in, map[string]Emitter{unusedExportedCode: emitterOf(reported)})
+	_, err := Compute(in, map[vocab.Code]Emitter{vocab.UnusedExported: emitterOf(reported)})
 	if !errors.Is(err, errEmitter) {
 		t.Errorf("Compute() = %v, want an errEmitter refusal: the inventory holds no such declaration", err)
 	}
@@ -314,13 +312,13 @@ func TestComputeRefusesAFindingAboutNoDeclarationOfTheInventory(t *testing.T) {
 func TestComputeRefusesAFindingAboutADeclarationAnEmitterNamesByItsReferenceAlone(t *testing.T) {
 	in := handInput(applicationConfig())
 	reported := Finding{
-		Code:     unusedExportedCode,
+		Code:     vocab.UnusedExported,
 		Position: Position{Path: "catalog.go", Line: 14, Column: 6, EndLine: 31},
 		Symbol:   Subject{Ref: exportedRef, Name: "Resolve", SizeLines: 18},
 		Message:  "the declaration has no reference in the target",
 	}
 
-	_, err := Compute(in, map[string]Emitter{unusedExportedCode: emitterOf(reported)})
+	_, err := Compute(in, map[vocab.Code]Emitter{vocab.UnusedExported: emitterOf(reported)})
 	if !errors.Is(err, errEmitter) {
 		t.Errorf("Compute(a finding naming %s by reference alone) = %v, want an errEmitter refusal: a report's own reference does not identify a declaration, because a blank declaration shares the reference of its container",
 			exportedRef, err)
@@ -353,14 +351,14 @@ func TestTheKeyOfEveryFindingAboutADeclarationIsThatDeclarationsIdentifier(t *te
 
 func TestComputeCapsTheConfidenceAtTheKindsCeilingAndTheMinimumConfidenceOmitsIt(t *testing.T) {
 	in := handInput(applicationConfig())
-	in.Config.Analysis.MinConfidence = config.Certain
-	swap(t, []catalog.Row{{
-		Code: unusedExportedCode, Name: "unused-exported", Languages: []string{"go"},
-		DefaultSeverity: "deny", MaxClass: string(Probable), Fixability: "deletable", DefaultEnabled: true,
+	in.Config.Analysis.MinConfidence = vocab.Certain
+	swap(t, []vocab.Kind{{
+		Code: vocab.UnusedExported, Name: "unused-exported", Languages: []vocab.Language{vocab.Go},
+		DefaultSeverity: vocab.Deny, MaxClass: vocab.Probable, Fixability: vocab.Deletable, DefaultEnabled: true,
 	}})
 
-	result := computed(t, in, map[string]Emitter{
-		unusedExportedCode: emitterOf(oneFinding(in, unusedExportedCode, exportedID)),
+	result := computed(t, in, map[vocab.Code]Emitter{
+		vocab.UnusedExported: emitterOf(oneFinding(in, vocab.UnusedExported, exportedID)),
 	})
 
 	if len(result.Findings) != 0 {
@@ -371,33 +369,33 @@ func TestComputeCapsTheConfidenceAtTheKindsCeilingAndTheMinimumConfidenceOmitsIt
 
 func TestComputeReportsTheCeilingAsTheConfidenceOfACertainClass(t *testing.T) {
 	in := handInput(applicationConfig())
-	swap(t, []catalog.Row{{
-		Code: unusedExportedCode, Name: "unused-exported", Languages: []string{"go"},
-		DefaultSeverity: "deny", MaxClass: string(Probable), Fixability: "deletable", DefaultEnabled: true,
+	swap(t, []vocab.Kind{{
+		Code: vocab.UnusedExported, Name: "unused-exported", Languages: []vocab.Language{vocab.Go},
+		DefaultSeverity: vocab.Deny, MaxClass: vocab.Probable, Fixability: vocab.Deletable, DefaultEnabled: true,
 	}})
 
-	result := computed(t, in, map[string]Emitter{
-		unusedExportedCode: emitterOf(oneFinding(in, unusedExportedCode, exportedID)),
+	result := computed(t, in, map[vocab.Code]Emitter{
+		vocab.UnusedExported: emitterOf(oneFinding(in, vocab.UnusedExported, exportedID)),
 	})
 
 	if len(result.Findings) != 1 {
 		t.Fatalf("Compute() = %v, want one finding", summary(result.Findings))
 	}
 	found := result.Findings[0]
-	if found.Class != Certain || found.Confidence != Probable {
+	if found.Class != vocab.Certain || found.Confidence != vocab.Probable {
 		t.Errorf("Compute() reported class %q and confidence %q, want %q and %q: the kind's ceiling caps the class",
-			found.Class, found.Confidence, Certain, Probable)
+			found.Class, found.Confidence, vocab.Certain, vocab.Probable)
 	}
 }
 
 func TestComputeReturnsTheFindingsInTheCanonicalOrder(t *testing.T) {
 	in := handInput(applicationConfig())
 
-	result := computed(t, in, map[string]Emitter{
-		unusedExportedCode: emitterOf(
-			oneFinding(in, unusedExportedCode, internalID),
-			oneFinding(in, unusedExportedCode, generatedID),
-			oneFinding(in, unusedExportedCode, exportedID),
+	result := computed(t, in, map[vocab.Code]Emitter{
+		vocab.UnusedExported: emitterOf(
+			oneFinding(in, vocab.UnusedExported, internalID),
+			oneFinding(in, vocab.UnusedExported, generatedID),
+			oneFinding(in, vocab.UnusedExported, exportedID),
 		),
 	})
 
@@ -414,14 +412,14 @@ func TestComputeReturnsTheFindingsInTheCanonicalOrder(t *testing.T) {
 func TestComputeMintsAComponentForASubjectNoDeadComponentHolds(t *testing.T) {
 	in := handInput(applicationConfig())
 
-	result := computed(t, in, map[string]Emitter{
-		unusedExportedCode: emitterOf(oneFinding(in, unusedExportedCode, internalID)),
+	result := computed(t, in, map[vocab.Code]Emitter{
+		vocab.UnusedExported: emitterOf(oneFinding(in, vocab.UnusedExported, internalID)),
 	})
 
 	if len(result.Findings) != 1 {
 		t.Fatalf("Compute() = %v, want one finding", summary(result.Findings))
 	}
-	want := Component{ID: "deadset-go/c-2", Root: true, SymbolCount: 1}
+	want := findingComponent{ID: "deadset-go/c-2", Root: true, SymbolCount: 1}
 	if got := result.Findings[0].Component; !sameComponent(&got, &want) {
 		t.Errorf("Compute() gave a live subject the component %+v, want %+v", got, want)
 	}
@@ -430,17 +428,17 @@ func TestComputeMintsAComponentForASubjectNoDeadComponentHolds(t *testing.T) {
 func TestComputeMarksAFindingInAGeneratedFileAsOneNoMechanicalEditActsOn(t *testing.T) {
 	in := handInput(applicationConfig())
 
-	result := computed(t, in, map[string]Emitter{
-		unusedExportedCode: emitterOf(oneFinding(in, unusedExportedCode, generatedID)),
+	result := computed(t, in, map[vocab.Code]Emitter{
+		vocab.UnusedExported: emitterOf(oneFinding(in, vocab.UnusedExported, generatedID)),
 	})
 
 	if len(result.Findings) != 1 {
 		t.Fatalf("Compute() = %v, want one finding", summary(result.Findings))
 	}
 	found := result.Findings[0]
-	if !found.Generated || found.Fixability != generatedFixability {
+	if !found.Generated || found.Fixability != vocab.None {
 		t.Errorf("Compute() reported generated=%t and fixability %q for a generated file, want true and %q",
-			found.Generated, found.Fixability, generatedFixability)
+			found.Generated, found.Fixability, vocab.None)
 	}
 }
 
@@ -452,12 +450,12 @@ func TestComputeRefusesAPassWithNoResolvedConfiguration(t *testing.T) {
 
 // swap puts one vocabulary in front of the framework for the length of one test,
 // which is how a ceiling below certain is measured: no shipped kind declares one.
-func swap(t *testing.T, rows []catalog.Row) {
+func swap(t *testing.T, rows []vocab.Kind) {
 	t.Helper()
 
-	before := kindsOfCatalog
-	kindsOfCatalog = func() []catalog.Row { return rows }
-	t.Cleanup(func() { kindsOfCatalog = before })
+	before := vocabularyKinds
+	vocabularyKinds = func() []vocab.Kind { return rows }
+	t.Cleanup(func() { vocabularyKinds = before })
 }
 
 func TestComputeReportsEveryPositionOnceOverEveryKindOfThePackage(t *testing.T) {
@@ -472,7 +470,7 @@ func TestComputeReportsEveryPositionOnceOverEveryKindOfThePackage(t *testing.T) 
 				t.Fatalf("Compute(every kind of the package, %s) = error %v, want the findings of the pass: two kinds disagree on which code reports one subject",
 					archive, err)
 			}
-			under := make(map[string]string, len(result.Findings))
+			under := make(map[string]vocab.Code, len(result.Findings))
 			for i := range result.Findings {
 				found := &result.Findings[i]
 				at := key(found)
@@ -490,11 +488,11 @@ func TestComputeReportsEveryPositionOnceOverEveryKindOfThePackage(t *testing.T) 
 func TestTheKindsOfThePackageAgreeOnWhichCodeReportsADeclarationNothingReferences(t *testing.T) {
 	t.Parallel()
 
-	want := map[string]string{
-		"go://example.com/app/api#Reader":      unusedInterfaceCode,
-		"go://example.com/app/api#Store.Flush": uncalledInterfaceMethodCode,
-		"go://example.com/app/api#Quiet":       enumMemberCode,
-		"go://example.com/app/api#Convert[T]":  typeParameterCode,
+	want := map[string]vocab.Code{
+		"go://example.com/app/api#Reader":      vocab.UnusedInterface,
+		"go://example.com/app/api#Store.Flush": vocab.UncalledInterfaceMethod,
+		"go://example.com/app/api#Quiet":       vocab.UnusedEnumMember,
+		"go://example.com/app/api#Convert[T]":  vocab.UnusedTypeParameter,
 	}
 
 	result, err := analysisOf(t, "precedence-importable.txtar", asApplication, Consumers{}).compute(t, everyKind)
@@ -502,7 +500,7 @@ func TestTheKindsOfThePackageAgreeOnWhichCodeReportsADeclarationNothingReference
 		t.Fatalf("Compute(every kind of the package, precedence-importable.txtar) = error %v, want the findings of the pass: an unused-declaration kind takes a subject a more specific kind reports",
 			err)
 	}
-	under := make(map[string]string, len(result.Findings))
+	under := make(map[string]vocab.Code, len(result.Findings))
 	for i := range result.Findings {
 		under[result.Findings[i].Symbol.Ref] = result.Findings[i].Code
 	}
@@ -515,17 +513,9 @@ func TestTheKindsOfThePackageAgreeOnWhichCodeReportsADeclarationNothingReference
 }
 
 // livenessAbsentKinds is the subject kinds the finding schema forbids a liveness
-// relation on.
+// relation on, read from the branch that states the rule by the members it is
+// written with rather than by the position of that branch.
 func livenessAbsentKinds(t *testing.T) []string {
-	t.Helper()
-	kinds, _ := livenessAbsentArms(t)
-	return kinds
-}
-
-// livenessAbsentArms is the two arms of the finding schema's liveness-absence rule,
-// the subject kinds and the codes, read from the branch that states the rule by the
-// members it is written with rather than by the position of that branch.
-func livenessAbsentArms(t *testing.T) (subjectKinds, codes []string) {
 	t.Helper()
 
 	const schemaPath = "contract/finding.schema.json"
@@ -567,6 +557,7 @@ func livenessAbsentArms(t *testing.T) (subjectKinds, codes []string) {
 		if !slices.Contains(branch.Then.Not.Required, "liveness_relation") {
 			continue
 		}
+		var subjectKinds, codes []string
 		for _, arm := range append(branch.If.AnyOf, branch.If.condition) {
 			subjectKinds = append(subjectKinds, arm.Properties.Symbol.Properties.Kind.Enum...)
 			codes = append(codes, arm.Properties.Code.Enum...)
@@ -575,149 +566,10 @@ func livenessAbsentArms(t *testing.T) (subjectKinds, codes []string) {
 			t.Fatalf("Setup: %s forbids a liveness relation under subject kinds %v and codes %v, want both arms, so this test pins nothing",
 				schemaPath, subjectKinds, codes)
 		}
-		return subjectKinds, codes
+		return subjectKinds
 	}
 	t.Fatalf("Setup: %s states no branch forbidding a liveness relation", schemaPath)
-	return nil, nil
-}
-
-func TestTheHeldLiveTableIsTheContractsCodeList(t *testing.T) {
-	t.Parallel()
-
-	_, codes := livenessAbsentArms(t)
-	slices.Sort(codes)
-	if got := slices.Sorted(maps.Keys(heldLive)); !slices.Equal(got, codes) {
-		t.Errorf("the held-live table names the codes %v, want %v, the codes the Contract carries no liveness relation on", got, codes)
-	}
-}
-
-func TestTheShapeTableIsTheContractsLivenessAbsenceList(t *testing.T) {
-	t.Parallel()
-
-	absent := livenessAbsentKinds(t)
-	want := make([]string, 0, len(absent))
-	for _, kind := range absent {
-		if kind != theMergesSubject {
-			want = append(want, kind)
-		}
-	}
-	slices.Sort(want)
-
-	got := slices.Sorted(maps.Keys(shapes))
-
-	if !slices.Equal(got, want) {
-		t.Errorf("the shape table marks %v as a part or a row, want %v, the subject kinds the Contract carries no liveness relation on and this analyzer reports",
-			got, want)
-	}
-
-	// The kind the list above drops is pinned in both directions, so a Contract that
-	// stops forbidding the relation on it and a table that starts holding a shape for
-	// it both land here rather than leaving the exemption unread.
-	if !slices.Contains(absent, theMergesSubject) {
-		t.Errorf("the Contract carries a liveness relation on the subject kind %q, and this table holds no shape for it because it carries none",
-			theMergesSubject)
-	}
-	if got := shapeOf(theMergesSubject); got != shapeDeclaration {
-		t.Errorf("the shape table reads the subject kind %q as %d, want the declaration shape, which is what a kind it does not name reads as",
-			theMergesSubject, got)
-	}
-	for kind, held := range shapes {
-		if held != shapePart && held != shapeRow && held != shapeDependency {
-			t.Errorf("the shape table gives %q the declaration shape, want a part or a row: the table holds the exception rather than the rule",
-				kind)
-		}
-	}
-	for _, word := range symbolKinds {
-		if word == fileSubject {
-			continue
-		}
-		if shapeOf(word) != shapeDeclaration {
-			t.Errorf("a declaration of the inventory reported as subject kind %q reads as %d, want the declaration shape",
-				word, shapeOf(word))
-		}
-	}
-}
-
-// theMergesSubject is the one subject kind the corpus's shape table names that this
-// table does not: a cross-language edge is the subject of the kind the orchestrator's
-// merge reports over the edge evaluations the analyzers publish, so no finding this
-// analyzer produces carries it and its shape is not this table's to hold.
-const theMergesSubject = "edge"
-
-// corpusSubjectShapes reads the shape table the Contract's corpus publishes: the
-// subject kinds it names a part of one declaration and the ones it names a row of a
-// document, every other kind being a declaration.
-func corpusSubjectShapes(t *testing.T) map[string]shape {
-	t.Helper()
-
-	const corpusPath = "corpus/corpus.json"
-	body, err := spec.Corpus.ReadFile(corpusPath)
-	if err != nil {
-		t.Fatalf("Setup: read %s from the corpus: %v", corpusPath, err)
-	}
-	var document struct {
-		SubjectShapes struct {
-			Part       []string `json:"part"`
-			Row        []string `json:"row"`
-			Dependency []string `json:"dependency"`
-		} `json:"subject_shapes"`
-	}
-	if err := json.Unmarshal(body, &document); err != nil {
-		t.Fatalf("Setup: decode %s: %v", corpusPath, err)
-	}
-	if len(document.SubjectShapes.Part) == 0 || len(document.SubjectShapes.Row) == 0 {
-		t.Fatalf("Setup: %s names %d part kinds and %d row kinds, so this test pins nothing",
-			corpusPath, len(document.SubjectShapes.Part), len(document.SubjectShapes.Row))
-	}
-	held := make(map[string]shape, len(document.SubjectShapes.Part)+len(document.SubjectShapes.Row))
-	for _, kind := range document.SubjectShapes.Part {
-		held[kind] = shapePart
-	}
-	for _, kind := range document.SubjectShapes.Row {
-		held[kind] = shapeRow
-	}
-	for _, kind := range document.SubjectShapes.Dependency {
-		held[kind] = shapeDependency
-	}
-	return held
-}
-
-// TestTheShapeTableIsTheCorpusShapeTable holds this table against the corpus's
-// reading of the same fact, which decides what a suppression record binds to: a
-// declaration, a part through its declaration's reference, a dependency row by its
-// reference and path, and no other row. The corpus runner reads the corpus's copy,
-// so a drift between the two would change what a corpus run measures unseen.
-func TestTheShapeTableIsTheCorpusShapeTable(t *testing.T) {
-	t.Parallel()
-
-	published := corpusSubjectShapes(t)
-	for kind, want := range published {
-		if kind == theMergesSubject {
-			continue
-		}
-		if got := shapeOf(kind); got != want {
-			t.Errorf("the shape table reads the subject kind %q as %d, want %d as the corpus publishes it",
-				kind, got, want)
-		}
-	}
-	for kind, held := range shapes {
-		if _, named := published[kind]; !named {
-			t.Errorf("the shape table reads the subject kind %q as %d and the corpus names it neither a part nor a row, so the corpus reads it as a declaration",
-				kind, held)
-		}
-	}
-
-	// The one kind the first loop skips is pinned in both directions, so a corpus that
-	// stops naming it a row and a table that starts holding a shape for it both land
-	// here rather than leaving the exemption unread.
-	if got, want := published[theMergesSubject], shapeRow; got != want {
-		t.Errorf("the corpus reads the subject kind %q as %d, want %d, which is why this table holds no shape for it",
-			theMergesSubject, got, want)
-	}
-	if got := shapeOf(theMergesSubject); got != shapeDeclaration {
-		t.Errorf("the shape table reads the subject kind %q as %d, want the declaration shape, which is what a kind it does not name reads as: a kind this analyzer now reports is a kind the table owes a shape",
-			theMergesSubject, got)
-	}
+	return nil
 }
 
 func TestLivenessAbsentAnswersForEveryFindingTheContractForbidsTheRelationOn(t *testing.T) {
@@ -731,7 +583,7 @@ func TestLivenessAbsentAnswersForEveryFindingTheContractForbidsTheRelationOn(t *
 				continue
 			}
 			measured++
-			if !LivenessAbsent(&found) {
+			if !livenessAbsent(&found) {
 				t.Errorf("LivenessAbsent(%s about the %s %s) = false, want true: the Contract forbids the relation on that subject kind",
 					found.Code, found.Symbol.Kind, found.Symbol.Ref)
 			}
@@ -801,7 +653,7 @@ const (
 // reference, with the build configurations the kind claims it under.
 func requirementFinding() Finding {
 	return Finding{
-		Code:     unusedDependencyCode,
+		Code:     vocab.UnusedDependency,
 		Position: Position{Path: "go.mod", Line: 7, Column: 2, EndLine: 7},
 		Symbol: Subject{
 			Ref:       requirementRef,
@@ -818,33 +670,33 @@ func requirementFinding() Finding {
 func TestComputeCompletesAFindingWhoseSubjectIsNoDeclarationOfTheInventory(t *testing.T) {
 	in := handInput(applicationConfig())
 
-	result := computed(t, in, map[string]Emitter{unusedDependencyCode: emitterOf(requirementFinding())})
+	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnusedDependency: emitterOf(requirementFinding())})
 
 	if len(result.Findings) != 1 {
 		t.Fatalf("Compute(%s over a requirement) returned %d findings, want 1: %v",
-			unusedDependencyCode, len(result.Findings), summary(result.Findings))
+			vocab.UnusedDependency, len(result.Findings), summary(result.Findings))
 	}
 	reported := requirementFinding()
 	want := Finding{
-		Code:            unusedDependencyCode,
+		Code:            vocab.UnusedDependency,
 		Kind:            "unused-dependency",
 		Language:        "go",
 		Position:        reported.Position,
 		Symbol:          reported.Symbol,
-		Class:           Certain,
-		Confidence:      Certain,
+		Class:           vocab.Certain,
+		Confidence:      vocab.Certain,
 		Relation:        graph.ReferenceCounting,
 		Live:            true,
-		Component:       Component{ID: "deadset-go/c-2", Root: true, SymbolCount: 1},
+		Component:       findingComponent{ID: "deadset-go/c-2", Root: true, SymbolCount: 1},
 		RetainedBy:      []string{},
 		Configurations:  []string{"linux-amd64", "linux-arm64"},
 		ConsumersLoaded: []string{},
 		Fixability:      "manual",
-		Severity:        config.Deny,
+		Severity:        vocab.Deny,
 		Message:         reported.Message,
 	}
 	if diff := differences(result.Findings[0], want); diff != "" {
-		t.Errorf("Compute(%s over a requirement) filled the finding as\n%s", unusedDependencyCode, diff)
+		t.Errorf("Compute(%s over a requirement) filled the finding as\n%s", vocab.UnusedDependency, diff)
 	}
 }
 
@@ -852,10 +704,10 @@ func TestComputeRefusesTwoFindingsAboutOneSubjectThatIsNoDeclaration(t *testing.
 	in := handInput(applicationConfig())
 	twice := requirementFinding()
 
-	_, err := Compute(in, map[string]Emitter{unusedDependencyCode: emitterOf(twice, twice)})
+	_, err := Compute(in, map[vocab.Code]Emitter{vocab.UnusedDependency: emitterOf(twice, twice)})
 	if !errors.Is(err, errEmitter) {
 		t.Errorf("Compute(%s reporting one requirement twice) = %v, want an errEmitter refusal: %s is reported twice",
-			unusedDependencyCode, err, requirementRef)
+			vocab.UnusedDependency, err, requirementRef)
 	}
 }
 
@@ -868,12 +720,12 @@ func TestComputeRefusesAFindingAboutADeclarationKindTheInventoryDoesNotHold(t *t
 		t.Run(kind, func(t *testing.T) {
 			in := handInput(applicationConfig())
 			reported := Finding{
-				Code:    unusedExportedCode,
+				Code:    vocab.UnusedExported,
 				Symbol:  Subject{Ref: "go://example.com/app#Absent", Kind: subject, Name: "Absent", SizeLines: 1},
 				Message: "the declaration has no reference in the target",
 			}
 
-			_, err := Compute(in, map[string]Emitter{unusedExportedCode: emitterOf(reported)})
+			_, err := Compute(in, map[vocab.Code]Emitter{vocab.UnusedExported: emitterOf(reported)})
 			if !errors.Is(err, errEmitter) {
 				t.Errorf("Compute(%s subject the inventory does not hold) = %v, want an errEmitter refusal",
 					kind, err)
@@ -887,16 +739,16 @@ func TestComputeRefusesARowThatNamesNoRecord(t *testing.T) {
 	unnamed := requirementFinding()
 	unnamed.Symbol.Ref = ""
 
-	_, err := Compute(in, map[string]Emitter{unusedDependencyCode: emitterOf(unnamed)})
+	_, err := Compute(in, map[vocab.Code]Emitter{vocab.UnusedDependency: emitterOf(unnamed)})
 	if !errors.Is(err, errEmitter) {
 		t.Errorf("Compute(%s naming no reference) = %v, want an errEmitter refusal: a %s row is found by the record it names, because its position names the document",
-			unusedDependencyCode, err, dependencySubject)
+			vocab.UnusedDependency, err, dependencySubject)
 	}
 }
 
 func TestComputeRefusesAPartOfADeclarationTheInventoryDoesNotHold(t *testing.T) {
 	in := handInput(applicationConfig())
-	orphan := findingAt(unusedParameterCode, Subject{
+	orphan := findingAt(vocab.UnusedParameter, Subject{
 		Ref:       "go://example.com/app#Absent",
 		Kind:      parameterSubject,
 		Name:      "limit",
@@ -904,7 +756,7 @@ func TestComputeRefusesAPartOfADeclarationTheInventoryDoesNotHold(t *testing.T) 
 	}, Position{Path: "catalog.go", Line: 14, Column: 20, EndLine: 14},
 		"parameter limit is never read in the body")
 
-	_, err := Compute(in, map[string]Emitter{unusedParameterCode: emitterOf(orphan)})
+	_, err := Compute(in, map[vocab.Code]Emitter{vocab.UnusedParameter: emitterOf(orphan)})
 	if !errors.Is(err, errEmitter) {
 		t.Errorf("Compute(a %s of a declaration the inventory does not hold) = %v, want an errEmitter refusal: a part belongs to a declaration and names it by reference",
 			parameterSubject, err)
@@ -913,9 +765,9 @@ func TestComputeRefusesAPartOfADeclarationTheInventoryDoesNotHold(t *testing.T) 
 
 func TestASuppressionWithholdsAFindingReportedInAnotherFileThanTheDeclarationItNames(t *testing.T) {
 	in := suppressed(t, "interfaces-assertion-elsewhere.txtar", applicationConfig())
-	emitters := map[string]Emitter{
-		unusedSatisfactionAssertionCode: UnusedSatisfactionAssertion,
-		staleSuppressionCode:            StaleSuppressions,
+	emitters := map[vocab.Code]Emitter{
+		vocab.UnusedSatisfactionAssertion: UnusedSatisfactionAssertion,
+		vocab.StaleSuppression:            StaleSuppressions,
 	}
 
 	// The premise the entry is written against: the reference it names is the
@@ -934,7 +786,7 @@ func TestASuppressionWithholdsAFindingReportedInAnotherFileThanTheDeclarationItN
 	// deleting it: it is what says the withheld finding exists, and where.
 	bare := suppressed(t, "interfaces-assertion-elsewhere.txtar", applicationConfig())
 	bare.Marks = nil
-	assertion := findingOf(t, computed(t, bare, emitters).Findings, unusedSatisfactionAssertionCode, "encoder")
+	assertion := findingOf(t, computed(t, bare, emitters).Findings, vocab.UnusedSatisfactionAssertion, "encoder")
 	if assertion.Symbol.Ref != "go://example.com/app#encoder" {
 		t.Errorf("the assertion finding names %q, want the interface's reference", assertion.Symbol.Ref)
 	}
@@ -962,14 +814,14 @@ func TestASuppressionWithholdsNoFindingReportedInAFileTheRecordDoesNotName(t *te
 	// the interface is declared in rather than the one the finding is reported in.
 	in.Marks[0].Path = "iface.go"
 
-	found := computed(t, in, map[string]Emitter{
-		unusedSatisfactionAssertionCode: UnusedSatisfactionAssertion,
-		staleSuppressionCode:            StaleSuppressions,
+	found := computed(t, in, map[vocab.Code]Emitter{
+		vocab.UnusedSatisfactionAssertion: UnusedSatisfactionAssertion,
+		vocab.StaleSuppression:            StaleSuppressions,
 	}).Findings
 
 	want := []string{
-		"DS1204 encoder",
-		"DS1703 go://example.com/app#encoder",
+		"DS1203 encoder",
+		"DS9003 go://example.com/app#encoder",
 	}
 	if got := summary(found); !slices.Equal(got, want) {
 		t.Errorf("the pass with the entry naming another file reports %v, want %v: an entry matches the path the finding carries",

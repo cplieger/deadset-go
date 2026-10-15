@@ -17,15 +17,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/matrix"
-)
-
-// The codes of the kinds whose subject is a non-code artifact: a source file, a
-// module requirement and a module-file directive.
-const (
-	fileNeverBuiltCode    = "DS1501"
-	fileNeverImportedCode = "DS1502"
-	unusedDependencyCode  = "DS1601"
-	unusedReplaceCode     = "DS1605"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // The words the Contract's subject vocabulary spells these subjects with. A file is
@@ -83,7 +75,7 @@ func FileNeverBuilt(in *Input) ([]Finding, error) {
 	}
 	found := make([]Finding, 0, len(ignored))
 	for _, file := range ignored {
-		one := findingAt(fileNeverBuiltCode, Subject{
+		one := findingAt(vocab.FileNeverBuilt, Subject{
 			Ref:       graph.Ref(graph.KindFile, file.pkgPath, []string{file.name}),
 			Kind:      fileSubject,
 			Name:      file.name,
@@ -478,7 +470,7 @@ func FileNeverImported(in *Input) ([]Finding, error) {
 		if symbol.Kind != graph.KindFile || !unreached[in.packageOf(symbol)] {
 			continue
 		}
-		one, held := in.finding(symbol.ID, fileNeverImportedCode,
+		one, held := in.finding(symbol.ID, vocab.FileNeverImported,
 			"no import reaches the package this file declares and no root names a declaration in it")
 		if !held {
 			continue
@@ -569,7 +561,7 @@ func UnusedDependency(in *Input) ([]Finding, error) {
 	for i := range in.Modules {
 		m := &in.Modules[i]
 		for _, require := range unusedRequirements(in, m) {
-			one := findingAt(unusedDependencyCode, Subject{
+			one := findingAt(vocab.UnusedDependency, Subject{
 				Ref:       moduleFragment(m.Path, require.Path+":"+requireSection),
 				Kind:      dependencySubject,
 				Name:      require.Path,
@@ -618,7 +610,7 @@ func UnusedReplace(in *Input) ([]Finding, error) {
 		m := &in.Modules[i]
 		for _, replace := range noopReplacements(in, m) {
 			named := referenceSpelling(replace.Old)
-			one := findingAt(unusedReplaceCode, Subject{
+			one := findingAt(vocab.UnusedModuleDirective, Subject{
 				Ref:       moduleFragment(m.Path, named+replaceSelector),
 				Kind:      directiveSubject,
 				Name:      named,
@@ -723,7 +715,7 @@ func Annotate(in *Input, findings []Finding) {
 	}
 	for i := range findings {
 		found := &findings[i]
-		if found.Fixability != deletableFixability || found.id == "" {
+		if found.Fixability != vocab.Deletable || found.id == "" {
 			continue
 		}
 		if modules := last[found.id]; len(modules) > 0 {
@@ -731,11 +723,6 @@ func Annotate(in *Input, findings []Finding) {
 		}
 	}
 }
-
-// deletableFixability is what a mechanical edit may do with a finding whose
-// subject can be deleted, and the one fixability a dependency's last use is named
-// on.
-const deletableFixability = "deletable"
 
 // lastUses is the union over the configurations of the modules each deletion
 // candidate holds the last use of, each list sorted.

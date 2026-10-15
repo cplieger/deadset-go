@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // lookup is one call that resolves a declaration by name at run time: the callee
@@ -145,7 +146,7 @@ func registrationOf(in *Input, info *types.Info, call *ast.CallExpr, own map[str
 			}
 			if id, held := in.Resolve.Object(selection.Obj()); held {
 				out = append(out, graph.Exemption{
-					ID: id, Class: string(ReflectiveLookup), Site: site,
+					ID: id, Class: string(vocab.ReflectiveLookup), Site: site,
 					Detail: "named by a string passed with " + named.Obj().Name() + " to " + callee.FullName(),
 				})
 			}
@@ -244,7 +245,7 @@ func (c *lookupCall) retains(index nameIndex, seen map[string]struct{}) []graph.
 		seen[key] = struct{}{}
 		out = append(out, graph.Exemption{
 			ID:     m.id,
-			Class:  string(ReflectiveLookup),
+			Class:  string(vocab.ReflectiveLookup),
 			Site:   c.site,
 			Detail: "looked up by " + c.lookup.callee,
 		})

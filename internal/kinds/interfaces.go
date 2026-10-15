@@ -9,14 +9,9 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/report"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
-)
-
-// The codes of the interface kinds.
-const (
-	unusedInterfaceCode             = "DS1201"
-	uncalledInterfaceMethodCode     = "DS1203"
-	unusedSatisfactionAssertionCode = "DS1204"
 )
 
 // satisfactionAssertionSubject is what the subject vocabulary calls a compile-time
@@ -57,7 +52,7 @@ func UnusedInterface(in *Input) ([]Finding, error) {
 		if symbol == nil || symbol.Kind != graph.KindInterface || testFile(symbol) {
 			continue
 		}
-		one, held := in.finding(candidate.ID, unusedInterfaceCode, unusedInterfaceMessage)
+		one, held := in.finding(candidate.ID, vocab.UnusedInterface, unusedInterfaceMessage)
 		if !held {
 			continue
 		}
@@ -95,7 +90,7 @@ func UncalledInterfaceMethod(in *Input) ([]Finding, error) {
 		if in.candidateOf(symbol.Parent) != nil || facts.exempt(candidate.ID) || testOnly(candidate) {
 			continue
 		}
-		one, held := in.finding(candidate.ID, uncalledInterfaceMethodCode, uncalledInterfaceMethodMessage)
+		one, held := in.finding(candidate.ID, vocab.UncalledInterfaceMethod, uncalledInterfaceMethodMessage)
 		if !held {
 			continue
 		}
@@ -127,7 +122,7 @@ func UnusedSatisfactionAssertion(in *Input) ([]Finding, error) {
 			in.index().retained[asserted.Var] {
 			continue
 		}
-		one, held := in.finding(asserted.Var, unusedSatisfactionAssertionCode,
+		one, held := in.finding(asserted.Var, vocab.UnusedSatisfactionAssertion,
 			unusedSatisfactionAssertionMessage)
 		if !held {
 			continue
@@ -139,7 +134,7 @@ func UnusedSatisfactionAssertion(in *Input) ([]Finding, error) {
 			if concrete := in.symbol(facts.assertedType[asserted]); concrete != nil && in.publishedAPI(concrete) {
 				continue
 			}
-			one.ceiling = Possible
+			one.ceiling = vocab.Possible
 		}
 		one.Details.Implementations = facts.implementationsOf(asserted.Interface)
 		found = append(found, one)
@@ -168,8 +163,8 @@ type implementationCount struct {
 // reaches through the interface, the satisfaction assertions, and which interfaces
 // something other than an assertion names as a type.
 type interfaceFacts struct {
-	implementations map[graph.SymbolID]map[graph.SymbolID]Positioned
-	ordered         map[graph.SymbolID][]Positioned
+	implementations map[graph.SymbolID]map[graph.SymbolID]positioned
+	ordered         map[graph.SymbolID][]positioned
 	sealed          map[graph.SymbolID]bool
 	counted         map[graph.SymbolID]*implementationCount
 	reached         map[graph.SymbolID]bool
@@ -188,8 +183,8 @@ type interfaceFacts struct {
 // need both.
 func interfacesOf(in *Input) *interfaceFacts {
 	f := &interfaceFacts{
-		implementations: make(map[graph.SymbolID]map[graph.SymbolID]Positioned),
-		ordered:         make(map[graph.SymbolID][]Positioned),
+		implementations: make(map[graph.SymbolID]map[graph.SymbolID]positioned),
+		ordered:         make(map[graph.SymbolID][]positioned),
 		sealed:          make(map[graph.SymbolID]bool),
 		counted:         make(map[graph.SymbolID]*implementationCount),
 		reached:         make(map[graph.SymbolID]bool),
@@ -292,9 +287,9 @@ func (f *interfaceFacts) addImplementation(in *Input, iface, concrete graph.Symb
 		return
 	}
 	if f.implementations[iface] == nil {
-		f.implementations[iface] = make(map[graph.SymbolID]Positioned)
+		f.implementations[iface] = make(map[graph.SymbolID]positioned)
 	}
-	f.implementations[iface][concrete] = Positioned{
+	f.implementations[iface][concrete] = positioned{
 		Ref:      cmp.Or(in.Refs[concrete], symbol.Ref),
 		Name:     symbol.Name,
 		Position: positionOf(symbol),
@@ -382,7 +377,7 @@ func (f *interfaceFacts) settle() {
 		}
 	}
 	for iface, held := range f.implementations {
-		implementations := make([]Positioned, 0, len(held))
+		implementations := make([]positioned, 0, len(held))
 		for _, positioned := range held {
 			implementations = append(implementations, positioned)
 		}
@@ -432,7 +427,7 @@ func (in *Input) testCalledInterfaceMethod(candidate *graph.Candidate, symbol *g
 }
 
 // InterfaceImplementations answers, before any sweep, which interface methods of
-// the target no call site of any file reaches through the interface and the DS1203
+// the target no call site of any file reaches through the interface and the DS1202
 // precondition does not exempt, and a use of each method implementing one by that
 // interface method, so an implementation nothing else keeps belongs to the interface
 // method's dead component. A method a test calls keeps its implementations, which the
@@ -458,11 +453,11 @@ func InterfaceImplementations(in *Input) (uncalled map[graph.SymbolID]bool, uses
 
 // implementationsOf returns the concrete implementations of one interface, in the
 // order they are written, and an empty list for an interface nothing implements.
-func (f *interfaceFacts) implementationsOf(iface graph.SymbolID) []Positioned {
+func (f *interfaceFacts) implementationsOf(iface graph.SymbolID) []positioned {
 	if held, ok := f.ordered[iface]; ok {
 		return held
 	}
-	return []Positioned{}
+	return []positioned{}
 }
 
 // positionOf renders one declaration's position the way a finding carries it. The
@@ -477,15 +472,12 @@ func positionOf(symbol *graph.Symbol) Position {
 	}
 }
 
-// byWrittenPosition orders two named symbols by where each is written, then by the
-// reference that names it.
-func byWrittenPosition(a, b Positioned) int {
-	return cmp.Or(
-		strings.Compare(a.Position.Path, b.Position.Path),
-		cmp.Compare(a.Position.Line, b.Position.Line),
-		cmp.Compare(a.Position.Column, b.Position.Column),
-		strings.Compare(a.Ref, b.Ref),
-	)
+// byWrittenPosition orders two named symbols as the report orders a component's
+// members.
+func byWrittenPosition(a, b positioned) int {
+	keyA := report.Positioned{Ref: a.Ref, Position: a.Position.document()}
+	keyB := report.Positioned{Ref: b.Ref, Position: b.Position.document()}
+	return report.ComparePositioned(&keyA, &keyB)
 }
 
 // declaredInterface is one interface the target declares, as one configuration

@@ -9,5 +9,5 @@ go 1.27.1
 -- catalog.go --
 package twocodes
 
-//deadset:ignore DS1001,DS1101
+//deadset:ignore DS1001,DS1501
 func Resolve(name string) string { return name }

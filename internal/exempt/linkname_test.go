@@ -3,6 +3,8 @@ package exempt
 import (
 	"slices"
 	"testing"
+
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // TestLinknameCgoAsmPluginDetectorRetainsNeitherSideOfALinknameDirective pins
@@ -12,7 +14,7 @@ func TestLinknameCgoAsmPluginDetectorRetainsNeitherSideOfALinknameDirective(t *t
 	shared := analysisOf(t, "linkname.txtar", Options{})
 	symbols := shared.inventory(t)
 
-	got, err := shared.detect(t, LinknameCgoAsmPlugin)
+	got, err := shared.detect(t, vocab.LinknameCgoAsmPlugin)
 	if err != nil {
 		t.Fatalf("LinknameCgoAsmPluginDetector(linkname.txtar) error: %v", err)
 	}
@@ -25,7 +27,7 @@ func TestLinknameCgoAsmPluginDetectorRetainsTheDeclarationATextDirectiveNames(t 
 	shared := analysisOf(t, "assembly.txtar", Options{})
 	symbols := shared.inventory(t)
 
-	got, err := shared.detect(t, LinknameCgoAsmPlugin)
+	got, err := shared.detect(t, vocab.LinknameCgoAsmPlugin)
 	if err != nil {
 		t.Fatalf("LinknameCgoAsmPluginDetector(assembly.txtar) error: %v", err)
 	}
@@ -43,7 +45,7 @@ func TestLinknameCgoAsmPluginDetectorRetainsTheExportedSymbolsOfAPluginMainPacka
 	shared := analysisOf(t, "plugin.txtar", Options{})
 	symbols := shared.inventory(t)
 
-	got, err := shared.detect(t, LinknameCgoAsmPlugin)
+	got, err := shared.detect(t, vocab.LinknameCgoAsmPlugin)
 	if err != nil {
 		t.Fatalf("LinknameCgoAsmPluginDetector(plugin.txtar) error: %v", err)
 	}

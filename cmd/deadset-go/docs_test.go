@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/config"
 	spec "github.com/cplieger/deadset-spec/v8"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // The shape a documentation entry takes, pinned here so that a page and this test
@@ -34,7 +34,7 @@ var (
 	docsContractVersion = regexp.MustCompile(`(?is)contract version\s+([0-9]+\.[0-9]+\.[0-9]+)`)
 	docsCorpusVersion   = regexp.MustCompile(`(?is)corpus version this analyzer answers is\s+([0-9]+\.[0-9]+\.[0-9]+)`)
 	docsFixtureCount    = regexp.MustCompile(`(?is)the run answers the\s+([0-9]+) fixtures`)
-	readmeFixtureCount  = regexp.MustCompile(`(?is)passes all\s+([0-9]+) of the contract's conformance fixtures`)
+	readmeFixtureCount  = regexp.MustCompile(`(?is)answers all\s+([0-9]+) of the contract's conformance fixtures`)
 )
 
 // TestEveryReportedKindHasADocumentationEntry reads the kinds page and refuses a
@@ -54,14 +54,14 @@ func TestEveryReportedKindHasADocumentationEntry(t *testing.T) {
 	page := docPage(t, "kinds.md")
 	sections := matched(docsKindHeading, page)
 	for _, code := range slices.Sorted(maps.Keys(emitters)) {
-		if !slices.Contains(sections, code) {
+		if !slices.Contains(sections, string(code)) {
 			t.Errorf("docs/kinds.md carries %d kind sections and none for %s, which the emitters table reports",
 				len(sections), code)
 		}
 	}
 	entries := docsKindEntries(page)
 	for _, code := range goKindsWithoutEmitter {
-		if !slices.Contains(entries, code) {
+		if !slices.Contains(entries, string(code)) {
 			t.Errorf("docs/kinds.md carries %d kind entries and none for %s, which another product reports",
 				len(entries), code)
 		}
@@ -80,7 +80,7 @@ func TestEveryDocumentedKindSectionIsOneThisAnalyzerReports(t *testing.T) {
 
 	sections := matched(docsKindHeading, docPage(t, "kinds.md"))
 	for _, code := range sections {
-		if emitters[code] == nil {
+		if emitters[vocab.Code(code)] == nil {
 			t.Errorf("docs/kinds.md carries a section for %s, want a section only for a code the emitters table reports: %v",
 				code, slices.Sorted(maps.Keys(emitters)))
 		}
@@ -207,9 +207,9 @@ func TestTheDocumentedContractVersionIsTheOneImplemented(t *testing.T) {
 	if len(stated) != 1 {
 		t.Fatalf("docs/conformance.md states the contract version %v, want exactly one statement of it", stated)
 	}
-	if stated[0] != config.ContractVersion {
+	if stated[0] != vocab.ContractVersion {
 		t.Errorf("docs/conformance.md states contract version %s, want %s, which this analyzer implements",
-			stated[0], config.ContractVersion)
+			stated[0], vocab.ContractVersion)
 	}
 }
 
@@ -226,9 +226,9 @@ func TestTheDocumentedCorpusVersionIsTheOneAnswered(t *testing.T) {
 	if len(stated) != 1 {
 		t.Fatalf("docs/conformance.md states the corpus version %v, want exactly one statement of it", stated)
 	}
-	if stated[0] != corpusVersion {
+	if stated[0] != vocab.CorpusVersion {
 		t.Errorf("docs/conformance.md states corpus version %s, want %s, which this analyzer answers",
-			stated[0], corpusVersion)
+			stated[0], vocab.CorpusVersion)
 	}
 }
 

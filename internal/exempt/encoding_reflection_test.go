@@ -14,10 +14,11 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	spec "github.com/cplieger/deadset-spec/v8"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // retained is what one class's detector recorded over a shared analysis.
-func retained(t *testing.T, shared *sharedAnalysis, class Class) []graph.Exemption {
+func retained(t *testing.T, shared *sharedAnalysis, class vocab.Exemption) []graph.Exemption {
 	t.Helper()
 	found, err := shared.detect(t, class)
 	if err != nil {
@@ -28,7 +29,7 @@ func retained(t *testing.T, shared *sharedAnalysis, class Class) []graph.Exempti
 
 // retainedRefs is the reference of every symbol one class's detector held back, once
 // each, sorted.
-func retainedRefs(t *testing.T, shared *sharedAnalysis, class Class) []string {
+func retainedRefs(t *testing.T, shared *sharedAnalysis, class vocab.Exemption) []string {
 	t.Helper()
 	symbols := shared.inventory(t)
 	refs := make(map[graph.SymbolID]string, len(symbols))
@@ -80,7 +81,7 @@ func flowRefs(typeName string, members ...string) []string {
 // through it, and a structured-logging call resolves LogValue alone.
 func TestEncodingReflectionRetainsWhatEachDestinationReads(t *testing.T) {
 	shared := analysisOf(t, "encoding-reflection-firing.txtar", Options{})
-	refs := retainedRefs(t, shared, EncodingReflection)
+	refs := retainedRefs(t, shared, vocab.EncodingReflection)
 
 	for _, test := range []struct {
 		destination string
@@ -185,7 +186,7 @@ func methodRefs(typeName string, members ...string) []string {
 // neither direction retains both, and a method of neither set is retained by nothing.
 func TestEncodingReflectionRetainsTheMethodsAnEncoderResolvesByName(t *testing.T) {
 	shared := analysisOf(t, "encoding-reflection-methods.txtar", Options{})
-	refs := retainedRefs(t, shared, EncodingReflection)
+	refs := retainedRefs(t, shared, vocab.EncodingReflection)
 
 	for _, test := range []struct {
 		destination string
@@ -238,7 +239,7 @@ func TestEncodingReflectionRetainsTheMethodsAnEncoderResolvesByName(t *testing.T
 // deleting one then changes which documents decode. A decoder of another package is
 // unaffected.
 func TestEncodingReflectionRetainsTheFieldsARefusingJSONDecoderReads(t *testing.T) {
-	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-unknown-members.txtar", Options{}), EncodingReflection)
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-unknown-members.txtar", Options{}), vocab.EncodingReflection)
 
 	for typeName, want := range map[string][]string{
 		"Strict": qualify("example.com/strict", "Strict", "Extra", "Name"),
@@ -254,7 +255,7 @@ func TestEncodingReflectionRetainsTheFieldsARefusingJSONDecoderReads(t *testing.
 // A program that finds a method of a reflected value by name may call any exported
 // method of a value it hands to reflection, so each such value keeps them.
 func TestEncodingReflectionRetainsTheExportedMethodsWhereReflectionFindsMethods(t *testing.T) {
-	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-method-finder.txtar", Options{}), EncodingReflection)
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-method-finder.txtar", Options{}), vocab.EncodingReflection)
 
 	want := qualify("example.com/finder", "Found", "Describe", "Extra", "Name")
 	if got := membersOf(refs, "Found"); !slices.Equal(got, want) {
@@ -310,7 +311,7 @@ func reachRefs(typeName string, members ...string) []string {
 
 func TestEncodingReflectionReachesTheTypesTheMembersOfAnArgumentCarry(t *testing.T) {
 	shared := analysisOf(t, "encoding-reflection-reach.txtar", Options{})
-	refs := retainedRefs(t, shared, EncodingReflection)
+	refs := retainedRefs(t, shared, vocab.EncodingReflection)
 
 	for _, test := range []struct {
 		reached  string
@@ -405,7 +406,7 @@ func TestEncodingReflectionReachesTheTypesTheMembersOfAnArgumentCarry(t *testing
 
 func TestEncodingReflectionReachesTheTypesStoredInAContainerArgument(t *testing.T) {
 	shared := analysisOf(t, "encoding-reflection-container.txtar", Options{})
-	refs := retainedRefs(t, shared, EncodingReflection)
+	refs := retainedRefs(t, shared, vocab.EncodingReflection)
 	containerRefs := func(typeName string, members ...string) []string {
 		return qualify("example.com/container", typeName, members...)
 	}
@@ -452,7 +453,7 @@ func TestEncodingReflectionReachesTheTypesStoredInAContainerArgument(t *testing.
 }
 
 func TestEncodingReflectionReachesTheTypesAnArgumentWritesOrConverts(t *testing.T) {
-	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-argument-reach.txtar", Options{}), EncodingReflection)
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-argument-reach.txtar", Options{}), vocab.EncodingReflection)
 	reachRefs := func(typeName string, members ...string) []string {
 		return qualify("example.com/reach", typeName, members...)
 	}
@@ -480,7 +481,7 @@ func TestEncodingReflectionReachesTheTypesAnArgumentWritesOrConverts(t *testing.
 
 func TestEncodingReflectionRetainsNothingWhereNoTypeReachesADestination(t *testing.T) {
 	shared := analysisOf(t, "encoding-reflection-quiet.txtar", Options{})
-	if got := retainedRefs(t, shared, EncodingReflection); len(got) > 0 {
+	if got := retainedRefs(t, shared, vocab.EncodingReflection); len(got) > 0 {
 		t.Errorf("EncodingReflectionDetector(encoding-reflection-quiet.txtar) retained %v, want nothing", got)
 	}
 }
@@ -495,7 +496,7 @@ func TestEncodingReflectionNamesTheClassTheDestinationAndTheSite(t *testing.T) {
 
 	type record struct{ ref, class, site, detail string }
 	var got []record
-	for _, e := range retained(t, shared, EncodingReflection) {
+	for _, e := range retained(t, shared, vocab.EncodingReflection) {
 		if !strings.HasPrefix(refs[e.ID], "go://example.com/flow#JSONPayload.") &&
 			!strings.HasPrefix(refs[e.ID], "go://example.com/flow#LogPayload.") {
 			continue
@@ -533,7 +534,7 @@ func opaqueRefs(typeName string, members ...string) []string {
 // as an interface that declares a method, which interface-satisfaction answers.
 func TestEncodingReflectionRetainsWhatCrossesOutOfTheProgram(t *testing.T) {
 	shared := analysisOf(t, "encoding-reflection-opaque.txtar", Options{})
-	refs := retainedRefs(t, shared, EncodingReflection)
+	refs := retainedRefs(t, shared, vocab.EncodingReflection)
 
 	for _, test := range []struct {
 		crossing string
@@ -622,7 +623,7 @@ func keysRefs(typeName string, members ...string) []string {
 // array or a map the way it crosses alone.
 func TestEncodingReflectionRetainsWhatAnEncoderReadsByKey(t *testing.T) {
 	shared := analysisOf(t, "encoding-reflection-keys.txtar", Options{})
-	refs := retainedRefs(t, shared, EncodingReflection)
+	refs := retainedRefs(t, shared, vocab.EncodingReflection)
 
 	for _, test := range []struct {
 		desc     string
@@ -653,7 +654,7 @@ func anonymousRefs(typeName string, members ...string) []string {
 // struct's, at the value handed to it and in a field of a type it reaches.
 func TestEncodingReflectionWalksTheFieldsOfAStructTypeWithNoName(t *testing.T) {
 	shared := analysisOf(t, "encoding-reflection-anonymous.txtar", Options{})
-	refs := retainedRefs(t, shared, EncodingReflection)
+	refs := retainedRefs(t, shared, vocab.EncodingReflection)
 
 	for _, test := range []struct {
 		desc     string
@@ -724,7 +725,7 @@ func outsideRefs(typeName string, members ...string) []string {
 // decoder, so a value handed to it crosses.
 func TestEncodingReflectionRetainsWhatADependencyCanName(t *testing.T) {
 	shared := analysisOf(t, "encoding-reflection-outside.txtar", Options{})
-	refs := retainedRefs(t, shared, EncodingReflection)
+	refs := retainedRefs(t, shared, vocab.EncodingReflection)
 
 	for _, test := range []struct {
 		desc     string
@@ -753,7 +754,7 @@ func TestEncodingReflectionRetainsWhatADependencyCanName(t *testing.T) {
 // interface of the container's own package, whether the program stores it directly
 // or through a function of its own.
 func TestEncodingReflectionRetainsWhatAStandardContainerReads(t *testing.T) {
-	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-standard-containers.txtar", Options{}), EncodingReflection)
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-standard-containers.txtar", Options{}), vocab.EncodingReflection)
 
 	for _, test := range []struct {
 		desc     string
@@ -787,7 +788,7 @@ func TestEncodingReflectionNamesTheCalleeAValueCrossedInto(t *testing.T) {
 	}
 
 	got := make(map[string]string)
-	for _, e := range retained(t, shared, EncodingReflection) {
+	for _, e := range retained(t, shared, vocab.EncodingReflection) {
 		if ref, held := refs[e.ID]; held {
 			got[ref] = e.Detail
 		}
@@ -812,12 +813,12 @@ func TestEncodingReflectionNamesTheCalleeAValueCrossedInto(t *testing.T) {
 func TestFormatVerbContractAloneRecordsAnOperandOfTheFormattingPackage(t *testing.T) {
 	shared := analysisOf(t, "encoding-reflection-opaque.txtar", Options{})
 
-	formatted := membersOf(retainedRefs(t, shared, FormatVerbContract), "Printed")
+	formatted := membersOf(retainedRefs(t, shared, vocab.FormatVerbContract), "Printed")
 	if want := opaqueRefs("Printed", "String"); !slices.Equal(formatted, want) {
 		t.Errorf("FormatVerbContractDetector(encoding-reflection-opaque.txtar) retained %v for Printed, want %v",
 			formatted, want)
 	}
-	if encoded := membersOf(retainedRefs(t, shared, EncodingReflection), "Printed"); len(encoded) > 0 {
+	if encoded := membersOf(retainedRefs(t, shared, vocab.EncodingReflection), "Printed"); len(encoded) > 0 {
 		t.Errorf("EncodingReflectionDetector(encoding-reflection-opaque.txtar) retained %v for Printed, want nothing: the formatting package is a destination the format-verb class names",
 			encoded)
 	}
@@ -844,13 +845,13 @@ func TestEncodingReflectionImplementsTheContractsMechanismText(t *testing.T) {
 	}
 	stated := ""
 	for _, one := range document.Exemptions {
-		if one.Class == string(EncodingReflection) {
+		if one.Class == string(vocab.EncodingReflection) {
 			stated = one.Mechanism["go"]
 		}
 	}
 	if stated == "" {
 		t.Fatalf("Setup: contract/exemptions.json states no Go mechanism for %s, so this test pins nothing",
-			EncodingReflection)
+			vocab.EncodingReflection)
 	}
 	sum := fmt.Sprintf("%x", sha256.Sum256([]byte(stated)))
 	if sum != encodingReflectionMechanismSHA256 {
@@ -866,7 +867,7 @@ func TestEncodingReflectionImplementsTheContractsMechanismText(t *testing.T) {
 // that destination reads of its type argument, and a value of a type parameter's
 // type reaching a destination is a value of each type argument the program gives it.
 func TestEncodingReflectionReadsTheTypeArgumentsADestinationReaches(t *testing.T) {
-	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-type-arguments.txtar", Options{}), EncodingReflection)
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-type-arguments.txtar", Options{}), vocab.EncodingReflection)
 
 	for _, test := range []struct {
 		typeName string
@@ -898,7 +899,7 @@ func TestEncodingReflectionReadsTheTypeArgumentsADestinationReaches(t *testing.T
 // interface reaches the encoder its caller hands the result to. A value returned the
 // same way and never encoded keeps nothing.
 func TestEncodingReflectionFollowsAValueThroughTheProgramsOwnInterfaces(t *testing.T) {
-	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-flows.txtar", Options{}), EncodingReflection)
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-flows.txtar", Options{}), vocab.EncodingReflection)
 
 	for _, test := range []struct {
 		typeName string
@@ -935,7 +936,7 @@ func anyFlowRefs(typeName string, members ...string) []string {
 // a map held by a variable and handed to an outside function. A call through an
 // interface method returns what the program's implementation of it returns.
 func TestEncodingReflectionFollowsContainersAndInterfaceMethodResults(t *testing.T) {
-	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-any-flow.txtar", Options{}), EncodingReflection)
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-any-flow.txtar", Options{}), vocab.EncodingReflection)
 
 	for _, test := range []struct {
 		how      string
@@ -1013,7 +1014,7 @@ func selfEncodingRefs(typeName string, members ...string) []string {
 // counts only where every value the walk meets is addressable, and a promoted method
 // counts on the type that embeds it.
 func TestEncodingReflectionReadsNoFieldOfATypeThatEncodesItself(t *testing.T) {
-	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-self-encoding.txtar", Options{}), EncodingReflection)
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-self-encoding.txtar", Options{}), vocab.EncodingReflection)
 
 	for _, test := range []struct {
 		how      string
@@ -1040,7 +1041,7 @@ func TestEncodingReflectionReadsNoFieldOfATypeThatEncodesItself(t *testing.T) {
 // it retains the methods by which each does; an unexported field cannot be read so,
 // and a value reflection holds that is no field is no field walk.
 func TestEncodingReflectionRetainsWhatAFieldWalkAssertsEachFieldTo(t *testing.T) {
-	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-field-walk.txtar", Options{}), EncodingReflection)
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-field-walk.txtar", Options{}), vocab.EncodingReflection)
 
 	want := []string{"go://example.com/walk#discord.Validate", "go://example.com/walk#slack.Validate"}
 	var got []string
@@ -1057,13 +1058,13 @@ func TestEncodingReflectionRetainsWhatAFieldWalkAssertsEachFieldTo(t *testing.T)
 // An assertion the checker records no type for, in a package with type errors, is
 // passed over by the field walk rather than failing the analysis.
 func TestEncodingReflectionFieldWalkPassesOverAnAssertionWithNoType(t *testing.T) {
-	if _, err := analysisOf(t, "encoding-reflection-field-walk-undefined.txtar", Options{}).detect(t, EncodingReflection); err != nil {
+	if _, err := analysisOf(t, "encoding-reflection-field-walk-undefined.txtar", Options{}).detect(t, vocab.EncodingReflection); err != nil {
 		t.Errorf("EncodingReflectionDetector(encoding-reflection-field-walk-undefined.txtar) = %v, want no error", err)
 	}
 }
 
 func TestEncodingReflectionRetainsOnlyTheFieldsEveryTemplateTheProgramReadsNames(t *testing.T) {
-	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-template-inventory.txtar", Options{}), EncodingReflection)
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-template-inventory.txtar", Options{}), vocab.EncodingReflection)
 
 	var got []string
 	for _, ref := range refs {
@@ -1089,7 +1090,7 @@ func TestEncodingReflectionRetainsOnlyTheFieldsEveryTemplateTheProgramReadsNames
 }
 
 func TestEncodingReflectionFollowsAValueReadBackFromAnInterfaceField(t *testing.T) {
-	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-field-read.txtar", Options{}), EncodingReflection)
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-field-read.txtar", Options{}), vocab.EncodingReflection)
 
 	var got []string
 	for _, ref := range refs {
@@ -1109,7 +1110,7 @@ func TestEncodingReflectionFollowsAValueReadBackFromAnInterfaceField(t *testing.
 // one it cannot read whole, and so is a set a function forwards its parameter to,
 // which still reads what the methods it calls return.
 func TestEncodingReflectionRetainsOnlyTheMethodsEveryTemplateTheProgramReadsNames(t *testing.T) {
-	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-template-methods.txtar", Options{}), EncodingReflection)
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-template-methods.txtar", Options{}), vocab.EncodingReflection)
 
 	want := []string{
 		"go://example.com/view#Status.String",
@@ -1130,7 +1131,7 @@ func TestEncodingReflectionRetainsOnlyTheMethodsEveryTemplateTheProgramReadsName
 
 // A context a log/slog call is given is no value it logs, whatever the context holds.
 func TestEncodingReflectionReadsNoFieldOfALoggingCallsContext(t *testing.T) {
-	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-log-context.txtar", Options{}), EncodingReflection)
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-log-context.txtar", Options{}), vocab.EncodingReflection)
 
 	var got []string
 	for _, ref := range refs {
@@ -1147,7 +1148,7 @@ func TestEncodingReflectionReadsNoFieldOfALoggingCallsContext(t *testing.T) {
 // the values whose reflection may reach a finder, and only fields where a reflect call
 // heads a chain that finds none and ends outside reflection.
 func TestEncodingReflectionKeepsMethodsOnlyWhereReflectionMayFindThem(t *testing.T) {
-	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-method-finder-flow.txtar", Options{}), EncodingReflection)
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-method-finder-flow.txtar", Options{}), vocab.EncodingReflection)
 
 	want := []string{
 		"go://example.com/finder#Declared.Name",

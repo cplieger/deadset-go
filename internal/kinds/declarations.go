@@ -9,17 +9,8 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
-)
-
-// The codes of the unused-declaration kinds.
-const (
-	unusedExportedCode      = "DS1001"
-	unusedUnexportedCode    = "DS1002"
-	unusedMemberCode        = "DS1003"
-	testOnlyUseCode         = "DS1004"
-	testOfDeadCodeCode      = "DS1005"
-	deprecatedAndUnusedCode = "DS1006"
 )
 
 // deprecatedPrefix opens the paragraph of a doc comment that marks a declaration
@@ -33,7 +24,7 @@ const testOfDeadCodeMessage = "every target symbol this test references is repor
 // UnusedExported reports an exported declaration that is not a member of a type
 // and that nothing references.
 func UnusedExported(in *Input) ([]Finding, error) {
-	return in.unusedDeclarations(unusedExportedCode), nil
+	return in.unusedDeclarations(vocab.UnusedExported), nil
 }
 
 // UnusedUnexported reports an unexported declaration that is not a member of a
@@ -44,27 +35,27 @@ func UnusedUnexported(in *Input) ([]Finding, error) {
 	if err != nil {
 		return nil, err
 	}
-	return append(in.unusedDeclarations(unusedUnexportedCode), locals...), nil
+	return append(in.unusedDeclarations(vocab.UnusedUnexported), locals...), nil
 }
 
 // UnusedMember reports a struct field that nothing references and whose container
 // is not itself dead, because a member of a dead container falls with it and is
 // reported inside its component.
 func UnusedMember(in *Input) ([]Finding, error) {
-	return in.unusedDeclarations(unusedMemberCode), nil
+	return in.unusedDeclarations(vocab.UnusedMember), nil
 }
 
 // TestOnlyUse reports a declaration that no production file references and at
 // least one test file does, which is the symbol and its tests deleted in one
 // change rather than an unreferenced declaration.
 func TestOnlyUse(in *Input) ([]Finding, error) {
-	return in.unusedDeclarations(testOnlyUseCode), nil
+	return in.unusedDeclarations(vocab.TestOnlyUse), nil
 }
 
 // DeprecatedAndUnused reports a declaration carrying a deprecation marker that no
 // production file references, which is the residue of a finished migration.
 func DeprecatedAndUnused(in *Input) ([]Finding, error) {
-	return in.unusedDeclarations(deprecatedAndUnusedCode), nil
+	return in.unusedDeclarations(vocab.DeprecatedUnused), nil
 }
 
 // TestOfDeadCode reports a test declaration whose set of referenced target
@@ -84,7 +75,7 @@ func TestOfDeadCode(in *Input) ([]Finding, error) {
 		if !candidate.TestOfDeadCode {
 			continue
 		}
-		one, held := in.finding(candidate.ID, testOfDeadCodeCode, testOfDeadCodeMessage)
+		one, held := in.finding(candidate.ID, vocab.TestOfDeadCode, testOfDeadCodeMessage)
 		if !held {
 			continue
 		}
@@ -96,7 +87,7 @@ func TestOfDeadCode(in *Input) ([]Finding, error) {
 
 // unusedDeclarations returns the candidates one unused-declaration kind reports,
 // which are the candidates the precedence rule assigns to its code.
-func (in *Input) unusedDeclarations(code string) []Finding {
+func (in *Input) unusedDeclarations(code vocab.Code) []Finding {
 	if in == nil || in.Sweep == nil {
 		return nil
 	}
@@ -123,7 +114,7 @@ func (in *Input) unusedDeclarations(code string) []Finding {
 // member kind, so a method of a live type is an unused declaration. The populations
 // another kind owns are [Input.outsideTheRule]'s, an exported declaration of a package
 // nothing outside imports being the unreachable-export kind's.
-func (in *Input) codeOf(candidate *graph.Candidate) string {
+func (in *Input) codeOf(candidate *graph.Candidate) vocab.Code {
 	symbol := in.symbol(candidate.ID)
 	if symbol == nil || in.outsideTheRule(candidate, symbol) {
 		return ""
@@ -134,9 +125,9 @@ func (in *Input) codeOf(candidate *graph.Candidate) string {
 	case candidate.UnreferencedTest:
 		return in.shapeCode(symbol)
 	case candidate.ProductionRefs == 0 && in.deprecations()[candidate.ID]:
-		return deprecatedAndUnusedCode
+		return vocab.DeprecatedUnused
 	case testKept(candidate):
-		return testOnlyUseCode
+		return vocab.TestOnlyUse
 	default:
 		return in.shapeCode(symbol)
 	}
@@ -144,16 +135,16 @@ func (in *Input) codeOf(candidate *graph.Candidate) string {
 
 // shapeCode is the unreferenced kind a declaration's shape selects: the member kind
 // for a struct field, then the kind its visibility selects.
-func (in *Input) shapeCode(symbol *graph.Symbol) string {
+func (in *Input) shapeCode(symbol *graph.Symbol) vocab.Code {
 	switch {
 	case member(symbol.Kind):
-		return unusedMemberCode
+		return vocab.UnusedMember
 	case !symbol.Exported:
-		return unusedUnexportedCode
+		return vocab.UnusedUnexported
 	case !in.importable(symbol):
 		return ""
 	default:
-		return unusedExportedCode
+		return vocab.UnusedExported
 	}
 }
 
@@ -194,15 +185,15 @@ func (in *Input) deadParent(symbol *graph.Symbol) bool {
 // candidate found by reference counting has no reference at all; one found by
 // reachability has references, every one of them from a declaration that is itself
 // dead, and saying "no reference" about it would be false.
-func (in *Input) unusedMessage(candidate *graph.Candidate, code string) string {
+func (in *Input) unusedMessage(candidate *graph.Candidate, code vocab.Code) string {
 	word := in.word(candidate.ID)
 	switch code {
-	case testOnlyUseCode:
+	case vocab.TestOnlyUse:
 		if candidate.ProductionRefs > 0 {
 			return word + " is referenced only from test files and from declarations that are themselves dead"
 		}
 		return word + " is referenced only from test files and never from production code"
-	case deprecatedAndUnusedCode:
+	case vocab.DeprecatedUnused:
 		return "deprecated " + word + " has no production reference"
 	}
 
@@ -324,23 +315,16 @@ func (in *Input) classifiedEverywhere(symbol *graph.Symbol, classified func(r *l
 	return held
 }
 
-// testReachedCodes are the codes a finding about production code only tests reach
-// is reported under where a test references the declaration.
-var testReachedCodes = map[string]bool{
-	unusedExportedCode:      true,
-	unusedUnexportedCode:    true,
-	unusedMemberCode:        true,
-	testOnlyUseCode:         true,
-	deprecatedAndUnusedCode: true,
-	unusedInterfaceCode:     true,
-}
+// testReachedEvidence is the row of the Contract's evidence table that names the
+// codes a finding about production code only tests reach is possible under.
+var testReachedEvidence, _ = vocab.EvidenceFor("test-reached", language)
 
 // testReachedUse reports whether a record under code holds a declaration of production
 // code only tests reach that a test references, whose finding is possible whether or
 // not the record keeps the declaration live.
-func (in *Input) testReachedUse(id graph.SymbolID, code string) bool {
+func (in *Input) testReachedUse(id graph.SymbolID, code vocab.Code) bool {
 	symbol := in.symbol(id)
-	return testReachedCodes[code] && symbol != nil && in.testReached(symbol) && in.testUse().referenced[id]
+	return testReachedEvidence.Lowers(language, code) && symbol != nil && in.testReached(symbol) && in.testUse().referenced[id]
 }
 
 // testUseFacts is what [Input.testUse] computes once per run.

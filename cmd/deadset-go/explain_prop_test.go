@@ -7,6 +7,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
 )
 
@@ -135,7 +136,7 @@ func checkDisjoint(t *rapid.T, subject *graph.Symbol, held *explainedState) {
 // checkOneFindingPerSymbol asserts that no declaration of the inventory is reported
 // twice, which is what makes the reported answer one finding's.
 func checkOneFindingPerSymbol(t *rapid.T, set *findingSet) {
-	seen := make(map[string]string, len(set.result.Findings))
+	seen := make(map[string]vocab.Code, len(set.result.Findings))
 	for i := range set.result.Findings {
 		found := &set.result.Findings[i]
 		key := positionKey(&found.Position)
@@ -185,7 +186,7 @@ func checkExplanation(t *rapid.T, set *findingSet, subject *graph.Symbol, held *
 // checkReported asserts the reported answer carries what the finding carries.
 func checkReported(t *rapid.T, subject *graph.Symbol, found *kinds.Finding, text string) {
 	for _, want := range []string{
-		"code: " + found.Code + " " + found.Kind,
+		"code: " + string(found.Code) + " " + found.Kind,
 		"message: " + found.Message,
 		"class: " + string(found.Class),
 		"confidence: " + string(found.Confidence),

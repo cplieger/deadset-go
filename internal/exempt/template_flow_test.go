@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // membersNamed keeps the references naming a member of any of the given types.
@@ -23,7 +25,7 @@ func membersNamed(refs []string, typeNames ...string) []string {
 }
 
 func TestEncodingReflectionReadsTemplatesLoadedThroughAFileSystem(t *testing.T) {
-	refs := retainedRefs(t, analysisOf(t, "template-fs-flow.txtar", Options{}), EncodingReflection)
+	refs := retainedRefs(t, analysisOf(t, "template-fs-flow.txtar", Options{}), vocab.EncodingReflection)
 	got := membersNamed(refs, "Page", "Mail")
 	want := []string{
 		"go://example.com/fsapp#Page.Greeting",
@@ -37,7 +39,7 @@ func TestEncodingReflectionReadsTemplatesLoadedThroughAFileSystem(t *testing.T) 
 }
 
 func TestEncodingReflectionReadsTemplatesEmbeddedByQuotedPatterns(t *testing.T) {
-	refs := retainedRefs(t, analysisOf(t, "template-fs-flow-quoted.txtar", Options{}), EncodingReflection)
+	refs := retainedRefs(t, analysisOf(t, "template-fs-flow-quoted.txtar", Options{}), vocab.EncodingReflection)
 	got := membersNamed(refs, "Page")
 	want := []string{"go://example.com/quoted#Page.Note", "go://example.com/quoted#Page.Title"}
 	if !slices.Equal(got, want) {
@@ -64,7 +66,7 @@ func TestEncodingReflectionReadsEveryMemberWhereAFileSystemTemplateIsUnread(t *t
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			refs := retainedRefs(t, analysisOf(t, tt.archive, Options{}), EncodingReflection)
+			refs := retainedRefs(t, analysisOf(t, tt.archive, Options{}), vocab.EncodingReflection)
 			if got := membersNamed(refs, "Page", "Card", "Article"); !slices.Equal(got, tt.want) {
 				t.Errorf("EncodingReflectionDetector(%s) retained %v, want %v", tt.archive, got, tt.want)
 			}

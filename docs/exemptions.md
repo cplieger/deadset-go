@@ -4,7 +4,7 @@ An exemption is a named reason for which deadset-go keeps a symbol the reference
 
 ## Reading the retained set
 
-`deadset-go print-retained` lists every symbol an exemption held back, with the class that held it. Each entry also carries one clause of detail naming the relation and the thing it relates to, and the source site the evidence was found at. That answers why a symbol was not reported. If the symbol is in the retained set, the class named beside it is the reason.
+`deadset-go print-retained` lists every symbol an exemption held back, with its position and the class that held it. Each entry also carries one clause of detail naming the relation and the thing it relates to, and the source site the evidence was found at. That answers why a symbol was not reported. If the symbol is in the retained set, the class named beside it is the reason.
 
 Every finding a report carries names in `retained_by` the classes that retained its subject, where any did.
 
@@ -24,7 +24,7 @@ Two classes read files and retain nothing until the project configures them: `an
 
 ## Evidence in a test file does not hold for production
 
-A report is built from a production analysis, which counts no reference a test file made. An exemption whose evidence is in a test file does not hold there either. A test that marshals a value or compares one makes no member of that value live for production. Such evidence counts as a test reference, so a member nothing in production references is reported as `DS1004`. `print-retained --mode=plain` counts every reference and every piece of evidence, which is the wider set, and a symbol the report names may be held back in it.
+A report is built from a production analysis, which counts no reference a test file made. An exemption whose evidence is in a test file does not hold there either. A test that marshals a value or compares one makes no member of that value live for production. Such evidence counts as a test reference, so a member nothing in production references is reported as `DS1102`. `print-retained --mode=plain` counts every reference and every piece of evidence, which is the wider set, and a symbol the report names may be held back in it.
 
 ## What leaves the analysis is fully reachable
 
@@ -54,7 +54,7 @@ The evidence is the conversion set, every site in the target or in a loaded cons
 
 An assertion naming an interface, `errors.As` and `errors.AsType` included, adds a site for each type that implements it and whose value reaches the operand's interface. In a library whose run loads no consumer, a published parameter of an interface type adds one for each type an outside program can hold.
 
-A method answering an interface method no call site invokes is not retained, and `DS1203` reports it with that interface method. Each retention is a use by the declaration that holds the site, so it holds only while that declaration is live. An assertion's site is held by the assertion's declaration as well. A satisfaction assertion is a use by the type it asserts, so it keeps nothing of a type only dead code builds.
+A method answering an interface method no call site invokes is not retained, and `DS1202` reports it with that interface method. Each retention is a use by the declaration that holds the site, so it holds only while that declaration is live. An assertion's site is held by the assertion's declaration as well. A satisfaction assertion is a use by the type it asserts, so it keeps nothing of a type only dead code builds.
 
 A value converted to a defined interface that a package outside the program declares is held by that package, which may assert another interface on it. So the value also keeps the methods by which it, or a pointer to it, satisfies an interface that package's source asserts. An asserted interface is one a type assertion, a type switch case, or an `errors.As` or `errors.AsType` call names, whichever package declares it. An interface that package declares and never asserts keeps nothing.
 
@@ -138,6 +138,6 @@ A router that registers a handler by its method name resolves the method the sam
 Two reasons a maintainer may have for keeping a symbol are answered by something other than an exemption:
 
 - A symbol a declared consumer references needs no class. Name the repositories that import the module in the scope document and the reference holds the symbol live like any other, as [How the analysis decides](analysis.md#consumers) describes.
-- A symbol only a test references is reported as `DS1004`, which a project assigns its own severity to, rather than retained.
+- A symbol only a test references is reported as `DS1102`, which a project assigns its own severity to, rather than retained.
 
 A symbol kept for a reason no class covers, a published API whose removal would be a breaking change, is an ignore entry with a reason, as [Configuration and invocation](configuration.md#ignore-file) describes.

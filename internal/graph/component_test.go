@@ -155,8 +155,8 @@ func TestDistinctLinesCountsALineSeveralSpansCoverOnce(t *testing.T) {
 	}
 	for name, test := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := DistinctLines(test.spans); got != test.want {
-				t.Errorf("DistinctLines(%+v) = %d, want %d", test.spans, got, test.want)
+			if got := distinctLines(test.spans); got != test.want {
+				t.Errorf("distinctLines(%+v) = %d, want %d", test.spans, got, test.want)
 			}
 		})
 	}

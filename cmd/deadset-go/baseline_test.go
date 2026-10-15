@@ -12,9 +12,9 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/reporttest"
-	"github.com/cplieger/deadset-go/v2/internal/suppress"
 	spec "github.com/cplieger/deadset-spec/v8"
+	core "github.com/cplieger/deadset-spec/v8/suppress"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // baselineVectorRoot is where the pinned Contract publishes the baseline vectors.
@@ -64,7 +64,10 @@ func runBaselineVector(t *testing.T, dir string) {
 	t.Helper()
 
 	body := vectorFile(t, dir, "report.json")
-	envelope := reporttest.MustRead(t, dir+"/report.json", body)
+	envelope := mustDecode(t, dir+"/report.json", body)
+	if len(envelope.Analyzer.Languages) == 1 && envelope.Analyzer.Languages[0] != vocab.Go {
+		t.Skipf("%s is a round of another language's analyzer", dir)
+	}
 	if len(envelope.Analyzer.Languages) != 1 {
 		t.Fatalf("Setup: %s/report.json names the languages %v, want the one language of the round", dir, envelope.Analyzer.Languages)
 	}
@@ -74,16 +77,23 @@ func runBaselineVector(t *testing.T, dir string) {
 			"want exactly one of the last two, and existing.json beside expected-error.json",
 			dir, existing != nil, expected != nil, refused != nil)
 	}
-	target := filepath.Join(t.TempDir(), suppress.BaselineFileName)
+	target := filepath.Join(t.TempDir(), core.BaselineFileName)
 	if existing != nil {
 		if err := os.WriteFile(target, existing, 0o600); err != nil {
 			t.Fatalf("Setup: write %s: %v", target, err)
 		}
 	}
 
-	rows, _ := recordRound(envelope.Findings, nil, nil)
-	provenance := suppress.Provenance{Analyzer: envelope.Analyzer.Name, Version: envelope.Analyzer.Version}
-	err := writeBaseline(target, rows, provenance, envelope.Analyzer.Languages[0]+"://")
+	var rows []core.Recorded
+	for i := range envelope.Findings {
+		found := &envelope.Findings[i]
+		row := core.Recorded{Code: found.Code, Symbol: found.Symbol.Ref, Path: found.Position.Path}
+		if core.Recordable(found) && !slices.Contains(rows, row) {
+			rows = append(rows, row)
+		}
+	}
+	provenance := core.Provenance{Analyzer: envelope.Analyzer.Name, Version: envelope.Analyzer.Version}
+	err := writeBaseline(t.Context(), target, rows, provenance)
 	written, readErr := os.ReadFile(target)
 	if readErr != nil {
 		t.Fatalf("read the baseline %s: %v", target, readErr)
@@ -95,9 +105,9 @@ func runBaselineVector(t *testing.T, dir string) {
 		if err := json.Unmarshal(refused, &want); err != nil {
 			t.Fatalf("Setup: decode %s/expected-error.json: %v", dir, err)
 		}
-		if err == nil || want.ExitCode != exitFailure {
+		if err == nil || want.ExitCode != vocab.ExitFailure {
 			t.Errorf("the write over %s/existing.json = %v, ending the run with %d, want it refused with exit code %d",
-				dir, err, exitFailure, want.ExitCode)
+				dir, err, vocab.ExitFailure, want.ExitCode)
 		}
 		if !bytes.Equal(written, existing) {
 			t.Errorf("the refused write over %s/existing.json left\n%s\nwant the document as it was\n%s", dir, written, existing)
@@ -189,7 +199,7 @@ func baselineFixpointModule(t *testing.T) string {
 
 func TestAnalyzeWritesTheBaselineFixpointAndNoDocumentRow(t *testing.T) {
 	dir := baselineFixpointModule(t)
-	baseline := path.Join(dir, suppress.BaselineFileName)
+	baseline := path.Join(dir, core.BaselineFileName)
 	runAnalyze(t, dir, "--baseline-write="+baseline)
 
 	body, err := os.ReadFile(baseline)
@@ -204,7 +214,7 @@ func TestAnalyzeWritesTheBaselineFixpointAndNoDocumentRow(t *testing.T) {
 	want := []string{
 		"DS1002 go://example.com/app#spare",
 		"DS1002 go://example.com/app#feed",
-		"DS1801 go://example.com/app#feed(chunk)",
+		"DS1401 go://example.com/app#feed(chunk)",
 		"DS1003 go://example.com/app#spare.field",
 	}
 	if !slices.Equal(codes, want) {
@@ -216,7 +226,7 @@ func TestAnalyzeWritesTheBaselineFixpointAndNoDocumentRow(t *testing.T) {
 
 func TestAnalyzeReadsBackTheBaselineItWroteWithNoStaleRow(t *testing.T) {
 	dir := baselineFixpointModule(t)
-	baseline := path.Join(dir, suppress.BaselineFileName)
+	baseline := path.Join(dir, core.BaselineFileName)
 	runAnalyze(t, dir, "--baseline-write="+baseline)
 
 	got := runAnalyze(t, dir)
@@ -229,18 +239,18 @@ func TestAnalyzeReadsBackTheBaselineItWroteWithNoStaleRow(t *testing.T) {
 		t.Errorf("analyze over the baseline it wrote reports %d stale rows, want none: %+v",
 			len(envelope.StaleSuppressions), envelope.StaleSuppressions)
 	}
-	var reported []string
+	var reported []vocab.Code
 	for i := range envelope.Findings {
 		reported = append(reported, envelope.Findings[i].Code)
 	}
-	if !slices.Equal(reported, []string{unmatchedRoot}) {
-		t.Errorf("analyze over the baseline it wrote reports %v, want only the %s no row can withhold", reported, unmatchedRoot)
+	if !slices.Equal(reported, []vocab.Code{vocab.UnmatchedRoot}) {
+		t.Errorf("analyze over the baseline it wrote reports %v, want only the %s no row can withhold", reported, vocab.UnmatchedRoot)
 	}
 }
 
 func TestAnalyzeWritesItsOwnRowsAndKeepsTheOtherSchemesRows(t *testing.T) {
 	dir := baselineFixpointModule(t)
-	baseline := path.Join(dir, suppress.BaselineFileName)
+	baseline := path.Join(dir, core.BaselineFileName)
 	const other = `{"code": "DS1301", "symbol": "ts://@example/app/src/a.ts#A.b", "path": "src/a.ts", "reason": "recorded by deadset-ts 7.0.0"}`
 	if err := os.WriteFile(baseline, []byte(`{"baseline": [`+other+`]}`), 0o600); err != nil {
 		t.Fatalf("Setup: write %s: %v", baseline, err)
@@ -263,5 +273,61 @@ func TestAnalyzeWritesItsOwnRowsAndKeepsTheOtherSchemesRows(t *testing.T) {
 	if !slices.Equal(symbols, want) {
 		t.Errorf("analyze --baseline-write over a document holding a ts:// row wrote the rows %q, want %q: this analyzer's rows, then the other scheme's as the document held them",
 			symbols, want)
+	}
+}
+
+// A row of a scheme no analyzer of the run implements is kept unread, and the
+// document orders its rows by their schemes compared bytewise.
+func TestAnalyzeKeepsAThirdSchemesRowInBytewiseSchemeOrder(t *testing.T) {
+	dir := baselineFixpointModule(t)
+	baseline := path.Join(dir, core.BaselineFileName)
+	const rows = `{"code": "DS1301", "symbol": "ts://@example/app/src/a.ts#A.b", "path": "src/a.ts", "reason": "recorded by deadset-ts 7.0.0"},
+  {"code": "DS1001", "symbol": "js://example/app/a.js#A", "path": "a.js", "reason": "recorded by a third analyzer"}`
+	if err := os.WriteFile(baseline, []byte(`{"baseline": [`+rows+`]}`), 0o600); err != nil {
+		t.Fatalf("Setup: write %s: %v", baseline, err)
+	}
+	runAnalyze(t, dir, "--baseline-write="+baseline)
+
+	body, err := os.ReadFile(baseline)
+	if err != nil {
+		t.Fatalf("read the baseline %s: %v", baseline, err)
+	}
+	got := baselineVectorRows(t, baseline, body)
+	symbols := make([]string, len(got))
+	for i := range got {
+		symbols[i] = got[i].Symbol
+	}
+	want := []string{
+		"go://example.com/app#spare", "go://example.com/app#feed", "go://example.com/app#feed(chunk)",
+		"go://example.com/app#spare.field", "js://example/app/a.js#A", "ts://@example/app/src/a.ts#A.b",
+	}
+	if !slices.Equal(symbols, want) {
+		t.Errorf("analyze --baseline-write over a document holding a js:// and a ts:// row wrote the rows %q, want %q", symbols, want)
+	}
+}
+
+// A baseline the run reads and cannot is a refused document, the usage code,
+// while a write over a document it cannot read is refused with the failure code
+// and leaves it as it was.
+func TestAMalformedBaselineIsAUsageErrorAndAWriteOverOneAFailure(t *testing.T) {
+	const malformed = `{"baseline": [{"symbol": "go://example.com/app#spare"}]}`
+	dir := baselineFixpointModule(t)
+	if err := os.WriteFile(path.Join(dir, core.BaselineFileName), []byte(malformed), 0o600); err != nil {
+		t.Fatalf("Setup: write the target's baseline: %v", err)
+	}
+	if got := runAnalyze(t, dir); got.code != vocab.ExitUsage {
+		t.Errorf("analyze over a malformed baseline = %d, want %d\nstderr: %s", got.code, vocab.ExitUsage, got.stderr)
+	}
+
+	dir = baselineFixpointModule(t)
+	baseline := filepath.Join(t.TempDir(), core.BaselineFileName)
+	if err := os.WriteFile(baseline, []byte(malformed), 0o600); err != nil {
+		t.Fatalf("Setup: write %s: %v", baseline, err)
+	}
+	if got := runAnalyze(t, dir, "--baseline-write="+baseline); got.code != vocab.ExitFailure {
+		t.Errorf("analyze --baseline-write over a malformed baseline = %d, want %d\nstderr: %s", got.code, vocab.ExitFailure, got.stderr)
+	}
+	if body, err := os.ReadFile(baseline); err != nil || string(body) != malformed {
+		t.Errorf("the refused write left %q, %v, want the document as it was", body, err)
 	}
 }

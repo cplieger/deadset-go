@@ -14,6 +14,7 @@ import (
 	"text/template/parse"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // ErrTemplateDir reports a configured template directory the scan cannot read:
@@ -69,7 +70,7 @@ func TemplateFieldDetector(in *Input) ([]graph.Exemption, error) {
 			}
 			out = append(out, graph.Exemption{
 				ID:     m.id,
-				Class:  string(TemplateField),
+				Class:  string(vocab.TemplateField),
 				Site:   r.site,
 				Detail: "named by " + r.action,
 			})

@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -410,7 +411,7 @@ func (s *enumGroupScan) exemptions() []graph.Exemption {
 		for _, m := range members {
 			found = append(found, graph.Exemption{
 				ID:     m.id,
-				Class:  string(EnumGroup),
+				Class:  string(vocab.EnumGroup),
 				Site:   enum.best.at,
 				Detail: enum.best.detail,
 			})

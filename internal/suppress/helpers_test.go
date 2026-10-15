@@ -10,6 +10,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	spec "github.com/cplieger/deadset-spec/v8"
+	core "github.com/cplieger/deadset-spec/v8/suppress"
 	"golang.org/x/tools/txtar"
 )
 
@@ -140,7 +141,7 @@ func loaded(t *testing.T, archive string) (*load.Result, string, []graph.Symbol)
 // returns its path.
 func writeIgnoreFile(t *testing.T, document string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), IgnoreFileName)
+	path := filepath.Join(t.TempDir(), core.IgnoreFileName)
 	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
 		t.Fatalf("Setup: write %s: %v", path, err)
 	}

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // matrix is the two configurations the platform fixtures are loaded under, in the
@@ -209,7 +211,7 @@ func TestAllDropsADerivedConfigurationThatMeetsASetupFailure(t *testing.T) {
 		t.Fatalf("All(testdata/setupfailure, windows-amd64 derived) dropped %v, want %v", got, want)
 	}
 	setup, ok := errors.AsType[*SetupError](unbuilt[0].Err)
-	if !ok || len(setup.Failures) == 0 || setup.Failures[0].Class != MissingModule {
+	if !ok || len(setup.Failures) == 0 || setup.Failures[0].Class != vocab.SetupMissingModule {
 		t.Errorf("All(testdata/setupfailure, windows-amd64 derived) dropped windows-amd64 with %v, want a missing-module setup failure",
 			unbuilt[0].Err)
 	}
@@ -224,7 +226,7 @@ func TestAllEndsAMatrixWhoseEveryConfigurationIsDroppedOnItsSetupFailure(t *test
 
 	results, unbuilt, err := All(t.Context(), unparsedScope(t, "everyderiveddropped"), matrix(), derived)
 	setup, ok := errors.AsType[*SetupError](err)
-	if !ok || len(setup.Failures) == 0 || setup.Failures[0].Class != MissingModule {
+	if !ok || len(setup.Failures) == 0 || setup.Failures[0].Class != vocab.SetupMissingModule {
 		t.Errorf("All(testdata/everyderiveddropped, both derived) = _, _, %v, want the windows-amd64 missing-module setup failure", err)
 	}
 	if len(results) != 0 || len(unbuilt) != 0 {
@@ -240,7 +242,7 @@ func TestAllEndsTheRunOnADeclaredConfigurationsSetupFailure(t *testing.T) {
 
 	results, unbuilt, err := All(t.Context(), unparsedScope(t, "setupfailure"), matrix(), nil)
 	setup, ok := errors.AsType[*SetupError](err)
-	if !ok || len(setup.Failures) == 0 || setup.Failures[0].Class != MissingModule {
+	if !ok || len(setup.Failures) == 0 || setup.Failures[0].Class != vocab.SetupMissingModule {
 		t.Errorf("All(testdata/setupfailure) = _, _, %v, want a missing-module setup failure", err)
 	}
 	if len(results) != 0 || len(unbuilt) != 0 {

@@ -1,66 +1,28 @@
 package config
 
 import (
-	"slices"
-	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/catalog"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // intraFunctionFamily is the family prefix addressing the kinds that report dead
 // code inside a function body, which is the one family a configuration is expected
 // to disable whole.
-const intraFunctionFamily = "DS18"
+const intraFunctionFamily = "DS14"
 
 // publishedKinds returns the issue kinds the vocabulary publishes as live, in the
 // order it lists them, with the default each carries. The vocabulary's own suite
 // pins those rows equal to the Contract's issue-kind document, so this package
 // reads the rows rather than the document.
-func publishedKinds(t *testing.T) []catalog.Row {
+func publishedKinds(t *testing.T) []vocab.Kind {
 	t.Helper()
 
-	rows := catalog.Kinds()
+	rows := vocab.Kinds()
 	if len(rows) == 0 {
 		t.Fatal("Setup: the vocabulary publishes no live kind, so this test pins nothing")
 	}
 	return rows
-}
-
-func TestLiveKindReadsTheVocabularysDefaults(t *testing.T) {
-	t.Parallel()
-
-	for _, row := range publishedKinds(t) {
-		want := kind{
-			severity: Severity(row.DefaultSeverity),
-			enabled:  row.DefaultEnabled,
-		}
-		held, live := liveKind(row.Code)
-		if !live || held != want {
-			t.Errorf("liveKind(%q) = %+v, %t, want %+v, true", row.Code, held, live, want)
-		}
-	}
-}
-
-func TestFixedSeverityCodesAreTheVocabularysFixedRows(t *testing.T) {
-	t.Parallel()
-
-	var want []string
-	for _, row := range publishedKinds(t) {
-		if row.Fixed {
-			want = append(want, row.Code)
-		}
-	}
-	slices.Sort(want)
-	if len(want) == 0 {
-		t.Fatal("Setup: the vocabulary fixes no severity, so this test pins nothing")
-	}
-
-	got := fixedSeverityCodes()
-	slices.Sort(got)
-	if !slices.Equal(got, want) {
-		t.Errorf("fixedSeverityCodes() = %v, want the codes the vocabulary fixes %v", got, want)
-	}
 }
 
 func TestNamesLiveKind(t *testing.T) {
@@ -73,12 +35,12 @@ func TestNamesLiveKind(t *testing.T) {
 	}{
 		{name: "a_live_code", key: "DS1001", want: true},
 		{name: "a_family_prefix_holding_live_kinds", key: intraFunctionFamily, want: true},
-		{name: "a_family_prefix_holding_one_live_kind", key: "DS16", want: true},
-		{name: "a_code_of_a_live_family_that_no_kind_carries", key: "DS1899", want: false},
+		{name: "a_family_prefix_holding_one_live_kind", key: "DS13", want: true},
+		{name: "a_code_of_a_live_family_that_no_kind_carries", key: "DS1499", want: false},
 		{name: "a_code_outside_every_family", key: "DS2999", want: false},
 		{name: "a_family_prefix_no_range_declares", key: "DS29", want: false},
-		{name: "a_family_prefix_whose_range_is_retired", key: "DS14", want: false},
-		{name: "a_retired_code", key: "DS1402", want: false},
+		{name: "a_family_prefix_whose_range_is_reserved", key: "DS18", want: false},
+		{name: "a_code_of_a_reserved_family", key: "DS1801", want: false},
 	}
 
 	for _, tc := range tests {
@@ -92,33 +54,9 @@ func TestNamesLiveKind(t *testing.T) {
 	}
 }
 
-func TestFamilyPrefix(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		code string
-		want string
-	}{
-		{name: "a_code", code: "DS1801", want: intraFunctionFamily},
-		{name: "a_family_prefix_is_its_own", code: intraFunctionFamily, want: intraFunctionFamily},
-		{name: "a_key_shorter_than_a_family_prefix", code: "DS", want: "DS"},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			if got := familyPrefix(tc.code); got != tc.want {
-				t.Errorf("familyPrefix(%q) = %q, want %q", tc.code, got, tc.want)
-			}
-		})
-	}
-}
-
 // configFor returns the default configuration for one target kind, with the
 // severity object and the consumer declaration a case carries.
-func configFor(of TargetKind, consumersComplete bool, severity map[string]Severity) Config {
+func configFor(of TargetKind, consumersComplete bool, severity map[string]vocab.Severity) Config {
 	cfg := Default()
 	cfg.Target.Kind = OneKind(of)
 	cfg.Consumers.Complete = consumersComplete
@@ -133,82 +71,82 @@ func TestEffectiveSeverity(t *testing.T) {
 
 	tests := []struct {
 		name     string
-		severity map[string]Severity
-		code     string
+		severity map[string]vocab.Severity
+		code     vocab.Code
 		of       TargetKind
-		want     Severity
+		want     vocab.Severity
 		complete bool
 	}{
 		{
 			name: "a_kind_no_source_names_takes_the_contract_default",
-			of:   Application, code: "DS1001", want: Deny,
+			of:   Application, code: "DS1001", want: vocab.Deny,
 		},
 		{
 			name: "a_kind_the_contract_defaults_to_warn",
-			of:   Application, code: "DS1101", want: Warn,
+			of:   Application, code: "DS1501", want: vocab.Warn,
 		},
 		{
 			name:     "the_configuration_key_for_the_code_outranks_the_default",
-			severity: map[string]Severity{"DS1001": Warn},
-			of:       Application, code: "DS1001", want: Warn,
+			severity: map[string]vocab.Severity{"DS1001": vocab.Warn},
+			of:       Application, code: "DS1001", want: vocab.Warn,
 		},
 		{
 			name:     "the_family_key_sets_every_kind_of_that_family",
-			severity: map[string]Severity{intraFunctionFamily: Allow},
-			of:       Application, code: "DS1801", want: Allow,
+			severity: map[string]vocab.Severity{intraFunctionFamily: vocab.Allow},
+			of:       Application, code: "DS1401", want: vocab.Allow,
 		},
 		{
 			name:     "the_family_key_reaches_a_deny_kind_of_the_same_family",
-			severity: map[string]Severity{intraFunctionFamily: Allow},
-			of:       Application, code: "DS1805", want: Allow,
+			severity: map[string]vocab.Severity{intraFunctionFamily: vocab.Allow},
+			of:       Application, code: "DS1405", want: vocab.Allow,
 		},
 		{
 			name:     "the_family_key_reaches_no_other_family",
-			severity: map[string]Severity{intraFunctionFamily: Allow},
-			of:       Application, code: "DS1001", want: Deny,
+			severity: map[string]vocab.Severity{intraFunctionFamily: vocab.Allow},
+			of:       Application, code: "DS1001", want: vocab.Deny,
 		},
 		{
 			name:     "the_code_key_outranks_the_family_key",
-			severity: map[string]Severity{intraFunctionFamily: Allow, "DS1801": Deny},
-			of:       Application, code: "DS1801", want: Deny,
+			severity: map[string]vocab.Severity{intraFunctionFamily: vocab.Allow, "DS1401": vocab.Deny},
+			of:       Application, code: "DS1401", want: vocab.Deny,
 		},
 
 		{
 			name: "a_library_keeps_the_unused_export_default",
-			of:   Library, code: "DS1001", want: Deny,
+			of:   Library, code: "DS1001", want: vocab.Deny,
 		},
 		{
 			name: "a_library_with_no_consumer_information_keeps_the_narrowing_kinds",
-			of:   Library, code: "DS1101", want: Warn,
+			of:   Library, code: "DS1501", want: vocab.Warn,
 		},
 		{
 			name: "a_library_with_no_consumer_information_keeps_every_other_kind",
-			of:   Library, code: "DS1002", want: Deny,
+			of:   Library, code: "DS1002", want: vocab.Deny,
 		},
 		{
 			name: "a_library_with_no_consumer_information_keeps_test_only_use",
-			of:   Library, code: "DS1004", want: Deny,
+			of:   Library, code: "DS1102", want: vocab.Deny,
 		},
 
 		{
 			name: "an_application_reads_no_consumer_fact",
-			of:   Application, code: "DS1001", want: Deny,
+			of:   Application, code: "DS1001", want: vocab.Deny,
 		},
 		{
 			name: "a_kind_whose_severity_the_contract_fixes",
-			of:   Library, code: "DS1703", want: Deny,
+			of:   Library, code: "DS9003", want: vocab.Deny,
 		},
 		{
 			name: "a_code_no_live_kind_carries",
-			of:   Application, code: "DS2999", want: Allow,
+			of:   Application, code: "DS2999", want: vocab.Allow,
 		},
 		{
-			name: "a_retired_code",
-			of:   Application, code: "DS1402", want: Allow,
+			name: "a_code_of_a_reserved_family",
+			of:   Application, code: "DS1801", want: vocab.Allow,
 		},
 		{
 			name: "a_family_prefix_is_not_a_kind",
-			of:   Application, code: intraFunctionFamily, want: Allow,
+			of:   Application, code: vocab.Code(intraFunctionFamily), want: vocab.Allow,
 		},
 	}
 
@@ -230,9 +168,9 @@ func TestEffectiveSeverityIsTheVocabularysDefaultWhenNothingNamesTheKind(t *test
 
 	cfg := configFor(Application, false, nil)
 	for _, published := range publishedKinds(t) {
-		want := Severity(published.DefaultSeverity)
+		want := published.DefaultSeverity
 		if !published.DefaultEnabled {
-			want = Allow
+			want = vocab.Allow
 		}
 		if got := cfg.EffectiveSeverity(published.Code); got != want {
 			t.Errorf("EffectiveSeverity(%q) over an application naming no severity = %q, want the vocabulary's %q",
@@ -244,12 +182,12 @@ func TestEffectiveSeverityIsTheVocabularysDefaultWhenNothingNamesTheKind(t *test
 func TestEffectiveSeverityDisablesTheFamilyTheConfigurationNamesAndNoOther(t *testing.T) {
 	t.Parallel()
 
-	cfg := configFor(Application, false, map[string]Severity{intraFunctionFamily: Allow})
+	cfg := configFor(Application, false, map[string]vocab.Severity{intraFunctionFamily: vocab.Allow})
 	disabled := 0
 	for _, published := range publishedKinds(t) {
-		want := Severity(published.DefaultSeverity)
-		if strings.HasPrefix(published.Code, intraFunctionFamily) {
-			want = Allow
+		want := published.DefaultSeverity
+		if vocab.FamilyOf(published.Code) == intraFunctionFamily {
+			want = vocab.Allow
 			disabled++
 		}
 		if got := cfg.EffectiveSeverity(published.Code); got != want {

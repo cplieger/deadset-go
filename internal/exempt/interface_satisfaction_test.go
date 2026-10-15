@@ -12,6 +12,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	spec "github.com/cplieger/deadset-spec/v8"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/txtar"
 )
 
@@ -396,7 +397,7 @@ func assertRetainedBy(t *testing.T, fixture string, row corpusRow, found []graph
 	retained map[graph.SymbolID]bool, subject graph.Symbol,
 ) {
 	t.Helper()
-	if !slices.Contains(row.RetainedBy, string(InterfaceSatisfaction)) {
+	if !slices.Contains(row.RetainedBy, string(vocab.InterfaceSatisfaction)) {
 		return
 	}
 	if !retained[subject.ID] {
@@ -404,9 +405,9 @@ func assertRetainedBy(t *testing.T, fixture string, row corpusRow, found []graph
 			fixture, subject.Ref, row.Symbol, row.RetainedBy)
 	}
 	for i := range found {
-		if found[i].ID == subject.ID && found[i].Class != string(InterfaceSatisfaction) {
+		if found[i].ID == subject.ID && found[i].Class != string(vocab.InterfaceSatisfaction) {
 			t.Errorf("InterfaceSatisfactionDetector(%s) recorded the class %q for %s, want %q",
-				fixture, found[i].Class, row.Symbol, InterfaceSatisfaction)
+				fixture, found[i].Class, row.Symbol, vocab.InterfaceSatisfaction)
 		}
 	}
 }
@@ -531,7 +532,7 @@ func TestInterfaceSatisfactionHoldsWhatAnAssertionReachesFromATestFileOutsideAPr
 // expression switch asserts nothing. A value converted to the program's own
 // interface keeps what that interface requires and nothing more.
 func TestInterfaceSatisfactionRetainsWhatAnOutsideHolderCanAssert(t *testing.T) {
-	refs := retainedRefs(t, analysisOf(t, "interface-satisfaction-outside.txtar", Options{}), InterfaceSatisfaction)
+	refs := retainedRefs(t, analysisOf(t, "interface-satisfaction-outside.txtar", Options{}), vocab.InterfaceSatisfaction)
 
 	for _, test := range []struct {
 		desc     string
@@ -558,7 +559,7 @@ func TestInterfaceSatisfactionRetainsWhatAnOutsideHolderCanAssert(t *testing.T) 
 func TestInterfaceSatisfactionRendersAConsumersSiteAgainstTheConsumersRoot(t *testing.T) {
 	const archive = "interface-satisfaction-consumer-site.txtar"
 	shared := analysisOf(t, archive, Options{})
-	found, err := shared.detect(t, InterfaceSatisfaction)
+	found, err := shared.detect(t, vocab.InterfaceSatisfaction)
 	if err != nil {
 		t.Fatalf("InterfaceSatisfactionDetector(%s) = %v, want the consumer's site recorded", archive, err)
 	}
@@ -587,7 +588,7 @@ func TestInterfaceSatisfactionRendersAConsumersSiteAgainstTheConsumersRoot(t *te
 // outside interface keeps what that package asserts through errors.AsType on
 // another value.
 func TestInterfaceSatisfactionRetainsWhatAnOutsidePackageAssertsOnAnError(t *testing.T) {
-	refs := retainedRefs(t, analysisOf(t, "interface-satisfaction-error-assertions.txtar", Options{}), InterfaceSatisfaction)
+	refs := retainedRefs(t, analysisOf(t, "interface-satisfaction-error-assertions.txtar", Options{}), vocab.InterfaceSatisfaction)
 
 	for _, test := range []struct {
 		typeName string
@@ -626,7 +627,7 @@ func TestAPublishedParameterOutsideTheTargetIsHeldByTheTypeItConverts(t *testing
 // callee's package asserts, the interface's package standing for a call through an
 // interface value. A package the callee hands the value on to is not read.
 func TestInterfaceSatisfactionRetainsWhatAnOutsideCalleesPackageAsserts(t *testing.T) {
-	refs := retainedRefs(t, analysisOf(t, "interface-satisfaction-callee.txtar", Options{}), InterfaceSatisfaction)
+	refs := retainedRefs(t, analysisOf(t, "interface-satisfaction-callee.txtar", Options{}), vocab.InterfaceSatisfaction)
 
 	for _, test := range []struct {
 		typeName string

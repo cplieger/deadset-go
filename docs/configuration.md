@@ -30,11 +30,11 @@ The analysis.
 
 | Key | Type | Default | What it does |
 | --- | --- | --- | --- |
-| `analysis.min_confidence` | `certain`, `probable`, `possible` | `probable` | The lowest confidence a finding is reported at. The default withholds the findings about a library's published API when no consumer is declared. A finding below it is not reported, and when it is a root of its dead component no finding of that component is reported. The exception is a finding that is `possible` only because production code only tests use it, as [kinds](kinds.md) `DS1004` describes, which is withheld on its own. `totals.withheld` counts what the minimum withheld at each confidence, and the text and SARIF outputs name those counts in one line |
+| `analysis.min_confidence` | `certain`, `probable`, `possible` | `probable` | The lowest confidence a finding is reported at. The default withholds the findings about a library's published API when no consumer is declared. A finding below it is not reported, and when it is a root of its dead component no finding of that component is reported. The exception is a finding that is `possible` only because production code only tests use it, as [kinds](kinds.md) `DS1102` describes, which is withheld on its own. `totals.withheld` counts what the minimum withheld at each confidence, and the text and SARIF outputs name those counts in one line |
 | `analysis.generated_files` | `exclude`, `include` | `exclude` | Whether declarations in generated files are judged. `include` reports them and marks every such finding as one no mechanical edit may act on |
 | `analysis.consumer_tests` | `test`, `production` | `test` | How a reference from a loaded consumer's test file counts |
 | `analysis.configurations` | array of objects | `[]` | The build matrix. A platform entry names an `id`, an `os`, an `arch` and optional `tags`. A project entry names an `id` and a TypeScript `project` file, which this analyzer ignores. With no platform entry the matrix derives from the target tree |
-| `analysis.matrix.complete` | boolean | `false` | Declares that the platform entries of `analysis.configurations` are every configuration the target builds, which `DS1501` needs |
+| `analysis.matrix.complete` | boolean | `false` | Declares that the platform entries of `analysis.configurations` are every configuration the target builds, which `DS1601` needs |
 | `analysis.template_dirs` | array of strings | `[]` | Directories, relative to the target root, the `template-field` exemption scans |
 | `analysis.template_delimiters` | object with `left` and `right` | `{{` and `}}` | The action delimiters that scan parses a template with |
 | `consumers.complete` | boolean | `false` | Declares that every consumer of the published API is declared, which the narrowing kinds need |
@@ -75,11 +75,11 @@ Keys this analyzer reads nothing from. It validates each one and prints it in th
 
 A declaration entry names one declaration by `symbol`, by `module` and `name`, or by `global`. The contract's [configuration schema](https://github.com/cplieger/deadset-spec/blob/v7.0.0-dev.3/contract/config.schema.json) states each shape. `go` is the section this analyzer owns, and it declares no key in this contract version.
 
-A pattern in `roots.patterns` is matched against the reference of every symbol the analysis enumerates. In a pattern, `*` matches any run of characters including the solidus. `?` matches exactly one character, counted as a Unicode code point, and no other character is special. An entry holding neither wildcard matches only the symbol whose reference it spells exactly. An entry that matches nothing is reported as `DS1704`.
+A pattern in `roots.patterns` is matched against the reference of every symbol the analysis enumerates. In a pattern, `*` matches any run of characters including the solidus. `?` matches exactly one character, counted as a Unicode code point, and no other character is special. An entry holding neither wildcard matches only the symbol whose reference it spells exactly. An entry that matches nothing is reported as `DS9004`.
 
 ### Naming a severity the contract fixes
 
-The severity of `DS1703` and `DS1704` is fixed. A severity key naming either code, or the family prefix `DS17` whose range holds them, is an unimplemented key and exits with the usage code. So no configuration reduces a stale suppression or an unmatched root below a finding.
+The severity of `DS9003` and `DS9004` is fixed. A severity key naming either code, or the family prefix `DS17` whose range holds them, is an unimplemented key and exits with the usage code. So no configuration reduces a stale suppression or an unmatched root below a finding.
 
 ## Verbs and flags
 
@@ -160,7 +160,7 @@ The ignore file is `deadset-ignore.json` at the target root. An absent file is a
 
 An entry matches only when its code, its symbol reference and its path all equal the finding's own. An entry supports no glob, regular expression, bare name or substring match. So an adjudication written for one symbol in one file masks nothing else.
 
-An entry can also keep a `DS1601` or `DS1605` finding about a requirement or a `replace` directive of `go.mod`, named by the `symbol.ref` and `position.path` the finding carries. An entry or a baseline row whose `symbol` starts with `ts://` belongs to the TypeScript analyzer: this analyzer checks its form, and it binds nothing here and is never reported stale here.
+An entry can also keep a `DS1701` or `DS1702` finding about a requirement or a `replace` directive of `go.mod`, named by the `symbol.ref` and `position.path` the finding carries. An entry or a baseline row whose `symbol` starts with `ts://` belongs to the TypeScript analyzer: this analyzer checks its form, and it binds nothing here and is never reported stale here.
 
 ### Baseline
 
@@ -172,10 +172,10 @@ The document read back on the tree it was written from then reports no finding a
 
 Four rules bind all three mechanisms:
 
-- A record binds to a declaration. A part of a declaration, which is a parameter, a receiver, a result, a statement, a store or a case, is suppressed through the declaration its own reference names. An unused parameter's finding names it by the function's reference followed by the parameter's name in parentheses: an entry or row with that reference holds that parameter alone, and one with the function's reference holds every parameter of it. The record withholds the part's finding without marking that declaration live. A directive for a parameter declared on the function's first line sits above the function. One for a parameter on a later line of a wrapped signature sits above that parameter, inside the list. A finding about a file no configuration built, a suppression record or a configured root has no suppression at all. An entry naming one matches nothing and is reported as `DS1703`. The remedy there is the change the finding names, or setting the severity of its code to `allow`. A finding about a requirement or a `replace` directive of the module file is kept only by an ignore entry or a baseline row, never by a directive. Its other remedies are `go mod tidy` for an unused requirement and deleting a `replace` that redirects nothing.
-- A record with no reason is refused and reported as `DS1701`. The refusal binds nothing, so the finding it was meant to cover stays reported beside it.
-- An ignore entry or baseline row naming a symbol and no path is refused and reported as `DS1702`. A record lacking both is two findings at one position.
-- A record that matched no current finding is reported as `DS1703` and fails the run.
+- A record binds to a declaration. A part of a declaration, which is a parameter, a receiver, a result, a statement, a store or a case, is suppressed through the declaration its own reference names. An unused parameter's finding names it by the function's reference followed by the parameter's name in parentheses: an entry or row with that reference holds that parameter alone, and one with the function's reference holds every parameter of it. The record withholds the part's finding without marking that declaration live. A directive for a parameter declared on the function's first line sits above the function. One for a parameter on a later line of a wrapped signature sits above that parameter, inside the list. A finding about a file no configuration built, a suppression record or a configured root has no suppression at all. An entry naming one matches nothing and is reported as `DS9003`. The remedy there is the change the finding names, or setting the severity of its code to `allow`. A finding about a requirement or a `replace` directive of the module file is kept only by an ignore entry or a baseline row, never by a directive. Its other remedies are `go mod tidy` for an unused requirement and deleting a `replace` that redirects nothing.
+- A record with no reason is refused and reported as `DS9001`. The refusal binds nothing, so the finding it was meant to cover stays reported beside it.
+- An ignore entry or baseline row naming a symbol and no path is refused and reported as `DS9002`. A record lacking both is two findings at one position.
+- A record that matched no current finding is reported as `DS9003` and fails the run.
 
 ## Exit codes
 

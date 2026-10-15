@@ -66,7 +66,7 @@ type Side string
 // The two sides of every edge. An edge has exactly these and no third: provides
 // exists because used_by uses it.
 const (
-	Provides Side = "provides"
+	provides Side = "provides"
 	usedBy   Side = "used_by"
 )
 
@@ -289,7 +289,7 @@ func (d *Document) Own(language string) []Reference {
 		for _, side := range [...]struct {
 			side   Side
 			symbol string
-		}{{Provides, edge.Provides}, {usedBy, edge.UsedBy}} {
+		}{{provides, edge.Provides}, {usedBy, edge.UsedBy}} {
 			if strings.HasPrefix(side.symbol, tag) {
 				own = append(own, Reference{Edge: edge.ID, Side: side.side, Symbol: side.symbol})
 			}

@@ -12,11 +12,9 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-)
 
-// ContractVersion is the Contract version this package implements. It is the
-// resolved value of contract_version when no source supplies one.
-const ContractVersion = "8.0.0"
+	"github.com/cplieger/deadset-spec/v8/vocab"
+)
 
 // defaultTestFiles is the documented default of ts.test_files.
 var defaultTestFiles = []string{"**/*.test.{ts,tsx,mts,cts}", "**/*.test-d.{ts,tsx,mts,cts}", "**/*.spec-d.{ts,tsx,mts,cts}", "**/*.spec.*", "**/__tests__/**", "**/__mocks__/**", "**/test-d/**"}
@@ -64,8 +62,8 @@ func kindPerLanguage(goKind, tsKind TargetKind) TargetKinds {
 func (k TargetKinds) IsSet() bool { return k.golang != "" }
 
 // Of is the kind of one language's code, empty where the setting is unset.
-func (k TargetKinds) Of(language Language) TargetKind {
-	if language == TSLanguage {
+func (k TargetKinds) Of(language vocab.Language) TargetKind {
+	if language == vocab.TS {
 		return k.ts
 	}
 	return k.golang
@@ -137,7 +135,7 @@ const targetKindPath = "target.kind"
 
 // kindLanguages are the languages target.kind's object form names, in the order
 // the vocabulary lists them.
-var kindLanguages = []Language{GoLanguage, TSLanguage}
+var kindLanguages = []vocab.Language{vocab.Go, vocab.TS}
 
 // checkLanguageMembers refuses the first member of target.kind's object form, in
 // document order, that names no language, then the first language it leaves out.
@@ -147,7 +145,7 @@ func checkLanguageMembers(data []byte, members map[string]json.RawMessage) *kind
 	for dec.More() {
 		token, _ := dec.Token()
 		name, _ := token.(string)
-		if !slices.Contains(kindLanguages, Language(name)) {
+		if !slices.Contains(kindLanguages, vocab.Language(name)) {
 			return &kindError{path: targetKindPath + "." + name, undeclared: true}
 		}
 		var skipped json.RawMessage
@@ -201,17 +199,6 @@ func jsonKindOf(data []byte) string {
 	}
 }
 
-// Confidence is the lowest reachability class a finding must reach to be
-// reported.
-type Confidence string
-
-// The reachability classes, from the narrowest to the widest.
-const (
-	Certain  Confidence = "certain"
-	Probable Confidence = "probable"
-	Possible Confidence = "possible"
-)
-
 // generatedFiles is whether declarations in generated files are analyzed.
 type generatedFiles string
 
@@ -221,53 +208,22 @@ const (
 	IncludeGenerated generatedFiles = "include"
 )
 
-// ConsumerTests is how a reference from a consumer's test file counts.
-type ConsumerTests string
+// consumerTests is how a reference from a consumer's test file counts.
+type consumerTests string
 
 // The consumer-test choices.
 const (
-	TestReference       ConsumerTests = "test"
-	ProductionReference ConsumerTests = "production"
+	TestReference       consumerTests = "test"
+	ProductionReference consumerTests = "production"
 )
 
-// Language is one language an analysis covers.
-type Language string
-
-// The languages.
-const (
-	GoLanguage Language = "go"
-	TSLanguage Language = "ts"
-)
-
-// Severity is what a finding of one issue kind does to a run.
-type Severity string
-
-// The severities, from the lowest to the highest.
-const (
-	Allow Severity = "allow"
-	Warn  Severity = "warn"
-	Deny  Severity = "deny"
-)
-
-// Format is one rendering of the finding list.
-type Format string
-
-// The formats.
-const (
-	Text     Format = "text"
-	JSON     Format = "json"
-	GitHub   Format = "github"
-	SARIF    Format = "sarif"
-	Template Format = "template"
-)
-
-// Sort is the order findings are rendered in.
-type Sort string
+// sortOrder is the order findings are rendered in.
+type sortOrder string
 
 // The orders.
 const (
-	ByPosition Sort = "position"
-	BySize     Sort = "size"
+	ByPosition sortOrder = "position"
+	BySize     sortOrder = "size"
 )
 
 // Cascade is how much of a dead component a rendering names.
@@ -285,17 +241,17 @@ const (
 //
 //nolint:govet // fieldalignment: the field order is the schema's key order, which Print writes
 type Config struct {
-	ContractVersion string              `json:"contract_version"`
-	Target          Target              `json:"target"`
-	Analysis        Analysis            `json:"analysis"`
-	Consumers       consumers           `json:"consumers"`
-	Roots           Roots               `json:"roots"`
-	Severity        map[string]Severity `json:"severity"`
-	Exemptions      exemptions          `json:"exemptions"`
-	Reporters       Reporters           `json:"reporters"`
-	Providers       providers           `json:"providers"`
-	Go              goSettings          `json:"go"`
-	TS              tsSettings          `json:"ts"`
+	ContractVersion string                    `json:"contract_version"`
+	Target          Target                    `json:"target"`
+	Analysis        Analysis                  `json:"analysis"`
+	Consumers       consumers                 `json:"consumers"`
+	Roots           Roots                     `json:"roots"`
+	Severity        map[string]vocab.Severity `json:"severity"`
+	Exemptions      exemptions                `json:"exemptions"`
+	Reporters       Reporters                 `json:"reporters"`
+	Providers       providers                 `json:"providers"`
+	Go              goSettings                `json:"go"`
+	TS              tsSettings                `json:"ts"`
 }
 
 // Target is what is being analyzed.
@@ -307,13 +263,13 @@ type Target struct {
 //
 //nolint:govet // fieldalignment: the field order is the schema's key order, which Print writes
 type Analysis struct {
-	Languages      []Language      `json:"languages"`
-	MinConfidence  Confidence      `json:"min_confidence"`
-	GeneratedFiles generatedFiles  `json:"generated_files"`
-	ConsumerTests  ConsumerTests   `json:"consumer_tests"`
-	Configurations []Configuration `json:"configurations"`
-	Matrix         matrix          `json:"matrix"`
-	TemplateDirs   []string        `json:"template_dirs"`
+	Languages      []vocab.Language `json:"languages"`
+	MinConfidence  vocab.Class      `json:"min_confidence"`
+	GeneratedFiles generatedFiles   `json:"generated_files"`
+	ConsumerTests  consumerTests    `json:"consumer_tests"`
+	Configurations []Configuration  `json:"configurations"`
+	Matrix         matrix           `json:"matrix"`
+	TemplateDirs   []string         `json:"template_dirs"`
 
 	TemplateDelimiters TemplateDelimiters `json:"template_delimiters"`
 }
@@ -352,11 +308,11 @@ type exemptions struct {
 //
 //nolint:govet // fieldalignment: the field order is the schema's key order, which Print writes
 type Reporters struct {
-	Formats     []Format `json:"formats"`
-	Sort        Sort     `json:"sort"`
-	Cascade     Cascade  `json:"cascade"`
-	MaxFindings int      `json:"max_findings"`
-	FailOn      Severity `json:"fail_on"`
+	Formats     []vocab.Format `json:"formats"`
+	Sort        sortOrder      `json:"sort"`
+	Cascade     Cascade        `json:"cascade"`
+	MaxFindings int            `json:"max_findings"`
+	FailOn      vocab.Severity `json:"fail_on"`
 }
 
 // providers names the analyzers the orchestrator runs. This package validates and
@@ -372,12 +328,12 @@ type providers struct {
 //
 //nolint:govet // fieldalignment: the field order is the schema's key order, which Print writes
 type provider struct {
-	Name      string     `json:"name"`
-	Languages []Language `json:"languages"`
-	Command   string     `json:"command"`
-	Source    *string    `json:"source,omitempty"`
-	Version   *string    `json:"version,omitempty"`
-	Digest    *string    `json:"digest,omitempty"`
+	Name      string           `json:"name"`
+	Languages []vocab.Language `json:"languages"`
+	Command   string           `json:"command"`
+	Source    *string          `json:"source,omitempty"`
+	Version   *string          `json:"version,omitempty"`
+	Digest    *string          `json:"digest,omitempty"`
 }
 
 // goSettings is the section the Go analyzer owns. It declares no key in this Contract
@@ -420,10 +376,10 @@ type LifecycleContract struct {
 // is unset: the field has no default and is never inferred.
 func Default() Config {
 	return Config{
-		ContractVersion: ContractVersion,
+		ContractVersion: vocab.ContractVersion,
 		Analysis: Analysis{
-			Languages:      []Language{},
-			MinConfidence:  Probable,
+			Languages:      []vocab.Language{},
+			MinConfidence:  vocab.Probable,
 			GeneratedFiles: ExcludeGenerated,
 			ConsumerTests:  TestReference,
 			Configurations: []Configuration{},
@@ -436,18 +392,18 @@ func Default() Config {
 		},
 		Consumers:  consumers{Complete: false},
 		Roots:      Roots{Patterns: []string{}},
-		Severity:   map[string]Severity{},
+		Severity:   map[string]vocab.Severity{},
 		Exemptions: exemptions{Disabled: []string{}},
 		Reporters: Reporters{
-			Formats:     []Format{Text},
+			Formats:     []vocab.Format{vocab.FormatText},
 			Sort:        ByPosition,
 			Cascade:     CascadeRoots,
 			MaxFindings: 0,
-			FailOn:      Deny,
+			FailOn:      vocab.Deny,
 		},
 		Providers: providers{Analyzers: []provider{
-			{Name: "deadset-go", Languages: []Language{GoLanguage}, Command: "deadset-go"},
-			{Name: "deadset-ts", Languages: []Language{TSLanguage}, Command: "deadset-ts"},
+			{Name: "deadset-go", Languages: []vocab.Language{vocab.Go}, Command: "deadset-go"},
+			{Name: "deadset-ts", Languages: []vocab.Language{vocab.TS}, Command: "deadset-ts"},
 		}},
 		TS: tsSettings{
 			TestFiles:              slices.Clone(defaultTestFiles),

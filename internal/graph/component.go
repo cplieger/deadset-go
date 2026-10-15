@@ -43,7 +43,7 @@ type Component struct {
 	DeletableLines int
 
 	// Held reports a component of declarations no mechanical edit deletes, as
-	// grammar/analysis.md "Positional members" states ([Graph.heldSet]).
+	// grammar/analysis/fixability.md "Positional members" states ([Graph.heldSet]).
 	Held bool
 }
 
@@ -61,10 +61,10 @@ func spanOf(s *Symbol) Span {
 	return Span{Path: s.Pos.Filename, First: s.Pos.Line, Last: max(s.Pos.Line, s.EndLine)}
 }
 
-// DistinctLines is the number of source lines a set of spans covers, a line two of
+// distinctLines is the number of source lines a set of spans covers, a line two of
 // them share counted once: a field's line inside its struct is one line whichever
 // of the two a deletion is counted from.
-func DistinctLines(spans []Span) int {
+func distinctLines(spans []Span) int {
 	ordered := slices.Clone(spans)
 	slices.SortFunc(ordered, func(a, b Span) int {
 		return cmp.Or(strings.Compare(a.Path, b.Path), cmp.Compare(a.First, b.First))
@@ -177,7 +177,7 @@ func (g *Graph) componentsOf(dead, testOfDeadCode, unreferencedTest, reachable [
 	}
 	for index := range components {
 		if !components[index].Held {
-			components[index].DeletableLines = DistinctLines(components[index].Spans)
+			components[index].DeletableLines = distinctLines(components[index].Spans)
 		}
 	}
 	return components

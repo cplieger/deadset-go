@@ -12,9 +12,10 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
-	"github.com/cplieger/deadset-go/v2/internal/report"
-	"github.com/cplieger/deadset-go/v2/internal/reporttest"
 	spec "github.com/cplieger/deadset-spec/v8"
+	"github.com/cplieger/deadset-spec/v8/render"
+	"github.com/cplieger/deadset-spec/v8/report"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // The Contract page that publishes the expression a finding line is defined by, and
@@ -44,7 +45,7 @@ func corpusAnswered() *corpusRecord {
 // and one assembly of a fixture module costs about a second under the race detector.
 //
 // A test whose target is a directory it built itself calls reportOfDir instead.
-func reportOfArchive(t *testing.T, files map[string]string) report.Envelope {
+func reportOfArchive(t *testing.T, files map[string]string) *report.Report {
 	t.Helper()
 
 	// A report names the target relative to the directory the run was invoked from
@@ -57,7 +58,7 @@ func reportOfArchive(t *testing.T, files map[string]string) report.Envelope {
 // reportOfDir is the envelope of one run over dir, which is what every test below
 // reads: the resolution a verb would build, the exemption options it would convert,
 // and the assembly itself.
-func reportOfDir(t *testing.T, dir string) report.Envelope {
+func reportOfDir(t *testing.T, dir string) *report.Report {
 	t.Helper()
 
 	// A report names the target relative to the directory the run was invoked from
@@ -65,8 +66,8 @@ func reportOfDir(t *testing.T, dir string) report.Envelope {
 	// fixture. Every test that calls this is therefore sequential.
 	t.Chdir(dir)
 	resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
-	if code != exitClean {
-		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, exitClean)
+	if code != vocab.ExitClean {
+		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
 	options, err := exemptOptions(&resolved.config)
 	if err != nil {
@@ -141,8 +142,8 @@ func TestReportOfCarriesTheStaleEntryAsItsOwnRecord(t *testing.T) {
 	}
 	stale := &envelope.StaleSuppressions[0]
 	switch {
-	case stale.Code != "DS1703":
-		t.Errorf("the stale suppression is reported under %s, want DS1703", stale.Code)
+	case stale.Code != "DS9003":
+		t.Errorf("the stale suppression is reported under %s, want DS9003", stale.Code)
 	case stale.Mechanism != "ignore":
 		t.Errorf("the stale suppression names mechanism %q, want %q", stale.Mechanism, "ignore")
 	case stale.Entry.Symbol != "go://example.com/app#vanished":
@@ -156,8 +157,8 @@ func TestReportOfCarriesTheStaleEntryAsItsOwnRecord(t *testing.T) {
 
 	// A stale row is its own record and never a row of the finding list.
 	for i := range envelope.Findings {
-		if envelope.Findings[i].Code == "DS1703" {
-			t.Errorf("the report holds a DS1703 row inside its finding list, want it in the stale-suppression array alone")
+		if envelope.Findings[i].Code == "DS9003" {
+			t.Errorf("the report holds a DS9003 row inside its finding list, want it in the stale-suppression array alone")
 		}
 	}
 	if got := envelope.Totals.StaleSuppressions; got != 1 {
@@ -227,7 +228,7 @@ func TestReportOfNamesTheDependencyADeletionOrphans(t *testing.T) {
 	})
 	envelope := reportOfDir(t, dir)
 
-	found := findingUnder(t, envelope.Findings, "DS1002")
+	found := reportedUnder(t, envelope.Findings, "DS1002")
 	want := []string{"example.com/dep"}
 	if got := found.Details.RemovesLastUseOf; !slices.Equal(got, want) {
 		t.Errorf("the finding about %s names %v as the dependencies its deletion orphans, want %v",
@@ -239,13 +240,13 @@ func TestReportOfReportsAConfiguredRootThatNamesNothing(t *testing.T) {
 	dir := findingsFixture(t, `{"target": {"kind": "application"}, "roots": {"patterns": ["go://example.com/app#Absent"]}}`)
 	envelope := reportOfDir(t, dir)
 
-	found := findingUnder(t, envelope.Findings, unmatchedRoot)
+	found := reportedUnder(t, envelope.Findings, vocab.UnmatchedRoot)
 	switch {
 	case found.Symbol.Ref != "go://example.com/app#Absent":
-		t.Errorf("%s names %q, want the configured string as the configuration spells it", unmatchedRoot, found.Symbol.Ref)
+		t.Errorf("%s names %q, want the configured string as the configuration spells it", vocab.UnmatchedRoot, found.Symbol.Ref)
 	case found.Position.Path != repositoryDocument:
 		t.Errorf("%s is sited at %q, want %q: a configured root has no line of its own",
-			unmatchedRoot, found.Position.Path, repositoryDocument)
+			vocab.UnmatchedRoot, found.Position.Path, repositoryDocument)
 	}
 }
 
@@ -275,8 +276,8 @@ func TestReportOfSitesAConfiguredRootInTheDocumentThatDeclaredIt(t *testing.T) {
 			t.Chdir(dir)
 			resolved, code := resolve("print-roots", printRootsUsage,
 				[]string{"--target=" + spelling.target, "--config=" + spelling.config}, &strings.Builder{})
-			if code != exitClean {
-				t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, exitClean)
+			if code != vocab.ExitClean {
+				t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 			}
 			options, err := exemptOptions(&resolved.config)
 			if err != nil {
@@ -287,11 +288,11 @@ func TestReportOfSitesAConfiguredRootInTheDocumentThatDeclaredIt(t *testing.T) {
 				t.Fatalf("reportOf(%s) = error %v, want the report of the run", dir, err)
 			}
 
-			found := findingUnder(t, envelope.Findings, unmatchedRoot)
+			found := reportedUnder(t, envelope.Findings, vocab.UnmatchedRoot)
 			want := "sub/other.json"
 			if found.Position.Path != want || found.Position.Line != 1 || found.Position.Column != 1 {
 				t.Errorf("%s is sited at %s:%d:%d, want %s:1:1: the position is the declaring document's",
-					unmatchedRoot, found.Position.Path, found.Position.Line, found.Position.Column, want)
+					vocab.UnmatchedRoot, found.Position.Path, found.Position.Line, found.Position.Column, want)
 			}
 		})
 	}
@@ -316,8 +317,8 @@ func TestReportOfSitesAConfiguredRootAtTheConventionalDocumentWhereNoDocumentOfT
 	t.Chdir(dir)
 	resolved, code := resolve("print-roots", printRootsUsage,
 		[]string{"--target=" + dir, "--central=" + central}, &strings.Builder{})
-	if code != exitClean {
-		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, exitClean)
+	if code != vocab.ExitClean {
+		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
 	options, err := exemptOptions(&resolved.config)
 	if err != nil {
@@ -328,10 +329,10 @@ func TestReportOfSitesAConfiguredRootAtTheConventionalDocumentWhereNoDocumentOfT
 		t.Fatalf("reportOf(%s) = error %v, want the report of the run", dir, err)
 	}
 
-	found := findingUnder(t, envelope.Findings, unmatchedRoot)
+	found := reportedUnder(t, envelope.Findings, vocab.UnmatchedRoot)
 	if found.Position.Path != repositoryDocument || found.Position.Line != 1 || found.Position.Column != 1 {
 		t.Errorf("%s is sited at %s:%d:%d, want %s:1:1: no document of the target declared the root",
-			unmatchedRoot, found.Position.Path, found.Position.Line, found.Position.Column, repositoryDocument)
+			vocab.UnmatchedRoot, found.Position.Path, found.Position.Line, found.Position.Column, repositoryDocument)
 	}
 }
 
@@ -340,8 +341,8 @@ func TestReportOfNamesEveryMemberTheContractRequiresOfTheRun(t *testing.T) {
 
 	contractVersion, schemaVersions := contractVersions(t)
 	switch {
-	case envelope.SchemaVersion != report.SchemaVersion:
-		t.Errorf("the report names schema version %q, want %q", envelope.SchemaVersion, report.SchemaVersion)
+	case envelope.SchemaVersion != vocab.SchemaVersion:
+		t.Errorf("the report names schema version %q, want %q", envelope.SchemaVersion, vocab.SchemaVersion)
 	case !slices.Contains(schemaVersions, envelope.SchemaVersion):
 		t.Errorf("the report names schema version %q, want one of the Contract's %v", envelope.SchemaVersion, schemaVersions)
 	case envelope.ContractVersion != contractVersion:
@@ -350,9 +351,9 @@ func TestReportOfNamesEveryMemberTheContractRequiresOfTheRun(t *testing.T) {
 		t.Errorf("the report names analyzer %q, want %q", envelope.Analyzer.Name, name)
 	case envelope.Analyzer.Version != version():
 		t.Errorf("the report names analyzer version %q, want %q", envelope.Analyzer.Version, version())
-	case !slices.Equal(envelope.Analyzer.SchemaVersionsAccepted, schemaVersionsAccepted):
+	case !slices.Equal(envelope.Analyzer.SchemaVersionsAccepted, vocab.SchemaVersions()):
 		t.Errorf("the report accepts schema versions %v, want %v",
-			envelope.Analyzer.SchemaVersionsAccepted, schemaVersionsAccepted)
+			envelope.Analyzer.SchemaVersionsAccepted, vocab.SchemaVersions())
 	case envelope.Target.Kind != "application":
 		t.Errorf("the report declares target kind %q, want %q", envelope.Target.Kind, "application")
 	case envelope.Target.Identity != "example.com/app":
@@ -368,7 +369,7 @@ func TestReportOfNamesEveryMemberTheContractRequiresOfTheRun(t *testing.T) {
 			len(envelope.Configurations))
 	}
 	held := &envelope.Configurations[0]
-	if held.ID == "" || held.OS == "" || held.Arch == "" {
+	if held.ID == "" || held.Platform == nil || held.Platform.OS == "" || held.Platform.Arch == "" {
 		t.Errorf("the report names configuration %+v, want an identifier, an operating system and an architecture", *held)
 	}
 
@@ -413,7 +414,7 @@ func TestReportOfRoundTripsThroughTheJSONDocumentItWrites(t *testing.T) {
 	// measures one of them.
 	var live, dead int
 	for i := range envelope.Findings {
-		if envelope.Findings[i].Live {
+		if envelope.Findings[i].LivenessRelation == "" {
 			live++
 			continue
 		}
@@ -421,24 +422,24 @@ func TestReportOfRoundTripsThroughTheJSONDocumentItWrites(t *testing.T) {
 	}
 	if live == 0 || dead == 0 {
 		t.Fatalf("the report holds %d findings about live subjects and %d about dead ones, want at least one of each: %v",
-			live, dead, findingCodes(envelope.Findings))
+			live, dead, reportedCodes(envelope.Findings))
 	}
 
 	var written bytes.Buffer
-	if err := report.JSON(&written, &envelope, report.Options{}); err != nil {
-		t.Fatalf("report.JSON() = %v, want the document of the envelope", err)
+	if err := report.Encode(&written, envelope); err != nil {
+		t.Fatalf("report.Encode() = %v, want the document of the envelope", err)
 	}
 
 	// The decode is strict: a member the envelope does not declare is a member this
 	// analyzer should not be writing, whatever the schema would accept.
-	decoded, err := reporttest.Read(written.Bytes())
+	decoded, err := report.Decode(written.Bytes())
 	if err != nil {
 		t.Fatalf("decode the document this run wrote: %v\n%s", err, written.String())
 	}
 
 	var again bytes.Buffer
-	if err := report.JSON(&again, &decoded, report.Options{}); err != nil {
-		t.Fatalf("report.JSON() over the decoded envelope = %v", err)
+	if err := report.Encode(&again, decoded); err != nil {
+		t.Fatalf("report.Encode() over the decoded envelope = %v", err)
 	}
 	if !bytes.Equal(written.Bytes(), again.Bytes()) {
 		t.Errorf("the document does not round-trip:\n--- written\n%s\n+++ read back and written again\n%s",
@@ -450,8 +451,11 @@ func TestReportOfWritesEveryTextLineThePublishedExpressionDefines(t *testing.T) 
 	envelope := reportOfArchive(t, suppressedArchive(`{"target": {"kind": "application"}}`))
 
 	var written bytes.Buffer
-	if err := report.Text(&written, &envelope, report.Options{}); err != nil {
-		t.Fatalf("report.Text() = %v, want the text report of the envelope", err)
+	if err := render.Text(&written, envelope); err != nil {
+		t.Fatalf("render.Text() = %v, want the text report of the envelope", err)
+	}
+	if err := render.Summary(&written, envelope); err != nil {
+		t.Fatalf("render.Summary() = %v, want the summary of the envelope", err)
 	}
 	lines := strings.Split(strings.TrimRight(written.String(), "\n"), "\n")
 	if len(lines) < 2 {
@@ -497,20 +501,23 @@ func TestReportOfRefusesAnEnvelopeNamingNoConformanceResult(t *testing.T) {
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
 	t.Chdir(dir)
 	resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
-	if code != exitClean {
-		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, exitClean)
+	if code != vocab.ExitClean {
+		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
 	options, err := exemptOptions(&resolved.config)
 	if err != nil {
 		t.Fatalf("Setup: exemptOptions(): %v", err)
 	}
 
-	_, _, err = reportOf(t.Context(), &resolved, &options, &corpusRecord{})
+	built, _, err := reportOf(t.Context(), &resolved, &options, &corpusRecord{})
+	if err == nil {
+		err = report.Validate(built)
+	}
 	if err == nil {
 		t.Fatalf("reportOf() with no corpus record wrote a report, want a refusal: a merge refuses a report carrying no conformance result")
 	}
-	if !errors.Is(err, report.ErrInput) {
-		t.Errorf("reportOf() with no corpus record = %v, want a %v", err, report.ErrInput)
+	if !errors.Is(err, report.ErrInvalid) {
+		t.Errorf("reportOf() with no corpus record = %v, want a %v", err, report.ErrInvalid)
 	}
 	if !strings.Contains(err.Error(), "conformance") {
 		t.Errorf("reportOf() with no corpus record = %v, want an error naming the conformance result", err)
@@ -525,8 +532,8 @@ func TestReportOfRefusesATargetTheRunDirectoryDoesNotContain(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
-	if code != exitClean {
-		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, exitClean)
+	if code != vocab.ExitClean {
+		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
 	options, err := exemptOptions(&resolved.config)
 	if err != nil {
@@ -550,8 +557,34 @@ func TestReportOfRefusesATargetTheRunDirectoryDoesNotContain(t *testing.T) {
 
 // findingCodes is the codes of a finding list, so a failure names what the run
 // reported rather than printing every finding whole.
-func findingCodes(findings []kinds.Finding) []string {
-	codes := make([]string, len(findings))
+func reportedCodes(findings []report.Finding) []vocab.Code {
+	codes := make([]vocab.Code, len(findings))
+	for i := range findings {
+		codes[i] = findings[i].Code
+	}
+	return codes
+}
+
+// reportedUnder is the one reported finding under code, ending the test where the
+// report holds another number of them.
+func reportedUnder(t *testing.T, findings []report.Finding, code vocab.Code) report.Finding {
+	t.Helper()
+
+	var held []report.Finding
+	for _, found := range findings {
+		if found.Code == code {
+			held = append(held, found)
+		}
+	}
+	if len(held) != 1 {
+		t.Fatalf("the report holds %d findings under %s, want 1: %v", len(held), code, reportedCodes(findings))
+	}
+	return held[0]
+}
+
+// findingCodes is the code of every finding, in order.
+func findingCodes(findings []kinds.Finding) []vocab.Code {
+	codes := make([]vocab.Code, len(findings))
 	for i := range findings {
 		codes[i] = findings[i].Code
 	}
@@ -570,8 +603,8 @@ type livenessAbsent struct {
 // forbids reports whether the schema forbids the relation on a finding about one
 // subject kind under one code, which is the rule read from the schema rather than a
 // copy of it.
-func (a *livenessAbsent) forbids(subjectKind, code string) bool {
-	return slices.Contains(a.subjectKinds, subjectKind) || slices.Contains(a.codes, code)
+func (a *livenessAbsent) forbids(subjectKind string, code vocab.Code) bool {
+	return slices.Contains(a.subjectKinds, subjectKind) || slices.Contains(a.codes, string(code))
 }
 
 // livenessAbsentRule reads both halves of the rule from the branch of the schema
@@ -669,12 +702,12 @@ func livenessModule(t *testing.T) string {
 // livenessWritten is which findings of one envelope's document carry a liveness
 // relation, keyed by the code and the subject reference of each, which is what a
 // reader of the document sees rather than what the finding holds in memory.
-func livenessWritten(t *testing.T, envelope *report.Envelope) map[string]bool {
+func livenessWritten(t *testing.T, envelope *report.Report) map[string]bool {
 	t.Helper()
 
 	var written bytes.Buffer
-	if err := report.JSON(&written, envelope, report.Options{}); err != nil {
-		t.Fatalf("report.JSON() = %v, want the document of the envelope", err)
+	if err := report.Encode(&written, envelope); err != nil {
+		t.Fatalf("report.Encode() = %v, want the document of the envelope", err)
 	}
 	var document struct {
 		Findings []struct {
@@ -700,7 +733,7 @@ func TestReportOfOmitsTheLivenessRelationWhereTheContractForbidsIt(t *testing.T)
 	envelope := reportOfDir(t, livenessModule(t))
 
 	rule := livenessAbsentRule(t)
-	written := livenessWritten(t, &envelope)
+	written := livenessWritten(t, envelope)
 
 	// No arm of the rule is measured by a finding list that holds none of its
 	// subjects, so the fixture's population is checked before the rule is: a finding
@@ -712,7 +745,7 @@ func TestReportOfOmitsTheLivenessRelationWhereTheContractForbidsIt(t *testing.T)
 		switch {
 		case slices.Contains(rule.subjectKinds, found.Symbol.Kind):
 			byKind++
-		case slices.Contains(rule.codes, found.Code):
+		case slices.Contains(rule.codes, string(found.Code)):
 			byCode++
 		default:
 			decided++
@@ -720,28 +753,20 @@ func TestReportOfOmitsTheLivenessRelationWhereTheContractForbidsIt(t *testing.T)
 	}
 	if byKind == 0 || byCode == 0 || decided == 0 {
 		t.Fatalf("the run reports %d findings whose subject is not a declaration, %d under the Contract's code list and %d a relation decided, want at least one of each: %v",
-			byKind, byCode, decided, findingCodes(envelope.Findings))
+			byKind, byCode, decided, reportedCodes(envelope.Findings))
 	}
 
 	for i := range envelope.Findings {
 		found := &envelope.Findings[i]
-		key := found.Code + " " + found.Symbol.Ref
+		key := string(found.Code) + " " + found.Symbol.Ref
 
 		// The document says what the finding holds: the member is written exactly
 		// where a relation decided the subject.
-		if got, want := written[key], !kinds.LivenessAbsent(found); got != want {
+		if got, want := written[key], !rule.forbids(found.Symbol.Kind, found.Code); got != want {
 			t.Errorf("the document carries a liveness relation for %s about %s: %v, want %v",
 				found.Code, found.Symbol.Ref, got, want)
 		}
 
-		// The analyzer and the Contract answer the same question about every finding
-		// the run produced: the one predicate the analyzer answers it with holds
-		// exactly where the schema forbids the relation, under either arm of the rule.
-		if got, want := kinds.LivenessAbsent(found), rule.forbids(found.Symbol.Kind, found.Code); got != want {
-			t.Errorf("kinds.LivenessAbsent(%s about the %s %s) = %v, want %v: the Contract forbids the relation on the subject kinds %v and the codes %v",
-				found.Code, found.Symbol.Kind, found.Symbol.Ref, got, want,
-				rule.subjectKinds, rule.codes)
-		}
 	}
 }
 
@@ -827,12 +852,12 @@ func TestReportOfWritesAnEmptyImplementationListForAnInterfaceNothingImplements(
 	codes := detailsRequiredCodes(t, "implementations")
 
 	var written bytes.Buffer
-	if err := report.JSON(&written, &envelope, report.Options{}); err != nil {
-		t.Fatalf("report.JSON() = %v, want the document of the envelope", err)
+	if err := report.Encode(&written, envelope); err != nil {
+		t.Fatalf("report.Encode() = %v, want the document of the envelope", err)
 	}
 	members := implementationsWritten(t, written.Bytes())
 
-	for _, key := range []string{"DS1201 go://example.com/app#unused", "DS1203 go://example.com/app#Store.Purge"} {
+	for _, key := range []string{"DS1201 go://example.com/app#unused", "DS1202 go://example.com/app#Store.Purge"} {
 		if got, held := members[key]; !held || string(got) != "[]" {
 			t.Errorf("the document's finding %s carries implementations %s, want []: the schema requires the member on %v",
 				key, got, codes)
@@ -847,10 +872,10 @@ func TestReportOfWritesAnEmptyImplementationListForAnInterfaceNothingImplements(
 	}
 
 	// The reader keeps the empty list, so a document read back writes it again.
-	decoded := reporttest.MustRead(t, "the document this run wrote", written.Bytes())
+	decoded := mustDecode(t, "the document this run wrote", written.Bytes())
 	var again bytes.Buffer
-	if err := report.JSON(&again, &decoded, report.Options{}); err != nil {
-		t.Fatalf("report.JSON() over the decoded envelope = %v", err)
+	if err := report.Encode(&again, decoded); err != nil {
+		t.Fatalf("report.Encode() over the decoded envelope = %v", err)
 	}
 	if !bytes.Equal(written.Bytes(), again.Bytes()) {
 		t.Errorf("the document does not round-trip:\n--- written\n%s\n+++ read back and written again\n%s",

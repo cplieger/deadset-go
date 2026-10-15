@@ -23,71 +23,27 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
-
-// Class names one exemption class of the vocabulary. The spelling is the one a
-// finding's retained record carries and the one a maintainer disables by.
-type Class string
-
-// The classes a Go analysis computes, in vocabulary order.
-const (
-	InterfaceSatisfaction Class = "interface-satisfaction"
-	EncodingReflection    Class = "encoding-reflection"
-	FormatVerbContract    Class = "format-verb-contract"
-	ErrorsDuckTyping      Class = "errors-duck-typing"
-	EnumGroup             Class = "enum-group"
-	GeneratedFile         Class = "generated-file"
-	LinknameCgoAsmPlugin  Class = "linkname-cgo-asm-plugin"
-	TemplateField         Class = "template-field"
-	ReflectiveLookup      Class = "reflective-lookup"
-)
-
-// goLanguage is the spelling the vocabulary gives this analyzer's language.
-const goLanguage = "go"
-
-// classRow is one class of the vocabulary and the languages it runs on.
-type classRow struct {
-	class     Class
-	languages []string
-}
-
-// vocabulary is every class of the vocabulary, in its order, the classes another
-// language's analyzer computes included. The rows are written here rather than
-// decoded from the vocabulary document at run time, and a test pins them equal to
-// the document.
-var vocabulary = []classRow{
-	{class: InterfaceSatisfaction, languages: []string{"go", "ts"}},
-	{class: EncodingReflection, languages: []string{"go"}},
-	{class: FormatVerbContract, languages: []string{"go"}},
-	{class: ErrorsDuckTyping, languages: []string{"go"}},
-	{class: EnumGroup, languages: []string{"go", "ts"}},
-	{class: GeneratedFile, languages: []string{"go", "ts"}},
-	{class: LinknameCgoAsmPlugin, languages: []string{"go"}},
-	{class: TemplateField, languages: []string{"go", "ts"}},
-	{class: ReflectiveLookup, languages: []string{"go", "ts"}},
-	{class: "decorator", languages: []string{"ts"}},
-	{class: "injection-container", languages: []string{"ts"}},
-	{class: "framework-lifecycle", languages: []string{"ts"}},
-	{class: "serialization-contract", languages: []string{"ts"}},
-}
 
 // Vocabulary lists every class of the vocabulary, in its order, which is every
 // name a configuration may disable.
-func Vocabulary() []Class {
-	names := make([]Class, len(vocabulary))
-	for i, row := range vocabulary {
-		names[i] = row.class
+func Vocabulary() []vocab.Exemption {
+	classes := vocab.ExemptionClasses()
+	names := make([]vocab.Exemption, len(classes))
+	for i := range classes {
+		names[i] = classes[i].Name
 	}
 	return names
 }
 
 // Classes lists the classes a Go analysis computes, in vocabulary order, which is
 // the order Compute runs them in.
-func Classes() []Class {
-	computed := make([]Class, 0, len(vocabulary))
-	for _, row := range vocabulary {
-		if slices.Contains(row.languages, goLanguage) {
-			computed = append(computed, row.class)
+func Classes() []vocab.Exemption {
+	var computed []vocab.Exemption
+	for _, class := range vocab.ExemptionClasses() {
+		if class.AppliesTo(vocab.Go) {
+			computed = append(computed, class.Name)
 		}
 	}
 	return computed
@@ -101,7 +57,7 @@ type Options struct {
 	// of hiding a defect can be tested. A class named twice is disabled once,
 	// and a name Compute does not run disables nothing, a class the vocabulary
 	// declares for another language alone included.
-	Disabled []Class
+	Disabled []vocab.Exemption
 
 	// TemplateDelimiters are the action delimiters the template class parses
 	// with. Both empty asks for the delimiters the template grammar itself
@@ -199,8 +155,8 @@ type Detector func(in *Input) ([]graph.Exemption, error)
 // found in a test file is returned as test evidence rather than held: it retains
 // nothing and counts as a test reference, and a fact a source file also carries
 // stays the source file's held entry.
-func Compute(in *Input, detectors map[Class]Detector) (held, testEvidence []graph.Exemption, err error) {
-	disabled := make(map[Class]bool, len(in.Options.Disabled))
+func Compute(in *Input, detectors map[vocab.Exemption]Detector) (held, testEvidence []graph.Exemption, err error) {
+	disabled := make(map[vocab.Exemption]bool, len(in.Options.Disabled))
 	for _, class := range in.Options.Disabled {
 		disabled[class] = true
 	}

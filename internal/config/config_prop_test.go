@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
 )
 
@@ -179,7 +180,7 @@ func expectedSetting(path string, drawn map[config.Source]map[string]any, defaul
 		}
 	}
 	if path == "contract_version" {
-		return config.SourceDefault, config.ContractVersion
+		return config.SourceDefault, vocab.ContractVersion
 	}
 	return config.SourceDefault, defaults[path]
 }

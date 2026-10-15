@@ -9,6 +9,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // The three expressions the grammar fixes, applied to the text of each line
@@ -46,7 +47,7 @@ const (
 // classify applies the three expressions to the text of one comment, in the
 // grammar's order, and returns what the comment is with the codes and the reason
 // it names.
-func classify(text string) (is verdict, codes []string, reason string) {
+func classify(text string) (is verdict, codes []vocab.Code, reason string) {
 	if !directiveCandidate.MatchString(text) {
 		return verdictNone, nil, ""
 	}
@@ -62,8 +63,13 @@ func classify(text string) (is verdict, codes []string, reason string) {
 }
 
 // codesOf splits the code list one expression captured.
-func codesOf(expression *regexp.Regexp, match []string) []string {
-	return strings.Split(match[expression.SubexpIndex("codes")], codeSeparator)
+func codesOf(expression *regexp.Regexp, match []string) []vocab.Code {
+	spelled := strings.Split(match[expression.SubexpIndex("codes")], codeSeparator)
+	codes := make([]vocab.Code, len(spelled))
+	for i, code := range spelled {
+		codes[i] = vocab.Code(code)
+	}
+	return codes
 }
 
 // directive is one comment in the namespace: what the decision procedure made of
@@ -71,7 +77,7 @@ func codesOf(expression *regexp.Regexp, match []string) []string {
 type directive struct {
 	text     string
 	reason   string
-	codes    []string
+	codes    []vocab.Code
 	at       token.Position
 	is       verdict
 	trailing bool // a token precedes it on its line
@@ -150,7 +156,7 @@ func (d *directive) refuse() []Refusal {
 	refusals := make([]Refusal, 0, len(d.codes))
 	for _, code := range d.codes {
 		refusals = append(refusals, Refusal{
-			Reported:  codeNoReason,
+			Reported:  vocab.SuppressionWithoutReason,
 			Code:      code,
 			Path:      d.at.Filename,
 			Site:      d.at,

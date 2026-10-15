@@ -3,6 +3,8 @@ package kinds
 import (
 	"slices"
 	"testing"
+
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // A test that calls published API outside programs may call is no test of dead
@@ -11,10 +13,10 @@ import (
 func TestATestOfPublishedAPIAtPossibleIsNoTestOfDeadCode(t *testing.T) {
 	result := computed(t, inputOf(t, "declarations-test-published.txtar", libraryConfig(), Consumers{}), declarationEmitters())
 
-	if got := namesUnder(result.Findings, testOfDeadCodeCode); !slices.Equal(got, []string{"TestSpare"}) {
-		t.Errorf("%s reports %v, want [TestSpare]", testOfDeadCodeCode, got)
+	if got := namesUnder(result.Findings, vocab.TestOfDeadCode); !slices.Equal(got, []string{"TestSpare"}) {
+		t.Errorf("%s reports %v, want [TestSpare]", vocab.TestOfDeadCode, got)
 	}
-	if found := findingOf(t, result.Findings, testOnlyUseCode, "Unmarshal"); found.Confidence != Possible {
-		t.Errorf("%s Unmarshal has confidence %s, want possible", testOnlyUseCode, found.Confidence)
+	if found := findingOf(t, result.Findings, vocab.TestOnlyUse, "Unmarshal"); found.Confidence != vocab.Possible {
+		t.Errorf("%s Unmarshal has confidence %s, want possible", vocab.TestOnlyUse, found.Confidence)
 	}
 }

@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // grammarPage is the page that fixes the suppression grammar.
@@ -101,12 +103,12 @@ func TestClassifyHasAnArmForEveryPublishedRuleAndNoneTheCorpusLacks(t *testing.T
 }
 
 func TestClassifyReadsTheTwoCodesOfOneDirectiveAsTwo(t *testing.T) {
-	const comment = "//deadset:ignore DS1001,DS1101 -- one reason for both codes."
+	const comment = "//deadset:ignore DS1001,DS1501 -- one reason for both codes."
 	is, codes, reason := classify(comment)
 	if is != verdictDirective {
 		t.Fatalf("classify(%q) = %v, want %v", comment, is, verdictDirective)
 	}
-	if want := []string{"DS1001", "DS1101"}; !slices.Equal(codes, want) {
+	if want := []vocab.Code{"DS1001", "DS1501"}; !slices.Equal(codes, want) {
 		t.Errorf("classify(%q) codes = %v, want %v", comment, codes, want)
 	}
 	if want := "one reason for both codes."; reason != want {
@@ -171,14 +173,14 @@ func TestInlineBindsADirectiveToEveryDeclarationOnTheLineBelowIt(t *testing.T) {
 	if got, want := bound[method], []string{pkg + "Catalog.Reset", pkg + "Catalog.Reset"}; !slices.Equal(got, want) {
 		t.Errorf("the directive %q bound %v, want %v", method, got, want)
 	}
-	if got, want := codesOfReason(records, method), []string{"DS1001", "DS1101"}; !slices.Equal(got, want) {
+	if got, want := codesOfReason(records, method), []vocab.Code{"DS1001", "DS1501"}; !slices.Equal(got, want) {
 		t.Errorf("the directive %q suppresses %v, want %v", method, got, want)
 	}
 }
 
 // codesOfReason lists the codes the records carrying one reason suppress.
-func codesOfReason(records []Record, reason string) []string {
-	var codes []string
+func codesOfReason(records []Record, reason string) []vocab.Code {
+	var codes []vocab.Code
 	for _, r := range records {
 		if r.Reason == reason {
 			codes = append(codes, r.Code)
@@ -216,8 +218,8 @@ func TestInlineRefusesADirectiveThatCarriesNoReason(t *testing.T) {
 	}
 
 	refusal := refusals[0]
-	if refusal.Reported != codeNoReason {
-		t.Errorf("Inline(directives.txtar) refusal reported %s, want %s", refusal.Reported, codeNoReason)
+	if refusal.Reported != vocab.SuppressionWithoutReason {
+		t.Errorf("Inline(directives.txtar) refusal reported %s, want %s", refusal.Reported, vocab.SuppressionWithoutReason)
 	}
 	if refusal.Code != "DS1001" || refusal.Reason != "" || refusal.Symbol != "" {
 		t.Errorf("Inline(directives.txtar) refusal = %+v, want the code named, no reason and no symbol bound", refusal)
@@ -294,14 +296,14 @@ func TestInlineRefusesAReasonlessDirectiveOncePerCodeItNames(t *testing.T) {
 		t.Fatalf("Inline(two-codes.txtar) returned %d refusals, want 2, one per code the directive names: %+v",
 			len(refusals), refusals)
 	}
-	got := []string{refusals[0].Code, refusals[1].Code}
-	if want := []string{"DS1001", "DS1101"}; !slices.Equal(got, want) {
+	got := []vocab.Code{refusals[0].Code, refusals[1].Code}
+	if want := []vocab.Code{"DS1001", "DS1501"}; !slices.Equal(got, want) {
 		t.Errorf("Inline(two-codes.txtar) refused the codes %v, want %v in the order the directive names them", got, want)
 	}
 	for _, refusal := range refusals {
-		if refusal.Reported != codeNoReason || refusal.Reason != "" || refusal.Site.Line != 3 {
+		if refusal.Reported != vocab.SuppressionWithoutReason || refusal.Reason != "" || refusal.Site.Line != 3 {
 			t.Errorf("Inline(two-codes.txtar) refusal = %+v, want %s at catalog.go:3 with no reason",
-				refusal, codeNoReason)
+				refusal, vocab.SuppressionWithoutReason)
 		}
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // destinationPackages are the packages whose every function and method may name
@@ -330,8 +331,8 @@ func EncodingReflectionDetector(in *Input) ([]graph.Exemption, error) {
 	}
 	f := &encodingFlow{
 		conversions:    conversions,
-		kept:           newRetention(in, EncodingReflection),
-		filled:         newRetention(in, EncodingReflection),
+		kept:           newRetention(in, vocab.EncodingReflection),
+		filled:         newRetention(in, vocab.EncodingReflection),
 		own:            programPaths(in),
 		unknownMembers: namesFunction(in, jsonPackages, unknownMemberRefusals),
 		findsMethods:   namesFunction(in, map[string]bool{reflectPackage: true}, methodFinders),
@@ -1559,7 +1560,7 @@ func concreteTypes(reached []*types.Named) []*types.Named {
 type retention struct {
 	in    *Input
 	seen  map[exemptionKey]bool
-	class Class
+	class vocab.Exemption
 	found []graph.Exemption
 }
 
@@ -1570,7 +1571,7 @@ type exemptionKey struct {
 }
 
 // newRetention prepares the accumulation of one class over one input.
-func newRetention(in *Input, class Class) *retention {
+func newRetention(in *Input, class vocab.Exemption) *retention {
 	return &retention{in: in, class: class, seen: make(map[exemptionKey]bool)}
 }
 

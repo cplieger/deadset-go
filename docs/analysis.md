@@ -18,7 +18,7 @@ A record for a part kind, a code from `DS1800` to `DS1899`, does the second alon
 
 The two are different sets, and the difference is the point. A symbol referenced only by an unreachable symbol is live under reference counting and dead under reachability. A symbol dead under both is reported under the stronger claim.
 
-The member is absent on two shapes of finding, because on each of them no relation decided anything. One is a finding whose subject is a part of a declaration or a row of a document, which is the intra-function kinds, the file and dependency kinds and the self-check kinds. The other is a finding about a declaration the analysis judged live, which is `DS1301` and `DS1204`.
+The member is absent on two shapes of finding, because on each of them no relation decided anything. One is a finding whose subject is a part of a declaration or a row of a document, which is the intra-function kinds, the file and dependency kinds and the self-check kinds. The other is a finding about a declaration the analysis judged live, which is `DS1301` and `DS1203`.
 
 A part is decided inside its declaration, whatever uses the declaration. So an unused parameter or a dead store of a function the analysis judged dead is reported beside the function's own finding. A part of a declaration a cross-language edge names is reported rather than pending. A type parameter of a dead function falls with the function and is reported under no code of its own.
 
@@ -48,7 +48,7 @@ Every root but `published-api` and `type-error` names an actual caller, which is
 
 `published-api` is the one root that only hypothesises a caller. It makes a library's exported symbol live under reachability, so the symbol's closure is not a dead component. The symbol itself stays a candidate under reference counting, which is what `DS1001` answers at the confidence the consumer model gives it. An exported method an exported type promotes from an embedded field of any visibility is a `published-api` root as well.
 
-A configured root or pattern that names no symbol is reported as `DS1704` rather than ignored.
+A configured root or pattern that names no symbol is reported as `DS9004` rather than ignored.
 
 In an application, a package that no `main` package, test, program or consumer the run loads imports, directly or through other packages, is linked into no build, so its `init` functions and blank declarations never run and root nothing. The package is dead with every declaration in it.
 
@@ -101,9 +101,9 @@ A reference from a loaded consumer holds a target symbol live like any other ref
 
 Four kinds report only where every reference that can exist is one the run loaded, because each proposes an edit whose safety depends on having seen every caller.
 
-`DS1101`, `DS1102` and `DS1103` are the narrowing kinds. A `main` package, an external test package and a package under an `internal` tree are closed whatever the run knows about consumers. A published package is closed only where the configuration declares `consumers.complete` and every declared consumer loaded. `DS1103` is the exception that needs no precondition, because unimportability is a property of the package graph.
+`DS1501`, `DS1502` and `DS1101` are the narrowing kinds. A `main` package, an external test package and a package under an `internal` tree are closed whatever the run knows about consumers. A published package is closed only where the configuration declares `consumers.complete` and every declared consumer loaded. `DS1101` is the exception that needs no precondition, because unimportability is a property of the package graph.
 
-`DS1803` applies the same rule to a signature. A result is reported unused only where every call site of the function is in the loaded graph.
+`DS1403` applies the same rule to a signature. A result is reported unused only where every call site of the function is in the loaded graph.
 
 ## Build configurations
 
@@ -127,7 +127,7 @@ A test file's tags count as any file's, so a tag only tests name, `race` among t
 
 A derived identifier is the operating system and the architecture joined by a hyphen, with each tag appended after a further hyphen. A malformed build expression ends the run naming the file.
 
-A derived matrix is never complete. It satisfies a Boolean constraint only where its atoms happen to, and a configuration no file in the tree names is never derived. The platform entries of `analysis.configurations` replace the derivation, and `analysis.matrix.complete` declares that the listed platforms are every configuration the target builds, which is the precondition `DS1501` needs. A project entry names a TypeScript compiler configuration file, and this analyzer ignores it, so a configuration listing only project entries leaves the Go matrix derived and incomplete.
+A derived matrix is never complete. It satisfies a Boolean constraint only where its atoms happen to, and a configuration no file in the tree names is never derived. The platform entries of `analysis.configurations` replace the derivation, and `analysis.matrix.complete` declares that the listed platforms are every configuration the target builds, which is the precondition `DS1601` needs. A project entry names a TypeScript compiler configuration file, and this analyzer ignores it, so a configuration listing only project entries leaves the Go matrix derived and incomplete.
 
 ## Modules below the target
 
@@ -143,7 +143,7 @@ So a Go declaration in a cgo file is a symbol, a Go helper only a cgo file calls
 
 Where that second check fails for any other reason, the file is recorded in the report's `excluded_by_cgo` list and its references are dropped. The report says that references made only from it are outside the reference set.
 
-One further limit is recorded rather than worked around. A directory whose every file a constraint excludes returns no package at all. So neither `DS1501` nor the matrix derivation can see a file in one, and nothing claims to report it.
+One further limit is recorded rather than worked around. A directory whose every file a constraint excludes returns no package at all. So neither `DS1601` nor the matrix derivation can see a file in one, and nothing claims to report it.
 
 ## What leaves the analysis
 

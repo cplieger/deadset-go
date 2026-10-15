@@ -20,6 +20,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	spec "github.com/cplieger/deadset-spec/v8"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // TestMain creates the directory the shared fixture modules are written under, runs
@@ -126,28 +127,6 @@ func analyzerPattern(t *testing.T, member string) *regexp.Regexp {
 	return compiled
 }
 
-func TestExitCodesEqualTheContract(t *testing.T) {
-	t.Parallel()
-
-	codes := contractExitCodes(t)
-	published := map[string]int{"clean": 0, "findings": 1, "usage": 2, "failure": 3, "pending": 4}
-	if len(codes) != len(published) {
-		t.Errorf("contract/exit-codes.json declares %d codes (%v), want %d", len(codes), codes, len(published))
-	}
-	for name, want := range published {
-		if got, ok := codes[name]; !ok || got != want {
-			t.Errorf("contract/exit-codes.json code %q = %d (present %t), want %d", name, got, ok, want)
-		}
-	}
-
-	wired := map[string]int{"clean": exitClean, "findings": exitFindings, "usage": exitUsage, "failure": exitFailure}
-	for name, got := range wired {
-		if want := codes[name]; got != want {
-			t.Errorf("the code this command returns for %q is %d, want %d as contract/exit-codes.json names it", name, got, want)
-		}
-	}
-}
-
 func TestExitCodeForMapsEveryWiredFailure(t *testing.T) {
 	t.Parallel()
 
@@ -169,7 +148,7 @@ func TestExitCodeForMapsEveryWiredFailure(t *testing.T) {
 		{name: "an_unimplemented_key_is_a_usage_error", err: &config.Error{Message: "not implemented"}, want: codes["usage"]},
 		{name: "a_missing_target_kind_is_a_usage_error", err: &config.Error{Message: "not set"}, want: codes["usage"]},
 		{name: "a_wrapped_refusal_is_a_usage_error", err: errors.Join(errors.New("resolve"), &config.Error{Message: "malformed"}), want: codes["usage"]},
-		{name: "a_configured_template_directory_the_target_does_not_hold_is_a_usage_error", err: fmt.Errorf("exempt: %s: %w: absent", exempt.TemplateField, exempt.ErrTemplateDir), want: codes["usage"]},
+		{name: "a_configured_template_directory_the_target_does_not_hold_is_a_usage_error", err: fmt.Errorf("exempt: %s: %w: absent", vocab.TemplateField, exempt.ErrTemplateDir), want: codes["usage"]},
 		{name: "a_matrix_holding_no_configuration_is_a_usage_error", err: fmt.Errorf("%w: %s", load.ErrNoConfiguration, "/src/app"), want: codes["usage"]},
 		{name: "a_matrix_the_merge_cannot_key_a_configuration_of_is_a_usage_error", err: fmt.Errorf("%w: %d configurations, at most 64", graph.ErrMatrix, 65), want: codes["usage"]},
 		{name: "a_load_failure_is_a_failure", err: loadFailure, want: codes["failure"]},
@@ -212,103 +191,103 @@ func TestRun(t *testing.T) {
 		{
 			name:       "version_prints_the_analyzer_and_the_contract_it_implements",
 			args:       []string{"version"},
-			wantCode:   exitClean,
+			wantCode:   vocab.ExitClean,
 			wantStdout: []string{"deadset-go " + version() + "\n", "contract " + contractVersion + "\n"},
 		},
 		{
 			name:       "no_arguments_is_a_usage_error",
 			args:       nil,
-			wantCode:   exitUsage,
+			wantCode:   vocab.ExitUsage,
 			wantStderr: []string{"usage: deadset-go", "analyze", "explain", "print-config", "print-roots", "print-retained", "describe", "version"},
 		},
 		{
 			name:       "an_unknown_verb_is_a_usage_error",
 			args:       []string{"analyse"},
-			wantCode:   exitUsage,
+			wantCode:   vocab.ExitUsage,
 			wantStderr: []string{`unknown verb "analyse"`, "usage: deadset-go"},
 		},
 		{
 			name:       "fix_flag_is_refused_by_name_with_the_usage_text",
 			args:       []string{"analyze", "--fix"},
-			wantCode:   exitUsage,
+			wantCode:   vocab.ExitUsage,
 			wantStderr: []string{"--fix", "not supported", "never edits a source file", "usage: deadset-go"},
 		},
 		{
 			name:       "rewrite_flag_is_refused_by_name_with_the_usage_text",
 			args:       []string{"analyze", "--rewrite"},
-			wantCode:   exitUsage,
+			wantCode:   vocab.ExitUsage,
 			wantStderr: []string{"--rewrite", "not supported", "never edits a source file", "usage: deadset-go"},
 		},
 		{
 			name:       "analyze_writes_its_report_to_a_path_the_invocation_names",
 			args:       []string{"analyze"},
-			wantCode:   exitUsage,
+			wantCode:   vocab.ExitUsage,
 			wantStderr: []string{"--report names", "usage: deadset-go analyze"},
 		},
 		{
 			name:       "analyze_refuses_a_format_it_renders_nothing_for",
 			args:       []string{"analyze", "--report=report.json", "--format=annotations"},
-			wantCode:   exitUsage,
+			wantCode:   vocab.ExitUsage,
 			wantStderr: []string{`"annotations" is not a format`, "github", "sarif", "template", "text"},
 		},
 		{
 			name:       "analyze_refuses_a_format_named_twice",
 			args:       []string{"analyze", "--report=report.json", "--format=text", "--format=text"},
-			wantCode:   exitUsage,
+			wantCode:   vocab.ExitUsage,
 			wantStderr: []string{`"text" is named twice`},
 		},
 		{
 			name:       "analyze_takes_no_argument",
 			args:       []string{"analyze", "--report=report.json", "."},
-			wantCode:   exitUsage,
+			wantCode:   vocab.ExitUsage,
 			wantStderr: []string{`analyze takes no argument, got "."`, "usage: deadset-go analyze"},
 		},
 		{
 			name:       "explain_explains_the_symbol_the_argument_names",
 			args:       []string{"explain"},
-			wantCode:   exitUsage,
+			wantCode:   vocab.ExitUsage,
 			wantStderr: []string{"no symbol was named", "usage: deadset-go explain"},
 		},
 		{
 			name:       "explain_explains_one_symbol",
 			args:       []string{"explain", "--why=go://example.com/app#Catalog", "go://example.com/app#Other"},
-			wantCode:   exitUsage,
+			wantCode:   vocab.ExitUsage,
 			wantStderr: []string{"explains one symbol", "the argument, --why"},
 		},
 		{
 			name:       "print_roots_takes_no_argument",
 			args:       []string{"print-roots", "."},
-			wantCode:   exitUsage,
+			wantCode:   vocab.ExitUsage,
 			wantStderr: []string{`print-roots takes no argument, got "."`, "usage: deadset-go print-roots"},
 		},
 		{
 			name:       "print_roots_refuses_an_undefined_flag",
 			args:       []string{"print-roots", "--roots=go://example.com/app#Catalog"},
-			wantCode:   exitUsage,
+			wantCode:   vocab.ExitUsage,
 			wantStderr: []string{"flag provided but not defined", "usage: deadset-go print-roots"},
 		},
 		{
 			name:       "print_retained_takes_no_argument",
 			args:       []string{"print-retained", "."},
-			wantCode:   exitUsage,
+			wantCode:   vocab.ExitUsage,
 			wantStderr: []string{`print-retained takes no argument, got "."`, "usage: deadset-go print-retained"},
 		},
 		{
 			name:       "describe_takes_no_argument",
 			args:       []string{"describe", "corpus"},
-			wantCode:   exitUsage,
+			wantCode:   vocab.ExitUsage,
 			wantStderr: []string{`describe takes no argument, got "corpus"`},
 		},
 		{
 			name:       "print_config_takes_no_argument",
 			args:       []string{"print-config", "."},
-			wantCode:   exitUsage,
+			wantCode:   vocab.ExitUsage,
 			wantStderr: []string{`print-config takes no argument, got "."`, "usage: deadset-go print-config"},
 		},
 		{
 			name:       "print_config_refuses_an_undefined_flag",
 			args:       []string{"print-config", "--config-file=deadset.json"},
-			wantCode:   exitUsage,
+			wantCode:   vocab.ExitUsage,
 			wantStderr: []string{"flag provided but not defined", "usage: deadset-go print-config"},
 		},
 	}
@@ -331,10 +310,10 @@ func TestRun(t *testing.T) {
 					t.Errorf("run(%q) stderr = %q, want it to contain %q", tc.args, stderr.String(), want)
 				}
 			}
-			if tc.wantCode == exitClean && stderr.Len() != 0 {
+			if tc.wantCode == vocab.ExitClean && stderr.Len() != 0 {
 				t.Errorf("run(%q) stderr = %q, want empty on exit 0", tc.args, stderr.String())
 			}
-			if tc.wantCode != exitClean && stdout.Len() != 0 {
+			if tc.wantCode != vocab.ExitClean && stdout.Len() != 0 {
 				t.Errorf("run(%q) stdout = %q, want empty on exit %d", tc.args, stdout.String(), tc.wantCode)
 			}
 		})
@@ -347,8 +326,8 @@ func TestDescribeNamesTheContractItImplements(t *testing.T) {
 	contractVersion, schemaVersions := contractVersions(t)
 
 	var stdout, stderr bytes.Buffer
-	if got := run(t.Context(), []string{"describe"}, &stdout, &stderr); got != exitClean {
-		t.Fatalf("run(describe) = %d, want %d\nstderr: %q", got, exitClean, stderr.String())
+	if got := run(t.Context(), []string{"describe"}, &stdout, &stderr); got != vocab.ExitClean {
+		t.Fatalf("run(describe) = %d, want %d\nstderr: %q", got, vocab.ExitClean, stderr.String())
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("run(describe) stderr = %q, want empty", stderr.String())
@@ -385,7 +364,7 @@ func TestDescribeNamesTheContractItImplements(t *testing.T) {
 	if !slices.Equal(described.SchemaVersionsAccepted, schemaVersions) {
 		t.Errorf("describe accepts schema versions %v, want %v as contract/contract.json names them", described.SchemaVersionsAccepted, schemaVersions)
 	}
-	if want := []string{string(config.GoLanguage)}; !slices.Equal(described.Languages, want) {
+	if want := []string{string(vocab.Go)}; !slices.Equal(described.Languages, want) {
 		t.Errorf("describe claimed languages %v, want %v", described.Languages, want)
 	}
 	// The orchestrator's handshake reads this record before it runs an analysis, so
@@ -396,7 +375,7 @@ func TestDescribeNamesTheContractItImplements(t *testing.T) {
 	}
 	want := conformanceBlock{
 		CorpusVersion: answered.conformance.CorpusVersion,
-		Result:        answered.conformance.Result,
+		Result:        string(answered.conformance.Result),
 		Digest:        answered.conformance.Digest,
 	}
 	if described.Conformance != want {
@@ -454,8 +433,8 @@ func TestPrintConfigNamesTheSourceOfEverySetting(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-config", "--target=" + dir, "--central=" + central, "--min-confidence=certain"}
-	if got := run(t.Context(), args, &stdout, &stderr); got != exitClean {
-		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, exitClean, stderr.String())
+	if got := run(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, vocab.ExitClean, stderr.String())
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("run(%q) stderr = %q, want empty", args, stderr.String())
@@ -463,7 +442,7 @@ func TestPrintConfigNamesTheSourceOfEverySetting(t *testing.T) {
 
 	printed := decodePrinted(t, stdout.Bytes())
 	if printed.Target.Kind != config.OneKind(config.Library) {
-		t.Errorf("run(%q) printed target.kind = %q, want %q from the repository configuration", args, printed.Target.Kind.Of(config.GoLanguage), config.Library)
+		t.Errorf("run(%q) printed target.kind = %q, want %q from the repository configuration", args, printed.Target.Kind.Of(vocab.Go), config.Library)
 	}
 	if printed.Reporters.Sort != config.BySize {
 		t.Errorf("run(%q) printed reporters.sort = %q, want %q: the repository configuration outranks the central one", args, printed.Reporters.Sort, config.BySize)
@@ -471,8 +450,8 @@ func TestPrintConfigNamesTheSourceOfEverySetting(t *testing.T) {
 	if printed.Reporters.MaxFindings != 20 {
 		t.Errorf("run(%q) printed reporters.max_findings = %d, want 20 from the central configuration", args, printed.Reporters.MaxFindings)
 	}
-	if printed.Analysis.MinConfidence != config.Certain {
-		t.Errorf("run(%q) printed analysis.min_confidence = %q, want %q from the flag", args, printed.Analysis.MinConfidence, config.Certain)
+	if printed.Analysis.MinConfidence != vocab.Certain {
+		t.Errorf("run(%q) printed analysis.min_confidence = %q, want %q from the flag", args, printed.Analysis.MinConfidence, vocab.Certain)
 	}
 
 	wantProvenance := map[string]string{
@@ -493,12 +472,12 @@ func TestPrintConfigOutputReadBackResolvesToTheSameConfiguration(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	writeDocument(t, dir, "deadset.json", `{"target": {"kind": "application"}, "severity": {"DS1101": "warn"}, "roots": {"patterns": ["go://example.com/app#Catalog"]}}`)
+	writeDocument(t, dir, "deadset.json", `{"target": {"kind": "application"}, "severity": {"DS1501": "warn"}, "roots": {"patterns": ["go://example.com/app#Catalog"]}}`)
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-config", "--target=" + dir}
-	if got := run(t.Context(), args, &stdout, &stderr); got != exitClean {
-		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, exitClean, stderr.String())
+	if got := run(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, vocab.ExitClean, stderr.String())
 	}
 	first := decodePrinted(t, stdout.Bytes())
 
@@ -507,8 +486,8 @@ func TestPrintConfigOutputReadBackResolvesToTheSameConfiguration(t *testing.T) {
 	readBack := writeDocument(t, t.TempDir(), "deadset.json", stdout.String())
 	var again, stderrAgain bytes.Buffer
 	argsAgain := []string{"print-config", "--target=" + filepath.Dir(readBack)}
-	if got := run(t.Context(), argsAgain, &again, &stderrAgain); got != exitClean {
-		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", argsAgain, got, exitClean, stderrAgain.String())
+	if got := run(t.Context(), argsAgain, &again, &stderrAgain); got != vocab.ExitClean {
+		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", argsAgain, got, vocab.ExitClean, stderrAgain.String())
 	}
 	second := decodePrinted(t, again.Bytes())
 
@@ -609,8 +588,8 @@ func TestPrintConfigRefusesADocumentOverTheSizeBound(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-config", "--target=" + dir}
-	if got := run(t.Context(), args, &stdout, &stderr); got != exitUsage {
-		t.Errorf("run(%q) = %d, want %d for a document over the size bound", args, got, exitUsage)
+	if got := run(t.Context(), args, &stdout, &stderr); got != vocab.ExitUsage {
+		t.Errorf("run(%q) = %d, want %d for a document over the size bound", args, got, vocab.ExitUsage)
 	}
 	if stdout.Len() != 0 {
 		t.Errorf("run(%q) stdout = %q, want empty", args, stdout.String())
@@ -631,13 +610,13 @@ func TestPrintConfigReadsTheDocumentTheInvocationNames(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-config", "--target=" + dir, "--config=" + named}
-	if got := run(t.Context(), args, &stdout, &stderr); got != exitClean {
-		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, exitClean, stderr.String())
+	if got := run(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, vocab.ExitClean, stderr.String())
 	}
 
 	printed := decodePrinted(t, stdout.Bytes())
 	if printed.Target.Kind != config.OneKind(config.Library) {
-		t.Errorf("run(%q) printed target.kind = %q, want %q: --config names the repository configuration to read", args, printed.Target.Kind.Of(config.GoLanguage), config.Library)
+		t.Errorf("run(%q) printed target.kind = %q, want %q: --config names the repository configuration to read", args, printed.Target.Kind.Of(vocab.Go), config.Library)
 	}
 	if got, want := printed.Provenance["target.kind"], "repository: "+named; got != want {
 		t.Errorf("run(%q) printed provenance[target.kind] = %q, want %q", args, got, want)
@@ -702,44 +681,20 @@ func TestSettingFlagsSupplyASchemaKey(t *testing.T) {
 	}
 }
 
-// contractKind reads one issue kind contract/kinds.json publishes.
-func contractKind(t *testing.T, code string) map[string]any {
-	t.Helper()
-
-	body, err := spec.Contract.ReadFile("contract/kinds.json")
-	if err != nil {
-		t.Fatalf("Setup: read contract/kinds.json: %v", err)
-	}
-	var document struct {
-		Kinds []map[string]any `json:"kinds"`
-	}
-	if err := json.Unmarshal(body, &document); err != nil {
-		t.Fatalf("Setup: decode contract/kinds.json: %v", err)
-	}
-
-	for _, kind := range document.Kinds {
-		if kind["code"] == code {
-			return kind
-		}
-	}
-	t.Fatalf("Setup: contract/kinds.json declares no kind %s", code)
-	return nil
-}
-
 func TestUnmatchedRootNamesTheKindTheContractPublishes(t *testing.T) {
 	t.Parallel()
 
-	kind := contractKind(t, unmatchedRoot)
-	if got, want := kind["name"], "unmatched-root"; got != want {
-		t.Errorf("contract/kinds.json names %s %q, want %q: the code this command prints is that kind", unmatchedRoot, got, want)
+	kind, live := vocab.KindOf(vocab.UnmatchedRoot)
+	if !live || kind.Name != "unmatched-root" {
+		t.Errorf("the vocabulary names %s %q (live %t), want unmatched-root: the code this command prints is that kind", vocab.UnmatchedRoot, kind.Name, live)
 	}
 	// The run fails on the finding because the kind's default severity is the
 	// failing one, which is what makes the exit code this verb returns correct.
-	if got, want := kind["default_severity"], string(config.Deny); got != want {
-		t.Errorf("contract/kinds.json gives %s default severity %q, want %q", unmatchedRoot, got, want)
+	if got, want := string(kind.DefaultSeverity), string(vocab.Deny); got != want {
+		t.Errorf("the vocabulary gives %s default severity %q, want %q", vocab.UnmatchedRoot, got, want)
 	}
-	if got := kind["default_enabled"]; got != true {
-		t.Errorf("contract/kinds.json has %s default_enabled %v, want true", unmatchedRoot, got)
+	if !kind.DefaultEnabled {
+		t.Errorf("the vocabulary has %s disabled by default, want it enabled", vocab.UnmatchedRoot)
 	}
 }
 
@@ -784,8 +739,8 @@ func TestPrintRootsNamesEveryRootAndWhyItIsOne(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-roots", "--target=" + dir}
-	if got := run(t.Context(), args, &stdout, &stderr); got != exitClean {
-		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, exitClean, stderr.String())
+	if got := run(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, vocab.ExitClean, stderr.String())
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("run(%q) stderr = %q, want empty", args, stderr.String())
@@ -834,8 +789,8 @@ func TestPrintRootsRootsThePublishedAPIOfALibraryTarget(t *testing.T) {
 			document := writeDocument(t, documents, string(tc.kind)+".json", `{"target": {"kind": "`+string(tc.kind)+`"}}`)
 			var stdout, stderr bytes.Buffer
 			args := []string{"print-roots", "--target=" + dir, "--config=" + document}
-			if got := run(t.Context(), args, &stdout, &stderr); got != exitClean {
-				t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, exitClean, stderr.String())
+			if got := run(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+				t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, vocab.ExitClean, stderr.String())
 			}
 			if got := stdout.String(); got != tc.want {
 				t.Errorf("run(%q) stdout = %q, want %q", args, got, tc.want)
@@ -851,8 +806,8 @@ func TestPrintRootsReportsEveryConfiguredStringThatNamesNothing(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-roots", "--target=" + dir}
-	if got := run(t.Context(), args, &stdout, &stderr); got != exitFindings {
-		t.Fatalf("run(%q) = %d, want %d for a configured string that names nothing\nstderr: %q", args, got, exitFindings, stderr.String())
+	if got := run(t.Context(), args, &stdout, &stderr); got != vocab.ExitFindings {
+		t.Fatalf("run(%q) = %d, want %d for a configured string that names nothing\nstderr: %q", args, got, vocab.ExitFindings, stderr.String())
 	}
 
 	// The roots the run did find are printed: the unmatched string is a finding
@@ -864,7 +819,7 @@ func TestPrintRootsReportsEveryConfiguredStringThatNamesNothing(t *testing.T) {
 	if got := stdout.String(); got != wantStdout {
 		t.Errorf("run(%q) stdout =\n%s\nwant\n%s", args, got, wantStdout)
 	}
-	wantStderr := unmatchedRoot + ": roots.patterns names nothing: go://example.com/app#Absent\n"
+	wantStderr := string(vocab.UnmatchedRoot) + ": roots.patterns names nothing: go://example.com/app#Absent\n"
 	if got := stderr.String(); got != wantStderr {
 		t.Errorf("run(%q) stderr = %q, want %q", args, got, wantStderr)
 	}
@@ -934,8 +889,8 @@ func TestPrintRootsStopsWhenTheRunIsCancelled(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-roots", "--target=" + dir}
-	if got := run(ctx, args, &stdout, &stderr); got != exitFailure {
-		t.Errorf("run(a cancelled run, %q) = %d, want %d\nstderr: %q", args, got, exitFailure, stderr.String())
+	if got := run(ctx, args, &stdout, &stderr); got != vocab.ExitFailure {
+		t.Errorf("run(a cancelled run, %q) = %d, want %d\nstderr: %q", args, got, vocab.ExitFailure, stderr.String())
 	}
 	if stdout.Len() != 0 {
 		t.Errorf("run(a cancelled run, %q) stdout = %q, want empty", args, stdout.String())
@@ -975,15 +930,15 @@ func TestPrintRetainedNamesEverySymbolAnExemptionHeldBackAndTheClassThatHeldIt(t
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-retained", "--target=" + dir}
-	if got := run(t.Context(), args, &stdout, &stderr); got != exitClean {
-		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, exitClean, stderr.String())
+	if got := run(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, vocab.ExitClean, stderr.String())
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("run(%q) stderr = %q, want empty", args, stderr.String())
 	}
 
-	want := "go://example.com/app#Sink.Write\tinterface-satisfaction\tapp.go:26:23\tsatisfies io.Writer\n" +
-		"go://example.com/app#Tier.String\tformat-verb-contract\tapp.go:29:14\tformatted by fmt.Println\n"
+	want := "go://example.com/app#Sink.Write\tapp.go:13:16\tinterface-satisfaction\tapp.go:26:23\tsatisfies io.Writer\n" +
+		"go://example.com/app#Tier.String\tapp.go:22:15\tformat-verb-contract\tapp.go:29:14\tformatted by fmt.Println\n"
 	if got := stdout.String(); got != want {
 		t.Errorf("run(%q) stdout =\n%s\nwant\n%s", args, got, want)
 	}
@@ -996,14 +951,14 @@ func TestPrintRetainedDropsTheClassTheConfigurationDisables(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-retained", "--target=" + dir}
-	if got := run(t.Context(), args, &stdout, &stderr); got != exitClean {
-		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, exitClean, stderr.String())
+	if got := run(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, vocab.ExitClean, stderr.String())
 	}
 
 	// The disabled class retains nothing, so its symbol is a reported candidate
 	// rather than a retained one and its line is gone; the class that still runs
 	// holds its own symbol back exactly as before.
-	want := "go://example.com/app#Sink.Write\tinterface-satisfaction\tapp.go:26:23\tsatisfies io.Writer\n"
+	want := "go://example.com/app#Sink.Write\tapp.go:13:16\tinterface-satisfaction\tapp.go:26:23\tsatisfies io.Writer\n"
 	if got := stdout.String(); got != want {
 		t.Errorf("run(%q) stdout =\n%s\nwant\n%s", args, got, want)
 	}
@@ -1016,8 +971,8 @@ func TestPrintRetainedRefusesAClassNameOutsideTheVocabulary(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-retained", "--target=" + dir}
-	if got := run(t.Context(), args, &stdout, &stderr); got != exitUsage {
-		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, exitUsage, stderr.String())
+	if got := run(t.Context(), args, &stdout, &stderr); got != vocab.ExitUsage {
+		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, vocab.ExitUsage, stderr.String())
 	}
 	if stdout.Len() != 0 {
 		t.Errorf("run(%q) stdout = %q, want empty: a refused configuration computes no exemption", args, stdout.String())
@@ -1039,8 +994,8 @@ func TestPrintRetainedAcceptsAClassAnotherLanguageComputesAndRetainsAsBefore(t *
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-retained", "--target=" + dir}
-	if got := run(t.Context(), args, &stdout, &stderr); got != exitClean {
-		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, exitClean, stderr.String())
+	if got := run(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, vocab.ExitClean, stderr.String())
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("run(%q) stderr = %q, want empty", args, stderr.String())
@@ -1049,8 +1004,8 @@ func TestPrintRetainedAcceptsAClassAnotherLanguageComputesAndRetainsAsBefore(t *
 	// A configuration shared with the TypeScript analyzer names classes this one
 	// does not compute, and switching them off changes nothing here: both classes
 	// that run still hold their symbols back.
-	want := "go://example.com/app#Sink.Write\tinterface-satisfaction\tapp.go:26:23\tsatisfies io.Writer\n" +
-		"go://example.com/app#Tier.String\tformat-verb-contract\tapp.go:29:14\tformatted by fmt.Println\n"
+	want := "go://example.com/app#Sink.Write\tapp.go:13:16\tinterface-satisfaction\tapp.go:26:23\tsatisfies io.Writer\n" +
+		"go://example.com/app#Tier.String\tapp.go:22:15\tformat-verb-contract\tapp.go:29:14\tformatted by fmt.Println\n"
 	if got := stdout.String(); got != want {
 		t.Errorf("run(%q) stdout =\n%s\nwant\n%s", args, got, want)
 	}
@@ -1063,8 +1018,8 @@ func TestPrintRetainedReportsEveryConfiguredStringThatNamesNothing(t *testing.T)
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-retained", "--target=" + dir}
-	if got := run(t.Context(), args, &stdout, &stderr); got != exitFindings {
-		t.Fatalf("run(%q) = %d, want %d for a configured root that names nothing\nstderr: %q", args, got, exitFindings, stderr.String())
+	if got := run(t.Context(), args, &stdout, &stderr); got != vocab.ExitFindings {
+		t.Fatalf("run(%q) = %d, want %d for a configured root that names nothing\nstderr: %q", args, got, vocab.ExitFindings, stderr.String())
 	}
 
 	// The root set is what the sweep decided the candidates against, so a root
@@ -1073,7 +1028,7 @@ func TestPrintRetainedReportsEveryConfiguredStringThatNamesNothing(t *testing.T)
 	if got, want := stdout.String(), "go://example.com/app#Sink.Write"; !strings.Contains(got, want) {
 		t.Errorf("run(%q) stdout =\n%s\nwant it to contain %q", args, got, want)
 	}
-	wantStderr := unmatchedRoot + ": roots.patterns names nothing: go://example.com/app#Absent\n"
+	wantStderr := string(vocab.UnmatchedRoot) + ": roots.patterns names nothing: go://example.com/app#Absent\n"
 	if got := stderr.String(); got != wantStderr {
 		t.Errorf("run(%q) stderr = %q, want %q", args, got, wantStderr)
 	}
@@ -1147,10 +1102,10 @@ func TestPrintRetainedOverAModuleThatHasTestFiles(t *testing.T) {
 	// the production sweep counts no such reference and the class holds nothing.
 	// The order is the site's: the production file first, then the external test
 	// file, then the in-package one.
-	const production = "go://example.com/app#Sink.Write\tinterface-satisfaction\tapp.go:26:23\tsatisfies io.Writer\n" +
-		"go://example.com/app#Tier.String\tformat-verb-contract\tapp.go:29:14\tformatted by fmt.Println\n"
-	const inTestFiles = "go://example.com/app_test#tally.Write\tinterface-satisfaction\tapp_ext_test.go:20:23\tsatisfies io.Writer\n" +
-		"go://example.com/app#probe.Write\tinterface-satisfaction\tapp_test.go:20:23\tsatisfies io.Writer\n"
+	const production = "go://example.com/app#Sink.Write\tapp.go:13:16\tinterface-satisfaction\tapp.go:26:23\tsatisfies io.Writer\n" +
+		"go://example.com/app#Tier.String\tapp.go:22:15\tformat-verb-contract\tapp.go:29:14\tformatted by fmt.Println\n"
+	const inTestFiles = "go://example.com/app_test#tally.Write\tapp_ext_test.go:13:17\tinterface-satisfaction\tapp_ext_test.go:20:23\tsatisfies io.Writer\n" +
+		"go://example.com/app#probe.Write\tapp_test.go:13:17\tinterface-satisfaction\tapp_test.go:20:23\tsatisfies io.Writer\n"
 
 	tests := []struct {
 		name string
@@ -1170,8 +1125,8 @@ func TestPrintRetainedOverAModuleThatHasTestFiles(t *testing.T) {
 
 			var stdout, stderr bytes.Buffer
 			args := append([]string{"print-retained", "--target=" + dir}, tc.mode...)
-			if got := run(t.Context(), args, &stdout, &stderr); got != exitClean {
-				t.Fatalf("run(%q) over a module with test files = %d, want %d\nstderr: %q", args, got, exitClean, stderr.String())
+			if got := run(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+				t.Fatalf("run(%q) over a module with test files = %d, want %d\nstderr: %q", args, got, vocab.ExitClean, stderr.String())
 			}
 			if stderr.Len() != 0 {
 				t.Errorf("run(%q) stderr = %q, want empty", args, stderr.String())
@@ -1190,8 +1145,8 @@ func TestPrintRetainedRefusesAModeOutsideTheTwoItAnswers(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-retained", "--target=" + dir, "--mode=report"}
-	if got := run(t.Context(), args, &stdout, &stderr); got != exitUsage {
-		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, exitUsage, stderr.String())
+	if got := run(t.Context(), args, &stdout, &stderr); got != vocab.ExitUsage {
+		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, vocab.ExitUsage, stderr.String())
 	}
 	if stdout.Len() != 0 {
 		t.Errorf("run(%q) stdout = %q, want empty: a refused invocation analyzes nothing", args, stdout.String())
@@ -1268,8 +1223,8 @@ func TestPrintRootsOverAMatrixLoadsEveryConfigurationAndNamesThemPerRoot(t *test
 
 			var stdout, stderr bytes.Buffer
 			args := []string{"print-roots", "--target=" + dir}
-			if got := run(t.Context(), args, &stdout, &stderr); got != exitClean {
-				t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, exitClean, stderr.String())
+			if got := run(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+				t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, vocab.ExitClean, stderr.String())
 			}
 			if stderr.Len() != 0 {
 				t.Errorf("run(%q) stderr = %q, want empty", args, stderr.String())
@@ -1290,9 +1245,9 @@ func TestPrintRootsFailsWhenOneConfigurationOfTheMatrixDoesNotLoad(t *testing.T)
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-roots", "--target=" + dir}
-	if got := run(t.Context(), args, &stdout, &stderr); got != exitFailure {
+	if got := run(t.Context(), args, &stdout, &stderr); got != vocab.ExitFailure {
 		t.Fatalf("run(%q) over a matrix whose second configuration does not load = %d, want %d\nstderr: %q",
-			args, got, exitFailure, stderr.String())
+			args, got, vocab.ExitFailure, stderr.String())
 	}
 	if stdout.Len() != 0 {
 		t.Errorf("run(%q) stdout = %q, want empty: a matrix missing a configuration has no intersection to print", args, stdout.String())
@@ -1326,14 +1281,14 @@ func TestPrintRetainedReadsTheDelimitersTheConfigurationSets(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-retained", "--target=" + dir}
-	if got := run(t.Context(), args, &stdout, &stderr); got != exitClean {
-		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, exitClean, stderr.String())
+	if got := run(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+		t.Fatalf("run(%q) = %d, want %d\nstderr: %q", args, got, vocab.ExitClean, stderr.String())
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("run(%q) stderr = %q, want empty", args, stderr.String())
 	}
 
-	want := "go://example.com/app#Page.Subtitle\ttemplate-field\ttemplates/page.tmpl:1:11\tnamed by [[.Subtitle]]\n"
+	want := "go://example.com/app#Page.Subtitle\tapp.go:6:2\ttemplate-field\ttemplates/page.tmpl:1:11\tnamed by [[.Subtitle]]\n"
 	if got := stdout.String(); got != want {
 		t.Errorf("run(%q) stdout =\n%s\nwant\n%s", args, got, want)
 	}
@@ -1351,16 +1306,16 @@ func TestPrintRootsReportsNoConfiguredStringOneConfigurationOfTheMatrixMatched(t
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-roots", "--target=" + dir}
-	if got := run(t.Context(), args, &stdout, &stderr); got != exitFindings {
+	if got := run(t.Context(), args, &stdout, &stderr); got != vocab.ExitFindings {
 		t.Fatalf("run(%q) = %d, want %d for the one configured string no configuration matched\nstderr: %q",
-			args, got, exitFindings, stderr.String())
+			args, got, vocab.ExitFindings, stderr.String())
 	}
 
 	want := "go://example.com/app#Elevated\tconfigured\tgo://example.com/app#Elevated\twindows-amd64\n"
 	if got := stdout.String(); got != want {
 		t.Errorf("run(%q) stdout =\n%s\nwant\n%s", args, got, want)
 	}
-	wantStderr := unmatchedRoot + ": roots.patterns names nothing: go://example.com/app#Absent\n"
+	wantStderr := string(vocab.UnmatchedRoot) + ": roots.patterns names nothing: go://example.com/app#Absent\n"
 	if got := stderr.String(); got != wantStderr {
 		t.Errorf("run(%q) stderr = %q, want %q: a string one configuration matched names something", args, got, wantStderr)
 	}
@@ -1394,8 +1349,8 @@ func TestPrintRetainedOverAMatrixNamesWhatAnyConfigurationRetained(t *testing.T)
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-retained", "--target=" + dir}
-	if got := run(t.Context(), args, &stdout, &stderr); got != exitClean {
-		t.Fatalf("run(%q) over a matrix of two configurations = %d, want %d\nstderr: %q", args, got, exitClean, stderr.String())
+	if got := run(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+		t.Fatalf("run(%q) over a matrix of two configurations = %d, want %d\nstderr: %q", args, got, vocab.ExitClean, stderr.String())
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("run(%q) stderr = %q, want empty", args, stderr.String())
@@ -1403,7 +1358,7 @@ func TestPrintRetainedOverAMatrixNamesWhatAnyConfigurationRetained(t *testing.T)
 
 	// The record exists under the second configuration alone, so it is here only
 	// because the classes ran over every configuration of the matrix.
-	want := "go://example.com/app#Tier.String\tformat-verb-contract\tplatform_windows.go:12:14\tformatted by fmt.Println\n"
+	want := "go://example.com/app#Tier.String\tplatform_windows.go:9:15\tformat-verb-contract\tplatform_windows.go:12:14\tformatted by fmt.Println\n"
 	if got := stdout.String(); got != want {
 		t.Errorf("run(%q) stdout =\n%s\nwant\n%s", args, got, want)
 	}

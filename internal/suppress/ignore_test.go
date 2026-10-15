@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	core "github.com/cplieger/deadset-spec/v8/suppress"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // documentOf wraps one entry, as the corpus writes it, in the document that
@@ -24,8 +26,8 @@ type entryOutcome string
 
 const (
 	outcomeRecord    entryOutcome = "a record"
-	outcomeNoReason  entryOutcome = "DS1701"
-	outcomeUnscoped  entryOutcome = "DS1702"
+	outcomeNoReason  entryOutcome = "DS9001"
+	outcomeUnscoped  entryOutcome = "DS9002"
 	outcomeMalformed entryOutcome = "malformed"
 
 	// outcomeOtherScheme is a well-formed record naming another language's
@@ -59,8 +61,8 @@ func outcomesOf(t *testing.T, document string) []entryOutcome {
 	records, refusals, err := IgnoreFile(writeIgnoreFile(t, document), nil)
 	switch {
 	case err != nil:
-		if !errors.Is(err, errMalformed) {
-			t.Fatalf("IgnoreFile(%s) error = %v, want one satisfying errors.Is(err, errMalformed)", document, err)
+		if !errors.Is(err, core.ErrMalformed) {
+			t.Fatalf("IgnoreFile(%s) error = %v, want one satisfying errors.Is(err, core.ErrMalformed)", document, err)
 		}
 		return []entryOutcome{outcomeMalformed}
 	case len(refusals) > 0:
@@ -253,7 +255,7 @@ func TestIgnoreFileRefusesAnEntryNamingASymbolAndNoPath(t *testing.T) {
 		t.Fatalf("IgnoreFile returned %d refusals, want 1: %+v", len(refusals), refusals)
 	}
 	want := Refusal{
-		Reported:  codeUnscoped,
+		Reported:  vocab.UnscopedIgnoreEntry,
 		Code:      "DS1001",
 		Symbol:    "go://example.com/samename#Helper",
 		Reason:    "no path at all.",
@@ -274,11 +276,11 @@ func TestIgnoreFileRefusesAnEntryLackingBothItsReasonAndItsPath(t *testing.T) {
 	if len(records) != 0 {
 		t.Errorf("IgnoreFile returned %d records, want none: %+v", len(records), records)
 	}
-	reported := make([]string, 0, len(refusals))
+	reported := make([]vocab.Code, 0, len(refusals))
 	for _, r := range refusals {
 		reported = append(reported, r.Reported)
 	}
-	if want := []string{codeNoReason, codeUnscoped}; !slices.Equal(reported, want) {
+	if want := []vocab.Code{vocab.SuppressionWithoutReason, vocab.UnscopedIgnoreEntry}; !slices.Equal(reported, want) {
 		t.Errorf("IgnoreFile reported %v, want %v: each rule reports the field it is about", reported, want)
 	}
 }
@@ -304,7 +306,7 @@ func TestIgnoreFileNamesThePositionOfTheBraceThatOpensEachEntry(t *testing.T) {
 	}
 
 	cases := []struct {
-		code string
+		code vocab.Code
 		line int
 		col  int
 	}{
@@ -313,17 +315,17 @@ func TestIgnoreFileNamesThePositionOfTheBraceThatOpensEachEntry(t *testing.T) {
 		{"DS1003", 4, 9},
 	}
 	for i, c := range cases {
-		t.Run(c.code, func(t *testing.T) {
+		t.Run(string(c.code), func(t *testing.T) {
 			at := records[i].Site
-			if at.Filename != IgnoreFileName || at.Line != c.line || at.Column != c.col {
-				t.Errorf("IgnoreFile record %s sits at %s, want %s:%d:%d", c.code, at, IgnoreFileName, c.line, c.col)
+			if at.Filename != core.IgnoreFileName || at.Line != c.line || at.Column != c.col {
+				t.Errorf("IgnoreFile record %s sits at %s, want %s:%d:%d", c.code, at, core.IgnoreFileName, c.line, c.col)
 			}
 		})
 	}
 }
 
 func TestIgnoreFileAbsentIsAnEmptyOne(t *testing.T) {
-	records, refusals, err := IgnoreFile(filepath.Join(t.TempDir(), IgnoreFileName), nil)
+	records, refusals, err := IgnoreFile(filepath.Join(t.TempDir(), core.IgnoreFileName), nil)
 	if err != nil {
 		t.Fatalf("IgnoreFile over an absent document error = %v, want none", err)
 	}
@@ -351,19 +353,19 @@ func TestIgnoreFileRefusesTheDocumentsTheGrammarRefuses(t *testing.T) {
 	for name, document := range cases {
 		t.Run(name, func(t *testing.T) {
 			records, refusals, err := IgnoreFile(writeIgnoreFile(t, document), nil)
-			if !errors.Is(err, errMalformed) {
-				t.Fatalf("IgnoreFile(%s) error = %v, want one satisfying errors.Is(err, errMalformed)", document, err)
+			if !errors.Is(err, core.ErrMalformed) {
+				t.Fatalf("IgnoreFile(%s) error = %v, want one satisfying errors.Is(err, core.ErrMalformed)", document, err)
 			}
 			if records != nil || refusals != nil {
 				t.Errorf("IgnoreFile(%s) returned %d records and %d refusals with its error, want none of either", document, len(records), len(refusals))
 			}
-			var malformed *malformedError
+			var malformed *core.MalformedError
 			if !errors.As(err, &malformed) {
-				t.Fatalf("IgnoreFile(%s) error = %v, want one errors.As reads as *malformedError", document, err)
+				t.Fatalf("IgnoreFile(%s) error = %v, want one errors.As reads as *core.MalformedError", document, err)
 			}
-			if malformed.Site.Filename != IgnoreFileName || malformed.Mechanism != MechanismIgnore {
-				t.Errorf("IgnoreFile(%s) refused at %s under mechanism %s, want %s and %s",
-					document, malformed.Site, malformed.Mechanism, IgnoreFileName, MechanismIgnore)
+			if malformed.Site.Path != core.IgnoreFileName || malformed.Mechanism != core.Ignore {
+				t.Errorf("IgnoreFile(%s) refused at %+v under mechanism %s, want %s and %s",
+					document, malformed.Site, malformed.Mechanism, core.IgnoreFileName, core.Ignore)
 			}
 		})
 	}
@@ -374,7 +376,7 @@ func TestIgnoreFileReportsADocumentItCannotRead(t *testing.T) {
 	if err == nil {
 		t.Fatal("IgnoreFile over a directory error = nil, want one naming the path")
 	}
-	if errors.Is(err, os.ErrNotExist) || errors.Is(err, errMalformed) {
+	if errors.Is(err, os.ErrNotExist) || errors.Is(err, core.ErrMalformed) {
 		t.Errorf("IgnoreFile over a directory error = %v, want neither an absent document nor a malformed one", err)
 	}
 }
@@ -398,8 +400,8 @@ func TestIgnoreFileLeavesEveryRecordOfAnotherSchemeToItsOwnAnalyzer(t *testing.T
 	}
 
 	malformed := `{"ignore": [{"code": "DS13", "symbol": "ts://@example/app/src/a.ts#A.b", "path": "src/a.ts", "reason": "r"}]}`
-	if _, _, err := IgnoreFile(writeIgnoreFile(t, malformed), nil); !errors.Is(err, errMalformed) {
-		t.Errorf("IgnoreFile(a malformed record of another scheme) error = %v, want errMalformed: every record is form-checked", err)
+	if _, _, err := IgnoreFile(writeIgnoreFile(t, malformed), nil); !errors.Is(err, core.ErrMalformed) {
+		t.Errorf("IgnoreFile(a malformed record of another scheme) error = %v, want core.ErrMalformed: every record is form-checked", err)
 	}
 }
 
@@ -413,7 +415,7 @@ func TestIgnoreFileReadsTheReferenceOfANestedManifestsDependency(t *testing.T) {
 		"ts://@example/app/package.json#lodash:dependency",
 	} {
 		t.Run(symbol, func(t *testing.T) {
-			document := `{"ignore": [{"code": "DS1601", "symbol": "` + symbol + `", "path": "static-src/package.json", "reason": "Run by hand."}]}`
+			document := `{"ignore": [{"code": "DS1701", "symbol": "` + symbol + `", "path": "static-src/package.json", "reason": "Run by hand."}]}`
 			records, refusals, err := IgnoreFile(writeIgnoreFile(t, document), nil)
 			if err != nil || len(records) != 0 || len(refusals) != 0 {
 				t.Errorf("IgnoreFile(an entry naming %s) = %+v, %+v, %v, want the record left to its analyzer", symbol, records, refusals, err)
@@ -426,9 +428,9 @@ func TestIgnoreFileReadsTheReferenceOfANestedManifestsDependency(t *testing.T) {
 		"ts://./static-src/manifest.json#html-validate:dev-dependency",
 	} {
 		t.Run(symbol, func(t *testing.T) {
-			document := `{"ignore": [{"code": "DS1601", "symbol": "` + symbol + `", "path": "static-src/package.json", "reason": "Run by hand."}]}`
-			if _, _, err := IgnoreFile(writeIgnoreFile(t, document), nil); !errors.Is(err, errMalformed) {
-				t.Errorf("IgnoreFile(an entry naming %s) error = %v, want errMalformed: the scope ends in package.json", symbol, err)
+			document := `{"ignore": [{"code": "DS1701", "symbol": "` + symbol + `", "path": "static-src/package.json", "reason": "Run by hand."}]}`
+			if _, _, err := IgnoreFile(writeIgnoreFile(t, document), nil); !errors.Is(err, core.ErrMalformed) {
+				t.Errorf("IgnoreFile(an entry naming %s) error = %v, want core.ErrMalformed: the scope ends in package.json", symbol, err)
 			}
 		})
 	}
@@ -443,7 +445,17 @@ func TestIgnoreFileReadsAPathOfAnyFileNameButOneHoldingAControlCharacter(t *test
 	if _, _, err := IgnoreFile(writeIgnoreFile(t, entry("src/routes/(app)/[id]/$page café.ts")), nil); err != nil {
 		t.Errorf("IgnoreFile(a route file's path) error = %v, want the entry read", err)
 	}
-	if _, _, err := IgnoreFile(writeIgnoreFile(t, entry(`src/a\tb.ts`)), nil); !errors.Is(err, errMalformed) {
-		t.Errorf("IgnoreFile(a path holding a tab) error = %v, want errMalformed", err)
+	if _, _, err := IgnoreFile(writeIgnoreFile(t, entry(`src/a\tb.ts`)), nil); !errors.Is(err, core.ErrMalformed) {
+		t.Errorf("IgnoreFile(a path holding a tab) error = %v, want core.ErrMalformed", err)
+	}
+}
+
+// A refused document is refused with the shared reader's own error, so every
+// product names one defect in one wording.
+func TestIgnoreFileRefusesWithTheSharedReadersError(t *testing.T) {
+	const document = `{"ignore": [{"symbol": "go://example.com/app#A", "path": "a.go", "reason": "no code."}]}`
+	_, want := core.ReadIgnore([]byte(document))
+	if _, _, err := IgnoreFile(writeIgnoreFile(t, document), nil); err == nil || want == nil || err.Error() != want.Error() {
+		t.Errorf("IgnoreFile(an entry naming no code) = %v, want the shared reader's %v", err, want)
 	}
 }

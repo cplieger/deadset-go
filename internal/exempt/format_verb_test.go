@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // verbRefs spells the references of one type's members in the verbs fixture.
@@ -15,7 +16,7 @@ func verbRefs(typeName string, members ...string) []string {
 
 func TestFormatVerbContractRetainsTheMethodEveryVerbFamilyCalls(t *testing.T) {
 	shared := analysisOf(t, "format-verb-firing.txtar", Options{})
-	refs := retainedRefs(t, shared, FormatVerbContract)
+	refs := retainedRefs(t, shared, vocab.FormatVerbContract)
 
 	for _, test := range []struct {
 		family   string
@@ -56,7 +57,7 @@ func facilityRefs(typeName string, members ...string) []string {
 
 func TestFormatVerbContractRetainsTheMethodEveryFacilityCalls(t *testing.T) {
 	shared := analysisOf(t, "format-verb-facilities.txtar", Options{})
-	refs := retainedRefs(t, shared, FormatVerbContract)
+	refs := retainedRefs(t, shared, vocab.FormatVerbContract)
 
 	for _, test := range []struct {
 		facility string
@@ -95,7 +96,7 @@ func TestFormatVerbContractNamesTheFacilityThatFormatted(t *testing.T) {
 
 	type record struct{ ref, site, detail string }
 	var got []record
-	for _, e := range retained(t, shared, FormatVerbContract) {
+	for _, e := range retained(t, shared, vocab.FormatVerbContract) {
 		got = append(got, record{ref: refs[e.ID], site: e.Site.String(), detail: e.Detail})
 	}
 
@@ -123,7 +124,7 @@ func TestFormatVerbContractNamesTheFacilityThatFormatted(t *testing.T) {
 
 func TestFormatVerbContractRetainsNothingWhereNoVerbAsksForAString(t *testing.T) {
 	shared := analysisOf(t, "format-verb-quiet.txtar", Options{})
-	if got := retainedRefs(t, shared, FormatVerbContract); len(got) > 0 {
+	if got := retainedRefs(t, shared, vocab.FormatVerbContract); len(got) > 0 {
 		t.Errorf("FormatVerbContractDetector(format-verb-quiet.txtar) retained %v, want nothing", got)
 	}
 }
@@ -138,7 +139,7 @@ func TestFormatVerbContractNamesTheClassTheVerbAndTheSite(t *testing.T) {
 
 	type record struct{ ref, class, site, detail string }
 	var got []record
-	for _, e := range retained(t, shared, FormatVerbContract) {
+	for _, e := range retained(t, shared, vocab.FormatVerbContract) {
 		got = append(got, record{ref: refs[e.ID], class: e.Class, site: e.Site.String(), detail: e.Detail})
 	}
 
@@ -262,7 +263,7 @@ func TestStringOperandsReportsHowFarTheVerbsReachedAndWhetherAnIndexAppeared(t *
 // without a method call, and an interface-typed field holds a type the walk does
 // not see.
 func TestFormatVerbContractRetainsTheMethodsOfTheFieldsItFormats(t *testing.T) {
-	refs := retainedRefs(t, analysisOf(t, "format-verb-fields.txtar", Options{}), FormatVerbContract)
+	refs := retainedRefs(t, analysisOf(t, "format-verb-fields.txtar", Options{}), vocab.FormatVerbContract)
 
 	for _, test := range []struct {
 		reach    string

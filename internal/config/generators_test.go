@@ -9,6 +9,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	spec "github.com/cplieger/deadset-spec/v8"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
 )
 
@@ -43,8 +44,8 @@ func settingGenerators() map[string]*rapid.Generator[any] {
 	return map[string]*rapid.Generator[any]{
 		"contract_version":         rapid.StringMatching(`^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,4}$`).AsAny(),
 		"target.kind":              enumOf(config.Application, config.Library),
-		"analysis.languages":       arrayOfDistinct(rapid.SampledFrom([]config.Language{config.GoLanguage, config.TSLanguage}), 0, 2),
-		"analysis.min_confidence":  enumOf(config.Certain, config.Probable, config.Possible),
+		"analysis.languages":       arrayOfDistinct(rapid.SampledFrom([]vocab.Language{vocab.Go, vocab.TS}), 0, 2),
+		"analysis.min_confidence":  enumOf(vocab.Certain, vocab.Probable, vocab.Possible),
 		"analysis.generated_files": enumOf(config.ExcludeGenerated, config.IncludeGenerated),
 		"analysis.consumer_tests":  enumOf(config.TestReference, config.ProductionReference),
 		"analysis.configurations":  rapid.SliceOfN(configurationEntry(), 0, 3).AsAny(),
@@ -59,13 +60,13 @@ func settingGenerators() map[string]*rapid.Generator[any] {
 		"consumers.complete":  rapid.Bool().AsAny(),
 		"roots.patterns":      arrayOfDistinct(symbolReference(), 0, 2),
 		"exemptions.disabled": arrayOfDistinct(rapid.StringMatching(`^[a-z][a-z0-9-]{0,10}$`), 0, 2),
-		"reporters.formats": arrayOfDistinct(rapid.SampledFrom([]config.Format{
-			config.Text, config.JSON, config.GitHub, config.SARIF, config.Template,
+		"reporters.formats": arrayOfDistinct(rapid.SampledFrom([]vocab.Format{
+			vocab.FormatText, vocab.FormatJSON, vocab.FormatGitHub, vocab.FormatSARIF, vocab.FormatTemplate,
 		}), 1, 3),
 		"reporters.sort":         enumOf(config.ByPosition, config.BySize),
 		"reporters.cascade":      enumOf(config.CascadeRoots, config.CascadeFull),
 		"reporters.max_findings": rapid.IntRange(0, 1000).AsAny(),
-		"reporters.fail_on":      enumOf(config.Allow, config.Warn, config.Deny),
+		"reporters.fail_on":      enumOf(vocab.Allow, vocab.Warn, vocab.Deny),
 		"providers.analyzers": rapid.SliceOfNDistinct(providerEntry(), 0, 3, func(entry map[string]any) any {
 			return entry["name"]
 		}).AsAny(),
@@ -85,8 +86,8 @@ func providerEntry() *rapid.Generator[map[string]any] {
 	return rapid.Custom(func(t *rapid.T) map[string]any {
 		entry := map[string]any{
 			"name": rapid.StringMatching(`^[a-z][a-z0-9]{0,5}(-[a-z0-9]{1,4})?$`).Draw(t, "provider name"),
-			"languages": rapid.SliceOfNDistinct(rapid.SampledFrom([]config.Language{config.GoLanguage, config.TSLanguage}),
-				1, 2, rapid.ID[config.Language]).Draw(t, "provider languages"),
+			"languages": rapid.SliceOfNDistinct(rapid.SampledFrom([]vocab.Language{vocab.Go, vocab.TS}),
+				1, 2, rapid.ID[vocab.Language]).Draw(t, "provider languages"),
 			"command": rapid.StringMatching(`^(/opt/[a-z]{1,6}/)?[a-z]{1,8}$`).Draw(t, "provider command"),
 		}
 		if rapid.Bool().Draw(t, "provider acquirable") {
@@ -206,7 +207,7 @@ func namesFixedSeverity(key string, fixed []string) bool {
 
 // severityValue draws one value of the severity object.
 func severityValue() *rapid.Generator[any] {
-	return enumOf(config.Allow, config.Warn, config.Deny)
+	return enumOf(vocab.Allow, vocab.Warn, vocab.Deny)
 }
 
 // provenanceEntry draws one value of a provenance object, in the syntax the

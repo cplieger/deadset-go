@@ -10,17 +10,18 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	core "github.com/cplieger/deadset-spec/v8/suppress"
 )
 
 // The analyzer identity every written row of these tests carries.
-var identity = Provenance{Analyzer: "deadset-go", Version: "1.6.0"}
+var identity = core.Provenance{Analyzer: "deadset-go", Version: "1.6.0"}
 
 // writeBaselineFile writes one baseline document into a directory of its own and
 // returns its path.
 func writeBaselineFile(t *testing.T, document string) string {
 	t.Helper()
 
-	return writeDocument(t, BaselineFileName, document)
+	return writeDocument(t, core.BaselineFileName, document)
 }
 
 // baselineDocumentOf wraps one row, as the corpus writes it, in the document that
@@ -37,8 +38,8 @@ func baselineOutcomesOf(t *testing.T, document string) []entryOutcome {
 	records, refusals, err := Baseline(writeBaselineFile(t, document), nil)
 	switch {
 	case err != nil:
-		if !errors.Is(err, errMalformed) {
-			t.Fatalf("Baseline(%s) error = %v, want one satisfying errors.Is(err, errMalformed)", document, err)
+		if !errors.Is(err, core.ErrMalformed) {
+			t.Fatalf("Baseline(%s) error = %v, want one satisfying errors.Is(err, core.ErrMalformed)", document, err)
 		}
 		return []entryOutcome{outcomeMalformed}
 	case len(refusals) > 0:
@@ -94,8 +95,8 @@ func TestBaselineBindsARowAndCarriesItsProvenanceAsTheReason(t *testing.T) {
 		t.Errorf("Baseline(a bound row) bound nothing, want the declaration %s names", ref)
 	case one.Reason != "recorded by deadset-go 1.6.0":
 		t.Errorf("Baseline(a bound row) carries reason %q, want the provenance the row holds", one.Reason)
-	case one.Site.Filename != BaselineFileName || one.Site.Line != 3 || one.Site.Column != 5:
-		t.Errorf("Baseline(a bound row) sites the record at %s, want %s:3:5", one.Site, BaselineFileName)
+	case one.Site.Filename != core.BaselineFileName || one.Site.Line != 3 || one.Site.Column != 5:
+		t.Errorf("Baseline(a bound row) sites the record at %s, want %s:3:5", one.Site, core.BaselineFileName)
 	}
 }
 
@@ -124,8 +125,8 @@ func TestBaselineAndTheIgnoreFileRefuseEachOtherMember(t *testing.T) {
 			if err := os.WriteFile(path, []byte(held.document), 0o600); err != nil {
 				t.Fatalf("Setup: write %s: %v", path, err)
 			}
-			if err := held.read(path); !errors.Is(err, errMalformed) {
-				t.Errorf("reading %s = %v, want an error satisfying errors.Is(err, errMalformed): "+
+			if err := held.read(path); !errors.Is(err, core.ErrMalformed) {
+				t.Errorf("reading %s = %v, want an error satisfying errors.Is(err, core.ErrMalformed): "+
 					"each document has its own closed key list", name, err)
 			}
 		})
@@ -133,7 +134,7 @@ func TestBaselineAndTheIgnoreFileRefuseEachOtherMember(t *testing.T) {
 }
 
 func TestBaselineOfAnAbsentDocumentIsAnEmptyOne(t *testing.T) {
-	records, refusals, err := Baseline(filepath.Join(t.TempDir(), BaselineFileName), nil)
+	records, refusals, err := Baseline(filepath.Join(t.TempDir(), core.BaselineFileName), nil)
 	if err != nil {
 		t.Fatalf("Baseline(an absent document) = _, _, %v, want no error", err)
 	}
@@ -142,127 +143,13 @@ func TestBaselineOfAnAbsentDocumentIsAnEmptyOne(t *testing.T) {
 	}
 }
 
-func TestWriteBaselineRecordsEveryFindingWithItsProvenance(t *testing.T) {
-	findings := []Recorded{
-		{Code: "DS1002", Symbol: "go://example.com/app#forgotten", Path: "app.go"},
-		{Code: "DS1001", Symbol: "go://example.com/app#Exported", Path: "app.go"},
-	}
-	var written bytes.Buffer
-	if err := WriteBaseline(&written, findings, identity, nil); err != nil {
-		t.Fatalf("WriteBaseline(two findings) = %v, want the document", err)
-	}
-
-	const want = `{
-  "description": "Recorded findings: a run fails only on a finding this document does not hold. Every reason is the analyzer that recorded the row, never an adjudication.",
-  "baseline": [
-    {
-      "code": "DS1002",
-      "symbol": "go://example.com/app#forgotten",
-      "path": "app.go",
-      "reason": "recorded by deadset-go 1.6.0"
-    },
-    {
-      "code": "DS1001",
-      "symbol": "go://example.com/app#Exported",
-      "path": "app.go",
-      "reason": "recorded by deadset-go 1.6.0"
-    }
-  ]
-}
-`
-	if got := written.String(); got != want {
-		t.Errorf("WriteBaseline(two findings) wrote\n%s\nwant\n%s", got, want)
-	}
-}
-
-func TestWriteBaselineOfNoFindingIsAnEmptyArray(t *testing.T) {
-	var written bytes.Buffer
-	if err := WriteBaseline(&written, nil, identity, nil); err != nil {
-		t.Fatalf("WriteBaseline(no finding) = %v, want the document", err)
-	}
-	if got := written.String(); !bytes.Contains([]byte(got), []byte(`"baseline": []`)) {
-		t.Errorf("WriteBaseline(no finding) wrote %s, want an empty baseline array rather than a null", got)
-	}
-}
-
-func TestWriteBaselineIsTheSameBytesForTheSameReport(t *testing.T) {
-	findings := []Recorded{{Code: "DS1002", Symbol: "go://example.com/app#forgotten", Path: "app.go"}}
-	var first, second bytes.Buffer
-	for _, into := range []*bytes.Buffer{&first, &second} {
-		if err := WriteBaseline(into, findings, identity, nil); err != nil {
-			t.Fatalf("WriteBaseline(one finding) = %v, want the document", err)
-		}
-	}
-	if first.String() != second.String() {
-		t.Errorf("WriteBaseline wrote\n%s\nand then\n%s\nwant one document written twice", first.String(), second.String())
-	}
-}
-
-func TestWriteBaselineLeavesAReferenceAsTheGrammarSpellsIt(t *testing.T) {
-	// A TypeScript reference carries a type parameter in angle brackets, which is
-	// what a JSON encoder escapes for HTML and what a byte comparison against the
-	// grammar's spelling would then fail on.
-	findings := []Recorded{{
-		Code:   "DS1003",
-		Symbol: "ts://@example/app/src/wire.ts#Codec.decode<T>",
-		Path:   "src/wire.ts",
-	}}
-	var written bytes.Buffer
-	if err := WriteBaseline(&written, findings, identity, nil); err != nil {
-		t.Fatalf("WriteBaseline(a TypeScript reference) = %v, want the document", err)
-	}
-	if !bytes.Contains(written.Bytes(), []byte("ts://@example/app/src/wire.ts#Codec.decode<T>")) {
-		t.Errorf("WriteBaseline(a TypeScript reference) wrote %s, want the reference as the grammar spells it",
-			written.String())
-	}
-}
-
-func TestWriteBaselineRefusesADocumentWhoseRowsWouldCarryNoReason(t *testing.T) {
-	for name, held := range map[string]struct {
-		findings   []Recorded
-		provenance Provenance
-	}{
-		"an identity with no analyzer name": {
-			findings:   []Recorded{{Code: "DS1001", Symbol: "go://example.com/app#A", Path: "app.go"}},
-			provenance: Provenance{Version: "1.6.0"},
-		},
-		"an identity with no version": {
-			findings:   []Recorded{{Code: "DS1001", Symbol: "go://example.com/app#A", Path: "app.go"}},
-			provenance: Provenance{Analyzer: "deadset-go"},
-		},
-		"a finding naming no code": {
-			findings:   []Recorded{{Symbol: "go://example.com/app#A", Path: "app.go"}},
-			provenance: identity,
-		},
-		"a finding naming no symbol": {
-			findings:   []Recorded{{Code: "DS1001", Path: "app.go"}},
-			provenance: identity,
-		},
-		"a finding naming no path": {
-			findings:   []Recorded{{Code: "DS1001", Symbol: "go://example.com/app#A"}},
-			provenance: identity,
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			var written bytes.Buffer
-			err := WriteBaseline(&written, held.findings, held.provenance, nil)
-			if !errors.Is(err, errProvenance) {
-				t.Fatalf("WriteBaseline(%s) = %v, want an error satisfying errors.Is(err, errProvenance)", name, err)
-			}
-			if written.Len() != 0 {
-				t.Errorf("WriteBaseline(%s) wrote %s, want nothing", name, written.String())
-			}
-		})
-	}
-}
-
 func TestWriteBaselineReadBackSuppressesExactlyTheRecordedFindings(t *testing.T) {
 	_, _, symbols := loaded(t, "same-name.txtar")
 	ref, path := boundSymbol(t, symbols)
 
 	var written bytes.Buffer
-	findings := []Recorded{{Code: "DS1002", Symbol: ref, Path: path}}
-	if err := WriteBaseline(&written, findings, identity, nil); err != nil {
+	findings := []core.Recorded{{Code: "DS1002", Symbol: ref, Path: path}}
+	if err := core.WriteBaseline(&written, findings, identity, nil); err != nil {
 		t.Fatalf("WriteBaseline(one finding) = %v, want the document", err)
 	}
 
@@ -283,8 +170,8 @@ func TestWriteBaselineReadBackSuppressesExactlyTheRecordedFindings(t *testing.T)
 		t.Errorf("Baseline(the document WriteBaseline wrote) read %+v, want the finding that was recorded", one)
 	case one.Bound == "":
 		t.Errorf("Baseline(the document WriteBaseline wrote) bound nothing, want the declaration %s names", ref)
-	case one.Reason != identity.reason():
-		t.Errorf("Baseline(the document WriteBaseline wrote) carries reason %q, want %q", one.Reason, identity.reason())
+	case one.Reason != "recorded by deadset-go 1.6.0":
+		t.Errorf("Baseline(the document WriteBaseline wrote) carries reason %q, want the provenance it wrote", one.Reason)
 	}
 }
 
@@ -306,14 +193,15 @@ func TestABaselineWriteKeepsTheOtherSchemesRowsAfterItsOwn(t *testing.T) {
 	held := writeBaselineFile(t, `{"baseline": [
   {"code": "DS1301", "symbol": "ts://@example/app/src/a.ts#A.b", "path": "src/a.ts", "reason": "recorded by deadset-ts 7.0.0"},
   {"code": "DS1002", "symbol": "go://example.com/app#gone", "path": "main.go", "reason": "recorded by deadset-go 1.6.0"},
-  {"code": "DS1601", "symbol": "ts://@example/app/package.json#left-pad:dependency", "path": "package.json", "reason": "recorded by deadset-ts 7.0.0"}
+  {"code": "DS1701", "symbol": "ts://@example/app/package.json#left-pad:dependency", "path": "package.json", "reason": "recorded by deadset-ts 7.0.0"}
 ]}`)
-	others, err := OtherSchemeRows(held, OwnScheme)
+	rows, err := BaselineRows(held)
 	if err != nil {
-		t.Fatalf("OtherSchemeRows(a document of two schemes) error = %v", err)
+		t.Fatalf("BaselineRows(a document of two schemes) error = %v", err)
 	}
 	var written bytes.Buffer
-	if err := WriteBaseline(&written, []Recorded{{Code: "DS1002", Symbol: "go://example.com/app#helper", Path: "main.go"}}, identity, others); err != nil {
+	recorded := []core.Recorded{{Code: "DS1002", Symbol: "go://example.com/app#helper", Path: "main.go"}}
+	if err := core.WriteBaseline(&written, recorded, identity, core.OtherRows(rows, OwnScheme)); err != nil {
 		t.Fatalf("WriteBaseline(one finding and the other scheme's rows) = %v", err)
 	}
 	records, _, err := BaselineDocument(written.Bytes(), nil)
@@ -333,35 +221,6 @@ func TestABaselineWriteKeepsTheOtherSchemesRowsAfterItsOwn(t *testing.T) {
 	}
 }
 
-func TestABaselineWriteKeepsAnOtherSchemeRowsMissingMembersMissing(t *testing.T) {
-	held := writeBaselineFile(t, `{"baseline": [
-  {"code": "DS1003", "symbol": "ts://web/src/a.ts#A.b", "path": "web/src/a.ts"},
-  {"code": "DS1003", "symbol": "ts://web/src/a.ts#A.c", "reason": ""}
-]}`)
-	others, err := OtherSchemeRows(held, OwnScheme)
-	if err != nil {
-		t.Fatalf("OtherSchemeRows(rows missing a reason and a path) error = %v", err)
-	}
-	var written bytes.Buffer
-	if err := WriteBaseline(&written, nil, identity, others); err != nil {
-		t.Fatalf("WriteBaseline(the other scheme's rows) = %v", err)
-	}
-	want := `    {
-      "code": "DS1003",
-      "symbol": "ts://web/src/a.ts#A.b",
-      "path": "web/src/a.ts"
-    },
-    {
-      "code": "DS1003",
-      "symbol": "ts://web/src/a.ts#A.c",
-      "reason": ""
-    }
-`
-	if got := written.String(); !strings.Contains(got, want) {
-		t.Errorf("WriteBaseline wrote\n%s\nwant the ts:// rows with exactly the members the document held:\n%s", got, want)
-	}
-}
-
 func TestABaselineWriteRefusesADocumentItCannotReadTheOtherSchemesRowsOf(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -374,8 +233,8 @@ func TestABaselineWriteRefusesADocumentItCannotReadTheOtherSchemesRowsOf(t *test
 		{name: "not JSON", body: `{`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if rows, err := OtherSchemeRows(writeBaselineFile(t, tc.body), OwnScheme); err == nil {
-				t.Errorf("OtherSchemeRows(%s) = %v, nil, want an error so the write leaves the document as it is", tc.body, rows)
+			if rows, err := BaselineRows(writeBaselineFile(t, tc.body)); err == nil {
+				t.Errorf("BaselineRows(%s) = %v, nil, want an error so the write leaves the document as it is", tc.body, rows)
 			}
 		})
 	}

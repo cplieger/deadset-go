@@ -7,7 +7,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
-	"github.com/cplieger/deadset-go/v2/internal/report"
+	"github.com/cplieger/deadset-spec/v8/report"
 )
 
 // withoutSkipped drops every finding positioned inside a declaration a type error

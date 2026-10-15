@@ -17,6 +17,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
 	spec "github.com/cplieger/deadset-spec/v8"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/txtar"
 )
 
@@ -31,16 +32,16 @@ const (
 // detectors are the exemption classes a findings pass runs behind, which is every
 // class the analyzer computes: a kind reports what the exemptions did not hold
 // back, so a fixture measured without them would report symbols a run never sees.
-var detectors = map[exempt.Class]exempt.Detector{
-	exempt.InterfaceSatisfaction: exempt.InterfaceSatisfactionDetector,
-	exempt.EncodingReflection:    exempt.EncodingReflectionDetector,
-	exempt.FormatVerbContract:    exempt.FormatVerbContractDetector,
-	exempt.ErrorsDuckTyping:      exempt.ErrorsDuckTypingDetector,
-	exempt.EnumGroup:             exempt.EnumGroupDetector,
-	exempt.GeneratedFile:         exempt.GeneratedFileDetector,
-	exempt.LinknameCgoAsmPlugin:  exempt.LinknameCgoAsmPluginDetector,
-	exempt.TemplateField:         exempt.TemplateFieldDetector,
-	exempt.ReflectiveLookup:      exempt.ReflectiveLookupDetector,
+var detectors = map[vocab.Exemption]exempt.Detector{
+	vocab.InterfaceSatisfaction: exempt.InterfaceSatisfactionDetector,
+	vocab.EncodingReflection:    exempt.EncodingReflectionDetector,
+	vocab.FormatVerbContract:    exempt.FormatVerbContractDetector,
+	vocab.ErrorsDuckTyping:      exempt.ErrorsDuckTypingDetector,
+	vocab.EnumGroup:             exempt.EnumGroupDetector,
+	vocab.GeneratedFile:         exempt.GeneratedFileDetector,
+	vocab.LinknameCgoAsmPlugin:  exempt.LinknameCgoAsmPluginDetector,
+	vocab.TemplateField:         exempt.TemplateFieldDetector,
+	vocab.ReflectiveLookup:      exempt.ReflectiveLookupDetector,
 }
 
 // fixtureConfiguration is the one build configuration a fixture is analyzed under
@@ -63,7 +64,7 @@ func applicationConfig() config.Config {
 func libraryConfig() config.Config {
 	resolved := config.Default()
 	resolved.Target.Kind = config.OneKind(config.Library)
-	resolved.Analysis.MinConfidence = config.Possible
+	resolved.Analysis.MinConfidence = vocab.Possible
 	return resolved
 }
 
@@ -170,7 +171,7 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 	mode := graph.Mode{Production: true}
 	rootOptions := graph.RootOptions{
 		Patterns:     resolved.Roots.Patterns,
-		PublishedAPI: resolved.Target.Kind.Of(config.GoLanguage) == config.Library,
+		PublishedAPI: resolved.Target.Kind.Of(vocab.Go) == config.Library,
 	}
 
 	per := make([]Configured, len(configurations))
@@ -286,14 +287,14 @@ func identifiers(configurations []load.Configuration) []string {
 
 // declarationEmitters are the emitters of the six unused-declaration kinds, which
 // is the table a run over a fixture of this package computes with.
-func declarationEmitters() map[string]Emitter {
-	return map[string]Emitter{
-		unusedExportedCode:      UnusedExported,
-		unusedUnexportedCode:    UnusedUnexported,
-		unusedMemberCode:        UnusedMember,
-		testOnlyUseCode:         TestOnlyUse,
-		testOfDeadCodeCode:      TestOfDeadCode,
-		deprecatedAndUnusedCode: DeprecatedAndUnused,
+func declarationEmitters() map[vocab.Code]Emitter {
+	return map[vocab.Code]Emitter{
+		vocab.UnusedExported:   UnusedExported,
+		vocab.UnusedUnexported: UnusedUnexported,
+		vocab.UnusedMember:     UnusedMember,
+		vocab.TestOnlyUse:      TestOnlyUse,
+		vocab.TestOfDeadCode:   TestOfDeadCode,
+		vocab.DeprecatedUnused: DeprecatedAndUnused,
 	}
 }
 
@@ -302,31 +303,31 @@ func declarationEmitters() map[string]Emitter {
 // position carries one finding, so the kinds agree on precedence or a pass over any
 // fixture fails. A kind landed later is added here, and its fixtures are then
 // measured against every kind that came before it.
-func packageEmitters() map[string]Emitter {
+func packageEmitters() map[vocab.Code]Emitter {
 	table := declarationEmitters()
-	table[unusedInterfaceCode] = UnusedInterface
-	table[uncalledInterfaceMethodCode] = UncalledInterfaceMethod
-	table[unusedSatisfactionAssertionCode] = UnusedSatisfactionAssertion
-	table[writeOnlyCode] = WriteOnlySymbol
-	table[enumMemberCode] = UnusedEnumMember
-	table[typeParameterCode] = UnusedTypeParameter
-	table[unnecessaryExportCode] = UnnecessaryExport
-	table[unnecessaryExposureCode] = UnnecessaryExposure
-	table[unreachableExportCode] = UnreachableExport
-	table[fileNeverBuiltCode] = FileNeverBuilt
-	table[fileNeverImportedCode] = FileNeverImported
-	table[unusedDependencyCode] = UnusedDependency
-	table[unusedReplaceCode] = UnusedReplace
-	table[suppressionWithoutReasonCode] = SuppressionsWithoutReason
-	table[unscopedEntryCode] = UnscopedEntries
-	table[staleSuppressionCode] = StaleSuppressions
-	table[unmatchedRootCode] = UnmatchedRoots
-	table[unusedParameterCode] = UnusedParameter
-	table[unusedReceiverCode] = UnusedReceiver
-	table[unusedResultCode] = UnusedResult
-	table[unreachableStatementCode] = UnreachableStatement
-	table[deadStoreCode] = DeadStore
-	table[unreachableCaseCode] = UnreachableCase
+	table[vocab.UnusedInterface] = UnusedInterface
+	table[vocab.UncalledInterfaceMethod] = UncalledInterfaceMethod
+	table[vocab.UnusedSatisfactionAssertion] = UnusedSatisfactionAssertion
+	table[vocab.WriteOnlySymbol] = WriteOnlySymbol
+	table[vocab.UnusedEnumMember] = UnusedEnumMember
+	table[vocab.UnusedTypeParameter] = UnusedTypeParameter
+	table[vocab.UnnecessaryExport] = UnnecessaryExport
+	table[vocab.UnnecessaryExposure] = UnnecessaryExposure
+	table[vocab.UnreachableExport] = UnreachableExport
+	table[vocab.FileNeverBuilt] = FileNeverBuilt
+	table[vocab.FileNeverImported] = FileNeverImported
+	table[vocab.UnusedDependency] = UnusedDependency
+	table[vocab.UnusedModuleDirective] = UnusedReplace
+	table[vocab.SuppressionWithoutReason] = SuppressionsWithoutReason
+	table[vocab.UnscopedIgnoreEntry] = UnscopedEntries
+	table[vocab.StaleSuppression] = StaleSuppressions
+	table[vocab.UnmatchedRoot] = UnmatchedRoots
+	table[vocab.UnusedParameter] = UnusedParameter
+	table[vocab.UnusedReceiver] = UnusedReceiver
+	table[vocab.UnusedResult] = UnusedResult
+	table[vocab.UnreachableStatement] = UnreachableStatement
+	table[vocab.DeadStore] = DeadStore
+	table[vocab.UnreachableCase] = UnreachableCase
 	return table
 }
 
@@ -351,7 +352,7 @@ func fixtures(t *testing.T) []string {
 
 // computed runs one findings pass and fails the test where the pass refuses a
 // finding, because a refusal is a defect in an emitter rather than an answer.
-func computed(t *testing.T, in *Input, emitters map[string]Emitter) Result {
+func computed(t *testing.T, in *Input, emitters map[vocab.Code]Emitter) Result {
 	t.Helper()
 
 	result, err := Compute(in, emitters)
@@ -397,7 +398,7 @@ var sharedTables = []table{
 }
 
 // emitters is the table one name stands for.
-func (tb table) emitters() map[string]Emitter {
+func (tb table) emitters() map[vocab.Code]Emitter {
 	switch tb {
 	case declarationKinds:
 		return declarationEmitters()
@@ -406,15 +407,15 @@ func (tb table) emitters() map[string]Emitter {
 	case intraFunctionKinds:
 		return intraFuncEmitters()
 	case narrowingKinds:
-		return map[string]Emitter{
-			unnecessaryExportCode:   UnnecessaryExport,
-			unnecessaryExposureCode: UnnecessaryExposure,
-			unreachableExportCode:   UnreachableExport,
+		return map[vocab.Code]Emitter{
+			vocab.UnnecessaryExport:   UnnecessaryExport,
+			vocab.UnnecessaryExposure: UnnecessaryExposure,
+			vocab.UnreachableExport:   UnreachableExport,
 		}
 	case writeOnlyKind:
-		return map[string]Emitter{writeOnlyCode: WriteOnlySymbol}
+		return map[vocab.Code]Emitter{vocab.WriteOnlySymbol: WriteOnlySymbol}
 	case testOnlyAndUnreachableExport:
-		return map[string]Emitter{testOnlyUseCode: TestOnlyUse, unreachableExportCode: UnreachableExport}
+		return map[vocab.Code]Emitter{vocab.TestOnlyUse: TestOnlyUse, vocab.UnreachableExport: UnreachableExport}
 	default:
 		return packageEmitters()
 	}
@@ -434,9 +435,9 @@ type pass struct {
 type sharedAnalysis struct {
 	computed map[pass]Result
 	refused  map[pass]error
-	emitted  map[string][]Finding
-	failed   map[string]error
-	classes  map[string]Class
+	emitted  map[vocab.Code][]Finding
+	failed   map[vocab.Code]error
+	classes  map[string]vocab.Class
 }
 
 // analysisKey is one shared analysis: the archive, the setup and the consumer set as
@@ -472,9 +473,9 @@ func analyzeShared(t *testing.T, in *Input) *sharedAnalysis {
 	held := &sharedAnalysis{
 		computed: make(map[pass]Result),
 		refused:  make(map[pass]error),
-		emitted:  make(map[string][]Finding),
-		failed:   make(map[string]error),
-		classes:  make(map[string]Class),
+		emitted:  make(map[vocab.Code][]Finding),
+		failed:   make(map[vocab.Code]error),
+		classes:  make(map[string]vocab.Class),
 	}
 	analyzed := in.Mode
 	fresh := func(production bool) {
@@ -563,7 +564,7 @@ func (a *sharedAnalysis) findingsUnder(t *testing.T, tb table, production bool) 
 }
 
 // emit is what the emitter of one code returned when it ran alone over the input.
-func (a *sharedAnalysis) emit(t *testing.T, code string) ([]Finding, error) {
+func (a *sharedAnalysis) emit(t *testing.T, code vocab.Code) ([]Finding, error) {
 	t.Helper()
 
 	found, held := a.emitted[code]
@@ -574,7 +575,7 @@ func (a *sharedAnalysis) emit(t *testing.T, code string) ([]Finding, error) {
 }
 
 // classOf is the reachability class of the declaration whose reference is ref.
-func (a *sharedAnalysis) classOf(t *testing.T, ref string) Class {
+func (a *sharedAnalysis) classOf(t *testing.T, ref string) vocab.Class {
 	t.Helper()
 
 	class, held := a.classes[ref]
@@ -585,8 +586,8 @@ func (a *sharedAnalysis) classOf(t *testing.T, ref string) Class {
 }
 
 // codesOf is the code of every finding, in the order the pass returned them.
-func codesOf(findings []Finding) []string {
-	codes := make([]string, len(findings))
+func codesOf(findings []Finding) []vocab.Code {
+	codes := make([]vocab.Code, len(findings))
 	for i := range findings {
 		codes[i] = findings[i].Code
 	}
@@ -595,7 +596,7 @@ func codesOf(findings []Finding) []string {
 
 // namesUnder is the name of every finding of one code, in the order the pass
 // returned them.
-func namesUnder(findings []Finding, code string) []string {
+func namesUnder(findings []Finding, code vocab.Code) []string {
 	var names []string
 	for i := range findings {
 		if findings[i].Code == code {
@@ -606,7 +607,7 @@ func namesUnder(findings []Finding, code string) []string {
 }
 
 // findingOf is the finding one code reports about the symbol one name spells.
-func findingOf(t *testing.T, findings []Finding, code, name string) Finding {
+func findingOf(t *testing.T, findings []Finding, code vocab.Code, name string) Finding {
 	t.Helper()
 
 	for i := range findings {
@@ -623,7 +624,7 @@ func findingOf(t *testing.T, findings []Finding, code, name string) Finding {
 func summary(findings []Finding) []string {
 	lines := make([]string, len(findings))
 	for i := range findings {
-		lines[i] = findings[i].Code + " " + findings[i].Symbol.Name
+		lines[i] = string(findings[i].Code) + " " + findings[i].Symbol.Name
 	}
 	return lines
 }

@@ -80,8 +80,8 @@ func TestOwnReturnsEverySideOfTheLanguageAndNoOther(t *testing.T) {
 	held := read(t, declared)
 
 	want := []Reference{
-		{Edge: "wire/ServerEvent", Side: Provides, Symbol: "go://example.com/app#ServerEvent"},
-		{Edge: "internal.bridge", Side: Provides, Symbol: "go://example.com/app#Bridge"},
+		{Edge: "wire/ServerEvent", Side: provides, Symbol: "go://example.com/app#ServerEvent"},
+		{Edge: "internal.bridge", Side: provides, Symbol: "go://example.com/app#Bridge"},
 		{Edge: "internal.bridge", Side: usedBy, Symbol: "go://example.com/app/internal/queue#List"},
 	}
 	got := held.Own("go")

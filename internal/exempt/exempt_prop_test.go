@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
 )
 
@@ -39,7 +40,7 @@ type drawnRoot struct {
 
 // drawnRetention is one declaration one class retains.
 type drawnRetention struct {
-	class Class
+	class vocab.Exemption
 	at    int
 }
 
@@ -51,7 +52,7 @@ type drawnSet struct {
 	edges        [][2]int
 	roots        []drawnRoot
 	retentions   []drawnRetention
-	disabled     []Class
+	disabled     []vocab.Exemption
 	mode         graph.Mode
 }
 
@@ -85,7 +86,7 @@ func drawnSets() *rapid.Generator[drawnSet] {
 		}), 0, 6).Draw(t, "the retentions")
 		disabled := rapid.SliceOfNDistinct(
 			rapid.SampledFrom(Classes()), 0, len(Classes()),
-			func(c Class) Class { return c },
+			func(c vocab.Exemption) vocab.Exemption { return c },
 		).Draw(t, "the disabled classes")
 
 		return drawnSet{
@@ -155,8 +156,8 @@ func (d drawnSet) graphOf() (*graph.Graph, []graph.SymbolID) {
 // detectors is the table Compute runs: one detection per class the draw gave a
 // retention, each returning what that class retains and reading nothing, so the
 // property drives the framework rather than any class's own rule.
-func (d drawnSet) detectors(ids []graph.SymbolID) map[Class]Detector {
-	byClass := map[Class][]graph.Exemption{}
+func (d drawnSet) detectors(ids []graph.SymbolID) map[vocab.Exemption]Detector {
+	byClass := map[vocab.Exemption][]graph.Exemption{}
 	for i, r := range d.retentions {
 		byClass[r.class] = append(byClass[r.class], graph.Exemption{
 			ID:     ids[r.at],
@@ -166,7 +167,7 @@ func (d drawnSet) detectors(ids []graph.SymbolID) map[Class]Detector {
 		})
 	}
 
-	table := make(map[Class]Detector, len(byClass))
+	table := make(map[vocab.Exemption]Detector, len(byClass))
 	for class, retained := range byClass {
 		table[class] = func(*Input) ([]graph.Exemption, error) { return retained, nil }
 	}
@@ -225,7 +226,7 @@ func heldBack(union []graph.Exemption, reported map[graph.SymbolID]bool) map[str
 
 // sweptWith computes the union of the classes the table holds under one set of
 // disabled classes, sweeps the graph with it, and returns both.
-func sweptWith(t *rapid.T, g *graph.Graph, table map[Class]Detector, disabled []Class, mode graph.Mode) ([]graph.Exemption, graph.Result) {
+func sweptWith(t *rapid.T, g *graph.Graph, table map[vocab.Exemption]Detector, disabled []vocab.Exemption, mode graph.Mode) ([]graph.Exemption, graph.Result) {
 	union, _, err := Compute(&Input{Options: Options{Disabled: disabled}, Mode: mode}, table)
 	if err != nil {
 		t.Fatalf("Compute over the drawn retentions error: %v", err)
@@ -261,7 +262,7 @@ func TestProperty04TheReportedSetAndTheRetainedSetAreDisjoint(t *testing.T) {
 		// A class the draw disabled retains nothing, which is what makes the
 		// growth below the consequence of the switch rather than of the draw.
 		for _, e := range union {
-			if slices.Contains(d.disabled, Class(e.Class)) {
+			if slices.Contains(d.disabled, vocab.Exemption(e.Class)) {
 				t.Fatalf("Compute retained %s under the disabled class %s\n%s", e.ID, e.Class, d.describeDrawn())
 			}
 		}

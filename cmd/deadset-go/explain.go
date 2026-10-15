@@ -13,6 +13,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 const explainUsage = "usage: deadset-go explain [--target=DIR] [--scope=FILE] [--config=FILE] [--central=FILE] " +
@@ -69,14 +70,14 @@ const (
 // names the symbol is what decides the explanation.
 func explain(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	named, resolved, code := explainFlags(args, stderr)
-	if code != exitClean {
+	if code != vocab.ExitClean {
 		return code
 	}
 
 	options, err := exemptOptions(&resolved.config)
 	if err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
-		return exitUsage
+		return vocab.ExitUsage
 	}
 	set, err := findingsOf(ctx, &resolved, &options)
 	if err != nil {
@@ -93,13 +94,13 @@ func explain(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		if len(partial) == 0 {
 			fmt.Fprintln(stderr, "  no symbol of the target partially matches it either")
 		}
-		return exitUsage
+		return vocab.ExitUsage
 	}
 	if err := writeExplanation(stdout, &set, cascadeOf(resolved.config.Reporters.Cascade), subject); err != nil {
 		fmt.Fprintf(stderr, "deadset-go: explain: %v\n", err)
-		return exitFailure
+		return vocab.ExitFailure
 	}
-	return exitClean
+	return vocab.ExitClean
 }
 
 // explainFlags parses the invocation and resolves the configuration documents it
@@ -111,19 +112,19 @@ func explainFlags(args []string, stderr io.Writer) (named string, resolved resol
 		asked[flagName] = flags.set.String(flagName, "", "the symbol to explain, as the argument names it")
 	}
 	if err := flags.set.Parse(args); err != nil {
-		return "", resolution{}, exitUsage
+		return "", resolution{}, vocab.ExitUsage
 	}
 
 	named, err := namedSymbol(flags.set, asked)
 	if err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
 		flags.set.Usage()
-		return "", resolution{}, exitUsage
+		return "", resolution{}, vocab.ExitUsage
 	}
-	if resolved, code = flags.resolution(stderr); code != exitClean {
+	if resolved, code = flags.resolution(stderr); code != vocab.ExitClean {
 		return "", resolution{}, code
 	}
-	return named, resolved, exitClean
+	return named, resolved, vocab.ExitClean
 }
 
 // namedSymbol is the symbol one request names, from the argument or from one of the

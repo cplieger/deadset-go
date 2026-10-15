@@ -13,6 +13,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // determinismModule writes the target every determinism assertion is measured over,
@@ -90,7 +92,7 @@ func determinismBase(t *testing.T) string {
 func documentSuffixes() []string {
 	suffixes := []string{".json", ".json.baseline"}
 	for _, format := range slices.Sorted(maps.Keys(renderings)) {
-		suffixes = append(suffixes, ".json"+renderings[format].suffix)
+		suffixes = append(suffixes, ".json"+renderings[format])
 	}
 	return suffixes
 }
@@ -114,9 +116,9 @@ func documentsOf(t *testing.T, name string) map[string][]byte {
 	}
 
 	var stderr strings.Builder
-	if code := run(t.Context(), args, io.Discard, &stderr); code != exitClean {
+	if code := run(t.Context(), args, io.Discard, &stderr); code != vocab.ExitClean {
 		t.Fatalf("run(%q) = %d, want %d with the exit code configured off\nstderr: %s",
-			args, code, exitClean, stderr.String())
+			args, code, vocab.ExitClean, stderr.String())
 	}
 
 	written := make(map[string][]byte, len(documentSuffixes()))

@@ -62,7 +62,10 @@ func keepGCSettings(t *testing.T) (limit int64, gogc int) {
 }
 
 func TestStartSetsNothingWhereNoSourceAnswers(t *testing.T) {
-	limit, gogc := keepGCSettings(t)
+	_, gogc := keepGCSettings(t)
+	// A GOMEMLIMIT in the test's environment is a caller limit, which answers on its own.
+	limit := int64(math.MaxInt64)
+	debug.SetMemoryLimit(limit)
 	silent := func() (uint64, bool) { return 0, false }
 	ctx, cancel := context.WithCancelCause(t.Context())
 	defer cancel(nil)

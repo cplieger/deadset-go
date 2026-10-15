@@ -8,11 +8,10 @@ import (
 	spec "github.com/cplieger/deadset-spec/v8"
 )
 
-// The published documents that fix the three value forms an entry names.
+// The published documents that fix the reference forms an entry names.
 const (
 	referencePage = "contract/grammar/symbol-ref.md"
 	referenceFile = "contract/grammar/symbol-ref-corpus.json"
-	findingSchema = "contract/finding.schema.json"
 )
 
 // referenceCase is one case of the published symbol-reference corpus.
@@ -55,54 +54,6 @@ func TestReferenceFormClassifiesEveryPublishedCorpusCase(t *testing.T) {
 				t.Errorf("referenceForm(%q) = %t, want %t: %s", c.Input, got, c.Accepted, c.Reason)
 			}
 		})
-	}
-}
-
-// schemaPatterns are the two value forms the published finding schema fixes,
-// read from the schema so a transcription that drifts fails here.
-func schemaPatterns(t *testing.T) (code, path string) {
-	t.Helper()
-	body, err := spec.Contract.ReadFile(findingSchema)
-	if err != nil {
-		t.Fatalf("Setup: read %s from the contract: %v", findingSchema, err)
-	}
-
-	var schema struct {
-		Defs struct {
-			RelativePath struct {
-				Pattern string `json:"pattern"`
-			} `json:"relative_path"`
-		} `json:"$defs"`
-		Properties struct {
-			Details struct {
-				Properties struct {
-					Entry struct {
-						Properties struct {
-							Code struct {
-								Pattern string `json:"pattern"`
-							} `json:"code"`
-						} `json:"properties"`
-					} `json:"entry"`
-				} `json:"properties"`
-			} `json:"details"`
-		} `json:"properties"`
-	}
-	if err := json.Unmarshal(body, &schema); err != nil {
-		t.Fatalf("Setup: decode %s: %v", findingSchema, err)
-	}
-	return schema.Properties.Details.Properties.Entry.Properties.Code.Pattern, schema.Defs.RelativePath.Pattern
-}
-
-func TestPublishedSchemaCarriesTheCodeAndPathExpressions(t *testing.T) {
-	code, path := schemaPatterns(t)
-	if code == "" || path == "" {
-		t.Fatalf("Setup: %s carries the code expression %q and the path expression %q, want both", findingSchema, code, path)
-	}
-	if got := codeForm.String(); got != code {
-		t.Errorf("the transcribed code expression is\n%s\nand %s carries\n%s", got, findingSchema, code)
-	}
-	if got := pathForm.String(); got != path {
-		t.Errorf("the transcribed path expression is\n%s\nand %s carries\n%s", got, findingSchema, path)
 	}
 }
 

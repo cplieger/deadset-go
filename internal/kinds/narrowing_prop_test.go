@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
 )
 
@@ -244,11 +245,11 @@ func owedFor(reach drawnReach, complete bool, sites []drawnSite) (string, bool) 
 	}
 	switch {
 	case !slices.Contains(sites, siteAnotherPackage) && !slices.Contains(sites, siteAnotherFile):
-		return unnecessaryExportCode + " " + visibilityFile, true
+		return string(vocab.UnnecessaryExport) + " " + visibilityFile, true
 	case !slices.Contains(sites, siteAnotherPackage):
-		return unnecessaryExportCode + " " + visibilityPackage, true
+		return string(vocab.UnnecessaryExport) + " " + visibilityPackage, true
 	case reach == reachPublished:
-		return unnecessaryExposureCode + " " + visibilityModule, true
+		return string(vocab.UnnecessaryExposure) + " " + visibilityModule, true
 	default:
 		return "", false
 	}
@@ -292,7 +293,7 @@ func TestNarrowingNamesTheNarrowestScopeContainingEveryReference(t *testing.T) {
 
 		got := make(map[string]string, len(exported)+len(exposed))
 		for _, f := range append(exported, exposed...) {
-			got[f.Symbol.Ref] = f.Code + " " + f.Details.NarrowerVisibility
+			got[f.Symbol.Ref] = string(f.Code) + " " + f.Details.NarrowerVisibility
 		}
 		if want := m.want(); !maps.Equal(got, want) {
 			t.Fatalf("the narrowing kinds reported %v, want %v", got, want)

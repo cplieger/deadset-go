@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // consumerArchive is the fixture whose program is a target and a module the scope
@@ -36,7 +37,7 @@ func wireRefs(typeName string, members ...string) []string {
 // only those crosses nothing.
 func TestEncodingReflectionRetainsWhatAConsumersWrapperReaches(t *testing.T) {
 	shared := analysisOf(t, consumerArchive, Options{})
-	refs := retainedRefs(t, shared, EncodingReflection)
+	refs := retainedRefs(t, shared, vocab.EncodingReflection)
 
 	for _, test := range []struct {
 		wrapper  string
@@ -95,7 +96,7 @@ func TestEncodingReflectionRetainsWhatAConsumersWrapperReaches(t *testing.T) {
 // consumer's function that formats nothing keeps nothing.
 func TestFormatVerbContractRetainsWhatAConsumersPrintWrapperFormats(t *testing.T) {
 	shared := analysisOf(t, consumerArchive, Options{})
-	refs := retainedRefs(t, shared, FormatVerbContract)
+	refs := retainedRefs(t, shared, vocab.FormatVerbContract)
 
 	for _, test := range []struct {
 		consumer string
@@ -135,7 +136,7 @@ func TestEncodingReflectionNamesTheConsumersWrapper(t *testing.T) {
 	}
 
 	got := make(map[string]string)
-	for _, e := range retained(t, shared, EncodingReflection) {
+	for _, e := range retained(t, shared, vocab.EncodingReflection) {
 		if ref, held := refs[e.ID]; held {
 			got[ref] = e.Detail
 		}
@@ -181,7 +182,7 @@ const consumerSiteArchive = "encoding-reflection-consumer-site.txtar"
 // file outside the target root.
 func TestEncodingReflectionRendersAConsumersEvidenceAgainstTheConsumersRoot(t *testing.T) {
 	shared := analysisOf(t, consumerSiteArchive, Options{})
-	found, err := shared.detect(t, EncodingReflection)
+	found, err := shared.detect(t, vocab.EncodingReflection)
 	if err != nil {
 		t.Fatalf("EncodingReflectionDetector(%s) = %v, want the consumer's evidence recorded", consumerSiteArchive, err)
 	}

@@ -5,19 +5,18 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/catalog"
-	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // The hand-built component's root is the exported function and the unexported
 // helper falls with it, so these emitters report the root under one code, the
 // member under another, and one declaration of no dead component under the second.
-func rootMemberAndBystander(in *Input) map[string]Emitter {
-	return map[string]Emitter{
-		unusedExportedCode:   emitterOf(oneFinding(in, unusedExportedCode, exportedID)),
-		unusedUnexportedCode: emitterOf(oneFinding(in, unusedUnexportedCode, helperID), oneFinding(in, unusedUnexportedCode, internalID)),
+func rootMemberAndBystander(in *Input) map[vocab.Code]Emitter {
+	return map[vocab.Code]Emitter{
+		vocab.UnusedExported:   emitterOf(oneFinding(in, vocab.UnusedExported, exportedID)),
+		vocab.UnusedUnexported: emitterOf(oneFinding(in, vocab.UnusedUnexported, helperID), oneFinding(in, vocab.UnusedUnexported, internalID)),
 	}
 }
 
@@ -37,7 +36,7 @@ func idsOf(findings []Finding) []graph.SymbolID {
 
 func TestComputeWithholdsTheComponentOfARootTheSeverityAllows(t *testing.T) {
 	resolved := applicationConfig()
-	resolved.Severity = map[string]config.Severity{unusedExportedCode: config.Allow}
+	resolved.Severity = map[string]vocab.Severity{string(vocab.UnusedExported): vocab.Allow}
 	in := handInput(resolved)
 
 	result := computed(t, in, rootMemberAndBystander(in))
@@ -66,12 +65,12 @@ func TestComputeReportsTheWholeComponentWhenNoDialWithholdsItsRoot(t *testing.T)
 
 func TestComputeWithholdsTheComponentOfARootBelowTheMinimumConfidence(t *testing.T) {
 	resolved := applicationConfig()
-	resolved.Analysis.MinConfidence = config.Certain
+	resolved.Analysis.MinConfidence = vocab.Certain
 	in := handInput(resolved)
-	rows := catalog.Kinds()
+	rows := vocab.Kinds()
 	for i := range rows {
-		if rows[i].Code == unusedExportedCode {
-			rows[i].MaxClass = string(Probable)
+		if rows[i].Code == vocab.UnusedExported {
+			rows[i].MaxClass = vocab.Probable
 		}
 	}
 	swap(t, rows)
@@ -95,7 +94,7 @@ func TestComputeWithholdsTheComponentOfARootBelowTheMinimumConfidence(t *testing
 // sweep without it judged dead.
 func heldBackMark(in *Input, id graph.SymbolID) {
 	in.Marks = []suppress.Record{{
-		Code:      unusedUnexportedCode,
+		Code:      vocab.UnusedUnexported,
 		Symbol:    in.Refs[id],
 		Reason:    "kept for the plugin loader",
 		Bound:     id,
@@ -107,7 +106,7 @@ func heldBackMark(in *Input, id graph.SymbolID) {
 
 func TestARecordOnAMemberOfAWithheldComponentIsDormant(t *testing.T) {
 	resolved := applicationConfig()
-	resolved.Severity = map[string]config.Severity{unusedExportedCode: config.Allow}
+	resolved.Severity = map[string]vocab.Severity{string(vocab.UnusedExported): vocab.Allow}
 	in := handInput(resolved)
 	heldBackMark(in, helperID)
 
@@ -117,7 +116,7 @@ func TestARecordOnAMemberOfAWithheldComponentIsDormant(t *testing.T) {
 		t.Errorf("Totals() = %d in effect, want 0: the record's finding falls with a root the severity withholds", inEffect)
 	}
 	for i := range result.Findings {
-		if result.Findings[i].Code == staleSuppressionCode {
+		if result.Findings[i].Code == vocab.StaleSuppression {
 			t.Errorf("Compute() reported %v, want no stale suppression for a dormant record", summary(result.Findings))
 		}
 	}
@@ -125,7 +124,7 @@ func TestARecordOnAMemberOfAWithheldComponentIsDormant(t *testing.T) {
 
 func TestARecordOnASymbolThatWouldJoinAWithheldComponentIsDormant(t *testing.T) {
 	resolved := applicationConfig()
-	resolved.Severity = map[string]config.Severity{unusedExportedCode: config.Allow}
+	resolved.Severity = map[string]vocab.Severity{string(vocab.UnusedExported): vocab.Allow}
 	in := handInput(resolved)
 	const markedID graph.SymbolID = "catalog.go:40:6"
 	in.Merged.Symbols = append(in.Merged.Symbols,
@@ -145,7 +144,7 @@ func TestARecordOnASymbolThatWouldJoinAWithheldComponentIsDormant(t *testing.T) 
 
 func TestARecordOnASymbolThatReferencesAMemberOfAWithheldComponentIsDormant(t *testing.T) {
 	resolved := applicationConfig()
-	resolved.Severity = map[string]config.Severity{unusedExportedCode: config.Allow}
+	resolved.Severity = map[string]vocab.Severity{string(vocab.UnusedExported): vocab.Allow}
 	in := handInput(resolved)
 	const markedID graph.SymbolID = "catalog.go:40:6"
 	in.Merged.Symbols = append(in.Merged.Symbols,
@@ -166,7 +165,7 @@ func TestARecordOnASymbolThatReferencesAMemberOfAWithheldComponentIsDormant(t *t
 
 func TestARecordOnAMethodWhoseTypeIsAMemberOfAWithheldComponentIsDormant(t *testing.T) {
 	resolved := applicationConfig()
-	resolved.Severity = map[string]config.Severity{unusedExportedCode: config.Allow}
+	resolved.Severity = map[string]vocab.Severity{string(vocab.UnusedExported): vocab.Allow}
 	in := handInput(resolved)
 	in.Merged.Symbols[1].Kind = graph.KindType
 	const markedID graph.SymbolID = "catalog.go:40:6"
@@ -187,7 +186,7 @@ func TestARecordOnAMethodWhoseTypeIsAMemberOfAWithheldComponentIsDormant(t *test
 
 func TestARecordOnATypeWhoseMethodIsAMemberOfAWithheldComponentIsDormant(t *testing.T) {
 	resolved := applicationConfig()
-	resolved.Severity = map[string]config.Severity{unusedExportedCode: config.Allow}
+	resolved.Severity = map[string]vocab.Severity{string(vocab.UnusedExported): vocab.Allow}
 	in := handInput(resolved)
 	const markedID graph.SymbolID = "catalog.go:40:6"
 	container := handSymbol(markedID, "go://example.com/app#marked", "marked", "example.com/app", "catalog.go", 40, 42, false)

@@ -6,6 +6,7 @@ import (
 	"go/types"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // localDeclaration is one constant or type a function body declares, with the
@@ -32,7 +33,7 @@ func (g *intrafunc) unusedLocals() ([]Finding, error) {
 			}
 		}
 	}
-	found, err := g.findings(unusedUnexportedCode, held.unused())
+	found, err := g.findings(vocab.UnusedUnexported, held.unused())
 	for i := range found {
 		found[i].local = true
 	}
