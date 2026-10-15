@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	core "github.com/cplieger/deadset-spec/v8/suppress"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
 )
 
@@ -111,7 +113,7 @@ func writeDrawnDocument(t *rapid.T, document string) string {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 
-	path := filepath.Join(dir, IgnoreFileName)
+	path := filepath.Join(dir, core.IgnoreFileName)
 	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
 		t.Fatalf("Setup: write %s: %v", path, err)
 	}
@@ -158,7 +160,7 @@ func TestProperty16ASuppressionMatchesOnlyWhatItNames(t *testing.T) {
 		}
 		bound := make([]graph.SymbolID, 0, len(records))
 		for _, r := range records {
-			if r.Code != code || r.Symbol != named.Ref || r.Path != named.Pos.Filename {
+			if string(r.Code) != code || r.Symbol != named.Ref || r.Path != named.Pos.Filename {
 				t.Fatalf("IgnoreFile(%s) returned the record %+v, which names something the entry does not\n%s",
 					document, r, drawn.describeDrawn())
 			}
@@ -179,9 +181,9 @@ func TestProperty16ASuppressionMatchesOnlyWhatItNames(t *testing.T) {
 			t.Fatalf("IgnoreFile(%s) returned %d records for an entry naming no path, want none: %+v\n%s",
 				unscoped, len(records), records, drawn.describeDrawn())
 		}
-		if len(refusals) != 1 || refusals[0].Reported != codeUnscoped {
+		if len(refusals) != 1 || refusals[0].Reported != vocab.UnscopedIgnoreEntry {
 			t.Fatalf("IgnoreFile(%s) returned %+v, want one refusal reported under %s\n%s",
-				unscoped, refusals, codeUnscoped, drawn.describeDrawn())
+				unscoped, refusals, vocab.UnscopedIgnoreEntry, drawn.describeDrawn())
 		}
 	})
 }

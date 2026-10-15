@@ -7,6 +7,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
 )
 
@@ -64,15 +65,15 @@ func drawnConsumers(t *rapid.T, label string) Consumers {
 // the run's consumer knowledge cannot move it: a kind the configuration does not
 // name resolves to the Contract's default, and one of those defaults is the one the
 // consumer model turns off.
-func drawnSeverities(t *rapid.T, label string) map[string]config.Severity {
-	severities := []config.Severity{config.Warn, config.Deny}
-	named := map[string]config.Severity{
-		unusedMemberCode: rapid.SampledFrom(severities).Draw(t, label+": the severity of the observed kind"),
+func drawnSeverities(t *rapid.T, label string) map[string]vocab.Severity {
+	severities := []vocab.Severity{vocab.Warn, vocab.Deny}
+	named := map[string]vocab.Severity{
+		string(vocab.UnusedMember): rapid.SampledFrom(severities).Draw(t, label+": the severity of the observed kind"),
 	}
-	for _, code := range []string{unusedExportedCode, unusedUnexportedCode, testOnlyUseCode} {
-		if rapid.Bool().Draw(t, label+": the configuration names "+code) {
-			named[code] = rapid.SampledFrom(append(severities, config.Allow)).
-				Draw(t, label+": the severity of "+code)
+	for _, code := range []vocab.Code{vocab.UnusedExported, vocab.UnusedUnexported, vocab.TestOnlyUse} {
+		if rapid.Bool().Draw(t, label+": the configuration names "+string(code)) {
+			named[string(code)] = rapid.SampledFrom(append(severities, vocab.Allow)).
+				Draw(t, label+": the severity of "+string(code))
 		}
 	}
 	return named
@@ -107,7 +108,7 @@ func propInput(symbols []graph.Symbol, resolved config.Config, consumers Consume
 func everyCandidate(in *Input) ([]Finding, error) {
 	var found []Finding
 	for i := range in.Sweep.Candidates {
-		one, held := in.finding(in.Sweep.Candidates[i].ID, unusedMemberCode,
+		one, held := in.finding(in.Sweep.Candidates[i].ID, vocab.UnusedMember,
 			"the field has no reference in the target")
 		if !held {
 			continue
@@ -118,13 +119,13 @@ func everyCandidate(in *Input) ([]Finding, error) {
 }
 
 // classes and severities are the two dials of one pass, keyed by declaration.
-func dials(t *rapid.T, in *Input) (map[string]Class, map[string]config.Severity) {
-	result, err := Compute(in, map[string]Emitter{unusedMemberCode: everyCandidate})
+func dials(t *rapid.T, in *Input) (map[string]vocab.Class, map[string]vocab.Severity) {
+	result, err := Compute(in, map[vocab.Code]Emitter{vocab.UnusedMember: everyCandidate})
 	if err != nil {
 		t.Fatalf("Compute() = error %v, want the findings of the pass", err)
 	}
-	classes := make(map[string]Class, len(result.Findings))
-	severities := make(map[string]config.Severity, len(result.Findings))
+	classes := make(map[string]vocab.Class, len(result.Findings))
+	severities := make(map[string]vocab.Severity, len(result.Findings))
 	for i := range result.Findings {
 		classes[result.Findings[i].Symbol.Ref] = result.Findings[i].Class
 		severities[result.Findings[i].Symbol.Ref] = result.Findings[i].Severity
@@ -157,7 +158,7 @@ func TestTheClassAndTheSeverityAreIndependentDials(t *testing.T) {
 
 		first := config.Default()
 		first.Target.Kind = config.OneKind(kind)
-		first.Analysis.MinConfidence = config.Possible
+		first.Analysis.MinConfidence = vocab.Possible
 		first.Consumers.Complete = consumers.Complete
 		first.Severity = drawnSeverities(t, "the first run")
 		classes, severities := dials(t, propInput(symbols, first, consumers))

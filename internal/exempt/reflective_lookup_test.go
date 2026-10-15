@@ -3,13 +3,15 @@ package exempt
 import (
 	"slices"
 	"testing"
+
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 func TestReflectiveLookupDetector(t *testing.T) {
 	shared := analysisOf(t, "reflective-lookup.txtar", Options{})
 	symbols := shared.inventory(t)
 
-	got, err := shared.detect(t, ReflectiveLookup)
+	got, err := shared.detect(t, vocab.ReflectiveLookup)
 	if err != nil {
 		t.Fatalf("ReflectiveLookupDetector(reflective-lookup.txtar) error: %v", err)
 	}
@@ -30,7 +32,7 @@ func TestReflectiveLookupDetectorWithoutALookup(t *testing.T) {
 	shared := analysisOf(t, "reflective-lookup-none.txtar", Options{})
 	symbols := shared.inventory(t)
 
-	got, err := shared.detect(t, ReflectiveLookup)
+	got, err := shared.detect(t, vocab.ReflectiveLookup)
 	if err != nil {
 		t.Fatalf("ReflectiveLookupDetector(reflective-lookup-none.txtar) error: %v", err)
 	}
@@ -47,7 +49,7 @@ func TestReflectiveLookupRetainsTheMethodsARegistrationNames(t *testing.T) {
 	shared := analysisOf(t, "reflective-lookup-registration.txtar", Options{})
 	symbols := shared.inventory(t)
 
-	got, err := shared.detect(t, ReflectiveLookup)
+	got, err := shared.detect(t, vocab.ReflectiveLookup)
 	if err != nil {
 		t.Fatalf("ReflectiveLookupDetector(reflective-lookup-registration.txtar) error: %v", err)
 	}

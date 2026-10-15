@@ -5,6 +5,7 @@ import (
 	"go/token"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // detailGenerated is the clause every exemption of the class records: the
@@ -58,7 +59,7 @@ func GeneratedFileDetector(in *Input) ([]graph.Exemption, error) {
 		}
 		found = append(found, graph.Exemption{
 			ID:     s.ID,
-			Class:  string(GeneratedFile),
+			Class:  string(vocab.GeneratedFile),
 			Site:   site,
 			Detail: detailGenerated,
 		})

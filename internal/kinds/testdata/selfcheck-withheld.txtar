@@ -18,20 +18,20 @@ go 1.27.1
 -- internal/store/store.go --
 package store
 
-//deadset:ignore DS1101 -- exported for a reader of this package alone
+//deadset:ignore DS1501 -- exported for a reader of this package alone
 func Narrowed() int { return 3 }
 
 // Entry is what the command calls, and its body holds the only reference to
 // Narrowed and the only call of tagged.
 func Entry() int { return Narrowed() + tagged(1, "a") }
 
-//deadset:ignore DS1101 -- the command reaches this one from its own package
+//deadset:ignore DS1501 -- the command reaches this one from its own package
 func Shared() int { return 2 }
 
-//deadset:ignore DS1801 -- the tag answers a shape this program does not read
+//deadset:ignore DS1401 -- the tag answers a shape this program does not read
 func tagged(value int, tag string) int { return value }
 
-//deadset:ignore DS1703 -- a finding about a row of a document has no suppression
+//deadset:ignore DS9003 -- a finding about a row of a document has no suppression
 func Rowless() int { return 4 }
 -- main.go --
 package main

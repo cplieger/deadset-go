@@ -7,6 +7,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 func TestUnusedRequirementsReportsADirectRequirementNoImportNeeds(t *testing.T) {
@@ -115,7 +116,7 @@ func TestTheLoadFailsBeforeADependencyAnswerWhereAnImportResolvesToNoModule(t *t
 			setup, isSetup := errors.AsType[*load.SetupError](err)
 			_, diagnosed := errors.AsType[*load.Error](err)
 			switch {
-			case tc.setup && (!isSetup || len(setup.Failures) == 0 || setup.Failures[0].Class != load.MissingModule):
+			case tc.setup && (!isSetup || len(setup.Failures) == 0 || setup.Failures[0].Class != vocab.SetupMissingModule):
 				t.Errorf("load.Load(%s) error = %v, want a missing-module failure: the module file requires the module", tc.archive, err)
 			case !tc.setup && !diagnosed:
 				t.Errorf("load.Load(%s) error = %v, want the load's own diagnostics: nothing requires the module", tc.archive, err)

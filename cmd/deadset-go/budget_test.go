@@ -8,15 +8,19 @@ import (
 	"testing"
 )
 
-// toolsModule is the one module outside the standard library this analyzer's
-// program is built on, and the whole of its runtime budget: the type information
-// the analysis reads has no reimplementation, and everything else the program does
-// is the standard library's.
+// toolsModule is the module the type information the analysis reads comes from,
+// which has no reimplementation.
 const toolsModule = "golang.org/x/tools"
 
 // testOnlyModules are the requirements no program links: the property-testing
-// instrument and the Contract, each read by a test alone.
-var testOnlyModules = []string{"github.com/cplieger/deadset-spec/v8", "pgregory.net/rapid"}
+// instrument, read by a test alone.
+var testOnlyModules = []string{"pgregory.net/rapid"}
+
+// firstParty reports whether a module is inside the budget by its path alone:
+// golang.org/x, and the first-party github.com/cplieger modules.
+func firstParty(module string) bool {
+	return strings.HasPrefix(module, "golang.org/x/") || strings.HasPrefix(module, "github.com/cplieger/")
+}
 
 // TestTheBuiltBinaryLinksNothingOutsideTheBudget reads the built program and
 // refuses a module the budget does not admit.
@@ -28,10 +32,10 @@ var testOnlyModules = []string{"github.com/cplieger/deadset-spec/v8", "pgregory.
 // the answer is, which is the build information the toolchain records in the binary
 // itself.
 //
-// The admissible set is derived and not written down: golang.org/x/tools, and every
-// module the main module needs only through a package of it. A module that arrives
-// because x/tools started requiring it is therefore admitted without an edit here,
-// and one that arrives any other way is reported whatever its name.
+// The admissible set is golang.org/x, the first-party modules, and every module the
+// main module needs only through a package of golang.org/x/tools. A module that
+// arrives because x/tools started requiring it is therefore admitted without an edit
+// here, and a third-party one that arrives any other way is reported.
 func TestTheBuiltBinaryLinksNothingOutsideTheBudget(t *testing.T) {
 	binary := analyzerBinary(t)
 
@@ -42,11 +46,11 @@ func TestTheBuiltBinaryLinksNothingOutsideTheBudget(t *testing.T) {
 	}
 	throughTools := tracedThroughTools(t, linked)
 	for _, module := range linked {
-		if module == toolsModule || throughTools[module] {
+		if firstParty(module) || throughTools[module] {
 			continue
 		}
-		t.Errorf("the built binary links %s, which the budget does not admit: the budget is the standard library, %s, and the modules the main module needs only through %s",
-			module, toolsModule, toolsModule)
+		t.Errorf("the built binary links %s, which the budget does not admit: the budget is the standard library, golang.org/x, the first-party modules and the modules the main module needs only through %s",
+			module, toolsModule)
 	}
 }
 
@@ -55,17 +59,15 @@ func TestTheBuiltBinaryLinksNothingOutsideTheBudget(t *testing.T) {
 //
 // It is the assertion the one above cannot make: a requirement only a test links is
 // inside the budget and absent from every binary, so nothing about the program says
-// whether the module file declares a fourth one. A new direct requirement is a
+// whether the module file declares another one. A new direct requirement is a
 // decision about the budget, and this is where that decision is refused.
 func TestTheModuleFileDeclaresNoDirectRequirementOutsideTheBudget(t *testing.T) {
-	want := append([]string{toolsModule}, testOnlyModules...)
-	slices.Sort(want)
-
-	got := directRequirements(t, moduleFilePath(t))
-	slices.Sort(got)
-	if !slices.Equal(got, want) {
-		t.Errorf("the module file requires %v directly, want %v: %s is the runtime budget and the others are read by a test alone",
-			got, want, toolsModule)
+	for _, module := range directRequirements(t, moduleFilePath(t)) {
+		if firstParty(module) || slices.Contains(testOnlyModules, module) {
+			continue
+		}
+		t.Errorf("the module file requires %s directly, which the budget does not admit: golang.org/x and the first-party modules are the runtime budget and %v are read by a test alone",
+			module, testOnlyModules)
 	}
 }
 
@@ -75,7 +77,6 @@ func linkedModules(t *testing.T, binary string) []string {
 	t.Helper()
 
 	command := exec.CommandContext(t.Context(), "go", "version", "-m", binary)
-	command.Env = append(os.Environ(), "GOWORK=off")
 	out, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("Setup: go version -m %s: %v\n%s", binary, err, out)
@@ -107,7 +108,6 @@ func tracedThroughTools(t *testing.T, modules []string) map[string]bool {
 		return nil
 	}
 	command := exec.CommandContext(t.Context(), "go", append([]string{"mod", "why", "-m"}, modules...)...)
-	command.Env = append(os.Environ(), "GOWORK=off")
 	out, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("Setup: go mod why -m %v: %v\n%s", modules, err, out)
@@ -136,7 +136,6 @@ func moduleFilePath(t *testing.T) string {
 	t.Helper()
 
 	command := exec.CommandContext(t.Context(), "go", "env", "GOMOD")
-	command.Env = append(os.Environ(), "GOWORK=off")
 	out, err := command.CombinedOutput()
 	if err != nil {
 		t.Fatalf("Setup: go env GOMOD: %v\n%s", err, out)

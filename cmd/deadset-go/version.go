@@ -14,7 +14,7 @@ const develVersion = "0.0.0-devel"
 
 // version is this analyzer's own version, which the build carries rather than the
 // source. It moves independently of the Contract version the analyzer implements,
-// which is [config.ContractVersion].
+// which the vocab package states.
 //
 // The value is the module version the build stamped with the leading v removed: the
 // tag under go install, and the pseudo-version the toolchain derives from the

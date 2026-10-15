@@ -64,7 +64,6 @@ func analyzerBinary(t *testing.T) string {
 
 	binary := filepath.Join(t.TempDir(), "deadset-go")
 	build := exec.CommandContext(t.Context(), "go", "build", "-trimpath", "-ldflags=-s -w", "-o", binary, ".")
-	build.Env = append(os.Environ(), "GOWORK=off")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("Setup: build the command: %v\n%s", err, out)
 	}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/edges"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // edged is the harness input over one archive with the target's edges document read,
@@ -31,7 +32,7 @@ type evaluated struct {
 	side    string
 	symbol  string
 	state   string
-	finding string
+	finding vocab.Code
 }
 
 // asNamed is every evaluation as a test names it, with the code of the pending finding
@@ -40,7 +41,7 @@ func asNamed(evaluations []Evaluation) []evaluated {
 	held := make([]evaluated, 0, len(evaluations))
 	for i := range evaluations {
 		one := &evaluations[i]
-		code := ""
+		var code vocab.Code
 		if one.Finding != nil {
 			code = one.Finding.Code
 		}
@@ -57,12 +58,12 @@ func asNamed(evaluations []Evaluation) []evaluated {
 
 func TestEvaluatePublishesOneRecordPerOwnSideWithItsState(t *testing.T) {
 	in := edged(t, "selfcheck-edges.txtar", applicationConfig())
-	result := computed(t, in, map[string]Emitter{unreachableExportCode: UnreachableExport})
+	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnreachableExport: UnreachableExport})
 
 	kept, evaluations := Evaluate(in, result.Findings)
 	const declaring = "go://example.com/selfcheckedges#"
 	want := []evaluated{
-		{edge: "wire/Event", side: "provides", symbol: declaring + "Event", state: "dead", finding: unreachableExportCode},
+		{edge: "wire/Event", side: "provides", symbol: declaring + "Event", state: "dead", finding: vocab.UnreachableExport},
 		{edge: "wire/Local", side: "provides", symbol: declaring + "Local", state: "live"},
 		{edge: "wire/Vanished", side: "provides", symbol: declaring + "Vanished", state: "absent"},
 		{edge: "wire/kept", side: "provides", symbol: declaring + "kept", state: "live"},
@@ -70,11 +71,11 @@ func TestEvaluatePublishesOneRecordPerOwnSideWithItsState(t *testing.T) {
 	if got := asNamed(evaluations); !slices.Equal(got, want) {
 		t.Errorf("Evaluate() published %+v, want %+v", got, want)
 	}
-	if slices.Contains(namesUnder(kept, unreachableExportCode), "Event") {
+	if slices.Contains(namesUnder(kept, vocab.UnreachableExport), "Event") {
 		t.Errorf("Evaluate() left the finding about Event reported, want it published inside the evaluation alone: %v",
 			summary(kept))
 	}
-	if !slices.Contains(namesUnder(kept, unreachableExportCode), "Orphan") {
+	if !slices.Contains(namesUnder(kept, vocab.UnreachableExport), "Orphan") {
 		t.Errorf("Evaluate() dropped the finding about Orphan, want every finding no edge names kept: %v",
 			summary(kept))
 	}
@@ -86,8 +87,8 @@ func TestEvaluatePublishesOneRecordPerOwnSideWithItsState(t *testing.T) {
 
 func TestEvaluateCarriesTheFindingTheAnalyzerWouldHaveReported(t *testing.T) {
 	in := edged(t, "selfcheck-edges.txtar", applicationConfig())
-	result := computed(t, in, map[string]Emitter{unreachableExportCode: UnreachableExport})
-	reported := findingOf(t, result.Findings, unreachableExportCode, "Event")
+	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnreachableExport: UnreachableExport})
+	reported := findingOf(t, result.Findings, vocab.UnreachableExport, "Event")
 
 	_, evaluations := Evaluate(in, result.Findings)
 	pending := evaluations[0].Finding
@@ -106,14 +107,14 @@ func TestEvaluateCarriesTheFindingTheAnalyzerWouldHaveReported(t *testing.T) {
 
 func TestEvaluatePublishesTheFindingAboutTheDeclarationAnEdgeNamesAndNeverAPartOfIt(t *testing.T) {
 	in := edged(t, "selfcheck-edges.txtar", applicationConfig())
-	result := computed(t, in, map[string]Emitter{unreachableExportCode: UnreachableExport})
+	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnreachableExport: UnreachableExport})
 	const declaring = "go://example.com/selfcheckedges#"
 
 	// A part of the declaration one edge names, reported beside the declaration's own
 	// finding. The edge stands for a consumer of the declaration, so what moves into
 	// the evaluation is the finding about the declaration; the part's is about the
 	// part and stays reported whatever the paired side answers.
-	part := findingAt(unusedParameterCode, Subject{
+	part := findingAt(vocab.UnusedParameter, Subject{
 		Ref:       declaring + "Event",
 		Kind:      parameterSubject,
 		Name:      "label",
@@ -124,10 +125,10 @@ func TestEvaluatePublishesTheFindingAboutTheDeclarationAnEdgeNamesAndNeverAPartO
 	kept, evaluations := Evaluate(in, append(result.Findings, part))
 
 	pending := evaluations[0].Finding
-	if pending == nil || pending.Code != unreachableExportCode {
+	if pending == nil || pending.Code != vocab.UnreachableExport {
 		t.Fatalf("Evaluate() published %+v, want the finding about the declaration", asNamed(evaluations))
 	}
-	if !slices.Contains(codesOf(kept), unusedParameterCode) {
+	if !slices.Contains(codesOf(kept), vocab.UnusedParameter) {
 		t.Errorf("Evaluate() moved the finding about a part of Event into the evaluation, want it kept: %v",
 			summary(kept))
 	}
@@ -135,8 +136,8 @@ func TestEvaluatePublishesTheFindingAboutTheDeclarationAnEdgeNamesAndNeverAPartO
 
 func TestEvaluatePublishesANarrowingCandidateWhoseOnlyOutsideReferenceIsAnEdge(t *testing.T) {
 	in := edged(t, "selfcheck-edges.txtar", applicationConfig())
-	result := computed(t, in, map[string]Emitter{unnecessaryExportCode: UnnecessaryExport})
-	if !slices.Contains(namesUnder(result.Findings, unnecessaryExportCode), "Local") {
+	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnnecessaryExport: UnnecessaryExport})
+	if !slices.Contains(namesUnder(result.Findings, vocab.UnnecessaryExport), "Local") {
 		t.Fatalf("the narrowing kind reports %v, want a finding about Local for the evaluation to publish",
 			summary(result.Findings))
 	}
@@ -152,11 +153,11 @@ func TestEvaluatePublishesANarrowingCandidateWhoseOnlyOutsideReferenceIsAnEdge(t
 		t.Fatalf("Evaluate() published %+v, want a record for wire/Local", asNamed(evaluations))
 	}
 	one := evaluations[local]
-	if one.State != StateDead || one.Finding == nil || one.Finding.Code != unnecessaryExportCode {
+	if one.State != stateDead || one.Finding == nil || one.Finding.Code != vocab.UnnecessaryExport {
 		t.Errorf("Evaluate() published %+v for wire/Local, want it dead and carrying the narrowing finding",
 			asNamed(evaluations)[local])
 	}
-	if slices.Contains(namesUnder(kept, unnecessaryExportCode), "Local") {
+	if slices.Contains(namesUnder(kept, vocab.UnnecessaryExport), "Local") {
 		t.Errorf("Evaluate() left the narrowing finding about Local reported, want it published pending: %v",
 			summary(kept))
 	}
@@ -164,7 +165,7 @@ func TestEvaluatePublishesANarrowingCandidateWhoseOnlyOutsideReferenceIsAnEdge(t
 
 func TestEvaluateReadsOnlyItsOwnSideOfEveryEdge(t *testing.T) {
 	in := edged(t, "selfcheck-edges.txtar", applicationConfig())
-	result := computed(t, in, map[string]Emitter{unreachableExportCode: UnreachableExport})
+	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnreachableExport: UnreachableExport})
 
 	_, evaluations := Evaluate(in, result.Findings)
 	for i := range evaluations {
@@ -173,14 +174,14 @@ func TestEvaluateReadsOnlyItsOwnSideOfEveryEdge(t *testing.T) {
 				asNamed(evaluations)[i])
 		}
 	}
-	if got, want := len(evaluations), len(in.Edges.Own(language)); got != want {
+	if got, want := len(evaluations), len(in.Edges.Own(string(language))); got != want {
 		t.Errorf("Evaluate() published %d records, want %d, one per own side the document declares", got, want)
 	}
 }
 
 func TestEvaluateWithNoDeclaredEdgeChangesNothing(t *testing.T) {
 	in := edged(t, "selfcheck-edges.txtar", applicationConfig())
-	result := computed(t, in, map[string]Emitter{unreachableExportCode: UnreachableExport})
+	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnreachableExport: UnreachableExport})
 	in.Edges = nil
 
 	kept, evaluations := Evaluate(in, result.Findings)

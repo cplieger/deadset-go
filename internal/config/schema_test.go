@@ -126,18 +126,6 @@ func TestSchemaRootEqualsTheContract(t *testing.T) {
 	}
 }
 
-func TestContractVersionEqualsTheContract(t *testing.T) {
-	t.Parallel()
-
-	want, isString := contractDocument(t, "contract.json")["contract_version"].(string)
-	if !isString {
-		t.Fatalf("contract.json: contract_version is not a string")
-	}
-	if ContractVersion != want {
-		t.Errorf("ContractVersion = %q, want contract.json's %q", ContractVersion, want)
-	}
-}
-
 func TestPatternsEqualTheContract(t *testing.T) {
 	t.Parallel()
 
@@ -421,9 +409,9 @@ func TestDeclaresSetting(t *testing.T) {
 		{name: "a_section_is_not_a_setting", path: "analysis", want: false},
 		{name: "a_section_declaring_no_member_is_not", path: "go", want: false},
 		{name: "the_severity_object_is_not_a_setting", path: "severity", want: false},
-		{name: "one_code_of_the_severity_object_is", path: "severity.DS1101", want: true},
+		{name: "one_code_of_the_severity_object_is", path: "severity.DS1501", want: true},
 		{name: "a_code_naming_no_live_kind_is_still_a_declared_setting", path: "severity.DS9999", want: true},
-		{name: "a_path_below_a_severity_code_is_not", path: "severity.DS1101.warn", want: false},
+		{name: "a_path_below_a_severity_code_is_not", path: "severity.DS1501.warn", want: false},
 		{name: "the_severity_object_with_an_empty_code_is_not", path: "severity.", want: false},
 		{name: "a_near_miss_of_a_setting_is_not", path: "analysis.min_confidences", want: false},
 		{name: "the_empty_path_is_not", path: "", want: false},
@@ -503,12 +491,12 @@ func TestFixedByContract(t *testing.T) {
 		code string
 		want []string
 	}{
-		{name: "the_fixed_code_itself", code: "DS1703", want: []string{"DS1703"}},
-		{name: "the_other_fixed_code", code: "DS1704", want: []string{"DS1704"}},
-		{name: "the_family_prefix_holding_every_fixed_code", code: "DS17", want: []string{"DS1703", "DS1704", "DS1706"}},
-		{name: "a_sibling_code_of_that_family", code: "DS1701", want: nil},
+		{name: "the_fixed_code_itself", code: "DS9003", want: []string{"DS9003"}},
+		{name: "the_other_fixed_code", code: "DS9004", want: []string{"DS9004"}},
+		{name: "the_family_prefix_holding_every_fixed_code", code: "DS90", want: []string{"DS9003", "DS9004", "DS9006"}},
+		{name: "a_sibling_code_of_that_family", code: "DS9001", want: nil},
 		{name: "another_family_prefix", code: "DS18", want: nil},
-		{name: "another_code", code: "DS1101", want: nil},
+		{name: "another_code", code: "DS1501", want: nil},
 	}
 
 	for _, tc := range tests {

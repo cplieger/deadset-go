@@ -1,12 +1,12 @@
-// Package suppress reads the two suppression mechanisms of one target: the
-// inline directives its source carries, and the entries of the ignore file at
-// its root. One grammar covers both, and a suppression is one code bound to one
-// site, carrying the reason a reader needs.
+// Package suppress reads the suppressions of one target: the inline directives
+// its source carries, and the entries of the ignore file and the rows of the
+// baseline at its root, which the shared core reads and binds. A suppression is
+// one code bound to one site, carrying the reason a reader needs.
 //
 // Nothing here emits a finding and nothing here ends a run. A reader returns the
 // records the suppressions resolve to, the refusals the grammar reports as
-// findings of their own, and a [malformedError] for a directive or a document
-// the grammar refuses before any finding exists.
+// findings of their own, and an error for a directive or a document the grammar
+// refuses before any finding exists.
 //
 // The findings pass reads four things from a record: the declaration it bound,
 // which is marked live before the sweep so the suppressed symbol keeps every
@@ -25,17 +25,11 @@ import (
 	"strconv"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
-// The codes a refused suppression is reported under.
-const (
-	codeNoReason = "DS1701" // a suppression that carries no reason
-	codeUnscoped = "DS1702" // an entry that names a symbol and no path
-)
-
-// errMalformed reports a suppression the grammar refuses before any finding
-// exists. Every [malformedError] carries it, so a caller maps the whole class to
-// the usage exit code with errors.Is and reads the site with errors.As.
+// errMalformed reports a directive the grammar refuses before any finding
+// exists. Every [malformedError] carries it.
 var errMalformed = errors.New("suppress: malformed suppression")
 
 // Mechanism names where a suppression is written. The spelling is the one a
@@ -70,10 +64,10 @@ func (m Mechanism) String() string {
 // carries. A directive naming two codes is two records with one reason, and a
 // directive above a line that declares two symbols is one record per symbol.
 type Record struct {
-	Code   string // the code this record suppresses
-	Symbol string // the reference of the declaration bound, empty where none was
-	Path   string // the file the suppression names
-	Reason string // never empty: a suppression carrying none is a Refusal
+	Code   vocab.Code // the code this record suppresses
+	Symbol string     // the reference of the declaration bound, empty where none was
+	Path   string     // the file the suppression names
+	Reason string     // never empty: a suppression carrying none is a Refusal
 
 	// Bound is the declaration this record marks live. It is empty where the
 	// suppression bound to nothing, which a directive on any line other than
@@ -89,25 +83,22 @@ type Record struct {
 // and no path. It binds nothing, and the finding it becomes reports the
 // suppression as written.
 type Refusal struct {
-	Reported string // the code the finding carries
-	Code     string // the code the refused suppression names
-	Symbol   string // the reference it names, empty for a directive
-	Path     string // the file it names, empty where that is the defect
-	Reason   string // the reason it carries, empty where that is the defect
+	Reported vocab.Code // the code the finding carries
+	Code     vocab.Code // the code the refused suppression names
+	Symbol   string     // the reference it names, empty for a directive
+	Path     string     // the file it names, empty where that is the defect
+	Reason   string     // the reason it carries, empty where that is the defect
 
 	Site      token.Position // where the suppression is written
 	Mechanism Mechanism
 }
 
-// malformedError is one directive, one entry or one document the grammar refuses
-// before any finding is produced, because it is an instruction the analysis
-// cannot carry out: read as prose the instruction would do nothing, and if the
-// finding it was meant to cover has already gone, nothing would say so.
+// malformedError is one directive the grammar refuses before any finding is
+// produced, because it is an instruction the analysis cannot carry out: read as
+// prose it would do nothing, and if the finding it was meant to cover has
+// already gone, nothing would say so.
 type malformedError struct {
-	// Err is the decoder's own error, and is nil where the grammar refused a
-	// value the decoder accepted.
-	Err       error
-	Text      string         // the directive, the value or the member at fault, as written
+	Text      string         // the directive at fault, as written
 	Want      string         // what the grammar fixes for it
 	Site      token.Position // where the defect is written
 	Mechanism Mechanism
@@ -121,19 +112,8 @@ func (e *malformedError) Error() string {
 	if e.Site.Line > 0 {
 		at = fmt.Sprintf("%s:%d:%d", at, e.Site.Line, e.Site.Column)
 	}
-	message := fmt.Sprintf("suppress: %s %s: %s", e.Mechanism, at, e.Text)
-	if e.Err != nil {
-		message += ": " + e.Err.Error()
-	}
-	return message + ": want " + e.Want
+	return fmt.Sprintf("suppress: %s %s: %s: want %s", e.Mechanism, at, e.Text, e.Want)
 }
 
-// Unwrap returns the class every malformed suppression carries and, where a
-// decoder refused the document, the error it returned, so a caller maps the
-// class to the usage code with errors.Is and still reaches the cause.
-func (e *malformedError) Unwrap() []error {
-	if e.Err == nil {
-		return []error{errMalformed}
-	}
-	return []error{errMalformed, e.Err}
-}
+// Unwrap returns the class every malformed directive carries.
+func (*malformedError) Unwrap() error { return errMalformed }

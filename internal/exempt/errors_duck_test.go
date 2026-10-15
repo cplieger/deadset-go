@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 func TestErrorsDuckTypingRetainsTheHelperFormsOnATypeReachableAsAnError(t *testing.T) {
@@ -34,11 +35,11 @@ func TestErrorsDuckTypingRetainsTheHelperFormsOnATypeReachableAsAnError(t *testi
 		t.Run(test.name, func(t *testing.T) {
 			shared := analysisOf(t, test.archive, Options{})
 			symbols := shared.inventory(t)
-			found, err := shared.detect(t, ErrorsDuckTyping)
+			found, err := shared.detect(t, vocab.ErrorsDuckTyping)
 			if err != nil {
 				t.Fatalf("ErrorsDuckTypingDetector(%s) error: %v", test.archive, err)
 			}
-			got := exemptionRows(t, symbols, ErrorsDuckTyping, found)
+			got := exemptionRows(t, symbols, vocab.ErrorsDuckTyping, found)
 			if !slices.Equal(got, test.want) {
 				t.Errorf("ErrorsDuckTypingDetector(%s) retained\n%v\nwant\n%v", test.archive, got, test.want)
 			}
@@ -56,9 +57,9 @@ func TestErrorsDuckTypingHoldsTheSourceFilesSiteUnderAProductionRun(t *testing.T
 		t.Fatalf("Compute(errors-duck-test-site.txtar, production) error: %v", err)
 	}
 
-	held = slices.DeleteFunc(held, func(e graph.Exemption) bool { return e.Class != string(ErrorsDuckTyping) })
-	got := exemptionRows(t, shared.inventory(t), ErrorsDuckTyping, held)
+	held = slices.DeleteFunc(held, func(e graph.Exemption) bool { return e.Class != string(vocab.ErrorsDuckTyping) })
+	got := exemptionRows(t, shared.inventory(t), vocab.ErrorsDuckTyping, held)
 	if want := []string{"(*fault).Is\timplements Is(error) bool"}; !slices.Equal(got, want) {
-		t.Errorf("Compute(errors-duck-test-site.txtar, production) holds %v under %s, want %v", got, ErrorsDuckTyping, want)
+		t.Errorf("Compute(errors-duck-test-site.txtar, production) holds %v under %s, want %v", got, vocab.ErrorsDuckTyping, want)
 	}
 }

@@ -35,7 +35,7 @@ func main() {
   "description": "One entry adjudicating the assertion: it names the interface the finding names and the file the assertion is written in.",
   "ignore": [
     {
-      "code": "DS1204",
+      "code": "DS1203",
       "symbol": "go://example.com/app#encoder",
       "path": "assert.go",
       "reason": "in effect: the assertion is kept until the second consumer of the interface lands"

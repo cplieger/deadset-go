@@ -10,6 +10,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/txtar"
 )
 
@@ -142,8 +143,8 @@ func inputOf(t *testing.T, archive string, opts Options, tags ...string) *Input 
 // of the input it was computed from is held.
 type sharedAnalysis struct {
 	symbols  []graph.Symbol
-	detected map[Class][]graph.Exemption
-	failed   map[Class]error
+	detected map[vocab.Exemption][]graph.Exemption
+	failed   map[vocab.Exemption]error
 	union    map[bool][]graph.Exemption
 	refused  map[bool]error
 }
@@ -176,8 +177,8 @@ func analysisOf(t *testing.T, archive string, opts Options) *sharedAnalysis {
 func analyzeShared(in *Input) *sharedAnalysis {
 	held := &sharedAnalysis{
 		symbols:  in.Symbols,
-		detected: make(map[Class][]graph.Exemption),
-		failed:   make(map[Class]error),
+		detected: make(map[vocab.Exemption][]graph.Exemption),
+		failed:   make(map[vocab.Exemption]error),
 		union:    make(map[bool][]graph.Exemption),
 		refused:  make(map[bool]error),
 	}
@@ -199,7 +200,7 @@ func (a *sharedAnalysis) inventory(t *testing.T) []graph.Symbol {
 }
 
 // detect is what one class's detector returned when it ran alone over the input.
-func (a *sharedAnalysis) detect(t *testing.T, class Class) ([]graph.Exemption, error) {
+func (a *sharedAnalysis) detect(t *testing.T, class vocab.Exemption) ([]graph.Exemption, error) {
 	t.Helper()
 
 	found, held := a.detected[class]

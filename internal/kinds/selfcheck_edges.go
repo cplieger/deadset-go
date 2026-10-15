@@ -1,11 +1,11 @@
 package kinds
 
 import (
-	"cmp"
 	"slices"
 
 	"github.com/cplieger/deadset-go/v2/internal/edges"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/report"
 )
 
 // state is one edge side's verdict, in the spelling a report carries.
@@ -14,9 +14,9 @@ type state string
 // The three states. A side this analyzer evaluated has one of them; a side of
 // another language has no record at all and is not absent, because nothing looked.
 const (
-	StateLive   state = "live"   // the symbol is enumerated and no finding is held for it
-	StateDead   state = "dead"   // the symbol is enumerated and a finding is held for it
-	StateAbsent state = "absent" // no symbol is enumerated under the reference
+	stateLive   state = "live"   // the symbol is enumerated and no finding is held for it
+	stateDead   state = "dead"   // the symbol is enumerated and a finding is held for it
+	stateAbsent state = "absent" // no symbol is enumerated under the reference
 )
 
 // Evaluation is one record of a report's edge_evaluations array: which declared
@@ -55,7 +55,7 @@ func Evaluate(in *Input, findings []Finding) ([]Finding, []Evaluation) {
 	if in == nil || in.Edges == nil {
 		return findings, nil
 	}
-	own := in.Edges.Own(language)
+	own := in.Edges.Own(string(language))
 	if len(own) == 0 {
 		return findings, nil
 	}
@@ -68,16 +68,16 @@ func Evaluate(in *Input, findings []Finding) ([]Finding, []Evaluation) {
 	pending := make(map[int]bool, len(own))
 	evaluations := make([]Evaluation, 0, len(own))
 	for _, side := range own {
-		record := Evaluation{Edge: side.Edge, Side: side.Side, Symbol: side.Symbol, State: StateAbsent}
+		record := Evaluation{Edge: side.Edge, Side: side.Side, Symbol: side.Symbol, State: stateAbsent}
 		id := in.index().byRef[side.Symbol]
 		switch at, reported := held[id]; {
 		case id == "":
 			// The reference names no declaration this run enumerated, so nothing
 			// here can say whether the symbol is live: the merge reports the edge.
 		case !reported:
-			record.State = StateLive
+			record.State = stateLive
 		default:
-			record.State = StateDead
+			record.State = stateDead
 			found := findings[at]
 			record.Finding = &found
 			pending[at] = true
@@ -92,7 +92,9 @@ func Evaluate(in *Input, findings []Finding) ([]Finding, []Evaluation) {
 		}
 	}
 	slices.SortStableFunc(evaluations, func(a, b Evaluation) int {
-		return cmp.Or(cmp.Compare(a.Edge, b.Edge), cmp.Compare(a.Side, b.Side))
+		keyA := report.EdgeEvaluation{Edge: a.Edge, Side: report.Side(a.Side)}
+		keyB := report.EdgeEvaluation{Edge: b.Edge, Side: report.Side(b.Side)}
+		return report.CompareEvaluations(&keyA, &keyB)
 	})
 	return kept, evaluations
 }

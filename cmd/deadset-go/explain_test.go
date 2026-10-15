@@ -264,7 +264,7 @@ func TestExplainAnswersFromTheAnalysisTheReportIsBuiltFrom(t *testing.T) {
 		if !strings.Contains(got.stdout, "answer: reported") {
 			t.Errorf("explain %s answered\n%s\nwant the reported answer: the report names it", found.Symbol.Ref, got.stdout)
 		}
-		if want := "code: " + found.Code + " " + found.Kind; !strings.Contains(got.stdout, want) {
+		if want := "code: " + string(found.Code) + " " + found.Kind; !strings.Contains(got.stdout, want) {
 			t.Errorf("explain %s answered\n%s\nwant it to name %q as the report does", found.Symbol.Ref, got.stdout, want)
 		}
 	}
@@ -372,7 +372,7 @@ func TestExplainListsTheFindingsThatNameTheSymbolAndReportSomewhereElse(t *testi
 		"declaration: interface encoder",
 		"position: iface.go:4:6",
 		"answer: live",
-		"also reported: DS1204 unused-satisfaction-assertion\tassert.go:7:5\tsatisfaction-assertion encoder",
+		"also reported: DS1203 unused-satisfaction-assertion\tassert.go:7:5\tsatisfaction-assertion encoder",
 	} {
 		if !strings.Contains(got.stdout, want) {
 			t.Errorf("explain stdout =\n%s\nwant it to contain %q", got.stdout, want)
@@ -393,7 +393,7 @@ func TestExplainListsTheUnusedParametersOfTheSymbol(t *testing.T) {
 	if want := contractExitCodes(t)["clean"]; got.code != want {
 		t.Fatalf("explain over the function = %d, want %d\nstderr: %s", got.code, want, got.stderr)
 	}
-	if want := "also reported: DS1801 unused-parameter\tapp.go:3:24\tparameter label"; !strings.Contains(got.stdout, want) {
+	if want := "also reported: DS1401 unused-parameter\tapp.go:3:24\tparameter label"; !strings.Contains(got.stdout, want) {
 		t.Errorf("explain stdout =\n%s\nwant it to contain %q", got.stdout, want)
 	}
 }

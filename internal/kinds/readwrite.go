@@ -8,14 +8,8 @@ import (
 	"strconv"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
-)
-
-// The codes of the read-and-write kinds.
-const (
-	writeOnlyCode     = "DS1301"
-	enumMemberCode    = "DS1302"
-	typeParameterCode = "DS1303"
 )
 
 // enumMemberSubject is the Contract's word for a constant of an enumerated type,
@@ -86,7 +80,7 @@ func writeOnly(in *Input, symbol *graph.Symbol, u *uses, exempted map[graph.Symb
 		read = " and read only from test files"
 	}
 	cascade := append(writeCascade(in, symbol, u.writes), in.annotationCascade().named[symbol.ID]...)
-	finding, names := in.finding(symbol.ID, writeOnlyCode, in.word(symbol.ID)+" "+symbol.Name+
+	finding, names := in.finding(symbol.ID, vocab.WriteOnlySymbol, in.word(symbol.ID)+" "+symbol.Name+
 		" is written "+writeCount(len(u.writes))+read+cascadeClause(cascade))
 	if !names {
 		return Finding{}, false
@@ -167,7 +161,7 @@ func UnusedEnumMember(in *Input) ([]Finding, error) {
 		if symbol == nil {
 			continue
 		}
-		finding, names := in.finding(candidate.ID, enumMemberCode,
+		finding, names := in.finding(candidate.ID, vocab.UnusedEnumMember,
 			"enumerated member "+symbol.Name+" of "+owner+" is named nowhere")
 		if !names {
 			continue
@@ -202,7 +196,7 @@ func UnusedTypeParameter(in *Input) ([]Finding, error) {
 		if !declaresTypeParameters(in.symbol(symbol.Parent)) || in.deadParent(symbol) {
 			continue
 		}
-		finding, names := in.finding(candidate.ID, typeParameterCode,
+		finding, names := in.finding(candidate.ID, vocab.UnusedTypeParameter,
 			"type parameter "+symbol.Name+" is named in neither its signature nor its body")
 		if !names {
 			continue
@@ -294,7 +288,7 @@ func (in *Input) deadReader(r *graph.Reference) bool {
 		return false
 	}
 	reader := in.candidateOf(r.From)
-	return reader != nil && reader.Relation == graph.ReferenceCounting && in.classOf(r.From) == Certain
+	return reader != nil && reader.Relation == graph.ReferenceCounting && in.classOf(r.From) == vocab.Certain
 }
 
 // testReference reports whether the mode classifies one reference as a test

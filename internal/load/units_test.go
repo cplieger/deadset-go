@@ -94,7 +94,7 @@ func TestLoadEndsOnTheFailureOfAModuleItCannotDrop(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			_, err := loadTree(t, writeTree(t, test.files), ".")
 			setup, ok := errors.AsType[*SetupError](err)
-			if !ok || !slices.ContainsFunc(setup.Failures, func(f SetupFailure) bool { return strings.HasPrefix(f.Detail, test.at+":") }) {
+			if !ok || !slices.ContainsFunc(setup.Failures, func(f setupFailure) bool { return strings.HasPrefix(f.Detail, test.at+":") }) {
 				t.Errorf("Load() = _, %v, want a setup failure positioned at %s", err, test.at)
 			}
 		})

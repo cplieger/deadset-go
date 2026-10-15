@@ -6,29 +6,17 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cplieger/deadset-go/v2/internal/catalog"
-	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
-)
-
-// The codes of the self-check kinds this analyzer reports. The stale-edge code is
-// absent: an analyzer publishes one evaluation per edge side it enumerated and the
-// merge is what reports a stale edge.
-const (
-	suppressionWithoutReasonCode = "DS1701"
-	unscopedEntryCode            = "DS1702"
-	staleSuppressionCode         = "DS1703"
-	unmatchedRootCode            = "DS1704"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // The words the subject vocabulary has for what a self-check finding is about. No
 // Go configuration key names a declaration, so this analyzer reports no finding
-// about a configured declaration; a report another analyzer wrote carries one.
+// about a configured declaration.
 const (
-	suppressionSubject           = "suppression"
-	rootSubject                  = "root"
-	configuredDeclarationSubject = "configured-declaration"
+	suppressionSubject = "suppression"
+	rootSubject        = "root"
 )
 
 // configurationDocument is the repository configuration at its conventional name and
@@ -54,7 +42,7 @@ const documentPosition = 1
 // the one position the directive is written on, because each code is a record of its
 // own and a reader is told which of them is now unsuppressed.
 func SuppressionsWithoutReason(in *Input) ([]Finding, error) {
-	return in.refused(suppressionWithoutReasonCode)
+	return in.refused(vocab.SuppressionWithoutReason)
 }
 
 // UnscopedEntries reports every ignore-file entry and baseline row the grammar
@@ -66,12 +54,12 @@ func SuppressionsWithoutReason(in *Input) ([]Finding, error) {
 // same record, so a maintainer who supplies the missing reason still sees the missing
 // path.
 func UnscopedEntries(in *Input) ([]Finding, error) {
-	return in.refused(unscopedEntryCode)
+	return in.refused(vocab.UnscopedIgnoreEntry)
 }
 
 // refused is the findings of one refusal kind: the refusals the readers reported
 // under its code, in the order they read them.
-func (in *Input) refused(code string) ([]Finding, error) {
+func (in *Input) refused(code vocab.Code) ([]Finding, error) {
 	if in == nil || in.Config == nil {
 		return nil, nil
 	}
@@ -88,7 +76,7 @@ func (in *Input) refused(code string) ([]Finding, error) {
 		one := selfCheck(refused.Reported, suppressionSubject,
 			in.suppressionRef(refused.Symbol, refused.Path), refused.Site, message)
 		one.Details.Mechanism = refused.Mechanism.String()
-		one.Details.Entry = &Entry{
+		one.Details.Entry = &suppressionEntry{
 			Code:   refused.Code,
 			Symbol: refused.Symbol,
 			Path:   refused.Path,
@@ -103,10 +91,10 @@ func (in *Input) refused(code string) ([]Finding, error) {
 // the code the suppression named and the rule it broke.
 func refusalMessage(refused *suppress.Refusal) (string, error) {
 	switch refused.Reported {
-	case suppressionWithoutReasonCode:
-		return written(refused.Mechanism) + " for " + refused.Code + " carries no reason", nil
-	case unscopedEntryCode:
-		return written(refused.Mechanism) + " for " + refused.Code + " names a symbol and no path", nil
+	case vocab.SuppressionWithoutReason:
+		return written(refused.Mechanism) + " for " + string(refused.Code) + " carries no reason", nil
+	case vocab.UnscopedIgnoreEntry:
+		return written(refused.Mechanism) + " for " + string(refused.Code) + " names a symbol and no path", nil
 	default:
 		return "", fmt.Errorf("%w: a suppression is refused under %s, which is no refusal of the grammar",
 			errEmitter, refused.Reported)
@@ -147,7 +135,7 @@ func StaleSuppressions(in *Input) ([]Finding, error) {
 // record per declaration under one key, and it is stale only when every record it
 // binds is.
 type recordKey struct {
-	code   string
+	code   vocab.Code
 	symbol string
 	site   token.Position
 }
@@ -171,7 +159,7 @@ func (in *Input) inEffect(at int, suppressed map[graph.SymbolID]bool) bool {
 	if mark.Bound == "" || !suppressed[mark.Bound] {
 		return false
 	}
-	if _, live := catalog.Kind(mark.Code); !live || catalog.ReportsPart(mark.Code) {
+	if !mark.Code.Live() || mark.Code.Subject() == vocab.SubjectPart {
 		return false
 	}
 	if code := in.wouldBeCode(mark.Bound); code != "" && shapeCodes[mark.Code] && code != mark.Code {
@@ -180,8 +168,17 @@ func (in *Input) inEffect(at int, suppressed map[graph.SymbolID]bool) bool {
 	return in.firstToBind(at)
 }
 
-// shapeCodes are the liveness codes the shape of a declaration alone decides.
-var shapeCodes = map[string]bool{unusedExportedCode: true, unusedUnexportedCode: true, unusedMemberCode: true}
+// shapeCodes are the liveness codes the shape of a declaration alone decides: the
+// codes another kind derives its candidates from.
+var shapeCodes = func() map[vocab.Code]bool {
+	held := map[vocab.Code]bool{}
+	for _, kind := range vocab.Kinds() {
+		for _, code := range kind.DerivedFrom {
+			held[code] = true
+		}
+	}
+	return held
+}()
 
 // wouldBeCode is the shape code, unused exported, unused unexported or unused
 // member, that one marked declaration's finding carries with the marks withdrawn,
@@ -189,7 +186,7 @@ var shapeCodes = map[string]bool{unusedExportedCode: true, unusedUnexportedCode:
 // another shape code than the declaration's is in effect for nothing; a record naming
 // any other liveness code is left to the sweep, whose answer for a marked declaration
 // is the only one there is.
-func (in *Input) wouldBeCode(id graph.SymbolID) string {
+func (in *Input) wouldBeCode(id graph.SymbolID) vocab.Code {
 	symbol := in.symbol(id)
 	if symbol == nil {
 		return ""
@@ -233,7 +230,7 @@ func (in *Input) staleInput() *graph.Result {
 // its own code is set to allow: bound, or paired with a finding that kind produced.
 func (in *Input) dormant(at int, matched bool) bool {
 	mark := &in.Marks[at]
-	row, live := catalog.Kind(mark.Code)
+	row, live := vocab.KindOf(mark.Code)
 	if !live {
 		return false
 	}
@@ -243,27 +240,27 @@ func (in *Input) dormant(at int, matched bool) bool {
 	if mark.Bound == "" {
 		return false
 	}
-	if in.Config.EffectiveSeverity(mark.Code) == config.Allow {
+	if in.Config.EffectiveSeverity(mark.Code) == vocab.Allow {
 		return true
 	}
 	if !matched {
 		return false
 	}
-	least := Class(in.Config.Analysis.MinConfidence)
+	least := in.Config.Analysis.MinConfidence
 	if held := in.withheld[at]; len(held) > 0 {
 		return !slices.ContainsFunc(held, func(found heldFinding) bool {
-			return found.confidence.rank() >= least.rank() &&
+			return rank(found.confidence) >= rank(least) &&
 				!in.dialed.components[found.component] && !in.dialed.allowed[found.component]
 		})
 	}
 	if in.dialed.dormant[mark.Bound] {
 		return true
 	}
-	class := in.classOf(mark.Bound).lower(Class(row.MaxClass))
+	class := lower(in.classOf(mark.Bound), row.MaxClass)
 	if in.nameLiteral(mark.Bound, mark.Code) != nil || in.testReachedUse(mark.Bound, mark.Code) {
-		class = Possible
+		class = vocab.Possible
 	}
-	return least.rank() != 0 && class.rank() < least.rank()
+	return rank(least) != 0 && rank(class) < rank(least)
 }
 
 // collapsed turns the stale records into one finding per site, each naming every
@@ -288,11 +285,11 @@ func (in *Input) collapsed(stale []*suppress.Record) ([]Finding, error) {
 	for _, site := range order {
 		records := at[site]
 		first := records[0]
-		one := selfCheck(staleSuppressionCode, suppressionSubject,
+		one := selfCheck(vocab.StaleSuppression, suppressionSubject,
 			in.suppressionRef(first.Symbol, first.Path), first.Site,
 			written(first.Mechanism)+" for "+spellCodes(codesAt(records))+" matches no current finding")
 		one.Details.Mechanism = first.Mechanism.String()
-		one.Details.Entry = &Entry{
+		one.Details.Entry = &suppressionEntry{
 			Code:   first.Code,
 			Symbol: first.Symbol,
 			Path:   first.Path,
@@ -305,8 +302,8 @@ func (in *Input) collapsed(stale []*suppress.Record) ([]Finding, error) {
 
 // codesAt is every code the records at one site name, in ascending order and each
 // once.
-func codesAt(records []*suppress.Record) []string {
-	codes := make([]string, 0, len(records))
+func codesAt(records []*suppress.Record) []vocab.Code {
+	codes := make([]vocab.Code, 0, len(records))
 	for _, mark := range records {
 		codes = append(codes, mark.Code)
 	}
@@ -337,7 +334,7 @@ func UnmatchedRoots(in *Input) ([]Finding, error) {
 		if strings.ContainsAny(unmatched.Source, "*?") {
 			message = "configured root pattern matches no symbol of the inventory"
 		}
-		found = append(found, selfCheck(unmatchedRootCode, rootSubject, unmatched.Source, at, message))
+		found = append(found, selfCheck(vocab.UnmatchedRoot, rootSubject, unmatched.Source, at, message))
 	}
 	return found, nil
 }
@@ -391,7 +388,7 @@ func Totals(in *Input) (inEffect, reasons int) {
 // The subject is the record as the document writes it, and the position is the
 // record's own site. A record spans no range, so it ends on the line it starts on and
 // its size is that one line.
-func selfCheck(code, subject, ref string, site token.Position, message string) Finding {
+func selfCheck(code vocab.Code, subject, ref string, site token.Position, message string) Finding {
 	return findingAt(code, Subject{
 		Ref:       ref,
 		Kind:      subject,
@@ -450,9 +447,13 @@ func written(m suppress.Mechanism) string {
 
 // spellCodes lists the codes one message names: one code on its own, and several
 // separated by commas with the last joined by and.
-func spellCodes(codes []string) string {
-	if len(codes) < 2 {
-		return strings.Join(codes, "")
+func spellCodes(codes []vocab.Code) string {
+	spelled := make([]string, len(codes))
+	for i, code := range codes {
+		spelled[i] = string(code)
 	}
-	return strings.Join(codes[:len(codes)-1], ", ") + " and " + codes[len(codes)-1]
+	if len(spelled) < 2 {
+		return strings.Join(spelled, "")
+	}
+	return strings.Join(spelled[:len(spelled)-1], ", ") + " and " + spelled[len(spelled)-1]
 }

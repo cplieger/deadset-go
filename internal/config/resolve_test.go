@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // labelled returns the inputs one case supplies, with the file names a refusal
@@ -50,7 +51,7 @@ func TestResolveAppliesTheHighestRankedSource(t *testing.T) {
 			central:    `{"analysis": {"min_confidence": "certain"}}`,
 			path:       "analysis.min_confidence",
 			read:       func(c config.Config) any { return c.Analysis.MinConfidence },
-			want:       config.Possible,
+			want:       vocab.Possible,
 			origin:     config.Origin{Source: config.SourceFlag, Label: "--min-confidence"},
 		},
 		{
@@ -59,7 +60,7 @@ func TestResolveAppliesTheHighestRankedSource(t *testing.T) {
 			central:    `{"reporters": {"fail_on": "warn"}}`,
 			path:       "reporters.fail_on",
 			read:       func(c config.Config) any { return c.Reporters.FailOn },
-			want:       config.Allow,
+			want:       vocab.Allow,
 			origin:     config.Origin{Source: config.SourceRepository, Label: "deadset.json"},
 		},
 		{
@@ -120,7 +121,7 @@ func TestResolveAppliesTheHighestRankedSource(t *testing.T) {
 			repository: `{"target": {"kind": "application"}}`,
 			path:       "contract_version",
 			read:       func(c config.Config) any { return c.ContractVersion },
-			want:       config.ContractVersion,
+			want:       vocab.ContractVersion,
 			origin:     config.Origin{Source: config.SourceDefault},
 		},
 	}
@@ -223,10 +224,10 @@ func TestTargetKindsOfEachLanguage(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Resolve(target.kind = %s) = error %v, want it resolved", tc.kind, err)
 			}
-			if got := cfg.Target.Kind.Of(config.GoLanguage); got != tc.goKind {
+			if got := cfg.Target.Kind.Of(vocab.Go); got != tc.goKind {
 				t.Errorf("Resolve(target.kind = %s).Target.Kind.Of(go) = %q, want %q", tc.kind, got, tc.goKind)
 			}
-			if got := cfg.Target.Kind.Of(config.TSLanguage); got != tc.tsKind {
+			if got := cfg.Target.Kind.Of(vocab.TS); got != tc.tsKind {
 				t.Errorf("Resolve(target.kind = %s).Target.Kind.Of(ts) = %q, want %q", tc.kind, got, tc.tsKind)
 			}
 		})
@@ -344,21 +345,21 @@ func TestResolveRefusesAnUnimplementedKey(t *testing.T) {
 		},
 		{
 			name:       "a_severity_code_the_contract_fixes",
-			repository: `{"target": {"kind": "application"}, "severity": {"DS1703": "allow"}}`,
-			key:        "severity.DS1703",
-			names:      []string{`"severity.DS1703"`, "fixes the severity of DS1703"},
+			repository: `{"target": {"kind": "application"}, "severity": {"DS9003": "allow"}}`,
+			key:        "severity.DS9003",
+			names:      []string{`"severity.DS9003"`, "fixes the severity of DS9003"},
 		},
 		{
 			name:       "the_other_severity_code_the_contract_fixes",
-			repository: `{"target": {"kind": "application"}, "severity": {"DS1704": "warn"}}`,
-			key:        "severity.DS1704",
-			names:      []string{`"severity.DS1704"`, "fixes the severity of DS1704"},
+			repository: `{"target": {"kind": "application"}, "severity": {"DS9004": "warn"}}`,
+			key:        "severity.DS9004",
+			names:      []string{`"severity.DS9004"`, "fixes the severity of DS9004"},
 		},
 		{
 			name:       "a_severity_family_prefix_holding_a_fixed_code",
-			repository: `{"target": {"kind": "application"}, "severity": {"DS17": "allow"}}`,
-			key:        "severity.DS17",
-			names:      []string{`"severity.DS17"`, "fixes the severity of DS1703, DS1704 and DS1706"},
+			repository: `{"target": {"kind": "application"}, "severity": {"DS90": "allow"}}`,
+			key:        "severity.DS90",
+			names:      []string{`"severity.DS90"`, "fixes the severity of DS9003, DS9004 and DS9006"},
 		},
 		{
 			name:       "a_severity_code_no_live_kind_carries",
@@ -368,15 +369,15 @@ func TestResolveRefusesAnUnimplementedKey(t *testing.T) {
 		},
 		{
 			name:       "a_severity_code_of_a_live_family_that_no_kind_carries",
-			repository: `{"target": {"kind": "application"}, "severity": {"DS1899": "warn"}}`,
-			key:        "severity.DS1899",
-			names:      []string{`"severity.DS1899"`, "no issue kind this analyzer ships carries the code DS1899"},
+			repository: `{"target": {"kind": "application"}, "severity": {"DS1499": "warn"}}`,
+			key:        "severity.DS1499",
+			names:      []string{`"severity.DS1499"`, "no issue kind this analyzer ships carries the code DS1499"},
 		},
 		{
-			name:       "a_retired_severity_code",
-			repository: `{"target": {"kind": "application"}, "severity": {"DS1402": "warn"}}`,
-			key:        "severity.DS1402",
-			names:      []string{`"severity.DS1402"`, "no issue kind this analyzer ships carries the code DS1402"},
+			name:       "a_severity_code_of_a_reserved_family",
+			repository: `{"target": {"kind": "application"}, "severity": {"DS1801": "warn"}}`,
+			key:        "severity.DS1801",
+			names:      []string{`"severity.DS1801"`, "no issue kind this analyzer ships carries the code DS1801"},
 		},
 		{
 			name:       "a_severity_family_prefix_no_range_declares",
@@ -385,10 +386,10 @@ func TestResolveRefusesAnUnimplementedKey(t *testing.T) {
 			names:      []string{`"severity.DS29"`, "no issue kind this analyzer ships carries a code of the family DS29"},
 		},
 		{
-			name:       "a_severity_family_prefix_whose_range_is_retired",
-			repository: `{"target": {"kind": "application"}, "severity": {"DS14": "allow"}}`,
-			key:        "severity.DS14",
-			names:      []string{`"severity.DS14"`, "no issue kind this analyzer ships carries a code of the family DS14"},
+			name:       "a_severity_family_prefix_whose_range_is_reserved",
+			repository: `{"target": {"kind": "application"}, "severity": {"DS18": "allow"}}`,
+			key:        "severity.DS18",
+			names:      []string{`"severity.DS18"`, "no issue kind this analyzer ships carries a code of the family DS18"},
 		},
 	}
 
@@ -419,15 +420,15 @@ func TestResolveNamesEveryFixedCodeASeverityKeyCovers(t *testing.T) {
 	}{
 		{
 			name:       "a_family_prefix_names_every_fixed_code_of_that_family",
-			repository: `{"target": {"kind": "application"}, "severity": {"DS17": "allow"}}`,
-			want: `deadset.json: key "severity.DS17" is not implemented: ` +
-				"the Contract fixes the severity of DS1703, DS1704 and DS1706, which this key names",
+			repository: `{"target": {"kind": "application"}, "severity": {"DS90": "allow"}}`,
+			want: `deadset.json: key "severity.DS90" is not implemented: ` +
+				"the Contract fixes the severity of DS9003, DS9004 and DS9006, which this key names",
 		},
 		{
 			name:       "a_code_names_that_code_alone",
-			repository: `{"target": {"kind": "application"}, "severity": {"DS1704": "warn"}}`,
-			want: `deadset.json: key "severity.DS1704" is not implemented: ` +
-				"the Contract fixes the severity of DS1704, which this key names",
+			repository: `{"target": {"kind": "application"}, "severity": {"DS9004": "warn"}}`,
+			want: `deadset.json: key "severity.DS9004" is not implemented: ` +
+				"the Contract fixes the severity of DS9004, which this key names",
 		},
 	}
 
@@ -457,7 +458,7 @@ func TestResolveRefusesADuplicateMember(t *testing.T) {
 	}{
 		{
 			name:       "at_the_root",
-			repository: `{"target": {"kind": "library"}, "severity": {"DS1101": "warn"}, "severity": {"DS1101": "deny"}}`,
+			repository: `{"target": {"kind": "library"}, "severity": {"DS1501": "warn"}, "severity": {"DS1501": "deny"}}`,
 			key:        "severity",
 		},
 		{
@@ -562,8 +563,8 @@ func TestResolveRefusesANullWhereverItSits(t *testing.T) {
 		},
 		{
 			name:       "a_severity_code",
-			repository: `{"target": {"kind": "library"}, "severity": {"DS1101": null}}`,
-			key:        "severity.DS1101",
+			repository: `{"target": {"kind": "library"}, "severity": {"DS1501": null}}`,
+			key:        "severity.DS1501",
 		},
 		{
 			name:       "a_provenance_entry",
@@ -605,30 +606,30 @@ func TestResolveSeverityPerCode(t *testing.T) {
 	t.Parallel()
 
 	in := labelled(
-		`{"severity.DS1801": "deny"}`,
-		`{"target": {"kind": "library"}, "severity": {"DS1101": "allow", "DS1801": "warn"}}`,
-		`{"severity": {"DS1101": "deny", "DS1201": "warn", "DS18": "allow"}}`,
-		map[string]string{"severity.DS1801": "--severity"},
+		`{"severity.DS1401": "deny"}`,
+		`{"target": {"kind": "library"}, "severity": {"DS1501": "allow", "DS1401": "warn"}}`,
+		`{"severity": {"DS1501": "deny", "DS1201": "warn", "DS14": "allow"}}`,
+		map[string]string{"severity.DS1401": "--severity"},
 	)
 	cfg, provenance, err := config.Resolve(in)
 	if err != nil {
 		t.Fatalf("Resolve(severity) = error %v, want the resolved configuration", err)
 	}
 
-	wantSeverity := map[string]config.Severity{
-		"DS1101": config.Allow,
-		"DS1201": config.Warn,
-		"DS18":   config.Allow,
-		"DS1801": config.Deny,
+	wantSeverity := map[string]vocab.Severity{
+		"DS1501": vocab.Allow,
+		"DS1201": vocab.Warn,
+		"DS14":   vocab.Allow,
+		"DS1401": vocab.Deny,
 	}
 	if !reflect.DeepEqual(cfg.Severity, wantSeverity) {
 		t.Errorf("Resolve(severity) = %v, want %v", cfg.Severity, wantSeverity)
 	}
 	wantOrigins := map[string]config.Origin{
-		"severity.DS1101": {Source: config.SourceRepository, Label: "deadset.json"},
+		"severity.DS1501": {Source: config.SourceRepository, Label: "deadset.json"},
 		"severity.DS1201": {Source: config.SourceCentral, Label: "central.json"},
-		"severity.DS18":   {Source: config.SourceCentral, Label: "central.json"},
-		"severity.DS1801": {Source: config.SourceFlag, Label: "--severity"},
+		"severity.DS14":   {Source: config.SourceCentral, Label: "central.json"},
+		"severity.DS1401": {Source: config.SourceFlag, Label: "--severity"},
 	}
 	for path, want := range wantOrigins {
 		if got := provenance[path]; got != want {
@@ -851,8 +852,8 @@ func TestResolveRefusesAMalformedDocument(t *testing.T) {
 		},
 		{
 			name:       "a_severity_outside_the_closed_set",
-			repository: `{"target": {"kind": "library"}, "severity": {"DS1101": "error"}}`,
-			key:        "severity.DS1101",
+			repository: `{"target": {"kind": "library"}, "severity": {"DS1501": "error"}}`,
+			key:        "severity.DS1501",
 		},
 		{
 			name:       "a_value_of_the_wrong_type",
@@ -918,7 +919,7 @@ const valueOutsideEveryClosedSet = "no-such-value"
 // the enumerated value inside one. The derivation fails on an open object with no
 // sample rather than passing over it.
 func openObjectSamples() map[string]string {
-	return map[string]string{"severity": "DS1101"}
+	return map[string]string{"severity": "DS1501"}
 }
 
 // enumeratedSettings returns every setting the Contract's configuration schema
@@ -1067,7 +1068,7 @@ func TestResolveRefusesEveryEnumeratedSettingsMalformedValue(t *testing.T) {
 	// reaching fails here.
 	for _, want := range []string{
 		"target.kind", "target.kind.go", "target.kind.ts", "analysis.languages[0]", "analysis.min_confidence", "analysis.generated_files",
-		"analysis.consumer_tests", "severity.DS1101", "reporters.formats[0]", "reporters.sort",
+		"analysis.consumer_tests", "severity.DS1501", "reporters.formats[0]", "reporters.sort",
 		"reporters.cascade", "reporters.fail_on",
 	} {
 		if !slices.ContainsFunc(found, func(setting enumeratedSetting) bool { return setting.names == want }) {

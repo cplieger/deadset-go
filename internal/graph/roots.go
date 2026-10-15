@@ -109,8 +109,8 @@ type Unmatched struct {
 // The order is by site, then kind, then configured string, and a symbol that is
 // a root for more than one reason appears once per reason, so a report can name
 // every reason one symbol is live. A root makes its symbol live under
-// reachability and plays no part in reference counting. Roots reaches the
-// filesystem only through read.
+// reachability, and every root but the published API makes it live under
+// reference counting too. Roots reaches the filesystem only through read.
 func Roots(r *load.Result, targetRoot string, read ReadFile, symbols []Symbol, opts RootOptions) ([]Root, []Unmatched, error) {
 	if r == nil || r.Fset == nil {
 		return nil, nil, fmt.Errorf("%w: no file set", ErrIncompleteLoad)

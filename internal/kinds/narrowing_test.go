@@ -6,9 +6,9 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -153,7 +153,7 @@ func TestUnnecessaryExportReportsAPublishedPackageOnlyUnderAClosedWorld(t *testi
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			found, err := analysisOf(t, "narrowing-published.txtar", asLibrary, tc.consumers).emit(t, unnecessaryExportCode)
+			found, err := analysisOf(t, "narrowing-published.txtar", asLibrary, tc.consumers).emit(t, vocab.UnnecessaryExport)
 			if err != nil {
 				t.Fatalf("UnnecessaryExport(%s) = error %v, want the findings", tc.name, err)
 			}
@@ -161,9 +161,9 @@ func TestUnnecessaryExportReportsAPublishedPackageOnlyUnderAClosedWorld(t *testi
 				t.Errorf("UnnecessaryExport(%s) reported %v, want %v", tc.name, got, tc.want)
 			}
 			for _, f := range found {
-				if f.Code != unnecessaryExportCode {
+				if f.Code != vocab.UnnecessaryExport {
 					t.Errorf("UnnecessaryExport(%s) reported %s under %q, want %q",
-						tc.name, f.Symbol.Ref, f.Code, unnecessaryExportCode)
+						tc.name, f.Symbol.Ref, f.Code, vocab.UnnecessaryExport)
 				}
 			}
 		})
@@ -200,7 +200,7 @@ func TestUnnecessaryExposureReportsAModuleWideReferenceSetUnderAClosedWorld(t *t
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			found, err := analysisOf(t, "narrowing-published.txtar", asLibrary, tc.consumers).emit(t, unnecessaryExposureCode)
+			found, err := analysisOf(t, "narrowing-published.txtar", asLibrary, tc.consumers).emit(t, vocab.UnnecessaryExposure)
 			if err != nil {
 				t.Fatalf("UnnecessaryExposure(%s) = error %v, want the findings", tc.name, err)
 			}
@@ -217,7 +217,7 @@ func TestUnnecessaryExposureReportsAModuleWideReferenceSetUnderAClosedWorld(t *t
 
 func TestUnreachableExportReachesCertainWithNoConsumerInformation(t *testing.T) {
 	shared := analysisOf(t, "narrowing-published.txtar", asLibrary, Consumers{})
-	found, err := shared.emit(t, unreachableExportCode)
+	found, err := shared.emit(t, vocab.UnreachableExport)
 	if err != nil {
 		t.Fatalf("UnreachableExport(narrowing-published) = error %v, want the findings", err)
 	}
@@ -229,23 +229,23 @@ func TestUnreachableExportReachesCertainWithNoConsumerInformation(t *testing.T) 
 		t.Errorf("UnreachableExport(narrowing-published) reported %v, want %v", got, want)
 	}
 	for _, f := range found {
-		if f.Code != unreachableExportCode {
+		if f.Code != vocab.UnreachableExport {
 			t.Errorf("UnreachableExport reported %s under %q, want %q",
-				f.Symbol.Ref, f.Code, unreachableExportCode)
+				f.Symbol.Ref, f.Code, vocab.UnreachableExport)
 		}
 		if f.Details.NarrowerVisibility != "" {
 			t.Errorf("UnreachableExport reported %s naming the narrower visibility %q, want none",
 				f.Symbol.Ref, f.Details.NarrowerVisibility)
 		}
-		if class := shared.classOf(t, f.Symbol.Ref); class != Certain {
+		if class := shared.classOf(t, f.Symbol.Ref); class != vocab.Certain {
 			t.Errorf("classOf(%s) = %q, want %q with no consumer information",
-				f.Symbol.Ref, class, Certain)
+				f.Symbol.Ref, class, vocab.Certain)
 		}
 	}
 }
 
 func TestUnreachableExportSaysWhatTheAnalysisFoundAboutTheReferences(t *testing.T) {
-	found, err := analysisOf(t, "narrowing-published.txtar", asLibrary, Consumers{}).emit(t, unreachableExportCode)
+	found, err := analysisOf(t, "narrowing-published.txtar", asLibrary, Consumers{}).emit(t, vocab.UnreachableExport)
 	if err != nil {
 		t.Fatalf("UnreachableExport(narrowing-published) = error %v, want the findings", err)
 	}
@@ -264,7 +264,7 @@ func TestUnreachableExportSaysWhatTheAnalysisFoundAboutTheReferences(t *testing.
 }
 
 func TestUnreachableExportLeavesADeclarationOutsideItsPopulationAlone(t *testing.T) {
-	found, err := analysisOf(t, "narrowing-published.txtar", asLibrary, Consumers{}).emit(t, unreachableExportCode)
+	found, err := analysisOf(t, "narrowing-published.txtar", asLibrary, Consumers{}).emit(t, vocab.UnreachableExport)
 	if err != nil {
 		t.Fatalf("UnreachableExport(narrowing-published) = error %v, want the findings", err)
 	}
@@ -288,14 +288,14 @@ func TestUnreachableExportLeavesACandidateATestFileReferencesToTheTestOnlyKind(t
 		t.Fatalf("Compute(the test-only and the unreachable-export kinds) = error %v, "+
 			"want the findings", err)
 	}
-	want := map[string]string{
-		internalProbe:     testOnlyUseCode,
-		commandUnused:     unreachableExportCode,
-		internalUnused:    unreachableExportCode,
-		internalForgotten: unreachableExportCode,
-		testPackageUnused: unreachableExportCode,
+	want := map[string]vocab.Code{
+		internalProbe:     vocab.TestOnlyUse,
+		commandUnused:     vocab.UnreachableExport,
+		internalUnused:    vocab.UnreachableExport,
+		internalForgotten: vocab.UnreachableExport,
+		testPackageUnused: vocab.UnreachableExport,
 	}
-	got := make(map[string]string, len(result.Findings))
+	got := make(map[string]vocab.Code, len(result.Findings))
 	for _, f := range result.Findings {
 		got[f.Symbol.Ref] = f.Code
 	}
@@ -316,26 +316,26 @@ func TestNarrowingAndTheUnusedDeclarationKindsReportEachDeclarationOnce(t *testi
 	resolved.Consumers.Complete = true
 	in := inputOf(t, "narrowing-published.txtar", resolved, Consumers{Complete: true})
 	emitters := declarationEmitters()
-	emitters[unnecessaryExportCode] = UnnecessaryExport
-	emitters[unnecessaryExposureCode] = UnnecessaryExposure
-	emitters[unreachableExportCode] = UnreachableExport
+	emitters[vocab.UnnecessaryExport] = UnnecessaryExport
+	emitters[vocab.UnnecessaryExposure] = UnnecessaryExposure
+	emitters[vocab.UnreachableExport] = UnreachableExport
 
 	result := computed(t, in, emitters)
-	want := map[string]string{
-		publishedDo:       unusedExportedCode,
-		publishedHelper:   unnecessaryExportCode,
-		publishedShared:   unnecessaryExposureCode,
-		serviceUse:        unusedExportedCode,
-		commandRun:        unnecessaryExportCode,
-		commandUnused:     unreachableExportCode,
-		internalHelper:    unnecessaryExportCode,
-		internalUnused:    unreachableExportCode,
-		internalForgotten: unreachableExportCode,
-		internalProbe:     testOnlyUseCode,
-		internalTestProbe: testOfDeadCodeCode,
-		testPackageUnused: unreachableExportCode,
+	want := map[string]vocab.Code{
+		publishedDo:       vocab.UnusedExported,
+		publishedHelper:   vocab.UnnecessaryExport,
+		publishedShared:   vocab.UnnecessaryExposure,
+		serviceUse:        vocab.UnusedExported,
+		commandRun:        vocab.UnnecessaryExport,
+		commandUnused:     vocab.UnreachableExport,
+		internalHelper:    vocab.UnnecessaryExport,
+		internalUnused:    vocab.UnreachableExport,
+		internalForgotten: vocab.UnreachableExport,
+		internalProbe:     vocab.TestOnlyUse,
+		internalTestProbe: vocab.TestOfDeadCode,
+		testPackageUnused: vocab.UnreachableExport,
 	}
-	got := make(map[string]string, len(result.Findings))
+	got := make(map[string]vocab.Code, len(result.Findings))
 	for _, f := range result.Findings {
 		got[f.Symbol.Ref] = f.Code
 	}
@@ -355,18 +355,18 @@ func TestNarrowingAndTheUnusedDeclarationKindsReportEachDeclarationOnce(t *testi
 // because an internal tree is closed world: they are not the subject of this test and
 // they are here because the table is the whole package's.
 func TestUnreachableExportYieldsEverySubjectAMoreSpecificKindReports(t *testing.T) {
-	want := map[string]string{
-		"go://example.com/app/internal/api#Reader":      unusedInterfaceCode,
-		"go://example.com/app/internal/api#Store.Flush": uncalledInterfaceMethodCode,
-		"go://example.com/app/internal/api#Quiet":       enumMemberCode,
-		"go://example.com/app/internal/api#Convert[T]":  typeParameterCode,
-		"go://example.com/app/internal/api#Forgotten":   unreachableExportCode,
-		"go://example.com/app/internal/api#Level":       unnecessaryExportCode,
-		"go://example.com/app/internal/api#Loud":        unnecessaryExportCode,
+	want := map[string]vocab.Code{
+		"go://example.com/app/internal/api#Reader":      vocab.UnusedInterface,
+		"go://example.com/app/internal/api#Store.Flush": vocab.UncalledInterfaceMethod,
+		"go://example.com/app/internal/api#Quiet":       vocab.UnusedEnumMember,
+		"go://example.com/app/internal/api#Convert[T]":  vocab.UnusedTypeParameter,
+		"go://example.com/app/internal/api#Forgotten":   vocab.UnreachableExport,
+		"go://example.com/app/internal/api#Level":       vocab.UnnecessaryExport,
+		"go://example.com/app/internal/api#Loud":        vocab.UnnecessaryExport,
 	}
 
 	result := analysisOf(t, "narrowing-unimportable.txtar", asApplication, Consumers{}).findings(t, everyKind)
-	got := make(map[string]string, len(result.Findings))
+	got := make(map[string]vocab.Code, len(result.Findings))
 	for _, f := range result.Findings {
 		got[f.Symbol.Ref] = f.Code
 	}
@@ -559,19 +559,19 @@ func TestNarrowingReportsEveryFindingTheFrameworkAccepts(t *testing.T) {
 				t.Fatalf("Compute(the three narrowing kinds) = error %v, want the findings", err)
 			}
 			want := map[string]string{
-				publishedHelper:   unnecessaryExportCode + " warn narrowable " + tc.published,
-				internalHelper:    unnecessaryExportCode + " warn narrowable certain",
-				commandRun:        unnecessaryExportCode + " warn narrowable certain",
-				publishedShared:   unnecessaryExposureCode + " warn narrowable " + tc.published,
-				commandUnused:     unreachableExportCode + " deny deletable certain",
-				internalUnused:    unreachableExportCode + " deny deletable certain",
-				internalForgotten: unreachableExportCode + " deny deletable certain",
-				testPackageUnused: unreachableExportCode + " deny deletable certain",
+				publishedHelper:   string(vocab.UnnecessaryExport) + " warn narrowable " + tc.published,
+				internalHelper:    string(vocab.UnnecessaryExport) + " warn narrowable certain",
+				commandRun:        string(vocab.UnnecessaryExport) + " warn narrowable certain",
+				publishedShared:   string(vocab.UnnecessaryExposure) + " warn narrowable " + tc.published,
+				commandUnused:     string(vocab.UnreachableExport) + " deny deletable certain",
+				internalUnused:    string(vocab.UnreachableExport) + " deny deletable certain",
+				internalForgotten: string(vocab.UnreachableExport) + " deny deletable certain",
+				testPackageUnused: string(vocab.UnreachableExport) + " deny deletable certain",
 			}
 			got := make(map[string]string, len(result.Findings))
 			for _, f := range result.Findings {
-				got[f.Symbol.Ref] = f.Code + " " + string(f.Severity) + " " +
-					f.Fixability + " " + string(f.Confidence)
+				got[f.Symbol.Ref] = string(f.Code) + " " + string(f.Severity) + " " +
+					string(f.Fixability) + " " + string(f.Confidence)
 			}
 			if !maps.Equal(got, want) {
 				t.Errorf("Compute(the three narrowing kinds) reported %v, want %v", got, want)
@@ -607,7 +607,7 @@ func TestANarrowingFindingCarriesNoLivenessRelationAndAnUnreachableExportCarries
 	if !maps.Equal(live, want) {
 		t.Errorf("Compute(the three narrowing kinds) reported the live subjects %v, want %v", live, want)
 	}
-	forgotten := findingOf(t, result.Findings, unreachableExportCode, "Forgotten")
+	forgotten := findingOf(t, result.Findings, vocab.UnreachableExport, "Forgotten")
 	if forgotten.Relation != graph.Reachability {
 		t.Errorf("Compute() reports %s with the relation %q, want %q: the candidate was found by reachability",
 			internalForgotten, forgotten.Relation, graph.Reachability)
@@ -622,17 +622,17 @@ func TestNarrowingCarriesTheVocabularyNameAndTheLanguage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compute(the three narrowing kinds) = error %v, want the findings", err)
 	}
-	names := map[string]string{
-		unnecessaryExportCode:   "unnecessary-export",
-		unnecessaryExposureCode: "unnecessary-exposure",
-		unreachableExportCode:   "unreachable-export",
+	names := map[vocab.Code]string{
+		vocab.UnnecessaryExport:   "unnecessary-export",
+		vocab.UnnecessaryExposure: "unnecessary-exposure",
+		vocab.UnreachableExport:   "unreachable-export",
 	}
 	for _, f := range result.Findings {
 		if f.Kind != names[f.Code] {
 			t.Errorf("Compute() reported %s under the name %q, want %q",
 				f.Symbol.Ref, f.Kind, names[f.Code])
 		}
-		if f.Language != "go" {
+		if f.Language != vocab.Go {
 			t.Errorf("Compute() reported %s in the language %q, want %q", f.Symbol.Ref, f.Language, "go")
 		}
 	}
@@ -690,7 +690,7 @@ func TestNarrowingExcludesASatisfyingMethodTheExemptionClassDoesNotHold(t *testi
 
 	exempted := make(map[string]bool, len(in.Exempt))
 	for _, exemption := range in.Exempt {
-		if exemption.Class == string(exempt.InterfaceSatisfaction) {
+		if exemption.Class == string(vocab.InterfaceSatisfaction) {
 			exempted[in.Refs[exemption.ID]] = true
 		}
 	}

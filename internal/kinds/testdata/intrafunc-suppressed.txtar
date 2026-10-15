@@ -8,7 +8,7 @@ go 1.27.1
 -- main.go --
 package main
 
-//deadset:ignore DS1801 -- the label answers a shape this program does not read
+//deadset:ignore DS1401 -- the label answers a shape this program does not read
 func scaled(value int, label string) int {
 	return value * 2
 }

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
 )
 
@@ -150,7 +151,7 @@ func TestAnalysisLeavesTheTreeByteIdentical(t *testing.T) {
 		before := hashTree(t, dir)
 		var stdout, stderr bytes.Buffer
 		code := run(t.Context(), drawInvocation(t, documents, filepath.Base(dir)), &stdout, &stderr)
-		if code != exitClean && code != exitFindings {
+		if code != vocab.ExitClean && code != vocab.ExitFindings {
 			t.Fatalf("analyze over the generated module = %d, want a verdict about its findings\nstderr: %s",
 				code, stderr.String())
 		}

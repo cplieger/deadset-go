@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // writeCascade names the declarations that deleting one write-only subject and its
@@ -353,7 +354,7 @@ func fallsWithAnnotation(in *Input, symbol *graph.Symbol) bool {
 	case graph.KindPackage, graph.KindFile, graph.KindField, graph.KindTypeParam, graph.KindMethod, graph.KindInterfaceMethod:
 		return false
 	}
-	return in.classOf(symbol.ID) == Certain
+	return in.classOf(symbol.ID) == vocab.Certain
 }
 
 // holderOf is the subject whose annotation or writes hold one reference's position.

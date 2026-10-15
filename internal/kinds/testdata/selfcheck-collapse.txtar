@@ -12,7 +12,7 @@ package main
 
 func main() { println(loud(), first, second) }
 
-//deadset:ignore DS1001,DS1101 -- stale at both codes: main reaches loud
+//deadset:ignore DS1001,DS1501 -- stale at both codes: main reaches loud
 func loud() string { return "l" }
 
 var (

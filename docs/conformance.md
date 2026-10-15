@@ -14,7 +14,7 @@ A consumer that requires a particular contract version reads it from that output
 
 ## The conformance corpus
 
-The contract publishes a conformance corpus, a set of fixtures each carrying its own expectation, and deadset-go runs it as part of its own test suite. The corpus version this analyzer answers is 6.0.0, which publishes 403 fixtures, and the run answers the 181 fixtures of it that carry a Go rendering. Every one of them passes, none is a gap and none fails.
+The contract publishes a conformance corpus, a set of fixtures each carrying its own expectation, and deadset-go runs it as part of its own test suite. The corpus version this analyzer answers is 6.0.0, which publishes 422 fixtures, and the run answers the 193 fixtures of it that carry a Go rendering. 186 of them pass, 7 are pending, none is a gap and none fails. A pending fixture states a rule the contract has adopted and this release does not meet yet, and its `expect.json` names the rule; the run records what the analyzer answers and fails on none of them.
 
 Every report names the result in its `analyzer.conformance` block, with the corpus version answered and the digest of the results document the corpus run wrote. `describe` prints the same record. That document, `conformance-results.json` at the repository root, names the version of the build that ran the corpus. Under the test suite that version is `0.0.0-devel`, so the committed document is reproducible from the source at its commit, and its digest binds the record to that source. A merge admits a report whose result is a pass and no other, so a consumer gating on conformance reads that block rather than assuming one.
 
@@ -24,7 +24,7 @@ A capability this analyzer does not implement is declared rather than silently a
 
 At corpus version 6.0.0 this analyzer declares no gap, so `conformance.json` carries an empty list and the `declared_gaps` member of every report is empty.
 
-Three codes of the contract are outside this analyzer, and none of them is a gap in its Go coverage. `DS1104` and `DS1706` apply to TypeScript and JavaScript, so the corpus fixtures for them carry no Go rendering, and `DS1705` is reported by the orchestrator's merge from the edge evaluations this analyzer publishes. All three are listed in [Issue kinds](kinds.md#kinds-this-analyzer-does-not-report). The four exemption classes the contract declares for TypeScript alone are outside this analyzer for the same reason. The nine Go classes are all implemented and are in [Exemption classes](exemptions.md).
+Four codes of the contract are outside this analyzer, and none of them is a gap in its Go coverage. `DS1004`, `DS1503` and `DS9006` apply to TypeScript and JavaScript, so the corpus fixtures for them carry no Go rendering, and `DS9005` is reported by the orchestrator's merge from the edge evaluations this analyzer publishes. All four are listed in [Issue kinds](kinds.md#kinds-this-analyzer-does-not-report). The four exemption classes the contract declares for TypeScript alone are outside this analyzer for the same reason. The nine Go classes are all implemented and are in [Exemption classes](exemptions.md).
 
 ## Platforms
 
@@ -66,4 +66,4 @@ deadset-go is installable and runnable on its own, and a repository holding only
 
 ### No kind whose answer needs a guess
 
-A kind ships only where what it reports is deletable, or narrowable, without a behavior change, and where the answer follows exactly from type information and the graph. That is why the retired codes in [Issue kinds](kinds.md#retired-codes) stay retired. Each names a question whose use site lives outside anything a type checker or a module graph reads, or a defect that belongs to a linter rather than to a dead-code analyzer.
+A kind ships only where what it reports is deletable, or narrowable, without a behavior change, and where the answer follows exactly from type information and the graph. A question whose use site lives outside anything a type checker or a module graph reads gets no kind, and neither does a defect that belongs to a linter rather than to a dead-code analyzer.

@@ -9,14 +9,12 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/config"
-	"github.com/cplieger/deadset-go/v2/internal/report"
-	"github.com/cplieger/deadset-go/v2/internal/reporttest"
 	spec "github.com/cplieger/deadset-spec/v8"
+	"github.com/cplieger/deadset-spec/v8/report"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // analyzed is one run of the analyze verb over dir: the verb is invoked from the
@@ -52,14 +50,14 @@ func runAnalyze(t *testing.T, dir string, args ...string) analyzed {
 
 // envelopeAt reads the report one run wrote, refusing a member the report package
 // does not declare.
-func envelopeAt(t *testing.T, path string) report.Envelope {
+func envelopeAt(t *testing.T, path string) *report.Report {
 	t.Helper()
 
 	body, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read the report %s: %v", path, err)
 	}
-	envelope := reporttest.MustRead(t, "the report "+path, body)
+	envelope := mustDecode(t, "the report "+path, body)
 	return envelope
 }
 
@@ -84,8 +82,8 @@ func liveModule(t *testing.T) string {
 const everyKindAllowed = `{
   "target": {"kind": "application"},
   "severity": {
-    "DS10": "allow", "DS11": "allow", "DS12": "allow",
-    "DS13": "allow", "DS15": "allow", "DS16": "allow", "DS18": "allow"
+    "DS10": "allow", "DS11": "allow", "DS12": "allow", "DS13": "allow",
+    "DS14": "allow", "DS15": "allow", "DS16": "allow", "DS17": "allow"
   }
 }`
 
@@ -408,7 +406,7 @@ func TestAnalyzeExitsWithFailureWhenTheTemplateFailsToRender(t *testing.T) {
 	if envelope := envelopeAt(t, got.reportPath); envelope.Totals.Findings == 0 {
 		t.Error("the report the run wrote before the rendering failed holds no finding, want the run's report")
 	}
-	if _, err := os.Stat(got.reportPath + renderings[config.Template].suffix); !errors.Is(err, fs.ErrNotExist) {
+	if _, err := os.Stat(got.reportPath + renderings[vocab.FormatTemplate]); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("analyze wrote the template rendering that failed, want none: %v", err)
 	}
 }
@@ -528,16 +526,16 @@ func TestAnalyzeWritesNoPartialDocumentWhereTheRenameIsRefused(t *testing.T) {
 	}
 }
 
-func TestWriteAtomicallyLeavesNoTemporaryFileBehind(t *testing.T) {
+func TestPublishLeavesNoTemporaryFileBehind(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "document.json")
-	if err := writeAtomically(path, func(w io.Writer) error {
+	if err := publish(t.Context(), path, func(w io.Writer) error {
 		_, err := w.Write([]byte("{}\n"))
 		return err
 	}); err != nil {
-		t.Fatalf("writeAtomically(%s) = error %v, want the document written", path, err)
+		t.Fatalf("publish(%s) = error %v, want the document written", path, err)
 	}
 
 	entries, err := os.ReadDir(dir)
@@ -554,8 +552,8 @@ func TestWriteAtomicallyLeavesNoTemporaryFileBehind(t *testing.T) {
 
 	// A rendering that fails leaves the path as it was and no temporary file.
 	failing := errors.New("the rendering refused")
-	if err := writeAtomically(path, func(io.Writer) error { return failing }); !errors.Is(err, failing) {
-		t.Errorf("writeAtomically() with a failing rendering = %v, want the rendering's own error", err)
+	if err := publish(t.Context(), path, func(io.Writer) error { return failing }); !errors.Is(err, failing) {
+		t.Errorf("publish() with a failing rendering = %v, want the rendering's own error", err)
 	}
 	body, err := os.ReadFile(path)
 	if err != nil {
@@ -598,7 +596,7 @@ func TestFormatListNamesEveryFormatTheContractDeclares(t *testing.T) {
 		t.Fatal("Setup: contract/config.schema.json declares no format enum")
 	}
 	for _, format := range published {
-		if _, held := renderings[config.Format(format)]; !held {
+		if _, held := renderings[vocab.Format(format)]; !held {
 			t.Errorf("the Contract declares the format %q and this analyzer renders nothing for it", format)
 		}
 	}
@@ -746,7 +744,7 @@ func TestAnalyzeRendersSARIFAgainstTheTargetTheScopeDocumentNames(t *testing.T) 
 	if want := contractExitCodes(t)["findings"]; code != want {
 		t.Fatalf("analyze --scope=scope.json --format=sarif = %d, want %d\nstderr: %s", code, want, stderr.String())
 	}
-	rendered, err := os.ReadFile(reportPath + renderings[config.SARIF].suffix)
+	rendered, err := os.ReadFile(reportPath + renderings[vocab.FormatSARIF])
 	if err != nil {
 		t.Fatalf("read the SARIF rendering: %v", err)
 	}
@@ -791,7 +789,7 @@ func TestAnalyzeReadsTheScopeDocumentTheInvocationNames(t *testing.T) {
 
 // testSupportAssertionModule is a module whose test-support package, a package only
 // tests import, asserts an interface nothing else names as a type, so the assertion
-// is a candidate of the production sweep and the run reports it under DS1204.
+// is a candidate of the production sweep and the run reports it under DS1203.
 func testSupportAssertionModule(t *testing.T) string {
 	t.Helper()
 	return writeModule(t, map[string]string{
@@ -806,18 +804,18 @@ func testSupportAssertionModule(t *testing.T) string {
 	})
 }
 
-func TestAnalyzeWritesASchemaValidDS1204InTestSupportCode(t *testing.T) {
+func TestAnalyzeWritesASchemaValidDS1203InTestSupportCode(t *testing.T) {
 	ran := runAnalyze(t, testSupportAssertionModule(t))
-	if ran.code != exitFindings {
-		t.Fatalf("analyze(a test-support assertion) = %d, want %d; stderr:\n%s", ran.code, exitFindings, ran.stderr)
+	if ran.code != vocab.ExitFindings {
+		t.Fatalf("analyze(a test-support assertion) = %d, want %d; stderr:\n%s", ran.code, vocab.ExitFindings, ran.stderr)
 	}
 
 	body, err := os.ReadFile(ran.reportPath)
 	if err != nil {
 		t.Fatalf("read the report: %v", err)
 	}
-	if err := checkReport(bytes.NewReader(body)); err != nil {
-		t.Errorf("checkReport(the report analyze wrote) = %v, want the report schema to admit it", err)
+	if _, err := report.Decode(body); err != nil {
+		t.Errorf("Decode(the report analyze wrote) = %v, want the report schema to admit it", err)
 	}
 	var document struct {
 		Findings []map[string]json.RawMessage `json:"findings"`
@@ -827,67 +825,16 @@ func TestAnalyzeWritesASchemaValidDS1204InTestSupportCode(t *testing.T) {
 	}
 	reported := 0
 	for _, found := range document.Findings {
-		if string(found["code"]) != `"DS1204"` {
+		if string(found["code"]) != `"DS1203"` {
 			continue
 		}
 		reported++
 		if relation, held := found["liveness_relation"]; held {
-			t.Errorf("the DS1204 finding carries liveness_relation %s, want none", relation)
+			t.Errorf("the DS1203 finding carries liveness_relation %s, want none", relation)
 		}
 	}
 	if reported != 1 {
-		t.Errorf("the report holds %d DS1204 findings, want the test-support assertion's one", reported)
-	}
-}
-
-func TestCheckReportNamesTheValueTheSchemaRefuses(t *testing.T) {
-	ran := runAnalyze(t, testSupportAssertionModule(t))
-	body, err := os.ReadFile(ran.reportPath)
-	if err != nil {
-		t.Fatalf("Setup: read the report: %v", err)
-	}
-	var document map[string]any
-	if err := json.Unmarshal(body, &document); err != nil {
-		t.Fatalf("Setup: decode the report: %v", err)
-	}
-	findings, _ := document["findings"].([]any)
-	at := -1
-	for i, one := range findings {
-		if found, _ := one.(map[string]any); found["code"] == "DS1204" {
-			found["liveness_relation"] = "reachability"
-			at = i
-		}
-	}
-	if at < 0 {
-		t.Fatalf("Setup: the report holds no DS1204 finding: %s", body)
-	}
-	planted, err := json.Marshal(document)
-	if err != nil {
-		t.Fatalf("Setup: encode the planted report: %v", err)
-	}
-
-	err = checkReport(bytes.NewReader(planted))
-	if want := "/findings/" + strconv.Itoa(at) + ": not:"; !errors.Is(err, errReportSchema) ||
-		!strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "liveness_relation") {
-		t.Errorf("checkReport(a DS1204 carrying a relation) = %v, want errReportSchema naming %q and the member", err, want)
-	}
-}
-
-func TestWriteCheckedPublishesNothingTheCheckRefuses(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	path := filepath.Join(dir, "report.json")
-	refused := errors.New("the check refused")
-	err := writeChecked(path, func(w io.Writer) error {
-		_, err := w.Write([]byte("{}\n"))
-		return err
-	}, func(io.Reader) error { return refused })
-	if !errors.Is(err, refused) {
-		t.Errorf("writeChecked() with a refusing check = %v, want the check's error", err)
-	}
-	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
-		t.Errorf("the directory holds %d entries after a refused check, want none", len(entries))
+		t.Errorf("the report holds %d DS1203 findings, want the test-support assertion's one", reported)
 	}
 }
 
@@ -928,9 +875,9 @@ func TestAnalyzeNamesAPublishablePackageAtTheRootAsADot(t *testing.T) {
 	envelope := envelopeAt(t, got.reportPath)
 	var paths []string
 	for _, note := range envelope.Notes {
-		paths = append(paths, note.Kind+" "+note.Path)
+		paths = append(paths, string(note.Kind)+" "+note.Path)
 	}
-	if want := []string{publishedPackageNote + " ."}; !slices.Equal(paths, want) {
+	if want := []string{string(report.NoteKindPublishedPackage) + " ."}; !slices.Equal(paths, want) {
 		t.Errorf("analyze over a root package nothing imports wrote the notes %q, want %q", paths, want)
 	}
 }

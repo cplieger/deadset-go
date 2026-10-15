@@ -9,6 +9,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // internalElement is the path element that makes a package importable only from
@@ -22,25 +23,23 @@ const testPackageSuffix = "_test"
 // mainPackageName is the name of a package nothing can import.
 const mainPackageName = "main"
 
+// classOrder is the classes from the most to the least certain.
+var classOrder = vocab.Classes()
+
 // rank orders the classes, certain above probable above possible, so the lower of
 // two is the weaker claim. A value outside the set ranks below every class, which
 // is what leaves an unset ceiling capping nothing.
-func (c Class) rank() int {
-	switch c {
-	case Certain:
-		return 3
-	case Probable:
-		return 2
-	case Possible:
-		return 1
-	default:
+func rank(c vocab.Class) int {
+	at := slices.Index(classOrder, c)
+	if at < 0 {
 		return 0
 	}
+	return len(classOrder) - at
 }
 
 // lower returns the weaker of two classes, and c where other is not a class.
-func (c Class) lower(other Class) Class {
-	if other.rank() == 0 || c.rank() <= other.rank() {
+func lower(c, other vocab.Class) vocab.Class {
+	if rank(other) == 0 || rank(c) <= rank(other) {
 		return c
 	}
 	return other
@@ -54,33 +53,33 @@ func (c Class) lower(other Class) Class {
 // and a member [Input.hiddenMember] reports; a library's other export is certain where
 // every declared consumer loaded, probable where some did not, and possible with no
 // consumer information.
-func (in *Input) classOf(id graph.SymbolID) Class {
+func (in *Input) classOf(id graph.SymbolID) vocab.Class {
 	symbol := in.symbol(id)
 	switch {
 	case symbol == nil:
-		return Certain
+		return vocab.Certain
 	case in.unlinkedApplicationPackage(symbol):
-		return Possible
+		return vocab.Possible
 	case !symbol.Exported:
-		return Certain
+		return vocab.Certain
 	case symbol.Kind == graph.KindTypeParam && declaresTypeParameters(in.symbol(symbol.Parent)):
-		return Certain
+		return vocab.Certain
 	case testFile(symbol):
-		return Certain
+		return vocab.Certain
 	case !in.importable(symbol):
-		return Certain
+		return vocab.Certain
 	case in.hiddenMember(symbol):
-		return Certain
+		return vocab.Certain
 	case in.unanalysedConsumer(symbol):
-		return Possible
-	case in.Config == nil || in.Config.Target.Kind.Of(config.GoLanguage) != config.Library:
-		return Certain
+		return vocab.Possible
+	case in.Config == nil || in.Config.Target.Kind.Of(vocab.Go) != config.Library:
+		return vocab.Certain
 	case in.everyConsumerLoaded():
-		return Certain
+		return vocab.Certain
 	case len(in.Consumers.Declared) > 0:
-		return Probable
+		return vocab.Probable
 	default:
-		return Possible
+		return vocab.Possible
 	}
 }
 
@@ -88,7 +87,7 @@ func (in *Input) classOf(id graph.SymbolID) Class {
 // application that no build links declares one symbol, in a run that declares no
 // consumer: outside programs may import it, so every declaration of it is possible.
 func (in *Input) unlinkedApplicationPackage(symbol *graph.Symbol) bool {
-	if in.Config == nil || in.Config.Target.Kind.Of(config.GoLanguage) != config.Application ||
+	if in.Config == nil || in.Config.Target.Kind.Of(vocab.Go) != config.Application ||
 		len(in.Consumers.Declared) > 0 || testFile(symbol) || !in.importable(symbol) {
 		return false
 	}
@@ -171,7 +170,7 @@ func unanalysedUnits(per []Configured, root string) map[string]bool {
 // publishedAPI reports whether one declaration is published API of a library: an
 // exported production declaration of a package outside programs can import.
 func (in *Input) publishedAPI(symbol *graph.Symbol) bool {
-	return in.Config != nil && in.Config.Target.Kind.Of(config.GoLanguage) == config.Library && symbol.Exported &&
+	return in.Config != nil && in.Config.Target.Kind.Of(vocab.Go) == config.Library && symbol.Exported &&
 		!testFile(symbol) && in.importable(symbol)
 }
 
@@ -179,7 +178,7 @@ func (in *Input) publishedAPI(symbol *graph.Symbol) bool {
 // component one declaration falls with, which caps the confidence of every finding
 // of that component so the minimum confidence withholds or reports it whole. It is
 // no class where the declaration falls with no component.
-func (in *Input) componentCap(id graph.SymbolID) Class {
+func (in *Input) componentCap(id graph.SymbolID) vocab.Class {
 	held := in.index()
 	component := held.components[id]
 	if component == nil {
@@ -188,9 +187,9 @@ func (in *Input) componentCap(id graph.SymbolID) Class {
 	if least, computed := held.caps[component.Index]; computed {
 		return least
 	}
-	least := Certain
+	least := vocab.Certain
 	for _, root := range component.Roots {
-		least = least.lower(in.classOf(root))
+		least = lower(least, in.classOf(root))
 	}
 	held.caps[component.Index] = least
 	return least

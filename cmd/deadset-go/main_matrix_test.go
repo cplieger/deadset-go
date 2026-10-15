@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // unbuildableWindows is the identifier of the configuration the fixture below
@@ -45,8 +46,8 @@ func unbuildableDerivedModule(t *testing.T, document string) string {
 func TestStagesOfDropsADerivedConfigurationTheTargetDoesNotBuild(t *testing.T) {
 	dir := unbuildableDerivedModule(t, `{"target": {"kind": "application"}}`)
 	resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
-	if code != exitClean {
-		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, exitClean)
+	if code != vocab.ExitClean {
+		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
 
 	loaded, err := stagesOf(t.Context(), &resolved)
@@ -82,8 +83,8 @@ func TestStagesOfFailsTheRunOnADeclaredConfigurationTheTargetDoesNotBuild(t *tes
 		`{"id": "`+load.HostConfiguration().ID+`", "os": "`+runtime.GOOS+`", "arch": "`+runtime.GOARCH+`"},`+
 		`{"id": "`+unbuildableWindows+`", "os": "windows", "arch": "`+runtime.GOARCH+`"}]}}`)
 	resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
-	if code != exitClean {
-		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, exitClean)
+	if code != vocab.ExitClean {
+		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
 
 	loaded, err := stagesOf(t.Context(), &resolved)
@@ -94,8 +95,8 @@ func TestStagesOfFailsTheRunOnADeclaredConfigurationTheTargetDoesNotBuild(t *tes
 	if failure.Configuration != unbuildableWindows {
 		t.Errorf("stagesOf() named the configuration %q, want %q", failure.Configuration, unbuildableWindows)
 	}
-	if got := exitCodeFor(err); got != exitFailure {
-		t.Errorf("exitCodeFor(stagesOf()) = %d, want %d", got, exitFailure)
+	if got := exitCodeFor(err); got != vocab.ExitFailure {
+		t.Errorf("exitCodeFor(stagesOf()) = %d, want %d", got, vocab.ExitFailure)
 	}
 	if len(loaded.identifiers) != 0 || len(loaded.unbuilt) != 0 {
 		t.Errorf("stagesOf() answered over %v and dropped %d configurations, want neither: a declared configuration that does not load leaves no answer",
@@ -110,7 +111,7 @@ func TestAnalyzeNamesTheDerivedConfigurationItDropped(t *testing.T) {
 	dir := unbuildableDerivedModule(t, `{"target": {"kind": "application"}}`)
 
 	run := runAnalyze(t, dir)
-	if run.code == exitFailure {
+	if run.code == vocab.ExitFailure {
 		t.Fatalf("analyze(a target whose derived Windows configuration does not build) = %d, want a verdict rather than a load failure: %s",
 			run.code, run.stderr)
 	}
@@ -133,13 +134,13 @@ func TestAnalyzeNamesTheDerivedConfigurationItDropped(t *testing.T) {
 			len(envelope.ConfigurationsNotBuilt))
 	}
 	dropped := &envelope.ConfigurationsNotBuilt[0]
-	if dropped.ID != unbuildableWindows || dropped.OS != "windows" || dropped.Arch != runtime.GOARCH {
-		t.Errorf("the report names the dropped configuration %q on %s/%s, want %q on windows/%s",
-			dropped.ID, dropped.OS, dropped.Arch, unbuildableWindows, runtime.GOARCH)
+	if dropped.ID != unbuildableWindows || dropped.Platform == nil || dropped.Platform.OS != "windows" || dropped.Platform.Arch != runtime.GOARCH {
+		t.Errorf("the report names the dropped configuration %q on %+v, want %q on windows/%s",
+			dropped.ID, dropped.Platform, unbuildableWindows, runtime.GOARCH)
 	}
-	if len(dropped.Tags) != 0 {
+	if dropped.Platform != nil && len(dropped.Platform.Tags) != 0 {
 		t.Errorf("the report names the dropped configuration %q with the tags %v, want none",
-			dropped.ID, dropped.Tags)
+			dropped.ID, dropped.Platform.Tags)
 	}
 	if want := "load " + unbuildableWindows + ": "; !strings.HasPrefix(dropped.Error, want) {
 		t.Errorf("the report names the error of %q as %q, want one opening %q",
@@ -165,8 +166,8 @@ const projectEntries = `{"target": {"kind": "application"}, "analysis": {` +
 func TestStagesOfDerivesTheMatrixWhereTheConfigurationListsProjectsAlone(t *testing.T) {
 	dir := unbuildableDerivedModule(t, projectEntries)
 	resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
-	if code != exitClean {
-		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, exitClean)
+	if code != vocab.ExitClean {
+		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
 
 	loaded, err := stagesOf(t.Context(), &resolved)
@@ -192,7 +193,7 @@ func TestAnalyzeReportsThePlatformEntriesOfAMatrixListingBothShapes(t *testing.T
 		`{"id": "`+host.ID+`", "os": "`+runtime.GOOS+`", "arch": "`+runtime.GOARCH+`"}]}}`)
 
 	run := runAnalyze(t, dir)
-	if run.code == exitFailure || run.code == exitUsage {
+	if run.code == vocab.ExitFailure || run.code == vocab.ExitUsage {
 		t.Fatalf("analyze(a matrix listing a project entry beside the host platform) = %d, want a verdict: %s",
 			run.code, run.stderr)
 	}
@@ -232,7 +233,7 @@ func TestAnalyzeReportsADerivedConfigurationsSetupFailureAsNotBuilt(t *testing.T
 	dir := setupFailingWindowsModule(t, `{"target": {"kind": "application"}}`)
 
 	run := runAnalyze(t, dir)
-	if run.code == exitFailure || run.code == exitUsage {
+	if run.code == vocab.ExitFailure || run.code == vocab.ExitUsage {
 		t.Fatalf("analyze(a target whose derived Windows configuration meets a setup failure) = %d, want a verdict: %s",
 			run.code, run.stderr)
 	}
@@ -255,9 +256,9 @@ func TestAnalyzeEndsTheRunOnADeclaredConfigurationsSetupFailure(t *testing.T) {
 		`{"id": "`+unbuildableWindows+`", "os": "windows", "arch": "`+runtime.GOARCH+`"}]}}`)
 
 	run := runAnalyze(t, dir)
-	if run.code != exitFailure {
+	if run.code != vocab.ExitFailure {
 		t.Errorf("analyze(a target declaring a Windows configuration that meets a setup failure) = %d, want %d\nstderr: %s",
-			run.code, exitFailure, run.stderr)
+			run.code, vocab.ExitFailure, run.stderr)
 	}
 	if !strings.HasPrefix(run.stderr, "setup failure: missing-module: ") {
 		t.Errorf("analyze() wrote to stderr %q, want the setup failure's line", run.stderr)
@@ -285,8 +286,8 @@ func TestAnalyzeAnswersWhereAnAssertionHoldsAMethodOneConfigurationLacks(t *test
 	})
 
 	run := runAnalyze(t, dir)
-	if run.code != exitFindings {
-		t.Fatalf("analyze(a method held under one configuration alone) = %d, want %d: %s", run.code, exitFindings, run.stderr)
+	if run.code != vocab.ExitFindings {
+		t.Fatalf("analyze(a method held under one configuration alone) = %d, want %d: %s", run.code, vocab.ExitFindings, run.stderr)
 	}
 	var found []string
 	for _, f := range envelopeAt(t, run.reportPath).Findings {
@@ -334,22 +335,22 @@ func TestAnalyzeReportsEveryModuleUnderATargetThatIsNoModuleRoot(t *testing.T) {
 	dir := twoModuleTree(t)
 
 	run := runAnalyze(t, dir)
-	if run.code != exitFindings {
-		t.Fatalf("analyze(a tree of two modules) = %d, want %d: %s", run.code, exitFindings, run.stderr)
+	if run.code != vocab.ExitFindings {
+		t.Fatalf("analyze(a tree of two modules) = %d, want %d: %s", run.code, vocab.ExitFindings, run.stderr)
 	}
 	envelope := envelopeAt(t, run.reportPath)
 	var found []string
 	for _, f := range envelope.Findings {
-		found = append(found, f.Code+" "+f.Symbol.Ref+" "+f.Position.Path+" "+strings.Join(f.Details.RemovesLastUseOf, ","))
+		found = append(found, string(f.Code)+" "+f.Symbol.Ref+" "+f.Position.Path+" "+strings.Join(f.Details.RemovesLastUseOf, ","))
 	}
 	want := []string{
-		"DS1605 go://example.com/a#example.com/absent@v1.0.0:replace a/go.mod ",
+		"DS1702 go://example.com/a#example.com/absent@v1.0.0:replace a/go.mod ",
 		"DS1002 go://example.com/a#unusedA a/main.go ",
 		"DS1001 go://example.com/b#Unused b/b.go ",
-		"DS1502 go://example.com/b/extra#extra.go:file b/extra/extra.go ",
+		"DS1602 go://example.com/b/extra#extra.go:file b/extra/extra.go ",
 		"DS1001 go://example.com/b/extra#Dead b/extra/extra.go example.com/c",
-		"DS1601 go://example.com/b#example.com/d:require b/go.mod ",
-		"DS1605 go://example.com/b#example.com/d:replace b/go.mod ",
+		"DS1701 go://example.com/b#example.com/d:require b/go.mod ",
+		"DS1702 go://example.com/b#example.com/d:replace b/go.mod ",
 		"DS1002 go://example.com/b#never b/never.go ",
 	}
 	if !slices.Equal(found, want) {
@@ -386,32 +387,32 @@ func TestAnalyzeJudgesTwoModulesOfOnePathEachAsItIsAlone(t *testing.T) {
 	})
 
 	run := runAnalyze(t, dir)
-	if run.code != exitFindings {
-		t.Fatalf("analyze(two modules of one path) = %d, want %d: %s", run.code, exitFindings, run.stderr)
+	if run.code != vocab.ExitFindings {
+		t.Fatalf("analyze(two modules of one path) = %d, want %d: %s", run.code, vocab.ExitFindings, run.stderr)
 	}
 	envelope := envelopeAt(t, run.reportPath)
 	var found []string
 	for _, f := range envelope.Findings {
-		found = append(found, f.Code+" "+f.Symbol.Ref+" "+f.Position.Path)
+		found = append(found, string(f.Code)+" "+f.Symbol.Ref+" "+f.Position.Path)
 	}
 	want := []string{
-		"DS1101 go://example#Color x/main.go",
-		"DS1802 go://example#Color.String x/main.go",
-		"DS1101 go://example#Mode x/main.go",
-		"DS1101 go://example#Slow x/main.go",
-		"DS1101 go://example#Quick x/main.go",
-		"DS1101 go://example#Box x/main.go",
-		"DS1103 go://example#Box.Spare x/main.go",
-		"DS1502 go://example/extra#extra.go:file y/extra/extra.go",
+		"DS1501 go://example#Color x/main.go",
+		"DS1402 go://example#Color.String x/main.go",
+		"DS1501 go://example#Mode x/main.go",
+		"DS1501 go://example#Slow x/main.go",
+		"DS1501 go://example#Quick x/main.go",
+		"DS1501 go://example#Box x/main.go",
+		"DS1101 go://example#Box.Spare x/main.go",
+		"DS1602 go://example/extra#extra.go:file y/extra/extra.go",
 		"DS1001 go://example/extra#Run y/extra/extra.go",
-		"DS1101 go://example#Color y/main.go",
-		"DS1101 go://example#Green y/main.go",
-		"DS1302 go://example#Pink y/main.go",
-		"DS1103 go://example#Mode y/main.go",
-		"DS1103 go://example#Fast y/main.go",
-		"DS1103 go://example#Box y/main.go",
-		"DS1005 go://example#TestHelp y/main_test.go",
-		"DS1004 go://example/util#Help y/util/util.go",
+		"DS1501 go://example#Color y/main.go",
+		"DS1501 go://example#Green y/main.go",
+		"DS1005 go://example#Pink y/main.go",
+		"DS1101 go://example#Mode y/main.go",
+		"DS1101 go://example#Fast y/main.go",
+		"DS1101 go://example#Box y/main.go",
+		"DS1103 go://example#TestHelp y/main_test.go",
+		"DS1102 go://example/util#Help y/util/util.go",
 	}
 	if !slices.Equal(found, want) {
 		t.Errorf("analyze() reported\n%v\nwant\n%v", found, want)
@@ -438,20 +439,20 @@ func TestAnalyzePublishesALibraryBesideAMainPackageOfItsPath(t *testing.T) {
 	})
 
 	analyzed := runAnalyze(t, dir)
-	if analyzed.code != exitFindings {
-		t.Fatalf("analyze(a library beside a main package of its path) = %d, want %d: %s", analyzed.code, exitFindings, analyzed.stderr)
+	if analyzed.code != vocab.ExitFindings {
+		t.Fatalf("analyze(a library beside a main package of its path) = %d, want %d: %s", analyzed.code, vocab.ExitFindings, analyzed.stderr)
 	}
 	var found []string
 	for _, f := range envelopeAt(t, analyzed.reportPath).Findings {
-		found = append(found, f.Code+" "+f.Symbol.Ref+" "+f.Position.Path)
+		found = append(found, string(f.Code)+" "+f.Symbol.Ref+" "+f.Position.Path)
 	}
 	if want := []string{"DS1002 go://example#unused y/lib.go"}; !slices.Equal(found, want) {
 		t.Errorf("analyze() reported %v, want %v", found, want)
 	}
 
 	var stdout, stderr bytes.Buffer
-	if code := run(t.Context(), []string{"print-roots", "--target=."}, &stdout, &stderr); code != exitClean {
-		t.Fatalf("print-roots = %d, want %d: %s", code, exitClean, stderr.String())
+	if code := run(t.Context(), []string{"print-roots", "--target=."}, &stdout, &stderr); code != vocab.ExitClean {
+		t.Fatalf("print-roots = %d, want %d: %s", code, vocab.ExitClean, stderr.String())
 	}
 	want := []string{"go://example#main\tmain", "go://example#Exported\tpublished-api", "go://example#TestExported\ttest"}
 	if got := strings.Split(strings.TrimSpace(stdout.String()), "\n"); !slices.Equal(got, want) {
@@ -477,21 +478,21 @@ func TestAnalyzeJudgesEachModuleAgainstItsOwnReadingOfItsImports(t *testing.T) {
 	})
 
 	run := runAnalyze(t, dir)
-	if run.code != exitClean {
-		t.Fatalf("analyze(two modules reading one standard library) = %d, want %d: %s", run.code, exitClean, run.stderr)
+	if run.code != vocab.ExitClean {
+		t.Fatalf("analyze(two modules reading one standard library) = %d, want %d: %s", run.code, vocab.ExitClean, run.stderr)
 	}
 	var found []string
 	for _, f := range envelopeAt(t, run.reportPath).Findings {
-		found = append(found, f.Code+" "+f.Symbol.Ref)
+		found = append(found, string(f.Code)+" "+f.Symbol.Ref)
 	}
 	want := []string{
-		"DS1101 go://example.com/x#T", "DS1101 go://example.com/x#R",
-		"DS1101 go://example.com/y#T", "DS1101 go://example.com/y#R",
+		"DS1501 go://example.com/x#T", "DS1501 go://example.com/x#R",
+		"DS1501 go://example.com/y#T", "DS1501 go://example.com/y#R",
 	}
 	if !slices.Equal(found, want) {
 		t.Errorf("analyze() reported %v, want %v", found, want)
 	}
-	if got := retainedIn(t, dir); !slices.Contains(got, "go://example.com/y#R.WriteTo\tinterface-satisfaction\ty/main.go:20:20\tsatisfies what io asserts through io.Reader") {
+	if got := retainedIn(t, dir); !slices.Contains(got, "go://example.com/y#R.WriteTo\ty/main.go:16:10\tinterface-satisfaction\ty/main.go:20:20\tsatisfies what io asserts through io.Reader") {
 		t.Errorf("print-retained printed %q, want y's R.WriteTo retained by what io asserts", got)
 	}
 }
@@ -519,8 +520,8 @@ func TestAnalyzeReportsAWorkspaceMemberBelowTheTarget(t *testing.T) {
 	dir := workspaceTree(t)
 
 	run := runAnalyze(t, dir)
-	if run.code != exitFindings {
-		t.Fatalf("analyze(a workspace with a member below the target) = %d, want %d: %s", run.code, exitFindings, run.stderr)
+	if run.code != vocab.ExitFindings {
+		t.Fatalf("analyze(a workspace with a member below the target) = %d, want %d: %s", run.code, vocab.ExitFindings, run.stderr)
 	}
 	envelope := envelopeAt(t, run.reportPath)
 	var found []string
@@ -543,8 +544,8 @@ func TestAnalyzeAWorkspaceMemberFromItsOwnDirectory(t *testing.T) {
 	dir := filepath.Join(workspaceTree(t), "sub")
 
 	run := runAnalyze(t, dir)
-	if run.code != exitFindings {
-		t.Fatalf("analyze(a workspace member from its own directory) = %d, want %d: %s", run.code, exitFindings, run.stderr)
+	if run.code != vocab.ExitFindings {
+		t.Fatalf("analyze(a workspace member from its own directory) = %d, want %d: %s", run.code, vocab.ExitFindings, run.stderr)
 	}
 	envelope := envelopeAt(t, run.reportPath)
 	var found []string
@@ -566,8 +567,8 @@ func retainedIn(t *testing.T, dir string) []string {
 
 	t.Chdir(dir)
 	var stdout, stderr bytes.Buffer
-	if code := run(t.Context(), []string{"print-retained", "--target=."}, &stdout, &stderr); code != exitClean {
-		t.Fatalf("print-retained = %d, want %d: %s", code, exitClean, stderr.String())
+	if code := run(t.Context(), []string{"print-retained", "--target=."}, &stdout, &stderr); code != vocab.ExitClean {
+		t.Fatalf("print-retained = %d, want %d: %s", code, vocab.ExitClean, stderr.String())
 	}
 	return strings.Split(strings.TrimSpace(stdout.String()), "\n")
 }
@@ -591,13 +592,14 @@ func TestRetainsForTwoModulesOfOnePathEachTypeItsOwnMethods(t *testing.T) {
 
 	var want []string
 	for _, module := range []string{"x", "y"} {
-		at := "\tinterface-satisfaction\t" + module + "/main.go:"
+		file := module + "/main.go:"
+		at := "\tinterface-satisfaction\t" + file
 		want = append(want,
-			"go://example#E.Error"+at+"25:18\tsatisfies error",
-			"go://example#E.Timeout"+at+"25:18\tsatisfies what net asserts through error as Error",
-			"go://example#E.Temporary"+at+"25:18\tsatisfies what net asserts through error as Error",
-			"go://example#R.Read"+at+"26:20\tsatisfies io.Reader",
-			"go://example#R.WriteTo"+at+"26:20\tsatisfies what io asserts through io.Reader",
+			"go://example#E.Error\t"+file+"12:10"+at+"25:18\tsatisfies error",
+			"go://example#E.Timeout\t"+file+"14:10"+at+"25:18\tsatisfies what net asserts through error as Error",
+			"go://example#E.Temporary\t"+file+"16:10"+at+"25:18\tsatisfies what net asserts through error as Error",
+			"go://example#R.Read\t"+file+"20:10"+at+"26:20\tsatisfies io.Reader",
+			"go://example#R.WriteTo\t"+file+"22:10"+at+"26:20\tsatisfies what io asserts through io.Reader",
 		)
 	}
 	if got := retainedIn(t, dir); !slices.Equal(got, want) {
@@ -640,12 +642,12 @@ func TestAnalyzeReportsANeverBuiltFileOfTheSecondModule(t *testing.T) {
 		`{"id": "`+host.ID+`", "os": "`+runtime.GOOS+`", "arch": "`+runtime.GOARCH+`"}], "matrix": {"complete": true}}}`)
 
 	run := runAnalyze(t, dir)
-	if run.code != exitFindings {
-		t.Fatalf("analyze(a tree of two modules under a complete matrix) = %d, want %d: %s", run.code, exitFindings, run.stderr)
+	if run.code != vocab.ExitFindings {
+		t.Fatalf("analyze(a tree of two modules under a complete matrix) = %d, want %d: %s", run.code, vocab.ExitFindings, run.stderr)
 	}
 	var found []string
 	for _, f := range envelopeAt(t, run.reportPath).Findings {
-		if f.Code == "DS1501" {
+		if f.Code == "DS1601" {
 			found = append(found, f.Symbol.Ref+" "+f.Position.Path)
 		}
 	}
@@ -662,8 +664,8 @@ func TestAnalyzeNamesATargetNoModuleIsRootedAtAsTheScopeDoes(t *testing.T) {
 	writeDocument(t, dir, "scope.json", `{"target": {"id": "whole", "path": "."}}`)
 
 	run := runAnalyze(t, dir, "--scope="+filepath.Join(dir, "scope.json"))
-	if run.code != exitFindings {
-		t.Fatalf("analyze(a scoped tree of two modules) = %d, want %d: %s", run.code, exitFindings, run.stderr)
+	if run.code != vocab.ExitFindings {
+		t.Fatalf("analyze(a scoped tree of two modules) = %d, want %d: %s", run.code, vocab.ExitFindings, run.stderr)
 	}
 	if got := envelopeAt(t, run.reportPath).Target.Identity; got != "whole" {
 		t.Errorf("the report names the target %q, want the scope's name %q", got, "whole")
@@ -686,8 +688,8 @@ func TestAnalyzeReadsAModuleTheTargetAlsoBuildsFromACopyOutsideIt(t *testing.T) 
 	})
 
 	run := runAnalyze(t, filepath.Join(root, "target"))
-	if run.code != exitFindings {
-		t.Fatalf("analyze(a module built from a copy outside the target) = %d, want %d: %s", run.code, exitFindings, run.stderr)
+	if run.code != vocab.ExitFindings {
+		t.Fatalf("analyze(a module built from a copy outside the target) = %d, want %d: %s", run.code, vocab.ExitFindings, run.stderr)
 	}
 	var found []string
 	for _, f := range envelopeAt(t, run.reportPath).Findings {

@@ -8,19 +8,12 @@ import (
 	"strconv"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
-// nameLiteralCodes are the candidate and visibility kinds about a package-level
-// declaration whose class a string literal spelling the declaration's name lowers.
-var nameLiteralCodes = map[string]bool{
-	unusedExportedCode:      true,
-	unusedUnexportedCode:    true,
-	testOnlyUseCode:         true,
-	deprecatedAndUnusedCode: true,
-	unnecessaryExportCode:   true,
-	unnecessaryExposureCode: true,
-	unreachableExportCode:   true,
-}
+// nameLiteralEvidence is the row of the Contract's evidence table that names the
+// codes a string literal spelling a package-level declaration's name lowers.
+var nameLiteralEvidence, _ = vocab.EvidenceFor("name-literal", language)
 
 // literalSite is one string literal of a production file of the target: where it is
 // written, and the package-level declarations whose own declaration node holds it, the
@@ -37,16 +30,16 @@ type literalSite struct {
 // type's constants among them, which only a text search could rule out.
 func (in *Input) capNameLiteral(found *Finding) {
 	if at := in.nameLiteral(found.id, found.Code); at != nil {
-		found.Class = Possible
+		found.Class = vocab.Possible
 		found.Details.NameLiteral = at
 	}
 }
 
 // nameLiteral is the literal that lowers one declaration's finding under one code,
 // and nil where none does.
-func (in *Input) nameLiteral(id graph.SymbolID, code string) *Position {
+func (in *Input) nameLiteral(id graph.SymbolID, code vocab.Code) *Position {
 	symbol := in.symbol(id)
-	if !nameLiteralCodes[code] || symbol == nil || !in.packageLevel(symbol) {
+	if !nameLiteralEvidence.Lowers(language, code) || symbol == nil || !in.packageLevel(symbol) {
 		return nil
 	}
 	at, spelled := in.spelling(id, symbol)

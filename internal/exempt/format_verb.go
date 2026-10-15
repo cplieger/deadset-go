@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // The packages whose functions format a value with the formatting machinery, and
@@ -172,7 +173,7 @@ type operand struct {
 // pointer, a slice, an array and a map, stopping at each defined type.
 func FormatVerbContractDetector(in *Input) ([]graph.Exemption, error) {
 	sites := newDeclarationSites(in.Result.Fset)
-	f := &formatFlow{kept: newRetention(in, FormatVerbContract), sites: sites, wrappers: forwardingWrappers(in, sites)}
+	f := &formatFlow{kept: newRetention(in, vocab.FormatVerbContract), sites: sites, wrappers: forwardingWrappers(in, sites)}
 	if err := f.walkCalls(); err != nil {
 		return nil, err
 	}

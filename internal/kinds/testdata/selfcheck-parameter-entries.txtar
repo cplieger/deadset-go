@@ -39,25 +39,25 @@ func main() {
 {
   "ignore": [
     {
-      "code": "DS1801",
+      "code": "DS1401",
       "symbol": "go://example.com/app#pair(first)",
       "path": "main.go",
       "reason": "the first operand answers a shape this program does not read"
     },
     {
-      "code": "DS1801",
+      "code": "DS1401",
       "symbol": "go://example.com/app#whole",
       "path": "main.go",
       "reason": "both operands answer a shape this program does not read"
     },
     {
-      "code": "DS1801",
+      "code": "DS1401",
       "symbol": "go://example.com/app#holder(x)",
       "path": "main.go",
       "reason": "each callback answers a shape this program does not read"
     },
     {
-      "code": "DS1801",
+      "code": "DS1401",
       "symbol": "go://example.com/app#reads(v)",
       "path": "main.go",
       "reason": "the value is read, so this matches nothing"

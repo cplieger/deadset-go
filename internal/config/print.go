@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/cplieger/deadset-go/v2/internal/jsondoc"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // printDocument is the resolved configuration as it is written: the closed key
@@ -58,7 +59,7 @@ func written(c *Config) Config {
 	c.TS.LifecycleContracts = orEmpty(c.TS.LifecycleContracts)
 	c.TS.Serializers = orEmpty(c.TS.Serializers)
 	if c.Severity == nil {
-		c.Severity = map[string]Severity{}
+		c.Severity = map[string]vocab.Severity{}
 	}
 	return *c
 }

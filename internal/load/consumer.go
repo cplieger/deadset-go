@@ -9,6 +9,7 @@ import (
 	"slices"
 
 	"github.com/cplieger/deadset-go/v2/internal/scope"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -213,7 +214,7 @@ func unitPaths(units []Unit) []string {
 // this target's run cannot count.
 func loadConsumer(ctx context.Context, trees *syntaxCache, doc *scope.Document, c Configuration, declared scope.Module, mains []*packages.Module) (Consumer, error) {
 	if _, err := os.Stat(declared.Path); err != nil {
-		return Consumer{}, &SetupError{Failures: []SetupFailure{{Class: missingConsumer, Detail: fmt.Sprintf(
+		return Consumer{}, &SetupError{Failures: []setupFailure{{Class: vocab.SetupMissingConsumer, Detail: fmt.Sprintf(
 			"the declared consumer %s does not exist; check it out at that path and install its dependencies",
 			declared.Path,
 		)}}}
@@ -231,7 +232,7 @@ func loadConsumer(ctx context.Context, trees *syntaxCache, doc *scope.Document, 
 	if setup, failed := errors.AsType[*SetupError](err); failed {
 		consumer := &SetupError{}
 		for _, one := range setup.Failures {
-			consumer.Failures = append(consumer.Failures, SetupFailure{Class: missingConsumer, Detail: fmt.Sprintf(
+			consumer.Failures = append(consumer.Failures, setupFailure{Class: vocab.SetupMissingConsumer, Detail: fmt.Sprintf(
 				"the declared consumer %s does not load (%s); check it out at that path and install its dependencies",
 				declared.Path, one.Detail,
 			)})

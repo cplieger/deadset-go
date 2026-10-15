@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // moduleSize is what one synthesized module holds: the packages the run loads, the
@@ -164,9 +166,9 @@ func analyzeSynthesized(ctx context.Context, sink failureSink, base, name string
 
 	var stderr strings.Builder
 	started := time.Now()
-	if code := run(ctx, args, io.Discard, &stderr); code != exitClean {
+	if code := run(ctx, args, io.Discard, &stderr); code != vocab.ExitClean {
 		sink.Fatalf("analyze over the synthesized module %s = %d, want %d with the exit code configured off\nstderr: %s",
-			name, code, exitClean, stderr.String())
+			name, code, vocab.ExitClean, stderr.String())
 	}
 	elapsed := time.Since(started)
 

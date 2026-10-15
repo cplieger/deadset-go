@@ -11,7 +11,7 @@ import (
 )
 
 // publishedConversions is the sites a program outside the analysis can write into
-// a library's published API, which grammar/analysis.md "Conversions an outside
+// a library's published API, which grammar/analysis/references-go.md "Conversions an outside
 // program writes" states: at each published parameter of an interface type, and at
 // each type parameter of a published declaration whose constraint is an interface,
 // one site per type of the target an outside program can hold that implements it.

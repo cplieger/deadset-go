@@ -11,21 +11,12 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/inspect"
 	"golang.org/x/tools/go/analysis/passes/unreachable"
 	"golang.org/x/tools/go/ast/inspector"
 	"golang.org/x/tools/go/packages"
-)
-
-// The codes of the intra-function kinds.
-const (
-	unusedParameterCode      = "DS1801"
-	unusedReceiverCode       = "DS1802"
-	unusedResultCode         = "DS1803"
-	unreachableStatementCode = "DS1805"
-	deadStoreCode            = "DS1807"
-	unreachableCaseCode      = "DS1809"
 )
 
 // The Contract's words for the subjects of these kinds. Each names a part of a
@@ -57,7 +48,7 @@ const panicBuiltin = "panic"
 // parameter used under one build configuration is used. A function literal is free
 // where it is called by name or is the callee of the call it is written in.
 func UnusedParameter(in *Input) ([]Finding, error) {
-	return in.intraFunc().parameters(unusedParameterCode)
+	return in.intraFunc().parameters(vocab.UnusedParameter)
 }
 
 // UnusedReceiver reports a named, non-blank method receiver the method body names
@@ -65,7 +56,7 @@ func UnusedParameter(in *Input) ([]Finding, error) {
 // receiver name, so the fix deletes an identifier and changes no signature, which
 // is why the kind's fixability is the deletable one and the parameter kind's is not.
 func UnusedReceiver(in *Input) ([]Finding, error) {
-	return in.intraFunc().parameters(unusedReceiverCode)
+	return in.intraFunc().parameters(vocab.UnusedReceiver)
 }
 
 // UnusedResult reports a result of a function that every call site in the loaded
@@ -141,7 +132,8 @@ type intrafunc struct {
 	twins map[string]map[string]bool
 }
 
-// intraFunc prepares what these kinds read, once per findings pass.
+// intraFunc prepares what these kinds read. Each emitter calls it, so the facts are
+// built once per emitter.
 func (in *Input) intraFunc() *intrafunc {
 	g := &intrafunc{
 		in:         in,
@@ -221,7 +213,7 @@ func (g *intrafunc) callersUnknown(id graph.SymbolID) bool {
 	if symbol == nil || !symbol.Exported || !g.in.importable(symbol) {
 		return false
 	}
-	if g.in.Config == nil || g.in.Config.Target.Kind.Of(config.GoLanguage) != config.Library {
+	if g.in.Config == nil || g.in.Config.Target.Kind.Of(vocab.Go) != config.Library {
 		return false
 	}
 	return !g.in.consumersLoaded()
@@ -331,7 +323,7 @@ func comparePositions(a, b Position) int {
 // dead is reported beside the declaration's own finding, a part is never pending, and
 // a declaration of test code nothing references is the exception unjudged states. A
 // suppression record silences a part through the framework, as any other finding.
-func (g *intrafunc) findings(code string, held []*part) ([]Finding, error) {
+func (g *intrafunc) findings(code vocab.Code, held []*part) ([]Finding, error) {
 	found := make([]Finding, 0, len(held))
 	for _, one := range held {
 		symbol := g.in.symbol(one.id)
@@ -339,7 +331,7 @@ func (g *intrafunc) findings(code string, held []*part) ([]Finding, error) {
 			continue
 		}
 		ref := symbol.Ref
-		if code == unusedParameterCode {
+		if code == vocab.UnusedParameter {
 			ref = graph.ParameterRef(ref, one.name)
 		}
 		finding := findingAt(code, Subject{
@@ -348,7 +340,7 @@ func (g *intrafunc) findings(code string, held []*part) ([]Finding, error) {
 			Name:      one.name,
 			SizeLines: one.position.EndLine - one.position.Line + 1,
 		}, one.position, one.message)
-		if code == deadStoreCode {
+		if code == vocab.DeadStore {
 			finding.Details.WritePositions = []Position{one.position}
 		}
 		found = append(found, finding)
@@ -499,7 +491,7 @@ func declaredFunctions(one *Configured, info *types.Info, f *ast.File) []walked 
 
 // parameters is the answer of the unused-parameter and the unused-receiver kinds,
 // which differ only in which part of the signature they read.
-func (g *intrafunc) parameters(code string) ([]Finding, error) {
+func (g *intrafunc) parameters(code vocab.Code) ([]Finding, error) {
 	held := newParts()
 	for i := range g.in.Per {
 		one := &g.in.Per[i]
@@ -508,7 +500,7 @@ func (g *intrafunc) parameters(code string) ([]Finding, error) {
 				return nil, err
 			}
 		}
-		if code == unusedReceiverCode {
+		if code == vocab.UnusedReceiver {
 			continue
 		}
 		for _, fn := range initializers(one) {
@@ -563,8 +555,8 @@ func nameExprs(names []*ast.Ident) []ast.Expr {
 // its parameters where its signature is free and the parameters of every literal
 // its body calls by name ([calledByName]) or calls where it is written
 // ([calledWhereWritten]), whose signatures are free whatever the function's is.
-func (g *intrafunc) parametersOf(one *Configured, fn *walked, code string, held *parts) error {
-	if code == unusedReceiverCode {
+func (g *intrafunc) parametersOf(one *Configured, fn *walked, code vocab.Code, held *parts) error {
+	if code == vocab.UnusedReceiver {
 		return g.signature(one, fn, fn.decl.Recv, fn.decl.Body, code, held)
 	}
 	if g.freeSignature(fn.id, fn.decl) && !g.twinned(fn.id, fn.decl) {
@@ -582,7 +574,7 @@ func (g *intrafunc) parametersOf(one *Configured, fn *walked, code string, held 
 
 // calledLiterals records the parameters of every literal one walked function calls
 // where it is written.
-func (g *intrafunc) calledLiterals(one *Configured, fn *walked, code string, held *parts) error {
+func (g *intrafunc) calledLiterals(one *Configured, fn *walked, code vocab.Code, held *parts) error {
 	for _, lit := range calledWhereWritten(fn.root()) {
 		if err := g.signature(one, fn, lit.Type.Params, lit.Body, code, held); err != nil {
 			return err
@@ -640,14 +632,14 @@ func calledByName(info *types.Info, body *ast.BlockStmt) []*ast.FuncLit {
 // signature records every named, non-blank identifier of one field list and
 // whether body reads it.
 func (*intrafunc) signature(one *Configured, fn *walked, fields *ast.FieldList, body *ast.BlockStmt,
-	code string, held *parts,
+	code vocab.Code, held *parts,
 ) error {
 	if fields == nil {
 		return nil
 	}
 	read := readObjects(fn.info, body)
 	word := parameterSubject
-	if code == unusedReceiverCode {
+	if code == vocab.UnusedReceiver {
 		word = receiverSubject
 	}
 	for _, field := range fields.List {
@@ -705,7 +697,7 @@ func (g *intrafunc) results() ([]Finding, error) {
 			}
 		}
 	}
-	return g.findings(unusedResultCode, held.unused())
+	return g.findings(vocab.UnusedResult, held.unused())
 }
 
 // resultsOf records every result of one function and whether any call site of it
@@ -876,7 +868,7 @@ func (g *intrafunc) unreachableStatements() ([]Finding, error) {
 			}
 		}
 	}
-	return g.findings(unreachableStatementCode, held.unused())
+	return g.findings(vocab.UnreachableStatement, held.unused())
 }
 
 // reportUnreachable runs the unreachable pass over one package and records one
@@ -982,7 +974,7 @@ func (g *intrafunc) unreachableCases() ([]Finding, error) {
 			}
 		}
 	}
-	return g.findings(unreachableCaseCode, held.unused())
+	return g.findings(vocab.UnreachableCase, held.unused())
 }
 
 // casesOf records every unreachable case clause of every type switch of one body.
@@ -1094,7 +1086,7 @@ func (g *intrafunc) deadStores() ([]Finding, error) {
 			}
 		}
 	}
-	return g.findings(deadStoreCode, held.unused())
+	return g.findings(vocab.DeadStore, held.unused())
 }
 
 // functionBody is one body and the signature that declares the variables it

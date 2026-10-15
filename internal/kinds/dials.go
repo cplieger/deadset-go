@@ -1,11 +1,8 @@
 package kinds
 
 import (
-	"slices"
-
-	"github.com/cplieger/deadset-go/v2/internal/catalog"
-	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // dialed is what the two configuration dials withhold beyond the findings they
@@ -34,16 +31,16 @@ type dialed struct {
 // The open-world rule that turns the unreferenced-exported kind off is not a dial.
 // It says the analysis cannot see every caller, not that the configuration
 // withholds a finding, so a kind it alone silences withholds no component.
-func (in *Input) withholdComponents(published []catalog.Row, emitters map[string]Emitter, first []Finding) error {
+func (in *Input) withholdComponents(published []vocab.Kind, emitters map[vocab.Code]Emitter, first []Finding) error {
 	in.dialed = dialed{
 		components: make(map[string]bool),
 		allowed:    make(map[string]bool),
 		dormant:    make(map[graph.SymbolID]bool),
 		paired:     make(map[int]bool),
 	}
-	least := Class(in.Config.Analysis.MinConfidence)
+	least := in.Config.Analysis.MinConfidence
 	for i := range first {
-		if found := &first[i]; found.componentConfidence().rank() < least.rank() {
+		if found := &first[i]; rank(found.componentConfidence()) < rank(least) {
 			in.withholdRoot(found, false)
 		}
 	}
@@ -77,8 +74,8 @@ func (in *Input) withholdComponents(published []catalog.Row, emitters map[string
 
 // dialAllows reports whether the severity dial sets one kind of this language to
 // allow, read with the published API closed so the open-world rule takes no part.
-func (in *Input) dialAllows(row *catalog.Row) bool {
-	return slices.Contains(row.Languages, language) && in.Config.EffectiveSeverity(row.Code) == config.Allow
+func (in *Input) dialAllows(row *vocab.Kind) bool {
+	return row.AppliesTo(language) && in.Config.EffectiveSeverity(row.Code) == vocab.Allow
 }
 
 // withholdRoot records the component of one withheld finding when the finding is a
@@ -150,7 +147,7 @@ func (in *Input) eachJoin(joined func(a, b graph.SymbolID)) {
 // testUsedWithheld is [testUseFacts.dead] where the minimum withholds its findings,
 // and empty where the minimum is possible.
 func (in *Input) testUsedWithheld() map[graph.SymbolID]bool {
-	if Class(in.Config.Analysis.MinConfidence).rank() <= Possible.rank() {
+	if rank(in.Config.Analysis.MinConfidence) <= rank(vocab.Possible) {
 		return nil
 	}
 	return in.testUse().dead
@@ -171,13 +168,13 @@ func (in *Input) withheldMembers() map[graph.SymbolID]bool {
 // the configured minimum confidence in a component the dials do not withhold, and
 // those the minimum alone withholds, which a run at the lowest minimum reports.
 func (in *Input) reportable(findings []Finding) (kept, withheld []Finding) {
-	least := Class(in.Config.Analysis.MinConfidence)
+	least := in.Config.Analysis.MinConfidence
 	kept = make([]Finding, 0, len(findings))
 	for i := range findings {
 		found := &findings[i]
 		switch {
 		case in.dialed.allowed[found.Component.ID]:
-		case found.Confidence.rank() < least.rank() || in.dialed.components[found.Component.ID]:
+		case rank(found.Confidence) < rank(least) || in.dialed.components[found.Component.ID]:
 			withheld = append(withheld, *found)
 		default:
 			kept = append(kept, *found)

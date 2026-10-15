@@ -7,16 +7,17 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // interfaceEmitters is the three interface rules as the composition root's table
 // holds them, which is what fixes each of them to the framework's emitter
 // signature.
-func interfaceEmitters() map[string]Emitter {
-	return map[string]Emitter{
-		unusedInterfaceCode:             UnusedInterface,
-		uncalledInterfaceMethodCode:     UncalledInterfaceMethod,
-		unusedSatisfactionAssertionCode: UnusedSatisfactionAssertion,
+func interfaceEmitters() map[vocab.Code]Emitter {
+	return map[vocab.Code]Emitter{
+		vocab.UnusedInterface:             UnusedInterface,
+		vocab.UncalledInterfaceMethod:     UncalledInterfaceMethod,
+		vocab.UnusedSatisfactionAssertion: UnusedSatisfactionAssertion,
 	}
 }
 
@@ -35,7 +36,7 @@ func TestInterfaceKinds_reportEachShapeOnceUnderItsOwnCode(t *testing.T) {
 		},
 		"a method the program calls on the concrete type and never through the interface": {
 			archive: "interfaces-uncalled.txtar",
-			want:    []string{"DS1203 Store.Put"},
+			want:    []string{"DS1202 Store.Put"},
 		},
 		"an interface whose method set holds an unexported method": {
 			archive: "interfaces-sum-type.txtar",
@@ -43,7 +44,7 @@ func TestInterfaceKinds_reportEachShapeOnceUnderItsOwnCode(t *testing.T) {
 		},
 		"an unexported interface whose method set holds an unexported method, beside an exported one": {
 			archive: "interfaces-sum-type-unexported.txtar",
-			want:    []string{"DS1203 shape.sides"},
+			want:    []string{"DS1202 shape.sides"},
 		},
 		"a method only a test calls through the interface, which the test-only kind reports": {
 			archive: "interfaces-test-called.txtar",
@@ -59,7 +60,7 @@ func TestInterfaceKinds_reportEachShapeOnceUnderItsOwnCode(t *testing.T) {
 		},
 		"a satisfaction assertion that is the only thing naming its interface": {
 			archive: "interfaces-assertion.txtar",
-			want:    []string{"DS1203 Encoder.Encode", "DS1204 Encoder"},
+			want:    []string{"DS1202 Encoder.Encode", "DS1203 Encoder"},
 		},
 	}
 	for description, tc := range cases {
@@ -76,7 +77,7 @@ func TestInterfaceKinds_reportEachShapeOnceUnderItsOwnCode(t *testing.T) {
 func TestUnusedInterface_namesEveryImplementationAndWhereItIsWritten(t *testing.T) {
 	result := analysisOf(t, "interfaces-unused.txtar", asApplication, Consumers{}).findings(t, interfaceKinds)
 
-	found := findingOf(t, result.Findings, unusedInterfaceCode, "Reader")
+	found := findingOf(t, result.Findings, vocab.UnusedInterface, "Reader")
 	if found.Kind != "unused-interface" || found.Symbol.Kind != "interface" {
 		t.Errorf("UnusedInterface(interfaces-unused.txtar) kind, subject kind = %q, %q, want %q, %q",
 			found.Kind, found.Symbol.Kind, "unused-interface", "interface")
@@ -89,7 +90,7 @@ func TestUnusedInterface_namesEveryImplementationAndWhereItIsWritten(t *testing.
 		t.Errorf("UnusedInterface(interfaces-unused.txtar) relation = %s, want %s",
 			found.Relation, graph.ReferenceCounting)
 	}
-	if found.Fixability != "deletable" || found.Severity != config.Deny {
+	if found.Fixability != "deletable" || found.Severity != vocab.Deny {
 		t.Errorf("UnusedInterface(interfaces-unused.txtar) fixability, severity = %q, %q, want deletable, deny",
 			found.Fixability, found.Severity)
 	}
@@ -111,7 +112,7 @@ func TestUnusedInterface_namesEveryImplementationAndWhereItIsWritten(t *testing.
 func TestUncalledInterfaceMethod_reportsTheInterfaceMethodAndNamesTheImplementation(t *testing.T) {
 	result := analysisOf(t, "interfaces-uncalled.txtar", asApplication, Consumers{}).findings(t, interfaceKinds)
 
-	found := findingOf(t, result.Findings, uncalledInterfaceMethodCode, "Store.Put")
+	found := findingOf(t, result.Findings, vocab.UncalledInterfaceMethod, "Store.Put")
 	if found.Kind != "uncalled-interface-method" || found.Symbol.Kind != "interface-method" {
 		t.Errorf("UncalledInterfaceMethod(interfaces-uncalled.txtar) kind, subject kind = %q, %q, want %q, %q",
 			found.Kind, found.Symbol.Kind, "uncalled-interface-method", "interface-method")
@@ -124,7 +125,7 @@ func TestUncalledInterfaceMethod_reportsTheInterfaceMethodAndNamesTheImplementat
 		t.Errorf("UncalledInterfaceMethod(interfaces-uncalled.txtar) relation = %s, want %s",
 			found.Relation, graph.ReferenceCounting)
 	}
-	if found.Fixability != "manual" || found.Severity != config.Warn {
+	if found.Fixability != "manual" || found.Severity != vocab.Warn {
 		t.Errorf("UncalledInterfaceMethod(interfaces-uncalled.txtar) fixability, severity = %q, %q, want manual, warn",
 			found.Fixability, found.Severity)
 	}
@@ -138,7 +139,7 @@ func TestUnusedSatisfactionAssertion_reportsTheAssertionWhileTheConcreteMethodSt
 
 	result := computed(t, in, interfaceEmitters())
 
-	found := findingOf(t, result.Findings, unusedSatisfactionAssertionCode, "Encoder")
+	found := findingOf(t, result.Findings, vocab.UnusedSatisfactionAssertion, "Encoder")
 	if found.Kind != "unused-satisfaction-assertion" || found.Symbol.Kind != satisfactionAssertionSubject {
 		t.Errorf("UnusedSatisfactionAssertion(interfaces-assertion.txtar) kind, subject kind = %q, %q, want %q, %q",
 			found.Kind, found.Symbol.Kind, "unused-satisfaction-assertion", satisfactionAssertionSubject)
@@ -158,7 +159,7 @@ func TestUnusedSatisfactionAssertion_reportsTheAssertionWhileTheConcreteMethodSt
 		t.Errorf("UnusedSatisfactionAssertion(interfaces-assertion.txtar) message = %q, want %q",
 			found.Message, unusedSatisfactionAssertionMessage)
 	}
-	if found.Fixability != "deletable" || found.Severity != config.Deny {
+	if found.Fixability != "deletable" || found.Severity != vocab.Deny {
 		t.Errorf("UnusedSatisfactionAssertion(interfaces-assertion.txtar) fixability, severity = %q, %q, want deletable, deny",
 			found.Fixability, found.Severity)
 	}
@@ -202,24 +203,24 @@ func TestUnusedSatisfactionAssertion_aPublishedInterfaceOfALibraryIsPossibleWhat
 	cases := map[string]struct {
 		resolved   config.Config
 		consumers  Consumers
-		want       map[string]Class
-		confidence Class
+		want       map[string]vocab.Class
+		confidence vocab.Class
 	}{
 		"a library with no consumer information": {
 			resolved:   libraryConfig(),
-			want:       map[string]Class{"Published": Possible, "hidden": Certain, "Runner": Certain},
-			confidence: Possible,
+			want:       map[string]vocab.Class{"Published": vocab.Possible, "hidden": vocab.Certain, "Runner": vocab.Certain},
+			confidence: vocab.Possible,
 		},
 		"a library whose every declared consumer loaded": {
 			resolved:   libraryConfig(),
 			consumers:  everyLoaded,
-			want:       map[string]Class{"Published": Possible, "hidden": Certain, "Runner": Certain},
-			confidence: Possible,
+			want:       map[string]vocab.Class{"Published": vocab.Possible, "hidden": vocab.Certain, "Runner": vocab.Certain},
+			confidence: vocab.Possible,
 		},
 		"an application": {
 			resolved:   applicationConfig(),
-			want:       map[string]Class{"Published": Certain, "hidden": Certain, "Runner": Certain},
-			confidence: Certain,
+			want:       map[string]vocab.Class{"Published": vocab.Certain, "hidden": vocab.Certain, "Runner": vocab.Certain},
+			confidence: vocab.Certain,
 		},
 	}
 	for description, tc := range cases {
@@ -229,7 +230,7 @@ func TestUnusedSatisfactionAssertion_aPublishedInterfaceOfALibraryIsPossibleWhat
 			result := computed(t, in, interfaceEmitters())
 
 			for name, want := range tc.want {
-				found := findingOf(t, result.Findings, unusedSatisfactionAssertionCode, name)
+				found := findingOf(t, result.Findings, vocab.UnusedSatisfactionAssertion, name)
 				if found.Class != want || found.Confidence != tc.confidence {
 					t.Errorf("UnusedSatisfactionAssertion over the assertion of %s gives class %s and confidence %s, want class %s and confidence %s",
 						name, found.Class, found.Confidence, want, tc.confidence)
@@ -244,18 +245,18 @@ func TestTestOnlyUse_reportsAnInterfaceMethodOnlyATestCallsThroughTheInterface(t
 
 	in := inputOf(t, "interfaces-test-called.txtar", applicationConfig(), Consumers{})
 	emitters := interfaceEmitters()
-	emitters[testOnlyUseCode] = TestOnlyUse
+	emitters[vocab.TestOnlyUse] = TestOnlyUse
 
 	result := computed(t, in, emitters)
 
-	if got, want := summary(result.Findings), []string{"DS1004 Store.Count"}; !slices.Equal(got, want) {
+	if got, want := summary(result.Findings), []string{"DS1102 Store.Count"}; !slices.Equal(got, want) {
 		t.Fatalf("the interface kinds and the test-only kind over interfaces-test-called.txtar report %v, want %v",
 			got, want)
 	}
-	found := findingOf(t, result.Findings, testOnlyUseCode, "Store.Count")
+	found := findingOf(t, result.Findings, vocab.TestOnlyUse, "Store.Count")
 	if found.Symbol.Kind != "interface-method" || !found.TestOnly {
 		t.Errorf("%s about Store.Count carries subject kind %q and test-only %t, want an interface method only tests reference",
-			testOnlyUseCode, found.Symbol.Kind, found.TestOnly)
+			vocab.TestOnlyUse, found.Symbol.Kind, found.TestOnly)
 	}
 }
 
@@ -277,7 +278,7 @@ func TestUnusedSatisfactionAssertion_anAssertionBetweenPublishedTypesOfALibraryI
 		t.Run(description, func(t *testing.T) {
 			in := inputOf(t, "interfaces-assertion-between-published.txtar", tc.resolved, Consumers{})
 
-			result := computed(t, in, map[string]Emitter{unusedSatisfactionAssertionCode: UnusedSatisfactionAssertion})
+			result := computed(t, in, map[vocab.Code]Emitter{vocab.UnusedSatisfactionAssertion: UnusedSatisfactionAssertion})
 
 			var got []int
 			for i := range result.Findings {
@@ -296,7 +297,7 @@ func TestUnusedSatisfactionAssertion_anAssertionBetweenPublishedTypesOfALibraryI
 func TestUnusedSatisfactionAssertion_anAssertionAnExemptionRetainedIsNotReported(t *testing.T) {
 	in := inputOf(t, "interfaces-assertion-retained.txtar", applicationConfig(), Consumers{})
 
-	result := computed(t, in, map[string]Emitter{unusedSatisfactionAssertionCode: UnusedSatisfactionAssertion})
+	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnusedSatisfactionAssertion: UnusedSatisfactionAssertion})
 
 	if len(result.Findings) != 0 {
 		t.Errorf("UnusedSatisfactionAssertion over interfaces-assertion-retained.txtar reports %v, want nothing", result.Findings)

@@ -5,25 +5,6 @@ import (
 	"strings"
 )
 
-// The forms an entry's three named values take, each anchored and each the whole
-// value. They are transcribed from the published grammar, which writes them in
-// the intersection of two regular-expression dialects so one string compiles
-// unchanged in either language, and a test asserts the transcription is
-// byte-identical to what the grammar carries.
-var (
-	// codeForm is an issue-kind code: DS and four digits, one rendering on every
-	// surface.
-	//
-	//nolint:gocritic // regexpSimplify: the expression is the grammar's own spelling, pinned equal to it
-	codeForm = regexp.MustCompile(`^DS[0-9]{4}$`)
-
-	// pathForm is a path inside the target: relative to the target root, the
-	// solidus as the separator on every platform, no leading ./, no trailing
-	// solidus, no segment that is . or .., never absolute, no control character;
-	// any other character a file name holds, a backslash among them.
-	pathForm = regexp.MustCompile(`^(?:[^/.\x00-\x1f\x7f][^/\x00-\x1f\x7f]*|\.[^/.\x00-\x1f\x7f][^/\x00-\x1f\x7f]*|\.\.[^/\x00-\x1f\x7f]+)(?:/(?:[^/.\x00-\x1f\x7f][^/\x00-\x1f\x7f]*|\.[^/.\x00-\x1f\x7f][^/\x00-\x1f\x7f]*|\.\.[^/\x00-\x1f\x7f]+))*$`)
-)
-
 // referenceBlock is one named building block the grammar of the stable symbol
 // reference is written from.
 type referenceBlock struct {

@@ -8,18 +8,12 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/load"
-	"github.com/cplieger/deadset-go/v2/internal/report"
+	"github.com/cplieger/deadset-spec/v8/report"
 	"golang.org/x/tools/go/packages"
 )
 
-// The notes this analyzer writes: about a package an application may publish, with
-// the key that settles it, and about a module below the target that did not load,
-// which no key settles.
-const (
-	publishedPackageNote = "published-package"
-	publishedPackageKey  = "roots.patterns"
-	droppedModuleNote    = "module-not-loaded"
-)
+// publishedPackageKey is the key that settles a published-package note.
+const publishedPackageKey = "roots.patterns"
 
 // The package name nothing imports, the import path suffix of an external test
 // package, and the path element that keeps a package inside its module tree.
@@ -58,7 +52,7 @@ func notesOf(kind config.TargetKind, loaded *stages) []report.Note {
 			continue
 		}
 		notes = append(notes, report.Note{
-			Kind: publishedPackageNote,
+			Kind: report.NoteKindPublishedPackage,
 			Path: directory,
 			Key:  publishedPackageKey,
 			Message: "package " + directory + " is imported by no other package of the target, and outside programs may import it: " +
@@ -83,7 +77,7 @@ func droppedNotes(loaded *stages) []report.Note {
 			seen[relative] = true
 			directory := filepath.ToSlash(relative)
 			notes = append(notes, report.Note{
-				Kind: droppedModuleNote,
+				Kind: report.NoteKindModuleNotLoaded,
 				Path: directory,
 				Message: "module " + directory + " is below the target and does not load, so the run does not analyze it, " +
 					"and an export of a module it requires is possible: " + firstLine(dropped.Err.Error()),

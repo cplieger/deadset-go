@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // Diagnostic is one error a load reported, at the position the toolchain named.
@@ -113,33 +115,23 @@ func (e *listError) Error() string {
 
 func (e *listError) Unwrap() error { return e.err }
 
-// setupClass names one class of setup failure: a file or a component the analysis
-// needs and the project does not provide.
-type setupClass string
-
-// The setup-failure classes a load answers.
-const (
-	MissingModule       setupClass = "missing-module"
-	incompleteModuleSum setupClass = "incomplete-module-sum"
-	missingConsumer     setupClass = "missing-consumer"
-)
-
-// SetupFailure is one setup failure: its class and what is missing, with the fix.
-type SetupFailure struct {
-	Class  setupClass
+// setupFailure is one setup failure: its class, one of the vocab.Setup classes,
+// and what is missing, with the fix.
+type setupFailure struct {
+	Class  string
 	Detail string
 }
 
 // Line is the failure as one line of standard error: the setup-failure prefix, the
 // class and what is missing with the fix.
-func (f SetupFailure) Line() string {
-	return "setup failure: " + string(f.Class) + ": " + f.Detail
+func (f setupFailure) Line() string {
+	return vocab.SetupFailurePrefix + f.Class + ": " + f.Detail
 }
 
 // SetupError reports every setup failure one run met. A run that returns one
 // analyzed nothing, because every missing piece hides real uses.
 type SetupError struct {
-	Failures []SetupFailure
+	Failures []setupFailure
 }
 
 // Error renders one line per failure.
@@ -165,7 +157,7 @@ const (
 // within a module the project expects, one of expected; an import of any other
 // module is a compile error the project's own build reports too.
 func setupFailures(diagnostics []Diagnostic, expected []string) *SetupError {
-	var failures []SetupFailure
+	var failures []setupFailure
 	for _, d := range diagnostics {
 		at := d.Position
 		if at == "" {
@@ -174,18 +166,18 @@ func setupFailures(diagnostics []Diagnostic, expected []string) *SetupError {
 		switch {
 		case strings.Contains(d.Message, missingSumEntry):
 			module, _, _ := strings.Cut(strings.SplitN(d.Message, missingSumEntry, 2)[1], " ")
-			failures = append(failures, SetupFailure{Class: incompleteModuleSum, Detail: fmt.Sprintf(
+			failures = append(failures, setupFailure{Class: vocab.SetupIncompleteModuleSum, Detail: fmt.Sprintf(
 				"%s: the module sum file holds no checksum for the module providing %s; run go mod tidy in the module that requires it",
 				at, module,
 			)})
 		case strings.Contains(d.Message, noModuleProvides) && within(packageNamed(d.Message), expected):
 			pkg := packageNamed(d.Message)
-			failures = append(failures, SetupFailure{Class: MissingModule, Detail: fmt.Sprintf(
+			failures = append(failures, setupFailure{Class: vocab.SetupMissingModule, Detail: fmt.Sprintf(
 				"%s: the import %s names a package nothing provides; run the generator, the build or the install that writes it",
 				at, pkg,
 			)})
 		case strings.Contains(d.Message, lookupDisabled):
-			failures = append(failures, SetupFailure{Class: MissingModule, Detail: fmt.Sprintf(
+			failures = append(failures, setupFailure{Class: vocab.SetupMissingModule, Detail: fmt.Sprintf(
 				"%s: %s; the required module is not installed, so run go mod download in the module that requires it",
 				at, strings.TrimSuffix(d.Message, ": "+lookupDisabled),
 			)})

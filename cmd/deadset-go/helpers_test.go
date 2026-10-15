@@ -11,8 +11,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cplieger/deadset-go/v2/internal/report"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
+	"github.com/cplieger/deadset-spec/v8/report"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // failureSink is what a fixture helper needs of the test that calls it: mark itself a
@@ -52,7 +53,7 @@ type fixture struct {
 	analyzeErr error
 
 	reported  sync.Once
-	envelope  report.Envelope
+	envelope  *report.Report
 	reportErr error
 }
 
@@ -101,7 +102,7 @@ func (f *fixture) findings(ctx context.Context) (findingSet, error) {
 	f.analyzed.Do(func() {
 		var refused strings.Builder
 		resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &refused)
-		if code != exitClean {
+		if code != vocab.ExitClean {
 			f.analyzeErr = fmt.Errorf("resolve the configuration of %s = %d: %s", dir, code, refused.String())
 			return
 		}
@@ -122,15 +123,15 @@ func (f *fixture) findings(ctx context.Context) (findingSet, error) {
 // caller has already made the archive's own directory the working directory; every
 // caller of one archive therefore names the same directory and reads an envelope built
 // under it.
-func (f *fixture) report(ctx context.Context) (report.Envelope, error) {
+func (f *fixture) report(ctx context.Context) (*report.Report, error) {
 	dir, err := f.directory()
 	if err != nil {
-		return report.Envelope{}, err
+		return nil, err
 	}
 	f.reported.Do(func() {
 		var refused strings.Builder
 		resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &refused)
-		if code != exitClean {
+		if code != vocab.ExitClean {
 			f.reportErr = fmt.Errorf("resolve the configuration of %s = %d: %s", dir, code, refused.String())
 			return
 		}
@@ -192,18 +193,19 @@ func detachedSet(sink failureSink, set *findingSet) findingSet {
 	loaded.unmatched = testsupport.Detached(sink, set.loaded.unmatched)
 	loaded.unbuilt = testsupport.Detached(sink, set.loaded.unbuilt)
 	return findingSet{
-		loaded:       loaded,
-		swept:        testsupport.Detached(sink, set.swept),
-		retained:     testsupport.Detached(sink, set.retained),
-		evaluations:  testsupport.Detached(sink, set.evaluations),
-		result:       testsupport.Detached(sink, set.result),
-		suppressions: set.suppressions,
+		loaded:      loaded,
+		swept:       testsupport.Detached(sink, set.swept),
+		retained:    testsupport.Detached(sink, set.retained),
+		evaluations: testsupport.Detached(sink, set.evaluations),
+		result:      testsupport.Detached(sink, set.result),
+		inEffect:    set.inEffect,
+		reasons:     set.reasons,
 	}
 }
 
 // cachedEnvelope is the report of one run over the archive's module, assembled once per
 // archive however many tests ask for it. Each caller gets its own copy of the report.
-func cachedEnvelope(ctx context.Context, sink failureSink, files map[string]string) report.Envelope {
+func cachedEnvelope(ctx context.Context, sink failureSink, files map[string]string) *report.Report {
 	sink.Helper()
 
 	envelope, err := fixtureFor(files).report(ctx)
@@ -211,4 +213,16 @@ func cachedEnvelope(ctx context.Context, sink failureSink, files map[string]stri
 		sink.Fatalf("the report of the fixture module: %v", err)
 	}
 	return testsupport.Detached(sink, envelope)
+}
+
+// mustDecode is the report document data holds, ending the test, naming what it
+// read, where the document is no report.
+func mustDecode(t failureSink, what string, data []byte) *report.Report {
+	t.Helper()
+
+	read, err := report.Decode(data)
+	if err != nil {
+		t.Fatalf("decode %s: %v", what, err)
+	}
+	return read
 }

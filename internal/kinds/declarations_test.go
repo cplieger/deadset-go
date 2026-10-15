@@ -7,18 +7,18 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 func TestTheUnusedKindsReportEveryDeadDeclarationOfTheFixtureAndNothingLive(t *testing.T) {
 	result := analysisOf(t, "declarations-unused.txtar", asApplication, Consumers{}).findings(t, declarationKinds)
 
-	for code, want := range map[string][]string{
-		unusedExportedCode:   {"Resolve", "Recurse"},
-		unusedUnexportedCode: {"helper"},
-		unusedMemberCode:     {"Counter.stale"},
+	for code, want := range map[vocab.Code][]string{
+		vocab.UnusedExported:   {"Resolve", "Recurse"},
+		vocab.UnusedUnexported: {"helper"},
+		vocab.UnusedMember:     {"Counter.stale"},
 	} {
 		if got := namesUnder(result.Findings, code); !slices.Equal(got, want) {
 			t.Errorf("the pass reports %s about %v, want %v", code, got, want)
@@ -37,17 +37,17 @@ func TestTheUnusedKindsReportEveryDeadDeclarationOfTheFixtureAndNothingLive(t *t
 func TestASelfReferencingDeclarationIsReportedOnceUnderTheCodeItsVisibilitySelects(t *testing.T) {
 	result := analysisOf(t, "declarations-unused.txtar", asApplication, Consumers{}).findings(t, declarationKinds)
 
-	var reported []string
+	var reported []vocab.Code
 	for i := range result.Findings {
 		if result.Findings[i].Symbol.Name == "Recurse" {
 			reported = append(reported, result.Findings[i].Code)
 		}
 	}
-	if !slices.Equal(reported, []string{unusedExportedCode}) {
+	if !slices.Equal(reported, []vocab.Code{vocab.UnusedExported}) {
 		t.Fatalf("the pass reports Recurse under %v, want only %s: it is exported and its own call is not a reference to it",
-			reported, unusedExportedCode)
+			reported, vocab.UnusedExported)
 	}
-	found := findingOf(t, result.Findings, unusedExportedCode, "Recurse")
+	found := findingOf(t, result.Findings, vocab.UnusedExported, "Recurse")
 	if found.Relation != graph.Reachability {
 		t.Errorf("the pass reports Recurse under the %s relation, want %s: its own call is a reference",
 			found.Relation, graph.Reachability)
@@ -61,10 +61,13 @@ func TestASelfReferencingDeclarationIsReportedOnceUnderTheCodeItsVisibilitySelec
 func TestTheUnusedMessagesSayWhatTheAnalysisFound(t *testing.T) {
 	result := analysisOf(t, "declarations-unused.txtar", asApplication, Consumers{}).findings(t, declarationKinds)
 
-	for _, want := range []struct{ code, name, message string }{
-		{unusedExportedCode, "Resolve", "exported function has no reference in the target and none from any loaded consumer"},
-		{unusedUnexportedCode, "helper", "unexported function has no reference in the target"},
-		{unusedMemberCode, "Counter.stale", "unexported field has no reference in the target"},
+	for _, want := range []struct {
+		code          vocab.Code
+		name, message string
+	}{
+		{vocab.UnusedExported, "Resolve", "exported function has no reference in the target and none from any loaded consumer"},
+		{vocab.UnusedUnexported, "helper", "unexported function has no reference in the target"},
+		{vocab.UnusedMember, "Counter.stale", "unexported field has no reference in the target"},
 	} {
 		if got := findingOf(t, result.Findings, want.code, want.name).Message; got != want.message {
 			t.Errorf("the pass reports %s about %s with the message %q, want %q",
@@ -77,36 +80,36 @@ func TestATestOnlyReferenceIsItsOwnKindAndAProductionReferenceRemovesTheFinding(
 	before := analysisOf(t, "declarations-test-only.txtar", asApplication, Consumers{}).findings(t, declarationKinds)
 	after := analysisOf(t, "declarations-test-only-moved.txtar", asApplication, Consumers{}).findings(t, declarationKinds)
 
-	if got := namesUnder(before.Findings, testOnlyUseCode); !slices.Equal(got, []string{"OnlyTested"}) {
-		t.Errorf("the pass reports %s about %v, want [OnlyTested]", testOnlyUseCode, got)
+	if got := namesUnder(before.Findings, vocab.TestOnlyUse); !slices.Equal(got, []string{"OnlyTested"}) {
+		t.Errorf("the pass reports %s about %v, want [OnlyTested]", vocab.TestOnlyUse, got)
 	}
-	found := findingOf(t, before.Findings, testOnlyUseCode, "OnlyTested")
+	found := findingOf(t, before.Findings, vocab.TestOnlyUse, "OnlyTested")
 	if !found.TestOnly {
 		t.Error("the pass reports OnlyTested with test_only false, want true: every reference to it is from a test file")
 	}
 	if found.Message != "function is referenced only from test files and never from production code" {
 		t.Errorf("the pass reports OnlyTested with the message %q, want the test-only one", found.Message)
 	}
-	if got := namesUnder(after.Findings, testOnlyUseCode); len(got) != 0 {
+	if got := namesUnder(after.Findings, vocab.TestOnlyUse); len(got) != 0 {
 		t.Errorf("with the reference moved to a production file the pass reports %s about %v, want nothing",
-			testOnlyUseCode, got)
+			vocab.TestOnlyUse, got)
 	}
 }
 
 func TestATestWhoseEveryTargetIsDeadIsReportedInTheirComponent(t *testing.T) {
 	result := analysisOf(t, "declarations-test-of-dead-code.txtar", asApplication, Consumers{}).findings(t, declarationKinds)
 
-	if got := namesUnder(result.Findings, testOfDeadCodeCode); !slices.Equal(got, []string{"TestDeadOnly"}) {
+	if got := namesUnder(result.Findings, vocab.TestOfDeadCode); !slices.Equal(got, []string{"TestDeadOnly"}) {
 		t.Fatalf("the pass reports %s about %v, want [TestDeadOnly]: TestMixed reaches a live declaration",
-			testOfDeadCodeCode, got)
+			vocab.TestOfDeadCode, got)
 	}
-	test := findingOf(t, result.Findings, testOfDeadCodeCode, "TestDeadOnly")
+	test := findingOf(t, result.Findings, vocab.TestOfDeadCode, "TestDeadOnly")
 	if test.Message != testOfDeadCodeMessage {
 		t.Errorf("the pass reports TestDeadOnly with the message %q, want the rule stated: %q",
 			test.Message, testOfDeadCodeMessage)
 	}
 	for _, target := range []string{"DeadOne", "DeadTwo"} {
-		found := findingOf(t, result.Findings, testOnlyUseCode, target)
+		found := findingOf(t, result.Findings, vocab.TestOnlyUse, target)
 		if found.Component.ID != test.Component.ID {
 			t.Errorf("the pass puts %s in component %s and its test in %s, want one component",
 				target, found.Component.ID, test.Component.ID)
@@ -127,12 +130,12 @@ func TestATestWhoseEveryTargetIsDeadIsReportedInTheirComponent(t *testing.T) {
 func TestTheMembersOfATestFileDeclarationATestReachesAreJudgedOnTheirOwn(t *testing.T) {
 	result := analysisOf(t, "declarations-test-file-members.txtar", asApplication, Consumers{}).findings(t, everyKind)
 
-	for code, want := range map[string][]string{
-		unusedMemberCode:      {"fixture.Spare", "fixture.stale"},
-		unusedUnexportedCode:  {"entry", "fixture.helper"},
-		unreachableExportCode: {"fixture.Label"},
-		typeParameterCode:     {"first[U]"},
-		enumMemberCode:        {"PhaseStop"},
+	for code, want := range map[vocab.Code][]string{
+		vocab.UnusedMember:        {"fixture.Spare", "fixture.stale"},
+		vocab.UnusedUnexported:    {"entry", "fixture.helper"},
+		vocab.UnreachableExport:   {"fixture.Label"},
+		vocab.UnusedTypeParameter: {"first[U]"},
+		vocab.UnusedEnumMember:    {"PhaseStop"},
 	} {
 		if got := namesUnder(result.Findings, code); !slices.Equal(got, want) {
 			t.Errorf("the pass reports %s about %v, want %v: the test reaches their container, which holds none of them live",
@@ -146,8 +149,8 @@ func TestTheMembersOfATestFileDeclarationATestReachesAreJudgedOnTheirOwn(t *test
 				result.Findings[i].Code, name)
 		}
 	}
-	entry := findingOf(t, result.Findings, unusedUnexportedCode, "entry")
-	spare := findingOf(t, result.Findings, unusedMemberCode, "fixture.Spare")
+	entry := findingOf(t, result.Findings, vocab.UnusedUnexported, "entry")
+	spare := findingOf(t, result.Findings, vocab.UnusedMember, "fixture.Spare")
 	if entry.Component.ID != spare.Component.ID {
 		t.Errorf("the pass puts entry in component %s and fixture.Spare in %s, want one component: only the field names the type",
 			entry.Component.ID, spare.Component.ID)
@@ -157,8 +160,8 @@ func TestTheMembersOfATestFileDeclarationATestReachesAreJudgedOnTheirOwn(t *test
 func TestAMethodOnlyADeadDeclarationConvertsFallsWithItAndNoExemptionRetainsIt(t *testing.T) {
 	result := analysisOf(t, "declarations-dead-holder.txtar", asApplication, Consumers{}).findings(t, everyKind)
 
-	spare := findingOf(t, result.Findings, unusedUnexportedCode, "spare")
-	write := findingOf(t, result.Findings, unreachableExportCode, "(*sink).Write")
+	spare := findingOf(t, result.Findings, vocab.UnusedUnexported, "spare")
+	write := findingOf(t, result.Findings, vocab.UnreachableExport, "(*sink).Write")
 	if write.Component.ID != spare.Component.ID {
 		t.Errorf("the pass puts (*sink).Write in component %s and spare in %s, want one component: only spare's conversion keeps the method",
 			write.Component.ID, spare.Component.ID)
@@ -172,7 +175,7 @@ func TestAMethodOnlyADeadDeclarationConvertsFallsWithItAndNoExemptionRetainsIt(t
 func TestAConversionInLiveCodeRetainsAMethodADeadDeclarationConvertsFirst(t *testing.T) {
 	result := analysisOf(t, "declarations-held-twice.txtar", asApplication, Consumers{}).findings(t, everyKind)
 
-	findingOf(t, result.Findings, unusedUnexportedCode, "spare")
+	findingOf(t, result.Findings, vocab.UnusedUnexported, "spare")
 	for i := range result.Findings {
 		if result.Findings[i].Symbol.Name == "(*sink).Write" {
 			t.Errorf("the pass reports %s about (*sink).Write, want nothing: main converts the type to io.Writer",
@@ -187,7 +190,7 @@ func TestAConversionInLiveCodeRetainsAMethodADeadDeclarationConvertsFirst(t *tes
 func TestAnAssertionInsideTheMethodItRetainsHoldsNothing(t *testing.T) {
 	result := analysisOf(t, "declarations-asserted-inside.txtar", asApplication, Consumers{}).findings(t, everyKind)
 
-	closed := findingOf(t, result.Findings, unreachableExportCode, "(*wrapper).Close")
+	closed := findingOf(t, result.Findings, vocab.UnreachableExport, "(*wrapper).Close")
 	if closed.Relation != graph.Reachability {
 		t.Errorf("the pass reports (*wrapper).Close under %v, want reachability: main holds the conversion and only Close holds the assertion",
 			closed.Relation)
@@ -205,9 +208,9 @@ func TestAMethodAnErrorsAsTargetRequiresIsRetainedOnATypeUsedAsAnError(t *testin
 
 	var reported []string
 	for i := range result.Findings {
-		reported = append(reported, result.Findings[i].Code+" "+result.Findings[i].Symbol.Name)
+		reported = append(reported, string(result.Findings[i].Code)+" "+result.Findings[i].Symbol.Name)
 	}
-	if want := []string{unreachableExportCode + " plain.Extra"}; !slices.Equal(reported, want) {
+	if want := []string{string(vocab.UnreachableExport) + " plain.Extra"}; !slices.Equal(reported, want) {
 		t.Errorf("the pass reports %v, want %v: errors.As and errors.AsType assert the error to the interface whose method the classifier calls",
 			reported, want)
 	}
@@ -217,21 +220,21 @@ func TestADeprecatedDeclarationNothingReferencesIsReportedUnderTheDeprecatedKind
 	result := analysisOf(t, "declarations-deprecated.txtar", asApplication, Consumers{}).findings(t, declarationKinds)
 
 	want := []string{"Old", "Stale", "StaleToo", "Counter.Old"}
-	if got := namesUnder(result.Findings, deprecatedAndUnusedCode); !slices.Equal(got, want) {
+	if got := namesUnder(result.Findings, vocab.DeprecatedUnused); !slices.Equal(got, want) {
 		t.Fatalf("the pass reports %s about %v, want %v: the second Old is the field",
-			deprecatedAndUnusedCode, got, want)
+			vocab.DeprecatedUnused, got, want)
 	}
 	for i := range result.Findings {
 		if name := result.Findings[i].Symbol.Name; name == "Kept" || name == "Fresh" || name == "Live" {
 			t.Errorf("the pass reports %s about %s, want nothing: it has a production reference",
 				result.Findings[i].Code, name)
 		}
-		if strings.HasSuffix(result.Findings[i].Symbol.Name, "Old") && result.Findings[i].Code != deprecatedAndUnusedCode {
+		if strings.HasSuffix(result.Findings[i].Symbol.Name, "Old") && result.Findings[i].Code != vocab.DeprecatedUnused {
 			t.Errorf("the pass reports Old under %s as well, want %s alone",
-				result.Findings[i].Code, deprecatedAndUnusedCode)
+				result.Findings[i].Code, vocab.DeprecatedUnused)
 		}
 	}
-	if got := findingOf(t, result.Findings, deprecatedAndUnusedCode, "Stale").Message; got != "deprecated variable has no production reference" {
+	if got := findingOf(t, result.Findings, vocab.DeprecatedUnused, "Stale").Message; got != "deprecated variable has no production reference" {
 		t.Errorf("the pass reports Stale with the message %q, want the deprecated one", got)
 	}
 }
@@ -250,10 +253,10 @@ func TestAnExportedDeclarationOfAnUnimportablePackageIsLeftToTheUnreachableExpor
 func TestAConsumersTestReferenceDecidesTheKindByHowTheReferencePassCountedIt(t *testing.T) {
 	for name, counts := range map[string]struct {
 		production, test int
-		want             string
+		want             vocab.Code
 	}{
-		"counted as a test reference":       {production: 0, test: 1, want: testOnlyUseCode},
-		"counted as a production reference": {production: 1, test: 0, want: unusedExportedCode},
+		"counted as a test reference":       {production: 0, test: 1, want: vocab.TestOnlyUse},
+		"counted as a production reference": {production: 1, test: 0, want: vocab.UnusedExported},
 	} {
 		t.Run(name, func(t *testing.T) {
 			in := handInput(applicationConfig())
@@ -267,7 +270,7 @@ func TestAConsumersTestReferenceDecidesTheKindByHowTheReferencePassCountedIt(t *
 
 			result := computed(t, in, declarationEmitters())
 
-			if got := codesOf(result.Findings); !slices.Equal(got, []string{counts.want}) {
+			if got := codesOf(result.Findings); !slices.Equal(got, []vocab.Code{counts.want}) {
 				t.Errorf("a candidate with %d production and %d test references is reported under %v, want [%s]",
 					counts.production, counts.test, got, counts.want)
 			}
@@ -301,24 +304,24 @@ func TestAMemberWhoseContainerIsDeadIsNotReportedIndependently(t *testing.T) {
 
 	result := computed(t, in, declarationEmitters())
 
-	if got := codesOf(result.Findings); !slices.Equal(got, []string{unusedExportedCode}) {
+	if got := codesOf(result.Findings); !slices.Equal(got, []vocab.Code{vocab.UnusedExported}) {
 		t.Errorf("the pass reports %v about a dead type and its dead field, want [%s] about the type alone",
-			got, unusedExportedCode)
+			got, vocab.UnusedExported)
 	}
 }
 
 func TestAKindReportsNothingWhereTheSeverityMapAllowsIt(t *testing.T) {
 	resolved := applicationConfig()
-	resolved.Severity = map[string]config.Severity{
-		unusedExportedCode:   config.Allow,
-		unusedUnexportedCode: config.Allow,
+	resolved.Severity = map[string]vocab.Severity{
+		string(vocab.UnusedExported):   vocab.Allow,
+		string(vocab.UnusedUnexported): vocab.Allow,
 	}
 	in := inputOf(t, "declarations-unused.txtar", resolved, Consumers{})
 
 	result := computed(t, in, declarationEmitters())
 
-	if got := codesOf(result.Findings); !slices.Equal(got, []string{unusedMemberCode}) {
-		t.Errorf("with two kinds allowed the pass reports %v, want [%s]", got, unusedMemberCode)
+	if got := codesOf(result.Findings); !slices.Equal(got, []vocab.Code{vocab.UnusedMember}) {
+		t.Errorf("with two kinds allowed the pass reports %v, want [%s]", got, vocab.UnusedMember)
 	}
 }
 
@@ -328,17 +331,17 @@ func TestAKindReportsNothingWhereTheSeverityMapAllowsIt(t *testing.T) {
 // nothing writes, which the encoder reads no value of, as an unused member.
 func TestTheMembersOfAStructOnlyATestFileMarshalsReportUnderAProductionSweep(t *testing.T) {
 	result := analysisOf(t, "declarations-test-evidence.txtar", asApplication, Consumers{}).findings(t, everyKind)
-	got := make(map[string]string, len(result.Findings))
+	got := make(map[string]vocab.Code, len(result.Findings))
 	for i := range result.Findings {
 		got[result.Findings[i].Symbol.Ref] = result.Findings[i].Code
 	}
-	want := map[string]string{
-		"go://example.com/evidence#Fixture.Name":  testOnlyUseCode,
-		"go://example.com/evidence#Fixture.Extra": unusedMemberCode,
+	want := map[string]vocab.Code{
+		"go://example.com/evidence#Fixture.Name":  vocab.TestOnlyUse,
+		"go://example.com/evidence#Fixture.Extra": vocab.UnusedMember,
 		// The struct itself is live, exported in a main package, and named only
 		// from inside that package, which is the export-narrowing kind's subject
 		// rather than this test's: the table is the whole pass over the fixture.
-		"go://example.com/evidence#Fixture": unnecessaryExportCode,
+		"go://example.com/evidence#Fixture": vocab.UnnecessaryExport,
 	}
 	if !maps.Equal(got, want) {
 		t.Errorf("the pass over declarations-test-evidence reported %v, want %v", got, want)
@@ -355,9 +358,9 @@ func TestAPackageAProductionFileImportsUnderOneConfigurationIsNotTestSupport(t *
 
 	result := computed(t, in, declarationEmitters())
 
-	if got := namesUnder(result.Findings, testOnlyUseCode); !slices.Equal(got, []string{"OnlyTested"}) {
+	if got := namesUnder(result.Findings, vocab.TestOnlyUse); !slices.Equal(got, []string{"OnlyTested"}) {
 		t.Errorf("the pass over linux and windows reports %s about %v, want [OnlyTested]: linux imports the package from production code",
-			testOnlyUseCode, got)
+			vocab.TestOnlyUse, got)
 	}
 }
 
@@ -367,16 +370,16 @@ func TestAPackageAProductionFileImportsUnderOneConfigurationIsNotTestSupport(t *
 // visibility selects, at certain.
 func TestTestSupportCodeATestReferencesIsTestCode(t *testing.T) {
 	resolved := applicationConfig()
-	resolved.Analysis.MinConfidence = config.Possible
+	resolved.Analysis.MinConfidence = vocab.Possible
 	in := inputOf(t, "declarations-test-support-possible.txtar", resolved, Consumers{})
 	emitters := declarationEmitters()
-	emitters[unusedInterfaceCode] = UnusedInterface
+	emitters[vocab.UnusedInterface] = UnusedInterface
 	result := computed(t, in, emitters)
 
-	found := findingOf(t, result.Findings, unusedExportedCode, "Fake.Get")
-	if found.Class != Certain || found.Confidence != Certain {
+	found := findingOf(t, result.Findings, vocab.UnusedExported, "Fake.Get")
+	if found.Class != vocab.Certain || found.Confidence != vocab.Certain {
 		t.Errorf("%s about Fake.Get has class %s and confidence %s, want certain and certain",
-			unusedExportedCode, found.Class, found.Confidence)
+			vocab.UnusedExported, found.Class, found.Confidence)
 	}
 	if got := summary(result.Findings); len(got) != 1 {
 		t.Errorf("the pass over declarations-test-support-possible.txtar reports %v, want the finding about Fake.Get alone", got)
@@ -385,21 +388,21 @@ func TestTestSupportCodeATestReferencesIsTestCode(t *testing.T) {
 
 func TestCapNameLiteral_lowersADeclarationAStringLiteralSpellsToPossible(t *testing.T) {
 	resolved := applicationConfig()
-	resolved.Analysis.MinConfidence = config.Possible
+	resolved.Analysis.MinConfidence = vocab.Possible
 	result := computed(t, inputOf(t, "name-literal.txtar", resolved, Consumers{}), packageEmitters())
 
 	cases := map[string]struct {
-		code    string
-		class   Class
+		code    vocab.Code
+		class   vocab.Class
 		literal int
 	}{
-		"spelled":     {code: unusedUnexportedCode, class: Possible, literal: 10},
-		"Kind":        {code: unnecessaryExportCode, class: Possible, literal: 10},
-		"KindA":       {code: unnecessaryExportCode, class: Possible, literal: 10},
-		"selfSpelled": {code: unusedUnexportedCode, class: Certain},
-		"testSpelled": {code: unusedUnexportedCode, class: Certain},
-		"strings":     {code: unusedUnexportedCode, class: Certain},
-		"Kind.Label":  {code: unnecessaryExportCode, class: Certain},
+		"spelled":     {code: vocab.UnusedUnexported, class: vocab.Possible, literal: 10},
+		"Kind":        {code: vocab.UnnecessaryExport, class: vocab.Possible, literal: 10},
+		"KindA":       {code: vocab.UnnecessaryExport, class: vocab.Possible, literal: 10},
+		"selfSpelled": {code: vocab.UnusedUnexported, class: vocab.Certain},
+		"testSpelled": {code: vocab.UnusedUnexported, class: vocab.Certain},
+		"strings":     {code: vocab.UnusedUnexported, class: vocab.Certain},
+		"Kind.Label":  {code: vocab.UnnecessaryExport, class: vocab.Certain},
 	}
 	for name, want := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -422,19 +425,20 @@ func TestCapNameLiteral_lowersADeclarationAStringLiteralSpellsToPossible(t *test
 // it, and an internal one at certain. A linked package's export keeps certain.
 func TestUnlinkedApplicationPackageIsReportedAtPossible(t *testing.T) {
 	resolved := applicationConfig()
-	resolved.Analysis.MinConfidence = config.Possible
+	resolved.Analysis.MinConfidence = vocab.Possible
 	result := computed(t, inputOf(t, "declarations-unlinked-package.txtar", resolved, Consumers{}), declarationEmitters())
 
 	for _, test := range []struct {
-		code, name string
-		class      Class
+		code  vocab.Code
+		name  string
+		class vocab.Class
 	}{
-		{code: unusedExportedCode, name: "Spare", class: Certain},
-		{code: unusedExportedCode, name: "Driver", class: Possible},
-		{code: unusedExportedCode, name: "New", class: Possible},
-		{code: unusedUnexportedCode, name: "register", class: Possible},
-		{code: unusedUnexportedCode, name: "init", class: Possible},
-		{code: unusedUnexportedCode, name: "load", class: Certain},
+		{code: vocab.UnusedExported, name: "Spare", class: vocab.Certain},
+		{code: vocab.UnusedExported, name: "Driver", class: vocab.Possible},
+		{code: vocab.UnusedExported, name: "New", class: vocab.Possible},
+		{code: vocab.UnusedUnexported, name: "register", class: vocab.Possible},
+		{code: vocab.UnusedUnexported, name: "init", class: vocab.Possible},
+		{code: vocab.UnusedUnexported, name: "load", class: vocab.Certain},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			found := findingOf(t, result.Findings, test.code, test.name)
@@ -451,18 +455,19 @@ func TestUnlinkedApplicationPackageIsReportedAtPossible(t *testing.T) {
 // it nothing references keeps certain.
 func TestProductionCodeOnlyTestsReachIsReportedAtPossible(t *testing.T) {
 	resolved := applicationConfig()
-	resolved.Analysis.MinConfidence = config.Possible
+	resolved.Analysis.MinConfidence = vocab.Possible
 	result := computed(t, inputOf(t, "declarations-test-reached.txtar", resolved, Consumers{}), declarationEmitters())
 
 	cases := []struct {
-		code, name        string
-		class, confidence Class
+		code              vocab.Code
+		name              string
+		class, confidence vocab.Class
 	}{
-		{testOnlyUseCode, "Sample", Possible, Possible},
-		{testOnlyUseCode, "Seeded", Possible, Possible},
-		{unusedUnexportedCode, "seed", Possible, Possible},
-		{testOfDeadCodeCode, "Start", Certain, Possible},
-		{unusedExportedCode, "Spare", Certain, Certain},
+		{vocab.TestOnlyUse, "Sample", vocab.Possible, vocab.Possible},
+		{vocab.TestOnlyUse, "Seeded", vocab.Possible, vocab.Possible},
+		{vocab.UnusedUnexported, "seed", vocab.Possible, vocab.Possible},
+		{vocab.TestOfDeadCode, "Start", vocab.Certain, vocab.Possible},
+		{vocab.UnusedExported, "Spare", vocab.Certain, vocab.Certain},
 	}
 	for _, want := range cases {
 		t.Run(want.name, func(t *testing.T) {
@@ -482,18 +487,18 @@ func TestProductionCodeOnlyTestsReachIsReportedAtPossible(t *testing.T) {
 // needs are at possible with that test, so the default level reports none of them.
 func TestTestFileHelpersOfATestOfProductionCodeOnlyTestsReachAreAtPossible(t *testing.T) {
 	resolved := applicationConfig()
-	resolved.Analysis.MinConfidence = config.Possible
+	resolved.Analysis.MinConfidence = vocab.Possible
 	result := computed(t, inputOf(t, "declarations-test-reached-test-helpers.txtar", resolved, Consumers{}), declarationEmitters())
 
 	for _, name := range []string{"helper", "base"} {
 		t.Run(name, func(t *testing.T) {
-			if found := findingOf(t, result.Findings, unusedUnexportedCode, name); found.Confidence != Possible {
-				t.Errorf("%s %s has confidence %s, want possible", unusedUnexportedCode, name, found.Confidence)
+			if found := findingOf(t, result.Findings, vocab.UnusedUnexported, name); found.Confidence != vocab.Possible {
+				t.Errorf("%s %s has confidence %s, want possible", vocab.UnusedUnexported, name, found.Confidence)
 			}
 		})
 	}
-	if found := findingOf(t, result.Findings, testOfDeadCodeCode, "TestSample"); found.Confidence != Possible {
-		t.Errorf("%s TestSample has confidence %s, want possible", testOfDeadCodeCode, found.Confidence)
+	if found := findingOf(t, result.Findings, vocab.TestOfDeadCode, "TestSample"); found.Confidence != vocab.Possible {
+		t.Errorf("%s TestSample has confidence %s, want possible", vocab.TestOfDeadCode, found.Confidence)
 	}
 
 	byDefault := computed(t, inputOf(t, "declarations-test-reached-test-helpers.txtar", applicationConfig(), Consumers{}), declarationEmitters())
@@ -508,42 +513,43 @@ func TestTestFileHelpersOfATestOfProductionCodeOnlyTestsReachAreAtPossible(t *te
 func TestADeclarationATestOfLiveCodeKeepsIsATestOnlyUse(t *testing.T) {
 	result := computed(t, inputOf(t, "declarations-test-kept.txtar", applicationConfig(), Consumers{}), declarationEmitters())
 
-	kept := findingOf(t, result.Findings, testOnlyUseCode, "FixedNow")
+	kept := findingOf(t, result.Findings, vocab.TestOnlyUse, "FixedNow")
 	if want := "variable is referenced only from test files and from declarations that are themselves dead"; kept.Message != want {
-		t.Errorf("DS1004 FixedNow says %q, want %q", kept.Message, want)
+		t.Errorf("DS1102 FixedNow says %q, want %q", kept.Message, want)
 	}
-	findingOf(t, result.Findings, unusedExportedCode, "Frozen")
-	findingOf(t, result.Findings, testOfDeadCodeCode, "TestStale")
+	findingOf(t, result.Findings, vocab.UnusedExported, "Frozen")
+	findingOf(t, result.Findings, vocab.TestOfDeadCode, "TestStale")
 }
 
 // Under an internal tree a declaration a test of live code keeps is the test-only
 // use alone, and one only a test of dead code reads is the unreachable export.
 func TestADeclarationATestOfLiveCodeKeepsIsNoUnreachableExport(t *testing.T) {
 	emitters := declarationEmitters()
-	emitters[unreachableExportCode] = UnreachableExport
+	emitters[vocab.UnreachableExport] = UnreachableExport
 	result := computed(t, inputOf(t, "declarations-test-kept-internal.txtar", applicationConfig(), Consumers{}), emitters)
 
-	findingOf(t, result.Findings, testOnlyUseCode, "FixedNow")
-	findingOf(t, result.Findings, unreachableExportCode, "Frozen")
+	findingOf(t, result.Findings, vocab.TestOnlyUse, "FixedNow")
+	findingOf(t, result.Findings, vocab.UnreachableExport, "Frozen")
 }
 
 // Every kind a test's use of production code only tests reach decides reports that
 // declaration at possible, and a declaration nothing references at certain.
 func TestEveryKindOfProductionCodeOnlyTestsReachIsAtPossible(t *testing.T) {
 	resolved := applicationConfig()
-	resolved.Analysis.MinConfidence = config.Possible
+	resolved.Analysis.MinConfidence = vocab.Possible
 	emitters := declarationEmitters()
-	emitters[unusedInterfaceCode] = UnusedInterface
+	emitters[vocab.UnusedInterface] = UnusedInterface
 	result := computed(t, inputOf(t, "declarations-test-reached-kinds.txtar", resolved, Consumers{}), emitters)
 
 	cases := []struct {
-		code, name string
-		class      Class
+		code  vocab.Code
+		name  string
+		class vocab.Class
 	}{
-		{unusedInterfaceCode, "Doer", Possible},
-		{deprecatedAndUnusedCode, "Old", Possible},
-		{unusedUnexportedCode, "helper", Possible},
-		{unusedExportedCode, "Spare", Certain},
+		{vocab.UnusedInterface, "Doer", vocab.Possible},
+		{vocab.DeprecatedUnused, "Old", vocab.Possible},
+		{vocab.UnusedUnexported, "helper", vocab.Possible},
+		{vocab.UnusedExported, "Spare", vocab.Certain},
 	}
 	for _, want := range cases {
 		t.Run(want.name, func(t *testing.T) {
@@ -560,24 +566,24 @@ func TestEveryKindOfProductionCodeOnlyTestsReachIsAtPossible(t *testing.T) {
 // same tier, while a field of the command a test alone reads keeps its class.
 func TestAFieldOfProductionCodeOnlyTestsReachThatOnlyTestsReadIsPossible(t *testing.T) {
 	resolved := applicationConfig()
-	resolved.Analysis.MinConfidence = config.Possible
+	resolved.Analysis.MinConfidence = vocab.Possible
 	emitters := declarationEmitters()
-	emitters[writeOnlyCode] = WriteOnlySymbol
+	emitters[vocab.WriteOnlySymbol] = WriteOnlySymbol
 	result := computed(t, inputOf(t, "declarations-test-reached-field-read-by-tests.txtar", resolved, Consumers{}), emitters)
 
 	cases := []struct {
 		name  string
-		class Class
+		class vocab.Class
 	}{
-		{"Volume.Initialized", Possible},
-		{"Disk.Ready", Certain},
+		{"Volume.Initialized", vocab.Possible},
+		{"Disk.Ready", vocab.Certain},
 	}
 	for _, want := range cases {
 		t.Run(want.name, func(t *testing.T) {
-			found := findingOf(t, result.Findings, writeOnlyCode, want.name)
+			found := findingOf(t, result.Findings, vocab.WriteOnlySymbol, want.name)
 			if found.Class != want.class || found.Confidence != want.class {
 				t.Errorf("%s %s has class %s and confidence %s, want %s",
-					writeOnlyCode, want.name, found.Class, found.Confidence, want.class)
+					vocab.WriteOnlySymbol, want.name, found.Class, found.Confidence, want.class)
 			}
 		})
 	}
@@ -587,19 +593,20 @@ func TestAFieldOfProductionCodeOnlyTestsReachThatOnlyTestsReadIsPossible(t *test
 // does what only it reaches, though it shares a dead declaration with that code.
 func TestADeadRootBesideProductionCodeOnlyTestsReachKeepsItsClass(t *testing.T) {
 	resolved := applicationConfig()
-	resolved.Analysis.MinConfidence = config.Possible
+	resolved.Analysis.MinConfidence = vocab.Possible
 	result := computed(t, inputOf(t, "declarations-test-reached-beside-a-dead-root.txtar", resolved, Consumers{}), declarationEmitters())
 
 	cases := []struct {
-		code, name        string
-		class, confidence Class
+		code              vocab.Code
+		name              string
+		class, confidence vocab.Class
 	}{
-		{unusedExportedCode, "Legacy", Certain, Certain},
-		{unusedUnexportedCode, "only", Certain, Certain},
-		{unusedExportedCode, "Shared", Possible, Possible},
-		{unusedUnexportedCode, "shared", Possible, Possible},
-		{testOnlyUseCode, "Make", Possible, Possible},
-		{testOfDeadCodeCode, "TestMake", Certain, Possible},
+		{vocab.UnusedExported, "Legacy", vocab.Certain, vocab.Certain},
+		{vocab.UnusedUnexported, "only", vocab.Certain, vocab.Certain},
+		{vocab.UnusedExported, "Shared", vocab.Possible, vocab.Possible},
+		{vocab.UnusedUnexported, "shared", vocab.Possible, vocab.Possible},
+		{vocab.TestOnlyUse, "Make", vocab.Possible, vocab.Possible},
+		{vocab.TestOfDeadCode, "TestMake", vocab.Certain, vocab.Possible},
 	}
 	for _, want := range cases {
 		t.Run(want.name, func(t *testing.T) {
@@ -618,8 +625,8 @@ func TestADeadRootBesideProductionCodeOnlyTestsReachKeepsItsClass(t *testing.T) 
 func TestATestOfDeadCodeBesideADeadRootKeepsItsConfidence(t *testing.T) {
 	result := computed(t, inputOf(t, "declarations-test-reached-and-dead-root-tested.txtar", applicationConfig(), Consumers{}), declarationEmitters())
 
-	if found := findingOf(t, result.Findings, testOfDeadCodeCode, "TestBoth"); found.Confidence != Certain {
-		t.Errorf("DS1005 TestBoth has confidence %s, want certain", found.Confidence)
+	if found := findingOf(t, result.Findings, vocab.TestOfDeadCode, "TestBoth"); found.Confidence != vocab.Certain {
+		t.Errorf("DS1103 TestBoth has confidence %s, want certain", found.Confidence)
 	}
 }
 
@@ -628,7 +635,7 @@ func TestATestOfDeadCodeBesideADeadRootKeepsItsConfidence(t *testing.T) {
 func TestADeadRootBesideProductionCodeOnlyTestsReachIsReportedByDefault(t *testing.T) {
 	result := computed(t, inputOf(t, "declarations-test-reached-beside-a-dead-root.txtar", applicationConfig(), Consumers{}), declarationEmitters())
 
-	if got, want := summary(result.Findings), []string{unusedExportedCode + " Legacy", unusedUnexportedCode + " only"}; !slices.Equal(got, want) {
+	if got, want := summary(result.Findings), []string{string(vocab.UnusedExported) + " Legacy", string(vocab.UnusedUnexported) + " only"}; !slices.Equal(got, want) {
 		t.Errorf("the pass reports %v, want %v", got, want)
 	}
 }
@@ -638,7 +645,7 @@ func TestADeadRootBesideProductionCodeOnlyTestsReachIsReportedByDefault(t *testi
 func TestProductionCodeOnlyTestsReachIsWithheldByDefault(t *testing.T) {
 	result := computed(t, inputOf(t, "declarations-test-reached.txtar", applicationConfig(), Consumers{}), declarationEmitters())
 
-	if got, want := summary(result.Findings), []string{unusedExportedCode + " Spare"}; !slices.Equal(got, want) {
+	if got, want := summary(result.Findings), []string{string(vocab.UnusedExported) + " Spare"}; !slices.Equal(got, want) {
 		t.Errorf("the pass reports %v, want %v", got, want)
 	}
 	if len(result.Withheld) != 4 {

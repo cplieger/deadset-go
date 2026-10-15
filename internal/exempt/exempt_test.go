@@ -1,7 +1,6 @@
 package exempt
 
 import (
-	"encoding/json"
 	"errors"
 	"go/token"
 	"path/filepath"
@@ -10,88 +9,9 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
-	spec "github.com/cplieger/deadset-spec/v8"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/txtar"
 )
-
-// publishedRow is one class of the vocabulary document this package implements.
-type publishedRow struct {
-	Class     string   `json:"class"`
-	Languages []string `json:"languages"`
-}
-
-// publishedRows reads every class of the embedded vocabulary, in the order the
-// document lists them.
-func publishedRows(t *testing.T) []publishedRow {
-	t.Helper()
-
-	raw, err := spec.Contract.ReadFile("contract/exemptions.json")
-	if err != nil {
-		t.Fatalf("Setup: read contract/exemptions.json: %v", err)
-	}
-	var document struct {
-		Exemptions []publishedRow `json:"exemptions"`
-	}
-	if err := json.Unmarshal(raw, &document); err != nil {
-		t.Fatalf("Setup: decode contract/exemptions.json: %v", err)
-	}
-	if len(document.Exemptions) == 0 {
-		t.Fatal("Setup: contract/exemptions.json names no class, so this test pins nothing")
-	}
-	return document.Exemptions
-}
-
-// publishedClasses reads the classes of the embedded vocabulary that run on Go, in
-// the order the document lists them.
-func publishedClasses(t *testing.T) []Class {
-	t.Helper()
-
-	rows := publishedRows(t)
-	published := make([]Class, 0, len(rows))
-	for _, row := range rows {
-		if slices.Contains(row.Languages, goLanguage) {
-			published = append(published, Class(row.Class))
-		}
-	}
-	if len(published) == 0 {
-		t.Fatalf("Setup: contract/exemptions.json names no %s class", goLanguage)
-	}
-	return published
-}
-
-func TestTheVocabularyIsTheContractsRowForRowAndInItsOrder(t *testing.T) {
-	// A configuration may disable any class the document declares, whichever
-	// language computes it, so a row missing here refuses a configuration the
-	// other analyzer accepts, and a row the document lacks accepts a name it does
-	// not.
-	want := publishedRows(t)
-	if len(vocabulary) != len(want) {
-		t.Fatalf("the vocabulary holds %d classes %v, want the %d of contract/exemptions.json %v",
-			len(vocabulary), Vocabulary(), len(want), want)
-	}
-	for i, row := range want {
-		got := vocabulary[i]
-		if string(got.class) != row.Class || !slices.Equal(got.languages, row.Languages) {
-			t.Errorf("vocabulary[%d] = %q on %v, want %q on %v", i, got.class, got.languages, row.Class, row.Languages)
-		}
-	}
-	names := make([]Class, len(want))
-	for i, row := range want {
-		names[i] = Class(row.Class)
-	}
-	if got := Vocabulary(); !slices.Equal(got, names) {
-		t.Errorf("Vocabulary() = %v, want %v", got, names)
-	}
-}
-
-func TestClassesAreTheVocabularysGoClassesInItsOrder(t *testing.T) {
-	// The order is the order a run computes the classes in, so the list in this
-	// package is the published one or a class is silently absent from every run.
-	want := publishedClasses(t)
-	if got := Classes(); !slices.Equal(got, want) {
-		t.Errorf("Classes() = %v, want %v", got, want)
-	}
-}
 
 func TestClassesHandsOutNoSliceACallerCanChange(t *testing.T) {
 	first := Classes()
@@ -127,8 +47,8 @@ func held(found []graph.Exemption) []string {
 }
 
 func TestComputeRunsEveryClassTheTableHoldsInVocabularyOrder(t *testing.T) {
-	var ran []Class
-	detectors := make(map[Class]Detector, len(Classes()))
+	var ran []vocab.Exemption
+	detectors := make(map[vocab.Exemption]Detector, len(Classes()))
 	for _, class := range Classes() {
 		detectors[class] = func(*Input) ([]graph.Exemption, error) {
 			ran = append(ran, class)
@@ -137,25 +57,25 @@ func TestComputeRunsEveryClassTheTableHoldsInVocabularyOrder(t *testing.T) {
 	}
 	// One class of the vocabulary is absent from the table, which is what a
 	// caller assembling the table from the classes it has produces.
-	delete(detectors, EnumGroup)
+	delete(detectors, vocab.EnumGroup)
 
 	if _, _, err := Compute(&Input{}, detectors); err != nil {
 		t.Fatalf("Compute over a table of every class error: %v", err)
 	}
-	want := slices.DeleteFunc(Classes(), func(class Class) bool { return class == EnumGroup })
+	want := slices.DeleteFunc(Classes(), func(class vocab.Exemption) bool { return class == vocab.EnumGroup })
 	if !slices.Equal(ran, want) {
 		t.Errorf("Compute ran %v, want %v", ran, want)
 	}
 }
 
 func TestComputeRunsNoDisabledClass(t *testing.T) {
-	retained := graph.Exemption{ID: "a.go:1:1", Class: string(GeneratedFile)}
-	detectors := map[Class]Detector{
-		GeneratedFile:         detector(retained),
-		InterfaceSatisfaction: detector(graph.Exemption{ID: "a.go:2:1", Class: string(InterfaceSatisfaction)}),
+	retained := graph.Exemption{ID: "a.go:1:1", Class: string(vocab.GeneratedFile)}
+	detectors := map[vocab.Exemption]Detector{
+		vocab.GeneratedFile:         detector(retained),
+		vocab.InterfaceSatisfaction: detector(graph.Exemption{ID: "a.go:2:1", Class: string(vocab.InterfaceSatisfaction)}),
 	}
 
-	in := &Input{Options: Options{Disabled: []Class{InterfaceSatisfaction, InterfaceSatisfaction, "not-a-class"}}}
+	in := &Input{Options: Options{Disabled: []vocab.Exemption{vocab.InterfaceSatisfaction, vocab.InterfaceSatisfaction, "not-a-class"}}}
 	found, _, err := Compute(in, detectors)
 	if err != nil {
 		t.Fatalf("Compute with one class disabled error: %v", err)
@@ -165,20 +85,20 @@ func TestComputeRunsNoDisabledClass(t *testing.T) {
 	// of hiding a defect be tested; a class named twice is disabled once and a
 	// name outside the vocabulary disables nothing.
 	if want := held([]graph.Exemption{retained}); !slices.Equal(held(found), want) {
-		t.Errorf("Compute with %s disabled retained %v, want %v", InterfaceSatisfaction, held(found), want)
+		t.Errorf("Compute with %s disabled retained %v, want %v", vocab.InterfaceSatisfaction, held(found), want)
 	}
 }
 
 func TestComputeOrdersTheUnionBySiteThenClassThenSymbol(t *testing.T) {
-	detectors := map[Class]Detector{
-		GeneratedFile: detector(
-			graph.Exemption{ID: "b.go:9:1", Class: string(GeneratedFile), Site: at("b.go", 9, 1)},
-			graph.Exemption{ID: "a.go:4:1", Class: string(GeneratedFile), Site: at("a.go", 4, 7)},
-			graph.Exemption{ID: "a.go:2:1", Class: string(GeneratedFile)},
+	detectors := map[vocab.Exemption]Detector{
+		vocab.GeneratedFile: detector(
+			graph.Exemption{ID: "b.go:9:1", Class: string(vocab.GeneratedFile), Site: at("b.go", 9, 1)},
+			graph.Exemption{ID: "a.go:4:1", Class: string(vocab.GeneratedFile), Site: at("a.go", 4, 7)},
+			graph.Exemption{ID: "a.go:2:1", Class: string(vocab.GeneratedFile)},
 		),
-		ReflectiveLookup: detector(
-			graph.Exemption{ID: "a.go:3:1", Class: string(ReflectiveLookup), Site: at("a.go", 4, 7)},
-			graph.Exemption{ID: "a.go:1:1", Class: string(ReflectiveLookup), Site: at("a.go", 4, 7)},
+		vocab.ReflectiveLookup: detector(
+			graph.Exemption{ID: "a.go:3:1", Class: string(vocab.ReflectiveLookup), Site: at("a.go", 4, 7)},
+			graph.Exemption{ID: "a.go:1:1", Class: string(vocab.ReflectiveLookup), Site: at("a.go", 4, 7)},
 		),
 	}
 
@@ -205,19 +125,19 @@ func TestComputeOrdersTheUnionBySiteThenClassThenSymbol(t *testing.T) {
 
 func TestComputeKeepsOneEntryPerSymbolClassDetailAndHolder(t *testing.T) {
 	const converted = "satisfies io.Writer"
-	detectors := map[Class]Detector{
-		GeneratedFile: detector(
+	detectors := map[vocab.Exemption]Detector{
+		vocab.GeneratedFile: detector(
 			// One fact stated at three sites, the last of them the earliest.
-			graph.Exemption{ID: "a.go:1:1", Class: string(GeneratedFile), Site: at("b.go", 2, 1), Detail: converted},
-			graph.Exemption{ID: "a.go:1:1", Class: string(GeneratedFile), Site: at("a.go", 9, 4), Detail: converted},
-			graph.Exemption{ID: "a.go:1:1", Class: string(GeneratedFile), Site: at("a.go", 4, 7), Detail: converted},
+			graph.Exemption{ID: "a.go:1:1", Class: string(vocab.GeneratedFile), Site: at("b.go", 2, 1), Detail: converted},
+			graph.Exemption{ID: "a.go:1:1", Class: string(vocab.GeneratedFile), Site: at("a.go", 9, 4), Detail: converted},
+			graph.Exemption{ID: "a.go:1:1", Class: string(vocab.GeneratedFile), Site: at("a.go", 4, 7), Detail: converted},
 			// A second reason on the same symbol and class, and the same reason
 			// on a second symbol: each is a fact of its own.
-			graph.Exemption{ID: "a.go:1:1", Class: string(GeneratedFile), Site: at("a.go", 9, 4), Detail: "satisfies io.Closer"},
-			graph.Exemption{ID: "a.go:2:1", Class: string(GeneratedFile), Site: at("a.go", 9, 4), Detail: converted},
+			graph.Exemption{ID: "a.go:1:1", Class: string(vocab.GeneratedFile), Site: at("a.go", 9, 4), Detail: "satisfies io.Closer"},
+			graph.Exemption{ID: "a.go:2:1", Class: string(vocab.GeneratedFile), Site: at("a.go", 9, 4), Detail: converted},
 			// The first fact again, held by a declaration: live only while that
 			// declaration is, so it is a fact of its own.
-			graph.Exemption{ID: "a.go:1:1", Class: string(GeneratedFile), Site: at("a.go", 12, 1), Detail: converted, Holder: "h.go:1:1"},
+			graph.Exemption{ID: "a.go:1:1", Class: string(vocab.GeneratedFile), Site: at("a.go", 12, 1), Detail: converted, Holder: "h.go:1:1"},
 		),
 	}
 
@@ -245,17 +165,17 @@ func TestComputeKeepsOneEntryPerSymbolClassDetailAndHolder(t *testing.T) {
 
 // goDetectors is the table a caller assembles from every class this analyzer
 // implements, which is the table the composition root builds.
-func goDetectors() map[Class]Detector {
-	return map[Class]Detector{
-		InterfaceSatisfaction: InterfaceSatisfactionDetector,
-		EncodingReflection:    EncodingReflectionDetector,
-		FormatVerbContract:    FormatVerbContractDetector,
-		ErrorsDuckTyping:      ErrorsDuckTypingDetector,
-		EnumGroup:             EnumGroupDetector,
-		GeneratedFile:         GeneratedFileDetector,
-		LinknameCgoAsmPlugin:  LinknameCgoAsmPluginDetector,
-		TemplateField:         TemplateFieldDetector,
-		ReflectiveLookup:      ReflectiveLookupDetector,
+func goDetectors() map[vocab.Exemption]Detector {
+	return map[vocab.Exemption]Detector{
+		vocab.InterfaceSatisfaction: InterfaceSatisfactionDetector,
+		vocab.EncodingReflection:    EncodingReflectionDetector,
+		vocab.FormatVerbContract:    FormatVerbContractDetector,
+		vocab.ErrorsDuckTyping:      ErrorsDuckTypingDetector,
+		vocab.EnumGroup:             EnumGroupDetector,
+		vocab.GeneratedFile:         GeneratedFileDetector,
+		vocab.LinknameCgoAsmPlugin:  LinknameCgoAsmPluginDetector,
+		vocab.TemplateField:         TemplateFieldDetector,
+		vocab.ReflectiveLookup:      ReflectiveLookupDetector,
 	}
 }
 
@@ -278,7 +198,7 @@ func TestComputeKeepsOneRecordPerHolderForAMethodConvertedAtSeveralSites(t *test
 	// The class states the fact once per conversion, which is what gives the
 	// framework something to collapse: without this the assertion below would
 	// hold over a fixture carrying one conversion.
-	perSite, err := shared.detect(t, InterfaceSatisfaction)
+	perSite, err := shared.detect(t, vocab.InterfaceSatisfaction)
 	if err != nil {
 		t.Fatalf("Setup: InterfaceSatisfactionDetector(several-sites.txtar): %v", err)
 	}
@@ -454,7 +374,7 @@ func fixtureOptions(t *testing.T, archive string) Options {
 const templateFixtureDir = "templates"
 
 func TestEveryClauseIsOneRelationThenTheThingItRelatesTo(t *testing.T) {
-	seen := make(map[Class]bool, len(Classes()))
+	seen := make(map[vocab.Exemption]bool, len(Classes()))
 	for _, archive := range fixtureArchives(t) {
 		t.Run(archive, func(t *testing.T) {
 			found, err := analysisOf(t, archive, fixtureOptions(t, archive)).compute(t, false)
@@ -462,7 +382,7 @@ func TestEveryClauseIsOneRelationThenTheThingItRelatesTo(t *testing.T) {
 				t.Fatalf("Compute(%s) error: %v", archive, err)
 			}
 			for _, e := range found {
-				seen[Class(e.Class)] = true
+				seen[vocab.Exemption(e.Class)] = true
 				checkClause(t, archive, e)
 			}
 		})
@@ -505,9 +425,9 @@ func checkClause(t *testing.T, archive string, e graph.Exemption) {
 var errEvidence = errors.New("the template directory cannot be read")
 
 func TestComputeNamesTheClassThatFailed(t *testing.T) {
-	detectors := map[Class]Detector{
-		GeneratedFile: detector(graph.Exemption{ID: "a.go:1:1", Class: string(GeneratedFile)}),
-		TemplateField: func(*Input) ([]graph.Exemption, error) { return nil, errEvidence },
+	detectors := map[vocab.Exemption]Detector{
+		vocab.GeneratedFile: detector(graph.Exemption{ID: "a.go:1:1", Class: string(vocab.GeneratedFile)}),
+		vocab.TemplateField: func(*Input) ([]graph.Exemption, error) { return nil, errEvidence },
 	}
 
 	found, _, err := Compute(&Input{}, detectors)
@@ -520,9 +440,9 @@ func TestComputeNamesTheClassThatFailed(t *testing.T) {
 		t.Errorf("Compute over a class that failed retained %v, want nothing", held(found))
 	}
 	if got := err.Error(); !slices.Contains([]string{
-		"exempt: " + string(TemplateField) + ": " + errEvidence.Error(),
+		"exempt: " + string(vocab.TemplateField) + ": " + errEvidence.Error(),
 	}, got) {
-		t.Errorf("Compute over a class that failed error = %q, want it to name %s", got, TemplateField)
+		t.Errorf("Compute over a class that failed error = %q, want it to name %s", got, vocab.TemplateField)
 	}
 }
 
@@ -536,8 +456,8 @@ func TestComputeHandsEveryClassTheLoadedConfigurationItReads(t *testing.T) {
 	// resolver over it, the target root, the reader and the configured half, and
 	// every class is written against that one value.
 	var seen *Input
-	detectors := map[Class]Detector{
-		GeneratedFile: func(in *Input) ([]graph.Exemption, error) {
+	detectors := map[vocab.Exemption]Detector{
+		vocab.GeneratedFile: func(in *Input) ([]graph.Exemption, error) {
 			seen = in
 			return nil, nil
 		},

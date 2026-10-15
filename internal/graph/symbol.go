@@ -91,7 +91,7 @@ type Symbol struct {
 
 	// Dependents are, for a constant of a parenthesized constant declaration, the
 	// other constants of the group whose value its specification's deletion
-	// changes or leaves undefined, as grammar/analysis.md "Positional members"
+	// changes or leaves undefined, as grammar/analysis/fixability.md "Positional members"
 	// states, blank names left out ([enumeration.constantDependents]).
 	Dependents []SymbolID
 

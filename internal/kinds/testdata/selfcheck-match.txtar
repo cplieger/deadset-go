@@ -13,10 +13,10 @@ package selfcheckmatch
 // Store holds nothing.
 type Store struct{}
 
-//deadset:ignore DS1801 -- published method whose parameter the body never names
+//deadset:ignore DS1401 -- published method whose parameter the body never names
 func (*Store) Get(key string) string { return "v" }
 
-//deadset:ignore DS1801 -- two unused parameters under one record
+//deadset:ignore DS1401 -- two unused parameters under one record
 func Pair(a, b int) int { return 1 }
 
 //deadset:ignore DS1001 -- the wrong code: the finding is DS1002
@@ -24,8 +24,8 @@ func hidden() int { return 2 }
 
 func deadCaller() int { return helper(3) }
 
-//deadset:ignore DS1801 -- the parameter is read, so this matches nothing
+//deadset:ignore DS1401 -- the parameter is read, so this matches nothing
 func helper(n int) int { return n }
 
-//deadset:ignore DS1002,DS1801 -- the mark holds spare back, and its parameter is read
+//deadset:ignore DS1002,DS1401 -- the mark holds spare back, and its parameter is read
 func spare(n int) int { return n }

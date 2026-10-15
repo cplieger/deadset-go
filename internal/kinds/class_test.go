@@ -12,6 +12,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // theConsumer is the consumer identifier every class case of this file names.
@@ -21,36 +22,36 @@ func TestTheReachabilityClassIsWhatTheRunKnowsAboutTheConsumers(t *testing.T) {
 	for name, one := range map[string]struct {
 		resolved  config.Config
 		consumers Consumers
-		want      Class
+		want      vocab.Class
 	}{
 		"an application, whose every caller is in the graph": {
 			resolved: applicationConfig(),
-			want:     Certain,
+			want:     vocab.Certain,
 		},
 		"a library whose declared consumer loaded, with the set declared complete": {
 			resolved:  libraryConfig(),
 			consumers: Consumers{Declared: []string{theConsumer}, Loaded: []string{theConsumer}, Complete: true},
-			want:      Certain,
+			want:      vocab.Certain,
 		},
 		"a library whose declared consumer loaded, with the set not declared complete": {
 			resolved:  libraryConfig(),
 			consumers: Consumers{Declared: []string{theConsumer}, Loaded: []string{theConsumer}},
-			want:      Certain,
+			want:      vocab.Certain,
 		},
 		"a library whose declared consumer did not load": {
 			resolved:  libraryConfig(),
 			consumers: Consumers{Declared: []string{theConsumer}, Complete: true},
-			want:      Probable,
+			want:      vocab.Probable,
 		},
 		"a library with no consumer information at all": {
 			resolved:  libraryConfig(),
 			consumers: Consumers{},
-			want:      Possible,
+			want:      vocab.Possible,
 		},
 		"a library whose consumer set is declared complete and declares none": {
 			resolved:  libraryConfig(),
 			consumers: Consumers{Complete: true},
-			want:      Possible,
+			want:      vocab.Possible,
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -60,7 +61,7 @@ func TestTheReachabilityClassIsWhatTheRunKnowsAboutTheConsumers(t *testing.T) {
 
 			result := computed(t, in, declarationEmitters())
 
-			found := findingOf(t, result.Findings, unusedMemberCode, "Counter.Stale")
+			found := findingOf(t, result.Findings, vocab.UnusedMember, "Counter.Stale")
 			if found.Class != one.want {
 				t.Errorf("the pass reports the class %q for an exported field of %s, want %q",
 					found.Class, name, one.want)
@@ -100,11 +101,11 @@ func TestEveryFindingNamesTheConsumersTheRunLoaded(t *testing.T) {
 func TestTheClassOfADeclarationNoConsumerCanReachIsCertainWithoutAnyConsumerInformation(t *testing.T) {
 	for name, one := range map[string]struct {
 		id   graph.SymbolID
-		want Class
+		want vocab.Class
 	}{
-		"an exported declaration of an internal package":   {id: internalID, want: Certain},
-		"an unexported declaration":                        {id: helperID, want: Certain},
-		"an exported declaration of an importable package": {id: exportedID, want: Possible},
+		"an exported declaration of an internal package":   {id: internalID, want: vocab.Certain},
+		"an unexported declaration":                        {id: helperID, want: vocab.Certain},
+		"an exported declaration of an importable package": {id: exportedID, want: vocab.Possible},
 	} {
 		t.Run(name, func(t *testing.T) {
 			in := handInput(libraryConfig())
@@ -126,16 +127,16 @@ func TestTheClassOfATypeParameterOfAFunctionIsCertainWithNoConsumerInformation(t
 	in := inputOf(t, "precedence-importable.txtar", libraryConfig(), Consumers{})
 
 	result := computed(t, in, packageEmitters())
-	found := findingOf(t, result.Findings, typeParameterCode, "Convert[T]")
-	if found.Class != Certain || found.Confidence != Certain {
+	found := findingOf(t, result.Findings, vocab.UnusedTypeParameter, "Convert[T]")
+	if found.Class != vocab.Certain || found.Confidence != vocab.Certain {
 		t.Errorf("the pass reports the type parameter of an exported function of a library with the class %q and the confidence %q, want %q for both",
-			found.Class, found.Confidence, Certain)
+			found.Class, found.Confidence, vocab.Certain)
 	}
 
 	container := narrowedIDOf(t, in, "go://example.com/app/api#Convert")
-	if got := in.classOf(container); got != Possible {
+	if got := in.classOf(container); got != vocab.Possible {
 		t.Errorf("classOf(the function that declares the type parameter) = %q, want %q: the type parameter's class is the parameter's own rule and not its container's",
-			got, Possible)
+			got, vocab.Possible)
 	}
 }
 
@@ -156,9 +157,9 @@ func TestTheCorpusConversionFixtureIsCertainWithItsConsumerLoaded(t *testing.T) 
 	}
 
 	dead := narrowedIDOf(t, in, "go://example.com/target#DeadExport")
-	if got := in.classOf(dead); got != Certain {
+	if got := in.classOf(dead); got != vocab.Certain {
 		t.Errorf("classOf(%s) = %q with the fixture's consumer loaded and the set not declared complete, want %q",
-			"go://example.com/target#DeadExport", got, Certain)
+			"go://example.com/target#DeadExport", got, vocab.Certain)
 	}
 
 	// The expectation's row for the same declaration is a finding: the
@@ -166,10 +167,10 @@ func TestTheCorpusConversionFixtureIsCertainWithItsConsumerLoaded(t *testing.T) 
 	// consumers all loaded, which is the fixture's run, and the completeness
 	// declaration the fixture does not carry decides nothing about it.
 	result := computed(t, in, packageEmitters())
-	found := findingOf(t, result.Findings, unusedExportedCode, "DeadExport")
-	if found.Class != Certain || found.Confidence != Certain {
+	found := findingOf(t, result.Findings, vocab.UnusedExported, "DeadExport")
+	if found.Class != vocab.Certain || found.Confidence != vocab.Certain {
 		t.Errorf("the pass reports %s with the class %q and the confidence %q, want %q for both",
-			found.Symbol.Ref, found.Class, found.Confidence, Certain)
+			found.Symbol.Ref, found.Class, found.Confidence, vocab.Certain)
 	}
 	if !slices.Equal(found.ConsumersLoaded, []string{"example.com/consumer"}) {
 		t.Errorf("the pass reports %s naming the loaded consumers %v, want the fixture's own consumer module",
@@ -298,8 +299,8 @@ func TestTheClassOfADeclarationOfAMainPackageIsCertain(t *testing.T) {
 			continue
 		}
 		found = true
-		if got := in.classOf(id); got != Certain {
-			t.Errorf("classOf(%s) = %q for a declaration of a main package, want %q", ref, got, Certain)
+		if got := in.classOf(id); got != vocab.Certain {
+			t.Errorf("classOf(%s) = %q for a declaration of a main package, want %q", ref, got, vocab.Certain)
 		}
 	}
 	if !found {
@@ -314,9 +315,9 @@ func TestTheClassOfADeclarationOfATestFileIsCertain(t *testing.T) {
 	in := inputOf(t, "declarations-test-of-dead-code.txtar", libraryConfig(), Consumers{})
 
 	test := narrowedIDOf(t, in, "go://example.com/app/catalog#TestDeadOnly")
-	if got := in.classOf(test); got != Certain {
+	if got := in.classOf(test); got != vocab.Certain {
 		t.Errorf("classOf(TestDeadOnly) = %q for a test function of a published package's own test file, want %q",
-			got, Certain)
+			got, vocab.Certain)
 	}
 }
 
@@ -328,16 +329,16 @@ func TestTheClassOfADeclarationOfATestFileIsCertain(t *testing.T) {
 func TestTheClassOfAFieldOfAnUnexposedUnexportedTypeIsCertain(t *testing.T) {
 	in := inputOf(t, "class-hidden-member.txtar", libraryConfig(), Consumers{})
 
-	for member, want := range map[string]Class{
-		"hidden.Width":    Certain,
-		"hidden.Area":     Possible,
-		"sizer.Measure":   Certain,
-		"returned.Height": Possible,
-		"promoted.Depth":  Possible,
-		"spanner.Span":    Possible,
-		"aliased.Length":  Possible,
-		"counter.Count":   Possible,
-		"Shown.Size":      Possible,
+	for member, want := range map[string]vocab.Class{
+		"hidden.Width":    vocab.Certain,
+		"hidden.Area":     vocab.Possible,
+		"sizer.Measure":   vocab.Certain,
+		"returned.Height": vocab.Possible,
+		"promoted.Depth":  vocab.Possible,
+		"spanner.Span":    vocab.Possible,
+		"aliased.Length":  vocab.Possible,
+		"counter.Count":   vocab.Possible,
+		"Shown.Size":      vocab.Possible,
 	} {
 		t.Run(member, func(t *testing.T) {
 			ref := "go://example.com/app/shape#" + member

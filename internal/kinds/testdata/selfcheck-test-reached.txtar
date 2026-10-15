@@ -33,7 +33,7 @@ package samples
 
 // Sample is called by a test alone.
 //
-//deadset:ignore DS1004 -- kept for the test that reads it
+//deadset:ignore DS1102 -- kept for the test that reads it
 func Sample() int { return 1 }
 
 // Spare is called by nothing.

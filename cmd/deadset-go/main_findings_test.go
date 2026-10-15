@@ -7,13 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/catalog"
 	"github.com/cplieger/deadset-go/v2/internal/config"
-	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
 	"github.com/cplieger/deadset-go/v2/internal/load"
-	"github.com/cplieger/deadset-go/v2/internal/suppress"
+	core "github.com/cplieger/deadset-spec/v8/suppress"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // goKindsWithoutEmitter are the live Go kinds the emitters table holds no entry
@@ -21,9 +20,9 @@ import (
 // the table's test says which kinds the table is silent about instead of allowing a
 // kind to go missing unnoticed.
 //
-// DS1705 is the merge's, which is another product.
-var goKindsWithoutEmitter = []string{
-	"DS1705", // the stale cross-language edge, which the merge answers
+// DS9005 is the merge's, which is another product.
+var goKindsWithoutEmitter = []vocab.Code{
+	"DS9005", // the stale cross-language edge, which the merge answers
 }
 
 // findingsArchive is the module the findings pass is driven against: an application
@@ -65,8 +64,8 @@ func findingsOfDir(t *testing.T, dir string) findingSet {
 	t.Helper()
 
 	resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
-	if code != exitClean {
-		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, exitClean)
+	if code != vocab.ExitClean {
+		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
 	options, err := exemptOptions(&resolved.config)
 	if err != nil {
@@ -82,9 +81,9 @@ func findingsOfDir(t *testing.T, dir string) findingSet {
 func TestEmittersNameEveryLiveGoKindOrSayWhichHasNoRule(t *testing.T) {
 	t.Parallel()
 
-	var published []string
-	for _, row := range catalog.Kinds() {
-		if !slices.Contains(row.Languages, string(language)) {
+	var published []vocab.Code
+	for _, row := range vocab.Kinds() {
+		if !row.AppliesTo(vocab.Go) {
 			continue
 		}
 		published = append(published, row.Code)
@@ -103,18 +102,18 @@ func TestEmittersNameEveryLiveGoKindOrSayWhichHasNoRule(t *testing.T) {
 			len(published), len(emitters), len(goKindsWithoutEmitter))
 	}
 	for code := range emitters {
-		row, live := catalog.Kind(code)
+		row, live := vocab.KindOf(code)
 		if !live {
 			t.Errorf("the table registers an emitter under %s, which names no live kind", code)
 			continue
 		}
-		if !slices.Contains(row.Languages, string(language)) {
+		if !row.AppliesTo(vocab.Go) {
 			t.Errorf("the table registers an emitter under %s, which the vocabulary gives languages %v and not %s",
 				code, row.Languages, language)
 		}
 	}
 	for _, code := range goKindsWithoutEmitter {
-		if _, live := catalog.Kind(code); !live {
+		if _, live := vocab.KindOf(code); !live {
 			t.Errorf("%s is named as a live Go kind without a rule, and the vocabulary does not hold it", code)
 		}
 	}
@@ -130,9 +129,9 @@ func TestFindingsOfReportsEveryDeadDeclarationOfAModuleOnceAndInTheCanonicalOrde
 	// whose every production reference is dead.
 	want := []string{
 		"app.go\t9\tDS1002\tgo://example.com/app#forgotten",
-		"app.go\t12\tDS1004\tgo://example.com/app#probed",
-		"app.go\t17\tDS1006\tgo://example.com/app#retired",
-		"app_test.go\t5\tDS1005\tgo://example.com/app#TestProbed",
+		"app.go\t12\tDS1102\tgo://example.com/app#probed",
+		"app.go\t17\tDS1104\tgo://example.com/app#retired",
+		"app_test.go\t5\tDS1103\tgo://example.com/app#TestProbed",
 	}
 	if got := reported(set.result.Findings); !slices.Equal(got, want) {
 		t.Errorf("findingsOf() reported\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -144,7 +143,7 @@ func TestFindingsOfReportsEveryDeadDeclarationOfAModuleOnceAndInTheCanonicalOrde
 
 	// One symbol is reported once, which is what the framework refuses to break
 	// and what the whole table over one real module is the measurement of.
-	seen := make(map[string]string, len(set.result.Findings))
+	seen := make(map[string]vocab.Code, len(set.result.Findings))
 	for _, found := range set.result.Findings {
 		if first, twice := seen[found.Symbol.Ref]; twice {
 			t.Errorf("findingsOf() reported %s under %s and under %s", found.Symbol.Ref, first, found.Code)
@@ -165,7 +164,7 @@ func TestFindingsOfCompletesAFindingWithEveryFieldTheContractRequires(t *testing
 	if got, want := found.Kind, "unused-unexported"; got != want {
 		t.Errorf("the finding's issue kind is %q, want %q as the vocabulary names the code", got, want)
 	}
-	if got, want := found.Language, string(config.GoLanguage); got != want {
+	if got, want := found.Language, vocab.Go; got != want {
 		t.Errorf("the finding's language is %q, want %q", got, want)
 	}
 	if got, want := found.Position, (kinds.Position{Path: "app.go", Line: 9, Column: 6, EndLine: 9}); got != want {
@@ -179,10 +178,10 @@ func TestFindingsOfCompletesAFindingWithEveryFieldTheContractRequires(t *testing
 	}); got != want {
 		t.Errorf("the finding's symbol is %+v, want %+v", got, want)
 	}
-	if got, want := found.Class, kinds.Certain; got != want {
+	if got, want := found.Class, vocab.Certain; got != want {
 		t.Errorf("the finding's reachability class is %q, want %q: an unexported declaration of any target is certain", got, want)
 	}
-	if got, want := found.Confidence, kinds.Certain; got != want {
+	if got, want := found.Confidence, vocab.Certain; got != want {
 		t.Errorf("the finding's confidence is %q, want %q: the kind's ceiling is certain", got, want)
 	}
 	if got, want := found.Relation, graph.ReferenceCounting; got != want {
@@ -212,11 +211,11 @@ func TestFindingsOfCompletesAFindingWithEveryFieldTheContractRequires(t *testing
 
 	// The vocabulary owns the severity and the fixability of every kind, so the
 	// two are read from it rather than restated here.
-	row, live := catalog.Kind("DS1002")
+	row, live := vocab.KindOf("DS1002")
 	if !live {
 		t.Fatal("Setup: the vocabulary does not hold DS1002")
 	}
-	if got, want := string(found.Severity), row.DefaultSeverity; got != want {
+	if got, want := found.Severity, row.DefaultSeverity; got != want {
 		t.Errorf("the finding's severity is %q, want %q as the vocabulary sets it", got, want)
 	}
 	if got, want := found.Fixability, row.Fixability; got != want {
@@ -314,8 +313,8 @@ func TestFindingsOfFailures(t *testing.T) {
 
 			dir := writeModule(t, tc.files)
 			resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
-			if code != exitClean {
-				t.Fatalf("Setup: resolve the configuration = %d, want %d", code, exitClean)
+			if code != vocab.ExitClean {
+				t.Fatalf("Setup: resolve the configuration = %d, want %d", code, vocab.ExitClean)
 			}
 			options, err := exemptOptions(&resolved.config)
 			if err != nil {
@@ -339,11 +338,11 @@ func TestFindingsOfRefusesATableRegisteredUnderACodeTheVocabularyDoesNotHold(t *
 	// The pass a defect in a kind's table produces is a failure rather than a
 	// finding list, which is the exit code an emitter's own error takes as well.
 	in := &kinds.Input{Config: &config.Config{}}
-	_, err := kinds.Compute(in, map[string]kinds.Emitter{"DS1400": kinds.UnusedExported})
+	_, err := kinds.Compute(in, map[vocab.Code]kinds.Emitter{"DS1499": kinds.UnusedExported})
 	if err == nil {
-		t.Fatal("kinds.Compute(a table naming a retired code) = _, <nil>, want an error")
+		t.Fatal("kinds.Compute(a table naming a code no kind carries) = _, <nil>, want an error")
 	}
-	if got, want := exitCodeFor(err), exitFailure; got != want {
+	if got, want := exitCodeFor(err), vocab.ExitFailure; got != want {
 		t.Errorf("exitCodeFor(%v) = %d, want %d", err, got, want)
 	}
 
@@ -351,7 +350,7 @@ func TestFindingsOfRefusesATableRegisteredUnderACodeTheVocabularyDoesNotHold(t *
 	if err == nil {
 		t.Fatal("kinds.Compute(no input) = _, <nil>, want an error")
 	}
-	if got, want := exitCodeFor(err), exitFailure; got != want {
+	if got, want := exitCodeFor(err), vocab.ExitFailure; got != want {
 		t.Errorf("exitCodeFor(%v) = %d, want %d", err, got, want)
 	}
 }
@@ -369,8 +368,8 @@ func TestGeneratedPathsNamesTheGeneratedFilesOfTheRun(t *testing.T) {
 	})
 
 	resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
-	if code != exitClean {
-		t.Fatalf("Setup: resolve the configuration = %d, want %d", code, exitClean)
+	if code != vocab.ExitClean {
+		t.Fatalf("Setup: resolve the configuration = %d, want %d", code, vocab.ExitClean)
 	}
 	options, err := exemptOptions(&resolved.config)
 	if err != nil {
@@ -417,7 +416,7 @@ func TestFindingsOfSaysAFindingAboutGeneratedSourceIsGenerated(t *testing.T) {
 		t.Errorf("the finding about %s is not marked generated, want generated: %s carries the generation marker",
 			found.Symbol.Ref, found.Position.Path)
 	}
-	if got, want := found.Fixability, "none"; got != want {
+	if got, want := found.Fixability, vocab.None; got != want {
 		t.Errorf("the finding's fixability is %q, want %q: a generated file is fixed by its generator", got, want)
 	}
 }
@@ -476,7 +475,7 @@ func reported(findings []kinds.Finding) []string {
 
 // findingUnder is the one finding a code reports, and a failure where the pass
 // reported none or more than one.
-func findingUnder(t *testing.T, findings []kinds.Finding, code string) kinds.Finding {
+func findingUnder(t *testing.T, findings []kinds.Finding, code vocab.Code) kinds.Finding {
 	t.Helper()
 
 	var held []kinds.Finding
@@ -520,8 +519,8 @@ func TestAnalysisOfComputesItsExemptionsUnderTheModeItSweepsIn(t *testing.T) {
 	const subject = "go://example.com/app#Record.Tally"
 
 	resolved, code := resolve("print-retained", printRetainedUsage, []string{"--target=" + dir}, &strings.Builder{})
-	if code != exitClean {
-		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, exitClean)
+	if code != vocab.ExitClean {
+		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
 	options, err := exemptOptions(&resolved.config)
 	if err != nil {
@@ -534,7 +533,7 @@ func TestAnalysisOfComputesItsExemptionsUnderTheModeItSweepsIn(t *testing.T) {
 		named string
 		want  string
 	}{
-		{named: modePlain, want: string(exempt.EncodingReflection)},
+		{named: modePlain, want: string(vocab.EncodingReflection)},
 		{named: modeProduction, want: ""},
 	} {
 		mode := modeOf(&resolved.config, test.named)
@@ -588,7 +587,7 @@ func TestTheSuppressionRecordsAreReadInTheOrderTheGrammarResolvesThem(t *testing
 			"// used is what the entry point calls.\nfunc used() {}\n\n" +
 			"//deadset:ignore DS1002 -- the first directive by position\nfunc first() {}\n",
 		"zz.go": "package main\n\n//deadset:ignore DS1002 -- the last directive by position\nfunc last() {}\n",
-		suppress.IgnoreFileName: `{
+		core.IgnoreFileName: `{
   "description": "Two entries in document order.",
   "ignore": [
     { "code": "DS1002", "symbol": "go://example.com/app#first", "path": "app.go", "reason": "the first entry" },
@@ -596,7 +595,7 @@ func TestTheSuppressionRecordsAreReadInTheOrderTheGrammarResolvesThem(t *testing
   ]
 }
 `,
-		suppress.BaselineFileName: `{
+		core.BaselineFileName: `{
   "description": "One recorded row.",
   "baseline": [
     { "code": "DS1002", "symbol": "go://example.com/app#first", "path": "app.go", "reason": "recorded by deadset-go 1.15.0" }
@@ -607,8 +606,8 @@ func TestTheSuppressionRecordsAreReadInTheOrderTheGrammarResolvesThem(t *testing
 	})
 
 	resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
-	if code != exitClean {
-		t.Fatalf("Setup: resolve the configuration = %d, want %d", code, exitClean)
+	if code != vocab.ExitClean {
+		t.Fatalf("Setup: resolve the configuration = %d, want %d", code, vocab.ExitClean)
 	}
 	options, err := exemptOptions(&resolved.config)
 	if err != nil {
@@ -627,9 +626,9 @@ func TestTheSuppressionRecordsAreReadInTheOrderTheGrammarResolvesThem(t *testing
 	want := []string{
 		"inline app.go:8",
 		"inline zz.go:3",
-		"ignore " + suppress.IgnoreFileName + ":4",
-		"ignore " + suppress.IgnoreFileName + ":5",
-		"baseline " + suppress.BaselineFileName + ":4",
+		"ignore " + core.IgnoreFileName + ":4",
+		"ignore " + core.IgnoreFileName + ":5",
+		"baseline " + core.BaselineFileName + ":4",
 	}
 	if !slices.Equal(read, want) {
 		t.Errorf("the run read the records as %v, want %v", read, want)
@@ -670,14 +669,14 @@ func TestFindingsOfKeepsAMethodReachedThroughAnInterfaceHandedOnByAFunctionValue
 		found := &envelope.Findings[i]
 		switch found.Symbol.Ref {
 		case "go://example.com/app#Getter.Get":
-			uncalled = found.Code == "DS1203"
+			uncalled = found.Code == "DS1202"
 		case "go://example.com/app#Store.Get", "go://example.com/app#db.Get", "go://example.com/app#fake.Get":
 			t.Errorf("findingsOf(the hand-off module) reports %s %s at %s:%d, want %s live: read selects it through Narrow",
 				found.Code, found.Symbol.Ref, found.Position.Path, found.Position.Line, found.Symbol.Ref)
 		}
 	}
 	if !uncalled {
-		t.Errorf("findingsOf(the hand-off module) = %v, want DS1203 about Getter.Get, which no call selects", findingCodes(envelope.Findings))
+		t.Errorf("findingsOf(the hand-off module) = %v, want DS1202 about Getter.Get, which no call selects", reportedCodes(envelope.Findings))
 	}
 }
 

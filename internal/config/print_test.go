@@ -104,7 +104,7 @@ func TestPrintWritesOneIndentedObjectEndingInANewline(t *testing.T) {
 func TestPrintIsDeterministic(t *testing.T) {
 	t.Parallel()
 
-	document := `{"target": {"kind": "library"}, "severity": {"DS1801": "allow", "DS1101": "warn", "DS18": "deny"}}`
+	document := `{"target": {"kind": "library"}, "severity": {"DS1401": "allow", "DS1501": "warn", "DS15": "deny"}}`
 	first := printed(t, document, "", nil)
 	second := printed(t, document, "", nil)
 	if !bytes.Equal(first, second) {
@@ -116,9 +116,9 @@ func TestPrintWritesSeverityCodesInAscendingOrder(t *testing.T) {
 	t.Parallel()
 
 	document := printed(t,
-		`{"target": {"kind": "library"}, "severity": {"DS1801": "allow", "DS1101": "warn", "DS18": "deny"}}`, "", nil)
+		`{"target": {"kind": "library"}, "severity": {"DS1401": "allow", "DS1501": "warn", "DS15": "deny"}}`, "", nil)
 	got := printedKeyOrder(t, section(t, document, "severity"))
-	want := []string{"DS1101", "DS18", "DS1801"}
+	want := []string{"DS1401", "DS15", "DS1501"}
 	if !slices.Equal(got, want) {
 		t.Errorf("Print() wrote the severity codes %v, want them ascending %v", got, want)
 	}
@@ -128,7 +128,7 @@ func TestPrintWritesEveryProvenanceValueTheContractAccepts(t *testing.T) {
 	t.Parallel()
 
 	document := printed(t,
-		`{"target": {"kind": "library"}, "severity": {"DS1101": "warn"}}`,
+		`{"target": {"kind": "library"}, "severity": {"DS1501": "warn"}}`,
 		`{"reporters.sort": "size"}`,
 		map[string]string{"reporters.sort": "--sort"},
 	)
@@ -146,7 +146,7 @@ func TestPrintWritesEveryProvenanceValueTheContractAccepts(t *testing.T) {
 	for path, want := range map[string]string{
 		"target.kind":            "repository: deadset.json",
 		"reporters.sort":         "flag: --sort",
-		"severity.DS1101":        "repository: deadset.json",
+		"severity.DS1501":        "repository: deadset.json",
 		"reporters.max_findings": "default",
 	} {
 		if got := decoded.Provenance[path]; got != want {

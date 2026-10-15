@@ -18,7 +18,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cplieger/deadset-go/v2/internal/catalog"
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/deps"
 	"github.com/cplieger/deadset-go/v2/internal/edges"
@@ -29,27 +28,15 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/matrix"
 	"github.com/cplieger/deadset-go/v2/internal/memory"
-	"github.com/cplieger/deadset-go/v2/internal/report"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
+	"github.com/cplieger/deadset-spec/v8/report"
+	core "github.com/cplieger/deadset-spec/v8/suppress"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // name is this analyzer's name wherever a document names a product.
 const name = "deadset-go"
-
-// The exit codes contract/exit-codes.json names. The pending verdict belongs to a
-// verb that returns a verdict about a merged report, and no such verb is served
-// yet.
-const (
-	exitClean    = 0
-	exitFindings = 1
-	exitUsage    = 2
-	exitFailure  = 3
-)
-
-// unmatchedRoot is the issue kind contract/kinds.json gives a configured root or
-// root pattern that names no symbol.
-const unmatchedRoot = "DS1704"
 
 // repositoryDocument is the repository configuration's name at the target root.
 const repositoryDocument = "deadset.json"
@@ -63,11 +50,7 @@ const rootsPatternsSetting = "roots.patterns"
 const maxDocumentBytes = 1 << 20
 
 // language is the language this analyzer claims.
-const language = config.GoLanguage
-
-// schemaVersionsAccepted lists every report schema version this analyzer reads,
-// which is contract.json's schema_versions.
-var schemaVersionsAccepted = []string{report.SchemaVersion}
+const language = vocab.Go
 
 // settingFlag is one setting a command-line flag supplies: the dotted path the
 // resolved configuration names the setting by, and what the flag's value is.
@@ -122,7 +105,7 @@ const printConfigUsage = "usage: deadset-go print-config [--target=DIR] [--confi
 
 const printRootsUsage = "usage: deadset-go print-roots [--target=DIR] [--config=FILE] [--central=FILE] [--min-confidence=CLASS]"
 
-const printRetainedUsage = "usage: deadset-go print-retained [--target=DIR] [--config=FILE] [--central=FILE] [--min-confidence=CLASS] [--mode=MODE]"
+const printRetainedUsage = "usage: deadset-go print-retained [--target=DIR] [--config=FILE] [--central=FILE] [--scope=FILE] [--min-confidence=CLASS] [--mode=MODE]"
 
 // The modes a run analyses in, as --mode spells them. The production mode is the one
 // the report is built from: it counts no reference a test file made, so an exemption
@@ -180,20 +163,20 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if flagName, ok := sourceEditFlag(args); ok {
 		fmt.Fprintf(stderr, "deadset-go: %s is not supported: deadset-go reports and never edits a source file\n", flagName)
 		fmt.Fprintln(stderr, usage)
-		return exitUsage
+		return vocab.ExitUsage
 	}
 
 	set := flag.NewFlagSet(name, flag.ContinueOnError)
 	set.SetOutput(stderr)
 	set.Usage = func() { fmt.Fprintln(stderr, usage) }
 	if err := set.Parse(args); err != nil {
-		return exitUsage
+		return vocab.ExitUsage
 	}
 
 	switch verb := set.Arg(0); verb {
 	case "version":
-		fmt.Fprintf(stdout, "deadset-go %s\ncontract %s\n", version(), config.ContractVersion)
-		return exitClean
+		fmt.Fprintf(stdout, "deadset-go %s\ncontract %s\n", version(), vocab.ContractVersion)
+		return vocab.ExitClean
 	case "describe":
 		return describe(set.Args()[1:], stdout, stderr)
 	case "print-config":
@@ -208,11 +191,11 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return explain(ctx, set.Args()[1:], stdout, stderr)
 	case "":
 		set.Usage()
-		return exitUsage
+		return vocab.ExitUsage
 	default:
 		fmt.Fprintf(stderr, "deadset-go: unknown verb %q\n", verb)
 		set.Usage()
-		return exitUsage
+		return vocab.ExitUsage
 	}
 }
 
@@ -221,11 +204,11 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 //
 //nolint:govet // fieldalignment: encoding/json writes fields in declaration order, and this is the order the Contract's analyzer object declares these members in
 type describeDocument struct {
-	Name                   string            `json:"name"`
-	Version                string            `json:"version"`
-	ContractVersion        string            `json:"contract_version"`
-	SchemaVersionsAccepted []string          `json:"schema_versions_accepted"`
-	Languages              []config.Language `json:"languages"`
+	Name                   string           `json:"name"`
+	Version                string           `json:"version"`
+	ContractVersion        string           `json:"contract_version"`
+	SchemaVersionsAccepted []string         `json:"schema_versions_accepted"`
+	Languages              []vocab.Language `json:"languages"`
 	// Conformance is the analyzer's result over the conformance corpus, read from
 	// the two documents the binary carries. The orchestrator's handshake refuses
 	// an analyzer whose result is not a pass before it runs an analysis at all,
@@ -239,35 +222,35 @@ func describe(args []string, stdout, stderr io.Writer) int {
 	if len(args) != 0 {
 		fmt.Fprintf(stderr, "deadset-go: describe takes no argument, got %q\n", args[0])
 		fmt.Fprintln(stderr, usage)
-		return exitUsage
+		return vocab.ExitUsage
 	}
 
 	answered, err := corpusAnswer()
 	if err != nil {
 		fmt.Fprintf(stderr, "deadset-go: describe: %v\n", err)
-		return exitFailure
+		return vocab.ExitFailure
 	}
 	encoded, err := jsondoc.Encode(describeDocument{
 		Name:                   name,
 		Version:                version(),
-		ContractVersion:        config.ContractVersion,
-		SchemaVersionsAccepted: schemaVersionsAccepted,
-		Languages:              []config.Language{language},
+		ContractVersion:        vocab.ContractVersion,
+		SchemaVersionsAccepted: vocab.SchemaVersions(),
+		Languages:              []vocab.Language{language},
 		Conformance: conformanceBlock{
 			CorpusVersion: answered.conformance.CorpusVersion,
-			Result:        answered.conformance.Result,
+			Result:        string(answered.conformance.Result),
 			Digest:        answered.conformance.Digest,
 		},
 	}, "  ")
 	if err != nil {
 		fmt.Fprintf(stderr, "deadset-go: describe: %v\n", err)
-		return exitFailure
+		return vocab.ExitFailure
 	}
 	if _, err := stdout.Write(encoded); err != nil {
 		fmt.Fprintf(stderr, "deadset-go: describe: %v\n", err)
-		return exitFailure
+		return vocab.ExitFailure
 	}
-	return exitClean
+	return vocab.ExitClean
 }
 
 // resolution is what one invocation resolved to: the configuration, the
@@ -281,7 +264,7 @@ func describe(args []string, stdout, stderr io.Writer) int {
 // of one baseline write share, and nil on every other run.
 type resolution struct {
 	provenance config.Provenance
-	baseline   *[]suppress.Recorded
+	baseline   *[]core.Recorded
 	prepared   *preparation
 	target     string
 	scope      string
@@ -326,21 +309,21 @@ func configuredFlagSet(verb, verbUsage string, stderr io.Writer, scoped bool) co
 }
 
 // resolution reads the configuration documents the parsed flags name and resolves
-// them. The returned code is exitClean when the resolution succeeded, and otherwise
+// them. The returned code is vocab.ExitClean when the resolution succeeded, and otherwise
 // the code the verb returns with the message already printed.
 func (f *configuredFlags) resolution(stderr io.Writer) (resolved resolution, code int) {
 	inputs, err := configInputs(*f.target, *f.repository, *f.central, f.set)
 	if err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
 		f.set.Usage()
-		return resolution{}, exitUsage
+		return resolution{}, vocab.ExitUsage
 	}
 
 	resolvedConfig, provenance, err := config.Resolve(inputs)
 	if err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
 		refusal := exitCodeFor(err)
-		if refusal == exitUsage {
+		if refusal == vocab.ExitUsage {
 			f.set.Usage()
 		}
 		return resolution{}, refusal
@@ -349,7 +332,7 @@ func (f *configuredFlags) resolution(stderr io.Writer) (resolved resolution, cod
 	if f.scope != nil {
 		document = *f.scope
 	}
-	return resolution{provenance: provenance, target: *f.target, scope: document, config: resolvedConfig}, exitClean
+	return resolution{provenance: provenance, target: *f.target, scope: document, config: resolvedConfig}, vocab.ExitClean
 }
 
 // resolve parses the flags a verb that reads a configuration and takes no argument
@@ -357,12 +340,12 @@ func (f *configuredFlags) resolution(stderr io.Writer) (resolved resolution, cod
 func resolve(verb, verbUsage string, args []string, stderr io.Writer) (resolved resolution, code int) {
 	flags := configuredFlagSet(verb, verbUsage, stderr, false)
 	if err := flags.set.Parse(args); err != nil {
-		return resolution{}, exitUsage
+		return resolution{}, vocab.ExitUsage
 	}
 	if flags.set.NArg() != 0 {
 		fmt.Fprintf(stderr, "deadset-go: %s takes no argument, got %q\n", verb, flags.set.Arg(0))
 		flags.set.Usage()
-		return resolution{}, exitUsage
+		return resolution{}, vocab.ExitUsage
 	}
 	return flags.resolution(stderr)
 }
@@ -371,15 +354,15 @@ func resolve(verb, verbUsage string, args []string, stderr io.Writer) (resolved 
 // configuration, with the provenance of every setting, to stdout.
 func printConfig(args []string, stdout, stderr io.Writer) int {
 	resolved, code := resolve("print-config", printConfigUsage, args, stderr)
-	if code != exitClean {
+	if code != vocab.ExitClean {
 		return code
 	}
 
 	if err := config.Print(stdout, resolved.config, resolved.provenance); err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
-		return exitFailure
+		return vocab.ExitFailure
 	}
-	return exitClean
+	return vocab.ExitClean
 }
 
 // detectors is the exemption classes this analyzer computes, each mapped to its
@@ -388,57 +371,54 @@ func printConfig(args []string, stdout, stderr io.Writer) int {
 // names every class the vocabulary declares for Go: a class the table does not hold
 // retains nothing, so a class missing from it is an exemption the analyzer stops
 // computing without anything refusing the configuration that disables it.
-var detectors = map[exempt.Class]exempt.Detector{
-	exempt.InterfaceSatisfaction: exempt.InterfaceSatisfactionDetector,
-	exempt.EncodingReflection:    exempt.EncodingReflectionDetector,
-	exempt.FormatVerbContract:    exempt.FormatVerbContractDetector,
-	exempt.ErrorsDuckTyping:      exempt.ErrorsDuckTypingDetector,
-	exempt.EnumGroup:             exempt.EnumGroupDetector,
-	exempt.GeneratedFile:         exempt.GeneratedFileDetector,
-	exempt.LinknameCgoAsmPlugin:  exempt.LinknameCgoAsmPluginDetector,
-	exempt.TemplateField:         exempt.TemplateFieldDetector,
-	exempt.ReflectiveLookup:      exempt.ReflectiveLookupDetector,
+var detectors = map[vocab.Exemption]exempt.Detector{
+	vocab.InterfaceSatisfaction: exempt.InterfaceSatisfactionDetector,
+	vocab.EncodingReflection:    exempt.EncodingReflectionDetector,
+	vocab.FormatVerbContract:    exempt.FormatVerbContractDetector,
+	vocab.ErrorsDuckTyping:      exempt.ErrorsDuckTypingDetector,
+	vocab.EnumGroup:             exempt.EnumGroupDetector,
+	vocab.GeneratedFile:         exempt.GeneratedFileDetector,
+	vocab.LinknameCgoAsmPlugin:  exempt.LinknameCgoAsmPluginDetector,
+	vocab.TemplateField:         exempt.TemplateFieldDetector,
+	vocab.ReflectiveLookup:      exempt.ReflectiveLookupDetector,
 }
 
 // emitters is every issue kind this analyzer reports, each mapped to the rule that
 // reports it, and it is the whole of what a findings pass computes: the framework
 // names no kind, so a code absent from this table reports nothing at all and a code
 // the vocabulary does not hold refuses the pass rather than running as nothing.
-//
-// A code is written out rather than read from the kind's own package, because the
-// table is what says which kinds this version of the analyzer answers; the
-// vocabulary says which kinds exist, and the two are compared by a test rather than
-// derived from one another.
-var emitters = map[string]kinds.Emitter{
-	"DS1001": kinds.UnusedExported,
-	"DS1002": kinds.UnusedUnexported,
-	"DS1003": kinds.UnusedMember,
-	"DS1004": kinds.TestOnlyUse,
-	"DS1005": kinds.TestOfDeadCode,
-	"DS1006": kinds.DeprecatedAndUnused,
-	"DS1101": kinds.UnnecessaryExport,
-	"DS1102": kinds.UnnecessaryExposure,
-	"DS1103": kinds.UnreachableExport,
-	"DS1501": kinds.FileNeverBuilt,
-	"DS1502": kinds.FileNeverImported,
-	"DS1201": kinds.UnusedInterface,
-	"DS1203": kinds.UncalledInterfaceMethod,
-	"DS1204": kinds.UnusedSatisfactionAssertion,
-	"DS1301": kinds.WriteOnlySymbol,
-	"DS1302": kinds.UnusedEnumMember,
-	"DS1303": kinds.UnusedTypeParameter,
-	"DS1601": kinds.UnusedDependency,
-	"DS1605": kinds.UnusedReplace,
-	"DS1701": kinds.SuppressionsWithoutReason,
-	"DS1702": kinds.UnscopedEntries,
-	"DS1703": kinds.StaleSuppressions,
-	"DS1704": kinds.UnmatchedRoots,
-	"DS1801": kinds.UnusedParameter,
-	"DS1802": kinds.UnusedReceiver,
-	"DS1803": kinds.UnusedResult,
-	"DS1805": kinds.UnreachableStatement,
-	"DS1807": kinds.DeadStore,
-	"DS1809": kinds.UnreachableCase,
+// The table says which kinds this version of the analyzer answers; the vocabulary
+// says which kinds exist, and a test compares the two.
+var emitters = map[vocab.Code]kinds.Emitter{
+	vocab.UnusedExported:              kinds.UnusedExported,
+	vocab.UnusedUnexported:            kinds.UnusedUnexported,
+	vocab.UnusedMember:                kinds.UnusedMember,
+	vocab.TestOnlyUse:                 kinds.TestOnlyUse,
+	vocab.TestOfDeadCode:              kinds.TestOfDeadCode,
+	vocab.DeprecatedUnused:            kinds.DeprecatedAndUnused,
+	vocab.UnnecessaryExport:           kinds.UnnecessaryExport,
+	vocab.UnnecessaryExposure:         kinds.UnnecessaryExposure,
+	vocab.UnreachableExport:           kinds.UnreachableExport,
+	vocab.FileNeverBuilt:              kinds.FileNeverBuilt,
+	vocab.FileNeverImported:           kinds.FileNeverImported,
+	vocab.UnusedInterface:             kinds.UnusedInterface,
+	vocab.UncalledInterfaceMethod:     kinds.UncalledInterfaceMethod,
+	vocab.UnusedSatisfactionAssertion: kinds.UnusedSatisfactionAssertion,
+	vocab.WriteOnlySymbol:             kinds.WriteOnlySymbol,
+	vocab.UnusedEnumMember:            kinds.UnusedEnumMember,
+	vocab.UnusedTypeParameter:         kinds.UnusedTypeParameter,
+	vocab.UnusedDependency:            kinds.UnusedDependency,
+	vocab.UnusedModuleDirective:       kinds.UnusedReplace,
+	vocab.SuppressionWithoutReason:    kinds.SuppressionsWithoutReason,
+	vocab.UnscopedIgnoreEntry:         kinds.UnscopedEntries,
+	vocab.StaleSuppression:            kinds.StaleSuppressions,
+	vocab.UnmatchedRoot:               kinds.UnmatchedRoots,
+	vocab.UnusedParameter:             kinds.UnusedParameter,
+	vocab.UnusedReceiver:              kinds.UnusedReceiver,
+	vocab.UnusedResult:                kinds.UnusedResult,
+	vocab.UnreachableStatement:        kinds.UnreachableStatement,
+	vocab.DeadStore:                   kinds.DeadStore,
+	vocab.UnreachableCase:             kinds.UnreachableCase,
 }
 
 // configured is one configuration of the matrix: what it loaded and the
@@ -511,6 +491,7 @@ type rootSet struct {
 // one names, and every configured string that named no symbol.
 type retainedSet struct {
 	refs      map[graph.SymbolID]string
+	positions map[graph.SymbolID]string
 	retained  []graph.Exemption
 	unmatched []graph.Unmatched
 	unbuilt   []load.Unbuilt
@@ -528,7 +509,7 @@ type retainedSet struct {
 // stderr by its issue kind, after every root this run did find, and fails the run.
 func printRoots(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	resolved, code := resolve("print-roots", printRootsUsage, args, stderr)
-	if code != exitClean {
+	if code != vocab.ExitClean {
 		return code
 	}
 
@@ -541,16 +522,16 @@ func printRoots(ctx context.Context, args []string, stdout, stderr io.Writer) in
 	for _, line := range rootLines(set.refs, set.roots, set.configurations) {
 		if _, err := fmt.Fprintln(stdout, line); err != nil {
 			fmt.Fprintf(stderr, "deadset-go: print-roots: %v\n", err)
-			return exitFailure
+			return vocab.ExitFailure
 		}
 	}
 	for _, unmatched := range set.unmatched {
-		fmt.Fprintf(stderr, "%s: roots.patterns names nothing: %s\n", unmatchedRoot, unmatched.Source)
+		fmt.Fprintf(stderr, "%s: roots.patterns names nothing: %s\n", vocab.UnmatchedRoot, unmatched.Source)
 	}
 	if len(set.unmatched) > 0 {
-		return exitFindings
+		return vocab.ExitFindings
 	}
-	return exitClean
+	return vocab.ExitClean
 }
 
 // rootsOf resolves the root set of the matrix.
@@ -619,7 +600,7 @@ func stagesOf(ctx context.Context, resolved *resolution) (stages, error) {
 	targetRoot := document.Target.Path
 	rootOptions := graph.RootOptions{
 		Patterns:     resolved.config.Roots.Patterns,
-		PublishedAPI: resolved.config.Target.Kind.Of(config.GoLanguage) == config.Library,
+		PublishedAPI: resolved.config.Target.Kind.Of(vocab.Go) == config.Library,
 	}
 	per := make([]configured, len(results))
 	passes := make([]graph.Configured, len(results))
@@ -786,8 +767,8 @@ func identifiers(configurations []load.Configuration) []string {
 }
 
 // printRetained writes the retained set of the matrix to stdout, one line per
-// symbol an exemption held back under any configuration: the symbol's reference,
-// then the class that held it, the site the evidence was found at and the clause
+// symbol an exemption held back under any configuration: the symbol's reference
+// and its position, then the class that held it, the site the evidence was found at and the clause
 // naming that evidence, repeated for every further class that held the same
 // symbol, all separated by tabs. One symbol, class and clause is one line whatever
 // the number of configurations that retained it, so the line does not name a
@@ -808,14 +789,14 @@ func identifiers(configurations []load.Configuration) []string {
 // names the production mode itself.
 func printRetained(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	resolved, mode, code := printRetainedFlags(args, stderr)
-	if code != exitClean {
+	if code != vocab.ExitClean {
 		return code
 	}
 
 	options, err := exemptOptions(&resolved.config)
 	if err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
-		return exitUsage
+		return vocab.ExitUsage
 	}
 
 	set, err := retainedOf(ctx, &resolved, &options, mode)
@@ -824,47 +805,47 @@ func printRetained(ctx context.Context, args []string, stdout, stderr io.Writer)
 	}
 
 	namedUnbuilt(stderr, set.unbuilt)
-	for _, line := range retainedLines(set.refs, set.retained) {
+	for _, line := range retainedLines(set.refs, set.positions, set.retained) {
 		if _, err := fmt.Fprintln(stdout, line); err != nil {
 			fmt.Fprintf(stderr, "deadset-go: print-retained: %v\n", err)
-			return exitFailure
+			return vocab.ExitFailure
 		}
 	}
 	for _, unmatched := range set.unmatched {
-		fmt.Fprintf(stderr, "%s: roots.patterns names nothing: %s\n", unmatchedRoot, unmatched.Source)
+		fmt.Fprintf(stderr, "%s: roots.patterns names nothing: %s\n", vocab.UnmatchedRoot, unmatched.Source)
 	}
 	if len(set.unmatched) > 0 {
-		return exitFindings
+		return vocab.ExitFindings
 	}
-	return exitClean
+	return vocab.ExitClean
 }
 
 // printRetainedFlags parses the invocation of print-retained, resolves the
 // configuration documents it names and answers which mode it asked for.
 func printRetainedFlags(args []string, stderr io.Writer) (resolved resolution, mode graph.Mode, code int) {
-	flags := configuredFlagSet("print-retained", printRetainedUsage, stderr, false)
+	flags := configuredFlagSet("print-retained", printRetainedUsage, stderr, true)
 	named := flags.set.String("mode", modeProduction,
 		"which analysis the retained set is read from: "+modeProduction+" or "+modePlain)
 
 	if err := flags.set.Parse(args); err != nil {
-		return resolution{}, graph.Mode{}, exitUsage
+		return resolution{}, graph.Mode{}, vocab.ExitUsage
 	}
 	if flags.set.NArg() != 0 {
 		fmt.Fprintf(stderr, "deadset-go: print-retained takes no argument, got %q\n", flags.set.Arg(0))
 		flags.set.Usage()
-		return resolution{}, graph.Mode{}, exitUsage
+		return resolution{}, graph.Mode{}, vocab.ExitUsage
 	}
 	if *named != modeProduction && *named != modePlain {
 		fmt.Fprintf(stderr, "deadset-go: --mode=%q: the values are %s and %s\n", *named, modeProduction, modePlain)
 		flags.set.Usage()
-		return resolution{}, graph.Mode{}, exitUsage
+		return resolution{}, graph.Mode{}, vocab.ExitUsage
 	}
 
 	resolved, code = flags.resolution(stderr)
-	if code != exitClean {
+	if code != vocab.ExitClean {
 		return resolution{}, graph.Mode{}, code
 	}
-	return resolved, modeOf(&resolved.config, *named), exitClean
+	return resolved, modeOf(&resolved.config, *named), vocab.ExitClean
 }
 
 // retainedOf resolves the retained set of the matrix: the stages the root verb
@@ -890,8 +871,13 @@ func retainedOf(ctx context.Context, resolved *resolution, options *exempt.Optio
 	if err != nil {
 		return retainedSet{}, err
 	}
+	positions := make(map[graph.SymbolID]string, len(analyzed.stages.merged.Symbols))
+	for i := range analyzed.stages.merged.Symbols {
+		positions[analyzed.stages.merged.Symbols[i].ID] = analyzed.stages.merged.Symbols[i].Pos.String()
+	}
 	return retainedSet{
 		refs:      analyzed.stages.refs,
+		positions: positions,
 		retained:  retainedListing(resolved, &analyzed),
 		unmatched: analyzed.stages.unmatched,
 		unbuilt:   analyzed.stages.unbuilt,
@@ -1077,7 +1063,7 @@ func preparedOf(ctx context.Context, resolved *resolution, options *exempt.Optio
 // reports with its implementations.
 func withoutUncalledRetentions(exemptions []graph.Exemption, uncalled map[graph.SymbolID]bool) []graph.Exemption {
 	return slices.DeleteFunc(exemptions, func(e graph.Exemption) bool {
-		return e.Class == string(exempt.InterfaceSatisfaction) && e.Via != "" && uncalled[e.Via]
+		return e.Class == string(vocab.InterfaceSatisfaction) && e.Via != "" && uncalled[e.Via]
 	})
 }
 
@@ -1098,7 +1084,7 @@ func withoutUncalledRetentions(exemptions []graph.Exemption, uncalled map[graph.
 // it was given in place of the target's baseline, through the document the write
 // would publish, so a row it reports stale is positioned where that document holds
 // it.
-func suppressionsOf(loaded *stages, per []kinds.Configured, rows *[]suppress.Recorded) ([]suppress.Record, []suppress.Refusal, error) {
+func suppressionsOf(loaded *stages, per []kinds.Configured, rows *[]core.Recorded) ([]suppress.Record, []suppress.Refusal, error) {
 	var records []suppress.Record
 	var refusals []suppress.Refusal
 	if len(per) > 0 {
@@ -1113,8 +1099,8 @@ func suppressionsOf(loaded *stages, per []kinds.Configured, rows *[]suppress.Rec
 		of   func(path string, symbols []graph.Symbol) ([]suppress.Record, []suppress.Refusal, error)
 		name string
 	}{
-		{suppress.IgnoreFile, suppress.IgnoreFileName},
-		{baselineReader(rows), suppress.BaselineFileName},
+		{suppress.IgnoreFile, core.IgnoreFileName},
+		{baselineReader(rows), core.BaselineFileName},
 	} {
 		held, refused, err := read.of(filepath.Join(loaded.root, read.name), loaded.merged.Symbols)
 		if err != nil {
@@ -1134,7 +1120,7 @@ func suppressionsOf(loaded *stages, per []kinds.Configured, rows *[]suppress.Rec
 func bound(marks []suppress.Record) []graph.SymbolID {
 	var marked []graph.SymbolID
 	for i := range marks {
-		if marks[i].Bound != "" && !catalog.ReportsPart(marks[i].Code) {
+		if marks[i].Bound != "" && marks[i].Code.Subject() != vocab.SubjectPart {
 			marked = append(marked, marks[i].Bound)
 		}
 	}
@@ -1195,9 +1181,12 @@ type findingSet struct {
 	// retained is what the retained-symbol listing names ([retainedListing]).
 	retained []graph.Exemption
 
-	evaluations  []kinds.Evaluation
-	result       kinds.Result
-	suppressions report.Suppressions
+	evaluations []kinds.Evaluation
+	result      kinds.Result
+
+	// inEffect and reasons are what the run's suppression records amount to:
+	// how many bound a would-be finding, and how many carry a reason.
+	inEffect, reasons int
 }
 
 // findingsOf is what this analyzer reports about one target: the stages, the
@@ -1253,12 +1242,13 @@ func findingsOf(ctx context.Context, resolved *resolution, options *exempt.Optio
 
 	inEffect, reasons := kinds.Totals(in)
 	return findingSet{
-		swept:        analyzed.swept,
-		retained:     retainedListing(resolved, &analyzed),
-		evaluations:  evaluations,
-		result:       computed,
-		suppressions: report.Suppressions{InEffect: inEffect, ReasonsRecorded: reasons},
-		loaded:       analyzed.stages,
+		swept:       analyzed.swept,
+		retained:    retainedListing(resolved, &analyzed),
+		evaluations: evaluations,
+		result:      computed,
+		inEffect:    inEffect,
+		reasons:     reasons,
+		loaded:      analyzed.stages,
 	}, nil
 }
 
@@ -1381,35 +1371,46 @@ type corpusRecord struct {
 // carry fails the run, because a document no reader admits says less than an error
 // does. The corpus record is what the analyzer states about itself, and an envelope
 // naming no conformance result is one such refusal.
-func reportOf(ctx context.Context, resolved *resolution, options *exempt.Options, answered *corpusRecord) (report.Envelope, []load.Unbuilt, error) {
+func reportOf(ctx context.Context, resolved *resolution, options *exempt.Options, answered *corpusRecord) (*report.Report, []load.Unbuilt, error) {
 	set, err := findingsOf(ctx, resolved, options)
 	if err != nil {
-		return report.Envelope{}, nil, err
+		return nil, nil, err
 	}
 	target, err := targetOf(resolved, &set.loaded)
 	if err != nil {
-		return report.Envelope{}, nil, err
+		return nil, nil, err
 	}
-	consumers, err := consumersReported(&set.loaded)
+	loaded, err := consumersReported(&set.loaded)
 	if err != nil {
-		return report.Envelope{}, nil, err
+		return nil, nil, err
 	}
-	envelope, err := report.Build(&report.BuildInput{
+	findings := make([]report.Finding, len(set.result.Findings))
+	for i := range set.result.Findings {
+		findings[i] = set.result.Findings[i].Document()
+	}
+	evaluations := make([]report.EdgeEvaluation, len(set.evaluations))
+	for i := range set.evaluations {
+		evaluations[i] = set.evaluations[i].Document()
+	}
+	built, err := report.Build(&report.Input{
+		Members:                kinds.Listing(set.result.Findings, set.evaluations),
 		Analyzer:               analyzerOf(answered.conformance),
 		Target:                 target,
 		Configurations:         configurationsReported(set.loaded.configurations),
 		ConfigurationsNotBuilt: configurationsNotBuilt(set.loaded.unbuilt),
-		Consumers:              consumers,
-		Result:                 set.result,
-		EdgeEvaluations:        evaluationsReported(set.evaluations),
+		Loaded:                 loaded,
+		Findings:               findings,
+		EdgeEvaluations:        evaluations,
 		DeclaredGaps:           answered.gaps,
 		ExcludedByCgo:          excludedByCgo(set.loaded.per),
-		TestFileRules:          set.loaded.testFileRules,
+		TestFileRules:          testFileRules(set.loaded.testFileRules),
 		TypeErrorSkips:         typeErrorSkipsReported(set.loaded.typeErrorSkips),
-		Notes:                  notesOf(resolved.config.Target.Kind.Of(config.GoLanguage), &set.loaded),
-		Suppressions:           set.suppressions,
+		Notes:                  notesOf(resolved.config.Target.Kind.Of(vocab.Go), &set.loaded),
+		SuppressionsInEffect:   set.inEffect,
+		ReasonsRecorded:        set.reasons,
+		Withheld:               kinds.WithheldOf(set.result.Withheld),
 	})
-	return envelope, set.loaded.unbuilt, err
+	return built, set.loaded.unbuilt, err
 }
 
 // analyzerOf is the identity every document this analyzer writes names it by, with
@@ -1418,8 +1419,8 @@ func analyzerOf(conformance report.Conformance) report.Analyzer {
 	return report.Analyzer{
 		Name:                   name,
 		Version:                version(),
-		Languages:              []string{string(language)},
-		SchemaVersionsAccepted: schemaVersionsAccepted,
+		Languages:              []vocab.Language{language},
+		SchemaVersionsAccepted: vocab.SchemaVersions(),
 		Conformance:            conformance,
 	}
 }
@@ -1436,7 +1437,7 @@ func targetOf(resolved *resolution, loaded *stages) (report.Target, error) {
 	if err != nil {
 		return report.Target{}, err
 	}
-	return report.Target{Kind: string(resolved.config.Target.Kind.Of(config.GoLanguage)), Root: root, Identity: identity}, nil
+	return report.Target{Kind: report.TargetKind(resolved.config.Target.Kind.Of(vocab.Go)), Root: root, Identity: identity}, nil
 }
 
 // identityOf is the name the loaded target publishes itself under: the path of
@@ -1509,7 +1510,7 @@ var errReportPath = errors.New("deadset-go: the report cannot name a path outsid
 func configurationsReported(configurations []load.Configuration) []report.Configuration {
 	named := make([]report.Configuration, len(configurations))
 	for i, c := range configurations {
-		named[i] = report.Configuration{ID: c.ID, OS: c.OS, Arch: c.Arch, Tags: slices.Clone(c.Tags)}
+		named[i] = report.Configuration{ID: c.ID, Platform: &report.Platform{OS: c.OS, Arch: c.Arch, Tags: append([]string{}, c.Tags...)}}
 	}
 	return named
 }
@@ -1527,11 +1528,9 @@ func configurationsNotBuilt(unbuilt []load.Unbuilt) []report.ConfigurationNotBui
 	for i := range unbuilt {
 		c := &unbuilt[i].Configuration
 		named[i] = report.ConfigurationNotBuilt{
-			ID:    c.ID,
-			OS:    c.OS,
-			Arch:  c.Arch,
-			Tags:  slices.Clone(c.Tags),
-			Error: firstLine(unbuilt[i].Err.Error()),
+			ID:       c.ID,
+			Platform: &report.Platform{OS: c.OS, Arch: c.Arch, Tags: append([]string{}, c.Tags...)},
+			Error:    firstLine(unbuilt[i].Err.Error()),
 		}
 	}
 	return named
@@ -1544,45 +1543,29 @@ func firstLine(message string) string {
 	return line
 }
 
-// consumersReported is the consumer set as a report names it: one entry per consumer
-// the load answered, at the directory the scope named it.
+// consumersReported is every consumer the load answered, at the directory the
+// scope named it.
 //
 // No consumer is unavailable: a declared consumer this analyzer cannot load ends the
 // run, so a run that reached a report loaded every consumer its scope declared.
-func consumersReported(loaded *stages) (report.Consumers, error) {
+func consumersReported(loaded *stages) ([]report.LoadedConsumer, error) {
 	var held []load.Consumer
 	if len(loaded.per) > 0 {
 		held = loaded.per[0].result.Consumers
 	}
-	named := report.Consumers{Loaded: make([]report.LoadedConsumer, len(held))}
+	named := make([]report.LoadedConsumer, len(held))
 	for i := range held {
 		if i >= len(loaded.declared) {
-			return report.Consumers{}, fmt.Errorf("the load answered %d consumers and the scope declared %d",
+			return nil, fmt.Errorf("the load answered %d consumers and the scope declared %d",
 				len(held), len(loaded.declared))
 		}
 		path, err := relativeToRunDirectory(loaded.declared[i].Path)
 		if err != nil {
-			return report.Consumers{}, err
+			return nil, err
 		}
-		named.Loaded[i] = report.LoadedConsumer{ID: held[i].ID, Path: path}
+		named[i] = report.LoadedConsumer{ID: held[i].ID, Path: path}
 	}
-	named.Declared = len(named.Loaded)
 	return named, nil
-}
-
-// evaluationsReported is the edge evaluations as a report names them.
-func evaluationsReported(evaluations []kinds.Evaluation) []report.EdgeEvaluation {
-	named := make([]report.EdgeEvaluation, len(evaluations))
-	for i := range evaluations {
-		named[i] = report.EdgeEvaluation{
-			Finding: evaluations[i].Finding,
-			Edge:    evaluations[i].Edge,
-			Side:    string(evaluations[i].Side),
-			Symbol:  evaluations[i].Symbol,
-			State:   string(evaluations[i].State),
-		}
-	}
-	return named
 }
 
 // excludedByCgo is every file the toolchain ignored solely for importing the C
@@ -1593,6 +1576,21 @@ func excludedByCgo(per []configured) []string {
 	var held []string
 	for i := range per {
 		held = append(held, per[i].result.ExcludedByCgo...)
+	}
+	return held
+}
+
+// testFileRules is one entry per rule a configuration classified test files by,
+// carrying the greatest count any configuration reported for it: every
+// configuration classifies the same files by the same rule.
+func testFileRules(rules []graph.TestFileRule) []report.TestFileRule {
+	matched := make(map[string]int, len(rules))
+	for _, rule := range rules {
+		matched[rule.Rule] = max(matched[rule.Rule], rule.Matched)
+	}
+	held := make([]report.TestFileRule, 0, len(matched))
+	for name, count := range matched {
+		held = append(held, report.TestFileRule{Rule: name, Matched: count})
 	}
 	return held
 }
@@ -1659,9 +1657,9 @@ func generatedPaths(per []kinds.Configured) (map[string]bool, error) {
 // switch off.
 func exemptOptions(cfg *config.Config) (exempt.Options, error) {
 	known := exempt.Vocabulary()
-	disabled := make([]exempt.Class, 0, len(cfg.Exemptions.Disabled))
+	disabled := make([]vocab.Exemption, 0, len(cfg.Exemptions.Disabled))
 	for _, name := range cfg.Exemptions.Disabled {
-		class := exempt.Class(name)
+		class := vocab.Exemption(name)
 		if !slices.Contains(known, class) {
 			return exempt.Options{}, fmt.Errorf("exemptions.disabled: %q is not an exemption class: the classes are %s", name, classNames(known))
 		}
@@ -1675,12 +1673,12 @@ func exemptOptions(cfg *config.Config) (exempt.Options, error) {
 		},
 		TemplateDirs:     cfg.Analysis.TemplateDirs,
 		IncludeGenerated: cfg.Analysis.GeneratedFiles == config.IncludeGenerated,
-		PublishedAPI:     cfg.Target.Kind.Of(config.GoLanguage) == config.Library,
+		PublishedAPI:     cfg.Target.Kind.Of(vocab.Go) == config.Library,
 	}, nil
 }
 
 // classNames renders a class list for a message, in the order it was given.
-func classNames(classes []exempt.Class) string {
+func classNames(classes []vocab.Exemption) string {
 	names := make([]string, len(classes))
 	for i, class := range classes {
 		names[i] = string(class)
@@ -1691,12 +1689,12 @@ func classNames(classes []exempt.Class) string {
 // retainedLines renders one line per retained symbol, reading the record in its
 // own order: it groups a symbol's classes adjacently, so one pass over it emits
 // one line per symbol and nothing is re-sorted.
-func retainedLines(refs map[graph.SymbolID]string, retained []graph.Exemption) []string {
+func retainedLines(refs, positions map[graph.SymbolID]string, retained []graph.Exemption) []string {
 	var lines []string
 	for i := range retained {
 		held := &retained[i]
 		if i == 0 || held.ID != retained[i-1].ID {
-			lines = append(lines, refs[held.ID])
+			lines = append(lines, refs[held.ID]+"\t"+positions[held.ID])
 		}
 		lines[len(lines)-1] += "\t" + held.Class + "\t" + evidenceSite(held) + "\t" + held.Detail
 	}
@@ -1892,13 +1890,13 @@ func settingValue(setting *settingFlag, value string) (json.RawMessage, error) {
 func failed(ctx context.Context, stderr io.Writer, err error) int {
 	if exhausted, ok := errors.AsType[*memory.ExhaustedError](context.Cause(ctx)); ok {
 		fmt.Fprintln(stderr, exhausted.Error())
-		return exitFailure
+		return vocab.ExitFailure
 	}
 	if setup, ok := errors.AsType[*load.SetupError](err); ok {
 		for _, one := range setup.Failures {
 			fmt.Fprintln(stderr, one.Line())
 		}
-		return exitFailure
+		return vocab.ExitFailure
 	}
 	fmt.Fprintf(stderr, "deadset-go: %v\n", err)
 	return exitCodeFor(err)
@@ -1912,7 +1910,9 @@ func failed(ctx context.Context, stderr io.Writer, err error) int {
 // kind: the document resolved, and what it names does not exist, which a stage
 // rather than the decode is the first to find out. A matrix holding no
 // configuration, or more than the merge can key one of, is the same kind again: the
-// documents resolved, and the matrix they name is one no run can analyze.
+// documents resolved, and the matrix they name is one no run can analyze. A
+// malformed ignore file or baseline is a usage error too, as suppression.md's
+// refusals table states.
 //
 // A configuration that fails to load is not one of those: the matrix is analyzable
 // and one of its configurations did not load, so the run is a failure that produced
@@ -1924,15 +1924,18 @@ func failed(ctx context.Context, stderr io.Writer, err error) int {
 // the failure code rather than being reported as a finding the report could carry.
 func exitCodeFor(err error) int {
 	if _, refusal := errors.AsType[*config.Error](err); refusal {
-		return exitUsage
+		return vocab.ExitUsage
 	}
 	if errors.Is(err, exempt.ErrTemplateDir) {
-		return exitUsage
+		return vocab.ExitUsage
 	}
 	if errors.Is(err, load.ErrNoConfiguration) || errors.Is(err, graph.ErrMatrix) {
-		return exitUsage
+		return vocab.ExitUsage
 	}
-	return exitFailure
+	if errors.Is(err, core.ErrMalformed) {
+		return vocab.ExitUsage
+	}
+	return vocab.ExitFailure
 }
 
 // sourceEditTokens are the tokens whose presence in a flag's name makes that flag

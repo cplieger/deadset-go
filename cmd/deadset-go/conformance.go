@@ -7,7 +7,8 @@ import (
 	"fmt"
 
 	deadsetgo "github.com/cplieger/deadset-go/v2"
-	"github.com/cplieger/deadset-go/v2/internal/report"
+	"github.com/cplieger/deadset-spec/v8/report"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // The two documents this analyzer commits about its own conformance, at the root of
@@ -16,13 +17,6 @@ const (
 	conformanceGapsFile    = "conformance.json"
 	conformanceResultsFile = "conformance-results.json"
 )
-
-// corpusVersion is the version of the Conformance Corpus this analyzer answers, which
-// is the corpus version the Contract's corpus publishes. It is stated rather than
-// read, because no document of the Contract is read at run time; a test pins it equal
-// to the published value, the two committed documents are refused where either names
-// another version, and the pages that state it are pinned to it.
-const corpusVersion = "6.0.0"
 
 // gapsDocument is the shape of the declared-gap document this analyzer reads of its
 // own: the corpus version answered and the declined capabilities.
@@ -90,17 +84,17 @@ func corpusAnswer() (*corpusRecord, error) {
 		conformanceResultsFile: results.CorpusVersion,
 		conformanceGapsFile:    gaps.CorpusVersion,
 	} {
-		if stated != corpusVersion {
+		if stated != vocab.CorpusVersion {
 			return nil, fmt.Errorf("%s names corpus version %s and this analyzer answers %s",
-				document, stated, corpusVersion)
+				document, stated, vocab.CorpusVersion)
 		}
 	}
 
 	digest := sha256.Sum256(deadsetgo.Results)
 	return &corpusRecord{
 		conformance: report.Conformance{
-			CorpusVersion: corpusVersion,
-			Result:        results.Result,
+			CorpusVersion: vocab.CorpusVersion,
+			Result:        report.Result(results.Result),
 			Digest:        "sha256:" + hex.EncodeToString(digest[:]),
 		},
 		gaps: reportedGaps(gaps.Gaps),

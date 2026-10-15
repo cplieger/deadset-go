@@ -14,6 +14,8 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/edges"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
+	core "github.com/cplieger/deadset-spec/v8/suppress"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
 )
 
@@ -31,11 +33,11 @@ const (
 // other, and the pass is what withholds it, so a document drawing from this class
 // alone is one the sweep's answer says nothing about.
 var (
-	deadSubjectCodes = []string{
-		unusedExportedCode, unusedUnexportedCode, unusedMemberCode, unusedInterfaceCode,
+	deadSubjectCodes = []vocab.Code{
+		vocab.UnusedExported, vocab.UnusedUnexported, vocab.UnusedMember, vocab.UnusedInterface,
 	}
-	liveSubjectCodes = []string{
-		unnecessaryExportCode, writeOnlyCode, unusedParameterCode,
+	liveSubjectCodes = []vocab.Code{
+		vocab.UnnecessaryExport, vocab.WriteOnlySymbol, vocab.UnusedParameter,
 	}
 )
 
@@ -46,7 +48,7 @@ const drawnPartColumn = 20
 // drawnFinding is one finding a drawn document records: the code it carries and the
 // declaration it is about.
 type drawnFinding struct {
-	code   string
+	code   vocab.Code
 	symbol string
 	id     graph.SymbolID
 	line   int
@@ -60,7 +62,7 @@ func (d drawnFinding) live() bool { return slices.Contains(liveSubjectCodes, d.c
 // part reports whether this finding is about a part of its declaration rather than
 // about the declaration, which is the subject a record reaches through the
 // declaration its own reference names.
-func (d drawnFinding) part() bool { return d.code == unusedParameterCode }
+func (d drawnFinding) part() bool { return d.code == vocab.UnusedParameter }
 
 // finding is this drawn finding as an emitter of its own kind returns it, which is
 // what the pass withholds under the record naming it.
@@ -114,12 +116,12 @@ func drawnFindings(t *rapid.T) []drawnFinding {
 // withholding rather than about any kind's rule: a drawn finding stands for whatever
 // its kind would have produced, which is what lets one document draw across the two
 // classes at once.
-func drawnEmitters(found []drawnFinding) map[string]Emitter {
-	byCode := make(map[string][]Finding, len(found))
+func drawnEmitters(found []drawnFinding) map[vocab.Code]Emitter {
+	byCode := make(map[vocab.Code][]Finding, len(found))
 	for _, one := range found {
 		byCode[one.code] = append(byCode[one.code], one.finding())
 	}
-	table := map[string]Emitter{staleSuppressionCode: StaleSuppressions}
+	table := map[vocab.Code]Emitter{vocab.StaleSuppression: StaleSuppressions}
 	for code, produced := range byCode {
 		table[code] = func(*Input) ([]Finding, error) { return slices.Clone(produced), nil }
 	}
@@ -228,18 +230,18 @@ func recordsOf(t *rapid.T, dir string, mechanism suppress.Mechanism, found []dra
 ) ([]suppress.Record, []suppress.Refusal) {
 	switch mechanism {
 	case suppress.MechanismBaseline:
-		recorded := make([]suppress.Recorded, 0, len(found))
+		recorded := make([]core.Recorded, 0, len(found))
 		for i := range found {
-			recorded = append(recorded, suppress.Recorded{
+			recorded = append(recorded, core.Recorded{
 				Code: found[i].code, Symbol: found[i].symbol, Path: drawnFilePath,
 			})
 		}
 		var written bytes.Buffer
-		identity := suppress.Provenance{Analyzer: analyzerName, Version: "1.6.0"}
-		if err := suppress.WriteBaseline(&written, recorded, identity, nil); err != nil {
-			t.Fatalf("suppress.WriteBaseline(%d findings) = %v, want the document", len(found), err)
+		identity := core.Provenance{Analyzer: analyzerName, Version: "1.6.0"}
+		if err := core.WriteBaseline(&written, recorded, identity, nil); err != nil {
+			t.Fatalf("core.WriteBaseline(%d findings) = %v, want the document", len(found), err)
 		}
-		records, refusals, err := suppress.Baseline(writeTemp(t, dir, suppress.BaselineFileName, written.String()), symbols)
+		records, refusals, err := suppress.Baseline(writeTemp(t, dir, core.BaselineFileName, written.String()), symbols)
 		if err != nil {
 			t.Fatalf("suppress.Baseline(the document just written) = _, _, %v, want its rows", err)
 		}
@@ -251,13 +253,13 @@ func recordsOf(t *rapid.T, dir string, mechanism suppress.Mechanism, found []dra
 			if i > 0 {
 				document += ",\n"
 			}
-			document += "    {\"code\": " + strconv.Quote(found[i].code) +
+			document += "    {\"code\": " + strconv.Quote(string(found[i].code)) +
 				", \"symbol\": " + strconv.Quote(found[i].symbol) +
 				", \"path\": " + strconv.Quote(drawnFilePath) +
 				", \"reason\": \"adjudicated by the maintainer\"}"
 		}
 		document += "\n  ]\n}\n"
-		records, refusals, err := suppress.IgnoreFile(writeTemp(t, dir, suppress.IgnoreFileName, document), symbols)
+		records, refusals, err := suppress.IgnoreFile(writeTemp(t, dir, core.IgnoreFileName, document), symbols)
 		if err != nil {
 			t.Fatalf("suppress.IgnoreFile(the document just written) = _, _, %v, want its entries", err)
 		}
@@ -317,7 +319,7 @@ func TestAnythingTheConfigurationNamesThatMatchesNothingIsReported(t *testing.T)
 				Symbol:    found[i].symbol,
 				Path:      drawnFilePath,
 				Reason:    "adjudicated by the maintainer",
-				Site:      token.Position{Filename: suppress.IgnoreFileName, Line: i + 2, Column: 5},
+				Site:      token.Position{Filename: core.IgnoreFileName, Line: i + 2, Column: 5},
 				Mechanism: suppress.MechanismIgnore,
 			})
 			declared.Edges = append(declared.Edges, edges.Edge{
@@ -372,7 +374,7 @@ func TestAnythingTheConfigurationNamesThatMatchesNothingIsReported(t *testing.T)
 				len(evaluations), len(declared.Edges))
 		}
 		for i := range evaluations {
-			if evaluations[i].State != StateAbsent || evaluations[i].Finding != nil {
+			if evaluations[i].State != stateAbsent || evaluations[i].Finding != nil {
 				t.Errorf("Evaluate() published %+v, want the absent state and no finding: nothing is enumerated",
 					asNamed(evaluations)[i])
 			}

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/scope"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -210,8 +211,8 @@ func assertMissingConsumer(t *testing.T, what string, err error, want ...string)
 		t.Fatalf("Load(%s) = _, %v, want a *load.SetupError", what, err)
 	}
 	for _, one := range setup.Failures {
-		if one.Class != missingConsumer {
-			t.Errorf("Load(%s) failed with the class %q, want %q", what, one.Class, missingConsumer)
+		if one.Class != vocab.SetupMissingConsumer {
+			t.Errorf("Load(%s) failed with the class %q, want %q", what, one.Class, vocab.SetupMissingConsumer)
 		}
 		for _, text := range want {
 			if !strings.Contains(one.Line(), text) {
