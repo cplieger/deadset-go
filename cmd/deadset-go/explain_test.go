@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // explained is one run of the explain verb: what it wrote to each stream and the
@@ -27,7 +28,7 @@ func runExplain(t *testing.T, dir string, args ...string) explained {
 	t.Chdir(dir)
 	var stdout, stderr bytes.Buffer
 	invoked := append([]string{"explain", "--target=."}, args...)
-	code := run(t.Context(), invoked, &stdout, &stderr)
+	code := invoke(t.Context(), invoked, &stdout, &stderr)
 	return explained{stdout: stdout.String(), stderr: stderr.String(), code: code}
 }
 
@@ -395,5 +396,49 @@ func TestExplainListsTheUnusedParametersOfTheSymbol(t *testing.T) {
 	}
 	if want := "also reported: DS1401 unused-parameter\tapp.go:3:24\tparameter label"; !strings.Contains(got.stdout, want) {
 		t.Errorf("explain stdout =\n%s\nwant it to contain %q", got.stdout, want)
+	}
+}
+
+func TestExplainNamesTheConsumerTestThatHoldsASymbolLiveUnderConsumerTestsProduction(t *testing.T) {
+	// Only the consumer's test calls Used, and the configuration classifies a loaded
+	// consumer's test reference as production, so the sweep holds Used live through
+	// that reference and the path the answer prints starts there.
+	dir := writeModule(t, map[string]string{
+		"target/go.mod":  "module example.com/app\n\ngo 1.27.1\n",
+		"target/main.go": "package main\n\nfunc main() {}\n",
+		"target/lib/lib.go": "// Package lib is called by the consumer's test alone.\npackage lib\n\n" +
+			"// Used is what the consumer's test calls.\nfunc Used() string { return \"used\" }\n",
+		"target/" + repositoryDocument: `{"target": {"kind": "application"}, "analysis": {"consumer_tests": "production"}}`,
+		"consumer/go.mod": "module example.com/consumer\n\ngo 1.27.1\n\n" +
+			"require example.com/app v0.0.0\n\nreplace example.com/app => ../target\n",
+		"consumer/consumer.go": "// Package consumer calls the target from its test.\npackage consumer\n",
+		"consumer/consumer_test.go": "package consumer\n\nimport (\n\t\"testing\"\n\n\t\"example.com/app/lib\"\n)\n\n" +
+			"func TestUsed(t *testing.T) {\n\tif lib.Used() == \"\" {\n\t\tt.Fatal(\"empty\")\n\t}\n}\n",
+		"scope.json": `{
+  "target": {"id": "example.com/app", "role": "target", "path": "target"},
+  "consumers": [{"id": "example.com/consumer", "role": "consumer", "path": "consumer"}]
+}
+`,
+	})
+	t.Chdir(dir)
+	var stdout, stderr bytes.Buffer
+	args := []string{"explain", "--scope=scope.json", "--config=target/" + repositoryDocument, "go://example.com/app/lib#Used"}
+	if code := invoke(t.Context(), args, &stdout, &stderr); code != vocab.ExitClean {
+		t.Fatalf("invoke(%q) = %d, want %d\nstderr: %s", args, code, vocab.ExitClean, stderr.String())
+	}
+	got := stdout.String()
+	for _, want := range []string{
+		"answer: live",
+		"reached from: loaded consumer example.com/consumer",
+		"\tcall\t",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("invoke(%q) stdout =\n%s\nwant it to contain %q", args, got, want)
+		}
+	}
+	for _, refused := range []string{"unreachable", "from a test file"} {
+		if strings.Contains(got, refused) {
+			t.Errorf("invoke(%q) stdout =\n%s\nwant no %q: the sweep counts the consumer's test as production", args, got, refused)
+		}
 	}
 }

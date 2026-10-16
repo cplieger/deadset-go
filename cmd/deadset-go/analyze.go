@@ -15,6 +15,7 @@ import (
 
 	"github.com/cplieger/atomicfile/v4"
 	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/run"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
 	"github.com/cplieger/deadset-spec/v8/render"
 	"github.com/cplieger/deadset-spec/v8/report"
@@ -22,16 +23,10 @@ import (
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
-// analyzeUsage names every flag the verb takes, in two groups: the flags that
-// supply a setting of the resolved configuration, and the flags that are the
-// invocation's own.
-//
-// A setting flag outranks both configuration sources for the setting it supplies,
-// and its value reaches every stage that reads the setting. An invocation flag
-// supplies no setting: it names where a document is written, what is rendered beside
-// it and whether the exit code carries the verdict, and none of the three is
-// something a repository commits. --scope is neither: it selects the scope document
-// the run reads rather than a value inside one.
+// analyzeUsage names every flag the verb takes: the invocation's own, which name
+// where documents are written, what is rendered beside them and whether the exit
+// code carries the verdict, then the flags that supply a setting and outrank both
+// configuration sources for it.
 const analyzeUsage = "usage: deadset-go analyze [--target=DIR] [--scope=FILE] [--config=FILE] [--central=FILE] " +
 	"--report=FILE [--format=FORMAT ...] [--template=FILE] [--baseline-write=FILE] [--exit-code=on|off] " +
 	"[--min-confidence=CLASS] [--sort=ORDER] [--cascade=DEPTH] [--max-findings=N] [--fail-on=SEVERITY]"
@@ -46,15 +41,10 @@ const (
 // documentMode is the mode every document this verb writes carries.
 const documentMode = 0o644
 
-// renderings is the suffix of the file each format this analyzer renders is
-// written to. A format absent from it is refused rather than silently not
-// written, so a configuration naming one is never a file a maintainer goes
-// looking for.
-//
-// A rendering is written at the report path with its suffix APPENDED, rather than
-// with the report's extension replaced: the report path is the invocation's and may
-// carry any extension or none, so appending is the one rule under which no rendering
-// can land on the report itself or on another rendering.
+// renderings is the suffix each format's file takes, and a format absent from it is
+// refused. The suffix is appended to the report path rather than replacing its
+// extension: the path may carry any extension or none, and appending is the one rule
+// under which no rendering lands on the report or on another rendering.
 var renderings = map[vocab.Format]string{
 	vocab.FormatText:     ".txt",
 	vocab.FormatJSON:     ".json",
@@ -122,40 +112,41 @@ type invocation struct {
 // is a file, its write is atomic, every rendering is a file beside it, every
 // diagnostic goes to stderr and the verdict is the exit code.
 func analyze(ctx context.Context, args []string, stderr io.Writer) int {
-	asked, resolved, code := analyzeFlags(args, stderr)
+	asked, req, code := analyzeFlags(args, stderr)
 	if code != vocab.ExitClean {
 		return code
 	}
-
-	options, err := exemptOptions(&resolved.config)
-	if err != nil {
-		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
-		return vocab.ExitUsage
-	}
-	answered, err := corpusAnswer()
+	self, err := selfOf()
 	if err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
 		return vocab.ExitFailure
 	}
-	built, unbuilt, err := reportOf(ctx, &resolved, &options, answered)
+	found, err := findingsOf(ctx, req)
 	if err != nil {
 		return failed(ctx, stderr, err)
 	}
-	namedUnbuilt(stderr, unbuilt)
-	namedSkips(stderr, built.TypeErrorSkips)
+	built, err := found.Report(self)
+	if err != nil {
+		return failed(ctx, stderr, err)
+	}
+	namedUnbuilt(stderr, found.Unbuilt)
+	for _, skip := range built.TypeErrorSkips {
+		fmt.Fprintf(stderr, "deadset-go: %s:%d: %s: the function or statement holding this type error is not evaluated\n",
+			skip.Path, skip.Line, skip.Message)
+	}
 
-	reporters := &resolved.config.Reporters
+	reporters := &req.Config.Reporters
 	report.Cap(built, reporters.MaxFindings, reporters.Sort == config.BySize)
 
 	var recorded []core.Recorded
 	if asked.baselineWrite != "" {
-		recorded, err = baselineRows(ctx, &resolved, &options, answered)
+		recorded, err = run.BaselineRows(ctx, found.Prepared, self)
 		if err != nil {
 			return failed(ctx, stderr, fmt.Errorf("write the baseline: %w", err))
 		}
 	}
 
-	if err := asked.write(ctx, built, reporters, recorded); err != nil {
+	if err := asked.write(ctx, built, reporters, recorded, run.Provenance(self)); err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
 		return vocab.ExitFailure
 	}
@@ -164,7 +155,7 @@ func analyze(ctx context.Context, args []string, stderr io.Writer) int {
 
 // analyzeFlags parses the invocation and resolves the configuration documents it
 // names.
-func analyzeFlags(args []string, stderr io.Writer) (asked invocation, resolved resolution, code int) {
+func analyzeFlags(args []string, stderr io.Writer) (asked invocation, req *run.Request, code int) {
 	flags := configuredFlagSet("analyze", analyzeUsage, stderr, true)
 	flags.set.StringVar(&asked.report, "report", "", "the path the JSON report is written to")
 	flags.set.Var(&asked.formats, "format", "one rendering written beside the report, repeatable, and one of "+formatNames())
@@ -175,36 +166,36 @@ func analyzeFlags(args []string, stderr io.Writer) (asked invocation, resolved r
 		"whether the exit code carries the verdict of the run: "+exitCodeOn+" or "+exitCodeOff)
 
 	if err := flags.set.Parse(args); err != nil {
-		return invocation{}, resolution{}, vocab.ExitUsage
+		return invocation{}, nil, vocab.ExitUsage
 	}
 	if flags.set.NArg() != 0 {
 		fmt.Fprintf(stderr, "deadset-go: analyze takes no argument, got %q\n", flags.set.Arg(0))
 		flags.set.Usage()
-		return invocation{}, resolution{}, vocab.ExitUsage
+		return invocation{}, nil, vocab.ExitUsage
 	}
 	if err := asked.request(*exitCode); err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
 		flags.set.Usage()
-		return invocation{}, resolution{}, vocab.ExitUsage
+		return invocation{}, nil, vocab.ExitUsage
 	}
 
-	resolved, code = flags.resolution(stderr)
+	req, code = flags.request(stderr)
 	if code != vocab.ExitClean {
-		return invocation{}, resolution{}, code
+		return invocation{}, nil, code
 	}
 	// The renderings are the invocation's where it named any and the resolved
 	// configuration's otherwise, which is the flag outranking the source for the
 	// one request whose value is a list: a repeated flag has no spelling inside a
 	// document the resolution reads.
 	if len(asked.formats) == 0 {
-		asked.formats = slices.Clone(resolved.config.Reporters.Formats)
+		asked.formats = slices.Clone(req.Config.Reporters.Formats)
 	}
 	if err := asked.read(*templatePath); err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
 		flags.set.Usage()
-		return invocation{}, resolution{}, vocab.ExitUsage
+		return invocation{}, nil, vocab.ExitUsage
 	}
-	return asked, resolved, vocab.ExitClean
+	return asked, req, vocab.ExitClean
 }
 
 // request checks the half of the invocation no configuration source has a say in,
@@ -260,7 +251,7 @@ func (a *invocation) read(templatePath string) error {
 // write writes every document one invocation asked for: the report at the path it
 // named, one rendering per format beside it, and the baseline where it named a path
 // for one. The report is held to the report schema before anything is written.
-func (a *invocation) write(ctx context.Context, r *report.Report, reporters *config.Reporters, recorded []core.Recorded) error {
+func (a *invocation) write(ctx context.Context, r *report.Report, reporters *config.Reporters, recorded []core.Recorded, p core.Provenance) error {
 	if err := publish(ctx, a.report, func(w io.Writer) error { return report.Encode(w, r) }); err != nil {
 		return err
 	}
@@ -288,7 +279,7 @@ func (a *invocation) write(ctx context.Context, r *report.Report, reporters *con
 	if a.baselineWrite == "" {
 		return nil
 	}
-	return writeBaseline(ctx, a.baselineWrite, recorded, baselineProvenance())
+	return writeBaseline(ctx, a.baselineWrite, recorded, p)
 }
 
 // writeBaseline writes the baseline document at path: the rows this write recorded

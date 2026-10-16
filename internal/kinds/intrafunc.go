@@ -39,7 +39,7 @@ const blankName = "_"
 // panicBuiltin is the name of the built-in whose call ends a control-flow path.
 const panicBuiltin = "panic"
 
-// UnusedParameter reports a named, non-blank parameter of a function or method
+// unusedParameter reports a named, non-blank parameter of a function or method
 // whose body names it nowhere, on a function whose signature is free to change.
 // The body is the whole evidence, because the type checker resolves every identifier
 // of it. [intrafunc.freeSignature] decides free for this kind and the result kind. A
@@ -47,39 +47,39 @@ const panicBuiltin = "panic"
 // parameter it never names, and the breaking edit is what the fixability says. A
 // parameter used under one build configuration is used. A function literal is free
 // where it is called by name or is the callee of the call it is written in.
-func UnusedParameter(in *Input) ([]Finding, error) {
+func unusedParameter(in *Input) ([]Finding, error) {
 	return in.intraFunc().parameters(vocab.UnusedParameter)
 }
 
-// UnusedReceiver reports a named, non-blank method receiver the method body names
+// unusedReceiver reports a named, non-blank method receiver the method body names
 // nowhere, whatever fixes the method's signature: Go permits a method with no
 // receiver name, so the fix deletes an identifier and changes no signature, which
 // is why the kind's fixability is the deletable one and the parameter kind's is not.
-func UnusedReceiver(in *Input) ([]Finding, error) {
+func unusedReceiver(in *Input) ([]Finding, error) {
 	return in.intraFunc().parameters(vocab.UnusedReceiver)
 }
 
-// UnusedResult reports a result of a function that every call site in the loaded
+// unusedResult reports a result of a function that every call site in the loaded
 // graph discards, under a closed-world precondition, because an unknown caller may
 // consume a result. A function with no call site is an unused declaration's subject.
 // A result is discarded by a call in statement position, under go or defer, or
 // assigned to the blank identifier at its own index; every other context, a
 // multi-value call passed straight to another call among them, uses it.
-func UnusedResult(in *Input) ([]Finding, error) {
+func unusedResult(in *Input) ([]Finding, error) {
 	return in.intraFunc().results()
 }
 
-// UnreachableStatement reports a statement control flow cannot reach.
+// unreachableStatement reports a statement control flow cannot reach.
 //
 // The rule is the one the toolchain's own unreachable pass applies, run over each
 // loaded package's syntax and type information rather than reimplemented: the
 // finding's position is the diagnostic's own and its subject is the declaration
 // the statement is written in.
-func UnreachableStatement(in *Input) ([]Finding, error) {
+func unreachableStatement(in *Input) ([]Finding, error) {
 	return in.intraFunc().unreachableStatements()
 }
 
-// DeadStore reports a write to a local variable that no read reaches on any path of
+// deadStore reports a write to a local variable that no read reaches on any path of
 // the function's control-flow graph before the next store or the end of the body,
 // in every function body and every function literal, a literal of a package-level
 // variable's initializer included. The subject is a variable the body or its
@@ -87,16 +87,16 @@ func UnreachableStatement(in *Input) ([]Finding, error) {
 // no value reads every named result. A variable a store to which may be read where
 // the graph cannot see is no subject ([escaped]). Every call but the panic built-in
 // is assumed to return.
-func DeadStore(in *Input) ([]Finding, error) {
+func deadStore(in *Input) ([]Finding, error) {
 	return in.intraFunc().deadStores()
 }
 
-// UnreachableCase reports a case clause of a type switch that can never match
+// unreachableCase reports a case clause of a type switch that can never match
 // because an earlier clause names an interface every value the later one names
 // implements. A clause naming nil, the default clause and a type parameter are no
 // subject. A switch over values has none either, because the language refuses a
 // duplicated constant case.
-func UnreachableCase(in *Input) ([]Finding, error) {
+func unreachableCase(in *Input) ([]Finding, error) {
 	return in.intraFunc().unreachableCases()
 }
 

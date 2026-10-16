@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/exempt"
+	"github.com/cplieger/deadset-go/v2/internal/kinds"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -40,8 +42,8 @@ var (
 // TestEveryReportedKindHasADocumentationEntry reads the kinds page and refuses a
 // code this command answers that the page says nothing about.
 //
-// The population is the composition root's own emitters table plus the kinds that
-// table names as another product's, which is every code a reader of this analyzer's
+// The population is kinds.Emitters plus the live Go kinds it holds no rule for,
+// which another product reports, which is every code a reader of this analyzer's
 // documentation can meet: one in a report it wrote, and one in a merged report the
 // edge evaluations it published produced.
 //
@@ -53,14 +55,18 @@ func TestEveryReportedKindHasADocumentationEntry(t *testing.T) {
 
 	page := docPage(t, "kinds.md")
 	sections := matched(docsKindHeading, page)
-	for _, code := range slices.Sorted(maps.Keys(emitters)) {
+	for _, code := range slices.Sorted(maps.Keys(kinds.Emitters)) {
 		if !slices.Contains(sections, string(code)) {
-			t.Errorf("docs/kinds.md carries %d kind sections and none for %s, which the emitters table reports",
+			t.Errorf("docs/kinds.md carries %d kind sections and none for %s, which kinds.Emitters reports",
 				len(sections), code)
 		}
 	}
 	entries := docsKindEntries(page)
-	for _, code := range goKindsWithoutEmitter {
+	for _, row := range vocab.Kinds() {
+		code := row.Code
+		if !row.AppliesTo(vocab.Go) || kinds.Emitters[code] != nil {
+			continue
+		}
 		if !slices.Contains(entries, string(code)) {
 			t.Errorf("docs/kinds.md carries %d kind entries and none for %s, which another product reports",
 				len(entries), code)
@@ -80,9 +86,9 @@ func TestEveryDocumentedKindSectionIsOneThisAnalyzerReports(t *testing.T) {
 
 	sections := matched(docsKindHeading, docPage(t, "kinds.md"))
 	for _, code := range sections {
-		if emitters[vocab.Code(code)] == nil {
-			t.Errorf("docs/kinds.md carries a section for %s, want a section only for a code the emitters table reports: %v",
-				code, slices.Sorted(maps.Keys(emitters)))
+		if kinds.Emitters[vocab.Code(code)] == nil {
+			t.Errorf("docs/kinds.md carries a section for %s, want a section only for a code kinds.Emitters reports: %v",
+				code, slices.Sorted(maps.Keys(kinds.Emitters)))
 		}
 	}
 }
@@ -90,7 +96,7 @@ func TestEveryDocumentedKindSectionIsOneThisAnalyzerReports(t *testing.T) {
 // TestEveryExemptionClassHasADocumentationEntry reads the exemptions page and
 // refuses any difference from the classes this command computes.
 //
-// The two directions are one assertion because the detectors table is the whole of
+// The two directions are one assertion because exempt.Detectors is the whole of
 // what this analyzer computes: a class absent from the page is an exemption a
 // maintainer cannot look up, and a class the page describes that the table does not
 // hold is a page promising an exemption no run applies.
@@ -98,13 +104,13 @@ func TestEveryExemptionClassHasADocumentationEntry(t *testing.T) {
 	t.Parallel()
 
 	documented := matched(docsClassHeading, docPage(t, "exemptions.md"))
-	computed := slices.Sorted(maps.Keys(detectors))
+	computed := slices.Sorted(maps.Keys(exempt.Detectors))
 	want := make([]string, 0, len(computed))
 	for _, class := range computed {
 		want = append(want, string(class))
 	}
 	if !slices.Equal(documented, want) {
-		t.Errorf("docs/exemptions.md documents the classes %v, want the %d the detectors table computes: %v",
+		t.Errorf("docs/exemptions.md documents the classes %v, want the %d exempt.Detectors computes: %v",
 			documented, len(want), want)
 	}
 }

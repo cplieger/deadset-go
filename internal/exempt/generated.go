@@ -1,10 +1,10 @@
 package exempt
 
 import (
-	"go/ast"
 	"go/token"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -12,15 +12,6 @@ import (
 // generator owns the file, which is the whole reason, so one text serves every
 // declaration the class retains.
 const detailGenerated = "declared in a generated file"
-
-// IsGeneratedFile reports whether f carries the standard Go generated-code
-// header: a line reading "// Code generated <generator> DO NOT EDIT." before the
-// first non-comment, non-blank text of the file.
-//
-// The rule is go/ast's, so a file this reports on is one the toolchain's own
-// readers treat as generated too, and one function answers the question for the
-// whole analyzer.
-func IsGeneratedFile(f *ast.File) bool { return ast.IsGenerated(f) }
 
 // GeneratedFileDetector retains every declaration written in a generated file:
 // the generator owns the file, so a deletion there is undone the next time it
@@ -42,7 +33,7 @@ func GeneratedFileDetector(in *Input) ([]graph.Exemption, error) {
 	if in.Options.IncludeGenerated {
 		return nil, nil
 	}
-	sites, err := generatedSites(in)
+	sites, err := GeneratedSites(in.Result, in.Resolve)
 	if err != nil {
 		return nil, err
 	}
@@ -67,23 +58,18 @@ func GeneratedFileDetector(in *Input) ([]graph.Exemption, error) {
 	return found, nil
 }
 
-// generatedSites renders the package clause of every generated file of the
-// configuration, keyed by the target-relative path the inventory spells its
+// GeneratedSites renders the package clause of every generated file of one
+// configuration's load, keyed by the target-relative path the inventory spells its
 // positions with. One file is reached once per variant of its package and renders
 // to one entry.
-func generatedSites(in *Input) (map[string]token.Position, error) {
+func GeneratedSites(r *load.Result, resolve *graph.Resolver) (map[string]token.Position, error) {
 	sites := make(map[string]token.Position)
-	for _, p := range in.Result.Packages {
-		for _, f := range p.Syntax {
-			if !IsGeneratedFile(f) {
-				continue
-			}
-			site, err := in.Resolve.Render(f.Package)
-			if err != nil {
-				return nil, err
-			}
-			sites[site.Filename] = site
+	for _, clause := range r.Generated {
+		site, err := resolve.Render(clause)
+		if err != nil {
+			return nil, err
 		}
+		sites[site.Filename] = site
 	}
 	return sites, nil
 }

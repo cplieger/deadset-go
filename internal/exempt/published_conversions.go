@@ -3,10 +3,9 @@ package exempt
 import (
 	"go/token"
 	"go/types"
-	"slices"
-	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -72,19 +71,11 @@ func newPublishedScan(pkgs []*packages.Package, resolve *graph.Resolver) *publis
 		}
 		seen[resolve.PackageKey(p.Types)] = true
 		s.target[resolve.PackageKey(p.Types)] = true
-		if publishedPackage(p) {
+		if load.Published(p.PkgPath, p.Name == "main") {
 			s.published = append(s.published, p)
 		}
 	}
 	return s
-}
-
-// publishedPackage reports whether a program outside the module can import one
-// package of the target: neither a command, an external test package nor a package
-// below an internal directory.
-func publishedPackage(p *packages.Package) bool {
-	return p.Name != "main" && !strings.HasSuffix(p.PkgPath, "_test") &&
-		!slices.Contains(strings.Split(p.PkgPath, "/"), "internal")
 }
 
 // sites reads the published API and records one site per published parameter and

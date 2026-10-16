@@ -766,8 +766,8 @@ func TestComputeRefusesAPartOfADeclarationTheInventoryDoesNotHold(t *testing.T) 
 func TestASuppressionWithholdsAFindingReportedInAnotherFileThanTheDeclarationItNames(t *testing.T) {
 	in := suppressed(t, "interfaces-assertion-elsewhere.txtar", applicationConfig())
 	emitters := map[vocab.Code]Emitter{
-		vocab.UnusedSatisfactionAssertion: UnusedSatisfactionAssertion,
-		vocab.StaleSuppression:            StaleSuppressions,
+		vocab.UnusedSatisfactionAssertion: unusedSatisfactionAssertion,
+		vocab.StaleSuppression:            staleSuppressions,
 	}
 
 	// The premise the entry is written against: the reference it names is the
@@ -815,8 +815,8 @@ func TestASuppressionWithholdsNoFindingReportedInAFileTheRecordDoesNotName(t *te
 	in.Marks[0].Path = "iface.go"
 
 	found := computed(t, in, map[vocab.Code]Emitter{
-		vocab.UnusedSatisfactionAssertion: UnusedSatisfactionAssertion,
-		vocab.StaleSuppression:            StaleSuppressions,
+		vocab.UnusedSatisfactionAssertion: unusedSatisfactionAssertion,
+		vocab.StaleSuppression:            staleSuppressions,
 	}).Findings
 
 	want := []string{
@@ -826,5 +826,56 @@ func TestASuppressionWithholdsNoFindingReportedInAFileTheRecordDoesNotName(t *te
 	if got := summary(found); !slices.Equal(got, want) {
 		t.Errorf("the pass with the entry naming another file reports %v, want %v: an entry matches the path the finding carries",
 			got, want)
+	}
+}
+
+// goKindsWithoutEmitter are the live Go kinds Emitters holds no entry
+// for, so no run of that table reports one. Each is named rather than counted, so
+// the table's test says which kinds the table is silent about instead of allowing a
+// kind to go missing unnoticed.
+//
+// DS9005 is the merge's, which is another product.
+var goKindsWithoutEmitter = []vocab.Code{
+	"DS9005", // the stale cross-language edge, which the merge answers
+}
+
+func TestEmittersNameEveryLiveGoKindOrSayWhichHasNoRule(t *testing.T) {
+	t.Parallel()
+
+	var published []vocab.Code
+	for _, row := range vocab.Kinds() {
+		if !row.AppliesTo(vocab.Go) {
+			continue
+		}
+		published = append(published, row.Code)
+		_, wired := Emitters[row.Code]
+		named := slices.Contains(goKindsWithoutEmitter, row.Code)
+		switch {
+		case wired && named:
+			t.Errorf("%s has an emitter and is named as having none", row.Code)
+		case !wired && !named:
+			t.Errorf("%s is a live Go kind with no emitter and is not named as one: a kind absent from both reports nothing and nothing says so", row.Code)
+		}
+	}
+
+	if len(published) != len(Emitters)+len(goKindsWithoutEmitter) {
+		t.Errorf("the vocabulary publishes %d Go kinds, the table holds %d and %d are named without a rule",
+			len(published), len(Emitters), len(goKindsWithoutEmitter))
+	}
+	for code := range Emitters {
+		row, live := vocab.KindOf(code)
+		if !live {
+			t.Errorf("the table registers an emitter under %s, which names no live kind", code)
+			continue
+		}
+		if !row.AppliesTo(vocab.Go) {
+			t.Errorf("the table registers an emitter under %s, which the vocabulary gives languages %v and not %s",
+				code, row.Languages, vocab.Go)
+		}
+	}
+	for _, code := range goKindsWithoutEmitter {
+		if _, live := vocab.KindOf(code); !live {
+			t.Errorf("%s is named as a live Go kind without a rule, and the vocabulary does not hold it", code)
+		}
 	}
 }

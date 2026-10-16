@@ -7,6 +7,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/run"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
 )
@@ -22,12 +23,12 @@ type explainedState struct {
 }
 
 // stateOf reads what the analysis holds about one symbol.
-func stateOf(set *findingSet, subject *graph.Symbol) explainedState {
+func stateOf(set *run.Findings, subject *graph.Symbol) explainedState {
 	return explainedState{
-		found:     findingAbout(set.result.Findings, subject),
-		retained:  retentionsOf(set.swept.Retained, subject.ID),
-		candidate: candidateFor(set.swept.Candidates, subject.ID),
-		live:      set.swept.LiveUnder[subject.ID],
+		found:     findingAbout(set.Result.Findings, subject),
+		retained:  retentionsOf(set.Liveness.Retained, subject.ID),
+		candidate: candidateFor(set.Liveness.Candidates, subject.ID),
+		live:      set.Liveness.LiveUnder[subject.ID],
 	}
 }
 
@@ -62,14 +63,14 @@ const explainedModules = 10
 // are the generated ones rather than a hand-written fixture: between them they put
 // symbols in all four states the explanation answers, which no reference structure
 // alone produces.
-func analyzedModules(t *testing.T) []*findingSet {
+func analyzedModules(t *testing.T) []*run.Findings {
 	t.Helper()
 
 	generator := drawnModules(`{"target": {"kind": "application"}}`, false)
-	held := make([]*findingSet, explainedModules)
+	held := make([]*run.Findings, explainedModules)
 	for seed := range held {
 		set := cachedFindings(t.Context(), t, generator.Example(seed).files)
-		held[seed] = &set
+		held[seed] = set
 	}
 	return held
 }
@@ -96,8 +97,8 @@ func TestAnExplanationAgreesWithTheReport(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		set := analyzed[rapid.IntRange(0, explainedModules-1).Draw(t, "the generated module's seed")]
 
-		for i := range set.loaded.merged.Symbols {
-			subject := &set.loaded.merged.Symbols[i]
+		for i := range set.Merged.Symbols {
+			subject := &set.Merged.Symbols[i]
 			held := stateOf(set, subject)
 			checkDisjoint(t, subject, &held)
 			checkExplanation(t, set, subject, &held)
@@ -135,10 +136,10 @@ func checkDisjoint(t *rapid.T, subject *graph.Symbol, held *explainedState) {
 
 // checkOneFindingPerSymbol asserts that no declaration of the inventory is reported
 // twice, which is what makes the reported answer one finding's.
-func checkOneFindingPerSymbol(t *rapid.T, set *findingSet) {
-	seen := make(map[string]vocab.Code, len(set.result.Findings))
-	for i := range set.result.Findings {
-		found := &set.result.Findings[i]
+func checkOneFindingPerSymbol(t *rapid.T, set *run.Findings) {
+	seen := make(map[string]vocab.Code, len(set.Result.Findings))
+	for i := range set.Result.Findings {
+		found := &set.Result.Findings[i]
 		key := positionKey(&found.Position)
 		if first, twice := seen[key]; twice {
 			t.Fatalf("%s is reported under %s and under %s", key, first, found.Code)
@@ -149,7 +150,7 @@ func checkOneFindingPerSymbol(t *rapid.T, set *findingSet) {
 
 // checkExplanation reads the printed explanation back and asserts it says what the
 // analysis holds.
-func checkExplanation(t *rapid.T, set *findingSet, subject *graph.Symbol, held *explainedState) {
+func checkExplanation(t *rapid.T, set *run.Findings, subject *graph.Symbol, held *explainedState) {
 	var printed strings.Builder
 	if err := writeExplanation(&printed, set, graph.CascadeRoots, subject); err != nil {
 		t.Fatalf("writeExplanation(%s) = %v, want the explanation", subject.Ref, err)
@@ -221,41 +222,49 @@ func checkRetained(t *rapid.T, subject *graph.Symbol, retained []graph.Exemption
 }
 
 // checkPath asserts every hop the liveness answer prints is a reference the graph
-// holds, and that the path starts at a symbol the root set names.
-func checkPath(t *rapid.T, set *findingSet, subject *graph.Symbol, text string) {
-	root, path, reached := pathFrom(set.loaded.merged, subject.ID)
+// holds, and that the path starts at a symbol the root set names or at a loaded
+// consumer's reference.
+func checkPath(t *rapid.T, set *run.Findings, subject *graph.Symbol, text string) {
+	path, reached := set.Matrix.Path(subject.ID, set.Mode)
+	if !reached {
+		path, reached = set.Matrix.Path(subject.ID, graph.Mode{ConsumerTestsProduction: set.Mode.ConsumerTestsProduction})
+	}
 	if !reached {
 		if !strings.Contains(text, "  unreachable: ") {
 			t.Fatalf("the explanation of %s claims a path where no root reaches it:\n%s", subject.Ref, text)
 		}
 		return
 	}
-	if len(path) == 0 {
-		if len(rootReasons(set.loaded.merged.Roots, subject.ID)) == 0 {
+	if path.Root != nil && len(path.Hops) == 0 {
+		if len(rootReasons(set.Merged.Roots, subject.ID)) == 0 {
 			t.Fatalf("%s is reached by the empty path and the root set does not name it", subject.Ref)
 		}
 		return
 	}
-	if !rootNames(set.loaded.merged.Roots, root.ID) {
-		t.Fatalf("the path to %s starts at %s, which the root set does not name", subject.Ref, root.ID)
+	hops := path.Hops
+	switch {
+	case path.Root == nil:
+		if hops[0].Consumer == "" {
+			t.Fatalf("the path to %s starts at no root and its first hop is no consumer's reference: %+v", subject.Ref, hops[0])
+		}
+	case !rootNames(set.Merged.Roots, path.Root.ID):
+		t.Fatalf("the path to %s starts at %s, which the root set does not name", subject.Ref, path.Root.ID)
+	case hops[0].From != path.Root.ID:
+		t.Fatalf("the path to %s starts at %s and its first hop is made by %s", subject.Ref, path.Root.ID, hops[0].From)
 	}
-	if path[0].From != root.ID {
-		t.Fatalf("the path to %s starts at %s and its first hop is made by %s", subject.Ref, root.ID, path[0].From)
+	if hops[len(hops)-1].To != subject.ID {
+		t.Fatalf("the path to %s ends at %s", subject.Ref, hops[len(hops)-1].To)
 	}
-	if path[len(path)-1].To != subject.ID {
-		t.Fatalf("the path to %s ends at %s", subject.Ref, path[len(path)-1].To)
-	}
-	for i := range path {
-		if i > 0 && path[i].From != path[i-1].To {
+	for i := range hops {
+		if i > 0 && hops[i].From != hops[i-1].To {
 			t.Fatalf("the path to %s has a gap: hop %d reaches %s and hop %d is made by %s",
-				subject.Ref, i-1, path[i-1].To, i, path[i].From)
+				subject.Ref, i-1, hops[i-1].To, i, hops[i].From)
 		}
-		if !heldReference(set.loaded.merged.References, path[i]) {
-			t.Fatalf("hop %d of the path to %s is no reference the graph holds: %+v", i, subject.Ref, path[i])
+		if !heldReference(set.Merged.References, hops[i]) {
+			t.Fatalf("hop %d of the path to %s is no reference the graph holds: %+v", i, subject.Ref, hops[i])
 		}
-		if !strings.Contains(text, "  reference: "+path[i].Pos.String()+"\t") {
-			t.Fatalf("the explanation of %s does not carry hop %d at %s:\n%s",
-				subject.Ref, i, path[i].Pos, text)
+		if hops[i].Consumer == "" && !strings.Contains(text, "  reference: "+hops[i].Pos.String()+"\t") {
+			t.Fatalf("the explanation of %s does not carry hop %d at %s:\n%s", subject.Ref, i, hops[i].Pos, text)
 		}
 	}
 }

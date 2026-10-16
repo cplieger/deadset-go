@@ -27,10 +27,10 @@ func UnusedExported(in *Input) ([]Finding, error) {
 	return in.unusedDeclarations(vocab.UnusedExported), nil
 }
 
-// UnusedUnexported reports an unexported declaration that is not a member of a
+// unusedUnexported reports an unexported declaration that is not a member of a
 // type and that nothing references, and a constant or a type a function body
 // declares that nothing in the body references.
-func UnusedUnexported(in *Input) ([]Finding, error) {
+func unusedUnexported(in *Input) ([]Finding, error) {
 	locals, err := in.intraFunc().unusedLocals()
 	if err != nil {
 		return nil, err
@@ -38,34 +38,34 @@ func UnusedUnexported(in *Input) ([]Finding, error) {
 	return append(in.unusedDeclarations(vocab.UnusedUnexported), locals...), nil
 }
 
-// UnusedMember reports a struct field that nothing references and whose container
+// unusedMember reports a struct field that nothing references and whose container
 // is not itself dead, because a member of a dead container falls with it and is
 // reported inside its component.
-func UnusedMember(in *Input) ([]Finding, error) {
+func unusedMember(in *Input) ([]Finding, error) {
 	return in.unusedDeclarations(vocab.UnusedMember), nil
 }
 
-// TestOnlyUse reports a declaration that no production file references and at
+// testOnlyUse reports a declaration that no production file references and at
 // least one test file does, which is the symbol and its tests deleted in one
 // change rather than an unreferenced declaration.
-func TestOnlyUse(in *Input) ([]Finding, error) {
+func testOnlyUse(in *Input) ([]Finding, error) {
 	return in.unusedDeclarations(vocab.TestOnlyUse), nil
 }
 
-// DeprecatedAndUnused reports a declaration carrying a deprecation marker that no
+// deprecatedAndUnused reports a declaration carrying a deprecation marker that no
 // production file references, which is the residue of a finished migration.
-func DeprecatedAndUnused(in *Input) ([]Finding, error) {
+func deprecatedAndUnused(in *Input) ([]Finding, error) {
 	return in.unusedDeclarations(vocab.DeprecatedUnused), nil
 }
 
-// TestOfDeadCode reports a test declaration whose set of referenced target
+// testOfDeadCode reports a test declaration whose set of referenced target
 // declarations is non-empty and wholly dead.
 //
 // The subject is the sweep's own admission rather than a rule of this kind: a test
 // that references one live declaration is never admitted, and an admitted test is
 // in the component of the declarations it references, so a report names the test
 // beside the code it exercises.
-func TestOfDeadCode(in *Input) ([]Finding, error) {
+func testOfDeadCode(in *Input) ([]Finding, error) {
 	if in == nil || in.Sweep == nil {
 		return nil, nil
 	}

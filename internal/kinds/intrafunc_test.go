@@ -18,12 +18,12 @@ import (
 // over a fixture of these kinds computes with.
 func intraFuncEmitters() map[vocab.Code]Emitter {
 	return map[vocab.Code]Emitter{
-		vocab.UnusedParameter:      UnusedParameter,
-		vocab.UnusedReceiver:       UnusedReceiver,
-		vocab.UnusedResult:         UnusedResult,
-		vocab.UnreachableStatement: UnreachableStatement,
-		vocab.DeadStore:            DeadStore,
-		vocab.UnreachableCase:      UnreachableCase,
+		vocab.UnusedParameter:      unusedParameter,
+		vocab.UnusedReceiver:       unusedReceiver,
+		vocab.UnusedResult:         unusedResult,
+		vocab.UnreachableStatement: unreachableStatement,
+		vocab.DeadStore:            deadStore,
+		vocab.UnreachableCase:      unreachableCase,
 	}
 }
 

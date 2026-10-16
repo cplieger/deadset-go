@@ -47,7 +47,7 @@ const versionSeparator = "@"
 // two, which is as two words of one directive.
 const versionGap = " "
 
-// FileNeverBuilt reports a source file of the target that no configuration of the
+// fileNeverBuilt reports a source file of the target that no configuration of the
 // build matrix compiles, naming the build constraint that excluded it.
 //
 // The kind reports only where the configuration both lists the platform
@@ -65,7 +65,7 @@ const versionGap = " "
 // configuration decides, and the run records it as excluded by cgo instead. A file
 // the cgo build TAG excluded stays in the population, because that tag is an atom
 // a configuration names.
-func FileNeverBuilt(in *Input) ([]Finding, error) {
+func fileNeverBuilt(in *Input) ([]Finding, error) {
 	if !completeMatrix(in) {
 		return nil, nil
 	}
@@ -450,7 +450,7 @@ func selectsName(base, system, arch string) bool {
 	return err == nil && selected
 }
 
-// FileNeverImported reports a source file of a package that no import reaches,
+// fileNeverImported reports a source file of a package that no import reaches,
 // that no root names, and whose every declaration the sweep found dead.
 //
 // The three conditions are one claim: nothing compiles the file into a package
@@ -459,7 +459,7 @@ func selectsName(base, system, arch string) bool {
 // package holding a root, which is what leaves a test package with a test function
 // out: the test binary reaches its declarations through those roots rather than
 // through an import.
-func FileNeverImported(in *Input) ([]Finding, error) {
+func fileNeverImported(in *Input) ([]Finding, error) {
 	if in == nil || in.Merged == nil || in.Sweep == nil {
 		return nil, nil
 	}
@@ -548,7 +548,7 @@ func (in *Input) rootedPackages() map[string]bool {
 	return rooted
 }
 
-// UnusedDependency reports a direct requirement of a module file whose module
+// unusedDependency reports a direct requirement of a module file whose module
 // provides no package any package of that file's module imports.
 //
 // A requirement marked indirect is never reported: it carries no import by
@@ -556,7 +556,7 @@ func (in *Input) rootedPackages() map[string]bool {
 // deleting it changes the build list. A requirement is reported only where every
 // configuration of the matrix agrees, because a requirement one configuration
 // imports is used.
-func UnusedDependency(in *Input) ([]Finding, error) {
+func unusedDependency(in *Input) ([]Finding, error) {
 	var found []Finding
 	for i := range in.Modules {
 		m := &in.Modules[i]
@@ -598,13 +598,13 @@ func unusedRequirements(in *Input, m *ModuleFile) []deps.Requirement {
 	return unused
 }
 
-// UnusedReplace reports a replace directive whose replaced module is absent from
+// unusedReplace reports a replace directive whose replaced module is absent from
 // its module's build list, which is the one case in which the directive redirects
 // nothing.
 //
 // It is reported only where every configuration of the matrix agrees, because a
 // module one configuration loads is in the build list.
-func UnusedReplace(in *Input) ([]Finding, error) {
+func unusedReplace(in *Input) ([]Finding, error) {
 	var found []Finding
 	for i := range in.Modules {
 		m := &in.Modules[i]

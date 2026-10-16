@@ -8,10 +8,9 @@
 // and never the configuration: the composition root converts every setting into
 // Options, the way it converts every other setting for every other stage.
 //
-// One file holds one class, and the framework names none of them: a caller
-// assembles the classes it has into the detector table Compute runs, so a class
-// that is not implemented is a class that produces nothing rather than a compile
-// failure.
+// One file holds one class. [Detectors] maps every class this analyzer computes
+// to its detection, and Compute runs the table it is given, so a class absent from
+// it produces nothing rather than failing to compile.
 package exempt
 
 import (
@@ -26,20 +25,23 @@ import (
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
-// Vocabulary lists every class of the vocabulary, in its order, which is every
-// name a configuration may disable.
-func Vocabulary() []vocab.Exemption {
-	classes := vocab.ExemptionClasses()
-	names := make([]vocab.Exemption, len(classes))
-	for i := range classes {
-		names[i] = classes[i].Name
-	}
-	return names
+// Detectors is every class this analyzer computes, mapped to its detection. A test
+// holds it equal to [goClasses].
+var Detectors = map[vocab.Exemption]Detector{
+	vocab.InterfaceSatisfaction: InterfaceSatisfactionDetector,
+	vocab.EncodingReflection:    EncodingReflectionDetector,
+	vocab.FormatVerbContract:    FormatVerbContractDetector,
+	vocab.ErrorsDuckTyping:      ErrorsDuckTypingDetector,
+	vocab.EnumGroup:             EnumGroupDetector,
+	vocab.GeneratedFile:         GeneratedFileDetector,
+	vocab.LinknameCgoAsmPlugin:  LinknameCgoAsmPluginDetector,
+	vocab.TemplateField:         TemplateFieldDetector,
+	vocab.ReflectiveLookup:      ReflectiveLookupDetector,
 }
 
-// Classes lists the classes a Go analysis computes, in vocabulary order, which is
+// goClasses lists the classes a Go analysis computes, in vocabulary order, which is
 // the order Compute runs them in.
-func Classes() []vocab.Exemption {
+func goClasses() []vocab.Exemption {
 	var computed []vocab.Exemption
 	for _, class := range vocab.ExemptionClasses() {
 		if class.AppliesTo(vocab.Go) {
@@ -162,7 +164,7 @@ func Compute(in *Input, detectors map[vocab.Exemption]Detector) (held, testEvide
 	}
 
 	var found, evidence []graph.Exemption
-	for _, class := range Classes() {
+	for _, class := range goClasses() {
 		detect, carried := detectors[class]
 		if disabled[class] || !carried {
 			continue

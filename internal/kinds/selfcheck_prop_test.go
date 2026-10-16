@@ -121,7 +121,7 @@ func drawnEmitters(found []drawnFinding) map[vocab.Code]Emitter {
 	for _, one := range found {
 		byCode[one.code] = append(byCode[one.code], one.finding())
 	}
-	table := map[vocab.Code]Emitter{vocab.StaleSuppression: StaleSuppressions}
+	table := map[vocab.Code]Emitter{vocab.StaleSuppression: staleSuppressions}
 	for code, produced := range byCode {
 		table[code] = func(*Input) ([]Finding, error) { return slices.Clone(produced), nil }
 	}
@@ -337,7 +337,7 @@ func TestAnythingTheConfigurationNamesThatMatchesNothingIsReported(t *testing.T)
 		}
 		in.Edges = declared
 
-		stale, err := StaleSuppressions(in)
+		stale, err := staleSuppressions(in)
 		if err != nil {
 			t.Fatalf("StaleSuppressions() = _, %v, want every record reported", err)
 		}
@@ -350,7 +350,7 @@ func TestAnythingTheConfigurationNamesThatMatchesNothingIsReported(t *testing.T)
 				len(records), inEffect, reasons, len(records))
 		}
 
-		unmatched, err := UnmatchedRoots(in)
+		unmatched, err := unmatchedRoots(in)
 		if err != nil {
 			t.Fatalf("UnmatchedRoots() = _, %v, want every configured string reported", err)
 		}

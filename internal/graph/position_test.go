@@ -115,6 +115,15 @@ func TestPositionsColumnRefusesAPositionOutsideTheFile(t *testing.T) {
 	}
 }
 
+func TestPositionsColumnCountsAnUnknownColumnAsTheFirst(t *testing.T) {
+	src := []byte("package app\n")
+	p := newPositions(token.NewFileSet(), "/root", func(string) ([]byte, error) { return src, nil })
+	q := token.Position{Filename: "/root/app.go", Line: 2, Column: 0, Offset: len(src)}
+	if got, err := p.column(q); err != nil || got != 1 {
+		t.Errorf("column(a line directive's unknown column at the end of the file) = %d, %v, want 1, <nil>", got, err)
+	}
+}
+
 func TestSymbolsColumnsOnANonASCIILine(t *testing.T) {
 	byName := make(map[string]Symbol)
 	for _, s := range symbolsOf(t, "columns.txtar") {

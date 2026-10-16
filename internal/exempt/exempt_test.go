@@ -3,6 +3,7 @@ package exempt
 import (
 	"errors"
 	"go/token"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -14,14 +15,14 @@ import (
 )
 
 func TestClassesHandsOutNoSliceACallerCanChange(t *testing.T) {
-	first := Classes()
+	first := goClasses()
 	first[0] = "changed"
 
 	// A caller that writes into the answer would change what every later caller
 	// reads, and a class list one consumer can rewrite is a vocabulary that is no
 	// longer closed.
-	if got := Classes(); got[0] == "changed" {
-		t.Errorf("Classes()[0] = %q after a caller wrote into an earlier answer, want the vocabulary's own first class", got[0])
+	if got := goClasses(); got[0] == "changed" {
+		t.Errorf("goClasses()[0] = %q after a caller wrote into an earlier answer, want the vocabulary's own first class", got[0])
 	}
 }
 
@@ -48,8 +49,8 @@ func held(found []graph.Exemption) []string {
 
 func TestComputeRunsEveryClassTheTableHoldsInVocabularyOrder(t *testing.T) {
 	var ran []vocab.Exemption
-	detectors := make(map[vocab.Exemption]Detector, len(Classes()))
-	for _, class := range Classes() {
+	detectors := make(map[vocab.Exemption]Detector, len(goClasses()))
+	for _, class := range goClasses() {
 		detectors[class] = func(*Input) ([]graph.Exemption, error) {
 			ran = append(ran, class)
 			return nil, nil
@@ -62,7 +63,7 @@ func TestComputeRunsEveryClassTheTableHoldsInVocabularyOrder(t *testing.T) {
 	if _, _, err := Compute(&Input{}, detectors); err != nil {
 		t.Fatalf("Compute over a table of every class error: %v", err)
 	}
-	want := slices.DeleteFunc(Classes(), func(class vocab.Exemption) bool { return class == vocab.EnumGroup })
+	want := slices.DeleteFunc(goClasses(), func(class vocab.Exemption) bool { return class == vocab.EnumGroup })
 	if !slices.Equal(ran, want) {
 		t.Errorf("Compute ran %v, want %v", ran, want)
 	}
@@ -163,19 +164,22 @@ func TestComputeKeepsOneEntryPerSymbolClassDetailAndHolder(t *testing.T) {
 	}
 }
 
-// goDetectors is the table a caller assembles from every class this analyzer
-// implements, which is the table the composition root builds.
-func goDetectors() map[vocab.Exemption]Detector {
-	return map[vocab.Exemption]Detector{
-		vocab.InterfaceSatisfaction: InterfaceSatisfactionDetector,
-		vocab.EncodingReflection:    EncodingReflectionDetector,
-		vocab.FormatVerbContract:    FormatVerbContractDetector,
-		vocab.ErrorsDuckTyping:      ErrorsDuckTypingDetector,
-		vocab.EnumGroup:             EnumGroupDetector,
-		vocab.GeneratedFile:         GeneratedFileDetector,
-		vocab.LinknameCgoAsmPlugin:  LinknameCgoAsmPluginDetector,
-		vocab.TemplateField:         TemplateFieldDetector,
-		vocab.ReflectiveLookup:      ReflectiveLookupDetector,
+// goDetectors is a copy of [Detectors] a test may change.
+func goDetectors() map[vocab.Exemption]Detector { return maps.Clone(Detectors) }
+
+// A class Detectors does not hold retains nothing and nothing refuses the run, so
+// the table is held to every class [goClasses] names.
+func TestDetectorsNameEveryClassTheAnalyzerComputes(t *testing.T) {
+	t.Parallel()
+
+	classes := goClasses()
+	for _, class := range classes {
+		if Detectors[class] == nil {
+			t.Errorf("Detectors[%q] = nil, want the detection of every class goClasses() names", class)
+		}
+	}
+	if len(Detectors) != len(classes) {
+		t.Errorf("Detectors names %d classes, want the %d goClasses() names: %v", len(Detectors), len(classes), classes)
 	}
 }
 
@@ -374,7 +378,7 @@ func fixtureOptions(t *testing.T, archive string) Options {
 const templateFixtureDir = "templates"
 
 func TestEveryClauseIsOneRelationThenTheThingItRelatesTo(t *testing.T) {
-	seen := make(map[vocab.Exemption]bool, len(Classes()))
+	seen := make(map[vocab.Exemption]bool, len(goClasses()))
 	for _, archive := range fixtureArchives(t) {
 		t.Run(archive, func(t *testing.T) {
 			found, err := analysisOf(t, archive, fixtureOptions(t, archive)).compute(t, false)
@@ -390,7 +394,7 @@ func TestEveryClauseIsOneRelationThenTheThingItRelatesTo(t *testing.T) {
 
 	// The grammar above is only worth pinning over a corpus that reaches every
 	// class, so the fixtures are also what proves each of the nine states one.
-	for _, class := range Classes() {
+	for _, class := range goClasses() {
 		if !seen[class] {
 			t.Errorf("no fixture of testdata made %s state a clause, want each class covered", class)
 		}

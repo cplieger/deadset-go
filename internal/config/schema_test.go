@@ -152,11 +152,6 @@ func TestPatternsEqualTheContract(t *testing.T) {
 			want: func() string { return stringAt(t, properties, "contract_version", "pattern") },
 		},
 		{
-			name: "the_exemption_class_pattern",
-			got:  exemptionClassPattern.String(),
-			want: func() string { return itemsPattern(t, properties, "exemptions", "disabled") },
-		},
-		{
 			name: "the_project_path_pattern",
 			got:  projectPathPattern.String(),
 			want: func() string { return shapePattern(t, properties, "analysis", "configurations", "project") },
@@ -277,33 +272,6 @@ func stringAt(t *testing.T, properties map[string]any, name, key string) string 
 		t.Fatalf("config.schema.json: %s declares no %s", name, key)
 	}
 	return value
-}
-
-// itemsPattern returns the pattern the entries of one array member must match.
-func itemsPattern(t *testing.T, properties map[string]any, section, member string) string {
-	t.Helper()
-
-	declared, isObject := properties[section].(map[string]any)
-	if !isObject {
-		t.Fatalf("config.schema.json: %s is not an object", section)
-	}
-	members, isObject := declared["properties"].(map[string]any)
-	if !isObject {
-		t.Fatalf("config.schema.json: %s declares no properties", section)
-	}
-	array, isObject := members[member].(map[string]any)
-	if !isObject {
-		t.Fatalf("config.schema.json: %s.%s is not an object", section, member)
-	}
-	items, isObject := array["items"].(map[string]any)
-	if !isObject {
-		t.Fatalf("config.schema.json: %s.%s declares no items", section, member)
-	}
-	pattern, isString := items["pattern"].(string)
-	if !isString {
-		t.Fatalf("config.schema.json: %s.%s items declare no pattern", section, member)
-	}
-	return pattern
 }
 
 // shapePattern returns the pattern one member of a list entry's shapes must match:

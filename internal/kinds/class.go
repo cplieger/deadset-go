@@ -9,16 +9,9 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
-
-// internalElement is the path element that makes a package importable only from
-// inside the module tree above it.
-const internalElement = "internal"
-
-// testPackageSuffix ends the import path of an external test package, which
-// nothing can import at all.
-const testPackageSuffix = "_test"
 
 // mainPackageName is the name of a package nothing can import.
 const mainPackageName = "main"
@@ -223,10 +216,7 @@ func (in *Input) everyDeclaredLoaded() bool {
 // not under an internal tree, which for a target analyzed alone is every internal
 // package.
 func (in *Input) importable(symbol *graph.Symbol) bool {
-	if in.index().mains[in.packageOf(symbol)] || strings.HasSuffix(symbol.PkgPath, testPackageSuffix) {
-		return false
-	}
-	return !slices.Contains(strings.Split(symbol.PkgPath, "/"), internalElement)
+	return load.Published(symbol.PkgPath, in.index().mains[in.packageOf(symbol)])
 }
 
 // consumersLoaded reports whether the configuration declares the consumer set

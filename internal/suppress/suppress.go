@@ -117,3 +117,16 @@ func (e *malformedError) Error() string {
 
 // Unwrap returns the class every malformed directive carries.
 func (*malformedError) Unwrap() error { return errMalformed }
+
+// Bound is the declarations the records mark live, which seed the sweep. A record
+// that bound nothing marks nothing, which is what makes it stale; a record for a
+// part kind marks nothing either: it withholds its finding and keeps nothing alive.
+func Bound(records []Record) []graph.SymbolID {
+	var marked []graph.SymbolID
+	for i := range records {
+		if records[i].Bound != "" && records[i].Code.Subject() != vocab.SubjectPart {
+			marked = append(marked, records[i].Bound)
+		}
+	}
+	return marked
+}

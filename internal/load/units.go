@@ -104,12 +104,14 @@ func withMembers(ctx context.Context, target string) ([]string, error) {
 // returns nil where r holds no such unit.
 func (r *Result) Unit(dir string) *Result {
 	for i := range r.Units {
-		if sameDir(r.Units[i].Dir, dir) {
-			narrowed := *r
-			narrowed.Packages = r.Units[i].Packages
-			narrowed.Units = r.Units[i : i+1]
-			return &narrowed
+		if !sameDir(r.Units[i].Dir, dir) {
+			continue
 		}
+		narrowed := *r
+		narrowed.Packages = r.Units[i].Packages
+		narrowed.Units = r.Units[i : i+1]
+		narrowed.Generated = generatedFiles(narrowed.Packages)
+		return &narrowed
 	}
 	return nil
 }

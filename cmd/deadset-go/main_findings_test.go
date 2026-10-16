@@ -11,19 +11,10 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/run"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
-
-// goKindsWithoutEmitter are the live Go kinds the emitters table holds no entry
-// for, so no run of that table reports one. Each is named rather than counted, so
-// the table's test says which kinds the table is silent about instead of allowing a
-// kind to go missing unnoticed.
-//
-// DS9005 is the merge's, which is another product.
-var goKindsWithoutEmitter = []vocab.Code{
-	"DS9005", // the stale cross-language edge, which the merge answers
-}
 
 // findingsArchive is the module the findings pass is driven against: an application
 // whose entry point reaches one declaration and whose three others are dead in three
@@ -60,63 +51,18 @@ func findingsFixture(t *testing.T, document string) string {
 // findingsOfDir is the findings of one run over dir, which is what every test below
 // reads: the resolution a verb would build, the exemption options it would convert,
 // and the pass itself.
-func findingsOfDir(t *testing.T, dir string) findingSet {
+func findingsOfDir(t *testing.T, dir string) *run.Findings {
 	t.Helper()
 
 	resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
-	options, err := exemptOptions(&resolved.config)
-	if err != nil {
-		t.Fatalf("Setup: exemptOptions(): %v", err)
-	}
-	set, err := findingsOf(t.Context(), &resolved, &options)
+	set, err := findingsOf(t.Context(), resolved)
 	if err != nil {
 		t.Fatalf("findingsOf(%s) = error %v, want the findings of the run", dir, err)
 	}
 	return set
-}
-
-func TestEmittersNameEveryLiveGoKindOrSayWhichHasNoRule(t *testing.T) {
-	t.Parallel()
-
-	var published []vocab.Code
-	for _, row := range vocab.Kinds() {
-		if !row.AppliesTo(vocab.Go) {
-			continue
-		}
-		published = append(published, row.Code)
-		_, wired := emitters[row.Code]
-		named := slices.Contains(goKindsWithoutEmitter, row.Code)
-		switch {
-		case wired && named:
-			t.Errorf("%s has an emitter and is named as having none", row.Code)
-		case !wired && !named:
-			t.Errorf("%s is a live Go kind with no emitter and is not named as one: a kind absent from both reports nothing and nothing says so", row.Code)
-		}
-	}
-
-	if len(published) != len(emitters)+len(goKindsWithoutEmitter) {
-		t.Errorf("the vocabulary publishes %d Go kinds, the table holds %d and %d are named without a rule",
-			len(published), len(emitters), len(goKindsWithoutEmitter))
-	}
-	for code := range emitters {
-		row, live := vocab.KindOf(code)
-		if !live {
-			t.Errorf("the table registers an emitter under %s, which names no live kind", code)
-			continue
-		}
-		if !row.AppliesTo(vocab.Go) {
-			t.Errorf("the table registers an emitter under %s, which the vocabulary gives languages %v and not %s",
-				code, row.Languages, language)
-		}
-	}
-	for _, code := range goKindsWithoutEmitter {
-		if _, live := vocab.KindOf(code); !live {
-			t.Errorf("%s is named as a live Go kind without a rule, and the vocabulary does not hold it", code)
-		}
-	}
 }
 
 func TestFindingsOfReportsEveryDeadDeclarationOfAModuleOnceAndInTheCanonicalOrder(t *testing.T) {
@@ -133,18 +79,18 @@ func TestFindingsOfReportsEveryDeadDeclarationOfAModuleOnceAndInTheCanonicalOrde
 		"app.go\t17\tDS1104\tgo://example.com/app#retired",
 		"app_test.go\t5\tDS1103\tgo://example.com/app#TestProbed",
 	}
-	if got := reported(set.result.Findings); !slices.Equal(got, want) {
+	if got := reported(set.Result.Findings); !slices.Equal(got, want) {
 		t.Errorf("findingsOf() reported\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
-	if len(set.loaded.unmatched) != 0 {
+	if len(set.Unmatched) != 0 {
 		t.Errorf("findingsOf() reported %d configured strings as naming nothing, want 0: the fixture configures no root pattern",
-			len(set.loaded.unmatched))
+			len(set.Unmatched))
 	}
 
 	// One symbol is reported once, which is what the framework refuses to break
 	// and what the whole table over one real module is the measurement of.
-	seen := make(map[string]vocab.Code, len(set.result.Findings))
-	for _, found := range set.result.Findings {
+	seen := make(map[string]vocab.Code, len(set.Result.Findings))
+	for _, found := range set.Result.Findings {
 		if first, twice := seen[found.Symbol.Ref]; twice {
 			t.Errorf("findingsOf() reported %s under %s and under %s", found.Symbol.Ref, first, found.Code)
 		}
@@ -156,7 +102,7 @@ func TestFindingsOfCompletesAFindingWithEveryFieldTheContractRequires(t *testing
 	t.Parallel()
 
 	set := cachedFindings(t.Context(), t, findingsArchive(`{"target": {"kind": "application"}}`))
-	found := findingUnder(t, set.result.Findings, "DS1002")
+	found := findingUnder(t, set.Result.Findings, "DS1002")
 
 	// The kind fills the code, the position, the subject, the relation and the
 	// message; the framework fills everything else, and the two together are what
@@ -250,9 +196,9 @@ func TestFindingsOfReportsNothingAboutAModuleWhereEveryDeclarationIsLive(t *test
 	})
 
 	set := findingsOfDir(t, dir)
-	if len(set.result.Findings) != 0 {
+	if len(set.Result.Findings) != 0 {
 		t.Errorf("findingsOf() reported\n%s\nwant nothing: the entry point reaches every declaration",
-			strings.Join(reported(set.result.Findings), "\n"))
+			strings.Join(reported(set.Result.Findings), "\n"))
 	}
 }
 
@@ -265,7 +211,7 @@ func TestFindingsOfDropsTheKindTheConfigurationAllows(t *testing.T) {
 	// The kind the configuration allows reports nothing and no other kind claims
 	// its subject, because a severity decides what is reported and never which
 	// kind a declaration belongs to.
-	for _, found := range set.result.Findings {
+	for _, found := range set.Result.Findings {
 		if found.Code == "DS1002" {
 			t.Errorf("findingsOf() reported %s under DS1002, which the configuration allows", found.Symbol.Ref)
 		}
@@ -273,8 +219,8 @@ func TestFindingsOfDropsTheKindTheConfigurationAllows(t *testing.T) {
 			t.Errorf("findingsOf() reported the allowed kind's subject under %s", found.Code)
 		}
 	}
-	if got, want := len(set.result.Findings), 3; got != want {
-		t.Errorf("findingsOf() reported %d findings, want %d:\n%s", got, want, strings.Join(reported(set.result.Findings), "\n"))
+	if got, want := len(set.Result.Findings), 3; got != want {
+		t.Errorf("findingsOf() reported %d findings, want %d:\n%s", got, want, strings.Join(reported(set.Result.Findings), "\n"))
 	}
 }
 
@@ -316,14 +262,10 @@ func TestFindingsOfFailures(t *testing.T) {
 			if code != vocab.ExitClean {
 				t.Fatalf("Setup: resolve the configuration = %d, want %d", code, vocab.ExitClean)
 			}
-			options, err := exemptOptions(&resolved.config)
-			if err != nil {
-				t.Fatalf("Setup: exemptOptions(): %v", err)
-			}
 
-			set, err := findingsOf(t.Context(), &resolved, &options)
+			set, err := findingsOf(t.Context(), resolved)
 			if err == nil {
-				t.Fatalf("findingsOf() = %d findings, <nil>, want an error", len(set.result.Findings))
+				t.Fatalf("findingsOf() = %d findings, <nil>, want an error", len(set.Result.Findings))
 			}
 			if got := exitCodeFor(err); got != tc.want {
 				t.Errorf("exitCodeFor(%v) = %d, want %d", err, got, tc.want)
@@ -346,7 +288,7 @@ func TestFindingsOfRefusesATableRegisteredUnderACodeTheVocabularyDoesNotHold(t *
 		t.Errorf("exitCodeFor(%v) = %d, want %d", err, got, want)
 	}
 
-	_, err = kinds.Compute(nil, emitters)
+	_, err = kinds.Compute(nil, kinds.Emitters)
 	if err == nil {
 		t.Fatal("kinds.Compute(no input) = _, <nil>, want an error")
 	}
@@ -355,40 +297,30 @@ func TestFindingsOfRefusesATableRegisteredUnderACodeTheVocabularyDoesNotHold(t *
 	}
 }
 
-func TestGeneratedPathsNamesTheGeneratedFilesOfTheRun(t *testing.T) {
+func TestFindingsOfRefusesAGeneratedFileWhosePackageClauseIsOutsideTheTarget(t *testing.T) {
 	t.Parallel()
 
+	// A line directive places the package clause outside the target, so no
+	// target-relative path names the generated file; the run fails rather than
+	// leaving the file unclassified. The malformed edge document is read after
+	// the generated file is rendered, so the generated file's failure is the one
+	// the run reports.
 	dir := writeModule(t, map[string]string{
 		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
-		"app.go": "package main\n\nfunc main() { used() }\n\n" +
-			"// used is what the entry point calls.\nfunc used() {}\n",
-		"wire.go": "// Code generated by a generator. DO NOT EDIT.\n\npackage main\n\n" +
-			"// Forgotten is what nothing names.\nfunc Forgotten() {}\n",
-		repositoryDocument: `{"target": {"kind": "application"}, "analysis": {"generated_files": "include"}}`,
+		"app.go": "package main\n\nfunc main() {}\n",
+		"wire.go": "// Code generated by a generator. DO NOT EDIT.\n\n//line ../elsewhere/wire.go:1:1\npackage main\n\n" +
+			"//line wire.go:6:1\nfunc forgotten() {}\n",
+		"deadset-edges.json": "{",
+		repositoryDocument:   `{"target": {"kind": "application"}, "analysis": {"generated_files": "include"}}`,
 	})
-
 	resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration = %d, want %d", code, vocab.ExitClean)
 	}
-	options, err := exemptOptions(&resolved.config)
-	if err != nil {
-		t.Fatalf("Setup: exemptOptions(): %v", err)
-	}
-	analyzed, err := analysisOf(t.Context(), &resolved, &options, modeOf(&resolved.config, modeProduction))
-	if err != nil {
-		t.Fatalf("Setup: analysisOf(): %v", err)
-	}
 
-	paths, err := generatedPaths(analyzed.per)
-	if err != nil {
-		t.Fatalf("generatedPaths() = _, %v, want the generated files of the run", err)
-	}
-	if !paths["wire.go"] {
-		t.Errorf("generatedPaths() = %v, want it to name wire.go, which carries the generation marker", paths)
-	}
-	if paths["app.go"] {
-		t.Errorf("generatedPaths() = %v, want it not to name app.go, which carries none", paths)
+	_, err := findingsOf(t.Context(), resolved)
+	if err == nil || !strings.Contains(err.Error(), "render the package clause of a generated file") {
+		t.Errorf("findingsOf() = _, %v, want the generated file's package clause refused", err)
 	}
 }
 
@@ -408,7 +340,7 @@ func TestFindingsOfSaysAFindingAboutGeneratedSourceIsGenerated(t *testing.T) {
 	})
 
 	set := findingsOfDir(t, dir)
-	found := findingUnder(t, set.result.Findings, "DS1002")
+	found := findingUnder(t, set.Result.Findings, "DS1002")
 	if got, want := found.Symbol.Ref, "go://example.com/app#forgotten"; got != want {
 		t.Fatalf("the pass reports %s under DS1002, want %s", got, want)
 	}
@@ -418,48 +350,6 @@ func TestFindingsOfSaysAFindingAboutGeneratedSourceIsGenerated(t *testing.T) {
 	}
 	if got, want := found.Fixability, vocab.None; got != want {
 		t.Errorf("the finding's fixability is %q, want %q: a generated file is fixed by its generator", got, want)
-	}
-}
-
-func TestConsumersOfNamesWhatTheRunLoaded(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		complete bool
-		per      []configured
-		want     kinds.Consumers
-	}{
-		{
-			name: "a_run_that_loaded_no_consumer",
-			want: kinds.Consumers{},
-		},
-		{
-			name:     "a_run_whose_configuration_declares_the_set_complete",
-			complete: true,
-			per: []configured{{result: load.Result{Consumers: []load.Consumer{
-				{ID: "example.com/one"}, {ID: "example.com/two"},
-			}}}},
-			want: kinds.Consumers{
-				Declared: []string{"example.com/one", "example.com/two"},
-				Loaded:   []string{"example.com/one", "example.com/two"},
-				Complete: true,
-			},
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			cfg := config.Default()
-			cfg.Consumers.Complete = tc.complete
-			got := consumersOf(&cfg, tc.per)
-			if !slices.Equal(got.Declared, tc.want.Declared) || !slices.Equal(got.Loaded, tc.want.Loaded) ||
-				got.Complete != tc.want.Complete {
-				t.Errorf("consumersOf() = %+v, want %+v", got, tc.want)
-			}
-		})
 	}
 }
 
@@ -522,10 +412,6 @@ func TestAnalysisOfComputesItsExemptionsUnderTheModeItSweepsIn(t *testing.T) {
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
-	options, err := exemptOptions(&resolved.config)
-	if err != nil {
-		t.Fatalf("Setup: exemptOptions(): %v", err)
-	}
 
 	// The plain mode counts the test's marshalling as the use it is evidence of, so
 	// the class holds the field; the production mode holds nothing by it.
@@ -536,20 +422,19 @@ func TestAnalysisOfComputesItsExemptionsUnderTheModeItSweepsIn(t *testing.T) {
 		{named: modePlain, want: string(vocab.EncodingReflection)},
 		{named: modeProduction, want: ""},
 	} {
-		mode := modeOf(&resolved.config, test.named)
-		analyzed, analysisErr := analysisOf(t.Context(), &resolved, &options, mode)
+		analyzed, analysisErr := sweptOf(t.Context(), resolved, test.named == modeProduction)
 		if analysisErr != nil {
-			t.Fatalf("analysisOf(%s) = %v, want the analysis of the run", test.named, analysisErr)
+			t.Fatalf("sweptOf(%s) = %v, want the analysis of the run", test.named, analysisErr)
 		}
 		var got string
-		for i := range analyzed.exemptions {
-			if analyzed.stages.refs[analyzed.exemptions[i].ID] == subject {
-				got = analyzed.exemptions[i].Class
+		for i := range analyzed.Exemptions {
+			if analyzed.Refs[analyzed.Exemptions[i].ID] == subject {
+				got = analyzed.Exemptions[i].Class
 				break
 			}
 		}
 		if got != test.want {
-			t.Errorf("analysisOf(%s) retains %s by %q, want %q: the only marshalling of the value is written in a test file",
+			t.Errorf("sweptOf(%s) retains %s by %q, want %q: the only marshalling of the value is written in a test file",
 				test.named, subject, got, test.want)
 		}
 	}
@@ -558,15 +443,15 @@ func TestAnalysisOfComputesItsExemptionsUnderTheModeItSweepsIn(t *testing.T) {
 	// production sweep and a kind names it, retained by nothing.
 	set := findingsOfDir(t, dir)
 	var reported *kinds.Finding
-	for i := range set.result.Findings {
-		if set.result.Findings[i].Symbol.Ref == subject {
-			reported = &set.result.Findings[i]
+	for i := range set.Result.Findings {
+		if set.Result.Findings[i].Symbol.Ref == subject {
+			reported = &set.Result.Findings[i]
 			break
 		}
 	}
 	if reported == nil {
 		t.Fatalf("the findings pass reports nothing about %s, want a finding\nreported: %v",
-			subject, findingCodes(set.result.Findings))
+			subject, findingCodes(set.Result.Findings))
 	}
 	if len(reported.RetainedBy) != 0 {
 		t.Errorf("the finding about %s names %v as what retained it, want nothing", subject, reported.RetainedBy)
@@ -609,18 +494,14 @@ func TestTheSuppressionRecordsAreReadInTheOrderTheGrammarResolvesThem(t *testing
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration = %d, want %d", code, vocab.ExitClean)
 	}
-	options, err := exemptOptions(&resolved.config)
+	analyzed, err := sweptOf(t.Context(), resolved, true)
 	if err != nil {
-		t.Fatalf("Setup: exemptOptions(): %v", err)
-	}
-	analyzed, err := analysisOf(t.Context(), &resolved, &options, modeOf(&resolved.config, modeProduction))
-	if err != nil {
-		t.Fatalf("Setup: analysisOf(): %v", err)
+		t.Fatalf("Setup: sweptOf(): %v", err)
 	}
 
-	read := make([]string, 0, len(analyzed.marks))
-	for i := range analyzed.marks {
-		mark := &analyzed.marks[i]
+	read := make([]string, 0, len(analyzed.Marks))
+	for i := range analyzed.Marks {
+		mark := &analyzed.Marks[i]
 		read = append(read, fmt.Sprintf("%s %s:%d", mark.Mechanism, mark.Site.Filename, mark.Site.Line))
 	}
 	want := []string{

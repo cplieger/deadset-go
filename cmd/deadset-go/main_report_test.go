@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/run"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/render"
 	"github.com/cplieger/deadset-spec/v8/report"
@@ -26,18 +27,26 @@ const (
 	expressionPrefix = "^(?<path>"
 )
 
-// corpusAnswered is the corpus record a test supplies. Nothing in this command can
-// answer the corpus, so the values a report is required to carry come from here:
-// what the analyzer states about itself is the caller's to supply, and every test
-// below is the caller.
-func corpusAnswered() *corpusRecord {
-	return &corpusRecord{
-		conformance: report.Conformance{
-			CorpusVersion: "1.0.0",
-			Result:        "pass",
-			Digest:        "sha256:" + strings.Repeat("ab", 32),
-		},
+// corpusAnswered is what the analyzer states about itself in a test's report, with a
+// corpus result of the test's own rather than the committed one.
+func corpusAnswered() *run.Self {
+	self := unanswered()
+	self.Analyzer.Conformance = report.Conformance{
+		CorpusVersion: "1.0.0",
+		Result:        "pass",
+		Digest:        "sha256:" + strings.Repeat("ab", 32),
 	}
+	return self
+}
+
+// unanswered is the analyzer's identity with no corpus result.
+func unanswered() *run.Self {
+	return &run.Self{Analyzer: report.Analyzer{
+		Name:                   name,
+		Version:                version(),
+		Languages:              []vocab.Language{language},
+		SchemaVersionsAccepted: vocab.SchemaVersions(),
+	}}
 }
 
 // reportOfArchive is the envelope of one run over the module one archive declares,
@@ -69,11 +78,7 @@ func reportOfDir(t *testing.T, dir string) *report.Report {
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
-	options, err := exemptOptions(&resolved.config)
-	if err != nil {
-		t.Fatalf("Setup: exemptOptions(): %v", err)
-	}
-	envelope, _, err := reportOf(t.Context(), &resolved, &options, corpusAnswered())
+	envelope, err := reportOf(t.Context(), resolved, corpusAnswered())
 	if err != nil {
 		t.Fatalf("reportOf(%s) = error %v, want the report of the run", dir, err)
 	}
@@ -279,11 +284,7 @@ func TestReportOfSitesAConfiguredRootInTheDocumentThatDeclaredIt(t *testing.T) {
 			if code != vocab.ExitClean {
 				t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 			}
-			options, err := exemptOptions(&resolved.config)
-			if err != nil {
-				t.Fatalf("Setup: exemptOptions(): %v", err)
-			}
-			envelope, _, err := reportOf(t.Context(), &resolved, &options, corpusAnswered())
+			envelope, err := reportOf(t.Context(), resolved, corpusAnswered())
 			if err != nil {
 				t.Fatalf("reportOf(%s) = error %v, want the report of the run", dir, err)
 			}
@@ -320,11 +321,7 @@ func TestReportOfSitesAConfiguredRootAtTheConventionalDocumentWhereNoDocumentOfT
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
-	options, err := exemptOptions(&resolved.config)
-	if err != nil {
-		t.Fatalf("Setup: exemptOptions(): %v", err)
-	}
-	envelope, _, err := reportOf(t.Context(), &resolved, &options, corpusAnswered())
+	envelope, err := reportOf(t.Context(), resolved, corpusAnswered())
 	if err != nil {
 		t.Fatalf("reportOf(%s) = error %v, want the report of the run", dir, err)
 	}
@@ -504,12 +501,8 @@ func TestReportOfRefusesAnEnvelopeNamingNoConformanceResult(t *testing.T) {
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
-	options, err := exemptOptions(&resolved.config)
-	if err != nil {
-		t.Fatalf("Setup: exemptOptions(): %v", err)
-	}
 
-	built, _, err := reportOf(t.Context(), &resolved, &options, &corpusRecord{})
+	built, err := reportOf(t.Context(), resolved, unanswered())
 	if err == nil {
 		err = report.Validate(built)
 	}
@@ -535,14 +528,10 @@ func TestReportOfRefusesATargetTheRunDirectoryDoesNotContain(t *testing.T) {
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
-	options, err := exemptOptions(&resolved.config)
-	if err != nil {
-		t.Fatalf("Setup: exemptOptions(): %v", err)
-	}
 
-	_, _, err = reportOf(t.Context(), &resolved, &options, corpusAnswered())
-	if !errors.Is(err, errReportPath) {
-		t.Fatalf("reportOf() over a target outside the run directory = %v, want a %v", err, errReportPath)
+	_, err := reportOf(t.Context(), resolved, corpusAnswered())
+	if !errors.Is(err, run.ErrReportPath) {
+		t.Fatalf("reportOf() over a target outside the run directory = %v, want a %v", err, run.ErrReportPath)
 	}
 	if !strings.Contains(err.Error(), dir) {
 		t.Errorf("reportOf() = %v, want an error naming the target %s", err, dir)
@@ -550,7 +539,7 @@ func TestReportOfRefusesATargetTheRunDirectoryDoesNotContain(t *testing.T) {
 
 	// The findings pass itself is unaffected: what a report can name is a question
 	// about the document, not about the analysis.
-	if _, err := findingsOf(t.Context(), &resolved, &options); err != nil {
+	if _, err := findingsOf(t.Context(), resolved); err != nil {
 		t.Errorf("findingsOf() over the same target = %v, want the findings of the run", err)
 	}
 }

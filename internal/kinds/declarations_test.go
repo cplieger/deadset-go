@@ -373,7 +373,7 @@ func TestTestSupportCodeATestReferencesIsTestCode(t *testing.T) {
 	resolved.Analysis.MinConfidence = vocab.Possible
 	in := inputOf(t, "declarations-test-support-possible.txtar", resolved, Consumers{})
 	emitters := declarationEmitters()
-	emitters[vocab.UnusedInterface] = UnusedInterface
+	emitters[vocab.UnusedInterface] = unusedInterface
 	result := computed(t, in, emitters)
 
 	found := findingOf(t, result.Findings, vocab.UnusedExported, "Fake.Get")
@@ -525,7 +525,7 @@ func TestADeclarationATestOfLiveCodeKeepsIsATestOnlyUse(t *testing.T) {
 // use alone, and one only a test of dead code reads is the unreachable export.
 func TestADeclarationATestOfLiveCodeKeepsIsNoUnreachableExport(t *testing.T) {
 	emitters := declarationEmitters()
-	emitters[vocab.UnreachableExport] = UnreachableExport
+	emitters[vocab.UnreachableExport] = unreachableExport
 	result := computed(t, inputOf(t, "declarations-test-kept-internal.txtar", applicationConfig(), Consumers{}), emitters)
 
 	findingOf(t, result.Findings, vocab.TestOnlyUse, "FixedNow")
@@ -538,7 +538,7 @@ func TestEveryKindOfProductionCodeOnlyTestsReachIsAtPossible(t *testing.T) {
 	resolved := applicationConfig()
 	resolved.Analysis.MinConfidence = vocab.Possible
 	emitters := declarationEmitters()
-	emitters[vocab.UnusedInterface] = UnusedInterface
+	emitters[vocab.UnusedInterface] = unusedInterface
 	result := computed(t, inputOf(t, "declarations-test-reached-kinds.txtar", resolved, Consumers{}), emitters)
 
 	cases := []struct {
@@ -568,7 +568,7 @@ func TestAFieldOfProductionCodeOnlyTestsReachThatOnlyTestsReadIsPossible(t *test
 	resolved := applicationConfig()
 	resolved.Analysis.MinConfidence = vocab.Possible
 	emitters := declarationEmitters()
-	emitters[vocab.WriteOnlySymbol] = WriteOnlySymbol
+	emitters[vocab.WriteOnlySymbol] = writeOnlySymbol
 	result := computed(t, inputOf(t, "declarations-test-reached-field-read-by-tests.txtar", resolved, Consumers{}), emitters)
 
 	cases := []struct {

@@ -15,9 +15,9 @@ import (
 // signature.
 func interfaceEmitters() map[vocab.Code]Emitter {
 	return map[vocab.Code]Emitter{
-		vocab.UnusedInterface:             UnusedInterface,
-		vocab.UncalledInterfaceMethod:     UncalledInterfaceMethod,
-		vocab.UnusedSatisfactionAssertion: UnusedSatisfactionAssertion,
+		vocab.UnusedInterface:             unusedInterface,
+		vocab.UncalledInterfaceMethod:     uncalledInterfaceMethod,
+		vocab.UnusedSatisfactionAssertion: unusedSatisfactionAssertion,
 	}
 }
 
@@ -245,7 +245,7 @@ func TestTestOnlyUse_reportsAnInterfaceMethodOnlyATestCallsThroughTheInterface(t
 
 	in := inputOf(t, "interfaces-test-called.txtar", applicationConfig(), Consumers{})
 	emitters := interfaceEmitters()
-	emitters[vocab.TestOnlyUse] = TestOnlyUse
+	emitters[vocab.TestOnlyUse] = testOnlyUse
 
 	result := computed(t, in, emitters)
 
@@ -278,7 +278,7 @@ func TestUnusedSatisfactionAssertion_anAssertionBetweenPublishedTypesOfALibraryI
 		t.Run(description, func(t *testing.T) {
 			in := inputOf(t, "interfaces-assertion-between-published.txtar", tc.resolved, Consumers{})
 
-			result := computed(t, in, map[vocab.Code]Emitter{vocab.UnusedSatisfactionAssertion: UnusedSatisfactionAssertion})
+			result := computed(t, in, map[vocab.Code]Emitter{vocab.UnusedSatisfactionAssertion: unusedSatisfactionAssertion})
 
 			var got []int
 			for i := range result.Findings {
@@ -297,7 +297,7 @@ func TestUnusedSatisfactionAssertion_anAssertionBetweenPublishedTypesOfALibraryI
 func TestUnusedSatisfactionAssertion_anAssertionAnExemptionRetainedIsNotReported(t *testing.T) {
 	in := inputOf(t, "interfaces-assertion-retained.txtar", applicationConfig(), Consumers{})
 
-	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnusedSatisfactionAssertion: UnusedSatisfactionAssertion})
+	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnusedSatisfactionAssertion: unusedSatisfactionAssertion})
 
 	if len(result.Findings) != 0 {
 		t.Errorf("UnusedSatisfactionAssertion over interfaces-assertion-retained.txtar reports %v, want nothing", result.Findings)

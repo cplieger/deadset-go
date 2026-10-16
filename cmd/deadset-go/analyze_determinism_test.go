@@ -116,8 +116,8 @@ func documentsOf(t *testing.T, name string) map[string][]byte {
 	}
 
 	var stderr strings.Builder
-	if code := run(t.Context(), args, io.Discard, &stderr); code != vocab.ExitClean {
-		t.Fatalf("run(%q) = %d, want %d with the exit code configured off\nstderr: %s",
+	if code := invoke(t.Context(), args, io.Discard, &stderr); code != vocab.ExitClean {
+		t.Fatalf("invoke(%q) = %d, want %d with the exit code configured off\nstderr: %s",
 			args, code, vocab.ExitClean, stderr.String())
 	}
 

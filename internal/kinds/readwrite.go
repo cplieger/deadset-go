@@ -17,7 +17,7 @@ import (
 // names its own subject rather than leaving the framework to.
 const enumMemberSubject = "enum-member"
 
-// WriteOnlySymbol reports a symbol the counted references store into and never
+// writeOnlySymbol reports a symbol the counted references store into and never
 // read, under the run's own reference mode: a production mode counts no reference
 // a test file made, so a read from a test file is no read and a symbol written in
 // production and read only from a test is reported.
@@ -46,7 +46,7 @@ const enumMemberSubject = "enum-member"
 // reference kinds answer and the sweep does not. A declaration the sweep did find
 // dead is the subject of the unused kinds and of the dead component that carries
 // it.
-func WriteOnlySymbol(in *Input) ([]Finding, error) {
+func writeOnlySymbol(in *Input) ([]Finding, error) {
 	exempted := make(map[graph.SymbolID]bool, len(in.Exempt))
 	for ix := range in.Exempt {
 		exemption := &in.Exempt[ix]
@@ -133,7 +133,7 @@ func writeOnlySubject(in *Input, symbol *graph.Symbol, u *uses, exempted map[gra
 	return true
 }
 
-// UnusedEnumMember reports a constant of an enumerated type that nothing names.
+// unusedEnumMember reports a constant of an enumerated type that nothing names.
 //
 // The enumerated type is the one the enum-group exemption recognises: a defined
 // type whose constants an iota group declares. Every member of a type whose
@@ -146,7 +146,7 @@ func writeOnlySubject(in *Input, symbol *graph.Symbol, u *uses, exempted map[gra
 // one's. This kind takes precedence over the unused-exported and the
 // unused-unexported kinds for a constant of an enumerated type, which report no
 // member of an iota group.
-func UnusedEnumMember(in *Input) ([]Finding, error) {
+func unusedEnumMember(in *Input) ([]Finding, error) {
 	members := enumGroupMembers(in)
 	referenced := referencedSymbols(in)
 
@@ -173,7 +173,7 @@ func UnusedEnumMember(in *Input) ([]Finding, error) {
 	return found, nil
 }
 
-// UnusedTypeParameter reports a type parameter of a function or a method that no
+// unusedTypeParameter reports a type parameter of a function or a method that no
 // part of the declaration's signature and no part of its body names.
 //
 // A type parameter of a type declaration is never reported: a phantom parameter
@@ -183,7 +183,7 @@ func UnusedEnumMember(in *Input) ([]Finding, error) {
 // unused-unexported kinds for a type parameter, which report none. A type parameter
 // of a function or a method the sweep judged dead falls with that declaration, whose
 // own finding is the one reported.
-func UnusedTypeParameter(in *Input) ([]Finding, error) {
+func unusedTypeParameter(in *Input) ([]Finding, error) {
 	referenced := referencedSymbols(in)
 
 	var found []Finding

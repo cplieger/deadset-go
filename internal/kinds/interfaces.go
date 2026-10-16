@@ -32,14 +32,14 @@ const (
 	unusedSatisfactionAssertionMessage = "the assertion is the only thing that names the interface as a type"
 )
 
-// UnusedInterface reports an interface declaration no symbol names as a type,
+// unusedInterface reports an interface declaration no symbol names as a type,
 // naming the concrete types that implement it and where each is written. The
 // subject is the sweep's own candidate, so a loaded consumer's use holds it live; a
 // satisfaction assertion is a use, so an interface used only by one is live and the
 // assertion is reported. Its members fall with it inside its component. An
 // interface a test file declares is not reported, because a production sweep
 // drops every reference such a declaration can have.
-func UnusedInterface(in *Input) ([]Finding, error) {
+func unusedInterface(in *Input) ([]Finding, error) {
 	if in == nil || in.Sweep == nil {
 		return nil, nil
 	}
@@ -67,14 +67,14 @@ func UnusedInterface(in *Input) ([]Finding, error) {
 	return found, nil
 }
 
-// UncalledInterfaceMethod reports a method an interface declares that no call site
+// uncalledInterfaceMethod reports a method an interface declares that no call site
 // of production code invokes and no expression selects through the interface,
 // whatever the number of implementations; a call on a concrete value invokes that
 // type's own method. [interfaceFacts.exempt] owns the exempt shapes. A method of an
 // interface that is itself a candidate falls with the interface, one only test code
 // invokes is [Input.testCalledInterfaceMethod]'s, and one an interface of a test file
 // declares is not judged by a production sweep.
-func UncalledInterfaceMethod(in *Input) ([]Finding, error) {
+func uncalledInterfaceMethod(in *Input) ([]Finding, error) {
 	if in == nil || in.Sweep == nil {
 		return nil, nil
 	}
@@ -101,7 +101,7 @@ func UncalledInterfaceMethod(in *Input) ([]Finding, error) {
 	return found, nil
 }
 
-// UnusedSatisfactionAssertion reports a compile-time satisfaction assertion, a
+// unusedSatisfactionAssertion reports a compile-time satisfaction assertion, a
 // package-level blank declaration typed as an interface of the target with a value of
 // a concrete type, when nothing but such assertions names that interface as a type.
 // Each assertion is one finding at its own position under the interface's reference
@@ -109,7 +109,7 @@ func UncalledInterfaceMethod(in *Input) ([]Finding, error) {
 // assertion of a test file or one an exemption retained is not reported, and neither
 // is a library's assertion whose interface and type are both published API, a promise
 // it states to every importer.
-func UnusedSatisfactionAssertion(in *Input) ([]Finding, error) {
+func unusedSatisfactionAssertion(in *Input) ([]Finding, error) {
 	if in == nil {
 		return nil, nil
 	}
@@ -689,4 +689,13 @@ func concreteOf(one *Configured, t types.Type) graph.SymbolID {
 	}
 	id, _ := one.Resolve.Object(named.Obj())
 	return id
+}
+
+// WithoutUncalled drops every interface-satisfaction retention through an interface
+// method no call site reaches, which [uncalledInterfaceMethod] reports with its
+// implementations.
+func WithoutUncalled(exemptions []graph.Exemption, uncalled map[graph.SymbolID]bool) []graph.Exemption {
+	return slices.DeleteFunc(exemptions, func(e graph.Exemption) bool {
+		return e.Class == string(vocab.InterfaceSatisfaction) && e.Via != "" && uncalled[e.Via]
+	})
 }

@@ -114,8 +114,8 @@ func TestTheDeclaredTargetKindIsTheOnlyThingThatChangesTheTargetsTreatment(t *te
 func libraryFindings(t *rapid.T, files map[string]string) []string {
 	set := cachedFindings(t.Context(), t, files)
 	var held []string
-	for i := range set.result.Findings {
-		found := &set.result.Findings[i]
+	for i := range set.Result.Findings {
+		found := &set.Result.Findings[i]
 		if !strings.HasPrefix(found.Position.Path, libraryPackage+"/") {
 			continue
 		}

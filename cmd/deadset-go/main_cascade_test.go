@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/run"
 )
 
 // cascadeModule is a target holding one dead component of two members: a function
@@ -22,12 +23,12 @@ func cascadeModule(t *testing.T, document string) string {
 }
 
 // findingOf is the one finding of a set naming one reference.
-func findingOf(t *testing.T, set *findingSet, ref string) *kinds.Finding {
+func findingOf(t *testing.T, set *run.Findings, ref string) *kinds.Finding {
 	t.Helper()
 
-	for i := range set.result.Findings {
-		if set.result.Findings[i].Symbol.Ref == ref {
-			return &set.result.Findings[i]
+	for i := range set.Result.Findings {
+		if set.Result.Findings[i].Symbol.Ref == ref {
+			return &set.Result.Findings[i]
 		}
 	}
 	t.Fatalf("Setup: the run reports no finding about %s", ref)
@@ -37,7 +38,7 @@ func findingOf(t *testing.T, set *findingSet, ref string) *kinds.Finding {
 func TestACascadeListedInFullNamesEveryMemberOfTheComponent(t *testing.T) {
 	dir := cascadeModule(t, `{"target": {"kind": "application"}, "reporters": {"cascade": "full"}}`)
 	set := findingsOfDir(t, dir)
-	found := findingOf(t, &set, "go://example.com/app#outer")
+	found := findingOf(t, set, "go://example.com/app#outer")
 
 	var got []string
 	for _, member := range found.Component.Members {
@@ -58,7 +59,7 @@ func TestACascadeListedByItsRootsNamesNoMember(t *testing.T) {
 	dir := cascadeModule(t, `{"target": {"kind": "application"}}`)
 	set := findingsOfDir(t, dir)
 
-	if members := findingOf(t, &set, "go://example.com/app#outer").Component.Members; len(members) != 0 {
+	if members := findingOf(t, set, "go://example.com/app#outer").Component.Members; len(members) != 0 {
 		t.Errorf("the finding about outer lists the members %+v at the default cascade, want none", members)
 	}
 }

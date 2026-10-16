@@ -179,14 +179,11 @@ func (g *Graph) counted(at int, m Mode) (production, test int) {
 // target.
 func (g *Graph) consumedIn(at int, m Mode) bool {
 	c := g.consumed[at]
-	switch {
-	case c.fromProductionFile:
-		return true
-	case !c.fromTestFile:
-		return false
-	case !m.Production:
-		return true
-	default:
-		return m.ConsumerTestsProduction
-	}
+	return c.fromProductionFile || (c.fromTestFile && m.countsConsumerTests())
+}
+
+// countsConsumerTests reports whether the mode counts a loaded consumer's test-file
+// reference as a call from outside the target.
+func (m Mode) countsConsumerTests() bool {
+	return !m.Production || m.ConsumerTestsProduction
 }
