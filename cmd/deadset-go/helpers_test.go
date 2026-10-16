@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/cplieger/deadset-go/v2/internal/run"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -49,7 +50,7 @@ type fixture struct {
 	writeErr error
 
 	analyzed   sync.Once
-	set        findingSet
+	set        *run.Findings
 	analyzeErr error
 
 	reported  sync.Once
@@ -94,24 +95,19 @@ func (f *fixture) directory() (string, error) {
 
 // findings analyzes the archive's directory on the first request and answers the same
 // findings to every later one.
-func (f *fixture) findings(ctx context.Context) (findingSet, error) {
+func (f *fixture) findings(ctx context.Context) (*run.Findings, error) {
 	dir, err := f.directory()
 	if err != nil {
-		return findingSet{}, err
+		return nil, err
 	}
 	f.analyzed.Do(func() {
 		var refused strings.Builder
-		resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &refused)
+		req, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &refused)
 		if code != vocab.ExitClean {
 			f.analyzeErr = fmt.Errorf("resolve the configuration of %s = %d: %s", dir, code, refused.String())
 			return
 		}
-		options, optionsErr := exemptOptions(&resolved.config)
-		if optionsErr != nil {
-			f.analyzeErr = fmt.Errorf("exemptOptions(): %w", optionsErr)
-			return
-		}
-		f.set, f.analyzeErr = findingsOf(ctx, &resolved, &options)
+		f.set, f.analyzeErr = findingsOf(ctx, req)
 	})
 	return f.set, f.analyzeErr
 }
@@ -130,19 +126,23 @@ func (f *fixture) report(ctx context.Context) (*report.Report, error) {
 	}
 	f.reported.Do(func() {
 		var refused strings.Builder
-		resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &refused)
+		req, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &refused)
 		if code != vocab.ExitClean {
 			f.reportErr = fmt.Errorf("resolve the configuration of %s = %d: %s", dir, code, refused.String())
 			return
 		}
-		options, optionsErr := exemptOptions(&resolved.config)
-		if optionsErr != nil {
-			f.reportErr = fmt.Errorf("exemptOptions(): %w", optionsErr)
-			return
-		}
-		f.envelope, _, f.reportErr = reportOf(ctx, &resolved, &options, corpusAnswered())
+		f.envelope, f.reportErr = reportOf(ctx, req, corpusAnswered())
 	})
 	return f.envelope, f.reportErr
+}
+
+// reportOf is the report of one run.
+func reportOf(ctx context.Context, req *run.Request, self *run.Self) (*report.Report, error) {
+	found, err := findingsOf(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return found.Report(self)
 }
 
 // sharedModule writes one archive and returns its directory, which is the same
@@ -162,45 +162,20 @@ func sharedModule(sink failureSink, files map[string]string) string {
 	return dir
 }
 
-// cachedFindings is the findings of one run over the archive's module: the resolution a
-// verb would build, the exemption options it would convert, and the pass itself,
-// computed once per archive however many tests ask for it. Each caller gets its own
-// copy of the set.
-func cachedFindings(ctx context.Context, sink failureSink, files map[string]string) findingSet {
+// cachedFindings is the findings of one run over the archive's module, computed once
+// per archive however many tests ask for it. Each caller gets its own copy of the
+// findings and evaluations; the stages before them are shared and read only.
+func cachedFindings(ctx context.Context, sink failureSink, files map[string]string) *run.Findings {
 	sink.Helper()
 
 	set, err := fixtureFor(files).findings(ctx)
 	if err != nil {
 		sink.Fatalf("the findings of the fixture module: %v", err)
 	}
-	return detachedSet(sink, &set)
-}
-
-// detachedSet is a copy of one shared finding set that shares no memory a caller could
-// write through, except the per-configuration loads and the matrix over them: those
-// hold state no copy reaches, the type checker's own and the matrix's unexported
-// inventory, and only the production code a test hands the set to reads them.
-func detachedSet(sink failureSink, set *findingSet) findingSet {
-	sink.Helper()
-
-	loaded := set.loaded
-	loaded.merged = testsupport.Detached(sink, set.loaded.merged)
-	loaded.refs = testsupport.Detached(sink, set.loaded.refs)
-	loaded.configurations = testsupport.Detached(sink, set.loaded.configurations)
-	loaded.identifiers = testsupport.Detached(sink, set.loaded.identifiers)
-	loaded.declared = testsupport.Detached(sink, set.loaded.declared)
-	loaded.testFileRules = testsupport.Detached(sink, set.loaded.testFileRules)
-	loaded.unmatched = testsupport.Detached(sink, set.loaded.unmatched)
-	loaded.unbuilt = testsupport.Detached(sink, set.loaded.unbuilt)
-	return findingSet{
-		loaded:      loaded,
-		swept:       testsupport.Detached(sink, set.swept),
-		retained:    testsupport.Detached(sink, set.retained),
-		evaluations: testsupport.Detached(sink, set.evaluations),
-		result:      testsupport.Detached(sink, set.result),
-		inEffect:    set.inEffect,
-		reasons:     set.reasons,
-	}
+	held := *set
+	held.Result = testsupport.Detached(sink, set.Result)
+	held.Evaluations = testsupport.Detached(sink, set.Evaluations)
+	return &held
 }
 
 // cachedEnvelope is the report of one run over the archive's module, assembled once per

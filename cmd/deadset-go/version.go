@@ -12,18 +12,10 @@ import (
 // else.
 const develVersion = "0.0.0-devel"
 
-// version is this analyzer's own version, which the build carries rather than the
-// source. It moves independently of the Contract version the analyzer implements,
-// which the vocab package states.
-//
-// The value is the module version the build stamped with the leading v removed: the
-// tag under go install, and the pseudo-version the toolchain derives from the
-// checkout under go build, carrying +dirty where the tree holds uncommitted
-// changes. A build the toolchain records no module version for is develVersion.
-//
-// It is one function because a version written in more than one place is two facts
-// that can disagree: the version verb, describe, the report envelope and a baseline
-// this command writes all read this one.
+// version is the module version the build stamped, with the leading v removed: the
+// tag under go install, or the pseudo-version go build derives from the checkout,
+// carrying +dirty for uncommitted changes. A build with no module version is
+// develVersion. Every document naming the analyzer's version reads this one.
 func version() string {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {

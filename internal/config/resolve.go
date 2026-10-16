@@ -544,7 +544,9 @@ func validateConfiguration(entry Configuration, at, label string) *Error {
 	}
 }
 
-// validateExemptions checks the exemption classes named for switching off.
+// validateExemptions checks the exemption classes named for switching off against
+// the whole vocabulary, so a class only another language computes is accepted and a
+// misspelling is refused rather than leaving the exemption meant to go running.
 func validateExemptions(e *docExemptions, label string) *Error {
 	if refusal := arrayOf(label, "exemptions.disabled", e.Disabled, 0); refusal != nil {
 		return refusal
@@ -552,9 +554,14 @@ func validateExemptions(e *docExemptions, label string) *Error {
 	if e.Disabled == nil {
 		return nil
 	}
+	classes := vocab.ExemptionClasses()
+	names := make([]string, len(classes))
+	for i := range classes {
+		names[i] = string(classes[i].Name)
+	}
 	for _, class := range *e.Disabled {
-		if !exemptionClassPattern.MatchString(class) {
-			return malformed(label, "exemptions.disabled", "%q is not an exemption class name", class)
+		if !slices.Contains(names, class) {
+			return malformed(label, "exemptions.disabled", "%q is not an exemption class: the classes are %s", class, strings.Join(names, ", "))
 		}
 	}
 	return nil

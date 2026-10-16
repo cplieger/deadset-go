@@ -129,7 +129,7 @@ func TestWriteOnlySymbolReportsNoDeclarationAnExemptionHoldsLive(t *testing.T) {
 		t.Fatalf("Setup: readwrite-retained.txtar exempts no field of answer, so the fixture stages nothing")
 	}
 
-	found := computed(t, in, map[vocab.Code]Emitter{vocab.WriteOnlySymbol: WriteOnlySymbol}).Findings
+	found := computed(t, in, map[vocab.Code]Emitter{vocab.WriteOnlySymbol: writeOnlySymbol}).Findings
 	if names := namesUnder(found, vocab.WriteOnlySymbol); len(names) != 0 {
 		t.Errorf("WriteOnlySymbol under a production mode over readwrite-retained.txtar reports %v, want nothing", names)
 	}
@@ -138,7 +138,7 @@ func TestWriteOnlySymbolReportsNoDeclarationAnExemptionHoldsLive(t *testing.T) {
 func TestUnusedEnumMemberReportsTheGroupNoConversionRetainsAtTheDerivedClass(t *testing.T) {
 	in := inputOf(t, "readwrite-enum.txtar", libraryConfig(), Consumers{})
 
-	found := computed(t, in, map[vocab.Code]Emitter{vocab.UnusedEnumMember: UnusedEnumMember}).Findings
+	found := computed(t, in, map[vocab.Code]Emitter{vocab.UnusedEnumMember: unusedEnumMember}).Findings
 	if names := namesUnder(found, vocab.UnusedEnumMember); !slices.Equal(names, []string{"modeWrite"}) {
 		t.Fatalf("UnusedEnumMember over readwrite-enum.txtar reports %v, want [modeWrite]", names)
 	}
@@ -207,7 +207,7 @@ func TestEnumGroupMembersReadsAnIotaGroupTheWayTheExemptionDoes(t *testing.T) {
 func TestUnusedTypeParameterReportsAFunctionAndAMethodAtCertain(t *testing.T) {
 	in := inputOf(t, "readwrite-typeparam.txtar", applicationConfig(), Consumers{})
 
-	found := computed(t, in, map[vocab.Code]Emitter{vocab.UnusedTypeParameter: UnusedTypeParameter}).Findings
+	found := computed(t, in, map[vocab.Code]Emitter{vocab.UnusedTypeParameter: unusedTypeParameter}).Findings
 	names := namesUnder(found, vocab.UnusedTypeParameter)
 	slices.Sort(names)
 	if want := []string{"convert[T]", "holder.take[T]"}; !slices.Equal(names, want) {
@@ -261,8 +261,8 @@ func TestConfidenceEqualsTheDerivedClassForBothCertainReadAndWriteKinds(t *testi
 	in := inputOf(t, "readwrite-confidence.txtar", applicationConfig(), Consumers{})
 
 	found := computed(t, in, map[vocab.Code]Emitter{
-		vocab.UnusedEnumMember:    UnusedEnumMember,
-		vocab.UnusedTypeParameter: UnusedTypeParameter,
+		vocab.UnusedEnumMember:    unusedEnumMember,
+		vocab.UnusedTypeParameter: unusedTypeParameter,
 	}).Findings
 	if codes := codesOf(found); !slices.Equal(codes, []vocab.Code{vocab.UnusedEnumMember, vocab.UnusedTypeParameter}) {
 		t.Fatalf("the read-and-write kinds over readwrite-confidence.txtar report %v, want %v in site order",
@@ -346,7 +346,7 @@ func TestWriteOnlySymbolCountsAConsumersWriteAsARead(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			in := sectionsInput(t, "readwrite-consumer-write.txtar", data, resolved)
 			in.Mode = test.mode
-			found := computed(t, in, map[vocab.Code]Emitter{vocab.WriteOnlySymbol: WriteOnlySymbol}).Findings
+			found := computed(t, in, map[vocab.Code]Emitter{vocab.WriteOnlySymbol: writeOnlySymbol}).Findings
 			if got := namesUnder(found, vocab.WriteOnlySymbol); !slices.Equal(got, test.want) {
 				t.Errorf("WriteOnlySymbol over readwrite-consumer-write.txtar under %+v reports %v, want %v", test.mode, got, test.want)
 			}
@@ -367,7 +367,7 @@ func TestWriteOnlyRetainedNamesTheExemptionThatHoldsAWriteOnlyFindingBack(t *tes
 	if want := []string{"answer.Status encoding-reflection"}; !slices.Equal(got, want) {
 		t.Errorf("WriteOnlyRetained(readwrite-encoded.txtar) = %v, want %v", got, want)
 	}
-	found := computed(t, in, map[vocab.Code]Emitter{vocab.WriteOnlySymbol: WriteOnlySymbol}).Findings
+	found := computed(t, in, map[vocab.Code]Emitter{vocab.WriteOnlySymbol: writeOnlySymbol}).Findings
 	if names := namesUnder(found, vocab.WriteOnlySymbol); !slices.Equal(names, []string{"answer.note"}) {
 		t.Errorf("WriteOnlySymbol over readwrite-encoded.txtar reports %v, want [answer.note]", names)
 	}

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/run"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -43,42 +44,42 @@ func unbuildableDerivedModule(t *testing.T, document string) string {
 // A configuration the derivation answered that the target does not build is dropped
 // from the matrix and returned for the verb to name, so the run answers over the
 // configurations the target does build instead of having no answer at all.
-func TestStagesOfDropsADerivedConfigurationTheTargetDoesNotBuild(t *testing.T) {
+func TestLoadDropsADerivedConfigurationTheTargetDoesNotBuild(t *testing.T) {
 	dir := unbuildableDerivedModule(t, `{"target": {"kind": "application"}}`)
 	resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
 
-	loaded, err := stagesOf(t.Context(), &resolved)
+	loaded, err := run.Load(t.Context(), resolved)
 	if err != nil {
-		t.Fatalf("stagesOf(a target whose derived Windows configuration does not build) = %v, want the stages of the run", err)
+		t.Fatalf("run.Load(a target whose derived Windows configuration does not build) = %v, want the load of the run", err)
 	}
-	if want := []string{load.HostConfiguration().ID}; !slices.Equal(loaded.identifiers, want) {
-		t.Errorf("stagesOf() analyzed the matrix %v, want %v: the matrix of the run is what the target builds",
-			loaded.identifiers, want)
+	if want := []string{load.HostConfiguration().ID}; !slices.Equal(loaded.Identifiers, want) {
+		t.Errorf("run.Load() analyzed the matrix %v, want %v: the matrix of the run is what the target builds",
+			loaded.Identifiers, want)
 	}
 
-	if len(loaded.unbuilt) != 1 {
-		t.Fatalf("stagesOf() dropped %d configurations, want 1", len(loaded.unbuilt))
+	if len(loaded.Unbuilt) != 1 {
+		t.Fatalf("run.Load() dropped %d configurations, want 1", len(loaded.Unbuilt))
 	}
-	dropped := &loaded.unbuilt[0]
+	dropped := &loaded.Unbuilt[0]
 	if dropped.Configuration.ID != unbuildableWindows {
-		t.Errorf("stagesOf() dropped %q, want %q", dropped.Configuration.ID, unbuildableWindows)
+		t.Errorf("run.Load() dropped %q, want %q", dropped.Configuration.ID, unbuildableWindows)
 	}
 	var failure *load.Error
 	if !errors.As(dropped.Err, &failure) {
-		t.Fatalf("stagesOf() dropped %q with %v, want a *load.Error", dropped.Configuration.ID, dropped.Err)
+		t.Fatalf("run.Load() dropped %q with %v, want a *load.Error", dropped.Configuration.ID, dropped.Err)
 	}
 	if len(failure.Diagnostics) == 0 {
-		t.Errorf("stagesOf() dropped %q with no diagnostic, want the load's own list", dropped.Configuration.ID)
+		t.Errorf("run.Load() dropped %q with no diagnostic, want the load's own list", dropped.Configuration.ID)
 	}
 }
 
 // The same configuration, declared by the maintainer rather than derived, fails the
 // run: the declaration asserts that the target builds it, and an answer computed
 // without it would report what it uses.
-func TestStagesOfFailsTheRunOnADeclaredConfigurationTheTargetDoesNotBuild(t *testing.T) {
+func TestLoadFailsTheRunOnADeclaredConfigurationTheTargetDoesNotBuild(t *testing.T) {
 	dir := unbuildableDerivedModule(t, `{"target": {"kind": "application"}, "analysis": {"configurations": [`+
 		`{"id": "`+load.HostConfiguration().ID+`", "os": "`+runtime.GOOS+`", "arch": "`+runtime.GOARCH+`"},`+
 		`{"id": "`+unbuildableWindows+`", "os": "windows", "arch": "`+runtime.GOARCH+`"}]}}`)
@@ -87,20 +88,19 @@ func TestStagesOfFailsTheRunOnADeclaredConfigurationTheTargetDoesNotBuild(t *tes
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
 
-	loaded, err := stagesOf(t.Context(), &resolved)
+	loaded, err := run.Load(t.Context(), resolved)
 	var failure *load.Error
 	if !errors.As(err, &failure) {
-		t.Fatalf("stagesOf(a target declaring the Windows configuration) = %v, want a *load.Error", err)
+		t.Fatalf("run.Load(a target declaring the Windows configuration) = %v, want a *load.Error", err)
 	}
 	if failure.Configuration != unbuildableWindows {
-		t.Errorf("stagesOf() named the configuration %q, want %q", failure.Configuration, unbuildableWindows)
+		t.Errorf("run.Load() named the configuration %q, want %q", failure.Configuration, unbuildableWindows)
 	}
 	if got := exitCodeFor(err); got != vocab.ExitFailure {
-		t.Errorf("exitCodeFor(stagesOf()) = %d, want %d", got, vocab.ExitFailure)
+		t.Errorf("exitCodeFor(run.Load()) = %d, want %d", got, vocab.ExitFailure)
 	}
-	if len(loaded.identifiers) != 0 || len(loaded.unbuilt) != 0 {
-		t.Errorf("stagesOf() answered over %v and dropped %d configurations, want neither: a declared configuration that does not load leaves no answer",
-			loaded.identifiers, len(loaded.unbuilt))
+	if loaded != nil {
+		t.Errorf("run.Load() answered over %v, want no answer: a declared configuration that does not load leaves none", loaded.Identifiers)
 	}
 }
 
@@ -163,24 +163,24 @@ const projectEntries = `{"target": {"kind": "application"}, "analysis": {` +
 // analysis builds, so the run derives its matrix from the tree as it does with no
 // matrix at all, and drops a derived configuration the target does not build rather
 // than failing on it.
-func TestStagesOfDerivesTheMatrixWhereTheConfigurationListsProjectsAlone(t *testing.T) {
+func TestLoadDerivesTheMatrixWhereTheConfigurationListsProjectsAlone(t *testing.T) {
 	dir := unbuildableDerivedModule(t, projectEntries)
 	resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
 
-	loaded, err := stagesOf(t.Context(), &resolved)
+	loaded, err := run.Load(t.Context(), resolved)
 	if err != nil {
-		t.Fatalf("stagesOf(a target listing project entries alone) = %v, want the stages of the derived matrix", err)
+		t.Fatalf("run.Load(a target listing project entries alone) = %v, want the load of the derived matrix", err)
 	}
-	if want := []string{load.HostConfiguration().ID}; !slices.Equal(loaded.identifiers, want) {
-		t.Errorf("stagesOf() analyzed the matrix %v, want the derived matrix the target builds %v",
-			loaded.identifiers, want)
+	if want := []string{load.HostConfiguration().ID}; !slices.Equal(loaded.Identifiers, want) {
+		t.Errorf("run.Load() analyzed the matrix %v, want the derived matrix the target builds %v",
+			loaded.Identifiers, want)
 	}
-	if len(loaded.unbuilt) != 1 || loaded.unbuilt[0].Configuration.ID != unbuildableWindows {
-		t.Errorf("stagesOf() dropped %d configurations, want the one derived configuration %q: only a derived configuration is dropped",
-			len(loaded.unbuilt), unbuildableWindows)
+	if len(loaded.Unbuilt) != 1 || loaded.Unbuilt[0].Configuration.ID != unbuildableWindows {
+		t.Errorf("run.Load() dropped %d configurations, want the one derived configuration %q: only a derived configuration is dropped",
+			len(loaded.Unbuilt), unbuildableWindows)
 	}
 }
 
@@ -451,7 +451,7 @@ func TestAnalyzePublishesALibraryBesideAMainPackageOfItsPath(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	if code := run(t.Context(), []string{"print-roots", "--target=."}, &stdout, &stderr); code != vocab.ExitClean {
+	if code := invoke(t.Context(), []string{"print-roots", "--target=."}, &stdout, &stderr); code != vocab.ExitClean {
 		t.Fatalf("print-roots = %d, want %d: %s", code, vocab.ExitClean, stderr.String())
 	}
 	want := []string{"go://example#main\tmain", "go://example#Exported\tpublished-api", "go://example#TestExported\ttest"}
@@ -567,7 +567,7 @@ func retainedIn(t *testing.T, dir string) []string {
 
 	t.Chdir(dir)
 	var stdout, stderr bytes.Buffer
-	if code := run(t.Context(), []string{"print-retained", "--target=."}, &stdout, &stderr); code != vocab.ExitClean {
+	if code := invoke(t.Context(), []string{"print-retained", "--target=."}, &stdout, &stderr); code != vocab.ExitClean {
 		t.Fatalf("print-retained = %d, want %d: %s", code, vocab.ExitClean, stderr.String())
 	}
 	return strings.Split(strings.TrimSpace(stdout.String()), "\n")

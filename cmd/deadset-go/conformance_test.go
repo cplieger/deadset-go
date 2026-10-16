@@ -15,6 +15,7 @@ import (
 
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/corpus"
+	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -131,36 +132,36 @@ func TestCommandLineVectors(t *testing.T) {
 // TestCorpusAnswerReadsTheCommittedConformanceDocuments pins the record every
 // report states about this analyzer to the two committed documents: the corpus
 // version, the result, the digest of the results document's bytes and the gaps.
-func TestCorpusAnswerReadsTheCommittedConformanceDocuments(t *testing.T) {
+func TestSelfReadsTheCommittedConformanceDocuments(t *testing.T) {
 	t.Parallel()
 
-	answered, err := corpusAnswer()
+	answered, err := selfOf()
 	if err != nil {
-		t.Fatalf("corpusAnswer() = error %v, want the committed conformance record", err)
+		t.Fatalf("selfOf() = error %v, want the committed conformance record", err)
 	}
 	results := readCommitted(t, conformanceResultsFile)
 	var document corpus.Results
 	if err := corpus.DecodeStrict(results, &document); err != nil {
 		t.Fatalf("Setup: decode %s: %v", conformanceResultsFile, err)
 	}
-	if got, want := answered.conformance.CorpusVersion, vocab.CorpusVersion; got != want || document.CorpusVersion != want {
+	if got, want := answered.Analyzer.Conformance.CorpusVersion, vocab.CorpusVersion; got != want || document.CorpusVersion != want {
 		t.Errorf("this analyzer answers corpus version %q and %s records %q, want %q as the pinned corpus publishes it",
 			got, conformanceResultsFile, document.CorpusVersion, want)
 	}
-	if got := string(answered.conformance.Result); got != document.Result {
+	if got := string(answered.Analyzer.Conformance.Result); got != document.Result {
 		t.Errorf("this analyzer states the corpus result %q, want %q as %s records it", got, document.Result, conformanceResultsFile)
 	}
 	digest := sha256.Sum256(results)
-	if want := "sha256:" + hex.EncodeToString(digest[:]); answered.conformance.Digest != want {
+	if want := "sha256:" + hex.EncodeToString(digest[:]); answered.Analyzer.Conformance.Digest != want {
 		t.Errorf("this analyzer states the digest %q, want %q, the digest of the committed %s",
-			answered.conformance.Digest, want, conformanceResultsFile)
+			answered.Analyzer.Conformance.Digest, want, conformanceResultsFile)
 	}
 	declared := committedGaps(t)
-	if got, want := len(answered.gaps), len(declared.Gaps); got != want {
+	if got, want := len(answered.Gaps), len(declared.Gaps); got != want {
 		t.Fatalf("this analyzer declares %d gaps, want %d as %s declares them", got, want, conformanceGapsFile)
 	}
 	for i, gap := range declared.Gaps {
-		held := answered.gaps[i]
+		held := answered.Gaps[i]
 		if held.Fixture != gap.Fixture || held.Symbol != gap.Symbol || held.Capability != gap.Capability || held.Reason != gap.Reason {
 			t.Errorf("this analyzer declares the gap %+v, want %+v as %s declares it", held, gap, conformanceGapsFile)
 		}
@@ -236,14 +237,14 @@ func TestTheBinaryReportsTheConformanceRecordItCommitted(t *testing.T) {
 	}
 	var document struct {
 		Analyzer struct {
-			Conformance conformanceBlock `json:"conformance"`
+			Conformance report.Conformance `json:"conformance"`
 		} `json:"analyzer"`
 		DeclaredGaps []conformanceGap `json:"declared_gaps"`
 	}
 	if err := json.Unmarshal(body, &document); err != nil {
 		t.Fatalf("decode the report the run wrote: %v", err)
 	}
-	want := conformanceBlock{CorpusVersion: committed.CorpusVersion, Result: committed.Result, Digest: "sha256:" + hex.EncodeToString(digest[:])}
+	want := report.Conformance{CorpusVersion: committed.CorpusVersion, Result: report.Result(committed.Result), Digest: "sha256:" + hex.EncodeToString(digest[:])}
 	if document.Analyzer.Conformance != want {
 		t.Errorf("the report states the conformance block %+v, want %+v as the committed documents record it", document.Analyzer.Conformance, want)
 	}

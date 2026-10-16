@@ -30,7 +30,7 @@ const configurationDocument = "deadset.json"
 // about a line of one.
 const documentPosition = 1
 
-// SuppressionsWithoutReason reports every suppression the grammar refused for
+// suppressionsWithoutReason reports every suppression the grammar refused for
 // carrying no reason, at any of the three mechanisms.
 //
 // The subject is the suppression as written, so the finding carries the mechanism and
@@ -41,11 +41,11 @@ const documentPosition = 1
 // A directive naming several codes and carrying no reason is one finding per code, at
 // the one position the directive is written on, because each code is a record of its
 // own and a reader is told which of them is now unsuppressed.
-func SuppressionsWithoutReason(in *Input) ([]Finding, error) {
+func suppressionsWithoutReason(in *Input) ([]Finding, error) {
 	return in.refused(vocab.SuppressionWithoutReason)
 }
 
-// UnscopedEntries reports every ignore-file entry and baseline row the grammar
+// unscopedEntries reports every ignore-file entry and baseline row the grammar
 // refused for naming a symbol and no path, which is an instruction that would mask a
 // match anywhere in the project.
 //
@@ -53,7 +53,7 @@ func SuppressionsWithoutReason(in *Input) ([]Finding, error) {
 // reason-free kind both, at one position: the two rules are separate checks over the
 // same record, so a maintainer who supplies the missing reason still sees the missing
 // path.
-func UnscopedEntries(in *Input) ([]Finding, error) {
+func unscopedEntries(in *Input) ([]Finding, error) {
 	return in.refused(vocab.UnscopedIgnoreEntry)
 }
 
@@ -101,12 +101,12 @@ func refusalMessage(refused *suppress.Refusal) (string, error) {
 	}
 }
 
-// StaleSuppressions reports every record that is neither in effect ([Input.inEffect])
+// staleSuppressions reports every record that is neither in effect ([Input.inEffect])
 // nor dormant ([Input.dormant]). It reads what the pass withheld, so it runs after
 // every other emitter; a record naming a retired code is stale whatever it bound. The
 // records one row binds are stale together or not at all, and the stale records of
 // one site are one finding naming every code, because a maintainer edits one line.
-func StaleSuppressions(in *Input) ([]Finding, error) {
+func staleSuppressions(in *Input) ([]Finding, error) {
 	if in == nil || in.Config == nil {
 		return nil, nil
 	}
@@ -311,7 +311,7 @@ func codesAt(records []*suppress.Record) []vocab.Code {
 	return slices.Compact(codes)
 }
 
-// UnmatchedRoots reports every configured root and every configured root pattern
+// unmatchedRoots reports every configured root and every configured root pattern
 // that named no symbol of the inventory.
 //
 // The subject is the configured string as the configuration spells it, pattern and
@@ -323,7 +323,7 @@ func codesAt(records []*suppress.Record) []vocab.Code {
 // line of their own, so every unmatched root of a run renders at the first position of
 // the document a maintainer opens to correct it, and the string each names is what
 // tells one from another.
-func UnmatchedRoots(in *Input) ([]Finding, error) {
+func unmatchedRoots(in *Input) ([]Finding, error) {
 	if in == nil || in.Config == nil {
 		return nil, nil
 	}

@@ -233,7 +233,7 @@ func (n *narrowing) subjects() []*graph.Symbol {
 	return held
 }
 
-// UnnecessaryExport reports an exported declaration whose every reference is inside
+// unnecessaryExport reports an exported declaration whose every reference is inside
 // the package that declares it, naming the narrower visibility those references
 // support: the file where every one of them is in the declaring file, and the
 // package otherwise.
@@ -243,7 +243,7 @@ func (n *narrowing) subjects() []*graph.Symbol {
 // consumer set complete and every declared consumer loaded, while a main package, an
 // external test package and an internal tree are closed whatever the run knows about
 // consumers.
-func UnnecessaryExport(in *Input) ([]Finding, error) {
+func unnecessaryExport(in *Input) ([]Finding, error) {
 	if in == nil || in.Merged == nil || in.Sweep == nil {
 		return nil, nil
 	}
@@ -272,12 +272,12 @@ func UnnecessaryExport(in *Input) ([]Finding, error) {
 	return found, nil
 }
 
-// UnnecessaryExposure reports an exported declaration of a package an importer
+// unnecessaryExposure reports an exported declaration of a package an importer
 // outside the module can name whose every reference is inside the target module, so
 // the declaration can move behind an internal boundary.
 //
 // It reports under the same closed-world precondition UnnecessaryExport does.
-func UnnecessaryExposure(in *Input) ([]Finding, error) {
+func unnecessaryExposure(in *Input) ([]Finding, error) {
 	if in == nil || in.Merged == nil || in.Sweep == nil {
 		return nil, nil
 	}
@@ -437,13 +437,13 @@ func (n *narrowing) finding(symbol *graph.Symbol, code vocab.Code, visibility, m
 	return one, true
 }
 
-// UnreachableExport reports an unused exported declaration of a package nothing
+// unreachableExport reports an unused exported declaration of a package nothing
 // outside can import: a main package, an external test package, or a package under
 // an internal tree. Unimportability is a property of the package graph, so the kind
 // needs no consumer information, and its subject may be declared in a test file: an
 // exported declaration of an external test package, or an exported test-file
 // declaration nothing reaches, is in this population and no other.
-func UnreachableExport(in *Input) ([]Finding, error) {
+func unreachableExport(in *Input) ([]Finding, error) {
 	if in == nil || in.Sweep == nil {
 		return nil, nil
 	}

@@ -58,7 +58,7 @@ func asNamed(evaluations []Evaluation) []evaluated {
 
 func TestEvaluatePublishesOneRecordPerOwnSideWithItsState(t *testing.T) {
 	in := edged(t, "selfcheck-edges.txtar", applicationConfig())
-	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnreachableExport: UnreachableExport})
+	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnreachableExport: unreachableExport})
 
 	kept, evaluations := Evaluate(in, result.Findings)
 	const declaring = "go://example.com/selfcheckedges#"
@@ -87,7 +87,7 @@ func TestEvaluatePublishesOneRecordPerOwnSideWithItsState(t *testing.T) {
 
 func TestEvaluateCarriesTheFindingTheAnalyzerWouldHaveReported(t *testing.T) {
 	in := edged(t, "selfcheck-edges.txtar", applicationConfig())
-	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnreachableExport: UnreachableExport})
+	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnreachableExport: unreachableExport})
 	reported := findingOf(t, result.Findings, vocab.UnreachableExport, "Event")
 
 	_, evaluations := Evaluate(in, result.Findings)
@@ -107,7 +107,7 @@ func TestEvaluateCarriesTheFindingTheAnalyzerWouldHaveReported(t *testing.T) {
 
 func TestEvaluatePublishesTheFindingAboutTheDeclarationAnEdgeNamesAndNeverAPartOfIt(t *testing.T) {
 	in := edged(t, "selfcheck-edges.txtar", applicationConfig())
-	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnreachableExport: UnreachableExport})
+	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnreachableExport: unreachableExport})
 	const declaring = "go://example.com/selfcheckedges#"
 
 	// A part of the declaration one edge names, reported beside the declaration's own
@@ -136,7 +136,7 @@ func TestEvaluatePublishesTheFindingAboutTheDeclarationAnEdgeNamesAndNeverAPartO
 
 func TestEvaluatePublishesANarrowingCandidateWhoseOnlyOutsideReferenceIsAnEdge(t *testing.T) {
 	in := edged(t, "selfcheck-edges.txtar", applicationConfig())
-	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnnecessaryExport: UnnecessaryExport})
+	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnnecessaryExport: unnecessaryExport})
 	if !slices.Contains(namesUnder(result.Findings, vocab.UnnecessaryExport), "Local") {
 		t.Fatalf("the narrowing kind reports %v, want a finding about Local for the evaluation to publish",
 			summary(result.Findings))
@@ -165,7 +165,7 @@ func TestEvaluatePublishesANarrowingCandidateWhoseOnlyOutsideReferenceIsAnEdge(t
 
 func TestEvaluateReadsOnlyItsOwnSideOfEveryEdge(t *testing.T) {
 	in := edged(t, "selfcheck-edges.txtar", applicationConfig())
-	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnreachableExport: UnreachableExport})
+	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnreachableExport: unreachableExport})
 
 	_, evaluations := Evaluate(in, result.Findings)
 	for i := range evaluations {
@@ -181,7 +181,7 @@ func TestEvaluateReadsOnlyItsOwnSideOfEveryEdge(t *testing.T) {
 
 func TestEvaluateWithNoDeclaredEdgeChangesNothing(t *testing.T) {
 	in := edged(t, "selfcheck-edges.txtar", applicationConfig())
-	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnreachableExport: UnreachableExport})
+	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnreachableExport: unreachableExport})
 	in.Edges = nil
 
 	kept, evaluations := Evaluate(in, result.Findings)

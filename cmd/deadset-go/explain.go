@@ -13,6 +13,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/run"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -69,23 +70,17 @@ const (
 // cannot disagree with a finding: the findings pass runs, and which of its answers
 // names the symbol is what decides the explanation.
 func explain(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	named, resolved, code := explainFlags(args, stderr)
+	named, req, code := explainFlags(args, stderr)
 	if code != vocab.ExitClean {
 		return code
 	}
-
-	options, err := exemptOptions(&resolved.config)
-	if err != nil {
-		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
-		return vocab.ExitUsage
-	}
-	set, err := findingsOf(ctx, &resolved, &options)
+	set, err := findingsOf(ctx, req)
 	if err != nil {
 		return failed(ctx, stderr, err)
 	}
-	namedUnbuilt(stderr, set.loaded.unbuilt)
+	namedUnbuilt(stderr, set.Unbuilt)
 
-	subject, partial := subjectOf(set.loaded.merged, named)
+	subject, partial := subjectOf(set.Merged, named)
 	if subject == nil {
 		fmt.Fprintf(stderr, "deadset-go: %q names no one symbol of the target\n", named)
 		for _, candidate := range partial {
@@ -96,7 +91,7 @@ func explain(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 		return vocab.ExitUsage
 	}
-	if err := writeExplanation(stdout, &set, cascadeOf(resolved.config.Reporters.Cascade), subject); err != nil {
+	if err := writeExplanation(stdout, set, cascadeOf(req.Config.Reporters.Cascade), subject); err != nil {
 		fmt.Fprintf(stderr, "deadset-go: explain: %v\n", err)
 		return vocab.ExitFailure
 	}
@@ -105,26 +100,26 @@ func explain(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 
 // explainFlags parses the invocation and resolves the configuration documents it
 // names.
-func explainFlags(args []string, stderr io.Writer) (named string, resolved resolution, code int) {
+func explainFlags(args []string, stderr io.Writer) (named string, req *run.Request, code int) {
 	flags := configuredFlagSet("explain", explainUsage, stderr, true)
 	asked := make(map[string]*string, len(whyFlags))
 	for _, flagName := range whyFlags {
 		asked[flagName] = flags.set.String(flagName, "", "the symbol to explain, as the argument names it")
 	}
 	if err := flags.set.Parse(args); err != nil {
-		return "", resolution{}, vocab.ExitUsage
+		return "", nil, vocab.ExitUsage
 	}
 
 	named, err := namedSymbol(flags.set, asked)
 	if err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
 		flags.set.Usage()
-		return "", resolution{}, vocab.ExitUsage
+		return "", nil, vocab.ExitUsage
 	}
-	if resolved, code = flags.resolution(stderr); code != vocab.ExitClean {
-		return "", resolution{}, code
+	if req, code = flags.request(stderr); code != vocab.ExitClean {
+		return "", nil, code
 	}
-	return named, resolved, vocab.ExitClean
+	return named, req, vocab.ExitClean
 }
 
 // namedSymbol is the symbol one request names, from the argument or from one of the
@@ -235,15 +230,15 @@ func partialMatches(merged *graph.Merged, named string) []string {
 //
 // The whole text is built first and written once, so a failure partway through the
 // rendering leaves nothing half-printed and the writer is touched exactly once.
-func writeExplanation(w io.Writer, set *findingSet, cascade graph.Cascade, subject *graph.Symbol) error {
+func writeExplanation(w io.Writer, set *run.Findings, cascade graph.Cascade, subject *graph.Symbol) error {
 	var held strings.Builder
 	fmt.Fprintf(&held, "symbol: %s\n", subject.Ref)
 	fmt.Fprintf(&held, "declaration: %s %s\n", subject.Kind, subject.Name)
 	fmt.Fprintf(&held, "position: %s\n", subject.Pos)
-	fmt.Fprintf(&held, "configurations: %s\n", configurationNames(set.loaded.identifiers, subject.Configs))
+	fmt.Fprintf(&held, "configurations: %s\n", configurationNames(set.Identifiers, subject.Configs))
 
-	found := findingAbout(set.result.Findings, subject)
-	retained := retentionsOf(set.retained, subject.ID)
+	found := findingAbout(set.Result.Findings, subject)
+	retained := retentionsOf(set.Retained(), subject.ID)
 	switch {
 	case found != nil:
 		fmt.Fprintf(&held, "answer: %s\n", stateReported)
@@ -254,7 +249,7 @@ func writeExplanation(w io.Writer, set *findingSet, cascade graph.Cascade, subje
 	default:
 		writeLiveness(&held, set, cascade, subject)
 	}
-	writeNamedElsewhere(&held, set.result.Findings, subject)
+	writeNamedElsewhere(&held, set.Result.Findings, subject)
 	_, err := io.WriteString(w, held.String())
 	return err
 }
@@ -309,9 +304,9 @@ func writeRetained(held *strings.Builder, retained []graph.Exemption) {
 // writeLiveness is the explanation of a symbol no finding names and no exemption held
 // back: the relations that hold it live, the root a path of references reaches it
 // from, and the dead component it falls with where the sweep judged it a candidate.
-func writeLiveness(held *strings.Builder, set *findingSet, cascade graph.Cascade, subject *graph.Symbol) {
-	candidate := candidateFor(set.swept.Candidates, subject.ID)
-	live := set.swept.LiveUnder[subject.ID]
+func writeLiveness(held *strings.Builder, set *run.Findings, cascade graph.Cascade, subject *graph.Symbol) {
+	candidate := candidateFor(set.Liveness.Candidates, subject.ID)
+	live := set.Liveness.LiveUnder[subject.ID]
 	fmt.Fprintf(held, "answer: %s\n", livenessState(candidate, live))
 	if livenessState(candidate, live) == stateUnjudged {
 		fmt.Fprintf(held, "  unjudged: neither liveness relation judges a %s\n", subject.Kind)
@@ -319,10 +314,10 @@ func writeLiveness(held *strings.Builder, set *findingSet, cascade graph.Cascade
 	}
 	fmt.Fprintf(held, "  live under: %s\n", relationsOf(live))
 
-	for _, root := range rootReasons(set.loaded.merged.Roots, subject.ID) {
+	for _, root := range rootReasons(set.Merged.Roots, subject.ID) {
 		fmt.Fprintf(held, "  root: %s%s\n", root.Kind, sourceNote(root.Source))
 	}
-	writePath(held, set.loaded.merged, subject.ID)
+	writePath(held, set.Prepared, subject.ID)
 	if candidate != nil {
 		writeComponent(held, set, cascade, subject.ID)
 		fmt.Fprintf(held, "  candidate: dead under %s, with %d production and %d test references\n",
@@ -343,23 +338,33 @@ func livenessState(candidate *graph.Candidate, live graph.RelationSet) state {
 	}
 }
 
-// writePath is the shortest path of references from a root to the symbol, one line
-// per hop, and the references that reach it where no path from a root does.
-func writePath(held *strings.Builder, merged *graph.Merged, id graph.SymbolID) {
-	root, path, reached := pathFrom(merged, id)
+// writePath is the caller-reachability path under the run's mode, one line per hop,
+// else the path over every reference, each hop the mode counts as a test file's
+// marked, else the references to the symbol.
+func writePath(held *strings.Builder, set *run.Prepared, id graph.SymbolID) {
+	mode := set.Mode
+	path, reached := set.Matrix.Path(id, mode)
+	if !reached {
+		mode = graph.Mode{ConsumerTestsProduction: mode.ConsumerTestsProduction}
+		path, reached = set.Matrix.Path(id, mode)
+	}
 	if reached {
-		if len(path) == 0 {
-			return
+		switch {
+		case path.Root != nil:
+			if len(path.Hops) == 0 {
+				return
+			}
+			fmt.Fprintf(held, "  reached from: root %s %s\n", path.Root.Kind, path.Root.ID)
+		default:
+			fmt.Fprintf(held, "  reached from: loaded consumer %s\n", path.Hops[0].Consumer)
 		}
-		fmt.Fprintf(held, "  reached from: root %s %s\n", root.Kind, root.ID)
-		for i := range path {
-			fmt.Fprintf(held, "  reference: %s\t%s\t%s -> %s%s\n",
-				path[i].Pos, path[i].Kind, path[i].From, path[i].To, testFileNote(path[i].Test))
+		for i := range path.Hops {
+			writeHop(held, &path.Hops[i], mode)
 		}
 		return
 	}
 
-	references := referencesTo(merged.References, id)
+	references := referencesTo(set.Merged.References, id)
 	fmt.Fprintln(held, "  unreachable: no path of references reaches it from a root")
 	fmt.Fprintf(held, "  references: %d\n", len(references))
 	for i := range references {
@@ -368,11 +373,21 @@ func writePath(held *strings.Builder, merged *graph.Merged, id graph.SymbolID) {
 	}
 }
 
+// writeHop is one hop of a path. A loaded consumer's reference is made by that
+// consumer.
+func writeHop(held *strings.Builder, hop *graph.Reference, mode graph.Mode) {
+	from := string(hop.From)
+	if hop.Consumer != "" {
+		from = hop.Consumer
+	}
+	fmt.Fprintf(held, "  reference: %s\t%s\t%s -> %s%s\n", consumerSite(hop.Consumer, hop.Pos), hop.Kind, from, hop.To, testFileNote(mode.TestReference(hop)))
+}
+
 // writeComponent is the dead component one candidate falls with, listed at the depth
 // the configuration asks for, and the identifier the report mints for it where the
 // report names the component's root.
-func writeComponent(held *strings.Builder, set *findingSet, cascade graph.Cascade, id graph.SymbolID) {
-	component := componentOf(set.swept.Components, id)
+func writeComponent(held *strings.Builder, set *run.Findings, cascade graph.Cascade, id graph.SymbolID) {
+	component := componentOf(set.Liveness.Components, id)
 	if component == nil {
 		return
 	}
@@ -394,9 +409,9 @@ func writeComponent(held *strings.Builder, set *findingSet, cascade graph.Cascad
 //
 // The identifier is read from the report rather than minted here, so this command
 // holds no second copy of the rule that mints it.
-func componentIdentity(set *findingSet, roots []graph.SymbolID) string {
-	for i := range set.result.Findings {
-		found := &set.result.Findings[i]
+func componentIdentity(set *run.Findings, roots []graph.SymbolID) string {
+	for i := range set.Result.Findings {
+		found := &set.Result.Findings[i]
 		if slices.Contains(roots, graph.SymbolID(positionKey(&found.Position))) {
 			return found.Component.ID
 		}
@@ -495,115 +510,6 @@ func componentOf(components []graph.Component, id graph.SymbolID) *graph.Compone
 		}
 	}
 	return nil
-}
-
-// pathFrom is the path one explanation prints: the shortest path of production
-// references from a root no test file declares, and the shortest path over every
-// reference where no such path exists.
-//
-// The production path is preferred because it is the path the sweep the report was
-// built from counts, so a symbol that sweep holds live is named live for a production
-// reason. Where the only path runs through a test file the answer prints it and says
-// so on the hop.
-func pathFrom(merged *graph.Merged, to graph.SymbolID) (graph.Root, []graph.Reference, bool) {
-	if root, path, reached := shortestPath(merged, to, productionReferences); reached {
-		return root, path, true
-	}
-	return shortestPath(merged, to, everyReference)
-}
-
-// referenceSet is which references one path walk follows. It is the walk's own
-// question rather than the run's mode: an explanation prefers the path the report's
-// sweep counts and answers over every reference where there is no such path, so one
-// explanation walks both sets whatever mode the run analysed under.
-type referenceSet uint8
-
-const (
-	// productionReferences is the set a production sweep counts: no reference a
-	// test file made, and no root a test file declares.
-	productionReferences referenceSet = iota
-
-	// everyReference is every reference and every root, which is the set that
-	// answers where no production path reaches the symbol.
-	everyReference
-)
-
-// shortestPath is the shortest path of references from a root to one symbol, and the
-// root it starts from.
-//
-// The search is breadth-first from every root at once, in the order the merge holds
-// the roots and then the references, so the path is a shortest one and is the same
-// path on every run over one tree. A symbol that is itself a root is reached by the
-// empty path.
-//
-// The production set drops the test roots from the seed and every reference a test
-// file made, which is the set the production sweep counts.
-func shortestPath(merged *graph.Merged, to graph.SymbolID, follows referenceSet) (graph.Root, []graph.Reference, bool) {
-	out := adjacency(merged, follows)
-	steps, seen := rootSeed(merged, follows)
-
-	for head := 0; head < len(steps); head++ {
-		if steps[head].at == to {
-			return merged.Roots[steps[head].root], pathOf(merged, steps, head), true
-		}
-		for _, at := range out[steps[head].at] {
-			next := merged.References[at].To
-			if seen[next] {
-				continue
-			}
-			seen[next] = true
-			steps = append(steps, walked{at: next, reference: at, previous: head, root: steps[head].root})
-		}
-	}
-	return graph.Root{}, nil, false
-}
-
-// adjacency is the references each symbol makes, by the index the merge holds them
-// at, so the walk follows them in the order the merge returned them.
-func adjacency(merged *graph.Merged, follows referenceSet) map[graph.SymbolID][]int {
-	out := make(map[graph.SymbolID][]int, len(merged.Symbols))
-	for i := range merged.References {
-		if follows == productionReferences && merged.References[i].Test {
-			continue
-		}
-		out[merged.References[i].From] = append(out[merged.References[i].From], i)
-	}
-	return out
-}
-
-// rootSeed is the walk's first steps, one per root the seed holds, and the symbols
-// already reached.
-func rootSeed(merged *graph.Merged, follows referenceSet) (steps []walked, seen map[graph.SymbolID]bool) {
-	steps = make([]walked, 0, len(merged.Symbols))
-	seen = make(map[graph.SymbolID]bool, len(merged.Symbols))
-	for i := range merged.Roots {
-		if seen[merged.Roots[i].ID] || (follows == productionReferences && merged.Roots[i].Kind == graph.RootTest) {
-			continue
-		}
-		seen[merged.Roots[i].ID] = true
-		steps = append(steps, walked{at: merged.Roots[i].ID, reference: -1, previous: -1, root: i})
-	}
-	return steps, seen
-}
-
-// walked is one step of the breadth-first walk: the symbol reached, the reference
-// that reached it, the step that made that reference, and the root the walk started
-// from. The reference and the previous step are absent for a root.
-type walked struct {
-	at        graph.SymbolID
-	reference int
-	previous  int
-	root      int
-}
-
-// pathOf is the path one step was reached by, from the root to the symbol.
-func pathOf(merged *graph.Merged, steps []walked, at int) []graph.Reference {
-	var path []graph.Reference
-	for held := at; steps[held].reference >= 0; held = steps[held].previous {
-		path = append(path, merged.References[steps[held].reference])
-	}
-	slices.Reverse(path)
-	return path
 }
 
 // relationsOf is the relations one symbol is live under, and the statement that none

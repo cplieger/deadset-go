@@ -292,6 +292,10 @@ type Input struct {
 	// Generated reports whether one target-relative path is a generated file.
 	Generated func(path string) bool
 
+	// TypeErrorSkips is every declaration a type error skipped, about which
+	// nothing is reported.
+	TypeErrorSkips []graph.TypeErrorSkip
+
 	// Marks is every suppression record the run read, bound or not, and Refusals
 	// is what the grammar refused with a finding of its own rather than with an
 	// exit. The self-check kinds read both: a record the sweep did not hold back
@@ -371,6 +375,40 @@ type Input struct {
 
 // Emitter is one kind's rule: it returns the findings of its own code.
 type Emitter func(in *Input) ([]Finding, error)
+
+// Emitters is every kind this analyzer reports, mapped to its rule. A code absent
+// from it reports nothing; a test holds it to the vocabulary's Go kinds.
+var Emitters = map[vocab.Code]Emitter{
+	vocab.UnusedExported:              UnusedExported,
+	vocab.UnusedUnexported:            unusedUnexported,
+	vocab.UnusedMember:                unusedMember,
+	vocab.TestOnlyUse:                 testOnlyUse,
+	vocab.TestOfDeadCode:              testOfDeadCode,
+	vocab.DeprecatedUnused:            deprecatedAndUnused,
+	vocab.UnnecessaryExport:           unnecessaryExport,
+	vocab.UnnecessaryExposure:         unnecessaryExposure,
+	vocab.UnreachableExport:           unreachableExport,
+	vocab.FileNeverBuilt:              fileNeverBuilt,
+	vocab.FileNeverImported:           fileNeverImported,
+	vocab.UnusedInterface:             unusedInterface,
+	vocab.UncalledInterfaceMethod:     uncalledInterfaceMethod,
+	vocab.UnusedSatisfactionAssertion: unusedSatisfactionAssertion,
+	vocab.WriteOnlySymbol:             writeOnlySymbol,
+	vocab.UnusedEnumMember:            unusedEnumMember,
+	vocab.UnusedTypeParameter:         unusedTypeParameter,
+	vocab.UnusedDependency:            unusedDependency,
+	vocab.UnusedModuleDirective:       unusedReplace,
+	vocab.SuppressionWithoutReason:    suppressionsWithoutReason,
+	vocab.UnscopedIgnoreEntry:         unscopedEntries,
+	vocab.StaleSuppression:            staleSuppressions,
+	vocab.UnmatchedRoot:               unmatchedRoots,
+	vocab.UnusedParameter:             unusedParameter,
+	vocab.UnusedReceiver:              unusedReceiver,
+	vocab.UnusedResult:                unusedResult,
+	vocab.UnreachableStatement:        unreachableStatement,
+	vocab.DeadStore:                   deadStore,
+	vocab.UnreachableCase:             unreachableCase,
+}
 
 // Result is what one findings pass produced: the findings in the canonical order,
 // and the findings the configured minimum confidence alone withheld.
@@ -469,7 +507,21 @@ func Compute(in *Input, emitters map[vocab.Code]Emitter) (Result, error) {
 
 	kept, withheld := in.reportable(findings)
 	slices.SortStableFunc(kept, compare)
-	return Result{Findings: kept, Withheld: withheld}, nil
+	return Result{Findings: in.withoutSkipped(kept), Withheld: in.withoutSkipped(withheld)}, nil
+}
+
+// withoutSkipped drops every finding positioned inside a declaration a type error
+// skipped: nothing is reported about the declaration or any part of it.
+func (in *Input) withoutSkipped(findings []Finding) []Finding {
+	if len(in.TypeErrorSkips) == 0 {
+		return findings
+	}
+	return slices.DeleteFunc(findings, func(found Finding) bool {
+		return slices.ContainsFunc(in.TypeErrorSkips, func(skip graph.TypeErrorSkip) bool {
+			return skip.FromLine > 0 && skip.Path == found.Position.Path &&
+				skip.FromLine <= found.Position.Line && found.Position.Line <= skip.ToLine
+		})
+	})
 }
 
 // capComponents lowers every finding of a dead component to the lowest confidence

@@ -18,7 +18,7 @@ Three rules decide what the retained set holds:
 
 `exemptions.disabled` in the configuration lists class names that do not run, so an exemption suspected of hiding a defect can be tested. A disabled class retains nothing.
 
-Any class of the contract's vocabulary may be named, so a configuration shared with the TypeScript analyzer works unchanged, and a class the vocabulary declares for TypeScript alone switches nothing off here. A name outside the vocabulary is refused. `analyze`, `explain` and `print-retained` exit with the usage code and list the classes, and `print-config` prints the list as written.
+Any class of the contract's vocabulary may be named, so a configuration shared with the TypeScript analyzer works unchanged, and a class the vocabulary declares for TypeScript alone switches nothing off here. A name outside the vocabulary is refused: every verb that reads the configuration exits with the usage code and lists the classes.
 
 Two classes read files and retain nothing until the project configures them: `analysis.template_dirs` for `template-field`, and nothing at all for `reflective-lookup`, which reads only the program's own string literals. A configured template directory the target does not hold ends the run with the usage code rather than being passed over, the same way a configured root that matches nothing is reported rather than ignored.
 

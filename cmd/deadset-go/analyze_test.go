@@ -39,7 +39,7 @@ func runAnalyze(t *testing.T, dir string, args ...string) analyzed {
 	reportPath := filepath.Join(t.TempDir(), "report.json")
 	var stdout, stderr bytes.Buffer
 	invoked := append([]string{"analyze", "--target=.", "--report=" + reportPath}, args...)
-	code := run(t.Context(), invoked, &stdout, &stderr)
+	code := invoke(t.Context(), invoked, &stdout, &stderr)
 	// The verb writes nothing to stdout: the report is a file and the verdict is
 	// the code, so a stream carries neither.
 	if stdout.Len() != 0 {
@@ -467,7 +467,7 @@ func TestAnalyzeWritesNoPartialDocumentWhereThePublishCannotHappen(t *testing.T)
 	reportPath := filepath.Join(held, "report.json")
 
 	var stdout, stderr bytes.Buffer
-	code := run(t.Context(), []string{"analyze", "--target=.", "--report=" + reportPath}, &stdout, &stderr)
+	code := invoke(t.Context(), []string{"analyze", "--target=.", "--report=" + reportPath}, &stdout, &stderr)
 	if want := contractExitCodes(t)["failure"]; code != want {
 		t.Errorf("analyze with a report path no write can publish = %d, want %d\nstderr: %s", code, want, stderr.String())
 	}
@@ -503,7 +503,7 @@ func TestAnalyzeWritesNoPartialDocumentWhereTheRenameIsRefused(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := run(t.Context(), []string{"analyze", "--target=.", "--report=" + reportPath}, &stdout, &stderr)
+	code := invoke(t.Context(), []string{"analyze", "--target=.", "--report=" + reportPath}, &stdout, &stderr)
 	if want := contractExitCodes(t)["failure"]; code != want {
 		t.Errorf("analyze with a report path the rename cannot take = %d, want %d\nstderr: %s",
 			code, want, stderr.String())
@@ -737,7 +737,7 @@ func TestAnalyzeRendersSARIFAgainstTheTargetTheScopeDocumentNames(t *testing.T) 
 	// The invocation names no target, so the target directory is the scope
 	// document's, and the SARIF rendering reads the lines it fingerprints there.
 	var stdout, stderr bytes.Buffer
-	code := run(t.Context(), []string{
+	code := invoke(t.Context(), []string{
 		"analyze", "--scope=scope.json", "--config=target/" + repositoryDocument,
 		"--format=sarif", "--report=" + reportPath,
 	}, &stdout, &stderr)
@@ -759,7 +759,7 @@ func TestAnalyzeReadsTheScopeDocumentTheInvocationNames(t *testing.T) {
 	reportPath := filepath.Join(t.TempDir(), "report.json")
 
 	var stdout, stderr bytes.Buffer
-	code := run(t.Context(), []string{
+	code := invoke(t.Context(), []string{
 		"analyze", "--target=target", "--scope=scope.json", "--report=" + reportPath,
 	}, &stdout, &stderr)
 	if want := contractExitCodes(t)["findings"]; code != want {

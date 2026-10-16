@@ -126,6 +126,10 @@ type Result struct {
 	// file the check did read is a file of its package like any other and is not
 	// in this list.
 	ExcludedByCgo []string
+
+	// Generated holds the package clause of every file of Packages that carries the
+	// generated-code header, once per parse of the file.
+	Generated []token.Pos
 }
 
 // HostConfiguration is the configuration of the host the binary runs on, with no
@@ -179,6 +183,7 @@ func load(ctx context.Context, doc scope.Document, c Configuration, trees *synta
 	}
 	slices.Sort(r.ExcludedByCgo)
 	r.ExcludedByCgo = slices.Compact(r.ExcludedByCgo)
+	r.Generated = generatedFiles(r.Packages)
 	r.markShared()
 
 	if !walked {

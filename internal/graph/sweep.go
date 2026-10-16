@@ -510,27 +510,41 @@ func (s *sweep) heldSeed(reached []bool) []int {
 // mode's.
 func (s *sweep) callerSeed(reached []bool) []int {
 	queue := make([]int, 0, len(s.g.rooted))
-	for _, r := range s.g.rooted {
-		if (s.in.Mode.Production && r.kind == RootTest) || reached[r.at] {
-			continue
-		}
-		reached[r.at] = true
-		queue = append(queue, r.at)
-	}
-	for i := range s.g.symbols {
-		if reached[i] || !s.g.consumedIn(i, s.in.Mode) {
-			continue
-		}
-		reached[i] = true
-		queue = append(queue, i)
-	}
+	s.g.callerSeeds(s.in.Mode, reached, func(at, _ int) { queue = append(queue, at) })
 	return queue
 }
 
+// callerSeeds visits, in order, every root and then every symbol a loaded consumer
+// references in a way the mode counts, except the test roots under a production
+// mode and the symbols already reached, and marks each reached. root is the seed's
+// place among the roots, -1 for a consumer's seed.
+func (g *Graph) callerSeeds(m Mode, reached []bool, visit func(at, root int)) {
+	for i, r := range g.rooted {
+		if (m.Production && r.kind == RootTest) || reached[r.at] {
+			continue
+		}
+		reached[r.at] = true
+		visit(r.at, i)
+	}
+	for i := range g.symbols {
+		if reached[i] || !g.consumedIn(i, m) {
+			continue
+		}
+		reached[i] = true
+		visit(i, -1)
+	}
+}
+
+// follows reports whether the mode's caller reachability follows a reference a test
+// file made or not: a production mode skips the test file's.
+func (m Mode) follows(test bool) bool {
+	return !m.Production || !test
+}
+
 // walk follows the references out of a seed's closure. Outside the held seed's
-// closure a production sweep skips the references a test file made.
+// closure the mode decides which references the walk follows.
 func (s *sweep) walk(reached []bool, queue []int, held bool) {
-	s.g.closure(reached, queue, func(e edge) bool { return !held && s.in.Mode.Production && e.test })
+	s.g.closure(reached, queue, func(e edge) bool { return !held && !s.in.Mode.follows(e.test) })
 }
 
 // decide keeps as a candidate every symbol the sweep judges that at least one

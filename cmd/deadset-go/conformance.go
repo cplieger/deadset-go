@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	deadsetgo "github.com/cplieger/deadset-go/v2"
+	"github.com/cplieger/deadset-go/v2/internal/run"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -47,31 +48,12 @@ type resultsAnswer struct {
 	Result        string `json:"result"`
 }
 
-// conformanceBlock is the conformance object of the Contract's analyzer object, as the
-// describe document writes it. A report writes the same three members through the
-// report package's own rendering, because a report is that package's document;
-// describe's document is this command's own and is written here.
-type conformanceBlock struct {
-	CorpusVersion string `json:"corpus_version"`
-	Result        string `json:"result"`
-	Digest        string `json:"digest"`
-}
-
-// corpusAnswer is what this analyzer states about itself in every document that names
-// it: its result over the Conformance Corpus, the version of the corpus that result is
-// against, the digest of the results document its corpus runner wrote, and every
-// capability it declines.
-//
-// The result, the digest and the gaps are read from the two committed documents the
-// binary carries, so what a report states and what a reader holding those files can
-// recompute are the same bytes. The digest is the SHA-256 of the results document
-// exactly as the runner wrote it, which the Contract requires, and a reader recomputes
-// it over the committed file.
-//
-// A document this analyzer cannot decode, and one naming a corpus version this
-// analyzer does not answer, are refused rather than patched over: either would make
-// every report state a conformance record the analyzer cannot stand behind.
-func corpusAnswer() (*corpusRecord, error) {
+// selfOf is what this analyzer states about itself in every document that names it,
+// read from the two committed documents the binary carries, so a report states what
+// a reader holding those files recomputes: the digest is the SHA-256 of the results
+// document as the runner wrote it, as the Contract requires. A document it cannot
+// decode, or one naming another corpus version, is refused.
+func selfOf() (*run.Self, error) {
 	var results resultsAnswer
 	if err := json.Unmarshal(deadsetgo.Results, &results); err != nil {
 		return nil, fmt.Errorf("decode %s: %w", conformanceResultsFile, err)
@@ -91,27 +73,22 @@ func corpusAnswer() (*corpusRecord, error) {
 	}
 
 	digest := sha256.Sum256(deadsetgo.Results)
-	return &corpusRecord{
-		conformance: report.Conformance{
-			CorpusVersion: vocab.CorpusVersion,
-			Result:        report.Result(results.Result),
-			Digest:        "sha256:" + hex.EncodeToString(digest[:]),
-		},
-		gaps: reportedGaps(gaps.Gaps),
-	}, nil
-}
-
-// reportedGaps is the declared gaps as a report names them, in the order the document
-// declares them.
-func reportedGaps(declared []conformanceGap) []report.DeclaredGap {
-	named := make([]report.DeclaredGap, len(declared))
-	for i, gap := range declared {
-		named[i] = report.DeclaredGap{
-			Fixture:    gap.Fixture,
-			Symbol:     gap.Symbol,
-			Capability: gap.Capability,
-			Reason:     gap.Reason,
-		}
+	declared := make([]report.DeclaredGap, len(gaps.Gaps))
+	for i, gap := range gaps.Gaps {
+		declared[i] = report.DeclaredGap{Fixture: gap.Fixture, Symbol: gap.Symbol, Capability: gap.Capability, Reason: gap.Reason}
 	}
-	return named
+	return &run.Self{
+		Analyzer: report.Analyzer{
+			Name:                   name,
+			Version:                version(),
+			Languages:              []vocab.Language{language},
+			SchemaVersionsAccepted: vocab.SchemaVersions(),
+			Conformance: report.Conformance{
+				CorpusVersion: vocab.CorpusVersion,
+				Result:        report.Result(results.Result),
+				Digest:        "sha256:" + hex.EncodeToString(digest[:]),
+			},
+		},
+		Gaps: declared,
+	}, nil
 }

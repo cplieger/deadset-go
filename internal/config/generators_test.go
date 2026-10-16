@@ -25,6 +25,16 @@ func enumOf[T ~string](values ...T) *rapid.Generator[any] {
 	return rapid.SampledFrom(values).AsAny()
 }
 
+// exemptionClassNames is every class of the vocabulary, which is every name
+// exemptions.disabled accepts.
+func exemptionClassNames() []string {
+	var names []string
+	for _, class := range vocab.ExemptionClasses() {
+		names = append(names, string(class.Name))
+	}
+	return names
+}
+
 // arrayOfDistinct draws an array of distinct entries, which is what every array
 // of the closed key list accepts, between minLen and maxLen of them.
 func arrayOfDistinct[T comparable](entry *rapid.Generator[T], minLen, maxLen int) *rapid.Generator[any] {
@@ -59,7 +69,7 @@ func settingGenerators() map[string]*rapid.Generator[any] {
 		}).AsAny(),
 		"consumers.complete":  rapid.Bool().AsAny(),
 		"roots.patterns":      arrayOfDistinct(symbolReference(), 0, 2),
-		"exemptions.disabled": arrayOfDistinct(rapid.StringMatching(`^[a-z][a-z0-9-]{0,10}$`), 0, 2),
+		"exemptions.disabled": arrayOfDistinct(rapid.SampledFrom(exemptionClassNames()), 0, 2),
 		"reporters.formats": arrayOfDistinct(rapid.SampledFrom([]vocab.Format{
 			vocab.FormatText, vocab.FormatJSON, vocab.FormatGitHub, vocab.FormatSARIF, vocab.FormatTemplate,
 		}), 1, 3),

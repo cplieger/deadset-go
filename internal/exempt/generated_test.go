@@ -2,9 +2,7 @@ package exempt
 
 import (
 	"fmt"
-	"go/ast"
 	"os"
-	"path/filepath"
 	"slices"
 	"testing"
 
@@ -31,41 +29,6 @@ func rendered(symbols []graph.Symbol, exemptions []graph.Exemption) []string {
 			names[e.ID], e.Class, e.Site.Filename, e.Site.Line, e.Site.Column, e.Detail))
 	}
 	return lines
-}
-
-// loadedFiles indexes one configuration's syntax by file name.
-func loadedFiles(in *Input) map[string]*ast.File {
-	files := make(map[string]*ast.File)
-	for _, p := range in.Result.Packages {
-		for _, f := range p.Syntax {
-			files[filepath.Base(in.Result.Fset.Position(f.FileStart).Filename)] = f
-		}
-	}
-	return files
-}
-
-func TestIsGeneratedFileMatchesTheStandardHeaderOnly(t *testing.T) {
-	files := loadedFiles(inputOf(t, "generated.txtar", Options{}))
-	tests := []struct {
-		file string
-		want bool
-	}{
-		{file: "gen.go", want: true},
-		{file: "app.go", want: false},
-		{file: "late.go", want: false},
-		{file: "nearmiss.go", want: false},
-	}
-	for _, test := range tests {
-		t.Run(test.file, func(t *testing.T) {
-			f, loaded := files[test.file]
-			if !loaded {
-				t.Fatalf("Setup: %s is not among the loaded files", test.file)
-			}
-			if got := IsGeneratedFile(f); got != test.want {
-				t.Errorf("IsGeneratedFile(%s) = %t, want %t", test.file, got, test.want)
-			}
-		})
-	}
 }
 
 func TestGeneratedFileDetectorRetainsEveryDeclarationOfAGeneratedFile(t *testing.T) {

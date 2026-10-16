@@ -18,9 +18,6 @@ import (
 //nolint:gocritic // regexpSimplify: the pattern is the schema's own spelling, pinned equal to it
 var severityKeyPattern = regexp.MustCompile(`^DS[0-9]{2}([0-9]{2})?$`)
 
-// exemptionClassPattern is the spelling an exemption class name takes.
-var exemptionClassPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
-
 // contractVersionPattern is the spelling contract_version takes.
 //
 //nolint:gocritic // regexpSimplify: the pattern is the schema's own spelling, pinned equal to it

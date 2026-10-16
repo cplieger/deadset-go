@@ -260,17 +260,12 @@ func generatedPaths(t *testing.T, per []Configured) map[string]bool {
 
 	paths := make(map[string]bool)
 	for _, one := range per {
-		for _, p := range one.Result.Packages {
-			for _, f := range p.Syntax {
-				if !exempt.IsGeneratedFile(f) {
-					continue
-				}
-				site, err := one.Resolve.Render(f.Package)
-				if err != nil {
-					t.Fatalf("Setup: render the package clause of a generated file: %v", err)
-				}
-				paths[site.Filename] = true
-			}
+		sites, err := exempt.GeneratedSites(one.Result, one.Resolve)
+		if err != nil {
+			t.Fatalf("Setup: render the package clause of a generated file: %v", err)
+		}
+		for path := range sites {
+			paths[path] = true
 		}
 	}
 	return paths
@@ -290,46 +285,18 @@ func identifiers(configurations []load.Configuration) []string {
 func declarationEmitters() map[vocab.Code]Emitter {
 	return map[vocab.Code]Emitter{
 		vocab.UnusedExported:   UnusedExported,
-		vocab.UnusedUnexported: UnusedUnexported,
-		vocab.UnusedMember:     UnusedMember,
-		vocab.TestOnlyUse:      TestOnlyUse,
-		vocab.TestOfDeadCode:   TestOfDeadCode,
-		vocab.DeprecatedUnused: DeprecatedAndUnused,
+		vocab.UnusedUnexported: unusedUnexported,
+		vocab.UnusedMember:     unusedMember,
+		vocab.TestOnlyUse:      testOnlyUse,
+		vocab.TestOfDeadCode:   testOfDeadCode,
+		vocab.DeprecatedUnused: deprecatedAndUnused,
 	}
 }
 
-// packageEmitters is every emitter this package implements, which is the table the
-// composition root registers and the table the once rule is measured over: one
-// position carries one finding, so the kinds agree on precedence or a pass over any
-// fixture fails. A kind landed later is added here, and its fixtures are then
-// measured against every kind that came before it.
-func packageEmitters() map[vocab.Code]Emitter {
-	table := declarationEmitters()
-	table[vocab.UnusedInterface] = UnusedInterface
-	table[vocab.UncalledInterfaceMethod] = UncalledInterfaceMethod
-	table[vocab.UnusedSatisfactionAssertion] = UnusedSatisfactionAssertion
-	table[vocab.WriteOnlySymbol] = WriteOnlySymbol
-	table[vocab.UnusedEnumMember] = UnusedEnumMember
-	table[vocab.UnusedTypeParameter] = UnusedTypeParameter
-	table[vocab.UnnecessaryExport] = UnnecessaryExport
-	table[vocab.UnnecessaryExposure] = UnnecessaryExposure
-	table[vocab.UnreachableExport] = UnreachableExport
-	table[vocab.FileNeverBuilt] = FileNeverBuilt
-	table[vocab.FileNeverImported] = FileNeverImported
-	table[vocab.UnusedDependency] = UnusedDependency
-	table[vocab.UnusedModuleDirective] = UnusedReplace
-	table[vocab.SuppressionWithoutReason] = SuppressionsWithoutReason
-	table[vocab.UnscopedIgnoreEntry] = UnscopedEntries
-	table[vocab.StaleSuppression] = StaleSuppressions
-	table[vocab.UnmatchedRoot] = UnmatchedRoots
-	table[vocab.UnusedParameter] = UnusedParameter
-	table[vocab.UnusedReceiver] = UnusedReceiver
-	table[vocab.UnusedResult] = UnusedResult
-	table[vocab.UnreachableStatement] = UnreachableStatement
-	table[vocab.DeadStore] = DeadStore
-	table[vocab.UnreachableCase] = UnreachableCase
-	return table
-}
+// packageEmitters is a copy of [Emitters] a test may change. The once rule is
+// measured over it: one position carries one finding, so the kinds agree on
+// precedence or a pass over any fixture fails.
+func packageEmitters() map[vocab.Code]Emitter { return maps.Clone(Emitters) }
 
 // fixtures is every one-module archive under testdata, which is every fixture of every
 // kind of this package but the archives of testdata/sections, which hold a consumer.
@@ -408,14 +375,14 @@ func (tb table) emitters() map[vocab.Code]Emitter {
 		return intraFuncEmitters()
 	case narrowingKinds:
 		return map[vocab.Code]Emitter{
-			vocab.UnnecessaryExport:   UnnecessaryExport,
-			vocab.UnnecessaryExposure: UnnecessaryExposure,
-			vocab.UnreachableExport:   UnreachableExport,
+			vocab.UnnecessaryExport:   unnecessaryExport,
+			vocab.UnnecessaryExposure: unnecessaryExposure,
+			vocab.UnreachableExport:   unreachableExport,
 		}
 	case writeOnlyKind:
-		return map[vocab.Code]Emitter{vocab.WriteOnlySymbol: WriteOnlySymbol}
+		return map[vocab.Code]Emitter{vocab.WriteOnlySymbol: writeOnlySymbol}
 	case testOnlyAndUnreachableExport:
-		return map[vocab.Code]Emitter{vocab.TestOnlyUse: TestOnlyUse, vocab.UnreachableExport: UnreachableExport}
+		return map[vocab.Code]Emitter{vocab.TestOnlyUse: testOnlyUse, vocab.UnreachableExport: unreachableExport}
 	default:
 		return packageEmitters()
 	}

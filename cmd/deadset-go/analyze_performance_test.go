@@ -166,7 +166,7 @@ func analyzeSynthesized(ctx context.Context, sink failureSink, base, name string
 
 	var stderr strings.Builder
 	started := time.Now()
-	if code := run(ctx, args, io.Discard, &stderr); code != vocab.ExitClean {
+	if code := invoke(ctx, args, io.Discard, &stderr); code != vocab.ExitClean {
 		sink.Fatalf("analyze over the synthesized module %s = %d, want %d with the exit code configured off\nstderr: %s",
 			name, code, vocab.ExitClean, stderr.String())
 	}

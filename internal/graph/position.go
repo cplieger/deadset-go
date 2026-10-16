@@ -99,7 +99,9 @@ func (p *positions) column(q token.Position) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	start := q.Offset - (q.Column - 1)
+	// A line directive naming no column leaves the column unknown, which Go reports
+	// as 0 and which counts as the first.
+	start := q.Offset - max(q.Column-1, 0)
 	if start < 0 || q.Offset > len(src) {
 		return 0, fmt.Errorf("%w: %s:%d:%d is outside the file's %d bytes",
 			ErrSource, q.Filename, q.Line, q.Column, len(src))

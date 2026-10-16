@@ -81,11 +81,11 @@ func drawnSets() *rapid.Generator[drawnSet] {
 		retentions := rapid.SliceOfN(rapid.Custom(func(t *rapid.T) drawnRetention {
 			return drawnRetention{
 				at:    rapid.IntRange(0, count-1).Draw(t, "the retained declaration"),
-				class: rapid.SampledFrom(Classes()).Draw(t, "the class that retains it"),
+				class: rapid.SampledFrom(goClasses()).Draw(t, "the class that retains it"),
 			}
 		}), 0, 6).Draw(t, "the retentions")
 		disabled := rapid.SliceOfNDistinct(
-			rapid.SampledFrom(Classes()), 0, len(Classes()),
+			rapid.SampledFrom(goClasses()), 0, len(goClasses()),
 			func(c vocab.Exemption) vocab.Exemption { return c },
 		).Draw(t, "the disabled classes")
 

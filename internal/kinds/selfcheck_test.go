@@ -85,7 +85,7 @@ type staleAt struct {
 func staleFindings(t *testing.T, in *Input) []staleAt {
 	t.Helper()
 
-	found, err := StaleSuppressions(in)
+	found, err := staleSuppressions(in)
 	if err != nil {
 		t.Fatalf("StaleSuppressions() = _, %v, want the stale records", err)
 	}
@@ -122,7 +122,7 @@ func TestStaleSuppressionsCarriesTheRecordAsWrittenAtTheFixedSeverity(t *testing
 	// Through the framework, because no emitter completes its own finding: the kind
 	// name, the class, the severity, the fixability and the component are the
 	// completion's and a reader of the report sees them.
-	found := computed(t, in, map[vocab.Code]Emitter{vocab.StaleSuppression: StaleSuppressions}).Findings
+	found := computed(t, in, map[vocab.Code]Emitter{vocab.StaleSuppression: staleSuppressions}).Findings
 	if len(found) == 0 {
 		t.Fatal("the stale-suppression kind reports nothing, want the fixture's stale records")
 	}
@@ -316,7 +316,7 @@ func TestTheRefusalKindsReportEachRefusalAsTheSuppressionWasWritten(t *testing.T
 
 	// Each kind reports the refusals of its own code and no other, which is what
 	// lets both stand in the emitters table.
-	reasonless := oneRefusal(t, SuppressionsWithoutReason, in, vocab.SuppressionWithoutReason)
+	reasonless := oneRefusal(t, suppressionsWithoutReason, in, vocab.SuppressionWithoutReason)
 	switch {
 	case reasonless.Message != "inline directive for DS1001 carries no reason":
 		t.Errorf("SuppressionsWithoutReason() reports %q, want the sentence naming the mechanism and the code",
@@ -330,7 +330,7 @@ func TestTheRefusalKindsReportEachRefusalAsTheSuppressionWasWritten(t *testing.T
 			reasonless.Symbol.Ref)
 	}
 
-	unscoped := oneRefusal(t, UnscopedEntries, in, vocab.UnscopedIgnoreEntry)
+	unscoped := oneRefusal(t, unscopedEntries, in, vocab.UnscopedIgnoreEntry)
 	switch {
 	case unscoped.Message != "ignore entry for DS1002 names a symbol and no path":
 		t.Errorf("UnscopedEntries() reports %q, want the sentence naming the mechanism and the code",
@@ -375,8 +375,8 @@ func TestAnEntryLackingBothItsReasonAndItsPathIsTwoFindingsAtOnePosition(t *test
 	in.Refusals = append(in.Refusals, refusal)
 
 	result := computed(t, in, map[vocab.Code]Emitter{
-		vocab.SuppressionWithoutReason: SuppressionsWithoutReason,
-		vocab.UnscopedIgnoreEntry:      UnscopedEntries,
+		vocab.SuppressionWithoutReason: suppressionsWithoutReason,
+		vocab.UnscopedIgnoreEntry:      unscopedEntries,
 	})
 
 	want := []vocab.Code{vocab.SuppressionWithoutReason, vocab.UnscopedIgnoreEntry}
@@ -406,7 +406,7 @@ func TestADirectiveNamingTwoCodesAndNoReasonIsOneFindingPerCodeAtOnePosition(t *
 	refusal.Code = "DS1002"
 	in.Refusals = append(in.Refusals, refusal)
 
-	result := computed(t, in, map[vocab.Code]Emitter{vocab.SuppressionWithoutReason: SuppressionsWithoutReason})
+	result := computed(t, in, map[vocab.Code]Emitter{vocab.SuppressionWithoutReason: suppressionsWithoutReason})
 
 	// One directive is one record per code it names, and a reader is told which of
 	// them is now unsuppressed, so the two records are two findings at the one
@@ -449,7 +449,7 @@ func TestTheRefusalKindsRefuseARefusalUnderACodeTheGrammarDoesNotReport(t *testi
 		Mechanism: suppress.MechanismInline,
 	}}
 
-	if _, err := SuppressionsWithoutReason(in); !errors.Is(err, errEmitter) {
+	if _, err := suppressionsWithoutReason(in); !errors.Is(err, errEmitter) {
 		t.Errorf("SuppressionsWithoutReason() over a refusal reported under %s = %v, want an error satisfying errors.Is(err, errEmitter)",
 			vocab.StaleSuppression, err)
 	}
@@ -465,7 +465,7 @@ func TestUnmatchedRootsReportsEveryConfiguredStringAsTheConfigurationSpellsIt(t 
 	// Through the framework, and two strings the configuration spells at one document
 	// position are two findings: the run cannot name the line a root is written on,
 	// and a row is identified by the record it reports rather than by that position.
-	found := computed(t, in, map[vocab.Code]Emitter{vocab.UnmatchedRoot: UnmatchedRoots}).Findings
+	found := computed(t, in, map[vocab.Code]Emitter{vocab.UnmatchedRoot: unmatchedRoots}).Findings
 	if len(found) != 2 {
 		t.Fatalf("the unmatched-root kind reported %d findings, want 2: %+v", len(found), summary(found))
 	}
@@ -592,8 +592,8 @@ func TestTheStaleSuppressionKindReadsWhatTheSamePassWithheldWhateverTheVocabular
 	// the record over tagged stale. Only these two kinds run, so the pass has nothing
 	// else that could withhold a finding.
 	found := computed(t, in, map[vocab.Code]Emitter{
-		vocab.StaleSuppression: StaleSuppressions,
-		vocab.UnusedParameter:  UnusedParameter,
+		vocab.StaleSuppression: staleSuppressions,
+		vocab.UnusedParameter:  unusedParameter,
 	}).Findings
 
 	stale := make([]string, 0, len(found))
@@ -774,7 +774,7 @@ func TestUnmatchedRootsIsPositionedInTheDocumentThatDeclaredTheRoot(t *testing.T
 			in.RootsDocument = held.document
 			want := held.want
 
-			found := computed(t, in, map[vocab.Code]Emitter{vocab.UnmatchedRoot: UnmatchedRoots}).Findings
+			found := computed(t, in, map[vocab.Code]Emitter{vocab.UnmatchedRoot: unmatchedRoots}).Findings
 			if len(found) != 1 {
 				t.Fatalf("the unmatched-root kind reported %d findings, want 1: %+v", len(found), summary(found))
 			}
@@ -819,7 +819,7 @@ func TestStaleSuppressionsReadsDormancyFromTheFindingsARecordMatches(t *testing.
 			in := suppressed(t, "selfcheck-match.txtar", resolved)
 			emitters := intraFuncEmitters()
 			maps.Copy(emitters, declarationEmitters())
-			emitters[vocab.StaleSuppression] = StaleSuppressions
+			emitters[vocab.StaleSuppression] = staleSuppressions
 
 			result := computed(t, in, emitters)
 
@@ -856,7 +856,7 @@ func TestStaleSuppressionsLeavesARecordDormantWhoseFindingANameLiteralLowers(t *
 func TestAnIgnoreEntryNamingAParameterHoldsThatParameterAlone(t *testing.T) {
 	in := suppressed(t, "selfcheck-parameter-entries.txtar", applicationConfig())
 	emitters := intraFuncEmitters()
-	emitters[vocab.StaleSuppression] = StaleSuppressions
+	emitters[vocab.StaleSuppression] = staleSuppressions
 
 	result := computed(t, in, emitters)
 
