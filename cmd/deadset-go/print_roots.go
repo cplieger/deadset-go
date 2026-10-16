@@ -18,7 +18,7 @@ const printRootsUsage = "usage: deadset-go print-roots [--target=DIR] [--config=
 // separated by tabs, plus the configurations that detected it where the matrix holds
 // more than one, so sort and cut read it.
 func printRoots(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	req, code := resolve("print-roots", printRootsUsage, args, stderr)
+	req, code := resolve(ctx, "print-roots", printRootsUsage, args, stderr)
 	if code != vocab.ExitClean {
 		return code
 	}

@@ -40,7 +40,7 @@ func TestConsumersNamesWhatTheRunLoaded(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			cfg := config.Default()
+			cfg := defaultConfig()
 			cfg.Consumers.Complete = tc.complete
 			got := (&Loaded{req: &Request{Config: cfg}, Loads: tc.loads}).consumers()
 			if !slices.Equal(got.Declared, tc.want.Declared) || !slices.Equal(got.Loaded, tc.want.Loaded) ||
@@ -49,4 +49,16 @@ func TestConsumersNamesWhatTheRunLoaded(t *testing.T) {
 			}
 		})
 	}
+}
+
+// defaultConfig is the configuration every default states, of an application:
+// what a repository configuration naming the target kind alone resolves to.
+func defaultConfig() config.Config {
+	resolved, err := config.Resolve(&config.Inputs{Repository: config.Document{
+		Path: "deadset.json", Data: []byte(`{"target": {"kind": "application"}}`),
+	}})
+	if err != nil {
+		panic(err)
+	}
+	return resolved.Config
 }

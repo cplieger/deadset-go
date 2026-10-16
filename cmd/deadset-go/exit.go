@@ -7,6 +7,7 @@ import (
 	"io"
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/edges"
 	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/load"
@@ -36,8 +37,8 @@ func failed(ctx context.Context, stderr io.Writer, err error) int {
 
 // exitCodeFor maps an error to the exit code contract/exit-codes.json gives it. A
 // configuration refused by its decode, a template directory the scan cannot read, a
-// matrix no run can analyze and a malformed ignore file or baseline are usage
-// errors; anything else that stopped the run before a verdict existed, a
+// matrix no run can analyze and a malformed ignore file, baseline or edges document
+// are usage errors; anything else that stopped the run before a verdict existed, a
 // configuration that does not load or a refused finding among them, is a failure.
 func exitCodeFor(err error) int {
 	if _, refusal := errors.AsType[*config.Error](err); refusal {
@@ -49,7 +50,7 @@ func exitCodeFor(err error) int {
 	if errors.Is(err, load.ErrNoConfiguration) || errors.Is(err, graph.ErrMatrix) {
 		return vocab.ExitUsage
 	}
-	if errors.Is(err, core.ErrMalformed) {
+	if errors.Is(err, core.ErrMalformed) || errors.Is(err, edges.ErrMalformed) {
 		return vocab.ExitUsage
 	}
 	return vocab.ExitFailure

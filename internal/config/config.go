@@ -1,498 +1,163 @@
-// Package config resolves the deadset configuration. It decodes the closed key
-// list the Contract declares from the documents one invocation supplies, applies
-// a command-line flag over the repository configuration over the central
-// configuration over each key's documented default, and records the source of
-// every resolved setting so the resolved configuration can be printed and read
-// back.
+// Package config resolves the deadset configuration the Go analysis reads. It
+// reads the closed key list of the Contract's generated setting table from the
+// command-line flags, the repository configuration and the central
+// configuration, applies them in that rank over each key's default, and records
+// the source of every resolved setting so the resolved configuration can be
+// printed and read back.
+//
+// It checks and resolves what the Go analysis reads alone: the keys the table
+// says it reads and, of a key written per language, the Go member. Every other
+// key the table declares is accepted unread; the orchestrator checks the whole
+// document.
 package config
 
 import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"slices"
-	"strings"
+	"errors"
 
+	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
-// defaultTestFiles is the documented default of ts.test_files.
-var defaultTestFiles = []string{"**/*.test.{ts,tsx,mts,cts}", "**/*.test-d.{ts,tsx,mts,cts}", "**/*.spec-d.{ts,tsx,mts,cts}", "**/*.spec.*", "**/__tests__/**", "**/__mocks__/**", "**/test-d/**"}
-
-// defaultComponentExtensions is the documented default of ts.component_extensions.
-var defaultComponentExtensions = []string{".vue", ".svelte", ".astro"}
-
-// The documented default of analysis.template_delimiters: the template grammar's
-// own action delimiters.
-const (
-	defaultLeftDelimiter  = "{{"
-	defaultRightDelimiter = "}}"
-)
-
-// TargetKind is whether the target is an application, whose every caller is in
-// the analyzed graph, or a library, whose published API has callers outside it.
-type TargetKind string
-
-// The target kinds. There is no third value and no default: a resolved
-// configuration carrying neither is refused.
-const (
-	Application TargetKind = "application"
-	Library     TargetKind = "library"
-)
-
-// TargetKinds is the target.kind setting: one kind for every language, or one
-// kind per language, held in the shape its source wrote it in. The zero value is
-// the setting no source supplied.
-type TargetKinds struct {
-	golang, ts  TargetKind
-	perLanguage bool
-}
-
-// OneKind is target.kind written as one kind for every language.
-func OneKind(kind TargetKind) TargetKinds {
-	return TargetKinds{golang: kind, ts: kind}
-}
-
-// kindPerLanguage is target.kind written as an object naming each language's kind.
-func kindPerLanguage(goKind, tsKind TargetKind) TargetKinds {
-	return TargetKinds{golang: goKind, ts: tsKind, perLanguage: true}
-}
-
-// IsSet reports whether a source supplied the setting.
-func (k TargetKinds) IsSet() bool { return k.golang != "" }
-
-// Of is the kind of one language's code, empty where the setting is unset.
-func (k TargetKinds) Of(language vocab.Language) TargetKind {
-	if language == vocab.TS {
-		return k.ts
-	}
-	return k.golang
-}
-
-// languageKinds is target.kind written per language, its members in the schema's
-// order.
-type languageKinds struct {
-	Go TargetKind `json:"go"`
-	TS TargetKind `json:"ts"`
-}
-
-// kindError refuses one value of target.kind, path naming the value at fault. The
-// label of the document that holds it is added where the document is decoded.
-type kindError struct {
-	path       string
-	detail     string
-	undeclared bool
-}
-
-func (r *kindError) Error() string { return r.path + ": " + r.detail }
-
-// MarshalJSON writes the setting in the shape its source wrote it in.
-func (k TargetKinds) MarshalJSON() ([]byte, error) {
-	if k.perLanguage {
-		return json.Marshal(languageKinds{Go: k.golang, TS: k.ts})
-	}
-	return json.Marshal(k.golang)
-}
-
-// UnmarshalJSON reads either shape, refusing a value of neither shape, a member the
-// object form does not declare, a language it leaves out and a value that is no
-// kind, in that order, the languages in the vocabulary's order, as a *kindError.
-func (k *TargetKinds) UnmarshalJSON(data []byte) error {
-	var one string
-	if json.Unmarshal(data, &one) == nil {
-		if refusal := checkKind(targetKindPath, data); refusal != nil {
-			return refusal
-		}
-		*k = OneKind(TargetKind(one))
-		return nil
-	}
-	var members map[string]json.RawMessage
-	if json.Unmarshal(data, &members) != nil || members == nil {
-		return &kindError{
-			path:   targetKindPath,
-			detail: fmt.Sprintf("holds %s, want %s or an object naming the kind of go and of ts", jsonKindOf(data), spellKinds()),
-		}
-	}
-	if refusal := checkLanguageMembers(data, members); refusal != nil {
-		return refusal
-	}
-	kinds := make([]TargetKind, 0, len(kindLanguages))
-	for _, language := range kindLanguages {
-		value := members[string(language)]
-		if refusal := checkKind(targetKindPath+"."+string(language), value); refusal != nil {
-			return refusal
-		}
-		var kind TargetKind
-		_ = json.Unmarshal(value, &kind)
-		kinds = append(kinds, kind)
-	}
-	*k = kindPerLanguage(kinds[0], kinds[1])
-	return nil
-}
-
-// targetKindPath is the dotted path of the target.kind setting.
-const targetKindPath = "target.kind"
-
-// kindLanguages are the languages target.kind's object form names, in the order
-// the vocabulary lists them.
-var kindLanguages = []vocab.Language{vocab.Go, vocab.TS}
-
-// checkLanguageMembers refuses the first member of target.kind's object form, in
-// document order, that names no language, then the first language it leaves out.
-func checkLanguageMembers(data []byte, members map[string]json.RawMessage) *kindError {
-	dec := json.NewDecoder(bytes.NewReader(data))
-	_, _ = dec.Token()
-	for dec.More() {
-		token, _ := dec.Token()
-		name, _ := token.(string)
-		if !slices.Contains(kindLanguages, vocab.Language(name)) {
-			return &kindError{path: targetKindPath + "." + name, undeclared: true}
-		}
-		var skipped json.RawMessage
-		_ = dec.Decode(&skipped)
-	}
-	for _, language := range kindLanguages {
-		if _, held := members[string(language)]; !held {
-			return &kindError{path: targetKindPath + "." + string(language), detail: "is not set: " +
-				"a target kind written per language names the kind of every language, go and ts"}
-		}
-	}
-	return nil
-}
-
-// checkKind refuses an encoded value at path that is no target kind. A null decodes
-// into a string as nothing at all, so it is refused by its spelling.
-func checkKind(path string, data json.RawMessage) *kindError {
-	var value string
-	if jsonKindOf(data) != aString || json.Unmarshal(data, &value) != nil {
-		return &kindError{path: path, detail: fmt.Sprintf("holds %s, want %s", jsonKindOf(data), spellKinds())}
-	}
-	if TargetKind(value) != Application && TargetKind(value) != Library {
-		return &kindError{path: path, detail: fmt.Sprintf("%q is not one of %s", value, spellKinds())}
-	}
-	return nil
-}
-
-// spellKinds lists the target kinds as a refusal names them.
-func spellKinds() string { return spell([]TargetKind{Application, Library}) }
-
-// aString is how a refusal names the JSON string type.
-const aString = "a string"
-
-// jsonKindOf names the JSON type of one encoded value for a refusal.
-func jsonKindOf(data []byte) string {
-	switch trimmed := bytes.TrimSpace(data); {
-	case len(trimmed) == 0:
-		return "nothing"
-	case trimmed[0] == '[':
-		return "an array"
-	case trimmed[0] == '{':
-		return "an object"
-	case trimmed[0] == '"':
-		return aString
-	case string(trimmed) == "null":
-		return "null"
-	case string(trimmed) == "true" || string(trimmed) == "false":
-		return "a Boolean"
-	default:
-		return "a number"
-	}
-}
-
-// generatedFiles is whether declarations in generated files are analyzed.
-type generatedFiles string
-
-// The generated-file choices.
-const (
-	ExcludeGenerated generatedFiles = "exclude"
-	IncludeGenerated generatedFiles = "include"
-)
-
-// consumerTests is how a reference from a consumer's test file counts.
-type consumerTests string
-
-// The consumer-test choices.
-const (
-	TestReference       consumerTests = "test"
-	ProductionReference consumerTests = "production"
-)
-
-// sortOrder is the order findings are rendered in.
-type sortOrder string
-
-// The orders.
-const (
-	ByPosition sortOrder = "position"
-	BySize     sortOrder = "size"
-)
-
-// Cascade is how much of a dead component a rendering names.
-type Cascade string
-
-// The cascade renderings.
-const (
-	CascadeRoots Cascade = "roots"
-	CascadeFull  Cascade = "full"
-)
-
-// Config is the resolved configuration: the closed key list of the Contract's
-// configuration schema, decoded, with every default applied. Field order is the
-// schema's key order, which is the order Print writes.
-//
-//nolint:govet // fieldalignment: the field order is the schema's key order, which Print writes
+// Config is the resolved configuration as the Go analysis reads it, each field
+// the setting of the same name in the closed key list.
 type Config struct {
-	ContractVersion string                    `json:"contract_version"`
-	Target          Target                    `json:"target"`
-	Analysis        Analysis                  `json:"analysis"`
-	Consumers       consumers                 `json:"consumers"`
-	Roots           Roots                     `json:"roots"`
-	Severity        map[string]vocab.Severity `json:"severity"`
-	Exemptions      exemptions                `json:"exemptions"`
-	Reporters       Reporters                 `json:"reporters"`
-	Providers       providers                 `json:"providers"`
-	Go              goSettings                `json:"go"`
-	TS              tsSettings                `json:"ts"`
+	Severity   map[string]vocab.Severity
+	Target     Target
+	Roots      Roots
+	Exemptions Exemptions
+	Analysis   Analysis
+	Reporters  Reporters
+	Consumers  Consumers
 }
 
-// Target is what is being analyzed.
+// Target is what is being analyzed. Kind is the kind of the Go code, empty in a
+// configuration no source has supplied one for.
 type Target struct {
-	Kind TargetKinds `json:"kind"`
+	Kind report.TargetKind
 }
 
 // Analysis is how the analysis is scoped and filtered.
-//
-//nolint:govet // fieldalignment: the field order is the schema's key order, which Print writes
 type Analysis struct {
-	Languages      []vocab.Language `json:"languages"`
-	MinConfidence  vocab.Class      `json:"min_confidence"`
-	GeneratedFiles generatedFiles   `json:"generated_files"`
-	ConsumerTests  consumerTests    `json:"consumer_tests"`
-	Configurations []Configuration  `json:"configurations"`
-	Matrix         matrix           `json:"matrix"`
-	TemplateDirs   []string         `json:"template_dirs"`
+	MinConfidence      vocab.Class
+	TemplateDelimiters TemplateDelimiters
+	TemplateDirs       []string
 
-	TemplateDelimiters TemplateDelimiters `json:"template_delimiters"`
+	// Platforms is the platform entries of analysis.configurations, in its
+	// order: the matrix the Go analysis builds. A project entry is the matrix
+	// of another language's analysis and is not among them.
+	Platforms []Platform
+	Matrix    Matrix
+
+	IncludeGenerated        bool
+	ConsumerTestsProduction bool
 }
 
-// TemplateDelimiters is the pair of action delimiters a template is parsed with:
-// Left opens an action and Right closes it. Both members are required once a
-// document names the object, so the pair is one setting rather than two: a
-// higher-ranked source replaces both members together and a resolved
-// configuration carries one provenance entry for it.
+// TemplateDelimiters is the pair of action delimiters a template is parsed with.
 type TemplateDelimiters struct {
 	Left  string `json:"left"`
 	Right string `json:"right"`
 }
 
-// matrix carries the declarations about the build matrix.
-type matrix struct {
-	Complete bool `json:"complete"`
+// Platform is a build configuration named by an operating system, an
+// architecture and the build tags in effect, under the identifier every finding
+// carries.
+type Platform struct {
+	ID   string   `json:"id"`
+	OS   string   `json:"os"`
+	Arch string   `json:"arch"`
+	Tags []string `json:"tags"`
 }
 
-// consumers carries the declarations about the consumer set.
-type consumers struct {
-	Complete bool `json:"complete"`
+// Matrix carries the declarations about the build matrix.
+type Matrix struct {
+	Complete bool
+}
+
+// Consumers carries the declarations about the consumer set.
+type Consumers struct {
+	Complete bool
 }
 
 // Roots names symbols the analysis treats as live without a reference.
 type Roots struct {
-	Patterns []string `json:"patterns"`
+	Patterns []string
 }
 
-// exemptions switches computed exemption classes off.
-type exemptions struct {
-	Disabled []string `json:"disabled"`
+// Exemptions switches computed exemption classes off.
+type Exemptions struct {
+	Disabled []vocab.Exemption
 }
 
 // Reporters is how findings are rendered.
-//
-//nolint:govet // fieldalignment: the field order is the schema's key order, which Print writes
 type Reporters struct {
-	Formats     []vocab.Format `json:"formats"`
-	Sort        sortOrder      `json:"sort"`
-	Cascade     Cascade        `json:"cascade"`
-	MaxFindings int            `json:"max_findings"`
-	FailOn      vocab.Severity `json:"fail_on"`
+	FailOn      vocab.Severity
+	Formats     []vocab.Format
+	MaxFindings int
+
+	// BySize puts the largest deletion first, and CascadeFull names every
+	// member of a dead component rather than its roots.
+	BySize      bool
+	CascadeFull bool
 }
 
-// providers names the analyzers the orchestrator runs. This package validates and
-// prints the section; nothing in the Go analysis reads it.
-type providers struct {
-	Analyzers []provider `json:"analyzers"`
-}
-
-// provider is one entry of the provider list, in one of two shapes: an installed
-// analyzer names Name, Languages and Command alone, and an acquirable one also
-// names Source, Version and Digest. Those three are nil where the entry does not
-// name them, so the shape an entry takes is read from the members it names.
-//
-//nolint:govet // fieldalignment: the field order is the schema's key order, which Print writes
-type provider struct {
-	Name      string           `json:"name"`
-	Languages []vocab.Language `json:"languages"`
-	Command   string           `json:"command"`
-	Source    *string          `json:"source,omitempty"`
-	Version   *string          `json:"version,omitempty"`
-	Digest    *string          `json:"digest,omitempty"`
-}
-
-// goSettings is the section the Go analyzer owns. It declares no key in this Contract
-// version and resolves to the empty object.
-type goSettings struct{}
-
-// tsSettings is the section the TypeScript analyzer owns. This package validates and
-// prints it; nothing in the Go analysis reads it.
-type tsSettings struct {
-	TestFiles              []string            `json:"test_files"`
-	EntryFiles             []string            `json:"entry_files"`
-	ComponentExtensions    []string            `json:"component_extensions"`
-	DisabledConventions    []string            `json:"disabled_conventions"`
-	InjectionRegistrations []Declaration       `json:"injection_registrations"`
-	LifecycleContracts     []LifecycleContract `json:"lifecycle_contracts"`
-	Serializers            []Declaration       `json:"serializers"`
-	RootsComplete          bool                `json:"roots_complete"`
-}
-
-// Declaration names one TypeScript declaration in exactly one of three shapes:
-// Symbol alone, Module with Name, or Global alone. A member is nil where the entry
-// does not name it, so the shape an entry takes is read from the members it names.
-type Declaration struct {
-	Symbol *string `json:"symbol,omitempty"`
-	Module *string `json:"module,omitempty"`
-	Name   *string `json:"name,omitempty"`
-	Global *string `json:"global,omitempty"`
-}
-
-// LifecycleContract is one framework's lifecycle contract: the declarations that
-// make a class a component, the classes whose subclasses are components, and the
-// names of the members the framework calls on a component.
-type LifecycleContract struct {
-	Components []Declaration `json:"components"`
-	Bases      []Declaration `json:"bases"`
-	Members    []string      `json:"members"`
-}
-
-// Default returns the configuration every documented default states. Target.Kind
-// is unset: the field has no default and is never inferred.
-func Default() Config {
-	return Config{
-		ContractVersion: vocab.ContractVersion,
-		Analysis: Analysis{
-			Languages:      []vocab.Language{},
-			MinConfidence:  vocab.Probable,
-			GeneratedFiles: ExcludeGenerated,
-			ConsumerTests:  TestReference,
-			Configurations: []Configuration{},
-			Matrix:         matrix{Complete: false},
-			TemplateDirs:   []string{},
-			TemplateDelimiters: TemplateDelimiters{
-				Left:  defaultLeftDelimiter,
-				Right: defaultRightDelimiter,
-			},
-		},
-		Consumers:  consumers{Complete: false},
-		Roots:      Roots{Patterns: []string{}},
-		Severity:   map[string]vocab.Severity{},
-		Exemptions: exemptions{Disabled: []string{}},
-		Reporters: Reporters{
-			Formats:     []vocab.Format{vocab.FormatText},
-			Sort:        ByPosition,
-			Cascade:     CascadeRoots,
-			MaxFindings: 0,
-			FailOn:      vocab.Deny,
-		},
-		Providers: providers{Analyzers: []provider{
-			{Name: "deadset-go", Languages: []vocab.Language{vocab.Go}, Command: "deadset-go"},
-			{Name: "deadset-ts", Languages: []vocab.Language{vocab.TS}, Command: "deadset-ts"},
-		}},
-		TS: tsSettings{
-			TestFiles:              slices.Clone(defaultTestFiles),
-			EntryFiles:             []string{},
-			ComponentExtensions:    slices.Clone(defaultComponentExtensions),
-			DisabledConventions:    []string{},
-			InjectionRegistrations: []Declaration{},
-			LifecycleContracts:     []LifecycleContract{},
-			Serializers:            []Declaration{},
-			RootsComplete:          false,
-		},
-	}
-}
-
-// Source names where a resolved setting came from.
-type Source string
+// sourceKind names where a resolved setting came from.
+type sourceKind string
 
 // The four sources, in the order they outrank each other.
 const (
-	SourceFlag       Source = "flag"
-	SourceRepository Source = "repository"
-	SourceCentral    Source = "central"
-	SourceDefault    Source = "default"
+	sourceFlag       sourceKind = "flag"
+	sourceRepository sourceKind = "repository"
+	sourceCentral    sourceKind = "central"
+	sourceDefault    sourceKind = "default"
 )
 
-// Origin is one setting's source together with the file or flag that supplied
-// it. Label is empty exactly when Source is SourceDefault.
-type Origin struct {
+// origin is one setting's source together with the file or flag that supplied
+// it. Label is empty exactly when the setting took its default.
+type origin struct {
 	Label  string
-	Source Source
+	source sourceKind
 }
 
 // String renders the origin as the provenance value the Contract declares:
 // default, or the source, a colon, a space and the file or flag.
-func (o Origin) String() string {
-	if o.Source == SourceDefault {
-		return string(SourceDefault)
+func (o origin) String() string {
+	if o.source == sourceDefault {
+		return string(sourceDefault)
 	}
-	return string(o.Source) + ": " + o.Label
+	return string(o.source) + ": " + o.Label
 }
 
 // Provenance maps a setting's dotted path to the origin that supplied it. A
 // section holds no value of its own and has no entry; the severity object
 // carries one entry per code it names, or the entry severity alone when it is
 // empty.
-type Provenance map[string]Origin
+type Provenance map[string]origin
 
-// Inputs are the configuration documents one invocation reads, each JSON or nil
-// when absent, with the file or flag that supplied each: RepositoryLabel names
-// the document Repository holds, CentralLabel the one Central holds, and
-// FlagLabels the flag that supplied each setting Flags names. Flags is keyed by
-// dotted setting path, the form a resolved configuration names a setting by.
-type Inputs struct {
-	FlagLabels      map[string]string
-	RepositoryLabel string
-	CentralLabel    string
-	Flags           []byte
-	Repository      []byte
-	Central         []byte
+// Document is one configuration document: the path it was read from and its
+// bytes, nil when the invocation carries none.
+type Document struct {
+	Path string
+	Data []byte
 }
 
-// Error is every refusal this package makes. Every one exits with the usage code.
+// Inputs are what one resolution reads. Flags is the settings the command line
+// supplied, by key, each the JSON value of its flag.
+type Inputs struct {
+	Flags      map[vocab.Key][]byte
+	Repository Document
+	Central    Document
+}
+
+// ErrNoSourceLabel reports a document carried with no path to name it by, which
+// the Contract's provenance syntax requires. A caller fixes it by naming every
+// document it passes.
+var ErrNoSourceLabel = errors.New("a configuration document names no file")
+
+// Error is every refusal of a configuration this package makes. Every one exits
+// with the usage code.
 type Error struct {
 	Message string
 }
 
 // Error returns the message, which names the key and the source that carried it.
 func (e *Error) Error() string { return e.Message }
-
-// malformed refuses a document that is not one instance of the closed key list.
-func malformed(label, path, format string, args ...any) *Error {
-	detail := fmt.Sprintf(format, args...)
-	message := label + ": " + detail
-	if path != "" {
-		message = fmt.Sprintf("%s: %s: %s", label, path, detail)
-	}
-	return &Error{Message: message}
-}
-
-// unimplementedKey refuses a key the closed key list does not declare, naming
-// the nearest key it does.
-func unimplementedKey(label, path string) *Error {
-	var hint strings.Builder
-	switch nearest := nearestKey(path); nearest {
-	case "":
-	case path:
-		fmt.Fprintf(&hint, ". %q is one setting written as nested objects, not as one key", path)
-	default:
-		fmt.Fprintf(&hint, ". The nearest implemented key is %q", nearest)
-	}
-	return &Error{Message: fmt.Sprintf("%s: key %q is not implemented%s", label, path, hint.String())}
-}

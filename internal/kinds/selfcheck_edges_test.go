@@ -1,7 +1,6 @@
 package kinds
 
 import (
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -18,7 +17,7 @@ func edged(t *testing.T, archive string, resolved config.Config) *Input {
 
 	dir := extract(t, archive)
 	in := inputOfDir(t, dir, resolved, Consumers{})
-	declared, err := edges.Read(filepath.Join(dir, edges.FileName))
+	declared, err := edges.Read(t.Context(), dir)
 	if err != nil {
 		t.Fatalf("Setup: edges.Read(%s): %v", archive, err)
 	}

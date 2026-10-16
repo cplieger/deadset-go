@@ -277,7 +277,7 @@ func TestTheSignatureKindsReportAPublishedDeclarationOfALibrary(t *testing.T) {
 
 			result := analysisOf(t, "intrafunc-published.txtar", test.setup, Consumers{}).findings(t, intraFunctionKinds)
 
-			kind := test.setup.resolved().Target.Kind.Of(vocab.Go)
+			kind := test.setup.resolved().Target.Kind
 			if got := subjectsOf(result.Findings, vocab.UnusedParameter); !slices.Equal(got, wantParameters) {
 				t.Errorf("the pass over intrafunc-published.txtar as %s reports %v under %s, want %v",
 					kind, got, vocab.UnusedParameter, wantParameters)
@@ -359,7 +359,7 @@ func TestTheUnusedResultKindReportsOnlyWhereEveryCallSiteIsLoaded(t *testing.T) 
 
 			if got := subjectsOf(result.Findings, vocab.UnusedResult); !slices.Equal(got, test.want) {
 				t.Errorf("the pass over intrafunc-outofgraph.txtar as %s reports %v under %s, want %v",
-					test.setup.resolved().Target.Kind.Of(vocab.Go), got, vocab.UnusedResult, test.want)
+					test.setup.resolved().Target.Kind, got, vocab.UnusedResult, test.want)
 			}
 		})
 	}

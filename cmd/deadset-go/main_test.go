@@ -195,6 +195,12 @@ func TestRun(t *testing.T) {
 			wantStdout: []string{"deadset-go " + version() + "\n", "contract " + contractVersion + "\n"},
 		},
 		{
+			name:       "version_takes_no_option",
+			args:       []string{"version", "--target=."},
+			wantCode:   vocab.ExitUsage,
+			wantStderr: []string{`version takes no argument, got "--target=."`, "usage: deadset-go"},
+		},
+		{
 			name:       "no_arguments_is_a_usage_error",
 			args:       nil,
 			wantCode:   vocab.ExitUsage,
@@ -398,24 +404,35 @@ func writeDocument(t *testing.T, dir, base, body string) string {
 	return file
 }
 
-// printedConfiguration is a resolved configuration as print-config writes it: the
-// closed key list, then the provenance object.
+// printedConfiguration is the members of a resolved configuration print-config
+// writes that these tests read, beside the whole document.
 type printedConfiguration struct {
-	config.Config
+	Settings   map[string]any    `json:"-"`
 	Provenance map[string]string `json:"provenance"`
+	Target     struct {
+		Kind any `json:"kind"`
+	} `json:"target"`
+	Analysis struct {
+		MinConfidence vocab.Class `json:"min_confidence"`
+	} `json:"analysis"`
+	Reporters struct {
+		Sort        string `json:"sort"`
+		MaxFindings int    `json:"max_findings"`
+	} `json:"reporters"`
 }
 
-// decodePrinted decodes what print-config wrote, refusing any member the closed
-// key list does not declare.
+// decodePrinted decodes what print-config wrote.
 func decodePrinted(t *testing.T, printed []byte) printedConfiguration {
 	t.Helper()
 
 	var document printedConfiguration
-	decoder := json.NewDecoder(bytes.NewReader(printed))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&document); err != nil {
+	if err := json.Unmarshal(printed, &document); err != nil {
 		t.Fatalf("decode the printed configuration %q: %v", printed, err)
 	}
+	if err := json.Unmarshal(printed, &document.Settings); err != nil {
+		t.Fatalf("decode the printed configuration %q: %v", printed, err)
+	}
+	delete(document.Settings, "provenance")
 	return document
 }
 
@@ -436,11 +453,11 @@ func TestPrintConfigNamesTheSourceOfEverySetting(t *testing.T) {
 	}
 
 	printed := decodePrinted(t, stdout.Bytes())
-	if printed.Target.Kind != config.OneKind(config.Library) {
-		t.Errorf("invoke(%q) printed target.kind = %q, want %q from the repository configuration", args, printed.Target.Kind.Of(vocab.Go), config.Library)
+	if printed.Target.Kind != string(report.TargetKindLibrary) {
+		t.Errorf("invoke(%q) printed target.kind = %q, want %q from the repository configuration", args, printed.Target.Kind, report.TargetKindLibrary)
 	}
-	if printed.Reporters.Sort != config.BySize {
-		t.Errorf("invoke(%q) printed reporters.sort = %q, want %q: the repository configuration outranks the central one", args, printed.Reporters.Sort, config.BySize)
+	if printed.Reporters.Sort != "size" {
+		t.Errorf("invoke(%q) printed reporters.sort = %q, want size: the repository configuration outranks the central one", args, printed.Reporters.Sort)
 	}
 	if printed.Reporters.MaxFindings != 20 {
 		t.Errorf("invoke(%q) printed reporters.max_findings = %d, want 20 from the central configuration", args, printed.Reporters.MaxFindings)
@@ -486,8 +503,8 @@ func TestPrintConfigOutputReadBackResolvesToTheSameConfiguration(t *testing.T) {
 	}
 	second := decodePrinted(t, again.Bytes())
 
-	if !reflect.DeepEqual(first.Config, second.Config) {
-		t.Errorf("print-config output read back resolved to\n%+v\nwant\n%+v", second.Config, first.Config)
+	if !reflect.DeepEqual(first.Settings, second.Settings) {
+		t.Errorf("print-config output read back resolved to\n%+v\nwant\n%+v", second.Settings, first.Settings)
 	}
 	if got, want := second.Provenance["target.kind"], "repository: "+readBack; got != want {
 		t.Errorf("the read-back provenance of target.kind = %q, want %q", got, want)
@@ -525,7 +542,7 @@ func TestPrintConfigRefusals(t *testing.T) {
 			document:   `{"target": {"kind": "library"}, "reporters": {"fail_under": "warn"}}`,
 			writeIt:    true,
 			wantCode:   codes["usage"],
-			wantStderr: []string{`key "reporters.fail_under" is not implemented`, `The nearest implemented key is "reporters.fail_on"`},
+			wantStderr: []string{`key "reporters.fail_under" is not implemented`},
 		},
 		{
 			name:       "a_document_that_is_not_one_instance_of_the_key_list",
@@ -596,6 +613,20 @@ func TestPrintConfigRefusesADocumentOverTheSizeBound(t *testing.T) {
 	}
 }
 
+func TestPrintConfigReadsADocumentAtTheSizeBound(t *testing.T) {
+	t.Parallel()
+
+	const body = `{"target": {"kind": "library"}}`
+	dir := t.TempDir()
+	writeDocument(t, dir, "deadset.json", body+strings.Repeat(" ", 1048576-len(body)))
+
+	var stdout, stderr bytes.Buffer
+	args := []string{"print-config", "--target=" + dir}
+	if got := invoke(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+		t.Errorf("invoke(%q) = %d, want %d for a document of exactly the size bound: stderr %q", args, got, vocab.ExitClean, stderr.String())
+	}
+}
+
 func TestPrintConfigReadsTheDocumentTheInvocationNames(t *testing.T) {
 	t.Parallel()
 
@@ -610,8 +641,8 @@ func TestPrintConfigReadsTheDocumentTheInvocationNames(t *testing.T) {
 	}
 
 	printed := decodePrinted(t, stdout.Bytes())
-	if printed.Target.Kind != config.OneKind(config.Library) {
-		t.Errorf("invoke(%q) printed target.kind = %q, want %q: --config names the repository configuration to read", args, printed.Target.Kind.Of(vocab.Go), config.Library)
+	if printed.Target.Kind != string(report.TargetKindLibrary) {
+		t.Errorf("invoke(%q) printed target.kind = %q, want %q: --config names the repository configuration to read", args, printed.Target.Kind, report.TargetKindLibrary)
 	}
 	if got, want := printed.Provenance["target.kind"], "repository: "+named; got != want {
 		t.Errorf("invoke(%q) printed provenance[target.kind] = %q, want %q", args, got, want)
@@ -650,29 +681,50 @@ func TestSourceEditFlag(t *testing.T) {
 	}
 }
 
-func TestSettingFlagsSupplyASchemaKey(t *testing.T) {
+// Each verb takes exactly the options cli.json lists for the Go analyzer: a
+// listed option parses, and any other refuses the invocation with the usage
+// code, naming the option. The target holds no configuration, so a verb that
+// parses its flags stops at the missing target kind before any load.
+func TestEveryVerbTakesExactlyTheOptionsCLIJSONListsForIt(t *testing.T) {
 	t.Parallel()
 
-	// The reverse direction is deliberately not asserted: a key the schema
-	// declares with no flag is normal, because most settings are document-only, so
-	// a Contract that adds a key adds no flag and this test stays green. Do not add
-	// that assertion.
-	if len(settingFlags) == 0 {
-		t.Fatal("settingFlags is empty, so no flag supplies a setting and this test asserts nothing")
-	}
-	for flagName, setting := range settingFlags {
-		t.Run(flagName, func(t *testing.T) {
-			t.Parallel()
+	target := t.TempDir()
+	for _, verb := range vocab.AnalyzerVerbs(vocab.Go) {
+		for _, option := range vocab.Options() {
+			t.Run(verb.Name+"/"+option.Name, func(t *testing.T) {
+				t.Parallel()
 
-			// config.DeclaresSetting answers over the same schema this command
-			// resolves a document against, and that schema is pinned equal to
-			// contract/config.schema.json key by key in internal/config, so a flag
-			// naming something the Contract does not declare fails here.
-			if !config.DeclaresSetting(setting.path) {
-				t.Errorf("settingFlags[%q].path = %q, want a setting contract/config.schema.json declares",
-					flagName, setting.path)
+				var stderr strings.Builder
+				args := []string{verb.Name, "--" + option.Name + "=planted", "--target=" + target}
+				code := invoke(t.Context(), args, &strings.Builder{}, &stderr)
+				refused := code == vocab.ExitUsage &&
+					(strings.Contains(stderr.String(), "not defined: -"+option.Name+"\n") || strings.Contains(stderr.String(), "--"+option.Name+"=planted"))
+				if listed := slices.Contains(verb.Options, option.Name); refused == listed {
+					t.Errorf("deadset-go %s refused --%s %t (exit %d, stderr %q), want refused %t: cli.json lists %q",
+						verb.Name, option.Name, refused, code, stderr.String(), !listed, verb.Options)
+				}
+			})
+		}
+	}
+}
+
+// Every option a Go verb takes that supplies a setting supplies one the Go
+// analysis reads, and the key names the option back.
+func TestEverySettingOptionSuppliesASettingTheGoAnalysisReads(t *testing.T) {
+	t.Parallel()
+
+	for _, verb := range vocab.AnalyzerVerbs(vocab.Go) {
+		for _, name := range verb.Options {
+			option, _ := vocab.OptionOf(name)
+			if option.Setting == "" {
+				continue
 			}
-		})
+			row, declared := vocab.ConfigKeyOf(vocab.Key(option.Setting))
+			if !declared || row.Option != name || !row.ReadIn(vocab.Go) {
+				t.Errorf("%s --%s supplies %q (key declared %t, its option %q), want a setting the Go analysis reads that names this option",
+					verb.Name, name, option.Setting, declared, row.Option)
+			}
+		}
 	}
 }
 
@@ -762,17 +814,17 @@ func TestPrintRootsRootsThePublishedAPIOfALibraryTarget(t *testing.T) {
 
 	tests := []struct {
 		name string
-		kind config.TargetKind
+		kind report.TargetKind
 		want string
 	}{
 		{
 			name: "a_library_publishes_the_exported_declarations_of_an_importable_package",
-			kind: config.Library,
+			kind: report.TargetKindLibrary,
 			want: "go://example.com/app#Helper\tpublished-api\n",
 		},
 		{
 			name: "an_application_publishes_nothing_and_has_no_root_at_all_here",
-			kind: config.Application,
+			kind: report.TargetKindApplication,
 			want: "",
 		},
 	}
@@ -962,7 +1014,7 @@ func TestPrintRetainedDropsTheClassTheConfigurationDisables(t *testing.T) {
 func TestEveryVerbRefusesAClassNameOutsideTheVocabulary(t *testing.T) {
 	t.Parallel()
 
-	dir := exemptedModule(t, `{"target": {"kind": "application"}, "exemptions": {"disabled": ["interface-satisfation"]}}`)
+	dir := exemptedModule(t, `{"target": {"kind": "application"}, "exemptions": {"disabled": ["enum-group", "interface-satisfation"]}}`)
 
 	// The resolution refuses the name, so a verb that computes no exemption refuses
 	// the configuration the verbs that do refuse.
@@ -975,12 +1027,46 @@ func TestEveryVerbRefusesAClassNameOutsideTheVocabulary(t *testing.T) {
 		if stdout.Len() != 0 {
 			t.Errorf("invoke(%q) stdout = %q, want empty: a refused configuration answers nothing", args, stdout.String())
 		}
-		// The refusal lists the vocabulary, from its first class to its last, which
-		// only another language's analyzer computes.
-		for _, want := range []string{`"interface-satisfation" is not an exemption class`, "interface-satisfaction", "serialization-contract"} {
+		// The refusal names the entry and lists the vocabulary, from its first class
+		// to its last, which only another language's analyzer computes.
+		for _, want := range []string{`exemptions.disabled[1]: "interface-satisfation"`, "interface-satisfaction", "serialization-contract"} {
 			if !strings.Contains(stderr.String(), want) {
 				t.Errorf("invoke(%q) stderr = %q, want it to contain %q", args, stderr.String(), want)
 			}
+		}
+	}
+}
+
+// The orchestrator checks the whole document; this analyzer reads the keys its
+// own analysis reads, so a key only another product reads is accepted whatever
+// it holds and left out of the printed configuration.
+func TestEveryVerbAcceptsAKeyOnlyAnotherProductReadsUnread(t *testing.T) {
+	t.Parallel()
+
+	dir := exemptedModule(t, `{"target": {"kind": {"go": "application", "ts": "service"}},
+		"analysis": {"languages": ["py"]},
+		"providers": {"analyzers": [{"name": "a", "languages": ["go"], "command": "x"}, {"name": "a", "languages": ["go"], "command": "y"}]},
+		"ts": {"component_extensions": ["vue"], "planted": true}}`)
+	for _, verb := range []string{"print-config", "print-roots", "print-retained"} {
+		var stdout, stderr bytes.Buffer
+		args := []string{verb, "--target=" + dir}
+		if got := invoke(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+			t.Fatalf("invoke(%q) = %d, want %d\nstderr: %q", args, got, vocab.ExitClean, stderr.String())
+		}
+		if verb != "print-config" {
+			continue
+		}
+		printed := decodePrinted(t, stdout.Bytes())
+		for _, absent := range []string{"ts", "providers"} {
+			if _, held := printed.Settings[absent]; held {
+				t.Errorf("invoke(%q) printed %s, want it left out", args, absent)
+			}
+		}
+		if analysis, _ := printed.Settings["analysis"].(map[string]any); analysis["languages"] != nil {
+			t.Errorf("invoke(%q) printed analysis.languages = %v, want it left out", args, analysis["languages"])
+		}
+		if want := map[string]any{"go": string(report.TargetKindApplication)}; !reflect.DeepEqual(printed.Target.Kind, want) {
+			t.Errorf("invoke(%q) printed target.kind = %v, want the Go member alone %v", args, printed.Target.Kind, want)
 		}
 	}
 }

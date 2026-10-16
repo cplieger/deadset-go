@@ -27,7 +27,7 @@ const (
 // is the report's unless --mode names the plain mode, so this verb and explain
 // answer about one analysis.
 func printRetained(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	flags := configuredFlagSet("print-retained", printRetainedUsage, stderr, true)
+	flags := configuredFlagSet("print-retained", printRetainedUsage, stderr)
 	named := flags.set.String("mode", modeProduction,
 		"which analysis the retained set is read from: "+modeProduction+" or "+modePlain)
 	if err := flags.set.Parse(args); err != nil {
@@ -43,7 +43,7 @@ func printRetained(ctx context.Context, args []string, stdout, stderr io.Writer)
 		flags.set.Usage()
 		return vocab.ExitUsage
 	}
-	req, code := flags.request(stderr)
+	req, code := flags.request(ctx, stderr)
 	if code != vocab.ExitClean {
 		return code
 	}

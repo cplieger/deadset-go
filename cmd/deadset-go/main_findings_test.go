@@ -54,7 +54,7 @@ func findingsFixture(t *testing.T, document string) string {
 func findingsOfDir(t *testing.T, dir string) *run.Findings {
 	t.Helper()
 
-	resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
+	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
@@ -258,7 +258,7 @@ func TestFindingsOfFailures(t *testing.T) {
 			t.Parallel()
 
 			dir := writeModule(t, tc.files)
-			resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
+			resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
 			if code != vocab.ExitClean {
 				t.Fatalf("Setup: resolve the configuration = %d, want %d", code, vocab.ExitClean)
 			}
@@ -313,7 +313,7 @@ func TestFindingsOfRefusesAGeneratedFileWhosePackageClauseIsOutsideTheTarget(t *
 		"deadset-edges.json": "{",
 		repositoryDocument:   `{"target": {"kind": "application"}, "analysis": {"generated_files": "include"}}`,
 	})
-	resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
+	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration = %d, want %d", code, vocab.ExitClean)
 	}
@@ -408,7 +408,7 @@ func TestAnalysisOfComputesItsExemptionsUnderTheModeItSweepsIn(t *testing.T) {
 	dir := testEvidenceModule(t)
 	const subject = "go://example.com/app#Record.Tally"
 
-	resolved, code := resolve("print-retained", printRetainedUsage, []string{"--target=" + dir}, &strings.Builder{})
+	resolved, code := resolve(t.Context(), "print-retained", printRetainedUsage, []string{"--target=" + dir}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
@@ -490,7 +490,7 @@ func TestTheSuppressionRecordsAreReadInTheOrderTheGrammarResolvesThem(t *testing
 		repositoryDocument: `{"target": {"kind": "application"}}`,
 	})
 
-	resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
+	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration = %d, want %d", code, vocab.ExitClean)
 	}

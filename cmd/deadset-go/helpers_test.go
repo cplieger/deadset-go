@@ -102,7 +102,7 @@ func (f *fixture) findings(ctx context.Context) (*run.Findings, error) {
 	}
 	f.analyzed.Do(func() {
 		var refused strings.Builder
-		req, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &refused)
+		req, code := resolve(ctx, "print-roots", printRootsUsage, []string{"--target=" + dir}, &refused)
 		if code != vocab.ExitClean {
 			f.analyzeErr = fmt.Errorf("resolve the configuration of %s = %d: %s", dir, code, refused.String())
 			return
@@ -126,7 +126,7 @@ func (f *fixture) report(ctx context.Context) (*report.Report, error) {
 	}
 	f.reported.Do(func() {
 		var refused strings.Builder
-		req, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &refused)
+		req, code := resolve(ctx, "print-roots", printRootsUsage, []string{"--target=" + dir}, &refused)
 		if code != vocab.ExitClean {
 			f.reportErr = fmt.Errorf("resolve the configuration of %s = %d: %s", dir, code, refused.String())
 			return

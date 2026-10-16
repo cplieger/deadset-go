@@ -74,7 +74,7 @@ func reportOfDir(t *testing.T, dir string) *report.Report {
 	// and can name no path outside it, so a run over a fixture is invoked from the
 	// fixture. Every test that calls this is therefore sequential.
 	t.Chdir(dir)
-	resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
+	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
@@ -175,14 +175,13 @@ func TestReportOfPublishesTheFindingADeclaredEdgeNamesInsideItsEvaluation(t *tes
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
 	writeDocument(t, dir, "deadset-edges.json", `{
   "description": "One edge pairing a dead Go declaration with the TypeScript generated from it.",
-  "edges": [
-    {
-      "id": "wire/forgotten",
+  "edges": {
+    "wire/forgotten": {
       "because": "generated",
       "provides": "go://example.com/app#forgotten",
       "used_by": "ts://@example/app/src/wire.ts#forgotten"
     }
-  ]
+  }
 }
 `)
 	envelope := reportOfDir(t, dir)
@@ -279,7 +278,7 @@ func TestReportOfSitesAConfiguredRootInTheDocumentThatDeclaredIt(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Chdir(dir)
-			resolved, code := resolve("print-roots", printRootsUsage,
+			resolved, code := resolve(t.Context(), "print-roots", printRootsUsage,
 				[]string{"--target=" + spelling.target, "--config=" + spelling.config}, &strings.Builder{})
 			if code != vocab.ExitClean {
 				t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
@@ -316,7 +315,7 @@ func TestReportOfSitesAConfiguredRootAtTheConventionalDocumentWhereNoDocumentOfT
 	}
 
 	t.Chdir(dir)
-	resolved, code := resolve("print-roots", printRootsUsage,
+	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage,
 		[]string{"--target=" + dir, "--central=" + central}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
@@ -497,7 +496,7 @@ func publishedFindingLine(t *testing.T) *regexp.Regexp {
 func TestReportOfRefusesAnEnvelopeNamingNoConformanceResult(t *testing.T) {
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
 	t.Chdir(dir)
-	resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
+	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
@@ -524,7 +523,7 @@ func TestReportOfRefusesATargetTheRunDirectoryDoesNotContain(t *testing.T) {
 	// directory, so the run fails rather than writing a document no reader admits.
 	t.Chdir(t.TempDir())
 
-	resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
+	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}

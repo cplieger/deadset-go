@@ -4,241 +4,160 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"maps"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
-// provenanceValue is the spelling the Contract declares for a provenance value.
-var provenanceValue = regexp.MustCompile(`^(default|(repository|central|flag): .+)$`)
-
-// schemaKeyOrder is the order the Contract's configuration schema declares its
-// root keys in, which is the order the emitter writes.
-func schemaKeyOrder() []string {
-	return []string{
-		"contract_version", "target", "analysis", "consumers", "roots",
-		"severity", "exemptions", "reporters", "providers", "go", "ts", "provenance",
-	}
-}
-
-// printedKeyOrder returns the root keys of one printed document in the order the
-// document writes them.
-func printedKeyOrder(t *testing.T, printed []byte) []string {
+// memberOrder returns the member names of one JSON object in the order the
+// encoding writes them.
+func memberOrder(t *testing.T, encoded []byte) []string {
 	t.Helper()
 
-	dec := json.NewDecoder(bytes.NewReader(printed))
-	open, err := dec.Token()
-	if err != nil {
-		t.Fatalf("read the printed configuration: %v", err)
+	dec := json.NewDecoder(bytes.NewReader(encoded))
+	if open, err := dec.Token(); err != nil || open != json.Delim('{') {
+		t.Fatalf("read %s: %v %v, want an object", encoded, open, err)
 	}
-	if open != json.Delim('{') {
-		t.Fatalf("the printed configuration opens with %v, want an object", open)
-	}
-	var keys []string
+	var names []string
 	for dec.More() {
 		name, err := dec.Token()
 		if err != nil {
-			t.Fatalf("read the printed configuration: %v", err)
+			t.Fatalf("read %s: %v", encoded, err)
 		}
-		key, isKey := name.(string)
-		if !isKey {
-			t.Fatalf("the printed configuration names %v, want a member name", name)
-		}
-		keys = append(keys, key)
-		var value json.RawMessage
-		if err := dec.Decode(&value); err != nil {
-			t.Fatalf("read the printed configuration: %v", err)
+		names = append(names, name.(string))
+		var skipped json.RawMessage
+		if err := dec.Decode(&skipped); err != nil {
+			t.Fatalf("read %s: %v", encoded, err)
 		}
 	}
-	return keys
+	return names
 }
 
-// printed resolves one repository configuration and prints it.
-func printed(t *testing.T, repository, flags string, flagLabels map[string]string) []byte {
+// printedSection is one member of a printed configuration, encoded.
+func printedSection(t *testing.T, printed []byte, name string) []byte {
 	t.Helper()
 
-	in := config.Inputs{Repository: []byte(repository), RepositoryLabel: "deadset.json", FlagLabels: flagLabels}
-	if flags != "" {
-		in.Flags = []byte(flags)
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(printed, &members); err != nil {
+		t.Fatalf("decode the printed configuration: %v", err)
 	}
-	cfg, provenance, err := config.Resolve(in)
-	if err != nil {
-		t.Fatalf("Resolve(%s) = error %v, want the resolved configuration", repository, err)
-	}
-	var out bytes.Buffer
-	if err := config.Print(&out, cfg, provenance); err != nil {
-		t.Fatalf("Print(%s) = error %v, want the resolved configuration", repository, err)
-	}
-	return out.Bytes()
+	return members[name]
 }
 
-func TestPrintWritesTheSchemaKeyOrder(t *testing.T) {
+func TestPrintWritesTheKeysTheGoAnalysisReadsInTheTablesOrder(t *testing.T) {
 	t.Parallel()
 
-	document := printed(t, `{"reporters": {"sort": "size"}, "target": {"kind": "library"}}`, "", nil)
-	got := printedKeyOrder(t, document)
-	if !slices.Equal(got, schemaKeyOrder()) {
-		t.Errorf("Print() wrote the keys %v, want the schema's order %v", got, schemaKeyOrder())
+	raw, _ := printedDocument(t, resolved(t, fromRepository(`{"reporters": {"sort": "size"}, "target": {"kind": "library"}}`)))
+	var want []string
+	for _, row := range vocab.ConfigKeys() {
+		if !strings.Contains(string(row.Key), ".") && row.ReadIn(vocab.Go) {
+			want = append(want, string(row.Key))
+		}
+	}
+	if got := memberOrder(t, raw); !slices.Equal(got, want) {
+		t.Errorf("Print wrote the keys %v, want the table's order of the keys the Go analysis reads %v", got, want)
 	}
 }
 
 func TestPrintWritesOneIndentedObjectEndingInANewline(t *testing.T) {
 	t.Parallel()
 
-	document := printed(t, `{"target": {"kind": "library"}}`, "", nil)
-	if !bytes.HasSuffix(document, []byte("}\n")) {
-		t.Errorf("Print() = %q, want it to end in a newline", document[max(0, len(document)-8):])
-	}
-	if !bytes.Contains(document, []byte("\n  \"target\": {")) {
-		t.Errorf("Print() = %q, want two-space indentation", document)
-	}
-	if bytes.Contains(document, []byte("\t")) {
-		t.Errorf("Print() = %q, want no tab", document)
+	raw, _ := printedDocument(t, resolved(t, fromRepository(`{"target": {"kind": "library"}}`)))
+	if !bytes.HasSuffix(raw, []byte("}\n")) || !bytes.Contains(raw, []byte("\n  \"target\": {")) || bytes.Contains(raw, []byte("\t")) {
+		t.Errorf("Print = %s, want one object indented by two spaces ending in a newline", raw)
 	}
 }
 
-func TestPrintIsDeterministic(t *testing.T) {
+func TestPrintIsDeterministicAndWritesSeverityCodesAscending(t *testing.T) {
 	t.Parallel()
 
 	document := `{"target": {"kind": "library"}, "severity": {"DS1401": "allow", "DS1501": "warn", "DS15": "deny"}}`
-	first := printed(t, document, "", nil)
-	second := printed(t, document, "", nil)
+	first, _ := printedDocument(t, resolved(t, fromRepository(document)))
+	second, _ := printedDocument(t, resolved(t, fromRepository(document)))
 	if !bytes.Equal(first, second) {
-		t.Errorf("Print() = %q on a second call, want the bytes of the first %q", second, first)
+		t.Errorf("Print = %s on a second resolution, want the bytes of the first %s", second, first)
+	}
+	if got, want := memberOrder(t, printedSection(t, first, "severity")), []string{"DS1401", "DS15", "DS1501"}; !slices.Equal(got, want) {
+		t.Errorf("Print wrote the severity codes %v, want them ascending %v", got, want)
 	}
 }
 
-func TestPrintWritesSeverityCodesInAscendingOrder(t *testing.T) {
+// provenanceValue is the spelling the Contract declares for a provenance value.
+var provenanceValue = regexp.MustCompile(`^(default|(repository|central|flag): .+)$`)
+
+func TestPrintWritesOneProvenanceEntryPerSetting(t *testing.T) {
 	t.Parallel()
 
-	document := printed(t,
-		`{"target": {"kind": "library"}, "severity": {"DS1401": "allow", "DS1501": "warn", "DS15": "deny"}}`, "", nil)
-	got := printedKeyOrder(t, section(t, document, "severity"))
-	want := []string{"DS1401", "DS15", "DS1501"}
-	if !slices.Equal(got, want) {
-		t.Errorf("Print() wrote the severity codes %v, want them ascending %v", got, want)
-	}
-}
-
-func TestPrintWritesEveryProvenanceValueTheContractAccepts(t *testing.T) {
-	t.Parallel()
-
-	document := printed(t,
-		`{"target": {"kind": "library"}, "severity": {"DS1501": "warn"}}`,
-		`{"reporters.sort": "size"}`,
-		map[string]string{"reporters.sort": "--sort"},
-	)
-	var decoded struct {
-		Provenance map[string]string `json:"provenance"`
-	}
-	if err := json.Unmarshal(document, &decoded); err != nil {
-		t.Fatalf("decode the printed configuration: %v", err)
-	}
-	for _, path := range slices.Sorted(maps.Keys(decoded.Provenance)) {
-		if !provenanceValue.MatchString(decoded.Provenance[path]) {
-			t.Errorf("Print() wrote provenance[%q] = %q, want the Contract's spelling", path, decoded.Provenance[path])
+	in := fromRepository(`{"target": {"kind": "library"}, "severity": {"DS1501": "warn"}}`)
+	in.Flags = map[vocab.Key][]byte{vocab.KeyReportersSort: []byte(`"size"`)}
+	_, document := printedDocument(t, resolved(t, in))
+	provenance, _ := document["provenance"].(map[string]any)
+	for path, value := range provenance {
+		if spelled, _ := value.(string); !provenanceValue.MatchString(spelled) {
+			t.Errorf("provenance[%q] = %#v, want the Contract's spelling", path, value)
 		}
 	}
-	for path, want := range map[string]string{
-		"target.kind":            "repository: deadset.json",
-		"reporters.sort":         "flag: --sort",
-		"severity.DS1501":        "repository: deadset.json",
-		"reporters.max_findings": "default",
-	} {
-		if got := decoded.Provenance[path]; got != want {
-			t.Errorf("Print() wrote provenance[%q] = %q, want %q", path, got, want)
+	for _, row := range vocab.ConfigKeys() {
+		if row.ReadIn(vocab.Go) && row.Role == vocab.RoleSetting {
+			if _, held := provenance[string(row.Key)]; !held {
+				t.Errorf("provenance names no %s, want one entry per setting", row.Key)
+			}
 		}
 	}
-}
-
-func TestPrintWritesAnEmptyArrayForAnAbsentOne(t *testing.T) {
-	t.Parallel()
-
-	cfg := config.Config{Target: config.Target{Kind: config.OneKind(config.Library)}}
-	var out bytes.Buffer
-	if err := config.Print(&out, cfg, config.Provenance{}); err != nil {
-		t.Fatalf("Print(a configuration with no arrays) = error %v, want the configuration", err)
-	}
-	if strings.Contains(out.String(), "null") {
-		t.Errorf("Print(a configuration with no arrays) = %s, want no null", out.String())
+	for path, want := range map[string]string{"reporters.sort": "flag: --sort", "severity.DS1501": "repository: deadset.json"} {
+		if got := provenance[path]; got != want {
+			t.Errorf("provenance[%q] = %#v, want %q", path, got, want)
+		}
 	}
 }
 
 func TestPrintWritesTheCharactersAPageEscapesAsThemselves(t *testing.T) {
 	t.Parallel()
 
-	cfg := config.Config{
-		Target: config.Target{Kind: config.OneKind(config.Library)},
-		Analysis: config.Analysis{
-			TemplateDelimiters: config.TemplateDelimiters{Left: "<%", Right: "%>"},
-		},
-		Roots: config.Roots{Patterns: []string{"go://example.com/app#Run&Stop"}},
-	}
-	var out bytes.Buffer
-	if err := config.Print(&out, cfg, config.Provenance{}); err != nil {
-		t.Fatalf("Print(a configuration naming <%%, %%> and &) = error %v, want the configuration", err)
-	}
+	raw, _ := printedDocument(t, resolved(t, fromRepository(`{"target": {"kind": "library"},
+		"analysis": {"template_delimiters": {"left": "<%", "right": "%>"}},
+		"roots": {"patterns": ["go://example.com/app#Run&Stop"]}}`)))
 	for _, want := range []string{`"left": "<%"`, `"right": "%>"`, `"go://example.com/app#Run&Stop"`} {
-		if !strings.Contains(out.String(), want) {
-			t.Errorf("Print(a configuration naming <%%, %%> and &) = %s, want it to write %s as the bytes it spells",
-				out.String(), want)
+		if !bytes.Contains(raw, []byte(want)) {
+			t.Errorf("Print = %s, want it to write %s as the bytes it spells", raw, want)
 		}
 	}
 }
 
-func TestPrintDoesNotMutateItsArgument(t *testing.T) {
+func TestPrintedConfigurationReadsBackAsItself(t *testing.T) {
 	t.Parallel()
 
-	cfg := config.Config{
-		Target: config.Target{Kind: config.OneKind(config.Library)},
-		Analysis: config.Analysis{Configurations: []config.Configuration{
-			{Platform: &config.Platform{ID: "a", OS: "linux", Arch: "amd64"}},
-		}},
-	}
-	var out bytes.Buffer
-	if err := config.Print(&out, cfg, config.Provenance{}); err != nil {
-		t.Fatalf("Print(a configuration with a matrix entry) = error %v, want the configuration", err)
-	}
-	if got := cfg.Analysis.Configurations[0].Platform.Tags; got != nil {
-		t.Errorf("Print() left the caller's matrix entry tags = %#v, want them untouched", got)
+	r := resolved(t, threeSources(map[vocab.Key]string{vocab.KeyReportersMaxFindings: `3`},
+		`{"target": {"kind": {"go": "library", "ts": "application"}}, "severity": {"DS14": "allow"},
+		  "analysis": {"configurations": [{"id": "a", "os": "linux", "arch": "amd64"}, {"id": "b", "project": "tsconfig.json"}]}}`,
+		`{"exemptions": {"disabled": ["enum-group"]}}`))
+	raw, document := printedDocument(t, r)
+	back := resolved(t, fromRepository(string(raw)))
+	rawBack, again := printedDocument(t, back)
+	delete(document, "provenance")
+	delete(again, "provenance")
+	if !reflect.DeepEqual(back.Config, r.Config) || !reflect.DeepEqual(again, document) {
+		t.Errorf("the printed configuration read back prints\n%s\nwant\n%s", rawBack, raw)
 	}
 }
 
 func TestPrintReportsAWriteFailure(t *testing.T) {
 	t.Parallel()
 
-	cfg := config.Default()
-	cfg.Target.Kind = config.OneKind(config.Library)
-	err := config.Print(refusingWriter{}, cfg, config.Provenance{})
-	if !errors.Is(err, errRefusingWriter) {
-		t.Errorf("Print(a writer that refuses) = %v, want it to be %v", err, errRefusingWriter)
+	r := resolved(t, fromRepository(`{"target": {"kind": "library"}}`))
+	if err := r.Print(refusingWriter{}); !errors.Is(err, errRefusingWriter) {
+		t.Errorf("Print(a writer that refuses) = %v, want it to wrap %v", err, errRefusingWriter)
 	}
 }
 
 // errRefusingWriter is what refusingWriter answers with.
 var errRefusingWriter = errors.New("the writer refuses")
 
-// refusingWriter is a writer that answers every write with a failure, so the
-// failure path of Print is exercised.
+// refusingWriter answers every write with a failure.
 type refusingWriter struct{}
 
 func (refusingWriter) Write([]byte) (int, error) { return 0, errRefusingWriter }
-
-// section decodes one section of a printed document as raw JSON.
-func section(t *testing.T, document []byte, name string) json.RawMessage {
-	t.Helper()
-
-	var sections map[string]json.RawMessage
-	if err := json.Unmarshal(document, &sections); err != nil {
-		t.Fatalf("decode the printed configuration: %v", err)
-	}
-	raw, held := sections[name]
-	if !held {
-		t.Fatalf("the printed configuration names no %q", name)
-	}
-	return raw
-}

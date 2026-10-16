@@ -99,7 +99,7 @@ func fileNeverBuilt(in *Input) ([]Finding, error) {
 // this analysis builds.
 func completeMatrix(in *Input) bool {
 	return in != nil && in.Config != nil &&
-		in.Config.Analysis.Matrix.Complete && len(in.Config.Analysis.Platforms()) > 0
+		in.Config.Analysis.Matrix.Complete && len(in.Config.Analysis.Platforms) > 0
 }
 
 // ignoredFile is one file of the target no configuration of the matrix compiled.

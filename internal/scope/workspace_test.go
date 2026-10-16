@@ -1,6 +1,7 @@
 package scope
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -223,7 +224,7 @@ func TestResolveRefusesAnAbsentTarget(t *testing.T) {
 func TestReadWorkspaceKeepsTheOrderTheFileLists(t *testing.T) {
 	dir := workspaceTree(t, "./c", "./a", "./b")
 
-	got, err := readWorkspace(t.Context(), filepath.Join(dir, workspaceFileName))
+	got, err := readWorkspace(filepath.Join(dir, workspaceFileName))
 	if err != nil {
 		t.Fatalf("readWorkspace(%s) = _, %v, want no error", dir, err)
 	}
@@ -264,5 +265,49 @@ func TestWorkspaceFileIgnoresADirectoryOfThatName(t *testing.T) {
 
 	if found {
 		t.Errorf("workspaceFile(%s) = %q, true, want no workspace: a directory is not the file", dir, got)
+	}
+}
+
+func TestWorkspaceListsOnlyTheModulesItNames(t *testing.T) {
+	dir := workspaceTree(t, "./library")
+	workspace, err := WorkspaceOf(t.Context(), filepath.Join(dir, "library", "sub"))
+	if err != nil {
+		t.Fatalf("WorkspaceOf = %v", err)
+	}
+	if workspace.File != filepath.Join(dir, workspaceFileName) {
+		t.Errorf("WorkspaceOf(a directory below a member).File = %q, want the governing file", workspace.File)
+	}
+	if workspace.Lists(filepath.Join(dir, "library", "sub")) || !workspace.Lists(filepath.Join(dir, "library")) {
+		t.Errorf("Lists = %v, want the member listed and the directory below it not", workspace.Modules)
+	}
+}
+
+// The modules come from parsing the bytes read, with no toolchain run, so a
+// rewrite of the file after the read cannot change them.
+func TestWorkspaceOfReadsTheFileWithNoToolchain(t *testing.T) {
+	dir := workspaceTree(t, "./library", "./consumer")
+	library := filepath.Join(dir, "library")
+	t.Setenv("PATH", "")
+	got, err := WorkspaceOf(t.Context(), library)
+	if want := []string{library, filepath.Join(dir, "consumer")}; err != nil || !reflect.DeepEqual(got.Modules, want) {
+		t.Errorf("WorkspaceOf(%s) with no toolchain on PATH = %+v, %v, want the modules %v", library, got, err, want)
+	}
+}
+
+// An entry naming no path lists no module, as the toolchain reads it.
+func TestReadWorkspaceListsNoModuleForAnEmptyEntry(t *testing.T) {
+	dir := workspaceTree(t, "./library", `""`)
+	got, err := readWorkspace(filepath.Join(dir, workspaceFileName))
+	if want := []string{filepath.Join(dir, "library")}; err != nil || !reflect.DeepEqual(got, want) {
+		t.Errorf("readWorkspace(a file listing an empty entry) = %v, %v, want %v", got, err, want)
+	}
+}
+
+func TestWorkspaceOfStopsWhenTheRunIsCancelled(t *testing.T) {
+	dir := workspaceTree(t, "./library")
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := WorkspaceOf(cancelled, filepath.Join(dir, "library")); !errors.Is(err, context.Canceled) {
+		t.Errorf("WorkspaceOf(a cancelled run) = %v, want an error matching context.Canceled", err)
 	}
 }

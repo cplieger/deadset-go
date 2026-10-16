@@ -46,7 +46,7 @@ func unbuildableDerivedModule(t *testing.T, document string) string {
 // configurations the target does build instead of having no answer at all.
 func TestLoadDropsADerivedConfigurationTheTargetDoesNotBuild(t *testing.T) {
 	dir := unbuildableDerivedModule(t, `{"target": {"kind": "application"}}`)
-	resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
+	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
@@ -83,7 +83,7 @@ func TestLoadFailsTheRunOnADeclaredConfigurationTheTargetDoesNotBuild(t *testing
 	dir := unbuildableDerivedModule(t, `{"target": {"kind": "application"}, "analysis": {"configurations": [`+
 		`{"id": "`+load.HostConfiguration().ID+`", "os": "`+runtime.GOOS+`", "arch": "`+runtime.GOARCH+`"},`+
 		`{"id": "`+unbuildableWindows+`", "os": "windows", "arch": "`+runtime.GOARCH+`"}]}}`)
-	resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
+	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
@@ -165,7 +165,7 @@ const projectEntries = `{"target": {"kind": "application"}, "analysis": {` +
 // than failing on it.
 func TestLoadDerivesTheMatrixWhereTheConfigurationListsProjectsAlone(t *testing.T) {
 	dir := unbuildableDerivedModule(t, projectEntries)
-	resolved, code := resolve("print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
+	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}

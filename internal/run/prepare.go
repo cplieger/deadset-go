@@ -7,7 +7,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
-	"github.com/cplieger/deadset-spec/v8/vocab"
+	"github.com/cplieger/deadset-spec/v8/report"
 )
 
 // Prepared is the exemption stage under one mode: one resolver and one exemption
@@ -45,7 +45,7 @@ func (l *Loaded) Prepare(production bool) (*Prepared, error) {
 		Loaded: l,
 		Mode: graph.Mode{
 			Production:              production,
-			ConsumerTestsProduction: l.req.Config.Analysis.ConsumerTests == config.ProductionReference,
+			ConsumerTestsProduction: l.req.Config.Analysis.ConsumerTestsProduction,
 		},
 		per:    make([]kinds.Configured, len(l.Loads)),
 		filled: make(map[graph.SymbolID]bool),
@@ -87,18 +87,14 @@ func (l *Loaded) Prepare(production bool) (*Prepared, error) {
 
 // exemptOptions is the whole of the configuration that reaches an exemption class.
 func exemptOptions(cfg *config.Config) exempt.Options {
-	disabled := make([]vocab.Exemption, len(cfg.Exemptions.Disabled))
-	for i, name := range cfg.Exemptions.Disabled {
-		disabled[i] = vocab.Exemption(name)
-	}
 	return exempt.Options{
-		Disabled: disabled,
+		Disabled: cfg.Exemptions.Disabled,
 		TemplateDelimiters: exempt.Delimiters{
 			Left:  cfg.Analysis.TemplateDelimiters.Left,
 			Right: cfg.Analysis.TemplateDelimiters.Right,
 		},
 		TemplateDirs:     cfg.Analysis.TemplateDirs,
-		IncludeGenerated: cfg.Analysis.GeneratedFiles == config.IncludeGenerated,
-		PublishedAPI:     cfg.Target.Kind.Of(vocab.Go) == config.Library,
+		IncludeGenerated: cfg.Analysis.IncludeGenerated,
+		PublishedAPI:     cfg.Target.Kind == report.TargetKindLibrary,
 	}
 }

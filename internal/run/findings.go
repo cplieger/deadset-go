@@ -73,7 +73,7 @@ func (s *Swept) input(ctx context.Context) (*kinds.Input, error) {
 	if err != nil {
 		return nil, err
 	}
-	declared, err := edges.Read(filepath.Join(s.Root, edges.FileName))
+	declared, err := edges.Read(ctx, s.Root)
 	if err != nil {
 		return nil, err
 	}

@@ -7,9 +7,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -65,7 +65,7 @@ func (in *Input) classOf(id graph.SymbolID) vocab.Class {
 		return vocab.Certain
 	case in.unanalysedConsumer(symbol):
 		return vocab.Possible
-	case in.Config == nil || in.Config.Target.Kind.Of(vocab.Go) != config.Library:
+	case in.Config == nil || in.Config.Target.Kind != report.TargetKindLibrary:
 		return vocab.Certain
 	case in.everyConsumerLoaded():
 		return vocab.Certain
@@ -80,7 +80,7 @@ func (in *Input) classOf(id graph.SymbolID) vocab.Class {
 // application that no build links declares one symbol, in a run that declares no
 // consumer: outside programs may import it, so every declaration of it is possible.
 func (in *Input) unlinkedApplicationPackage(symbol *graph.Symbol) bool {
-	if in.Config == nil || in.Config.Target.Kind.Of(vocab.Go) != config.Application ||
+	if in.Config == nil || in.Config.Target.Kind != report.TargetKindApplication ||
 		len(in.Consumers.Declared) > 0 || testFile(symbol) || !in.importable(symbol) {
 		return false
 	}
@@ -163,7 +163,7 @@ func unanalysedUnits(per []Configured, root string) map[string]bool {
 // publishedAPI reports whether one declaration is published API of a library: an
 // exported production declaration of a package outside programs can import.
 func (in *Input) publishedAPI(symbol *graph.Symbol) bool {
-	return in.Config != nil && in.Config.Target.Kind.Of(vocab.Go) == config.Library && symbol.Exported &&
+	return in.Config != nil && in.Config.Target.Kind == report.TargetKindLibrary && symbol.Exported &&
 		!testFile(symbol) && in.importable(symbol)
 }
 

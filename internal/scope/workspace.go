@@ -1,125 +1,91 @@
 package scope
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
+
+	"golang.org/x/mod/modfile"
 )
 
 // workspaceFileName is the name of the file that lists the modules of a Go
 // workspace.
 const workspaceFileName = "go.work"
 
-// goCommand is the toolchain the workspace is read through.
-const goCommand = "go"
-
-// errWorkspace reports a workspace file the toolchain refused to read.
+// errWorkspace reports a workspace file that cannot be read or parsed.
 var errWorkspace = errors.New("scope: unreadable workspace")
 
-// Resolve is the scope of one run, from the first source that names one:
-//
-//   - the scope document at document, when the invocation names one;
-//   - otherwise the workspace that governs dir, when a workspace file lists dir
-//     as one of its modules;
-//   - otherwise dir alone, loading nothing else.
-//
-// The precedence is that order and nothing else decides it: an invocation that
-// names a document gets exactly what the document declares, whatever workspace
-// the filesystem holds, and a run with neither source loads the target alone
-// rather than guessing at consumers. Cancelling ctx stops the toolchain the
-// workspace is read through.
+// Resolve is the scope of one run, from the first source that names one: the
+// scope document at document, when the invocation names one; otherwise the
+// workspace that governs dir, when its file lists dir as a module; otherwise
+// dir alone. Nothing else decides it: a named document gets exactly what it
+// declares whatever workspace the filesystem holds, and a run with neither
+// source loads the target alone rather than guessing at consumers.
 func Resolve(ctx context.Context, dir, document string) (Document, error) {
 	if document != "" {
-		return read(document)
+		return read(ctx, document)
 	}
-	doc, found, err := forWorkspace(ctx, dir)
+	target, err := existingDir(dir)
 	if err != nil {
 		return Document{}, err
 	}
-	if found {
-		return doc, nil
+	workspace, err := WorkspaceOf(ctx, target)
+	if err != nil {
+		return Document{}, err
 	}
-	return ForDir(dir)
+	if !workspace.Lists(target) {
+		return ForDir(target)
+	}
+	// The module whose directory dir names is the target, a listed module below
+	// it is a module of the target the load reads beside it, and every other
+	// listed module is a consumer.
+	doc := Document{Workspace: workspace.File, Target: Module{Path: target}}
+	for _, path := range workspace.Modules {
+		if path != target && !below(target, path) {
+			doc.Consumers = append(doc.Consumers, Module{Path: path})
+		}
+	}
+	return doc, nil
 }
 
-// forWorkspace builds the scope from the workspace that governs dir: the module
-// whose directory dir names is the target, a listed module below it is a module of
-// the target the load reads beside it, and every other listed module is a consumer.
-//
-// It reports false when no workspace file governs dir, and when the workspace
-// lists no module at dir: a workspace the target is not a member of decides nothing
-// about it, and a directory below a listed module is part of that module.
-func forWorkspace(ctx context.Context, dir string) (Document, bool, error) {
-	target, err := existingDir(dir)
-	if err != nil {
-		return Document{}, false, err
-	}
-	file, found := workspaceFile(target)
-	if !found {
-		return Document{}, false, nil
-	}
-
-	used, err := readWorkspace(ctx, file)
-	if err != nil {
-		return Document{}, false, err
-	}
-	doc := Document{Workspace: file}
-	for _, path := range used {
-		if path == target {
-			doc.Target = Module{Path: path}
-			continue
-		}
-		if below(target, path) {
-			continue
-		}
-		doc.Consumers = append(doc.Consumers, Module{Path: path})
-	}
-	if doc.Target.Path == "" {
-		return Document{}, false, nil
-	}
-	return doc, true, nil
+// Workspace is the workspace file that governs a directory and the absolute
+// path of every module it lists, in its order; File is empty where no file
+// governs the directory.
+type Workspace struct {
+	File    string
+	Modules []string
 }
 
-// Governing returns the workspace file that governs dir and reports whether that
-// file lists dir as one of its modules, which is when the toolchain run in dir
-// builds through it. No file, and a file not listing dir, report false.
-func Governing(ctx context.Context, dir string) (file string, member bool, err error) {
+// Lists reports whether the workspace lists dir as one of its modules, which is
+// when the toolchain run in dir builds through it.
+func (w *Workspace) Lists(dir string) bool {
+	return slices.Contains(w.Modules, filepath.Clean(dir))
+}
+
+// WorkspaceOf returns the workspace that governs dir: the file in the nearest
+// directory at or above dir that holds one, the rule the toolchain applies,
+// read from the filesystem so an ambient workspace setting cannot decide which
+// file one target's run reads. A cancelled ctx ends the read before it starts.
+func WorkspaceOf(ctx context.Context, dir string) (Workspace, error) {
+	if err := ctx.Err(); err != nil {
+		return Workspace{}, err
+	}
 	file, found := workspaceFile(dir)
 	if !found {
-		return "", false, nil
+		return Workspace{}, nil
 	}
-	used, err := readWorkspace(ctx, file)
+	modules, err := readWorkspace(file)
 	if err != nil {
-		return "", false, err
+		return Workspace{}, err
 	}
-	return file, slices.Contains(used, filepath.Clean(dir)), nil
+	return Workspace{File: file, Modules: modules}, nil
 }
 
-// Members returns every module the workspace file that governs dir lists, when
-// that file lists dir among them, and nothing otherwise.
-func Members(ctx context.Context, dir string) ([]string, error) {
-	file, found := workspaceFile(dir)
-	if !found {
-		return nil, nil
-	}
-	used, err := readWorkspace(ctx, file)
-	if err != nil || !slices.Contains(used, filepath.Clean(dir)) {
-		return nil, err
-	}
-	return used, nil
-}
-
-// workspaceFile returns the workspace file that governs dir, which is the one in
-// the nearest directory at or above dir that holds one, and reports whether such
-// a file exists. This is the rule the toolchain itself applies, read from the
-// filesystem rather than from the toolchain, so an ambient workspace setting
-// cannot decide which file one target's run reads.
+// workspaceFile returns the workspace file that governs dir and reports
+// whether one exists.
 func workspaceFile(dir string) (string, bool) {
 	for at := dir; ; {
 		file := filepath.Join(at, workspaceFileName)
@@ -135,81 +101,28 @@ func workspaceFile(dir string) (string, bool) {
 }
 
 // readWorkspace returns the absolute path of every module the workspace file
-// lists, in the order it lists them.
-//
-// The toolchain prints the file as it reads it, which is the same rule applied to
-// the workspace file that [deps] applies to a module file: the grammar of a
-// toolchain file has one reader, and it is the toolchain. A relative entry
-// resolves against the workspace file's own directory, which is what the
-// toolchain resolves it against.
-func readWorkspace(ctx context.Context, file string) ([]string, error) {
-	printed, err := printWorkspace(ctx, file)
+// lists, in its order, parsed from one reading of its bytes by the toolchain's
+// own parser. A relative entry resolves against the file's own directory, as
+// the toolchain resolves it.
+func readWorkspace(file string) ([]string, error) {
+	content, err := os.ReadFile(file)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %s: %w", errWorkspace, file, err)
 	}
-
-	// Unknown members are ignored rather than refused: the toolchain prints every
-	// directive of the file and may gain one, and the use directives are all this
-	// reads.
-	var document workJSON
-	if decoded := json.Unmarshal(printed, &document); decoded != nil {
-		return nil, fmt.Errorf("%w: %s: %w", errWorkspace, file, decoded)
+	work, err := modfile.ParseWork(file, content, nil)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s: %w", errWorkspace, file, err)
 	}
-
 	base := filepath.Dir(file)
-	used := make([]string, 0, len(document.Use))
-	for _, use := range document.Use {
-		if use.DiskPath == "" {
+	used := make([]string, 0, len(work.Use))
+	for _, use := range work.Use {
+		// The toolchain lists no module for an entry naming no path.
+		if use.Path == "" {
 			continue
 		}
-		path := use.DiskPath
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(base, path)
-		}
-		used = append(used, filepath.Clean(path))
+		used = append(used, filepath.Clean(absolute(use.Path, base)))
 	}
 	return used, nil
-}
-
-// printWorkspace runs the toolchain that prints the workspace file as it reads
-// it. The file is named as an argument, so no setting of the environment decides
-// which file is read, and the two settings pinned are pinned for the reason the
-// load pins them: an ambient workspace or flag list reaching the child would make
-// one target's answer depend on where the run was started.
-func printWorkspace(ctx context.Context, file string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, goCommand, "work", "edit", "-json", file)
-	cmd.Dir = filepath.Dir(file)
-	cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=")
-
-	var printed, diagnostic bytes.Buffer
-	cmd.Stdout = &printed
-	cmd.Stderr = &diagnostic
-	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("%w: %s: %s: %w", errWorkspace, file, trimmed(&diagnostic), err)
-	}
-	return printed.Bytes(), nil
-}
-
-// trimmed renders what the toolchain wrote to its diagnostic stream as one line
-// of a message, and says so when it wrote nothing.
-func trimmed(diagnostic *bytes.Buffer) string {
-	text := string(bytes.TrimSpace(diagnostic.Bytes()))
-	if text == "" {
-		return "no diagnostic"
-	}
-	return text
-}
-
-// workJSON mirrors the member of the printed workspace file this package reads.
-type workJSON struct {
-	Use []workUse
-}
-
-// workUse is one printed use directive. The toolchain prints the module path as
-// well where the directive carries one, and nothing here reads it: the module a
-// path holds is what the load reports, so a scope never states it twice.
-type workUse struct {
-	DiskPath string
 }
 
 // below reports whether path is a directory strictly under dir.

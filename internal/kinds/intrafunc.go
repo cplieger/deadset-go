@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/inspect"
@@ -213,7 +213,7 @@ func (g *intrafunc) callersUnknown(id graph.SymbolID) bool {
 	if symbol == nil || !symbol.Exported || !g.in.importable(symbol) {
 		return false
 	}
-	if g.in.Config == nil || g.in.Config.Target.Kind.Of(vocab.Go) != config.Library {
+	if g.in.Config == nil || g.in.Config.Target.Kind != report.TargetKindLibrary {
 		return false
 	}
 	return !g.in.consumersLoaded()

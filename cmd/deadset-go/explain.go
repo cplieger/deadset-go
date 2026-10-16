@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
 	"github.com/cplieger/deadset-go/v2/internal/run"
@@ -70,7 +69,7 @@ const (
 // cannot disagree with a finding: the findings pass runs, and which of its answers
 // names the symbol is what decides the explanation.
 func explain(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	named, req, code := explainFlags(args, stderr)
+	named, req, code := explainFlags(ctx, args, stderr)
 	if code != vocab.ExitClean {
 		return code
 	}
@@ -91,7 +90,7 @@ func explain(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 		return vocab.ExitUsage
 	}
-	if err := writeExplanation(stdout, set, cascadeOf(req.Config.Reporters.Cascade), subject); err != nil {
+	if err := writeExplanation(stdout, set, cascadeOf(req.Config.Reporters.CascadeFull), subject); err != nil {
 		fmt.Fprintf(stderr, "deadset-go: explain: %v\n", err)
 		return vocab.ExitFailure
 	}
@@ -100,8 +99,8 @@ func explain(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 
 // explainFlags parses the invocation and resolves the configuration documents it
 // names.
-func explainFlags(args []string, stderr io.Writer) (named string, req *run.Request, code int) {
-	flags := configuredFlagSet("explain", explainUsage, stderr, true)
+func explainFlags(ctx context.Context, args []string, stderr io.Writer) (named string, req *run.Request, code int) {
+	flags := configuredFlagSet("explain", explainUsage, stderr)
 	asked := make(map[string]*string, len(whyFlags))
 	for _, flagName := range whyFlags {
 		asked[flagName] = flags.set.String(flagName, "", "the symbol to explain, as the argument names it")
@@ -116,7 +115,7 @@ func explainFlags(args []string, stderr io.Writer) (named string, req *run.Reque
 		flags.set.Usage()
 		return "", nil, vocab.ExitUsage
 	}
-	if req, code = flags.request(stderr); code != vocab.ExitClean {
+	if req, code = flags.request(ctx, stderr); code != vocab.ExitClean {
 		return "", nil, code
 	}
 	return named, req, vocab.ExitClean
@@ -563,8 +562,8 @@ func testFileNote(test bool) string {
 
 // cascadeOf is the graph's own spelling of the configured cascade depth, so the
 // listing a component answers is the depth the configuration asked for.
-func cascadeOf(configured config.Cascade) graph.Cascade {
-	if configured == config.CascadeFull {
+func cascadeOf(full bool) graph.Cascade {
+	if full {
 		return graph.CascadeFull
 	}
 	return graph.CascadeRoots

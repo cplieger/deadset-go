@@ -6,43 +6,25 @@
 package scope
 
 import (
-	"bytes"
-	"encoding/json"
+	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
-)
+	"sync"
 
-// Role values a scope document declares for a module.
-const (
-	roleTarget   = "target"
-	roleConsumer = "consumer"
+	"github.com/cplieger/deadset-go/v2/internal/jsondoc"
+	spec "github.com/cplieger/deadset-spec/v8"
+	"github.com/cplieger/deadset-spec/v8/document"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
-
-// maxDocumentBytes bounds a scope document, which names one target and its
-// consumers. A larger file is refused rather than decoded.
-const maxDocumentBytes = 1 << 20
 
 var (
-	// ErrNoTarget reports a document that names no target path.
+	// ErrNoTarget reports a scope that names no target path.
 	ErrNoTarget = errors.New("scope: no target path")
 
-	// errRole reports a module whose declared role is not the one its position
-	// in the document gives it.
-	errRole = errors.New("scope: invalid role")
-
-	// errTooLarge reports a document above the size bound.
-	errTooLarge = errors.New("scope: document too large")
-
-	// errTrailingContent reports bytes after the document's closing brace.
-	errTrailingContent = errors.New("scope: trailing content after document")
-
-	// errMember reports a member the closed key list refuses: a key it does not
-	// declare, compared as bytes so a key spelled in another case is undeclared, a
-	// key written twice in one object, a null value, or an empty id or workspace.
-	errMember = errors.New("scope: refused member")
+	// errRefused reports a document the Contract's scope schema refuses.
+	errRefused = errors.New("scope: refused document")
 
 	// errNotDirectory reports a target path that exists and is not a directory.
 	errNotDirectory = errors.New("not a directory")
@@ -52,8 +34,8 @@ var (
 //
 // The role a document declares for a module is not carried here, because the
 // resolved scope holds exactly one target and a list of consumers, so a module's
-// role is where it sits. What a document declares is read and refused where it
-// contradicts that position, which is the only place the declaration can be wrong.
+// role is where it sits. The schema refuses a declared role that contradicts the
+// position, which is the only place the declaration can be wrong.
 type Module struct {
 	// ID is the module path. A document may state it; otherwise it stays empty
 	// until a load reports the module the path belongs to.
@@ -75,49 +57,43 @@ type Document struct {
 	Consumers []Module
 }
 
-// wireModule is one module as a scope document spells it. ID is nil where the
-// document omits it, which is distinguishable from the empty name it refuses.
+// wireModule is one module as a scope document spells it.
 type wireModule struct {
-	ID   *string `json:"id"`
-	Role string  `json:"role"`
-	Path string  `json:"path"`
+	ID   string `json:"id"`
+	Path string `json:"path"`
 }
 
-// wireDocument is the closed key list of a scope document. Every key the format
-// declares appears here, so an undeclared key is a decode error.
+// wireDocument is the members of a scope document a run reads.
 type wireDocument struct {
-	Workspace *string      `json:"workspace"`
+	Workspace string       `json:"workspace"`
 	Target    wireModule   `json:"target"`
 	Consumers []wireModule `json:"consumers"`
 }
 
-// read decodes the scope document at path. Decoding is strict: an undeclared key
-// is an error, trailing content after the document is an error, and a relative
-// path inside the document resolves against the document's own directory.
-//
-// read returns [ErrNoTarget], [errRole], [errMember], [errTooLarge] or
-// [errTrailingContent] for a document it refuses, an error satisfying
-// errors.Is(err, fs.ErrNotExist) when the document is absent, and a
-// *json.SyntaxError or *json.UnmarshalTypeError for one it cannot decode.
-func read(path string) (Document, error) {
-	body, err := readBounded(path)
+const schemaPath = "contract/scope.schema.json"
+
+var scopeSchema = sync.OnceValues(func() (*document.Schema, error) {
+	return document.Compile(spec.Contract, schemaPath)
+})
+
+// read decodes the scope document at path as one strict instance of the
+// Contract's scope schema, refused as [errRefused] naming the first place at
+// fault, and resolves a relative path inside it against the document's own
+// directory. An absent document is an error satisfying
+// errors.Is(err, fs.ErrNotExist).
+func read(ctx context.Context, path string) (Document, error) {
+	body, err := jsondoc.Read(ctx, path, vocab.DocumentMaxBytes)
+	if err != nil {
+		return Document{}, fmt.Errorf("scope: read %s: %w", path, err)
+	}
+	schema, err := scopeSchema()
 	if err != nil {
 		return Document{}, err
 	}
-	if err := checkMembers(body); err != nil {
-		return Document{}, fmt.Errorf("scope: decode %s: %w", path, err)
-	}
-
 	var wire wireDocument
-	dec := json.NewDecoder(bytes.NewReader(body))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&wire); err != nil {
-		return Document{}, fmt.Errorf("scope: decode %s: %w", path, err)
+	if err := jsondoc.Unmarshal(schema, path, body, &wire); err != nil {
+		return Document{}, fmt.Errorf("%w: %w", errRefused, err)
 	}
-	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
-		return Document{}, fmt.Errorf("%w: %s", errTrailingContent, path)
-	}
-
 	return resolve(&wire, filepath.Dir(path))
 }
 
@@ -149,57 +125,18 @@ func existingDir(dir string) (string, error) {
 	return abs, nil
 }
 
-// readBounded returns the document's bytes, refusing one above the size bound
-// without reading it whole.
-func readBounded(path string) ([]byte, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("scope: open %s: %w", path, err)
-	}
-	defer func() { _ = f.Close() }()
-
-	// One byte past the bound tells a document at the limit from one over it.
-	body, err := io.ReadAll(io.LimitReader(f, maxDocumentBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("scope: read %s: %w", path, err)
-	}
-	if len(body) > maxDocumentBytes {
-		return nil, fmt.Errorf("%w: %s exceeds %d bytes", errTooLarge, path, maxDocumentBytes)
-	}
-	return body, nil
-}
-
 // resolve turns a decoded document into a Document with absolute paths.
 func resolve(wire *wireDocument, base string) (Document, error) {
-	if wire.Target.Path == "" {
-		return Document{}, ErrNoTarget
-	}
-	if wire.Target.Role != "" && wire.Target.Role != roleTarget {
-		return Document{}, fmt.Errorf("%w: target declares role %q", errRole, wire.Target.Role)
-	}
-
-	target, err := resolveModule(wire.Target, roleTarget, base)
+	target, err := resolveModule(wire.Target, base)
 	if err != nil {
 		return Document{}, err
 	}
 	doc := Document{Target: target}
-
-	if wire.Workspace != nil {
-		workspace := *wire.Workspace
-		if workspace == "" {
-			return Document{}, fmt.Errorf("%w: workspace is empty, which names no file", errMember)
-		}
-		if !filepath.IsAbs(workspace) {
-			workspace = filepath.Join(base, workspace)
-		}
-		doc.Workspace = filepath.Clean(workspace)
+	if wire.Workspace != "" {
+		doc.Workspace = filepath.Clean(absolute(wire.Workspace, base))
 	}
-
 	for _, w := range wire.Consumers {
-		if w.Role != "" && w.Role != roleConsumer {
-			return Document{}, fmt.Errorf("%w: consumer %s declares role %q", errRole, w.Path, w.Role)
-		}
-		consumer, err := resolveModule(w, roleConsumer, base)
+		consumer, err := resolveModule(w, base)
 		if err != nil {
 			return Document{}, err
 		}
@@ -208,27 +145,19 @@ func resolve(wire *wireDocument, base string) (Document, error) {
 	return doc, nil
 }
 
-// resolveModule resolves one decoded module against base, naming role in the
-// refusal of a module that declares no path.
-func resolveModule(w wireModule, role, base string) (Module, error) {
-	if w.Path == "" {
-		return Module{}, fmt.Errorf("scope: %s declares an empty path", role)
-	}
-	var id string
-	if w.ID != nil {
-		if *w.ID == "" {
-			return Module{}, fmt.Errorf("%w: %s %s declares an empty id. Leave the name to the load by omitting it",
-				errMember, role, w.Path)
-		}
-		id = *w.ID
-	}
-	path := w.Path
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(base, path)
-	}
-	abs, err := filepath.Abs(path)
+// resolveModule resolves one decoded module against base.
+func resolveModule(w wireModule, base string) (Module, error) {
+	abs, err := filepath.Abs(absolute(w.Path, base))
 	if err != nil {
 		return Module{}, fmt.Errorf("scope: resolve %s: %w", w.Path, err)
 	}
-	return Module{ID: id, Path: abs}, nil
+	return Module{ID: w.ID, Path: abs}, nil
+}
+
+// absolute is path, resolved against base where it is relative.
+func absolute(path, base string) string {
+	if filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(base, path)
 }

@@ -4,10 +4,8 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-spec/v8/report"
-	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -19,7 +17,7 @@ import (
 // a run that declares consumers has named the outside programs.
 func (l *Loaded) notes() []report.Note {
 	notes := l.droppedNotes()
-	if l.req.Config.Target.Kind.Of(vocab.Go) != config.Application || len(l.Declared) > 0 {
+	if l.req.Config.Target.Kind != report.TargetKindApplication || len(l.Declared) > 0 {
 		return notes
 	}
 	imported := make(map[string]bool)

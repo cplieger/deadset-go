@@ -96,14 +96,13 @@ func edgedModule(t *testing.T) string {
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
 	writeDocument(t, dir, "deadset-edges.json", `{
   "description": "One edge pairing a dead Go declaration with the TypeScript generated from it.",
-  "edges": [
-    {
-      "id": "wire/forgotten",
+  "edges": {
+    "wire/forgotten": {
       "because": "generated",
       "provides": "go://example.com/app#forgotten",
       "used_by": "ts://@example/app/src/wire.ts#forgotten"
     }
-  ]
+  }
 }
 `)
 	return dir
@@ -624,31 +623,39 @@ func TestFormatListNamesEveryFormatTheContractDeclares(t *testing.T) {
 	}
 }
 
+func TestAnalyzeNamesATemplateItCannotRead(t *testing.T) {
+	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
+	got := runAnalyze(t, dir, "--format=template", "--template=absent.tmpl")
+	if got.code != vocab.ExitUsage || !strings.Contains(got.stderr, "read the template absent.tmpl") {
+		t.Errorf("analyze --template=absent.tmpl = %d, stderr %q, want %d naming the template", got.code, got.stderr, vocab.ExitUsage)
+	}
+}
+
 func TestSettingValueRendersEachSettingAsItsDeclaredType(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name    string
-		setting settingFlag
+		option  string
 		value   string
 		want    string
 		wantErr bool
 	}{
 		{
-			name:    "a_string_setting",
-			setting: settingFlags["min-confidence"],
-			value:   "probable",
-			want:    `"probable"`,
+			name:   "a_string_setting",
+			option: "min-confidence",
+			value:  "probable",
+			want:   `"probable"`,
 		},
 		{
-			name:    "a_number_setting",
-			setting: settingFlags["max-findings"],
-			value:   "20",
-			want:    "20",
+			name:   "a_number_setting",
+			option: "max-findings",
+			value:  "20",
+			want:   "20",
 		},
 		{
 			name:    "a_number_setting_given_something_that_is_not_one",
-			setting: settingFlags["max-findings"],
+			option:  "max-findings",
 			value:   "twenty",
 			wantErr: true,
 		},
@@ -658,12 +665,16 @@ func TestSettingValueRendersEachSettingAsItsDeclaredType(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, err := settingValue(&tc.setting, tc.value)
+			option, held := vocab.OptionOf(tc.option)
+			if !held {
+				t.Fatalf("Setup: cli.json declares no option %q", tc.option)
+			}
+			got, err := settingValue(&option, tc.value)
 			if (err != nil) != tc.wantErr {
-				t.Fatalf("settingValue(%+v, %q) = %v, want an error %t", tc.setting, tc.value, err, tc.wantErr)
+				t.Fatalf("settingValue(--%s, %q) = %v, want an error %t", tc.option, tc.value, err, tc.wantErr)
 			}
 			if err == nil && string(got) != tc.want {
-				t.Errorf("settingValue(%+v, %q) = %s, want %s", tc.setting, tc.value, got, tc.want)
+				t.Errorf("settingValue(--%s, %q) = %s, want %s", tc.option, tc.value, got, tc.want)
 			}
 		})
 	}
@@ -879,5 +890,28 @@ func TestAnalyzeNamesAPublishablePackageAtTheRootAsADot(t *testing.T) {
 	}
 	if want := []string{string(report.NoteKindPublishedPackage) + " ."}; !slices.Equal(paths, want) {
 		t.Errorf("analyze over a root package nothing imports wrote the notes %q, want %q", paths, want)
+	}
+}
+
+// An edges document the Contract refuses ends the run with the usage code,
+// naming the document, and writes no report: an identifier written twice, and
+// the edges written as a list.
+func TestAnalyzeRefusesAnEdgesDocumentTheContractRefuses(t *testing.T) {
+	const edge = `{"provides": "go://example.com/app#forgotten", "used_by": "ts://@example/app/src/wire.ts#forgotten"}`
+	for name, document := range map[string]string{
+		"an identifier written twice": `{"edges": {"wire/forgotten": ` + edge + `, "wire/forgotten": ` + edge + `}}`,
+		"the edges written as a list": `{"edges": [{"id": "wire/forgotten", "provides": "go://example.com/app#forgotten", "used_by": "ts://@example/app/src/wire.ts#forgotten"}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
+			writeDocument(t, dir, vocab.EdgesFileName, document)
+			got := runAnalyze(t, dir)
+			if got.code != vocab.ExitUsage || !strings.Contains(got.stderr, vocab.EdgesFileName) {
+				t.Errorf("analyze over %s = %d, stderr %q, want %d naming %s", name, got.code, got.stderr, vocab.ExitUsage, vocab.EdgesFileName)
+			}
+			if _, err := os.Stat(got.reportPath); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("analyze over %s left a report at %s (%v), want none", name, got.reportPath, err)
+			}
+		})
 	}
 }
