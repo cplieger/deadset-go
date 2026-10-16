@@ -943,7 +943,7 @@ func (in *Input) complete(found *Finding, row *vocab.Kind) {
 		found.Class = vocab.Certain
 		found.Component = held.componentOf("")
 	}
-	if in.Config != nil && in.Config.Reporters.Cascade == config.CascadeFull {
+	if in.Config != nil && in.Config.Reporters.CascadeFull {
 		found.Component.Members = held.membersOf(found)
 	}
 	in.capNameLiteral(found)

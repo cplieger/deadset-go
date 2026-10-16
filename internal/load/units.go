@@ -86,12 +86,15 @@ func Units(ctx context.Context, target string) ([]string, error) {
 // withMembers is the module rooted at target, then every other module below it the
 // workspace listing target lists, in directory order.
 func withMembers(ctx context.Context, target string) ([]string, error) {
-	members, err := scope.Members(ctx, target)
+	workspace, err := scope.WorkspaceOf(ctx, target)
 	if err != nil {
 		return nil, err
 	}
 	dirs := []string{target}
-	for _, member := range slices.Sorted(slices.Values(members)) {
+	if !workspace.Lists(target) {
+		return dirs, nil
+	}
+	for _, member := range slices.Sorted(slices.Values(workspace.Modules)) {
 		if rel, err := filepath.Rel(target, member); err == nil && rel != "." && filepath.IsLocal(rel) {
 			dirs = append(dirs, member)
 		}
@@ -195,11 +198,11 @@ type unitDir struct {
 // that governs dir where it lists dir as a module, which is the file `go build`
 // in dir reads, and [workspaceOff] otherwise, the ambient setting included.
 func unitWorkspace(ctx context.Context, dir string) (string, error) {
-	file, member, err := scope.Governing(ctx, dir)
-	if err != nil || !member {
+	workspace, err := scope.WorkspaceOf(ctx, dir)
+	if err != nil || !workspace.Lists(dir) {
 		return workspaceOff, err
 	}
-	return file, nil
+	return workspace.File, nil
 }
 
 // demoteOtherMembers leaves the module rooted at dir the one main module of a

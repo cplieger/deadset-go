@@ -35,14 +35,13 @@ func pendingBase(t *testing.T) string {
 			"// nothing in this module.\nfunc Generated() {}\n",
 		"deadset-edges.json": `{
   "description": "One edge pairing a declaration of this module with the TypeScript generated from it.",
-  "edges": [
-    {
-      "id": "wire/Generated",
+  "edges": {
+    "wire/Generated": {
       "because": "generated",
       "provides": "go://example.com/app#Generated",
       "used_by": "ts://@example/app/src/wire.ts#Generated"
     }
-  ]
+  }
 }
 `,
 		repositoryDocument: `{"target": {"kind": "application"}}`,

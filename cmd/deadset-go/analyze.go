@@ -15,6 +15,7 @@ import (
 
 	"github.com/cplieger/atomicfile/v4"
 	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/jsondoc"
 	"github.com/cplieger/deadset-go/v2/internal/run"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
 	"github.com/cplieger/deadset-spec/v8/render"
@@ -112,7 +113,7 @@ type invocation struct {
 // is a file, its write is atomic, every rendering is a file beside it, every
 // diagnostic goes to stderr and the verdict is the exit code.
 func analyze(ctx context.Context, args []string, stderr io.Writer) int {
-	asked, req, code := analyzeFlags(args, stderr)
+	asked, req, code := analyzeFlags(ctx, args, stderr)
 	if code != vocab.ExitClean {
 		return code
 	}
@@ -136,7 +137,7 @@ func analyze(ctx context.Context, args []string, stderr io.Writer) int {
 	}
 
 	reporters := &req.Config.Reporters
-	report.Cap(built, reporters.MaxFindings, reporters.Sort == config.BySize)
+	report.Cap(built, reporters.MaxFindings, reporters.BySize)
 
 	var recorded []core.Recorded
 	if asked.baselineWrite != "" {
@@ -155,8 +156,8 @@ func analyze(ctx context.Context, args []string, stderr io.Writer) int {
 
 // analyzeFlags parses the invocation and resolves the configuration documents it
 // names.
-func analyzeFlags(args []string, stderr io.Writer) (asked invocation, req *run.Request, code int) {
-	flags := configuredFlagSet("analyze", analyzeUsage, stderr, true)
+func analyzeFlags(ctx context.Context, args []string, stderr io.Writer) (asked invocation, req *run.Request, code int) {
+	flags := configuredFlagSet("analyze", analyzeUsage, stderr)
 	flags.set.StringVar(&asked.report, "report", "", "the path the JSON report is written to")
 	flags.set.Var(&asked.formats, "format", "one rendering written beside the report, repeatable, and one of "+formatNames())
 	templatePath := flags.set.String("template", "", "the file holding the template the template rendering reads")
@@ -179,7 +180,7 @@ func analyzeFlags(args []string, stderr io.Writer) (asked invocation, req *run.R
 		return invocation{}, nil, vocab.ExitUsage
 	}
 
-	req, code = flags.request(stderr)
+	req, code = flags.request(ctx, stderr)
 	if code != vocab.ExitClean {
 		return invocation{}, nil, code
 	}
@@ -190,10 +191,8 @@ func analyzeFlags(args []string, stderr io.Writer) (asked invocation, req *run.R
 	if len(asked.formats) == 0 {
 		asked.formats = slices.Clone(req.Config.Reporters.Formats)
 	}
-	if err := asked.read(*templatePath); err != nil {
-		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
-		flags.set.Usage()
-		return invocation{}, nil, vocab.ExitUsage
+	if err := asked.read(ctx, *templatePath); err != nil {
+		return invocation{}, nil, flags.unread(ctx, stderr, err)
 	}
 	return asked, req, vocab.ExitClean
 }
@@ -224,7 +223,7 @@ func (a *invocation) request(exitCode string) error {
 // nothing for is refused wherever it came from, a template the invocation names is
 // read and parsed whether or not a rendering reads it, and the template rendering
 // without a template is refused, all before the analysis runs, so none costs a load.
-func (a *invocation) read(templatePath string) error {
+func (a *invocation) read(ctx context.Context, templatePath string) error {
 	for _, format := range a.formats {
 		if _, held := renderings[format]; !held {
 			return fmt.Errorf("reporters.formats names %q, which is not a format: the formats are %s",
@@ -232,9 +231,10 @@ func (a *invocation) read(templatePath string) error {
 		}
 	}
 	if templatePath != "" {
-		body, err := readDocument(templatePath, false)
+		// A template is held to the bound of a configuration document.
+		body, err := jsondoc.Read(ctx, templatePath, vocab.DocumentMaxBytes)
 		if err != nil {
-			return err
+			return fmt.Errorf("read the template %s: %w", templatePath, err)
 		}
 		parsed, err := render.ParseTemplate(string(body))
 		if err != nil {
@@ -262,7 +262,7 @@ func (a *invocation) write(ctx context.Context, r *report.Report, reporters *con
 	opts := &render.Options{
 		Read:     func(path string) ([]byte, error) { return os.ReadFile(filepath.Join(targetRoot, path)) },
 		Template: a.template,
-		BySize:   reporters.Sort == config.BySize,
+		BySize:   reporters.BySize,
 	}
 	for _, format := range a.formats {
 		err := publish(ctx, a.report+renderings[format], func(w io.Writer) error {

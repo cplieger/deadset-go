@@ -63,12 +63,17 @@ func invoke(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 
 	switch verb := set.Arg(0); verb {
 	case "version":
+		if len(set.Args()) > 1 {
+			fmt.Fprintf(stderr, "deadset-go: version takes no argument, got %q\n", set.Arg(1))
+			set.Usage()
+			return vocab.ExitUsage
+		}
 		fmt.Fprintf(stdout, "deadset-go %s\ncontract %s\n", version(), vocab.ContractVersion)
 		return vocab.ExitClean
 	case "describe":
 		return describe(set.Args()[1:], stdout, stderr)
 	case "print-config":
-		return printConfig(set.Args()[1:], stdout, stderr)
+		return printConfig(ctx, set.Args()[1:], stdout, stderr)
 	case "print-roots":
 		return printRoots(ctx, set.Args()[1:], stdout, stderr)
 	case "print-retained":

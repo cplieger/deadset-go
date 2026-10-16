@@ -4,75 +4,69 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"strconv"
+	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/cplieger/atomicfile/v4"
+	spec "github.com/cplieger/deadset-spec/v8"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // The document every test of a well-formed read is measured over: two edges, one
 // pairing a Go symbol with a TypeScript one and one pairing two Go symbols, so a
-// read answers both the one-own-side case and the two-own-side case.
+// read answers both the one-own-side case and the two-own-side case. The
+// identifiers are written out of order, so a read that keeps document order
+// fails.
 const declared = `{
   "description": "Each edge pairs a Go wire type with the TypeScript generated from it.",
-  "edges": [
-    {
-      "id": "wire/ServerEvent",
+  "edges": {
+    "wire/ServerEvent": {
       "because": "generated",
       "provides": "go://example.com/app#ServerEvent",
       "used_by": "ts://@example/app/src/wire.ts#ServerEvent"
     },
-    {
-      "id": "internal.bridge",
+    "internal.bridge": {
       "provides": "go://example.com/app#Bridge",
       "used_by": "go://example.com/app/internal/queue#List"
     }
-  ]
+  }
 }
 `
 
-// write writes one document into a directory of its own and returns its path.
-func write(t *testing.T, document string) string {
+// target writes one edges document at the root of a target of its own and
+// returns the target root.
+func target(t *testing.T, document string) string {
 	t.Helper()
 
-	path := filepath.Join(t.TempDir(), FileName)
+	dir := t.TempDir()
+	path := filepath.Join(dir, vocab.EdgesFileName)
 	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
 		t.Fatalf("Setup: write %s: %v", path, err)
 	}
-	return path
+	return dir
 }
 
 // read reads one document and fails the test where the read refused it.
 func read(t *testing.T, document string) *Document {
 	t.Helper()
 
-	held, err := Read(write(t, document))
+	held, err := Read(t.Context(), target(t, document))
 	if err != nil {
 		t.Fatalf("Read(a well-formed document) = _, %v, want the declared edges", err)
 	}
 	return held
 }
 
-func TestReadCarriesEveryDeclaredEdgeInDocumentOrder(t *testing.T) {
+func TestReadCarriesEveryDeclaredEdgeInIdentifierOrder(t *testing.T) {
 	held := read(t, declared)
 
 	want := []Edge{
-		{
-			ID:       "wire/ServerEvent",
-			Provides: "go://example.com/app#ServerEvent",
-			UsedBy:   "ts://@example/app/src/wire.ts#ServerEvent",
-		},
-		{
-			ID:       "internal.bridge",
-			Provides: "go://example.com/app#Bridge",
-			UsedBy:   "go://example.com/app/internal/queue#List",
-		},
+		{ID: "internal.bridge", Provides: "go://example.com/app#Bridge", UsedBy: "go://example.com/app/internal/queue#List"},
+		{ID: "wire/ServerEvent", Provides: "go://example.com/app#ServerEvent", UsedBy: "ts://@example/app/src/wire.ts#ServerEvent"},
 	}
-	if len(held.Edges) != len(want) {
-		t.Fatalf("Read(the declared document) carries %d edges, want %d: %+v", len(held.Edges), len(want), held.Edges)
-	}
-	for i := range want {
-		if held.Edges[i] != want[i] {
-			t.Errorf("Read(the declared document).Edges[%d] = %+v, want %+v", i, held.Edges[i], want[i])
-		}
+	if !reflect.DeepEqual(held.Edges, want) {
+		t.Errorf("Read(declared).Edges = %+v, want %+v", held.Edges, want)
 	}
 }
 
@@ -80,27 +74,19 @@ func TestOwnReturnsEverySideOfTheLanguageAndNoOther(t *testing.T) {
 	held := read(t, declared)
 
 	want := []Reference{
-		{Edge: "wire/ServerEvent", Side: provides, Symbol: "go://example.com/app#ServerEvent"},
 		{Edge: "internal.bridge", Side: provides, Symbol: "go://example.com/app#Bridge"},
 		{Edge: "internal.bridge", Side: usedBy, Symbol: "go://example.com/app/internal/queue#List"},
+		{Edge: "wire/ServerEvent", Side: provides, Symbol: "go://example.com/app#ServerEvent"},
 	}
-	got := held.Own("go")
-	if len(got) != len(want) {
-		t.Fatalf("Own(%q) returned %d sides, want %d: %+v", "go", len(got), len(want), got)
+	if got := held.Own("go"); !reflect.DeepEqual(got, want) {
+		t.Errorf("Own(%q) = %+v, want %+v", "go", got, want)
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("Own(%q)[%d] = %+v, want %+v", "go", i, got[i], want[i])
-		}
-	}
-
 	ts := held.Own("ts")
 	if len(ts) != 1 || ts[0].Side != usedBy || ts[0].Symbol != "ts://@example/app/src/wire.ts#ServerEvent" {
 		t.Errorf("Own(%q) = %+v, want the one used_by side of the generated pair", "ts", ts)
 	}
 	if len(held.Own("python")) != 0 {
-		t.Errorf("Own(%q) = %+v, want no side: a side no analyzer evaluated has no record",
-			"python", held.Own("python"))
+		t.Errorf("Own(%q) = %+v, want no side: a side no analyzer evaluated has no record", "python", held.Own("python"))
 	}
 }
 
@@ -112,201 +98,132 @@ func TestOwnOfANilDocumentIsNoSide(t *testing.T) {
 }
 
 func TestReadOfAnAbsentDocumentIsAnEmptyOne(t *testing.T) {
-	held, err := Read(filepath.Join(t.TempDir(), FileName))
+	held, err := Read(t.Context(), t.TempDir())
 	if err != nil {
-		t.Fatalf("Read(an absent document) = _, %v, want an empty document and no error", err)
+		t.Fatalf("Read(a target with no edges document) = _, %v, want an empty document and no error", err)
 	}
 	if held == nil || len(held.Edges) != 0 {
-		t.Errorf("Read(an absent document) = %+v, want an empty document", held)
+		t.Errorf("Read(a target with no edges document) = %+v, want an empty document", held)
 	}
 }
 
-func TestReadOfAnEmptyArrayIsADocumentWithNoEdge(t *testing.T) {
-	held := read(t, `{"edges": []}`)
-	if len(held.Edges) != 0 {
+func TestReadOfAnEmptyObjectIsADocumentWithNoEdge(t *testing.T) {
+	if held := read(t, `{"edges": {}}`); len(held.Edges) != 0 {
 		t.Errorf("Read(a document declaring no edge) carries %+v, want no edge", held.Edges)
 	}
 }
 
-func TestReadRefusesTheDocumentsTheGrammarRefuses(t *testing.T) {
-	for name, document := range map[string]string{
-		"no edges member":             `{"description": "nothing declared"}`,
-		"an undeclared top-level key": `{"edges": [], "pairs": []}`,
-		"the edges member twice": `{"edges": [], "edges": [
-      {"id": "a", "provides": "go://example.com/app#A", "used_by": "ts://@example/app/src/a.ts#A"}]}`,
-		"a member of one edge twice": `{"edges": [
-      {"id": "a", "id": "b", "provides": "go://example.com/app#A", "used_by": "ts://@example/app/src/a.ts#A"}]}`,
-		"an undeclared key on an edge": `{"edges": [
-      {"id": "a", "why": "generated", "provides": "go://example.com/app#A", "used_by": "ts://@example/app/src/a.ts#A"}]}`,
-		"a value of the wrong type": `{"edges": [
-      {"id": ["a"], "provides": "go://example.com/app#A", "used_by": "ts://@example/app/src/a.ts#A"}]}`,
-		"an edge naming no id": `{"edges": [
-      {"provides": "go://example.com/app#A", "used_by": "ts://@example/app/src/a.ts#A"}]}`,
-		"an edge naming no provides side": `{"edges": [
-      {"id": "a", "used_by": "ts://@example/app/src/a.ts#A"}]}`,
-		"an edge naming no used_by side": `{"edges": [
-      {"id": "a", "provides": "go://example.com/app#A"}]}`,
-		"an identifier outside its form": `{"edges": [
-      {"id": "wire ServerEvent", "provides": "go://example.com/app#A", "used_by": "ts://@example/app/src/a.ts#A"}]}`,
-		"a wildcard in the fragment of a side": `{"edges": [
-      {"id": "a", "provides": "go://example.com/app#Server*", "used_by": "ts://@example/app/src/a.ts#A"}]}`,
-		"a wildcard in the scope of a side": `{"edges": [
-      {"id": "a", "provides": "go://example.com/app/internal/*#A", "used_by": "ts://@example/app/src/a.ts#A"}]}`,
-		"a bare name on a side": `{"edges": [
-      {"id": "a", "provides": "ServerEvent", "used_by": "ts://@example/app/src/a.ts#A"}]}`,
-		"a side with no fragment separator": `{"edges": [
-      {"id": "a", "provides": "go://example.com/app", "used_by": "ts://@example/app/src/a.ts#A"}]}`,
-		"a second value after the document": `{"edges": []} {"edges": []}`,
-		"a bracket after the document":      `{"edges": []}]`,
-		"a brace after the document":        `{"edges": []}}`,
-		"a document that is not an object":  `["edges"]`,
+// Every document the Contract refuses is refused as malformed, naming the place
+// at fault, the list form the edges member once took among them.
+func TestReadRefusesTheDocumentsTheContractRefuses(t *testing.T) {
+	const edge = `{"provides": "go://example.com/app#A", "used_by": "ts://@example/app/src/a.ts#A"}`
+	for _, tc := range []struct {
+		name, document, names string
+	}{
+		{name: "the edges written as a list", document: `{"edges": [{"id": "wire/A", "provides": "go://example.com/app#A", "used_by": "ts://@example/app/src/a.ts#A"}]}`, names: "edges"},
+		{name: "no edges member", document: `{"description": "nothing declared"}`, names: "edges"},
+		{name: "an undeclared top-level key", document: `{"edges": {}, "pairs": {}}`, names: "pairs"},
+		{name: "an identifier written twice", document: `{"edges": {"wire/A": ` + edge + `, "wire/A": ` + edge + `}}`, names: "wire/A"},
+		{name: "an identifier outside its form", document: `{"edges": {"wire A": ` + edge + `}}`, names: "edges.wire A"},
+		{name: "an edge naming no used_by side", document: `{"edges": {"wire/A": {"provides": "go://example.com/app#A"}}}`, names: "edges.wire/A.used_by"},
+		{name: "an edge under an identifier of digits alone", document: `{"edges": {"1": {"provides": "go://example.com/app#A"}}}`, names: "edges.1.used_by"},
+		{name: "an undeclared key of an edge", document: `{"edges": {"wire/A": {"provides": "go://example.com/app#A", "used_by": "ts://x#A", "line": 3}}}`, names: "edges.wire/A.line"},
+		{name: "a wildcard side", document: `{"edges": {"wire/A": {"provides": "go://example.com/app#*", "used_by": "ts://x#A"}}}`, names: "edges.wire/A.provides"},
+		{name: "a bare name", document: `{"edges": {"wire/A": {"provides": "A", "used_by": "ts://x#A"}}}`, names: "edges.wire/A.provides"},
+		{name: "a scope holding whitespace", document: `{"edges": {"wire/A": {"provides": "go://example.com/a pp#A", "used_by": "ts://x#A"}}}`, names: "edges.wire/A.provides"},
+		{name: "a fragment holding whitespace", document: `{"edges": {"wire/A": {"provides": "go://example.com/app#A B", "used_by": "ts://x#A"}}}`, names: "edges.wire/A.provides"},
+		{name: "content after the document", document: `{"edges": {}} {}`, names: vocab.EdgesFileName},
+		{name: "not JSON", document: `{`, names: vocab.EdgesFileName},
 	} {
-		t.Run(name, func(t *testing.T) {
-			held, err := Read(write(t, document))
-			if !errors.Is(err, errMalformed) {
-				t.Fatalf("Read(%s) = %+v, %v, want an error satisfying errors.Is(err, errMalformed)", name, held, err)
+		t.Run(tc.name, func(t *testing.T) {
+			held, err := Read(t.Context(), target(t, tc.document))
+			if !errors.Is(err, ErrMalformed) {
+				t.Fatalf("Read(%s) = %+v, %v, want an error satisfying errors.Is(err, ErrMalformed)", tc.document, held, err)
 			}
-			if held != nil {
-				t.Errorf("Read(%s) returned %+v with its error, want no document", name, held)
-			}
-			var malformed *malformedError
-			if !errors.As(err, &malformed) {
-				t.Fatalf("Read(%s) = %v, want one errors.As reads as *malformedError", name, err)
-			}
-			if malformed.Site.Filename != FileName {
-				t.Errorf("Read(%s) refused at %s, want a site in %s", name, malformed.Site, FileName)
-			}
-			if malformed.Want == "" {
-				t.Errorf("Read(%s) error = %q, want it to name the form expected", name, malformed.Error())
+			if !strings.Contains(err.Error(), tc.names) {
+				t.Errorf("Read(%s) = %v, want it to name %q", tc.document, err, tc.names)
 			}
 		})
 	}
 }
 
+// A reference outside the grammar that still names one symbol is accepted: its
+// side evaluates absent, which is what a misspelled reference is owed.
 func TestReadAcceptsAReferenceOutsideTheGrammarThatStillNamesOneSymbol(t *testing.T) {
-	// The wildcard is the one character a pattern is written with, and it stands
-	// for itself inside a quoted component and inside a computed key, so each of
-	// these names one symbol. The question mark is no wildcard of this grammar at
-	// all: a reference carrying one names at most one symbol, and where it names
-	// none the side evaluates absent and the merge reports the edge.
-	for name, side := range map[string]string{
-		"a wildcard inside a quoted component": `ts://@example/app/src/a.ts#Headers.'a*b'`,
-		"a wildcard inside a computed key":     `ts://@example/app/src/a.ts#Sizes.[k*2]`,
-		"a question mark in a quoted name":     `ts://@example/app/src/a.ts#Flags.'active?'`,
-		"a question mark outside the grammar":  `ts://@example/app/src/a.ts#Serve?`,
+	for _, ref := range []string{
+		"go://example.com/app#Not.A.Real..Path",
+		"go://example.com/app#'quoted*star'",
+		"go://example.com/app#Type[computed*]",
+		"go://example.com/app#A\fB",
+		"go://example.com/a\fpp#A",
 	} {
-		t.Run(name, func(t *testing.T) {
-			held := read(t, `{"edges": [
-      {"id": "a", "provides": "go://example.com/app#A", "used_by": `+strconv.Quote(side)+`}]}`)
-			if len(held.Edges) != 1 || held.Edges[0].UsedBy != side {
-				t.Errorf("Read(a document whose used_by side is %s) carries %+v, want the side as written",
-					side, held.Edges)
-			}
-		})
+		document := `{"edges": {"wire/A": {"provides": ` + quote(ref) + `, "used_by": "ts://x#A"}}}`
+		if held := read(t, document); len(held.Edges) != 1 || held.Edges[0].Provides != ref {
+			t.Errorf("Read(a side %q) = %+v, want the one edge carrying it", ref, held.Edges)
+		}
 	}
 }
 
-func TestReadNamesThePositionOfTheBraceThatOpensTheEdgeAtFault(t *testing.T) {
-	const document = `{
-  "edges": [
-    {"id": "first", "provides": "go://example.com/app#A", "used_by": "ts://@example/app/src/a.ts#A"},
-    {"id": "second", "provides": "go://example.com/app#B", "used_by": "ServerEvent"}
-  ]
-}
-`
-	_, err := Read(write(t, document))
-	var malformed *malformedError
-	if !errors.As(err, &malformed) {
-		t.Fatalf("Read(a document whose second edge names a bare name) = _, %v, want a *malformedError", err)
-	}
-	if malformed.Site.Line != 4 || malformed.Site.Column != 5 {
-		t.Errorf("Read(a document whose second edge names a bare name) refused at %s, want %s:4:5",
-			malformed.Site, FileName)
-	}
+func quote(s string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\f", `\f`).Replace(s) + `"`
 }
 
-func TestReadCountsAColumnInUTF16CodeUnits(t *testing.T) {
-	// The description holds one astral character, which is two UTF-16 code units
-	// and four bytes, so a byte column and the column a report carries differ.
-	const document = "{\n  \"description\": \"\U0001F600\",\n  \"edges\": [\n    {\"id\": \"a\", \"provides\": \"go://example.com/app#A\", \"used_by\": \"bare\"}\n  ]\n}\n"
-
-	_, err := Read(write(t, document))
-	var malformed *malformedError
-	if !errors.As(err, &malformed) {
-		t.Fatalf("Read(a document carrying an astral character) = _, %v, want a *malformedError", err)
+// Every published edges example reads, and every published negative of the
+// edges schema is refused.
+func TestReadHoldsThePublishedExamples(t *testing.T) {
+	body, err := spec.Examples.ReadFile("examples/edges/declared.json")
+	if err != nil {
+		t.Fatalf("Setup: read examples/edges/declared.json: %v", err)
 	}
-	if malformed.Site.Line != 4 || malformed.Site.Column != 5 {
-		t.Errorf("Read(a document carrying an astral character) refused at %s, want %s:4:5",
-			malformed.Site, FileName)
+	if held := read(t, string(body)); len(held.Edges) == 0 {
+		t.Errorf("Read(examples/edges/declared.json) carries no edge, want the declared ones")
+	}
+	for _, name := range []string{"edges-identifier-form.json", "edges-object-absent.json", "edges-reference-wildcard.json", "edges-unknown-member.json"} {
+		body, err := spec.Examples.ReadFile("examples/negatives/" + name)
+		if err != nil {
+			t.Fatalf("Setup: read examples/negatives/%s: %v", name, err)
+		}
+		if _, err := Read(t.Context(), target(t, string(body))); !errors.Is(err, ErrMalformed) {
+			t.Errorf("Read(examples/negatives/%s) = %v, want it refused as malformed", name, err)
+		}
 	}
 }
 
-func TestReadReportsADocumentItCannotRead(t *testing.T) {
-	_, err := Read(t.TempDir())
-	if err == nil {
-		t.Fatal("Read(a directory) = _, nil, want an error naming the path")
-	}
-	if errors.Is(err, os.ErrNotExist) || errors.Is(err, errMalformed) {
-		t.Errorf("Read(a directory) = _, %v, want neither an absent document nor a malformed one", err)
+func TestReadRefusesADocumentOverTheBound(t *testing.T) {
+	_, err := Read(t.Context(), target(t, `{"edges": {}}`+strings.Repeat(" ", vocab.DocumentMaxBytes)))
+	if !errors.Is(err, ErrMalformed) || !errors.Is(err, atomicfile.ErrFileTooLarge) {
+		t.Errorf("Read(a document over the bound) = %v, want it refused as malformed and too large", err)
 	}
 }
 
-func TestReadRefusesAScopeHoldingWhitespace(t *testing.T) {
-	for name, side := range map[string]string{
-		"a space":           "go://example.com/a pp#A",
-		"a tab":             "go://example.com/a\tpp#A",
-		"a carriage return": "go://example.com/a\rpp#A",
-		"a line feed":       "go://example.com/a\npp#A",
+// A document name resolving outside the target, or to anything but a regular
+// file, is refused without being read, and not as a malformed document.
+func TestReadRefusesADocumentNameThatLeavesTheTargetOrIsNoFile(t *testing.T) {
+	outside := filepath.Join(t.TempDir(), "elsewhere.json")
+	if err := os.WriteFile(outside, []byte(declared), 0o600); err != nil {
+		t.Fatalf("Setup: write %s: %v", outside, err)
+	}
+	escaping := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(escaping, vocab.EdgesFileName)); err != nil {
+		t.Fatalf("Setup: symlink: %v", err)
+	}
+	directory := t.TempDir()
+	if err := os.Mkdir(filepath.Join(directory, vocab.EdgesFileName), 0o750); err != nil {
+		t.Fatalf("Setup: mkdir: %v", err)
+	}
+	for _, tc := range []struct {
+		name, dir  string
+		notRegular bool
+	}{
+		{name: "a link out of the target", dir: escaping},
+		{name: "a directory", dir: directory, notRegular: true},
 	} {
-		t.Run(name, func(t *testing.T) {
-			held, err := Read(write(t, `{"edges": [
-      {"id": "a", "provides": `+strconv.Quote(side)+`, "used_by": "ts://@example/app/src/a.ts#A"}]}`))
-			if !errors.Is(err, errMalformed) {
-				t.Errorf("Read(a document whose provides side holds %s in its scope) = %+v, %v, want an error satisfying errors.Is(err, errMalformed)",
-					name, held, err)
-			}
-		})
-	}
-}
-
-func TestReadRefusesAFragmentHoldingWhitespace(t *testing.T) {
-	for name, side := range map[string]string{
-		"a space":           "go://example.com/app#Re solve",
-		"a tab":             "go://example.com/app#Re\tsolve",
-		"a carriage return": "go://example.com/app#Re\rsolve",
-		"a line feed":       "go://example.com/app#Re\nsolve",
-	} {
-		t.Run(name, func(t *testing.T) {
-			held, err := Read(write(t, `{"edges": [
-      {"id": "a", "provides": `+strconv.Quote(side)+`, "used_by": "ts://@example/app/src/a.ts#A"}]}`))
-			if !errors.Is(err, errMalformed) {
-				t.Errorf("Read(a document whose provides side is %q) = %+v, %v, want an error satisfying errors.Is(err, errMalformed)",
-					side, held, err)
-			}
-		})
-	}
-}
-
-func TestReadAcceptsAFragmentHoldingAFormFeed(t *testing.T) {
-	const side = "go://example.com/app#Re\fsolve"
-
-	held := read(t, `{"edges": [
-      {"id": "a", "provides": `+strconv.Quote(side)+`, "used_by": "ts://@example/app/src/a.ts#A"}]}`)
-	if len(held.Edges) != 1 || held.Edges[0].Provides != side {
-		t.Errorf("Read(a document whose provides side is %q) carries %+v, want the side as written", side, held.Edges)
-	}
-}
-
-func TestReadAcceptsAScopeHoldingAFormFeed(t *testing.T) {
-	// Whitespace is exactly space, tab, carriage return and line feed. A form feed
-	// is none of them, so a scope holding one is a misspelling that names no
-	// symbol rather than a reference naming more than one.
-	const side = "go://example.com/a\fpp#A"
-
-	held := read(t, `{"edges": [
-      {"id": "a", "provides": `+strconv.Quote(side)+`, "used_by": "ts://@example/app/src/a.ts#A"}]}`)
-	if len(held.Edges) != 1 || held.Edges[0].Provides != side {
-		t.Errorf("Read(a document whose provides side holds a form feed in its scope) carries %+v, want the side as written",
-			held.Edges)
+		held, err := Read(t.Context(), tc.dir)
+		if err == nil || errors.Is(err, ErrMalformed) {
+			t.Errorf("Read(%s) = %+v, %v, want a refusal that is not a malformed document", tc.name, held, err)
+		}
+		if tc.notRegular && !errors.Is(err, atomicfile.ErrNotRegular) {
+			t.Errorf("Read(%s) = %v, want an error matching atomicfile.ErrNotRegular", tc.name, err)
+		}
 	}
 }

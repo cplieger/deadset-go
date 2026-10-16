@@ -17,6 +17,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
 	spec "github.com/cplieger/deadset-spec/v8"
+	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/txtar"
 )
@@ -53,8 +54,8 @@ func fixtureConfiguration() load.Configuration {
 // applicationConfig is the resolved configuration of a target whose every caller is
 // in the graph.
 func applicationConfig() config.Config {
-	resolved := config.Default()
-	resolved.Target.Kind = config.OneKind(config.Application)
+	resolved := defaultConfig()
+	resolved.Target.Kind = report.TargetKindApplication
 	return resolved
 }
 
@@ -62,8 +63,8 @@ func applicationConfig() config.Config {
 // callers outside the graph, with every finding reported whatever its class, so a
 // test reads what each kind decides rather than what the minimum withholds.
 func libraryConfig() config.Config {
-	resolved := config.Default()
-	resolved.Target.Kind = config.OneKind(config.Library)
+	resolved := defaultConfig()
+	resolved.Target.Kind = report.TargetKindLibrary
 	resolved.Analysis.MinConfidence = vocab.Possible
 	return resolved
 }
@@ -163,7 +164,7 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 			Right: resolved.Analysis.TemplateDelimiters.Right,
 		},
 		TemplateDirs:     resolved.Analysis.TemplateDirs,
-		IncludeGenerated: resolved.Analysis.GeneratedFiles == config.IncludeGenerated,
+		IncludeGenerated: resolved.Analysis.IncludeGenerated,
 	}
 	// The fixture analyses in the production mode, which is the run the analyzer
 	// makes, and every stage of the fixture reads the one value as the composition
@@ -171,7 +172,7 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 	mode := graph.Mode{Production: true}
 	rootOptions := graph.RootOptions{
 		Patterns:     resolved.Roots.Patterns,
-		PublishedAPI: resolved.Target.Kind.Of(vocab.Go) == config.Library,
+		PublishedAPI: resolved.Target.Kind == report.TargetKindLibrary,
 	}
 
 	per := make([]Configured, len(configurations))
@@ -648,3 +649,15 @@ func sectionsInput(t *testing.T, fixture string, data []byte, resolved config.Co
 // corpusTargetSection is the directory of a fixture rendering that holds the module
 // being analyzed.
 const corpusTargetSection = "target"
+
+// defaultConfig is the configuration every default states, of an application:
+// what a repository configuration naming the target kind alone resolves to.
+func defaultConfig() config.Config {
+	resolved, err := config.Resolve(&config.Inputs{Repository: config.Document{
+		Path: "deadset.json", Data: []byte(`{"target": {"kind": "application"}}`),
+	}})
+	if err != nil {
+		panic(err)
+	}
+	return resolved.Config
+}

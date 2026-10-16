@@ -11,6 +11,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
+	"github.com/cplieger/deadset-spec/v8/report"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -279,18 +280,6 @@ func TestStaleSuppressionsCollapsesTheRecordsAtOneSiteIntoOneFindingNamingEveryC
 	// directive produced, so the four records of this fixture are two reasons.
 	if _, reasons := Totals(in); reasons != 2 {
 		t.Errorf("Totals() = %d reasons over four records at two sites, want 2", reasons)
-	}
-}
-
-func TestNoSeverityKeyReducesAStaleSuppressionOrAnUnmatchedRoot(t *testing.T) {
-	for _, key := range []string{"DS9003", "DS9004", "DS90"} {
-		t.Run(key, func(t *testing.T) {
-			document := []byte(`{"target": {"kind": "application"}, "severity": {"` + key + `": "warn"}}`)
-			_, _, err := config.Resolve(config.Inputs{Repository: document, RepositoryLabel: "deadset.json"})
-			if _, ok := errors.AsType[*config.Error](err); !ok {
-				t.Fatalf("config.Resolve(a severity key naming %s) = %v, want an unimplemented-key refusal", key, err)
-			}
-		})
 	}
 }
 
@@ -813,8 +802,8 @@ func TestStaleSuppressionsReadsDormancyFromTheFindingsARecordMatches(t *testing.
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			resolved := config.Default()
-			resolved.Target.Kind = config.OneKind(config.Library)
+			resolved := defaultConfig()
+			resolved.Target.Kind = report.TargetKindLibrary
 			resolved.Severity = tc.severity
 			in := suppressed(t, "selfcheck-match.txtar", resolved)
 			emitters := intraFuncEmitters()

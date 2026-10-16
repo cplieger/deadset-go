@@ -9,7 +9,6 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-spec/v8/report"
-	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // Self is what the analyzer states about itself in every document it writes: its
@@ -82,7 +81,7 @@ func (l *Loaded) target() (report.Target, error) {
 	if err != nil {
 		return report.Target{}, err
 	}
-	return report.Target{Kind: report.TargetKind(l.req.Config.Target.Kind.Of(vocab.Go)), Root: root, Identity: identity}, nil
+	return report.Target{Kind: l.req.Config.Target.Kind, Root: root, Identity: identity}, nil
 }
 
 // identity is the path of the module rooted at the target root, else the name the

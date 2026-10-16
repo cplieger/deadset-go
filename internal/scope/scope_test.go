@@ -11,7 +11,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/atomicfile/v4"
 	spec "github.com/cplieger/deadset-spec/v8"
+	"github.com/cplieger/deadset-spec/v8/document"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // writeDocument writes body as a scope document in a fresh directory and returns
@@ -27,32 +30,17 @@ func writeDocument(t *testing.T, body string) (dir, path string) {
 	return dir, path
 }
 
-// is matches an error against a sentinel.
-func is(target error) func(error) bool {
-	return func(err error) bool { return errors.Is(err, target) }
+// refusedAt matches the refusal of a document the scope schema refuses at one
+// place, named as a dotted path.
+func refusedAt(place string) func(error) bool {
+	return func(err error) bool {
+		return errors.Is(err, errRefused) && strings.Contains(err.Error(), ": "+place+": ")
+	}
 }
 
-// hasText matches an error by a phrase of its message, for a refusal
-// encoding/json gives no sentinel and no type.
-func hasText(phrase string) func(error) bool {
-	return func(err error) bool { return err != nil && strings.Contains(err.Error(), phrase) }
-}
-
-// memberRefused matches a refusal of one member, naming it.
-func memberRefused(named string) func(error) bool {
-	return func(err error) bool { return errors.Is(err, errMember) && strings.Contains(err.Error(), named) }
-}
-
-// isSyntaxError matches the decoder's refusal of malformed JSON.
-func isSyntaxError(err error) bool {
-	var syntaxErr *json.SyntaxError
-	return errors.As(err, &syntaxErr)
-}
-
-// isTypeError matches the decoder's refusal of a value of the wrong JSON type.
-func isTypeError(err error) bool {
-	var typeErr *json.UnmarshalTypeError
-	return errors.As(err, &typeErr)
+// notStrictJSON matches the refusal of a document that is not one strict JSON value.
+func notStrictJSON(err error) bool {
+	return errors.Is(err, errRefused) && errors.Is(err, document.ErrMalformed)
 }
 
 func TestReadResolvesTheTargetAndItsConsumers(t *testing.T) {
@@ -61,7 +49,7 @@ func TestReadResolvesTheTargetAndItsConsumers(t *testing.T) {
   "consumers": [ { "role": "consumer", "path": "../consumer" } ]
 }`)
 
-	got, err := read(path)
+	got, err := read(t.Context(), path)
 	if err != nil {
 		t.Fatalf("read(%s) = _, %v, want no error", path, err)
 	}
@@ -108,7 +96,7 @@ func TestReadResolvesTheWorkspaceTheDocumentNames(t *testing.T) {
 			body += `}`
 			dir, path := writeDocument(t, body)
 
-			got, err := read(path)
+			got, err := read(t.Context(), path)
 			if err != nil {
 				t.Fatalf("read(%s) with body %s = _, %v, want no error", path, body, err)
 			}
@@ -123,7 +111,7 @@ func TestReadKeepsAnAbsolutePathAsWritten(t *testing.T) {
 	absolute := filepath.Join(t.TempDir(), "elsewhere")
 	_, path := writeDocument(t, `{"target": {"path": `+strconv.Quote(absolute)+`}}`)
 
-	got, err := read(path)
+	got, err := read(t.Context(), path)
 	if err != nil {
 		t.Fatalf("read(%s) = _, %v, want no error", path, err)
 	}
@@ -141,7 +129,7 @@ func TestReadAcceptsADocumentThatLeavesEveryRoleOut(t *testing.T) {
   "consumers": [ { "path": "consumer" } ]
 }`)
 
-	got, err := read(path)
+	got, err := read(t.Context(), path)
 	if err != nil {
 		t.Fatalf("read(%s) = _, %v, want no error", path, err)
 	}
@@ -160,129 +148,39 @@ func TestReadAcceptsADocumentThatLeavesEveryRoleOut(t *testing.T) {
 
 func TestReadRefusals(t *testing.T) {
 	cases := map[string]struct {
-		body string
 		want func(error) bool
-		desc string
+		body string
 	}{
-		"undeclared document key": {
-			body: `{"target": {"path": "app"}, "roots": ["x"]}`,
-			want: memberRefused("roots"),
-			desc: "errMember naming roots",
-		},
-		"undeclared module key": {
-			body: `{"target": {"path": "app", "kind": "library"}}`,
-			want: memberRefused("target.kind"),
-			desc: "errMember naming target.kind",
-		},
-		"a declared key spelled in another case": {
-			body: `{"target": {"path": "app"}, "Consumers": [{"path": "c"}]}`,
-			want: memberRefused("Consumers"),
-			desc: "errMember naming Consumers",
-		},
-		"a module key spelled in another case": {
-			body: `{"target": {"Path": "app"}}`,
-			want: memberRefused("target.Path"),
-			desc: "errMember naming target.Path",
-		},
-		"a key written twice": {
-			body: `{"target": {"path": "app", "path": "other"}}`,
-			want: memberRefused("target.path"),
-			desc: "errMember naming target.path",
-		},
-		"a null id": {
-			body: `{"target": {"id": null, "path": "app"}}`,
-			want: memberRefused("target.id"),
-			desc: "errMember naming target.id",
-		},
-		"a null consumer": {
-			body: `{"target": {"path": "app"}, "consumers": [null]}`,
-			want: memberRefused("consumers[0]"),
-			desc: "errMember naming consumers[0]",
-		},
-		"a null consumer list": {
-			body: `{"target": {"path": "app"}, "consumers": null}`,
-			want: memberRefused("consumers"),
-			desc: "errMember naming consumers",
-		},
-		"an empty target id": {
-			body: `{"target": {"id": "", "path": "app"}}`,
-			want: memberRefused("empty id"),
-			desc: "errMember naming the empty id",
-		},
-		"an empty consumer id": {
-			body: `{"target": {"path": "app"}, "consumers": [{"id": "", "path": "c"}]}`,
-			want: memberRefused("empty id"),
-			desc: "errMember naming the empty id",
-		},
-		"an empty workspace": {
-			body: `{"target": {"path": "app"}, "workspace": ""}`,
-			want: memberRefused("workspace"),
-			desc: "errMember naming the workspace",
-		},
-		"no target": {
-			body: `{"consumers": [{"path": "consumer"}]}`,
-			want: is(ErrNoTarget),
-			desc: "ErrNoTarget",
-		},
-		"empty target path": {
-			body: `{"target": {"path": ""}}`,
-			want: is(ErrNoTarget),
-			desc: "ErrNoTarget",
-		},
-		"target declaring the consumer role": {
-			body: `{"target": {"role": "consumer", "path": "app"}}`,
-			want: is(errRole),
-			desc: "errRole",
-		},
-		"consumer declaring the target role": {
-			body: `{"target": {"path": "app"}, "consumers": [{"role": "target", "path": "c"}]}`,
-			want: is(errRole),
-			desc: "errRole",
-		},
-		"unknown role": {
-			body: `{"target": {"role": "producer", "path": "app"}}`,
-			want: is(errRole),
-			desc: "errRole",
-		},
-		"consumer with an empty path": {
-			body: `{"target": {"path": "app"}, "consumers": [{"path": ""}]}`,
-			want: hasText("empty path"),
-			desc: "an error naming the empty path",
-		},
-
-		"trailing content": {
-			body: `{"target": {"path": "app"}} {"target": {"path": "other"}}`,
-			want: is(errTrailingContent),
-			desc: "errTrailingContent",
-		},
-		"a bracket after the document": {
-			body: `{"target": {"path": "app"}}]`,
-			want: is(errTrailingContent),
-			desc: "errTrailingContent",
-		},
-		"a brace after the document": {
-			body: `{"target": {"path": "app"}}}`,
-			want: is(errTrailingContent),
-			desc: "errTrailingContent",
-		},
-		"an array rather than an object": {
-			body: `["app"]`,
-			want: isTypeError,
-			desc: "*json.UnmarshalTypeError",
-		},
-		"malformed JSON": {
-			body: `{"target": {"path": "app",}}`,
-			want: isSyntaxError,
-			desc: "*json.SyntaxError",
-		},
+		"undeclared document key":                {body: `{"target": {"path": "app"}, "roots": ["x"]}`, want: refusedAt("roots")},
+		"undeclared module key":                  {body: `{"target": {"path": "app", "kind": "library"}}`, want: refusedAt("target.kind")},
+		"a declared key spelled in another case": {body: `{"target": {"path": "app"}, "Consumers": [{"path": "c"}]}`, want: refusedAt("Consumers")},
+		"a module key spelled in another case":   {body: `{"target": {"Path": "app"}}`, want: refusedAt("target.Path")},
+		"a key written twice":                    {body: `{"target": {"path": "app", "path": "other"}}`, want: notStrictJSON},
+		"a null id":                              {body: `{"target": {"id": null, "path": "app"}}`, want: refusedAt("target.id")},
+		"a null consumer":                        {body: `{"target": {"path": "app"}, "consumers": [null]}`, want: refusedAt("consumers[0]")},
+		"a null consumer list":                   {body: `{"target": {"path": "app"}, "consumers": null}`, want: refusedAt("consumers")},
+		"an empty target id":                     {body: `{"target": {"id": "", "path": "app"}}`, want: refusedAt("target.id")},
+		"an empty consumer id":                   {body: `{"target": {"path": "app"}, "consumers": [{"id": "", "path": "c"}]}`, want: refusedAt("consumers[0].id")},
+		"an empty workspace":                     {body: `{"target": {"path": "app"}, "workspace": ""}`, want: refusedAt("workspace")},
+		"no target":                              {body: `{"consumers": [{"path": "consumer"}]}`, want: refusedAt("target")},
+		"empty target path":                      {body: `{"target": {"path": ""}}`, want: refusedAt("target.path")},
+		"target declaring the consumer role":     {body: `{"target": {"role": "consumer", "path": "app"}}`, want: refusedAt("target.role")},
+		"consumer declaring the target role":     {body: `{"target": {"path": "app"}, "consumers": [{"role": "target", "path": "c"}]}`, want: refusedAt("consumers[0].role")},
+		"unknown role":                           {body: `{"target": {"role": "producer", "path": "app"}}`, want: refusedAt("target.role")},
+		"consumer with an empty path":            {body: `{"target": {"path": "app"}, "consumers": [{"path": ""}]}`, want: refusedAt("consumers[0].path")},
+		"trailing content":                       {body: `{"target": {"path": "app"}} {"target": {"path": "other"}}`, want: notStrictJSON},
+		"a bracket after the document":           {body: `{"target": {"path": "app"}}]`, want: notStrictJSON},
+		"a brace after the document":             {body: `{"target": {"path": "app"}}}`, want: notStrictJSON},
+		"an array rather than an object":         {body: `["app"]`, want: refusedAt("the document")},
+		"malformed JSON":                         {body: `{"target": {"path": "app",}}`, want: notStrictJSON},
 	}
 
 	for name, test := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, path := writeDocument(t, test.body)
-			got, err := read(path)
+			got, err := read(t.Context(), path)
 			if !test.want(err) {
-				t.Errorf("read(%s) with body %s = _, %v, want %s", path, test.body, err, test.desc)
+				t.Errorf("read(%s) with body %s = _, %v, want the refusal %s names", path, test.body, err, name)
 			}
 			if !reflect.DeepEqual(got, Document{}) {
 				t.Errorf("read(%s) = %+v, want the zero Document", path, got)
@@ -294,7 +192,7 @@ func TestReadRefusals(t *testing.T) {
 func TestReadRefusesAnAbsentDocument(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing.json")
 
-	_, err := read(path)
+	_, err := read(t.Context(), path)
 
 	if !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("read(%s) = _, %v, want an error matching fs.ErrNotExist", path, err)
@@ -307,25 +205,25 @@ func TestReadRefusesAnAbsentDocument(t *testing.T) {
 func TestReadRefusesADocumentAboveTheSizeBound(t *testing.T) {
 	// Padding inside a declared string keeps the document valid JSON, so the
 	// size bound is the only thing that can refuse it.
-	padding := strings.Repeat("p", maxDocumentBytes)
+	padding := strings.Repeat("p", vocab.DocumentMaxBytes)
 	_, path := writeDocument(t, `{"target": {"id": "`+padding+`", "path": "app"}}`)
 
-	_, err := read(path)
+	_, err := read(t.Context(), path)
 
-	if !errors.Is(err, errTooLarge) {
-		t.Errorf("read(oversize document) = _, %v, want an error matching errTooLarge", err)
+	if !errors.Is(err, atomicfile.ErrFileTooLarge) {
+		t.Errorf("read(oversize document) = _, %v, want an error matching atomicfile.ErrFileTooLarge", err)
 	}
 }
 
 func TestReadAcceptsADocumentAtTheSizeBound(t *testing.T) {
 	prefix := `{"target": {"id": "`
 	suffix := `", "path": "app"}}`
-	padding := strings.Repeat("p", maxDocumentBytes-len(prefix)-len(suffix))
+	padding := strings.Repeat("p", vocab.DocumentMaxBytes-len(prefix)-len(suffix))
 	_, path := writeDocument(t, prefix+padding+suffix)
 
-	got, err := read(path)
+	got, err := read(t.Context(), path)
 	if err != nil {
-		t.Fatalf("read(document of exactly %d bytes) = _, %v, want no error", maxDocumentBytes, err)
+		t.Fatalf("read(document of exactly %d bytes) = _, %v, want no error", vocab.DocumentMaxBytes, err)
 	}
 	if got.Target.ID != padding {
 		t.Errorf("Target.ID has %d characters, want %d", len(got.Target.ID), len(padding))
@@ -409,7 +307,7 @@ func TestReadAcceptsEveryPublishedScopeDocument(t *testing.T) {
 	for _, entry := range entries {
 		t.Run(strings.TrimSuffix(entry.Name(), ".json"), func(t *testing.T) {
 			_, path := publishedScope(t, "examples/scope/"+entry.Name())
-			if _, err := read(path); err != nil {
+			if _, err := read(t.Context(), path); err != nil {
 				t.Errorf("read(examples/scope/%s) = _, %v, want no error", entry.Name(), err)
 			}
 		})
@@ -419,7 +317,7 @@ func TestReadAcceptsEveryPublishedScopeDocument(t *testing.T) {
 func TestReadResolvesThePublishedDocumentNamingEveryMember(t *testing.T) {
 	dir, path := publishedScope(t, "examples/scope/target-and-consumers.json")
 
-	got, err := read(path)
+	got, err := read(t.Context(), path)
 	if err != nil {
 		t.Fatalf("read(target-and-consumers.json) = _, %v, want no error", err)
 	}
@@ -458,7 +356,7 @@ func TestReadRefusesEveryPublishedScopeNegative(t *testing.T) {
 		refused++
 		t.Run(strings.TrimSuffix(row.File, ".json"), func(t *testing.T) {
 			_, path := publishedScope(t, "examples/negatives/"+row.File)
-			got, err := read(path)
+			got, err := read(t.Context(), path)
 			if err == nil {
 				t.Errorf("read(examples/negatives/%s) = %+v, nil, want a refusal", row.File, got)
 			}

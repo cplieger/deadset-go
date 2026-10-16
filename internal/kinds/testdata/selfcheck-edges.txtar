@@ -27,30 +27,26 @@ func Orphan() string { return "o" }
 -- deadset-edges.json --
 {
   "description": "Each edge pairs a Go declaration with the TypeScript generated from it.",
-  "edges": [
-    {
-      "id": "wire/Event",
+  "edges": {
+    "wire/Event": {
       "because": "generated",
       "provides": "go://example.com/selfcheckedges#Event",
       "used_by": "ts://@example/app/src/wire.ts#Event"
     },
-    {
-      "id": "wire/Local",
+    "wire/Local": {
       "because": "generated",
       "provides": "go://example.com/selfcheckedges#Local",
       "used_by": "ts://@example/app/src/wire.ts#Local"
     },
-    {
-      "id": "wire/Vanished",
+    "wire/Vanished": {
       "because": "generated",
       "provides": "go://example.com/selfcheckedges#Vanished",
       "used_by": "ts://@example/app/src/wire.ts#Vanished"
     },
-    {
-      "id": "wire/kept",
+    "wire/kept": {
       "because": "generated",
       "provides": "go://example.com/selfcheckedges#kept",
       "used_by": "ts://@example/app/src/wire.ts#kept"
     }
-  ]
+  }
 }

@@ -19,7 +19,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/matrix"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
-	"github.com/cplieger/deadset-spec/v8/vocab"
+	"github.com/cplieger/deadset-spec/v8/report"
 )
 
 // Request is what a verb asks one analysis for, with the flags already resolved.
@@ -132,7 +132,7 @@ func Load(ctx context.Context, req *Request) (*Loaded, error) {
 func (l *Loaded) enumerate(results []load.Result, derived bool) ([]graph.Configured, error) {
 	options := graph.RootOptions{
 		Patterns:     l.req.Config.Roots.Patterns,
-		PublishedAPI: l.req.Config.Target.Kind.Of(vocab.Go) == config.Library,
+		PublishedAPI: l.req.Config.Target.Kind == report.TargetKindLibrary,
 	}
 	var elsewhere []map[string]bool
 	if derived {
@@ -200,7 +200,7 @@ func greatestPerRule(held, next []graph.TestFileRule) []graph.TestFileRule {
 // implies where it lists none, with that derivation; a derived matrix is never
 // complete, which only the configuration asserts.
 func matrixOf(ctx context.Context, cfg *config.Config, root string) ([]load.Configuration, *matrix.Derived, error) {
-	if platforms := cfg.Analysis.Platforms(); len(platforms) > 0 {
+	if platforms := cfg.Analysis.Platforms; len(platforms) > 0 {
 		configurations := make([]load.Configuration, len(platforms))
 		for i, p := range platforms {
 			configurations[i] = load.Configuration{ID: p.ID, OS: p.OS, Arch: p.Arch, Tags: p.Tags}

@@ -1,66 +1,24 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"strconv"
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/jsondoc"
 	"github.com/cplieger/deadset-go/v2/internal/run"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // repositoryDocument is the repository configuration's name at the target root.
 const repositoryDocument = "deadset.json"
-
-// maxDocumentBytes bounds one configuration document. A configuration is one
-// instance of a closed key list, so the bound is far above any real document.
-const maxDocumentBytes = 1 << 20
-
-// settingFlag is one setting a command-line flag supplies: the dotted path the
-// resolved configuration names the setting by, and what the flag's value is.
-type settingFlag struct {
-	path        string
-	description string
-
-	// number says the setting is declared a number, so the document this flag
-	// supplies carries a JSON number: a number written as a string is refused by the
-	// same decode a file goes through.
-	number bool
-}
-
-// settingFlags maps a flag name, chosen for how it reads on a command line, to the
-// setting of contract/config.schema.json it supplies. A setting reaches the command
-// line only by an entry, and the path is what its provenance names.
-var settingFlags = map[string]settingFlag{
-	"min-confidence": {
-		path:        "analysis.min_confidence",
-		description: "the lowest reachability class a finding is reported at",
-	},
-	"sort": {
-		path:        "reporters.sort",
-		description: "the order findings are rendered in",
-	},
-	"cascade": {
-		path:        "reporters.cascade",
-		description: "how much of a dead component a rendering names",
-	},
-	"max-findings": {
-		path:        "reporters.max_findings",
-		description: "the greatest number of findings a rendering prints, with the rest counted as omitted",
-		number:      true,
-	},
-	"fail-on": {
-		path:        "reporters.fail_on",
-		description: "the lowest severity that fails the run",
-	},
-}
 
 // configuredFlags are the flags every verb that reads a configuration registers,
 // and the values they parsed into. scope is nil for a verb that registers no flag
@@ -73,10 +31,10 @@ type configuredFlags struct {
 	scope      *string
 }
 
-// configuredFlagSet registers the target root, the two configuration documents, one
-// flag per setting the command line supplies, and the scope document where the verb
-// reads one.
-func configuredFlagSet(verb, verbUsage string, stderr io.Writer, scoped bool) configuredFlags {
+// configuredFlagSet registers the target root and the two configuration
+// documents, and of the options cli.json lists for the verb, the scope document
+// and each option supplying a setting. The verb registers the rest of its list.
+func configuredFlagSet(verb, verbUsage string, stderr io.Writer) configuredFlags {
 	set := flag.NewFlagSet("deadset-go "+verb, flag.ContinueOnError)
 	set.SetOutput(stderr)
 	set.Usage = func() { fmt.Fprintln(stderr, verbUsage) }
@@ -86,26 +44,36 @@ func configuredFlagSet(verb, verbUsage string, stderr io.Writer, scoped bool) co
 		repository: set.String("config", "", "the repository configuration, in place of "+repositoryDocument+" at the target root"),
 		central:    set.String("central", "", "the central configuration"),
 	}
-	if scoped {
-		held.scope = set.String("scope", "", "the scope document naming the target and its declared consumers")
-	}
-	for flagName, setting := range settingFlags {
-		set.String(flagName, "", setting.description)
+	for _, name := range optionsOf(verb) {
+		switch option, _ := vocab.OptionOf(name); {
+		case name == "scope":
+			held.scope = set.String(name, "", option.Summary)
+		case option.Setting != "":
+			set.String(name, "", option.Summary)
+		}
 	}
 	return held
 }
 
-// request reads the configuration documents the parsed flags name and resolves
+// optionsOf is the option list cli.json gives this analyzer's verb.
+func optionsOf(verb string) []string {
+	for _, served := range vocab.AnalyzerVerbs(language) {
+		if served.Name == verb {
+			return served.Options
+		}
+	}
+	return nil
+}
+
+// resolution reads the configuration documents the parsed flags name and resolves
 // them. The code is vocab.ExitClean on success, and otherwise the verb's code with
 // the message already printed.
-func (f *configuredFlags) request(stderr io.Writer) (req *run.Request, code int) {
-	inputs, err := configInputs(*f.target, *f.repository, *f.central, f.set)
+func (f *configuredFlags) resolution(ctx context.Context, stderr io.Writer) (resolved *config.Resolved, code int) {
+	inputs, err := configInputs(ctx, *f.target, *f.repository, *f.central, f.set)
 	if err != nil {
-		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
-		f.set.Usage()
-		return nil, vocab.ExitUsage
+		return nil, f.unread(ctx, stderr, err)
 	}
-	resolved, provenance, err := config.Resolve(inputs)
+	resolved, err = config.Resolve(inputs)
 	if err != nil {
 		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
 		refusal := exitCodeFor(err)
@@ -114,121 +82,128 @@ func (f *configuredFlags) request(stderr io.Writer) (req *run.Request, code int)
 		}
 		return nil, refusal
 	}
-	req = &run.Request{Config: resolved, Provenance: provenance, Target: *f.target}
+	return resolved, vocab.ExitClean
+}
+
+// unread prints why an input the invocation names was not read and returns its
+// code: a failure where ctx ended the read, and a usage error otherwise.
+func (f *configuredFlags) unread(ctx context.Context, stderr io.Writer, err error) int {
+	if ctx.Err() != nil {
+		return failed(ctx, stderr, err)
+	}
+	fmt.Fprintf(stderr, "deadset-go: %v\n", err)
+	f.set.Usage()
+	return vocab.ExitUsage
+}
+
+// request is [configuredFlags.resolution] as the request a verb asks one analysis
+// for.
+func (f *configuredFlags) request(ctx context.Context, stderr io.Writer) (req *run.Request, code int) {
+	resolved, code := f.resolution(ctx, stderr)
+	if code != vocab.ExitClean {
+		return nil, code
+	}
+	req = &run.Request{Config: resolved.Config, Provenance: resolved.Provenance, Target: *f.target}
 	if f.scope != nil {
 		req.Scope = *f.scope
 	}
 	return req, vocab.ExitClean
 }
 
+// parsed parses the flags of a verb that reads a configuration and takes no
+// argument.
+func parsed(verb, verbUsage string, args []string, stderr io.Writer) (flags *configuredFlags, code int) {
+	held := configuredFlagSet(verb, verbUsage, stderr)
+	if err := held.set.Parse(args); err != nil {
+		return nil, vocab.ExitUsage
+	}
+	if held.set.NArg() != 0 {
+		fmt.Fprintf(stderr, "deadset-go: %s takes no argument, got %q\n", verb, held.set.Arg(0))
+		held.set.Usage()
+		return nil, vocab.ExitUsage
+	}
+	return &held, vocab.ExitClean
+}
+
 // resolve parses the flags of a verb that reads a configuration and takes no
 // argument, and resolves the documents they name.
-func resolve(verb, verbUsage string, args []string, stderr io.Writer) (req *run.Request, code int) {
-	flags := configuredFlagSet(verb, verbUsage, stderr, false)
-	if err := flags.set.Parse(args); err != nil {
-		return nil, vocab.ExitUsage
+func resolve(ctx context.Context, verb, verbUsage string, args []string, stderr io.Writer) (req *run.Request, code int) {
+	flags, code := parsed(verb, verbUsage, args, stderr)
+	if code != vocab.ExitClean {
+		return nil, code
 	}
-	if flags.set.NArg() != 0 {
-		fmt.Fprintf(stderr, "deadset-go: %s takes no argument, got %q\n", verb, flags.set.Arg(0))
-		flags.set.Usage()
-		return nil, vocab.ExitUsage
-	}
-	return flags.request(stderr)
+	return flags.request(ctx, stderr)
 }
 
 // configInputs reads the configuration documents one invocation names. The
 // repository configuration at its conventional path is optional; a document the
 // invocation named is not.
-func configInputs(target, repository, central string, set *flag.FlagSet) (config.Inputs, error) {
-	inputs := config.Inputs{
-		RepositoryLabel: repository,
-		CentralLabel:    central,
+func configInputs(ctx context.Context, target, repository, central string, set *flag.FlagSet) (*config.Inputs, error) {
+	inputs := &config.Inputs{
+		Repository: config.Document{Path: repository},
+		Central:    config.Document{Path: central},
 	}
-	if inputs.RepositoryLabel == "" {
-		inputs.RepositoryLabel = filepath.Join(target, repositoryDocument)
+	if repository == "" {
+		inputs.Repository.Path = filepath.Join(target, repositoryDocument)
 	}
-
 	var err error
-	if inputs.Repository, err = readDocument(inputs.RepositoryLabel, repository == ""); err != nil {
-		return config.Inputs{}, err
+	if inputs.Repository.Data, err = readDocument(ctx, inputs.Repository.Path, repository == ""); err != nil {
+		return nil, err
 	}
 	if central != "" {
-		if inputs.Central, err = readDocument(central, false); err != nil {
-			return config.Inputs{}, err
+		if inputs.Central.Data, err = readDocument(ctx, central, false); err != nil {
+			return nil, err
 		}
 	}
-	if err := applyFlagSettings(set, &inputs); err != nil {
-		return config.Inputs{}, err
+	if inputs.Flags, err = flagSettings(set); err != nil {
+		return nil, err
 	}
 	return inputs, nil
 }
 
-// readDocument reads one document, refusing one above the size bound without
-// reading it whole. An absent optional document is no document.
-func readDocument(path string, optional bool) ([]byte, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		if optional && errors.Is(err, fs.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("read the configuration %s: %w", path, err)
+// readDocument reads one configuration document, refusing one above the bound
+// the Contract sets without reading it whole. An absent optional document is no
+// document.
+func readDocument(ctx context.Context, path string, optional bool) ([]byte, error) {
+	body, err := jsondoc.Read(ctx, path, vocab.DocumentMaxBytes)
+	if optional && errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
 	}
-	defer func() { _ = file.Close() }()
-
-	// One byte past the bound tells a document at the limit from one over it.
-	body, err := io.ReadAll(io.LimitReader(file, maxDocumentBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("read the configuration %s: %w", path, err)
-	}
-	if len(body) > maxDocumentBytes {
-		return nil, fmt.Errorf("the configuration %s is larger than the %d bytes a configuration document may hold", path, maxDocumentBytes)
 	}
 	return body, nil
 }
 
-// applyFlagSettings records the settings the command line supplied as one document
-// keyed by dotted setting path, with the flag that supplied each as its label.
-func applyFlagSettings(set *flag.FlagSet, inputs *config.Inputs) error {
-	settings := make(map[string]json.RawMessage)
-	labels := make(map[string]string)
+// flagSettings is the settings the command line supplied, by key, each as the
+// JSON value its option's kind of value requires.
+func flagSettings(set *flag.FlagSet) (map[vocab.Key][]byte, error) {
+	settings := map[vocab.Key][]byte{}
 	var refused error
 	set.Visit(func(f *flag.Flag) {
-		setting, ok := settingFlags[f.Name]
-		if !ok {
+		option, held := vocab.OptionOf(f.Name)
+		if !held || option.Setting == "" {
 			return
 		}
-		encoded, err := settingValue(&setting, f.Value.String())
+		encoded, err := settingValue(&option, f.Value.String())
 		if err != nil {
 			refused = errors.Join(refused, fmt.Errorf("--%s: %w", f.Name, err))
 			return
 		}
-		settings[setting.path] = encoded
-		labels[setting.path] = "--" + f.Name
+		settings[vocab.Key(option.Setting)] = encoded
 	})
-	if refused != nil {
-		return refused
-	}
-	if len(settings) == 0 {
-		return nil
-	}
-
-	document, err := json.Marshal(settings)
-	if err != nil {
-		return fmt.Errorf("render the command-line settings: %w", err)
-	}
-	inputs.Flags = document
-	inputs.FlagLabels = labels
-	return nil
+	return settings, refused
 }
 
-// settingValue is one flag's value as the JSON the setting's declared type requires.
-func settingValue(setting *settingFlag, value string) (json.RawMessage, error) {
-	if !setting.number {
+// settingValue is one flag's value as the JSON its option's kind of value
+// requires: a number for an integer, a string otherwise.
+func settingValue(option *vocab.Option, value string) ([]byte, error) {
+	if option.Value != vocab.OptionValueInteger {
 		return json.Marshal(value)
 	}
 	held, err := strconv.Atoi(value)
 	if err != nil {
-		return nil, fmt.Errorf("%s is a number, and %q is not one", setting.path, value)
+		return nil, fmt.Errorf("%s is a number, and %q is not one", option.Setting, value)
 	}
 	return json.Marshal(held)
 }

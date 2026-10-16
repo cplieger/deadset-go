@@ -3,6 +3,7 @@ package config
 import (
 	"testing"
 
+	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -25,40 +26,11 @@ func publishedKinds(t *testing.T) []vocab.Kind {
 	return rows
 }
 
-func TestNamesLiveKind(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name string
-		key  string
-		want bool
-	}{
-		{name: "a_live_code", key: "DS1001", want: true},
-		{name: "a_family_prefix_holding_live_kinds", key: intraFunctionFamily, want: true},
-		{name: "a_family_prefix_holding_one_live_kind", key: "DS13", want: true},
-		{name: "a_code_of_a_live_family_that_no_kind_carries", key: "DS1499", want: false},
-		{name: "a_code_outside_every_family", key: "DS2999", want: false},
-		{name: "a_family_prefix_no_range_declares", key: "DS29", want: false},
-		{name: "a_family_prefix_whose_range_is_reserved", key: "DS18", want: false},
-		{name: "a_code_of_a_reserved_family", key: "DS1801", want: false},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			if got := namesLiveKind(tc.key); got != tc.want {
-				t.Errorf("namesLiveKind(%q) = %t, want %t", tc.key, got, tc.want)
-			}
-		})
-	}
-}
-
-// configFor returns the default configuration for one target kind, with the
+// configFor returns a configuration of one target kind, with the
 // severity object and the consumer declaration a case carries.
-func configFor(of TargetKind, consumersComplete bool, severity map[string]vocab.Severity) Config {
-	cfg := Default()
-	cfg.Target.Kind = OneKind(of)
+func configFor(of report.TargetKind, consumersComplete bool, severity map[string]vocab.Severity) Config {
+	cfg := Config{Severity: map[string]vocab.Severity{}}
+	cfg.Target.Kind = of
 	cfg.Consumers.Complete = consumersComplete
 	if severity != nil {
 		cfg.Severity = severity
@@ -73,80 +45,80 @@ func TestEffectiveSeverity(t *testing.T) {
 		name     string
 		severity map[string]vocab.Severity
 		code     vocab.Code
-		of       TargetKind
+		of       report.TargetKind
 		want     vocab.Severity
 		complete bool
 	}{
 		{
 			name: "a_kind_no_source_names_takes_the_contract_default",
-			of:   Application, code: "DS1001", want: vocab.Deny,
+			of:   report.TargetKindApplication, code: "DS1001", want: vocab.Deny,
 		},
 		{
 			name: "a_kind_the_contract_defaults_to_warn",
-			of:   Application, code: "DS1501", want: vocab.Warn,
+			of:   report.TargetKindApplication, code: "DS1501", want: vocab.Warn,
 		},
 		{
 			name:     "the_configuration_key_for_the_code_outranks_the_default",
 			severity: map[string]vocab.Severity{"DS1001": vocab.Warn},
-			of:       Application, code: "DS1001", want: vocab.Warn,
+			of:       report.TargetKindApplication, code: "DS1001", want: vocab.Warn,
 		},
 		{
 			name:     "the_family_key_sets_every_kind_of_that_family",
 			severity: map[string]vocab.Severity{intraFunctionFamily: vocab.Allow},
-			of:       Application, code: "DS1401", want: vocab.Allow,
+			of:       report.TargetKindApplication, code: "DS1401", want: vocab.Allow,
 		},
 		{
 			name:     "the_family_key_reaches_a_deny_kind_of_the_same_family",
 			severity: map[string]vocab.Severity{intraFunctionFamily: vocab.Allow},
-			of:       Application, code: "DS1405", want: vocab.Allow,
+			of:       report.TargetKindApplication, code: "DS1405", want: vocab.Allow,
 		},
 		{
 			name:     "the_family_key_reaches_no_other_family",
 			severity: map[string]vocab.Severity{intraFunctionFamily: vocab.Allow},
-			of:       Application, code: "DS1001", want: vocab.Deny,
+			of:       report.TargetKindApplication, code: "DS1001", want: vocab.Deny,
 		},
 		{
 			name:     "the_code_key_outranks_the_family_key",
 			severity: map[string]vocab.Severity{intraFunctionFamily: vocab.Allow, "DS1401": vocab.Deny},
-			of:       Application, code: "DS1401", want: vocab.Deny,
+			of:       report.TargetKindApplication, code: "DS1401", want: vocab.Deny,
 		},
 
 		{
 			name: "a_library_keeps_the_unused_export_default",
-			of:   Library, code: "DS1001", want: vocab.Deny,
+			of:   report.TargetKindLibrary, code: "DS1001", want: vocab.Deny,
 		},
 		{
 			name: "a_library_with_no_consumer_information_keeps_the_narrowing_kinds",
-			of:   Library, code: "DS1501", want: vocab.Warn,
+			of:   report.TargetKindLibrary, code: "DS1501", want: vocab.Warn,
 		},
 		{
 			name: "a_library_with_no_consumer_information_keeps_every_other_kind",
-			of:   Library, code: "DS1002", want: vocab.Deny,
+			of:   report.TargetKindLibrary, code: "DS1002", want: vocab.Deny,
 		},
 		{
 			name: "a_library_with_no_consumer_information_keeps_test_only_use",
-			of:   Library, code: "DS1102", want: vocab.Deny,
+			of:   report.TargetKindLibrary, code: "DS1102", want: vocab.Deny,
 		},
 
 		{
 			name: "an_application_reads_no_consumer_fact",
-			of:   Application, code: "DS1001", want: vocab.Deny,
+			of:   report.TargetKindApplication, code: "DS1001", want: vocab.Deny,
 		},
 		{
 			name: "a_kind_whose_severity_the_contract_fixes",
-			of:   Library, code: "DS9003", want: vocab.Deny,
+			of:   report.TargetKindLibrary, code: "DS9003", want: vocab.Deny,
 		},
 		{
 			name: "a_code_no_live_kind_carries",
-			of:   Application, code: "DS2999", want: vocab.Allow,
+			of:   report.TargetKindApplication, code: "DS2999", want: vocab.Allow,
 		},
 		{
 			name: "a_code_of_a_reserved_family",
-			of:   Application, code: "DS1801", want: vocab.Allow,
+			of:   report.TargetKindApplication, code: "DS1801", want: vocab.Allow,
 		},
 		{
 			name: "a_family_prefix_is_not_a_kind",
-			of:   Application, code: vocab.Code(intraFunctionFamily), want: vocab.Allow,
+			of:   report.TargetKindApplication, code: vocab.Code(intraFunctionFamily), want: vocab.Allow,
 		},
 	}
 
@@ -166,7 +138,7 @@ func TestEffectiveSeverity(t *testing.T) {
 func TestEffectiveSeverityIsTheVocabularysDefaultWhenNothingNamesTheKind(t *testing.T) {
 	t.Parallel()
 
-	cfg := configFor(Application, false, nil)
+	cfg := configFor(report.TargetKindApplication, false, nil)
 	for _, published := range publishedKinds(t) {
 		want := published.DefaultSeverity
 		if !published.DefaultEnabled {
@@ -182,7 +154,7 @@ func TestEffectiveSeverityIsTheVocabularysDefaultWhenNothingNamesTheKind(t *test
 func TestEffectiveSeverityDisablesTheFamilyTheConfigurationNamesAndNoOther(t *testing.T) {
 	t.Parallel()
 
-	cfg := configFor(Application, false, map[string]vocab.Severity{intraFunctionFamily: vocab.Allow})
+	cfg := configFor(report.TargetKindApplication, false, map[string]vocab.Severity{intraFunctionFamily: vocab.Allow})
 	disabled := 0
 	for _, published := range publishedKinds(t) {
 		want := published.DefaultSeverity

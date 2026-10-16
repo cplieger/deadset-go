@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/edges"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
+	"github.com/cplieger/deadset-spec/v8/report"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
@@ -149,8 +149,8 @@ func inventoryOf(found []drawnFinding) []graph.Symbol {
 // naming the declarations a mark held back, which is the dead-subject half of the
 // drawn set and nothing else.
 func inputOfRecords(records []suppress.Record, symbols []graph.Symbol, suppressed []graph.SymbolID) *Input {
-	resolved := config.Default()
-	resolved.Target.Kind = config.OneKind(config.Application)
+	resolved := defaultConfig()
+	resolved.Target.Kind = report.TargetKindApplication
 	return &Input{
 		Config: &resolved,
 		Merged: &graph.Merged{Symbols: symbols},

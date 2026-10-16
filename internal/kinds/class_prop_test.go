@@ -7,6 +7,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
 )
@@ -152,12 +153,12 @@ func TestTheClassAndTheSeverityAreIndependentDials(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		symbols := drawnInventory(t)
 		consumers := drawnConsumers(t, "the first run")
-		kind := config.TargetKind(rapid.SampledFrom([]string{
-			string(config.Application), string(config.Library),
+		kind := report.TargetKind(rapid.SampledFrom([]string{
+			string(report.TargetKindApplication), string(report.TargetKindLibrary),
 		}).Draw(t, "the target kind"))
 
-		first := config.Default()
-		first.Target.Kind = config.OneKind(kind)
+		first := defaultConfig()
+		first.Target.Kind = kind
 		first.Analysis.MinConfidence = vocab.Possible
 		first.Consumers.Complete = consumers.Complete
 		first.Severity = drawnSeverities(t, "the first run")
@@ -180,9 +181,9 @@ func TestTheClassAndTheSeverityAreIndependentDials(t *testing.T) {
 
 		// The consumer set and the target kind move, and the severity map does not.
 		third := first
-		third.Target.Kind = config.OneKind(config.TargetKind(rapid.SampledFrom([]string{
-			string(config.Application), string(config.Library),
-		}).Draw(t, "the target kind of the third run")))
+		third.Target.Kind = report.TargetKind(rapid.SampledFrom([]string{
+			string(report.TargetKindApplication), string(report.TargetKindLibrary),
+		}).Draw(t, "the target kind of the third run"))
 		otherConsumers := drawnConsumers(t, "the third run")
 		third.Consumers.Complete = otherConsumers.Complete
 		_, movedClasses := dials(t, propInput(symbols, third, otherConsumers))

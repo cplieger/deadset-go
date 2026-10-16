@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // unvisited is the index of a symbol the component walk has not reached.
@@ -100,9 +102,9 @@ const (
 	CascadeFull
 )
 
-var cascadeNames = [...]string{
-	CascadeRoots: "roots",
-	CascadeFull:  "full",
+var cascadeNames = [...]vocab.Choice{
+	CascadeRoots: vocab.ReportersCascadeRoots,
+	CascadeFull:  vocab.ReportersCascadeFull,
 }
 
 // String returns the mode's spelling, and a numbered form for a value outside the
@@ -111,7 +113,7 @@ func (c Cascade) String() string {
 	if int(c) >= len(cascadeNames) {
 		return "Cascade(" + strconv.Itoa(int(c)) + ")"
 	}
-	return cascadeNames[c]
+	return string(cascadeNames[c])
 }
 
 // Listing is what a report carries for one dead component under one cascade mode.

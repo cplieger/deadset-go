@@ -37,6 +37,7 @@ var (
 	docsCorpusVersion   = regexp.MustCompile(`(?is)corpus version this analyzer answers is\s+([0-9]+\.[0-9]+\.[0-9]+)`)
 	docsFixtureCount    = regexp.MustCompile(`(?is)the run answers the\s+([0-9]+) fixtures`)
 	readmeFixtureCount  = regexp.MustCompile(`(?is)answers all\s+([0-9]+) of the contract's conformance fixtures`)
+	docsSpecLink        = regexp.MustCompile(`github\.com/cplieger/deadset-spec/(?:blob|tree)/([^/)\s]+)/`)
 )
 
 // TestEveryReportedKindHasADocumentationEntry reads the kinds page and refuses a
@@ -216,6 +217,31 @@ func TestTheDocumentedContractVersionIsTheOneImplemented(t *testing.T) {
 	if stated[0] != vocab.ContractVersion {
 		t.Errorf("docs/conformance.md states contract version %s, want %s, which this analyzer implements",
 			stated[0], vocab.ContractVersion)
+	}
+}
+
+// TestEveryContractLinkNamesTheImplementedRelease refuses a link into the
+// contract's repository pinned to any tag but the release of the contract
+// version this analyzer implements, so a page never sends a reader to the rules
+// of another version.
+func TestEveryContractLinkNamesTheImplementedRelease(t *testing.T) {
+	t.Parallel()
+
+	pages, err := filepath.Glob(filepath.Join("..", "..", "docs", "*.md"))
+	if err != nil || len(pages) == 0 {
+		t.Fatalf("Setup: glob docs/*.md = %v, %v", pages, err)
+	}
+	linked := 0
+	for _, page := range pages {
+		for _, tag := range matched(docsSpecLink, docPage(t, filepath.Base(page))) {
+			linked++
+			if want := "v" + vocab.ContractVersion; tag != want {
+				t.Errorf("docs/%s links the contract at %s, want %s, the release this analyzer implements", filepath.Base(page), tag, want)
+			}
+		}
+	}
+	if linked == 0 {
+		t.Fatal("no page links the contract's repository, so this test pins nothing")
 	}
 }
 
