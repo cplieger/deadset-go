@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 )
 
 // unreachableChain is the graph both relations disagree over: one declaration a
@@ -64,7 +66,7 @@ func TestSweepNamesTheRelationsHoldingEachSymbolLive(t *testing.T) {
 
 func TestSweepHoldsAMarkedSymbolLiveUnderBothRelationsWithWhatItReferences(t *testing.T) {
 	b := unreachableChain(t)
-	r := b.graph().Sweep(&SweepInput{Marked: []SymbolID{b.id("unreferenced")}})
+	r := b.graph().Sweep(&SweepInput{Marked: []inventory.SymbolID{b.id("unreferenced")}})
 
 	// A mark seeds reachability as well as holding its own symbol live, so
 	// nothing the marked declaration alone references is reported. A mark that
@@ -167,7 +169,7 @@ func TestTestReferencesOfCountsOneReferencePerClassAndDetail(t *testing.T) {
 		{ID: other, Class: "encoding-reflection", Detail: "json.Marshal"},
 	})
 
-	want := map[SymbolID]int{one: 3, other: 1}
+	want := map[inventory.SymbolID]int{one: 3, other: 1}
 	if !maps.Equal(got, want) {
 		t.Errorf("TestReferencesOf over five records, one repeated at a second site, returned %v, want %v", got, want)
 	}
@@ -207,8 +209,8 @@ func TestSweepAdmitsATestOfDeadCodeAndDeclinesATestOfLiveCode(t *testing.T) {
 
 func TestSweepJudgesNoPackageAndNoFile(t *testing.T) {
 	b := newGraphBuilder(t)
-	b.declare(handSymbol{name: "package", kind: KindPackage})
-	b.declare(handSymbol{name: "file", kind: KindFile, parent: "package"})
+	b.declare(handSymbol{name: "package", kind: inventory.KindPackage})
+	b.declare(handSymbol{name: "file", kind: inventory.KindFile, parent: "package"})
 	b.declare(handSymbol{name: "declared", parent: "package"})
 	r := b.graph().Sweep(&SweepInput{})
 
@@ -230,8 +232,8 @@ func TestSweepJudgesNoPackageAndNoFile(t *testing.T) {
 func retainedMethod(t *testing.T) *graphBuilder {
 	t.Helper()
 	b := newGraphBuilder(t)
-	b.declare(handSymbol{name: "Stringer", kind: KindType})
-	b.declare(handSymbol{name: "String", kind: KindMethod, parent: "Stringer"})
+	b.declare(handSymbol{name: "Stringer", kind: inventory.KindType})
+	b.declare(handSymbol{name: "String", kind: inventory.KindMethod, parent: "Stringer"})
 	b.add("helper")
 	b.ref("String", "Stringer")
 	b.ref("String", "helper")
@@ -311,7 +313,7 @@ func TestSweepRecordsEveryExemptionThatHeldASymbolBackAndNoOther(t *testing.T) {
 func TestSweepRecordsNoExemptionNamingASymbolTheInventoryDoesNotHold(t *testing.T) {
 	b := newGraphBuilder(t).add("unreferenced")
 	r := b.graph().Sweep(&SweepInput{Exempt: []Exemption{
-		{ID: SymbolID("absent.go:1:1"), Class: "reflective-lookup"},
+		{ID: inventory.SymbolID("absent.go:1:1"), Class: "reflective-lookup"},
 	}})
 
 	// A class that resolved a name to a declaration outside the inventory holds
@@ -339,13 +341,13 @@ func TestSweepRecordsEveryMarkThatHeldASymbolBackAndNoOther(t *testing.T) {
 	b := newGraphBuilder(t).add("entry", "heldBack", "alsoHeldBack", "exemptAndMarked")
 	b.root("entry", RootMain)
 	r := b.graph().Sweep(&SweepInput{
-		Marked: []SymbolID{
+		Marked: []inventory.SymbolID{
 			b.id("alsoHeldBack"),
 			b.id("exemptAndMarked"),
 			b.id("entry"),
 			b.id("heldBack"),
 			b.id("heldBack"),
-			SymbolID("absent.go:1:1"),
+			inventory.SymbolID("absent.go:1:1"),
 		},
 		Exempt: []Exemption{b.exemption("exemptAndMarked", "enum-group")},
 	})
@@ -383,7 +385,7 @@ func TestSweepRecordsAMarkThatHeldBackATestOfDeadCode(t *testing.T) {
 	b := newGraphBuilder(t).add("deadOne").addTest("TestDead")
 	b.root("TestDead", RootTest)
 	b.ref("TestDead", "deadOne")
-	r := b.graph().Sweep(&SweepInput{Marked: []SymbolID{b.id("TestDead")}, Mode: Mode{Production: true}})
+	r := b.graph().Sweep(&SweepInput{Marked: []inventory.SymbolID{b.id("TestDead")}, Mode: Mode{Production: true}})
 
 	// A test of dead code joins the candidate set by the rule rather than by a
 	// relation, and both relations hold it live, so a record read from the
@@ -584,9 +586,9 @@ func TestRelationStringNamesEveryRelation(t *testing.T) {
 // the sweep answers over.
 type swept struct {
 	graph   *Graph
-	byID    map[SymbolID]Symbol
-	byRef   map[string]SymbolID
-	symbols []Symbol
+	byID    map[inventory.SymbolID]inventory.Symbol
+	byRef   map[string]inventory.SymbolID
+	symbols []inventory.Symbol
 	refs    []Reference
 	roots   []Root
 }
@@ -604,8 +606,8 @@ func sweepOf(t *testing.T, archive string, opts RootOptions) *swept {
 
 	s := &swept{
 		graph:   New(symbols, refs, roots),
-		byID:    make(map[SymbolID]Symbol, len(symbols)),
-		byRef:   make(map[string]SymbolID, len(symbols)),
+		byID:    make(map[inventory.SymbolID]inventory.Symbol, len(symbols)),
+		byRef:   make(map[string]inventory.SymbolID, len(symbols)),
 		symbols: symbols,
 		refs:    refs,
 		roots:   roots,
@@ -622,7 +624,7 @@ func sweepOf(t *testing.T, archive string, opts RootOptions) *swept {
 }
 
 // id returns the identifier of the symbol one reference names.
-func (s *swept) id(t *testing.T, ref string) SymbolID {
+func (s *swept) id(t *testing.T, ref string) inventory.SymbolID {
 	t.Helper()
 	id, held := s.byRef[ref]
 	if !held {
@@ -633,12 +635,12 @@ func (s *swept) id(t *testing.T, ref string) SymbolID {
 
 // name is how a failure message and a table name one symbol: its reference
 // without the part every symbol of the package shares.
-func (s *swept) name(id SymbolID, prefix string) string {
+func (s *swept) name(id inventory.SymbolID, prefix string) string {
 	return strings.TrimPrefix(s.byID[id].Ref, prefix)
 }
 
 // names names a set of symbols in the order given.
-func (s *swept) names(ids []SymbolID, prefix string) []string {
+func (s *swept) names(ids []inventory.SymbolID, prefix string) []string {
 	names := make([]string, 0, len(ids))
 	for _, id := range ids {
 		names = append(names, s.name(id, prefix))
@@ -709,7 +711,7 @@ func TestSweepOverTheLoadedGraphNamesTheRelationThatFoundEachCandidate(t *testin
 func TestSweepOverTheLoadedGraphReportsNothingUnderAMarkedDeclaration(t *testing.T) {
 	const pkg = "go://example.com/sweep#"
 	s := sweepOf(t, "sweep.txtar", RootOptions{PublishedAPI: true})
-	r := s.graph.Sweep(&SweepInput{Marked: []SymbolID{s.id(t, pkg+"unreferenced")}})
+	r := s.graph.Sweep(&SweepInput{Marked: []inventory.SymbolID{s.id(t, pkg+"unreferenced")}})
 
 	// The mark holds the declaration live under both relations and seeds
 	// reachability from it, so the declaration only it references is not reported
@@ -1040,7 +1042,7 @@ func TestMatrixSweepHoldsATestFileDeclarationTestEvidenceNamesLiveWithWhatItReac
 	b.root("entry", RootMain)
 	b.root("TestLive", RootTest)
 	b.ref("write", "writeHelper")
-	merged, err := Merge(b.configured(1, func(int, string) bool { return true }))
+	merged, err := Merge(b.configured(1, func(int, string) bool { return true }), handTests)
 	if err != nil {
 		t.Fatalf("Merge = _, %v, want no error", err)
 	}
@@ -1061,7 +1063,7 @@ func TestMatrixSweepHoldsTestSupportCodeTestEvidenceNamesLive(t *testing.T) {
 	b := newGraphBuilder(t).add("entry").addTest("TestLive").addSupport("Get", "Spare")
 	b.root("entry", RootMain)
 	b.root("TestLive", RootTest)
-	merged, err := Merge(b.configured(1, func(int, string) bool { return true }))
+	merged, err := Merge(b.configured(1, func(int, string) bool { return true }), handTests)
 	if err != nil {
 		t.Fatalf("Merge = _, %v, want no error", err)
 	}
@@ -1117,8 +1119,8 @@ func TestSweepRetainsAnExemptionWithCoHoldersOnlyWhileEveryHolderIsLive(t *testi
 	b.root("entry", RootMain)
 	b.root("second", RootMain)
 	exemptions := []Exemption{
-		{ID: b.id("keptByBoth"), Class: "interface-satisfaction", Holder: b.id("entry"), CoHolders: []SymbolID{b.id("second")}},
-		{ID: b.id("keptWithADead"), Class: "interface-satisfaction", Holder: b.id("entry"), CoHolders: []SymbolID{b.id("deadHolder")}},
+		{ID: b.id("keptByBoth"), Class: "interface-satisfaction", Holder: b.id("entry"), CoHolders: []inventory.SymbolID{b.id("second")}},
+		{ID: b.id("keptWithADead"), Class: "interface-satisfaction", Holder: b.id("entry"), CoHolders: []inventory.SymbolID{b.id("deadHolder")}},
 	}
 	r := b.graph().Sweep(&SweepInput{Exempt: exemptions})
 
@@ -1139,7 +1141,7 @@ func TestSweepCreditsAnExemptionWithASymbolAMarkItMadeStaleNamesToo(t *testing.T
 	b.root("entry", RootMain)
 	r := b.graph().Sweep(&SweepInput{
 		Exempt: []Exemption{{ID: b.id("kept"), Class: "interface-satisfaction", Holder: b.id("entry")}},
-		Marked: []SymbolID{b.id("kept")},
+		Marked: []inventory.SymbolID{b.id("kept")},
 	})
 
 	if len(r.Suppressed) != 0 {
@@ -1168,7 +1170,7 @@ func TestSweepCountsAHolderReachabilityHoldsLiveAsHoldingItsExemption(t *testing
 func TestMatrixSweepRecordsTheHolderOfAFactThatRetained(t *testing.T) {
 	b := newGraphBuilder(t).add("entry", "deadHolder", "method")
 	b.root("entry", RootMain)
-	merged, err := Merge(b.configured(1, func(int, string) bool { return true }))
+	merged, err := Merge(b.configured(1, func(int, string) bool { return true }), handTests)
 	if err != nil {
 		t.Fatalf("Merge = _, %v, want no error", err)
 	}
@@ -1225,7 +1227,7 @@ func TestSweepLeavesTheGraphUngatedByACoHeldExemptionOnASymbolItDoesNotHold(t *t
 	g := b.graph()
 	in := &SweepInput{Exempt: []Exemption{{
 		ID: "go://example.com/app#absent", Class: "interface-satisfaction",
-		Holder: b.id("entry"), CoHolders: []SymbolID{b.id("second")},
+		Holder: b.id("entry"), CoHolders: []inventory.SymbolID{b.id("second")},
 	}}}
 	g.Sweep(in)
 

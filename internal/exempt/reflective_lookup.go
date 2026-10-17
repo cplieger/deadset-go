@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -17,7 +18,7 @@ import (
 // and whether the run time reaches an unexported one.
 type lookup struct {
 	callee   string
-	kinds    []graph.SymbolKind
+	kinds    []inventory.SymbolKind
 	exported bool
 }
 
@@ -37,25 +38,25 @@ type lookup struct {
 var lookups = map[string]lookup{
 	"reflect.Value.MethodByName": {
 		callee:   "reflect.Value.MethodByName",
-		kinds:    []graph.SymbolKind{graph.KindMethod, graph.KindInterfaceMethod},
+		kinds:    []inventory.SymbolKind{inventory.KindMethod, inventory.KindInterfaceMethod},
 		exported: true,
 	},
 	"reflect.Type.MethodByName": {
 		callee:   "reflect.Type.MethodByName",
-		kinds:    []graph.SymbolKind{graph.KindMethod, graph.KindInterfaceMethod},
+		kinds:    []inventory.SymbolKind{inventory.KindMethod, inventory.KindInterfaceMethod},
 		exported: true,
 	},
 	"reflect.Value.FieldByName": {
 		callee: "reflect.Value.FieldByName",
-		kinds:  []graph.SymbolKind{graph.KindField},
+		kinds:  []inventory.SymbolKind{inventory.KindField},
 	},
 	"reflect.Type.FieldByName": {
 		callee: "reflect.Type.FieldByName",
-		kinds:  []graph.SymbolKind{graph.KindField},
+		kinds:  []inventory.SymbolKind{inventory.KindField},
 	},
 	"plugin.Plugin.Lookup": {
 		callee:   "plugin.Plugin.Lookup",
-		kinds:    []graph.SymbolKind{graph.KindFunc, graph.KindVar},
+		kinds:    []inventory.SymbolKind{inventory.KindFunc, inventory.KindVar},
 		exported: true,
 	},
 }

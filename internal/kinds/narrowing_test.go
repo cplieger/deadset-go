@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
@@ -41,13 +42,13 @@ func narrowingInput(
 ) *Input {
 	sink.Helper()
 
-	merged, err := graph.Merge([]graph.Configured{passes})
+	merged, err := graph.Merge([]graph.Configured{passes}, graph.TestClasses{})
 	if err != nil {
 		sink.Fatalf("Setup: graph.Merge: %v", err)
 	}
 	mode := graph.Mode{Production: true}
 	swept := graph.NewMatrix(&merged).Sweep(&graph.SweepInput{Mode: mode}, nil)
-	refs := make(map[graph.SymbolID]string, len(merged.Symbols))
+	refs := make(map[inventory.SymbolID]string, len(merged.Symbols))
 	for i := range merged.Symbols {
 		refs[merged.Symbols[i].ID] = merged.Symbols[i].Ref
 	}
@@ -96,7 +97,7 @@ func narrowedRefs(found []Finding) []string {
 }
 
 // narrowedIDOf answers the identifier of the declaration whose reference is ref.
-func narrowedIDOf(t *testing.T, in *Input, ref string) graph.SymbolID {
+func narrowedIDOf(t *testing.T, in *Input, ref string) inventory.SymbolID {
 	t.Helper()
 
 	if id := in.index().byRef[ref]; id != "" {
@@ -402,39 +403,39 @@ func TestNarrowingYieldsADeclarationNothingReadsToTheWriteOnlyKind(t *testing.T)
 		pkgPath = "example.com/app"
 		fieldOf = "go://example.com/app#Answer.Status"
 	)
-	answer := graph.Symbol{
-		ID:       graph.SymbolID(file + ":3:6"),
+	answer := inventory.Symbol{
+		ID:       inventory.SymbolID(file + ":3:6"),
 		Ref:      "go://example.com/app#Answer",
 		Name:     "Answer",
 		PkgPath:  pkgPath,
 		Pos:      token.Position{Filename: file, Line: 3, Column: 6},
 		EndLine:  5,
-		Kind:     graph.KindType,
+		Kind:     inventory.KindType,
 		Exported: true,
 	}
-	status := graph.Symbol{
-		ID:       graph.SymbolID(file + ":4:2"),
+	status := inventory.Symbol{
+		ID:       inventory.SymbolID(file + ":4:2"),
 		Ref:      fieldOf,
 		Name:     "Status",
 		PkgPath:  pkgPath,
 		Pos:      token.Position{Filename: file, Line: 4, Column: 2},
 		EndLine:  4,
-		Kind:     graph.KindField,
+		Kind:     inventory.KindField,
 		Parent:   answer.ID,
 		Exported: true,
 	}
-	fill := graph.Symbol{
-		ID:       graph.SymbolID(file + ":7:6"),
+	fill := inventory.Symbol{
+		ID:       inventory.SymbolID(file + ":7:6"),
 		Ref:      "go://example.com/app#Fill",
 		Name:     "Fill",
 		PkgPath:  pkgPath,
 		Pos:      token.Position{Filename: file, Line: 7, Column: 6},
 		EndLine:  9,
-		Kind:     graph.KindFunc,
+		Kind:     inventory.KindFunc,
 		Exported: true,
 	}
 	in := narrowingInput(t, graph.Configured{
-		Symbols: []graph.Symbol{answer, status, fill},
+		Symbols: []inventory.Symbol{answer, status, fill},
 		References: []graph.Reference{
 			{
 				From: fill.ID, To: status.ID, Kind: graph.RefWrite,
@@ -471,19 +472,19 @@ func TestNarrowingLeavesADeclarationReferencedFromOutsideTheModuleAlone(t *testi
 		file    = "catalog/api.go"
 		pkgPath = "example.com/app/catalog"
 	)
-	subject := graph.Symbol{
-		ID:       graph.SymbolID(file + ":3:6"),
+	subject := inventory.Symbol{
+		ID:       inventory.SymbolID(file + ":3:6"),
 		Ref:      ref,
 		Name:     "Shared",
 		PkgPath:  pkgPath,
 		Pos:      token.Position{Filename: file, Line: 3, Column: 6},
 		EndLine:  3,
-		Kind:     graph.KindFunc,
+		Kind:     inventory.KindFunc,
 		Exported: true,
 	}
 	tests := []struct {
 		name     string
-		from     graph.SymbolID
+		from     inventory.SymbolID
 		consumer string
 		want     map[string]string
 	}{
@@ -509,7 +510,7 @@ func TestNarrowingLeavesADeclarationReferencedFromOutsideTheModuleAlone(t *testi
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			in := narrowingInput(t, graph.Configured{
-				Symbols: []graph.Symbol{subject},
+				Symbols: []inventory.Symbol{subject},
 				References: []graph.Reference{{
 					From:     tc.from,
 					To:       subject.ID,

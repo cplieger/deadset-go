@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
@@ -110,13 +111,13 @@ func readOutsideRootSource(string) ([]byte, error) { return []byte(outsideRootSo
 
 // symbolsOf extracts one archive, loads it for the host configuration and
 // enumerates it.
-func symbolsOf(t *testing.T, archive string) []Symbol {
+func symbolsOf(t *testing.T, archive string) []inventory.Symbol {
 	t.Helper()
 	return analysisOf(t, archive, nil).inventory(t)
 }
 
 // render prints one symbol per line, tab-separated, for a golden comparison.
-func render(symbols []Symbol) string {
+func render(symbols []inventory.Symbol) string {
 	var b strings.Builder
 	for _, s := range symbols {
 		fmt.Fprintf(&b, "%s:%d:%d-%d\t%s\t%s\t%s\tparent=%s\texported=%t\tblank=%t\n",
@@ -128,13 +129,13 @@ func render(symbols []Symbol) string {
 
 func TestSymbolsNamesTheDependentsOfEveryConstantOfAGroup(t *testing.T) {
 	symbols := symbolsOf(t, "constant-groups.txtar")
-	names := make(map[SymbolID]string, len(symbols))
+	names := make(map[inventory.SymbolID]string, len(symbols))
 	for _, s := range symbols {
 		names[s.ID] = s.Name
 	}
 	got := make(map[string]string)
 	for _, s := range symbols {
-		if s.Kind != KindConst || s.Blank {
+		if s.Kind != inventory.KindConst || s.Blank {
 			continue
 		}
 		dependents := make([]string, len(s.Dependents))
@@ -184,14 +185,14 @@ func TestSymbolsGoldenTableOverEveryKind(t *testing.T) {
 
 func TestSymbolsReachesEveryKind(t *testing.T) {
 	symbols := symbolsOf(t, "every-kind.txtar")
-	found := make(map[SymbolKind][]string)
+	found := make(map[inventory.SymbolKind][]string)
 	for _, s := range symbols {
 		found[s.Kind] = append(found[s.Kind], s.Ref)
 	}
 
-	all := []SymbolKind{
-		KindFunc, KindMethod, KindType, KindInterface, KindInterfaceMethod,
-		KindField, KindConst, KindVar, KindTypeParam, KindPackage, KindFile,
+	all := []inventory.SymbolKind{
+		inventory.KindFunc, inventory.KindMethod, inventory.KindType, inventory.KindInterface, inventory.KindInterfaceMethod,
+		inventory.KindField, inventory.KindConst, inventory.KindVar, inventory.KindTypeParam, inventory.KindPackage, inventory.KindFile,
 	}
 	for _, kind := range all {
 		t.Run(kind.String(), func(t *testing.T) {
@@ -203,7 +204,7 @@ func TestSymbolsReachesEveryKind(t *testing.T) {
 }
 
 // reached names the kinds an enumeration produced, for a failure message.
-func reached(found map[SymbolKind][]string) []string {
+func reached(found map[inventory.SymbolKind][]string) []string {
 	names := make([]string, 0, len(found))
 	for kind := range found {
 		names = append(names, kind.String())
@@ -215,8 +216,8 @@ func reached(found map[SymbolKind][]string) []string {
 // the outermost of any that share one. A blank declaration takes its container's
 // reference, so several symbols can answer to one reference and the first by
 // position is the one it names.
-func namedByRef(symbols []Symbol) map[string]Symbol {
-	byRef := make(map[string]Symbol, len(symbols))
+func namedByRef(symbols []inventory.Symbol) map[string]inventory.Symbol {
+	byRef := make(map[string]inventory.Symbol, len(symbols))
 	for _, s := range symbols {
 		if _, taken := byRef[s.Ref]; taken || s.Blank {
 			continue
@@ -231,32 +232,32 @@ func TestSymbolsNamesEveryMemberWithItsContainer(t *testing.T) {
 
 	cases := []struct {
 		ref     string
-		kind    SymbolKind
+		kind    inventory.SymbolKind
 		name    string
 		parent  string
 		blank   bool
 		wantHit bool
 	}{
-		{ref: "go://example.com/app#", kind: KindPackage, name: "example.com/app", wantHit: true},
-		{ref: "go://example.com/app#catalog.go:file", kind: KindFile, name: "catalog.go", parent: "go://example.com/app#", wantHit: true},
-		{ref: "go://example.com/app#Fetcher", kind: KindInterface, name: "Fetcher", parent: "go://example.com/app#", wantHit: true},
-		{ref: "go://example.com/app#Fetcher.Fetch", kind: KindInterfaceMethod, name: "Fetcher.Fetch", parent: "go://example.com/app#Fetcher", wantHit: true},
-		{ref: "go://example.com/app#Catalog.entries", kind: KindField, name: "Catalog.entries", parent: "go://example.com/app#Catalog", wantHit: true},
+		{ref: "go://example.com/app#", kind: inventory.KindPackage, name: "example.com/app", wantHit: true},
+		{ref: "go://example.com/app#catalog.go:file", kind: inventory.KindFile, name: "catalog.go", parent: "go://example.com/app#", wantHit: true},
+		{ref: "go://example.com/app#Fetcher", kind: inventory.KindInterface, name: "Fetcher", parent: "go://example.com/app#", wantHit: true},
+		{ref: "go://example.com/app#Fetcher.Fetch", kind: inventory.KindInterfaceMethod, name: "Fetcher.Fetch", parent: "go://example.com/app#Fetcher", wantHit: true},
+		{ref: "go://example.com/app#Catalog.entries", kind: inventory.KindField, name: "Catalog.entries", parent: "go://example.com/app#Catalog", wantHit: true},
 		// A blank declaration carries no reference of its own, so nothing is
 		// reachable under the name the source spells.
 		{ref: "go://example.com/app#Catalog._", wantHit: false},
 		{ref: "go://example.com/app#_", wantHit: false},
-		{ref: "go://example.com/app#Catalog.Tools.Name", kind: KindField, name: "Catalog.Tools.Name", parent: "go://example.com/app#Catalog.Tools", wantHit: true},
-		{ref: "go://example.com/app#Buffered.Catalog", kind: KindField, name: "Buffered.Catalog", parent: "go://example.com/app#Buffered", wantHit: true},
-		{ref: "go://example.com/app#Alias", kind: KindType, name: "Alias", parent: "go://example.com/app#", wantHit: true},
-		{ref: "go://example.com/app#Exact", kind: KindConst, name: "Exact", parent: "go://example.com/app#", wantHit: true},
-		{ref: "go://example.com/app#ErrNotFound", kind: KindVar, name: "ErrNotFound", parent: "go://example.com/app#", wantHit: true},
-		{ref: "go://example.com/app#Catalog.ResolveAlias", kind: KindMethod, name: "(*Catalog).ResolveAlias", parent: "go://example.com/app#Catalog", wantHit: true},
-		{ref: "go://example.com/app#Catalog.Size", kind: KindMethod, name: "Catalog.Size", parent: "go://example.com/app#Catalog", wantHit: true},
-		{ref: "go://example.com/app#Best[T]", kind: KindTypeParam, name: "Best[T]", parent: "go://example.com/app#Best", wantHit: true},
-		{ref: "go://example.com/app/internal/queue#List.Push", kind: KindMethod, name: "(*List).Push", parent: "go://example.com/app/internal/queue#List", wantHit: true},
-		{ref: "go://example.com/app/internal/queue#List.Contains", kind: KindMethod, name: "(*List).Contains", parent: "go://example.com/app/internal/queue#List", wantHit: true},
-		{ref: "go://example.com/app/internal/queue#List.Contains[U]", kind: KindTypeParam, name: "(*List).Contains[U]", parent: "go://example.com/app/internal/queue#List.Contains", wantHit: true},
+		{ref: "go://example.com/app#Catalog.Tools.Name", kind: inventory.KindField, name: "Catalog.Tools.Name", parent: "go://example.com/app#Catalog.Tools", wantHit: true},
+		{ref: "go://example.com/app#Buffered.Catalog", kind: inventory.KindField, name: "Buffered.Catalog", parent: "go://example.com/app#Buffered", wantHit: true},
+		{ref: "go://example.com/app#Alias", kind: inventory.KindType, name: "Alias", parent: "go://example.com/app#", wantHit: true},
+		{ref: "go://example.com/app#Exact", kind: inventory.KindConst, name: "Exact", parent: "go://example.com/app#", wantHit: true},
+		{ref: "go://example.com/app#ErrNotFound", kind: inventory.KindVar, name: "ErrNotFound", parent: "go://example.com/app#", wantHit: true},
+		{ref: "go://example.com/app#Catalog.ResolveAlias", kind: inventory.KindMethod, name: "(*Catalog).ResolveAlias", parent: "go://example.com/app#Catalog", wantHit: true},
+		{ref: "go://example.com/app#Catalog.Size", kind: inventory.KindMethod, name: "Catalog.Size", parent: "go://example.com/app#Catalog", wantHit: true},
+		{ref: "go://example.com/app#Best[T]", kind: inventory.KindTypeParam, name: "Best[T]", parent: "go://example.com/app#Best", wantHit: true},
+		{ref: "go://example.com/app/internal/queue#List.Push", kind: inventory.KindMethod, name: "(*List).Push", parent: "go://example.com/app/internal/queue#List", wantHit: true},
+		{ref: "go://example.com/app/internal/queue#List.Contains", kind: inventory.KindMethod, name: "(*List).Contains", parent: "go://example.com/app/internal/queue#List", wantHit: true},
+		{ref: "go://example.com/app/internal/queue#List.Contains[U]", kind: inventory.KindTypeParam, name: "(*List).Contains[U]", parent: "go://example.com/app/internal/queue#List.Contains", wantHit: true},
 		// A type's own type parameters are not subjects.
 		{ref: "go://example.com/app/internal/queue#List[T]", wantHit: false},
 	}
@@ -287,7 +288,7 @@ func TestSymbolsNamesEveryMemberWithItsContainer(t *testing.T) {
 }
 
 // parentRef resolves one symbol's container to that container's reference.
-func parentRef(byRef map[string]Symbol, s Symbol) string {
+func parentRef(byRef map[string]inventory.Symbol, s inventory.Symbol) string {
 	for _, candidate := range byRef {
 		if candidate.ID == s.Parent {
 			return candidate.Ref
@@ -333,7 +334,7 @@ func TestSymbolsCountsTheBlankDeclarations(t *testing.T) {
 }
 
 func TestSymbolsRecordsExportedness(t *testing.T) {
-	byName := make(map[string]Symbol)
+	byName := make(map[string]inventory.Symbol)
 	for _, s := range symbolsOf(t, "every-kind.txtar") {
 		byName[s.Name] = s
 	}
@@ -399,11 +400,11 @@ func TestSymbolsOrderIsTheSameOnEveryCall(t *testing.T) {
 	dir := extract(t, "every-kind.txtar")
 	result, root := loadDir(t, dir, "linux", "amd64")
 
-	first, err := Symbols(result, root, os.ReadFile)
+	first, _, err := inventoryOf(result, root, os.ReadFile)
 	if err != nil {
 		t.Fatalf("Symbols first call error: %v", err)
 	}
-	second, err := Symbols(result, root, os.ReadFile)
+	second, _, err := inventoryOf(result, root, os.ReadFile)
 	if err != nil {
 		t.Fatalf("Symbols second call error: %v", err)
 	}
@@ -412,7 +413,7 @@ func TestSymbolsOrderIsTheSameOnEveryCall(t *testing.T) {
 	}
 
 	for i := 1; i < len(first); i++ {
-		if bySite(first[i-1], first[i]) >= 0 {
+		if inventory.BySite(first[i-1], first[i]) >= 0 {
 			t.Fatalf("Symbols order is not strictly increasing at %d: %s then %s",
 				i, first[i-1].ID, first[i].ID)
 		}
@@ -421,7 +422,7 @@ func TestSymbolsOrderIsTheSameOnEveryCall(t *testing.T) {
 
 func TestSymbolsIDIsTheRenderedPosition(t *testing.T) {
 	for _, s := range symbolsOf(t, "every-kind.txtar") {
-		want := SymbolID(fmt.Sprintf("%s:%d:%d", s.Pos.Filename, s.Pos.Line, s.Pos.Column))
+		want := inventory.SymbolID(fmt.Sprintf("%s:%d:%d", s.Pos.Filename, s.Pos.Line, s.Pos.Column))
 		if s.ID != want {
 			t.Errorf("Symbols(every-kind.txtar)[%s].ID = %q, want %q", s.Ref, s.ID, want)
 		}
@@ -436,24 +437,26 @@ func TestSymbolsRefusesAnIncompleteRequest(t *testing.T) {
 		name    string
 		result  *load.Result
 		root    string
-		read    ReadFile
+		read    inventory.ReadFile
 		wantErr error
 	}{
-		{name: "no result", result: nil, root: root, read: os.ReadFile, wantErr: ErrIncompleteLoad},
-		{name: "no file set", result: &load.Result{Packages: result.Packages}, root: root, read: os.ReadFile, wantErr: ErrIncompleteLoad},
-		{name: "no reader", result: result, root: root, read: nil, wantErr: ErrIncompleteLoad},
+		{name: "no result", result: nil, root: root, read: os.ReadFile, wantErr: inventory.ErrIncompleteLoad},
+		{name: "no file set", result: &load.Result{Packages: result.Packages}, root: root, read: os.ReadFile, wantErr: inventory.ErrIncompleteLoad},
+		{name: "no reader", result: result, root: root, read: nil, wantErr: inventory.ErrIncompleteLoad},
 		{
-			name:    "a load that carries no syntax tree",
-			result:  &load.Result{Fset: result.Fset, Packages: []*packages.Package{{PkgPath: "example.com/app", TypesInfo: &types.Info{}}}},
-			root:    root,
-			read:    os.ReadFile,
-			wantErr: errNoTargetPackage,
+			name:   "a load that carries no syntax tree",
+			result: &load.Result{Fset: result.Fset, Packages: []*packages.Package{{PkgPath: "example.com/app", TypesInfo: &types.Info{}}}},
+			root:   root,
+			read:   os.ReadFile,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := Symbols(tc.result, tc.root, tc.read)
-			if !errors.Is(err, tc.wantErr) {
+			got, _, err := inventoryOf(tc.result, tc.root, tc.read)
+			if tc.wantErr == nil && (err == nil || !strings.Contains(err.Error(), "carries no package to enumerate")) {
+				t.Fatalf("Symbols(%s) error = %v, want the one naming a load that carries no package", tc.name, err)
+			}
+			if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
 				t.Fatalf("Symbols(%s) error = %v, want one satisfying errors.Is(err, %v)", tc.name, err, tc.wantErr)
 			}
 			if got != nil {
@@ -466,9 +469,9 @@ func TestSymbolsRefusesAnIncompleteRequest(t *testing.T) {
 func TestSymbolsReportsAFileTheTargetRootDoesNotHold(t *testing.T) {
 	result, root, file := outsideRoot(t)
 
-	got, err := Symbols(result, root, readOutsideRootSource)
-	if !errors.Is(err, ErrSource) {
-		t.Fatalf("Symbols(a file outside the root) error = %v, want one satisfying errors.Is(err, %v)", err, ErrSource)
+	got, _, err := inventoryOf(result, root, readOutsideRootSource)
+	if !errors.Is(err, inventory.ErrSource) {
+		t.Fatalf("Symbols(a file outside the root) error = %v, want one satisfying errors.Is(err, %v)", err, inventory.ErrSource)
 	}
 	if !strings.Contains(err.Error(), file) {
 		t.Errorf("Symbols(a file outside the root) error = %v, want it to name %s", err, file)
@@ -483,9 +486,9 @@ func TestSymbolsReportsAnUnreadableSource(t *testing.T) {
 	result, root := loadDir(t, dir, "linux", "amd64")
 
 	refuse := func(string) ([]byte, error) { return nil, os.ErrPermission }
-	got, err := Symbols(result, root, refuse)
-	if !errors.Is(err, ErrSource) {
-		t.Fatalf("Symbols with a refusing reader error = %v, want one satisfying errors.Is(err, %v)", err, ErrSource)
+	got, _, err := inventoryOf(result, root, refuse)
+	if !errors.Is(err, inventory.ErrSource) {
+		t.Fatalf("Symbols with a refusing reader error = %v, want one satisfying errors.Is(err, %v)", err, inventory.ErrSource)
 	}
 	if got != nil {
 		t.Errorf("Symbols with a refusing reader returned %d symbols, want none", len(got))
@@ -494,21 +497,21 @@ func TestSymbolsReportsAnUnreadableSource(t *testing.T) {
 
 func TestSymbolKindStringNamesEveryKind(t *testing.T) {
 	cases := []struct {
-		kind SymbolKind
+		kind inventory.SymbolKind
 		want string
 	}{
-		{KindFunc, "function"},
-		{KindMethod, "method"},
-		{KindType, "type"},
-		{KindInterface, "interface"},
-		{KindInterfaceMethod, "interface-method"},
-		{KindField, "field"},
-		{KindConst, "constant"},
-		{KindVar, "variable"},
-		{KindTypeParam, "type-parameter"},
-		{KindPackage, "package"},
-		{KindFile, "file"},
-		{SymbolKind(200), "SymbolKind(200)"},
+		{inventory.KindFunc, "function"},
+		{inventory.KindMethod, "method"},
+		{inventory.KindType, "type"},
+		{inventory.KindInterface, "interface"},
+		{inventory.KindInterfaceMethod, "interface-method"},
+		{inventory.KindField, "field"},
+		{inventory.KindConst, "constant"},
+		{inventory.KindVar, "variable"},
+		{inventory.KindTypeParam, "type-parameter"},
+		{inventory.KindPackage, "package"},
+		{inventory.KindFile, "file"},
+		{inventory.SymbolKind(200), "SymbolKind(200)"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.want, func(t *testing.T) {
@@ -521,7 +524,7 @@ func TestSymbolKindStringNamesEveryKind(t *testing.T) {
 
 func TestSymbolsGivesABlankDeclarationItsContainersReference(t *testing.T) {
 	symbols := symbolsOf(t, "every-kind.txtar")
-	byID := make(map[SymbolID]Symbol, len(symbols))
+	byID := make(map[inventory.SymbolID]inventory.Symbol, len(symbols))
 	for _, s := range symbols {
 		byID[s.ID] = s
 	}
@@ -535,7 +538,7 @@ func TestSymbolsGivesABlankDeclarationItsContainersReference(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var got Symbol
+			var got inventory.Symbol
 			for _, s := range symbols {
 				if s.Blank && s.Name == tc.name {
 					got = s
@@ -561,12 +564,12 @@ func TestSymbolsGivesAMethodTypeParameterItsOwnBracketedReference(t *testing.T) 
 		parameterRef = "go://example.com/app/internal/queue#List.Contains[U]"
 	)
 
-	var method, parameter Symbol
+	var method, parameter inventory.Symbol
 	for _, s := range symbolsOf(t, "every-kind.txtar") {
 		switch {
-		case s.Kind == KindMethod && s.Ref == methodRef:
+		case s.Kind == inventory.KindMethod && s.Ref == methodRef:
 			method = s
-		case s.Kind == KindTypeParam && s.Name == "(*List).Contains[U]":
+		case s.Kind == inventory.KindTypeParam && s.Name == "(*List).Contains[U]":
 			parameter = s
 		}
 	}

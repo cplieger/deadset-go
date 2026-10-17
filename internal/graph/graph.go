@@ -1,4 +1,9 @@
+// Package graph collects the references and the roots of one loaded
+// configuration over its inventory, classifies its test-support packages, and
+// sweeps the merged matrix for the declarations nothing keeps live.
 package graph
+
+import "github.com/cplieger/deadset-go/v2/internal/inventory"
 
 // outside is the position of a symbol the inventory does not hold.
 const outside = -1
@@ -45,8 +50,8 @@ type rooted struct {
 // no file, renders no position and issues no query, so a sweep over it is a
 // function of the values New was given. One Graph answers any number of sweeps.
 type Graph struct {
-	index    map[SymbolID]int
-	symbols  []Symbol
+	index    map[inventory.SymbolID]int
+	symbols  []inventory.Symbol
 	out      [][]edge // per symbol, the references the symbol makes
 	made     []counts // per symbol, the references made to the symbol
 	consumed []calls  // per symbol, how a loaded consumer references it
@@ -57,23 +62,14 @@ type Graph struct {
 	gates    [][]int // per gate, the positions of the symbols that must all be reached before an edge waiting on it is followed
 }
 
-// New indexes the outputs of Symbols, References and Roots.
-//
-// Each reference is kept in the adjacency it can serve. One whose From is not a
-// symbol of the inventory still counts toward the references made to its target,
-// because reference counting asks whether any declaration of the loaded graph
-// references the symbol and a declaration outside the inventory is one, a loaded
-// consumer's being the case that arrives by design. One whose To is not a symbol
-// is kept nowhere, and neither is a root naming no symbol, because the inventory
-// is what decides which symbols the analysis reasons about.
-//
-// The symbols slice is held rather than copied, so a caller that changes it
-// afterwards changes what every later sweep answers, and the order it arrives in,
-// which is the order Symbols returns and so by site, is the order every set in a
+// New indexes the outputs of inventory.Of, References and Roots. A reference from
+// outside the inventory, a consumer's, still counts toward its target's references;
+// one to a symbol outside it, and a root naming none, are kept nowhere. The symbols
+// slice is held, not copied, and its order (by site) is the order every set of a
 // Result reads in.
-func New(symbols []Symbol, refs []Reference, roots []Root) *Graph {
+func New(symbols []inventory.Symbol, refs []Reference, roots []Root) *Graph {
 	g := &Graph{
-		index:    make(map[SymbolID]int, len(symbols)),
+		index:    make(map[inventory.SymbolID]int, len(symbols)),
 		symbols:  symbols,
 		out:      make([][]edge, len(symbols)),
 		made:     make([]counts, len(symbols)),
@@ -88,13 +84,12 @@ func New(symbols []Symbol, refs []Reference, roots []Root) *Graph {
 	for i := range symbols {
 		s := &symbols[i]
 		g.parent[i] = g.at(s.Parent)
-		_, inTestFile := IsTestFile(s.Pos.Filename)
-		g.test[i] = inTestFile || s.TestSupport
+		g.test[i] = s.InTestFile || s.TestSupport
 		// A package and a file are not judged by either relation. Their liveness
 		// is the subject of the file and package kinds, which read the load and
 		// the file-to-package edges an import records rather than asking whether
 		// anything references the file, which nothing ever does.
-		g.subject[i] = s.Kind != KindPackage && s.Kind != KindFile
+		g.subject[i] = s.Kind != inventory.KindPackage && s.Kind != inventory.KindFile
 	}
 	for i := range refs {
 		g.add(&refs[i])
@@ -139,7 +134,7 @@ func (g *Graph) add(r *Reference) bool {
 
 // at returns the position of the symbol id names, or outside when the inventory
 // holds no such symbol. The empty identifier names none.
-func (g *Graph) at(id SymbolID) int {
+func (g *Graph) at(id inventory.SymbolID) int {
 	if i, held := g.index[id]; held {
 		return i
 	}

@@ -1,37 +1,35 @@
 package graph
 
 import (
+	"maps"
 	"os"
 	"slices"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 )
 
 // classifiedSupport loads the test-support archive and returns the packages
 // ClassifyTestSupport classifies, with the declaration Kept configured as a root,
-// and the functions outside test files it marked.
+// and the functions outside test files those packages declare.
 func classifiedSupport(t *testing.T, library bool) (support, marked []string) {
 	t.Helper()
 
 	result, root := loadDir(t, extract(t, "test-support.txtar"), "linux", "amd64")
-	symbols, err := Symbols(result, root, os.ReadFile)
+	symbols, rs, err := inventoryOf(result, root, os.ReadFile)
 	if err != nil {
 		t.Fatalf("Setup: Symbols(test-support.txtar): %v", err)
 	}
-	kept := slices.IndexFunc(symbols, func(s Symbol) bool { return s.Name == "Kept" })
+	kept := slices.IndexFunc(symbols, func(s inventory.Symbol) bool { return s.Name == "Kept" })
 	if kept < 0 {
 		t.Fatalf("Setup: test-support.txtar declares no Kept")
 	}
 	opts := RootOptions{Patterns: []string{symbols[kept].Ref}, PublishedAPI: library}
-	roots, _, err := Roots(result, root, os.ReadFile, symbols, opts)
-	if err != nil {
-		t.Fatalf("Setup: Roots(test-support.txtar): %v", err)
-	}
-	classes := ClassifyTestSupport(result, root, symbols, roots, library)
+	roots, _ := Roots(result, rs, symbols, opts)
+	classes := ClassifyTestSupport(result, symbols, roots, library)
 	for i := range symbols {
-		_, inTestFile := IsTestFile(symbols[i].Pos.Filename)
-		if symbols[i].TestSupport && !inTestFile && symbols[i].Kind == KindFunc {
+		if classes.Support[symbols[i].Package] && !symbols[i].InTestFile && symbols[i].Kind == inventory.KindFunc {
 			marked = append(marked, symbols[i].Name)
 		}
 	}
@@ -68,15 +66,12 @@ func TestClassifyTestSupportIsTheLargestSetOnlyTestsReach(t *testing.T) {
 // package's is, and one of a module whose path only starts with a library's is not.
 func TestClassifyTestSupportCountsTestLibraryImportsAsEvidence(t *testing.T) {
 	result, root := loadDir(t, extract(t, "test-support-libraries.txtar"), "linux", "amd64")
-	symbols, err := Symbols(result, root, os.ReadFile)
+	symbols, rs, err := inventoryOf(result, root, os.ReadFile)
 	if err != nil {
 		t.Fatalf("Setup: Symbols(test-support-libraries.txtar): %v", err)
 	}
-	roots, _, err := Roots(result, root, os.ReadFile, symbols, RootOptions{})
-	if err != nil {
-		t.Fatalf("Setup: Roots(test-support-libraries.txtar): %v", err)
-	}
-	classes := ClassifyTestSupport(result, root, symbols, roots, false)
+	roots, _ := Roots(result, rs, symbols, RootOptions{})
+	classes := ClassifyTestSupport(result, symbols, roots, false)
 
 	if got, want := paths(classes.Support), []string{
 		"example.com/libs/asserted", "example.com/libs/matched", "example.com/libs/tooled",
@@ -103,19 +98,16 @@ func TestClassifyTestSupportKeepsALibrarysImportablePackagesOut(t *testing.T) {
 // that package.
 func TestClassifyTestSupportKeepsADeclarationALineDirectiveMovesInItsPackage(t *testing.T) {
 	result, root := loadDir(t, extract(t, "test-support-line-directive.txtar"), "linux", "amd64")
-	symbols, err := Symbols(result, root, os.ReadFile)
+	symbols, rs, err := inventoryOf(result, root, os.ReadFile)
 	if err != nil {
 		t.Fatalf("Setup: Symbols(test-support-line-directive.txtar): %v", err)
 	}
-	roots, _, err := Roots(result, root, os.ReadFile, symbols, RootOptions{})
-	if err != nil {
-		t.Fatalf("Setup: Roots(test-support-line-directive.txtar): %v", err)
-	}
-	ClassifyTestSupport(result, root, symbols, roots, false)
+	roots, _ := Roots(result, rs, symbols, RootOptions{})
+	classes := ClassifyTestSupport(result, symbols, roots, false)
 
 	var marked []string
 	for i := range symbols {
-		if symbols[i].Kind == KindFunc && symbols[i].TestSupport {
+		if symbols[i].Kind == inventory.KindFunc && classes.Support[symbols[i].Package] {
 			marked = append(marked, symbols[i].Name+" "+symbols[i].Pos.Filename)
 		}
 	}
@@ -133,4 +125,37 @@ func paths(set map[load.PackageID]bool) []string {
 	}
 	slices.Sort(held)
 	return held
+}
+
+// A configuration that loads a package and classifies it otherwise vetoes the class,
+// whatever the order of the matrix, and one that does not load it decides nothing.
+func TestMatrixTestsKeepsAClassEveryConfigurationLoadingThePackageGives(t *testing.T) {
+	support, reached, production, absent := load.PackageID{Path: "s"}, load.PackageID{Path: "r"}, load.PackageID{Path: "p"}, load.PackageID{Path: "a"}
+	set := func(keys ...load.PackageID) map[load.PackageID]bool {
+		held := make(map[load.PackageID]bool, len(keys))
+		for _, key := range keys {
+			held[key] = true
+		}
+		return held
+	}
+	first := TestClasses{
+		Support: set(support, reached, production, absent),
+		Loaded:  set(support, reached, production, absent),
+	}
+	second := TestClasses{
+		Support: set(support),
+		Reached: set(reached),
+		Loaded:  set(support, reached, production),
+	}
+	for name, per := range map[string][]TestClasses{"in order": {first, second}, "reversed": {second, first}} {
+		t.Run(name, func(t *testing.T) {
+			got := MatrixTests(per)
+			if want := set(support, absent); !maps.Equal(got.Support, want) {
+				t.Errorf("MatrixTests(%s).Support = %v, want %v", name, got.Support, want)
+			}
+			if want := set(reached); !maps.Equal(got.Reached, want) {
+				t.Errorf("MatrixTests(%s).Reached = %v, want %v", name, got.Reached, want)
+			}
+		})
+	}
 }

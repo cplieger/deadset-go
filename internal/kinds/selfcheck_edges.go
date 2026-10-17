@@ -4,7 +4,7 @@ import (
 	"slices"
 
 	"github.com/cplieger/deadset-go/v2/internal/edges"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/report"
 )
 
@@ -60,7 +60,7 @@ func Evaluate(in *Input, findings []Finding) ([]Finding, []Evaluation) {
 		return findings, nil
 	}
 
-	held := make(map[graph.SymbolID]int, len(findings))
+	held := make(map[inventory.SymbolID]int, len(findings))
 	for i := range findings {
 		held[findings[i].id] = i
 	}

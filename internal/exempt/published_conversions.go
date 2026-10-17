@@ -5,7 +5,9 @@ import (
 	"go/types"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -32,10 +34,10 @@ func publishedConversions(in *Input) []graph.Conversion {
 // publishedScan reads one configuration's target packages for what an outside
 // program can hold and where it can hand a value over.
 type publishedScan struct {
-	resolve    *graph.Resolver
-	target     map[string]bool       // the target's packages, by [graph.Resolver.PackageKey]
-	holdable   map[string]types.Type // by [graph.Resolver.TypeKey]
-	reached    map[string]bool       // the types the published API reaches, by [graph.Resolver.TypeKey]
+	resolve    *resolve.Resolver
+	target     map[string]bool       // the target's packages, by [resolve.Resolver.PackageKey]
+	holdable   map[string]types.Type // by [resolve.Resolver.TypeKey]
+	reached    map[string]bool       // the types the published API reaches, by [resolve.Resolver.TypeKey]
 	functions  map[*types.Func]bool  // the published functions read
 	typeParams map[*types.TypeParam]bool
 	queue      []types.Type         // holdable types not yet read
@@ -55,9 +57,9 @@ type publishedParameter struct {
 }
 
 // newPublishedScan indexes the target's packages, each once.
-func newPublishedScan(pkgs []*packages.Package, resolve *graph.Resolver) *publishedScan {
+func newPublishedScan(pkgs []*packages.Package, rs *resolve.Resolver) *publishedScan {
 	s := &publishedScan{
-		resolve:    resolve,
+		resolve:    rs,
 		target:     make(map[string]bool),
 		holdable:   make(map[string]types.Type),
 		reached:    make(map[string]bool),
@@ -65,12 +67,12 @@ func newPublishedScan(pkgs []*packages.Package, resolve *graph.Resolver) *publis
 		typeParams: make(map[*types.TypeParam]bool),
 	}
 	seen := make(map[string]bool)
-	for _, p := range graph.SortedPackages(pkgs) {
-		if p.Types == nil || p.Module == nil || !p.Module.Main || p.ForTest != "" || seen[resolve.PackageKey(p.Types)] {
+	for _, p := range inventory.Packages(pkgs, rs.Positions().Fset) {
+		if p.Types == nil || p.Module == nil || !p.Module.Main || p.ForTest != "" || seen[rs.PackageKey(p.Types)] {
 			continue
 		}
-		seen[resolve.PackageKey(p.Types)] = true
-		s.target[resolve.PackageKey(p.Types)] = true
+		seen[rs.PackageKey(p.Types)] = true
+		s.target[rs.PackageKey(p.Types)] = true
 		if load.Published(p.PkgPath, p.Name == "main") {
 			s.published = append(s.published, p)
 		}

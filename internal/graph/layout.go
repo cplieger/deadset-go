@@ -5,6 +5,7 @@ import (
 	"go/token"
 	"go/types"
 
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -109,7 +110,7 @@ func (in *instantiations) declared(param *types.TypeParam) token.Pos {
 // readUnsafeConversion records the layout reads of one conversion between a pointer
 // and unsafe.Pointer, in either direction, at the conversion: memory read through
 // either names no field, so every field the pointed-to type lays out is used there.
-func (p *referencePass) readUnsafeConversion(call *ast.CallExpr, encl SymbolID) {
+func (p *referencePass) readUnsafeConversion(call *ast.CallExpr, encl inventory.SymbolID) {
 	if len(call.Args) != 1 {
 		return
 	}
@@ -140,7 +141,7 @@ func (p *referencePass) readUnsafeConversion(call *ast.CallExpr, encl SymbolID) 
 // readHostLayout records the layout reads of one struct type that declares a field
 // of type structs.HostLayout, at that field: the layout is fixed for code outside the
 // program, which names none of the fields.
-func (p *referencePass) readHostLayout(t *ast.StructType, owner SymbolID) {
+func (p *referencePass) readHostLayout(t *ast.StructType, owner inventory.SymbolID) {
 	declared, isStruct := p.info.TypeOf(t).(*types.Struct)
 	if !isStruct {
 		return
@@ -156,14 +157,14 @@ func (p *referencePass) readHostLayout(t *ast.StructType, owner SymbolID) {
 // layoutRead is one site's walk over a laid-out type: where it is recorded, and the
 // fields and type parameters it has reached, so each field is read once per site.
 type layoutRead struct {
-	read   map[SymbolID]bool
+	read   map[inventory.SymbolID]bool
 	params map[token.Pos]bool
-	encl   SymbolID
+	encl   inventory.SymbolID
 	pos    token.Pos
 }
 
-func newLayoutRead(encl SymbolID, pos token.Pos) *layoutRead {
-	return &layoutRead{read: make(map[SymbolID]bool), params: make(map[token.Pos]bool), encl: encl, pos: pos}
+func newLayoutRead(encl inventory.SymbolID, pos token.Pos) *layoutRead {
+	return &layoutRead{read: make(map[inventory.SymbolID]bool), params: make(map[token.Pos]bool), encl: encl, pos: pos}
 }
 
 // readLayout records one read of every field t lays out: every field of a struct
@@ -186,9 +187,9 @@ func (p *referencePass) readLayout(t types.Type, site *layoutRead) {
 	switch u := t.Underlying().(type) {
 	case *types.Struct:
 		for field := range u.Fields() {
-			if to, ok := p.symbolOf(field.Origin()); ok && !site.read[to] {
+			if to, ok := p.resolve.Object(field.Origin()); ok && !site.read[to] {
 				site.read[to] = true
-				p.add(site.encl, to, site.pos, RefRead)
+				p.add(site.encl, to, site.pos, RefRead, viaLayout)
 			}
 			p.readLayout(field.Type(), site)
 		}

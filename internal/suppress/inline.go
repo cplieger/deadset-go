@@ -7,8 +7,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -90,14 +91,14 @@ type directive struct {
 // anywhere else is a record bound to nothing, one lacking only its reason is a
 // [Refusal], and any other comment in the namespace is a [malformedError]. A file the
 // target root does not hold ends the read.
-func Inline(r *load.Result, resolve *graph.Resolver, symbols []graph.Symbol) ([]Record, []Refusal, error) {
-	directives, err := namespaced(r, resolve)
+func Inline(r *load.Result, rs *resolve.Resolver, symbols []inventory.Symbol) ([]Record, []Refusal, error) {
+	directives, err := namespaced(r, rs)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	below := declarationLines(symbols)
-	if err := signatureLines(r, resolve, symbols, below); err != nil {
+	if err := signatureLines(r, rs, symbols, below); err != nil {
 		return nil, nil, err
 	}
 	var records []Record
@@ -128,7 +129,7 @@ func Inline(r *load.Result, resolve *graph.Resolver, symbols []graph.Symbol) ([]
 // bind returns one record per code the directive names and per declaration it
 // bound, and one record per code bound to nothing where it bound none, which is
 // the record a stale-suppression finding reports.
-func (d *directive) bind(bound []graph.Symbol) []Record {
+func (d *directive) bind(bound []inventory.Symbol) []Record {
 	records := make([]Record, 0, len(d.codes)*max(len(bound), 1))
 	for _, code := range d.codes {
 		record := Record{
@@ -174,8 +175,8 @@ func (d *directive) refuse() []Refusal {
 // variant carries the same syntax tree. The order the load reported the packages
 // in does not reach the result: the comments are ordered by rendered position, so
 // the first malformed directive a read refuses is the first one written.
-func namespaced(r *load.Result, resolve *graph.Resolver) ([]directive, error) {
-	read := &comments{resolve: resolve, fset: r.Fset, seen: make(map[token.Pos]bool)}
+func namespaced(r *load.Result, rs *resolve.Resolver) ([]directive, error) {
+	read := &comments{resolve: rs, fset: r.Fset, seen: make(map[token.Pos]bool)}
 	for _, p := range r.Packages {
 		for _, f := range p.Syntax {
 			if err := read.file(f); err != nil {
@@ -184,14 +185,14 @@ func namespaced(r *load.Result, resolve *graph.Resolver) ([]directive, error) {
 		}
 	}
 	found := read.found
-	slices.SortFunc(found, func(a, b directive) int { return graph.ByPosition(a.at, b.at) })
+	slices.SortFunc(found, func(a, b directive) int { return inventory.ByPosition(a.at, b.at) })
 	return found, nil
 }
 
 // comments accumulates the line comments of one configuration that are in the
 // namespace, one per source site.
 type comments struct {
-	resolve *graph.Resolver
+	resolve *resolve.Resolver
 	fset    *token.FileSet
 	seen    map[token.Pos]bool
 	found   []directive
@@ -272,11 +273,11 @@ func lineText(c *ast.Comment) string {
 // neither has a first token for a directive to sit above, and a directive
 // covering a whole file is not admitted: a suppression names one site so that its
 // staleness can be decided at that site.
-func declarationLines(symbols []graph.Symbol) map[site][]graph.Symbol {
-	below := make(map[site][]graph.Symbol, len(symbols))
+func declarationLines(symbols []inventory.Symbol) map[site][]inventory.Symbol {
+	below := make(map[site][]inventory.Symbol, len(symbols))
 	for i := range symbols {
 		s := &symbols[i]
-		if s.Kind == graph.KindFile || s.Kind == graph.KindPackage {
+		if s.Kind == inventory.KindFile || s.Kind == inventory.KindPackage {
 			continue
 		}
 		at := site{file: s.Pos.Filename, line: s.Pos.Line}
@@ -300,10 +301,10 @@ type site struct {
 //
 // A file several package variants compile is read once, for the reason namespaced
 // gives.
-func signatureLines(r *load.Result, resolve *graph.Resolver, symbols []graph.Symbol,
-	below map[site][]graph.Symbol,
+func signatureLines(r *load.Result, rs *resolve.Resolver, symbols []inventory.Symbol,
+	below map[site][]inventory.Symbol,
 ) error {
-	byID := make(map[graph.SymbolID]*graph.Symbol, len(symbols))
+	byID := make(map[inventory.SymbolID]*inventory.Symbol, len(symbols))
 	for i := range symbols {
 		byID[symbols[i].ID] = &symbols[i]
 	}
@@ -314,7 +315,7 @@ func signatureLines(r *load.Result, resolve *graph.Resolver, symbols []graph.Sym
 				continue
 			}
 			seen[f.FileStart] = true
-			if err := signatureLinesOf(f, resolve, byID, below); err != nil {
+			if err := signatureLinesOf(f, rs, byID, below); err != nil {
 				return err
 			}
 		}
@@ -323,25 +324,25 @@ func signatureLines(r *load.Result, resolve *graph.Resolver, symbols []graph.Sym
 }
 
 // signatureLinesOf adds the wrapped signature lines of one file's functions.
-func signatureLinesOf(f *ast.File, resolve *graph.Resolver, byID map[graph.SymbolID]*graph.Symbol,
-	below map[site][]graph.Symbol,
+func signatureLinesOf(f *ast.File, rs *resolve.Resolver, byID map[inventory.SymbolID]*inventory.Symbol,
+	below map[site][]inventory.Symbol,
 ) error {
 	for _, decl := range f.Decls {
 		fn, isFunc := decl.(*ast.FuncDecl)
 		if !isFunc {
 			continue
 		}
-		id, inventoried := resolve.At(fn.Name.Pos())
+		id, inventoried := rs.At(fn.Name.Pos())
 		function := byID[id]
 		if !inventoried || function == nil {
 			continue
 		}
-		lines, err := fieldLines(fn, resolve)
+		lines, err := fieldLines(fn, rs)
 		if err != nil {
 			return err
 		}
 		for _, line := range lines {
-			if line.line == function.Pos.Line || slices.ContainsFunc(below[line], func(s graph.Symbol) bool {
+			if line.line == function.Pos.Line || slices.ContainsFunc(below[line], func(s inventory.Symbol) bool {
 				return s.ID == function.ID
 			}) {
 				continue
@@ -354,14 +355,14 @@ func signatureLinesOf(f *ast.File, resolve *graph.Resolver, byID map[graph.Symbo
 
 // fieldLines is the line every receiver, parameter and result of one function's
 // signature begins on, in signature order.
-func fieldLines(fn *ast.FuncDecl, resolve *graph.Resolver) ([]site, error) {
+func fieldLines(fn *ast.FuncDecl, rs *resolve.Resolver) ([]site, error) {
 	var lines []site
 	for _, list := range []*ast.FieldList{fn.Recv, fn.Type.Params, fn.Type.Results} {
 		if list == nil {
 			continue
 		}
 		for _, field := range list.List {
-			at, err := resolve.Render(field.Pos())
+			at, err := rs.Render(field.Pos())
 			if err != nil {
 				return nil, err
 			}

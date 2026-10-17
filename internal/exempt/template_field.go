@@ -14,6 +14,8 @@ import (
 	"text/template/parse"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -84,8 +86,8 @@ func TemplateFieldDetector(in *Input) ([]graph.Exemption, error) {
 // this kind. A template reaches the fields and the methods of the value it
 // renders, and a method it reaches may be declared by a concrete type or by the
 // interface the value carries.
-func templateReaches(k graph.SymbolKind) bool {
-	return k == graph.KindField || k == graph.KindMethod || k == graph.KindInterfaceMethod
+func templateReaches(k inventory.SymbolKind) bool {
+	return k == inventory.KindField || k == inventory.KindMethod || k == inventory.KindInterfaceMethod
 }
 
 // templateDirs cleans the configured directories into target-relative paths with
@@ -305,14 +307,14 @@ func templatePosition(file string, src []byte, at int) token.Position {
 		Filename: file,
 		Offset:   at,
 		Line:     line,
-		Column:   graph.Column(src[start:], at-start),
+		Column:   inventory.Column(src[start:], at-start),
 	}
 }
 
 // member is one declaration of the inventory a name reaches.
 type member struct {
-	id       graph.SymbolID
-	kind     graph.SymbolKind
+	id       inventory.SymbolID
+	kind     inventory.SymbolKind
 	exported bool
 }
 
@@ -328,7 +330,7 @@ type nameIndex map[string][]member
 // name. A declaration outside the inventory, a local variable among them, is not
 // indexed.
 func newNameIndex(in *Input) nameIndex {
-	symbols := make(map[graph.SymbolID]*graph.Symbol, len(in.Symbols))
+	symbols := make(map[inventory.SymbolID]*inventory.Symbol, len(in.Symbols))
 	for i := range in.Symbols {
 		symbols[in.Symbols[i].ID] = &in.Symbols[i]
 	}
@@ -352,11 +354,11 @@ func newNameIndex(in *Input) nameIndex {
 // declaration is defined once per package variant that type-checks its file, and
 // every variant resolves to the one symbol of that site, so the second and later
 // variants add nothing.
-func (x nameIndex) add(resolve *graph.Resolver, symbols map[graph.SymbolID]*graph.Symbol, obj types.Object) {
+func (x nameIndex) add(rs *resolve.Resolver, symbols map[inventory.SymbolID]*inventory.Symbol, obj types.Object) {
 	if obj == nil {
 		return
 	}
-	id, held := resolve.Object(obj)
+	id, held := rs.Object(obj)
 	if !held {
 		return
 	}

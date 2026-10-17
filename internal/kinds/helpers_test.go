@@ -13,7 +13,9 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
 	spec "github.com/cplieger/deadset-spec/v8"
@@ -177,6 +179,7 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 
 	per := make([]Configured, len(configurations))
 	passes := make([]graph.Configured, len(configurations))
+	classes := make([]graph.TestClasses, len(configurations))
 	var exemptions, testEvidence []graph.Exemption
 	var root string
 	var loadedConsumers []string
@@ -184,23 +187,17 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 		result := loadScope(t, doc, c)
 		root = doc.Target.Path
 		loadedConsumers = consumerIDs(result)
-		symbols, err := graph.Symbols(result, root, os.ReadFile)
+		inv, err := inventory.Of(result, root, os.ReadFile)
 		if err != nil {
-			t.Fatalf("Setup: graph.Symbols(%s): %v", c.ID, err)
+			t.Fatalf("Setup: inventory.Of(%s): %v", c.ID, err)
 		}
-		roots, _, err := graph.Roots(result, root, os.ReadFile, symbols, rootOptions)
+		symbols := inv.Symbols
+		resolver, err := resolve.New(result, inv)
 		if err != nil {
-			t.Fatalf("Setup: graph.Roots(%s): %v", c.ID, err)
+			t.Fatalf("Setup: resolve.New(%s): %v", c.ID, err)
 		}
-		tests := graph.ClassifyTestSupport(result, root, symbols, roots, rootOptions.PublishedAPI)
-		references, _, err := graph.References(result, root, os.ReadFile, symbols)
-		if err != nil {
-			t.Fatalf("Setup: graph.References(%s): %v", c.ID, err)
-		}
-		resolver, err := graph.NewResolver(result, root, os.ReadFile, symbols)
-		if err != nil {
-			t.Fatalf("Setup: graph.NewResolver(%s): %v", c.ID, err)
-		}
+		roots, _ := graph.Roots(result, resolver, symbols, rootOptions)
+		classes[i] = graph.ClassifyTestSupport(result, symbols, roots, rootOptions.PublishedAPI)
 		computed, evidence, err := exempt.Compute(&exempt.Input{
 			Result:  result,
 			Resolve: resolver,
@@ -215,17 +212,25 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 		}
 		exemptions = append(exemptions, computed...)
 		testEvidence = append(testEvidence, evidence...)
-		per[i] = Configured{Result: result, Resolve: resolver, Symbols: symbols, Tests: tests}
-		passes[i] = graph.Configured{Symbols: symbols, References: references, Roots: roots}
+		per[i] = Configured{Result: result, Resolve: resolver, Symbols: symbols}
+		passes[i] = graph.Configured{Symbols: symbols, Roots: roots}
+	}
+	tests := graph.MatrixTests(classes)
+	for i := range per {
+		references, _, err := graph.References(per[i].Result, per[i].Resolve, per[i].Symbols, tests)
+		if err != nil {
+			t.Fatalf("Setup: graph.References(%s): %v", configurations[i].ID, err)
+		}
+		passes[i].References = references
 	}
 
-	merged, err := graph.Merge(passes)
+	merged, err := graph.Merge(passes, tests)
 	if err != nil {
 		t.Fatalf("Setup: graph.Merge(%s): %v", doc.Target.Path, err)
 	}
 	swept := graph.NewMatrix(&merged).Sweep(&graph.SweepInput{Exempt: exemptions, Mode: mode}, graph.TestReferencesOf(testEvidence))
 
-	refs := make(map[graph.SymbolID]string, len(merged.Symbols))
+	refs := make(map[inventory.SymbolID]string, len(merged.Symbols))
 	for i := range merged.Symbols {
 		refs[merged.Symbols[i].ID] = merged.Symbols[i].Ref
 	}

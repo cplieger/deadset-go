@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"golang.org/x/tools/go/packages"
 )
@@ -330,7 +331,7 @@ func programFunctions(in *Input) []programFunction {
 		if p.TypesInfo == nil {
 			continue
 		}
-		for _, file := range graph.SortedSyntax(p, in.Result.Fset) {
+		for _, file := range inventory.Files(p, in.Result.Fset) {
 			found = append(found, fileFunctions(p.TypesInfo, file)...)
 		}
 	}
@@ -358,9 +359,9 @@ func fileFunctions(info *types.Info, file *ast.File) []programFunction {
 // programPackages are the packages of the analysed program: the target's own, then
 // every loaded consumer's in the order the scope declared them, each set ordered.
 func programPackages(r *load.Result) []*packages.Package {
-	found := graph.SortedPackages(r.Packages)
+	found := inventory.Packages(r.Packages, r.Fset)
 	for _, one := range r.Consumers {
-		found = append(found, graph.SortedPackages(one.Packages)...)
+		found = append(found, inventory.Packages(one.Packages, r.Fset)...)
 	}
 	return found
 }
@@ -482,7 +483,7 @@ func holdsInMode(e *graph.Exemption, m graph.Mode) bool {
 	if !m.Production {
 		return true
 	}
-	if _, test := graph.IsTestFile(e.Site.Filename); !test {
+	if _, test := inventory.IsTestFile(e.Site.Filename); !test {
 		return true
 	}
 	return e.Consumer != "" && m.ConsumerTestsProduction

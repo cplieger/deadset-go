@@ -3,60 +3,21 @@ package graph
 import (
 	"errors"
 	"fmt"
-	"math/bits"
 	"slices"
 	"strings"
+
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 )
 
 // ErrMatrix reports a matrix the merge cannot key a configuration of.
 var ErrMatrix = errors.New("graph: unmergeable matrix")
 
-// maxConfigurations is the number of configurations one [ConfigSet] holds. The
-// matrix is the set of configurations a project builds, which is the two or three
-// a continuous-integration run already covers rather than the product of the
-// atoms in its build constraints, so the bound is generous by two orders of
-// magnitude; a matrix past it is refused rather than silently narrowed to the
-// first sixty-four.
-const maxConfigurations = 64
-
-// ConfigSet is the set of build configurations a declaration exists in: one bit
-// per configuration, at the configuration's place in the matrix.
-type ConfigSet uint64
-
-// has reports whether the set holds the configuration at index config.
-func (s ConfigSet) has(config int) bool {
-	if config < 0 || config >= maxConfigurations {
-		return false
-	}
-	return s&(ConfigSet(1)<<config) != 0
-}
-
-// Indexes lists the configurations the set holds, in matrix order.
-func (s ConfigSet) Indexes() []int {
-	found := make([]int, 0, bits.OnesCount64(uint64(s)))
-	for config := range maxConfigurations {
-		if s.has(config) {
-			found = append(found, config)
-		}
-	}
-	return found
-}
-
-// with returns the set holding config as well. A configuration outside the bound
-// is held by no set, which is why the merge refuses a matrix it could not key.
-func (s ConfigSet) with(config int) ConfigSet {
-	if config < 0 || config >= maxConfigurations {
-		return s
-	}
-	return s | ConfigSet(1)<<config
-}
-
-// Configured is what the three passes returned for one build configuration: the
+// Configured is what the passes returned for one build configuration: the
 // declarations that configuration holds, the references made to them by that
 // configuration's files and by every consumer loaded with it, the roots that seed
 // it, and the configured strings its root detection matched nothing with.
 type Configured struct {
-	Symbols    []Symbol
+	Symbols    []inventory.Symbol
 	References []Reference
 	Roots      []Root
 	Unmatched  []Unmatched
@@ -72,7 +33,8 @@ type Configured struct {
 // row per configuration that left a string unmatched, with no configuration: only
 // how many configurations left it is read.
 type Merged struct {
-	Symbols        []Symbol
+	Tests          TestClasses // the matrix's, [MatrixTests]
+	Symbols        []inventory.Symbol
 	References     []Reference
 	Roots          []Root
 	Unmatched      []Unmatched
@@ -80,39 +42,32 @@ type Merged struct {
 }
 
 // Merge combines what the passes returned for each configuration of a matrix into
-// one inventory, per matching a configuration's place in per to the index it is
-// keyed by everywhere else.
-//
-// A declaration is keyed across configurations by its identifier, which is the
-// rendered source position and so is the same in every configuration that
-// compiles the file: the fields of the first configuration that declared it are
-// the ones kept, and every later configuration adds its bit. The fields cannot
-// disagree, because one position names one declaration written once in one file
-// and no configuration changes the bytes of that file; where two configurations
-// disagreed all the same, the lowest configuration index would decide.
-//
-// A declaration one configuration alone holds is in the inventory with that one
-// configuration's bit, because a symbol present on one platform is analyzed under
-// that platform rather than skipped.
-func Merge(per []Configured) (Merged, error) {
+// one inventory, per's order being the configuration index, under the matrix's test
+// classes ([MatrixTests]). A declaration is keyed across configurations by its
+// identifier, the rendered position: the first configuration that declares it gives
+// its fields, tests its test support, and every configuration that declares it adds
+// its bit. A declaration one configuration alone holds is analyzed under that
+// configuration rather than skipped.
+func Merge(per []Configured, tests TestClasses) (Merged, error) {
 	if len(per) == 0 {
 		return Merged{}, fmt.Errorf("%w: no configuration", ErrMatrix)
 	}
-	if len(per) > maxConfigurations {
+	if len(per) > inventory.MaxConfigurations {
 		return Merged{}, fmt.Errorf("%w: %d configurations, at most %d",
-			ErrMatrix, len(per), maxConfigurations)
+			ErrMatrix, len(per), inventory.MaxConfigurations)
 	}
 
-	m := Merged{Configurations: len(per)}
-	at := make(map[SymbolID]int)
+	m := Merged{Configurations: len(per), Tests: tests}
+	at := make(map[inventory.SymbolID]int)
 	for config, one := range per {
 		for i := range one.Symbols {
 			if held, ok := at[one.Symbols[i].ID]; ok {
-				m.Symbols[held].Configs = m.Symbols[held].Configs.with(config)
+				m.Symbols[held].Configs = m.Symbols[held].Configs.With(config)
 				continue
 			}
 			s := one.Symbols[i]
-			s.Configs = ConfigSet(0).with(config)
+			s.Configs = inventory.ConfigSet(0).With(config)
+			s.TestSupport = tests.Support[s.Package]
 			at[s.ID] = len(m.Symbols)
 			m.Symbols = append(m.Symbols, s)
 		}
@@ -128,7 +83,7 @@ func Merge(per []Configured) (Merged, error) {
 		}
 		m.Unmatched = append(m.Unmatched, one.Unmatched...)
 	}
-	slices.SortFunc(m.Symbols, bySite)
+	slices.SortFunc(m.Symbols, inventory.BySite)
 	return m, nil
 }
 
@@ -173,7 +128,7 @@ func NewMatrix(m *Merged) *Matrix {
 func restrict(m *Merged, config int) Configured {
 	var one Configured
 	for i := range m.Symbols {
-		if m.Symbols[i].Configs.has(config) {
+		if m.Symbols[i].Configs.Has(config) {
 			one.Symbols = append(one.Symbols, m.Symbols[i])
 		}
 	}
@@ -200,8 +155,8 @@ func restrict(m *Merged, config int) Configured {
 // line of it is two references.
 type referenceSite struct {
 	consumer string
-	from     SymbolID
-	to       SymbolID
+	from     inventory.SymbolID
+	to       inventory.SymbolID
 	file     string
 	line     int
 	col      int
@@ -272,13 +227,13 @@ func distinct(refs []Reference) []Reference {
 // stale.
 func (x *Matrix) Sweep(in *SweepInput, evidence TestEvidence) Result {
 	per := make([]Result, len(x.per))
-	held := make([]map[SymbolID]Candidate, len(x.per))
-	r := Result{LiveUnder: make(map[SymbolID]RelationSet)}
+	held := make([]map[inventory.SymbolID]Candidate, len(x.per))
+	r := Result{LiveUnder: make(map[inventory.SymbolID]RelationSet)}
 	tested := *in
 	tested.tested = evidence
 	for config, g := range x.per {
 		per[config] = g.Sweep(&tested)
-		held[config] = make(map[SymbolID]Candidate, len(per[config].Candidates))
+		held[config] = make(map[inventory.SymbolID]Candidate, len(per[config].Candidates))
 		for _, c := range per[config].Candidates {
 			held[config][c.ID] = c
 		}
@@ -321,9 +276,9 @@ func (x *Matrix) Sweep(in *SweepInput, evidence TestEvidence) Result {
 // that a configuration compiles a reference to from a declaration the matrix keeps,
 // until no declaration joins. Deleting one would break that configuration's build: a
 // file behind a build constraint is dead only where no kept declaration calls it.
-func (x *Matrix) compiledReferences(held []map[SymbolID]Candidate, m Mode) map[SymbolID]bool {
+func (x *Matrix) compiledReferences(held []map[inventory.SymbolID]Candidate, m Mode) map[inventory.SymbolID]bool {
 	dead := x.deadEverywhere(held)
-	kept := make(map[SymbolID]bool)
+	kept := make(map[inventory.SymbolID]bool)
 	for changed := true; changed; {
 		changed = false
 		for _, g := range x.per {
@@ -334,13 +289,13 @@ func (x *Matrix) compiledReferences(held []map[SymbolID]Candidate, m Mode) map[S
 }
 
 // deadEverywhere is every declaration a candidate in each configuration it exists in.
-func (x *Matrix) deadEverywhere(held []map[SymbolID]Candidate) map[SymbolID]bool {
-	dead := make(map[SymbolID]bool)
+func (x *Matrix) deadEverywhere(held []map[inventory.SymbolID]Candidate) map[inventory.SymbolID]bool {
+	dead := make(map[inventory.SymbolID]bool)
 	for i := range x.merged.Symbols {
 		s := &x.merged.Symbols[i]
 		everywhere := s.Configs != 0
 		for config := range x.merged.Configurations {
-			if _, candidate := held[config][s.ID]; s.Configs.has(config) && !candidate {
+			if _, candidate := held[config][s.ID]; s.Configs.Has(config) && !candidate {
 				everywhere = false
 			}
 		}
@@ -352,7 +307,7 @@ func (x *Matrix) deadEverywhere(held []map[SymbolID]Candidate) map[SymbolID]bool
 // keepCompiled adds to kept every declaration of dead one configuration's graph
 // references from a declaration outside dead or already kept, and reports whether
 // one joined. A production sweep counts no reference a test file made.
-func (g *Graph) keepCompiled(dead, kept map[SymbolID]bool, m Mode) bool {
+func (g *Graph) keepCompiled(dead, kept map[inventory.SymbolID]bool, m Mode) bool {
 	changed := false
 	for from := range g.symbols {
 		if id := g.symbols[from].ID; !g.subject[from] || (dead[id] && !kept[id]) {
@@ -380,17 +335,17 @@ func (g *Graph) keepCompiled(dead, kept map[SymbolID]bool, m Mode) bool {
 // are the matrix's totals, one per reference rather than one per configuration
 // that saw it, so a kind reading them reads how many references the declaration
 // carries.
-func (x *Matrix) intersect(union *Graph, s *Symbol, held []map[SymbolID]Candidate, m Mode) (Candidate, bool) {
+func (x *Matrix) intersect(union *Graph, s *inventory.Symbol, held []map[inventory.SymbolID]Candidate, m Mode) (Candidate, bool) {
 	c := Candidate{ID: s.ID, Relation: ReferenceCounting, Configs: 0, TestOfDeadCode: true, UnreferencedTest: true}
 	for config := range x.merged.Configurations {
-		if !s.Configs.has(config) {
+		if !s.Configs.Has(config) {
 			continue
 		}
 		found, candidate := held[config][s.ID]
 		if !candidate {
 			return Candidate{}, false
 		}
-		c.Configs = c.Configs.with(config)
+		c.Configs = c.Configs.With(config)
 		if found.Relation != ReferenceCounting {
 			c.Relation = Reachability
 		}
@@ -460,7 +415,7 @@ func (x *Matrix) retained(exempt []Exemption, per []Result) []Exemption {
 		return nil
 	}
 
-	held := make(map[SymbolID][]Exemption)
+	held := make(map[inventory.SymbolID][]Exemption)
 	kept := make(map[exemptionKey]bool, len(retained))
 	for i := range exempt {
 		key := keyOf(&exempt[i])
@@ -483,8 +438,8 @@ func (x *Matrix) retained(exempt []Exemption, per []Result) []Exemption {
 // The answer is the union and not the intersection, which is the same rule the
 // retained record follows: a mark that holds a symbol back on one platform is in
 // effect, and withdrawing it would report the symbol there.
-func (x *Matrix) suppressed(per []Result) []SymbolID {
-	held := make(map[SymbolID]bool)
+func (x *Matrix) suppressed(per []Result) []inventory.SymbolID {
+	held := make(map[inventory.SymbolID]bool)
 	for i := range per {
 		for _, id := range per[i].Suppressed {
 			held[id] = true
@@ -493,7 +448,7 @@ func (x *Matrix) suppressed(per []Result) []SymbolID {
 	if len(held) == 0 {
 		return nil
 	}
-	found := make([]SymbolID, 0, len(held))
+	found := make([]inventory.SymbolID, 0, len(held))
 	for i := range x.merged.Symbols {
 		if id := x.merged.Symbols[i].ID; held[id] {
 			found = append(found, id)
@@ -507,10 +462,10 @@ func (x *Matrix) suppressed(per []Result) []SymbolID {
 // the class, the detail and the holders, which is the key the exemption classes
 // themselves deduplicate one configuration's records on.
 type exemptionKey struct {
-	id        SymbolID
+	id        inventory.SymbolID
 	class     string
 	detail    string
-	holder    SymbolID
+	holder    inventory.SymbolID
 	coHolders string
 }
 
@@ -520,7 +475,7 @@ func keyOf(e *Exemption) exemptionKey {
 }
 
 // JoinedIDs spells a list of identifiers as one comparable value.
-func JoinedIDs(ids []SymbolID) string {
+func JoinedIDs(ids []inventory.SymbolID) string {
 	parts := make([]string, len(ids))
 	for i, id := range ids {
 		parts[i] = string(id)

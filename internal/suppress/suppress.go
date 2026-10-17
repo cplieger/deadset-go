@@ -24,7 +24,7 @@ import (
 	"go/token"
 	"strconv"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -73,7 +73,7 @@ type Record struct {
 	// suppression bound to nothing, which a directive on any line other than
 	// the one above a declaration is, and an entry naming a symbol and a path no
 	// declaration of the inventory holds.
-	Bound     graph.SymbolID
+	Bound     inventory.SymbolID
 	Site      token.Position // where the suppression is written
 	Mechanism Mechanism
 }
@@ -121,8 +121,8 @@ func (*malformedError) Unwrap() error { return errMalformed }
 // Bound is the declarations the records mark live, which seed the sweep. A record
 // that bound nothing marks nothing, which is what makes it stale; a record for a
 // part kind marks nothing either: it withholds its finding and keeps nothing alive.
-func Bound(records []Record) []graph.SymbolID {
-	var marked []graph.SymbolID
+func Bound(records []Record) []inventory.SymbolID {
+	var marked []inventory.SymbolID
 	for i := range records {
 		if records[i].Bound != "" && records[i].Code.Subject() != vocab.SubjectPart {
 			marked = append(marked, records[i].Bound)

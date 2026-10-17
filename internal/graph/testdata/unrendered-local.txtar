@@ -1,0 +1,21 @@
+One command whose function body holds a line directive naming a file of the target
+too short to hold the positions it maps. The local the directive covers is no
+declaration the inventory holds, and its position still does not render.
+
+-- go.mod --
+module example.com/unrendered
+
+go 1.27.1
+-- app.go --
+package main
+
+func main() { run() }
+
+func run() {
+//line short.txt:1
+	x := 1
+	_ = x
+//line app.go:9
+}
+-- short.txt --
+ab

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -229,12 +230,12 @@ func TestUnusedTypeParameterReportsAFunctionAndAMethodAtCertain(t *testing.T) {
 }
 
 func TestUnusedTypeParameterTakesNoSubjectFromATypeDeclaration(t *testing.T) {
-	for name, owner := range map[string]*graph.Symbol{
+	for name, owner := range map[string]*inventory.Symbol{
 		"none":     nil,
-		"function": {Kind: graph.KindFunc},
-		"method":   {Kind: graph.KindMethod},
-		"type":     {Kind: graph.KindType},
-		"variable": {Kind: graph.KindVar},
+		"function": {Kind: inventory.KindFunc},
+		"method":   {Kind: inventory.KindMethod},
+		"type":     {Kind: inventory.KindType},
+		"variable": {Kind: inventory.KindVar},
 	} {
 		t.Run(name, func(t *testing.T) {
 			want := name == "function" || name == "method"
@@ -247,7 +248,7 @@ func TestUnusedTypeParameterTakesNoSubjectFromATypeDeclaration(t *testing.T) {
 	in := inputOf(t, "readwrite-typeparam.txtar", applicationConfig(), Consumers{})
 	for i := range in.Merged.Symbols {
 		symbol := &in.Merged.Symbols[i]
-		if symbol.Kind != graph.KindTypeParam {
+		if symbol.Kind != inventory.KindTypeParam {
 			continue
 		}
 		if !declaresTypeParameters(in.symbol(symbol.Parent)) {
@@ -322,6 +323,26 @@ func TestWriteOnlySymbolNamesTheDeclarationsOnlyItsAnnotationUses(t *testing.T) 
 			t.Errorf("the pass over readwrite-cascade-declarations.txtar reports %s about %s, which falls with a write-only finding",
 				found.Code, found.Symbol.Name)
 		}
+	}
+}
+
+// A line directive inside a write or an annotation maps part of it to another file,
+// and the cascade still names what the write or the annotation holds in source order.
+func TestWriteOnlySymbolNamesWhatAWriteHoldsInSourceOrderUnderALineDirective(t *testing.T) {
+	in := inputOf(t, "readwrite-line-directive.txtar", applicationConfig(), Consumers{})
+	in.Mode = graph.Mode{Production: true}
+	result := computed(t, in, packageEmitters())
+
+	for subject, want := range map[string]string{
+		"settings.modes": "field settings.modes is written once and never read, and deleting it with its writes also deletes type Mode",
+		"sink":           `variable sink is written once and never read, and deleting it with its writes also deletes import "strings"`,
+	} {
+		if got := findingOf(t, result.Findings, vocab.WriteOnlySymbol, subject).Message; got != want {
+			t.Errorf("WriteOnlySymbol over readwrite-line-directive.txtar reports %s with message %q, want %q", subject, got, want)
+		}
+	}
+	if got := summary(result.Findings); len(got) != 2 {
+		t.Errorf("the pass over readwrite-line-directive.txtar reports %v, want the two write-only findings alone", got)
 	}
 }
 

@@ -5,7 +5,7 @@ import (
 	"go/token"
 	"go/types"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -126,7 +126,7 @@ func specLocals(info *types.Info, spec ast.Spec) []*localDeclaration {
 
 func localKind(object types.Object) string {
 	if _, isConst := object.(*types.Const); isConst {
-		return symbolKinds[graph.KindConst]
+		return symbolKinds[inventory.KindConst]
 	}
-	return symbolKinds[graph.KindType]
+	return symbolKinds[inventory.KindType]
 }

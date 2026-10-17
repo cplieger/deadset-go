@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"pgregory.net/rapid"
 )
 
@@ -246,8 +247,8 @@ func TestProperty07TheRelationRecordedIsTheOneThatFoundTheCandidate(t *testing.T
 }
 
 // namesOf lists the identifiers of a symbol set in the order it holds them.
-func namesOf(symbols []Symbol) []SymbolID {
-	ids := make([]SymbolID, 0, len(symbols))
+func namesOf(symbols []inventory.Symbol) []inventory.SymbolID {
+	ids := make([]inventory.SymbolID, 0, len(symbols))
 	for _, s := range symbols {
 		ids = append(ids, s.ID)
 	}
@@ -326,9 +327,9 @@ func plant(b *graphBuilder, at int, shape drawnShape) string {
 		}
 	case shapeContainer:
 		for i := range shape.size {
-			d := handSymbol{name: name(i), lines: span(i), kind: KindType}
+			d := handSymbol{name: name(i), lines: span(i), kind: inventory.KindType}
 			if i > 0 {
-				d.parent, d.kind = name(i-1), KindField
+				d.parent, d.kind = name(i-1), inventory.KindField
 			}
 			b.declare(d)
 		}
@@ -339,9 +340,9 @@ func plant(b *graphBuilder, at int, shape drawnShape) string {
 		for i := 1; i < shape.size; i++ {
 			lines += span(i)
 		}
-		b.declare(handSymbol{name: name(0), lines: lines, kind: KindType})
+		b.declare(handSymbol{name: name(0), lines: lines, kind: inventory.KindType})
 		for i := 1; i < shape.size; i++ {
-			b.declare(handSymbol{name: name(i), lines: span(i), kind: KindField, parent: name(0), nested: true})
+			b.declare(handSymbol{name: name(i), lines: span(i), kind: inventory.KindField, parent: name(0), nested: true})
 		}
 	case shapeDeadTest:
 		// Nothing outside the shape names these declarations and no root reaches
@@ -459,7 +460,7 @@ func (b *graphBuilder) describe(r Result) string {
 
 // lineTotal is the number of distinct source lines a set of symbols occupies,
 // counted by naming every line each of them runs over.
-func (*graphBuilder) lineTotal(g *Graph, ids []SymbolID) int {
+func (*graphBuilder) lineTotal(g *Graph, ids []inventory.SymbolID) int {
 	covered := map[token.Position]bool{}
 	for _, id := range ids {
 		symbol := g.symbols[g.at(id)]
@@ -545,7 +546,7 @@ func (b *graphBuilder) slowSubgraph(dead []string, admitted map[string]bool) map
 	}
 	tests := map[string]bool{}
 	for _, s := range b.symbols {
-		if _, test := IsTestFile(s.Pos.Filename); test {
+		if s.InTestFile {
 			tests[b.named[s.ID]] = true
 		}
 	}
@@ -607,8 +608,8 @@ func (b *graphBuilder) bySite(names []string) []string {
 }
 
 // identifiers names the symbols a set of names identifies.
-func (b *graphBuilder) identifiers(names []string) []SymbolID {
-	ids := make([]SymbolID, 0, len(names))
+func (b *graphBuilder) identifiers(names []string) []inventory.SymbolID {
+	ids := make([]inventory.SymbolID, 0, len(names))
 	for _, name := range names {
 		ids = append(ids, b.ids[name])
 	}
@@ -616,9 +617,9 @@ func (b *graphBuilder) identifiers(names []string) []SymbolID {
 }
 
 // sorted returns the symbols in the order the graph holds them.
-func (b *graphBuilder) sorted() []Symbol {
+func (b *graphBuilder) sorted() []inventory.Symbol {
 	symbols := slices.Clone(b.symbols)
-	slices.SortFunc(symbols, bySite)
+	slices.SortFunc(symbols, inventory.BySite)
 	return symbols
 }
 

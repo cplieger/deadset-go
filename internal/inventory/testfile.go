@@ -1,12 +1,12 @@
-package graph
+package inventory
 
 import (
 	"path/filepath"
 	"strings"
 )
 
-// goTestSuffixRule names the Go language's own test-file rule.
-const goTestSuffixRule = "go-test-suffix"
+// GoTestSuffixRule names the Go language's own test-file rule.
+const GoTestSuffixRule = "go-test-suffix"
 
 // testFileSuffix is what that rule matches.
 const testFileSuffix = "_test.go"
@@ -32,5 +32,5 @@ func IsTestFile(path string) (rule string, ok bool) {
 	if !found || stem == "" || stem[0] == '_' || stem[0] == '.' {
 		return "", false
 	}
-	return goTestSuffixRule, true
+	return GoTestSuffixRule, true
 }

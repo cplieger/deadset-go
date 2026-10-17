@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -32,7 +33,7 @@ func retained(t *testing.T, shared *sharedAnalysis, class vocab.Exemption) []gra
 func retainedRefs(t *testing.T, shared *sharedAnalysis, class vocab.Exemption) []string {
 	t.Helper()
 	symbols := shared.inventory(t)
-	refs := make(map[graph.SymbolID]string, len(symbols))
+	refs := make(map[inventory.SymbolID]string, len(symbols))
 	for i := range symbols {
 		refs[symbols[i].ID] = symbols[i].Ref
 	}
@@ -489,7 +490,7 @@ func TestEncodingReflectionRetainsNothingWhereNoTypeReachesADestination(t *testi
 func TestEncodingReflectionNamesTheClassTheDestinationAndTheSite(t *testing.T) {
 	shared := analysisOf(t, "encoding-reflection-firing.txtar", Options{})
 	symbols := shared.inventory(t)
-	refs := make(map[graph.SymbolID]string, len(symbols))
+	refs := make(map[inventory.SymbolID]string, len(symbols))
 	for i := range symbols {
 		refs[symbols[i].ID] = symbols[i].Ref
 	}
@@ -694,7 +695,7 @@ func TestEncodingReflectionReadsADependencyUnderTheConfigurationsTags(t *testing
 			if err != nil {
 				t.Fatalf("EncodingReflectionDetector(encoding-reflection-tagged.txtar, tags %v): %v", test.tags, err)
 			}
-			refs := make(map[graph.SymbolID]string, len(in.Symbols))
+			refs := make(map[inventory.SymbolID]string, len(in.Symbols))
 			for i := range in.Symbols {
 				refs[in.Symbols[i].ID] = in.Symbols[i].Ref
 			}
@@ -782,7 +783,7 @@ func TestEncodingReflectionRetainsWhatAStandardContainerReads(t *testing.T) {
 func TestEncodingReflectionNamesTheCalleeAValueCrossedInto(t *testing.T) {
 	shared := analysisOf(t, "encoding-reflection-opaque.txtar", Options{})
 	symbols := shared.inventory(t)
-	refs := make(map[graph.SymbolID]string, len(symbols))
+	refs := make(map[inventory.SymbolID]string, len(symbols))
 	for i := range symbols {
 		refs[symbols[i].ID] = symbols[i].Ref
 	}
@@ -968,7 +969,7 @@ func TestEncodingReflectionFillsTheFieldsADecodingCalleeOutsideReceives(t *testi
 	if err != nil {
 		t.Fatalf("EncodingReflectionDetector(encoding-reflection-any-flow.txtar) error: %v", err)
 	}
-	refOf := make(map[graph.SymbolID]string, len(in.Symbols))
+	refOf := make(map[inventory.SymbolID]string, len(in.Symbols))
 	for i := range in.Symbols {
 		refOf[in.Symbols[i].ID] = in.Symbols[i].Ref
 	}
@@ -1190,7 +1191,7 @@ func TestEncodingReflectionReadsTheFieldsADecoderFills(t *testing.T) {
 			if err != nil {
 				t.Fatalf("EncodingReflectionDetector(%s) error: %v", tt.archive, err)
 			}
-			refOf := make(map[graph.SymbolID]string, len(in.Symbols))
+			refOf := make(map[inventory.SymbolID]string, len(in.Symbols))
 			for i := range in.Symbols {
 				refOf[in.Symbols[i].ID] = in.Symbols[i].Ref
 			}
@@ -1240,7 +1241,7 @@ func TestEncodingReflectionReadsOnlyTheFieldsTheProgramWrites(t *testing.T) {
 			if err != nil {
 				t.Fatalf("EncodingReflectionDetector(encoding-reflection-written-fields.txtar) error: %v", err)
 			}
-			refOf := make(map[graph.SymbolID]string, len(in.Symbols))
+			refOf := make(map[inventory.SymbolID]string, len(in.Symbols))
 			for i := range in.Symbols {
 				refOf[in.Symbols[i].ID] = in.Symbols[i].Ref
 			}

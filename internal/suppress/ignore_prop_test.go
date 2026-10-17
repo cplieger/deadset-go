@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
@@ -73,20 +73,20 @@ func drawnInventories() *rapid.Generator[drawnInventory] {
 // symbols indexes one drawn inventory the way the enumeration would: one
 // declaration per line of its own file. No load takes place, so a draw costs no
 // package load and shrinks to the declarations that carry a failure.
-func (d drawnInventory) symbols() []graph.Symbol {
-	symbols := make([]graph.Symbol, 0, len(d.declarations))
+func (d drawnInventory) symbols() []inventory.Symbol {
+	symbols := make([]inventory.Symbol, 0, len(d.declarations))
 	lines := map[string]int{}
 	for _, declaration := range d.declarations {
 		lines[declaration.file]++
 		at := token.Position{Filename: declaration.file, Line: lines[declaration.file], Column: 1}
-		symbols = append(symbols, graph.Symbol{
-			ID:      graph.SymbolID(fmt.Sprintf("%s:%d:%d", at.Filename, at.Line, at.Column)),
+		symbols = append(symbols, inventory.Symbol{
+			ID:      inventory.SymbolID(fmt.Sprintf("%s:%d:%d", at.Filename, at.Line, at.Column)),
 			Ref:     declaration.ref(),
 			Name:    declaration.name,
 			PkgPath: drawnModule + declaration.pkg,
 			Pos:     at,
 			EndLine: at.Line,
-			Kind:    graph.KindFunc,
+			Kind:    inventory.KindFunc,
 		})
 	}
 	return symbols
@@ -152,13 +152,13 @@ func TestProperty16ASuppressionMatchesOnlyWhatItNames(t *testing.T) {
 
 		// Every declaration at the named reference in the named file is bound, and
 		// no other is, which is the whole of the matching rule.
-		var want []graph.SymbolID
+		var want []inventory.SymbolID
 		for _, s := range symbols {
 			if s.Ref == named.Ref && s.Pos.Filename == named.Pos.Filename {
 				want = append(want, s.ID)
 			}
 		}
-		bound := make([]graph.SymbolID, 0, len(records))
+		bound := make([]inventory.SymbolID, 0, len(records))
 		for _, r := range records {
 			if string(r.Code) != code || r.Symbol != named.Ref || r.Path != named.Pos.Filename {
 				t.Fatalf("IgnoreFile(%s) returned the record %+v, which names something the entry does not\n%s",

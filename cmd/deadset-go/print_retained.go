@@ -7,6 +7,7 @@ import (
 	"io"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/run"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -53,7 +54,7 @@ func printRetained(ctx context.Context, args []string, stdout, stderr io.Writer)
 		return failed(ctx, stderr, err)
 	}
 	namedUnbuilt(stderr, swept.Unbuilt)
-	positions := make(map[graph.SymbolID]string, len(swept.Merged.Symbols))
+	positions := make(map[inventory.SymbolID]string, len(swept.Merged.Symbols))
 	for i := range swept.Merged.Symbols {
 		positions[swept.Merged.Symbols[i].ID] = swept.Merged.Symbols[i].Pos.String()
 	}
@@ -86,7 +87,7 @@ func findingsOf(ctx context.Context, req *run.Request) (*run.Findings, error) {
 
 // retainedLines renders one line per retained symbol. The listing groups a symbol's
 // classes adjacently, so one pass emits one line per symbol and nothing is re-sorted.
-func retainedLines(refs, positions map[graph.SymbolID]string, retained []graph.Exemption) []string {
+func retainedLines(refs, positions map[inventory.SymbolID]string, retained []graph.Exemption) []string {
 	var lines []string
 	for i := range retained {
 		held := &retained[i]

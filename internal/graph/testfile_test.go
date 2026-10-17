@@ -3,6 +3,8 @@ package graph
 import (
 	"slices"
 	"testing"
+
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 )
 
 func TestIsTestFileAppliesTheLanguageRule(t *testing.T) {
@@ -39,7 +41,7 @@ func TestIsTestFileAppliesTheLanguageRule(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rule, ok := IsTestFile(tc.path)
+			rule, ok := inventory.IsTestFile(tc.path)
 			if ok != tc.want {
 				t.Fatalf("IsTestFile(%q) = %q, %t, want %t", tc.path, rule, ok, tc.want)
 			}
@@ -53,13 +55,13 @@ func TestIsTestFileAppliesTheLanguageRule(t *testing.T) {
 func TestReferencesReportsTheRuleThatClassifiedEachTestFile(t *testing.T) {
 	cases := []struct {
 		archive string
-		want    []TestFileRule
+		want    []inventory.TestFileRule
 	}{
 		// catalog_test.go and external_test.go.
-		{archive: "variants.txtar", want: []TestFileRule{{Rule: "go-test-suffix", Matched: 2}}},
+		{archive: "variants.txtar", want: []inventory.TestFileRule{{Rule: "go-test-suffix", Matched: 2}}},
 		// A module with no test file reads the rule with a count of zero rather
 		// than no rule at all.
-		{archive: "reference-kinds.txtar", want: []TestFileRule{{Rule: "go-test-suffix", Matched: 0}}},
+		{archive: "reference-kinds.txtar", want: []inventory.TestFileRule{{Rule: "go-test-suffix", Matched: 0}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.archive, func(t *testing.T) {
@@ -74,7 +76,7 @@ func TestReferencesFlagsEveryReferenceATestFileMakes(t *testing.T) {
 	a := analyze(t, "variants.txtar")
 
 	for _, r := range a.refs {
-		_, isTest := IsTestFile(r.Pos.Filename)
+		_, isTest := inventory.IsTestFile(r.Pos.Filename)
 		if r.Test != isTest {
 			t.Errorf("References(variants.txtar) reference from %s to %s at %s:%d:%d has Test %t, want %t",
 				a.name(r.From), a.name(r.To), r.Pos.Filename, r.Pos.Line, r.Pos.Column, r.Test, isTest)

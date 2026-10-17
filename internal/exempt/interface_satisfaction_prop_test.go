@@ -10,7 +10,9 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
 	"pgregory.net/rapid"
@@ -168,16 +170,17 @@ func inputUnder(t *rapid.T, dir string) *Input {
 	if err != nil {
 		t.Fatalf("Setup: load.Load(%s): %v", dir, err)
 	}
-	symbols, err := graph.Symbols(&result, doc.Target.Path, os.ReadFile)
+	inv, err := inventory.Of(&result, doc.Target.Path, os.ReadFile)
 	if err != nil {
-		t.Fatalf("Setup: graph.Symbols(%s): %v", dir, err)
+		t.Fatalf("Setup: inventory.Of(%s): %v", dir, err)
 	}
-	resolve, err := graph.NewResolver(&result, doc.Target.Path, os.ReadFile, symbols)
+	symbols := inv.Symbols
+	resolver, err := resolve.New(&result, inv)
 	if err != nil {
-		t.Fatalf("Setup: graph.NewResolver(%s): %v", dir, err)
+		t.Fatalf("Setup: resolve.New(%s): %v", dir, err)
 	}
 	return &Input{
-		Result: &result, Symbols: symbols, Resolve: resolve,
+		Result: &result, Symbols: symbols, Resolve: resolver,
 		Root: doc.Target.Path, Read: os.ReadFile,
 	}
 }
@@ -185,9 +188,9 @@ func inputUnder(t *rapid.T, dir string) *Input {
 // retainedMethods names the methods one exemption set retains, spelled the way the
 // oracle spells them.
 func retainedMethods(in *Input, held []graph.Exemption) map[string]bool {
-	byID := make(map[graph.SymbolID]string, len(in.Symbols))
+	byID := make(map[inventory.SymbolID]string, len(in.Symbols))
 	for i := range in.Symbols {
-		if in.Symbols[i].Kind == graph.KindMethod {
+		if in.Symbols[i].Kind == inventory.KindMethod {
 			byID[in.Symbols[i].ID] = strings.TrimPrefix(in.Symbols[i].Ref, "go://example.test/target#")
 		}
 	}

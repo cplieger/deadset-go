@@ -148,17 +148,17 @@ type PackageID struct {
 	Dir  string
 }
 
-// ID is the identity of any package the load holds, [Result.IDAt] of its import
+// ID is the identity of any package the load holds, [Result.idAt] of its import
 // path and the directory of its first file.
 func (r *Result) ID(p *packages.Package) PackageID {
-	return r.IDAt(p.PkgPath, packageDir(p))
+	return r.idAt(p.PkgPath, packageDir(p))
 }
 
-// IDAt is the identity of the package of import path pkgPath read from dir: the
+// idAt is the identity of the package of import path pkgPath read from dir: the
 // target's package of that path where one directory of the target declares it, so
 // a copy a module builds the target from reads as the target's package, and
 // otherwise the package of that path in dir.
-func (r *Result) IDAt(pkgPath, dir string) PackageID {
+func (r *Result) idAt(pkgPath, dir string) PackageID {
 	if declared, held := r.declared[pkgPath]; held && declared != "" {
 		return PackageID{Path: pkgPath, Dir: declared}
 	}

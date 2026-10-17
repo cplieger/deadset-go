@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -360,7 +361,7 @@ func EncodingReflectionDetector(in *Input) ([]graph.Exemption, error) {
 	}
 	f.keepDecoded()
 	kept := f.kept.exemptions()
-	retained := make(map[graph.SymbolID]bool, len(kept))
+	retained := make(map[inventory.SymbolID]bool, len(kept))
 	for i := range kept {
 		retained[kept[i].ID] = retained[kept[i].ID] || holdsInMode(&kept[i], in.Mode)
 	}
@@ -513,11 +514,9 @@ func (f *encodingFlow) resultsCalled(named *types.Named, d *destination) []*type
 
 // walkCalls records every value a call hands to a destination package.
 func (f *encodingFlow) walkCalls() error {
-	for _, p := range graph.SortedPackages(f.kept.in.Result.Packages) {
-		if p.TypesInfo == nil {
-			continue
-		}
-		for _, file := range p.Syntax {
+	r := f.kept.in.Result
+	for _, p := range inventory.Packages(r.Packages, r.Fset) {
+		for _, file := range inventory.Files(p, r.Fset) {
 			if err := f.walkFile(p.TypesInfo, file); err != nil {
 				return err
 			}
@@ -1130,7 +1129,7 @@ func (f *encodingFlow) noteDecoded(field *types.Var, visited bool, site evidence
 	if !visited || !d.reach.holders && !d.reach.fills {
 		return
 	}
-	if _, test := graph.IsTestFile(site.at.Filename); test {
+	if _, test := inventory.IsTestFile(site.at.Filename); test {
 		return
 	}
 	if f.decoded == nil {
@@ -1566,7 +1565,7 @@ type retention struct {
 
 // exemptionKey identifies one symbol held back at one site.
 type exemptionKey struct {
-	id   graph.SymbolID
+	id   inventory.SymbolID
 	site evidence
 }
 
@@ -1658,7 +1657,7 @@ func (f *encodingFlow) writtenFor(site evidence) map[token.Position]bool {
 	if f.production == nil {
 		f.indexWrites()
 	}
-	if _, test := graph.IsTestFile(site.at.Filename); test || !f.kept.in.Mode.Production {
+	if _, test := inventory.IsTestFile(site.at.Filename); test || !f.kept.in.Mode.Production {
 		return f.everyWrite
 	}
 	return f.production
@@ -1673,7 +1672,7 @@ func (f *encodingFlow) indexWrites() {
 			continue
 		}
 		for _, file := range p.Syntax {
-			_, test := graph.IsTestFile(in.Result.Fset.Position(file.FileStart).Filename)
+			_, test := inventory.IsTestFile(in.Result.Fset.Position(file.FileStart).Filename)
 			for _, field := range slices.Concat(fieldsWritten(p.TypesInfo, file), fieldsConverted(p.TypesInfo, file)) {
 				f.everyWrite[f.edge.sites.of(field)] = true
 				if !test {

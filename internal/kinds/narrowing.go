@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -32,14 +33,14 @@ const (
 // with the declarations no narrowing may report.
 type narrowing struct {
 	in           *Input
-	reach        map[graph.SymbolID]narrowScope
-	named        map[graph.SymbolID]int
-	fromTest     map[graph.SymbolID]int
-	unnarrowable map[graph.SymbolID]bool
+	reach        map[inventory.SymbolID]narrowScope
+	named        map[inventory.SymbolID]int
+	fromTest     map[inventory.SymbolID]int
+	unnarrowable map[inventory.SymbolID]bool
 
 	// signatures keys every type an exported function or method of the type's own
 	// package names in a parameter or a result, with those functions and methods.
-	signatures map[graph.SymbolID][]graph.SymbolID
+	signatures map[inventory.SymbolID][]inventory.SymbolID
 }
 
 // newNarrowing folds every reference into the spread of the declaration it names,
@@ -52,10 +53,10 @@ type narrowing struct {
 func newNarrowing(in *Input) *narrowing {
 	n := &narrowing{
 		in:           in,
-		reach:        make(map[graph.SymbolID]narrowScope),
-		named:        make(map[graph.SymbolID]int),
-		fromTest:     make(map[graph.SymbolID]int),
-		unnarrowable: make(map[graph.SymbolID]bool, len(in.Exempt)),
+		reach:        make(map[inventory.SymbolID]narrowScope),
+		named:        make(map[inventory.SymbolID]int),
+		fromTest:     make(map[inventory.SymbolID]int),
+		unnarrowable: make(map[inventory.SymbolID]bool, len(in.Exempt)),
 		signatures:   signatureTypes(in),
 	}
 	for ix := range in.Exempt {
@@ -93,7 +94,7 @@ func (n *narrowing) widen(r *graph.Reference) {
 // rather than restating its rule, so the two cannot disagree about a declaration
 // nothing reads.
 func (n *narrowing) holdWriteOnly() {
-	exempted := make(map[graph.SymbolID]bool, len(n.in.Exempt))
+	exempted := make(map[inventory.SymbolID]bool, len(n.in.Exempt))
 	for ix := range n.in.Exempt {
 		exemption := &n.in.Exempt[ix]
 		exempted[exemption.ID] = true
@@ -164,7 +165,7 @@ func (n *narrowing) holdSatisfiers(one *Configured, declared declaredInterface, 
 // narrowing kinds however narrow the target's own references are. An external test
 // package is a package of its own, so a reference from one reaches past the package
 // it tests.
-func (n *narrowing) scopeOf(to *graph.Symbol, r *graph.Reference) narrowScope {
+func (n *narrowing) scopeOf(to *inventory.Symbol, r *graph.Reference) narrowScope {
 	from := n.in.symbol(r.From)
 	switch {
 	case from == nil:
@@ -185,7 +186,7 @@ func (n *narrowing) scopeOf(to *graph.Symbol, r *graph.Reference) narrowScope {
 // consumers. An importable one is closed only where the configuration declares the
 // consumer set complete and every declared consumer loaded, because the callers of a
 // published package are otherwise unknown.
-func (in *Input) closed(symbol *graph.Symbol) bool {
+func (in *Input) closed(symbol *inventory.Symbol) bool {
 	return !in.importable(symbol) || in.consumersLoaded()
 }
 
@@ -196,13 +197,13 @@ func (in *Input) closed(symbol *graph.Symbol) bool {
 // supplies a type argument by position, an interface method's exportedness is its
 // implementors' contract, and an encoder, a template or a reflective lookup names a
 // field by string where no reference does.
-func (n *narrowing) narrowable(symbol *graph.Symbol) bool {
+func (n *narrowing) narrowable(symbol *inventory.Symbol) bool {
 	switch {
 	case !symbol.Exported, unnarrowableKind(symbol.Kind):
 		return false
 	case n.unnarrowable[symbol.ID]:
 		return false
-	case !n.in.closed(symbol), n.in.candidateOf(symbol.ID) != nil, n.in.testSupport(symbol):
+	case !n.in.closed(symbol), n.in.candidateOf(symbol.ID) != nil, symbol.TestSupport:
 		return false
 	default:
 		return n.named[symbol.ID] > 0
@@ -212,9 +213,9 @@ func (n *narrowing) narrowable(symbol *graph.Symbol) bool {
 // unnarrowableKind reports whether one kind of declaration is outside both
 // narrowing kinds' population: a type parameter, a method an interface declares, and
 // a field of a struct.
-func unnarrowableKind(kind graph.SymbolKind) bool {
+func unnarrowableKind(kind inventory.SymbolKind) bool {
 	switch kind {
-	case graph.KindTypeParam, graph.KindInterfaceMethod, graph.KindField:
+	case inventory.KindTypeParam, inventory.KindInterfaceMethod, inventory.KindField:
 		return true
 	default:
 		return false
@@ -223,8 +224,8 @@ func unnarrowableKind(kind graph.SymbolKind) bool {
 
 // subjects lists the declarations the two narrowing kinds judge, in the order the
 // inventory holds them.
-func (n *narrowing) subjects() []*graph.Symbol {
-	var held []*graph.Symbol
+func (n *narrowing) subjects() []*inventory.Symbol {
+	var held []*inventory.Symbol
 	for i := range n.in.Merged.Symbols {
 		if symbol := &n.in.Merged.Symbols[i]; n.narrowable(symbol) {
 			held = append(held, symbol)
@@ -301,7 +302,7 @@ func unnecessaryExposure(in *Input) ([]Finding, error) {
 // names one type in a parameter or a result is referenced from at least as far as
 // scope. Its callers then hold values of the type, so narrowing the type would leave
 // an exported signature naming a type those callers cannot name.
-func (n *narrowing) namedBySignatureReachedFrom(symbol *graph.Symbol, scope narrowScope) bool {
+func (n *narrowing) namedBySignatureReachedFrom(symbol *inventory.Symbol, scope narrowScope) bool {
 	for _, fn := range n.signatures[symbol.ID] {
 		if n.reach[fn] >= scope {
 			return true
@@ -313,8 +314,8 @@ func (n *narrowing) namedBySignatureReachedFrom(symbol *graph.Symbol, scope narr
 // signatureTypes keys every type of the target that an exported function or method
 // of the type's own package names in a parameter or a result, with the functions
 // and methods that name it, over every configuration of the run.
-func signatureTypes(in *Input) map[graph.SymbolID][]graph.SymbolID {
-	named := make(map[graph.SymbolID][]graph.SymbolID)
+func signatureTypes(in *Input) map[inventory.SymbolID][]inventory.SymbolID {
+	named := make(map[inventory.SymbolID][]inventory.SymbolID)
 	for one, p := range in.typedPackages() {
 		for _, fn := range exportedFuncs(p.Types) {
 			holdSignature(named, one, fn, p.Types.Path())
@@ -325,7 +326,7 @@ func signatureTypes(in *Input) map[graph.SymbolID][]graph.SymbolID {
 
 // holdSignature keys every type of the package at path that one function's
 // signature names to that function.
-func holdSignature(named map[graph.SymbolID][]graph.SymbolID, one *Configured, fn *types.Func, path string) {
+func holdSignature(named map[inventory.SymbolID][]inventory.SymbolID, one *Configured, fn *types.Func, path string) {
 	fnID, held := one.Resolve.Object(fn)
 	if !held {
 		return
@@ -427,7 +428,7 @@ func typeNamesIn(held map[*types.TypeName]bool, path string, t types.Type) {
 }
 
 // finding renders one finding of a narrowing kind.
-func (n *narrowing) finding(symbol *graph.Symbol, code vocab.Code, visibility, message string) (Finding, bool) {
+func (n *narrowing) finding(symbol *inventory.Symbol, code vocab.Code, visibility, message string) (Finding, bool) {
 	one, held := n.in.finding(symbol.ID, code, message)
 	if !held {
 		return Finding{}, false
@@ -468,13 +469,13 @@ func unreachableExport(in *Input) ([]Finding, error) {
 // unused-exported population of a package nothing outside can import. Every arm is
 // the unused-declaration rule's own, in its order, yielding the candidate to the
 // kind that makes the more specific claim, so one declaration is reported once.
-func (in *Input) unreachableExport(candidate *graph.Candidate, symbol *graph.Symbol) bool {
+func (in *Input) unreachableExport(candidate *graph.Candidate, symbol *inventory.Symbol) bool {
 	switch {
 	case !symbol.Exported:
 		return false
 	case candidate.UnreferencedTest:
 		return in.unreferencedTestExport(candidate, symbol)
-	case in.importable(symbol), candidate.TestOfDeadCode, testFile(symbol):
+	case in.importable(symbol), candidate.TestOfDeadCode, symbol.InTestFile:
 		return false
 	case in.deadParent(symbol):
 		return false
@@ -492,7 +493,7 @@ func (in *Input) unreachableExport(candidate *graph.Candidate, symbol *graph.Sym
 // unreferencedTestExport reports whether an exported test-file declaration nothing
 // reaches is this kind's population, whatever its package: no other program compiles
 // a test file, so its export reaches nobody.
-func (in *Input) unreferencedTestExport(candidate *graph.Candidate, symbol *graph.Symbol) bool {
+func (in *Input) unreferencedTestExport(candidate *graph.Candidate, symbol *inventory.Symbol) bool {
 	return !member(symbol.Kind) && !interfaceDeclaration(symbol.Kind) && !in.deadParent(symbol) &&
 		!in.readOrWriteSubject(candidate, symbol)
 }

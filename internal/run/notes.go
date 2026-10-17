@@ -30,7 +30,7 @@ func (l *Loaded) notes() []report.Note {
 		for _, p := range result.Packages {
 			if p.Module != nil && p.Module.Main {
 				imported.add(p)
-				addPublishable(directories, l.Root, result, p, &l.Loads[i].Tests)
+				addPublishable(directories, l.Root, result, p, &l.Merged.Tests)
 			}
 		}
 		imported.addReaders(result)

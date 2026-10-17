@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -10,15 +9,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 )
 
 // analysis is one fixture's symbol inventory and the references over it.
 type analysis struct {
-	names   map[SymbolID]string
-	symbols []Symbol
+	names   map[inventory.SymbolID]string
+	symbols []inventory.Symbol
 	refs    []Reference
-	rules   []TestFileRule
+	rules   []inventory.TestFileRule
 }
 
 // analyze extracts one archive, loads it for one configuration, enumerates its
@@ -31,7 +30,7 @@ func analyze(t *testing.T, archive string) analysis {
 	refs := shared.references(t)
 	rules := shared.testFileRules(t)
 
-	names := make(map[SymbolID]string, len(symbols))
+	names := make(map[inventory.SymbolID]string, len(symbols))
 	for _, s := range symbols {
 		names[s.ID] = s.Name
 	}
@@ -41,7 +40,7 @@ func analyze(t *testing.T, archive string) analysis {
 // name spells one end of a reference as the declaration it is, and as the raw
 // identifier when no symbol answers to it, so a golden row is readable and a
 // row naming no declaration is visible.
-func (a analysis) name(id SymbolID) string {
+func (a analysis) name(id inventory.SymbolID) string {
 	if name, ok := a.names[id]; ok {
 		return name
 	}
@@ -371,29 +370,23 @@ func TestReferencesRecordsAProductionReferenceOncePerVariantSet(t *testing.T) {
 func TestReferencesInspectsEachSourceFileOnce(t *testing.T) {
 	dir := extract(t, "variants.txtar")
 	result, root := loadDir(t, dir, "linux", "amd64")
-	symbols, err := Symbols(result, root, os.ReadFile)
+	symbols, rs, err := inventoryOf(result, root, os.ReadFile)
 	if err != nil {
 		t.Fatalf("Setup: Symbols(variants.txtar): %v", err)
 	}
 
-	p, err := newReferencePass(result, root, os.ReadFile, symbols)
-	if err != nil {
-		t.Fatalf("Setup: newReferencePass(variants.txtar): %v", err)
-	}
+	p := newReferencePass(result, rs, symbols, TestClasses{})
 	if err := p.walk(result.Packages); err != nil {
 		t.Fatalf("References(variants.txtar) walk error: %v", err)
 	}
 
-	// catalog.go is compiled by two variants and inspected for the first of
-	// them; each test file is compiled by the one variant that holds it. A file is
-	// keyed by the path the toolchain named it by, which is what tells one
-	// module's file from another module's file of the same name, so the assertion
-	// reads the base names.
-	reached := make(map[string]int, len(p.reached))
-	for named, count := range p.reached {
-		reached[filepath.Base(named)] = count
+	// catalog.go is compiled by two variants and walked once, under the first of
+	// them; each test file is compiled by the one variant that holds it.
+	reached := make(map[string]int)
+	for _, f := range inventory.Sources(result.Packages, result.Fset) {
+		reached[filepath.Base(result.Fset.Position(f.FileStart).Filename)]++
 	}
-	want := map[string]int{"catalog.go": 2, "catalog_test.go": 1, "external_test.go": 1}
+	want := map[string]int{"catalog.go": 1, "catalog_test.go": 1, "external_test.go": 1}
 	if !maps.Equal(reached, want) {
 		t.Errorf("References(variants.txtar) reached %v, want %v", reached, want)
 	}
@@ -411,16 +404,16 @@ func TestReferencesInspectsEachSourceFileOnce(t *testing.T) {
 func TestReferencesOrderIsTheSameOnEveryCall(t *testing.T) {
 	dir := extract(t, "reference-kinds.txtar")
 	result, root := loadDir(t, dir, "linux", "amd64")
-	symbols, err := Symbols(result, root, os.ReadFile)
+	symbols, rs, err := inventoryOf(result, root, os.ReadFile)
 	if err != nil {
 		t.Fatalf("Setup: Symbols(reference-kinds.txtar): %v", err)
 	}
 
-	first, _, err := References(result, root, os.ReadFile, symbols)
+	first, _, err := References(result, rs, symbols, TestClasses{})
 	if err != nil {
 		t.Fatalf("References first call error: %v", err)
 	}
-	second, _, err := References(result, root, os.ReadFile, symbols)
+	second, _, err := References(result, rs, symbols, TestClasses{})
 	if err != nil {
 		t.Fatalf("References second call error: %v", err)
 	}
@@ -432,70 +425,6 @@ func TestReferencesOrderIsTheSameOnEveryCall(t *testing.T) {
 			t.Fatalf("References order is not strictly increasing at %d: %s to %s then %s to %s",
 				i, first[i-1].From, first[i-1].To, first[i].From, first[i].To)
 		}
-	}
-}
-
-func TestReferencesRefusesAnIncompleteRequest(t *testing.T) {
-	dir := extract(t, "reference-kinds.txtar")
-	result, root := loadDir(t, dir, "linux", "amd64")
-	symbols, err := Symbols(result, root, os.ReadFile)
-	if err != nil {
-		t.Fatalf("Setup: Symbols(reference-kinds.txtar): %v", err)
-	}
-
-	cases := []struct {
-		name    string
-		result  *load.Result
-		read    ReadFile
-		wantErr error
-	}{
-		{name: "no result", result: nil, read: os.ReadFile, wantErr: ErrIncompleteLoad},
-		{name: "no file set", result: &load.Result{Packages: result.Packages}, read: os.ReadFile, wantErr: ErrIncompleteLoad},
-		{name: "no reader", result: result, read: nil, wantErr: ErrIncompleteLoad},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			refs, rules, err := References(tc.result, root, tc.read, symbols)
-			if !errors.Is(err, tc.wantErr) {
-				t.Fatalf("References(%s) error = %v, want one satisfying errors.Is(err, %v)", tc.name, err, tc.wantErr)
-			}
-			if refs != nil || rules != nil {
-				t.Errorf("References(%s) returned %d references and %d rules, want none", tc.name, len(refs), len(rules))
-			}
-		})
-	}
-}
-
-func TestReferencesReportsAFileTheTargetRootDoesNotHold(t *testing.T) {
-	result, root, file := outsideRoot(t)
-
-	refs, rules, err := References(result, root, readOutsideRootSource, nil)
-	if !errors.Is(err, ErrSource) {
-		t.Fatalf("References(a file outside the root) error = %v, want one satisfying errors.Is(err, %v)", err, ErrSource)
-	}
-	if !strings.Contains(err.Error(), file) {
-		t.Errorf("References(a file outside the root) error = %v, want it to name %s", err, file)
-	}
-	if refs != nil || rules != nil {
-		t.Errorf("References(a file outside the root) returned %d references and %d rules, want none", len(refs), len(rules))
-	}
-}
-
-func TestReferencesReportsAnUnreadableSource(t *testing.T) {
-	dir := extract(t, "reference-kinds.txtar")
-	result, root := loadDir(t, dir, "linux", "amd64")
-	symbols, err := Symbols(result, root, os.ReadFile)
-	if err != nil {
-		t.Fatalf("Setup: Symbols(reference-kinds.txtar): %v", err)
-	}
-
-	refuse := func(string) ([]byte, error) { return nil, os.ErrPermission }
-	refs, rules, err := References(result, root, refuse, symbols)
-	if !errors.Is(err, ErrSource) {
-		t.Fatalf("References with a refusing reader error = %v, want one satisfying errors.Is(err, %v)", err, ErrSource)
-	}
-	if refs != nil || rules != nil {
-		t.Errorf("References with a refusing reader returned %d references and %d rules, want none", len(refs), len(rules))
 	}
 }
 
@@ -524,8 +453,8 @@ func TestRefKindStringNamesEveryKind(t *testing.T) {
 
 // kinds maps every symbol of one analysis to its kind, so a test can pick out the
 // files and the packages the reference pass named.
-func (a analysis) kinds() map[SymbolID]SymbolKind {
-	held := make(map[SymbolID]SymbolKind, len(a.symbols))
+func (a analysis) kinds() map[inventory.SymbolID]inventory.SymbolKind {
+	held := make(map[inventory.SymbolID]inventory.SymbolKind, len(a.symbols))
 	for i := range a.symbols {
 		held[a.symbols[i].ID] = a.symbols[i].Kind
 	}
@@ -538,7 +467,7 @@ func TestReferencesRecordsEveryImportOfATargetPackageFromTheImportingFile(t *tes
 
 	var found []string
 	for _, r := range a.refs {
-		if kinds[r.From] != KindFile {
+		if kinds[r.From] != inventory.KindFile {
 			continue
 		}
 		found = append(found, fmt.Sprintf("%s to %s %s %s:%d:%d",
@@ -571,7 +500,7 @@ func TestReferencesLeavesTheCandidateSetToTheDeclarations(t *testing.T) {
 	// imports are alike to the sweep: what the rule added is an edge for the file
 	// and package kinds to read, not a change to what is reported.
 	for _, c := range New(a.symbols, a.refs, nil).Sweep(&SweepInput{}).Candidates {
-		if kind := kinds[c.ID]; kind == KindPackage || kind == KindFile {
+		if kind := kinds[c.ID]; kind == inventory.KindPackage || kind == inventory.KindFile {
 			t.Errorf("Sweep over imports.txtar reported the %s %s, want only declarations", kind, a.name(c.ID))
 		}
 	}
@@ -584,8 +513,8 @@ const comparisonsPackage = "go://example.com/comparisons#"
 // refNames maps every symbol of one analysis to its reference without the part
 // every symbol of the package shares, which is what tells a field from the type of
 // the same name where a display name cannot.
-func (a analysis) refNames(prefix string) map[SymbolID]string {
-	held := make(map[SymbolID]string, len(a.symbols))
+func (a analysis) refNames(prefix string) map[inventory.SymbolID]string {
+	held := make(map[inventory.SymbolID]string, len(a.symbols))
 	for i := range a.symbols {
 		held[a.symbols[i].ID] = strings.TrimPrefix(a.symbols[i].Ref, prefix)
 	}
@@ -606,7 +535,7 @@ func (a analysis) fieldReadsIn(prefix string) map[string][]string {
 	kinds := a.kinds()
 	reads := make(map[string][]string)
 	for _, r := range a.refs {
-		if r.Kind != RefRead || kinds[r.To] != KindField {
+		if r.Kind != RefRead || kinds[r.To] != inventory.KindField {
 			continue
 		}
 		reads[names[r.From]] = append(reads[names[r.From]], names[r.To])
@@ -673,7 +602,7 @@ func TestReferencesRecordsAComparisonsReadsAtTheComparisonSite(t *testing.T) {
 
 	sites := make(map[string][]string)
 	for _, r := range a.refs {
-		if r.Kind != RefRead || kinds[r.To] != KindField {
+		if r.Kind != RefRead || kinds[r.To] != inventory.KindField {
 			continue
 		}
 		from := names[r.From]
@@ -739,6 +668,20 @@ func TestReferencesReadAFieldThroughEveryIdenticalStructLiteral(t *testing.T) {
 		if slices.Contains(fields, "holder.Y.c") {
 			t.Errorf("References(struct-identity.txtar) recorded %s reading holder.Y.c, whose unexported field another package's literal of the same spelling does not share", from)
 		}
+	}
+}
+
+func TestReferencesReadAnIdenticalLiteralsFieldOnceWhateverTheVariants(t *testing.T) {
+	a := analyze(t, "struct-identity-variants.txtar")
+
+	var vias []string
+	for _, r := range a.refs {
+		if a.name(r.From) == "use" && a.name(r.To) == "holder.X.C" && r.Kind == RefRead {
+			vias = append(vias, r.Via.String())
+		}
+	}
+	if want := []string{"literal-twin"}; !slices.Equal(vias, want) {
+		t.Errorf("References(struct-identity-variants.txtar) recorded use reading holder.X.C via %v, want %v", vias, want)
 	}
 }
 

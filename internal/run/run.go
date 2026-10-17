@@ -16,8 +16,10 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/matrix"
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/report"
 )
@@ -34,10 +36,10 @@ type Request struct {
 }
 
 // enumerated is one configuration's load, the declarations enumerated from it and
-// the test classes of its packages.
+// the resolver over them.
 type enumerated struct {
-	Tests   graph.TestClasses
-	Symbols []graph.Symbol
+	Resolve *resolve.Resolver
+	Symbols []inventory.Symbol
 	Result  load.Result
 }
 
@@ -52,7 +54,7 @@ type Loaded struct {
 
 	Matrix *graph.Matrix
 	Merged *graph.Merged
-	Refs   map[graph.SymbolID]string
+	Refs   map[inventory.SymbolID]string
 
 	// Root is the target root every position is rendered against, and Identity
 	// the name the scope gives the target, empty where it gives none.
@@ -66,7 +68,7 @@ type Loaded struct {
 
 	// Declared is the consumers the scope declared.
 	Declared       []scope.Module
-	TestFileRules  []graph.TestFileRule
+	TestFileRules  []inventory.TestFileRule
 	Unmatched      []graph.Unmatched
 	TypeErrorSkips []graph.TypeErrorSkip
 
@@ -108,16 +110,16 @@ func Load(ctx context.Context, req *Request) (*Loaded, error) {
 		Declared: document.Consumers,
 		Unbuilt:  unbuilt,
 	}
-	passes, err := l.enumerate(results, derived)
+	passes, tests, err := l.enumerate(results, derived)
 	if err != nil {
 		return nil, err
 	}
-	merged, err := graph.Merge(passes)
+	merged, err := graph.Merge(passes, tests)
 	if err != nil {
 		return nil, err
 	}
 	l.Merged = &merged
-	l.Refs = make(map[graph.SymbolID]string, len(merged.Symbols))
+	l.Refs = make(map[inventory.SymbolID]string, len(merged.Symbols))
 	for i := range merged.Symbols {
 		l.Refs[merged.Symbols[i].ID] = merged.Symbols[i].Ref
 	}
@@ -136,9 +138,10 @@ func (l *Loaded) Identifiers() []string {
 	return ids
 }
 
-// enumerate runs the passes over every loaded configuration. A derived matrix
-// checks a file against the configurations that compile it elsewhere.
-func (l *Loaded) enumerate(results []load.Result, derived bool) ([]graph.Configured, error) {
+// enumerate runs the passes over every loaded configuration, and returns them with
+// the matrix's test classes the reference pass read. A derived matrix checks a file
+// against the configurations that compile it elsewhere.
+func (l *Loaded) enumerate(results []load.Result, derived bool) ([]graph.Configured, graph.TestClasses, error) {
 	options := graph.RootOptions{
 		Patterns:     l.req.Config.Roots.Patterns,
 		PublishedAPI: l.req.Config.Target.Kind == report.TargetKindLibrary,
@@ -149,51 +152,55 @@ func (l *Loaded) enumerate(results []load.Result, derived bool) ([]graph.Configu
 	}
 	l.Loads = make([]enumerated, len(results))
 	passes := make([]graph.Configured, len(results))
+	classes := make([]graph.TestClasses, len(results))
 	for i := range results {
 		one := options
 		if elsewhere != nil {
 			one.CheckedElsewhere = elsewhere[i]
 		}
-		var rules []graph.TestFileRule
 		var err error
-		if l.Loads[i], passes[i], rules, err = passesOf(&results[i], l.Root, one); err != nil {
-			return nil, err
+		if l.Loads[i], passes[i], classes[i], err = rootsOf(&results[i], l.Root, one); err != nil {
+			return nil, graph.TestClasses{}, err
 		}
-		l.TestFileRules = greatestPerRule(l.TestFileRules, rules)
 		l.TypeErrorSkips = append(l.TypeErrorSkips, graph.TypeErrorSkips(&results[i], l.Root, one.CheckedElsewhere)...)
 		l.Configurations = append(l.Configurations, results[i].Configuration)
 	}
-	return passes, nil
+	tests := graph.MatrixTests(classes)
+	for i := range results {
+		references, rules, err := graph.References(&results[i], l.Loads[i].Resolve, l.Loads[i].Symbols, tests)
+		if err != nil {
+			return nil, graph.TestClasses{}, err
+		}
+		passes[i].References = references
+		l.TestFileRules = greatestPerRule(l.TestFileRules, rules)
+	}
+	return passes, tests, nil
 }
 
-// passesOf runs the passes over one loaded configuration. The test-support
-// classification reads the roots and decides which references are test references,
-// so it runs between the two.
-func passesOf(result *load.Result, root string, options graph.RootOptions) (enumerated, graph.Configured, []graph.TestFileRule, error) {
-	symbols, err := graph.Symbols(result, root, os.ReadFile)
+// rootsOf runs the passes over one loaded configuration that come before the
+// matrix's test classes: the enumeration, the resolver, the roots, and the
+// configuration's own test classes, which read the roots.
+func rootsOf(result *load.Result, root string, options graph.RootOptions) (enumerated, graph.Configured, graph.TestClasses, error) {
+	inv, err := inventory.Of(result, root, os.ReadFile)
 	if err != nil {
-		return enumerated{}, graph.Configured{}, nil, err
+		return enumerated{}, graph.Configured{}, graph.TestClasses{}, err
 	}
-	roots, unmatched, err := graph.Roots(result, root, os.ReadFile, symbols, options)
+	resolver, err := resolve.New(result, inv)
 	if err != nil {
-		return enumerated{}, graph.Configured{}, nil, err
+		return enumerated{}, graph.Configured{}, graph.TestClasses{}, err
 	}
-	tests := graph.ClassifyTestSupport(result, root, symbols, roots, options.PublishedAPI)
-	references, rules, err := graph.References(result, root, os.ReadFile, symbols)
-	if err != nil {
-		return enumerated{}, graph.Configured{}, nil, err
-	}
-	return enumerated{Symbols: symbols, Result: *result, Tests: tests},
-		graph.Configured{Symbols: symbols, References: references, Roots: roots, Unmatched: unmatched},
-		rules, nil
+	roots, unmatched := graph.Roots(result, resolver, inv.Symbols, options)
+	return enumerated{Symbols: inv.Symbols, Result: *result, Resolve: resolver},
+		graph.Configured{Symbols: inv.Symbols, Roots: roots, Unmatched: unmatched},
+		graph.ClassifyTestSupport(result, inv.Symbols, roots, options.PublishedAPI), nil
 }
 
 // greatestPerRule folds one configuration's test-file rules into the run's. Every
 // configuration classifies the same files by the same rule, so the greater count is
 // the one the whole run classified.
-func greatestPerRule(held, next []graph.TestFileRule) []graph.TestFileRule {
+func greatestPerRule(held, next []inventory.TestFileRule) []inventory.TestFileRule {
 	for _, rule := range next {
-		at := slices.IndexFunc(held, func(r graph.TestFileRule) bool { return r.Rule == rule.Rule })
+		at := slices.IndexFunc(held, func(r inventory.TestFileRule) bool { return r.Rule == rule.Rule })
 		switch {
 		case at < 0:
 			held = append(held, rule)

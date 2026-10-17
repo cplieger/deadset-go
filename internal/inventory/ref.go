@@ -1,6 +1,8 @@
-package graph
+package inventory
 
-import "strings"
+import (
+	"strings"
+)
 
 // refPrefix namespaces every reference this analyzer emits by language.
 const refPrefix = "go://"

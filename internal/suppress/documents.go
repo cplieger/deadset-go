@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
 )
 
@@ -30,7 +30,7 @@ const symbolWant = "a stable symbol reference, go://<import-path>#<fragment> or 
 // IgnoreFile reads the ignore file at path and binds each of its entries to the
 // declarations it names, through the shared reader and binder. An absent file is
 // an empty one; a malformed document is a [core.MalformedError].
-func IgnoreFile(path string, symbols []graph.Symbol) ([]Record, []Refusal, error) {
+func IgnoreFile(path string, symbols []inventory.Symbol) ([]Record, []Refusal, error) {
 	entries, err := documentEntries(path, core.ReadIgnore, core.Ignore)
 	if err != nil {
 		return nil, nil, err
@@ -40,7 +40,7 @@ func IgnoreFile(path string, symbols []graph.Symbol) ([]Record, []Refusal, error
 
 // Baseline reads the baseline at path and binds each of its rows as [IgnoreFile]
 // binds an entry. A row's reason is the analyzer that recorded it.
-func Baseline(path string, symbols []graph.Symbol) ([]Record, []Refusal, error) {
+func Baseline(path string, symbols []inventory.Symbol) ([]Record, []Refusal, error) {
 	entries, err := BaselineRows(path)
 	if err != nil {
 		return nil, nil, err
@@ -50,7 +50,7 @@ func Baseline(path string, symbols []graph.Symbol) ([]Record, []Refusal, error) 
 
 // BaselineDocument reads one baseline document held in memory, as [Baseline]
 // reads the one at the target root.
-func BaselineDocument(body []byte, symbols []graph.Symbol) ([]Record, []Refusal, error) {
+func BaselineDocument(body []byte, symbols []inventory.Symbol) ([]Record, []Refusal, error) {
 	entries, err := core.ReadBaseline(body)
 	if err == nil {
 		err = checkForms(entries, core.Baseline)
@@ -101,7 +101,7 @@ func checkForms(entries []core.Entry, mechanism core.Mechanism) error {
 // bind resolves the entries of this analyzer's scheme against the inventory, by
 // reference and file together, and carries each record and refusal in the shape
 // the findings pass reads.
-func bind(entries []core.Entry, symbols []graph.Symbol, mechanism core.Mechanism, own Mechanism) ([]Record, []Refusal, error) {
+func bind(entries []core.Entry, symbols []inventory.Symbol, mechanism core.Mechanism, own Mechanism) ([]Record, []Refusal, error) {
 	byReference := make(map[[2]string][]string, len(symbols))
 	for i := range symbols {
 		at := [2]string{symbols[i].Ref, symbols[i].Pos.Filename}
@@ -109,7 +109,7 @@ func bind(entries []core.Entry, symbols []graph.Symbol, mechanism core.Mechanism
 	}
 	binder := core.Binder{
 		Lookup: func(symbol, path string) []string { return byReference[[2]string{symbol, path}] },
-		Holder: graph.ParameterHolder,
+		Holder: inventory.ParameterHolder,
 		Valid:  referenceForm,
 		Scheme: OwnScheme,
 	}
@@ -122,7 +122,7 @@ func bind(entries []core.Entry, symbols []graph.Symbol, mechanism core.Mechanism
 		one := &bound[i]
 		records = append(records, Record{
 			Code: one.Code, Symbol: one.Symbol, Path: one.Path, Reason: one.Reason,
-			Bound: graph.SymbolID(one.Bound), Site: position(one.Site), Mechanism: own,
+			Bound: inventory.SymbolID(one.Bound), Site: position(one.Site), Mechanism: own,
 		})
 	}
 	var refusals []Refusal

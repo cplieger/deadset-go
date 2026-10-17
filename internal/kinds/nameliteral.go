@@ -7,7 +7,8 @@ import (
 	"slices"
 	"strconv"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -19,7 +20,7 @@ var nameLiteralEvidence, _ = vocab.EvidenceFor("name-literal", language)
 // written, and the package-level declarations whose own declaration node holds it, the
 // specification for a name a grouped declaration declares.
 type literalSite struct {
-	within []graph.SymbolID
+	within []inventory.SymbolID
 	at     token.Position
 }
 
@@ -37,13 +38,13 @@ func (in *Input) capNameLiteral(found *Finding) {
 
 // nameLiteral is the literal that lowers one declaration's finding under one code,
 // and nil where none does.
-func (in *Input) nameLiteral(id graph.SymbolID, code vocab.Code) *Position {
+func (in *Input) nameLiteral(id inventory.SymbolID, code vocab.Code) *Position {
 	symbol := in.symbol(id)
 	if !nameLiteralEvidence.Lowers(language, code) || symbol == nil || !in.packageLevel(symbol) {
 		return nil
 	}
 	at, spelled := in.spelling(id, symbol)
-	if !spelled && symbol.Kind == graph.KindConst {
+	if !spelled && symbol.Kind == inventory.KindConst {
 		if typed := in.symbol(in.index().constTypes[id]); typed != nil && in.packageLevel(typed) {
 			at, spelled = in.spelling(typed.ID, typed)
 		}
@@ -56,7 +57,7 @@ func (in *Input) nameLiteral(id graph.SymbolID, code vocab.Code) *Position {
 
 // spelling is the first string literal spelling one declaration's name outside its
 // own declaration node.
-func (in *Input) spelling(id graph.SymbolID, symbol *graph.Symbol) (token.Position, bool) {
+func (in *Input) spelling(id inventory.SymbolID, symbol *inventory.Symbol) (token.Position, bool) {
 	for _, one := range in.nameLiterals()[symbol.Name] {
 		if !slices.Contains(one.within, id) {
 			return one.at, true
@@ -67,9 +68,9 @@ func (in *Input) spelling(id graph.SymbolID, symbol *graph.Symbol) (token.Positi
 
 // packageLevel reports whether one declaration is declared at package level rather
 // than inside a type.
-func (in *Input) packageLevel(symbol *graph.Symbol) bool {
+func (in *Input) packageLevel(symbol *inventory.Symbol) bool {
 	parent := in.symbol(symbol.Parent)
-	return parent != nil && (parent.Kind == graph.KindPackage || parent.Kind == graph.KindFile)
+	return parent != nil && (parent.Kind == inventory.KindPackage || parent.Kind == inventory.KindFile)
 }
 
 // nameLiterals is every string literal of the production files of the target the
@@ -83,55 +84,55 @@ func (in *Input) nameLiterals() map[string][]literalSite {
 		return held.literals
 	}
 	held.literals = make(map[string][]literalSite)
-	held.constTypes = make(map[graph.SymbolID]graph.SymbolID)
+	held.constTypes = make(map[inventory.SymbolID]inventory.SymbolID)
 	seen := make(map[token.Position]bool)
 	for typed := range in.typedFiles() {
-		resolve := typed.one.Resolve
+		rs := typed.one.Resolve
 		for _, decl := range typed.file.Decls {
-			keepConstTypes(decl, typed.pkg.TypesInfo, resolve, held.constTypes)
+			keepConstTypes(decl, typed.pkg.TypesInfo, rs, held.constTypes)
 			for _, node := range declarationNodes(decl) {
-				in.keepLiteralsOf(node, resolve, seen)
+				in.keepLiteralsOf(node, rs, seen)
 			}
 		}
 	}
 	for value := range held.literals {
-		slices.SortFunc(held.literals[value], func(a, b literalSite) int { return graph.ByPosition(a.at, b.at) })
+		slices.SortFunc(held.literals[value], func(a, b literalSite) int { return inventory.ByPosition(a.at, b.at) })
 	}
 	return held.literals
 }
 
 // keepLiteralsOf records every string literal one declaration node holds, as written
 // within the declarations that node declares, an import path and a struct tag left out.
-func (in *Input) keepLiteralsOf(node ast.Node, resolve *graph.Resolver, seen map[token.Position]bool) {
-	within := declaredBy(node, resolve)
+func (in *Input) keepLiteralsOf(node ast.Node, rs *resolve.Resolver, seen map[token.Position]bool) {
+	within := declaredBy(node, rs)
 	ast.Inspect(node, func(n ast.Node) bool {
 		switch n := n.(type) {
 		case *ast.ImportSpec:
 			return false
 		case *ast.Field:
 			if n.Tag != nil {
-				ast.Inspect(n.Type, func(inner ast.Node) bool { return in.keepLiteral(inner, resolve, within, seen) })
+				ast.Inspect(n.Type, func(inner ast.Node) bool { return in.keepLiteral(inner, rs, within, seen) })
 				return false
 			}
 		}
-		return in.keepLiteral(n, resolve, within, seen)
+		return in.keepLiteral(n, rs, within, seen)
 	})
 }
 
 // keepLiteral records one node where it is a string literal of a production file
 // of the target, once per position however many configurations build the file.
-func (in *Input) keepLiteral(n ast.Node, resolve *graph.Resolver, within []graph.SymbolID,
+func (in *Input) keepLiteral(n ast.Node, rs *resolve.Resolver, within []inventory.SymbolID,
 	seen map[token.Position]bool,
 ) bool {
 	lit, isLit := n.(*ast.BasicLit)
 	if !isLit || lit.Kind != token.STRING {
 		return true
 	}
-	consumer, at, err := resolve.Site(lit.Pos())
+	consumer, at, err := rs.Site(lit.Pos())
 	if err != nil || consumer != "" || at.Filename == "" || seen[at] {
 		return false
 	}
-	if _, test := graph.IsTestFile(at.Filename); test {
+	if _, test := inventory.IsTestFile(at.Filename); test {
 		return false
 	}
 	value, err := strconv.Unquote(lit.Value)
@@ -160,7 +161,7 @@ func declarationNodes(decl ast.Decl) []ast.Node {
 
 // declaredBy is the package-level declarations one declaration node declares, which
 // is what a literal inside that node is written within.
-func declaredBy(node ast.Node, resolve *graph.Resolver) []graph.SymbolID {
+func declaredBy(node ast.Node, rs *resolve.Resolver) []inventory.SymbolID {
 	var names []*ast.Ident
 	switch d := node.(type) {
 	case *ast.FuncDecl:
@@ -170,9 +171,9 @@ func declaredBy(node ast.Node, resolve *graph.Resolver) []graph.SymbolID {
 	case *ast.ValueSpec:
 		names = append(names, d.Names...)
 	}
-	var ids []graph.SymbolID
+	var ids []inventory.SymbolID
 	for _, name := range names {
-		if id, held := resolve.At(name.Pos()); held {
+		if id, held := rs.At(name.Pos()); held {
 			ids = append(ids, id)
 		}
 	}
@@ -181,7 +182,7 @@ func declaredBy(node ast.Node, resolve *graph.Resolver) []graph.SymbolID {
 
 // keepConstTypes records, for each constant one declaration node declares, the
 // defined type of the target the constant has.
-func keepConstTypes(decl ast.Decl, info *types.Info, resolve *graph.Resolver, held map[graph.SymbolID]graph.SymbolID) {
+func keepConstTypes(decl ast.Decl, info *types.Info, rs *resolve.Resolver, held map[inventory.SymbolID]inventory.SymbolID) {
 	group, isGroup := decl.(*ast.GenDecl)
 	if !isGroup || group.Tok != token.CONST {
 		return
@@ -192,8 +193,8 @@ func keepConstTypes(decl ast.Decl, info *types.Info, resolve *graph.Resolver, he
 			continue
 		}
 		for _, name := range values.Names {
-			if typeID, typed := definedTypeOf(info.Defs[name], resolve); typed {
-				if id, declared := resolve.At(name.Pos()); declared {
+			if typeID, typed := definedTypeOf(info.Defs[name], rs); typed {
+				if id, declared := rs.At(name.Pos()); declared {
 					held[id] = typeID
 				}
 			}
@@ -202,7 +203,7 @@ func keepConstTypes(decl ast.Decl, info *types.Info, resolve *graph.Resolver, he
 }
 
 // definedTypeOf is the declaration of the defined type of the target one object has.
-func definedTypeOf(object types.Object, resolve *graph.Resolver) (graph.SymbolID, bool) {
+func definedTypeOf(object types.Object, rs *resolve.Resolver) (inventory.SymbolID, bool) {
 	if object == nil {
 		return "", false
 	}
@@ -210,5 +211,5 @@ func definedTypeOf(object types.Object, resolve *graph.Resolver) (graph.SymbolID
 	if !isNamed {
 		return "", false
 	}
-	return resolve.At(named.Obj().Pos())
+	return rs.At(named.Obj().Pos())
 }

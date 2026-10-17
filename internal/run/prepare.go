@@ -6,13 +6,14 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
 	"github.com/cplieger/deadset-spec/v8/report"
 )
 
-// Prepared is the exemption stage under one mode: one resolver and one exemption
-// set per configuration. No suppression record changes it, so the rounds of a
-// baseline write share one.
+// Prepared is the exemption stage under one mode: one exemption set per
+// configuration, over the resolver the load built. No suppression record changes
+// it, so the rounds of a baseline write share one.
 type Prepared struct {
 	*Loaded
 
@@ -26,7 +27,7 @@ type Prepared struct {
 
 	// filled is every field a callee outside the program fills and no class
 	// retains ([exempt.FilledFields]).
-	filled map[graph.SymbolID]bool
+	filled map[inventory.SymbolID]bool
 
 	// uses are the references from each uncalled interface method to the methods
 	// implementing it.
@@ -48,18 +49,14 @@ func (l *Loaded) Prepare(production bool) (*Prepared, error) {
 			ConsumerTestsProduction: l.req.Config.Analysis.ConsumerTestsProduction,
 		},
 		per:    make([]kinds.Configured, len(l.Loads)),
-		filled: make(map[graph.SymbolID]bool),
+		filled: make(map[inventory.SymbolID]bool),
 	}
 	options := exemptOptions(&l.req.Config)
 	for i := range l.Loads {
 		one := &l.Loads[i]
-		resolver, err := graph.NewResolver(&one.Result, l.Root, os.ReadFile, one.Symbols)
-		if err != nil {
-			return nil, err
-		}
 		in := &exempt.Input{
 			Result:  &one.Result,
-			Resolve: resolver,
+			Resolve: one.Resolve,
 			Symbols: one.Symbols,
 			Root:    l.Root,
 			Read:    os.ReadFile,
@@ -76,7 +73,7 @@ func (l *Loaded) Prepare(production bool) (*Prepared, error) {
 		for j := range filled {
 			p.filled[filled[j].ID] = true
 		}
-		p.per[i] = kinds.Configured{Result: &one.Result, Resolve: resolver, Symbols: one.Symbols, Tests: one.Tests}
+		p.per[i] = kinds.Configured{Result: &one.Result, Resolve: one.Resolve, Symbols: one.Symbols}
 	}
 	uncalled, uses := kinds.InterfaceImplementations(&kinds.Input{Merged: l.Merged, Per: p.per})
 	p.uses = uses

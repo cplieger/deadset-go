@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/txtar"
@@ -27,8 +28,8 @@ func retainedBy(t *testing.T, in *Input, subject string) []graph.Exemption {
 }
 
 // retainedSet is the set of symbols one exemption slice names.
-func retainedSet(exemptions []graph.Exemption) map[graph.SymbolID]bool {
-	set := make(map[graph.SymbolID]bool, len(exemptions))
+func retainedSet(exemptions []graph.Exemption) map[inventory.SymbolID]bool {
+	set := make(map[inventory.SymbolID]bool, len(exemptions))
 	for i := range exemptions {
 		set[exemptions[i].ID] = true
 	}
@@ -37,7 +38,7 @@ func retainedSet(exemptions []graph.Exemption) map[graph.SymbolID]bool {
 
 // refsOf names each symbol of a set by its stable reference, sorted, for a
 // failure message.
-func refsOf(in *Input, set map[graph.SymbolID]bool) []string {
+func refsOf(in *Input, set map[inventory.SymbolID]bool) []string {
 	var named []string
 	for i := range in.Symbols {
 		if set[in.Symbols[i].ID] {
@@ -50,7 +51,7 @@ func refsOf(in *Input, set map[graph.SymbolID]bool) []string {
 
 // symbolAtLine returns the symbol of the inventory declared on one line of one
 // target-relative file.
-func symbolAtLine(t *testing.T, in *Input, file string, line int) graph.Symbol {
+func symbolAtLine(t *testing.T, in *Input, file string, line int) inventory.Symbol {
 	t.Helper()
 	for i := range in.Symbols {
 		s := &in.Symbols[i]
@@ -59,13 +60,13 @@ func symbolAtLine(t *testing.T, in *Input, file string, line int) graph.Symbol {
 		}
 	}
 	t.Fatalf("Setup: the inventory holds no symbol at %s:%d", file, line)
-	return graph.Symbol{}
+	return inventory.Symbol{}
 }
 
 // symbolRef returns the symbol of the inventory carrying one stable reference.
 // A test names its subject this way rather than by line, so a fixture edit above
 // the subject does not move the expectation.
-func symbolRef(t *testing.T, in *Input, ref string) graph.Symbol {
+func symbolRef(t *testing.T, in *Input, ref string) inventory.Symbol {
 	t.Helper()
 	for i := range in.Symbols {
 		if in.Symbols[i].Ref == ref {
@@ -73,7 +74,7 @@ func symbolRef(t *testing.T, in *Input, ref string) graph.Symbol {
 		}
 	}
 	t.Fatalf("Setup: the inventory holds no symbol referenced %s", ref)
-	return graph.Symbol{}
+	return inventory.Symbol{}
 }
 
 // sweepWith indexes the graph of one input and sweeps it once with the given
@@ -81,19 +82,16 @@ func symbolRef(t *testing.T, in *Input, ref string) graph.Symbol {
 // published API is rooted.
 func sweepWith(t *testing.T, in *Input, subject string, held []graph.Exemption) graph.Result {
 	t.Helper()
-	references, _, err := graph.References(in.Result, in.Root, in.Read, in.Symbols)
+	references, _, err := graph.References(in.Result, in.Resolve, in.Symbols, graph.TestClasses{})
 	if err != nil {
 		t.Fatalf("Setup: graph.References(%s): %v", subject, err)
 	}
-	roots, _, err := graph.Roots(in.Result, in.Root, in.Read, in.Symbols, graph.RootOptions{PublishedAPI: true})
-	if err != nil {
-		t.Fatalf("Setup: graph.Roots(%s): %v", subject, err)
-	}
+	roots, _ := graph.Roots(in.Result, in.Resolve, in.Symbols, graph.RootOptions{PublishedAPI: true})
 	return graph.New(in.Symbols, references, roots).Sweep(&graph.SweepInput{Exempt: held})
 }
 
 // candidateOf returns the candidate one sweep reported for a symbol.
-func candidateOf(r graph.Result, id graph.SymbolID) (graph.Candidate, bool) {
+func candidateOf(r graph.Result, id inventory.SymbolID) (graph.Candidate, bool) {
 	for _, c := range r.Candidates {
 		if c.ID == id {
 			return c, true
@@ -156,7 +154,7 @@ func TestInterfaceSatisfactionRetainsNothingWhereNoConversionReachesTheType(t *t
 	write := symbolRef(t, in, "go://example.com/target#Sink.Write")
 	dead := symbolRef(t, in, "go://example.com/target#DeadExport")
 	r := sweepWith(t, in, "no-conversion.txtar", found)
-	for _, want := range []graph.Symbol{write, dead} {
+	for _, want := range []inventory.Symbol{write, dead} {
 		got, reported := candidateOf(r, want.ID)
 		if !reported {
 			t.Errorf("Sweep(no-conversion.txtar) reported %v, want it to report %s",
@@ -178,7 +176,7 @@ func TestInterfaceSatisfactionRetainsEveryMethodOfAMultiMethodInterfaceAtEverySi
 	// names one of the two Count methods and each is held at more than one site.
 	value := symbolRef(t, in, "go://example.com/shapes#Holder.Count")
 	pointer := symbolRef(t, in, "go://example.com/shapes#Pointed.Count")
-	sites := make(map[graph.SymbolID]int)
+	sites := make(map[inventory.SymbolID]int)
 	for i := range found {
 		if strings.HasPrefix(found[i].Detail, "asserts ") {
 			continue
@@ -189,7 +187,7 @@ func TestInterfaceSatisfactionRetainsEveryMethodOfAMultiMethodInterfaceAtEverySi
 				found[i].ID)
 		}
 	}
-	for _, want := range []graph.Symbol{value, pointer} {
+	for _, want := range []inventory.Symbol{value, pointer} {
 		if sites[want.ID] < 2 {
 			t.Errorf("InterfaceSatisfactionDetector(conversion-shapes.txtar) retained %s at %d sites, want it retained once per conversion",
 				want.Ref, sites[want.ID])
@@ -223,7 +221,7 @@ func TestInterfaceSatisfactionRetainsStrictlyLessThanTheConservativeRule(t *test
 
 // reportedRefs names every candidate one sweep reported, for a failure message.
 func reportedRefs(in *Input, r graph.Result) []string {
-	set := make(map[graph.SymbolID]bool, len(r.Candidates))
+	set := make(map[inventory.SymbolID]bool, len(r.Candidates))
 	for _, c := range r.Candidates {
 		set[c.ID] = true
 	}
@@ -231,8 +229,8 @@ func reportedRefs(in *Input, r graph.Result) []string {
 }
 
 // differenceOf names the symbols the first set holds and the second does not.
-func differenceOf(in *Input, wide, narrow map[graph.SymbolID]bool) []string {
-	only := make(map[graph.SymbolID]bool)
+func differenceOf(in *Input, wide, narrow map[inventory.SymbolID]bool) []string {
+	only := make(map[inventory.SymbolID]bool)
 	for id := range wide {
 		if !narrow[id] {
 			only[id] = true
@@ -246,10 +244,10 @@ func differenceOf(in *Input, wide, narrow map[graph.SymbolID]bool) []string {
 // interface the program mentions, on either method set, whether or not a value of
 // the type ever reaches that interface. It is the test's oracle for what the
 // conversion set removes and no production code implements it.
-func conservativeRetained(t *testing.T, in *Input) map[graph.SymbolID]bool {
+func conservativeRetained(t *testing.T, in *Input) map[inventory.SymbolID]bool {
 	t.Helper()
 	interfaces := mentionedInterfaces(in)
-	set := make(map[graph.SymbolID]bool)
+	set := make(map[inventory.SymbolID]bool)
 	for _, named := range namedTypes(in) {
 		for _, subject := range []types.Type{named, types.NewPointer(named)} {
 			methods := types.NewMethodSet(subject)
@@ -394,7 +392,7 @@ func TestInterfaceSatisfactionAnswersTheCorpusConversionFixture(t *testing.T) {
 // assertRetainedBy checks that one expectation's classes are the classes the
 // detector recorded for its subject.
 func assertRetainedBy(t *testing.T, fixture string, row corpusRow, found []graph.Exemption,
-	retained map[graph.SymbolID]bool, subject graph.Symbol,
+	retained map[inventory.SymbolID]bool, subject inventory.Symbol,
 ) {
 	t.Helper()
 	if !slices.Contains(row.RetainedBy, string(vocab.InterfaceSatisfaction)) {
@@ -416,7 +414,7 @@ func assertRetainedBy(t *testing.T, fixture string, row corpusRow, found []graph
 // of the inventory at the position the manifest names. A manifest path is relative
 // to the rendering root and the target is loaded on its own, so the target
 // directory is stripped from it.
-func corpusSymbol(t *testing.T, in *Input, manifest corpusManifest, name string) graph.Symbol {
+func corpusSymbol(t *testing.T, in *Input, manifest corpusManifest, name string) inventory.Symbol {
 	t.Helper()
 	at, held := manifest.Symbols[name]
 	if !held || at.File == "" || at.Line == 0 {
@@ -564,7 +562,7 @@ func TestInterfaceSatisfactionRendersAConsumersSiteAgainstTheConsumersRoot(t *te
 		t.Fatalf("InterfaceSatisfactionDetector(%s) = %v, want the consumer's site recorded", archive, err)
 	}
 	symbols := shared.inventory(t)
-	refs := make(map[graph.SymbolID]string, len(symbols))
+	refs := make(map[inventory.SymbolID]string, len(symbols))
 	for i := range symbols {
 		refs[symbols[i].ID] = symbols[i].Ref
 	}

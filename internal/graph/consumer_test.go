@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
@@ -63,26 +64,23 @@ func loadTwoModules(t *testing.T, dir string, consumers ...string) (*load.Result
 
 // passes runs the enumeration, the reference pass and the root detection over one
 // loaded configuration, which is the order the analysis runs them in.
-func passes(t *testing.T, result *load.Result, root string) ([]Symbol, []Reference, []Root) {
+func passes(t *testing.T, result *load.Result, root string) ([]inventory.Symbol, []Reference, []Root) {
 	t.Helper()
-	symbols, err := Symbols(result, root, os.ReadFile)
+	symbols, rs, err := inventoryOf(result, root, os.ReadFile)
 	if err != nil {
 		t.Fatalf("Symbols() error: %v", err)
 	}
-	refs, _, err := References(result, root, os.ReadFile, symbols)
+	refs, _, err := References(result, rs, symbols, TestClasses{})
 	if err != nil {
 		t.Fatalf("References() error: %v", err)
 	}
-	roots, _, err := Roots(result, root, os.ReadFile, symbols, RootOptions{})
-	if err != nil {
-		t.Fatalf("Roots() error: %v", err)
-	}
+	roots, _ := Roots(result, rs, symbols, RootOptions{})
 	return symbols, refs, roots
 }
 
 // named maps each symbol's identifier to the name a test reads it by.
-func named(symbols []Symbol) map[SymbolID]string {
-	names := make(map[SymbolID]string, len(symbols))
+func named(symbols []inventory.Symbol) map[inventory.SymbolID]string {
+	names := make(map[inventory.SymbolID]string, len(symbols))
 	for _, s := range symbols {
 		names[s.ID] = s.Name
 	}
@@ -91,7 +89,7 @@ func named(symbols []Symbol) map[SymbolID]string {
 
 // candidateNames lists the name of every candidate of one sweep, in the order the
 // sweep returned them.
-func candidateNames(names map[SymbolID]string, r Result) []string {
+func candidateNames(names map[inventory.SymbolID]string, r Result) []string {
 	found := make([]string, 0, len(r.Candidates))
 	for _, c := range r.Candidates {
 		found = append(found, names[c.ID])
@@ -358,7 +356,7 @@ func TestReferencesAndSweepOverATargetOnlyDocumentAreUnchanged(t *testing.T) {
 // a golden comparison fails on any change to either. It names no field the
 // consumer half added, so the same rendering is what the stage before consumers
 // produced.
-func renderRun(symbols []Symbol, refs []Reference, r Result) string {
+func renderRun(symbols []inventory.Symbol, refs []Reference, r Result) string {
 	names := named(symbols)
 	var b strings.Builder
 	for _, ref := range refs {
@@ -384,7 +382,7 @@ func renderRun(symbols []Symbol, refs []Reference, r Result) string {
 }
 
 // namesIn lists the names of a symbol set, in the order given.
-func namesIn(names map[SymbolID]string, ids []SymbolID) []string {
+func namesIn(names map[inventory.SymbolID]string, ids []inventory.SymbolID) []string {
 	found := make([]string, 0, len(ids))
 	for _, id := range ids {
 		found = append(found, names[id])
@@ -405,7 +403,7 @@ func relationsOf(set RelationSet) []string {
 
 // idOf returns the identifier of the one symbol of that name, and the empty
 // identifier when the inventory holds none.
-func idOf(names map[SymbolID]string, name string) SymbolID {
+func idOf(names map[inventory.SymbolID]string, name string) inventory.SymbolID {
 	for id, held := range names {
 		if held == name {
 			return id

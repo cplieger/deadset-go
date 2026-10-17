@@ -3,6 +3,8 @@ package graph
 import (
 	"go/ast"
 	"go/types"
+
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 )
 
 // standardContainers are the standard-library functions that store or compare the
@@ -43,7 +45,7 @@ func StandardContainer(fn *types.Func) (compared []int, isContainer bool) {
 
 // readContainerKeys records the fields one call to a standard container reads by
 // comparing an argument as a map key.
-func (p *referencePass) readContainerKeys(call *ast.CallExpr, encl SymbolID) {
+func (p *referencePass) readContainerKeys(call *ast.CallExpr, encl inventory.SymbolID) {
 	sel, isSelector := ast.Unparen(call.Fun).(*ast.SelectorExpr)
 	var fn *types.Func
 	shift := 0
@@ -65,7 +67,7 @@ func (p *referencePass) readContainerKeys(call *ast.CallExpr, encl SymbolID) {
 	for _, at := range compared {
 		if at+shift < len(call.Args) {
 			arg := call.Args[at+shift]
-			p.readComparison(encl, arg.Pos(), arg)
+			p.readComparison(encl, arg.Pos(), viaContainerKey, arg)
 		}
 	}
 }

@@ -7,7 +7,9 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
 )
 
 func TestLastUsesNamesTheModuleOneCandidateAloneUses(t *testing.T) {
@@ -70,21 +72,18 @@ func TestLastUsesNamesNothingWithoutACandidate(t *testing.T) {
 // inventory, the graph, the sweep that answers which declarations are candidates,
 // and the join over them. It returns the join and the same answer keyed by
 // declaration name, which is what a case asserts on.
-func lastUsesOf(t *testing.T, archive string) (map[graph.SymbolID][]string, map[string][]string) {
+func lastUsesOf(t *testing.T, archive string) (map[inventory.SymbolID][]string, map[string][]string) {
 	t.Helper()
 
 	dir := extract(t, archive)
 	result := loadDir(t, dir)
 	symbols, resolve := inventoryOf(t, result, dir)
 
-	refs, _, err := graph.References(result, dir, os.ReadFile, symbols)
+	refs, _, err := graph.References(result, resolve, symbols, graph.TestClasses{})
 	if err != nil {
 		t.Fatalf("Setup: graph.References(%s): %v", archive, err)
 	}
-	roots, _, err := graph.Roots(result, dir, os.ReadFile, symbols, graph.RootOptions{})
-	if err != nil {
-		t.Fatalf("Setup: graph.Roots(%s): %v", archive, err)
-	}
+	roots, _ := graph.Roots(result, resolve, symbols, graph.RootOptions{})
 	candidates := graph.New(symbols, refs, roots).Sweep(&graph.SweepInput{}).Candidates
 	if len(candidates) == 0 {
 		t.Fatalf("Setup: Sweep(%s) returned no candidate, so the join has nothing to answer over", archive)
@@ -102,16 +101,16 @@ func lastUsesOf(t *testing.T, archive string) (map[graph.SymbolID][]string, map[
 
 // inventoryOf enumerates one load's declarations and prepares the resolver over
 // them.
-func inventoryOf(t *testing.T, result *load.Result, dir string) ([]graph.Symbol, *graph.Resolver) {
+func inventoryOf(t *testing.T, result *load.Result, dir string) ([]inventory.Symbol, *resolve.Resolver) {
 	t.Helper()
 
-	symbols, err := graph.Symbols(result, dir, os.ReadFile)
+	inv, err := inventory.Of(result, dir, os.ReadFile)
 	if err != nil {
-		t.Fatalf("Setup: graph.Symbols(%s): %v", dir, err)
+		t.Fatalf("Setup: inventory.Of(%s): %v", dir, err)
 	}
-	resolve, err := graph.NewResolver(result, dir, os.ReadFile, symbols)
+	resolver, err := resolve.New(result, inv)
 	if err != nil {
-		t.Fatalf("Setup: graph.NewResolver(%s): %v", dir, err)
+		t.Fatalf("Setup: resolve.New(%s): %v", dir, err)
 	}
-	return symbols, resolve
+	return inv.Symbols, resolver
 }

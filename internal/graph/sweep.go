@@ -4,6 +4,8 @@ import (
 	"go/token"
 	"slices"
 	"strconv"
+
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 )
 
 // Relation names the liveness relation that decided a symbol. String returns the
@@ -50,7 +52,7 @@ func (s RelationSet) with(r Relation) RelationSet { return s | 1<<r }
 // class whose evidence is a type relation rather than a source site leaves Site
 // and Detail empty.
 type Exemption struct {
-	ID     SymbolID
+	ID     inventory.SymbolID
 	Class  string
 	Detail string // one short clause naming the evidence
 
@@ -59,17 +61,17 @@ type Exemption struct {
 	// the holder is, and falls into the holder's dead component with it. A root
 	// the exemption names is held by the holder instead. Empty, the exemption
 	// holds the symbol live whatever else is.
-	Holder SymbolID
+	Holder inventory.SymbolID
 
 	// CoHolders are the further declarations holding the evidence where the class
 	// derives it from sites several declarations hold. The exemption is then a
 	// use by each holder, and it holds the symbol reachable only while the holder
 	// and every co-holder are.
-	CoHolders []SymbolID
+	CoHolders []inventory.SymbolID
 
 	// Via is the interface method a retained method answers, where the class
 	// retains through an interface the inventory declares.
-	Via SymbolID
+	Via inventory.SymbolID
 
 	// Consumer is the module path of the loaded consumer whose file holds the
 	// evidence, empty for a file of the target. Site is relative to that module's
@@ -107,7 +109,7 @@ type SweepInput struct {
 
 	// Marked are the symbols a matched suppression names: each is live under both
 	// relations and seeds reachability.
-	Marked []SymbolID
+	Marked []inventory.SymbolID
 
 	// Exempt are the exemptions the classes computed, one per symbol and class. An
 	// exempt symbol is never a candidate and seeds reachability; every exemption of
@@ -123,14 +125,14 @@ type SweepInput struct {
 
 // Use is one inferred reference: From uses To.
 type Use struct {
-	From SymbolID
-	To   SymbolID
+	From inventory.SymbolID
+	To   inventory.SymbolID
 }
 
 // Candidate is one dead symbol, the relation that found it, and the reference
 // counts a later kind assignment reads.
 type Candidate struct {
-	ID SymbolID
+	ID inventory.SymbolID
 
 	// ProductionRefs and TestRefs count every reference to the symbol, split as the
 	// mode classifies them, whatever the mode counts: a kind reads both to tell a
@@ -140,7 +142,7 @@ type Candidate struct {
 
 	// Configs is the set of build configurations the candidate is dead in: every
 	// configuration it exists in over a matrix, empty over one configuration's graph.
-	Configs ConfigSet
+	Configs inventory.ConfigSet
 
 	Relation Relation
 
@@ -163,7 +165,7 @@ type Candidate struct {
 type Result struct {
 	// LiveUnder holds, per symbol, the relations that hold it live; a symbol with
 	// no entry is live under none.
-	LiveUnder map[SymbolID]RelationSet
+	LiveUnder map[inventory.SymbolID]RelationSet
 
 	// Candidates are the dead symbols in the order the inventory holds them,
 	// each carrying the relation that found it.
@@ -181,16 +183,16 @@ type Result struct {
 	// Suppressed are the marks that held back a symbol, in inventory order and each
 	// once; a mark on a symbol live anyway, exempt, or outside the inventory is
 	// stale and not here. Over a matrix it is the union of the configurations.
-	Suppressed []SymbolID
+	Suppressed []inventory.SymbolID
 }
 
 // withoutExemptions is the input with the exemptions withdrawn, and with them every
 // mark that held nothing back, which the sweep that answers which exemptions took
 // effect runs under: a mark an exemption made stale leaves the symbol to it.
-func (in *SweepInput) withoutExemptions(suppressed []SymbolID) *SweepInput {
+func (in *SweepInput) withoutExemptions(suppressed []inventory.SymbolID) *SweepInput {
 	out := *in
 	out.Exempt = nil
-	out.Marked = slices.DeleteFunc(slices.Clone(in.Marked), func(id SymbolID) bool { return !slices.Contains(suppressed, id) })
+	out.Marked = slices.DeleteFunc(slices.Clone(in.Marked), func(id inventory.SymbolID) bool { return !slices.Contains(suppressed, id) })
 	return &out
 }
 
@@ -271,10 +273,9 @@ func (g *Graph) using(in *SweepInput) *Graph {
 		if from == outside {
 			continue
 		}
-		_, test := IsTestFile(g.symbols[from].Pos.Filename)
 		// An unappended use leaves another edge last, the base graph's or another
 		// use's, so only an edge this call appended may be gated.
-		if derived.add(&Reference{From: use.From, To: use.To, Test: test}) && gates[i] > 0 {
+		if derived.add(&Reference{From: use.From, To: use.To, Test: g.symbols[from].InTestFile}) && gates[i] > 0 {
 			last := len(derived.out[from]) - 1
 			derived.out[from][last].gate = len(g.gates) + gates[i]
 		}
@@ -299,7 +300,7 @@ func (g *Graph) heldUses(in *SweepInput) (uses []Use, gates []int, gated [][]int
 			gated = append(gated, g.gateOf(e))
 			gate = len(gated)
 		}
-		for _, holder := range append([]SymbolID{e.Holder}, e.CoHolders...) {
+		for _, holder := range append([]inventory.SymbolID{e.Holder}, e.CoHolders...) {
 			uses = append(uses, Use{From: holder, To: e.ID})
 			gates = append(gates, gate)
 		}
@@ -315,7 +316,7 @@ func (g *Graph) heldUses(in *SweepInput) (uses []Use, gates []int, gated [][]int
 // never closes the gate.
 func (g *Graph) gateOf(e *Exemption) []int {
 	var held []int
-	for _, holder := range append([]SymbolID{e.Holder}, e.CoHolders...) {
+	for _, holder := range append([]inventory.SymbolID{e.Holder}, e.CoHolders...) {
 		if at := g.at(holder); at != outside {
 			held = append(held, at)
 		}
@@ -353,7 +354,7 @@ func (g *Graph) closure(reached []bool, queue []int, skip func(e edge) bool) {
 
 // positions returns one flag per symbol, set for each symbol the identifiers
 // name. An identifier the inventory does not hold names none.
-func (g *Graph) positions(ids []SymbolID) []bool {
+func (g *Graph) positions(ids []inventory.SymbolID) []bool {
 	flags := make([]bool, len(g.symbols))
 	for _, id := range ids {
 		if at := g.at(id); at != outside {
@@ -366,7 +367,7 @@ func (g *Graph) positions(ids []SymbolID) []bool {
 // exempted returns one flag per symbol an exemption names; which classes held it
 // is [sweep.retained]'s answer.
 func (g *Graph) exempted(exempt []Exemption) []bool {
-	ids := make([]SymbolID, 0, len(exempt))
+	ids := make([]inventory.SymbolID, 0, len(exempt))
 	for ix := range exempt {
 		e := &exempt[ix]
 		if e.Holder == "" {
@@ -395,7 +396,7 @@ type sweep struct {
 // the order the inventory holds those symbols. An exemption whose holder is dead
 // held nothing back.
 func (s *sweep) retained(exempt []Exemption, with *sweep) []Exemption {
-	held := make(map[SymbolID][]Exemption)
+	held := make(map[inventory.SymbolID][]Exemption)
 	for ix := range exempt {
 		e := &exempt[ix]
 		if at := s.g.at(e.ID); at != outside && s.dead[at] && !with.dead[at] && with.holds(e) {
@@ -417,7 +418,7 @@ func (s *sweep) retained(exempt []Exemption, with *sweep) []Exemption {
 // counting finds it dead: a published declaration nothing loaded references still
 // runs when an outside program calls it, and so does what it holds.
 func (s *sweep) holds(e *Exemption) bool {
-	for _, holder := range append([]SymbolID{e.Holder}, e.CoHolders...) {
+	for _, holder := range append([]inventory.SymbolID{e.Holder}, e.CoHolders...) {
 		if at := s.g.at(holder); holder != "" && at != outside && s.dead[at] && !s.live[at].Has(Reachability) {
 			return false
 		}
@@ -428,8 +429,8 @@ func (s *sweep) holds(e *Exemption) bool {
 // suppressed lists the marks that name a symbol this sweep, run without them,
 // judged a candidate, in inventory order and each once. Any other mark held
 // nothing back: its symbol is outside the inventory, live, or exempt.
-func (s *sweep) suppressed(marked []SymbolID) []SymbolID {
-	held := make(map[SymbolID]bool, len(marked))
+func (s *sweep) suppressed(marked []inventory.SymbolID) []inventory.SymbolID {
+	held := make(map[inventory.SymbolID]bool, len(marked))
 	for _, id := range marked {
 		if at := s.g.at(id); at != outside && s.dead[at] {
 			held[id] = true
@@ -438,7 +439,7 @@ func (s *sweep) suppressed(marked []SymbolID) []SymbolID {
 	if len(held) == 0 {
 		return nil
 	}
-	found := make([]SymbolID, 0, len(held))
+	found := make([]inventory.SymbolID, 0, len(held))
 	for i := range s.g.symbols {
 		if id := s.g.symbols[i].ID; held[id] {
 			found = append(found, id)
@@ -592,7 +593,7 @@ func (s *sweep) admitUnreferencedTests() {
 		if !s.g.subject[i] || s.exempt[i] || s.marked[i] || s.testOfDeadCode[i] || reached[i] {
 			continue
 		}
-		if _, inTestFile := IsTestFile(s.g.symbols[i].Pos.Filename); !inTestFile {
+		if !s.g.symbols[i].InTestFile {
 			continue
 		}
 		s.dead[i] = true
@@ -674,8 +675,7 @@ func (s *sweep) sharedSupport() []bool {
 // supportCode reports whether one symbol is a declaration of test-support code
 // rather than of a test file.
 func (s *sweep) supportCode(at int) bool {
-	_, inTestFile := IsTestFile(s.g.symbols[at].Pos.Filename)
-	return s.g.symbols[at].TestSupport && !inTestFile
+	return s.g.symbols[at].TestSupport && !s.g.symbols[at].InTestFile
 }
 
 // targetsOf counts the target symbols one test declaration references, and how many
@@ -702,7 +702,7 @@ func (s *sweep) targetsOf(at int, shared []bool) (targets, live int) {
 // result collects the candidates in the order the inventory holds the symbols,
 // whichever step admitted each, and the components over the set that results.
 func (s *sweep) result() Result {
-	r := Result{LiveUnder: make(map[SymbolID]RelationSet)}
+	r := Result{LiveUnder: make(map[inventory.SymbolID]RelationSet)}
 	for i := range s.g.symbols {
 		if set := s.live[i]; set != 0 {
 			r.LiveUnder[s.g.symbols[i].ID] = set
@@ -736,19 +736,19 @@ func (s *sweep) result() Result {
 // TestEvidence counts, per symbol, the exemptions whose evidence a test file
 // carries, which a production run does not hold: each is a test reference to its
 // symbol, as a reference from a test file is, and holds nothing live.
-type TestEvidence map[SymbolID]int
+type TestEvidence map[inventory.SymbolID]int
 
 // TestReferencesOf counts, per symbol, the distinct facts test evidence states
 // about it: one per class and detail, however many configurations or sites found
 // it.
 func TestReferencesOf(evidence []Exemption) TestEvidence {
 	type fact struct {
-		id     SymbolID
+		id     inventory.SymbolID
 		class  string
 		detail string
 	}
 	seen := make(map[fact]bool, len(evidence))
-	counts := make(map[SymbolID]int, len(evidence))
+	counts := make(map[inventory.SymbolID]int, len(evidence))
 	for ix := range evidence {
 		e := &evidence[ix]
 		if f := (fact{id: e.ID, class: e.Class, detail: e.Detail}); !seen[f] {

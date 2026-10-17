@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
 	"github.com/cplieger/deadset-go/v2/internal/run"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -23,7 +24,7 @@ type explainedState struct {
 }
 
 // stateOf reads what the analysis holds about one symbol.
-func stateOf(set *run.Findings, subject *graph.Symbol) explainedState {
+func stateOf(set *run.Findings, subject *inventory.Symbol) explainedState {
 	return explainedState{
 		found:     findingAbout(set.Result.Findings, subject),
 		retained:  retentionsOf(set.Liveness.Retained, subject.ID),
@@ -109,7 +110,7 @@ func TestAnExplanationAgreesWithTheReport(t *testing.T) {
 
 // checkDisjoint asserts that the four states the analysis answers are disjoint, so
 // exactly one explanation applies to the symbol.
-func checkDisjoint(t *rapid.T, subject *graph.Symbol, held *explainedState) {
+func checkDisjoint(t *rapid.T, subject *inventory.Symbol, held *explainedState) {
 	if held.found != nil && len(held.retained) > 0 {
 		t.Fatalf("%s is reported under %s and held back by %d exemption classes",
 			subject.Ref, held.found.Code, len(held.retained))
@@ -150,7 +151,7 @@ func checkOneFindingPerSymbol(t *rapid.T, set *run.Findings) {
 
 // checkExplanation reads the printed explanation back and asserts it says what the
 // analysis holds.
-func checkExplanation(t *rapid.T, set *run.Findings, subject *graph.Symbol, held *explainedState) {
+func checkExplanation(t *rapid.T, set *run.Findings, subject *inventory.Symbol, held *explainedState) {
 	var printed strings.Builder
 	if err := writeExplanation(&printed, set, graph.CascadeRoots, subject); err != nil {
 		t.Fatalf("writeExplanation(%s) = %v, want the explanation", subject.Ref, err)
@@ -185,7 +186,7 @@ func checkExplanation(t *rapid.T, set *run.Findings, subject *graph.Symbol, held
 }
 
 // checkReported asserts the reported answer carries what the finding carries.
-func checkReported(t *rapid.T, subject *graph.Symbol, found *kinds.Finding, text string) {
+func checkReported(t *rapid.T, subject *inventory.Symbol, found *kinds.Finding, text string) {
 	for _, want := range []string{
 		"code: " + string(found.Code) + " " + found.Kind,
 		"message: " + found.Message,
@@ -202,7 +203,7 @@ func checkReported(t *rapid.T, subject *graph.Symbol, found *kinds.Finding, text
 
 // checkRetained asserts the retained answer names every class the sweep recorded, and
 // no other.
-func checkRetained(t *rapid.T, subject *graph.Symbol, retained []graph.Exemption, text string) {
+func checkRetained(t *rapid.T, subject *inventory.Symbol, retained []graph.Exemption, text string) {
 	named := 0
 	for line := range strings.SplitSeq(text, "\n") {
 		if strings.HasPrefix(line, "  class: ") {
@@ -224,7 +225,7 @@ func checkRetained(t *rapid.T, subject *graph.Symbol, retained []graph.Exemption
 // checkPath asserts every hop the liveness answer prints is a reference the graph
 // holds, and that the path starts at a symbol the root set names or at a loaded
 // consumer's reference.
-func checkPath(t *rapid.T, set *run.Findings, subject *graph.Symbol, text string) {
+func checkPath(t *rapid.T, set *run.Findings, subject *inventory.Symbol, text string) {
 	path, reached := set.Matrix.Path(subject.ID, set.Mode)
 	if !reached {
 		path, reached = set.Matrix.Path(subject.ID, graph.Mode{ConsumerTestsProduction: set.Mode.ConsumerTestsProduction})
@@ -270,7 +271,7 @@ func checkPath(t *rapid.T, set *run.Findings, subject *graph.Symbol, text string
 }
 
 // rootNames reports whether the root set names one symbol.
-func rootNames(roots []graph.Root, id graph.SymbolID) bool {
+func rootNames(roots []graph.Root, id inventory.SymbolID) bool {
 	for i := range roots {
 		if roots[i].ID == id {
 			return true

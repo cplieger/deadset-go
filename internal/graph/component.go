@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -24,13 +25,13 @@ const unvisited = -1
 // any part of it alone leaves a reference to what was deleted.
 type Component struct {
 	// Members are every symbol of the component, by site.
-	Members []SymbolID
+	Members []inventory.SymbolID
 
 	// Roots are the members of the component's root cycles whose container is not
 	// itself dead, by site: the symbols a deletion starts at. Every component has
 	// at least one, because a member's dead container sits on the member's own
 	// cycle.
-	Roots []SymbolID
+	Roots []inventory.SymbolID
 
 	// Spans are the lines each member occupies, in the order of Members.
 	Spans []Span
@@ -59,7 +60,7 @@ type Span struct {
 
 // spanOf is the run of source lines one symbol occupies. A declaration occupies at
 // least the line it starts on, so a span never ends above the line it starts on.
-func spanOf(s *Symbol) Span {
+func spanOf(s *inventory.Symbol) Span {
 	return Span{Path: s.Pos.Filename, First: s.Pos.Line, Last: max(s.Pos.Line, s.EndLine)}
 }
 
@@ -119,11 +120,11 @@ func (c Cascade) String() string {
 // Listing is what a report carries for one dead component under one cascade mode.
 type Listing struct {
 	// Roots are the component's roots, which the default mode reports.
-	Roots []SymbolID
+	Roots []inventory.SymbolID
 
 	// Members is every symbol of the component under CascadeFull, and empty
 	// otherwise.
-	Members []SymbolID
+	Members []inventory.SymbolID
 
 	// SymbolCount and DeletableLines are the component's size, under either mode.
 	SymbolCount    int
@@ -361,10 +362,7 @@ func (g *Graph) deadSubgraph(dead, testOfDeadCode, unreferencedTest []bool) (at 
 // code whose outermost declaration nothing references, which is dead as a
 // production declaration nothing references is.
 func (g *Graph) unreferencedSupport(i int) bool {
-	if !g.symbols[i].TestSupport {
-		return false
-	}
-	if _, inTestFile := IsTestFile(g.symbols[i].Pos.Filename); inTestFile {
+	if !g.symbols[i].TestSupport || g.symbols[i].InTestFile {
 		return false
 	}
 	for g.parent[i] != outside && g.subject[g.parent[i]] {

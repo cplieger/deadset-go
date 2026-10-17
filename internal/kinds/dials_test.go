@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -21,13 +22,13 @@ func rootMemberAndBystander(in *Input) map[vocab.Code]Emitter {
 }
 
 // reportedIDs names the subject of every finding a pass reported, in its order.
-func reportedIDs(result Result) []graph.SymbolID {
+func reportedIDs(result Result) []inventory.SymbolID {
 	return idsOf(result.Findings)
 }
 
 // idsOf names the subject of every finding of a list, in its order.
-func idsOf(findings []Finding) []graph.SymbolID {
-	ids := make([]graph.SymbolID, 0, len(findings))
+func idsOf(findings []Finding) []inventory.SymbolID {
+	ids := make([]inventory.SymbolID, 0, len(findings))
 	for i := range findings {
 		ids = append(ids, findings[i].id)
 	}
@@ -43,7 +44,7 @@ func TestComputeWithholdsTheComponentOfARootTheSeverityAllows(t *testing.T) {
 
 	// The helper is dead only through the root, so its finding goes with the root's,
 	// whatever its own severity, while a declaration outside the component stays.
-	if got, want := reportedIDs(result), []graph.SymbolID{internalID}; !slices.Equal(got, want) {
+	if got, want := reportedIDs(result), []inventory.SymbolID{internalID}; !slices.Equal(got, want) {
 		t.Errorf("Compute() with the root's kind at allow reported %v, want %v", got, want)
 	}
 	// The lowest minimum confidence still withholds a component whose root the
@@ -58,7 +59,7 @@ func TestComputeReportsTheWholeComponentWhenNoDialWithholdsItsRoot(t *testing.T)
 
 	result := computed(t, in, rootMemberAndBystander(in))
 
-	if got, want := reportedIDs(result), []graph.SymbolID{exportedID, helperID, internalID}; !slices.Equal(got, want) {
+	if got, want := reportedIDs(result), []inventory.SymbolID{exportedID, helperID, internalID}; !slices.Equal(got, want) {
 		t.Errorf("Compute() with every kind at its default reported %v, want %v", got, want)
 	}
 }
@@ -77,13 +78,13 @@ func TestComputeWithholdsTheComponentOfARootBelowTheMinimumConfidence(t *testing
 
 	result := computed(t, in, rootMemberAndBystander(in))
 
-	if got, want := reportedIDs(result), []graph.SymbolID{internalID}; !slices.Equal(got, want) {
+	if got, want := reportedIDs(result), []inventory.SymbolID{internalID}; !slices.Equal(got, want) {
 		t.Errorf("Compute() with the root below the minimum confidence reported %v, want %v", got, want)
 	}
 	// The member falls with the root, so the minimum withheld both, each counted.
 	got := idsOf(result.Withheld)
 	slices.Sort(got)
-	want := []graph.SymbolID{exportedID, helperID}
+	want := []inventory.SymbolID{exportedID, helperID}
 	slices.Sort(want)
 	if !slices.Equal(got, want) {
 		t.Errorf("Compute() with the root below the minimum confidence withheld %v, want %v", got, want)
@@ -92,7 +93,7 @@ func TestComputeWithholdsTheComponentOfARootBelowTheMinimumConfidence(t *testing
 
 // heldBackMark is a record naming the member's code, bound to one declaration a
 // sweep without it judged dead.
-func heldBackMark(in *Input, id graph.SymbolID) {
+func heldBackMark(in *Input, id inventory.SymbolID) {
 	in.Marks = []suppress.Record{{
 		Code:      vocab.UnusedUnexported,
 		Symbol:    in.Refs[id],
@@ -101,7 +102,7 @@ func heldBackMark(in *Input, id graph.SymbolID) {
 		Site:      token.Position{Filename: "catalog.go", Line: 30, Column: 1},
 		Mechanism: suppress.MechanismInline,
 	}}
-	in.Sweep.Suppressed = []graph.SymbolID{id}
+	in.Sweep.Suppressed = []inventory.SymbolID{id}
 }
 
 func TestARecordOnAMemberOfAWithheldComponentIsDormant(t *testing.T) {
@@ -126,7 +127,7 @@ func TestARecordOnASymbolThatWouldJoinAWithheldComponentIsDormant(t *testing.T) 
 	resolved := applicationConfig()
 	resolved.Severity = map[string]vocab.Severity{string(vocab.UnusedExported): vocab.Allow}
 	in := handInput(resolved)
-	const markedID graph.SymbolID = "catalog.go:40:6"
+	const markedID inventory.SymbolID = "catalog.go:40:6"
 	in.Merged.Symbols = append(in.Merged.Symbols,
 		handSymbol(markedID, "go://example.com/app#marked", "marked", "example.com/app", "catalog.go", 40, 42, false))
 	in.Merged.References = append(in.Merged.References, graph.Reference{From: exportedID, To: markedID, Kind: graph.RefCall})
@@ -146,7 +147,7 @@ func TestARecordOnASymbolThatReferencesAMemberOfAWithheldComponentIsDormant(t *t
 	resolved := applicationConfig()
 	resolved.Severity = map[string]vocab.Severity{string(vocab.UnusedExported): vocab.Allow}
 	in := handInput(resolved)
-	const markedID graph.SymbolID = "catalog.go:40:6"
+	const markedID inventory.SymbolID = "catalog.go:40:6"
 	in.Merged.Symbols = append(in.Merged.Symbols,
 		handSymbol(markedID, "go://example.com/app#marked", "marked", "example.com/app", "catalog.go", 40, 42, false))
 	in.Merged.References = append(in.Merged.References, graph.Reference{From: markedID, To: helperID, Kind: graph.RefCall})
@@ -167,10 +168,10 @@ func TestARecordOnAMethodWhoseTypeIsAMemberOfAWithheldComponentIsDormant(t *test
 	resolved := applicationConfig()
 	resolved.Severity = map[string]vocab.Severity{string(vocab.UnusedExported): vocab.Allow}
 	in := handInput(resolved)
-	in.Merged.Symbols[1].Kind = graph.KindType
-	const markedID graph.SymbolID = "catalog.go:40:6"
+	in.Merged.Symbols[1].Kind = inventory.KindType
+	const markedID inventory.SymbolID = "catalog.go:40:6"
 	method := handSymbol(markedID, "go://example.com/app#resolve.marked", "marked", "example.com/app", "catalog.go", 40, 42, false)
-	method.Kind, method.Parent = graph.KindMethod, helperID
+	method.Kind, method.Parent = inventory.KindMethod, helperID
 	in.Merged.Symbols = append(in.Merged.Symbols, method)
 	in.Refs[markedID] = method.Ref
 	heldBackMark(in, markedID)
@@ -188,11 +189,11 @@ func TestARecordOnATypeWhoseMethodIsAMemberOfAWithheldComponentIsDormant(t *test
 	resolved := applicationConfig()
 	resolved.Severity = map[string]vocab.Severity{string(vocab.UnusedExported): vocab.Allow}
 	in := handInput(resolved)
-	const markedID graph.SymbolID = "catalog.go:40:6"
+	const markedID inventory.SymbolID = "catalog.go:40:6"
 	container := handSymbol(markedID, "go://example.com/app#marked", "marked", "example.com/app", "catalog.go", 40, 42, false)
-	container.Kind = graph.KindType
+	container.Kind = inventory.KindType
 	in.Merged.Symbols = append(in.Merged.Symbols, container)
-	in.Merged.Symbols[1].Kind, in.Merged.Symbols[1].Parent = graph.KindMethod, markedID
+	in.Merged.Symbols[1].Kind, in.Merged.Symbols[1].Parent = inventory.KindMethod, markedID
 	in.Refs[markedID] = container.Ref
 	heldBackMark(in, markedID)
 

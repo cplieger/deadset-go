@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"pgregory.net/rapid"
 )
 
@@ -127,23 +128,23 @@ func TestProperty11MatrixIntersectionReportsOnlyWhatIsDeadEverywhere(t *testing.
 		in := d.graph.input(b)
 		per := b.configured(d.configs, d.in)
 
-		merged, err := Merge(per)
+		merged, err := Merge(per, handTests)
 		if err != nil {
 			t.Fatalf("Merge over %d configurations = _, %v, want no error", d.configs, err)
 		}
 		r := NewMatrix(&merged).Sweep(in, nil)
 
-		oracle := make([]map[SymbolID]Candidate, d.configs)
+		oracle := make([]map[inventory.SymbolID]Candidate, d.configs)
 		for config := range d.configs {
 			one := per[config]
 			answer := New(one.Symbols, one.References, one.Roots).Sweep(in)
-			oracle[config] = make(map[SymbolID]Candidate, len(answer.Candidates))
+			oracle[config] = make(map[inventory.SymbolID]Candidate, len(answer.Candidates))
 			for _, c := range answer.Candidates {
 				oracle[config][c.ID] = c
 			}
 		}
 
-		lines := make(map[SymbolID]string, len(merged.Symbols))
+		lines := make(map[inventory.SymbolID]string, len(merged.Symbols))
 		for i := range merged.Symbols {
 			name := b.named[merged.Symbols[i].ID]
 			var configs []int
@@ -214,7 +215,7 @@ func TestProperty11MatrixIntersectionReportsOnlyWhatIsDeadEverywhere(t *testing.
 		// A declaration any configuration holds a reference to cannot be reported
 		// under the stronger claim, because a reference under any configuration is
 		// a reference.
-		referenced := make(map[SymbolID]bool, len(merged.References))
+		referenced := make(map[inventory.SymbolID]bool, len(merged.References))
 		for _, ref := range merged.References {
 			referenced[ref.To] = true
 		}

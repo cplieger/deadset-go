@@ -2,16 +2,16 @@ package exempt
 
 import (
 	"fmt"
-	"os"
 	"slices"
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 )
 
 // symbolNames maps every symbol of one inventory to the name a message renders.
-func symbolNames(symbols []graph.Symbol) map[graph.SymbolID]string {
-	names := make(map[graph.SymbolID]string, len(symbols))
+func symbolNames(symbols []inventory.Symbol) map[inventory.SymbolID]string {
+	names := make(map[inventory.SymbolID]string, len(symbols))
 	for i := range symbols {
 		names[symbols[i].ID] = symbols[i].Name
 	}
@@ -21,7 +21,7 @@ func symbolNames(symbols []graph.Symbol) map[graph.SymbolID]string {
 // rendered prints one exemption per line as the name of the declaration it
 // retains, the class, the site and the clause, so a want list reads as source
 // rather than as positions.
-func rendered(symbols []graph.Symbol, exemptions []graph.Exemption) []string {
+func rendered(symbols []inventory.Symbol, exemptions []graph.Exemption) []string {
 	names := symbolNames(symbols)
 	lines := make([]string, 0, len(exemptions))
 	for _, e := range exemptions {
@@ -71,14 +71,11 @@ func candidatesOf(t *testing.T, archive string, opts Options) []string {
 	if err != nil {
 		t.Fatalf("Setup: GeneratedFileDetector(%s): %v", archive, err)
 	}
-	refs, _, err := graph.References(in.Result, in.Root, os.ReadFile, in.Symbols)
+	refs, _, err := graph.References(in.Result, in.Resolve, in.Symbols, graph.TestClasses{})
 	if err != nil {
 		t.Fatalf("Setup: graph.References(%s): %v", archive, err)
 	}
-	roots, _, err := graph.Roots(in.Result, in.Root, os.ReadFile, in.Symbols, graph.RootOptions{})
-	if err != nil {
-		t.Fatalf("Setup: graph.Roots(%s): %v", archive, err)
-	}
+	roots, _ := graph.Roots(in.Result, in.Resolve, in.Symbols, graph.RootOptions{})
 
 	names := symbolNames(in.Symbols)
 	result := graph.New(in.Symbols, refs, roots).Sweep(&graph.SweepInput{Exempt: exemptions})

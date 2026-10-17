@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	spec "github.com/cplieger/deadset-spec/v8"
 )
 
@@ -83,7 +84,7 @@ var corpusForms = map[string]string{
 
 // emitterInput is what Ref is called with to produce one corpus case.
 type emitterInput struct {
-	kind    SymbolKind
+	kind    inventory.SymbolKind
 	pkgPath string
 	chain   []string
 }
@@ -92,26 +93,26 @@ type emitterInput struct {
 // the parts Ref is called with. A case the analyzer does not produce is absent,
 // and notEmitted below names the forms that covers.
 var emitted = map[string]emitterInput{
-	"go://example.com/app#":                                       {KindPackage, "example.com/app", nil},
-	"go://example.com/app#Resolve":                                {KindFunc, "example.com/app", []string{"Resolve"}},
-	"go://example.com/app#normalize":                              {KindFunc, "example.com/app", []string{"normalize"}},
-	"go://example.com/app#Catalog":                                {KindType, "example.com/app", []string{"Catalog"}},
-	"go://example.com/app#Exact":                                  {KindConst, "example.com/app", []string{"Exact"}},
-	"go://example.com/app#ErrNotFound":                            {KindVar, "example.com/app", []string{"ErrNotFound"}},
-	"go://example.com/fixture#Ünused":                             {KindFunc, "example.com/fixture", []string{"Ünused"}},
-	"go://example.com/app#TestResolve":                            {KindFunc, "example.com/app", []string{"TestResolve"}},
-	"go://example.com/app/httpapi_test#TestSearch":                {KindFunc, "example.com/app/httpapi_test", []string{"TestSearch"}},
-	"go://example.com/app/cmd/tool#run":                           {KindFunc, "example.com/app/cmd/tool", []string{"run"}},
-	"go://example.com/app#Catalog.ResolveAlias":                   {KindMethod, "example.com/app", []string{"Catalog", "ResolveAlias"}},
-	"go://example.com/app/internal/queue#List.Push":               {KindMethod, "example.com/app/internal/queue", []string{"List", "Push"}},
-	"go://example.com/app#Fetcher.Fetch":                          {KindInterfaceMethod, "example.com/app", []string{"Fetcher", "Fetch"}},
-	"go://example.com/app#Catalog.entries":                        {KindField, "example.com/app", []string{"Catalog", "entries"}},
-	"go://example.com/app#Buffered.Buffer":                        {KindField, "example.com/app", []string{"Buffered", "Buffer"}},
-	"go://example.com/app#Manifest.Tools.Version":                 {KindField, "example.com/app", []string{"Manifest", "Tools", "Version"}},
-	"go://example.com/app#Best[T]":                                {KindTypeParam, "example.com/app", []string{"Best", "T"}},
-	"go://example.com/app#Catalog.Decode[T]":                      {KindTypeParam, "example.com/app", []string{"Catalog", "Decode", "T"}},
-	"go://example.com/app/internal/queue#List.Map[T]":             {KindTypeParam, "example.com/app/internal/queue", []string{"List", "Map", "T"}},
-	"go://example.com/app/internal/legacy#render_windows.go:file": {KindFile, "example.com/app/internal/legacy", []string{"render_windows.go"}},
+	"go://example.com/app#":                                       {inventory.KindPackage, "example.com/app", nil},
+	"go://example.com/app#Resolve":                                {inventory.KindFunc, "example.com/app", []string{"Resolve"}},
+	"go://example.com/app#normalize":                              {inventory.KindFunc, "example.com/app", []string{"normalize"}},
+	"go://example.com/app#Catalog":                                {inventory.KindType, "example.com/app", []string{"Catalog"}},
+	"go://example.com/app#Exact":                                  {inventory.KindConst, "example.com/app", []string{"Exact"}},
+	"go://example.com/app#ErrNotFound":                            {inventory.KindVar, "example.com/app", []string{"ErrNotFound"}},
+	"go://example.com/fixture#Ünused":                             {inventory.KindFunc, "example.com/fixture", []string{"Ünused"}},
+	"go://example.com/app#TestResolve":                            {inventory.KindFunc, "example.com/app", []string{"TestResolve"}},
+	"go://example.com/app/httpapi_test#TestSearch":                {inventory.KindFunc, "example.com/app/httpapi_test", []string{"TestSearch"}},
+	"go://example.com/app/cmd/tool#run":                           {inventory.KindFunc, "example.com/app/cmd/tool", []string{"run"}},
+	"go://example.com/app#Catalog.ResolveAlias":                   {inventory.KindMethod, "example.com/app", []string{"Catalog", "ResolveAlias"}},
+	"go://example.com/app/internal/queue#List.Push":               {inventory.KindMethod, "example.com/app/internal/queue", []string{"List", "Push"}},
+	"go://example.com/app#Fetcher.Fetch":                          {inventory.KindInterfaceMethod, "example.com/app", []string{"Fetcher", "Fetch"}},
+	"go://example.com/app#Catalog.entries":                        {inventory.KindField, "example.com/app", []string{"Catalog", "entries"}},
+	"go://example.com/app#Buffered.Buffer":                        {inventory.KindField, "example.com/app", []string{"Buffered", "Buffer"}},
+	"go://example.com/app#Manifest.Tools.Version":                 {inventory.KindField, "example.com/app", []string{"Manifest", "Tools", "Version"}},
+	"go://example.com/app#Best[T]":                                {inventory.KindTypeParam, "example.com/app", []string{"Best", "T"}},
+	"go://example.com/app#Catalog.Decode[T]":                      {inventory.KindTypeParam, "example.com/app", []string{"Catalog", "Decode", "T"}},
+	"go://example.com/app/internal/queue#List.Map[T]":             {inventory.KindTypeParam, "example.com/app/internal/queue", []string{"List", "Map", "T"}},
+	"go://example.com/app/internal/legacy#render_windows.go:file": {inventory.KindFile, "example.com/app/internal/legacy", []string{"render_windows.go"}},
 }
 
 // emittedParameters gives, for each accepted Go parameter case, the holder's
@@ -150,10 +151,10 @@ func TestRefEmitsEveryAcceptedCorpusCase(t *testing.T) {
 		}
 		t.Run(c.Input, func(t *testing.T) {
 			if parts, parameter := emittedParameters[c.Input]; parameter {
-				if got := ParameterRef(parts[0], parts[1]); got != c.Input {
+				if got := inventory.ParameterRef(parts[0], parts[1]); got != c.Input {
 					t.Errorf("ParameterRef(%q, %q) = %q, want %q", parts[0], parts[1], got, c.Input)
 				}
-				if holder, named := ParameterHolder(c.Input); !named || holder != parts[0] {
+				if holder, named := inventory.ParameterHolder(c.Input); !named || holder != parts[0] {
 					t.Errorf("ParameterHolder(%q) = %q, %t, want %q, true", c.Input, holder, named, parts[0])
 				}
 				return
@@ -168,7 +169,7 @@ func TestRefEmitsEveryAcceptedCorpusCase(t *testing.T) {
 			if !declared {
 				t.Fatalf("the corpus accepts %s (form %s) and no emitter input is declared for it: %s", c.Input, c.Form, c.Reason)
 			}
-			if got := Ref(in.kind, in.pkgPath, in.chain); got != c.Input {
+			if got := inventory.Ref(in.kind, in.pkgPath, in.chain); got != c.Input {
 				t.Errorf("Ref(%s, %q, %q) = %q, want %q", in.kind, in.pkgPath, in.chain, got, c.Input)
 			}
 		})
@@ -252,11 +253,11 @@ func TestRefIsTheSameUnderAnotherBuildConfiguration(t *testing.T) {
 		t.Fatal("Setup: the two configurations share one file set, so positions were not computed independently")
 	}
 
-	first, err := Symbols(linux, root, os.ReadFile)
+	first, _, err := inventoryOf(linux, root, os.ReadFile)
 	if err != nil {
 		t.Fatalf("Symbols(linux-amd64) error: %v", err)
 	}
-	second, err := Symbols(windows, root, os.ReadFile)
+	second, _, err := inventoryOf(windows, root, os.ReadFile)
 	if err != nil {
 		t.Fatalf("Symbols(windows-arm64) error: %v", err)
 	}
@@ -294,7 +295,7 @@ func TestRefIsTheSameUnderAnotherBuildConfiguration(t *testing.T) {
 func TestRefSurvivesAnEditAboveTheDeclarationAndAFileRename(t *testing.T) {
 	dir := extract(t, "every-kind.txtar")
 	before, root := loadDir(t, dir, "linux", "amd64")
-	original, err := Symbols(before, root, os.ReadFile)
+	original, _, err := inventoryOf(before, root, os.ReadFile)
 	if err != nil {
 		t.Fatalf("Symbols before the edit error: %v", err)
 	}
@@ -316,7 +317,7 @@ func TestRefSurvivesAnEditAboveTheDeclarationAndAFileRename(t *testing.T) {
 	}
 
 	after, root := loadDir(t, dir, "linux", "amd64")
-	moved, err := Symbols(after, root, os.ReadFile)
+	moved, _, err := inventoryOf(after, root, os.ReadFile)
 	if err != nil {
 		t.Fatalf("Symbols after the edit error: %v", err)
 	}
@@ -329,7 +330,7 @@ func TestRefSurvivesAnEditAboveTheDeclarationAndAFileRename(t *testing.T) {
 	positionsMoved := false
 	byRef := namedByRef(original)
 	for _, s := range moved {
-		if s.Kind == KindFile || s.Kind == KindPackage {
+		if s.Kind == inventory.KindFile || s.Kind == inventory.KindPackage {
 			continue
 		}
 		if was, ok := byRef[s.Ref]; ok && was.Pos.Line != s.Pos.Line {
@@ -342,7 +343,7 @@ func TestRefSurvivesAnEditAboveTheDeclarationAndAFileRename(t *testing.T) {
 }
 
 // refs lists every symbol's reference in the order the enumeration returned.
-func refs(symbols []Symbol) []string {
+func refs(symbols []inventory.Symbol) []string {
 	out := make([]string, 0, len(symbols))
 	for _, s := range symbols {
 		out = append(out, s.Ref)
@@ -352,10 +353,10 @@ func refs(symbols []Symbol) []string {
 
 // declarationRefs lists the references of everything but the files, whose own
 // reference carries the name of the file and so changes when a file is renamed.
-func declarationRefs(symbols []Symbol) []string {
+func declarationRefs(symbols []inventory.Symbol) []string {
 	out := make([]string, 0, len(symbols))
 	for _, s := range symbols {
-		if s.Kind != KindFile {
+		if s.Kind != inventory.KindFile {
 			out = append(out, s.Ref)
 		}
 	}

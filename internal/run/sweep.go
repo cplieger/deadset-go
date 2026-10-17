@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
@@ -70,7 +71,7 @@ func (p *Prepared) suppressions(r *round) ([]suppress.Record, []suppress.Refusal
 	}
 	baseline := suppress.Baseline
 	if r != nil {
-		baseline = func(_ string, symbols []graph.Symbol) ([]suppress.Record, []suppress.Refusal, error) {
+		baseline = func(_ string, symbols []inventory.Symbol) ([]suppress.Record, []suppress.Refusal, error) {
 			var body bytes.Buffer
 			if err := core.WriteBaseline(&body, r.rows, r.provenance, nil); err != nil {
 				return nil, nil, err
@@ -79,7 +80,7 @@ func (p *Prepared) suppressions(r *round) ([]suppress.Record, []suppress.Refusal
 		}
 	}
 	for _, read := range []struct {
-		of   func(path string, symbols []graph.Symbol) ([]suppress.Record, []suppress.Refusal, error)
+		of   func(path string, symbols []inventory.Symbol) ([]suppress.Record, []suppress.Refusal, error)
 		name string
 	}{
 		{suppress.IgnoreFile, core.IgnoreFileName},
@@ -110,7 +111,7 @@ func (s *Swept) Retained() []graph.Exemption {
 	if len(writeOnly) == 0 {
 		return s.Liveness.Retained
 	}
-	held := make(map[graph.SymbolID][]graph.Exemption)
+	held := make(map[inventory.SymbolID][]graph.Exemption)
 	all := slices.Concat(s.Liveness.Retained, writeOnly)
 	for i := range all {
 		held[all[i].ID] = append(held[all[i].ID], all[i])

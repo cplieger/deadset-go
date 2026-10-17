@@ -30,7 +30,9 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/deps"
 	"github.com/cplieger/deadset-go/v2/internal/edges"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -183,7 +185,7 @@ type Finding struct {
 	// what the framework reads the sweep's answers about a declaration by, because
 	// a report's own symbol reference is not one: a blank declaration shares the
 	// reference of its container.
-	id graph.SymbolID
+	id inventory.SymbolID
 
 	// ceiling caps the reachability class [Input.complete] gives the finding, for an
 	// emitter whose subject's class is not its declaration's own; no class caps nothing.
@@ -220,7 +222,7 @@ func (f *Finding) DeclarationRef() string {
 	if f.Symbol.Kind != parameterSubject {
 		return f.Symbol.Ref
 	}
-	holder, _ := graph.ParameterHolder(f.Symbol.Ref)
+	holder, _ := inventory.ParameterHolder(f.Symbol.Ref)
 	return holder
 }
 
@@ -234,13 +236,11 @@ type Consumers struct {
 }
 
 // Configured is one build configuration's load, with the declarations enumerated
-// from it, the resolver over them and its test classes, for a kind that reads
-// syntax or types.
+// from it and the resolver over them, for a kind that reads syntax or types.
 type Configured struct {
 	Result  *load.Result
-	Resolve *graph.Resolver
-	Tests   graph.TestClasses
-	Symbols []graph.Symbol
+	Resolve *resolve.Resolver
+	Symbols []inventory.Symbol
 }
 
 // ModuleFile is the module file of one unit of the target.
@@ -269,7 +269,7 @@ type Input struct {
 	Sweep  *graph.Result
 
 	// Refs is the reference of every symbol of the inventory.
-	Refs map[graph.SymbolID]string
+	Refs map[inventory.SymbolID]string
 
 	// Exempt is every exemption the sweep was given, which is not what the sweep
 	// held back: an exemption on a declaration no relation found dead is here and
@@ -289,7 +289,7 @@ type Input struct {
 
 	// Filled is every field a callee outside the analysed program fills from a
 	// document and may read, which nothing retains ([Input.capFilled]).
-	Filled map[graph.SymbolID]bool
+	Filled map[inventory.SymbolID]bool
 
 	// Generated reports whether one target-relative path is a generated file.
 	Generated func(path string) bool
@@ -339,7 +339,7 @@ type Input struct {
 	indexed *index
 
 	// fixed is [Input.fixedByOutsideInterface]'s answer, built on first use.
-	fixed map[graph.SymbolID]bool
+	fixed map[inventory.SymbolID]bool
 
 	// withheld names every record of Marks, by its place in that slice, whose code
 	// and declaration matched a finding this pass produced, with each finding the
@@ -421,32 +421,32 @@ type Result struct {
 
 // words is the reader's word for each kind of declaration, which a message spells
 // out where the vocabulary hyphenates it.
-var words = map[graph.SymbolKind]string{
-	graph.KindFunc:            "function",
-	graph.KindMethod:          "method",
-	graph.KindType:            "type",
-	graph.KindInterface:       "interface",
-	graph.KindInterfaceMethod: "interface method",
-	graph.KindField:           "field",
-	graph.KindConst:           "constant",
-	graph.KindVar:             "variable",
-	graph.KindTypeParam:       "type parameter",
+var words = map[inventory.SymbolKind]string{
+	inventory.KindFunc:            "function",
+	inventory.KindMethod:          "method",
+	inventory.KindType:            "type",
+	inventory.KindInterface:       "interface",
+	inventory.KindInterfaceMethod: "interface method",
+	inventory.KindField:           "field",
+	inventory.KindConst:           "constant",
+	inventory.KindVar:             "variable",
+	inventory.KindTypeParam:       "type parameter",
 }
 
 // symbolKinds maps a declaration's kind onto the Contract's subject vocabulary. A
 // package is absent because the vocabulary has no word for one and nothing reports
 // a package as a subject.
-var symbolKinds = map[graph.SymbolKind]string{
-	graph.KindFunc:            "function",
-	graph.KindMethod:          "method",
-	graph.KindType:            "type",
-	graph.KindInterface:       "interface",
-	graph.KindInterfaceMethod: "interface-method",
-	graph.KindField:           "field",
-	graph.KindConst:           "constant",
-	graph.KindVar:             "variable",
-	graph.KindTypeParam:       "type-parameter",
-	graph.KindFile:            fileSubject,
+var symbolKinds = map[inventory.SymbolKind]string{
+	inventory.KindFunc:            "function",
+	inventory.KindMethod:          "method",
+	inventory.KindType:            "type",
+	inventory.KindInterface:       "interface",
+	inventory.KindInterfaceMethod: "interface-method",
+	inventory.KindField:           "field",
+	inventory.KindConst:           "constant",
+	inventory.KindVar:             "variable",
+	inventory.KindTypeParam:       "type-parameter",
+	inventory.KindFile:            fileSubject,
 }
 
 // vocabularyKinds is the vocabulary the framework runs the emitters in the order of.
@@ -654,19 +654,19 @@ func (in *Input) runKind(emit Emitter, row *vocab.Kind, reported map[string]stri
 // declaration whose reachability class is possible: outside programs may call that
 // declaration, so it counts as a live target symbol and the test is no test of dead
 // code. It is computed on first use.
-func (in *Input) testsOutsideUse() map[graph.SymbolID]bool {
+func (in *Input) testsOutsideUse() map[inventory.SymbolID]bool {
 	held := in.index()
 	if held.outsideUse != nil {
 		return held.outsideUse
 	}
-	held.outsideUse = make(map[graph.SymbolID]bool)
+	held.outsideUse = make(map[inventory.SymbolID]bool)
 	if in.Merged == nil {
 		return held.outsideUse
 	}
 	for i := range in.Merged.References {
 		ref := &in.Merged.References[i]
 		test, target := in.candidateOf(ref.From), in.symbol(ref.To)
-		if test == nil || !test.TestOfDeadCode || target == nil || testFile(target) || target.TestSupport {
+		if test == nil || !test.TestOfDeadCode || target == nil || target.InTestFile || target.TestSupport {
 			continue
 		}
 		if in.classOf(ref.To) == vocab.Possible {
@@ -1016,7 +1016,7 @@ func (in *Input) generated(file string) bool {
 // configuration compiles is reported only where every configuration agrees.
 func (in *Input) configurationsOf(found *Finding) []string {
 	held := in.index()
-	var id graph.SymbolID
+	var id inventory.SymbolID
 	switch found.shape() {
 	case shapeRow, shapeDependency:
 		return append(make([]string, 0, len(in.Matrix)), in.Matrix...)
@@ -1025,7 +1025,7 @@ func (in *Input) configurationsOf(found *Finding) []string {
 	default:
 		id = found.id
 	}
-	set := graph.ConfigSet(0)
+	set := inventory.ConfigSet(0)
 	if candidate := held.candidates[id]; candidate != nil {
 		set = candidate.Configs
 	}
@@ -1045,33 +1045,33 @@ func (in *Input) configurationsOf(found *Finding) []string {
 
 // index is what a lookup over one run's inventory needs, keyed by declaration.
 type index struct {
-	symbols    map[graph.SymbolID]*graph.Symbol
-	candidates map[graph.SymbolID]*graph.Candidate
-	components map[graph.SymbolID]*graph.Component
-	retained   map[graph.SymbolID]bool
-	byRef      map[string]graph.SymbolID
+	symbols    map[inventory.SymbolID]*inventory.Symbol
+	candidates map[inventory.SymbolID]*graph.Candidate
+	components map[inventory.SymbolID]*graph.Component
+	retained   map[inventory.SymbolID]bool
+	byRef      map[string]inventory.SymbolID
 	mains      map[string]bool     // by [index.packageKey]
 	dirs       map[string][]string // each import path's target-relative package directories
-	children   map[graph.SymbolID][]graph.SymbolID
+	children   map[inventory.SymbolID][]inventory.SymbolID
 
 	// caps is each dead component's confidence cap by its index, computed on first use.
 	caps map[int]vocab.Class
 
 	// exposed is every type code outside its package can reach, computed on first
 	// use and nil until then.
-	exposed map[graph.SymbolID]bool
+	exposed map[inventory.SymbolID]bool
 
 	// deprecated is every declaration carrying a deprecation marker, and
 	// enumerated every constant of an enumerated type with the type's name. Both
 	// are read from the syntax on first use, because the kinds that need them are
 	// few and the walk is the whole tree's.
-	deprecated map[graph.SymbolID]bool
-	enumerated map[graph.SymbolID]string
+	deprecated map[inventory.SymbolID]bool
+	enumerated map[inventory.SymbolID]string
 
 	// literals is every production string literal of the target by its value, and
 	// constTypes each constant's defined type, both read on first use.
 	literals   map[string][]literalSite
-	constTypes map[graph.SymbolID]graph.SymbolID
+	constTypes map[inventory.SymbolID]inventory.SymbolID
 
 	// falling is the write-only kind's annotation cascade, computed on first use.
 	falling *annotationFalls
@@ -1086,7 +1086,7 @@ type index struct {
 	// that judges an interface method outside them.
 	interfaces *interfaceFacts
 	testUse    *testUseFacts
-	outsideUse map[graph.SymbolID]bool
+	outsideUse map[inventory.SymbolID]bool
 	// listed is each dead component's member listing by its index, on first use.
 	listed map[int][]positioned
 
@@ -1099,14 +1099,14 @@ func (in *Input) index() *index {
 		return in.indexed
 	}
 	held := &index{
-		symbols:    make(map[graph.SymbolID]*graph.Symbol),
-		candidates: make(map[graph.SymbolID]*graph.Candidate),
-		components: make(map[graph.SymbolID]*graph.Component),
-		retained:   make(map[graph.SymbolID]bool),
-		byRef:      make(map[string]graph.SymbolID),
+		symbols:    make(map[inventory.SymbolID]*inventory.Symbol),
+		candidates: make(map[inventory.SymbolID]*graph.Candidate),
+		components: make(map[inventory.SymbolID]*graph.Component),
+		retained:   make(map[inventory.SymbolID]bool),
+		byRef:      make(map[string]inventory.SymbolID),
 		mains:      make(map[string]bool),
 		dirs:       make(map[string][]string),
-		children:   make(map[graph.SymbolID][]graph.SymbolID),
+		children:   make(map[inventory.SymbolID][]inventory.SymbolID),
 		caps:       make(map[int]vocab.Class),
 	}
 	held.holdInventory(in.Merged)
@@ -1207,19 +1207,19 @@ func (x *index) packageKey(pkgPath, dir string) string {
 }
 
 // packageOf is the [index.packageKey] of the package declaring symbol.
-func (in *Input) packageOf(symbol *graph.Symbol) string {
+func (in *Input) packageOf(symbol *inventory.Symbol) string {
 	return in.index().packageKey(symbol.PkgPath, path.Dir(symbol.Pos.Filename))
 }
 
 // symbol is the declaration of the inventory one identifier names, or nil where the
 // inventory holds none.
-func (in *Input) symbol(id graph.SymbolID) *graph.Symbol {
+func (in *Input) symbol(id inventory.SymbolID) *inventory.Symbol {
 	return in.index().symbols[id]
 }
 
 // candidateOf is the sweep's candidate for one declaration, or nil where the sweep
 // judged the declaration live.
-func (in *Input) candidateOf(id graph.SymbolID) *graph.Candidate {
+func (in *Input) candidateOf(id inventory.SymbolID) *graph.Candidate {
 	return in.index().candidates[id]
 }
 
@@ -1233,7 +1233,7 @@ func (in *Input) candidateOf(id graph.SymbolID) *graph.Candidate {
 // findingAt instead, which names its subject by position: the inventory holds no
 // declaration for either, and the identifier is what the sweep's answers about a
 // declaration are read by.
-func (in *Input) finding(id graph.SymbolID, code vocab.Code, message string) (Finding, bool) {
+func (in *Input) finding(id inventory.SymbolID, code vocab.Code, message string) (Finding, bool) {
 	symbol := in.symbol(id)
 	if symbol == nil {
 		return Finding{}, false
@@ -1273,7 +1273,7 @@ func findingAt(code vocab.Code, subject Subject, at Position, message string) Fi
 
 // word is the reader's word for the kind of one declaration, and the vocabulary's
 // own spelling for a kind no message has a word for.
-func (in *Input) word(id graph.SymbolID) string {
+func (in *Input) word(id inventory.SymbolID) string {
 	kind := in.index().kindOf(id)
 	if word, held := words[kind]; held {
 		return word
@@ -1282,11 +1282,11 @@ func (in *Input) word(id graph.SymbolID) string {
 }
 
 // kindOf is the kind of one declaration of the inventory.
-func (x *index) kindOf(id graph.SymbolID) graph.SymbolKind {
+func (x *index) kindOf(id inventory.SymbolID) inventory.SymbolKind {
 	if symbol := x.symbols[id]; symbol != nil {
 		return symbol.Kind
 	}
-	return graph.KindPackage
+	return inventory.KindPackage
 }
 
 // componentOf is the dead component one finding's subject belongs to.
@@ -1297,7 +1297,7 @@ func (x *index) kindOf(id graph.SymbolID) graph.SymbolKind {
 // report; a declaration of test-support code that test code references; a part of a
 // declaration, which is deleted without the declaration; and a row of a document,
 // which names the empty identifier.
-func (x *index) componentOf(id graph.SymbolID) findingComponent {
+func (x *index) componentOf(id inventory.SymbolID) findingComponent {
 	component := x.components[id]
 	if component == nil {
 		x.minted++
@@ -1339,7 +1339,7 @@ func (x *index) membersOf(found *Finding) []positioned {
 }
 
 // listing is the members of one set of symbols in the order [index.membersOf] names.
-func (x *index) listing(ids []graph.SymbolID) []positioned {
+func (x *index) listing(ids []inventory.SymbolID) []positioned {
 	members := make([]positioned, 0, len(ids))
 	for _, id := range ids {
 		symbol := x.symbols[id]
@@ -1360,8 +1360,8 @@ func (x *index) listing(ids []graph.SymbolID) []positioned {
 // fallen is the members of a component minted for one subject: the subject, and
 // where the sweep judged it dead, every dead member it contains at any depth, which
 // falls with its container.
-func (x *index) fallen(id graph.SymbolID) []graph.SymbolID {
-	members := []graph.SymbolID{id}
+func (x *index) fallen(id inventory.SymbolID) []inventory.SymbolID {
+	members := []inventory.SymbolID{id}
 	if id == "" || x.candidates[id] == nil {
 		return members
 	}

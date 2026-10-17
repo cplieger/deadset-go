@@ -6,8 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
 	spec "github.com/cplieger/deadset-spec/v8"
@@ -127,14 +128,15 @@ func loadDir(t *testing.T, dir string) (*load.Result, string) {
 // loaded extracts one archive, loads it and enumerates its declarations, so a
 // reader is measured over the production path from the archive to the inventory
 // rather than over symbols written by hand.
-func loaded(t *testing.T, archive string) (*load.Result, string, []graph.Symbol) {
+func loaded(t *testing.T, archive string) (*load.Result, string, []inventory.Symbol) {
 	t.Helper()
 
 	result, root := loadDir(t, extract(t, archive))
-	symbols, err := graph.Symbols(result, root, os.ReadFile)
+	inv, err := inventory.Of(result, root, os.ReadFile)
 	if err != nil {
-		t.Fatalf("Setup: graph.Symbols(%s): %v", archive, err)
+		t.Fatalf("Setup: inventory.Of(%s): %v", archive, err)
 	}
+	symbols := inv.Symbols
 	return result, root, symbols
 }
 
@@ -152,14 +154,18 @@ func writeIgnoreFile(t *testing.T, document string) string {
 // resolverOf is the resolver over one load and its inventory, which is the one the
 // composition root builds once per configuration and hands to every pass that
 // renders a position.
-func resolverOf(t *testing.T, result *load.Result, root string, symbols []graph.Symbol) *graph.Resolver {
+func resolverOf(t *testing.T, result *load.Result, root string, _ []inventory.Symbol) *resolve.Resolver {
 	t.Helper()
 
-	resolve, err := graph.NewResolver(result, root, os.ReadFile, symbols)
+	inv, err := inventory.Of(result, root, os.ReadFile)
 	if err != nil {
-		t.Fatalf("Setup: graph.NewResolver(%s): %v", root, err)
+		t.Fatalf("Setup: inventory.Of(%s): %v", root, err)
 	}
-	return resolve
+	resolver, err := resolve.New(result, inv)
+	if err != nil {
+		t.Fatalf("Setup: resolve.New(%s): %v", root, err)
+	}
+	return resolver
 }
 
 // writeDocument writes one suppression document under name into a directory of its

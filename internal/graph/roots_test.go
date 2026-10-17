@@ -3,7 +3,6 @@ package graph
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -14,7 +13,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"golang.org/x/tools/go/packages"
 )
@@ -23,7 +22,7 @@ import (
 // excluded for importing C.
 type detection struct {
 	excludedByCgo []string
-	symbols       []Symbol
+	symbols       []inventory.Symbol
 	roots         []Root
 	unmatched     []Unmatched
 }
@@ -47,7 +46,7 @@ func detect(t *testing.T, archive string, opts RootOptions) detection {
 // symbol carrying it. A blank declaration carries its container's reference rather
 // than one of its own, so it is left out and tested by position.
 func kindsByRef(d detection) map[string][]RootKind {
-	refs := make(map[SymbolID]string, len(d.symbols))
+	refs := make(map[inventory.SymbolID]string, len(d.symbols))
 	for _, s := range d.symbols {
 		if !s.Blank {
 			refs[s.ID] = s.Ref
@@ -70,7 +69,7 @@ func kindsByRef(d detection) map[string][]RootKind {
 // refsOfKind lists, in the order Roots returned them, the references of the
 // symbols one kind of root names.
 func refsOfKind(d detection, kind RootKind) []string {
-	byID := make(map[SymbolID]Symbol, len(d.symbols))
+	byID := make(map[inventory.SymbolID]inventory.Symbol, len(d.symbols))
 	for _, s := range d.symbols {
 		byID[s.ID] = s
 	}
@@ -160,7 +159,7 @@ func TestRootsDetectsEachClassAndDeclinesItsLookAlike(t *testing.T) {
 func TestRootsRootsABlankDeclarationAndNotTheNamedOneBesideIt(t *testing.T) {
 	d := detect(t, "roots.txtar", RootOptions{PublishedAPI: true})
 
-	var blank Symbol
+	var blank inventory.Symbol
 	for _, s := range d.symbols {
 		if s.Blank {
 			blank = s
@@ -383,20 +382,14 @@ func TestRootsReportsEveryUnmatchedStringOnceInTheConfigurationsOrder(t *testing
 func TestRootsOrderIsTheSameOnEveryCall(t *testing.T) {
 	dir := extract(t, "roots.txtar")
 	result, target := loadDir(t, dir, "linux", "amd64")
-	symbols, err := Symbols(result, target, os.ReadFile)
+	symbols, rs, err := inventoryOf(result, target, os.ReadFile)
 	if err != nil {
 		t.Fatalf("Setup: Symbols(roots.txtar): %v", err)
 	}
 	opts := RootOptions{PublishedAPI: true, Patterns: []string{"go://example.com/roots#Publish*"}}
 
-	first, _, err := Roots(result, target, os.ReadFile, symbols, opts)
-	if err != nil {
-		t.Fatalf("Roots first call error: %v", err)
-	}
-	second, _, err := Roots(result, target, os.ReadFile, symbols, opts)
-	if err != nil {
-		t.Fatalf("Roots second call error: %v", err)
-	}
+	first, _ := Roots(result, rs, symbols, opts)
+	second, _ := Roots(result, rs, symbols, opts)
 	if !slices.Equal(first, second) {
 		t.Errorf("Roots returned a different order on the second call\n--- first\n%v\n+++ second\n%v", first, second)
 	}
@@ -411,7 +404,7 @@ func TestRootsOrderIsTheSameOnEveryCall(t *testing.T) {
 func TestRootsOrdersBySiteRatherThanBySymbolIdentifier(t *testing.T) {
 	d := detect(t, "roots.txtar", RootOptions{PublishedAPI: true})
 
-	sites := make(map[SymbolID]Symbol, len(d.symbols))
+	sites := make(map[inventory.SymbolID]inventory.Symbol, len(d.symbols))
 	for _, s := range d.symbols {
 		sites[s.ID] = s
 	}
@@ -436,41 +429,6 @@ func TestRootsOrdersBySiteRatherThanBySymbolIdentifier(t *testing.T) {
 	}
 	if !inverted {
 		t.Fatal("roots.txtar holds no two roots of one file whose identifier order differs from their line order, so this test cannot fail")
-	}
-}
-
-func TestRootsRefusesAnIncompleteRequest(t *testing.T) {
-	dir := extract(t, "roots.txtar")
-	result, target := loadDir(t, dir, "linux", "amd64")
-	symbols, err := Symbols(result, target, os.ReadFile)
-	if err != nil {
-		t.Fatalf("Setup: Symbols(roots.txtar): %v", err)
-	}
-
-	cases := map[string]struct {
-		result  *load.Result
-		read    ReadFile
-		wantErr error
-	}{
-		"no result":   {result: nil, read: os.ReadFile, wantErr: ErrIncompleteLoad},
-		"no file set": {result: &load.Result{Packages: result.Packages}, read: os.ReadFile, wantErr: ErrIncompleteLoad},
-		"no reader":   {result: result, read: nil, wantErr: ErrIncompleteLoad},
-		"a reader that refuses": {
-			result:  result,
-			read:    func(string) ([]byte, error) { return nil, os.ErrPermission },
-			wantErr: ErrSource,
-		},
-	}
-	for name, test := range cases {
-		t.Run(name, func(t *testing.T) {
-			roots, unmatched, err := Roots(test.result, target, test.read, symbols, RootOptions{PublishedAPI: true})
-			if !errors.Is(err, test.wantErr) {
-				t.Fatalf("Roots(%s) error = %v, want one satisfying errors.Is(err, %v)", name, err, test.wantErr)
-			}
-			if roots != nil || unmatched != nil {
-				t.Errorf("Roots(%s) = %v, %v, want no root and no unmatched pattern", name, roots, unmatched)
-			}
-		})
 	}
 }
 
@@ -706,12 +664,12 @@ func TestDeclaredRootsOnlyAFunctionNamedMainOrInit(t *testing.T) {
 		found:   make(map[Root]struct{}),
 	}
 
-	d.declared([]Symbol{
-		{ID: "variable", Kind: KindVar, Name: mainFunction, PkgPath: target},
-		{ID: "type", Kind: KindType, Name: initFunction, PkgPath: target},
-		{ID: "entry point", Kind: KindFunc, Name: mainFunction, PkgPath: target},
-		{ID: "library function", Kind: KindFunc, Name: mainFunction, PkgPath: "example.com/lib"},
-		{ID: "initializer", Kind: KindFunc, Name: initFunction, PkgPath: "example.com/lib"},
+	d.declared([]inventory.Symbol{
+		{ID: "variable", Kind: inventory.KindVar, Name: mainFunction, PkgPath: target},
+		{ID: "type", Kind: inventory.KindType, Name: initFunction, PkgPath: target},
+		{ID: "entry point", Kind: inventory.KindFunc, Name: mainFunction, PkgPath: target},
+		{ID: "library function", Kind: inventory.KindFunc, Name: mainFunction, PkgPath: "example.com/lib"},
+		{ID: "initializer", Kind: inventory.KindFunc, Name: initFunction, PkgPath: "example.com/lib"},
 	})
 
 	want := map[Root]struct{}{
@@ -753,7 +711,7 @@ func TestRootKindStringNamesEveryKind(t *testing.T) {
 func TestRootsRootsWhatAProgramUnderTheIgnoreTagNames(t *testing.T) {
 	d := analysisOf(t, "programs.txtar", nil)
 	roots, _ := d.rootsUnder(t, false)
-	names := make(map[SymbolID]string)
+	names := make(map[inventory.SymbolID]string)
 	for _, s := range d.inventory(t) {
 		names[s.ID] = s.Name
 	}

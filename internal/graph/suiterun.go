@@ -33,40 +33,34 @@ var suiteRunners = [...]suiteRunner{
 
 // suiteMethods roots, as tests, the methods a suite runner calls on each value of a
 // static type other than an interface that a call in f passes it as the suite.
-func (d *rootDetection) suiteMethods(p *packages.Package, f *ast.File) error {
+func (d *rootDetection) suiteMethods(p *packages.Package, f *ast.File) {
 	if p.TypesInfo == nil {
-		return nil
+		return
 	}
-	var err error
 	ast.Inspect(f, func(n ast.Node) bool {
-		if call, ok := n.(*ast.CallExpr); ok && err == nil {
-			err = d.suiteCall(p.TypesInfo, call)
+		if call, ok := n.(*ast.CallExpr); ok {
+			d.suiteCall(p.TypesInfo, call)
 		}
-		return err == nil
+		return true
 	})
-	return err
 }
 
 // suiteCall roots the methods one call's suite runner calls on its suite.
-func (d *rootDetection) suiteCall(info *types.Info, call *ast.CallExpr) error {
+func (d *rootDetection) suiteCall(info *types.Info, call *ast.CallExpr) {
 	runner := runnerOf(info, call)
 	if runner == nil || runner.arg >= len(call.Args) {
-		return nil
+		return
 	}
 	suite := info.TypeOf(call.Args[runner.arg])
 	if suite == nil || types.IsInterface(suite) {
-		return nil
+		return
 	}
 	for selection := range types.NewMethodSet(suite).Methods() {
 		method := selection.Obj()
-		if method.Pkg() == nil || d.byPath[method.Pkg().Path()] == nil || !method.Exported() || !runner.calls(method.Name()) {
-			continue
-		}
-		if err := d.addAt(method.Pos(), RootTest); err != nil {
-			return err
+		if method.Exported() && runner.calls(method.Name()) {
+			d.addObject(method, RootTest)
 		}
 	}
-	return nil
 }
 
 // runnerOf is the suite runner a call calls, nil for any other callee.

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/txtar"
 )
@@ -186,7 +187,7 @@ func TestDetectorsNameEveryClassTheAnalyzerComputes(t *testing.T) {
 // retainedClauses names every exemption of one union as the declaration held
 // back, the class, the site and the clause, which is the line print-retained
 // carries.
-func retainedClauses(symbols []graph.Symbol, found []graph.Exemption) []string {
+func retainedClauses(symbols []inventory.Symbol, found []graph.Exemption) []string {
 	names := symbolNames(symbols)
 	lines := make([]string, 0, len(found))
 	for _, e := range found {
@@ -407,7 +408,7 @@ func TestEveryClauseIsOneRelationThenTheThingItRelatesTo(t *testing.T) {
 func checkClause(t *testing.T, archive string, e graph.Exemption) {
 	t.Helper()
 
-	stated := e.ID + " " + graph.SymbolID(e.Class)
+	stated := e.ID + " " + inventory.SymbolID(e.Class)
 	if e.Detail == "" {
 		t.Errorf("Compute(%s) recorded %s with no clause, want one relation and the thing it relates to", archive, stated)
 		return

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
@@ -49,7 +50,7 @@ func unusedInterface(in *Input) ([]Finding, error) {
 	for i := range in.Sweep.Candidates {
 		candidate := &in.Sweep.Candidates[i]
 		symbol := in.symbol(candidate.ID)
-		if symbol == nil || symbol.Kind != graph.KindInterface || testFile(symbol) {
+		if symbol == nil || symbol.Kind != inventory.KindInterface || symbol.InTestFile {
 			continue
 		}
 		one, held := in.finding(candidate.ID, vocab.UnusedInterface, unusedInterfaceMessage)
@@ -84,7 +85,7 @@ func uncalledInterfaceMethod(in *Input) ([]Finding, error) {
 	for i := range in.Sweep.Candidates {
 		candidate := &in.Sweep.Candidates[i]
 		symbol := in.symbol(candidate.ID)
-		if symbol == nil || symbol.Kind != graph.KindInterfaceMethod || testFile(symbol) {
+		if symbol == nil || symbol.Kind != inventory.KindInterfaceMethod || symbol.InTestFile {
 			continue
 		}
 		if in.candidateOf(symbol.Parent) != nil || facts.exempt(candidate.ID) || testOnly(candidate) {
@@ -118,7 +119,7 @@ func unusedSatisfactionAssertion(in *Input) ([]Finding, error) {
 	var found []Finding
 	for _, asserted := range facts.assertions {
 		symbol, iface := in.symbol(asserted.Var), in.symbol(asserted.Interface)
-		if symbol == nil || iface == nil || testFile(symbol) || facts.usedAsType[asserted.Interface] ||
+		if symbol == nil || iface == nil || symbol.InTestFile || facts.usedAsType[asserted.Interface] ||
 			in.index().retained[asserted.Var] {
 			continue
 		}
@@ -145,8 +146,8 @@ func unusedSatisfactionAssertion(in *Input) ([]Finding, error) {
 // assertion is one compile-time satisfaction assertion: the blank declaration and
 // the interface of the target it names.
 type assertion struct {
-	Var       graph.SymbolID
-	Interface graph.SymbolID
+	Var       inventory.SymbolID
+	Interface inventory.SymbolID
 }
 
 // implementationCount counts, per method an interface declares, the implementations
@@ -163,18 +164,18 @@ type implementationCount struct {
 // reaches through the interface, the satisfaction assertions, and which interfaces
 // something other than an assertion names as a type.
 type interfaceFacts struct {
-	implementations map[graph.SymbolID]map[graph.SymbolID]positioned
-	ordered         map[graph.SymbolID][]positioned
-	sealed          map[graph.SymbolID]bool
-	counted         map[graph.SymbolID]*implementationCount
-	reached         map[graph.SymbolID]bool
-	called          map[graph.SymbolID]bool
-	usedAsType      map[graph.SymbolID]bool
-	typeUsedBy      map[graph.SymbolID][]graph.SymbolID
+	implementations map[inventory.SymbolID]map[inventory.SymbolID]positioned
+	ordered         map[inventory.SymbolID][]positioned
+	sealed          map[inventory.SymbolID]bool
+	counted         map[inventory.SymbolID]*implementationCount
+	reached         map[inventory.SymbolID]bool
+	called          map[inventory.SymbolID]bool
+	usedAsType      map[inventory.SymbolID]bool
+	typeUsedBy      map[inventory.SymbolID][]inventory.SymbolID
 	asserted        map[assertion]bool
-	assertedType    map[assertion]graph.SymbolID
-	implementors    map[graph.SymbolID][]graph.SymbolID
-	declaredBy      map[graph.SymbolID]graph.SymbolID
+	assertedType    map[assertion]inventory.SymbolID
+	implementors    map[inventory.SymbolID][]inventory.SymbolID
+	declaredBy      map[inventory.SymbolID]inventory.SymbolID
 	assertions      []assertion
 }
 
@@ -183,18 +184,18 @@ type interfaceFacts struct {
 // need both.
 func interfacesOf(in *Input) *interfaceFacts {
 	f := &interfaceFacts{
-		implementations: make(map[graph.SymbolID]map[graph.SymbolID]positioned),
-		ordered:         make(map[graph.SymbolID][]positioned),
-		sealed:          make(map[graph.SymbolID]bool),
-		counted:         make(map[graph.SymbolID]*implementationCount),
-		reached:         make(map[graph.SymbolID]bool),
-		called:          make(map[graph.SymbolID]bool),
-		usedAsType:      make(map[graph.SymbolID]bool),
-		typeUsedBy:      make(map[graph.SymbolID][]graph.SymbolID),
+		implementations: make(map[inventory.SymbolID]map[inventory.SymbolID]positioned),
+		ordered:         make(map[inventory.SymbolID][]positioned),
+		sealed:          make(map[inventory.SymbolID]bool),
+		counted:         make(map[inventory.SymbolID]*implementationCount),
+		reached:         make(map[inventory.SymbolID]bool),
+		called:          make(map[inventory.SymbolID]bool),
+		usedAsType:      make(map[inventory.SymbolID]bool),
+		typeUsedBy:      make(map[inventory.SymbolID][]inventory.SymbolID),
 		asserted:        make(map[assertion]bool),
-		assertedType:    make(map[assertion]graph.SymbolID),
-		implementors:    make(map[graph.SymbolID][]graph.SymbolID),
-		declaredBy:      make(map[graph.SymbolID]graph.SymbolID),
+		assertedType:    make(map[assertion]inventory.SymbolID),
+		implementors:    make(map[inventory.SymbolID][]inventory.SymbolID),
+		declaredBy:      make(map[inventory.SymbolID]inventory.SymbolID),
 	}
 	if in.Merged != nil {
 		f.references(in, in.Merged.References)
@@ -221,10 +222,10 @@ func (f *interfaceFacts) references(in *Input, refs []graph.Reference) {
 			continue
 		}
 		switch {
-		case to.Kind == graph.KindInterfaceMethod && selects(reference.Kind):
+		case to.Kind == inventory.KindInterfaceMethod && selects(reference.Kind):
 			f.called[reference.To] = true
 			f.reached[reference.To] = f.reached[reference.To] || !in.uncounted(reference)
-		case to.Kind == graph.KindInterface && namesAsType(reference.Kind):
+		case to.Kind == inventory.KindInterface && namesAsType(reference.Kind):
 			f.typeUsedBy[reference.To] = append(f.typeUsedBy[reference.To], reference.From)
 		}
 	}
@@ -281,13 +282,13 @@ func (f *interfaceFacts) configuration(in *Input, one *Configured) {
 // addImplementation records one concrete type of the target as an implementation of
 // one of its interfaces, once per type whatever the number of configurations that
 // compile both.
-func (f *interfaceFacts) addImplementation(in *Input, iface, concrete graph.SymbolID) {
+func (f *interfaceFacts) addImplementation(in *Input, iface, concrete inventory.SymbolID) {
 	symbol := in.symbol(concrete)
 	if symbol == nil {
 		return
 	}
 	if f.implementations[iface] == nil {
-		f.implementations[iface] = make(map[graph.SymbolID]positioned)
+		f.implementations[iface] = make(map[inventory.SymbolID]positioned)
 	}
 	f.implementations[iface][concrete] = positioned{
 		Ref:      cmp.Or(in.Refs[concrete], symbol.Ref),
@@ -338,7 +339,7 @@ func (f *interfaceFacts) assertionsIn(in *Input, one *Configured, d *declared) {
 			continue
 		}
 		id, held := one.Resolve.Object(named.Obj())
-		if symbol := in.symbol(id); !held || symbol == nil || symbol.Kind != graph.KindInterface {
+		if symbol := in.symbol(id); !held || symbol == nil || symbol.Kind != inventory.KindInterface {
 			continue
 		}
 		value := blank.info.TypeOf(blank.value)
@@ -402,7 +403,7 @@ func (f *interfaceFacts) seal(one *Configured, iface *types.Interface) {
 // interface's method set that fixes its implementors holds it ([interfaceFacts.seal]),
 // or because the method is a marker, whose every implementation in the target has a
 // body with no statement; one the target does not declare has no body to read.
-func (f *interfaceFacts) exempt(method graph.SymbolID) bool {
+func (f *interfaceFacts) exempt(method inventory.SymbolID) bool {
 	if f.reached[method] || f.sealed[method] {
 		return true
 	}
@@ -415,8 +416,8 @@ func (f *interfaceFacts) exempt(method graph.SymbolID) bool {
 // precondition does not exempt, which the test-only kind reports as it reports any
 // declaration only tests reference. A method of an interface that is itself a
 // candidate falls with the interface.
-func (in *Input) testCalledInterfaceMethod(candidate *graph.Candidate, symbol *graph.Symbol) bool {
-	if symbol.Kind != graph.KindInterfaceMethod || !testOnly(candidate) || in.candidateOf(symbol.Parent) != nil {
+func (in *Input) testCalledInterfaceMethod(candidate *graph.Candidate, symbol *inventory.Symbol) bool {
+	if symbol.Kind != inventory.KindInterfaceMethod || !testOnly(candidate) || in.candidateOf(symbol.Parent) != nil {
 		return false
 	}
 	held := in.index()
@@ -432,12 +433,12 @@ func (in *Input) testCalledInterfaceMethod(candidate *graph.Candidate, symbol *g
 // interface method, so an implementation nothing else keeps belongs to the interface
 // method's dead component. A method a test calls keeps its implementations, which the
 // test reaches through it. It reads the inventory, the references and the types alone.
-func InterfaceImplementations(in *Input) (uncalled map[graph.SymbolID]bool, uses []graph.Use) {
+func InterfaceImplementations(in *Input) (uncalled map[inventory.SymbolID]bool, uses []graph.Use) {
 	facts := interfacesOf(in)
-	uncalled = make(map[graph.SymbolID]bool)
+	uncalled = make(map[inventory.SymbolID]bool)
 	for method := range facts.declaredBy {
 		symbol := in.symbol(method)
-		if symbol == nil || testFile(symbol) || facts.exempt(method) || facts.called[method] {
+		if symbol == nil || symbol.InTestFile || facts.exempt(method) || facts.called[method] {
 			continue
 		}
 		uncalled[method] = true
@@ -453,7 +454,7 @@ func InterfaceImplementations(in *Input) (uncalled map[graph.SymbolID]bool, uses
 
 // implementationsOf returns the concrete implementations of one interface, in the
 // order they are written, and an empty list for an interface nothing implements.
-func (f *interfaceFacts) implementationsOf(iface graph.SymbolID) []positioned {
+func (f *interfaceFacts) implementationsOf(iface inventory.SymbolID) []positioned {
 	if held, ok := f.ordered[iface]; ok {
 		return held
 	}
@@ -463,7 +464,7 @@ func (f *interfaceFacts) implementationsOf(iface graph.SymbolID) []positioned {
 // positionOf renders one declaration's position the way a finding carries it. The
 // inventory's position is already target-relative and already counts UTF-16 code
 // units, so nothing is converted here.
-func positionOf(symbol *graph.Symbol) Position {
+func positionOf(symbol *inventory.Symbol) Position {
 	return Position{
 		Path:    symbol.Pos.Filename,
 		Line:    symbol.Pos.Line,
@@ -484,14 +485,14 @@ func byWrittenPosition(a, b positioned) int {
 // type-checks it.
 type declaredInterface struct {
 	iface *types.Interface
-	id    graph.SymbolID
+	id    inventory.SymbolID
 }
 
 // declaredType is one concrete type the target declares, as one configuration
 // type-checks it.
 type declaredType struct {
 	typ types.Type
-	id  graph.SymbolID
+	id  inventory.SymbolID
 }
 
 // blankDeclaration is one package-level declaration of the blank identifier, with
@@ -506,7 +507,7 @@ type blankDeclaration struct {
 // declared is what one configuration's type information holds for these kinds.
 type declared struct {
 	written    map[token.Pos]*ast.FuncDecl
-	seen       map[graph.SymbolID]bool
+	seen       map[inventory.SymbolID]bool
 	interfaces []declaredInterface
 	concrete   []declaredType
 	blanks     []blankDeclaration
@@ -515,20 +516,16 @@ type declared struct {
 // declaredIn reads one configuration's type information: the interfaces and the
 // concrete types the target declares, the function declarations the marker rule
 // measures, and the package-level blank declarations that may be satisfaction
-// assertions. A declaration several package variants type-check is read from the
-// first variant by identifier, so one run answers what the next one does.
+// assertions, each read from the first variant of the inventory's walk order.
 //
 // A generic type is in neither type set, because whether an uninstantiated generic
 // type implements an interface is not a question the type checker answers.
 func declaredIn(one *Configured) declared {
 	d := declared{
 		written: make(map[token.Pos]*ast.FuncDecl),
-		seen:    make(map[graph.SymbolID]bool),
+		seen:    make(map[inventory.SymbolID]bool),
 	}
-	for _, p := range graph.SortedPackages(one.Result.Packages) {
-		if p.TypesInfo == nil {
-			continue
-		}
+	for _, p := range inventory.Packages(one.Result.Packages, one.Result.Fset) {
 		d.collect(one, p)
 	}
 	slices.SortFunc(d.interfaces, func(a, b declaredInterface) int {
@@ -562,7 +559,7 @@ func (d *declared) collect(one *Configured, p *packages.Package) {
 
 // keep files one named type of the target under what it is: an interface whose
 // methods these kinds judge, or a concrete type that may implement one.
-func (d *declared) keep(id graph.SymbolID, name *types.TypeName) {
+func (d *declared) keep(id inventory.SymbolID, name *types.TypeName) {
 	named, isNamed := types.Unalias(name.Type()).(*types.Named)
 	if !isNamed || named.TypeParams().Len() > 0 {
 		return
@@ -678,7 +675,7 @@ func isInterfaceType(t types.Type) bool {
 
 // concreteOf returns the declaration of the concrete type one asserted value has,
 // through the pointer the assertion may take.
-func concreteOf(one *Configured, t types.Type) graph.SymbolID {
+func concreteOf(one *Configured, t types.Type) inventory.SymbolID {
 	held := types.Unalias(t)
 	if pointer, isPointer := held.(*types.Pointer); isPointer {
 		held = types.Unalias(pointer.Elem())
@@ -694,7 +691,7 @@ func concreteOf(one *Configured, t types.Type) graph.SymbolID {
 // WithoutUncalled drops every interface-satisfaction retention through an interface
 // method no call site reaches, which [uncalledInterfaceMethod] reports with its
 // implementations.
-func WithoutUncalled(exemptions []graph.Exemption, uncalled map[graph.SymbolID]bool) []graph.Exemption {
+func WithoutUncalled(exemptions []graph.Exemption, uncalled map[inventory.SymbolID]bool) []graph.Exemption {
 	return slices.DeleteFunc(exemptions, func(e graph.Exemption) bool {
 		return e.Class == string(vocab.InterfaceSatisfaction) && e.Via != "" && uncalled[e.Via]
 	})

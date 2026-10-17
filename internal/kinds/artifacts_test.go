@@ -10,6 +10,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/deps"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
@@ -121,9 +122,9 @@ func TestFileNeverBuiltReportsEveryFileNoConfigurationCompiles(t *testing.T) {
 			t.Errorf("FileNeverBuilt(%s).Details.ExcludedBy = %q, want %q",
 				one.Symbol.Name, one.Details.ExcludedBy, constraint)
 		}
-		if one.Symbol.Kind != symbolKinds[graph.KindFile] {
+		if one.Symbol.Kind != symbolKinds[inventory.KindFile] {
 			t.Errorf("FileNeverBuilt(%s).Symbol.Kind = %q, want %q",
-				one.Symbol.Name, one.Symbol.Kind, symbolKinds[graph.KindFile])
+				one.Symbol.Name, one.Symbol.Kind, symbolKinds[inventory.KindFile])
 		}
 		wantRef := "go://example.com/app#" + one.Symbol.Name + ":file"
 		if one.Symbol.Ref != wantRef {
@@ -239,9 +240,9 @@ func TestFileNeverImportedReportsEveryFileOfAPackageNothingReaches(t *testing.T)
 		t.Errorf("FileNeverImported(%s).Relation = %v, want %v: the kind decides on the references made to the package the file declares",
 			one.Position.Path, one.Relation, graph.ReferenceCounting)
 	}
-	if one.Symbol.Kind != symbolKinds[graph.KindFile] {
+	if one.Symbol.Kind != symbolKinds[inventory.KindFile] {
 		t.Errorf("FileNeverImported(%s).Symbol.Kind = %q, want %q",
-			one.Position.Path, one.Symbol.Kind, symbolKinds[graph.KindFile])
+			one.Position.Path, one.Symbol.Kind, symbolKinds[inventory.KindFile])
 	}
 	if one.Fixability != vocab.Deletable {
 		t.Errorf("FileNeverImported(%s).Fixability = %q, want %q",
@@ -358,12 +359,12 @@ func TestFileNeverImportedReportsNoFileOfTheMainPackage(t *testing.T) {
 }
 
 // packageSymbol is the identifier of the package symbol one import path names.
-func packageSymbol(t *testing.T, in *Input, pkgPath string) graph.SymbolID {
+func packageSymbol(t *testing.T, in *Input, pkgPath string) inventory.SymbolID {
 	t.Helper()
 
 	for i := range in.Merged.Symbols {
 		symbol := &in.Merged.Symbols[i]
-		if symbol.Kind == graph.KindPackage && symbol.PkgPath == pkgPath {
+		if symbol.Kind == inventory.KindPackage && symbol.PkgPath == pkgPath {
 			return symbol.ID
 		}
 	}
@@ -373,12 +374,12 @@ func packageSymbol(t *testing.T, in *Input, pkgPath string) graph.SymbolID {
 
 // mainFunction is the identifier of the target's main function, which is the
 // declaration a synthesized import edge is made from.
-func mainFunction(t *testing.T, in *Input) graph.SymbolID {
+func mainFunction(t *testing.T, in *Input) inventory.SymbolID {
 	t.Helper()
 
 	for i := range in.Merged.Symbols {
 		symbol := &in.Merged.Symbols[i]
-		if symbol.Kind == graph.KindFunc && symbol.Name == "main" {
+		if symbol.Kind == inventory.KindFunc && symbol.Name == "main" {
 			return symbol.ID
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/run"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -34,7 +35,7 @@ func printRoots(ctx context.Context, args []string, stdout, stderr io.Writer) in
 // root several configurations detect is one line keyed by the symbol, the class and
 // the configured string; the configurations are a further field only where the
 // matrix holds more than one, with the third field then present even when empty.
-func rootLines(refs map[graph.SymbolID]string, roots []graph.Root, configurations []string) []string {
+func rootLines(refs map[inventory.SymbolID]string, roots []graph.Root, configurations []string) []string {
 	at := make(map[rootKey]int, len(roots))
 	lines := make([]string, 0, len(roots))
 	detected := make([][]string, 0, len(roots))
@@ -60,7 +61,7 @@ func rootLines(refs map[graph.SymbolID]string, roots []graph.Root, configuration
 
 // rootKey is what makes two roots of a matrix one root.
 type rootKey struct {
-	id     graph.SymbolID
+	id     inventory.SymbolID
 	source string
 	kind   graph.RootKind
 }

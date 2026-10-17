@@ -1,20 +1,22 @@
-// Package graph builds the graph of one loaded build configuration: the symbols
-// a target declares, the references between them, and what the roots keep alive.
+// Package inventory enumerates the declarations of one loaded build
+// configuration, renders their positions, and provides a deterministic order to
+// walk the configuration's files in.
 //
 // A declaration is identified by where it is written, never by the identity of
 // the types.Object that carries it. A package and its in-package test variant
 // type-check the same file independently and produce distinct objects for one
-// declaration, so an object-keyed graph would split the declaration from the
+// declaration, so an object-keyed inventory would split the declaration from the
 // references its own tests make.
-package graph
+package inventory
 
 import (
-	"cmp"
 	"errors"
 	"fmt"
 	"go/ast"
 	"go/token"
 	"go/types"
+	"iter"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -26,11 +28,11 @@ import (
 var (
 	// ErrIncompleteLoad reports a result missing the file set or the source
 	// reader the enumeration needs.
-	ErrIncompleteLoad = errors.New("graph: incomplete load result")
+	ErrIncompleteLoad = errors.New("inventory: incomplete load result")
 
 	// errNoTargetPackage reports a load carrying no package the enumeration can
 	// walk, which leaves the target without a declaration to reason about.
-	errNoTargetPackage = errors.New("graph: the load carries no package to enumerate")
+	errNoTargetPackage = errors.New("inventory: the load carries no package to enumerate")
 )
 
 // SymbolKind names what a symbol is. String is the spelling a report and a
@@ -95,6 +97,9 @@ type Symbol struct {
 	// states, blank names left out ([enumeration.constantDependents]).
 	Dependents []SymbolID
 
+	// Package is the identity in the load of the package declaring the symbol.
+	Package load.PackageID
+
 	// Pos is rendered: Filename is target-relative with forward slashes and
 	// Column counts UTF-16 code units rather than the bytes Go reports.
 	Pos     token.Position
@@ -102,14 +107,20 @@ type Symbol struct {
 
 	// Configs is the set of build configurations the declaration exists in. One
 	// enumeration fills none of it, because a load is of one configuration and
-	// the set is a fact about the matrix; [Merge] is what fills it.
+	// the set is a fact about the matrix; graph.Merge is what fills it.
 	Configs  ConfigSet
 	Kind     SymbolKind
 	Exported bool
 	Blank    bool // declared with the blank identifier
 
+	// InTestFile reports a declaration of a file the Go test-file rule classifies
+	// ([IsTestFile]).
+	InTestFile bool
+
 	// TestSupport reports a declaration of a test-support package, which is test
-	// code as a test file's declaration is. [ClassifyTestSupport] sets it.
+	// code as a test file's declaration is. It is decided over the matrix after the
+	// roots, so one enumeration fills none of it; graph.Merge fills it from the
+	// matrix's test classes.
 	TestSupport bool
 }
 
@@ -119,14 +130,22 @@ type Symbol struct {
 // composition root passes os.ReadFile.
 type ReadFile func(name string) ([]byte, error)
 
-// Symbols enumerates every declaration of one loaded configuration, one Symbol
-// per source site whatever the number of package variants that type-check the
-// site. Every position is rendered relative to targetRoot, and a file that root
-// does not hold ends the enumeration with [ErrSource] rather than being passed
-// over. The order is by rendered position and then by Ref, so
-// two calls over one result return the same slice. Symbols reaches the
-// filesystem only through read.
-func Symbols(r *load.Result, targetRoot string, read ReadFile) ([]Symbol, error) {
+// Inventory is one configuration's declarations, each also keyed by the
+// token.Pos the configuration's own parse writes it at, and the renderer every
+// pass over the configuration shares.
+type Inventory struct {
+	pos     *Positions
+	at      map[token.Pos]SymbolID
+	Symbols []Symbol
+}
+
+// Of enumerates every declaration of one loaded configuration, one Symbol per
+// source site whatever the number of package variants that type-check the site.
+// Every position is rendered relative to targetRoot, and a file that root does
+// not hold ends the enumeration with [ErrSource] rather than being passed over.
+// The symbols are ordered by rendered position and then by Ref, so two calls over
+// one result return the same slice. Of reaches the filesystem only through read.
+func Of(r *load.Result, targetRoot string, read ReadFile) (*Inventory, error) {
 	if r == nil || r.Fset == nil {
 		return nil, fmt.Errorf("%w: no file set", ErrIncompleteLoad)
 	}
@@ -135,22 +154,19 @@ func Symbols(r *load.Result, targetRoot string, read ReadFile) ([]Symbol, error)
 	}
 
 	e := &enumeration{
-		pos:     newPositions(r.Fset, targetRoot, read),
+		pos:     NewPositions(r.Fset, targetRoot, read),
 		seen:    make(map[token.Pos]SymbolID),
 		refs:    make(map[SymbolID]string),
 		typeIDs: make(map[string]SymbolID),
 
 		dependents: make(map[SymbolID][]SymbolID),
 	}
-	for _, g := range groupVariants(r.Packages, e.pos) {
-		if err := e.walkPackage(g); err != nil {
+	for _, g := range Groups(r.Packages, r.Fset) {
+		if err := e.walkPackage(g, r.ID(g.Packages[0])); err != nil {
 			return nil, err
 		}
 	}
-	if len(e.symbols) == 0 {
-		if len(r.Packages) == 0 {
-			return nil, nil
-		}
+	if len(e.symbols) == 0 && len(r.Packages) > 0 {
 		return nil, fmt.Errorf("%w: %s", errNoTargetPackage, targetRoot)
 	}
 
@@ -158,91 +174,44 @@ func Symbols(r *load.Result, targetRoot string, read ReadFile) ([]Symbol, error)
 	for i := range e.symbols {
 		e.symbols[i].Dependents = e.dependents[e.symbols[i].ID]
 	}
-	slices.SortFunc(e.symbols, bySite)
-	return e.symbols, nil
+	slices.SortFunc(e.symbols, BySite)
+	return &Inventory{Symbols: e.symbols, pos: e.pos, at: e.seen}, nil
 }
 
-// bySite orders two symbols by rendered position and then by reference. It is a
+// At returns the declaration the configuration's own parse writes at pos: the
+// name of a declaration, the package clause of a package's anchor file, or the
+// start of a file. Any other position names none, and the lookup reads nothing.
+func (inv *Inventory) At(pos token.Pos) (SymbolID, bool) {
+	id, held := inv.at[pos]
+	return id, held
+}
+
+// Sites yields every position [Inventory.At] answers for, with its declaration.
+func (inv *Inventory) Sites() iter.Seq2[token.Pos, SymbolID] { return maps.All(inv.at) }
+
+// Positions is the renderer the enumeration rendered with, which every later pass
+// over the configuration renders target positions with, so each file is read once.
+func (inv *Inventory) Positions() *Positions { return inv.pos }
+
+// BySite orders two symbols by rendered position and then by reference. It is a
 // total order because two symbols never share a position.
 //
 //nolint:gocritic // slices.SortFunc fixes a comparator's parameters to values.
-func bySite(a, b Symbol) int {
+func BySite(a, b Symbol) int {
 	if c := ByPosition(a.Pos, b.Pos); c != 0 {
 		return c
 	}
 	return strings.Compare(a.Ref, b.Ref)
 }
 
-// variantGroup holds every loaded package that shares one import path and one
-// directory: the package itself and the test variants that type-check its files
-// again. Two modules of the target can declare one module path, so the import path
-// alone names two packages.
-type variantGroup struct {
-	anchor  *ast.File
-	pkgPath string
-	dir     string
-	pkgs    []*packages.Package
-}
-
-// groupVariants gathers the loaded packages by import path and directory, and orders the groups
-// and the variants inside each so one configuration is walked in one order. A
-// package the type checker did not check and a package with no syntax tree carry
-// no declaration and are left out. The anchor is the file whose name sorts first
-// across every variant, so the position of the package itself does not depend on
-// which variant reached it.
-func groupVariants(pkgs []*packages.Package, pos *positions) []variantGroup {
-	byPath := make(map[string]*variantGroup)
-	for _, p := range pkgs {
-		if p.PkgPath == "" || p.TypesInfo == nil {
-			continue
-		}
-		files := syntaxFiles(p, pos)
-		if len(files) == 0 {
-			continue
-		}
-		dir := pos.dir(files[0].FileStart)
-		key := p.PkgPath + "\x00" + dir
-		g := byPath[key]
-		if g == nil {
-			g = &variantGroup{pkgPath: p.PkgPath, dir: dir}
-			byPath[key] = g
-		}
-		g.pkgs = append(g.pkgs, p)
-		for _, f := range files {
-			if g.anchor == nil || pos.base(f.FileStart) < pos.base(g.anchor.FileStart) {
-				g.anchor = f
-			}
-		}
-	}
-
-	groups := make([]variantGroup, 0, len(byPath))
-	for _, g := range byPath {
-		slices.SortFunc(g.pkgs, func(a, b *packages.Package) int { return strings.Compare(a.ID, b.ID) })
-		groups = append(groups, *g)
-	}
-	slices.SortFunc(groups, func(a, b variantGroup) int {
-		return cmp.Or(strings.Compare(a.pkgPath, b.pkgPath), strings.Compare(a.dir, b.dir))
-	})
-	return groups
-}
-
-// syntaxFiles returns the package's syntax trees ordered by file name, so one
-// configuration is walked in one order whatever order the load reported.
-func syntaxFiles(p *packages.Package, pos *positions) []*ast.File {
-	files := slices.Clone(p.Syntax)
-	slices.SortFunc(files, func(a, b *ast.File) int {
-		return strings.Compare(pos.base(a.FileStart), pos.base(b.FileStart))
-	})
-	return files
-}
-
 // enumeration accumulates the symbols of one loaded configuration.
 type enumeration struct {
-	pos        *positions
+	pos        *Positions
 	seen       map[token.Pos]SymbolID  // one declaration per source site
 	refs       map[SymbolID]string     // a symbol's reference, for a container to lend
 	typeIDs    map[string]SymbolID     // [typeKey] to that type's symbol
 	dependents map[SymbolID][]SymbolID // a constant's dependents, applied once the walk ends
+	pkg        load.PackageID          // the package being walked
 	pending    []receiverOwner
 	symbols    []Symbol
 }
@@ -351,11 +320,11 @@ func (e *enumeration) append(d *declaration) (SymbolID, error) {
 	if id, ok := e.seen[d.pos]; ok {
 		return id, nil
 	}
-	position, err := e.pos.render(d.pos)
+	position, err := e.pos.Render(d.pos)
 	if err != nil {
 		return "", err
 	}
-	end, err := e.pos.render(d.end)
+	end, err := e.pos.Render(d.end)
 	if err != nil {
 		return "", err
 	}
@@ -388,25 +357,28 @@ func (e *enumeration) append(d *declaration) (SymbolID, error) {
 		Kind:     d.kind,
 		Exported: named && ast.IsExported(own),
 		Blank:    blank,
+		Package:  e.pkg,
 	})
+	_, e.symbols[len(e.symbols)-1].InTestFile = IsTestFile(position.Filename)
 	return id, nil
 }
 
 // walkPackage enumerates one import path: the package itself, then every file of
 // every variant that type-checks it.
-func (e *enumeration) walkPackage(g variantGroup) error {
+func (e *enumeration) walkPackage(g Variants, id load.PackageID) error {
+	e.pkg = id
 	pkgID, err := e.append(&declaration{
-		pos:     g.anchor.Name.Pos(),
-		end:     g.anchor.Name.End(),
+		pos:     g.Anchor.Name.Pos(),
+		end:     g.Anchor.Name.End(),
 		kind:    KindPackage,
-		pkgPath: g.pkgPath,
-		name:    g.pkgPath,
+		pkgPath: g.PkgPath,
+		name:    g.PkgPath,
 	})
 	if err != nil {
 		return err
 	}
-	for _, p := range g.pkgs {
-		for _, f := range syntaxFiles(p, e.pos) {
+	for _, p := range g.Packages {
+		for _, f := range Files(p, e.pos.Fset) {
 			if err := e.walkFile(p, f, pkgID); err != nil {
 				return err
 			}
@@ -417,7 +389,7 @@ func (e *enumeration) walkPackage(g variantGroup) error {
 
 // walkFile enumerates one source file and the declarations it holds.
 func (e *enumeration) walkFile(p *packages.Package, f *ast.File, pkgID SymbolID) error {
-	base := e.pos.base(f.FileStart)
+	base := e.pos.Base(f.FileStart)
 	if _, err := e.append(&declaration{
 		pos:     f.FileStart,
 		end:     f.FileEnd,
@@ -590,7 +562,7 @@ func (e *enumeration) walkField(p *packages.Package, f *ast.Field, chain []strin
 		if err != nil {
 			return err
 		}
-		inner := anonymousStruct(f.Type)
+		inner := AnonymousStruct(f.Type)
 		if inner == nil {
 			continue
 		}
@@ -713,22 +685,22 @@ func EmbeddedName(expr ast.Expr) *ast.Ident {
 	return nil
 }
 
-// anonymousStruct returns the anonymous struct type a field carries, reached
+// AnonymousStruct returns the anonymous struct type a field carries, reached
 // through a pointer, a slice, an array, a channel or a map value. A map key, a
 // signature and an interface method's parameters are not stepped into, because
 // two fields of one name would then share one reference.
-func anonymousStruct(expr ast.Expr) *ast.StructType {
+func AnonymousStruct(expr ast.Expr) *ast.StructType {
 	switch t := expr.(type) {
 	case *ast.StructType:
 		return t
 	case *ast.StarExpr:
-		return anonymousStruct(t.X)
+		return AnonymousStruct(t.X)
 	case *ast.ArrayType:
-		return anonymousStruct(t.Elt)
+		return AnonymousStruct(t.Elt)
 	case *ast.ChanType:
-		return anonymousStruct(t.Value)
+		return AnonymousStruct(t.Value)
 	case *ast.MapType:
-		return anonymousStruct(t.Value)
+		return AnonymousStruct(t.Value)
 	}
 	return nil
 }

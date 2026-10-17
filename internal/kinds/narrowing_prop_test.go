@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
 )
@@ -98,7 +99,7 @@ func drawnModules() *rapid.Generator[drawnModule] {
 // module renders to.
 type narrowedInventory struct {
 	lines   map[string]int
-	symbols []graph.Symbol
+	symbols []inventory.Symbol
 	refs    []graph.Reference
 	roots   []graph.Root
 	uses    int
@@ -107,18 +108,18 @@ type narrowedInventory struct {
 // declare appends one declaration at the next line of its file and returns its
 // identifier. Every declaration is a root, so reachability holds every one of them
 // live and the reference spread is the only thing a narrowing rule decides on.
-func (d *narrowedInventory) declare(file, pkgPath, name string, exported bool) graph.SymbolID {
+func (d *narrowedInventory) declare(file, pkgPath, name string, exported bool) inventory.SymbolID {
 	d.lines[file]++
 	line := d.lines[file]
-	id := graph.SymbolID(fmt.Sprintf("%s:%d:1", file, line))
-	d.symbols = append(d.symbols, graph.Symbol{
+	id := inventory.SymbolID(fmt.Sprintf("%s:%d:1", file, line))
+	d.symbols = append(d.symbols, inventory.Symbol{
 		ID:       id,
 		Ref:      "go://" + pkgPath + "#" + name,
 		Name:     name,
 		PkgPath:  pkgPath,
 		Pos:      token.Position{Filename: file, Line: line, Column: 1},
 		EndLine:  line,
-		Kind:     graph.KindFunc,
+		Kind:     inventory.KindFunc,
 		Exported: exported,
 	})
 	d.roots = append(d.roots, graph.Root{ID: id, Kind: graph.RootPublishedAPI})
@@ -126,7 +127,7 @@ func (d *narrowedInventory) declare(file, pkgPath, name string, exported bool) g
 }
 
 // refer appends one reference to id, written in file by from.
-func (d *narrowedInventory) refer(from graph.SymbolID, file string, id graph.SymbolID) {
+func (d *narrowedInventory) refer(from inventory.SymbolID, file string, id inventory.SymbolID) {
 	d.lines[file]++
 	d.refs = append(d.refs, graph.Reference{
 		From: from,
@@ -171,7 +172,7 @@ func (m drawnModule) names() map[string]string {
 // produced.
 func (m drawnModule) render() *narrowedInventory {
 	d := &narrowedInventory{lines: make(map[string]int)}
-	held := make(map[string]graph.SymbolID)
+	held := make(map[string]inventory.SymbolID)
 	for at, pkg := range m.packages {
 		path := pathOf(pkg.reach, at)
 		files := filesOf(path)
@@ -200,7 +201,7 @@ func (m drawnModule) render() *narrowedInventory {
 
 // place writes the one reference site names, declaring the referrer it needs.
 func (d *narrowedInventory) place(
-	m drawnModule, at int, own, other string, site drawnSite, id graph.SymbolID,
+	m drawnModule, at int, own, other string, site drawnSite, id inventory.SymbolID,
 ) {
 	d.uses++
 	name := fmt.Sprintf("use%d", d.uses)
@@ -216,7 +217,7 @@ func (d *narrowedInventory) place(
 		d.refer(d.declare(file, path, name, false), file, id)
 	case siteOutsideModule:
 		file := "consumer/use.go"
-		d.refer(graph.SymbolID(fmt.Sprintf("%s:%d:1", file, d.uses)), file, id)
+		d.refer(inventory.SymbolID(fmt.Sprintf("%s:%d:1", file, d.uses)), file, id)
 	}
 }
 

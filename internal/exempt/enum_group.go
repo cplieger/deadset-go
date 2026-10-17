@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
@@ -70,7 +71,7 @@ type enumGroupScan struct {
 // enumGroupType is one defined type whose constants an iota group declares.
 type enumGroupType struct {
 	best    *enumGroupEvidence
-	held    map[graph.SymbolID]struct{}
+	held    map[inventory.SymbolID]struct{}
 	spelled string // the type as types.TypeString spells it, the order of the exemptions
 	members []enumGroupMember
 	named   []*types.Named // the type as each package variant type-checked it
@@ -79,7 +80,7 @@ type enumGroupType struct {
 // enumGroupMember is one constant of an enumerated type, at the rendered position
 // of its own declaration.
 type enumGroupMember struct {
-	id graph.SymbolID
+	id inventory.SymbolID
 	at token.Position
 }
 
@@ -174,7 +175,7 @@ func (s *enumGroupScan) constant(p *packages.Package, name *ast.Ident, register 
 		if !register || !s.in.Resolve.Inside(named.Obj().Pos()) {
 			return nil
 		}
-		enum = &enumGroupType{held: make(map[graph.SymbolID]struct{}), spelled: types.TypeString(named, nil)}
+		enum = &enumGroupType{held: make(map[inventory.SymbolID]struct{}), spelled: types.TypeString(named, nil)}
 		s.byKey[key] = enum
 		s.keys = append(s.keys, key)
 	}
@@ -387,7 +388,7 @@ func (s *enumGroupScan) record(enum *enumGroupType, rank int, pos token.Pos, det
 		return err
 	}
 	if enum.best == nil || rank < enum.best.rank ||
-		(rank == enum.best.rank && graph.ByPosition(at, enum.best.at) < 0) {
+		(rank == enum.best.rank && inventory.ByPosition(at, enum.best.at) < 0) {
 		enum.best = &enumGroupEvidence{rank: rank, at: at, detail: detail}
 	}
 	return nil
@@ -407,7 +408,7 @@ func (s *enumGroupScan) exemptions() []graph.Exemption {
 			continue
 		}
 		members := slices.Clone(enum.members)
-		slices.SortFunc(members, func(a, b enumGroupMember) int { return graph.ByPosition(a.at, b.at) })
+		slices.SortFunc(members, func(a, b enumGroupMember) int { return inventory.ByPosition(a.at, b.at) })
 		for _, m := range members {
 			found = append(found, graph.Exemption{
 				ID:     m.id,

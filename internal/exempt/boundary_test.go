@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -130,7 +131,7 @@ func TestFormatVerbContractRetainsWhatAConsumersPrintWrapperFormats(t *testing.T
 func TestEncodingReflectionNamesTheConsumersWrapper(t *testing.T) {
 	shared := analysisOf(t, consumerArchive, Options{})
 	symbols := shared.inventory(t)
-	refs := make(map[graph.SymbolID]string, len(symbols))
+	refs := make(map[inventory.SymbolID]string, len(symbols))
 	for i := range symbols {
 		refs[symbols[i].ID] = symbols[i].Ref
 	}
@@ -187,7 +188,7 @@ func TestEncodingReflectionRendersAConsumersEvidenceAgainstTheConsumersRoot(t *t
 		t.Fatalf("EncodingReflectionDetector(%s) = %v, want the consumer's evidence recorded", consumerSiteArchive, err)
 	}
 	symbols := shared.inventory(t)
-	refs := make(map[graph.SymbolID]string, len(symbols))
+	refs := make(map[inventory.SymbolID]string, len(symbols))
 	for i := range symbols {
 		refs[symbols[i].ID] = symbols[i].Ref
 	}

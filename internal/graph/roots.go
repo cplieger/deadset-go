@@ -2,7 +2,6 @@ package graph
 
 import (
 	"cmp"
-	"fmt"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -14,7 +13,9 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -69,7 +70,7 @@ func (k RootKind) String() string {
 
 // Root is one symbol the analysis keeps live under reachability, and why.
 type Root struct {
-	ID     SymbolID
+	ID     inventory.SymbolID
 	Source string // the configured string that named it, empty for a detected class
 
 	// Config is the place in the matrix of the build configuration the root was
@@ -108,51 +109,37 @@ type Unmatched struct {
 // a root for more than one reason appears once per reason, so a report can name
 // every reason one symbol is live. A root makes its symbol live under
 // reachability, and every root but the published API makes it live under
-// reference counting too. Roots reaches the filesystem only through read.
-func Roots(r *load.Result, targetRoot string, read ReadFile, symbols []Symbol, opts RootOptions) ([]Root, []Unmatched, error) {
-	if r == nil || r.Fset == nil {
-		return nil, nil, fmt.Errorf("%w: no file set", ErrIncompleteLoad)
-	}
-	if read == nil {
-		return nil, nil, fmt.Errorf("%w: no source reader", ErrIncompleteLoad)
-	}
-
+// reference counting too. Roots reads no source.
+func Roots(r *load.Result, rs *resolve.Resolver, symbols []inventory.Symbol, opts RootOptions) ([]Root, []Unmatched) {
 	d := &rootDetection{
-		pos:        newPositions(r.Fset, targetRoot, read),
-		byPosition: make(map[token.Position]SymbolID, len(symbols)),
-		byID:       make(map[SymbolID]Symbol, len(symbols)),
-		classes:    make(map[string][]packageClass),
-		byPath:     make(map[string][]*packages.Package),
-		found:      make(map[Root]struct{}),
-		inputDirs:  make(map[string]bool),
+		resolve:   rs,
+		pos:       rs.Positions(),
+		byID:      make(map[inventory.SymbolID]inventory.Symbol, len(symbols)),
+		classes:   make(map[string][]packageClass),
+		byPath:    make(map[string][]*packages.Package),
+		found:     make(map[Root]struct{}),
+		inputDirs: make(map[string]bool),
 	}
 	for i := range symbols {
-		d.byPosition[symbols[i].Pos] = symbols[i].ID
 		d.byID[symbols[i].ID] = symbols[i]
 	}
 
-	if err := d.walk(r); err != nil {
-		return nil, nil, err
-	}
+	d.walk(r)
 	d.typeErrors(r, opts.CheckedElsewhere)
 	d.programs(r)
 	if !opts.PublishedAPI {
 		unlinked := UnlinkedPackages(r)
-		d.unlinked = func(s *Symbol) bool {
-			return unlinked[PackageOf(r, s, targetRoot)]
-		}
+		d.unlinked = func(s *inventory.Symbol) bool { return unlinked[s.Package] }
 	}
 	d.declared(symbols)
 	d.generatorPackageInputs(symbols)
 	if opts.PublishedAPI {
 		d.publishedAPI(symbols)
-		if err := d.promoted(); err != nil {
-			return nil, nil, err
-		}
+		d.promoted()
 	}
 	unmatched := d.configured(symbols, opts.Patterns)
 
-	return slices.SortedFunc(maps.Keys(d.found), rootOrder(symbols)), unmatched, nil
+	return slices.SortedFunc(maps.Keys(d.found), rootOrder(symbols)), unmatched
 }
 
 // rootOrder is the total order Roots returns its result in: the site of the
@@ -162,14 +149,14 @@ func Roots(r *load.Result, targetRoot string, read ReadFile, symbols []Symbol, o
 //
 // Two roots of one symbol are ordered by kind, and two configured roots of one
 // symbol and kind by the string that named each.
-func rootOrder(symbols []Symbol) func(a, b Root) int {
-	sites := make(map[SymbolID]Symbol, len(symbols))
+func rootOrder(symbols []inventory.Symbol) func(a, b Root) int {
+	sites := make(map[inventory.SymbolID]inventory.Symbol, len(symbols))
 	for i := range symbols {
 		sites[symbols[i].ID] = symbols[i]
 	}
 	return func(a, b Root) int {
 		return cmp.Or(
-			bySite(sites[a.ID], sites[b.ID]),
+			inventory.BySite(sites[a.ID], sites[b.ID]),
 			cmp.Compare(a.Kind, b.Kind),
 			cmp.Compare(a.Source, b.Source),
 		)
@@ -178,33 +165,35 @@ func rootOrder(symbols []Symbol) func(a, b Root) int {
 
 // rootDetection accumulates the roots of one loaded configuration.
 type rootDetection struct {
-	unlinked   func(*Symbol) bool // whether no build links an application's package declaring a symbol
-	pos        *positions
-	byPosition map[token.Position]SymbolID // a rendered position to the declaration at it
-	byID       map[SymbolID]Symbol
-	classes    map[string][]packageClass      // by import path, one per variant group
-	byPath     map[string][]*packages.Package // import path to its type-checked variants
-	inputDirs  map[string]bool                // target-relative directories of generatorPackages
-	found      map[Root]struct{}
+	unlinked  func(*inventory.Symbol) bool // whether no build links an application's package declaring a symbol
+	resolve   *resolve.Resolver
+	pos       *inventory.Positions
+	byID      map[inventory.SymbolID]inventory.Symbol
+	classes   map[string][]packageClass      // by import path, one per variant group
+	byPath    map[string][]*packages.Package // import path to its type-checked variants
+	inputDirs map[string]bool                // target-relative directories of generatorPackages
+	found     map[Root]struct{}
 }
 
 // add keeps one root, once per symbol, kind and configured string.
-func (d *rootDetection) add(id SymbolID, kind RootKind, source string) {
+func (d *rootDetection) add(id inventory.SymbolID, kind RootKind, source string) {
 	d.found[Root{ID: id, Kind: kind, Source: source}] = struct{}{}
 }
 
-// addAt keeps the declaration at pos as a root of kind. A position no enumerated
-// declaration holds is not a root: the enumeration is what decides which
-// declarations the analysis reasons about.
-func (d *rootDetection) addAt(pos token.Pos, kind RootKind) error {
-	rendered, err := d.pos.render(pos)
-	if err != nil {
-		return err
-	}
-	if id, ok := d.byPosition[rendered]; ok {
+// addAt keeps the declaration whose name the walked syntax writes at pos as a root
+// of kind, and addObject the declaration of obj. Neither is a root where the
+// inventory holds no declaration: the enumeration decides which declarations the
+// analysis reasons about.
+func (d *rootDetection) addAt(pos token.Pos, kind RootKind) {
+	if id, ok := d.resolve.At(pos); ok {
 		d.add(id, kind, "")
 	}
-	return nil
+}
+
+func (d *rootDetection) addObject(obj types.Object, kind RootKind) {
+	if id, ok := d.resolve.Object(obj); ok {
+		d.add(id, kind, "")
+	}
 }
 
 // programs roots every declaration of the target a program names: a program's main
@@ -213,12 +202,7 @@ func (d *rootDetection) addAt(pos token.Pos, kind RootKind) error {
 func (d *rootDetection) programs(r *load.Result) {
 	for _, program := range r.Programs {
 		for _, obj := range program.Info.Uses {
-			// A position outside the target renders to no declaration of it.
-			if rendered, err := d.pos.render(obj.Pos()); err == nil {
-				if id, ok := d.byPosition[rendered]; ok {
-					d.add(id, RootProgram, "")
-				}
-			}
+			d.addObject(obj, RootProgram)
 		}
 	}
 }
@@ -226,29 +210,26 @@ func (d *rootDetection) programs(r *load.Result) {
 // walk classifies every import path of the load and reads the directives and the
 // signatures the file's own syntax carries. Variants of one package are walked in
 // the order the enumeration walks them, so one configuration yields one order.
-func (d *rootDetection) walk(r *load.Result) error {
-	groups := groupVariants(r.Packages, d.pos)
+func (d *rootDetection) walk(r *load.Result) {
+	groups := inventory.Groups(r.Packages, r.Fset)
 	d.index(groups)
 	for _, g := range groups {
 		d.classify(g)
-		for _, p := range g.pkgs {
-			for _, f := range syntaxFiles(p, d.pos) {
-				if err := d.walkFile(p, f); err != nil {
-					return err
-				}
+		for _, p := range g.Packages {
+			for _, f := range inventory.Files(p, r.Fset) {
+				d.walkFile(p, f)
 			}
 		}
 	}
-	return nil
 }
 
 // index keeps every type-checked variant by the import path a linkname directive
 // of another package spells.
-func (d *rootDetection) index(groups []variantGroup) {
+func (d *rootDetection) index(groups []inventory.Variants) {
 	for _, g := range groups {
-		for _, p := range g.pkgs {
+		for _, p := range g.Packages {
 			if p.Types != nil {
-				d.byPath[g.pkgPath] = append(d.byPath[g.pkgPath], p)
+				d.byPath[g.PkgPath] = append(d.byPath[g.PkgPath], p)
 			}
 		}
 	}
@@ -259,9 +240,9 @@ func (d *rootDetection) index(groups []variantGroup) {
 //
 // A path holding an internal element is importable only inside the module, so
 // nothing outside decides its liveness.
-func (d *rootDetection) classify(g variantGroup) {
+func (d *rootDetection) classify(g inventory.Variants) {
 	var checked *types.Package
-	for _, p := range g.pkgs {
+	for _, p := range g.Packages {
 		if p.Types != nil {
 			checked = p.Types
 			break
@@ -269,11 +250,11 @@ func (d *rootDetection) classify(g variantGroup) {
 	}
 	class := packageClass{
 		types: checked,
-		dir:   path.Dir(d.pos.relative(d.pos.fset.Position(g.anchor.FileStart).Filename)),
+		dir:   path.Dir(d.pos.Relative(d.pos.Fset.Position(g.Anchor.FileStart).Filename)),
 		main:  checked != nil && checked.Name() == mainPackage,
 	}
-	class.published = !class.main && !slices.Contains(strings.Split(g.pkgPath, "/"), internalElement)
-	d.classes[g.pkgPath] = append(d.classes[g.pkgPath], class)
+	class.published = !class.main && !slices.Contains(strings.Split(g.PkgPath, "/"), internalElement)
+	d.classes[g.PkgPath] = append(d.classes[g.PkgPath], class)
 }
 
 // packageClass is what one variant group's package is.
@@ -286,7 +267,7 @@ type packageClass struct {
 
 // classOf is the class of the package declaring s. Where two packages share s's
 // import path, it is the one whose directory holds s's file.
-func (d *rootDetection) classOf(s *Symbol) packageClass {
+func (d *rootDetection) classOf(s *inventory.Symbol) packageClass {
 	classes := d.classes[s.PkgPath]
 	if len(classes) == 1 {
 		return classes[0]
@@ -301,56 +282,42 @@ func (d *rootDetection) classOf(s *Symbol) packageClass {
 
 // walkFile reads one file's test functions and suite runs, linkname, generate and
 // swagger directives, swag routes, cgo exports and go-fuzz entry points.
-func (d *rootDetection) walkFile(p *packages.Package, f *ast.File) error {
-	if err := d.linknames(p, f); err != nil {
-		return err
-	}
-	if err := d.generatorInputs(p, f); err != nil {
-		return err
-	}
-	if err := d.swaggerDeclarations(f); err != nil {
-		return err
-	}
-	if err := d.suiteMethods(p, f); err != nil {
-		return err
-	}
+func (d *rootDetection) walkFile(p *packages.Package, f *ast.File) {
+	d.linknames(p, f)
+	d.generatorInputs(p, f)
+	d.swaggerDeclarations(f)
+	d.suiteMethods(p, f)
 	d.generatorPackages(f)
-	return d.functionRoots(p, f)
+	d.functionRoots(p, f)
 }
 
 // functionRoots reads one file's test functions, swag routes, cgo exports and go-fuzz
 // entry points.
-func (d *rootDetection) functionRoots(p *packages.Package, f *ast.File) error {
+func (d *rootDetection) functionRoots(p *packages.Package, f *ast.File) {
 	fuzz := goFuzzFile(f)
-	_, test := IsTestFile(d.pos.base(f.FileStart))
+	_, test := inventory.IsTestFile(d.pos.Base(f.FileStart))
 	cgo := importsPath(f, cgoImport)
 	for _, decl := range f.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok {
 			continue
 		}
-		var err error
 		if swagRoute(fn.Doc) {
-			err = d.addAt(fn.Name.Pos(), RootSwagRoute)
+			d.addAt(fn.Name.Pos(), RootSwagRoute)
 		}
 		switch {
-		case err != nil:
 		// None of the classes below reaches a method: a test function is called by
 		// the generated test main, an exported function by C and an entry point by
 		// the fuzzer, and none has a receiver to call it on.
 		case fn.Recv != nil:
 		case test && testFunction(p, fn):
-			err = d.addAt(fn.Name.Pos(), RootTest)
+			d.addAt(fn.Name.Pos(), RootTest)
 		case cgo && cgoExported(fn):
-			err = d.addAt(fn.Name.Pos(), RootCgoExport)
+			d.addAt(fn.Name.Pos(), RootCgoExport)
 		case fuzz && goFuzzEntry(p, fn):
-			err = d.addAt(fn.Name.Pos(), RootFuzz)
-		}
-		if err != nil {
-			return err
+			d.addAt(fn.Name.Pos(), RootFuzz)
 		}
 	}
-	return nil
 }
 
 // linknames keeps every function and variable a //go:linkname directive of this
@@ -361,22 +328,17 @@ func (d *rootDetection) functionRoots(p *packages.Package, f *ast.File) error {
 // the package's scope rather than by adjacency. The qualified name it joins the
 // local one to is resolved in every loaded variant of the package whose import
 // path it spells, the last full stop separating the path from the name.
-func (d *rootDetection) linknames(p *packages.Package, f *ast.File) error {
+func (d *rootDetection) linknames(p *packages.Package, f *ast.File) {
 	if p.Types == nil || !importsPath(f, unsafeImport) {
-		return nil
+		return
 	}
 	for _, group := range f.Comments {
 		for _, c := range group.List {
-			local, qualified, ok := linknameDirective(c.Text)
-			if !ok {
-				continue
-			}
-			if err := d.linked(d.joined(p, local, qualified)); err != nil {
-				return err
+			if local, qualified, ok := linknameDirective(c.Text); ok {
+				d.linked(d.joined(p, local, qualified))
 			}
 		}
 	}
-	return nil
 }
 
 // joined returns what one directive names: the local name in p's scope, and the
@@ -393,29 +355,26 @@ func (d *rootDetection) joined(p *packages.Package, local, qualified string) []t
 
 // linked keeps each function and variable of objs as a linkname root; the linker
 // joins no other kind of declaration.
-func (d *rootDetection) linked(objs []types.Object) error {
+func (d *rootDetection) linked(objs []types.Object) {
 	for _, obj := range objs {
 		switch obj.(type) {
 		case *types.Func, *types.Var:
-			if err := d.addAt(obj.Pos(), RootLinkname); err != nil {
-				return err
-			}
+			d.addObject(obj, RootLinkname)
 		}
 	}
-	return nil
 }
 
 // declared keeps the classes the enumeration alone decides. An init function and a
 // blank declaration run because their package is linked, so in a package no build
 // links neither is a root.
-func (d *rootDetection) declared(symbols []Symbol) {
+func (d *rootDetection) declared(symbols []inventory.Symbol) {
 	for i := range symbols {
 		s := &symbols[i]
 		linked := d.unlinked == nil || !d.unlinked(s)
 		if s.Blank && linked {
 			d.add(s.ID, RootBlank, "")
 		}
-		if s.Kind != KindFunc {
+		if s.Kind != inventory.KindFunc {
 			continue
 		}
 		switch {
@@ -433,13 +392,12 @@ func (d *rootDetection) declared(symbols []Symbol) {
 //
 // A type parameter is not in that set. It is exported by its name and no consumer
 // can write it, because a caller supplies a type argument by position.
-func (d *rootDetection) publishedAPI(symbols []Symbol) {
+func (d *rootDetection) publishedAPI(symbols []inventory.Symbol) {
 	for i := range symbols {
 		s := &symbols[i]
-		_, test := IsTestFile(s.Pos.Filename)
 		switch {
-		case !s.Exported || s.Kind == KindTypeParam:
-		case !d.classOf(s).published || test:
+		case !s.Exported || s.Kind == inventory.KindTypeParam:
+		case !d.classOf(s).published || s.InTestFile:
 		case !d.exportedContainers(s.Parent):
 		default:
 			d.add(s.ID, RootPublishedAPI, "")
@@ -450,55 +408,44 @@ func (d *rootDetection) publishedAPI(symbols []Symbol) {
 // promoted keeps every exported method a value of an exported type of an importable
 // package selects through an embedded field of any visibility: a consumer calls it
 // as it calls a method the type declares.
-func (d *rootDetection) promoted() error {
+func (d *rootDetection) promoted() {
 	for _, pkgPath := range slices.Sorted(maps.Keys(d.classes)) {
 		for _, class := range d.classes[pkgPath] {
 			if class.published && class.types != nil {
-				if err := d.promotedIn(class.types.Scope()); err != nil {
-					return err
-				}
+				d.promotedIn(class.types.Scope())
 			}
 		}
 	}
-	return nil
 }
 
 // promotedIn is [rootDetection.promoted] over one package's scope.
-func (d *rootDetection) promotedIn(scope *types.Scope) error {
+func (d *rootDetection) promotedIn(scope *types.Scope) {
 	for _, name := range scope.Names() {
 		typeName, isType := scope.Lookup(name).(*types.TypeName)
-		if !isType || !typeName.Exported() || types.IsInterface(typeName.Type()) {
-			continue
-		}
-		if err := d.promotedBy(typeName.Type()); err != nil {
-			return err
+		if isType && typeName.Exported() && !types.IsInterface(typeName.Type()) {
+			d.promotedBy(typeName.Type())
 		}
 	}
-	return nil
 }
 
 // promotedBy keeps every exported method of the target a value of t or a pointer
 // to it selects through an embedded field.
-func (d *rootDetection) promotedBy(t types.Type) error {
+func (d *rootDetection) promotedBy(t types.Type) {
 	for selection := range types.NewMethodSet(types.NewPointer(t)).Methods() {
 		obj := selection.Obj()
-		if len(selection.Index()) < 2 || !obj.Exported() || obj.Pkg() == nil || d.byPath[obj.Pkg().Path()] == nil {
-			continue
-		}
-		if err := d.addAt(obj.Pos(), RootPublishedAPI); err != nil {
-			return err
+		if len(selection.Index()) >= 2 && obj.Exported() {
+			d.addObject(obj, RootPublishedAPI)
 		}
 	}
-	return nil
 }
 
 // exportedContainers reports whether parent and every container above it is
 // exported. A container the enumeration does not hold is not evidence that
 // nothing outside reaches the symbol below it, so it counts as exported.
-func (d *rootDetection) exportedContainers(parent SymbolID) bool {
+func (d *rootDetection) exportedContainers(parent inventory.SymbolID) bool {
 	for parent != "" {
 		container, ok := d.byID[parent]
-		if !ok || container.Kind == KindPackage || container.Kind == KindFile {
+		if !ok || container.Kind == inventory.KindPackage || container.Kind == inventory.KindFile {
 			return true
 		}
 		if !container.Exported {
@@ -511,7 +458,7 @@ func (d *rootDetection) exportedContainers(parent SymbolID) bool {
 
 // configured keeps every symbol the configuration names and returns every string
 // that named none. A string the configuration lists twice is one configured root.
-func (d *rootDetection) configured(symbols []Symbol, patterns []string) []Unmatched {
+func (d *rootDetection) configured(symbols []inventory.Symbol, patterns []string) []Unmatched {
 	var unmatched []Unmatched
 	seen := make(map[string]bool, len(patterns))
 	for _, pattern := range patterns {
