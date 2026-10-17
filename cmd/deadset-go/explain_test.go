@@ -442,3 +442,37 @@ func TestExplainNamesTheConsumerTestThatHoldsASymbolLiveUnderConsumerTestsProduc
 		}
 	}
 }
+
+// A reference no identifier at its site names is printed with the rule that made
+// it: a comparison reads every field of the struct it compares.
+func TestExplainNamesTheRuleBehindAReadNoIdentifierNames(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"go.mod":           "module example.com/app\n\ngo 1.27.1\n",
+		"app.go":           "package main\n\ntype key struct{ id int }\n\nfunc main() { println(key{} == key{}) }\n",
+		repositoryDocument: `{"target": {"kind": "application"}}`,
+	})
+	got := runExplain(t, dir, "go://example.com/app#key.id")
+
+	if want := contractExitCodes(t)["clean"]; got.code != want {
+		t.Fatalf("explain over a compared field = %d, want %d\nstderr: %s", got.code, want, got.stderr)
+	}
+	if want := "reference: app.go:5:29\tread via comparison\tapp.go:5:6 -> app.go:3:18"; !strings.Contains(got.stdout, want) {
+		t.Errorf("explain stdout =\n%s\nwant it to contain %q", got.stdout, want)
+	}
+}
+
+func TestExplainNamesTheConstantRepetitionBehindARead(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"go.mod":           "module example.com/app\n\ngo 1.27.1\n",
+		"app.go":           "package main\n\nconst helper = 1\n\nconst (\n\ta = helper\n\tb\n)\n\nfunc main() { println(b) }\n",
+		repositoryDocument: `{"target": {"kind": "application"}}`,
+	})
+	got := runExplain(t, dir, "go://example.com/app#helper")
+
+	if want := contractExitCodes(t)["clean"]; got.code != want {
+		t.Fatalf("explain over a repeated constant = %d, want %d\nstderr: %s", got.code, want, got.stderr)
+	}
+	if want := "reference: app.go:7:2\tread via constant-repetition\tapp.go:7:2 -> app.go:3:7"; !strings.Contains(got.stdout, want) {
+		t.Errorf("explain stdout =\n%s\nwant it to contain %q", got.stdout, want)
+	}
+}

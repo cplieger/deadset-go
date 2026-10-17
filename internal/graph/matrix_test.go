@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 )
 
@@ -24,7 +25,7 @@ import (
 func (b *graphBuilder) configured(configs int, in func(config int, name string) bool) []Configured {
 	per := make([]Configured, configs)
 	for config := range configs {
-		holds := func(id SymbolID) bool { return in(config, b.named[id]) }
+		holds := func(id inventory.SymbolID) bool { return in(config, b.named[id]) }
 		for _, s := range b.sorted() {
 			if holds(s.ID) {
 				per[config].Symbols = append(per[config].Symbols, s)
@@ -43,6 +44,10 @@ func (b *graphBuilder) configured(configs int, in func(config int, name string) 
 	}
 	return per
 }
+
+// handTests is the hand-built graph's test classes, under which its support file's
+// package is test support.
+var handTests = TestClasses{Support: map[load.PackageID]bool{handPackageOf(handSupportFile): true}}
 
 // The prefix every reference of the matrix fixture's one package carries.
 const matrixPackage = "go://example.com/matrix#"
@@ -65,18 +70,15 @@ func configuredOf(t *testing.T, dir string, c load.Configuration, opts RootOptio
 	t.Helper()
 
 	result, target := loadDirUnder(t.Context(), t, dir, c)
-	symbols, err := Symbols(result, target, os.ReadFile)
+	symbols, rs, err := inventoryOf(result, target, os.ReadFile)
 	if err != nil {
 		t.Fatalf("Setup: Symbols(%s): %v", c.ID, err)
 	}
-	refs, _, err := References(result, target, os.ReadFile, symbols)
+	refs, _, err := References(result, rs, symbols, TestClasses{})
 	if err != nil {
 		t.Fatalf("Setup: References(%s): %v", c.ID, err)
 	}
-	roots, _, err := Roots(result, target, os.ReadFile, symbols, opts)
-	if err != nil {
-		t.Fatalf("Setup: Roots(%s): %v", c.ID, err)
-	}
+	roots, _ := Roots(result, rs, symbols, opts)
 	return Configured{Symbols: symbols, References: refs, Roots: roots}
 }
 
@@ -84,8 +86,8 @@ func configuredOf(t *testing.T, dir string, c load.Configuration, opts RootOptio
 // the names a failure message reads by.
 type sweptMatrix struct {
 	matrix *Matrix
-	byID   map[SymbolID]Symbol
-	byRef  map[string]SymbolID
+	byID   map[inventory.SymbolID]inventory.Symbol
+	byRef  map[string]inventory.SymbolID
 	merged Merged
 	ids    []string // per configuration, its identifier
 }
@@ -98,8 +100,8 @@ func matrixOf(t *testing.T, archive string, opts RootOptions, configs ...load.Co
 	dir := extract(t, archive)
 	per := make([]Configured, 0, len(configs))
 	x := &sweptMatrix{
-		byID:  make(map[SymbolID]Symbol),
-		byRef: make(map[string]SymbolID),
+		byID:  make(map[inventory.SymbolID]inventory.Symbol),
+		byRef: make(map[string]inventory.SymbolID),
 		ids:   make([]string, 0, len(configs)),
 	}
 	for _, c := range configs {
@@ -107,7 +109,7 @@ func matrixOf(t *testing.T, archive string, opts RootOptions, configs ...load.Co
 		x.ids = append(x.ids, c.ID)
 	}
 
-	merged, err := Merge(per)
+	merged, err := Merge(per, TestClasses{})
 	if err != nil {
 		t.Fatalf("Merge(%s) = _, %v, want no error", archive, err)
 	}
@@ -126,12 +128,12 @@ func matrixOf(t *testing.T, archive string, opts RootOptions, configs ...load.Co
 
 // name is how a failure message and a table name one symbol: its reference
 // without the part every symbol of the package shares.
-func (x *sweptMatrix) name(id SymbolID, prefix string) string {
+func (x *sweptMatrix) name(id inventory.SymbolID, prefix string) string {
 	return strings.TrimPrefix(x.byID[id].Ref, prefix)
 }
 
 // names names a set of symbols in the order given.
-func (x *sweptMatrix) names(ids []SymbolID, prefix string) []string {
+func (x *sweptMatrix) names(ids []inventory.SymbolID, prefix string) []string {
 	found := make([]string, 0, len(ids))
 	for _, id := range ids {
 		found = append(found, x.name(id, prefix))
@@ -140,7 +142,7 @@ func (x *sweptMatrix) names(ids []SymbolID, prefix string) []string {
 }
 
 // configurations names the configurations one set holds, in matrix order.
-func (x *sweptMatrix) configurations(set ConfigSet) string {
+func (x *sweptMatrix) configurations(set inventory.ConfigSet) string {
 	found := make([]string, 0, len(x.ids))
 	for _, at := range set.Indexes() {
 		found = append(found, x.ids[at])
@@ -280,7 +282,7 @@ func TestMatrixOverOneConfigurationAnswersWhatTheGraphOfThatConfigurationAnswers
 	one := analysisOf(t, "sweep.txtar", nil).configured(t, true)
 	direct := New(one.Symbols, one.References, one.Roots).Sweep(&SweepInput{})
 
-	merged, err := Merge([]Configured{one})
+	merged, err := Merge([]Configured{one}, TestClasses{})
 	if err != nil {
 		t.Fatalf("Merge(sweep.txtar) = _, %v, want no error", err)
 	}
@@ -301,7 +303,7 @@ func TestMatrixOverOneConfigurationAnswersWhatTheGraphOfThatConfigurationAnswers
 		t.Errorf("Sweep(sweep.txtar) over a matrix of one configuration held %d symbols live, want %d",
 			len(got.LiveUnder), len(direct.LiveUnder))
 	}
-	only := ConfigSet(0).with(0)
+	only := inventory.ConfigSet(0).With(0)
 	for _, c := range got.Candidates {
 		if c.Configs != only {
 			t.Errorf("Sweep(sweep.txtar) over a matrix of one configuration reported %s under configurations %v, want %v",
@@ -332,7 +334,7 @@ func TestMatrixSweepUnionsTheExemptionsEveryConfigurationRetained(t *testing.T) 
 			return true
 		}
 	})
-	merged, err := Merge(per)
+	merged, err := Merge(per, handTests)
 	if err != nil {
 		t.Fatalf("Merge = _, %v, want no error", err)
 	}
@@ -379,11 +381,11 @@ func TestMatrixSweepUnionsTheMarksEveryConfigurationSuppressed(t *testing.T) {
 			return true
 		}
 	})
-	merged, err := Merge(per)
+	merged, err := Merge(per, handTests)
 	if err != nil {
 		t.Fatalf("Merge = _, %v, want no error", err)
 	}
-	r := NewMatrix(&merged).Sweep(&SweepInput{Marked: []SymbolID{
+	r := NewMatrix(&merged).Sweep(&SweepInput{Marked: []inventory.SymbolID{
 		b.id("heldBackOnTheSecond"),
 		b.id("liveEverywhere"),
 		b.id("heldBackOnTheFirst"),
@@ -408,12 +410,12 @@ func TestMatrixSweepUnionsTheMarksEveryConfigurationSuppressed(t *testing.T) {
 func TestMergeRefusesAMatrixItCannotKeyAConfigurationOf(t *testing.T) {
 	cases := map[string]int{
 		"no configuration":                 0,
-		"one configuration past the bound": maxConfigurations + 1,
+		"one configuration past the bound": inventory.MaxConfigurations + 1,
 	}
 	for name, count := range cases {
 		t.Run(name, func(t *testing.T) {
 			per := make([]Configured, count)
-			if _, err := Merge(per); !errors.Is(err, ErrMatrix) {
+			if _, err := Merge(per, handTests); !errors.Is(err, ErrMatrix) {
 				t.Errorf("Merge over %d configurations = _, %v, want %v", count, err, ErrMatrix)
 			}
 		})
@@ -428,7 +430,7 @@ func TestMergeKeepsOneSymbolPerPositionWithTheFirstConfigurationsFields(t *testi
 	// own, which one source position cannot produce and the merge therefore
 	// decides by the lowest configuration index.
 	per[1].Symbols[0].EndLine = 99
-	merged, err := Merge(per)
+	merged, err := Merge(per, handTests)
 	if err != nil {
 		t.Fatalf("Merge = _, %v, want no error", err)
 	}
@@ -452,7 +454,7 @@ func TestMergeCarriesEveryConfigurationsReferencesAndRoots(t *testing.T) {
 	b.root("caller", RootMain)
 	per := b.configured(2, func(int, string) bool { return true })
 
-	merged, err := Merge(per)
+	merged, err := Merge(per, handTests)
 	if err != nil {
 		t.Fatalf("Merge = _, %v, want no error", err)
 	}
@@ -526,7 +528,7 @@ func TestMatrixUnmatchedEverywhereIntersectsWhatEachConfigurationMatchedNothingW
 					per[config].Unmatched = append(per[config].Unmatched, Unmatched{Source: source})
 				}
 			}
-			merged, err := Merge(per)
+			merged, err := Merge(per, handTests)
 			if err != nil {
 				t.Fatalf("Merge = _, %v, want no error", err)
 			}
@@ -548,7 +550,7 @@ func TestMergeCarriesEveryConfigurationsUnmatchedStrings(t *testing.T) {
 	per[0].Unmatched = []Unmatched{{Source: "first"}}
 	per[1].Unmatched = []Unmatched{{Source: "second"}}
 
-	merged, err := Merge(per)
+	merged, err := Merge(per, handTests)
 	if err != nil {
 		t.Fatalf("Merge = _, %v, want no error", err)
 	}
@@ -564,7 +566,7 @@ func TestDistinctCountsOneReferenceOncePerMatrixAndTwiceInOneConfiguration(t *te
 	b.ref("caller", "target")
 	b.ref("caller", "target")
 	per := b.configured(2, func(int, string) bool { return true })
-	merged, err := Merge(per)
+	merged, err := Merge(per, handTests)
 	if err != nil {
 		t.Fatalf("Merge = _, %v, want no error", err)
 	}
@@ -585,7 +587,7 @@ func TestDistinctTellsTwoConsumersReferencesAtOnePositionApart(t *testing.T) {
 	// name produce: the module is part of what makes a reference one reference.
 	b.refs[1].Pos = b.refs[0].Pos
 	per := b.configured(2, func(int, string) bool { return true })
-	merged, err := Merge(per)
+	merged, err := Merge(per, handTests)
 	if err != nil {
 		t.Fatalf("Merge = _, %v, want no error", err)
 	}
@@ -598,11 +600,11 @@ func TestDistinctTellsTwoConsumersReferencesAtOnePositionApart(t *testing.T) {
 func TestNewMatrixAnalyzesNoDeclarationOfNoConfigurationOfTheMatrix(t *testing.T) {
 	b := newGraphBuilder(t).add("outside")
 	per := b.configured(1, func(int, string) bool { return true })
-	merged, err := Merge(per)
+	merged, err := Merge(per, handTests)
 	if err != nil {
 		t.Fatalf("Merge = _, %v, want no error", err)
 	}
-	merged.Symbols[0].Configs = ConfigSet(0).with(1)
+	merged.Symbols[0].Configs = inventory.ConfigSet(0).With(1)
 
 	// A declaration that exists in no configuration of the matrix is not
 	// analyzed. Reporting it would be the vacuous truth that it is dead in every
@@ -615,22 +617,22 @@ func TestNewMatrixAnalyzesNoDeclarationOfNoConfigurationOfTheMatrix(t *testing.T
 
 func TestConfigSetHoldsEveryConfigurationInTheMatrixAndNoneOutsideIt(t *testing.T) {
 	cases := map[string]struct {
-		set  ConfigSet
+		set  inventory.ConfigSet
 		want []int
 	}{
 		"no configuration":               {set: 0, want: []int{}},
-		"the first":                      {set: ConfigSet(0).with(0), want: []int{0}},
-		"the first and the last":         {set: ConfigSet(0).with(0).with(maxConfigurations - 1), want: []int{0, maxConfigurations - 1}},
-		"one configuration past the set": {set: ConfigSet(0).with(maxConfigurations), want: []int{}},
-		"a negative configuration":       {set: ConfigSet(0).with(-1), want: []int{}},
+		"the first":                      {set: inventory.ConfigSet(0).With(0), want: []int{0}},
+		"the first and the last":         {set: inventory.ConfigSet(0).With(0).With(inventory.MaxConfigurations - 1), want: []int{0, inventory.MaxConfigurations - 1}},
+		"one configuration past the set": {set: inventory.ConfigSet(0).With(inventory.MaxConfigurations), want: []int{}},
+		"a negative configuration":       {set: inventory.ConfigSet(0).With(-1), want: []int{}},
 	}
 	for name, test := range cases {
 		t.Run(name, func(t *testing.T) {
 			if got := test.set.Indexes(); !slices.Equal(got, test.want) {
 				t.Errorf("ConfigSet(%d).Indexes() = %v, want %v", test.set, got, test.want)
 			}
-			for _, config := range []int{-1, maxConfigurations, maxConfigurations + 1} {
-				if test.set.has(config) {
+			for _, config := range []int{-1, inventory.MaxConfigurations, inventory.MaxConfigurations + 1} {
+				if test.set.Has(config) {
 					t.Errorf("ConfigSet(%d).has(%d) = true, want false", test.set, config)
 				}
 			}

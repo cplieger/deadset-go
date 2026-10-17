@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
 	"github.com/cplieger/deadset-go/v2/internal/run"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -162,11 +163,11 @@ func namedSymbol(set *flag.FlagSet, asked map[string]*string) (string, error) {
 // the display name the inventory carries. A key several declarations answer is no
 // answer, because a run cannot know which was meant, and the candidates are returned
 // so the maintainer names one by its reference.
-func subjectOf(merged *graph.Merged, named string) (subject *graph.Symbol, partial []string) {
-	keys := []func(s *graph.Symbol) string{
-		func(s *graph.Symbol) string { return s.Ref },
+func subjectOf(merged *graph.Merged, named string) (subject *inventory.Symbol, partial []string) {
+	keys := []func(s *inventory.Symbol) string{
+		func(s *inventory.Symbol) string { return s.Ref },
 		fragmentOf,
-		func(s *graph.Symbol) string { return s.Name },
+		func(s *inventory.Symbol) string { return s.Name },
 	}
 	for _, key := range keys {
 		var matched []int
@@ -189,7 +190,7 @@ func subjectOf(merged *graph.Merged, named string) (subject *graph.Symbol, parti
 
 // fragmentOf is the part of a symbol reference after the separator, which is the
 // Type.Member form or the bare name a maintainer types.
-func fragmentOf(s *graph.Symbol) string {
+func fragmentOf(s *inventory.Symbol) string {
 	_, fragment, found := strings.Cut(s.Ref, "#")
 	if !found {
 		return ""
@@ -229,7 +230,7 @@ func partialMatches(merged *graph.Merged, named string) []string {
 //
 // The whole text is built first and written once, so a failure partway through the
 // rendering leaves nothing half-printed and the writer is touched exactly once.
-func writeExplanation(w io.Writer, set *run.Findings, cascade graph.Cascade, subject *graph.Symbol) error {
+func writeExplanation(w io.Writer, set *run.Findings, cascade graph.Cascade, subject *inventory.Symbol) error {
 	var held strings.Builder
 	fmt.Fprintf(&held, "symbol: %s\n", subject.Ref)
 	fmt.Fprintf(&held, "declaration: %s %s\n", subject.Kind, subject.Name)
@@ -259,7 +260,7 @@ func writeExplanation(w io.Writer, set *run.Findings, cascade graph.Cascade, sub
 // compile-time assertion of an interface, and a suppression record. Each is published
 // under the reference asked about, so leaving it out would disagree with the report;
 // none changes the answer above, which is about the declaration itself.
-func writeNamedElsewhere(held *strings.Builder, findings []kinds.Finding, subject *graph.Symbol) {
+func writeNamedElsewhere(held *strings.Builder, findings []kinds.Finding, subject *inventory.Symbol) {
 	for i := range findings {
 		found := &findings[i]
 		if found.DeclarationRef() != subject.Ref || positionKey(&found.Position) == string(subject.ID) {
@@ -303,7 +304,7 @@ func writeRetained(held *strings.Builder, retained []graph.Exemption) {
 // writeLiveness is the explanation of a symbol no finding names and no exemption held
 // back: the relations that hold it live, the root a path of references reaches it
 // from, and the dead component it falls with where the sweep judged it a candidate.
-func writeLiveness(held *strings.Builder, set *run.Findings, cascade graph.Cascade, subject *graph.Symbol) {
+func writeLiveness(held *strings.Builder, set *run.Findings, cascade graph.Cascade, subject *inventory.Symbol) {
 	candidate := candidateFor(set.Liveness.Candidates, subject.ID)
 	live := set.Liveness.LiveUnder[subject.ID]
 	fmt.Fprintf(held, "answer: %s\n", livenessState(candidate, live))
@@ -340,7 +341,7 @@ func livenessState(candidate *graph.Candidate, live graph.RelationSet) state {
 // writePath is the caller-reachability path under the run's mode, one line per hop,
 // else the path over every reference, each hop the mode counts as a test file's
 // marked, else the references to the symbol.
-func writePath(held *strings.Builder, set *run.Prepared, id graph.SymbolID) {
+func writePath(held *strings.Builder, set *run.Prepared, id inventory.SymbolID) {
 	mode := set.Mode
 	path, reached := set.Matrix.Path(id, mode)
 	if !reached {
@@ -368,7 +369,7 @@ func writePath(held *strings.Builder, set *run.Prepared, id graph.SymbolID) {
 	fmt.Fprintf(held, "  references: %d\n", len(references))
 	for i := range references {
 		fmt.Fprintf(held, "  reference: %s\t%s\tfrom %s%s\n",
-			references[i].Pos, references[i].Kind, references[i].From, testFileNote(references[i].Test))
+			references[i].Pos, useOf(&references[i]), references[i].From, testFileNote(references[i].Test))
 	}
 }
 
@@ -379,13 +380,22 @@ func writeHop(held *strings.Builder, hop *graph.Reference, mode graph.Mode) {
 	if hop.Consumer != "" {
 		from = hop.Consumer
 	}
-	fmt.Fprintf(held, "  reference: %s\t%s\t%s -> %s%s\n", consumerSite(hop.Consumer, hop.Pos), hop.Kind, from, hop.To, testFileNote(mode.TestReference(hop)))
+	fmt.Fprintf(held, "  reference: %s\t%s\t%s -> %s%s\n", consumerSite(hop.Consumer, hop.Pos), useOf(hop), from, hop.To, testFileNote(mode.TestReference(hop)))
+}
+
+// useOf is how one reference uses its target, and the rule that made it where no
+// identifier at the site names the target.
+func useOf(r *graph.Reference) string {
+	if !r.Via.Synthesized() {
+		return r.Kind.String()
+	}
+	return r.Kind.String() + " via " + r.Via.String()
 }
 
 // writeComponent is the dead component one candidate falls with, listed at the depth
 // the configuration asks for, and the identifier the report mints for it where the
 // report names the component's root.
-func writeComponent(held *strings.Builder, set *run.Findings, cascade graph.Cascade, id graph.SymbolID) {
+func writeComponent(held *strings.Builder, set *run.Findings, cascade graph.Cascade, id inventory.SymbolID) {
 	component := componentOf(set.Liveness.Components, id)
 	if component == nil {
 		return
@@ -408,10 +418,10 @@ func writeComponent(held *strings.Builder, set *run.Findings, cascade graph.Casc
 //
 // The identifier is read from the report rather than minted here, so this command
 // holds no second copy of the rule that mints it.
-func componentIdentity(set *run.Findings, roots []graph.SymbolID) string {
+func componentIdentity(set *run.Findings, roots []inventory.SymbolID) string {
 	for i := range set.Result.Findings {
 		found := &set.Result.Findings[i]
-		if slices.Contains(roots, graph.SymbolID(positionKey(&found.Position))) {
+		if slices.Contains(roots, inventory.SymbolID(positionKey(&found.Position))) {
 			return found.Component.ID
 		}
 	}
@@ -431,7 +441,7 @@ func positionKey(at *kinds.Position) string {
 // The match is on the declaration's position rather than on its reference, because a
 // reference is not one declaration's alone: a declaration written with the blank
 // identifier carries the reference of its container.
-func findingAbout(findings []kinds.Finding, subject *graph.Symbol) *kinds.Finding {
+func findingAbout(findings []kinds.Finding, subject *inventory.Symbol) *kinds.Finding {
 	key := string(subject.ID)
 	for i := range findings {
 		if positionKey(&findings[i].Position) == key {
@@ -443,7 +453,7 @@ func findingAbout(findings []kinds.Finding, subject *graph.Symbol) *kinds.Findin
 
 // retentionsOf is every exemption that held one symbol back, in the order the sweep
 // returned them.
-func retentionsOf(retained []graph.Exemption, id graph.SymbolID) []graph.Exemption {
+func retentionsOf(retained []graph.Exemption, id inventory.SymbolID) []graph.Exemption {
 	var held []graph.Exemption
 	for i := range retained {
 		if retained[i].ID == id {
@@ -455,7 +465,7 @@ func retentionsOf(retained []graph.Exemption, id graph.SymbolID) []graph.Exempti
 
 // candidateFor is the candidate record of one symbol, and nil where the sweep judged
 // the symbol live.
-func candidateFor(candidates []graph.Candidate, id graph.SymbolID) *graph.Candidate {
+func candidateFor(candidates []graph.Candidate, id inventory.SymbolID) *graph.Candidate {
 	for i := range candidates {
 		if candidates[i].ID == id {
 			return &candidates[i]
@@ -467,7 +477,7 @@ func candidateFor(candidates []graph.Candidate, id graph.SymbolID) *graph.Candid
 // rootReasons is every reason one symbol is a root, in the order the merge returned
 // them, with one entry per reason whatever the number of configurations that
 // detected it.
-func rootReasons(roots []graph.Root, id graph.SymbolID) []graph.Root {
+func rootReasons(roots []graph.Root, id inventory.SymbolID) []graph.Root {
 	var held []graph.Root
 	for i := range roots {
 		if roots[i].ID != id {
@@ -486,7 +496,7 @@ func rootReasons(roots []graph.Root, id graph.SymbolID) []graph.Root {
 // referencesTo is every reference to one symbol, in the order the merge returned
 // them, with one entry per site whatever the number of configurations that compiled
 // it.
-func referencesTo(references []graph.Reference, id graph.SymbolID) []graph.Reference {
+func referencesTo(references []graph.Reference, id inventory.SymbolID) []graph.Reference {
 	var held []graph.Reference
 	for i := range references {
 		if references[i].To != id {
@@ -502,7 +512,7 @@ func referencesTo(references []graph.Reference, id graph.SymbolID) []graph.Refer
 
 // componentOf is the dead component one symbol is a member of, and nil where no
 // component holds it.
-func componentOf(components []graph.Component, id graph.SymbolID) *graph.Component {
+func componentOf(components []graph.Component, id inventory.SymbolID) *graph.Component {
 	for i := range components {
 		if slices.Contains(components[i].Members, id) {
 			return &components[i]
@@ -525,7 +535,7 @@ func relationsOf(held graph.RelationSet) string {
 
 // configurationNames is the identifiers of the configurations one declaration exists
 // in, in the matrix's own order.
-func configurationNames(identifiers []string, configs graph.ConfigSet) string {
+func configurationNames(identifiers []string, configs inventory.ConfigSet) string {
 	named := make([]string, 0, len(identifiers))
 	for _, at := range configs.Indexes() {
 		named = append(named, configurationName(identifiers, at))

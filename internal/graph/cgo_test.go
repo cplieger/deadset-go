@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 )
 
 // cgoArchive is the fixture whose every package holds a file the toolchain
@@ -17,7 +19,7 @@ const (
 // cgoGraph is the fixture swept once, which is what every case below reads: one
 // load of one module answers what the opaque-C check gave the three passes.
 type cgoGraph struct {
-	byID       map[SymbolID]Symbol
+	byID       map[inventory.SymbolID]inventory.Symbol
 	byRef      map[string]bool
 	references map[string][]string // a reference, and the references made to it
 	roots      map[string][]RootKind
@@ -33,25 +35,22 @@ func sweepCgo(t *testing.T) *cgoGraph {
 	t.Helper()
 
 	result, target := loadDirUnder(t.Context(), t, extract(t, cgoArchive), linuxAmd64())
-	symbols, err := Symbols(result, target, os.ReadFile)
+	symbols, rs, err := inventoryOf(result, target, os.ReadFile)
 	if err != nil {
 		t.Fatalf("Setup: Symbols(%s): %v", cgoArchive, err)
 	}
-	refs, _, err := References(result, target, os.ReadFile, symbols)
+	refs, _, err := References(result, rs, symbols, TestClasses{})
 	if err != nil {
 		t.Fatalf("Setup: References(%s): %v", cgoArchive, err)
 	}
-	roots, _, err := Roots(result, target, os.ReadFile, symbols, RootOptions{PublishedAPI: true})
-	if err != nil {
-		t.Fatalf("Setup: Roots(%s): %v", cgoArchive, err)
-	}
-	merged, err := Merge([]Configured{{Symbols: symbols, References: refs, Roots: roots}})
+	roots, _ := Roots(result, rs, symbols, RootOptions{PublishedAPI: true})
+	merged, err := Merge([]Configured{{Symbols: symbols, References: refs, Roots: roots}}, TestClasses{})
 	if err != nil {
 		t.Fatalf("Setup: Merge(%s): %v", cgoArchive, err)
 	}
 
 	g := &cgoGraph{
-		byID:       make(map[SymbolID]Symbol, len(merged.Symbols)),
+		byID:       make(map[inventory.SymbolID]inventory.Symbol, len(merged.Symbols)),
 		byRef:      make(map[string]bool, len(merged.Symbols)),
 		references: make(map[string][]string),
 		roots:      make(map[string][]RootKind),
@@ -62,7 +61,7 @@ func sweepCgo(t *testing.T) *cgoGraph {
 	for _, s := range merged.Symbols {
 		g.byID[s.ID] = s
 		g.byRef[s.Ref] = true
-		if s.Kind == KindFile {
+		if s.Kind == inventory.KindFile {
 			g.files[s.Pos.Filename] = true
 		}
 	}

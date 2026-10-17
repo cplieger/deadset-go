@@ -27,7 +27,7 @@ func TestATypeErrorAnotherConfigurationDoesNotReportRootsAndSkipsNothing(t *test
 	}
 
 	windows := &results[1]
-	symbols, err := Symbols(windows, dir, os.ReadFile)
+	symbols, rs, err := inventoryOf(windows, dir, os.ReadFile)
 	if err != nil {
 		t.Fatalf("Symbols(windows) error: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestATypeErrorAnotherConfigurationDoesNotReportRootsAndSkipsNothing(t *test
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			roots, _, err := Roots(windows, dir, os.ReadFile, symbols, RootOptions{CheckedElsewhere: test.elsewhere})
+			roots, _ := Roots(windows, rs, symbols, RootOptions{CheckedElsewhere: test.elsewhere})
 			if err != nil {
 				t.Fatalf("Roots(windows) error: %v", err)
 			}

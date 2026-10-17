@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/build/constraint"
 	"go/types"
+	"iter"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -52,11 +53,11 @@ var mockgenBooleanFlags = map[string]bool{
 
 // generatorInputs roots every declaration a go:generate directive of f names as the
 // input of a generator: deleting one breaks go generate, whatever reads its output.
-func (d *rootDetection) generatorInputs(p *packages.Package, f *ast.File) error {
+func (d *rootDetection) generatorInputs(p *packages.Package, f *ast.File) {
 	if p.Types == nil {
-		return nil
+		return
 	}
-	file := d.pos.fset.Position(f.FileStart).Filename
+	file := d.pos.Fset.Position(f.FileStart).Filename
 	for _, group := range f.Comments {
 		for _, c := range group.List {
 			line, ok := strings.CutPrefix(c.Text, generateDirective)
@@ -64,29 +65,21 @@ func (d *rootDetection) generatorInputs(p *packages.Package, f *ast.File) error 
 				continue
 			}
 			for _, obj := range d.generatorNames(p, file, generateWords(line, filepath.Base(file), p.Name)) {
-				if err := d.rootInput(obj); err != nil {
-					return err
-				}
+				d.rootInput(obj)
 			}
 		}
 	}
-	return nil
 }
 
 // rootInput roots one generator input, and every method an input interface declares,
 // which the generator reads as well.
-func (d *rootDetection) rootInput(obj types.Object) error {
-	if err := d.addAt(obj.Pos(), RootGenerate); err != nil {
-		return err
-	}
+func (d *rootDetection) rootInput(obj types.Object) {
+	d.addObject(obj, RootGenerate)
 	if iface, ok := obj.Type().Underlying().(*types.Interface); ok {
 		for method := range iface.ExplicitMethods() {
-			if err := d.addAt(method.Pos(), RootGenerate); err != nil {
-				return err
-			}
+			d.addObject(method, RootGenerate)
 		}
 	}
-	return nil
 }
 
 // generatorNames is every declaration one directive's words name as a generator's
@@ -240,7 +233,7 @@ func lookup(scopes []*types.Package, names string) []types.Object {
 func (d *rootDetection) interfacesOf(p *packages.Package, file string) []types.Object {
 	var held []types.Object
 	for _, f := range p.Syntax {
-		if filepath.Clean(d.pos.fset.Position(f.FileStart).Filename) != filepath.Clean(file) {
+		if filepath.Clean(d.pos.Fset.Position(f.FileStart).Filename) != filepath.Clean(file) {
 			continue
 		}
 		ast.Inspect(f, func(n ast.Node) bool {
@@ -296,91 +289,86 @@ func goFuzzEntry(p *packages.Package, fn *ast.FuncDecl) bool {
 // swaggerDeclarations roots every declaration of f whose doc comment holds a
 // go-swagger directive, and every field of a struct type it declares, an anonymous
 // struct's included: the generator reads each one.
-func (d *rootDetection) swaggerDeclarations(f *ast.File) error {
+func (d *rootDetection) swaggerDeclarations(f *ast.File) {
 	for _, decl := range f.Decls {
-		if err := d.swaggerDeclaration(decl); err != nil {
-			return err
-		}
+		d.swaggerDeclaration(decl)
 	}
-	return nil
 }
 
 // swaggerDeclaration roots one top-level declaration a swagger directive names.
-func (d *rootDetection) swaggerDeclaration(decl ast.Decl) error {
+func (d *rootDetection) swaggerDeclaration(decl ast.Decl) {
 	switch decl := decl.(type) {
 	case *ast.FuncDecl:
 		if swaggerDoc(decl.Doc) {
-			return d.addAt(decl.Name.Pos(), RootSwagger)
+			d.addAt(decl.Name.Pos(), RootSwagger)
 		}
 	case *ast.GenDecl:
 		for _, spec := range decl.Specs {
-			if err := d.swaggerSpec(spec, swaggerDoc(decl.Doc)); err != nil {
-				return err
-			}
+			d.swaggerSpec(spec, swaggerDoc(decl.Doc))
 		}
 	}
-	return nil
 }
 
 // swaggerSpec roots one specification a swagger directive names, through its own doc
 // comment or through its declaration's.
-func (d *rootDetection) swaggerSpec(spec ast.Spec, declared bool) error {
+func (d *rootDetection) swaggerSpec(spec ast.Spec, declared bool) {
 	switch spec := spec.(type) {
 	case *ast.TypeSpec:
-		if !declared && !swaggerDoc(spec.Doc) {
-			return nil
+		if declared || swaggerDoc(spec.Doc) {
+			d.addAt(spec.Name.Pos(), RootSwagger)
+			d.swaggerFields(spec.Type)
 		}
-		if err := d.addAt(spec.Name.Pos(), RootSwagger); err != nil {
-			return err
-		}
-		return d.swaggerFields(spec.Type)
 	case *ast.ValueSpec:
-		if !declared && !swaggerDoc(spec.Doc) {
-			return nil
-		}
-		for _, name := range spec.Names {
-			if err := d.addAt(name.Pos(), RootSwagger); err != nil {
-				return err
+		if declared || swaggerDoc(spec.Doc) {
+			for _, name := range spec.Names {
+				d.addAt(name.Pos(), RootSwagger)
 			}
 		}
 	}
-	return nil
 }
 
 // swaggerFields roots every field of a struct type expression, through anonymous
 // struct types.
-func (d *rootDetection) swaggerFields(expr ast.Expr) error {
+func (d *rootDetection) swaggerFields(expr ast.Expr) {
 	structure, ok := expr.(*ast.StructType)
 	if !ok {
-		return nil
+		return
 	}
 	for _, field := range structure.Fields.List {
 		for _, name := range field.Names {
-			if err := d.addAt(name.Pos(), RootSwagger); err != nil {
-				return err
-			}
+			d.addAt(name.Pos(), RootSwagger)
 		}
-		if err := d.swaggerFields(field.Type); err != nil {
-			return err
-		}
+		d.swaggerFields(field.Type)
 	}
-	return nil
 }
 
 // swaggerDoc reports whether a doc comment holds a line opening with a swagger
-// directive. The raw comments are read because [ast.CommentGroup.Text] drops a
-// line spelled as a directive, as one written with no space after the slashes is.
+// directive.
 func swaggerDoc(doc *ast.CommentGroup) bool {
-	if doc == nil {
-		return false
-	}
-	for _, c := range doc.List {
-		text := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(c.Text, "//"), "/*"), "*/")
-		for line := range strings.SplitSeq(text, "\n") {
-			if strings.HasPrefix(strings.TrimLeft(line, " \t*"), swaggerDirective) {
-				return true
-			}
+	for line := range docLines(doc) {
+		if strings.HasPrefix(line, swaggerDirective) {
+			return true
 		}
 	}
 	return false
+}
+
+// docLines yields every line of a doc comment with its comment markers and its
+// leading spaces, tabs and asterisks removed. The raw comments are read because
+// [ast.CommentGroup.Text] drops a line spelled as a directive, as one written with
+// no space after the slashes is.
+func docLines(doc *ast.CommentGroup) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		if doc == nil {
+			return
+		}
+		for _, c := range doc.List {
+			text := strings.TrimSuffix(strings.TrimPrefix(strings.TrimPrefix(c.Text, "//"), "/*"), "*/")
+			for line := range strings.SplitSeq(text, "\n") {
+				if !yield(strings.TrimLeft(line, " \t*")) {
+					return
+				}
+			}
+		}
+	}
 }

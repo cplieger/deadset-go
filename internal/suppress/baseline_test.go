@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
 )
 
@@ -177,11 +177,11 @@ func TestWriteBaselineReadBackSuppressesExactlyTheRecordedFindings(t *testing.T)
 
 // boundSymbol is the reference and path of one declaration of a loaded fixture that
 // an entry or a row can name, which is the first function the inventory holds.
-func boundSymbol(t *testing.T, symbols []graph.Symbol) (ref, path string) {
+func boundSymbol(t *testing.T, symbols []inventory.Symbol) (ref, path string) {
 	t.Helper()
 
 	for i := range symbols {
-		if symbols[i].Kind == graph.KindFunc {
+		if symbols[i].Kind == inventory.KindFunc {
 			return symbols[i].Ref, symbols[i].Pos.Filename
 		}
 	}

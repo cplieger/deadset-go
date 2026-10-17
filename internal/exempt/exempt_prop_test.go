@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
 )
@@ -109,9 +110,9 @@ func drawnName(at int) string { return fmt.Sprintf("d%02d", at) }
 // declaration per line of its own file, the references between them and the roots.
 // No load takes place, so a draw costs no package load and shrinks to the
 // declarations that carry a failure.
-func (d drawnSet) graphOf() (*graph.Graph, []graph.SymbolID) {
-	ids := make([]graph.SymbolID, len(d.declarations))
-	symbols := make([]graph.Symbol, 0, len(d.declarations))
+func (d drawnSet) graphOf() (*graph.Graph, []inventory.SymbolID) {
+	ids := make([]inventory.SymbolID, len(d.declarations))
+	symbols := make([]inventory.Symbol, 0, len(d.declarations))
 	lines := map[string]int{}
 	for at, declaration := range d.declarations {
 		file := drawnFile
@@ -120,14 +121,15 @@ func (d drawnSet) graphOf() (*graph.Graph, []graph.SymbolID) {
 		}
 		lines[file]++
 		position := token.Position{Filename: file, Line: lines[file], Column: 1}
-		ids[at] = graph.SymbolID(fmt.Sprintf("%s:%d:%d", position.Filename, position.Line, position.Column))
-		symbols = append(symbols, graph.Symbol{
-			ID:      ids[at],
-			Ref:     "drawn://" + drawnName(at),
-			Name:    drawnName(at),
-			PkgPath: "example.com/drawn",
-			Pos:     position,
-			EndLine: position.Line,
+		ids[at] = inventory.SymbolID(fmt.Sprintf("%s:%d:%d", position.Filename, position.Line, position.Column))
+		symbols = append(symbols, inventory.Symbol{
+			ID:         ids[at],
+			Ref:        "drawn://" + drawnName(at),
+			Name:       drawnName(at),
+			PkgPath:    "example.com/drawn",
+			Pos:        position,
+			EndLine:    position.Line,
+			InTestFile: declaration.inTest,
 		})
 	}
 
@@ -147,7 +149,7 @@ func (d drawnSet) graphOf() (*graph.Graph, []graph.SymbolID) {
 		roots = append(roots, graph.Root{ID: ids[r.at], Kind: r.kind})
 	}
 
-	slices.SortFunc(symbols, func(a, b graph.Symbol) int {
+	slices.SortFunc(symbols, func(a, b inventory.Symbol) int {
 		return strings.Compare(string(a.ID), string(b.ID))
 	})
 	return graph.New(symbols, refs, roots), ids
@@ -156,7 +158,7 @@ func (d drawnSet) graphOf() (*graph.Graph, []graph.SymbolID) {
 // detectors is the table Compute runs: one detection per class the draw gave a
 // retention, each returning what that class retains and reading nothing, so the
 // property drives the framework rather than any class's own rule.
-func (d drawnSet) detectors(ids []graph.SymbolID) map[vocab.Exemption]Detector {
+func (d drawnSet) detectors(ids []inventory.SymbolID) map[vocab.Exemption]Detector {
 	byClass := map[vocab.Exemption][]graph.Exemption{}
 	for i, r := range d.retentions {
 		byClass[r.class] = append(byClass[r.class], graph.Exemption{
@@ -195,8 +197,8 @@ func (d drawnSet) describeDrawn() string {
 }
 
 // candidateSet names every symbol one sweep reported.
-func candidateSet(r graph.Result) map[graph.SymbolID]bool {
-	found := make(map[graph.SymbolID]bool, len(r.Candidates))
+func candidateSet(r graph.Result) map[inventory.SymbolID]bool {
+	found := make(map[inventory.SymbolID]bool, len(r.Candidates))
 	for _, c := range r.Candidates {
 		found[c.ID] = true
 	}
@@ -214,7 +216,7 @@ func retainedRecord(r graph.Result) map[string]bool {
 
 // heldBack names every exemption of a union whose symbol one sweep reported, which
 // is what the retained record of a sweep carrying that union must hold.
-func heldBack(union []graph.Exemption, reported map[graph.SymbolID]bool) map[string]bool {
+func heldBack(union []graph.Exemption, reported map[inventory.SymbolID]bool) map[string]bool {
 	found := make(map[string]bool, len(union))
 	for _, e := range union {
 		if reported[e.ID] {

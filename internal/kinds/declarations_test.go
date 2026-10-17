@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -265,7 +266,7 @@ func TestAConsumersTestReferenceDecidesTheKindByHowTheReferencePassCountedIt(t *
 				Relation:       graph.Reachability,
 				ProductionRefs: counts.production,
 				TestRefs:       counts.test,
-				Configs:        graph.ConfigSet(0b11),
+				Configs:        inventory.ConfigSet(0b11),
 			}}
 
 			result := computed(t, in, declarationEmitters())
@@ -280,26 +281,26 @@ func TestAConsumersTestReferenceDecidesTheKindByHowTheReferencePassCountedIt(t *
 
 func TestAMemberWhoseContainerIsDeadIsNotReportedIndependently(t *testing.T) {
 	const (
-		typeID  graph.SymbolID = "catalog.go:40:6"
-		fieldID graph.SymbolID = "catalog.go:41:2"
+		typeID  inventory.SymbolID = "catalog.go:40:6"
+		fieldID inventory.SymbolID = "catalog.go:41:2"
 	)
 
 	in := handInput(applicationConfig())
 	in.Merged.Symbols = append(in.Merged.Symbols,
-		graph.Symbol{
+		inventory.Symbol{
 			ID: typeID, Ref: "go://example.com/app#Counter", Name: "Counter",
 			PkgPath: "example.com/app", Pos: token.Position{Filename: "catalog.go", Line: 40, Column: 6},
-			EndLine: 43, Kind: graph.KindType, Exported: true, Configs: graph.ConfigSet(0b11),
+			EndLine: 43, Kind: inventory.KindType, Exported: true, Configs: inventory.ConfigSet(0b11),
 		},
-		graph.Symbol{
+		inventory.Symbol{
 			ID: fieldID, Ref: "go://example.com/app#Counter.stale", Name: "stale",
 			PkgPath: "example.com/app", Pos: token.Position{Filename: "catalog.go", Line: 41, Column: 2},
-			EndLine: 41, Kind: graph.KindField, Parent: typeID, Configs: graph.ConfigSet(0b11),
+			EndLine: 41, Kind: inventory.KindField, Parent: typeID, Configs: inventory.ConfigSet(0b11),
 		},
 	)
 	in.Sweep.Candidates = []graph.Candidate{
-		{ID: typeID, Relation: graph.ReferenceCounting, Configs: graph.ConfigSet(0b11)},
-		{ID: fieldID, Relation: graph.ReferenceCounting, Configs: graph.ConfigSet(0b11)},
+		{ID: typeID, Relation: graph.ReferenceCounting, Configs: inventory.ConfigSet(0b11)},
+		{ID: fieldID, Relation: graph.ReferenceCounting, Configs: inventory.ConfigSet(0b11)},
 	}
 
 	result := computed(t, in, declarationEmitters())
@@ -361,6 +362,29 @@ func TestAPackageAProductionFileImportsUnderOneConfigurationIsNotTestSupport(t *
 	if got := namesUnder(result.Findings, vocab.TestOnlyUse); !slices.Equal(got, []string{"OnlyTested"}) {
 		t.Errorf("the pass over linux and windows reports %s about %v, want [OnlyTested]: linux imports the package from production code",
 			vocab.TestOnlyUse, got)
+	}
+}
+
+// A package carrying test evidence that one configuration imports from production
+// code is production code under every order of the matrix, so a function of it only
+// a test references is reported as test-only, and the test as a test of dead code,
+// whichever configuration comes first.
+func TestATestSupportClassOneConfigurationVetoesHoldsUnderEveryMatrixOrder(t *testing.T) {
+	linux := load.Configuration{ID: "linux-amd64", OS: "linux", Arch: "amd64"}
+	windows := load.Configuration{ID: "windows-amd64", OS: "windows", Arch: "amd64"}
+	for name, order := range map[string][]load.Configuration{
+		"linux first":   {linux, windows},
+		"windows first": {windows, linux},
+	} {
+		t.Run(name, func(t *testing.T) {
+			in := inputOf(t, "declarations-test-support-evidence-platform.txtar", applicationConfig(), Consumers{}, order...)
+			result := computed(t, in, declarationEmitters())
+
+			want := []string{string(vocab.TestOnlyUse) + " OnlyTested", string(vocab.TestOfDeadCode) + " TestOnlyTested"}
+			if got := summary(result.Findings); !slices.Equal(got, want) {
+				t.Errorf("the pass over %s reports %v, want %v: linux imports the package from production code", name, got, want)
+			}
+		})
 	}
 }
 

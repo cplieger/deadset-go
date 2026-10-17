@@ -6,6 +6,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 )
 
 // The files a hand-built graph declares its symbols in. The file is what decides
@@ -24,7 +27,7 @@ type handSymbol struct {
 	name    string // what a test names the symbol by; no sweep reads it
 	parent  string // the container's name, empty at package level
 	lines   int    // the declaration's line span, one when zero
-	kind    SymbolKind
+	kind    inventory.SymbolKind
 	inTest  bool
 	support bool // a declaration of test-support code, in its own file
 	nested  bool // the declaration's lines lie inside its container's, as a field's lie inside its struct
@@ -38,11 +41,11 @@ type handSymbol struct {
 // first line.
 type graphBuilder struct {
 	sink    failureSink
-	ids     map[string]SymbolID
-	named   map[SymbolID]string
+	ids     map[string]inventory.SymbolID
+	named   map[inventory.SymbolID]string
 	lines   map[string]int
-	inner   map[SymbolID]int
-	symbols []Symbol
+	inner   map[inventory.SymbolID]int
+	symbols []inventory.Symbol
 	refs    []Reference
 	roots   []Root
 	outside int
@@ -53,10 +56,10 @@ type graphBuilder struct {
 func newGraphBuilder(sink failureSink) *graphBuilder {
 	return &graphBuilder{
 		sink:  sink,
-		ids:   make(map[string]SymbolID),
-		named: make(map[SymbolID]string),
+		ids:   make(map[string]inventory.SymbolID),
+		named: make(map[inventory.SymbolID]string),
 		lines: make(map[string]int),
-		inner: make(map[SymbolID]int),
+		inner: make(map[inventory.SymbolID]int),
 	}
 }
 
@@ -77,10 +80,10 @@ func (b *graphBuilder) declare(d handSymbol) {
 	parent := b.parentOf(d)
 	line, end := b.place(d, file, parent)
 
-	id := SymbolID(fmt.Sprintf("%s:%d:1", file, line))
+	id := inventory.SymbolID(fmt.Sprintf("%s:%d:1", file, line))
 	b.ids[d.name] = id
 	b.named[id] = d.name
-	b.symbols = append(b.symbols, Symbol{
+	b.symbols = append(b.symbols, inventory.Symbol{
 		ID:          id,
 		Ref:         "hand://" + d.name,
 		Name:        d.name,
@@ -90,13 +93,24 @@ func (b *graphBuilder) declare(d handSymbol) {
 		EndLine:     end,
 		Kind:        d.kind,
 		TestSupport: d.support,
+		InTestFile:  d.inTest,
+		Package:     handPackageOf(file),
 	})
+}
+
+// handPackageOf is the package of one hand-built file: the support file's own,
+// and one package for the others.
+func handPackageOf(file string) load.PackageID {
+	if file == handSupportFile {
+		return load.PackageID{Path: handPackage + "/support", Dir: "support"}
+	}
+	return load.PackageID{Path: handPackage}
 }
 
 // place is the first and last line one declaration occupies: the next lines of
 // its file, or for a nested declaration the next lines inside its container,
 // which must hold them.
-func (b *graphBuilder) place(d handSymbol, file string, parent SymbolID) (first, last int) {
+func (b *graphBuilder) place(d handSymbol, file string, parent inventory.SymbolID) (first, last int) {
 	b.sink.Helper()
 	size := max(1, d.lines)
 	if !d.nested {
@@ -108,7 +122,7 @@ func (b *graphBuilder) place(d handSymbol, file string, parent SymbolID) (first,
 	if parent == "" {
 		b.sink.Fatalf("the hand-built graph nests %s in no container", d.name)
 	}
-	container := b.symbols[slices.IndexFunc(b.symbols, func(s Symbol) bool { return s.ID == parent })]
+	container := b.symbols[slices.IndexFunc(b.symbols, func(s inventory.Symbol) bool { return s.ID == parent })]
 	first = max(b.inner[parent], container.Pos.Line+1)
 	last = first + size - 1
 	if last > container.EndLine {
@@ -121,7 +135,7 @@ func (b *graphBuilder) place(d handSymbol, file string, parent SymbolID) (first,
 
 // parentOf resolves a declaration's container, which the builder requires to be
 // declared already so that a graph is written from the outside in.
-func (b *graphBuilder) parentOf(d handSymbol) SymbolID {
+func (b *graphBuilder) parentOf(d handSymbol) inventory.SymbolID {
 	b.sink.Helper()
 	if d.parent == "" {
 		return ""
@@ -204,7 +218,7 @@ func (b *graphBuilder) refFromOutside(to string) {
 	b.sink.Helper()
 	b.outside++
 	b.refs = append(b.refs, Reference{
-		From: SymbolID(fmt.Sprintf("../consumer/consumer.go:%d:1", b.outside)),
+		From: inventory.SymbolID(fmt.Sprintf("../consumer/consumer.go:%d:1", b.outside)),
 		To:   b.id(to),
 		Kind: RefCall,
 	})
@@ -217,7 +231,7 @@ func (b *graphBuilder) refToOutside(from string) {
 	b.outside++
 	b.refs = append(b.refs, Reference{
 		From: b.id(from),
-		To:   SymbolID(fmt.Sprintf("../consumer/consumer.go:%d:1", b.outside)),
+		To:   inventory.SymbolID(fmt.Sprintf("../consumer/consumer.go:%d:1", b.outside)),
 		Kind: RefCall,
 	})
 }
@@ -231,11 +245,11 @@ func (b *graphBuilder) root(name string, kind RootKind) {
 // rootOutside keeps one root on a symbol the inventory does not hold.
 func (b *graphBuilder) rootOutside(kind RootKind) {
 	b.outside++
-	b.roots = append(b.roots, Root{ID: SymbolID(fmt.Sprintf("absent.go:%d:1", b.outside)), Kind: kind})
+	b.roots = append(b.roots, Root{ID: inventory.SymbolID(fmt.Sprintf("absent.go:%d:1", b.outside)), Kind: kind})
 }
 
 // id returns the identifier of one declared symbol.
-func (b *graphBuilder) id(name string) SymbolID {
+func (b *graphBuilder) id(name string) inventory.SymbolID {
 	b.sink.Helper()
 	id, held := b.ids[name]
 	if !held {
@@ -245,7 +259,7 @@ func (b *graphBuilder) id(name string) SymbolID {
 }
 
 // names returns the names the builder gave a set of symbols, in the order given.
-func (b *graphBuilder) names(ids []SymbolID) []string {
+func (b *graphBuilder) names(ids []inventory.SymbolID) []string {
 	names := make([]string, 0, len(ids))
 	for _, id := range ids {
 		names = append(names, b.named[id])
@@ -257,7 +271,7 @@ func (b *graphBuilder) names(ids []SymbolID) []string {
 // enumeration returns them.
 func (b *graphBuilder) graph() *Graph {
 	symbols := slices.Clone(b.symbols)
-	slices.SortFunc(symbols, bySite)
+	slices.SortFunc(symbols, inventory.BySite)
 	return New(symbols, b.refs, b.roots)
 }
 
@@ -371,11 +385,11 @@ func TestNewKeepsNoRootAndNoReferenceNamingNoSymbol(t *testing.T) {
 }
 
 func TestSpanOfCoversTheLinesOneDeclarationOccupies(t *testing.T) {
-	at := func(line, end int) Symbol {
-		return Symbol{Pos: token.Position{Filename: "a.go", Line: line}, EndLine: end}
+	at := func(line, end int) inventory.Symbol {
+		return inventory.Symbol{Pos: token.Position{Filename: "a.go", Line: line}, EndLine: end}
 	}
 	cases := map[string]struct {
-		symbol Symbol
+		symbol inventory.Symbol
 		want   Span
 	}{
 		"one line":                   {symbol: at(10, 10), want: Span{Path: "a.go", First: 10, Last: 10}},

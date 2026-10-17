@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/analysis"
@@ -109,23 +110,23 @@ type intrafunc struct {
 	// any file. A class stands for a mechanism that reaches the declaration by a
 	// name the analysis cannot see, and a mechanism that reaches a function fixes
 	// its signature, so a retained function's signature is not free.
-	exempted map[graph.SymbolID]bool
+	exempted map[inventory.SymbolID]bool
 
 	// foreign is every declaration a caller outside the source names with the
 	// signature that caller requires: the linker through a go:linkname directive, C
 	// through an export directive, the test driver, which runs every test,
 	// benchmark, fuzz test and TestMain the toolchain recognises in a test file, and
 	// code a type error left unresolved, whose interface may fix the signature.
-	foreign map[graph.SymbolID]bool
+	foreign map[inventory.SymbolID]bool
 
 	// programmed is every declaration a program run on its own names, whose call
 	// sites in that program are outside the reference set.
-	programmed map[graph.SymbolID]bool
+	programmed map[inventory.SymbolID]bool
 
 	// valued is every declaration a reference names outside call position, which
 	// is a function used as a value: its signature is fixed by the func or
 	// interface type the value reaches.
-	valued map[graph.SymbolID]bool
+	valued map[inventory.SymbolID]bool
 
 	// twins is every function and method by package, receiver type and name, to
 	// the files that declare it.
@@ -137,10 +138,10 @@ type intrafunc struct {
 func (in *Input) intraFunc() *intrafunc {
 	g := &intrafunc{
 		in:         in,
-		exempted:   make(map[graph.SymbolID]bool, len(in.Exempt)),
-		foreign:    make(map[graph.SymbolID]bool),
-		programmed: make(map[graph.SymbolID]bool),
-		valued:     make(map[graph.SymbolID]bool),
+		exempted:   make(map[inventory.SymbolID]bool, len(in.Exempt)),
+		foreign:    make(map[inventory.SymbolID]bool),
+		programmed: make(map[inventory.SymbolID]bool),
+		valued:     make(map[inventory.SymbolID]bool),
 		twins:      platformTwins(in),
 	}
 	for ix := range in.Exempt {
@@ -179,7 +180,7 @@ func (in *Input) intraFunc() *intrafunc {
 // free whatever the run knows of its consumers, since no caller can make a body read a
 // parameter; [intrafunc.callersUnknown] answers for the one kind a caller outside the
 // graph decides.
-func (g *intrafunc) freeSignature(id graph.SymbolID, decl *ast.FuncDecl) bool {
+func (g *intrafunc) freeSignature(id inventory.SymbolID, decl *ast.FuncDecl) bool {
 	switch {
 	case g.exempted[id], g.valued[id], g.foreign[id], g.in.fixedByOutsideInterface()[id]:
 		return false
@@ -195,7 +196,7 @@ func (g *intrafunc) freeSignature(id graph.SymbolID, decl *ast.FuncDecl) bool {
 // parameters, and each body is one platform's answer to them. A receiver's name is
 // no part of the signature, and a result every visible call discards is decided by
 // those calls.
-func (g *intrafunc) twinned(id graph.SymbolID, decl *ast.FuncDecl) bool {
+func (g *intrafunc) twinned(id inventory.SymbolID, decl *ast.FuncDecl) bool {
 	symbol := g.in.symbol(id)
 	return symbol != nil && decl != nil && len(g.twins[twinKey(symbol.PkgPath, decl)]) > 1
 }
@@ -205,7 +206,7 @@ func (g *intrafunc) twinned(id graph.SymbolID, decl *ast.FuncDecl) bool {
 // the unused-result kind's precondition. It reads the narrowing kinds' completeness
 // declaration, because a consumer set loaded whole is every caller only where the
 // configuration says so.
-func (g *intrafunc) callersUnknown(id graph.SymbolID) bool {
+func (g *intrafunc) callersUnknown(id inventory.SymbolID) bool {
 	if g.programmed[id] {
 		return true
 	}
@@ -259,7 +260,7 @@ func isPanicCall(expr ast.Expr) bool {
 // part is one subject of this group: a part of a declaration, with the position it
 // is written at and what a message calls it.
 type part struct {
-	id       graph.SymbolID
+	id       inventory.SymbolID
 	kind     string
 	name     string
 	message  string
@@ -332,7 +333,7 @@ func (g *intrafunc) findings(code vocab.Code, held []*part) ([]Finding, error) {
 		}
 		ref := symbol.Ref
 		if code == vocab.UnusedParameter {
-			ref = graph.ParameterRef(ref, one.name)
+			ref = inventory.ParameterRef(ref, one.name)
 		}
 		finding := findingAt(code, Subject{
 			Ref:       ref,
@@ -352,9 +353,9 @@ func (g *intrafunc) findings(code vocab.Code, held []*part) ([]Finding, error) {
 // the intra-function kinds: a declaration of test code is judged while test code
 // references it, and one nothing references, which the production sweep cannot
 // judge either, has none of its parts reported.
-func (g *intrafunc) unjudged(symbol *graph.Symbol, id graph.SymbolID) bool {
+func (g *intrafunc) unjudged(symbol *inventory.Symbol, id inventory.SymbolID) bool {
 	candidate := g.in.candidateOf(id)
-	if candidate == nil || (!testFile(symbol) && !g.in.testSupport(symbol)) {
+	if candidate == nil || (!symbol.InTestFile && !symbol.TestSupport) {
 		return false
 	}
 	return candidate.TestRefs == 0 || candidate.UnreferencedTest
@@ -369,7 +370,7 @@ type walked struct {
 	decl  *ast.FuncDecl
 	value ast.Expr
 	info  *types.Info
-	id    graph.SymbolID
+	id    inventory.SymbolID
 }
 
 // root is the syntax one walked function's parts are read from.
@@ -387,31 +388,16 @@ type compiledFile struct {
 	info *types.Info
 }
 
-// compiledFiles is every file one build configuration compiled, in the order the
-// walk meets them.
-//
-// A file several package variants compile is walked once, because the bodies are
-// the same bytes and the answer is about the body. The variant the walk reads is
-// the first by package identifier, which is the choice the exemption classes make
-// over the same question.
+// compiledFiles is every file one build configuration compiled, each once under
+// the first variant that compiles it ([inventory.Sources]): the bodies are the
+// same bytes and the answer is about the body.
 func compiledFiles(one *Configured) []compiledFile {
 	if one.Result == nil || one.Resolve == nil {
 		return nil
 	}
 	var found []compiledFile
-	seen := make(map[string]bool)
-	for _, p := range graph.SortedPackages(one.Result.Packages) {
-		if p.TypesInfo == nil {
-			continue
-		}
-		for _, f := range p.Syntax {
-			name := one.Result.Fset.Position(f.FileStart).Filename
-			if seen[name] {
-				continue
-			}
-			seen[name] = true
-			found = append(found, compiledFile{file: f, info: p.TypesInfo})
-		}
+	for p, f := range inventory.Sources(one.Result.Packages, one.Result.Fset) {
+		found = append(found, compiledFile{file: f, info: p.TypesInfo})
 	}
 	return found
 }
@@ -789,8 +775,8 @@ func (s *callSite) uses(index, count int) bool {
 
 // callsPerFunction is every call of every declaration of the inventory that one
 // build configuration compiled, keyed by the declaration called.
-func callsPerFunction(one *Configured) map[graph.SymbolID][]*callSite {
-	calls := make(map[graph.SymbolID][]*callSite)
+func callsPerFunction(one *Configured) map[inventory.SymbolID][]*callSite {
+	calls := make(map[inventory.SymbolID][]*callSite)
 	for _, compiled := range compiledFiles(one) {
 		collectCalls(one, compiled.info, compiled.file, calls)
 	}
@@ -800,7 +786,7 @@ func callsPerFunction(one *Configured) map[graph.SymbolID][]*callSite {
 // collectCalls records every call of one file against the declaration it calls,
 // carrying the node the call's value flows into.
 func collectCalls(one *Configured, info *types.Info, f *ast.File,
-	calls map[graph.SymbolID][]*callSite,
+	calls map[inventory.SymbolID][]*callSite,
 ) {
 	var stack []ast.Node
 	ast.Inspect(f, func(n ast.Node) bool {
@@ -833,7 +819,7 @@ func enclosing(stack []ast.Node) ast.Node {
 // where the callee is no declaration the run enumerated: a built-in, a value of
 // func type, a method reached through an interface, and a declaration of another
 // module all answer so.
-func calledFunction(one *Configured, info *types.Info, call *ast.CallExpr) (graph.SymbolID, bool) {
+func calledFunction(one *Configured, info *types.Info, call *ast.CallExpr) (inventory.SymbolID, bool) {
 	var name *ast.Ident
 	switch fun := ast.Unparen(call.Fun).(type) {
 	case *ast.Ident:
@@ -859,10 +845,7 @@ func (g *intrafunc) unreachableStatements() ([]Finding, error) {
 		if one.Result == nil || one.Resolve == nil {
 			continue
 		}
-		for _, p := range graph.SortedPackages(one.Result.Packages) {
-			if p.TypesInfo == nil || len(p.Syntax) == 0 {
-				continue
-			}
+		for _, p := range inventory.Packages(one.Result.Packages, one.Result.Fset) {
 			if err := g.reportUnreachable(one, p, held); err != nil {
 				return nil, err
 			}
@@ -920,7 +903,7 @@ func (g *intrafunc) reportUnreachable(one *Configured, p *packages.Package, held
 // span is one function declaration's extent and the identifier of the declaration
 // the inventory holds for it.
 type span struct {
-	id    graph.SymbolID
+	id    inventory.SymbolID
 	start token.Pos
 	end   token.Pos
 }
@@ -948,7 +931,7 @@ func enclosingDeclarations(one *Configured, files []*ast.File) []span {
 
 // declarationAt is the declaration one position is written inside, and false where
 // no declaration of the inventory holds it.
-func declarationAt(spans []span, pos token.Pos) (graph.SymbolID, bool) {
+func declarationAt(spans []span, pos token.Pos) (inventory.SymbolID, bool) {
 	at, _ := slices.BinarySearchFunc(spans, pos, func(s span, p token.Pos) int {
 		return int(s.start - p)
 	})

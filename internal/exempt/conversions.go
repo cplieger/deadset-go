@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 )
 
 // conversionsOf returns every site in the loaded configuration where a value of a
@@ -18,7 +19,7 @@ import (
 // It is computed once per input, and a caller reads the slice without changing it.
 func conversionsOf(in *Input) ([]graph.Conversion, error) {
 	if in == nil || in.Result == nil || in.Result.Fset == nil {
-		return nil, fmt.Errorf("%w: no file set", graph.ErrIncompleteLoad)
+		return nil, fmt.Errorf("%w: no file set", inventory.ErrIncompleteLoad)
 	}
 	if in.conversions == nil {
 		all, err := allConversionsOf(in)
@@ -36,7 +37,7 @@ func conversionsOf(in *Input) ([]graph.Conversion, error) {
 // is read from.
 func allConversionsOf(in *Input) ([]graph.Conversion, error) {
 	if in == nil || in.Result == nil || in.Result.Fset == nil {
-		return nil, fmt.Errorf("%w: no file set", graph.ErrIncompleteLoad)
+		return nil, fmt.Errorf("%w: no file set", inventory.ErrIncompleteLoad)
 	}
 	if in.allConversions == nil {
 		sites := graph.Conversions(in.Result.Fset, in.Result.Packages)

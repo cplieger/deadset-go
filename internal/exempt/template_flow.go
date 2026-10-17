@@ -828,7 +828,7 @@ func (f *valueFlow) osFile(name ast.Expr, at flowAt) ([]textSource, bool) {
 	if !ok {
 		return nil, false
 	}
-	inv := &inventory{root: f.root}
+	inv := &templateSet{root: f.root}
 	found := make([]textSource, 0, len(names))
 	for _, one := range names {
 		found = append(found, textSource{files: inv.matching(at.dir, one, false), file: true})

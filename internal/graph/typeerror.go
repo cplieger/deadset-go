@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"golang.org/x/tools/go/packages"
 )
@@ -67,11 +68,11 @@ func enclosingDecl(files []*ast.File, pos token.Pos) ast.Decl {
 // and its test variant check one file twice, so an error may be listed twice; the
 // report holds each once.
 func TypeErrorSkips(r *load.Result, targetRoot string, checkedElsewhere map[load.PackageID]bool) []TypeErrorSkip {
-	pos := newPositions(r.Fset, targetRoot, nil)
+	pos := inventory.NewPositions(r.Fset, targetRoot, nil)
 	var held []TypeErrorSkip
 	for _, one := range skippedDecls(r, checkedElsewhere) {
 		at := r.Fset.Position(one.err.Pos)
-		path := pos.relative(at.Filename)
+		path := pos.Relative(at.Filename)
 		if path == "" {
 			continue
 		}
@@ -141,16 +142,16 @@ func (d *rootDetection) typeErrors(r *load.Result, checkedElsewhere map[load.Pac
 func (d *rootDetection) rootDeclared(node ast.Node) bool {
 	switch decl := node.(type) {
 	case *ast.FuncDecl:
-		d.addIfInside(decl.Name.Pos())
+		d.addAt(decl.Name.Pos(), RootTypeError)
 	case *ast.GenDecl:
 		for _, spec := range decl.Specs {
 			switch spec := spec.(type) {
 			case *ast.ValueSpec:
 				for _, name := range spec.Names {
-					d.addIfInside(name.Pos())
+					d.addAt(name.Pos(), RootTypeError)
 				}
 			case *ast.TypeSpec:
-				d.addIfInside(spec.Name.Pos())
+				d.addAt(spec.Name.Pos(), RootTypeError)
 			}
 		}
 	default:
@@ -311,23 +312,11 @@ func (d *rootDetection) rootMembers(t types.Type) {
 		return
 	}
 	for method := range named.Methods() {
-		d.addIfInside(method.Pos())
+		d.addObject(method, RootTypeError)
 	}
 	if structure, ok := named.Underlying().(*types.Struct); ok {
 		for field := range structure.Fields() {
-			d.addIfInside(field.Pos())
+			d.addObject(field, RootTypeError)
 		}
-	}
-}
-
-// addIfInside roots the declaration at pos where the target holds it, and nothing
-// where pos is in a file outside the target, a dependency's member among them.
-func (d *rootDetection) addIfInside(pos token.Pos) {
-	rendered, err := d.pos.render(pos)
-	if err != nil {
-		return
-	}
-	if id, held := d.byPosition[rendered]; held {
-		d.add(id, RootTypeError, "")
 	}
 }

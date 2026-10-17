@@ -1,6 +1,10 @@
 package graph
 
-import "slices"
+import (
+	"slices"
+
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
+)
 
 // Path is a caller-reachability path to a symbol: the root it starts from, or the
 // loaded consumer whose reference seeds it, and the references it follows. It never
@@ -20,7 +24,7 @@ type Path struct {
 //
 // The search is breadth-first from every seed at once, roots first in the merge's
 // order, so one tree answers the same path on every run.
-func (x *Matrix) Path(to SymbolID, m Mode) (Path, bool) {
+func (x *Matrix) Path(to inventory.SymbolID, m Mode) (Path, bool) {
 	g := x.union
 	target := g.at(to)
 	if target == outside {

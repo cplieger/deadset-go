@@ -2,7 +2,6 @@ package graph
 
 import (
 	"cmp"
-	"fmt"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -10,7 +9,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -28,6 +29,52 @@ const (
 	RefEmbed                     // an embedded field or an embedded interface
 	RefAssert                    // x.(T), or a type in a type-switch case
 )
+
+// via is the rule that made a reference: the identifier at its site, or one of the
+// reads analysis.md synthesizes where no identifier names the declaration. String
+// is the spelling a message carries.
+type via uint8
+
+// The rules a reference is made by.
+const (
+	viaIdentifier            via = iota // an identifier names the declaration
+	viaImport                           // an import names the package
+	viaPromotedPath                     // an embedded field a selection reaches through
+	viaComparison                       // a field equality, a switch or a map key compares
+	viaContainerKey                     // a field a standard container compares as a key
+	viaStructIdentity                   // a field a conversion between struct types requires
+	viaLayout                           // a field a memory-layout use lays out
+	viaConversionRequirement            // a method or embedded field an interface conversion requires
+	viaLiteralTwin                      // the field of an identical struct type literal
+	viaCgoRecovery                      // a member selected on a value of C converted to a Go type
+	viaConstantRepetition               // a constant specification repeating the expression list before it
+)
+
+var viaNames = [...]string{
+	viaIdentifier:            "identifier",
+	viaImport:                "import",
+	viaPromotedPath:          "promoted-path",
+	viaComparison:            "comparison",
+	viaContainerKey:          "container-key",
+	viaStructIdentity:        "struct-identity",
+	viaLayout:                "layout",
+	viaConversionRequirement: "conversion-requirement",
+	viaLiteralTwin:           "literal-twin",
+	viaCgoRecovery:           "cgo-recovery",
+	viaConstantRepetition:    "constant-repetition",
+}
+
+// Synthesized reports whether the rule is one no identifier at the site spells.
+func (v via) Synthesized() bool { return v != viaIdentifier }
+
+// String returns the rule's spelling, and a numbered form for a value outside the
+// set so a message never loses the number it was given.
+func (v via) String() string {
+	if int(v) >= len(viaNames) {
+		return "via(" + strconv.Itoa(int(v)) + ")"
+	}
+	return viaNames[v]
+}
 
 // The language's own functions whose call stores into the value they are given.
 const (
@@ -66,14 +113,23 @@ type Reference struct {
 	// its From is that file's own symbol. An import belongs to the file and
 	// serves every declaration in it at once, so no declaration is the one that
 	// made it, and the file and package kinds are what read those edges.
-	From SymbolID
-	To   SymbolID
+	From inventory.SymbolID
+	To   inventory.SymbolID
 
 	// Consumer is the module path of the loaded consumer that made the reference,
 	// and is empty for a reference the target made. A consumer's reference is an
 	// actual caller of the target from outside it, which is what the sweep reads
 	// it as.
 	Consumer string
+
+	// Span is, on a write the target makes as the one target of an assignment, an
+	// increment, a keyed literal element or a delete statement, the statement or
+	// element deleting the write deletes. It is zero on every other reference.
+	Span inventory.SourceRange
+
+	// Site is where the referencing identifier is written, which a Span holds or
+	// does not.
+	Site inventory.Offset
 
 	// Pos is the referencing identifier's rendered position, relative to the root
 	// of the module that made the reference, with forward slashes and a Column
@@ -86,66 +142,46 @@ type Reference struct {
 	// configuration; [Merge] is what fills it.
 	Config int
 	Kind   RefKind
+	Via    via
 	Test   bool // the referencing file is a test file
 }
 
-// References walks every loaded package of one configuration once, the target's
-// and every declared consumer's, and returns every reference to a symbol in
-// symbols, in a deterministic order, plus the test-file rules applied. It issues
-// no per-symbol query: one walk per source file resolves every identifier the file
-// holds through the type information the load already carries.
-//
-// A source file that several package variants type-check is walked once, from
-// the first variant that reaches it, so a reference a production file makes is
-// recorded once whatever the number of test variants that compile that file, and
-// a reference a test file makes comes from the variant that compiles it.
-//
-// Every reference a test file or a test-support package makes carries Test, which
-// is the flag a caller
-// filters on to count production references alone, and the rule that classified
-// the file is the same rule in a consumer as in the target. References itself
-// counts both.
-//
-// A reference names a declaration the target declares, so a use of another
-// module's declaration and of a name the language itself declares is no
-// reference, whichever module made it. A file of the target that targetRoot does
-// not hold ends the walk with [ErrSource] rather than being passed over; a
-// consumer's own files are rendered against that consumer's root, so nothing of
-// the target's rendering depends on where a consumer sits.
-func References(r *load.Result, targetRoot string, read ReadFile, symbols []Symbol) ([]Reference, []TestFileRule, error) {
-	p, err := newReferencePass(r, targetRoot, read, symbols)
-	if err != nil {
-		return nil, nil, err
-	}
+// References walks each source file of one configuration once ([inventory.Sources]),
+// the target's and every declared consumer's, and returns every reference to a
+// declaration of symbols in a deterministic order, plus the test-file rules applied.
+// A reference a test file or a package tests classifies as test support
+// carries Test; one to a declaration of another module or of the language is none.
+// A target file the resolver cannot render ends the walk with [inventory.ErrSource];
+// a consumer's files render against that consumer's root.
+func References(r *load.Result, rs *resolve.Resolver, symbols []inventory.Symbol, tests TestClasses) ([]Reference, []inventory.TestFileRule, error) {
+	p := newReferencePass(r, rs, symbols, tests)
 	if err := p.walk(r.Packages); err != nil {
 		return nil, nil, err
 	}
 	for _, consumer := range r.Referencing() {
-		if err := p.walkConsumer(&consumer, read); err != nil {
+		if err := p.walkConsumer(&consumer); err != nil {
 			return nil, nil, err
 		}
 	}
 	slices.SortFunc(p.refs, byUse)
-	rules := []TestFileRule{{Rule: goTestSuffixRule, Matched: p.testFiles}}
+	rules := []inventory.TestFileRule{{Rule: inventory.GoTestSuffixRule, Matched: p.testFiles}}
 	if p.supportFile > 0 {
-		rules = append(rules, TestFileRule{Rule: testSupportRule, Matched: p.supportFile})
+		rules = append(rules, inventory.TestFileRule{Rule: testSupportRule, Matched: p.supportFile})
 	}
 	return p.refs, rules, nil
 }
 
 // byUse orders two references by the module that made them, the target's own
-// first, then by the position of the referencing identifier, then by the symbol
-// referenced, the declaration referencing it and the kind. It is a total order
-// because one identifier never references one symbol twice from one declaration,
-// while a selector that reaches through an embedded field does reference two
-// symbols at one position, and a position is only unique within one module.
+// first, then by position, the symbol referenced, the declaration referencing it,
+// the kind and the rule: a total order, because one identifier never references one
+// symbol twice from one declaration, and a position is unique within one module.
 //
 //nolint:gocritic // slices.SortFunc fixes a comparator's parameters to values.
 func byUse(a, b Reference) int {
 	if c := strings.Compare(a.Consumer, b.Consumer); c != 0 {
 		return c
 	}
-	if c := ByPosition(a.Pos, b.Pos); c != 0 {
+	if c := inventory.ByPosition(a.Pos, b.Pos); c != 0 {
 		return c
 	}
 	if c := strings.Compare(string(a.To), string(b.To)); c != 0 {
@@ -154,37 +190,25 @@ func byUse(a, b Reference) int {
 	if c := strings.Compare(string(a.From), string(b.From)); c != 0 {
 		return c
 	}
-	return cmp.Compare(a.Kind, b.Kind)
-}
-
-// site is one declaration's rendered position, which is what a symbol
-// identifier spells and what resolves a types.Object to the symbol declared
-// where the object is.
-type site struct {
-	file string
-	line int
-	col  int
+	return cmp.Or(cmp.Compare(a.Kind, b.Kind), cmp.Compare(a.Via, b.Via))
 }
 
 // referencePass accumulates the references of one loaded configuration.
 type referencePass struct {
-	pos         *positions
-	at          *positions  // renders the file being walked, which is pos while the target is walked
-	info        *types.Info // the type information of the variant that compiles the file being walked
-	symbols     map[site]SymbolID
-	packages    map[load.PackageID]SymbolID // the inventory's package symbol per package, which an import resolves to
+	resolve     *resolve.Resolver
+	at          *inventory.Positions // renders the file being walked, the resolver's while the target is walked
+	info        *types.Info          // the type information of the variant that compiles the file being walked
+	tests       TestClasses
+	packages    map[load.PackageID]inventory.SymbolID // the inventory's package symbol per package, which an import resolves to
 	pkgKeys     map[*types.Package]load.PackageID
-	ids         map[token.Pos]SymbolID  // one resolved position, resolved once; empty for a position no symbol declares
-	kinds       map[token.Pos]RefKind   // the kind a parent node fixes for an identifier below it
-	callees     map[token.Pos]bool      // the identifiers a call expression names as its callee
-	reached     map[string]int          // per source file, by the path the toolchain named, the variants that compile it
-	declaring   map[string]bool         // the import paths of the packages the target declares
-	support     map[load.PackageID]bool // the target's test-support packages, which its symbols carry
+	kinds       map[token.Pos]RefKind  // the kind a parent node fixes for an identifier below it
+	spans       map[token.Pos]ast.Node // the statement or element a write's deletion deletes, by the written identifier
+	callees     map[token.Pos]bool     // the identifiers a call expression names as its callee
 	idOf        func(*packages.Package) load.PackageID
 	instances   *instantiations           // the type arguments a layout read lays a type parameter out as
 	literals    literalStructs            // the struct type literals walked, by identity
 	consumer    string                    // the module path of the consumer being walked, empty while the target is
-	file        SymbolID                  // the symbol of the file being walked, empty outside the inventory
+	file        inventory.SymbolID        // the symbol of the file being walked, empty outside the inventory
 	syntax      *ast.File                 // the file being walked
 	converted   map[*types.Var]types.Type // per file, the type a typeless variable's conversion initializer names
 	err         error
@@ -194,41 +218,26 @@ type referencePass struct {
 	test        bool // the file being walked is test code
 }
 
-// newReferencePass prepares one configuration's walk, and refuses a result
-// missing the file set or the source reader the rendering needs.
-func newReferencePass(r *load.Result, targetRoot string, read ReadFile, symbols []Symbol) (*referencePass, error) {
-	if r == nil || r.Fset == nil {
-		return nil, fmt.Errorf("%w: no file set", ErrIncompleteLoad)
-	}
-	if read == nil {
-		return nil, fmt.Errorf("%w: no source reader", ErrIncompleteLoad)
-	}
-
+// newReferencePass prepares one configuration's walk.
+func newReferencePass(r *load.Result, rs *resolve.Resolver, symbols []inventory.Symbol, tests TestClasses) *referencePass {
 	p := &referencePass{
-		pos:       newPositions(r.Fset, targetRoot, read),
-		symbols:   make(map[site]SymbolID, len(symbols)),
-		packages:  make(map[load.PackageID]SymbolID),
-		ids:       make(map[token.Pos]SymbolID),
+		resolve:   rs,
+		at:        rs.Positions(),
+		tests:     tests,
+		packages:  make(map[load.PackageID]inventory.SymbolID),
 		kinds:     make(map[token.Pos]RefKind),
+		spans:     make(map[token.Pos]ast.Node),
 		callees:   make(map[token.Pos]bool),
-		reached:   make(map[string]int),
-		support:   make(map[load.PackageID]bool),
 		idOf:      r.ID,
 		pkgKeys:   packageKeys(r),
 		instances: instantiationsOf(r.Packages),
 	}
-	p.at = p.pos
 	for i := range symbols {
-		s := &symbols[i]
-		p.symbols[site{file: s.Pos.Filename, line: s.Pos.Line, col: s.Pos.Column}] = s.ID
-		if s.Kind == KindPackage {
-			p.packages[PackageOf(r, s, targetRoot)] = s.ID
-		}
-		if s.TestSupport {
-			p.support[PackageOf(r, s, targetRoot)] = true
+		if s := &symbols[i]; s.Kind == inventory.KindPackage {
+			p.packages[s.Package] = s.ID
 		}
 	}
-	return p, nil
+	return p
 }
 
 // walkConsumer walks every package of one loaded consumer, recording the
@@ -240,70 +249,37 @@ func newReferencePass(r *load.Result, targetRoot string, read ReadFile, symbols 
 // against are the consumer's own root, which is the module directory the scope
 // named, so a consumer outside the target's tree renders as readily as one inside
 // it.
-func (p *referencePass) walkConsumer(consumer *load.Consumer, read ReadFile) error {
+func (p *referencePass) walkConsumer(consumer *load.Consumer) error {
 	root := ""
-	if module := consumerModule(consumer); module != nil {
+	if module := resolve.ConsumerModule(consumer); module != nil {
 		root = module.Dir
 	}
 	p.consumer = consumer.ID
-	p.at = newPositions(p.pos.fset, root, read)
+	p.at = p.resolve.Positions().Under(root)
 	defer func() {
 		p.consumer = ""
-		p.at = p.pos
+		p.at = p.resolve.Positions()
 	}()
 	return p.walk(consumer.Packages)
 }
 
-// consumerModule returns the module one consumer's packages belong to, which is
-// what its files are rendered relative to.
-func consumerModule(consumer *load.Consumer) *packages.Module {
-	for _, pkg := range consumer.Packages {
-		if pkg.Module != nil && pkg.Module.Dir != "" {
-			return pkg.Module
-		}
-	}
-	return nil
-}
-
 // walk visits every file of every variant of one module, in one order, and
 // returns the first failure the walk met.
-//
-// The import paths a reference may name are the target's, recorded by the walk of
-// the target, so a consumer's own packages never join that set: a consumer
-// declares nothing this analysis reasons about.
 func (p *referencePass) walk(pkgs []*packages.Package) error {
-	p.literals.add(pkgs)
-	groups := groupVariants(pkgs, p.at)
-	if p.consumer == "" {
-		p.declaring = make(map[string]bool, len(groups))
-		for _, g := range groups {
-			p.declaring[g.pkgPath] = true
-		}
-	}
-	for _, g := range groups {
-		for _, pkg := range g.pkgs {
-			for _, f := range syntaxFiles(pkg, p.at) {
-				if err := p.walkFile(pkg, f); err != nil {
-					return err
-				}
-			}
+	p.literals.add(pkgs, p.at.Fset)
+	for pkg, f := range inventory.Sources(pkgs, p.at.Fset) {
+		if err := p.walkFile(pkg, f); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-// walkFile walks one source file, unless a variant reached it first. A file is
-// keyed by the path the toolchain named it by, which is unique across the modules
-// one configuration loads where a module-relative path is not.
+// walkFile walks one source file under the variant that compiles it first.
 func (p *referencePass) walkFile(pkg *packages.Package, f *ast.File) error {
-	position, err := p.at.render(f.FileStart)
+	position, err := p.at.Render(f.FileStart)
 	if err != nil {
 		return err
-	}
-	named := p.at.fset.Position(f.FileStart).Filename
-	p.reached[named]++
-	if p.reached[named] > 1 {
-		return nil
 	}
 
 	p.info = pkg.TypesInfo
@@ -313,13 +289,13 @@ func (p *referencePass) walkFile(pkg *packages.Package, f *ast.File) error {
 	// it is not resolved at all rather than resolved and failing.
 	p.file = ""
 	if p.consumer == "" {
-		p.file, _ = p.symbolAt(f.FileStart)
+		p.file, _ = p.resolve.At(f.FileStart)
 	}
-	_, p.test = IsTestFile(position.Filename)
+	_, p.test = inventory.IsTestFile(position.Filename)
 	switch {
 	case p.test:
 		p.testFiles++
-	case p.consumer == "" && p.support[p.idOf(pkg)]:
+	case p.consumer == "" && p.tests.Support[p.idOf(pkg)]:
 		p.test = true
 		p.supportFile++
 	}
@@ -406,7 +382,7 @@ func (p *referencePass) walkGenDecl(d *ast.GenDecl) {
 // first name (Go specification, Constant declarations: an omitted list is the
 // textual substitution of the first preceding one).
 func (p *referencePass) walkRepeated(s, repeated *ast.ValueSpec) {
-	ids := make([]SymbolID, 0, len(s.Names))
+	ids := make([]inventory.SymbolID, 0, len(s.Names))
 	for _, n := range s.Names {
 		if id, ok := p.owner(n.Pos()); ok {
 			ids = append(ids, id)
@@ -429,14 +405,14 @@ func (p *referencePass) walkRepeated(s, repeated *ast.ValueSpec) {
 
 // repeatedUse records the declaration one identifier of a repeated list names, from
 // each constant of ids, at pos.
-func (p *referencePass) repeatedUse(ident *ast.Ident, ids []SymbolID, pos token.Pos) {
+func (p *referencePass) repeatedUse(ident *ast.Ident, ids []inventory.SymbolID, pos token.Pos) {
 	obj := p.info.Uses[ident]
 	if obj == nil {
 		return
 	}
-	if to, held := p.symbolOf(obj); held {
+	if to, held := p.resolve.Object(obj); held {
 		for _, id := range ids {
-			p.add(id, to, pos, p.kindOf(ident, obj))
+			p.add(id, to, pos, p.kindOf(ident, obj), viaConstantRepetition)
 		}
 	}
 }
@@ -469,7 +445,7 @@ func (p *referencePass) walkImport(spec *ast.ImportSpec) {
 	if !held {
 		return
 	}
-	p.add(p.file, to, spec.Pos(), RefRead)
+	p.add(p.file, to, spec.Pos(), RefRead, viaImport)
 }
 
 // walkTypeSpec walks one type declaration. A type's own type parameters belong
@@ -498,7 +474,7 @@ func (p *referencePass) walkTypeSpec(s *ast.TypeSpec) {
 // feeds several names, no name owns a value of its own and the group's first
 // name carries the list.
 func (p *referencePass) walkValueSpec(s *ast.ValueSpec) {
-	ids := make([]SymbolID, 0, len(s.Names))
+	ids := make([]inventory.SymbolID, 0, len(s.Names))
 	for _, n := range s.Names {
 		id, ok := p.owner(n.Pos())
 		if !ok {
@@ -524,7 +500,7 @@ func (p *referencePass) walkValueSpec(s *ast.ValueSpec) {
 // walkStruct walks the fields of one struct type. Every field is a symbol of its
 // own, so nothing in a struct body references from the type that declares it but
 // the layout reads a host-layout field records from owner.
-func (p *referencePass) walkStruct(t *ast.StructType, owner SymbolID) {
+func (p *referencePass) walkStruct(t *ast.StructType, owner inventory.SymbolID) {
 	p.readHostLayout(t, owner)
 	for _, f := range t.Fields.List {
 		if len(f.Names) == 0 {
@@ -538,7 +514,7 @@ func (p *referencePass) walkStruct(t *ast.StructType, owner SymbolID) {
 // walkEmbedded walks one embedded field, whose type references from the field
 // the language names after that type.
 func (p *referencePass) walkEmbedded(f *ast.Field) {
-	named := EmbeddedName(f.Type)
+	named := inventory.EmbeddedName(f.Type)
 	if named == nil {
 		return
 	}
@@ -554,7 +530,7 @@ func (p *referencePass) walkEmbedded(f *ast.Field) {
 // field, and an anonymous struct the type carries declares the field's own
 // members, whose container is the group's first name.
 func (p *referencePass) walkField(f *ast.Field) {
-	inner := anonymousStruct(f.Type)
+	inner := inventory.AnonymousStruct(f.Type)
 	members := inner
 	for _, n := range f.Names {
 		id, ok := p.owner(n.Pos())
@@ -573,10 +549,10 @@ func (p *referencePass) walkField(f *ast.Field) {
 // walkInterface walks one interface type. A declared method references from
 // itself; an embedded interface and a type-set element declare nothing, so they
 // reference from the interface.
-func (p *referencePass) walkInterface(t *ast.InterfaceType, owner SymbolID) {
+func (p *referencePass) walkInterface(t *ast.InterfaceType, owner inventory.SymbolID) {
 	for _, f := range t.Methods.List {
 		if len(f.Names) == 0 {
-			if named := EmbeddedName(f.Type); named != nil {
+			if named := inventory.EmbeddedName(f.Type); named != nil {
 				p.kinds[named.Pos()] = RefEmbed
 			}
 			p.inspect(f.Type, owner)
@@ -593,14 +569,14 @@ func (p *referencePass) walkInterface(t *ast.InterfaceType, owner SymbolID) {
 }
 
 // inspect records every reference one subtree makes from encl.
-func (p *referencePass) inspect(node ast.Node, encl SymbolID) {
+func (p *referencePass) inspect(node ast.Node, encl inventory.SymbolID) {
 	p.inspectExcept(node, encl, nil)
 }
 
 // inspectExcept records every reference one subtree makes from encl, visiting
 // nothing at or below skip, which is how a field's anonymous struct is left to
 // its own members.
-func (p *referencePass) inspectExcept(node ast.Node, encl SymbolID, skip ast.Node) {
+func (p *referencePass) inspectExcept(node ast.Node, encl inventory.SymbolID, skip ast.Node) {
 	ast.Inspect(node, func(n ast.Node) bool {
 		if n == nil || n == skip || p.err != nil {
 			return false
@@ -617,8 +593,8 @@ func (p *referencePass) inspectExcept(node ast.Node, encl SymbolID, skip ast.Nod
 			p.markAssign(n)
 		case *ast.CompositeLit:
 			p.markFieldKeys(n)
-		case *ast.IncDecStmt:
-			p.markWrite(n.X)
+		case *ast.IncDecStmt, *ast.ExprStmt:
+			p.markStatement(n)
 		case *ast.RangeStmt:
 			p.markRange(n)
 		case *ast.TypeAssertExpr:
@@ -627,7 +603,7 @@ func (p *referencePass) inspectExcept(node ast.Node, encl SymbolID, skip ast.Nod
 			p.markCaseAsserts(n)
 		case *ast.CallExpr:
 			p.markCallee(n.Fun)
-			p.markDelete(n)
+			p.markDelete(n, nil)
 			p.readUnsafeConversion(n, encl)
 			p.readStructConversion(n, encl)
 			p.readContainerKeys(n, encl)
@@ -640,11 +616,29 @@ func (p *referencePass) inspectExcept(node ast.Node, encl SymbolID, skip ast.Nod
 
 // markAssign records the stores one assignment performs: every target it names,
 // and the collection the append-back idiom reads only to store into.
+// The statement is the write's span only where it has one target.
 func (p *referencePass) markAssign(s *ast.AssignStmt) {
+	var span ast.Node
+	if len(s.Lhs) == 1 {
+		span = s
+	}
 	for _, target := range s.Lhs {
-		p.markWrite(target)
+		p.markWrite(target, span)
 	}
 	p.markAppendBack(s)
+}
+
+// markStatement records the store an increment or a delete statement performs,
+// which deleting the statement deletes.
+func (p *referencePass) markStatement(s ast.Node) {
+	switch s := s.(type) {
+	case *ast.IncDecStmt:
+		p.markWrite(s.X, s)
+	case *ast.ExprStmt:
+		if call, isCall := s.X.(*ast.CallExpr); isCall {
+			p.markDelete(call, s)
+		}
+	}
 }
 
 // markRange records the stores one range statement performs, which are its key and
@@ -654,26 +648,26 @@ func (p *referencePass) markRange(s *ast.RangeStmt) {
 	if s.Tok != token.ASSIGN {
 		return
 	}
-	p.markWrite(s.Key)
-	p.markWrite(s.Value)
+	p.markWrite(s.Key, nil)
+	p.markWrite(s.Value, nil)
 }
 
 // readComparedFields records the fields the comparison one node writes reads. The
 // four nodes are the four shapes that compare a value of struct type: equality,
 // the tag and the cases of an expression switch, the key type of a map type, and
 // the key of an index into a map.
-func (p *referencePass) readComparedFields(n ast.Node, encl SymbolID) {
+func (p *referencePass) readComparedFields(n ast.Node, encl inventory.SymbolID) {
 	switch n := n.(type) {
 	case *ast.BinaryExpr:
 		// Only equality compares a struct: an ordered comparison is not defined
 		// over one, so a value of struct type is never an operand of it.
 		if n.Op == token.EQL || n.Op == token.NEQ {
-			p.readComparison(encl, n.OpPos, n.X, n.Y)
+			p.readComparison(encl, n.OpPos, viaComparison, n.X, n.Y)
 		}
 	case *ast.SwitchStmt:
 		p.readSwitch(n, encl)
 	case *ast.MapType:
-		p.readComparison(encl, n.Key.Pos(), n.Key)
+		p.readComparison(encl, n.Key.Pos(), viaComparison, n.Key)
 	case *ast.IndexExpr:
 		p.readMapKey(n, encl)
 	}
@@ -686,18 +680,18 @@ func (p *referencePass) readComparedFields(n ast.Node, encl SymbolID) {
 // A switch with no tag compares each case against true and names no struct value,
 // and a type switch names types rather than values, so neither reaches here: the
 // language's type switch is its own node.
-func (p *referencePass) readSwitch(s *ast.SwitchStmt, encl SymbolID) {
+func (p *referencePass) readSwitch(s *ast.SwitchStmt, encl inventory.SymbolID) {
 	if s.Tag == nil {
 		return
 	}
-	p.readComparison(encl, s.Tag.Pos(), s.Tag)
+	p.readComparison(encl, s.Tag.Pos(), viaComparison, s.Tag)
 	for _, stmt := range s.Body.List {
 		clause, ok := stmt.(*ast.CaseClause)
 		if !ok {
 			continue
 		}
 		for _, expr := range clause.List {
-			p.readComparison(encl, expr.Pos(), expr)
+			p.readComparison(encl, expr.Pos(), viaComparison, expr)
 		}
 	}
 }
@@ -707,7 +701,7 @@ func (p *referencePass) readSwitch(s *ast.SwitchStmt, encl SymbolID) {
 // operand of equality is. An index into a slice or an array compares nothing, and
 // an instantiation of a generic declaration is written the same way and is not an
 // index at all, so the map is what decides.
-func (p *referencePass) readMapKey(e *ast.IndexExpr, encl SymbolID) {
+func (p *referencePass) readMapKey(e *ast.IndexExpr, encl inventory.SymbolID) {
 	held := p.info.TypeOf(e.X)
 	if held == nil {
 		return
@@ -715,7 +709,7 @@ func (p *referencePass) readMapKey(e *ast.IndexExpr, encl SymbolID) {
 	if _, isMap := types.Unalias(held).Underlying().(*types.Map); !isMap {
 		return
 	}
-	p.readComparison(encl, e.Index.Pos(), e.Index)
+	p.readComparison(encl, e.Index.Pos(), viaComparison, e.Index)
 }
 
 // readComparison records a read of every field the comparison at pos reads, over
@@ -725,8 +719,8 @@ func (p *referencePass) readMapKey(e *ast.IndexExpr, encl SymbolID) {
 // compared with a struct value holds two, so the reads are deduplicated per site:
 // one read per field whichever operand named the type, which is what keeps the
 // reference order a total one.
-func (p *referencePass) readComparison(encl SymbolID, pos token.Pos, operands ...ast.Expr) {
-	var held map[SymbolID]bool
+func (p *referencePass) readComparison(encl inventory.SymbolID, pos token.Pos, rule via, operands ...ast.Expr) {
+	var held map[inventory.SymbolID]bool
 	for _, operand := range operands {
 		if operand == nil {
 			continue
@@ -736,9 +730,9 @@ func (p *referencePass) readComparison(encl SymbolID, pos token.Pos, operands ..
 			continue
 		}
 		if held == nil {
-			held = make(map[SymbolID]bool)
+			held = make(map[inventory.SymbolID]bool)
 		}
-		p.readFields(st, held, encl, pos)
+		p.readFields(st, held, encl, pos, rule)
 	}
 }
 
@@ -746,7 +740,7 @@ func (p *referencePass) readComparison(encl SymbolID, pos token.Pos, operands ..
 // reads: a type argument whose type parameter's constraint is comparable, or embeds
 // it, is compared by the generic code as an operand of == is. reflect.DeepEqual
 // takes no type parameter, so it is no such comparison.
-func (p *referencePass) readComparableArguments(id *ast.Ident, encl SymbolID) {
+func (p *referencePass) readComparableArguments(id *ast.Ident, encl inventory.SymbolID) {
 	instance, held := p.info.Instances[id]
 	if !held || instance.TypeArgs == nil {
 		return
@@ -755,7 +749,7 @@ func (p *referencePass) readComparableArguments(id *ast.Ident, encl SymbolID) {
 	if params == nil || params.Len() != instance.TypeArgs.Len() {
 		return
 	}
-	var read map[SymbolID]bool
+	var read map[inventory.SymbolID]bool
 	for i := range params.Len() {
 		if !embedsComparable(params.At(i).Constraint()) {
 			continue
@@ -765,9 +759,9 @@ func (p *referencePass) readComparableArguments(id *ast.Ident, encl SymbolID) {
 			continue
 		}
 		if read == nil {
-			read = make(map[SymbolID]bool)
+			read = make(map[inventory.SymbolID]bool)
 		}
-		p.readFields(st, read, encl, id.Pos())
+		p.readFields(st, read, encl, id.Pos(), viaComparison)
 	}
 }
 
@@ -799,14 +793,14 @@ func embedsComparable(constraint types.Type) bool {
 // field too. It stops anywhere else: a pointer field is compared by address rather
 // than by what it points at, and the dynamic type of an interface field is not
 // known here. A struct cannot hold itself by value, so the walk ends.
-func (p *referencePass) readFields(st *types.Struct, held map[SymbolID]bool, encl SymbolID, pos token.Pos) {
+func (p *referencePass) readFields(st *types.Struct, held map[inventory.SymbolID]bool, encl inventory.SymbolID, pos token.Pos, rule via) {
 	for field := range st.Fields() {
-		if to, ok := p.symbolOf(field); ok && !held[to] {
+		if to, ok := p.resolve.Object(field); ok && !held[to] {
 			held[to] = true
-			p.add(encl, to, pos, RefRead)
+			p.add(encl, to, pos, RefRead, rule)
 		}
 		if inner, isStruct := comparedStruct(field.Type()); isStruct {
-			p.readFields(inner, held, encl, pos)
+			p.readFields(inner, held, encl, pos, rule)
 		}
 	}
 }
@@ -837,42 +831,42 @@ func comparedStruct(t types.Type) (*types.Struct, bool) {
 // record keeps the reference one identifier makes, unless the identifier names
 // no object or names one whose declaration is not a symbol of the target. A field
 // of a struct type literal is referenced in every identical literal as well.
-func (p *referencePass) record(id *ast.Ident, encl SymbolID) {
+func (p *referencePass) record(id *ast.Ident, encl inventory.SymbolID) {
 	obj := p.info.Uses[id]
 	if obj == nil {
 		return
 	}
 	kind := p.kindOf(id, obj)
 	if field, isField := obj.(*types.Var); isField && field.IsField() {
-		for _, twin := range p.literals.twins(field) {
-			if to, ok := p.symbolOf(twin); ok {
-				p.add(encl, to, id.Pos(), kind)
+		for _, twin := range p.literals.twins(p.info, field) {
+			if to, ok := p.resolve.Object(twin); ok {
+				p.add(encl, to, id.Pos(), kind, viaLiteralTwin)
 			}
 		}
 	}
-	to, ok := p.symbolOf(obj)
+	to, ok := p.resolve.Object(obj)
 	if !ok {
 		return
 	}
-	p.add(encl, to, id.Pos(), kind)
+	p.add(encl, to, id.Pos(), kind, viaIdentifier)
 }
 
 // reachThrough records the embedded fields one selector reaches through. A
 // promoted member is selected through every embedded field on the path, and
 // those fields carry no identifier at the selection, so the selector names them.
 // Writing a promoted member still only reads the fields that reach it.
-func (p *referencePass) reachThrough(e *ast.SelectorExpr, encl SymbolID) {
+func (p *referencePass) reachThrough(e *ast.SelectorExpr, encl inventory.SymbolID) {
 	sel := p.info.Selections[e]
 	if sel == nil {
 		return
 	}
-	p.readPath(sel.Recv(), sel.Index(), encl, e.Sel.Pos(), nil)
+	p.readPath(sel.Recv(), sel.Index(), encl, e.Sel.Pos(), nil, viaPromotedPath)
 }
 
 // readPath records a read at pos of every embedded field one selection index path
 // passes through from recv, the last step being the member selected. A field in
 // seen is not read twice, and seen gains every field read; a nil seen keeps none.
-func (p *referencePass) readPath(recv types.Type, index []int, encl SymbolID, pos token.Pos, seen map[SymbolID]bool) {
+func (p *referencePass) readPath(recv types.Type, index []int, encl inventory.SymbolID, pos token.Pos, seen map[inventory.SymbolID]bool, rule via) {
 	if len(index) < 2 {
 		return
 	}
@@ -883,11 +877,11 @@ func (p *referencePass) readPath(recv types.Type, index []int, encl SymbolID, po
 			return
 		}
 		field := st.Field(i)
-		if to, ok := p.symbolOf(field); ok && !seen[to] {
+		if to, ok := p.resolve.Object(field); ok && !seen[to] {
 			if seen != nil {
 				seen[to] = true
 			}
-			p.add(encl, to, pos, RefRead)
+			p.add(encl, to, pos, RefRead, rule)
 		}
 		held = field.Type()
 	}
@@ -902,7 +896,7 @@ func (p *referencePass) readConversions(d ast.Decl) {
 	switch d := d.(type) {
 	case *ast.FuncDecl:
 		if id, ok := p.owner(d.Name.Pos()); ok {
-			p.readRequired(conversionsIn(p.info, d), func(token.Pos) SymbolID { return id })
+			p.readRequired(conversionsIn(p.info, d), func(token.Pos) inventory.SymbolID { return id })
 		}
 	case *ast.GenDecl:
 		for _, spec := range d.Specs {
@@ -916,7 +910,7 @@ func (p *referencePass) readConversions(d ast.Decl) {
 // readRequiredIn records the conversions one constant or variable group writes,
 // each from the name whose value holds it, as walkValueSpec attributes the values.
 func (p *referencePass) readRequiredIn(s *ast.ValueSpec) {
-	ids := make([]SymbolID, 0, len(s.Names))
+	ids := make([]inventory.SymbolID, 0, len(s.Names))
 	for _, n := range s.Names {
 		id, ok := p.owner(n.Pos())
 		if !ok {
@@ -927,7 +921,7 @@ func (p *referencePass) readRequiredIn(s *ast.ValueSpec) {
 	if len(ids) == 0 {
 		return
 	}
-	p.readRequired(conversionsIn(p.info, s), func(site token.Pos) SymbolID {
+	p.readRequired(conversionsIn(p.info, s), func(site token.Pos) inventory.SymbolID {
 		if len(ids) == len(s.Values) {
 			for i, v := range s.Values {
 				if v.Pos() <= site && site < v.End() {
@@ -941,15 +935,15 @@ func (p *referencePass) readRequiredIn(s *ast.ValueSpec) {
 
 // readRequired records, for every conversion of sites, a read of what it requires
 // of the value converted, once per declaration and site.
-func (p *referencePass) readRequired(sites []Conversion, from func(token.Pos) SymbolID) {
-	seen := make(map[token.Pos]map[SymbolID]bool)
+func (p *referencePass) readRequired(sites []Conversion, from func(token.Pos) inventory.SymbolID) {
+	seen := make(map[token.Pos]map[inventory.SymbolID]bool)
 	for i := range sites {
 		c := &sites[i]
 		if !types.Implements(c.From, c.To) {
 			continue
 		}
 		if seen[c.Site] == nil {
-			seen[c.Site] = make(map[SymbolID]bool)
+			seen[c.Site] = make(map[inventory.SymbolID]bool)
 		}
 		encl, set := from(c.Site), types.NewMethodSet(c.From)
 		for required := range c.To.Methods() {
@@ -957,12 +951,12 @@ func (p *referencePass) readRequired(sites []Conversion, from func(token.Pos) Sy
 			if sel == nil {
 				continue
 			}
-			p.readPath(sel.Recv(), sel.Index(), encl, c.Site, seen[c.Site])
+			p.readPath(sel.Recv(), sel.Index(), encl, c.Site, seen[c.Site], viaConversionRequirement)
 			// A method the destination declares through the same object is
 			// deleted from both at once, which breaks nothing.
-			if to, ok := p.symbolOf(sel.Obj()); ok && types.IsInterface(c.From) && sel.Obj() != required && !seen[c.Site][to] {
+			if to, ok := p.resolve.Object(sel.Obj()); ok && types.IsInterface(c.From) && sel.Obj() != required && !seen[c.Site][to] {
 				seen[c.Site][to] = true
-				p.add(encl, to, c.Site, RefRead)
+				p.add(encl, to, c.Site, RefRead, viaConversionRequirement)
 			}
 		}
 	}
@@ -973,7 +967,7 @@ func (p *referencePass) readRequired(sites []Conversion, from func(token.Pos) Sy
 // operand is a conversion to a Go type, or a variable a conversion initialized:
 // the conversion still names the Go type, so the member is the one that type
 // declares.
-func (p *referencePass) recoverSelection(e *ast.SelectorExpr, encl SymbolID) {
+func (p *referencePass) recoverSelection(e *ast.SelectorExpr, encl inventory.SymbolID) {
 	if p.info.Uses[e.Sel] != nil || p.info.Selections[e] != nil {
 		return
 	}
@@ -992,9 +986,9 @@ func (p *referencePass) recoverSelection(e *ast.SelectorExpr, encl SymbolID) {
 	if obj == nil {
 		return
 	}
-	p.readPath(held, index, encl, e.Sel.Pos(), nil)
-	if to, ok := p.symbolOf(obj); ok {
-		p.add(encl, to, e.Sel.Pos(), p.kindOf(e.Sel, obj))
+	p.readPath(held, index, encl, e.Sel.Pos(), nil, viaCgoRecovery)
+	if to, ok := p.resolve.Object(obj); ok {
+		p.add(encl, to, e.Sel.Pos(), p.kindOf(e.Sel, obj), viaCgoRecovery)
 	}
 }
 
@@ -1110,31 +1104,37 @@ func (p *referencePass) kindOf(id *ast.Ident, obj types.Object) RefKind {
 // into, because a slice or a map a package only ever stores into holds nothing
 // anything reads. An indirection writes through a value it reads: the pointer's
 // own value is read to find the pointee, and the pointee is not a declaration.
-// markIndexed and markHeldIn own a store through a struct field.
-func (p *referencePass) markWrite(target ast.Expr) {
+// markIndexed and markHeldIn own a store through a struct field. A non-nil span is
+// what deleting the write the identifier makes deletes; a held-in write has none.
+func (p *referencePass) markWrite(target ast.Expr, span ast.Node) {
 	switch t := ast.Unparen(target).(type) {
 	case *ast.Ident:
-		p.kinds[t.Pos()] = RefWrite
+		p.write(t, span)
 	case *ast.SelectorExpr:
-		p.kinds[t.Sel.Pos()] = RefWrite
+		p.write(t.Sel, span)
 		p.markHeldIn(t.X)
 	case *ast.IndexExpr:
-		p.markIndexed(t.X)
+		p.markIndexed(t.X, span)
+	}
+}
+
+// write records one identifier as written, with its span where it has one.
+func (p *referencePass) write(id *ast.Ident, span ast.Node) {
+	p.kinds[id.Pos()] = RefWrite
+	if span != nil {
+		p.spans[id.Pos()] = span
 	}
 }
 
 // markIndexed records the collection one index store lands in: a field holding a
 // map, a slice or a pointer is read, and any other collection is written.
-func (p *referencePass) markIndexed(collection ast.Expr) {
-	switch t := ast.Unparen(collection).(type) {
-	case *ast.SelectorExpr:
-		if field, ok := p.fieldOf(t); ok && holdsByReference(field) {
+func (p *referencePass) markIndexed(collection ast.Expr, span ast.Node) {
+	if t, ok := ast.Unparen(collection).(*ast.SelectorExpr); ok {
+		if field, isField := p.fieldOf(t); isField && holdsByReference(field) {
 			return
 		}
-		p.markWrite(t)
-	default:
-		p.markWrite(t)
 	}
+	p.markWrite(collection, span)
 }
 
 // markHeldIn records the storage one selector store lands in beyond the member it
@@ -1207,18 +1207,19 @@ func (p *referencePass) markFieldKeys(lit *ast.CompositeLit) {
 			continue
 		}
 		if key, ok := ast.Unparen(keyed.Key).(*ast.Ident); ok {
-			p.kinds[key.Pos()] = RefWrite
+			p.write(key, keyed)
 		}
 	}
 }
 
 // markDelete records the collection one delete stores into. Removing an entry
-// changes what the map holds, the same way an assignment through a key does.
-func (p *referencePass) markDelete(call *ast.CallExpr) {
+// changes what the map holds, the same way an assignment through a key does. The
+// span is the statement where the delete is one; a deferred delete has none.
+func (p *referencePass) markDelete(call *ast.CallExpr, span ast.Node) {
 	if len(call.Args) == 0 || !p.builtin(call.Fun, deleteBuiltin) {
 		return
 	}
-	p.markIndexed(call.Args[0])
+	p.markIndexed(call.Args[0], span)
 }
 
 // markAppendBack records the store the append-back idiom performs. In
@@ -1321,20 +1322,20 @@ func (p *referencePass) markCallee(fun ast.Expr) {
 
 // add keeps one reference, rendering the referencing identifier's position against
 // the root of the module that made it.
-func (p *referencePass) add(from, to SymbolID, pos token.Pos, kind RefKind) {
-	position, err := p.at.render(pos)
+func (p *referencePass) add(from, to inventory.SymbolID, pos token.Pos, kind RefKind, rule via) {
+	position, err := p.at.Render(pos)
 	if err != nil {
 		p.fail(err)
 		return
 	}
-	p.refs = append(p.refs, Reference{
-		From:     from,
-		To:       to,
-		Consumer: p.consumer,
-		Pos:      position,
-		Kind:     kind,
-		Test:     p.test,
-	})
+	r := Reference{
+		From: from, To: to, Consumer: p.consumer, Pos: position, Site: p.at.Offset(pos),
+		Kind: kind, Via: rule, Test: p.test,
+	}
+	if node := p.spans[pos]; node != nil && kind == RefWrite && p.consumer == "" {
+		r.Span = p.at.Range(node)
+	}
+	p.refs = append(p.refs, r)
 }
 
 // owner returns the declaration a subtree references from, and whether the subtree
@@ -1345,44 +1346,11 @@ func (p *referencePass) add(from, to SymbolID, pos token.Pos, kind RefKind) {
 // analysis can name. In a consumer, no declaration is in the inventory and every
 // subtree is walked with no owner: what a consumer's declaration is called decides
 // nothing, and what it references decides everything.
-func (p *referencePass) owner(pos token.Pos) (SymbolID, bool) {
+func (p *referencePass) owner(pos token.Pos) (inventory.SymbolID, bool) {
 	if p.consumer != "" {
 		return "", true
 	}
-	return p.symbolAt(pos)
-}
-
-// symbolOf resolves the declaration of one object a walked file names. Only a
-// package this walk enumerates declares a symbol of the target, so an object of
-// another module, an object of a package outside the scope and a name the
-// language itself declares resolve to nothing without a position being read.
-func (p *referencePass) symbolOf(obj types.Object) (SymbolID, bool) {
-	if obj.Pkg() == nil || !p.declaring[obj.Pkg().Path()] {
-		return "", false
-	}
-	// One module of the target can require another from the module cache, whose
-	// copy shares the package paths and declares nothing of the target.
-	if q := p.pos.fset.Position(obj.Pos()); q.IsValid() && p.pos.relative(q.Filename) == "" {
-		return "", false
-	}
-	return p.symbolAt(obj.Pos())
-}
-
-// symbolAt resolves one position of the target to the symbol declared there,
-// resolving each position once. A position no symbol declares resolves to
-// nothing; a position that does not render fails the walk.
-func (p *referencePass) symbolAt(pos token.Pos) (SymbolID, bool) {
-	if id, ok := p.ids[pos]; ok {
-		return id, id != ""
-	}
-	position, err := p.pos.render(pos)
-	if err != nil {
-		p.fail(err)
-		return "", false
-	}
-	id := p.symbols[site{file: position.Filename, line: position.Line, col: position.Column}]
-	p.ids[pos] = id
-	return id, id != ""
+	return p.resolve.At(pos)
 }
 
 // fail keeps the first failure of the walk, which is the one a caller is told.

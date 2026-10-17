@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
@@ -47,7 +48,7 @@ const enumMemberSubject = "enum-member"
 // dead is the subject of the unused kinds and of the dead component that carries
 // it.
 func writeOnlySymbol(in *Input) ([]Finding, error) {
-	exempted := make(map[graph.SymbolID]bool, len(in.Exempt))
+	exempted := make(map[inventory.SymbolID]bool, len(in.Exempt))
 	for ix := range in.Exempt {
 		exemption := &in.Exempt[ix]
 		exempted[exemption.ID] = true
@@ -68,7 +69,7 @@ func writeOnlySymbol(in *Input) ([]Finding, error) {
 // writeOnly is the write-only kind's answer about one declaration of the
 // inventory: whether the counted references store into it and never read it, and
 // the finding that says so.
-func writeOnly(in *Input, symbol *graph.Symbol, u *uses, exempted map[graph.SymbolID]bool) (Finding, bool) {
+func writeOnly(in *Input, symbol *inventory.Symbol, u *uses, exempted map[inventory.SymbolID]bool) (Finding, bool) {
 	if !writeOnlySubject(in, symbol, u, exempted) {
 		return Finding{}, false
 	}
@@ -79,7 +80,7 @@ func writeOnly(in *Input, symbol *graph.Symbol, u *uses, exempted map[graph.Symb
 	case u.testReads > 0:
 		read = " and read only from test files"
 	}
-	cascade := append(writeCascade(in, symbol, u.writes), in.annotationCascade().named[symbol.ID]...)
+	cascade := append(writeCascade(in, symbol, u.spans), in.annotationCascade().named[symbol.ID]...)
 	finding, names := in.finding(symbol.ID, vocab.WriteOnlySymbol, in.word(symbol.ID)+" "+symbol.Name+
 		" is written "+writeCount(len(u.writes))+read+cascadeClause(cascade))
 	if !names {
@@ -101,7 +102,7 @@ func writeOnly(in *Input, symbol *graph.Symbol, u *uses, exempted map[graph.Symb
 // symbol, class and detail is one record.
 func WriteOnlyRetained(in *Input) []graph.Exemption {
 	type fact struct {
-		id            graph.SymbolID
+		id            inventory.SymbolID
 		class, detail string
 	}
 	counted := writesAndReads(in)
@@ -123,7 +124,7 @@ func WriteOnlyRetained(in *Input) []graph.Exemption {
 // writeOnlySubject reports whether the counted references store into one
 // declaration of the inventory and never read it, where a read from a declaration
 // nothing references leaves it a subject only beside a write from one something does.
-func writeOnlySubject(in *Input, symbol *graph.Symbol, u *uses, exempted map[graph.SymbolID]bool) bool {
+func writeOnlySubject(in *Input, symbol *inventory.Symbol, u *uses, exempted map[inventory.SymbolID]bool) bool {
 	switch {
 	case !writableSubject(in, symbol), exempted[symbol.ID], in.candidateOf(symbol.ID) != nil:
 		return false
@@ -190,7 +191,7 @@ func unusedTypeParameter(in *Input) ([]Finding, error) {
 	for i := range in.Sweep.Candidates {
 		candidate := &in.Sweep.Candidates[i]
 		symbol := in.symbol(candidate.ID)
-		if symbol == nil || symbol.Kind != graph.KindTypeParam || referenced[candidate.ID] {
+		if symbol == nil || symbol.Kind != inventory.KindTypeParam || referenced[candidate.ID] {
 			continue
 		}
 		if !declaresTypeParameters(in.symbol(symbol.Parent)) || in.deadParent(symbol) {
@@ -210,16 +211,18 @@ func unusedTypeParameter(in *Input) ([]Finding, error) {
 // declaresTypeParameters reports whether a type parameter's container is a
 // declaration whose parameters this kind reports, which is a function or a
 // method. A type declaration's is exempt.
-func declaresTypeParameters(owner *graph.Symbol) bool {
-	return owner != nil && (owner.Kind == graph.KindFunc || owner.Kind == graph.KindMethod)
+func declaresTypeParameters(owner *inventory.Symbol) bool {
+	return owner != nil && (owner.Kind == inventory.KindFunc || owner.Kind == inventory.KindMethod)
 }
 
 // uses is how one declaration's counted references divide for the write-only
-// kind: the positions written, in reference order and once per position, how many
+// kind: the positions written, in reference order and once per position, the
+// statement or element each of those writes' deletion deletes, how many
 // references of every other kind read it, and how the two split by file. testReads
 // counts the reads of test files a production mode does not count.
 type uses struct {
 	writes     []Position
+	spans      []inventory.SourceRange
 	reads      int
 	production int
 	test       int
@@ -236,8 +239,8 @@ type uses struct {
 // One write position is kept once however many build configurations saw it: the
 // merged reference set holds one reference per configuration it was seen in, and
 // the deletion set the finding names is a set of positions in the source.
-func writesAndReads(in *Input) map[graph.SymbolID]*uses {
-	counted := make(map[graph.SymbolID]*uses)
+func writesAndReads(in *Input) map[inventory.SymbolID]*uses {
+	counted := make(map[inventory.SymbolID]*uses)
 	for i := range in.Merged.References {
 		r := &in.Merged.References[i]
 		held := counted[r.To]
@@ -276,6 +279,9 @@ func (u *uses) count(in *Input, r *graph.Reference) {
 	}
 	if at := positionAt(r.Pos); !slices.Contains(u.writes, at) {
 		u.writes = append(u.writes, at)
+		if r.Span != (inventory.SourceRange{}) {
+			u.spans = append(u.spans, r.Span)
+		}
 	}
 }
 
@@ -322,12 +328,12 @@ func positionAt(pos token.Position) Position {
 // kind: a package-level variable, or a struct field, neither declared with the
 // blank identifier. A package-level variable is one whose container is the
 // package, which is what keeps a variable a function declares out.
-func writableSubject(in *Input, symbol *graph.Symbol) bool {
+func writableSubject(in *Input, symbol *inventory.Symbol) bool {
 	switch symbol.Kind {
-	case graph.KindVar:
+	case inventory.KindVar:
 		owner := in.symbol(symbol.Parent)
-		return !symbol.Blank && (owner == nil || owner.Kind == graph.KindPackage)
-	case graph.KindField:
+		return !symbol.Blank && (owner == nil || owner.Kind == inventory.KindPackage)
+	case inventory.KindField:
 		return !symbol.Blank
 	default:
 		return false
@@ -344,8 +350,8 @@ func writeCount(writes int) string {
 
 // referencedSymbols reports, per declaration, whether any reference of any build
 // configuration and of any file names it.
-func referencedSymbols(in *Input) map[graph.SymbolID]bool {
-	named := make(map[graph.SymbolID]bool, len(in.Merged.References))
+func referencedSymbols(in *Input) map[inventory.SymbolID]bool {
+	named := make(map[inventory.SymbolID]bool, len(in.Merged.References))
 	for i := range in.Merged.References {
 		named[in.Merged.References[i].To] = true
 	}
@@ -368,8 +374,8 @@ func referencedSymbols(in *Input) map[graph.SymbolID]bool {
 // A constant is a member when one build configuration declares it in such a
 // group, because a group a constraint excludes from one configuration is still
 // the group the source writes.
-func enumGroupMembers(in *Input) map[graph.SymbolID]string {
-	members := make(map[graph.SymbolID]string)
+func enumGroupMembers(in *Input) map[inventory.SymbolID]string {
+	members := make(map[inventory.SymbolID]string)
 	for i := range in.Per {
 		scan := &enumScan{per: &in.Per[i], owners: make(map[string]string), members: members}
 		for _, iotaGroups := range []bool{true, false} {
@@ -384,7 +390,7 @@ func enumGroupMembers(in *Input) map[graph.SymbolID]string {
 type enumScan struct {
 	per     *Configured
 	owners  map[string]string // the type's key to the name a message carries
-	members map[graph.SymbolID]string
+	members map[inventory.SymbolID]string
 }
 
 // blocks walks every constant block of one configuration, registering the types

@@ -3,6 +3,8 @@ package graph
 import (
 	"slices"
 	"testing"
+
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 )
 
 func TestComponentsGroupACycleAndReportEveryMemberAsARoot(t *testing.T) {
@@ -73,12 +75,12 @@ func TestComponentsJoinTwoRootsThatReachOneDeclaration(t *testing.T) {
 
 func TestComponentsPlaceADeadMemberInsideItsDeadContainer(t *testing.T) {
 	b := newGraphBuilder(t)
-	b.declare(handSymbol{name: "box", kind: KindType, lines: 4})
-	b.declare(handSymbol{name: "lid", kind: KindField, parent: "box"})
-	b.declare(handSymbol{name: "side", kind: KindField, parent: "box"})
-	b.declare(handSymbol{name: "open", kind: KindMethod, parent: "box", lines: 2})
-	b.declare(handSymbol{name: "fetcher", kind: KindInterface, lines: 3})
-	b.declare(handSymbol{name: "fetch", kind: KindInterfaceMethod, parent: "fetcher"})
+	b.declare(handSymbol{name: "box", kind: inventory.KindType, lines: 4})
+	b.declare(handSymbol{name: "lid", kind: inventory.KindField, parent: "box"})
+	b.declare(handSymbol{name: "side", kind: inventory.KindField, parent: "box"})
+	b.declare(handSymbol{name: "open", kind: inventory.KindMethod, parent: "box", lines: 2})
+	b.declare(handSymbol{name: "fetcher", kind: inventory.KindInterface, lines: 3})
+	b.declare(handSymbol{name: "fetch", kind: inventory.KindInterfaceMethod, parent: "fetcher"})
 	b.ref("open", "box")
 	b.ref("open", "lid")
 	got := b.groups(b.graph().Sweep(&SweepInput{}))
@@ -98,10 +100,10 @@ func TestComponentsPlaceADeadMemberInsideItsDeadContainer(t *testing.T) {
 
 func TestComponentsCountALineTwoFallingDeclarationsShareOnce(t *testing.T) {
 	b := newGraphBuilder(t)
-	b.declare(handSymbol{name: "box", kind: KindType, lines: 4})
-	b.declare(handSymbol{name: "lid", kind: KindField, parent: "box", nested: true})
-	b.declare(handSymbol{name: "side", kind: KindField, parent: "box", nested: true, lines: 2})
-	b.declare(handSymbol{name: "open", kind: KindMethod, parent: "box", lines: 2})
+	b.declare(handSymbol{name: "box", kind: inventory.KindType, lines: 4})
+	b.declare(handSymbol{name: "lid", kind: inventory.KindField, parent: "box", nested: true})
+	b.declare(handSymbol{name: "side", kind: inventory.KindField, parent: "box", nested: true, lines: 2})
+	b.declare(handSymbol{name: "open", kind: inventory.KindMethod, parent: "box", lines: 2})
 	got := b.groups(b.graph().Sweep(&SweepInput{}))
 
 	// The struct runs from its first line to its closing brace and its fields'
@@ -208,8 +210,8 @@ func TestComponentsOrderIsTheSameOnEveryCall(t *testing.T) {
 
 func TestComponentListNamesEveryMemberOnlyWhereTheModeIsFull(t *testing.T) {
 	b := newGraphBuilder(t)
-	b.declare(handSymbol{name: "box", kind: KindType, lines: 2})
-	b.declare(handSymbol{name: "lid", kind: KindField, parent: "box"})
+	b.declare(handSymbol{name: "box", kind: inventory.KindType, lines: 2})
+	b.declare(handSymbol{name: "lid", kind: inventory.KindField, parent: "box"})
 	components := b.graph().Sweep(&SweepInput{}).Components
 	if len(components) != 1 {
 		t.Fatalf("Sweep over a dead type and its field returned %d components, want 1", len(components))

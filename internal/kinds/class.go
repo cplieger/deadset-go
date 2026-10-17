@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -46,7 +47,7 @@ func lower(c, other vocab.Class) vocab.Class {
 // and a member [Input.hiddenMember] reports; a library's other export is certain where
 // every declared consumer loaded, probable where some did not, and possible with no
 // consumer information.
-func (in *Input) classOf(id graph.SymbolID) vocab.Class {
+func (in *Input) classOf(id inventory.SymbolID) vocab.Class {
 	symbol := in.symbol(id)
 	switch {
 	case symbol == nil:
@@ -55,9 +56,9 @@ func (in *Input) classOf(id graph.SymbolID) vocab.Class {
 		return vocab.Possible
 	case !symbol.Exported:
 		return vocab.Certain
-	case symbol.Kind == graph.KindTypeParam && declaresTypeParameters(in.symbol(symbol.Parent)):
+	case symbol.Kind == inventory.KindTypeParam && declaresTypeParameters(in.symbol(symbol.Parent)):
 		return vocab.Certain
-	case testFile(symbol):
+	case symbol.InTestFile:
 		return vocab.Certain
 	case !in.importable(symbol):
 		return vocab.Certain
@@ -79,9 +80,9 @@ func (in *Input) classOf(id graph.SymbolID) vocab.Class {
 // unlinkedApplicationPackage reports whether an importable package of an
 // application that no build links declares one symbol, in a run that declares no
 // consumer: outside programs may import it, so every declaration of it is possible.
-func (in *Input) unlinkedApplicationPackage(symbol *graph.Symbol) bool {
+func (in *Input) unlinkedApplicationPackage(symbol *inventory.Symbol) bool {
 	if in.Config == nil || in.Config.Target.Kind != report.TargetKindApplication ||
-		len(in.Consumers.Declared) > 0 || testFile(symbol) || !in.importable(symbol) {
+		len(in.Consumers.Declared) > 0 || symbol.InTestFile || !in.importable(symbol) {
 		return false
 	}
 	held := in.index()
@@ -121,7 +122,7 @@ func unlinkedPackages(per []Configured, root string, x *index) map[string]bool {
 
 // unanalysedConsumer reports whether the unit declaring one symbol has, under some
 // configuration, a module the run dropped requiring it ([load.Unit]).
-func (in *Input) unanalysedConsumer(symbol *graph.Symbol) bool {
+func (in *Input) unanalysedConsumer(symbol *inventory.Symbol) bool {
 	held := in.index()
 	if held.unanalysed == nil {
 		held.unanalysed = unanalysedUnits(in.Per, in.Root)
@@ -162,16 +163,16 @@ func unanalysedUnits(per []Configured, root string) map[string]bool {
 
 // publishedAPI reports whether one declaration is published API of a library: an
 // exported production declaration of a package outside programs can import.
-func (in *Input) publishedAPI(symbol *graph.Symbol) bool {
+func (in *Input) publishedAPI(symbol *inventory.Symbol) bool {
 	return in.Config != nil && in.Config.Target.Kind == report.TargetKindLibrary && symbol.Exported &&
-		!testFile(symbol) && in.importable(symbol)
+		!symbol.InTestFile && in.importable(symbol)
 }
 
 // componentCap is the lowest reachability class among the roots of the dead
 // component one declaration falls with, which caps the confidence of every finding
 // of that component so the minimum confidence withholds or reports it whole. It is
 // no class where the declaration falls with no component.
-func (in *Input) componentCap(id graph.SymbolID) vocab.Class {
+func (in *Input) componentCap(id inventory.SymbolID) vocab.Class {
 	held := in.index()
 	component := held.components[id]
 	if component == nil {
@@ -215,7 +216,7 @@ func (in *Input) everyDeclaredLoaded() bool {
 // package declaring symbol: not a main package, not an external test package, and
 // not under an internal tree, which for a target analyzed alone is every internal
 // package.
-func (in *Input) importable(symbol *graph.Symbol) bool {
+func (in *Input) importable(symbol *inventory.Symbol) bool {
 	return load.Published(symbol.PkgPath, in.index().mains[in.packageOf(symbol)])
 }
 
@@ -237,17 +238,17 @@ func (in *Input) consumersLoaded() bool {
 // concrete type's method is never hidden: a value converted to an interface carries
 // it out, where an assertion calls it. A field of an anonymous struct belongs to
 // the type that holds the struct.
-func (in *Input) hiddenMember(symbol *graph.Symbol) bool {
+func (in *Input) hiddenMember(symbol *inventory.Symbol) bool {
 	switch symbol.Kind {
-	case graph.KindField, graph.KindInterfaceMethod:
+	case inventory.KindField, inventory.KindInterfaceMethod:
 	default:
 		return false
 	}
 	owner := in.symbol(symbol.Parent)
-	for owner != nil && owner.Kind == graph.KindField {
+	for owner != nil && owner.Kind == inventory.KindField {
 		owner = in.symbol(owner.Parent)
 	}
-	if owner == nil || owner.Exported || (owner.Kind != graph.KindType && owner.Kind != graph.KindInterface) {
+	if owner == nil || owner.Exported || (owner.Kind != inventory.KindType && owner.Kind != inventory.KindInterface) {
 		return false
 	}
 	held := in.index()
@@ -261,8 +262,8 @@ func (in *Input) hiddenMember(symbol *graph.Symbol) bool {
 // or hold a value of: an exported type, and every type an exported declaration's
 // type spells, closed over the exported fields, the embedded fields and the
 // exported methods of every type it holds.
-func exposedTypes(in *Input) map[graph.SymbolID]bool {
-	exposed := make(map[graph.SymbolID]bool)
+func exposedTypes(in *Input) map[inventory.SymbolID]bool {
+	exposed := make(map[inventory.SymbolID]bool)
 	for one, p := range in.typedPackages() {
 		for name := range exposedIn(p.Types) {
 			if id, held := one.Resolve.Object(name); held {

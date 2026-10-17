@@ -4,12 +4,11 @@ import (
 	"go/token"
 	"go/types"
 	"maps"
-	"path"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"golang.org/x/tools/go/packages"
 )
@@ -30,49 +29,68 @@ var (
 	outsideUser = load.PackageID{Path: " consumer"}
 )
 
-// TestClasses is one configuration's classification of the target's packages
-// only tests reach: Support carries test evidence and is test code, Reached does
-// not and stays production code.
+// TestClasses is a classification of the target's packages only tests reach:
+// Support carries test evidence and is test code, Reached does not and stays
+// production code. Loaded is every package the classification read.
 type TestClasses struct {
 	Support map[load.PackageID]bool
 	Reached map[load.PackageID]bool
+	Loaded  map[load.PackageID]bool
 }
 
-// ClassifyTestSupport classifies the target's packages and marks the test-support
-// declarations in symbols (positions relative to targetRoot). Support is the largest
-// set of non-main, non-test, unrooted packages carrying test evidence that only test
+// MatrixTests is the matrix's classification of per, one per configuration, which
+// is the one every stage after the classification reads. A package is in Support
+// where every configuration that loads it classified it so, and in Reached where
+// every such configuration classified it either way and not every one Support: a
+// production import under one configuration makes the package production code,
+// whatever a configuration that compiles none of its importers says.
+func MatrixTests(per []TestClasses) TestClasses {
+	matrix := TestClasses{Loaded: make(map[load.PackageID]bool)}
+	for _, one := range per {
+		maps.Copy(matrix.Loaded, one.Loaded)
+	}
+	everywhere := func(classified func(one TestClasses, key load.PackageID) bool) map[load.PackageID]bool {
+		held := make(map[load.PackageID]bool)
+		for key := range matrix.Loaded {
+			vetoed := slices.ContainsFunc(per, func(one TestClasses) bool { return one.Loaded[key] && !classified(one, key) })
+			if !vetoed {
+				held[key] = true
+			}
+		}
+		return held
+	}
+	matrix.Support = everywhere(func(one TestClasses, key load.PackageID) bool { return one.Support[key] })
+	matrix.Reached = everywhere(func(one TestClasses, key load.PackageID) bool { return one.Support[key] || one.Reached[key] })
+	maps.DeleteFunc(matrix.Reached, func(key load.PackageID, _ bool) bool { return matrix.Support[key] })
+	return matrix
+}
+
+// ClassifyTestSupport classifies the target's packages. Support is the largest set
+// of non-main, non-test, unrooted packages carrying test evidence that only test
 // files and members import or reference by resolved name, so an interface call
 // references no implementation. Init functions, blank declarations and tests are no
 // root; a library's package qualifies only under an internal tree. Reached is the
 // same largest set with no evidence needed, less Support.
-func ClassifyTestSupport(r *load.Result, targetRoot string, symbols []Symbol, roots []Root, library bool) TestClasses {
+func ClassifyTestSupport(r *load.Result, symbols []inventory.Symbol, roots []Root, library bool) TestClasses {
 	reached := make(map[load.PackageID]bool)
 	evidenced := make(map[load.PackageID]bool)
+	loaded := make(map[load.PackageID]bool)
 	for _, p := range r.Packages {
+		loaded[r.ID(p)] = true
 		if p.Module != nil && p.Module.Main && supportCandidate(p, library) {
 			reached[r.ID(p)] = true
 			evidenced[r.ID(p)] = carriesTestEvidence(p)
 		}
 	}
-	keyOf := func(s *Symbol) load.PackageID { return PackageOf(r, s, targetRoot) }
-	for key := range rootedPackages(symbols, roots, keyOf) {
+	for key := range rootedPackages(symbols, roots) {
 		delete(reached, key)
 	}
 	candidates := maps.Clone(reached)
 	maps.DeleteFunc(candidates, func(key load.PackageID, _ bool) bool { return !evidenced[key] })
 	users := usersOf(r, reached)
-	classes := TestClasses{Support: largestSupport(candidates, users), Reached: largestSupport(reached, users)}
+	classes := TestClasses{Support: largestSupport(candidates, users), Reached: largestSupport(reached, users), Loaded: loaded}
 	maps.DeleteFunc(classes.Reached, func(key load.PackageID, _ bool) bool { return classes.Support[key] })
-	for i := range symbols {
-		symbols[i].TestSupport = classes.Support[keyOf(&symbols[i])]
-	}
 	return classes
-}
-
-// PackageOf is the identity in r of the package declaring s, positions relative to
-// targetRoot.
-func PackageOf(r *load.Result, s *Symbol, targetRoot string) load.PackageID {
-	return r.IDAt(s.PkgPath, filepath.Join(targetRoot, filepath.FromSlash(path.Dir(s.Pos.Filename))))
 }
 
 // supportCandidate reports whether one package of the main module could be test
@@ -109,10 +127,10 @@ func carriesTestEvidence(p *packages.Package) bool {
 
 // rootedPackages is the key of every package that declares a root of a kind
 // that keeps a package out of test-support code.
-func rootedPackages(symbols []Symbol, roots []Root, keyOf func(*Symbol) load.PackageID) map[load.PackageID]bool {
-	pkgOf := make(map[SymbolID]load.PackageID, len(symbols))
+func rootedPackages(symbols []inventory.Symbol, roots []Root) map[load.PackageID]bool {
+	pkgOf := make(map[inventory.SymbolID]load.PackageID, len(symbols))
 	for i := range symbols {
-		pkgOf[symbols[i].ID] = keyOf(&symbols[i])
+		pkgOf[symbols[i].ID] = symbols[i].Package
 	}
 	rooted := make(map[load.PackageID]bool)
 	for _, root := range roots {
@@ -226,7 +244,7 @@ func (u *fileUsers) at(pos token.Pos) load.PackageID {
 	}
 	user := u.production
 	if file != nil {
-		if _, test := IsTestFile(file.Name()); test {
+		if _, test := inventory.IsTestFile(file.Name()); test {
 			user = testUser
 		}
 	}

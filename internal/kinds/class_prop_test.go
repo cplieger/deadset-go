@@ -7,6 +7,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
@@ -14,14 +15,14 @@ import (
 
 // drawnInventory draws one inventory of candidates: a few declarations, each in a
 // package of a shape the class rule distinguishes and either exported or not.
-func drawnInventory(t *rapid.T) []graph.Symbol {
+func drawnInventory(t *rapid.T) []inventory.Symbol {
 	packages := []string{
 		"example.com/app/pub",
 		"example.com/app/internal/store",
 		"example.com/app/pub_test",
 	}
 	count := rapid.IntRange(1, 6).Draw(t, "the number of declarations")
-	symbols := make([]graph.Symbol, count)
+	symbols := make([]inventory.Symbol, count)
 	for i := range count {
 		name := "Decl" + strconv.Itoa(i)
 		if !rapid.Bool().Draw(t, "declaration "+strconv.Itoa(i)+" is exported") {
@@ -29,16 +30,16 @@ func drawnInventory(t *rapid.T) []graph.Symbol {
 		}
 		pkgPath := rapid.SampledFrom(packages).Draw(t, "the package of declaration "+strconv.Itoa(i))
 		line := 10 + i
-		symbols[i] = graph.Symbol{
-			ID:       graph.SymbolID("catalog.go:" + strconv.Itoa(line) + ":6"),
+		symbols[i] = inventory.Symbol{
+			ID:       inventory.SymbolID("catalog.go:" + strconv.Itoa(line) + ":6"),
 			Ref:      "go://" + pkgPath + "#" + name,
 			Name:     name,
 			PkgPath:  pkgPath,
 			Pos:      token.Position{Filename: "catalog.go", Line: line, Column: 6},
 			EndLine:  line,
-			Kind:     graph.KindField,
+			Kind:     inventory.KindField,
 			Exported: name[0] >= 'A' && name[0] <= 'Z',
-			Configs:  graph.ConfigSet(0b1),
+			Configs:  inventory.ConfigSet(0b1),
 		}
 	}
 	return symbols
@@ -82,16 +83,16 @@ func drawnSeverities(t *rapid.T, label string) map[string]vocab.Severity {
 
 // propInput is the input one drawn inventory, configuration and consumer set make,
 // with every declaration a candidate so every one of them is reported.
-func propInput(symbols []graph.Symbol, resolved config.Config, consumers Consumers) *Input {
+func propInput(symbols []inventory.Symbol, resolved config.Config, consumers Consumers) *Input {
 	candidates := make([]graph.Candidate, len(symbols))
-	refs := make(map[graph.SymbolID]string, len(symbols))
+	refs := make(map[inventory.SymbolID]string, len(symbols))
 	for i := range symbols {
 		candidates[i] = graph.Candidate{
-			ID: symbols[i].ID, Relation: graph.ReferenceCounting, Configs: graph.ConfigSet(0b1),
+			ID: symbols[i].ID, Relation: graph.ReferenceCounting, Configs: inventory.ConfigSet(0b1),
 		}
 		refs[symbols[i].ID] = symbols[i].Ref
 	}
-	held := make([]graph.Symbol, len(symbols))
+	held := make([]inventory.Symbol, len(symbols))
 	copy(held, symbols)
 	return &Input{
 		Config:    &resolved,

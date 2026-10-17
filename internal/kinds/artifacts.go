@@ -11,7 +11,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/buildconstraint"
 	"github.com/cplieger/deadset-go/v2/internal/deps"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -72,7 +72,7 @@ func fileNeverBuilt(in *Input) ([]Finding, error) {
 	found := make([]Finding, 0, len(ignored))
 	for _, file := range ignored {
 		one := findingAt(vocab.FileNeverBuilt, Subject{
-			Ref:       graph.Ref(graph.KindFile, file.pkgPath, []string{file.name}),
+			Ref:       inventory.Ref(inventory.KindFile, file.pkgPath, []string{file.name}),
 			Kind:      fileSubject,
 			Name:      file.name,
 			SizeLines: file.lines,
@@ -259,7 +259,7 @@ func fileNeverImported(in *Input) ([]Finding, error) {
 	var found []Finding
 	for i := range in.Merged.Symbols {
 		symbol := &in.Merged.Symbols[i]
-		if symbol.Kind != graph.KindFile || !unreached[in.packageOf(symbol)] {
+		if symbol.Kind != inventory.KindFile || !unreached[in.packageOf(symbol)] {
 			continue
 		}
 		one, held := in.finding(symbol.ID, vocab.FileNeverImported,
@@ -287,9 +287,9 @@ func unreachedPackages(in *Input) map[string]bool {
 	for i := range in.Merged.Symbols {
 		symbol := &in.Merged.Symbols[i]
 		switch {
-		case symbol.Kind == graph.KindFile:
+		case symbol.Kind == inventory.KindFile:
 			files[in.packageOf(symbol)] = true
-		case symbol.Kind == graph.KindPackage:
+		case symbol.Kind == inventory.KindPackage:
 		case in.candidateOf(symbol.ID) == nil:
 			live[in.packageOf(symbol)]++
 		}
@@ -317,7 +317,7 @@ func (in *Input) importedPackages() map[string]bool {
 	for i := range in.Merged.References {
 		ref := &in.Merged.References[i]
 		to := in.symbol(ref.To)
-		if to == nil || to.Kind != graph.KindPackage {
+		if to == nil || to.Kind != inventory.KindPackage {
 			continue
 		}
 		if from := in.symbol(ref.From); from != nil && in.packageOf(from) == in.packageOf(to) {
@@ -475,7 +475,7 @@ func moduleFileSpelling(m deps.Module) string {
 // grammar spells. The scope comes from the reference of a package so that the
 // language prefix has one owner.
 func moduleFragment(module, fragment string) string {
-	return graph.Ref(graph.KindPackage, module, nil) + fragment
+	return inventory.Ref(inventory.KindPackage, module, nil) + fragment
 }
 
 // directivePosition renders the position of a directive of one module file,
@@ -523,11 +523,11 @@ func Annotate(in *Input, findings []Finding) {
 // whose last use one configuration writes inside the candidate loses that use when
 // the candidate goes, whatever another configuration does, and the finding names
 // what the deletion would remove.
-func lastUses(in *Input) map[graph.SymbolID][]string {
+func lastUses(in *Input) map[inventory.SymbolID][]string {
 	if in.Sweep == nil {
 		return nil
 	}
-	union := make(map[graph.SymbolID][]string)
+	union := make(map[inventory.SymbolID][]string)
 	for _, one := range in.Per {
 		if one.Result == nil {
 			continue
@@ -546,7 +546,7 @@ func lastUses(in *Input) map[graph.SymbolID][]string {
 }
 
 // joinLastUses adds each module of found to its candidate's entry of union, once.
-func joinLastUses(union, found map[graph.SymbolID][]string) {
+func joinLastUses(union, found map[inventory.SymbolID][]string) {
 	for id, modules := range found {
 		for _, module := range modules {
 			if !slices.Contains(union[id], module) {

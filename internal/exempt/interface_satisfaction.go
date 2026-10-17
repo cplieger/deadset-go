@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -41,7 +43,7 @@ func InterfaceSatisfactionDetector(in *Input) ([]graph.Exemption, error) {
 
 // span is one top-level declaration's source range and the symbol it declares.
 type span struct {
-	id       graph.SymbolID
+	id       inventory.SymbolID
 	from, to token.Pos
 }
 
@@ -56,8 +58,8 @@ type spans struct {
 // declarationSpans reads the spans of every file the configuration compiles.
 func declarationSpans(in *Input) *spans {
 	held := &spans{}
-	for _, p := range graph.SortedPackages(in.Result.Packages) {
-		for _, f := range graph.SortedSyntax(p, in.Result.Fset) {
+	for _, p := range inventory.Packages(in.Result.Packages, in.Result.Fset) {
+		for _, f := range inventory.Files(p, in.Result.Fset) {
 			for _, decl := range f.Decls {
 				held.add(in, decl)
 			}
@@ -108,7 +110,7 @@ func (s *spans) addSpec(in *Input, spec ast.Spec) {
 // declaration that holds the site. A site derived from others is held by the
 // declaration of each [graph.Conversion.Held] position ([spans.holdersAt]). Empty
 // where no declaration of the inventory does.
-func (s *spans) holderOf(in *Input, c *graph.Conversion) (holder graph.SymbolID, coHolders []graph.SymbolID, asserted graph.SymbolID) {
+func (s *spans) holderOf(in *Input, c *graph.Conversion) (holder inventory.SymbolID, coHolders []inventory.SymbolID, asserted inventory.SymbolID) {
 	if len(c.Held) == 0 {
 		holder, asserted = s.declarationAt(in, c, c.Site)
 		return holder, nil, asserted
@@ -119,7 +121,7 @@ func (s *spans) holderOf(in *Input, c *graph.Conversion) (holder graph.SymbolID,
 
 // holdersAt is the declaration holding each of several positions of one conversion,
 // each once: the first the holder, the rest its co-holders, sorted.
-func (s *spans) holdersAt(in *Input, c *graph.Conversion, positions []token.Pos) (holder graph.SymbolID, coHolders []graph.SymbolID) {
+func (s *spans) holdersAt(in *Input, c *graph.Conversion, positions []token.Pos) (holder inventory.SymbolID, coHolders []inventory.SymbolID) {
 	for _, at := range positions {
 		one, _ := s.declarationAt(in, c, at)
 		switch {
@@ -136,7 +138,7 @@ func (s *spans) holdersAt(in *Input, c *graph.Conversion, positions []token.Pos)
 
 // declarationAt is the declaration holding one position of a conversion, and the
 // satisfaction assertion where the position is in one.
-func (s *spans) declarationAt(in *Input, c *graph.Conversion, at token.Pos) (holder, asserted graph.SymbolID) {
+func (s *spans) declarationAt(in *Input, c *graph.Conversion, at token.Pos) (holder, asserted inventory.SymbolID) {
 	for _, a := range s.assertions {
 		if a.from <= at && at < a.to {
 			return typeDeclaration(in, c.From), a.id
@@ -280,7 +282,7 @@ func (s *spans) retainOutside(in *Input, c *graph.Conversion, pkg *types.Package
 // ([assertable.asserted]); and on an error, the interfaces holding error's method
 // that a package declares and asserts itself ([outsideAssertions.ofError]).
 type outsideAssertions struct {
-	resolve   *graph.Resolver
+	resolve   *resolve.Resolver
 	program   map[string]bool
 	assert    *assertable
 	methodsOf map[outsideKey][]types.Object    // the methods retained, by type and package
@@ -435,7 +437,7 @@ func definedType(t types.Type) (*types.Named, bool) {
 
 // typeDeclaration is the declaration of a defined type, or of the type a pointer
 // points to.
-func typeDeclaration(in *Input, t types.Type) graph.SymbolID {
+func typeDeclaration(in *Input, t types.Type) inventory.SymbolID {
 	if pointer, ok := t.(*types.Pointer); ok {
 		t = pointer.Elem()
 	}

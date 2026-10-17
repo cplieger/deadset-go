@@ -5,13 +5,15 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 )
 
 // generatorPackages records the directory of every package of the target that a
 // directive of f passes, by a relative path, to a generator that loads the package and
 // reads its declarations by their names.
 func (d *rootDetection) generatorPackages(f *ast.File) {
-	file := d.pos.fset.Position(f.FileStart).Filename
+	file := d.pos.Fset.Position(f.FileStart).Filename
 	for _, group := range f.Comments {
 		for _, c := range group.List {
 			if line, ok := strings.CutPrefix(c.Text, generateDirective); ok {
@@ -41,7 +43,7 @@ func (d *rootDetection) packageArguments(file string, words []string) {
 			continue
 		}
 		dir := filepath.Join(filepath.Dir(file), filepath.FromSlash(arg))
-		if relative := d.pos.relative(dir); relative != "" && dir != filepath.Dir(file) {
+		if relative := d.pos.Relative(dir); relative != "" && dir != filepath.Dir(file) {
 			d.inputDirs[relative] = true
 		}
 	}
@@ -50,14 +52,13 @@ func (d *rootDetection) packageArguments(file string, words []string) {
 // generatorPackageInputs roots every declaration a package generatorPackages recorded
 // exports to a generator: an exported declaration outside a test file whose every
 // container is exported too, a type parameter excepted.
-func (d *rootDetection) generatorPackageInputs(symbols []Symbol) {
+func (d *rootDetection) generatorPackageInputs(symbols []inventory.Symbol) {
 	if len(d.inputDirs) == 0 {
 		return
 	}
 	for i := range symbols {
 		s := &symbols[i]
-		_, test := IsTestFile(s.Pos.Filename)
-		if d.inputDirs[path.Dir(s.Pos.Filename)] && s.Exported && s.Kind != KindTypeParam && !test && d.exportedContainers(s.Parent) {
+		if d.inputDirs[path.Dir(s.Pos.Filename)] && s.Exported && s.Kind != inventory.KindTypeParam && !s.InTestFile && d.exportedContainers(s.Parent) {
 			d.add(s.ID, RootGenerate, "")
 		}
 	}

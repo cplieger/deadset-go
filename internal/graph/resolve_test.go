@@ -4,20 +4,20 @@ import (
 	"errors"
 	"go/token"
 	"go/types"
-	"io/fs"
 	"os"
-	"path/filepath"
 	"slices"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
 )
 
 // resolved is one archive's load, enumeration and resolver.
 type resolved struct {
 	result  *load.Result
-	rs      *Resolver
-	symbols []Symbol
+	rs      *resolve.Resolver
+	symbols []inventory.Symbol
 }
 
 // resolverOf extracts one archive, loads it for one configuration, enumerates it
@@ -27,13 +27,9 @@ func resolverOf(t *testing.T, archive string) *resolved {
 
 	dir := extract(t, archive)
 	result, root := loadDir(t, dir, "linux", "amd64")
-	symbols, err := Symbols(result, root, os.ReadFile)
+	symbols, rs, err := inventoryOf(result, root, os.ReadFile)
 	if err != nil {
-		t.Fatalf("Setup: Symbols(%s): %v", archive, err)
-	}
-	rs, err := NewResolver(result, root, os.ReadFile, symbols)
-	if err != nil {
-		t.Fatalf("Setup: NewResolver(%s): %v", archive, err)
+		t.Fatalf("Setup: inventoryOf(%s): %v", archive, err)
 	}
 	return &resolved{result: result, rs: rs, symbols: symbols}
 }
@@ -45,7 +41,7 @@ func resolverOf(t *testing.T, archive string) *resolved {
 func (r *resolved) declared() []string {
 	ids := make([]string, 0, len(r.symbols))
 	for i := range r.symbols {
-		if r.symbols[i].Kind == KindPackage || r.symbols[i].Kind == KindFile {
+		if r.symbols[i].Kind == inventory.KindPackage || r.symbols[i].Kind == inventory.KindFile {
 			continue
 		}
 		ids = append(ids, string(r.symbols[i].ID))
@@ -56,8 +52,7 @@ func (r *resolved) declared() []string {
 
 // resolvedDefs sorts every object the type checker defined, over every variant of
 // the load, into the declarations the resolver named and the names it named none
-// for. Every position renders, because a load carrying a declaration whose
-// position does not is a resolver that was never built.
+// for.
 func (r *resolved) resolvedDefs() (named, none []string) {
 	for _, p := range r.result.Packages {
 		for _, obj := range p.TypesInfo.Defs {
@@ -109,10 +104,9 @@ func TestResolverOverALoadedConfiguration(t *testing.T) {
 	named, none := r.resolvedDefs()
 
 	t.Run("it names every declaration the inventory holds", func(t *testing.T) {
-		// The resolver and the enumeration answer the same question from two
-		// indexes built independently, so the set the resolver names over every
-		// object the type checker defined is the enumeration's own set. A resolver
-		// keyed on anything but the rendered position answers a different set.
+		// The set the resolver names over every object the type checker defined is
+		// the enumeration's own set: an object resolves through the position its
+		// declaration is written at, and nothing else.
 		if want := r.declared(); !slices.Equal(named, want) {
 			t.Errorf("Resolver.Object over every definition of receivers.txtar named %v, want %v", named, want)
 		}
@@ -166,9 +160,14 @@ func TestResolverOverALoadedConfiguration(t *testing.T) {
 }
 
 func TestResolverNamesNothingForAnObjectWithNoPosition(t *testing.T) {
-	rs, err := NewResolver(&load.Result{Fset: token.NewFileSet()}, "/target", os.ReadFile, nil)
+	empty := &load.Result{Fset: token.NewFileSet()}
+	inv, err := inventory.Of(empty, "/target", os.ReadFile)
 	if err != nil {
-		t.Fatalf("Setup: NewResolver: %v", err)
+		t.Fatalf("Setup: inventory.Of: %v", err)
+	}
+	rs, err := resolve.New(empty, inv)
+	if err != nil {
+		t.Fatalf("Setup: resolve.New: %v", err)
 	}
 
 	cases := map[string]types.Object{
@@ -199,29 +198,17 @@ func (c *countingReader) read(name string) ([]byte, error) {
 	return os.ReadFile(name)
 }
 
-func TestResolverResolvesADeclarationWithoutReadingItsSource(t *testing.T) {
+func TestResolverResolvesWithoutReadingASource(t *testing.T) {
 	dir := extract(t, "receivers.txtar")
 	result, root := loadDir(t, dir, "linux", "amd64")
-	symbols, err := Symbols(result, root, os.ReadFile)
-	if err != nil {
-		t.Fatalf("Setup: Symbols(receivers.txtar): %v", err)
-	}
-
 	reader := &countingReader{}
-	rs, err := NewResolver(result, root, reader.read, symbols)
+	symbols, rs, err := inventoryOf(result, root, reader.read)
 	if err != nil {
-		t.Fatalf("Setup: NewResolver(receivers.txtar): %v", err)
+		t.Fatalf("Setup: inventoryOf(receivers.txtar): %v", err)
 	}
-	indexed := reader.reads
-	if indexed == 0 {
-		t.Fatalf("NewResolver(receivers.txtar) read %d files, want at least one: it renders every declaration the load defines", indexed)
-	}
+	enumerated := reader.reads
 	r := &resolved{result: result, rs: rs, symbols: symbols}
 
-	// A declaration of the target and a declaration of a dependency are the two
-	// answers At has, and neither reaches the reader: the index the constructor
-	// built is what holds the first, and a position it does not hold is the
-	// second, whether or not the target root contains it.
 	held := r.objectsNamed("Catalog")
 	if len(held) == 0 {
 		t.Fatalf("receivers.txtar defines no Catalog, so the case is untested")
@@ -229,7 +216,6 @@ func TestResolverResolvesADeclarationWithoutReadingItsSource(t *testing.T) {
 	if id, named := rs.Object(held[0]); !named {
 		t.Errorf("Resolver.Object(Catalog) named %q and held = false, want the declaration of the inventory", id)
 	}
-
 	foreign := r.dependencyObject()
 	if foreign == nil {
 		t.Fatalf("receivers.txtar uses no object of package %s, so the case is untested", testingPath)
@@ -237,59 +223,20 @@ func TestResolverResolvesADeclarationWithoutReadingItsSource(t *testing.T) {
 	if id, named := rs.Object(foreign); named {
 		t.Errorf("Resolver.Object(%s.%s) named %q, want none", testingPath, foreign.Name(), id)
 	}
-
-	if reader.reads != indexed {
-		t.Errorf("two calls to Resolver.Object read %d files, want the %d NewResolver read: resolving a position is a lookup", reader.reads-indexed, indexed)
+	if reader.reads != enumerated {
+		t.Errorf("building the resolver and two calls to Resolver.Object read %d files, want none: resolving is a lookup", reader.reads-enumerated)
 	}
 }
 
-func TestNewResolverFailsOnAFileItCannotRead(t *testing.T) {
-	dir := extract(t, "receivers.txtar")
+func TestResolverRefusesATargetFileWhosePositionsDoNotRender(t *testing.T) {
+	dir := extract(t, "unrendered-local.txtar")
 	result, root := loadDir(t, dir, "linux", "amd64")
-	symbols, err := Symbols(result, root, os.ReadFile)
+	inv, err := inventory.Of(result, root, os.ReadFile)
 	if err != nil {
-		t.Fatalf("Setup: Symbols(receivers.txtar): %v", err)
+		t.Fatalf("Setup: inventory.Of(unrendered-local.txtar): %v", err)
 	}
 
-	// Every file a load compiles is a file of the target, so one the reader
-	// refuses is a source the run cannot reason about rather than a declaration
-	// the analysis does not hold: the construction that renders it fails, and no
-	// resolver exists to answer "not a symbol" for what it could not read.
-	unreadable := "catalog.go"
-	read := func(name string) ([]byte, error) {
-		if filepath.Base(name) == unreadable {
-			return nil, fs.ErrPermission
-		}
-		return os.ReadFile(name)
-	}
-
-	rs, err := NewResolver(result, root, read, symbols)
-	if rs != nil {
-		t.Errorf("NewResolver(receivers.txtar, a reader refusing %s) returned a resolver, want none", unreadable)
-	}
-	if !errors.Is(err, ErrSource) {
-		t.Errorf("NewResolver(receivers.txtar, a reader refusing %s) error = %v, want one satisfying errors.Is(err, %v)", unreadable, err, ErrSource)
-	}
-}
-
-func TestNewResolverRefusesALoadMissingWhatTheRenderingNeeds(t *testing.T) {
-	cases := map[string]struct {
-		result *load.Result
-		read   ReadFile
-	}{
-		"no result":   {read: os.ReadFile},
-		"no file set": {result: &load.Result{}, read: os.ReadFile},
-		"no reader":   {result: &load.Result{Fset: token.NewFileSet()}},
-	}
-	for name, test := range cases {
-		t.Run(name, func(t *testing.T) {
-			rs, err := NewResolver(test.result, "/target", test.read, nil)
-			if rs != nil {
-				t.Errorf("NewResolver(%s) returned a resolver, want none", name)
-			}
-			if !errors.Is(err, ErrIncompleteLoad) {
-				t.Errorf("NewResolver(%s) error = %v, want one wrapping %v", name, err, ErrIncompleteLoad)
-			}
-		})
+	if _, err := resolve.New(result, inv); !errors.Is(err, inventory.ErrSource) {
+		t.Errorf("resolve.New(unrendered-local.txtar) returned %v, want %v: the local x renders outside short.txt", err, inventory.ErrSource)
 	}
 }

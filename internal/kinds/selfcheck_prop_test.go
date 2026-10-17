@@ -12,6 +12,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/edges"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
 	"github.com/cplieger/deadset-spec/v8/report"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
@@ -50,7 +51,7 @@ const drawnPartColumn = 20
 type drawnFinding struct {
 	code   vocab.Code
 	symbol string
-	id     graph.SymbolID
+	id     inventory.SymbolID
 	line   int
 }
 
@@ -102,7 +103,7 @@ func drawnFindings(t *rapid.T) []drawnFinding {
 		found = append(found, drawnFinding{
 			code:   code,
 			symbol: "go://" + drawnModulePath + "#" + name,
-			id:     graph.SymbolID(drawnFilePath + ":" + strconv.Itoa(i+1) + ":1"),
+			id:     inventory.SymbolID(drawnFilePath + ":" + strconv.Itoa(i+1) + ":1"),
 			line:   i + 1,
 		})
 	}
@@ -130,13 +131,13 @@ func drawnEmitters(found []drawnFinding) map[vocab.Code]Emitter {
 
 // inventoryOf is the inventory a drawn finding set is about, which is what a
 // document's entries and rows bind against.
-func inventoryOf(found []drawnFinding) []graph.Symbol {
-	symbols := make([]graph.Symbol, 0, len(found))
+func inventoryOf(found []drawnFinding) []inventory.Symbol {
+	symbols := make([]inventory.Symbol, 0, len(found))
 	for i := range found {
-		symbols = append(symbols, graph.Symbol{
+		symbols = append(symbols, inventory.Symbol{
 			ID:       found[i].id,
 			Ref:      found[i].symbol,
-			Kind:     graph.KindFunc,
+			Kind:     inventory.KindFunc,
 			Pos:      token.Position{Filename: drawnFilePath, Line: found[i].line, Column: 1},
 			Exported: true,
 		})
@@ -148,7 +149,7 @@ func inventoryOf(found []drawnFinding) []graph.Symbol {
 // inventory the records bind against, the records themselves, and the sweep answer
 // naming the declarations a mark held back, which is the dead-subject half of the
 // drawn set and nothing else.
-func inputOfRecords(records []suppress.Record, symbols []graph.Symbol, suppressed []graph.SymbolID) *Input {
+func inputOfRecords(records []suppress.Record, symbols []inventory.Symbol, suppressed []inventory.SymbolID) *Input {
 	resolved := defaultConfig()
 	resolved.Target.Kind = report.TargetKindApplication
 	return &Input{
@@ -184,7 +185,7 @@ func TestASuppressionDocumentRoundTrips(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		found := drawnFindings(t)
 		symbols := inventoryOf(found)
-		suppressed := make([]graph.SymbolID, 0, len(found))
+		suppressed := make([]inventory.SymbolID, 0, len(found))
 		for i := range found {
 			if !found[i].live() {
 				suppressed = append(suppressed, found[i].id)
@@ -226,7 +227,7 @@ func TestASuppressionDocumentRoundTrips(t *testing.T) {
 // The ignore file and the baseline are written and read back; the inline records are
 // built directly, one per finding, at the line above the declaration.
 func recordsOf(t *rapid.T, dir string, mechanism suppress.Mechanism, found []drawnFinding,
-	symbols []graph.Symbol,
+	symbols []inventory.Symbol,
 ) ([]suppress.Record, []suppress.Refusal) {
 	switch mechanism {
 	case suppress.MechanismBaseline:

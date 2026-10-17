@@ -1,0 +1,38 @@
+One module whose function writes package variables and fields in every shape a
+write takes: a single assignment, an increment, a keyed literal element, a delete
+statement, a deferred delete, a two-target assignment, a range assignment, and a
+store through a field holding a struct.
+
+-- go.mod --
+module example.com/spans
+
+go 1.27.1
+-- spans.go --
+package spans
+
+type inner struct{ leaf int }
+
+type outer struct {
+	in   inner
+	hits int
+}
+
+var (
+	count, other int
+	table        = map[string]int{}
+	gone         = map[string]int{}
+	key          string
+	box          outer
+)
+
+func Write() {
+	count = 1
+	box.hits++
+	_ = outer{hits: 2}
+	delete(table, "a")
+	defer delete(gone, "b")
+	count, other = 3, 4
+	for key = range table {
+	}
+	box.in.leaf = 5
+}

@@ -4,6 +4,8 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 )
 
 // readStructConversion records the field reads of one conversion between two struct
@@ -13,7 +15,7 @@ import (
 // (https://go.dev/ref/spec#Conversions). A type parameter operand stands for each type
 // argument an instantiation gives it, and a type parameter destination for the struct
 // type its constraint's core type is.
-func (p *referencePass) readStructConversion(call *ast.CallExpr, encl SymbolID) {
+func (p *referencePass) readStructConversion(call *ast.CallExpr, encl inventory.SymbolID) {
 	if len(call.Args) != 1 {
 		return
 	}
@@ -25,7 +27,7 @@ func (p *referencePass) readStructConversion(call *ast.CallExpr, encl SymbolID) 
 	if from == nil {
 		return
 	}
-	site := &identityRead{read: make(map[SymbolID]bool), encl: encl, pos: call.Pos()}
+	site := &identityRead{read: make(map[inventory.SymbolID]bool), encl: encl, pos: call.Pos()}
 	to := coreOf(target.Type)
 	for _, operand := range p.operandTypes(from, make(map[token.Pos]bool)) {
 		a, b, convertible := convertedStructs(operand, to)
@@ -38,8 +40,8 @@ func (p *referencePass) readStructConversion(call *ast.CallExpr, encl SymbolID) 
 // identityRead is one conversion's walk: where it is recorded, and the fields it has
 // read, so each field is read once per conversion.
 type identityRead struct {
-	read map[SymbolID]bool
-	encl SymbolID
+	read map[inventory.SymbolID]bool
+	encl inventory.SymbolID
 	pos  token.Pos
 }
 
@@ -171,8 +173,8 @@ func componentPairs(a, b types.Type) [][2]types.Type {
 
 // readIdentityField records one read of a field at the conversion.
 func (p *referencePass) readIdentityField(field *types.Var, site *identityRead) {
-	if to, ok := p.symbolOf(field.Origin()); ok && !site.read[to] {
+	if to, ok := p.resolve.Object(field.Origin()); ok && !site.read[to] {
 		site.read[to] = true
-		p.add(site.encl, to, site.pos, RefRead)
+		p.add(site.encl, to, site.pos, RefRead, viaStructIdentity)
 	}
 }

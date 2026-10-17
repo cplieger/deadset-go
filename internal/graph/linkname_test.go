@@ -5,6 +5,8 @@ import (
 	"go/parser"
 	"go/token"
 	"testing"
+
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 )
 
 func TestEmbeddedNameIsTheUnqualifiedNameOfTheEmbeddedType(t *testing.T) {
@@ -30,7 +32,7 @@ func TestEmbeddedNameIsTheUnqualifiedNameOfTheEmbeddedType(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			field := embeddedFieldOf(t, test.source)
 			got := ""
-			if named := EmbeddedName(field); named != nil {
+			if named := inventory.EmbeddedName(field); named != nil {
 				got = named.Name
 			}
 			if got != test.want {

@@ -33,7 +33,7 @@ func (o *templateOrigins) everyParse(engine string) map[string]bool {
 	return inv.names
 }
 
-func (o *templateOrigins) readEveryParse(engine string) *inventory {
+func (o *templateOrigins) readEveryParse(engine string) *templateSet {
 	inv := o.inventory()
 	if outsideMentionsTemplate(o.in, engine) {
 		inv.complete = false
@@ -49,7 +49,7 @@ func (o *templateOrigins) readEveryParse(engine string) *inventory {
 
 // readPackage reads one package for [templateOrigins.everyParse]: every node of its
 // files, then every name of a parse or unread method of the engine it uses but calls.
-func (o *templateOrigins) readPackage(info *types.Info, files []*ast.File, engine string, inv *inventory) {
+func (o *templateOrigins) readPackage(info *types.Info, files []*ast.File, engine string, inv *templateSet) {
 	called := make(map[*ast.Ident]bool)
 	for _, file := range files {
 		dir := filepath.Dir(o.fset.Position(file.FileStart).Filename)
@@ -69,7 +69,7 @@ func (o *templateOrigins) readPackage(info *types.Info, files []*ast.File, engin
 }
 
 // readNode reads one node of the program for [templateOrigins.everyParse].
-func (o *templateOrigins) readNode(info *types.Info, dir, engine string, n ast.Node, inv *inventory, called map[*ast.Ident]bool) {
+func (o *templateOrigins) readNode(info *types.Info, dir, engine string, n ast.Node, inv *templateSet, called map[*ast.Ident]bool) {
 	switch n := n.(type) {
 	case *ast.CallExpr:
 		o.readCall(info, dir, engine, n, inv, called)
@@ -93,7 +93,7 @@ func (o *templateOrigins) readNode(info *types.Info, dir, engine string, n ast.N
 }
 
 // readCall reads one call of a function or method of the engine.
-func (*templateOrigins) readCall(info *types.Info, dir, engine string, call *ast.CallExpr, inv *inventory, called map[*ast.Ident]bool) {
+func (*templateOrigins) readCall(info *types.Info, dir, engine string, call *ast.CallExpr, inv *templateSet, called map[*ast.Ident]bool) {
 	fn, isFunc := resolveObject(info, call.Fun).(*types.Func)
 	if !isFunc || !isEngineFunc(fn, engine) {
 		return

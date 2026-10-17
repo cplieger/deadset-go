@@ -17,9 +17,10 @@ import (
 	spec "github.com/cplieger/deadset-spec/v8"
 )
 
-// memoryExhaustionLine is the line the Contract's exit-code table states for a run
-// that needs more memory than the machine makes available, as a pattern whose two
-// groups are N and M.
+// memoryExhaustionLine is the line this analyzer prints for a run that needs more
+// memory than the machine makes available, as a pattern whose two groups are N and
+// M. The text after "memory exhausted: " is the one the Contract's memory-exhausted
+// run failure opens with.
 func memoryExhaustionLine(t *testing.T) *regexp.Regexp {
 	t.Helper()
 	body, err := spec.Contract.ReadFile("contract/exit-codes.json")
@@ -27,18 +28,31 @@ func memoryExhaustionLine(t *testing.T) *regexp.Regexp {
 		t.Fatalf("Setup: read contract/exit-codes.json: %v", err)
 	}
 	var document struct {
-		MemoryExhaustion string `json:"memory_exhaustion"`
+		FailureClasses struct {
+			Run struct {
+				Classes []struct {
+					Class string `json:"class"`
+					Fix   string `json:"fix"`
+				} `json:"classes"`
+			} `json:"run"`
+		} `json:"failure_classes"`
 	}
 	if err := json.Unmarshal(body, &document); err != nil {
 		t.Fatalf("Setup: decode contract/exit-codes.json: %v", err)
 	}
-	quoted := regexp.MustCompile(`"([^"]+)"`).FindStringSubmatch(document.MemoryExhaustion)
+	var fix string
+	for _, class := range document.FailureClasses.Run.Classes {
+		if class.Class == "memory-exhausted" {
+			fix = class.Fix
+		}
+	}
+	quoted := regexp.MustCompile(`"([^"]+)"`).FindStringSubmatch(fix)
 	if quoted == nil {
-		t.Fatalf("Setup: memory_exhaustion %q quotes no line", document.MemoryExhaustion)
+		t.Fatalf("Setup: the memory-exhausted run failure's fix %q quotes no line", fix)
 	}
 	number := `(\d+(?:\.\d)?)`
 	pattern := strings.NewReplacer(" N ", " "+number+" ", " M ", " "+number+" ").Replace(regexp.QuoteMeta(quoted[1]))
-	return regexp.MustCompile(`^` + pattern + `\n$`)
+	return regexp.MustCompile(`^memory exhausted: ` + pattern + `\n$`)
 }
 
 // held keeps the live heap the low-budget test runs under.

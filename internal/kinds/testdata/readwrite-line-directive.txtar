@@ -1,0 +1,68 @@
+One command with two write-only declarations whose writes or annotations a line
+directive splits: the directive maps the second half of each to a file of the
+target holding the same bytes, as a generator's copy does. Source order still puts
+the use of strings inside the write to sink and the use of Mode inside the
+annotation of settings.modes.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+import "strings"
+
+// Mode is named by one write-only field's annotation alone.
+type Mode int
+
+type settings struct {
+	modes map[string]/*line shadow.txt:6:1*/ Mode /*line main.go:9:2*/
+	name  string
+}
+
+// sink is stored into through the file's one use of strings.
+var sink string
+
+func record() {
+	sink =
+//line shadow.txt:7
+		strings.TrimSpace(" a ")
+//line main.go:20
+}
+
+func load() settings { return settings{modes: nil, name: "app"} }
+
+func main() {
+	record()
+	println(load().name)
+}
+-- shadow.txt --
+package main
+
+import "strings"
+
+// Mode is named by one write-only field's annotation alone.
+type Mode int
+
+type settings struct {
+	modes map[string]/*line shadow.txt:6:1*/ Mode /*line main.go:9:2*/
+	name  string
+}
+
+// sink is stored into through the file's one use of strings.
+var sink string
+
+func record() {
+	sink =
+//line shadow.txt:7
+		strings.TrimSpace(" a ")
+//line main.go:20
+}
+
+func load() settings { return settings{modes: nil, name: "app"} }
+
+func main() {
+	record()
+	println(load().name)
+}

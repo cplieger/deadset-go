@@ -14,7 +14,7 @@ import (
 	"bytes"
 	"go/token"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"golang.org/x/mod/modfile"
 )
@@ -103,5 +103,5 @@ func site(text []byte, line *modfile.Line) token.Position {
 		}
 	}
 	start := bytes.LastIndexByte(text[:at], '\n') + 1
-	return token.Position{Filename: modFileName, Line: line.Start.Line, Column: graph.Column(text[start:], at-start)}
+	return token.Position{Filename: modFileName, Line: line.Start.Line, Column: inventory.Column(text[start:], at-start)}
 }

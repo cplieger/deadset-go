@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -210,7 +210,7 @@ func TestIgnoreFileBindsOnCodeSymbolAndPathTogether(t *testing.T) {
 		name   string
 		symbol string
 		path   string
-		want   graph.SymbolID
+		want   inventory.SymbolID
 	}{
 		{"the function the entry names", "go://example.com/samename#Helper", "catalog.go", "catalog.go:6:6"},
 		{"the method of another file", "go://example.com/samename#Queue.Helper", "other.go", "other.go:7:16"},

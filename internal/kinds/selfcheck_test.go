@@ -10,6 +10,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
 	"github.com/cplieger/deadset-spec/v8/report"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
@@ -56,8 +57,8 @@ func suppressed(t *testing.T, archive string, resolved config.Config) *Input {
 
 // boundMarks is the declaration of every record that bound one, which is what seeds
 // the sweep.
-func boundMarks(marks []suppress.Record) []graph.SymbolID {
-	bound := make([]graph.SymbolID, 0, len(marks))
+func boundMarks(marks []suppress.Record) []inventory.SymbolID {
+	bound := make([]inventory.SymbolID, 0, len(marks))
 	for i := range marks {
 		if marks[i].Bound != "" && marks[i].Code.Subject() != vocab.SubjectPart {
 			bound = append(bound, marks[i].Bound)
@@ -694,7 +695,7 @@ func TestTheRecordInEffectIsTheFirstOfTheReadingOrderAndNotOfAnyFileOrder(t *tes
 	// ignore document. The record in effect is that directive all the same, because a
 	// directive is read before the ignore file whatever either is written in.
 	inEffect := make([]string, 0, len(in.Marks))
-	suppressedIDs := make(map[graph.SymbolID]bool, len(in.Sweep.Suppressed))
+	suppressedIDs := make(map[inventory.SymbolID]bool, len(in.Sweep.Suppressed))
 	for _, id := range in.Sweep.Suppressed {
 		suppressedIDs[id] = true
 	}

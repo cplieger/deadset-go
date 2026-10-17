@@ -4,7 +4,9 @@ import (
 	"go/token"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -41,7 +43,7 @@ func GeneratedFileDetector(in *Input) ([]graph.Exemption, error) {
 	var found []graph.Exemption
 	for i := range in.Symbols {
 		s := &in.Symbols[i]
-		if s.Kind == graph.KindPackage || s.Kind == graph.KindFile {
+		if s.Kind == inventory.KindPackage || s.Kind == inventory.KindFile {
 			continue
 		}
 		site, generated := sites[s.Pos.Filename]
@@ -62,10 +64,10 @@ func GeneratedFileDetector(in *Input) ([]graph.Exemption, error) {
 // configuration's load, keyed by the target-relative path the inventory spells its
 // positions with. One file is reached once per variant of its package and renders
 // to one entry.
-func GeneratedSites(r *load.Result, resolve *graph.Resolver) (map[string]token.Position, error) {
+func GeneratedSites(r *load.Result, rs *resolve.Resolver) (map[string]token.Position, error) {
 	sites := make(map[string]token.Position)
 	for _, clause := range r.Generated {
-		site, err := resolve.Render(clause)
+		site, err := rs.Render(clause)
 		if err != nil {
 			return nil, err
 		}

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -110,7 +111,7 @@ func staleSuppressions(in *Input) ([]Finding, error) {
 	if in == nil || in.Config == nil {
 		return nil, nil
 	}
-	suppressed := make(map[graph.SymbolID]bool, len(in.staleInput().Suppressed))
+	suppressed := make(map[inventory.SymbolID]bool, len(in.staleInput().Suppressed))
 	for _, id := range in.staleInput().Suppressed {
 		suppressed[id] = true
 	}
@@ -151,7 +152,7 @@ func keyOf(mark *suppress.Record) recordKey {
 // symbol back stands for it: read for a live code that is no part kind, whose shape
 // is the declaration's own, and for the first record in Marks' reading order that
 // bound the declaration under the code.
-func (in *Input) inEffect(at int, suppressed map[graph.SymbolID]bool) bool {
+func (in *Input) inEffect(at int, suppressed map[inventory.SymbolID]bool) bool {
 	if len(in.withheld[at]) > 0 {
 		return true
 	}
@@ -186,7 +187,7 @@ var shapeCodes = func() map[vocab.Code]bool {
 // another shape code than the declaration's is in effect for nothing; a record naming
 // any other liveness code is left to the sweep, whose answer for a marked declaration
 // is the only one there is.
-func (in *Input) wouldBeCode(id graph.SymbolID) vocab.Code {
+func (in *Input) wouldBeCode(id inventory.SymbolID) vocab.Code {
 	symbol := in.symbol(id)
 	if symbol == nil {
 		return ""
@@ -365,7 +366,7 @@ func Totals(in *Input) (inEffect, reasons int) {
 	if in == nil || in.Config == nil {
 		return 0, 0
 	}
-	suppressed := make(map[graph.SymbolID]bool, len(in.staleInput().Suppressed))
+	suppressed := make(map[inventory.SymbolID]bool, len(in.staleInput().Suppressed))
 	for _, id := range in.staleInput().Suppressed {
 		suppressed[id] = true
 	}
@@ -423,7 +424,7 @@ func (in *Input) fileRef(path string) string {
 	}
 	for i := range in.Merged.Symbols {
 		symbol := &in.Merged.Symbols[i]
-		if symbol.Kind == graph.KindFile && symbol.Pos.Filename == path {
+		if symbol.Kind == inventory.KindFile && symbol.Pos.Filename == path {
 			return symbol.Ref
 		}
 	}

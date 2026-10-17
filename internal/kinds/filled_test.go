@@ -3,7 +3,7 @@ package kinds
 import (
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -13,7 +13,7 @@ func TestCapFilled_lowersAFindingAboutAFilledFieldToPossible(t *testing.T) {
 	in := inputOf(t, "filled-field.txtar", resolved, Consumers{})
 	for i := range in.Merged.Symbols {
 		if in.Merged.Symbols[i].Ref == "go://example.com/filled#request.Extra" {
-			in.Filled = map[graph.SymbolID]bool{in.Merged.Symbols[i].ID: true}
+			in.Filled = map[inventory.SymbolID]bool{in.Merged.Symbols[i].ID: true}
 		}
 	}
 	if len(in.Filled) != 1 {

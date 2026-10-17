@@ -1,0 +1,28 @@
+One package selecting a field through one spelling of an unnamed struct type whose
+identical twin another declaration spells, with an in-package test file, so the
+package and its test variant both type-check the two spellings.
+
+-- go.mod --
+module example.com/twins
+
+go 1.27.1
+-- twins.go --
+package twins
+
+type holder struct {
+	X *struct{ C string }
+}
+
+func use(p *struct{ C string }) string { return p.C }
+
+func read(h holder) string { return use(h.X) }
+-- twins_test.go --
+package twins
+
+import "testing"
+
+func TestRead(t *testing.T) {
+	if got := read(holder{X: &struct{ C string }{}}); got != "" {
+		t.Errorf("read = %q", got)
+	}
+}

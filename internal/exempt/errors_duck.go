@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -17,7 +18,7 @@ import (
 // A type entering another interface, from which a chain of sites leads to error,
 // retains each method once per chain, held by every declaration holding a site of it.
 func ErrorsDuckTypingDetector(in *Input) ([]graph.Exemption, error) {
-	scan := &errorsDuckScan{in: in, held: make(map[graph.SymbolID]struct{}), chained: make(map[string]bool)}
+	scan := &errorsDuckScan{in: in, held: make(map[inventory.SymbolID]struct{}), chained: make(map[string]bool)}
 	scan.build()
 
 	all, err := allConversionsOf(in)
@@ -38,7 +39,7 @@ func ErrorsDuckTypingDetector(in *Input) ([]graph.Exemption, error) {
 		return nil, err
 	}
 
-	slices.SortStableFunc(scan.found, func(a, b errorsDuckRetained) int { return graph.ByPosition(a.at, b.at) })
+	slices.SortStableFunc(scan.found, func(a, b errorsDuckRetained) int { return inventory.ByPosition(a.at, b.at) })
 	found := make([]graph.Exemption, 0, len(scan.found))
 	for i := range scan.found {
 		found = append(found, scan.found[i].exemption)
@@ -49,8 +50,8 @@ func ErrorsDuckTypingDetector(in *Input) ([]graph.Exemption, error) {
 // errorsDuckScan accumulates the methods one configuration retains.
 type errorsDuckScan struct {
 	in         *Input
-	held       map[graph.SymbolID]struct{} // retained unheld, through a site the program writes to error
-	chained    map[string]bool             // retained held, by method and holders
+	held       map[inventory.SymbolID]struct{} // retained unheld, through a site the program writes to error
+	chained    map[string]bool                 // retained held, by method and holders
 	errorIface *types.Interface
 	forms      []errorsDuckForm
 	found      []errorsDuckRetained
@@ -75,8 +76,8 @@ type errorsDuckRetained struct {
 // declarations holding it where it is derived from sites several hold.
 type errorsDuckSite struct {
 	from      types.Type
-	holder    graph.SymbolID
-	coHolders []graph.SymbolID
+	holder    inventory.SymbolID
+	coHolders []inventory.SymbolID
 	at        token.Position
 }
 
@@ -149,7 +150,7 @@ func (s *errorsDuckScan) sites(conversions []graph.Conversion) ([]errorsDuckSite
 		return 1
 	}
 	slices.SortFunc(sites, func(a, b errorsDuckSite) int {
-		return cmp.Or(cmp.Compare(rank(a.at), rank(b.at)), graph.ByPosition(a.at, b.at))
+		return cmp.Or(cmp.Compare(rank(a.at), rank(b.at)), inventory.ByPosition(a.at, b.at))
 	})
 	return sites, nil
 }
@@ -205,7 +206,7 @@ func (s *errorsDuckScan) throughChains(spans *spans, chains *graph.Chains, c *gr
 // holds, because the chain is then a test's evidence, and its first site otherwise.
 func (s *errorsDuckScan) evidence(first token.Pos, positions []token.Pos) token.Pos {
 	for _, at := range positions {
-		if _, test := graph.IsTestFile(s.in.Result.Fset.Position(at).Filename); test {
+		if _, test := inventory.IsTestFile(s.in.Result.Fset.Position(at).Filename); test {
 			return at
 		}
 	}
@@ -254,7 +255,7 @@ func (s *errorsDuckScan) conversion(c *errorsDuckSite) error {
 // first reports whether one method is retained for the first time at one site: once
 // per method unheld, and once per method and set of holders held. A method retained
 // unheld is never retained again.
-func (s *errorsDuckScan) first(id graph.SymbolID, c *errorsDuckSite) bool {
+func (s *errorsDuckScan) first(id inventory.SymbolID, c *errorsDuckSite) bool {
 	if _, already := s.held[id]; already {
 		return false
 	}

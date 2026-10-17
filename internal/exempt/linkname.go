@@ -12,6 +12,7 @@ import (
 	"unicode"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
@@ -76,7 +77,7 @@ type linkname struct {
 // linknameFact is one retention the class records: the symbol, the rendered site of
 // the evidence and the clause.
 type linknameFact struct {
-	id     graph.SymbolID
+	id     inventory.SymbolID
 	detail string
 	site   token.Position
 }
@@ -117,7 +118,7 @@ func (d *linkname) exemptions() []graph.Exemption {
 	}
 	slices.SortFunc(found, func(a, b graph.Exemption) int {
 		return cmp.Or(
-			graph.ByPosition(a.Site, b.Site),
+			inventory.ByPosition(a.Site, b.Site),
 			cmp.Compare(a.ID, b.ID),
 			strings.Compare(a.Detail, b.Detail),
 		)
@@ -146,7 +147,7 @@ func (d *linkname) keep(obj types.Object, site token.Pos, detail string) error {
 // A function and a variable are those two kinds: they are what an assembly
 // definition and a plugin lookup name, so a name denoting any other kind
 // of declaration is not evidence of a caller outside the type checker's view.
-func (d *linkname) linkable(obj types.Object) (graph.SymbolID, bool) {
+func (d *linkname) linkable(obj types.Object) (inventory.SymbolID, bool) {
 	switch obj.(type) {
 	case *types.Func, *types.Var:
 		return d.in.Resolve.Object(obj)
@@ -158,7 +159,7 @@ func (d *linkname) linkable(obj types.Object) (graph.SymbolID, bool) {
 // at retains one symbol against a site that is already rendered, which is how an
 // assembly file names one: the file is not parsed, so its directives have no
 // position in the file set.
-func (d *linkname) at(id graph.SymbolID, site token.Position, detail string) {
+func (d *linkname) at(id inventory.SymbolID, site token.Position, detail string) {
 	d.found[linknameFact{id: id, site: site, detail: detail}] = struct{}{}
 }
 
@@ -209,7 +210,7 @@ func (d *linkname) plugin(p *packages.Package) error {
 		if f == nil {
 			continue
 		}
-		if _, test := graph.IsTestFile(d.in.Result.Fset.Position(f.FileStart).Filename); test {
+		if _, test := inventory.IsTestFile(d.in.Result.Fset.Position(f.FileStart).Filename); test {
 			continue
 		}
 		if err := d.keep(obj, f.Package, detailPluginMain); err != nil {
@@ -229,7 +230,7 @@ func (d *linkname) plugin(p *packages.Package) error {
 func targetRelative(root, path string) (string, error) {
 	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
 	if err != nil || !filepath.IsLocal(rel) {
-		return "", fmt.Errorf("%w: %s is outside %s", graph.ErrSource, path, root)
+		return "", fmt.Errorf("%w: %s is outside %s", inventory.ErrSource, path, root)
 	}
 	return filepath.ToSlash(rel), nil
 }

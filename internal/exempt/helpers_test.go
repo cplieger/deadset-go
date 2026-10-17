@@ -7,7 +7,9 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -119,17 +121,18 @@ func inputOf(t *testing.T, archive string, opts Options, tags ...string) *Input 
 		program = loadTwoModules
 	}
 	result, root := program(t, dir, tags...)
-	symbols, err := graph.Symbols(result, root, os.ReadFile)
+	inv, err := inventory.Of(result, root, os.ReadFile)
 	if err != nil {
-		t.Fatalf("Setup: graph.Symbols(%s): %v", archive, err)
+		t.Fatalf("Setup: inventory.Of(%s): %v", archive, err)
 	}
-	resolve, err := graph.NewResolver(result, root, os.ReadFile, symbols)
+	symbols := inv.Symbols
+	resolver, err := resolve.New(result, inv)
 	if err != nil {
-		t.Fatalf("Setup: graph.NewResolver(%s): %v", archive, err)
+		t.Fatalf("Setup: resolve.New(%s): %v", archive, err)
 	}
 	return &Input{
 		Result:  result,
-		Resolve: resolve,
+		Resolve: resolver,
 		Symbols: symbols,
 		Root:    root,
 		Read:    os.ReadFile,
@@ -142,7 +145,7 @@ func inputOf(t *testing.T, archive string, opts Options, tags ...string) *Input 
 // returned when it ran alone, and the union Compute returned under each mode. No part
 // of the input it was computed from is held.
 type sharedAnalysis struct {
-	symbols  []graph.Symbol
+	symbols  []inventory.Symbol
 	detected map[vocab.Exemption][]graph.Exemption
 	failed   map[vocab.Exemption]error
 	union    map[bool][]graph.Exemption
@@ -193,7 +196,7 @@ func analyzeShared(in *Input) *sharedAnalysis {
 }
 
 // inventory is the declarations the archive's load enumerated.
-func (a *sharedAnalysis) inventory(t *testing.T) []graph.Symbol {
+func (a *sharedAnalysis) inventory(t *testing.T) []inventory.Symbol {
 	t.Helper()
 
 	return testsupport.Detached(t, a.symbols)

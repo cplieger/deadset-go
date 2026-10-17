@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/run"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -295,6 +296,58 @@ func TestAnalyzeAnswersWhereAnAssertionHoldsAMethodOneConfigurationLacks(t *test
 	}
 	if want := []string{"go://example.com/app#windowsOnly"}; !slices.Equal(found, want) {
 		t.Errorf("analyze() reported %v, want %v: the assertion holds sysWriter's methods", found, want)
+	}
+}
+
+// A package a production file imports under linux and only a test imports under
+// windows is production code in the matrix, so the references its windows-only file
+// makes are production references under either order of the configurations.
+func TestAnalyzeReadsTheReferencesOfAPackageOneConfigurationImportsFromProductionAsProduction(t *testing.T) {
+	files := map[string]string{
+		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
+		"internal/sys/sys.go": "package sys\n\nimport \"testing\"\n\nfunc Live() int { return 1 }\n\n" +
+			"func OnlyTested(t testing.TB) int {\n\tt.Helper()\n\treturn 2\n}\n",
+		"internal/sys/sys_windows.go": "package sys\n\nfunc Win() int { return helper() }\n\nfunc helper() int { return 3 }\n",
+		"main.go":                     "package main\n\nfunc main() {\n\tprintln(watch())\n}\n",
+		"watch_linux.go":              "package main\n\nimport \"example.com/app/internal/sys\"\n\nfunc watch() int { return sys.Live() }\n",
+		"watch_windows.go":            "package main\n\nfunc watch() int { return 0 }\n",
+		"main_test.go": "package main\n\nimport (\n\t\"testing\"\n\n\t\"example.com/app/internal/sys\"\n)\n\n" +
+			"func TestOnlyTested(t *testing.T) {\n\tif sys.OnlyTested(t) != 2 {\n\t\tt.Error(\"not 2\")\n\t}\n}\n",
+		"win_windows_test.go": "package main\n\nimport (\n\t\"testing\"\n\n\t\"example.com/app/internal/sys\"\n)\n\n" +
+			"func TestWin(t *testing.T) {\n\tif sys.Win() != 3 {\n\t\tt.Error(\"not 3\")\n\t}\n}\n",
+	}
+	linux := `{"id": "linux-amd64", "os": "linux", "arch": "amd64"}`
+	windows := `{"id": "windows-amd64", "os": "windows", "arch": "amd64"}`
+	want := []string{
+		"DS1002 go://example.com/app/internal/sys#helper",
+		"DS1102 go://example.com/app/internal/sys#OnlyTested",
+		"DS1102 go://example.com/app/internal/sys#Win",
+		"DS1103 go://example.com/app#TestOnlyTested",
+		"DS1103 go://example.com/app#TestWin",
+	}
+	for name, order := range map[string]string{"linux first": linux + ", " + windows, "windows first": windows + ", " + linux} {
+		t.Run(name, func(t *testing.T) {
+			files[repositoryDocument] = `{"target": {"kind": "application"}, "analysis": {"configurations": [` + order + `]}}`
+			run := runAnalyze(t, writeModule(t, files))
+			if run.code != vocab.ExitFindings {
+				t.Fatalf("analyze(%s) = %d, want %d: %s", name, run.code, vocab.ExitFindings, run.stderr)
+			}
+			envelope := envelopeAt(t, run.reportPath)
+			var found []string
+			for _, f := range envelope.Findings {
+				found = append(found, string(f.Code)+" "+f.Symbol.Ref)
+			}
+			slices.Sort(found)
+			if !slices.Equal(found, want) {
+				t.Errorf("analyze(%s) reported %v, want %v: helper is called from production code", name, found, want)
+			}
+			for _, rule := range envelope.TestFileRules {
+				if rule.Rule != inventory.GoTestSuffixRule {
+					t.Errorf("analyze(%s) applied the test-file rule %s to %d files, want %s alone",
+						name, rule.Rule, rule.Matched, inventory.GoTestSuffixRule)
+				}
+			}
+		})
 	}
 }
 

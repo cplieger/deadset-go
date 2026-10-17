@@ -21,7 +21,9 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -96,7 +98,7 @@ type Input struct {
 
 	// Resolve maps a types.Object or a position to the declaration written
 	// there, which is how a class names the symbol it retains.
-	Resolve *graph.Resolver
+	Resolve *resolve.Resolver
 
 	// conversions is the conversion set [conversionsOf] computed first, which every
 	// later class reads rather than walking the program again.
@@ -124,7 +126,7 @@ type Input struct {
 
 	// Symbols is the inventory, for a class that reads a declaration's own
 	// properties rather than resolving an object.
-	Symbols []graph.Symbol
+	Symbols []inventory.Symbol
 
 	// Root is the target root: what a scanned path is joined onto and what a
 	// recorded site is rendered relative to.
@@ -132,7 +134,7 @@ type Input struct {
 
 	// Read is how a class that reads a file reads it. A class reaches the
 	// filesystem through this and nowhere else.
-	Read graph.ReadFile
+	Read inventory.ReadFile
 
 	Options Options
 
@@ -192,10 +194,10 @@ func Compute(in *Input, detectors map[vocab.Exemption]Detector) (held, testEvide
 // this symbol for this reason while these holders are live. A class that finds the
 // same fact at several sites found it once.
 type fact struct {
-	id        graph.SymbolID
+	id        inventory.SymbolID
 	class     string
 	detail    string
-	holder    graph.SymbolID
+	holder    inventory.SymbolID
 	coHolders string
 }
 
@@ -237,7 +239,7 @@ func bySite(a, b *graph.Exemption) int {
 	if c := strings.Compare(a.Consumer, b.Consumer); c != 0 {
 		return c
 	}
-	return graph.ByPosition(a.Site, b.Site)
+	return inventory.ByPosition(a.Site, b.Site)
 }
 
 // resolveObject returns the declaration an identifier or a selector expression

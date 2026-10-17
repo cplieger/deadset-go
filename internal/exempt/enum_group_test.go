@@ -6,13 +6,14 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // exemptionRows renders one class's answer as one row per retained symbol, the
 // declaration's name and the clause the exemption records, and fails the test for
 // a row naming another class, a symbol outside the inventory or no site.
-func exemptionRows(t *testing.T, symbols []graph.Symbol, class vocab.Exemption, found []graph.Exemption) []string {
+func exemptionRows(t *testing.T, symbols []inventory.Symbol, class vocab.Exemption, found []graph.Exemption) []string {
 	t.Helper()
 	names := symbolNames(symbols)
 	rows := make([]string, 0, len(found))
@@ -105,20 +106,17 @@ func TestEnumGroupLeavesTheUnreferencedMemberOfAPlainGroupASweepCandidate(t *tes
 			exemptionRows(t, in.Symbols, vocab.EnumGroup, found))
 	}
 
-	references, _, err := graph.References(in.Result, in.Root, in.Read, in.Symbols)
+	references, _, err := graph.References(in.Result, in.Resolve, in.Symbols, graph.TestClasses{})
 	if err != nil {
 		t.Fatalf("Setup: graph.References(%s): %v", archive, err)
 	}
-	roots, _, err := graph.Roots(in.Result, in.Root, in.Read, in.Symbols, graph.RootOptions{PublishedAPI: true})
-	if err != nil {
-		t.Fatalf("Setup: graph.Roots(%s): %v", archive, err)
-	}
+	roots, _ := graph.Roots(in.Result, in.Resolve, in.Symbols, graph.RootOptions{PublishedAPI: true})
 
 	// The class retained nothing on this fixture, so the mode carries no
 	// exemption and the sweep answers over the graph alone.
 	result := graph.New(in.Symbols, references, roots).Sweep(&graph.SweepInput{})
 
-	names := make(map[graph.SymbolID]string, len(in.Symbols))
+	names := make(map[inventory.SymbolID]string, len(in.Symbols))
 	for i := range in.Symbols {
 		names[in.Symbols[i].ID] = in.Symbols[i].Name
 	}

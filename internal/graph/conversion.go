@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -35,29 +36,17 @@ type Conversion struct {
 }
 
 // Conversions returns every conversion site of one loaded configuration's
-// packages, each file walked once from the first package by identifier that
-// compiles it, ordered by position, then by the type converted and the interface
-// reached.
+// packages, each file walked once ([inventory.Sources]), ordered by position, then
+// by the type converted and the interface reached.
 //
 // A type assertion takes a value out of an interface, so it is no site itself; a
 // concrete type whose value reaches the operand's interface and that implements the
 // asserted one reaches the asserted interface there ([conversionScan.asserted]).
 func Conversions(fset *token.FileSet, pkgs []*packages.Package) []Conversion {
 	s := &conversionScan{fset: fset}
-	walked := make(map[string]bool)
-	for _, p := range SortedPackages(pkgs) {
-		if p.TypesInfo == nil {
-			continue
-		}
+	for p, f := range inventory.Sources(pkgs, fset) {
 		s.info = p.TypesInfo
-		for _, f := range SortedSyntax(p, fset) {
-			name := fset.Position(f.FileStart).Filename
-			if walked[name] {
-				continue
-			}
-			walked[name] = true
-			s.walk(f)
-		}
+		s.walk(f)
 	}
 	s.sites = append(s.sites, s.asserted()...)
 	slices.SortFunc(s.sites, s.bySite)
@@ -70,23 +59,6 @@ func conversionsIn(info *types.Info, decl ast.Node) []Conversion {
 	s := &conversionScan{info: info}
 	ast.Inspect(decl, s.visit)
 	return s.sites
-}
-
-// SortedPackages orders packages by identifier, so the variant that walks a file
-// a test variant also compiles is the same one on every run.
-func SortedPackages(pkgs []*packages.Package) []*packages.Package {
-	ordered := slices.Clone(pkgs)
-	slices.SortFunc(ordered, func(a, b *packages.Package) int { return strings.Compare(a.ID, b.ID) })
-	return ordered
-}
-
-// SortedSyntax orders one package's syntax trees by file name.
-func SortedSyntax(p *packages.Package, fset *token.FileSet) []*ast.File {
-	files := slices.Clone(p.Syntax)
-	slices.SortFunc(files, func(a, b *ast.File) int {
-		return strings.Compare(fset.Position(a.FileStart).Filename, fset.Position(b.FileStart).Filename)
-	})
-	return files
 }
 
 // conversionScan accumulates the conversion sites of one loaded configuration.

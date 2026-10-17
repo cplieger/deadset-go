@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -89,7 +89,7 @@ func TestFormatVerbContractRetainsTheMethodEveryFacilityCalls(t *testing.T) {
 func TestFormatVerbContractNamesTheFacilityThatFormatted(t *testing.T) {
 	shared := analysisOf(t, "format-verb-facilities.txtar", Options{})
 	symbols := shared.inventory(t)
-	refs := make(map[graph.SymbolID]string, len(symbols))
+	refs := make(map[inventory.SymbolID]string, len(symbols))
 	for i := range symbols {
 		refs[symbols[i].ID] = symbols[i].Ref
 	}
@@ -132,7 +132,7 @@ func TestFormatVerbContractRetainsNothingWhereNoVerbAsksForAString(t *testing.T)
 func TestFormatVerbContractNamesTheClassTheVerbAndTheSite(t *testing.T) {
 	shared := analysisOf(t, "format-verb-firing.txtar", Options{})
 	symbols := shared.inventory(t)
-	refs := make(map[graph.SymbolID]string, len(symbols))
+	refs := make(map[inventory.SymbolID]string, len(symbols))
 	for i := range symbols {
 		refs[symbols[i].ID] = symbols[i].Ref
 	}

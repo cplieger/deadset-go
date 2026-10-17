@@ -1,7 +1,7 @@
 package kinds
 
 import (
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -14,7 +14,7 @@ import (
 type dialed struct {
 	components map[string]bool
 	allowed    map[string]bool
-	dormant    map[graph.SymbolID]bool
+	dormant    map[inventory.SymbolID]bool
 	paired     map[int]bool
 }
 
@@ -35,7 +35,7 @@ func (in *Input) withholdComponents(published []vocab.Kind, emitters map[vocab.C
 	in.dialed = dialed{
 		components: make(map[string]bool),
 		allowed:    make(map[string]bool),
-		dormant:    make(map[graph.SymbolID]bool),
+		dormant:    make(map[inventory.SymbolID]bool),
 		paired:     make(map[int]bool),
 	}
 	least := in.Config.Analysis.MinConfidence
@@ -112,12 +112,12 @@ func (in *Input) dormantNear() {
 	for id := range testUsed {
 		in.dialed.dormant[id] = true
 	}
-	heldBack := make(map[graph.SymbolID]bool, len(in.staleInput().Suppressed))
+	heldBack := make(map[inventory.SymbolID]bool, len(in.staleInput().Suppressed))
 	for _, id := range in.staleInput().Suppressed {
 		heldBack[id] = true
 	}
 	// joined reads a, held back, against b, which references or contains it.
-	joined := func(a, b graph.SymbolID) {
+	joined := func(a, b inventory.SymbolID) {
 		if heldBack[a] && (members[b] || testUsed[b]) {
 			in.dialed.dormant[a] = true
 		}
@@ -130,7 +130,7 @@ func (in *Input) dormantNear() {
 
 // eachJoin calls joined with each referenced symbol and its referrer, and each
 // contained symbol and its container, of the merged inventory.
-func (in *Input) eachJoin(joined func(a, b graph.SymbolID)) {
+func (in *Input) eachJoin(joined func(a, b inventory.SymbolID)) {
 	if in.Merged == nil {
 		return
 	}
@@ -146,7 +146,7 @@ func (in *Input) eachJoin(joined func(a, b graph.SymbolID)) {
 
 // testUsedWithheld is [testUseFacts.dead] where the minimum withholds its findings,
 // and empty where the minimum is possible.
-func (in *Input) testUsedWithheld() map[graph.SymbolID]bool {
+func (in *Input) testUsedWithheld() map[inventory.SymbolID]bool {
 	if rank(in.Config.Analysis.MinConfidence) <= rank(vocab.Possible) {
 		return nil
 	}
@@ -154,8 +154,8 @@ func (in *Input) testUsedWithheld() map[graph.SymbolID]bool {
 }
 
 // withheldMembers is every member of a component the dials withhold.
-func (in *Input) withheldMembers() map[graph.SymbolID]bool {
-	members := make(map[graph.SymbolID]bool)
+func (in *Input) withheldMembers() map[inventory.SymbolID]bool {
+	members := make(map[inventory.SymbolID]bool)
 	for id, component := range in.index().components {
 		if in.dialed.components[componentID(component.Index+1)] {
 			members[id] = true

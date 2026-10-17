@@ -22,14 +22,11 @@ func generatorRoots(t *testing.T, c load.Configuration, kind RootKind) (named, h
 func archiveRoots(t *testing.T, archive string, c load.Configuration, kind RootKind) (named, held map[string]bool) {
 	t.Helper()
 	result, root := loadDirUnder(t.Context(), t, extract(t, archive), c)
-	symbols, err := Symbols(result, root, os.ReadFile)
+	symbols, rs, err := inventoryOf(result, root, os.ReadFile)
 	if err != nil {
 		t.Fatalf("Symbols(%s) error: %v", archive, err)
 	}
-	roots, _, err := Roots(result, root, os.ReadFile, symbols, RootOptions{})
-	if err != nil {
-		t.Fatalf("Roots(%s) error: %v", archive, err)
-	}
+	roots, _ := Roots(result, rs, symbols, RootOptions{})
 	d := detection{symbols: symbols, roots: roots}
 	named = make(map[string]bool)
 	for _, ref := range refsOfKind(d, kind) {

@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"golang.org/x/tools/txtar"
 )
 
@@ -18,15 +20,16 @@ import (
 func inputForDir(t *testing.T, dir, subject string) *Input {
 	t.Helper()
 	result, root := loadDir(t, dir)
-	symbols, err := graph.Symbols(result, root, os.ReadFile)
+	inv, err := inventory.Of(result, root, os.ReadFile)
 	if err != nil {
-		t.Fatalf("Setup: graph.Symbols(%s): %v", subject, err)
+		t.Fatalf("Setup: inventory.Of(%s): %v", subject, err)
 	}
-	resolve, err := graph.NewResolver(result, root, os.ReadFile, symbols)
+	symbols := inv.Symbols
+	resolver, err := resolve.New(result, inv)
 	if err != nil {
-		t.Fatalf("Setup: graph.NewResolver(%s): %v", subject, err)
+		t.Fatalf("Setup: resolve.New(%s): %v", subject, err)
 	}
-	return &Input{Result: result, Symbols: symbols, Resolve: resolve, Root: root, Read: os.ReadFile}
+	return &Input{Result: result, Symbols: symbols, Resolve: resolver, Root: root, Read: os.ReadFile}
 }
 
 // renderConversions prints one conversion per line, tab-separated, for a golden
@@ -127,7 +130,7 @@ func TestConversionsRefusesAnInputCarryingNoFileSet(t *testing.T) {
 			if err == nil {
 				t.Fatalf("conversionsOf(%s) = %v, nil, want an error", test.name, sites)
 			}
-			if !errors.Is(err, graph.ErrIncompleteLoad) {
+			if !errors.Is(err, inventory.ErrIncompleteLoad) {
 				t.Errorf("conversionsOf(%s) error = %v, want one matching graph.ErrIncompleteLoad", test.name, err)
 			}
 		})

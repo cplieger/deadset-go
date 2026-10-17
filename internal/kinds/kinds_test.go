@@ -11,6 +11,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -19,14 +20,14 @@ import (
 // function, the unexported helper it would call, and one exported function of an
 // internal package.
 const (
-	exportedID   graph.SymbolID = "catalog.go:14:6"
-	helperID     graph.SymbolID = "catalog.go:31:6"
-	internalID   graph.SymbolID = "internal/store/store.go:9:6"
-	generatedID  graph.SymbolID = "wire.gen.go:12:6"
-	exportedRef                 = "go://example.com/app#Resolve"
-	helperRef                   = "go://example.com/app#resolve"
-	internalRef                 = "go://example.com/app/internal/store#Open"
-	generatedRef                = "go://example.com/app#Wired"
+	exportedID   inventory.SymbolID = "catalog.go:14:6"
+	helperID     inventory.SymbolID = "catalog.go:31:6"
+	internalID   inventory.SymbolID = "internal/store/store.go:9:6"
+	generatedID  inventory.SymbolID = "wire.gen.go:12:6"
+	exportedRef                     = "go://example.com/app#Resolve"
+	helperRef                       = "go://example.com/app#resolve"
+	internalRef                     = "go://example.com/app/internal/store#Open"
+	generatedRef                    = "go://example.com/app#Wired"
 )
 
 // handSpans are the lines the hand-built component's two declarations occupy, which
@@ -37,7 +38,7 @@ var handSpans = []graph.Span{{Path: "catalog.go", First: 14, Last: 31}, {Path: "
 // two-configuration matrix, so a test of the framework measures the framework
 // rather than a load.
 func handInput(resolved config.Config) *Input {
-	symbols := []graph.Symbol{
+	symbols := []inventory.Symbol{
 		handSymbol(exportedID, exportedRef, "Resolve", "example.com/app", "catalog.go", 14, 31, true),
 		handSymbol(helperID, helperRef, "resolve", "example.com/app", "catalog.go", 31, 36, false),
 		handSymbol(internalID, internalRef, "Open", "example.com/app/internal/store", "internal/store/store.go", 9, 12, true),
@@ -46,19 +47,19 @@ func handInput(resolved config.Config) *Input {
 	merged := &graph.Merged{Symbols: symbols, Configurations: 2}
 	swept := &graph.Result{
 		Candidates: []graph.Candidate{
-			{ID: exportedID, Relation: graph.ReferenceCounting, Configs: graph.ConfigSet(0b11)},
-			{ID: helperID, Relation: graph.Reachability, ProductionRefs: 1, Configs: graph.ConfigSet(0b01)},
-			{ID: generatedID, Relation: graph.ReferenceCounting, Configs: graph.ConfigSet(0b11)},
+			{ID: exportedID, Relation: graph.ReferenceCounting, Configs: inventory.ConfigSet(0b11)},
+			{ID: helperID, Relation: graph.Reachability, ProductionRefs: 1, Configs: inventory.ConfigSet(0b01)},
+			{ID: generatedID, Relation: graph.ReferenceCounting, Configs: inventory.ConfigSet(0b11)},
 		},
 		Components: []graph.Component{{
-			Members:        []graph.SymbolID{exportedID, helperID},
-			Roots:          []graph.SymbolID{exportedID},
+			Members:        []inventory.SymbolID{exportedID, helperID},
+			Roots:          []inventory.SymbolID{exportedID},
 			Spans:          handSpans,
 			Index:          0,
 			DeletableLines: 23,
 		}},
 	}
-	refs := make(map[graph.SymbolID]string, len(symbols))
+	refs := make(map[inventory.SymbolID]string, len(symbols))
 	for i := range symbols {
 		refs[symbols[i].ID] = symbols[i].Ref
 	}
@@ -73,17 +74,17 @@ func handInput(resolved config.Config) *Input {
 }
 
 // handSymbol is one declaration of a hand-built inventory.
-func handSymbol(id graph.SymbolID, ref, name, pkgPath, path string, line, endLine int, exported bool) graph.Symbol {
-	return graph.Symbol{
+func handSymbol(id inventory.SymbolID, ref, name, pkgPath, path string, line, endLine int, exported bool) inventory.Symbol {
+	return inventory.Symbol{
 		ID:       id,
 		Ref:      ref,
 		Name:     name,
 		PkgPath:  pkgPath,
 		Pos:      token.Position{Filename: path, Line: line, Column: 6},
 		EndLine:  endLine,
-		Kind:     graph.KindFunc,
+		Kind:     inventory.KindFunc,
 		Exported: exported,
-		Configs:  graph.ConfigSet(0b11),
+		Configs:  inventory.ConfigSet(0b11),
 	}
 }
 
@@ -94,7 +95,7 @@ func emitterOf(findings ...Finding) Emitter {
 }
 
 // oneFinding is the finding an emitter of code reports about one declaration.
-func oneFinding(in *Input, code vocab.Code, id graph.SymbolID) Finding {
+func oneFinding(in *Input, code vocab.Code, id inventory.SymbolID) Finding {
 	found, held := in.finding(id, code, "the declaration has no reference in the target")
 	if !held {
 		panic("the hand-built inventory holds no " + string(id))
@@ -630,8 +631,8 @@ func TestEveryKindOfDeclarationMapsOntoTheContractsSubjectVocabulary(t *testing.
 				kind, word, schemaPath)
 		}
 	}
-	for kind := graph.KindFunc; kind <= graph.KindFile; kind++ {
-		if kind == graph.KindPackage {
+	for kind := inventory.KindFunc; kind <= inventory.KindFile; kind++ {
+		if kind == inventory.KindPackage {
 			continue
 		}
 		if _, held := symbolKinds[kind]; !held {
@@ -713,8 +714,8 @@ func TestComputeRefusesTwoFindingsAboutOneSubjectThatIsNoDeclaration(t *testing.
 
 func TestComputeRefusesAFindingAboutADeclarationKindTheInventoryDoesNotHold(t *testing.T) {
 	for kind, subject := range map[string]string{
-		"a function": symbolKinds[graph.KindFunc],
-		"a field":    symbolKinds[graph.KindField],
+		"a function": symbolKinds[inventory.KindFunc],
+		"a field":    symbolKinds[inventory.KindField],
 		"no kind":    "",
 	} {
 		t.Run(kind, func(t *testing.T) {

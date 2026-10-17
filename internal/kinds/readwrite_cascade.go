@@ -8,23 +8,24 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // writeCascade names the declarations that deleting one write-only subject and its
 // writes also deletes: a type parameter of the subject's declaring type that only
 // the subject's type names, and an import whose every use in its file is inside the
-// writes.
-func writeCascade(in *Input, symbol *graph.Symbol, writes []Position) []string {
-	return append(cascadingTypeParams(in, symbol), cascadingImports(in, writes)...)
+// spans the writes' deletion deletes.
+func writeCascade(in *Input, symbol *inventory.Symbol, spans []inventory.SourceRange) []string {
+	return append(cascadingTypeParams(in, symbol), cascadingImports(in, spans)...)
 }
 
 // cascadingTypeParams names every type parameter of a field's declaring type that
 // the field's own type expression holds every use of in that declaration, where
 // the field is the one name its line declares.
-func cascadingTypeParams(in *Input, symbol *graph.Symbol) []string {
+func cascadingTypeParams(in *Input, symbol *inventory.Symbol) []string {
 	container := in.symbol(symbol.Parent)
-	if symbol.Kind != graph.KindField || container == nil {
+	if symbol.Kind != inventory.KindField || container == nil {
 		return nil
 	}
 	for typed := range in.typedFiles() {
@@ -110,99 +111,43 @@ func usesOf(node ast.Node, object types.Object, info *types.Info) int {
 }
 
 // cascadingImports names every import whose uses in its file all sit inside the
-// statements and literal elements the writes are, read from the first variant that
-// compiles each file.
-func cascadingImports(in *Input, writes []Position) []string {
-	at := make(map[string]map[[2]int]bool)
-	for _, w := range writes {
-		if at[w.Path] == nil {
-			at[w.Path] = make(map[[2]int]bool)
-		}
-		at[w.Path][[2]int{w.Line, w.Column}] = true
+// spans, read from the first variant that compiles each file. A use inside two
+// spans counts twice, so an import used in nested spans is not named.
+func cascadingImports(in *Input, spans []inventory.SourceRange) []string {
+	at := make(map[string][]inventory.SourceRange)
+	for _, s := range spans {
+		at[s.File] = append(at[s.File], s)
 	}
 	var names []string
 	done := make(map[string]bool)
 	for typed := range in.typedFiles() {
-		site, err := typed.one.Resolve.Render(typed.file.FileStart)
-		if err != nil || done[site.Filename] || at[site.Filename] == nil {
+		file := typed.one.Resolve.Positions().Offset(typed.file.FileStart).File
+		if done[file] || at[file] == nil {
 			continue
 		}
-		done[site.Filename] = true
-		nodes := writeNodes(typed.file, typed.one, at[site.Filename])
-		names = append(names, importsOnlyIn(typed.file, typed.pkg.TypesInfo, nodes)...)
+		done[file] = true
+		names = append(names, importsOnlyIn(typed, at[file])...)
 	}
 	return names
 }
 
-// writeNodes is every statement and literal element of one file that performs one
-// of the writes at the given positions, and that deleting the write deletes whole.
-func writeNodes(f *ast.File, one *Configured, at map[[2]int]bool) []ast.Node {
-	writes := func(e ast.Expr) bool {
-		written := writtenName(e)
-		if written == nil {
-			return false
-		}
-		site, err := one.Resolve.Render(written.Pos())
-		return err == nil && at[[2]int{site.Line, site.Column}]
-	}
-	var nodes []ast.Node
-	ast.Inspect(f, func(n ast.Node) bool {
-		if performsWrite(n, writes) {
-			nodes = append(nodes, n)
+// importsOnlyIn names every import of one file whose uses all sit inside spans.
+func importsOnlyIn(typed typedFile, spans []inventory.SourceRange) []string {
+	info := typed.pkg.TypesInfo
+	inside := make(map[*types.PkgName]int)
+	total := make(map[*types.PkgName]int)
+	ast.Inspect(typed.file, func(n ast.Node) bool {
+		if id, isIdent := n.(*ast.Ident); isIdent {
+			if name, isPkg := info.Uses[id].(*types.PkgName); isPkg {
+				total[name]++
+				inside[name] += holding(typed.one.Resolve.Positions().Offset(id.Pos()), spans)
+			}
 		}
 		return true
 	})
-	return nodes
-}
-
-// performsWrite reports whether one node is a statement or a literal element that
-// performs a write writes accepts, and that deleting the write deletes whole.
-func performsWrite(n ast.Node, writes func(ast.Expr) bool) bool {
-	switch n := n.(type) {
-	case *ast.AssignStmt:
-		return len(n.Lhs) == 1 && writes(n.Lhs[0])
-	case *ast.IncDecStmt:
-		return writes(n.X)
-	case *ast.KeyValueExpr:
-		key, isIdent := n.Key.(*ast.Ident)
-		return isIdent && writes(key)
-	case *ast.ExprStmt:
-		call, isCall := n.X.(*ast.CallExpr)
-		return isCall && len(call.Args) > 0 && writes(call.Args[0])
-	default:
-		return false
-	}
-}
-
-// writtenName is the identifier a store into one expression writes: the expression's
-// own name, a selector's member, and the collection an index stores into.
-func writtenName(e ast.Expr) *ast.Ident {
-	switch t := ast.Unparen(e).(type) {
-	case *ast.Ident:
-		return t
-	case *ast.SelectorExpr:
-		return t.Sel
-	case *ast.IndexExpr:
-		return writtenName(t.X)
-	default:
-		return nil
-	}
-}
-
-// importsOnlyIn names every import of one file whose uses all sit inside nodes.
-func importsOnlyIn(f *ast.File, info *types.Info, nodes []ast.Node) []string {
-	if len(nodes) == 0 {
-		return nil
-	}
-	inside := make(map[*types.PkgName]int)
-	for _, node := range nodes {
-		countPackageUses(node, info, inside)
-	}
-	total := make(map[*types.PkgName]int, len(inside))
-	countPackageUses(f, info, total)
 
 	var names []string
-	for _, spec := range f.Imports {
+	for _, spec := range typed.file.Imports {
 		name := info.PkgNameOf(spec)
 		if name != nil && inside[name] > 0 && inside[name] == total[name] {
 			names = append(names, "import "+strconv.Quote(name.Imported().Path()))
@@ -211,17 +156,15 @@ func importsOnlyIn(f *ast.File, info *types.Info, nodes []ast.Node) []string {
 	return names
 }
 
-// countPackageUses counts, per imported package name, the identifiers below one node
-// that use it.
-func countPackageUses(node ast.Node, info *types.Info, into map[*types.PkgName]int) {
-	ast.Inspect(node, func(n ast.Node) bool {
-		if id, isIdent := n.(*ast.Ident); isIdent {
-			if name, isPkg := info.Uses[id].(*types.PkgName); isPkg {
-				into[name]++
-			}
+// holding is the number of spans holding one byte.
+func holding(at inventory.Offset, spans []inventory.SourceRange) int {
+	held := 0
+	for i := range spans {
+		if spans[i].Holds(at) {
+			held++
 		}
-		return true
-	})
+	}
+	return held
 }
 
 // cascadeClause is the clause a write-only message names the cascade in, and empty
@@ -242,26 +185,8 @@ func cascadeClause(names []string) string {
 // subject, the declarations its finding names as falling with it, and every
 // declaration that falls with some subject.
 type annotationFalls struct {
-	named map[graph.SymbolID][]string
-	falls map[graph.SymbolID]bool
-}
-
-// renderedSpan is the run of rendered positions one node of a file covers, its end
-// excluded.
-type renderedSpan struct {
-	path     string
-	from, to [2]int
-}
-
-// holds reports whether one rendered position is inside the renderedSpan.
-func (s renderedSpan) holds(at token.Position) bool {
-	p := [2]int{at.Line, at.Column}
-	return at.Filename == s.path && !before(p, s.from) && before(p, s.to)
-}
-
-// before orders two line and column pairs.
-func before(a, b [2]int) bool {
-	return a[0] < b[0] || (a[0] == b[0] && a[1] < b[1])
+	named map[inventory.SymbolID][]string
+	falls map[inventory.SymbolID]bool
 }
 
 // annotationCascade is the declarations that fall with the write-only findings: a
@@ -279,7 +204,7 @@ func (in *Input) annotationCascade() *annotationFalls {
 
 // computeAnnotationCascade answers annotationCascade over the whole run.
 func computeAnnotationCascade(in *Input) *annotationFalls {
-	falls := &annotationFalls{named: make(map[graph.SymbolID][]string), falls: make(map[graph.SymbolID]bool)}
+	falls := &annotationFalls{named: make(map[inventory.SymbolID][]string), falls: make(map[inventory.SymbolID]bool)}
 	if in.Merged == nil {
 		return falls
 	}
@@ -303,14 +228,14 @@ func computeAnnotationCascade(in *Input) *annotationFalls {
 }
 
 // writeOnlySubjects is every declaration the write-only kind reports, with its uses.
-func writeOnlySubjects(in *Input) map[graph.SymbolID]*uses {
-	exempted := make(map[graph.SymbolID]bool, len(in.Exempt))
+func writeOnlySubjects(in *Input) map[inventory.SymbolID]*uses {
+	exempted := make(map[inventory.SymbolID]bool, len(in.Exempt))
 	for ix := range in.Exempt {
 		exemption := &in.Exempt[ix]
 		exempted[exemption.ID] = true
 	}
 	counted := writesAndReads(in)
-	subjects := make(map[graph.SymbolID]*uses)
+	subjects := make(map[inventory.SymbolID]*uses)
 	for i := range in.Merged.Symbols {
 		symbol := &in.Merged.Symbols[i]
 		if writeOnlySubject(in, symbol, counted[symbol.ID], exempted) {
@@ -323,10 +248,10 @@ func writeOnlySubjects(in *Input) map[graph.SymbolID]*uses {
 // annotationHolders is, per declaration a counted reference outside the subjects
 // names, the subjects whose annotation or writes hold those references, and the
 // declarations some such reference outside every span names.
-func annotationHolders(in *Input, subjects map[graph.SymbolID]*uses, spans map[graph.SymbolID][]renderedSpan,
-) (holders map[graph.SymbolID]map[graph.SymbolID]bool, outside map[graph.SymbolID]bool) {
-	holders = make(map[graph.SymbolID]map[graph.SymbolID]bool)
-	outside = make(map[graph.SymbolID]bool)
+func annotationHolders(in *Input, subjects map[inventory.SymbolID]*uses, spans map[inventory.SymbolID][]inventory.SourceRange,
+) (holders map[inventory.SymbolID]map[inventory.SymbolID]bool, outside map[inventory.SymbolID]bool) {
+	holders = make(map[inventory.SymbolID]map[inventory.SymbolID]bool)
+	outside = make(map[inventory.SymbolID]bool)
 	for i := range in.Merged.References {
 		r := &in.Merged.References[i]
 		if in.uncounted(r) || subjects[r.To] != nil || outside[r.To] {
@@ -338,7 +263,7 @@ func annotationHolders(in *Input, subjects map[graph.SymbolID]*uses, spans map[g
 			continue
 		}
 		if holders[r.To] == nil {
-			holders[r.To] = make(map[graph.SymbolID]bool)
+			holders[r.To] = make(map[inventory.SymbolID]bool)
 		}
 		holders[r.To][holder] = true
 	}
@@ -349,19 +274,19 @@ func annotationHolders(in *Input, subjects map[graph.SymbolID]*uses, spans map[g
 // cascade deletes: a declaration of its own, not a member, a type parameter, which
 // the type-parameter clause names, a package or a file, and one no code outside the
 // analysis can name.
-func fallsWithAnnotation(in *Input, symbol *graph.Symbol) bool {
+func fallsWithAnnotation(in *Input, symbol *inventory.Symbol) bool {
 	switch symbol.Kind {
-	case graph.KindPackage, graph.KindFile, graph.KindField, graph.KindTypeParam, graph.KindMethod, graph.KindInterfaceMethod:
+	case inventory.KindPackage, inventory.KindFile, inventory.KindField, inventory.KindTypeParam, inventory.KindMethod, inventory.KindInterfaceMethod:
 		return false
 	}
 	return in.classOf(symbol.ID) == vocab.Certain
 }
 
 // holderOf is the subject whose annotation or writes hold one reference's position.
-func holderOf(spans map[graph.SymbolID][]renderedSpan, r *graph.Reference) (graph.SymbolID, bool) {
+func holderOf(spans map[inventory.SymbolID][]inventory.SourceRange, r *graph.Reference) (inventory.SymbolID, bool) {
 	for id, held := range spans {
-		for _, s := range held {
-			if s.holds(r.Pos) {
+		for i := range held {
+			if held[i].Holds(r.Site) {
 				return id, true
 			}
 		}
@@ -369,12 +294,12 @@ func holderOf(spans map[graph.SymbolID][]renderedSpan, r *graph.Reference) (grap
 	return "", false
 }
 
-// subjectSpans is, per write-only subject, the spans of its type annotation and of
-// every statement and literal element that performs one of its writes, read from the
-// first variant that compiles each file.
-func subjectSpans(in *Input, subjects map[graph.SymbolID]*uses) map[graph.SymbolID][]renderedSpan {
+// subjectSpans is, per write-only subject, the spans of its type annotation, read
+// from the first variant that compiles each file, and of every statement and
+// literal element its writes' deletion deletes.
+func subjectSpans(in *Input, subjects map[inventory.SymbolID]*uses) map[inventory.SymbolID][]inventory.SourceRange {
 	at := subjectsByPosition(in, subjects)
-	spans := make(map[graph.SymbolID][]renderedSpan)
+	spans := make(map[inventory.SymbolID][]inventory.SourceRange)
 	done := make(map[string]bool)
 	for typed := range in.typedFiles() {
 		site, err := typed.one.Resolve.Render(typed.file.FileStart)
@@ -383,50 +308,29 @@ func subjectSpans(in *Input, subjects map[graph.SymbolID]*uses) map[graph.Symbol
 		}
 		done[site.Filename] = true
 		annotationSpans(typed, at[site.Filename], spans)
-		for id, u := range subjects {
-			spans[id] = append(spans[id], writeSpans(typed, site.Filename, u)...)
-		}
+	}
+	for id, u := range subjects {
+		spans[id] = append(spans[id], u.spans...)
 	}
 	return spans
 }
 
 // subjectsByPosition is every subject keyed by its file, then its line and column.
-func subjectsByPosition(in *Input, subjects map[graph.SymbolID]*uses) map[string]map[[2]int]graph.SymbolID {
-	at := make(map[string]map[[2]int]graph.SymbolID)
+func subjectsByPosition(in *Input, subjects map[inventory.SymbolID]*uses) map[string]map[[2]int]inventory.SymbolID {
+	at := make(map[string]map[[2]int]inventory.SymbolID)
 	for id := range subjects {
 		symbol := in.symbol(id)
 		if at[symbol.Pos.Filename] == nil {
-			at[symbol.Pos.Filename] = make(map[[2]int]graph.SymbolID)
+			at[symbol.Pos.Filename] = make(map[[2]int]inventory.SymbolID)
 		}
 		at[symbol.Pos.Filename][[2]int{symbol.Pos.Line, symbol.Pos.Column}] = id
 	}
 	return at
 }
 
-// writeSpans is the span of every statement and literal element of one file that
-// performs one of a subject's writes.
-func writeSpans(typed typedFile, path string, u *uses) []renderedSpan {
-	writes := make(map[[2]int]bool)
-	for _, w := range u.writes {
-		if w.Path == path {
-			writes[[2]int{w.Line, w.Column}] = true
-		}
-	}
-	if len(writes) == 0 {
-		return nil
-	}
-	var spans []renderedSpan
-	for _, node := range writeNodes(typed.file, typed.one, writes) {
-		if s, rendered := renderSpan(typed.one, node); rendered {
-			spans = append(spans, s)
-		}
-	}
-	return spans
-}
-
-// annotationSpans adds the renderedSpan of the type annotation of every subject one file
+// annotationSpans adds the inventory.SourceRange of the type annotation of every subject one file
 // declares, a field or a package-level variable written with a type.
-func annotationSpans(typed typedFile, declared map[[2]int]graph.SymbolID, spans map[graph.SymbolID][]renderedSpan) {
+func annotationSpans(typed typedFile, declared map[[2]int]inventory.SymbolID, spans map[inventory.SymbolID][]inventory.SourceRange) {
 	if len(declared) == 0 {
 		return
 	}
@@ -443,7 +347,7 @@ func annotationSpans(typed typedFile, declared map[[2]int]graph.SymbolID, spans 
 
 // annotationSpan adds the span of one annotation to every subject among the names it
 // types.
-func annotationSpan(typed typedFile, declared map[[2]int]graph.SymbolID, spans map[graph.SymbolID][]renderedSpan,
+func annotationSpan(typed typedFile, declared map[[2]int]inventory.SymbolID, spans map[inventory.SymbolID][]inventory.SourceRange,
 	names []*ast.Ident, annotation ast.Expr,
 ) {
 	if annotation == nil {
@@ -455,22 +359,7 @@ func annotationSpan(typed typedFile, declared map[[2]int]graph.SymbolID, spans m
 			continue
 		}
 		if id, isSubject := declared[[2]int{site.Line, site.Column}]; isSubject {
-			if s, rendered := renderSpan(typed.one, annotation); rendered {
-				spans[id] = append(spans[id], s)
-			}
+			spans[id] = append(spans[id], typed.one.Resolve.Positions().Range(annotation))
 		}
 	}
-}
-
-// renderSpan renders the renderedSpan one node covers.
-func renderSpan(one *Configured, node ast.Node) (renderedSpan, bool) {
-	from, err := one.Resolve.Render(node.Pos())
-	if err != nil {
-		return renderedSpan{}, false
-	}
-	to, err := one.Resolve.Render(node.End())
-	if err != nil {
-		return renderedSpan{}, false
-	}
-	return renderedSpan{path: from.Filename, from: [2]int{from.Line, from.Column}, to: [2]int{to.Line, to.Column}}, true
 }

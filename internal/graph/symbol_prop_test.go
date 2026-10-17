@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"pgregory.net/rapid"
 )
@@ -300,7 +301,7 @@ func checkOneDeclarationPerSourceSite(t failureSink, one *loadedModule) {
 		}
 	}
 
-	symbols, err := Symbols(one.result, one.root, os.ReadFile)
+	symbols, _, err := inventoryOf(one.result, one.root, os.ReadFile)
 	if err != nil {
 		t.Fatalf("Symbols over %d generated packages under %s error: %v", len(one.generated), one.config.ID, err)
 	}
@@ -308,7 +309,7 @@ func checkOneDeclarationPerSourceSite(t failureSink, one *loadedModule) {
 		t.Fatalf("Symbols over %d generated packages under %s returned nothing", len(one.generated), one.config.ID)
 	}
 
-	at := make(map[SymbolID][]string, len(symbols))
+	at := make(map[inventory.SymbolID][]string, len(symbols))
 	for _, s := range symbols {
 		at[s.ID] = append(at[s.ID], s.Kind.String()+" "+s.Name)
 	}
@@ -322,9 +323,9 @@ func checkOneDeclarationPerSourceSite(t failureSink, one *loadedModule) {
 	for _, s := range symbols {
 		owner, _, _ := strings.Cut(s.Pos.Filename, "/")
 		switch s.Kind {
-		case KindFile:
+		case inventory.KindFile:
 			files[owner]++
-		case KindPackage:
+		case inventory.KindPackage:
 			packageSymbols[owner]++
 		}
 	}

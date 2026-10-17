@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
-	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-spec/v8/vocab"
-	"golang.org/x/tools/go/packages"
 )
 
 // deprecatedPrefix opens the paragraph of a doc comment that marks a declaration
@@ -133,7 +133,7 @@ func (in *Input) codeOf(candidate *graph.Candidate) vocab.Code {
 
 // shapeCode is the unreferenced kind a declaration's shape selects: the member kind
 // for a struct field, then the kind its visibility selects.
-func (in *Input) shapeCode(symbol *graph.Symbol) vocab.Code {
+func (in *Input) shapeCode(symbol *inventory.Symbol) vocab.Code {
 	switch {
 	case member(symbol.Kind):
 		return vocab.UnusedMember
@@ -151,9 +151,9 @@ func (in *Input) shapeCode(symbol *graph.Symbol) vocab.Code {
 // file's declaration that something reaches, a member of a dead parent, an
 // interface's declaration but an interface method only tests call, and a
 // read-or-write kind's subject.
-func (in *Input) outsideTheRule(candidate *graph.Candidate, symbol *graph.Symbol) bool {
+func (in *Input) outsideTheRule(candidate *graph.Candidate, symbol *inventory.Symbol) bool {
 	switch {
-	case candidate.TestOfDeadCode || symbol.Blank || (testFile(symbol) && !candidate.UnreferencedTest):
+	case candidate.TestOfDeadCode || symbol.Blank || (symbol.InTestFile && !candidate.UnreferencedTest):
 		return true
 	case in.deadParent(symbol):
 		return true
@@ -167,13 +167,13 @@ func (in *Input) outsideTheRule(candidate *graph.Candidate, symbol *graph.Symbol
 // deadParent reports whether a declaration's container is dead. A test file's
 // declaration a test reaches is a candidate of the production sweep alone, so its
 // members are judged on their own.
-func (in *Input) deadParent(symbol *graph.Symbol) bool {
+func (in *Input) deadParent(symbol *inventory.Symbol) bool {
 	parent := in.candidateOf(symbol.Parent)
 	if parent == nil {
 		return false
 	}
 	container := in.symbol(symbol.Parent)
-	return container == nil || !testFile(container) || parent.UnreferencedTest || parent.TestOfDeadCode
+	return container == nil || !container.InTestFile || parent.UnreferencedTest || parent.TestOfDeadCode
 }
 
 // unusedMessage is what one unused-declaration finding says, in the reader's words:
@@ -213,14 +213,14 @@ func (in *Input) unusedMessage(candidate *graph.Candidate, code vocab.Code) stri
 //
 // A method with a receiver is not one: it has its own declaration site and its own
 // reference set, and a report names it by its own visibility.
-func member(kind graph.SymbolKind) bool {
-	return kind == graph.KindField
+func member(kind inventory.SymbolKind) bool {
+	return kind == inventory.KindField
 }
 
 // interfaceDeclaration reports whether one kind of declaration is an interface or a
 // method an interface declares, which are the interface kinds' subjects.
-func interfaceDeclaration(kind graph.SymbolKind) bool {
-	return kind == graph.KindInterface || kind == graph.KindInterfaceMethod
+func interfaceDeclaration(kind inventory.SymbolKind) bool {
+	return kind == inventory.KindInterface || kind == inventory.KindInterfaceMethod
 }
 
 // readOrWriteSubject reports whether one candidate is a subject of the
@@ -234,15 +234,15 @@ func interfaceDeclaration(kind graph.SymbolKind) bool {
 // enumerated-member kind's. The same reading gives a type parameter to the
 // type-parameter kind, whose one subject is a parameter its own signature and body
 // leave unnamed.
-func (in *Input) readOrWriteSubject(candidate *graph.Candidate, symbol *graph.Symbol) bool {
+func (in *Input) readOrWriteSubject(candidate *graph.Candidate, symbol *inventory.Symbol) bool {
 	if candidate.ProductionRefs > 0 || candidate.TestRefs > 0 {
 		return false
 	}
 	switch symbol.Kind {
-	case graph.KindConst:
+	case inventory.KindConst:
 		_, enumerated := in.enumMembers()[candidate.ID]
 		return enumerated
-	case graph.KindTypeParam:
+	case inventory.KindTypeParam:
 		return declaresTypeParameters(in.symbol(symbol.Parent))
 	default:
 		return false
@@ -253,7 +253,7 @@ func (in *Input) readOrWriteSubject(candidate *graph.Candidate, symbol *graph.Sy
 // type, read from the syntax on first use. It is the recognition the
 // enumerated-member kind and the enum-group exemption apply, so the three kinds
 // that read it agree on what an enumerated type is.
-func (in *Input) enumMembers() map[graph.SymbolID]string {
+func (in *Input) enumMembers() map[inventory.SymbolID]string {
 	held := in.index()
 	if held.enumerated == nil {
 		held.enumerated = enumGroupMembers(in)
@@ -272,48 +272,10 @@ func testKept(candidate *graph.Candidate) bool {
 	return testOnly(candidate) || (candidate.TestRefs > 0 && candidate.Relation == graph.Reachability && candidate.KeptByTests)
 }
 
-// testFile reports whether a test file declares one symbol, by the language's own
-// rule over the file's name.
-func testFile(symbol *graph.Symbol) bool {
-	_, test := graph.IsTestFile(symbol.Pos.Filename)
-	return test
-}
-
-// testSupport reports whether a test-support package declares one symbol: every
-// configuration of the run that loads the package classified it as one. A
-// production import under one configuration makes the package production code,
-// whatever another configuration that compiles none of its importers says.
-func (in *Input) testSupport(symbol *graph.Symbol) bool {
-	return in.classifiedEverywhere(symbol, func(c *Configured, key load.PackageID) bool { return c.Tests.Support[key] })
-}
-
-// testReached reports whether production code only tests reach declares one symbol:
-// every configuration that loads its package found only tests reaching it, and not
-// every one found it test-support code.
-func (in *Input) testReached(symbol *graph.Symbol) bool {
-	return !in.testSupport(symbol) && in.classifiedEverywhere(symbol, func(c *Configured, key load.PackageID) bool {
-		return c.Tests.Support[key] || c.Tests.Reached[key]
-	})
-}
-
-// classifiedEverywhere reports whether some configuration of the run classified the
-// package declaring one symbol by classified and every configuration that loads it did.
-func (in *Input) classifiedEverywhere(symbol *graph.Symbol, classified func(c *Configured, key load.PackageID) bool) bool {
-	held := false
-	for i := range in.Per {
-		one := &in.Per[i]
-		if one.Result == nil {
-			continue
-		}
-		key := graph.PackageOf(one.Result, symbol, in.Root)
-		switch {
-		case classified(one, key):
-			held = true
-		case loads(one.Result, key):
-			return false
-		}
-	}
-	return held
+// testReached reports whether production code only tests reach declares one symbol
+// of the merged inventory ([graph.MatrixTests]).
+func (in *Input) testReached(symbol *inventory.Symbol) bool {
+	return in.Merged.Tests.Reached[symbol.Package]
 }
 
 // testReachedEvidence is the row of the Contract's evidence table that names the
@@ -323,7 +285,7 @@ var testReachedEvidence, _ = vocab.EvidenceFor("test-reached", language)
 // testReachedUse reports whether a record under code holds a declaration of production
 // code only tests reach that a test references, whose finding is possible whether or
 // not the record keeps the declaration live.
-func (in *Input) testReachedUse(id graph.SymbolID, code vocab.Code) bool {
+func (in *Input) testReachedUse(id inventory.SymbolID, code vocab.Code) bool {
 	symbol := in.symbol(id)
 	return testReachedEvidence.Lowers(language, code) && symbol != nil && in.testReached(symbol) && in.testUse().referenced[id]
 }
@@ -336,9 +298,9 @@ type testUseFacts struct {
 	// of dead code every dead target of which is one. No member references a dead
 	// declaration outside the set, so reporting the rest of its component without it
 	// deletes nothing a withheld member needs.
-	dead map[graph.SymbolID]bool
+	dead map[inventory.SymbolID]bool
 	// referenced is every declaration a test file references.
-	referenced map[graph.SymbolID]bool
+	referenced map[inventory.SymbolID]bool
 }
 
 // testUse computes the run's [testUseFacts] on first use.
@@ -347,12 +309,12 @@ func (in *Input) testUse() *testUseFacts {
 	if held.testUse != nil {
 		return held.testUse
 	}
-	facts := &testUseFacts{dead: make(map[graph.SymbolID]bool), referenced: make(map[graph.SymbolID]bool)}
+	facts := &testUseFacts{dead: make(map[inventory.SymbolID]bool), referenced: make(map[inventory.SymbolID]bool)}
 	held.testUse = facts
 	if in.Merged == nil || in.Sweep == nil {
 		return facts
 	}
-	out := make(map[graph.SymbolID][]graph.SymbolID)
+	out := make(map[inventory.SymbolID][]inventory.SymbolID)
 	for i := range in.Merged.References {
 		ref := &in.Merged.References[i]
 		if ref.Test {
@@ -379,8 +341,8 @@ func (in *Input) testUse() *testUseFacts {
 // dead code reaches through out or holds as its container, a test file's helpers
 // included, so a reported finding is never about a declaration the withheld test
 // needs. A production declaration it adds can admit a further test.
-func (in *Input) walkAdmittedTest(facts *testUseFacts, out map[graph.SymbolID][]graph.SymbolID, test graph.SymbolID) {
-	queue := []graph.SymbolID{test}
+func (in *Input) walkAdmittedTest(facts *testUseFacts, out map[inventory.SymbolID][]inventory.SymbolID, test inventory.SymbolID) {
+	queue := []inventory.SymbolID{test}
 	children := in.index().children
 	for len(queue) > 0 {
 		id := queue[len(queue)-1]
@@ -396,17 +358,17 @@ func (in *Input) walkAdmittedTest(facts *testUseFacts, out map[graph.SymbolID][]
 
 // deadProduction reports whether one declaration is a dead production declaration:
 // a candidate outside the test files that is no test of dead code.
-func (in *Input) deadProduction(id graph.SymbolID) bool {
+func (in *Input) deadProduction(id inventory.SymbolID) bool {
 	candidate, symbol := in.candidateOf(id), in.symbol(id)
-	return candidate != nil && !candidate.TestOfDeadCode && symbol != nil && !testFile(symbol)
+	return candidate != nil && !candidate.TestOfDeadCode && symbol != nil && !symbol.InTestFile
 }
 
 // walkTestUse fills facts.dead with the dead declarations of production code only
 // tests reach that a test references, and every dead production declaration one
 // reaches through out or holds as its container.
-func (in *Input) walkTestUse(facts *testUseFacts, out map[graph.SymbolID][]graph.SymbolID) {
-	var queue []graph.SymbolID
-	add := func(id graph.SymbolID) {
+func (in *Input) walkTestUse(facts *testUseFacts, out map[inventory.SymbolID][]inventory.SymbolID) {
+	var queue []inventory.SymbolID
+	add := func(id inventory.SymbolID) {
 		if !facts.dead[id] && in.deadProduction(id) {
 			facts.dead[id] = true
 			queue = append(queue, id)
@@ -433,7 +395,7 @@ func (in *Input) walkTestUse(facts *testUseFacts, out map[graph.SymbolID][]graph
 
 // everyDeadTargetIn reports whether a test's references name at least one dead
 // production declaration and every one they name is in set.
-func everyDeadTargetIn(targets []graph.SymbolID, production func(graph.SymbolID) bool, set map[graph.SymbolID]bool) bool {
+func everyDeadTargetIn(targets []inventory.SymbolID, production func(inventory.SymbolID) bool, set map[inventory.SymbolID]bool) bool {
 	named := false
 	for _, to := range targets {
 		if !production(to) {
@@ -447,19 +409,14 @@ func everyDeadTargetIn(targets []graph.SymbolID, production func(graph.SymbolID)
 	return named
 }
 
-// loads reports whether one configuration loaded the package.
-func loads(r *load.Result, key load.PackageID) bool {
-	return slices.ContainsFunc(r.Packages, func(p *packages.Package) bool { return r.ID(p) == key })
-}
-
 // deprecations is every declaration of the inventory carrying a deprecation
 // marker, read from the syntax of every configuration and built on first use.
-func (in *Input) deprecations() map[graph.SymbolID]bool {
+func (in *Input) deprecations() map[inventory.SymbolID]bool {
 	held := in.index()
 	if held.deprecated != nil {
 		return held.deprecated
 	}
-	held.deprecated = make(map[graph.SymbolID]bool)
+	held.deprecated = make(map[inventory.SymbolID]bool)
 	for _, one := range in.Per {
 		if one.Result == nil || one.Resolve == nil {
 			continue
@@ -480,10 +437,10 @@ func (in *Input) deprecations() map[graph.SymbolID]bool {
 // the convention reads for a grouped constant or variable, and a member carries its
 // own. A name the resolver does not answer for is a declaration the inventory does
 // not hold, a local variable above all, and marks nothing.
-func markDeprecated(file *ast.File, resolve *graph.Resolver, marked map[graph.SymbolID]bool) {
+func markDeprecated(file *ast.File, rs *resolve.Resolver, marked map[inventory.SymbolID]bool) {
 	ast.Inspect(file, func(n ast.Node) bool {
 		for _, name := range deprecatedNames(n) {
-			if id, held := resolve.At(name.Pos()); held {
+			if id, held := rs.At(name.Pos()); held {
 				marked[id] = true
 			}
 		}

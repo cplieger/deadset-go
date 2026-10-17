@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -100,7 +100,7 @@ func TestEveryFindingNamesTheConsumersTheRunLoaded(t *testing.T) {
 
 func TestTheClassOfADeclarationNoConsumerCanReachIsCertainWithoutAnyConsumerInformation(t *testing.T) {
 	for name, one := range map[string]struct {
-		id   graph.SymbolID
+		id   inventory.SymbolID
 		want vocab.Class
 	}{
 		"an exported declaration of an internal package":   {id: internalID, want: vocab.Certain},
@@ -355,10 +355,10 @@ func TestAnUnanalysedConsumerIsReadFromTheInnermostUnitWhateverTheMapOrder(t *te
 		{Dir: "/r/x"},
 	}}}}}
 	for range 64 {
-		if in.unanalysedConsumer(&graph.Symbol{Pos: token.Position{Filename: "x/a.go"}}) {
+		if in.unanalysedConsumer(&inventory.Symbol{Pos: token.Position{Filename: "x/a.go"}}) {
 			t.Fatal("unanalysedConsumer(x/a.go) = true with the root unit flagged and unit x not, want false")
 		}
-		if !in.unanalysedConsumer(&graph.Symbol{Pos: token.Position{Filename: "a.go"}}) {
+		if !in.unanalysedConsumer(&inventory.Symbol{Pos: token.Position{Filename: "a.go"}}) {
 			t.Fatal("unanalysedConsumer(a.go) = false with the root unit flagged, want true")
 		}
 	}
