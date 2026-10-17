@@ -1,0 +1,45 @@
+One module whose test-support package holds a file a generator wrote with a line
+directive naming its template in another directory of the target. The template
+holds the same bytes, as a generator's copy of it does.
+
+-- go.mod --
+module example.com/lined
+
+go 1.27.1
+-- main.go --
+package main
+
+func main() {}
+-- helper/helper.go --
+package helper
+
+import "testing"
+
+// Check fails a test whose value is not one.
+func Check(t testing.TB, v int) {
+	if v != 1 {
+		t.Error("not one")
+	}
+}
+-- helper/gen.go --
+package helper
+
+//line ../tmpl/gen.tmpl:3
+// Generated is written from the template.
+func Generated() int { return 1 }
+-- tmpl/gen.tmpl --
+package helper
+
+//line ../tmpl/gen.tmpl:3
+// Generated is written from the template.
+func Generated() int { return 1 }
+-- helper/helper_test.go --
+package helper_test
+
+import (
+	"testing"
+
+	"example.com/lined/helper"
+)
+
+func TestGenerated(t *testing.T) { helper.Check(t, helper.Generated()) }

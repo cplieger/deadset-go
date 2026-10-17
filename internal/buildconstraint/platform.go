@@ -1,4 +1,4 @@
-package matrix
+package buildconstraint
 
 import (
 	"slices"
@@ -97,7 +97,6 @@ var (
 // configuration's tag list.
 const (
 	unixTag       = "unix"
-	gcCompiler    = "gc"
 	gccgoCompiler = "gccgo"
 
 	// boringcryptoTag is the older spelling of one experiment tag, which the
@@ -125,27 +124,27 @@ var architectures = sync.OnceValue(func() map[string][]string {
 	return byArch
 })
 
-// isOS reports whether name is an operating-system name the toolchain's
+// IsOS reports whether name is an operating-system name the toolchain's
 // conventions reserve, whether or not it still builds for it.
-func isOS(name string) bool {
+func IsOS(name string) bool {
 	_, built := platforms()[name]
 	return built || slices.Contains(retiredOS, name)
 }
 
-// isArch reports whether name is an architecture name the toolchain's
+// IsArch reports whether name is an architecture name the toolchain's
 // conventions reserve, whether or not it still builds for it.
-func isArch(name string) bool {
+func IsArch(name string) bool {
 	_, built := architectures()[name]
 	return built || slices.Contains(retiredArch, name)
 }
 
-// isToolchainTag reports whether the toolchain answers tag from its own
+// IsToolchainTag reports whether the toolchain answers tag from its own
 // environment: the compiler it is, the operating-system class it targets, the
 // release it implements or an experiment it was built with. A configuration
-// naming one of these decides nothing, so none is an axis of the matrix.
-func isToolchainTag(tag string) bool {
+// naming one of these decides nothing.
+func IsToolchainTag(tag string) bool {
 	switch tag {
-	case unixTag, gcCompiler, gccgoCompiler, boringcryptoTag:
+	case unixTag, Compiler, gccgoCompiler, boringcryptoTag:
 		return true
 	}
 	return strings.HasPrefix(tag, experimentPrefix) || isReleaseTag(tag)
@@ -174,28 +173,10 @@ func digits(s string) bool {
 	return true
 }
 
-// archFor returns the architecture a configuration for one operating system is
-// built with: preferred where the toolchain builds that pair, and otherwise the
-// first architecture it builds that system for. It reports false for a system
-// the toolchain builds nothing for.
-func archFor(system, preferred string) (string, bool) {
-	return partner(platforms()[system], preferred)
-}
+// ArchitecturesOf is every architecture the toolchain builds the operating system
+// for, sorted, and none for a system it builds nothing for.
+func ArchitecturesOf(system string) []string { return slices.Clone(platforms()[system]) }
 
-// osFor returns the operating system a configuration for one architecture is
-// built for, by the same rule archFor applies to the other axis.
-func osFor(arch, preferred string) (string, bool) {
-	return partner(architectures()[arch], preferred)
-}
-
-// partner picks preferred out of candidates, falling back to the first of them,
-// and reports false when there are none.
-func partner(candidates []string, preferred string) (string, bool) {
-	if len(candidates) == 0 {
-		return "", false
-	}
-	if slices.Contains(candidates, preferred) {
-		return preferred, true
-	}
-	return candidates[0], true
-}
+// SystemsOf is every operating system the toolchain builds the architecture for,
+// sorted, and none for an architecture it builds nothing for.
+func SystemsOf(arch string) []string { return slices.Clone(architectures()[arch]) }

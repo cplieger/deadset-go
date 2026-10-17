@@ -2,6 +2,7 @@ package matrix
 
 import (
 	"go/build"
+	"go/build/constraint"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -9,7 +10,9 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/buildconstraint"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/txtar"
 )
 
@@ -54,6 +57,33 @@ func write(t *testing.T, path string, data []byte) {
 	}
 }
 
+// topOf is the topology of the target root dir.
+func topOf(t *testing.T, dir string) *load.Topology {
+	t.Helper()
+
+	doc, err := scope.ForDir(dir)
+	if err != nil {
+		t.Fatalf("Setup: scope.ForDir(%s): %v", dir, err)
+	}
+	top, err := load.Discover(t.Context(), doc)
+	if err != nil {
+		t.Fatalf("Setup: load.Discover(%s): %v", dir, err)
+	}
+	return top
+}
+
+// derivedIDs names every configuration of a matrix derivation paired from an atom,
+// in order.
+func derivedIDs(configurations []load.Configuration) []string {
+	var ids []string
+	for _, c := range configurations {
+		if c.Origin == load.Derived {
+			ids = append(ids, c.ID)
+		}
+	}
+	return ids
+}
+
 // identifiers returns the identifier of every configuration of a matrix, in
 // order.
 func identifiers(configurations []load.Configuration) []string {
@@ -80,6 +110,8 @@ var unixOS = []string{
 
 const (
 	cgoTag                 = "cgo"
+	unixTag                = "unix"
+	boringcryptoTag        = "boringcrypto"
 	boringcryptoExperiment = "goexperiment.boringcrypto"
 )
 
@@ -111,7 +143,7 @@ func satisfies(c load.Configuration) func(tag string) bool {
 // pathed is one Go file of a fixture tree and its constraint.
 type pathed struct {
 	path string // root-relative, forward slashes
-	file fileConstraint
+	file constraint.Expr
 }
 
 // pathedFiles reads every Go file the derivation reads under root, as collect walks
@@ -124,16 +156,20 @@ func pathedFiles(t *testing.T, root string) []pathed {
 		switch {
 		case err != nil:
 			return err
-		case entry.IsDir() && path != root && (unbuilt(entry.Name()) || startsAnotherModule(path)):
+		case entry.IsDir() && path != root && (buildconstraint.SkipsDir(entry.Name()) || load.IsModuleRoot(path)):
 			return fs.SkipDir
-		case entry.IsDir() || !isGoFile(entry.Name()):
+		case entry.IsDir() || !buildconstraint.IsGoFile(entry.Name()):
 			return nil
 		}
-		file, err := readConstraint(root, path)
+		content, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
-		found = append(found, pathed{path: relativeToSlash(root, path), file: file})
+		file, err := buildconstraint.Of(filepath.Base(path), content)
+		if err != nil {
+			return err
+		}
+		found = append(found, pathed{path: load.RelativeSlash(root, path), file: file})
 		return nil
 	})
 	if err != nil {
@@ -143,8 +179,8 @@ func pathedFiles(t *testing.T, root string) []pathed {
 }
 
 // constraintsOf is the constraints of pathed files, in their order.
-func constraintsOf(files []pathed) []fileConstraint {
-	held := make([]fileConstraint, len(files))
+func constraintsOf(files []pathed) []constraint.Expr {
+	held := make([]constraint.Expr, len(files))
 	for i := range files {
 		held[i] = files[i].file
 	}

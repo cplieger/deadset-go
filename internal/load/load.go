@@ -1,20 +1,19 @@
 // Package load resolves one build configuration of a target into type-checked
-// packages, test variants included. A load is fail-closed: a package that does
-// not type-check ends the run with every diagnostic and no package set.
+// packages, test variants included, over a topology read once per run. A load is
+// fail-closed: a package that does not type-check ends the run with every
+// diagnostic and no package set.
 package load
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"go/token"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
 
-	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -48,88 +47,40 @@ var (
 	errConfiguration = errors.New("load: incomplete configuration")
 
 	// errConsumer reports a declared consumer whose references a configuration
-	// cannot count: a module whose identity
-	// disagrees with the scope, or one whose own module graph resolves the target
-	// somewhere other than the target's own directory. Each is refused rather
-	// than passed over, because a run that counted no reference from a declared
-	// consumer would report the symbols that consumer uses.
+	// cannot count: a module whose identity disagrees with the scope, or one whose
+	// own module graph resolves the target somewhere other than the target's own
+	// directory. Each is refused rather than passed over, because a run that
+	// counted no reference from a declared consumer would report the symbols that
+	// consumer uses.
 	errConsumer = errors.New("load: unusable consumer")
+)
+
+// origin is where a configuration of the matrix comes from, which decides what a
+// failing load of it means.
+type origin int
+
+const (
+	// Declared is a configuration the configuration document lists: one that does
+	// not load ends the run, because an answer computed from the others is more
+	// permissive than the truth.
+	Declared origin = iota
+
+	// host is the configuration of the host the run is on, which a derived matrix
+	// always holds: one that does not load ends the run too.
+	host
+
+	// Derived is derivation's own pairing of an atom the tree names with an axis: one
+	// that does not load is dropped, because the pairing was the guess.
+	Derived
 )
 
 // Configuration is one build configuration of the matrix.
 type Configuration struct {
-	ID   string   // the identifier every finding names, "linux-amd64"
-	OS   string   // GOOS
-	Arch string   // GOARCH
-	Tags []string // build tags, passed to the toolchain as one -tags flag
-}
-
-// Result is one configuration's loaded packages.
-type Result struct {
-	Configuration Configuration
-
-	// Packages holds the target's packages and the test variants that
-	// type-check their files again, and never a synthesized test binary, so
-	// every file a stage of the analysis meets is a file of the target.
-	Packages []*packages.Package
-
-	// Units holds one entry per module of the target, in [Units] order, each
-	// with its share of Packages. A reference from one unit to another is to a
-	// dependency of the first loaded from the second's directory, which is a
-	// second reading of the second's files.
-	Units []Unit
-
-	// Nested holds one entry per module that is no declared consumer and whose
-	// references count as a declared consumer's do: each module below a target the
-	// walk does not search that builds against a unit's directory, in directory order,
-	// then each unit's packages below an underscore directory, then each workspace
-	// reader [Result.AddReaders] appends.
-	Nested []Consumer
-
-	// Dropped holds every module the walk found below the target, and every
-	// module Nested would hold, that did not load. A unit one of them requires has
-	// it as a consumer the run did not analyze.
-	Dropped []droppedModule
-
-	// Consumers holds one entry per declared consumer, in the order the scope
-	// declares them. A consumer's packages are kept apart from the target's
-	// because the two answer different questions: the declarations a run reports
-	// on are the target's alone, while the references it counts come from every
-	// module it loaded.
-	Consumers []Consumer
-
-	Fset  *token.FileSet // one FileSet for the whole configuration, shared by every configuration [All] loads
-	trees *syntaxCache
-
-	// TestSupport holds the [Result.PackageKey] of the target's test-support packages:
-	// packages only tests reach that carry test evidence, which every stage judges as
-	// test code. The load leaves it empty and [graph.ClassifyTestSupport] fills it,
-	// because the classification turns on the target kind and the roots.
-	TestSupport map[string]bool
-
-	// TestReached holds, by the same key, the target's packages only tests reach that
-	// are not test support, which stay production code. A package with test evidence
-	// is one when a member of this set imports it. [graph.ClassifyTestSupport] fills it.
-	TestReached map[string]bool
-
-	// Programs holds the target's files run on their own under the ignore tag, and
-	// the scripts of every dropped module, which no package of the target compiles
-	// and every stage but the root detection leaves alone.
-	Programs []program
-
-	shared map[string]bool // the import paths [Result.PackageKey] joins a directory to
-
-	// ExcludedByCgo holds the target-relative paths, forward slashes, of the
-	// files the toolchain ignored for importing "C" that the opaque-C check could
-	// not read either. References those files make are outside the reference set,
-	// which is a declared limit of the run rather than a file nothing builds. A
-	// file the check did read is a file of its package like any other and is not
-	// in this list.
-	ExcludedByCgo []string
-
-	// Generated holds the package clause of every file of Packages that carries the
-	// generated-code header, once per parse of the file.
-	Generated []token.Pos
+	ID     string   // the identifier every finding names, "linux-amd64"
+	OS     string   // GOOS
+	Arch   string   // GOARCH
+	Tags   []string // build tags, passed to the toolchain as one -tags flag
+	Origin origin
 }
 
 // HostConfiguration is the configuration of the host the binary runs on, with no
@@ -137,82 +88,129 @@ type Result struct {
 // toolchain, so it spawns nothing and cannot disagree with the code it belongs to.
 func HostConfiguration() Configuration {
 	return Configuration{
-		ID:   runtime.GOOS + "-" + runtime.GOARCH,
-		OS:   runtime.GOOS,
-		Arch: runtime.GOARCH,
+		ID:     runtime.GOOS + "-" + runtime.GOARCH,
+		OS:     runtime.GOOS,
+		Arch:   runtime.GOARCH,
+		Origin: host,
 	}
 }
 
-// Load resolves configuration c of every unit of doc's target ([Units]) and every
-// consumer doc declares; cancelling ctx stops it. A file or component the project
-// lacks returns a *[SetupError], any other metadata or [typeCheck] error a *[Error],
-// an unusable consumer [errConsumer], each with a zero Result; a walked or nested
-// module that does not load is dropped into [Result.Dropped] instead while a unit is
-// left. Load makes no network request, runs no compiler and pins the settings that
-// decide what loads. A unit another unit builds from its directory is read twice,
-// and the resolver joins the two readings by rendered site.
-func Load(ctx context.Context, doc scope.Document, c Configuration) (Result, error) {
-	return load(ctx, doc, c, newSyntaxCache())
+// Load resolves configuration c of every module top holds; cancelling ctx stops
+// it. A file or component the project lacks returns a *[SetupError], any other
+// metadata or [typeCheck] error a *[Error], an unusable consumer [errConsumer],
+// each with a zero Result; a walked unit, a nested module or a reader that does not
+// load is dropped into [Result.Dropped] instead while a unit is left. Load makes no
+// network request, runs no compiler and pins the settings that decide what loads.
+func Load(ctx context.Context, top *Topology, c *Configuration) (Result, error) {
+	return load(ctx, top, c, newSyntaxCache())
 }
 
 // load is [Load] over trees, which [All] shares across the configurations of a matrix.
-func load(ctx context.Context, doc scope.Document, c Configuration, trees *syntaxCache) (Result, error) {
+func load(ctx context.Context, top *Topology, c *Configuration, trees *syntaxCache) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, fmt.Errorf("load %s: %w", c.ID, err)
 	}
 	if c.ID == "" || c.OS == "" || c.Arch == "" {
 		return Result{}, fmt.Errorf("%w: id=%q os=%q arch=%q", errConfiguration, c.ID, c.OS, c.Arch)
 	}
-
-	target := doc.Target.Path
-	if target == "" {
-		return Result{}, fmt.Errorf("load %s: %w", c.ID, scope.ErrNoTarget)
-	}
-	if _, err := os.Stat(target); err != nil {
-		return Result{}, fmt.Errorf("load %s: target %s: %w", c.ID, target, err)
-	}
-
-	dirs, err := Units(ctx, target)
-	if err != nil {
-		return Result{}, fmt.Errorf("load %s: find the modules under %s: %w", c.ID, target, err)
-	}
-	walked := walkedUnits(target, dirs)
-	r := Result{Configuration: c, Fset: trees.fset, trees: trees}
-	if failed := r.loadUnits(ctx, target, dirs, walked); failed != nil {
+	l := &loader{ctx: ctx, top: top, c: c, trees: trees}
+	r := Result{Configuration: *c, Fset: trees.fset}
+	if failed := l.units(&r); failed != nil {
 		return Result{}, failed
 	}
 	slices.Sort(r.ExcludedByCgo)
 	r.ExcludedByCgo = slices.Compact(r.ExcludedByCgo)
 	r.Generated = generatedFiles(r.Packages)
-	r.markShared()
+	r.declared = declaredDirs(r.Packages)
 
-	if !walked {
-		if r.Nested, r.Dropped, err = loadNested(ctx, r.trees, &doc, c, r.Units); err != nil {
-			return Result{}, err
-		}
-	}
-	r.markUnanalysedConsumers(ctx)
-	for _, dropped := range r.Dropped {
-		r.Programs = append(r.Programs, checkScripts(ctx, r.Fset, dropped.Dir, r.Packages, c)...)
-	}
-
-	r.Consumers, err = loadConsumers(ctx, r.trees, &doc, c, r.Units)
-	if err != nil {
+	if err := l.readers(&r); err != nil {
 		return Result{}, err
 	}
+	r.markUnanalysedConsumers()
+
+	var err error
+	if r.Consumers, err = l.consumers(r.Units); err != nil {
+		return Result{}, err
+	}
+	r.sources = newSourceCache(&r)
 	return r, nil
 }
 
-// loadUnits loads every unit of dirs into r, dropping a walked unit that does not
-// load, and returns the error that ends the load, the first drop's where no unit is
-// left.
-func (r *Result) loadUnits(ctx context.Context, target string, dirs []string, walked bool) error {
-	for _, dir := range dirs {
-		failed := r.loadUnit(ctx, target, dir)
+// loader is one configuration's load of one topology.
+type loader struct {
+	ctx   context.Context
+	top   *Topology
+	c     *Configuration
+	trees *syntaxCache
+}
+
+// readers loads into r every module whose references count as a declared
+// consumer's without being one: the nested modules, then the units' underscored
+// packages, then the scripts of every module dropped so far, then the workspace
+// readers.
+func (l *loader) readers(r *Result) error {
+	for i := range l.top.Nested {
+		if err := l.nested(r, &l.top.Nested[i], unitPrefix(l.top.Root, l.top.Nested[i].Dir)); err != nil {
+			return err
+		}
+	}
+	for i := range l.top.Units {
+		if err := l.underscored(r, &l.top.Units[i]); err != nil {
+			return err
+		}
+	}
+	for _, dropped := range r.Dropped {
+		r.Programs = append(r.Programs, checkScripts(l.ctx, r.Fset, dropped.Dir, r.Packages, l.c)...)
+	}
+	for i := range l.top.Readers {
+		if err := l.reader(r, &l.top.Readers[i]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// loadSpec is what one load of a module directory runs: the directory, its GOWORK
+// setting and the module file its toolchain reads, the further modules [typeCheck]
+// checks whole, the prefix a position the toolchain wrote relative to the
+// directory is rewritten below, and the patterns it names there.
+type loadSpec struct {
+	dir, workspace, prefix string
+	file                   *ModuleFile
+	modules                []string
+	patterns               []string
+}
+
+// specOf is the load of one discovered module, checking whole the modules it consumes.
+func specOf(m *discoveredModule, prefix string) *loadSpec {
+	return &loadSpec{dir: m.Dir, workspace: m.Workspace, prefix: prefix, file: m.File, modules: m.Consumes}
+}
+
+// module loads one module directory under the configuration, test binaries
+// dropped. A load that reports diagnostics returns them as an *[Error] naming
+// name, empty for a unit of the target, and any other failure as the load met it.
+func (l *loader) module(spec *loadSpec, name string) ([]*packages.Package, error) {
+	pkgs, diagnostics, err := loadPackages(l.ctx, l.trees, l.c, spec)
+	if err != nil {
+		return nil, err
+	}
+	if len(diagnostics) > 0 {
+		return nil, &Error{Configuration: l.c.ID, Module: name, Diagnostics: diagnostics}
+	}
+	return withoutTestBinaries(pkgs), nil
+}
+
+// units loads every unit of the topology into r, dropping a walked unit that does
+// not load, and returns the error that ends the load, the first drop's where no
+// unit is left.
+func (l *loader) units(r *Result) error {
+	for i := range l.top.Units {
+		unit := &l.top.Units[i]
+		failed := l.unit(r, unit)
 		switch {
 		case failed == nil:
-		case walked && droppable(failed) && ctx.Err() == nil:
-			r.Dropped = append(r.Dropped, droppedModule{Dir: dir, Err: failed})
+		case l.top.Walked && droppable(failed) && l.ctx.Err() == nil:
+			r.Dropped = append(r.Dropped, droppedOf(unit, failed))
 		default:
 			return failed
 		}
@@ -223,49 +221,117 @@ func (r *Result) loadUnits(ctx context.Context, target string, dirs []string, wa
 	return nil
 }
 
-// loadUnit loads the unit whose toolchain runs from dir into r, as [Load] loads every unit.
-// The unit's own module file decides its versions, through the workspace that
-// lists it where one governs dir, and never through the ambient setting.
-func (r *Result) loadUnit(ctx context.Context, target, dir string) error {
-	c := r.Configuration
-	workspace, err := unitWorkspace(ctx, dir)
+// unit loads one unit into r: its packages, the files the opaque-C check reads
+// back, and its programs.
+func (l *loader) unit(r *Result, unit *discoveredModule) error {
+	pkgs, err := l.module(specOf(unit, unitPrefix(l.top.Root, unit.Dir)), "")
 	if err != nil {
-		return fmt.Errorf("load %s: %s: %w", c.ID, dir, err)
+		_, setup := errors.AsType[*SetupError](err)
+		_, diagnosed := errors.AsType[*Error](err)
+		if setup || diagnosed {
+			return err
+		}
+		return fmt.Errorf("load %s: %s: %w", l.c.ID, unit.Dir, err)
 	}
-	pkgs, diagnostics, err := loadPackages(ctx, r.trees, dir, c, workspace, nil, unitPrefix(target, dir))
-	if _, setup := errors.AsType[*SetupError](err); setup {
-		return err
-	}
+	cgo, err := cgoOnly(pkgs, l.c)
 	if err != nil {
-		return fmt.Errorf("load %s: %s: %w", c.ID, dir, err)
+		return fmt.Errorf("load %s: %w", l.c.ID, err)
 	}
-	if len(diagnostics) > 0 {
-		return &Error{Configuration: c.ID, Diagnostics: diagnostics}
-	}
-
-	pkgs = withoutTestBinaries(pkgs)
-	cgo, err := cgoOnly(pkgs, c)
-	if err != nil {
-		return fmt.Errorf("load %s: %w", c.ID, err)
-	}
-	from := unitDir{dir: dir, workspace: workspace}
-	r.ExcludedByCgo = append(r.ExcludedByCgo, checkOpaqueC(ctx, r.Fset, target, from, pkgs, cgo, c)...)
-	r.Programs = append(r.Programs, checkPrograms(ctx, r.Fset, from, pkgs, c)...)
+	from := unitDir{dir: unit.Dir, workspace: unit.Workspace}
+	r.ExcludedByCgo = append(r.ExcludedByCgo, checkOpaqueC(l.ctx, r.Fset, l.top.Root, from, pkgs, cgo, l.c)...)
+	r.Programs = append(r.Programs, checkPrograms(l.ctx, r.Fset, from, pkgs, l.c)...)
 	r.Packages = append(r.Packages, pkgs...)
-	unit := Unit{Dir: dir, Packages: pkgs}
-	if module := mainModule(pkgs); module != nil {
-		unit.Path = module.Path
-	}
-	r.Units = append(r.Units, unit)
+	r.Units = append(r.Units, Unit{Dir: unit.Dir, Path: unit.Path, Packages: pkgs})
 	return nil
 }
 
-// loadPackages resolves and type-checks every package of the module rooted at dir,
-// or the packages patterns names there, under configuration c, with workspace as the child toolchain's GOWORK setting and
-// modules as the further modules [typeCheck] checks whole. A load that reports errors
-// returns them as diagnostics and no packages, each position the toolchain wrote
-// relative to dir rewritten below prefix.
-func loadPackages(ctx context.Context, trees *syntaxCache, dir string, c Configuration, workspace string, modules []string, prefix string, patterns ...string) ([]*packages.Package, []Diagnostic, error) {
+// nested loads one module below the target that builds against a unit's
+// directory as a [Result.Nested] consumer, dropping it where it does not load. A
+// module below the target is named by prefix, its target-relative directory, which
+// a note may carry.
+func (l *loader) nested(r *Result, m *discoveredModule, prefix string) error {
+	name := prefix
+	if name == "" {
+		name = m.Dir
+	}
+	pkgs, err := l.module(specOf(m, prefix), name)
+	switch {
+	case err == nil:
+	case droppable(err) && l.ctx.Err() == nil:
+		r.Dropped = append(r.Dropped, droppedOf(m, err))
+		return nil
+	default:
+		return fmt.Errorf("load %s: %s: %w", l.c.ID, m.Dir, err)
+	}
+	if module := mainModule(pkgs); module != nil {
+		r.Nested = append(r.Nested, Consumer{ID: module.Path, Packages: pkgs})
+	}
+	return nil
+}
+
+// reader loads one workspace reader as a [Result.Nested] consumer through the
+// workspace, as [loader.nested] loads a module below the target. A reader whose
+// module file the toolchain reads and this parser refuses is dropped unloaded,
+// which makes every unit's exports possible ([program.8], [program.9]). One whose
+// file the toolchain cannot read never gets here: the units' loads through the
+// workspace read that file too, and end the run.
+func (l *loader) reader(r *Result, m *discoveredModule) error {
+	if m.FileErr != nil {
+		r.Dropped = append(r.Dropped, droppedOf(m, fmt.Errorf("load %s: %s: %w", l.c.ID, m.Dir, m.FileErr)))
+		return nil
+	}
+	return l.nested(r, m, "")
+}
+
+// underscored loads the packages of unit's own module below an underscore directory
+// ([underscoredPackages]), an example tree among them, as a nested consumer of the
+// unit. No build of the module compiles them, so where they do not load together
+// each loads alone, and one that does not load counts nothing.
+func (l *loader) underscored(r *Result, unit *discoveredModule) error {
+	if len(unit.Underscored) == 0 {
+		return nil
+	}
+	try := func(patterns []string) (bool, error) {
+		spec := specOf(unit, unitPrefix(l.top.Root, unit.Dir))
+		spec.modules, spec.patterns = []string{unit.Path}, patterns
+		pkgs, err := l.module(spec, "")
+		switch {
+		case err == nil:
+			r.Nested = append(r.Nested, Consumer{ID: unit.Path, Packages: pkgs})
+			return true, nil
+		case droppable(err) && l.ctx.Err() == nil:
+			return false, nil
+		default:
+			return false, fmt.Errorf("load %s: %s: %w", l.c.ID, unit.Dir, err)
+		}
+	}
+	if loaded, err := try(unit.Underscored); loaded || err != nil || len(unit.Underscored) == 1 {
+		return err
+	}
+	for _, pattern := range unit.Underscored {
+		if _, err := try([]string{pattern}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// droppable reports whether one module's load error is about the project, a setup
+// failure, the diagnostics of a load or the go command refusing to list it, rather
+// than about the run.
+func droppable(err error) bool {
+	_, setup := errors.AsType[*SetupError](err)
+	_, diagnosed := errors.AsType[*Error](err)
+	_, listed := errors.AsType[*listError](err)
+	return setup || diagnosed || listed
+}
+
+// loadPackages resolves and type-checks every package of the module rooted at
+// spec's directory, or the packages its patterns name there, under configuration c.
+// A load that reports errors returns them as diagnostics and no packages, each
+// position the toolchain wrote relative to the directory rewritten below the prefix.
+func loadPackages(ctx context.Context, trees *syntaxCache, c *Configuration, spec *loadSpec) ([]*packages.Package, []Diagnostic, error) {
+	patterns := spec.patterns
 	if len(patterns) == 0 {
 		patterns = []string{loadPattern}
 	}
@@ -273,33 +339,83 @@ func loadPackages(ctx context.Context, trees *syntaxCache, dir string, c Configu
 		Mode:       metadataMode,
 		Context:    ctx,
 		Tests:      true,
-		Dir:        dir,
-		Env:        loadEnv(c, workspace),
+		Dir:        spec.dir,
+		Env:        loadEnv(c, spec.workspace),
 		BuildFlags: buildFlags(c.Tags),
 	}
 	pkgs, err := packages.Load(cfg, patterns...)
 	if err != nil {
 		return nil, nil, &listError{err: err}
 	}
-	if workspace != workspaceOff && len(modules) == 0 {
-		demoteOtherMembers(pkgs, dir)
+	if spec.workspace != workspaceOff && len(spec.modules) == 0 {
+		demoteOtherMembers(pkgs, spec.dir)
 	}
 	if err := dropUnbuiltErrors(pkgs, c); err != nil {
 		return nil, nil, err
 	}
-	if diagnostics := collect(pkgs, prefix); len(diagnostics) > 0 {
-		if failure := setupFailures(diagnostics, expectedModules(ctx, dir, c, workspace, pkgs)); failure != nil {
+	if diagnostics := collect(pkgs, spec.prefix); len(diagnostics) > 0 {
+		if failure := setupFailures(diagnostics, expectedModules(spec.file, pkgs)); failure != nil {
 			return nil, nil, failure
 		}
 		return nil, diagnostics, nil
 	}
-	if err := typeCheck(ctx, trees, dir+"\x00"+strings.Join(modules, "\x00"), pkgs, c.Arch, modules); err != nil {
+	if err := typeCheck(ctx, trees, spec.dir+"\x00"+strings.Join(spec.modules, "\x00"), pkgs, c.Arch, spec.modules); err != nil {
 		return nil, nil, err
 	}
-	if diagnostics := collect(pkgs, prefix); len(diagnostics) > 0 {
+	if diagnostics := collect(pkgs, spec.prefix); len(diagnostics) > 0 {
 		return nil, diagnostics, nil
 	}
 	return pkgs, nil, nil
+}
+
+// expectedModules is every module the project expects to exist: the main modules
+// the listing names, which a workspace makes several of and which a failed listing
+// still names, and every module its module file requires or replaces. A module file
+// that cannot be read contributes nothing, so the main modules alone decide.
+func expectedModules(file *ModuleFile, pkgs []*packages.Package) []string {
+	var modules []string
+	add := func(path string) {
+		if path != "" && !slices.Contains(modules, path) {
+			modules = append(modules, path)
+		}
+	}
+	for _, p := range pkgs {
+		if p.Module != nil && p.Module.Main {
+			add(p.Module.Path)
+		}
+	}
+	if file == nil {
+		return modules
+	}
+	for _, r := range file.Syntax.Require {
+		add(r.Mod.Path)
+	}
+	for _, r := range file.Syntax.Replace {
+		add(r.Old.Path)
+	}
+	return modules
+}
+
+// demoteOtherMembers leaves the module rooted at dir the one main module of a
+// workspace load. Every other member is a dependency of that unit, as a module a
+// replace directive names is, so no stage reads it as the unit's own code.
+func demoteOtherMembers(pkgs []*packages.Package, dir string) {
+	packages.Visit(pkgs, nil, func(p *packages.Package) {
+		if p.Module == nil || !p.Module.Main || sameDir(p.Module.Dir, dir) {
+			return
+		}
+		dependency := *p.Module
+		dependency.Main = false
+		p.Module = &dependency
+	})
+}
+
+// positionlessOnly reports whether a package with no file the configuration
+// compiles failed with list errors alone, none of them positioned: the toolchain's
+// answer for a directory it builds nothing of, which is no error of the program.
+func positionlessOnly(p *packages.Package) bool {
+	return len(p.GoFiles) == 0 && len(p.CompiledGoFiles) == 0 && len(p.Errors) > 0 &&
+		!slices.ContainsFunc(p.Errors, func(e packages.Error) bool { return e.Kind != packages.ListError || e.Pos != "" })
 }
 
 // unbuilt reports whether one package of the main module is a directory whose
@@ -308,18 +424,13 @@ func loadPackages(ctx context.Context, trees *syntaxCache, dir string, c Configu
 // package with a positionless error only while its build cache holds no entry for
 // it, so the error is dropped and the package is read the same way on every run.
 func unbuilt(p *packages.Package) bool {
-	if p.Module == nil || !p.Module.Main || len(p.GoFiles) > 0 || len(p.CompiledGoFiles) > 0 || len(p.IgnoredFiles) == 0 {
-		return false
-	}
-	return len(p.Errors) > 0 && !slices.ContainsFunc(p.Errors, func(e packages.Error) bool {
-		return e.Kind != packages.ListError || e.Pos != ""
-	})
+	return p.Module != nil && p.Module.Main && len(p.IgnoredFiles) > 0 && positionlessOnly(p)
 }
 
 // dropUnbuiltErrors clears the errors of every package reachable from pkgs that
 // [unbuilt] or [unbuiltForCgo] reports, and returns the first error reading a
 // file's imports met.
-func dropUnbuiltErrors(pkgs []*packages.Package, c Configuration) error {
+func dropUnbuiltErrors(pkgs []*packages.Package, c *Configuration) error {
 	var failed error
 	packages.Visit(pkgs, nil, func(p *packages.Package) {
 		if unbuilt(p) {
@@ -343,9 +454,8 @@ func dropUnbuiltErrors(pkgs []*packages.Package, c Configuration) error {
 // package, so its positionless error is the analysis's own setting and no error
 // of the program. Its declarations are absent from the load, so a reference to
 // one is a type error [typeCheck] handles as it handles any other.
-func unbuiltForCgo(p *packages.Package, c Configuration) (bool, error) {
-	if len(p.GoFiles) > 0 || len(p.CompiledGoFiles) > 0 || len(p.Errors) == 0 ||
-		slices.ContainsFunc(p.Errors, func(e packages.Error) bool { return e.Kind != packages.ListError || e.Pos != "" }) {
+func unbuiltForCgo(p *packages.Package, c *Configuration) (bool, error) {
+	if !positionlessOnly(p) {
 		return false, nil
 	}
 	ctxt := cgoEnabledContext(c)
@@ -364,16 +474,12 @@ func unbuiltForCgo(p *packages.Package, c Configuration) (bool, error) {
 }
 
 // loadEnv is the environment every load of configuration c runs the toolchain
-// under, with workspace as the child toolchain's GOWORK setting.
-//
-// os/exec keeps the last value of a repeated key, so the settings pinned here win
-// over the inherited environment. An ambient go.work or GOFLAGS reaches the child
-// toolchain and changes which packages and which files load, which would make one
-// module's result depend on where the run was started, and GOPROXY=off is what
-// makes the analysis's no-network rule the toolchain's rule too: a module the
-// local cache does not hold ends the load with the toolchain's own message
-// instead of being fetched.
-func loadEnv(c Configuration, workspace string) []string {
+// under, with workspace as the child toolchain's GOWORK setting. os/exec keeps the
+// last value of a repeated key, so these settings win over the inherited ones: an
+// ambient go.work or GOFLAGS would make a module's result depend on where the run
+// started, and GOPROXY=off makes the no-network rule the toolchain's, a module the
+// cache does not hold ending the load instead of being fetched.
+func loadEnv(c *Configuration, workspace string) []string {
 	return append(os.Environ(),
 		"CGO_ENABLED=0", "GOOS="+c.OS, "GOARCH="+c.Arch,
 		"GOWORK="+workspace, "GOFLAGS=", "GOPROXY=off")

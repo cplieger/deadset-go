@@ -7,6 +7,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -110,7 +111,7 @@ func TestTheLoadFailsBeforeADependencyAnswerWhereAnImportResolvesToNoModule(t *t
 				t.Fatalf("Setup: scope.ForDir(%s): %v", dir, err)
 			}
 
-			_, err = load.Load(t.Context(), doc, load.Configuration{
+			_, err = load.Load(t.Context(), testsupport.Topology(t.Context(), t, doc), &load.Configuration{
 				ID: fixtureOS + "-" + fixtureArch, OS: fixtureOS, Arch: fixtureArch,
 			})
 			setup, isSetup := errors.AsType[*load.SetupError](err)

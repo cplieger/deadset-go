@@ -55,9 +55,9 @@ func TestLoadDropsADerivedConfigurationTheTargetDoesNotBuild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run.Load(a target whose derived Windows configuration does not build) = %v, want the load of the run", err)
 	}
-	if want := []string{load.HostConfiguration().ID}; !slices.Equal(loaded.Identifiers, want) {
+	if want := []string{load.HostConfiguration().ID}; !slices.Equal(loaded.Identifiers(), want) {
 		t.Errorf("run.Load() analyzed the matrix %v, want %v: the matrix of the run is what the target builds",
-			loaded.Identifiers, want)
+			loaded.Identifiers(), want)
 	}
 
 	if len(loaded.Unbuilt) != 1 {
@@ -100,7 +100,7 @@ func TestLoadFailsTheRunOnADeclaredConfigurationTheTargetDoesNotBuild(t *testing
 		t.Errorf("exitCodeFor(run.Load()) = %d, want %d", got, vocab.ExitFailure)
 	}
 	if loaded != nil {
-		t.Errorf("run.Load() answered over %v, want no answer: a declared configuration that does not load leaves none", loaded.Identifiers)
+		t.Errorf("run.Load() answered over %v, want no answer: a declared configuration that does not load leaves none", loaded.Identifiers())
 	}
 }
 
@@ -174,9 +174,9 @@ func TestLoadDerivesTheMatrixWhereTheConfigurationListsProjectsAlone(t *testing.
 	if err != nil {
 		t.Fatalf("run.Load(a target listing project entries alone) = %v, want the load of the derived matrix", err)
 	}
-	if want := []string{load.HostConfiguration().ID}; !slices.Equal(loaded.Identifiers, want) {
+	if want := []string{load.HostConfiguration().ID}; !slices.Equal(loaded.Identifiers(), want) {
 		t.Errorf("run.Load() analyzed the matrix %v, want the derived matrix the target builds %v",
-			loaded.Identifiers, want)
+			loaded.Identifiers(), want)
 	}
 	if len(loaded.Unbuilt) != 1 || loaded.Unbuilt[0].Configuration.ID != unbuildableWindows {
 		t.Errorf("run.Load() dropped %d configurations, want the one derived configuration %q: only a derived configuration is dropped",

@@ -2,91 +2,17 @@ package exempt
 
 import (
 	"go/ast"
-	"go/build"
-	"go/parser"
 	"go/token"
 	"go/types"
-	"os"
-	"path/filepath"
 	"slices"
-	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 )
-
-// sources parses and type-checks the packages outside the analysed program whose
-// source a class reads, each once, under the configuration's build context.
-type sources struct {
-	fset    *token.FileSet
-	checked map[string]*checkedSource // by directory
-	context build.Context
-}
-
-// checkedSource is one package outside the program, parsed and type-checked from
-// its source directory, and false where that failed.
-type checkedSource struct {
-	info  *types.Info
-	decls map[string]programFunction // by the declaring file and line of the name, on first use
-	files []*ast.File
-	ok    bool
-}
-
-// newSources reads source under one input's configuration.
-func newSources(in *Input) *sources {
-	return &sources{
-		fset:    token.NewFileSet(),
-		checked: make(map[string]*checkedSource),
-		context: in.Result.Configuration.Context(),
-	}
-}
-
-// read parses and type-checks the package in one directory, its imports resolved
-// to the packages the loaded program holds and otherwise to the toolchain's export
-// data, so its objects are the program's own.
-func (s *sources) read(pkg *types.Package, dir string) *checkedSource {
-	if held, known := s.checked[dir]; known {
-		return held
-	}
-	held := &checkedSource{}
-	s.checked[dir] = held
-	held.files = s.parseDir(pkg, dir)
-	if len(held.files) == 0 {
-		return held
-	}
-	held.info = checkFiles(pkg, s.fset, held.files)
-	held.ok = true
-	return held
-}
-
-// parseDir parses the files of one directory that build into the package under the
-// configuration's build context, tests excluded.
-func (s *sources) parseDir(pkg *types.Package, dir string) []*ast.File {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-	var files []*ast.File
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		if match, matchErr := s.context.MatchFile(dir, name); matchErr != nil || !match {
-			continue
-		}
-		file, parseErr := parser.ParseFile(s.fset, filepath.Join(dir, name), nil, parser.SkipObjectResolution)
-		if parseErr == nil && file.Name.Name == pkg.Name() {
-			files = append(files, file)
-		}
-	}
-	return files
-}
 
 // assertable answers which interfaces a package outside the analysed program can
 // assert on a value it holds, each package's answer computed once.
 type assertable struct {
 	in         *Input
-	source     *sources
 	own        map[*types.Package][]*types.Interface // per reading of a package, as each states its types
 	imported   map[*types.Package]importedSet
 	assertions map[*types.Package][]*types.Interface
@@ -105,7 +31,6 @@ func assertableOf(in *Input) *assertable {
 	if in.assert == nil {
 		in.assert = &assertable{
 			in:         in,
-			source:     newSources(in),
 			own:        make(map[*types.Package][]*types.Interface),
 			imported:   make(map[*types.Package]importedSet),
 			assertions: make(map[*types.Package][]*types.Interface),
@@ -155,28 +80,24 @@ func (a *assertable) importedBy(pkg *types.Package) importedSet {
 }
 
 // literals is every interface type literal one package's source writes that holds
-// methods alone and that the loaded program can state, read from the directory the
-// package was compiled from. A package-level type declaration is the scope's
-// ([declaredInterfaces]), so its literal is not read twice.
+// methods alone and that the loaded program can state ([load.Result.Source]). A
+// package-level type declaration is the scope's ([declaredInterfaces]), so its
+// literal is not read twice.
 func (a *assertable) literals(pkg *types.Package) []*types.Interface {
-	dir, located := packageDir(a.in.Result.Fset, pkg)
-	if !located {
-		return nil
-	}
-	source := a.source.read(pkg, dir)
-	if !source.ok {
+	source, ok := a.in.Result.Source(pkg)
+	if !ok {
 		return nil
 	}
 	local := localizer{pkg: pkg}
 	var found []*types.Interface
-	for _, file := range source.files {
+	for _, file := range source.Files {
 		declared := packageLevelTypes(file)
 		ast.Inspect(file, func(n ast.Node) bool {
 			literal, isInterface := n.(*ast.InterfaceType)
 			if !isInterface || declared[literal] {
 				return true
 			}
-			iface, checked := source.info.TypeOf(literal).(*types.Interface)
+			iface, checked := source.Info.TypeOf(literal).(*types.Interface)
 			if !checked || !iface.IsMethodSet() || iface.NumMethods() == 0 {
 				return true
 			}
@@ -192,25 +113,21 @@ func (a *assertable) literals(pkg *types.Package) []*types.Interface {
 // asserted is every interface one package outside the program asserts: the interface
 // type of each type assertion and each type switch case its source writes, and the
 // interface of each errors.As and errors.AsType call there, wherever it stands and
-// whatever value it asserts on, read from the directory the package was compiled
-// from. A case naming a type that is no interface asserts nothing.
+// whatever value it asserts on, read from its source ([load.Result.Source]). A case
+// naming a type that is no interface asserts nothing.
 func (a *assertable) asserted(pkg *types.Package) []*types.Interface {
 	if held, known := a.assertions[pkg]; known {
 		return held
 	}
 	a.assertions[pkg] = nil
-	dir, located := packageDir(a.in.Result.Fset, pkg)
-	if !located {
-		return nil
-	}
-	source := a.source.read(pkg, dir)
-	if !source.ok {
+	source, ok := a.in.Result.Source(pkg)
+	if !ok {
 		return nil
 	}
 	local := localizer{pkg: pkg}
 	var found []*types.Interface
-	for _, file := range source.files {
-		for _, asserted := range assertedTypes(file, source.info) {
+	for _, file := range source.Files {
+		for _, asserted := range assertedTypes(file, source.Info) {
 			if iface, stated := local.assertedInterface(asserted); stated {
 				found = append(found, iface)
 			}
@@ -238,16 +155,12 @@ func (a *assertable) assertsOwn(iface *types.Named) bool {
 // program that the package's own source asserts.
 func (a *assertable) ownAsserted(pkg *types.Package) map[string]bool {
 	names := make(map[string]bool)
-	dir, located := packageDir(a.in.Result.Fset, pkg)
-	if !located {
+	source, ok := a.in.Result.Source(pkg)
+	if !ok {
 		return names
 	}
-	source := a.source.read(pkg, dir)
-	if !source.ok {
-		return names
-	}
-	for _, file := range source.files {
-		for _, asserted := range assertedTypes(file, source.info) {
+	for _, file := range source.Files {
+		for _, asserted := range assertedTypes(file, source.Info) {
 			named, isNamed := types.Unalias(asserted).(*types.Named)
 			if !isNamed || named.Obj().Pkg() == nil || named.Obj().Pkg().Path() != pkg.Path() ||
 				named.Obj().Parent() != named.Obj().Pkg().Scope() {
@@ -311,19 +224,6 @@ func packageLevelTypes(file *ast.File) map[ast.Expr]bool {
 		}
 	}
 	return held
-}
-
-// packageDir is the directory one package outside the program was compiled from,
-// read from the position of a declaration its scope holds.
-func packageDir(fset *token.FileSet, pkg *types.Package) (string, bool) {
-	scope := pkg.Scope()
-	for _, name := range scope.Names() {
-		at := fset.Position(scope.Lookup(name).Pos())
-		if at.IsValid() && at.Filename != "" {
-			return filepath.Dir(at.Filename), true
-		}
-	}
-	return "", false
 }
 
 // localizer rewrites a type a source reading checked into the loaded program's

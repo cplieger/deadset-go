@@ -2,8 +2,6 @@ package exempt
 
 import (
 	"go/ast"
-	"go/importer"
-	"go/token"
 	"go/types"
 	"path/filepath"
 	"slices"
@@ -30,19 +28,18 @@ type decoders struct {
 	flow     *encodingFlow
 	answered map[*types.Func]map[int]reach
 	pending  map[*types.Func]bool
-	reader   *sources
-	declared map[*types.Func]programFunction // the program's and every checked source's
+	declared map[*types.Func]programFunction               // the program's and every read source's
+	sources  map[*types.Package]map[string]programFunction // per source read, its functions by [declKey]
 }
 
-// newDecoders starts the answer over one configuration, reading source through one
-// reader.
-func newDecoders(f *encodingFlow, source *sources) *decoders {
+// newDecoders starts the answer over one configuration.
+func newDecoders(f *encodingFlow) *decoders {
 	d := &decoders{
 		flow:     f,
 		answered: make(map[*types.Func]map[int]reach),
 		pending:  make(map[*types.Func]bool),
-		reader:   source,
 		declared: make(map[*types.Func]programFunction),
+		sources:  make(map[*types.Package]map[string]programFunction),
 	}
 	for _, one := range programFunctions(f.kept.in) {
 		d.declared[one.fn.Origin()] = one
@@ -211,7 +208,7 @@ func usedParameter(info *types.Info, arg ast.Expr) *types.Var {
 
 // body is the declaration and type information of one function: the program's own
 // where it declares the function, and otherwise the source its package was compiled
-// from.
+// from ([load.Result.Source]).
 func (d *decoders) body(fn *types.Func) (*ast.FuncDecl, *types.Info) {
 	if one, held := d.declared[fn.Origin()]; held {
 		return one.decl, one.info
@@ -223,89 +220,49 @@ func (d *decoders) body(fn *types.Func) (*ast.FuncDecl, *types.Info) {
 	if !at.IsValid() || at.Filename == "" {
 		return nil, nil
 	}
-	source := d.source(fn.Pkg(), filepath.Dir(at.Filename))
-	if !source.ok {
-		return nil, nil
-	}
-	one, held := source.decls[declKey(filepath.Base(at.Filename), at.Line)]
+	one, held := d.source(fn.Pkg())[declKey(filepath.Base(at.Filename), at.Line)]
 	if !held {
 		return nil, nil
 	}
 	return one.decl, one.info
 }
 
-// source is the package in one directory, read through the shared reader, with
-// its function declarations indexed on first use.
-func (d *decoders) source(pkg *types.Package, dir string) *checkedSource {
-	held := d.reader.read(pkg, dir)
-	if !held.ok || held.decls != nil {
+// source is every function declaration of one package's source, indexed on first
+// use by its file and the line of its name.
+func (d *decoders) source(pkg *types.Package) map[string]programFunction {
+	if held, known := d.sources[pkg]; known {
 		return held
 	}
-	held.decls = make(map[string]programFunction)
-	for _, file := range held.files {
+	held := make(map[string]programFunction)
+	d.sources[pkg] = held
+	source, ok := d.flow.kept.in.Result.Source(pkg)
+	if !ok {
+		return held
+	}
+	for _, file := range source.Files {
 		for _, decl := range file.Decls {
-			d.index(held, held.info, decl)
+			fd, isFunc := decl.(*ast.FuncDecl)
+			if !isFunc {
+				continue
+			}
+			fn, defines := source.Info.Defs[fd.Name].(*types.Func)
+			if !defines {
+				continue
+			}
+			one := programFunction{info: source.Info, decl: fd, fn: fn}
+			d.declared[fn] = one
+			at := source.Fset.Position(fd.Name.Pos())
+			held[declKey(filepath.Base(at.Filename), at.Line)] = one
 		}
 	}
 	return held
 }
 
-// checkFiles type-checks one package's files, its imports resolved to the packages
-// the loaded program holds and otherwise to the toolchain's export data. A type error
-// leaves what it could not check out of the answer.
-func checkFiles(pkg *types.Package, fset *token.FileSet, files []*ast.File) *types.Info {
-	imports := make(map[string]*types.Package, len(pkg.Imports()))
-	for _, imported := range pkg.Imports() {
-		imports[imported.Path()] = imported
-	}
-	fallback := importer.Default()
-	info := &types.Info{
-		Defs:      make(map[*ast.Ident]types.Object),
-		Uses:      make(map[*ast.Ident]types.Object),
-		Types:     make(map[ast.Expr]types.TypeAndValue),
-		Instances: make(map[*ast.Ident]types.Instance),
-	}
-	config := types.Config{
-		Importer: importerFunc(func(path string) (*types.Package, error) {
-			if one, found := imports[path]; found {
-				return one, nil
-			}
-			return fallback.Import(path)
-		}),
-		Error: func(error) {},
-	}
-	_, _ = config.Check(pkg.Path(), fset, files, info)
-	return info
-}
-
-// index records one checked function declaration of a source under its file and
-// line, and as a function the program can read the body of.
-func (d *decoders) index(held *checkedSource, info *types.Info, decl ast.Decl) {
-	fd, isFunc := decl.(*ast.FuncDecl)
-	if !isFunc {
-		return
-	}
-	fn, defines := info.Defs[fd.Name].(*types.Func)
-	if !defines {
-		return
-	}
-	one := programFunction{info: info, decl: fd, fn: fn}
-	d.declared[fn] = one
-	at := d.reader.fset.Position(fd.Name.Pos())
-	held.decls[declKey(filepath.Base(at.Filename), at.Line)] = one
-}
-
-// declKey names a declaration by its file and the line of its name, which is what an
-// object read from export data carries.
+// declKey names a declaration by its file and the line of its name, which is what
+// an object the load checked for its declarations alone carries.
 func declKey(file string, line int) string {
 	return file + ":" + strconv.Itoa(line)
 }
-
-// importerFunc adapts a function to the types.Importer interface.
-type importerFunc func(path string) (*types.Package, error)
-
-// Import resolves one import path.
-func (f importerFunc) Import(path string) (*types.Package, error) { return f(path) }
 
 // formattingPackages are the packages whose functions the format-verb class reads,
 // which print the fields of a value they are given.

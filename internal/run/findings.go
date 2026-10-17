@@ -4,11 +4,13 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"slices"
 
 	"github.com/cplieger/deadset-go/v2/internal/deps"
 	"github.com/cplieger/deadset-go/v2/internal/edges"
 	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 )
 
 // Findings is the findings stage: every kind of [kinds.Emitters] over the production
@@ -69,7 +71,7 @@ func (s *Swept) input(ctx context.Context) (*kinds.Input, error) {
 			generated[path] = true
 		}
 	}
-	modules, err := s.moduleFiles(ctx)
+	modules, err := s.moduleFiles()
 	if err != nil {
 		return nil, err
 	}
@@ -94,27 +96,33 @@ func (s *Swept) input(ctx context.Context) (*kinds.Input, error) {
 		Unmatched:      s.Unmatched,
 		RootsDocument:  s.rootsDocument(),
 		Edges:          declared,
-		Matrix:         s.Identifiers,
+		Matrix:         s.Identifiers(),
 		Per:            s.per,
 		Consumers:      s.consumers(),
 		Mode:           s.Mode,
 	}, nil
 }
 
-// moduleFiles reads the module file of every unit, in unit order. Every
-// configuration loads the same units, so the first one names them.
-func (l *Loaded) moduleFiles(ctx context.Context) ([]kinds.ModuleFile, error) {
+// moduleFiles is the module file of every unit the first configuration loaded
+// whose file sits at its root, in unit order. Every configuration loads the same
+// units, and a file above the target root has no directive a report can position.
+func (l *Loaded) moduleFiles() ([]kinds.ModuleFile, error) {
 	if len(l.Loads) == 0 {
 		return nil, nil
 	}
-	units := l.Loads[0].Result.Units
-	files := make([]kinds.ModuleFile, 0, len(units))
-	for i := range units {
-		file, err := deps.ModuleFile(ctx, units[i].Dir)
-		if err != nil {
-			return nil, err
+	var files []kinds.ModuleFile
+	for i := range l.Topology.Units {
+		unit := &l.Topology.Units[i]
+		if !slices.ContainsFunc(l.Loads[0].Result.Units, func(u load.Unit) bool { return u.Dir == unit.Dir }) {
+			continue
 		}
-		files = append(files, kinds.ModuleFile{Dir: units[i].Dir, Path: units[i].Path, File: file})
+		if unit.FileErr != nil {
+			return nil, unit.FileErr
+		}
+		if unit.File == nil || filepath.Dir(unit.File.Path) != filepath.Clean(unit.Dir) {
+			continue
+		}
+		files = append(files, kinds.ModuleFile{Dir: unit.Dir, Path: unit.Path, File: deps.Directives(unit.File)})
 	}
 	return files, nil
 }

@@ -11,6 +11,8 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/deps"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -62,11 +64,15 @@ func withModuleFile(t *testing.T, archive string, resolved config.Config,
 
 	dir := extract(t, archive)
 	in := inputOfDir(t, dir, resolved, Consumers{}, configurations...)
-	file, err := deps.ModuleFile(t.Context(), dir)
+	doc, err := scope.ForDir(dir)
 	if err != nil {
-		t.Fatalf("Setup: deps.ModuleFile(%s): %v", dir, err)
+		t.Fatalf("Setup: scope.ForDir(%s): %v", dir, err)
 	}
-	in.Modules = []ModuleFile{{Dir: in.Root, Path: in.Per[0].Result.Units[0].Path, File: file}}
+	unit := testsupport.Topology(t.Context(), t, doc).Units[0]
+	if unit.File == nil {
+		t.Fatalf("Setup: %s holds no module file: %v", dir, unit.FileErr)
+	}
+	in.Modules = []ModuleFile{{Dir: in.Root, Path: unit.Path, File: deps.Directives(unit.File)}}
 	return in
 }
 
@@ -562,36 +568,5 @@ func TestAnnotateNamesNoModuleOnAFindingNoDeletionFixes(t *testing.T) {
 			t.Errorf("Annotate(%s, a finding no deletion fixes) names %v, want nothing: narrowing a declaration removes no use of anything",
 				result.Findings[i].Symbol.Name, named)
 		}
-	}
-}
-
-func TestNameConstraintReadsTheConstraintOneFileNameImplies(t *testing.T) {
-	t.Parallel()
-
-	cases := map[string]string{
-		"ninth.go":                "",
-		"sized_windows.go":        "windows",
-		"zsyscall_linux_amd64.go": "linux && amd64",
-		"stream_js_wasm.go":       "js && wasm",
-		"handler_amd64.go":        "amd64",
-		"buffer_amd64_linux.go":   "linux",
-		"gate_windows_plan9.go":   "plan9",
-		"reader_unix.go":          "",
-		"reader_helper.go":        "",
-		"render_windows_test.go":  "windows",
-		"windows.go":              "",
-	}
-	for name, want := range cases {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			got := ""
-			if implied := nameConstraint(name); implied != nil {
-				got = implied.String()
-			}
-			if got != want {
-				t.Errorf("nameConstraint(%q) = %q, want %q", name, got, want)
-			}
-		})
 	}
 }

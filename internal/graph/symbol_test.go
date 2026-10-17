@@ -17,6 +17,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport"
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/txtar"
 )
@@ -61,7 +62,7 @@ func loadDirUnder(ctx context.Context, sink failureSink, dir string, c load.Conf
 	if err != nil {
 		sink.Fatalf("Setup: scope.ForDir(%s): %v", dir, err)
 	}
-	result, err := load.Load(ctx, doc, c)
+	result, err := load.Load(ctx, testsupport.Topology(ctx, sink, doc), &c)
 	if err != nil {
 		sink.Fatalf("Setup: load.Load(%s, %s): %v", dir, c.ID, err)
 	}

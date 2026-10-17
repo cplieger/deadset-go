@@ -12,6 +12,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport"
 	"pgregory.net/rapid"
 )
 
@@ -163,7 +164,7 @@ func inputUnder(t *rapid.T, dir string) *Input {
 	if err != nil {
 		t.Fatalf("Setup: scope.ForDir(%s): %v", dir, err)
 	}
-	result, err := load.Load(t.Context(), doc, load.HostConfiguration())
+	result, err := load.Load(t.Context(), testsupport.Topology(t.Context(), t, doc), new(load.HostConfiguration()))
 	if err != nil {
 		t.Fatalf("Setup: load.Load(%s): %v", dir, err)
 	}

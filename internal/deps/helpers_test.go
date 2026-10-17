@@ -9,6 +9,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport"
 	"golang.org/x/tools/txtar"
 )
 
@@ -52,7 +53,7 @@ func loadDir(t *testing.T, dir string) *load.Result {
 	if err != nil {
 		t.Fatalf("Setup: scope.ForDir(%s): %v", dir, err)
 	}
-	result, err := load.Load(t.Context(), doc, load.Configuration{
+	result, err := load.Load(t.Context(), testsupport.Topology(t.Context(), t, doc), &load.Configuration{
 		ID: fixtureOS + "-" + fixtureArch, OS: fixtureOS, Arch: fixtureArch,
 	})
 	if err != nil {
@@ -61,14 +62,18 @@ func loadDir(t *testing.T, dir string) *load.Result {
 	return &result
 }
 
-// moduleFileOf reads one archive's module file through the production reader.
+// moduleFileOf reads one archive's module file through the topology a load reads.
 func moduleFileOf(t *testing.T, dir string) File {
 	t.Helper()
-	f, err := ModuleFile(t.Context(), dir)
+	doc, err := scope.ForDir(dir)
 	if err != nil {
-		t.Fatalf("Setup: ModuleFile(%s): %v", dir, err)
+		t.Fatalf("Setup: scope.ForDir(%s): %v", dir, err)
 	}
-	return f
+	unit := testsupport.Topology(t.Context(), t, doc).Units[0]
+	if unit.File == nil {
+		t.Fatalf("Setup: %s holds no module file: %v", dir, unit.FileErr)
+	}
+	return Directives(unit.File)
 }
 
 // targetOf extracts one archive, loads it and reads its module file, which is

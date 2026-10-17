@@ -6,10 +6,10 @@ import (
 	"go/types"
 	"path"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/cplieger/deadset-go/v2/internal/buildconstraint"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -269,57 +269,12 @@ func goFuzzFile(f *ast.File) bool {
 			if !constraint.IsGoBuild(c.Text) && !constraint.IsPlusBuild(c.Text) {
 				continue
 			}
-			if expr, err := constraint.Parse(c.Text); err == nil && !holdsWithTag(expr, goFuzzTag) {
+			if expr, err := constraint.Parse(c.Text); err == nil && !buildconstraint.HoldsWith(expr, goFuzzTag, true) {
 				return false
 			}
 		}
 	}
 	return true
-}
-
-// maxConstraintTags bounds the tags holdsWithTag enumerates the settings of; a
-// constraint naming more is read as one that holds.
-const maxConstraintTags = 16
-
-// holdsWithTag reports whether expr is true with tag set for some setting of the
-// other tags it names.
-func holdsWithTag(expr constraint.Expr, tag string) bool {
-	var others []string
-	seen := map[string]bool{tag: true}
-	var collect func(constraint.Expr)
-	collect = func(e constraint.Expr) {
-		switch e := e.(type) {
-		case *constraint.TagExpr:
-			if !seen[e.Tag] {
-				seen[e.Tag] = true
-				others = append(others, e.Tag)
-			}
-		case *constraint.NotExpr:
-			collect(e.X)
-		case *constraint.AndExpr:
-			collect(e.X)
-			collect(e.Y)
-		case *constraint.OrExpr:
-			collect(e.X)
-			collect(e.Y)
-		}
-	}
-	collect(expr)
-	if len(others) > maxConstraintTags {
-		return true
-	}
-	for setting := range 1 << len(others) {
-		if expr.Eval(func(name string) bool {
-			if name == tag {
-				return true
-			}
-			at := slices.Index(others, name)
-			return at >= 0 && setting&(1<<at) != 0
-		}) {
-			return true
-		}
-	}
-	return false
 }
 
 // goFuzzEntry reports whether fn is a go-fuzz entry point: Fuzz or a name it opens

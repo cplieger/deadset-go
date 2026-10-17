@@ -96,7 +96,7 @@ func extract(t *testing.T, archive string) string {
 func loadScope(t *testing.T, doc scope.Document, c load.Configuration) *load.Result {
 	t.Helper()
 
-	result, err := load.Load(t.Context(), doc, c)
+	result, err := load.Load(t.Context(), testsupport.Topology(t.Context(), t, doc), &c)
 	if err != nil {
 		t.Fatalf("Setup: load.Load(%s, %s): %v", doc.Target.Path, c.ID, err)
 	}
@@ -192,7 +192,7 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 		if err != nil {
 			t.Fatalf("Setup: graph.Roots(%s): %v", c.ID, err)
 		}
-		graph.ClassifyTestSupport(result, root, symbols, roots, rootOptions.PublishedAPI)
+		tests := graph.ClassifyTestSupport(result, root, symbols, roots, rootOptions.PublishedAPI)
 		references, _, err := graph.References(result, root, os.ReadFile, symbols)
 		if err != nil {
 			t.Fatalf("Setup: graph.References(%s): %v", c.ID, err)
@@ -215,7 +215,7 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 		}
 		exemptions = append(exemptions, computed...)
 		testEvidence = append(testEvidence, evidence...)
-		per[i] = Configured{Result: result, Resolve: resolver, Symbols: symbols}
+		per[i] = Configured{Result: result, Resolve: resolver, Symbols: symbols, Tests: tests}
 		passes[i] = graph.Configured{Symbols: symbols, References: references, Roots: roots}
 	}
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"golang.org/x/tools/txtar"
 )
@@ -53,7 +54,7 @@ func loadTwoModules(t *testing.T, dir string, consumers ...string) (*load.Result
 		doc.Consumers = append(doc.Consumers,
 			scope.Module{Path: filepath.Join(dir, name)})
 	}
-	result, err := load.Load(t.Context(), doc, load.Configuration{ID: "linux-amd64", OS: "linux", Arch: "amd64"})
+	result, err := load.Load(t.Context(), testsupport.Topology(t.Context(), t, doc), &load.Configuration{ID: "linux-amd64", OS: "linux", Arch: "amd64"})
 	if err != nil {
 		t.Fatalf("Setup: load %s with consumers %v: %v", dir, consumers, err)
 	}

@@ -80,7 +80,7 @@ func loadTwoModules(t *testing.T, dir string, tags ...string) (*load.Result, str
 func loadScope(t *testing.T, doc scope.Document, tags []string) (*load.Result, string) {
 	t.Helper()
 
-	result, err := load.Load(t.Context(), doc, load.Configuration{
+	result, err := load.Load(t.Context(), testsupport.Topology(t.Context(), t, doc), &load.Configuration{
 		ID: fixtureOS + "-" + fixtureArch, OS: fixtureOS, Arch: fixtureArch, Tags: tags,
 	})
 	if err != nil {

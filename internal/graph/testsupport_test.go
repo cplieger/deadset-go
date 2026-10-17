@@ -1,10 +1,11 @@
 package graph
 
 import (
-	"maps"
 	"os"
 	"slices"
 	"testing"
+
+	"github.com/cplieger/deadset-go/v2/internal/load"
 )
 
 // classifiedSupport loads the test-support archive and returns the packages
@@ -27,7 +28,7 @@ func classifiedSupport(t *testing.T, library bool) (support, marked []string) {
 	if err != nil {
 		t.Fatalf("Setup: Roots(test-support.txtar): %v", err)
 	}
-	ClassifyTestSupport(result, root, symbols, roots, library)
+	classes := ClassifyTestSupport(result, root, symbols, roots, library)
 	for i := range symbols {
 		_, inTestFile := IsTestFile(symbols[i].Pos.Filename)
 		if symbols[i].TestSupport && !inTestFile && symbols[i].Kind == KindFunc {
@@ -35,7 +36,7 @@ func classifiedSupport(t *testing.T, library bool) (support, marked []string) {
 		}
 	}
 	slices.Sort(marked)
-	return slices.Sorted(maps.Keys(result.TestSupport)), marked
+	return paths(classes.Support), marked
 }
 
 // Test-support code is the largest set of packages only tests reach that carry test
@@ -75,14 +76,14 @@ func TestClassifyTestSupportCountsTestLibraryImportsAsEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Setup: Roots(test-support-libraries.txtar): %v", err)
 	}
-	ClassifyTestSupport(result, root, symbols, roots, false)
+	classes := ClassifyTestSupport(result, root, symbols, roots, false)
 
-	if got, want := slices.Sorted(maps.Keys(result.TestSupport)), []string{
+	if got, want := paths(classes.Support), []string{
 		"example.com/libs/asserted", "example.com/libs/matched", "example.com/libs/tooled",
 	}; !slices.Equal(got, want) {
 		t.Errorf("ClassifyTestSupport(test-support-libraries.txtar) test support = %v, want %v", got, want)
 	}
-	if got, want := slices.Sorted(maps.Keys(result.TestReached)), []string{"example.com/libs/lookalike"}; !slices.Equal(got, want) {
+	if got, want := paths(classes.Reached), []string{"example.com/libs/lookalike"}; !slices.Equal(got, want) {
 		t.Errorf("ClassifyTestSupport(test-support-libraries.txtar) test reached = %v, want %v", got, want)
 	}
 }
@@ -95,4 +96,41 @@ func TestClassifyTestSupportKeepsALibrarysImportablePackagesOut(t *testing.T) {
 	if want := []string{"example.com/support/internal/own"}; !slices.Equal(support, want) {
 		t.Errorf("ClassifyTestSupport(test-support.txtar, library) = %v, want %v", support, want)
 	}
+}
+
+// A declaration a line directive places in another directory of the target is still
+// a declaration of the package whose file holds it, so it is test-support code with
+// that package.
+func TestClassifyTestSupportKeepsADeclarationALineDirectiveMovesInItsPackage(t *testing.T) {
+	result, root := loadDir(t, extract(t, "test-support-line-directive.txtar"), "linux", "amd64")
+	symbols, err := Symbols(result, root, os.ReadFile)
+	if err != nil {
+		t.Fatalf("Setup: Symbols(test-support-line-directive.txtar): %v", err)
+	}
+	roots, _, err := Roots(result, root, os.ReadFile, symbols, RootOptions{})
+	if err != nil {
+		t.Fatalf("Setup: Roots(test-support-line-directive.txtar): %v", err)
+	}
+	ClassifyTestSupport(result, root, symbols, roots, false)
+
+	var marked []string
+	for i := range symbols {
+		if symbols[i].Kind == KindFunc && symbols[i].TestSupport {
+			marked = append(marked, symbols[i].Name+" "+symbols[i].Pos.Filename)
+		}
+	}
+	slices.Sort(marked)
+	if want := []string{"Check helper/helper.go", "Generated tmpl/gen.tmpl"}; !slices.Equal(marked, want) {
+		t.Errorf("ClassifyTestSupport(test-support-line-directive.txtar) marked %v, want %v", marked, want)
+	}
+}
+
+// paths is the import path of every package of a set, sorted.
+func paths(set map[load.PackageID]bool) []string {
+	held := make([]string, 0, len(set))
+	for id := range set {
+		held = append(held, id.Path)
+	}
+	slices.Sort(held)
+	return held
 }

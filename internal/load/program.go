@@ -13,17 +13,14 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cplieger/deadset-go/v2/internal/buildconstraint"
 	"golang.org/x/tools/go/packages"
 )
 
 // mainFunction is the name of the function a program starts at.
 const mainFunction = "main"
 
-// ignoreTag is the tag the toolchain's convention for a file run by hand
-// constrains it on, which no configuration sets.
-const ignoreTag = "ignore"
-
-// program is one file of the target that its build constraint keeps out of the
+// programFile is one file of the target that its build constraint keeps out of the
 // configuration unless the ignore tag is set, and that declares package main: a
 // program of its own, run with go run, that no package of the target compiles.
 //
@@ -31,7 +28,7 @@ const ignoreTag = "ignore"
 // recorded, so every declaration of the target the file names resolves to the
 // object the target's own packages declare. The check may have reported errors,
 // and what it resolved is recorded all the same.
-type program struct {
+type programFile struct {
 	Info *types.Info
 
 	// Imports is the path of every package the file imports, a blank or dot import's
@@ -41,7 +38,7 @@ type program struct {
 
 // checkPrograms finds and checks every program of one unit's packages under
 // configuration c, in the order of their paths.
-func checkPrograms(ctx context.Context, fset *token.FileSet, from unitDir, pkgs []*packages.Package, c Configuration) []program {
+func checkPrograms(ctx context.Context, fset *token.FileSet, from unitDir, pkgs []*packages.Package, c *Configuration) []programFile {
 	return checkProgramFiles(ctx, fset, from, pkgs, c, programPaths(pkgs, c))
 }
 
@@ -50,24 +47,24 @@ func checkPrograms(ctx context.Context, fset *token.FileSet, from unitDir, pkgs 
 // of its package compiles because a sibling file declares main as well. A package a
 // script imports that pkgs do not hold is loaded from dir, so the script's own module
 // file decides it.
-func checkScripts(ctx context.Context, fset *token.FileSet, dir string, pkgs []*packages.Package, c Configuration) []program {
+func checkScripts(ctx context.Context, fset *token.FileSet, dir string, pkgs []*packages.Package, c *Configuration) []programFile {
 	return checkProgramFiles(ctx, fset, unitDir{dir: dir, workspace: workspaceOff}, pkgs, c, scriptPaths(dir, c))
 }
 
 // scriptPaths lists, sorted, every Go file below the module root dir, in no nested
-// module and no directory [Units] leaves unsearched, other than a test file, that
+// module and no directory discovery skips, other than a test file, that
 // configuration c builds with or without the ignore tag and that declares a function
 // main with no receiver in package main, where another such file shares its directory.
-func scriptPaths(dir string, c Configuration) []string {
+func scriptPaths(dir string, c *Configuration) []string {
 	without := cgoEnabledContext(c)
 	with := cgoEnabledContext(c)
-	with.BuildTags = append(with.BuildTags, ignoreTag)
+	with.BuildTags = append(with.BuildTags, buildconstraint.IgnoreTag)
 	byDir := make(map[string][]string)
 	_ = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
 		switch {
 		case err != nil:
 			return nil
-		case entry.IsDir() && path != dir && (unsearched(entry.Name()) || isModuleRoot(path)):
+		case entry.IsDir() && path != dir && (goRow.Skips(entry.Name()) || IsModuleRoot(path)):
 			return filepath.SkipDir
 		case !entry.IsDir() && isScript(&without, &with, path):
 			parent := filepath.Dir(path)
@@ -114,14 +111,14 @@ func declaresMain(path string) bool {
 
 // checkProgramFiles checks each file of paths that declares package main alone under
 // configuration c, against pkgs and what loads from from.
-func checkProgramFiles(ctx context.Context, fset *token.FileSet, from unitDir, pkgs []*packages.Package, c Configuration, paths []string) []program {
+func checkProgramFiles(ctx context.Context, fset *token.FileSet, from unitDir, pkgs []*packages.Package, c *Configuration, paths []string) []programFile {
 	if len(paths) == 0 {
 		return nil
 	}
 	imports := newCgoImporter(ctx, fset, from, c, pkgs)
-	sizes := types.SizesFor(gcCompiler, c.Arch)
+	sizes := types.SizesFor(buildconstraint.Compiler, c.Arch)
 	version := mainModuleVersion(pkgs)
-	held := make([]program, 0, len(paths))
+	held := make([]programFile, 0, len(paths))
 	for _, path := range paths {
 		f, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
 		if err != nil || f.Name.Name != mainPackageName {
@@ -142,7 +139,7 @@ func checkProgramFiles(ctx context.Context, fset *token.FileSet, from unitDir, p
 				imported = append(imported, path)
 			}
 		}
-		held = append(held, program{Info: info, Imports: imported})
+		held = append(held, programFile{Info: info, Imports: imported})
 	}
 	return held
 }
@@ -151,10 +148,10 @@ func checkProgramFiles(ctx context.Context, fset *token.FileSet, from unitDir, p
 // configuration c builds once the ignore tag is set and does not build without
 // it. Both answers are read with cgo enabled, so a file ignored for importing "C"
 // alone is no program.
-func programPaths(pkgs []*packages.Package, c Configuration) []string {
+func programPaths(pkgs []*packages.Package, c *Configuration) []string {
 	without := cgoEnabledContext(c)
 	with := cgoEnabledContext(c)
-	with.BuildTags = append(with.BuildTags, ignoreTag)
+	with.BuildTags = append(with.BuildTags, buildconstraint.IgnoreTag)
 	seen := make(map[string]bool)
 	var paths []string
 	for _, p := range pkgs {

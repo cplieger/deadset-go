@@ -343,7 +343,7 @@ func EncodingReflectionDetector(in *Input) ([]graph.Exemption, error) {
 		typeArgs:       typeArgumentsOf(programPackages(in.Result)),
 	}
 	f.templates = newTemplateOrigins(in)
-	f.decode = newDecoders(f, assert.source)
+	f.decode = newDecoders(f)
 	f.edge = newBoundary(in, f.namedDestinationParameter)
 	f.stored = storedTypesOf(in, f.edge.sites)
 	if err := f.walkCalls(); err != nil {
