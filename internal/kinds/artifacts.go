@@ -2,21 +2,17 @@ package kinds
 
 import (
 	"fmt"
-	"go/build"
-	"go/build/constraint"
-	"go/parser"
 	"go/token"
-	"io"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 
+	"github.com/cplieger/deadset-go/v2/internal/buildconstraint"
 	"github.com/cplieger/deadset-go/v2/internal/deps"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/load"
-	"github.com/cplieger/deadset-go/v2/internal/matrix"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -133,7 +129,7 @@ func neverBuilt(in *Input) ([]ignoredFile, error) {
 	cgo := excludedByCgo(in.Per)
 	files := make([]ignoredFile, 0, len(ignored))
 	for _, path := range slices.Sorted(maps.Keys(ignored)) {
-		relative := relativeToSlash(in.Root, path)
+		relative := load.RelativeSlash(in.Root, path)
 		if cgo[relative] {
 			continue
 		}
@@ -213,16 +209,6 @@ func excludedByCgo(per []Configured) map[string]bool {
 	return excluded
 }
 
-// relativeToSlash renders path relative to base with forward slashes, falling back
-// to path itself where no relative form exists.
-func relativeToSlash(base, path string) string {
-	relative, err := filepath.Rel(base, path)
-	if err != nil {
-		return filepath.ToSlash(path)
-	}
-	return filepath.ToSlash(relative)
-}
-
 // readIgnored reads one ignored file, the constraint that excluded it and the
 // number of lines it spans, and reports whether the file is a subject of the kind.
 // A file whose constraint holds only under the ignore tag is not one: the toolchain
@@ -236,7 +222,7 @@ func readIgnored(path, relative, pkgPath string) (ignoredFile, bool, error) {
 		return ignoredFile{}, false, fmt.Errorf("read the ignored file %s: %w", relative, err)
 	}
 	base := filepath.Base(path)
-	expression, err := fileConstraint(path, base, content)
+	expression, err := buildconstraint.Of(base, content)
 	if err != nil {
 		return ignoredFile{}, false, fmt.Errorf("read the build constraint of %s: %w", relative, err)
 	}
@@ -244,7 +230,7 @@ func readIgnored(path, relative, pkgPath string) (ignoredFile, bool, error) {
 		return ignoredFile{}, false, fmt.Errorf("%w: %s declares no build constraint and no configuration built it",
 			errEmitter, relative)
 	}
-	if matrix.OnlyUnderIgnore(expression) {
+	if buildconstraint.OnlyUnderIgnore(expression) {
 		return ignoredFile{}, false, nil
 	}
 	return ignoredFile{
@@ -254,200 +240,6 @@ func readIgnored(path, relative, pkgPath string) (ignoredFile, bool, error) {
 		constraint: expression.String(),
 		lines:      max(1, strings.Count(string(content), "\n")+1),
 	}, true, nil
-}
-
-// fileConstraint is the one build constraint a file carries: what its name implies
-// and what its content declares, joined where it carries both.
-//
-// A condition both halves state appears once. A file named for a platform and
-// declaring that platform states one condition twice, and the constraint the file
-// spells is that condition, so the join drops the repetition rather than writing it
-// out. Only the conditions the join itself puts side by side are compared: a
-// condition nested inside one half's own Boolean expression is that expression's and
-// is left as the file wrote it.
-//
-// internal/matrix owns the reading of a build constraint and does not export it,
-// so these are its two rules over the same standard-library parser, and they go
-// when that package exports one function for a caller outside it.
-func fileConstraint(path, base string, content []byte) (constraint.Expr, error) {
-	declared, err := declaredConstraint(path, content)
-	if err != nil {
-		return nil, err
-	}
-	implied := nameConstraint(base)
-	switch {
-	case implied == nil:
-		return declared, nil
-	case declared == nil:
-		return implied, nil
-	default:
-		return conjunction(append(conditions(implied), conditions(declared)...)), nil
-	}
-}
-
-// conditions is the conditions one expression states side by side, which is the
-// expression itself where it states one.
-func conditions(expression constraint.Expr) []constraint.Expr {
-	and, joined := expression.(*constraint.AndExpr)
-	if !joined {
-		return []constraint.Expr{expression}
-	}
-	return append(conditions(and.X), conditions(and.Y)...)
-}
-
-// conjunction joins conditions into one expression, keeping the first of any that
-// read the same and their order, and answers nil for none.
-func conjunction(stated []constraint.Expr) constraint.Expr {
-	var joined constraint.Expr
-	held := make(map[string]bool, len(stated))
-	for _, condition := range stated {
-		if held[condition.String()] {
-			continue
-		}
-		held[condition.String()] = true
-		joined = and(joined, condition)
-	}
-	return joined
-}
-
-// declaredConstraint is the constraint one file's content declares, and nil for
-// content that declares none.
-//
-// A //go:build expression controls where the file carries one; otherwise the
-// legacy lines the header holds are combined, each a further condition the file
-// must satisfy. Only the comments above the package clause count, which is where
-// the language admits a build constraint.
-func declaredConstraint(path string, content []byte) (constraint.Expr, error) {
-	parsed, err := parser.ParseFile(token.NewFileSet(), path, content,
-		parser.PackageClauseOnly|parser.ParseComments|parser.SkipObjectResolution)
-	if err != nil {
-		return nil, err
-	}
-
-	var legacy constraint.Expr
-	for _, group := range parsed.Comments {
-		if group.End() > parsed.Package {
-			break
-		}
-		for _, line := range group.List {
-			switch {
-			case constraint.IsGoBuild(line.Text):
-				return constraint.Parse(line.Text)
-			case constraint.IsPlusBuild(line.Text):
-				expression, err := constraint.Parse(line.Text)
-				if err != nil {
-					continue
-				}
-				legacy = and(legacy, expression)
-			}
-		}
-	}
-	return legacy, nil
-}
-
-// and joins two conditions, and answers the second alone where the first is
-// absent.
-func and(held, next constraint.Expr) constraint.Expr {
-	if held == nil {
-		return next
-	}
-	return &constraint.AndExpr{X: held, Y: next}
-}
-
-// nameConstraint is the constraint a file's name implies, and nil for a name that
-// implies none.
-//
-// The rule is the toolchain's: the name is read up to its first full stop,
-// everything before its first underscore is dropped, a trailing test field is
-// dropped with it, and then the last two fields count where the first of them
-// names an operating system and the second an architecture, or the last field
-// alone counts where it names either.
-func nameConstraint(base string) constraint.Expr {
-	stem, _, _ := strings.Cut(base, ".")
-	_, suffixed, underscored := strings.Cut(stem, "_")
-	if !underscored {
-		return nil
-	}
-	fields := strings.Split(suffixed, "_")
-	if last := len(fields) - 1; fields[last] == testStem {
-		fields = fields[:last]
-	}
-
-	last := len(fields) - 1
-	switch {
-	case last < 0:
-		return nil
-	case last >= 1 && isOperatingSystem(fields[last-1]) && isArchitecture(fields[last]):
-		return &constraint.AndExpr{
-			X: &constraint.TagExpr{Tag: fields[last-1]},
-			Y: &constraint.TagExpr{Tag: fields[last]},
-		}
-	case isPlatformName(fields[last]):
-		return &constraint.TagExpr{Tag: fields[last]}
-	default:
-		return nil
-	}
-}
-
-// testStem is the file-name field that names a test file, which carries no
-// platform constraint of its own.
-const testStem = "test"
-
-// The two names a platform probe pins so that the toolchain answers about the
-// field beside them: an architecture every toolchain knows, and an operating
-// system and architecture no toolchain does.
-const (
-	probeArch    = "amd64"
-	unknownOS    = "notanoperatingsystem"
-	unknownArch  = "notanarchitecture"
-	probePattern = "probe_%s.go"
-)
-
-// isPlatformName reports whether one field of a file name is a platform name, so
-// that a file whose name ends in it carries a constraint.
-//
-// The toolchain is asked rather than a second copy of its platform list carried
-// here: a file whose name ends in a platform name is selected only where that name
-// is in effect, so a synthetic name ending in the field is refused under a
-// configuration naming neither an operating system nor an architecture exactly
-// where the field is a platform name.
-func isPlatformName(field string) bool {
-	return !selectsName(fmt.Sprintf(probePattern, field), unknownOS, unknownArch)
-}
-
-// isOperatingSystem reports whether one field of a file name is an
-// operating-system name.
-//
-// The toolchain reads the last two fields of a name together only where the first
-// is an operating system and the second an architecture, so a synthetic name
-// pairing the field with an architecture is refused under a configuration naming
-// that architecture exactly where the field is an operating-system name.
-func isOperatingSystem(field string) bool {
-	return !selectsName(fmt.Sprintf(probePattern, field+"_"+probeArch), unknownOS, probeArch)
-}
-
-// isArchitecture reports whether one field of a file name is an architecture name,
-// which is a platform name that is not an operating system: the toolchain's two
-// lists are disjoint.
-func isArchitecture(field string) bool {
-	return isPlatformName(field) && !isOperatingSystem(field)
-}
-
-// selectsName reports whether the toolchain selects a file of that name under the
-// named platform, deciding on the name alone: the content every probe reads holds
-// a package clause and no constraint.
-func selectsName(base, system, arch string) bool {
-	ctxt := build.Default
-	ctxt.GOOS = system
-	ctxt.GOARCH = arch
-	ctxt.BuildTags = nil
-	ctxt.ToolTags = nil
-	ctxt.CgoEnabled = false
-	ctxt.OpenFile = func(string) (io.ReadCloser, error) {
-		return io.NopCloser(strings.NewReader("package p\n")), nil
-	}
-	selected, err := ctxt.MatchFile(".", base)
-	return err == nil && selected
 }
 
 // fileNeverImported reports a source file of a package that no import reaches,
@@ -690,7 +482,7 @@ func moduleFragment(module, fragment string) string {
 // relative to the target root, which spans the one line it is written on.
 func (in *Input) directivePosition(m *ModuleFile, site token.Position) Position {
 	return Position{
-		Path:    relativeToSlash(in.Root, filepath.Join(m.Dir, site.Filename)),
+		Path:    load.RelativeSlash(in.Root, filepath.Join(m.Dir, site.Filename)),
 		Line:    site.Line,
 		Column:  site.Column,
 		EndLine: site.Line,

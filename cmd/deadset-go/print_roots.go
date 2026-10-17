@@ -27,7 +27,7 @@ func printRoots(ctx context.Context, args []string, stdout, stderr io.Writer) in
 		return failed(ctx, stderr, err)
 	}
 	namedUnbuilt(stderr, loaded.Unbuilt)
-	return printLines(stdout, stderr, "print-roots", rootLines(loaded.Refs, loaded.Merged.Roots, loaded.Identifiers), loaded.Unmatched)
+	return printLines(stdout, stderr, "print-roots", rootLines(loaded.Refs, loaded.Merged.Roots, loaded.Identifiers()), loaded.Unmatched)
 }
 
 // rootLines renders one line per root the matrix holds, in the merge's order. One

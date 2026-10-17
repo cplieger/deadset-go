@@ -1,14 +1,11 @@
 package load
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 
-	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
@@ -31,18 +28,13 @@ type Consumer struct {
 	Packages []*packages.Package
 }
 
-// loadConsumers resolves every consumer the scope declares, in the order it
-// declares them, and returns nothing when it declares none.
-//
-// Each consumer is one module loaded from its own directory, because a consumer
-// has its own module file and its own build list, and one load runs per module
-// directory. A consumer reaches the target's own directory either through its
-// module file, a replace directive being the form that names a directory, or
-// through the workspace the scope declares; a consumer that reaches a copy of the
-// target somewhere else counts no reference against the target being analyzed, so
-// it is refused rather than counted as zero.
-func loadConsumers(ctx context.Context, trees *syntaxCache, doc *scope.Document, c Configuration, units []Unit) ([]Consumer, error) {
-	if len(doc.Consumers) == 0 {
+// consumers resolves every consumer the topology declares, in the order the scope
+// declares them, each from its own directory with its own build list, against the
+// units the configuration loaded. A consumer reaches the target's directory through
+// a replace directive of its module file or the workspace the scope declares; one
+// reaching a copy elsewhere counts no reference, so it is refused.
+func (l *loader) consumers(units []Unit) ([]Consumer, error) {
+	if len(l.top.Consumers) == 0 {
 		return nil, nil
 	}
 	var mains []*packages.Module
@@ -51,16 +43,16 @@ func loadConsumers(ctx context.Context, trees *syntaxCache, doc *scope.Document,
 			mains = append(mains, main)
 		}
 	}
-	loaded := make([]Consumer, 0, len(doc.Consumers))
-	held := make(map[string]bool, len(doc.Consumers))
-	for _, declared := range doc.Consumers {
-		one, err := loadConsumer(ctx, trees, doc, c, declared, mains)
+	loaded := make([]Consumer, 0, len(l.top.Consumers))
+	held := make(map[string]bool, len(l.top.Consumers))
+	for i := range l.top.Consumers {
+		declared := &l.top.Consumers[i]
+		one, err := l.consumer(declared, mains)
 		if err != nil {
 			return nil, err
 		}
 		if held[one.ID] {
-			return nil, fmt.Errorf("%w: %s: the scope declares module %s twice",
-				errConsumer, declared.Path, one.ID)
+			return nil, fmt.Errorf("%w: %s: the scope declares module %s twice", errConsumer, declared.Dir, one.ID)
 		}
 		held[one.ID] = true
 		loaded = append(loaded, one)
@@ -68,184 +60,36 @@ func loadConsumers(ctx context.Context, trees *syntaxCache, doc *scope.Document,
 	return loaded, nil
 }
 
-// Referencing is every loaded consumer whose references the run counts: each declared
-// one, then each nested one.
-func (r *Result) Referencing() []Consumer {
-	return slices.Concat(r.Consumers, r.Nested)
-}
-
-// loadNested loads every module below the target that builds against a unit's own
-// directory ([replacedUnits]) as a consumer of it, in directory order, and returns
-// each one that does not load as dropped, then each unit's underscored packages.
-func loadNested(ctx context.Context, trees *syntaxCache, doc *scope.Document, c Configuration, units []Unit) ([]Consumer, []droppedModule, error) {
-	target := doc.Target.Path
-	dirs, err := nestedModules(target, units)
-	if err != nil {
-		return nil, nil, fmt.Errorf("load %s: find the modules under %s: %w", c.ID, target, err)
-	}
-	var held nestedLoads
-	for _, dir := range dirs {
-		consumed := replacedUnits(ctx, dir, units)
-		declared := slices.ContainsFunc(doc.Consumers, func(m scope.Module) bool { return sameDir(m.Path, dir) })
-		if len(consumed) == 0 || declared {
-			continue
-		}
-		if err := held.load(ctx, trees, dir, c, workspaceOff, unitPaths(consumed), unitPrefix(target, dir)); err != nil {
-			return nil, nil, err
-		}
-	}
-	for i := range units {
-		if err := held.underscored(ctx, trees, c, target, &units[i]); err != nil {
-			return nil, nil, err
-		}
-	}
-	return held.loaded, held.dropped, nil
-}
-
-// nestedLoads accumulates the [Result.Nested] consumers and the modules dropped
-// while loading them.
-type nestedLoads struct {
-	loaded  []Consumer
-	dropped []droppedModule
-}
-
-// underscored loads the packages of unit's own module below an underscore directory
-// ([underscoredPackages]), an example tree among them, as a nested consumer of the
-// unit. No build of the module compiles them, so where they do not load together
-// each loads alone, and one that does not load counts nothing.
-func (n *nestedLoads) underscored(ctx context.Context, trees *syntaxCache, c Configuration, target string, unit *Unit) error {
-	if unit.Path == "" {
-		return nil
-	}
-	patterns, err := underscoredPackages(unit.Dir)
-	if err != nil || len(patterns) == 0 {
-		return err
-	}
-	workspace, err := unitWorkspace(ctx, unit.Dir)
-	if err != nil {
-		return fmt.Errorf("load %s: %s: %w", c.ID, unit.Dir, err)
-	}
-	try := func(patterns []string) (bool, error) {
-		pkgs, diagnostics, err := loadPackages(ctx, trees, unit.Dir, c, workspace, []string{unit.Path}, unitPrefix(target, unit.Dir), patterns...)
-		switch {
-		case err == nil && len(diagnostics) == 0:
-			n.loaded = append(n.loaded, Consumer{ID: unit.Path, Packages: withoutTestBinaries(pkgs)})
-			return true, nil
-		case err == nil || droppable(err) && ctx.Err() == nil:
-			return false, nil
-		default:
-			return false, fmt.Errorf("load %s: %s: %w", c.ID, unit.Dir, err)
-		}
-	}
-	if loaded, err := try(patterns); loaded || err != nil || len(patterns) == 1 {
-		return err
-	}
-	for _, pattern := range patterns {
-		if _, err := try([]string{pattern}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// AddReaders loads every module of readers whose module file requires a unit of r,
-// through the workspace file at workspace, as a [Result.Nested] consumer, in the
-// order given, and drops one that does not load. A caller passes the modules a
-// workspace lists that it counts the references of without naming them.
-func (r *Result) AddReaders(ctx context.Context, workspace string, readers []scope.Module) error {
-	if workspace == "" {
-		workspace = workspaceOff
-	}
-	var held nestedLoads
-	for _, reader := range readers {
-		required, _ := requiredModules(ctx, reader.Path)
-		consumed := slices.DeleteFunc(unitPaths(r.Units), func(path string) bool { return !slices.Contains(required, path) })
-		if len(consumed) == 0 {
-			continue
-		}
-		if err := held.load(ctx, r.trees, reader.Path, r.Configuration, workspace, consumed, ""); err != nil {
-			return err
-		}
-	}
-	r.Nested = append(r.Nested, held.loaded...)
-	r.Dropped = append(r.Dropped, held.dropped...)
-	r.markUnanalysedConsumers(ctx)
-	return nil
-}
-
-// load loads the module rooted at dir as a nested consumer of the units whose module
-// paths modules lists, dropping it where it does not load. A module below the target
-// is named by prefix, its target-relative directory, which a note may carry.
-func (n *nestedLoads) load(ctx context.Context, trees *syntaxCache, dir string, c Configuration, workspace string, modules []string, prefix string) error {
-	pkgs, diagnostics, err := loadPackages(ctx, trees, dir, c, workspace, modules, prefix)
-	if len(diagnostics) > 0 {
-		name := prefix
-		if name == "" {
-			name = dir
-		}
-		err = &Error{Configuration: c.ID, Module: name, Diagnostics: diagnostics}
-	}
-	switch {
-	case err == nil:
-	case droppable(err) && ctx.Err() == nil:
-		n.dropped = append(n.dropped, droppedModule{Dir: dir, Err: err})
-		return nil
-	default:
-		return fmt.Errorf("load %s: %s: %w", c.ID, dir, err)
-	}
-	pkgs = withoutTestBinaries(pkgs)
-	if module := mainModule(pkgs); module != nil {
-		n.loaded = append(n.loaded, Consumer{ID: module.Path, Packages: pkgs})
-	}
-	return nil
-}
-
-func unitPaths(units []Unit) []string {
-	paths := make([]string, 0, len(units))
-	for i := range units {
-		if units[i].Path != "" {
-			paths = append(paths, units[i].Path)
-		}
-	}
-	return paths
-}
-
-// loadConsumer resolves one declared consumer, and refuses one whose references
-// this target's run cannot count.
-func loadConsumer(ctx context.Context, trees *syntaxCache, doc *scope.Document, c Configuration, declared scope.Module, mains []*packages.Module) (Consumer, error) {
-	if _, err := os.Stat(declared.Path); err != nil {
+// consumer resolves one declared consumer, and refuses one whose references this
+// target's run cannot count.
+func (l *loader) consumer(declared *discoveredModule, mains []*packages.Module) (Consumer, error) {
+	if _, err := os.Stat(declared.Dir); err != nil {
 		return Consumer{}, &SetupError{Failures: []setupFailure{{Class: vocab.SetupMissingConsumer, Detail: fmt.Sprintf(
 			"the declared consumer %s does not exist; check it out at that path and install its dependencies",
-			declared.Path,
+			declared.Dir,
 		)}}}
 	}
-
-	workspace := workspaceOff
-	if doc.Workspace != "" {
-		workspace = doc.Workspace
-	}
-	targetModules := make([]string, 0, len(mains))
+	spec := loadSpec{dir: declared.Dir, workspace: l.top.ConsumerWorkspace, file: declared.File}
 	for _, main := range mains {
-		targetModules = append(targetModules, main.Path)
+		spec.modules = append(spec.modules, main.Path)
 	}
-	pkgs, diagnostics, err := loadPackages(ctx, trees, declared.Path, c, workspace, targetModules, "")
+	pkgs, err := l.module(&spec, declared.Dir)
 	if setup, failed := errors.AsType[*SetupError](err); failed {
 		consumer := &SetupError{}
 		for _, one := range setup.Failures {
 			consumer.Failures = append(consumer.Failures, setupFailure{Class: vocab.SetupMissingConsumer, Detail: fmt.Sprintf(
 				"the declared consumer %s does not load (%s); check it out at that path and install its dependencies",
-				declared.Path, one.Detail,
+				declared.Dir, one.Detail,
 			)})
 		}
 		return Consumer{}, consumer
 	}
+	if _, diagnosed := errors.AsType[*Error](err); diagnosed {
+		return Consumer{}, err
+	}
 	if err != nil {
-		return Consumer{}, fmt.Errorf("load %s: consumer %s: %w", c.ID, declared.Path, err)
+		return Consumer{}, fmt.Errorf("load %s: consumer %s: %w", l.c.ID, declared.Dir, err)
 	}
-	if len(diagnostics) > 0 {
-		return Consumer{}, &Error{Configuration: c.ID, Module: declared.Path, Diagnostics: diagnostics}
-	}
-	pkgs = withoutTestBinaries(pkgs)
 	module, err := consumerModuleOf(pkgs, declared, mains)
 	if err != nil {
 		return Consumer{}, err
@@ -256,21 +100,21 @@ func loadConsumer(ctx context.Context, trees *syntaxCache, doc *scope.Document, 
 // consumerModuleOf returns the module path of one loaded consumer, and refuses a
 // consumer whose module disagrees with the scope, is a module of the target, or
 // resolves a module of the target at another directory.
-func consumerModuleOf(pkgs []*packages.Package, declared scope.Module, mains []*packages.Module) (string, error) {
+func consumerModuleOf(pkgs []*packages.Package, declared *discoveredModule, mains []*packages.Module) (string, error) {
 	module := mainModule(pkgs)
 	if module == nil || module.Path == "" {
-		return "", fmt.Errorf("%w: %s: the load reports no module for it", errConsumer, declared.Path)
+		return "", fmt.Errorf("%w: %s: the load reports no module for it", errConsumer, declared.Dir)
 	}
 	if declared.ID != "" && declared.ID != module.Path {
 		return "", fmt.Errorf("%w: %s: the scope declares module %s and the directory holds %s",
-			errConsumer, declared.Path, declared.ID, module.Path)
+			errConsumer, declared.Dir, declared.ID, module.Path)
 	}
 	for _, main := range mains {
 		if module.Path == main.Path {
 			return "", fmt.Errorf("%w: %s: it is the target module %s",
-				errConsumer, declared.Path, main.Path)
+				errConsumer, declared.Dir, main.Path)
 		}
-		if err := resolvesTarget(pkgs, declared.Path, main); err != nil {
+		if err := resolvesTarget(pkgs, declared.Dir, main); err != nil {
 			return "", err
 		}
 	}
@@ -278,20 +122,10 @@ func consumerModuleOf(pkgs []*packages.Package, declared scope.Module, mains []*
 }
 
 // resolvesTarget refuses a consumer whose module graph holds the target module at
-// a directory other than the one being analyzed.
-//
-// A reference is a reference to the declaration written at one position, so a
-// consumer that resolved the target from the module cache references a copy of
-// the target's declarations rather than the target's own, and every reference it
-// makes would be counted against nothing. Reporting the symbols such a consumer
-// uses is the false positive this whole stage exists to remove, so the run ends
-// here and the message names both directories and the two ways a consumer reaches
-// the target.
-//
-// A consumer that imports nothing of the target holds the target module nowhere
-// in its graph and is loaded as it is: a module that declares a consumer
-// relationship it does not exercise contributes no reference, which is an answer
-// rather than a fault.
+// a directory other than the one being analyzed: its references would count
+// against a copy, and the symbols it uses would be reported. A consumer that
+// imports nothing of the target holds the module nowhere and contributes no
+// reference, which is an answer.
 func resolvesTarget(pkgs []*packages.Package, path string, main *packages.Module) error {
 	if main == nil || main.Path == "" || main.Dir == "" {
 		return nil

@@ -179,7 +179,11 @@ func TestUnlinkedPackagesIsWhatNoBuildLinksOfAModuleLoadedWhole(t *testing.T) {
 	dir := extract(t, "unlinked.txtar")
 	host := load.Configuration{ID: "linux-amd64", OS: "linux", Arch: "amd64"}
 	result, _ := loadDirUnder(t.Context(), t, dir, host)
-	got := slices.Sorted(maps.Keys(UnlinkedPackages(result)))
+	var got []string
+	for id := range UnlinkedPackages(result) {
+		got = append(got, id.Path)
+	}
+	slices.Sort(got)
 	want := []string{"example.com/unlinked/leaf", "example.com/unlinked/orphan", "example.com/unlinked/unused"}
 	if !slices.Equal(got, want) {
 		t.Errorf("UnlinkedPackages(unlinked.txtar) = %v, want %v", got, want)

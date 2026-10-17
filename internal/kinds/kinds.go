@@ -234,10 +234,12 @@ type Consumers struct {
 }
 
 // Configured is one build configuration's load, with the declarations enumerated
-// from it and the resolver over them, for a kind that reads syntax or types.
+// from it, the resolver over them and its test classes, for a kind that reads
+// syntax or types.
 type Configured struct {
 	Result  *load.Result
 	Resolve *graph.Resolver
+	Tests   graph.TestClasses
 	Symbols []graph.Symbol
 }
 

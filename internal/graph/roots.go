@@ -8,7 +8,6 @@ import (
 	"go/types"
 	"maps"
 	"path"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -87,10 +86,9 @@ type Root struct {
 // ? matches exactly one character. A string holding neither is exact and names
 // the symbol whose reference it spells.
 type RootOptions struct {
-	// CheckedElsewhere holds the [load.Result.PackageKey] of every package whose type
-	// errors root nothing, because another configuration of a derived matrix
-	// type-checks it ([CheckedElsewhere]).
-	CheckedElsewhere map[string]bool
+	// CheckedElsewhere holds every package whose type errors root nothing, because
+	// another configuration of a derived matrix type-checks it ([CheckedElsewhere]).
+	CheckedElsewhere map[load.PackageID]bool
 
 	Patterns     []string // roots.patterns from the resolved configuration
 	PublishedAPI bool     // the target is a library, so its published API is rooted
@@ -141,7 +139,7 @@ func Roots(r *load.Result, targetRoot string, read ReadFile, symbols []Symbol, o
 	if !opts.PublishedAPI {
 		unlinked := UnlinkedPackages(r)
 		d.unlinked = func(s *Symbol) bool {
-			return unlinked[r.PackageKey(s.PkgPath, filepath.Join(targetRoot, filepath.FromSlash(path.Dir(s.Pos.Filename))))]
+			return unlinked[PackageOf(r, s, targetRoot)]
 		}
 	}
 	d.declared(symbols)

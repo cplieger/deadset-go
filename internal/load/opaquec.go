@@ -13,16 +13,13 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cplieger/deadset-go/v2/internal/buildconstraint"
 	"golang.org/x/tools/go/packages"
 )
 
 // The settings of the second type check, which reads the original sources of
 // every package the load ignored a file of for importing "C".
 const (
-	// gcCompiler names the compiler whose type sizes a configuration's check uses,
-	// which is the one the load's own toolchain is.
-	gcCompiler = "gc"
-
 	// opaqueAttempts is the number of checks one import path gets: the first over
 	// every file cgo alone excluded, and the second over the files the first
 	// reported no error in. A third would ask the same question again, so what the
@@ -42,7 +39,7 @@ const (
 // because the load's packages hold one another in their import maps: its syntax,
 // types, type information, imports and file lists change, and its identity does
 // not. No C declaration becomes a symbol; only the Go half is analyzed.
-func checkOpaqueC(ctx context.Context, fset *token.FileSet, target string, from unitDir, pkgs []*packages.Package, cgo map[string]bool, c Configuration) []string {
+func checkOpaqueC(ctx context.Context, fset *token.FileSet, target string, from unitDir, pkgs []*packages.Package, cgo map[string]bool, c *Configuration) []string {
 	if len(cgo) == 0 {
 		return nil
 	}
@@ -51,7 +48,7 @@ func checkOpaqueC(ctx context.Context, fset *token.FileSet, target string, from 
 		imports:  newCgoImporter(ctx, fset, from, c, pkgs),
 		parsed:   make(map[string]*ast.File),
 		excluded: make(map[string]bool, len(cgo)),
-		sizes:    types.SizesFor(gcCompiler, c.Arch),
+		sizes:    types.SizesFor(buildconstraint.Compiler, c.Arch),
 	}
 	for _, g := range cgoGroups(pkgs, cgo) {
 		o.recheck(g)
@@ -139,12 +136,10 @@ type replacement struct {
 // recheck checks one import path with the files cgo alone excluded from it and
 // updates its packages when the check reports nothing about them.
 //
-// The file is the unit of the fall-back: a file the check reports an error in
-// stays excluded and the group is checked again without it, so one file the
-// analysis cannot read costs its own references and no more. An error anywhere
-// else is about the files the load already compiled and type-checked without
-// complaint, which this check is not entitled to contradict, so the whole group
-// falls back and the loaded packages stand.
+// A file the check reports an error in stays excluded and the group is checked
+// again without it, so one unreadable file costs its own references alone. An
+// error anywhere else contradicts files the load already checked, so the whole
+// group falls back and the loaded packages stand.
 func (o *opaqueCheck) recheck(g cgoGroup) {
 	accept, unparsed := o.parse(g.own)
 	o.exclude(unparsed)
@@ -246,16 +241,11 @@ func (o *opaqueCheck) check(p *packages.Package, accept []*ast.File) (*types.Pac
 }
 
 // atOpaqueImport reports whether pos is the position the mode's own diagnostic at
-// an `import "C"` carries.
-//
-// The mode leaves the type of every C expression unrecorded, and a check that
-// reported nothing would promise the opposite, so it reports one diagnostic at the
-// import spec of each file that imports "C". That position is what recognises it,
-// never its text: the text belongs to the toolchain, and the position is also the
-// one the unused-import diagnostic carries, which is what the same file produces
-// when it names no C declaration at all. The language itself refuses a renamed or
-// dotted import of "C", so the position of one is not in this set and a file
-// spelling it falls back.
+// an `import "C"` carries: the mode reports one at each such import spec, because
+// it records no type of a C expression. The position recognises it, never the
+// toolchain's text, and is also where the unused-import diagnostic of a file naming
+// no C declaration sits. A renamed or dotted import of "C", which the language
+// refuses, is not in this set, so a file spelling one falls back.
 func (o *opaqueCheck) atOpaqueImport(pos token.Pos) bool {
 	for _, f := range o.parsed {
 		for _, imp := range f.Imports {
@@ -270,12 +260,10 @@ func (o *opaqueCheck) atOpaqueImport(pos token.Pos) bool {
 // parse reads the files of one group, once per path for the whole configuration,
 // and returns the trees together with the paths that do not parse.
 //
-// One tree per path is what keeps a declaration of such a file at one position:
-// the variants of a package share the trees of the files the load compiled, and a
-// second parse of one file into the same file set would give one source site two
-// positions and therefore two declarations. A file whose imports read and whose
-// body does not is the one a load cannot have refused already, and it falls back
-// like any other file the check cannot read.
+// One tree per path keeps a declaration of such a file at one position: a second
+// parse into the same file set would give one source site two positions, and so
+// two declarations. A file whose body does not parse falls back like any other
+// file the check cannot read.
 func (o *opaqueCheck) parse(paths []string) (files []*ast.File, unparsed map[string]bool) {
 	files = make([]*ast.File, 0, len(paths))
 	unparsed = make(map[string]bool)
@@ -406,17 +394,15 @@ func goVersionOf(p *packages.Package) string {
 // demand from its metadata and checked for its declarations alone, as every
 // dependency of the load is.
 //
-// go/types reaches an importer through an interface the language's own package
-// fixes, and that interface carries no context, so the run's is held here: an
-// on-demand load spawns the toolchain the load already spawns, and it stops when
-// the run does.
+// The types.Importer interface carries no context, so the run's is held here: an
+// on-demand load spawns the toolchain, and it stops when the run does.
 type cgoImporter struct {
 	ctx     context.Context
 	fset    *token.FileSet
 	known   map[string]*packages.Package
 	refused map[string]bool
+	c       *Configuration
 	from    unitDir
-	c       Configuration
 }
 
 // newCgoImporter indexes every package the load type-checked, by import path, and
@@ -424,7 +410,7 @@ type cgoImporter struct {
 //
 // A package and its test variants share one import path and an import of that path
 // names the package itself, so a variant is never indexed.
-func newCgoImporter(ctx context.Context, fset *token.FileSet, from unitDir, c Configuration, pkgs []*packages.Package) *cgoImporter {
+func newCgoImporter(ctx context.Context, fset *token.FileSet, from unitDir, c *Configuration, pkgs []*packages.Package) *cgoImporter {
 	im := &cgoImporter{
 		ctx:     ctx,
 		fset:    fset,

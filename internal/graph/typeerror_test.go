@@ -1,7 +1,6 @@
 package graph
 
 import (
-	"maps"
 	"os"
 	"slices"
 	"testing"
@@ -23,7 +22,7 @@ func TestATypeErrorAnotherConfigurationDoesNotReportRootsAndSkipsNothing(t *test
 	if got := elsewhere[0]; len(got) != 0 {
 		t.Errorf("CheckedElsewhere()[linux] = %v, want none", got)
 	}
-	if got, want := slices.Sorted(maps.Keys(elsewhere[1])), []string{"example.com/platform/sig"}; !slices.Equal(got, want) {
+	if got, want := paths(elsewhere[1]), []string{"example.com/platform/sig"}; !slices.Equal(got, want) {
 		t.Errorf("CheckedElsewhere()[windows] = %v, want %v", got, want)
 	}
 
@@ -34,7 +33,7 @@ func TestATypeErrorAnotherConfigurationDoesNotReportRootsAndSkipsNothing(t *test
 	}
 	for _, test := range []struct {
 		name      string
-		elsewhere map[string]bool
+		elsewhere map[load.PackageID]bool
 		roots     []string
 		skipped   []string
 	}{

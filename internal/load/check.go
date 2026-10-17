@@ -14,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/cplieger/deadset-go/v2/internal/buildconstraint"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -75,7 +76,7 @@ func typeCheckDeclarations(ctx context.Context, fset *token.FileSet, roots []*pa
 func check(ctx context.Context, trees *syntaxCache, reading string, roots []*packages.Package, arch string,
 	own func(*packages.Package) bool, mainWhole bool,
 ) error {
-	sizes := types.SizesFor(gcCompiler, arch)
+	sizes := types.SizesFor(buildconstraint.Compiler, arch)
 	if sizes == nil {
 		return fmt.Errorf("no type sizes for architecture %q", arch)
 	}

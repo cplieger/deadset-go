@@ -168,7 +168,7 @@ func TestLoadResolvesAnImportOnlyAFileImportingCWrites(t *testing.T) {
 }
 
 func TestCgoOnlyDecidesWhichIgnoredFilesTheCheckReads(t *testing.T) {
-	ctxt := cgoEnabledContext(HostConfiguration())
+	ctxt := cgoEnabledContext(new(HostConfiguration()))
 	cases := map[string]bool{
 		"bridge.go":         true,
 		"bridge_tagged.go":  true,

@@ -44,7 +44,7 @@ func TestLoadCarriesEveryDeclaredConsumerApartFromTheTarget(t *testing.T) {
 	stableToolchain(t)
 	doc := consumedScope(t, "consumer")
 
-	got, err := Load(t.Context(), doc, HostConfiguration())
+	got, err := loadScope(t.Context(), doc, HostConfiguration())
 	if err != nil {
 		t.Fatalf("Load(the consumed fixture with one consumer) = _, %v, want no error", err)
 	}
@@ -74,7 +74,7 @@ func TestLoadResolvesTheTargetOfAConsumerAtTheTargetRoot(t *testing.T) {
 	stableToolchain(t)
 	doc := consumedScope(t, "consumer")
 
-	got, err := Load(t.Context(), doc, HostConfiguration())
+	got, err := loadScope(t.Context(), doc, HostConfiguration())
 	if err != nil {
 		t.Fatalf("Load(the consumed fixture with one consumer) = _, %v, want no error", err)
 	}
@@ -98,7 +98,7 @@ func TestLoadSharesOneFileSetWithEveryConsumer(t *testing.T) {
 	stableToolchain(t)
 	doc := consumedScope(t, "consumer")
 
-	got, err := Load(t.Context(), doc, HostConfiguration())
+	got, err := loadScope(t.Context(), doc, HostConfiguration())
 	if err != nil {
 		t.Fatalf("Load(the consumed fixture with one consumer) = _, %v, want no error", err)
 	}
@@ -150,7 +150,7 @@ func TestLoadRefusesAConsumerItCannotCount(t *testing.T) {
 	for name, test := range cases {
 		t.Run(name, func(t *testing.T) {
 			stableToolchain(t)
-			got, err := Load(t.Context(), test.declared(t), HostConfiguration())
+			got, err := loadScope(t.Context(), test.declared(t), HostConfiguration())
 
 			if !errors.Is(err, errConsumer) {
 				t.Fatalf("Load() = _, %v, want an error matching errConsumer", err)
@@ -173,7 +173,7 @@ func TestLoadRefusesAnAbsentConsumerAsAMissingConsumer(t *testing.T) {
 	doc := consumedScope(t)
 	doc.Consumers = append(doc.Consumers, scope.Module{Path: absent})
 
-	got, err := Load(t.Context(), doc, HostConfiguration())
+	got, err := loadScope(t.Context(), doc, HostConfiguration())
 
 	assertMissingConsumer(t, "a scope naming an absent consumer", err, absent)
 	if !reflect.DeepEqual(got, Result{}) {
@@ -197,7 +197,7 @@ func TestLoadRefusesAConsumerWhoseDependenciesAreNotInstalledAsAMissingConsumer(
 	doc := consumedScope(t)
 	doc.Consumers = append(doc.Consumers, scope.Module{Path: consumer})
 
-	_, err := Load(t.Context(), doc, HostConfiguration())
+	_, err := loadScope(t.Context(), doc, HostConfiguration())
 
 	assertMissingConsumer(t, "a scope naming a consumer whose import nothing provides", err, consumer, "example.com/nowhere")
 }
@@ -226,7 +226,7 @@ func TestLoadRefusesAConsumerThatDoesNotTypeCheck(t *testing.T) {
 	stableToolchain(t)
 	doc := consumedScope(t, "broken")
 
-	got, err := Load(t.Context(), doc, HostConfiguration())
+	got, err := loadScope(t.Context(), doc, HostConfiguration())
 
 	var failure *Error
 	if !errors.As(err, &failure) {
@@ -247,7 +247,7 @@ func TestLoadRefusesAConsumerRequiringAModuleNoCacheHolds(t *testing.T) {
 	stableToolchain(t)
 	doc := consumedScope(t, "uncached")
 
-	got, err := Load(t.Context(), doc, HostConfiguration())
+	got, err := loadScope(t.Context(), doc, HostConfiguration())
 
 	// GOPROXY=off is what makes the analysis's no-network rule the toolchain's
 	// rule: a module the local cache does not hold is not fetched, so the run ends

@@ -79,7 +79,7 @@ func TestLoadKeepsTheColumnOfADependencyDeclaration(t *testing.T) {
 
 func TestLoadAcceptsADependencyWhoseOnlyErrorIsInsideAFunctionBody(t *testing.T) {
 	stableToolchain(t)
-	got, err := Load(t.Context(), fixtureScope(t, filepath.Join("sigdeps", "app")), HostConfiguration())
+	got, err := loadScope(t.Context(), fixtureScope(t, filepath.Join("sigdeps", "app")), HostConfiguration())
 	if err != nil {
 		t.Fatalf("Load(testdata/sigdeps/app) = _, %v, want no error: plain.Broken's error is inside its body", err)
 	}
@@ -92,7 +92,7 @@ func TestLoadRefusesAConfigurationOnItsMetadataBeforeCheckingAnything(t *testing
 	stableToolchain(t)
 	c := HostConfiguration()
 
-	got, err := Load(t.Context(), fixtureScope(t, "metadataerror"), c)
+	got, err := loadScope(t.Context(), fixtureScope(t, "metadataerror"), c)
 
 	var loadErr *Error
 	if !errors.As(err, &loadErr) {

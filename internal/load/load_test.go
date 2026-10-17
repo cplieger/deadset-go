@@ -36,11 +36,31 @@ func fixtureScope(t *testing.T, dir string) scope.Document {
 	return doc
 }
 
+// discovered is the topology of doc, failing the test where it cannot be read.
+func discovered(t *testing.T, doc scope.Document) *Topology {
+	t.Helper()
+	top, err := Discover(t.Context(), doc)
+	if err != nil {
+		t.Fatalf("Setup: Discover(%s) = _, %v", doc.Target.Path, err)
+	}
+	return top
+}
+
+// loadScope is one configuration's load of doc's topology, a discovery error
+// returned as the load's.
+func loadScope(ctx context.Context, doc scope.Document, c Configuration) (Result, error) {
+	top, err := Discover(ctx, doc)
+	if err != nil {
+		return Result{}, err
+	}
+	return Load(ctx, top, &c)
+}
+
 // loadFixture loads the testdata module named by dir under the host
 // configuration and fails the test when the load does not succeed.
 func loadFixture(t *testing.T, dir string) Result {
 	t.Helper()
-	got, err := Load(t.Context(), fixtureScope(t, dir), HostConfiguration())
+	got, err := loadScope(t.Context(), fixtureScope(t, dir), HostConfiguration())
 	if err != nil {
 		t.Fatalf("Load(testdata/%s) = _, %v, want no error", dir, err)
 	}
@@ -80,7 +100,7 @@ func baseNames(files []string) []string {
 
 func TestHostConfiguration(t *testing.T) {
 	got := HostConfiguration()
-	want := Configuration{ID: runtime.GOOS + "-" + runtime.GOARCH, OS: runtime.GOOS, Arch: runtime.GOARCH}
+	want := Configuration{ID: runtime.GOOS + "-" + runtime.GOARCH, OS: runtime.GOOS, Arch: runtime.GOARCH, Origin: host}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("HostConfiguration() = %+v, want %+v", got, want)
 	}
@@ -157,7 +177,7 @@ func TestLoadKeysOnePositionAcrossVariantsAndReportsEveryDiagnostic(t *testing.T
 	stableToolchain(t)
 	c := HostConfiguration()
 
-	got, err := Load(t.Context(), unparsedScope(t, "syntaxerror"), c)
+	got, err := loadScope(t.Context(), unparsedScope(t, "syntaxerror"), c)
 
 	var loadErr *Error
 	if !errors.As(err, &loadErr) {
@@ -205,7 +225,7 @@ func TestLoadKeysOnePositionAcrossVariantsAndReportsEveryDiagnostic(t *testing.T
 func TestLoadRecordsATypeErrorOfTheTargetWithoutFailing(t *testing.T) {
 	stableToolchain(t)
 
-	got, err := Load(t.Context(), fixtureScope(t, "typeerror"), HostConfiguration())
+	got, err := loadScope(t.Context(), fixtureScope(t, "typeerror"), HostConfiguration())
 	if err != nil {
 		t.Fatalf("Load(testdata/typeerror) = _, %v, want the package set", err)
 	}
@@ -325,7 +345,7 @@ func TestLoadPinsGoworkOffAgainstAnAmbientWorkspace(t *testing.T) {
 		t.Fatalf("Setup: scope.ForDir(%s) = _, %v, want no error", module, err)
 	}
 
-	got, err := Load(t.Context(), doc, HostConfiguration())
+	got, err := loadScope(t.Context(), doc, HostConfiguration())
 	if err != nil {
 		t.Fatalf("Load(a module under a go.work naming an absent module) = _, %v, want no error", err)
 	}
@@ -338,7 +358,7 @@ func TestLoadPinsGoflagsEmptyAgainstAnAmbientTagList(t *testing.T) {
 	t.Setenv("GOWORK", "off")
 	t.Setenv("GOFLAGS", "-tags=plan9")
 
-	got, err := Load(t.Context(), fixtureScope(t, "constraint"), HostConfiguration())
+	got, err := loadScope(t.Context(), fixtureScope(t, "constraint"), HostConfiguration())
 	if err != nil {
 		t.Fatalf("Load(testdata/constraint) = _, %v, want no error", err)
 	}
@@ -361,7 +381,7 @@ func TestLoadSelectsTheFileAConfiguredTagNames(t *testing.T) {
 	c.ID += "-plan9"
 	c.Tags = []string{"plan9"}
 
-	got, err := Load(t.Context(), fixtureScope(t, "constraint"), c)
+	got, err := loadScope(t.Context(), fixtureScope(t, "constraint"), c)
 	if err != nil {
 		t.Fatalf("Load(testdata/constraint, %s) = _, %v, want no error", c.ID, err)
 	}
@@ -457,7 +477,7 @@ func TestLoadRefusals(t *testing.T) {
 				cancel()
 				ctx = cancellable
 			}
-			got, err := Load(ctx, test.doc(t), test.config)
+			got, err := loadScope(ctx, test.doc(t), test.config)
 			if !errors.Is(err, test.wantErr) {
 				t.Errorf("Load() = _, %v, want an error matching %v", err, test.wantErr)
 			}
@@ -532,7 +552,7 @@ func TestLoadReadsAPackageTheConfigurationBuildsNoFileOfTheSameOnAColdBuildCache
 	stableToolchain(t)
 	t.Setenv("GOCACHE", t.TempDir())
 
-	got, err := Load(t.Context(), fixtureScope(t, "unbuilt"), Configuration{ID: "linux-amd64", OS: "linux", Arch: "amd64"})
+	got, err := loadScope(t.Context(), fixtureScope(t, "unbuilt"), Configuration{ID: "linux-amd64", OS: "linux", Arch: "amd64"})
 	if err != nil {
 		t.Fatalf("Load(testdata/unbuilt) on an empty build cache = _, %v, want no error", err)
 	}
@@ -579,7 +599,7 @@ func TestLoadReadsADependencyCgoAloneExcludes(t *testing.T) {
 	stableToolchain(t)
 	t.Setenv("GOCACHE", t.TempDir())
 
-	got, err := Load(t.Context(), cgoDependencyScope(t, ""), HostConfiguration())
+	got, err := loadScope(t.Context(), cgoDependencyScope(t, ""), HostConfiguration())
 	if err != nil {
 		t.Fatalf("Load(a target importing a cgo-only dependency) = _, %v, want no error", err)
 	}
@@ -598,7 +618,7 @@ func TestLoadFailsOnADependencyAnotherConstraintExcludes(t *testing.T) {
 	stableToolchain(t)
 	t.Setenv("GOCACHE", t.TempDir())
 
-	_, err := Load(t.Context(), cgoDependencyScope(t, "//go:build never\n\n"), HostConfiguration())
+	_, err := loadScope(t.Context(), cgoDependencyScope(t, "//go:build never\n\n"), HostConfiguration())
 	if failure, ok := errors.AsType[*Error](err); !ok || len(failure.Diagnostics) == 0 {
 		t.Errorf("Load(a target importing a dependency no configuration builds) = _, %v, want a *Error with its diagnostics", err)
 	}
@@ -645,7 +665,7 @@ func TestLoadReadsAMemberThroughTheWorkspaceThatListsIt(t *testing.T) {
 		t.Fatalf("Setup: scope.ForDir = _, %v", err)
 	}
 
-	got, err := Load(t.Context(), doc, HostConfiguration())
+	got, err := loadScope(t.Context(), doc, HostConfiguration())
 	if err != nil {
 		t.Fatalf("Load(a workspace member requiring another member) = _, %v, want no error", err)
 	}
@@ -686,7 +706,7 @@ func TestLoadReadsEveryModuleUnderATargetThatIsNoModuleRoot(t *testing.T) {
 		t.Fatalf("Setup: scope.ForDir = _, %v", err)
 	}
 
-	got, err := Load(t.Context(), doc, HostConfiguration())
+	got, err := loadScope(t.Context(), doc, HostConfiguration())
 	if err != nil {
 		t.Fatalf("Load(a tree of two modules) = _, %v, want no error", err)
 	}
@@ -715,12 +735,12 @@ func TestUnitsOfADirectoryAModuleAboveGovernsIsTheDirectory(t *testing.T) {
 	})
 	target := filepath.Join(root, "sub")
 
-	got, err := Units(t.Context(), target)
+	got, err := unitDirs(t.Context(), target)
 	if err != nil {
-		t.Fatalf("Units(a directory of an enclosing module) = _, %v, want no error", err)
+		t.Fatalf("unitDirs(a directory of an enclosing module) = _, %v, want no error", err)
 	}
 	if want := []string{target}; !slices.Equal(got, want) {
-		t.Errorf("Units() = %v, want %v", got, want)
+		t.Errorf("unitDirs() = %v, want %v", got, want)
 	}
 }
 

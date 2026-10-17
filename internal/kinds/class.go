@@ -106,7 +106,7 @@ func unlinkedPackages(per []Configured, root string, x *index) map[string]bool {
 				continue
 			}
 			key := x.packageKey(p.PkgPath, packageDir(p, root))
-			if none[one.Result.KeyOf(p)] {
+			if none[one.Result.ID(p)] {
 				unlinked[key] = true
 			} else {
 				linked[key] = true

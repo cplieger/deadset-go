@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestModuleFileReadsEveryRequireDirectiveWithItsLine(t *testing.T) {
+func TestDirectivesReadsEveryRequireDirectiveWithItsLine(t *testing.T) {
 	f := moduleFileOf(t, extract(t, "directives.txtar"))
 
 	want := []Requirement{
@@ -15,11 +15,11 @@ func TestModuleFileReadsEveryRequireDirectiveWithItsLine(t *testing.T) {
 		{Path: "example.com/quoted", Site: at(12, 9)},
 	}
 	if !slices.Equal(f.Requires, want) {
-		t.Errorf("ModuleFile(directives.txtar).Requires = %+v, want %+v", f.Requires, want)
+		t.Errorf("Directives(directives.txtar).Requires = %+v, want %+v", f.Requires, want)
 	}
 }
 
-func TestModuleFileReadsEveryReplaceDirectiveWithItsLine(t *testing.T) {
+func TestDirectivesReadsEveryReplaceDirectiveWithItsLine(t *testing.T) {
 	f := moduleFileOf(t, extract(t, "directives.txtar"))
 
 	want := []Replacement{
@@ -40,21 +40,15 @@ func TestModuleFileReadsEveryReplaceDirectiveWithItsLine(t *testing.T) {
 		},
 	}
 	if !slices.Equal(f.Replaces, want) {
-		t.Errorf("ModuleFile(directives.txtar).Replaces = %+v, want %+v", f.Replaces, want)
+		t.Errorf("Directives(directives.txtar).Replaces = %+v, want %+v", f.Replaces, want)
 	}
 }
 
-func TestModuleFileReadsTheToolDirectivesPackagePath(t *testing.T) {
+func TestDirectivesReadsTheToolDirectivesPackagePath(t *testing.T) {
 	f := moduleFileOf(t, extract(t, "directives.txtar"))
 
 	if want := []string{"example.com/direct/cmd/gen"}; !slices.Equal(f.Tools, want) {
-		t.Errorf("ModuleFile(directives.txtar).Tools = %v, want %v", f.Tools, want)
-	}
-}
-
-func TestModuleFileFailsWhereTheDirectoryHoldsNoModuleFile(t *testing.T) {
-	if _, err := ModuleFile(t.Context(), t.TempDir()); err == nil {
-		t.Error("ModuleFile(an empty directory) returned no error, want one")
+		t.Errorf("Directives(directives.txtar).Tools = %v, want %v", f.Tools, want)
 	}
 }
 

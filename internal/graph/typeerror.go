@@ -34,10 +34,10 @@ type skippedDecl struct {
 
 // skippedDecls pairs every type error of the target's packages with its declaration,
 // leaving out the packages another configuration type-checks.
-func skippedDecls(r *load.Result, checkedElsewhere map[string]bool) []skippedDecl {
+func skippedDecls(r *load.Result, checkedElsewhere map[load.PackageID]bool) []skippedDecl {
 	var held []skippedDecl
 	for _, p := range r.Packages {
-		if p.Module == nil || !p.Module.Main || len(p.TypeErrors) == 0 || checkedElsewhere[r.KeyOf(p)] {
+		if p.Module == nil || !p.Module.Main || len(p.TypeErrors) == 0 || checkedElsewhere[r.ID(p)] {
 			continue
 		}
 		for _, e := range p.TypeErrors {
@@ -66,7 +66,7 @@ func enclosingDecl(files []*ast.File, pos token.Pos) ast.Decl {
 // the declaration it skipped, but none of a package checkedElsewhere holds. A package
 // and its test variant check one file twice, so an error may be listed twice; the
 // report holds each once.
-func TypeErrorSkips(r *load.Result, targetRoot string, checkedElsewhere map[string]bool) []TypeErrorSkip {
+func TypeErrorSkips(r *load.Result, targetRoot string, checkedElsewhere map[load.PackageID]bool) []TypeErrorSkip {
 	pos := newPositions(r.Fset, targetRoot, nil)
 	var held []TypeErrorSkip
 	for _, one := range skippedDecls(r, checkedElsewhere) {
@@ -85,34 +85,33 @@ func TypeErrorSkips(r *load.Result, targetRoot string, checkedElsewhere map[stri
 	return held
 }
 
-// CheckedElsewhere is, per result in the order given, the [load.Result.PackageKey]
-// of every package of the target with a type error there that another result
-// type-checks without one. Such a package is judged by the configurations that
-// build it.
-func CheckedElsewhere(results []load.Result) []map[string]bool {
-	failed := make([]map[string]bool, len(results))
-	clean := make(map[string]bool)
+// CheckedElsewhere is, per result in the order given, every package of the target
+// with a type error there that another result type-checks without one. Such a
+// package is judged by the configurations that build it.
+func CheckedElsewhere(results []load.Result) []map[load.PackageID]bool {
+	failed := make([]map[load.PackageID]bool, len(results))
+	clean := make(map[load.PackageID]bool)
 	for i := range results {
 		failed[i] = typeFailed(&results[i])
 		for _, p := range results[i].Packages {
-			if key := results[i].KeyOf(p); p.Module != nil && p.Module.Main && !failed[i][key] {
+			if key := results[i].ID(p); p.Module != nil && p.Module.Main && !failed[i][key] {
 				clean[key] = true
 			}
 		}
 	}
 	for i := range failed {
-		maps.DeleteFunc(failed[i], func(key string, _ bool) bool { return !clean[key] })
+		maps.DeleteFunc(failed[i], func(key load.PackageID, _ bool) bool { return !clean[key] })
 	}
 	return failed
 }
 
-// typeFailed is the [load.Result.PackageKey] of every package of the target with a
-// type error in r, in any of its variants.
-func typeFailed(r *load.Result) map[string]bool {
-	failed := make(map[string]bool)
+// typeFailed is every package of the target with a type error in r, in any of its
+// variants.
+func typeFailed(r *load.Result) map[load.PackageID]bool {
+	failed := make(map[load.PackageID]bool)
 	for _, p := range r.Packages {
 		if p.Module != nil && p.Module.Main && len(p.TypeErrors) > 0 {
-			failed[r.KeyOf(p)] = true
+			failed[r.ID(p)] = true
 		}
 	}
 	return failed
@@ -125,7 +124,7 @@ func typeFailed(r *load.Result) map[string]bool {
 // value reaching a position whose type it could not resolve could reach an
 // interface, so every method and field of the type is rooted too. A package another
 // configuration type-checks holds no such root ([CheckedElsewhere]).
-func (d *rootDetection) typeErrors(r *load.Result, checkedElsewhere map[string]bool) {
+func (d *rootDetection) typeErrors(r *load.Result, checkedElsewhere map[load.PackageID]bool) {
 	for _, one := range skippedDecls(r, checkedElsewhere) {
 		if !d.rootDeclared(one.decl) {
 			continue

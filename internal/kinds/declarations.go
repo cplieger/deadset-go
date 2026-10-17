@@ -2,8 +2,6 @@ package kinds
 
 import (
 	"go/ast"
-	"path"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -286,29 +284,32 @@ func testFile(symbol *graph.Symbol) bool {
 // production import under one configuration makes the package production code,
 // whatever another configuration that compiles none of its importers says.
 func (in *Input) testSupport(symbol *graph.Symbol) bool {
-	return in.classifiedEverywhere(symbol, func(r *load.Result, key string) bool { return r.TestSupport[key] })
+	return in.classifiedEverywhere(symbol, func(c *Configured, key load.PackageID) bool { return c.Tests.Support[key] })
 }
 
 // testReached reports whether production code only tests reach declares one symbol:
 // every configuration that loads its package found only tests reaching it, and not
 // every one found it test-support code.
 func (in *Input) testReached(symbol *graph.Symbol) bool {
-	return !in.testSupport(symbol) && in.classifiedEverywhere(symbol, func(r *load.Result, key string) bool {
-		return r.TestSupport[key] || r.TestReached[key]
+	return !in.testSupport(symbol) && in.classifiedEverywhere(symbol, func(c *Configured, key load.PackageID) bool {
+		return c.Tests.Support[key] || c.Tests.Reached[key]
 	})
 }
 
 // classifiedEverywhere reports whether some configuration of the run classified the
 // package declaring one symbol by classified and every configuration that loads it did.
-func (in *Input) classifiedEverywhere(symbol *graph.Symbol, classified func(r *load.Result, key string) bool) bool {
+func (in *Input) classifiedEverywhere(symbol *graph.Symbol, classified func(c *Configured, key load.PackageID) bool) bool {
 	held := false
-	dir := filepath.Join(in.Root, filepath.FromSlash(path.Dir(symbol.Pos.Filename)))
-	for _, one := range in.Per {
+	for i := range in.Per {
+		one := &in.Per[i]
+		if one.Result == nil {
+			continue
+		}
+		key := graph.PackageOf(one.Result, symbol, in.Root)
 		switch {
-		case one.Result == nil:
-		case classified(one.Result, one.Result.PackageKey(symbol.PkgPath, dir)):
+		case classified(one, key):
 			held = true
-		case loads(one.Result, one.Result.PackageKey(symbol.PkgPath, dir)):
+		case loads(one.Result, key):
 			return false
 		}
 	}
@@ -446,10 +447,9 @@ func everyDeadTargetIn(targets []graph.SymbolID, production func(graph.SymbolID)
 	return named
 }
 
-// loads reports whether one configuration loaded the package of that
-// [load.Result.PackageKey].
-func loads(r *load.Result, key string) bool {
-	return slices.ContainsFunc(r.Packages, func(p *packages.Package) bool { return r.KeyOf(p) == key })
+// loads reports whether one configuration loaded the package.
+func loads(r *load.Result, key load.PackageID) bool {
+	return slices.ContainsFunc(r.Packages, func(p *packages.Package) bool { return r.ID(p) == key })
 }
 
 // deprecations is every declaration of the inventory carrying a deprecation

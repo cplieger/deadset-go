@@ -234,7 +234,7 @@ func writeExplanation(w io.Writer, set *run.Findings, cascade graph.Cascade, sub
 	fmt.Fprintf(&held, "symbol: %s\n", subject.Ref)
 	fmt.Fprintf(&held, "declaration: %s %s\n", subject.Kind, subject.Name)
 	fmt.Fprintf(&held, "position: %s\n", subject.Pos)
-	fmt.Fprintf(&held, "configurations: %s\n", configurationNames(set.Identifiers, subject.Configs))
+	fmt.Fprintf(&held, "configurations: %s\n", configurationNames(set.Identifiers(), subject.Configs))
 
 	found := findingAbout(set.Result.Findings, subject)
 	retained := retentionsOf(set.Retained(), subject.ID)

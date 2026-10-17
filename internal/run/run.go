@@ -33,8 +33,10 @@ type Request struct {
 	Config config.Config
 }
 
-// enumerated is one configuration's load and the declarations enumerated from it.
+// enumerated is one configuration's load, the declarations enumerated from it and
+// the test classes of its packages.
 type enumerated struct {
+	Tests   graph.TestClasses
 	Symbols []graph.Symbol
 	Result  load.Result
 }
@@ -44,6 +46,9 @@ type enumerated struct {
 // stage answers over.
 type Loaded struct {
 	req *Request
+
+	// Topology is what every configuration loaded, read once.
+	Topology *load.Topology
 
 	Matrix *graph.Matrix
 	Merged *graph.Merged
@@ -55,9 +60,8 @@ type Loaded struct {
 	Identity string
 
 	// Configurations is the matrix the run analyzed, in the order every
-	// configuration index names, and Identifiers the identifier of each.
+	// configuration index names.
 	Configurations []load.Configuration
-	Identifiers    []string
 	Loads          []enumerated
 
 	// Declared is the consumers the scope declared.
@@ -80,36 +84,31 @@ func Load(ctx context.Context, req *Request) (*Loaded, error) {
 	if err != nil {
 		return nil, err
 	}
-	var readers []scope.Module
 	if req.Scope == "" {
-		document.Consumers, readers = nameable(document.Consumers)
+		document.Consumers = nameable(document.Consumers)
 	}
-	configurations, derived, err := matrixOf(ctx, &req.Config, document.Target.Path)
+	top, err := load.Discover(ctx, document)
 	if err != nil {
 		return nil, err
 	}
-	var guessed []string
-	if derived != nil {
-		guessed = derived.Guessed
-	}
-	results, unbuilt, err := load.All(ctx, document, configurations, guessed)
+	configurations, derived, err := matrixOf(&req.Config, top)
 	if err != nil {
 		return nil, err
 	}
-	for i := range results {
-		if failed := results[i].AddReaders(ctx, document.Workspace, readers); failed != nil {
-			return nil, failed
-		}
+	results, unbuilt, err := load.All(ctx, top, configurations)
+	if err != nil {
+		return nil, err
 	}
 
 	l := &Loaded{
 		req:      req,
-		Root:     document.Target.Path,
+		Topology: top,
+		Root:     top.Root,
 		Identity: document.Target.ID,
 		Declared: document.Consumers,
 		Unbuilt:  unbuilt,
 	}
-	passes, err := l.enumerate(results, derived != nil)
+	passes, err := l.enumerate(results, derived)
 	if err != nil {
 		return nil, err
 	}
@@ -127,6 +126,16 @@ func Load(ctx context.Context, req *Request) (*Loaded, error) {
 	return l, nil
 }
 
+// Identifiers is the identifier of every configuration the run analyzed, in matrix
+// order.
+func (l *Loaded) Identifiers() []string {
+	ids := make([]string, len(l.Configurations))
+	for i := range l.Configurations {
+		ids[i] = l.Configurations[i].ID
+	}
+	return ids
+}
+
 // enumerate runs the passes over every loaded configuration. A derived matrix
 // checks a file against the configurations that compile it elsewhere.
 func (l *Loaded) enumerate(results []load.Result, derived bool) ([]graph.Configured, error) {
@@ -134,7 +143,7 @@ func (l *Loaded) enumerate(results []load.Result, derived bool) ([]graph.Configu
 		Patterns:     l.req.Config.Roots.Patterns,
 		PublishedAPI: l.req.Config.Target.Kind == report.TargetKindLibrary,
 	}
-	var elsewhere []map[string]bool
+	var elsewhere []map[load.PackageID]bool
 	if derived {
 		elsewhere = graph.CheckedElsewhere(results)
 	}
@@ -153,7 +162,6 @@ func (l *Loaded) enumerate(results []load.Result, derived bool) ([]graph.Configu
 		l.TestFileRules = greatestPerRule(l.TestFileRules, rules)
 		l.TypeErrorSkips = append(l.TypeErrorSkips, graph.TypeErrorSkips(&results[i], l.Root, one.CheckedElsewhere)...)
 		l.Configurations = append(l.Configurations, results[i].Configuration)
-		l.Identifiers = append(l.Identifiers, results[i].Configuration.ID)
 	}
 	return passes, nil
 }
@@ -170,12 +178,12 @@ func passesOf(result *load.Result, root string, options graph.RootOptions) (enum
 	if err != nil {
 		return enumerated{}, graph.Configured{}, nil, err
 	}
-	graph.ClassifyTestSupport(result, root, symbols, roots, options.PublishedAPI)
+	tests := graph.ClassifyTestSupport(result, root, symbols, roots, options.PublishedAPI)
 	references, rules, err := graph.References(result, root, os.ReadFile, symbols)
 	if err != nil {
 		return enumerated{}, graph.Configured{}, nil, err
 	}
-	return enumerated{Symbols: symbols, Result: *result},
+	return enumerated{Symbols: symbols, Result: *result, Tests: tests},
 		graph.Configured{Symbols: symbols, References: references, Roots: roots, Unmatched: unmatched},
 		rules, nil
 }
@@ -197,35 +205,28 @@ func greatestPerRule(held, next []graph.TestFileRule) []graph.TestFileRule {
 }
 
 // matrixOf is the matrix the configuration lists, or the one the target tree
-// implies where it lists none, with that derivation; a derived matrix is never
+// implies where it lists none, reporting which; a derived matrix is never
 // complete, which only the configuration asserts.
-func matrixOf(ctx context.Context, cfg *config.Config, root string) ([]load.Configuration, *matrix.Derived, error) {
+func matrixOf(cfg *config.Config, top *load.Topology) ([]load.Configuration, bool, error) {
 	if platforms := cfg.Analysis.Platforms; len(platforms) > 0 {
 		configurations := make([]load.Configuration, len(platforms))
 		for i, p := range platforms {
-			configurations[i] = load.Configuration{ID: p.ID, OS: p.OS, Arch: p.Arch, Tags: p.Tags}
+			configurations[i] = load.Configuration{ID: p.ID, OS: p.OS, Arch: p.Arch, Tags: p.Tags, Origin: load.Declared}
 		}
-		return configurations, nil, nil
+		return configurations, false, nil
 	}
-	derived, err := matrix.Derive(ctx, root)
-	if err != nil {
-		return nil, nil, err
-	}
-	return derived.Configurations, &derived, nil
+	configurations, err := matrix.Derive(top)
+	return configurations, true, err
 }
 
-// nameable splits the consumers a workspace lists into those a report can name, the
-// ones under the run directory, and the others, whose references the run still
-// counts as readers.
-func nameable(consumers []scope.Module) (named, readers []scope.Module) {
-	for _, consumer := range consumers {
-		if _, err := relativeToRunDirectory(consumer.Path); err == nil {
-			named = append(named, consumer)
-		} else {
-			readers = append(readers, consumer)
-		}
-	}
-	return named, readers
+// nameable is the consumers a workspace lists that a report can name, the ones
+// under the run directory. The others are workspace readers, which the topology
+// counts whatever named the scope.
+func nameable(consumers []scope.Module) []scope.Module {
+	return slices.DeleteFunc(slices.Clone(consumers), func(consumer scope.Module) bool {
+		_, err := relativeToRunDirectory(consumer.Path)
+		return err != nil
+	})
 }
 
 // ErrReportPath reports a path of the run no report can name: one the directory the

@@ -9,6 +9,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport"
 	spec "github.com/cplieger/deadset-spec/v8"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
 	"golang.org/x/tools/txtar"
@@ -114,7 +115,7 @@ func loadDir(t *testing.T, dir string) (*load.Result, string) {
 	if err != nil {
 		t.Fatalf("Setup: scope.ForDir(%s): %v", dir, err)
 	}
-	result, err := load.Load(t.Context(), doc, load.Configuration{
+	result, err := load.Load(t.Context(), testsupport.Topology(t.Context(), t, doc), &load.Configuration{
 		ID: fixtureOS + "-" + fixtureArch, OS: fixtureOS, Arch: fixtureArch,
 	})
 	if err != nil {

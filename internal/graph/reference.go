@@ -6,8 +6,6 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
-	"path"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -174,15 +172,15 @@ type referencePass struct {
 	at          *positions  // renders the file being walked, which is pos while the target is walked
 	info        *types.Info // the type information of the variant that compiles the file being walked
 	symbols     map[site]SymbolID
-	packages    map[string]SymbolID // the inventory's package symbol per package key, which an import resolves to
-	pkgKeys     map[*types.Package]string
-	ids         map[token.Pos]SymbolID // one resolved position, resolved once; empty for a position no symbol declares
-	kinds       map[token.Pos]RefKind  // the kind a parent node fixes for an identifier below it
-	callees     map[token.Pos]bool     // the identifiers a call expression names as its callee
-	reached     map[string]int         // per source file, by the path the toolchain named, the variants that compile it
-	declaring   map[string]bool        // the import paths of the packages the target declares
-	support     map[string]bool        // the target's test-support packages, by keyOf
-	keyOf       func(*packages.Package) string
+	packages    map[load.PackageID]SymbolID // the inventory's package symbol per package, which an import resolves to
+	pkgKeys     map[*types.Package]load.PackageID
+	ids         map[token.Pos]SymbolID  // one resolved position, resolved once; empty for a position no symbol declares
+	kinds       map[token.Pos]RefKind   // the kind a parent node fixes for an identifier below it
+	callees     map[token.Pos]bool      // the identifiers a call expression names as its callee
+	reached     map[string]int          // per source file, by the path the toolchain named, the variants that compile it
+	declaring   map[string]bool         // the import paths of the packages the target declares
+	support     map[load.PackageID]bool // the target's test-support packages, which its symbols carry
+	idOf        func(*packages.Package) load.PackageID
 	instances   *instantiations           // the type arguments a layout read lays a type parameter out as
 	literals    literalStructs            // the struct type literals walked, by identity
 	consumer    string                    // the module path of the consumer being walked, empty while the target is
@@ -209,13 +207,13 @@ func newReferencePass(r *load.Result, targetRoot string, read ReadFile, symbols 
 	p := &referencePass{
 		pos:       newPositions(r.Fset, targetRoot, read),
 		symbols:   make(map[site]SymbolID, len(symbols)),
-		packages:  make(map[string]SymbolID),
+		packages:  make(map[load.PackageID]SymbolID),
 		ids:       make(map[token.Pos]SymbolID),
 		kinds:     make(map[token.Pos]RefKind),
 		callees:   make(map[token.Pos]bool),
 		reached:   make(map[string]int),
-		support:   r.TestSupport,
-		keyOf:     r.KeyOf,
+		support:   make(map[load.PackageID]bool),
+		idOf:      r.ID,
 		pkgKeys:   packageKeys(r),
 		instances: instantiationsOf(r.Packages),
 	}
@@ -224,7 +222,10 @@ func newReferencePass(r *load.Result, targetRoot string, read ReadFile, symbols 
 		s := &symbols[i]
 		p.symbols[site{file: s.Pos.Filename, line: s.Pos.Line, col: s.Pos.Column}] = s.ID
 		if s.Kind == KindPackage {
-			p.packages[r.PackageKey(s.PkgPath, filepath.Join(targetRoot, filepath.FromSlash(path.Dir(s.Pos.Filename))))] = s.ID
+			p.packages[PackageOf(r, s, targetRoot)] = s.ID
+		}
+		if s.TestSupport {
+			p.support[PackageOf(r, s, targetRoot)] = true
 		}
 	}
 	return p, nil
@@ -318,7 +319,7 @@ func (p *referencePass) walkFile(pkg *packages.Package, f *ast.File) error {
 	switch {
 	case p.test:
 		p.testFiles++
-	case p.consumer == "" && p.support[p.keyOf(pkg)]:
+	case p.consumer == "" && p.support[p.idOf(pkg)]:
 		p.test = true
 		p.supportFile++
 	}

@@ -1,10 +1,10 @@
 package matrix
 
 import (
-	"maps"
 	"slices"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/buildconstraint"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"pgregory.net/rapid"
 )
@@ -13,8 +13,8 @@ import (
 // the toolchain reserves, and tags from a small closed set, each axis distinct
 // and sorted the way collection leaves it.
 func drawnAtoms(t *rapid.T) atomSet {
-	systems := append(slices.Sorted(maps.Keys(platforms())), retiredOS...)
-	arches := append(slices.Sorted(maps.Keys(architectures())), retiredArch...)
+	systems := []string{"aix", "android", "darwin", "hurd", "ios", "js", "linux", "nacl", "plan9", "wasip1", "windows", "zos"}
+	arches := []string{"386", "amd64", "amd64p32", "arm", "arm64", "loong64", "mips", "ppc64", "riscv64", "s390x", "sparc64", "wasm"}
 	tags := []string{"integration", "cgo", "purego", "netgo", "osusergo"}
 
 	atoms := atomSet{
@@ -40,7 +40,7 @@ func TestDerivationNeverEnumeratesCombinations(t *testing.T) {
 	host := fixtureHost()
 	rapid.Check(t, func(t *rapid.T) {
 		atoms := drawnAtoms(t)
-		configurations := configurationsOf(host, atoms)
+		configurations := configurationsOf(&host, atoms)
 
 		if bound := 1 + len(atoms.OS) + len(atoms.Arch) + len(atoms.Tags); len(configurations) > bound {
 			t.Fatalf("configurationsOf(%+v) derived %d configurations, want at most %d",
@@ -56,7 +56,7 @@ func TestDerivationNeverEnumeratesCombinations(t *testing.T) {
 				t.Fatalf("configurationsOf(%+v) derived %q twice", atoms, c.ID)
 			}
 			ids[c.ID] = true
-			if !slices.Contains(platforms()[c.OS], c.Arch) {
+			if !slices.Contains(buildconstraint.ArchitecturesOf(c.OS), c.Arch) {
 				t.Fatalf("configurationsOf(%+v) derived %q, which names the pair %s/%s the toolchain does not build",
 					atoms, c.ID, c.OS, c.Arch)
 			}
@@ -67,12 +67,12 @@ func TestDerivationNeverEnumeratesCombinations(t *testing.T) {
 		}
 
 		for _, system := range atoms.OS {
-			if _, built := archFor(system, host.Arch); built && !carried(configurations, system, "") {
+			if _, built := partner(buildconstraint.ArchitecturesOf(system), host.Arch); built && !carried(configurations, system, "") {
 				t.Fatalf("configurationsOf(%+v) derived no configuration for the operating system %q", atoms, system)
 			}
 		}
 		for _, arch := range atoms.Arch {
-			if _, built := osFor(arch, host.OS); built && !carried(configurations, "", arch) {
+			if _, built := partner(buildconstraint.SystemsOf(arch), host.OS); built && !carried(configurations, "", arch) {
 				t.Fatalf("configurationsOf(%+v) derived no configuration for the architecture %q", atoms, arch)
 			}
 		}
