@@ -6,7 +6,9 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 )
 
 // A write carries the statement or element its deletion deletes where the write is
@@ -17,7 +19,7 @@ func TestReferencesGiveAWriteTheSpanItsDeletionDeletes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Setup: inventoryOf(write-spans.txtar): %v", err)
 	}
-	refs, _, err := References(result, rs, symbols, TestClasses{})
+	refs, _, err := facts.References(result, rs, symbols, roots.TestClasses{})
 	if err != nil {
 		t.Fatalf("References(write-spans.txtar) error: %v", err)
 	}
@@ -29,7 +31,7 @@ func TestReferencesGiveAWriteTheSpanItsDeletionDeletes(t *testing.T) {
 	var got []string
 	for i := range refs {
 		r := &refs[i]
-		if r.Kind != RefWrite {
+		if r.Kind != facts.RefWrite {
 			continue
 		}
 		span := "none"
@@ -56,16 +58,5 @@ func TestReferencesGiveAWriteTheSpanItsDeletionDeletes(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("References(write-spans.txtar) writes =\n%v\nwant\n%v", got, want)
-	}
-}
-
-func TestViaStringNamesEveryRule(t *testing.T) {
-	for v := viaIdentifier; v <= viaConstantRepetition; v++ {
-		if got := v.String(); got == "" || got == "via("+strconv.Itoa(int(v))+")" {
-			t.Errorf("via(%d).String() = %q, want the rule's spelling", v, got)
-		}
-	}
-	if got, want := via(255).String(), "via(255)"; got != want {
-		t.Errorf("via(255).String() = %q, want %q", got, want)
 	}
 }

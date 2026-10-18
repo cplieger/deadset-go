@@ -8,8 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
 )
@@ -24,8 +26,8 @@ const (
 // drawnRootKinds are the kinds a drawn root takes: one that names a caller, the
 // test kind a production sweep withdraws from the seed, the one kind that seeds
 // reachability alone, and one a declaration of any file carries.
-func drawnRootKinds() []graph.RootKind {
-	return []graph.RootKind{graph.RootMain, graph.RootTest, graph.RootPublishedAPI, graph.RootBlank}
+func drawnRootKinds() []roots.RootKind {
+	return []roots.RootKind{roots.RootMain, roots.RootTest, roots.RootPublishedAPI, roots.RootBlank}
 }
 
 // drawnDeclaration is one declaration a draw produced.
@@ -36,7 +38,7 @@ type drawnDeclaration struct {
 // drawnRoot is one root a draw places on one declaration.
 type drawnRoot struct {
 	at   int
-	kind graph.RootKind
+	kind roots.RootKind
 }
 
 // drawnRetention is one declaration one class retains.
@@ -133,26 +135,26 @@ func (d drawnSet) graphOf() (*graph.Graph, []inventory.SymbolID) {
 		})
 	}
 
-	refs := make([]graph.Reference, 0, len(d.edges))
+	refs := make([]facts.Reference, 0, len(d.edges))
 	for _, e := range d.edges {
 		from := symbols[e[0]]
-		refs = append(refs, graph.Reference{
+		refs = append(refs, facts.Reference{
 			From: from.ID,
 			To:   ids[e[1]],
 			Pos:  from.Pos,
-			Kind: graph.RefCall,
+			Kind: facts.RefCall,
 			Test: d.declarations[e[0]].inTest,
 		})
 	}
-	roots := make([]graph.Root, 0, len(d.roots))
+	rooted := make([]roots.Root, 0, len(d.roots))
 	for _, r := range d.roots {
-		roots = append(roots, graph.Root{ID: ids[r.at], Kind: r.kind})
+		rooted = append(rooted, roots.Root{ID: ids[r.at], Kind: r.kind})
 	}
 
 	slices.SortFunc(symbols, func(a, b inventory.Symbol) int {
 		return strings.Compare(string(a.ID), string(b.ID))
 	})
-	return graph.New(symbols, refs, roots), ids
+	return graph.New(symbols, refs, rooted), ids
 }
 
 // detectors is the table Compute runs: one detection per class the draw gave a

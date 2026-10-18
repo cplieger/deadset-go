@@ -1,16 +1,20 @@
 package suppress
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"go/token"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/cplieger/atomicfile/v4"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // OwnScheme opens every reference of this analyzer's language. A record naming
@@ -23,6 +27,10 @@ const OwnScheme = "go://"
 // both, whose malformed record ends the run here as it would there. A record of
 // any other scheme is read unchecked and binds nothing.
 var formChecked = []string{OwnScheme, "ts://"}
+
+// ErrUnreadable reports a suppression document present at its path that cannot
+// be read. Which failure class that is depends on where the caller reads it from.
+var ErrUnreadable = errors.New("cannot be read")
 
 // symbolWant is the form a malformed reference is told to take.
 const symbolWant = "a stable symbol reference, go://<import-path>#<fragment> or ts://<package>/<source-path>#<fragment>"
@@ -68,20 +76,33 @@ func BaselineRows(path string) ([]core.Entry, error) {
 }
 
 // documentEntries reads one suppression document's entries, an absent file
-// holding none.
+// holding none and a present one it cannot read an [ErrUnreadable].
 func documentEntries(path string, read func([]byte) ([]core.Entry, error), mechanism core.Mechanism) ([]core.Entry, error) {
-	body, err := os.ReadFile(path)
+	body, err := readInDir(path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return nil, nil
+	case errors.Is(err, atomicfile.ErrFileTooLarge):
+		return nil, fmt.Errorf("%w: %s: %w", core.ErrMalformed, filepath.Base(path), err)
 	case err != nil:
-		return nil, fmt.Errorf("suppress: read %s: %w", path, err)
+		return nil, fmt.Errorf("%s %w: %w", filepath.Base(path), ErrUnreadable, err)
 	}
 	entries, err := read(body)
 	if err == nil {
 		err = checkForms(entries, mechanism)
 	}
 	return entries, err
+}
+
+// readInDir reads the regular file at path through its directory, so a name
+// resolving outside that directory or to anything but a regular file is refused.
+func readInDir(path string) ([]byte, error) {
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	return atomicfile.ReadBoundedInRoot(context.Background(), root, filepath.Base(path), vocab.DocumentMaxBytes)
 }
 
 // checkForms refuses, in document order, the first entry of a form-checked scheme

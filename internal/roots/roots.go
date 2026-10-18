@@ -1,4 +1,7 @@
-package graph
+// Package roots is the root set of one loaded configuration, each root classed
+// by why it is one, and the test-support packages the roots and the imports
+// decide.
+package roots
 
 import (
 	"cmp"
@@ -10,12 +13,12 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
+	"github.com/cplieger/deadset-go/v2/internal/conventions"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -171,7 +174,7 @@ type rootDetection struct {
 	byID      map[inventory.SymbolID]inventory.Symbol
 	classes   map[string][]packageClass      // by import path, one per variant group
 	byPath    map[string][]*packages.Package // import path to its type-checked variants
-	inputDirs map[string]bool                // target-relative directories of generatorPackages
+	inputDirs map[string]bool                // target-relative directories a package generator reads
 	found     map[Root]struct{}
 }
 
@@ -280,21 +283,16 @@ func (d *rootDetection) classOf(s *inventory.Symbol) packageClass {
 	return packageClass{}
 }
 
-// walkFile reads one file's test functions and suite runs, linkname, generate and
-// swagger directives, swag routes, cgo exports and go-fuzz entry points.
+// walkFile reads one file's linkname directives, test functions and cgo exports,
+// and what each convention row's rule names.
 func (d *rootDetection) walkFile(p *packages.Package, f *ast.File) {
 	d.linknames(p, f)
-	d.generatorInputs(p, f)
-	d.swaggerDeclarations(f)
-	d.suiteMethods(p, f)
-	d.generatorPackages(f)
 	d.functionRoots(p, f)
+	d.conventionRoots(p, f)
 }
 
-// functionRoots reads one file's test functions, swag routes, cgo exports and go-fuzz
-// entry points.
+// functionRoots reads one file's test functions and cgo exports.
 func (d *rootDetection) functionRoots(p *packages.Package, f *ast.File) {
-	fuzz := goFuzzFile(f)
 	_, test := inventory.IsTestFile(d.pos.Base(f.FileStart))
 	cgo := importsPath(f, cgoImport)
 	for _, decl := range f.Decls {
@@ -302,20 +300,15 @@ func (d *rootDetection) functionRoots(p *packages.Package, f *ast.File) {
 		if !ok {
 			continue
 		}
-		if swagRoute(fn.Doc) {
-			d.addAt(fn.Name.Pos(), RootSwagRoute)
-		}
 		switch {
-		// None of the classes below reaches a method: a test function is called by
-		// the generated test main, an exported function by C and an entry point by
-		// the fuzzer, and none has a receiver to call it on.
+		// Neither class reaches a method: a test function is called by the
+		// generated test main and an exported function by C, and neither has a
+		// receiver to call it on.
 		case fn.Recv != nil:
 		case test && testFunction(p, fn):
 			d.addAt(fn.Name.Pos(), RootTest)
 		case cgo && cgoExported(fn):
 			d.addAt(fn.Name.Pos(), RootCgoExport)
-		case fuzz && goFuzzEntry(p, fn):
-			d.addAt(fn.Name.Pos(), RootFuzz)
 		}
 	}
 }
@@ -457,12 +450,13 @@ func (d *rootDetection) exportedContainers(parent inventory.SymbolID) bool {
 }
 
 // configured keeps every symbol the configuration names and returns every string
-// that named none. A string the configuration lists twice is one configured root.
+// it reads that named none. A string the configuration lists twice is one
+// configured root, and one another language's analysis reads is accepted unread.
 func (d *rootDetection) configured(symbols []inventory.Symbol, patterns []string) []Unmatched {
 	var unmatched []Unmatched
 	seen := make(map[string]bool, len(patterns))
 	for _, pattern := range patterns {
-		if seen[pattern] {
+		if seen[pattern] || !vocab.ReadsRoot([]vocab.Language{vocab.Go}, pattern) {
 			continue
 		}
 		seen[pattern] = true
@@ -551,26 +545,12 @@ func testFunction(p *packages.Package, fn *ast.FuncDecl) bool {
 		return testSignature(p, fn, "M") || testSignature(p, fn, "T")
 	}
 	for _, family := range testFamilies {
-		if hasTestPrefix(name, family.prefix) {
+		if conventions.NamePrefixed(name, family.prefix) {
 			return testSignature(p, fn, family.param)
 		}
 	}
-	return hasTestPrefix(name, "Example") &&
+	return conventions.NamePrefixed(name, "Example") &&
 		fn.Type.Params.NumFields() == 0 && fn.Type.Results.NumFields() == 0
-}
-
-// hasTestPrefix reports whether name is the family prefix or the prefix followed
-// by something that is not a lower-case letter, so Testing is not a test.
-func hasTestPrefix(name, prefix string) bool {
-	rest, ok := strings.CutPrefix(name, prefix)
-	if !ok {
-		return false
-	}
-	if rest == "" {
-		return true
-	}
-	first, _ := utf8.DecodeRuneInString(rest)
-	return !unicode.IsLower(first)
 }
 
 // testSignature reports whether fn takes one pointer to the named type of package

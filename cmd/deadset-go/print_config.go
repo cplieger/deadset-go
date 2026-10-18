@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"io"
 
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -22,8 +21,7 @@ func printConfig(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		return code
 	}
 	if err := resolved.Print(stdout); err != nil {
-		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
-		return vocab.ExitFailure
+		return unwrittenAnswer(stderr, "print-config", err)
 	}
 	return vocab.ExitClean
 }

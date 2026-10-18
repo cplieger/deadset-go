@@ -6,7 +6,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 )
 
 // ErrMatrix reports a matrix the merge cannot key a configuration of.
@@ -18,9 +20,9 @@ var ErrMatrix = errors.New("graph: unmergeable matrix")
 // it, and the configured strings its root detection matched nothing with.
 type Configured struct {
 	Symbols    []inventory.Symbol
-	References []Reference
-	Roots      []Root
-	Unmatched  []Unmatched
+	References []facts.Reference
+	Roots      []roots.Root
+	Unmatched  []roots.Unmatched
 }
 
 // Merged is one matrix's inventory.
@@ -33,11 +35,11 @@ type Configured struct {
 // row per configuration that left a string unmatched, with no configuration: only
 // how many configurations left it is read.
 type Merged struct {
-	Tests          TestClasses // the matrix's, [MatrixTests]
+	Tests          roots.TestClasses // the matrix's, [MatrixTests]
 	Symbols        []inventory.Symbol
-	References     []Reference
-	Roots          []Root
-	Unmatched      []Unmatched
+	References     []facts.Reference
+	Roots          []roots.Root
+	Unmatched      []roots.Unmatched
 	Configurations int
 }
 
@@ -48,7 +50,7 @@ type Merged struct {
 // its fields, tests its test support, and every configuration that declares it adds
 // its bit. A declaration one configuration alone holds is analyzed under that
 // configuration rather than skipped.
-func Merge(per []Configured, tests TestClasses) (Merged, error) {
+func Merge(per []Configured, tests roots.TestClasses) (Merged, error) {
 	if len(per) == 0 {
 		return Merged{}, fmt.Errorf("%w: no configuration", ErrMatrix)
 	}
@@ -172,9 +174,9 @@ type referenceSite struct {
 // same reference; two in one configuration are two, so a configuration's own
 // reference set comes through unchanged and a one-configuration matrix counts
 // exactly what a single load counts.
-func distinct(refs []Reference) []Reference {
+func distinct(refs []facts.Reference) []facts.Reference {
 	first := make(map[referenceSite]int, len(refs))
-	kept := make([]Reference, 0, len(refs))
+	kept := make([]facts.Reference, 0, len(refs))
 	for i := range refs {
 		r := &refs[i]
 		site := referenceSite{
@@ -373,7 +375,7 @@ func (x *Matrix) intersect(union *Graph, s *inventory.Symbol, held []map[invento
 // that configuration's own set. This is the same rule the candidate intersection
 // applies, which is why it is answered here rather than by the caller that reads
 // both.
-func (x *Matrix) UnmatchedEverywhere() []Unmatched {
+func (x *Matrix) UnmatchedEverywhere() []roots.Unmatched {
 	if x.merged.Configurations == 0 {
 		return nil
 	}
@@ -381,7 +383,7 @@ func (x *Matrix) UnmatchedEverywhere() []Unmatched {
 	for i := range x.merged.Unmatched {
 		count[x.merged.Unmatched[i].Source]++
 	}
-	everywhere := make([]Unmatched, 0, len(count))
+	everywhere := make([]roots.Unmatched, 0, len(count))
 	held := make(map[string]bool, len(count))
 	for i := range x.merged.Unmatched {
 		source := x.merged.Unmatched[i].Source
@@ -389,7 +391,7 @@ func (x *Matrix) UnmatchedEverywhere() []Unmatched {
 			continue
 		}
 		held[source] = true
-		everywhere = append(everywhere, Unmatched{Source: source})
+		everywhere = append(everywhere, roots.Unmatched{Source: source})
 	}
 	return everywhere
 }

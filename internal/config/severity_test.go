@@ -113,8 +113,8 @@ func TestEffectiveSeverity(t *testing.T) {
 			of:   report.TargetKindApplication, code: "DS2999", want: vocab.Allow,
 		},
 		{
-			name: "a_code_of_a_reserved_family",
-			of:   report.TargetKindApplication, code: "DS1801", want: vocab.Allow,
+			name: "a_code_of_a_live_family_no_kind_carries",
+			of:   report.TargetKindApplication, code: "DS1899", want: vocab.Allow,
 		},
 		{
 			name: "a_family_prefix_is_not_a_kind",

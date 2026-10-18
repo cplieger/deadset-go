@@ -21,6 +21,7 @@ import (
 	"sync"
 
 	"github.com/cplieger/atomicfile/v4"
+	"github.com/cplieger/deadset-go/v2/internal/failure"
 	"github.com/cplieger/deadset-go/v2/internal/jsondoc"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/document"
@@ -96,7 +97,7 @@ func Read(ctx context.Context, dir string) (*Document, error) {
 	case errors.Is(err, atomicfile.ErrFileTooLarge):
 		return nil, fmt.Errorf("%w: %s: %w", ErrMalformed, vocab.EdgesFileName, err)
 	case err != nil:
-		return nil, fmt.Errorf("edges: read %s: %w", vocab.EdgesFileName, err)
+		return nil, failure.Wrap(vocab.SetupUnreadableDocument, fmt.Errorf("%s cannot be read: %w", vocab.EdgesFileName, err))
 	}
 	schema, err := edgesSchema()
 	if err != nil {

@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"golang.org/x/tools/go/packages"
 )
@@ -130,7 +130,7 @@ func (in *imports) addReaders(result *load.Result) {
 
 // addPublishable records the target-relative directory of one published package
 // with source files that is neither a test variant nor test support.
-func addPublishable(directories map[load.PackageID]string, root string, result *load.Result, p *packages.Package, tests *graph.TestClasses) {
+func addPublishable(directories map[load.PackageID]string, root string, result *load.Result, p *packages.Package, tests *roots.TestClasses) {
 	if p.ForTest != "" || len(p.GoFiles) == 0 || tests.Support[result.ID(p)] || !load.Published(p.PkgPath, p.Name == "main") {
 		return
 	}

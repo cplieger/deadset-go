@@ -8,20 +8,23 @@ package run
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/facts"
+	"github.com/cplieger/deadset-go/v2/internal/failure"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/matrix"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/report"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // Request is what a verb asks one analysis for, with the flags already resolved.
@@ -39,6 +42,7 @@ type Request struct {
 // the resolver over them.
 type enumerated struct {
 	Resolve *resolve.Resolver
+	Facts   *facts.Index
 	Symbols []inventory.Symbol
 	Result  load.Result
 }
@@ -69,8 +73,8 @@ type Loaded struct {
 	// Declared is the consumers the scope declared.
 	Declared       []scope.Module
 	TestFileRules  []inventory.TestFileRule
-	Unmatched      []graph.Unmatched
-	TypeErrorSkips []graph.TypeErrorSkip
+	Unmatched      []roots.Unmatched
+	TypeErrorSkips []roots.TypeErrorSkip
 
 	// Unbuilt is every derived configuration the target does not build, which the
 	// load dropped from the matrix and a verb names.
@@ -141,18 +145,18 @@ func (l *Loaded) Identifiers() []string {
 // enumerate runs the passes over every loaded configuration, and returns them with
 // the matrix's test classes the reference pass read. A derived matrix checks a file
 // against the configurations that compile it elsewhere.
-func (l *Loaded) enumerate(results []load.Result, derived bool) ([]graph.Configured, graph.TestClasses, error) {
-	options := graph.RootOptions{
+func (l *Loaded) enumerate(results []load.Result, derived bool) ([]graph.Configured, roots.TestClasses, error) {
+	options := roots.RootOptions{
 		Patterns:     l.req.Config.Roots.Patterns,
 		PublishedAPI: l.req.Config.Target.Kind == report.TargetKindLibrary,
 	}
 	var elsewhere []map[load.PackageID]bool
 	if derived {
-		elsewhere = graph.CheckedElsewhere(results)
+		elsewhere = roots.CheckedElsewhere(results)
 	}
 	l.Loads = make([]enumerated, len(results))
 	passes := make([]graph.Configured, len(results))
-	classes := make([]graph.TestClasses, len(results))
+	classes := make([]roots.TestClasses, len(results))
 	for i := range results {
 		one := options
 		if elsewhere != nil {
@@ -160,16 +164,16 @@ func (l *Loaded) enumerate(results []load.Result, derived bool) ([]graph.Configu
 		}
 		var err error
 		if l.Loads[i], passes[i], classes[i], err = rootsOf(&results[i], l.Root, one); err != nil {
-			return nil, graph.TestClasses{}, err
+			return nil, roots.TestClasses{}, err
 		}
-		l.TypeErrorSkips = append(l.TypeErrorSkips, graph.TypeErrorSkips(&results[i], l.Root, one.CheckedElsewhere)...)
+		l.TypeErrorSkips = append(l.TypeErrorSkips, roots.TypeErrorSkips(&results[i], l.Root, one.CheckedElsewhere)...)
 		l.Configurations = append(l.Configurations, results[i].Configuration)
 	}
-	tests := graph.MatrixTests(classes)
+	tests := roots.MatrixTests(classes)
 	for i := range results {
-		references, rules, err := graph.References(&results[i], l.Loads[i].Resolve, l.Loads[i].Symbols, tests)
+		references, rules, err := facts.References(&results[i], l.Loads[i].Resolve, l.Loads[i].Symbols, tests)
 		if err != nil {
-			return nil, graph.TestClasses{}, err
+			return nil, roots.TestClasses{}, err
 		}
 		passes[i].References = references
 		l.TestFileRules = greatestPerRule(l.TestFileRules, rules)
@@ -180,19 +184,23 @@ func (l *Loaded) enumerate(results []load.Result, derived bool) ([]graph.Configu
 // rootsOf runs the passes over one loaded configuration that come before the
 // matrix's test classes: the enumeration, the resolver, the roots, and the
 // configuration's own test classes, which read the roots.
-func rootsOf(result *load.Result, root string, options graph.RootOptions) (enumerated, graph.Configured, graph.TestClasses, error) {
+func rootsOf(result *load.Result, root string, options roots.RootOptions) (enumerated, graph.Configured, roots.TestClasses, error) {
 	inv, err := inventory.Of(result, root, os.ReadFile)
 	if err != nil {
-		return enumerated{}, graph.Configured{}, graph.TestClasses{}, err
+		return enumerated{}, graph.Configured{}, roots.TestClasses{}, err
 	}
 	resolver, err := resolve.New(result, inv)
 	if err != nil {
-		return enumerated{}, graph.Configured{}, graph.TestClasses{}, err
+		return enumerated{}, graph.Configured{}, roots.TestClasses{}, err
 	}
-	roots, unmatched := graph.Roots(result, resolver, inv.Symbols, options)
-	return enumerated{Symbols: inv.Symbols, Result: *result, Resolve: resolver},
-		graph.Configured{Symbols: inv.Symbols, Roots: roots, Unmatched: unmatched},
-		graph.ClassifyTestSupport(result, inv.Symbols, roots, options.PublishedAPI), nil
+	index, err := facts.NewIndex(result, resolver)
+	if err != nil {
+		return enumerated{}, graph.Configured{}, roots.TestClasses{}, err
+	}
+	found, unmatched := roots.Roots(result, resolver, inv.Symbols, options)
+	return enumerated{Symbols: inv.Symbols, Result: *result, Resolve: resolver, Facts: index},
+		graph.Configured{Symbols: inv.Symbols, Roots: found, Unmatched: unmatched},
+		roots.ClassifyTestSupport(result, inv.Symbols, found, options.PublishedAPI), nil
 }
 
 // greatestPerRule folds one configuration's test-file rules into the run's. Every
@@ -236,10 +244,6 @@ func nameable(consumers []scope.Module) []scope.Module {
 	})
 }
 
-// ErrReportPath reports a path of the run no report can name: one the directory the
-// run was invoked from does not contain.
-var ErrReportPath = errors.New("deadset-go: the report cannot name a path outside the run directory")
-
 // relativeToRunDirectory is one path relative to the directory the run was invoked
 // from, with forward slashes, so two runs over one tree on two machines write the
 // same bytes; a path outside that directory has no spelling a report carries.
@@ -253,8 +257,8 @@ func relativeToRunDirectory(path string) (string, error) {
 		return "", fmt.Errorf("resolve %s against the directory the run was invoked from: %w", path, err)
 	}
 	if relative != "." && !filepath.IsLocal(relative) {
-		return "", fmt.Errorf("%w: a report names %s relative to the directory the run was invoked from, and %s does not contain it: run from a directory that does",
-			ErrReportPath, path, invoked)
+		return "", failure.Wrap(vocab.RunUnreportablePath, fmt.Errorf("a report names %s relative to the directory the run was invoked from, and %s does not contain it",
+			path, invoked))
 	}
 	return filepath.ToSlash(relative), nil
 }

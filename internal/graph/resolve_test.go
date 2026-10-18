@@ -77,7 +77,7 @@ func (r *resolved) resolvedDefs() (named, none []string) {
 func (r *resolved) dependencyObject() types.Object {
 	for _, p := range r.result.Packages {
 		for _, obj := range p.TypesInfo.Uses {
-			if obj.Pkg() != nil && obj.Pkg().Path() == testingPath {
+			if obj.Pkg() != nil && obj.Pkg().Path() == "testing" {
 				return obj
 			}
 		}
@@ -144,17 +144,17 @@ func TestResolverOverALoadedConfiguration(t *testing.T) {
 		checked := 0
 		for _, p := range r.result.Packages {
 			for _, obj := range p.TypesInfo.Uses {
-				if obj.Pkg() == nil || obj.Pkg().Path() != testingPath {
+				if obj.Pkg() == nil || obj.Pkg().Path() != "testing" {
 					continue
 				}
 				checked++
 				if id, held := r.rs.Object(obj); held {
-					t.Errorf("Resolver.Object(%s.%s) named %q, want nothing", testingPath, obj.Name(), id)
+					t.Errorf("Resolver.Object(%s.%s) named %q, want nothing", "testing", obj.Name(), id)
 				}
 			}
 		}
 		if checked == 0 {
-			t.Fatalf("receivers.txtar uses no object of package %s, so the case is untested", testingPath)
+			t.Fatalf("receivers.txtar uses no object of package %s, so the case is untested", "testing")
 		}
 	})
 }
@@ -218,10 +218,10 @@ func TestResolverResolvesWithoutReadingASource(t *testing.T) {
 	}
 	foreign := r.dependencyObject()
 	if foreign == nil {
-		t.Fatalf("receivers.txtar uses no object of package %s, so the case is untested", testingPath)
+		t.Fatalf("receivers.txtar uses no object of package %s, so the case is untested", "testing")
 	}
 	if id, named := rs.Object(foreign); named {
-		t.Errorf("Resolver.Object(%s.%s) named %q, want none", testingPath, foreign.Name(), id)
+		t.Errorf("Resolver.Object(%s.%s) named %q, want none", "testing", foreign.Name(), id)
 	}
 	if reader.reads != enumerated {
 		t.Errorf("building the resolver and two calls to Resolver.Object read %d files, want none: resolving is a lookup", reader.reads-enumerated)

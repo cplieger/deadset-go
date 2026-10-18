@@ -5,8 +5,6 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
-	"github.com/cplieger/deadset-go/v2/internal/load"
-	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -17,27 +15,19 @@ const detailGenerated = "declared in a generated file"
 
 // GeneratedFileDetector retains every declaration written in a generated file:
 // the generator owns the file, so a deletion there is undone the next time it
-// runs and the declaration to remove is in the generator's input rather than in
-// the tree.
+// runs. Under Options.IncludeGenerated it retains nothing.
 //
-// Under Options.IncludeGenerated the class retains nothing and every declaration
-// of a generated file is judged like any other, which is what a project asks for
-// when it configures its generated files as included.
-//
-// A package and a file are not declarations IN a file: the package clause of one
-// generated file would otherwise retain every declaration of the package, and the
-// sweep judges neither kind in any case. The site is the package clause of the
-// generated file and the clause names the file rather than its generator, because
-// go/ast reports that a file is generated without exporting the header line it
-// matched or the generator that line names, and matching the header again here
-// would be a second implementation of a rule the standard library owns.
+// A package and a file are not declarations in a file: the package clause of one
+// generated file would otherwise retain every declaration of the package. The site
+// is the file's package clause.
 func GeneratedFileDetector(in *Input) ([]graph.Exemption, error) {
 	if in.Options.IncludeGenerated {
 		return nil, nil
 	}
-	sites, err := GeneratedSites(in.Result, in.Resolve)
-	if err != nil {
-		return nil, err
+	sites := make(map[string]token.Position)
+	all := in.Facts.Generated()
+	for i := range all {
+		sites[all[i].Path] = all[i].Site
 	}
 
 	var found []graph.Exemption
@@ -58,20 +48,4 @@ func GeneratedFileDetector(in *Input) ([]graph.Exemption, error) {
 		})
 	}
 	return found, nil
-}
-
-// GeneratedSites renders the package clause of every generated file of one
-// configuration's load, keyed by the target-relative path the inventory spells its
-// positions with. One file is reached once per variant of its package and renders
-// to one entry.
-func GeneratedSites(r *load.Result, rs *resolve.Resolver) (map[string]token.Position, error) {
-	sites := make(map[string]token.Position)
-	for _, clause := range r.Generated {
-		site, err := rs.Render(clause)
-		if err != nil {
-			return nil, err
-		}
-		sites[site.Filename] = site
-	}
-	return sites, nil
 }

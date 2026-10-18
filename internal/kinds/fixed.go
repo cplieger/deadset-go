@@ -33,10 +33,7 @@ func fixedIn(one *Configured, fixed map[inventory.SymbolID]bool) {
 	if len(fixing) == 0 {
 		return
 	}
-	for _, p := range one.Result.Packages {
-		if p.TypesInfo == nil {
-			continue
-		}
+	for _, p := range one.Facts.Packages() {
 		for _, object := range p.TypesInfo.Defs {
 			if id, isFixed := fixedMethod(one.Resolve, object, fixing); isFixed {
 				fixed[id] = true

@@ -1,21 +1,12 @@
 package graph
 
 import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"go/types"
-	"maps"
 	"os"
 	"slices"
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
-	spec "github.com/cplieger/deadset-spec/v8"
-	"golang.org/x/tools/go/packages"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 )
 
 // detection is one archive's enumeration and root set, and the files its load
@@ -23,13 +14,13 @@ import (
 type detection struct {
 	excludedByCgo []string
 	symbols       []inventory.Symbol
-	roots         []Root
-	unmatched     []Unmatched
+	roots         []roots.Root
+	unmatched     []roots.Unmatched
 }
 
 // detect is the enumeration and the roots of one archive loaded for one
 // configuration.
-func detect(t *testing.T, archive string, opts RootOptions) detection {
+func detect(t *testing.T, archive string, opts roots.RootOptions) detection {
 	t.Helper()
 
 	shared := analysisOf(t, archive, opts.Patterns)
@@ -45,14 +36,14 @@ func detect(t *testing.T, archive string, opts RootOptions) detection {
 // kindsByRef maps each symbol reference to the kinds of root the detection gave a
 // symbol carrying it. A blank declaration carries its container's reference rather
 // than one of its own, so it is left out and tested by position.
-func kindsByRef(d detection) map[string][]RootKind {
+func kindsByRef(d detection) map[string][]roots.RootKind {
 	refs := make(map[inventory.SymbolID]string, len(d.symbols))
 	for _, s := range d.symbols {
 		if !s.Blank {
 			refs[s.ID] = s.Ref
 		}
 	}
-	kinds := make(map[string][]RootKind)
+	kinds := make(map[string][]roots.RootKind)
 	for _, r := range d.roots {
 		ref, held := refs[r.ID]
 		if !held || slices.Contains(kinds[ref], r.Kind) {
@@ -68,7 +59,7 @@ func kindsByRef(d detection) map[string][]RootKind {
 
 // refsOfKind lists, in the order Roots returned them, the references of the
 // symbols one kind of root names.
-func refsOfKind(d detection, kind RootKind) []string {
+func refsOfKind(d detection, kind roots.RootKind) []string {
 	byID := make(map[inventory.SymbolID]inventory.Symbol, len(d.symbols))
 	for _, s := range d.symbols {
 		byID[s.ID] = s
@@ -83,52 +74,52 @@ func refsOfKind(d detection, kind RootKind) []string {
 }
 
 func TestRootsDetectsEachClassAndDeclinesItsLookAlike(t *testing.T) {
-	d := detect(t, "roots.txtar", RootOptions{PublishedAPI: true})
+	d := detect(t, "roots.txtar", roots.RootOptions{PublishedAPI: true})
 	kinds := kindsByRef(d)
 
 	const pkg = "go://example.com/roots#"
 	cases := []struct {
 		ref  string
-		want []RootKind
+		want []roots.RootKind
 	}{
-		{ref: "go://example.com/roots/cmd/app#main", want: []RootKind{RootMain}},
+		{ref: "go://example.com/roots/cmd/app#main", want: []roots.RootKind{roots.RootMain}},
 		{ref: "go://example.com/roots/notmain#main"},
-		{ref: pkg + "init", want: []RootKind{RootInit}},
+		{ref: pkg + "init", want: []roots.RootKind{roots.RootInit}},
 
-		{ref: pkg + "TestMain", want: []RootKind{RootTest}},
-		{ref: pkg + "TestPublished", want: []RootKind{RootTest}},
-		{ref: pkg + "BenchmarkPublished", want: []RootKind{RootTest}},
-		{ref: pkg + "FuzzPublished", want: []RootKind{RootTest}},
-		{ref: pkg + "ExampleWithOutput", want: []RootKind{RootTest}},
+		{ref: pkg + "TestMain", want: []roots.RootKind{roots.RootTest}},
+		{ref: pkg + "TestPublished", want: []roots.RootKind{roots.RootTest}},
+		{ref: pkg + "BenchmarkPublished", want: []roots.RootKind{roots.RootTest}},
+		{ref: pkg + "FuzzPublished", want: []roots.RootKind{roots.RootTest}},
+		{ref: pkg + "ExampleWithOutput", want: []roots.RootKind{roots.RootTest}},
 		// The toolchain compiles an example into the test binary whether or not
 		// the example declares output.
-		{ref: pkg + "ExampleWithoutOutput", want: []RootKind{RootTest}},
-		{ref: "go://example.com/roots_test#TestExternal", want: []RootKind{RootTest}},
+		{ref: pkg + "ExampleWithoutOutput", want: []roots.RootKind{roots.RootTest}},
+		{ref: "go://example.com/roots_test#TestExternal", want: []roots.RootKind{roots.RootTest}},
 		{ref: pkg + "ExampleTakesAnArgument"},
 		{ref: pkg + "TestingLower"},
 		{ref: pkg + "HelperExported"},
-		{ref: pkg + "TestOutsideATestFile", want: []RootKind{RootPublishedAPI}},
+		{ref: pkg + "TestOutsideATestFile", want: []roots.RootKind{roots.RootPublishedAPI}},
 
-		{ref: pkg + "pushed", want: []RootKind{RootLinkname}},
-		{ref: pkg + "aliased", want: []RootKind{RootLinkname}},
-		{ref: pkg + "counted", want: []RootKind{RootLinkname}},
-		{ref: pkg + "pulled", want: []RootKind{RootLinkname}},
-		{ref: pkg + "typed", want: []RootKind{RootLinkname}},
-		{ref: "go://example.com/roots/internal/hidden#linked", want: []RootKind{RootLinkname}},
+		{ref: pkg + "pushed", want: []roots.RootKind{roots.RootLinkname}},
+		{ref: pkg + "aliased", want: []roots.RootKind{roots.RootLinkname}},
+		{ref: pkg + "counted", want: []roots.RootKind{roots.RootLinkname}},
+		{ref: pkg + "pulled", want: []roots.RootKind{roots.RootLinkname}},
+		{ref: pkg + "typed", want: []roots.RootKind{roots.RootLinkname}},
+		{ref: "go://example.com/roots/internal/hidden#linked", want: []roots.RootKind{roots.RootLinkname}},
 		{ref: "go://example.com/roots/internal/hidden#unlinked"},
 		{ref: "go://example.com/roots/internal/hidden#Kind"},
 		{ref: pkg + "notLinked"},
 		{ref: pkg + "unsafeless"},
 
-		{ref: pkg + "Published", want: []RootKind{RootPublishedAPI}},
-		{ref: pkg + "Catalog", want: []RootKind{RootPublishedAPI}},
-		{ref: pkg + "Catalog.Name", want: []RootKind{RootPublishedAPI}},
-		{ref: pkg + "Catalog.Resolve", want: []RootKind{RootPublishedAPI}},
-		{ref: pkg + "Fetcher", want: []RootKind{RootPublishedAPI}},
-		{ref: pkg + "Fetcher.Fetch", want: []RootKind{RootPublishedAPI}},
-		{ref: pkg + "Best", want: []RootKind{RootPublishedAPI}},
-		{ref: pkg + "Sentinel", want: []RootKind{RootPublishedAPI}},
-		{ref: pkg + "Named", want: []RootKind{RootPublishedAPI}},
+		{ref: pkg + "Published", want: []roots.RootKind{roots.RootPublishedAPI}},
+		{ref: pkg + "Catalog", want: []roots.RootKind{roots.RootPublishedAPI}},
+		{ref: pkg + "Catalog.Name", want: []roots.RootKind{roots.RootPublishedAPI}},
+		{ref: pkg + "Catalog.Resolve", want: []roots.RootKind{roots.RootPublishedAPI}},
+		{ref: pkg + "Fetcher", want: []roots.RootKind{roots.RootPublishedAPI}},
+		{ref: pkg + "Fetcher.Fetch", want: []roots.RootKind{roots.RootPublishedAPI}},
+		{ref: pkg + "Best", want: []roots.RootKind{roots.RootPublishedAPI}},
+		{ref: pkg + "Sentinel", want: []roots.RootKind{roots.RootPublishedAPI}},
+		{ref: pkg + "Named", want: []roots.RootKind{roots.RootPublishedAPI}},
 		{ref: pkg + "unpublished"},
 		{ref: pkg + "Catalog.size"},
 		{ref: pkg + "Catalog.fill"},
@@ -157,7 +148,7 @@ func TestRootsDetectsEachClassAndDeclinesItsLookAlike(t *testing.T) {
 }
 
 func TestRootsRootsABlankDeclarationAndNotTheNamedOneBesideIt(t *testing.T) {
-	d := detect(t, "roots.txtar", RootOptions{PublishedAPI: true})
+	d := detect(t, "roots.txtar", roots.RootOptions{PublishedAPI: true})
 
 	var blank inventory.Symbol
 	for _, s := range d.symbols {
@@ -169,25 +160,25 @@ func TestRootsRootsABlankDeclarationAndNotTheNamedOneBesideIt(t *testing.T) {
 		t.Fatalf("Symbols(roots.txtar) holds no blank declaration")
 	}
 
-	var kinds []RootKind
+	var kinds []roots.RootKind
 	for _, r := range d.roots {
 		if r.ID == blank.ID {
 			kinds = append(kinds, r.Kind)
 		}
 	}
-	if want := []RootKind{RootBlank}; !slices.Equal(kinds, want) {
+	if want := []roots.RootKind{roots.RootBlank}; !slices.Equal(kinds, want) {
 		t.Errorf("Roots(roots.txtar)[%s at %s] = %v, want %v", blank.Name, blank.ID, kinds, want)
 	}
-	if refs := refsOfKind(d, RootBlank); len(refs) != 1 {
+	if refs := refsOfKind(d, roots.RootBlank); len(refs) != 1 {
 		t.Errorf("Roots(roots.txtar) blank roots name %v, want the one blank declaration", refs)
 	}
 }
 
 func TestRootsRootsTheMembersOfAValueAPositionOfNoResolvedTypeReceives(t *testing.T) {
-	d := detect(t, "type-error-destinations.txtar", RootOptions{})
+	d := detect(t, "type-error-destinations.txtar", roots.RootOptions{})
 
 	const pkg = "go://example.com/app#"
-	got := refsOfKind(d, RootTypeError)
+	got := refsOfKind(d, roots.RootTypeError)
 	for _, want := range []string{"returned.Write", "passed.Close", "stored.Len", "built.Step", "assigned.Shift", "handed.Send", "made.Build"} {
 		if !slices.Contains(got, pkg+want) {
 			t.Errorf("Roots(type-error-destinations.txtar) type-error roots %v, want %s: a skipped function hands its value to a type the compiler could not resolve",
@@ -203,7 +194,7 @@ func TestRootsRootsTheMembersOfAValueAPositionOfNoResolvedTypeReceives(t *testin
 }
 
 func TestRootsReachesTheCgoExportTheOpaqueCheckRead(t *testing.T) {
-	d := detect(t, "roots.txtar", RootOptions{PublishedAPI: true})
+	d := detect(t, "roots.txtar", roots.RootOptions{PublishedAPI: true})
 
 	// The file importing "C" is read by the opaque-C check, so nothing about it is
 	// a declared limit of the run.
@@ -215,30 +206,30 @@ func TestRootsReachesTheCgoExportTheOpaqueCheckRead(t *testing.T) {
 	if _, held := kinds[bridge]; !held {
 		t.Fatalf("Symbols(roots.txtar) holds no %s, want the declaration of the file importing \"C\"", bridge)
 	}
-	if want := []RootKind{RootCgoExport, RootPublishedAPI}; !slices.Equal(kinds[bridge], want) {
+	if want := []roots.RootKind{roots.RootCgoExport, roots.RootPublishedAPI}; !slices.Equal(kinds[bridge], want) {
 		t.Errorf("Roots(roots.txtar)[%s] = %v, want %v", bridge, kinds[bridge], want)
 	}
-	if refs := refsOfKind(d, RootCgoExport); !slices.Equal(refs, []string{bridge}) {
+	if refs := refsOfKind(d, roots.RootCgoExport); !slices.Equal(refs, []string{bridge}) {
 		t.Errorf("Roots(roots.txtar) cgo-export roots name %v, want %v", refs, []string{bridge})
 	}
 	// The sibling directive carries the same name and no import of "C", which is
 	// what the class requires.
 	const plain = "go://example.com/roots/cgoexport#Plain"
-	if want := []RootKind{RootPublishedAPI}; !slices.Equal(kinds[plain], want) {
+	if want := []roots.RootKind{roots.RootPublishedAPI}; !slices.Equal(kinds[plain], want) {
 		t.Errorf("Roots(roots.txtar)[%s] = %v, want %v", plain, kinds[plain], want)
 	}
 }
 
 func TestRootsPublishedAPIIsTheOnlyDifferenceTheTargetKindMakes(t *testing.T) {
-	library := detect(t, "roots.txtar", RootOptions{PublishedAPI: true})
-	application := detect(t, "roots.txtar", RootOptions{})
+	library := detect(t, "roots.txtar", roots.RootOptions{PublishedAPI: true})
+	application := detect(t, "roots.txtar", roots.RootOptions{})
 
-	if refs := refsOfKind(library, RootPublishedAPI); len(refs) == 0 {
+	if refs := refsOfKind(library, roots.RootPublishedAPI); len(refs) == 0 {
 		t.Fatalf("Roots(roots.txtar) with PublishedAPI named nothing as published")
 	}
-	var want []Root
+	var want []roots.Root
 	for _, r := range library.roots {
-		if r.Kind != RootPublishedAPI {
+		if r.Kind != roots.RootPublishedAPI {
 			want = append(want, r)
 		}
 	}
@@ -246,17 +237,17 @@ func TestRootsPublishedAPIIsTheOnlyDifferenceTheTargetKindMakes(t *testing.T) {
 		t.Errorf("Roots(roots.txtar) without PublishedAPI returned %d roots, want the %d roots of a library run that are not published-api\n--- want\n%v\n+++ got\n%v",
 			len(application.roots), len(want), want, application.roots)
 	}
-	if refs := refsOfKind(application, RootPublishedAPI); len(refs) != 0 {
+	if refs := refsOfKind(application, roots.RootPublishedAPI); len(refs) != 0 {
 		t.Errorf("Roots(roots.txtar) without PublishedAPI named %v as published, want none", refs)
 	}
 }
 
 func TestRootsNamesOneSymbolOncePerReason(t *testing.T) {
 	const published = "go://example.com/roots#Published"
-	d := detect(t, "roots.txtar", RootOptions{PublishedAPI: true, Patterns: []string{published, "go://example.com/roots#Publish*"}})
+	d := detect(t, "roots.txtar", roots.RootOptions{PublishedAPI: true, Patterns: []string{published, "go://example.com/roots#Publish*"}})
 
 	kinds := kindsByRef(d)
-	want := []RootKind{RootPublishedAPI, RootConfigured, RootPattern}
+	want := []roots.RootKind{roots.RootPublishedAPI, roots.RootConfigured, roots.RootPattern}
 	slices.Sort(want)
 	if got := kinds[published]; !slices.Equal(got, want) {
 		t.Errorf("Roots(roots.txtar)[%s] = %v, want %v", published, got, want)
@@ -264,7 +255,7 @@ func TestRootsNamesOneSymbolOncePerReason(t *testing.T) {
 
 	var sources []string
 	for _, r := range d.roots {
-		if r.Kind == RootConfigured || r.Kind == RootPattern {
+		if r.Kind == roots.RootConfigured || r.Kind == roots.RootPattern {
 			sources = append(sources, r.Source)
 		}
 	}
@@ -272,7 +263,7 @@ func TestRootsNamesOneSymbolOncePerReason(t *testing.T) {
 		t.Errorf("Roots(roots.txtar) configured roots name sources %v, want %v", sources, want)
 	}
 	for _, r := range d.roots {
-		if r.Kind != RootConfigured && r.Kind != RootPattern && r.Source != "" {
+		if r.Kind != roots.RootConfigured && r.Kind != roots.RootPattern && r.Source != "" {
 			t.Errorf("Roots(roots.txtar) root %+v carries a source, want one only on a configured root", r)
 		}
 	}
@@ -283,69 +274,69 @@ func TestRootsMatchesAConfiguredStringAgainstASymbolReference(t *testing.T) {
 
 	cases := map[string]struct {
 		pattern string
-		kind    RootKind
+		kind    roots.RootKind
 		want    []string
 	}{
 		"an exact reference": {
 			pattern: pkg + "Alpha",
-			kind:    RootConfigured,
+			kind:    roots.RootConfigured,
 			want:    []string{pkg + "Alpha"},
 		},
 		"a star over the members of one type": {
 			pattern: pkg + "Box.*",
-			kind:    RootPattern,
+			kind:    roots.RootPattern,
 			want:    []string{pkg + "Box.Lid", pkg + "Box.Open"},
 		},
 		"a star crossing the solidus": {
 			pattern: "go://example.com/*#Gamma",
-			kind:    RootPattern,
+			kind:    roots.RootPattern,
 			want:    []string{"go://example.com/patterns/inner#Gamma"},
 		},
 		"a question mark standing for one character": {
 			pattern: pkg + "Bo?",
-			kind:    RootPattern,
+			kind:    roots.RootPattern,
 			want:    []string{pkg + "Box"},
 		},
 		"a star over one package": {
 			pattern: pkg + "Alph*",
-			kind:    RootPattern,
+			kind:    roots.RootPattern,
 			want:    []string{pkg + "Alpha"},
 		},
 		// A blank declaration carries this reference too, and no configured
 		// string names a blank declaration.
 		"the package, whose reference a blank declaration borrows": {
 			pattern: pkg,
-			kind:    RootConfigured,
+			kind:    roots.RootConfigured,
 			want:    []string{pkg},
 		},
 		"an exact reference naming nothing": {
 			pattern: pkg + "Absent",
-			kind:    RootConfigured,
+			kind:    roots.RootConfigured,
 		},
 		"a pattern naming nothing": {
 			pattern: pkg + "Zeta*",
-			kind:    RootPattern,
+			kind:    roots.RootPattern,
 		},
 		"a character class, which is not syntax": {
 			pattern: pkg + "[AB]lpha",
-			kind:    RootConfigured,
+			kind:    roots.RootConfigured,
 		},
 		"a full stop, which is not syntax": {
 			pattern: pkg + "Alph.",
-			kind:    RootConfigured,
+			kind:    roots.RootConfigured,
 		},
 	}
 
 	for name, test := range cases {
 		t.Run(name, func(t *testing.T) {
-			d := detect(t, "root-patterns.txtar", RootOptions{Patterns: []string{test.pattern}})
+			d := detect(t, "root-patterns.txtar", roots.RootOptions{Patterns: []string{test.pattern}})
 
 			if got := refsOfKind(d, test.kind); !slices.Equal(got, test.want) {
 				t.Errorf("Roots(root-patterns.txtar, %q) named %v, want %v", test.pattern, got, test.want)
 			}
-			var wantUnmatched []Unmatched
+			var wantUnmatched []roots.Unmatched
 			if len(test.want) == 0 {
-				wantUnmatched = []Unmatched{{Source: test.pattern}}
+				wantUnmatched = []roots.Unmatched{{Source: test.pattern}}
 			}
 			if !slices.Equal(d.unmatched, wantUnmatched) {
 				t.Errorf("Roots(root-patterns.txtar, %q) unmatched = %v, want %v", test.pattern, d.unmatched, wantUnmatched)
@@ -353,7 +344,7 @@ func TestRootsMatchesAConfiguredStringAgainstASymbolReference(t *testing.T) {
 			// The fixture's command and blank declaration are the roots that are
 			// not configured, so any other kind is a string matched as the wrong one.
 			for _, r := range d.roots {
-				if r.Kind != test.kind && r.Kind != RootBlank && r.Kind != RootMain {
+				if r.Kind != test.kind && r.Kind != roots.RootBlank && r.Kind != roots.RootMain {
 					t.Errorf("Roots(root-patterns.txtar, %q) returned a root of kind %s, want %s", test.pattern, r.Kind, test.kind)
 				}
 			}
@@ -368,9 +359,9 @@ func TestRootsReportsEveryUnmatchedStringOnceInTheConfigurationsOrder(t *testing
 		"go://example.com/patterns#Absent*",
 		"go://example.com/patterns#Zeta",
 	}
-	d := detect(t, "root-patterns.txtar", RootOptions{Patterns: patterns})
+	d := detect(t, "root-patterns.txtar", roots.RootOptions{Patterns: patterns})
 
-	want := []Unmatched{
+	want := []roots.Unmatched{
 		{Source: "go://example.com/patterns#Zeta"},
 		{Source: "go://example.com/patterns#Absent*"},
 	}
@@ -386,23 +377,20 @@ func TestRootsOrderIsTheSameOnEveryCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Setup: Symbols(roots.txtar): %v", err)
 	}
-	opts := RootOptions{PublishedAPI: true, Patterns: []string{"go://example.com/roots#Publish*"}}
+	opts := roots.RootOptions{PublishedAPI: true, Patterns: []string{"go://example.com/roots#Publish*"}}
 
-	first, _ := Roots(result, rs, symbols, opts)
-	second, _ := Roots(result, rs, symbols, opts)
+	first, _ := roots.Roots(result, rs, symbols, opts)
+	second, _ := roots.Roots(result, rs, symbols, opts)
 	if !slices.Equal(first, second) {
 		t.Errorf("Roots returned a different order on the second call\n--- first\n%v\n+++ second\n%v", first, second)
 	}
-	order := rootOrder(symbols)
-	for i := 1; i < len(first); i++ {
-		if order(first[i-1], first[i]) >= 0 {
-			t.Fatalf("Roots order is not strictly increasing at %d: %+v then %+v", i, first[i-1], first[i])
-		}
+	if unique := slices.Compact(slices.Clone(first)); len(unique) != len(first) {
+		t.Errorf("Roots returned %d roots of which %d are distinct, want each root once", len(first), len(unique))
 	}
 }
 
 func TestRootsOrdersBySiteRatherThanBySymbolIdentifier(t *testing.T) {
-	d := detect(t, "roots.txtar", RootOptions{PublishedAPI: true})
+	d := detect(t, "roots.txtar", roots.RootOptions{PublishedAPI: true})
 
 	sites := make(map[inventory.SymbolID]inventory.Symbol, len(d.symbols))
 	for _, s := range d.symbols {
@@ -432,272 +420,23 @@ func TestRootsOrdersBySiteRatherThanBySymbolIdentifier(t *testing.T) {
 	}
 }
 
-func TestMatchRefAcceptsTwoSpecialCharactersAndNothingElse(t *testing.T) {
-	const ref = "go://example.com/app/inner#Catalog.Name"
-
-	cases := map[string]struct {
-		pattern string
-		want    bool
-	}{
-		"the reference itself":                 {pattern: ref, want: true},
-		"a reference that differs by one rune": {pattern: "go://example.com/app/inner#Catalog.name"},
-		"a star for the whole reference":       {pattern: "*", want: true},
-		"a star for one member":                {pattern: "go://example.com/app/inner#Catalog.*", want: true},
-		"a star crossing the solidus":          {pattern: "go://example.com/*#Catalog.Name", want: true},
-		"a star standing for nothing":          {pattern: "go://example.com/app/inner#Catalog.Name*", want: true},
-		"two stars":                            {pattern: "go://*app*#*Name", want: true},
-		"a question mark for one rune":         {pattern: "go://example.com/app/inner#Catalog.Nam?", want: true},
-		"a question mark for the solidus":      {pattern: "go://example.com?app/inner#Catalog.Name", want: true},
-		"a question mark for two runes":        {pattern: "go://example.com/app/inner#Catalog.Nam?e"},
-		"a character class":                    {pattern: "go://example.com/app/inner#[CD]atalog.Name"},
-		"a full stop":                          {pattern: "go://example.com/app/inner#Catalog.Nam."},
-		"a regular expression":                 {pattern: "^go://.*Name$"},
-		"an empty pattern":                     {pattern: ""},
-		"a prefix of the reference":            {pattern: "go://example.com"},
-	}
-	for name, test := range cases {
-		t.Run(name, func(t *testing.T) {
-			if got := matchRef(test.pattern, ref); got != test.want {
-				t.Errorf("matchRef(%q, %q) = %t, want %t", test.pattern, ref, got, test.want)
-			}
-		})
-	}
-}
-
-func TestMatchRefOnRunesRatherThanBytes(t *testing.T) {
-	const ref = "go://example.com/app#Café"
-
-	cases := map[string]struct {
-		pattern string
-		want    bool
-	}{
-		"one question mark for one multi-byte rune":  {pattern: "go://example.com/app#Caf?", want: true},
-		"two question marks for one multi-byte rune": {pattern: "go://example.com/app#Caf??"},
-	}
-	for name, test := range cases {
-		t.Run(name, func(t *testing.T) {
-			if got := matchRef(test.pattern, ref); got != test.want {
-				t.Errorf("matchRef(%q, %q) = %t, want %t", test.pattern, ref, got, test.want)
-			}
-		})
-	}
-}
-
-// patternCase is one case of the published root-pattern corpus: a configured
-// pattern, a symbol reference, and whether the one matches the other.
-type patternCase struct {
-	Pattern   string `json:"pattern"`
-	Reference string `json:"reference"`
-	Reason    string `json:"reason"`
-	Matches   bool   `json:"matches"`
-}
-
-func TestMatchRefAnswersEveryCaseOfThePublishedPatternCorpus(t *testing.T) {
-	const path = "contract/grammar/pattern-corpus.json"
-	body, err := spec.Contract.ReadFile(path)
-	if err != nil {
-		t.Fatalf("Setup: read %s from the contract: %v", path, err)
-	}
-	var cases []patternCase
-	decoder := json.NewDecoder(bytes.NewReader(body))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&cases); err != nil {
-		t.Fatalf("Setup: decode %s: %v", path, err)
-	}
-	if len(cases) == 0 {
-		t.Fatalf("Setup: %s holds no case", path)
-	}
-
-	for i, test := range cases {
-		t.Run(fmt.Sprintf("case-%02d", i), func(t *testing.T) {
-			if got := matchRef(test.Pattern, test.Reference); got != test.Matches {
-				t.Errorf("matchRef(%q, %q) = %t, want %t: %s", test.Pattern, test.Reference, got, test.Matches, test.Reason)
-			}
-			if got := matchGlob([]rune(test.Pattern), []rune(test.Reference)); got != test.Matches {
-				t.Errorf("matchGlob(%q, %q) = %t, want %t: %s", test.Pattern, test.Reference, got, test.Matches, test.Reason)
-			}
-		})
-	}
-}
-
-func TestCgoExportedReadsTheDirectiveOverTheFunctionItNames(t *testing.T) {
-	const source = `package bridge
-
-import "C"
-
-//export Bridge
-func Bridge() {}
-
-//export Other
-func Renamed() {}
-
-// Documented is documented and not exported.
-func Documented() {}
-
-func Bare() {}
-
-func Inner() {
-	//export Nested
-	_ = 0
-}
-`
-	file, err := parser.ParseFile(token.NewFileSet(), "bridge.go", source, parser.ParseComments|parser.SkipObjectResolution)
-	if err != nil {
-		t.Fatalf("Setup: parse the fixture source: %v", err)
-	}
-	byName := make(map[string]*ast.FuncDecl)
-	for _, decl := range file.Decls {
-		if fn, ok := decl.(*ast.FuncDecl); ok {
-			byName[fn.Name.Name] = fn
-		}
-	}
-
-	cases := map[string]bool{
-		"Bridge":     true,
-		"Renamed":    false,
-		"Documented": false,
-		"Bare":       false,
-		"Inner":      false,
-	}
-	for name, want := range cases {
-		t.Run(name, func(t *testing.T) {
-			fn, held := byName[name]
-			if !held {
-				t.Fatalf("the fixture source declares no function named %s", name)
-			}
-			if got := cgoExported(fn); got != want {
-				t.Errorf("cgoExported(%s) = %t, want %t", name, got, want)
-			}
-		})
-	}
-}
-
-// fakePackages answers an import with a package the test type-checked itself, so
-// a fixture source can name package testing without a toolchain.
-type fakePackages map[string]*types.Package
-
-func (f fakePackages) Import(path string) (*types.Package, error) {
-	if pkg, held := f[path]; held {
-		return pkg, nil
-	}
-	return nil, fmt.Errorf("fake importer: no package %q", path)
-}
-
-// typeCheck type-checks one source file as the package at path and returns it
-// with the identifiers it defines and its syntax.
-func typeCheck(t *testing.T, path, source string, imports fakePackages) (*types.Package, *types.Info, *ast.File) {
-	t.Helper()
-
-	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "fixture.go", source, parser.SkipObjectResolution)
-	if err != nil {
-		t.Fatalf("Setup: parse the source of %s: %v", path, err)
-	}
-	info := &types.Info{Defs: make(map[*ast.Ident]types.Object)}
-	pkg, err := (&types.Config{Importer: imports}).Check(path, fset, []*ast.File{file}, info)
-	if err != nil {
-		t.Fatalf("Setup: type-check %s: %v", path, err)
-	}
-	return pkg, info, file
-}
-
-// A tree the loader accepts holds none of these shapes: the generated test main
-// assigns each function to a field of its family's type, so the load refuses the
-// configuration with a type error before a root set exists. The rule is pinned
-// here instead, over two packages the test type-checks itself.
-func TestTestSignatureNamesTheFamilysTypeOfPackageTesting(t *testing.T) {
-	testingPackage, _, _ := typeCheck(t, "testing", "package testing\n\ntype T struct{}\n\ntype B struct{}\n", nil)
-	_, info, file := typeCheck(t, "example.com/fixture", `package fixture
-
-import "testing"
-
-type T struct{}
-
-func TestFamily(b *testing.B) {}
-
-func TestLocalType(t *T) {}
-
-func TestTwoParameters(t *testing.T, size int) {}
-
-func TestResult(t *testing.T) error { return nil }
-
-func TestValue(t testing.T) {}
-`, fakePackages{"testing": testingPackage})
-
-	byName := make(map[string]*ast.FuncDecl)
-	for _, decl := range file.Decls {
-		if fn, ok := decl.(*ast.FuncDecl); ok {
-			byName[fn.Name.Name] = fn
-		}
-	}
-	p := &packages.Package{TypesInfo: info}
-
-	cases := []struct {
-		function string
-		param    string
-		want     bool
-	}{
-		{function: "TestFamily", param: "B", want: true},
-		{function: "TestFamily", param: "T"},
-		{function: "TestLocalType", param: "T"},
-		{function: "TestTwoParameters", param: "T"},
-		{function: "TestResult", param: "T"},
-		{function: "TestValue", param: "T"},
-	}
-	for _, test := range cases {
-		t.Run(test.function+"_"+test.param, func(t *testing.T) {
-			fn, held := byName[test.function]
-			if !held {
-				t.Fatalf("the fixture source declares no function named %s", test.function)
-			}
-			if got := testSignature(p, fn, test.param); got != test.want {
-				t.Errorf("testSignature(%s, %s) = %t, want %t", test.function, test.param, got, test.want)
-			}
-		})
-	}
-}
-
-func TestDeclaredRootsOnlyAFunctionNamedMainOrInit(t *testing.T) {
-	const target = "example.com/app"
-	d := &rootDetection{
-		classes: map[string][]packageClass{target: {{main: true}}},
-		found:   make(map[Root]struct{}),
-	}
-
-	d.declared([]inventory.Symbol{
-		{ID: "variable", Kind: inventory.KindVar, Name: mainFunction, PkgPath: target},
-		{ID: "type", Kind: inventory.KindType, Name: initFunction, PkgPath: target},
-		{ID: "entry point", Kind: inventory.KindFunc, Name: mainFunction, PkgPath: target},
-		{ID: "library function", Kind: inventory.KindFunc, Name: mainFunction, PkgPath: "example.com/lib"},
-		{ID: "initializer", Kind: inventory.KindFunc, Name: initFunction, PkgPath: "example.com/lib"},
-	})
-
-	want := map[Root]struct{}{
-		{ID: "entry point", Kind: RootMain}: {},
-		{ID: "initializer", Kind: RootInit}: {},
-	}
-	if !maps.Equal(d.found, want) {
-		t.Errorf("declared() found %v, want %v", d.found, want)
-	}
-}
-
 func TestRootKindStringNamesEveryKind(t *testing.T) {
 	cases := []struct {
-		kind RootKind
+		kind roots.RootKind
 		want string
 	}{
-		{RootMain, "main"},
-		{RootInit, "init"},
-		{RootTest, "test"},
-		{RootLinkname, "linkname"},
-		{RootCgoExport, "cgo-export"},
-		{RootBlank, "blank"},
-		{RootPublishedAPI, "published-api"},
-		{RootConfigured, "configured"},
-		{RootPattern, "pattern"},
-		{RootProgram, "program"},
-		{RootSwagRoute, "swag-route"},
-		{RootKind(200), "RootKind(200)"},
+		{roots.RootMain, "main"},
+		{roots.RootInit, "init"},
+		{roots.RootTest, "test"},
+		{roots.RootLinkname, "linkname"},
+		{roots.RootCgoExport, "cgo-export"},
+		{roots.RootBlank, "blank"},
+		{roots.RootPublishedAPI, "published-api"},
+		{roots.RootConfigured, "configured"},
+		{roots.RootPattern, "pattern"},
+		{roots.RootProgram, "program"},
+		{roots.RootSwagRoute, "swag-route"},
+		{roots.RootKind(200), "RootKind(200)"},
 	}
 	for _, test := range cases {
 		t.Run(test.want, func(t *testing.T) {
@@ -710,14 +449,14 @@ func TestRootKindStringNamesEveryKind(t *testing.T) {
 
 func TestRootsRootsWhatAProgramUnderTheIgnoreTagNames(t *testing.T) {
 	d := analysisOf(t, "programs.txtar", nil)
-	roots, _ := d.rootsUnder(t, false)
+	rooted, _ := d.rootsUnder(t, false)
 	names := make(map[inventory.SymbolID]string)
 	for _, s := range d.inventory(t) {
 		names[s.ID] = s.Name
 	}
 	var programs []string
-	for _, r := range roots {
-		if r.Kind == RootProgram {
+	for _, r := range rooted {
+		if r.Kind == roots.RootProgram {
 			programs = append(programs, names[r.ID])
 		}
 	}
@@ -726,6 +465,6 @@ func TestRootsRootsWhatAProgramUnderTheIgnoreTagNames(t *testing.T) {
 	// ignored file of a library package, which go run cannot run, and Tooled by a
 	// program behind another tag, so neither is a program's.
 	if want := []string{"Generate"}; !slices.Equal(programs, want) {
-		t.Errorf("Roots(programs.txtar) roots %v as a program's, want %v", programs, want)
+		t.Errorf("Roots(programs.txtar) rooted %v as a program's, want %v", programs, want)
 	}
 }

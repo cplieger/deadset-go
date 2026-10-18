@@ -15,11 +15,12 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/memory"
 	spec "github.com/cplieger/deadset-spec/v8"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // memoryExhaustionLine is the line this analyzer prints for a run that needs more
 // memory than the machine makes available, as a pattern whose two groups are N and
-// M. The text after "memory exhausted: " is the one the Contract's memory-exhausted
+// M. The text after the class is the one the Contract's memory-exhausted
 // run failure opens with.
 func memoryExhaustionLine(t *testing.T) *regexp.Regexp {
 	t.Helper()
@@ -52,7 +53,7 @@ func memoryExhaustionLine(t *testing.T) *regexp.Regexp {
 	}
 	number := `(\d+(?:\.\d)?)`
 	pattern := strings.NewReplacer(" N ", " "+number+" ", " M ", " "+number+" ").Replace(regexp.QuoteMeta(quoted[1]))
-	return regexp.MustCompile(`^memory exhausted: ` + pattern + `\n$`)
+	return regexp.MustCompile(`^` + regexp.QuoteMeta(vocab.RunFailurePrefix+vocab.RunMemoryExhausted+": ") + pattern + `; ` + `[^\n]+\n$`)
 }
 
 // held keeps the live heap the low-budget test runs under.
@@ -107,7 +108,7 @@ func TestAStageTheGovernorCancelledEndsWithTheMemoryLine(t *testing.T) {
 	if want := contractExitCodes(t)["failure"]; code != want {
 		t.Errorf("failed(governor-cancelled context, %q) = %d, want %d", stage, code, want)
 	}
-	want := "memory exhausted: at least 1 GB were needed, 0.5 GB are available\n"
+	want := vocab.RunFailurePrefix + vocab.RunMemoryExhausted + ": at least 1 GB were needed, 0.5 GB are available; run on a machine with more memory, or narrow the scope\n"
 	if got := stderr.String(); got != want {
 		t.Errorf("failed(governor-cancelled context, %q) printed %q, want %q", stage, got, want)
 	}

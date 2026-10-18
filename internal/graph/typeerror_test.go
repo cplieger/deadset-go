@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 )
 
 func TestATypeErrorAnotherConfigurationDoesNotReportRootsAndSkipsNothing(t *testing.T) {
@@ -18,7 +19,7 @@ func TestATypeErrorAnotherConfigurationDoesNotReportRootsAndSkipsNothing(t *test
 		result, _ := loadDirUnder(t.Context(), t, dir, c)
 		results = append(results, *result)
 	}
-	elsewhere := CheckedElsewhere(results)
+	elsewhere := roots.CheckedElsewhere(results)
 	if got := elsewhere[0]; len(got) != 0 {
 		t.Errorf("CheckedElsewhere()[linux] = %v, want none", got)
 	}
@@ -34,29 +35,29 @@ func TestATypeErrorAnotherConfigurationDoesNotReportRootsAndSkipsNothing(t *test
 	for _, test := range []struct {
 		name      string
 		elsewhere map[load.PackageID]bool
-		roots     []string
+		rooted    []string
 		skipped   []string
 	}{
 		{
-			name: "alone", roots: []string{"go://example.com/platform/broken#Missing", "go://example.com/platform/sig#Reload"},
+			name: "alone", rooted: []string{"go://example.com/platform/broken#Missing", "go://example.com/platform/sig#Reload"},
 			skipped: []string{"broken/broken.go", "sig/sig.go"},
 		},
 		{
-			name: "in the matrix", elsewhere: elsewhere[1], roots: []string{"go://example.com/platform/broken#Missing"},
+			name: "in the matrix", elsewhere: elsewhere[1], rooted: []string{"go://example.com/platform/broken#Missing"},
 			skipped: []string{"broken/broken.go"},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			roots, _ := Roots(windows, rs, symbols, RootOptions{CheckedElsewhere: test.elsewhere})
+			rooted, _ := roots.Roots(windows, rs, symbols, roots.RootOptions{CheckedElsewhere: test.elsewhere})
 			if err != nil {
 				t.Fatalf("Roots(windows) error: %v", err)
 			}
-			got := refsOfKind(detection{symbols: symbols, roots: roots}, RootTypeError)
-			if !slices.Equal(got, test.roots) {
-				t.Errorf("Roots(windows) roots %v by a type error, want %v", got, test.roots)
+			got := refsOfKind(detection{symbols: symbols, roots: rooted}, roots.RootTypeError)
+			if !slices.Equal(got, test.rooted) {
+				t.Errorf("Roots(windows) rooted %v by a type error, want %v", got, test.rooted)
 			}
 			var skipped []string
-			for _, skip := range TypeErrorSkips(windows, dir, test.elsewhere) {
+			for _, skip := range roots.TypeErrorSkips(windows, dir, test.elsewhere) {
 				skipped = append(skipped, skip.Path)
 			}
 			if !slices.Equal(skipped, test.skipped) {

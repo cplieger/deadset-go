@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/cplieger/deadset-go/v2/internal/failure"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -96,7 +97,7 @@ func HostConfiguration() Configuration {
 }
 
 // Load resolves configuration c of every module top holds; cancelling ctx stops
-// it. A file or component the project lacks returns a *[SetupError], any other
+// it. A file or component the project lacks returns a setup *[failure.Error], any other
 // metadata or [typeCheck] error a *[Error], an unusable consumer [errConsumer],
 // each with a zero Result; a walked unit, a nested module or a reader that does not
 // load is dropped into [Result.Dropped] instead while a unit is left. Load makes no
@@ -120,7 +121,6 @@ func load(ctx context.Context, top *Topology, c *Configuration, trees *syntaxCac
 	}
 	slices.Sort(r.ExcludedByCgo)
 	r.ExcludedByCgo = slices.Compact(r.ExcludedByCgo)
-	r.Generated = generatedFiles(r.Packages)
 	r.declared = declaredDirs(r.Packages)
 
 	if err := l.readers(&r); err != nil {
@@ -226,7 +226,7 @@ func (l *loader) units(r *Result) error {
 func (l *loader) unit(r *Result, unit *discoveredModule) error {
 	pkgs, err := l.module(specOf(unit, unitPrefix(l.top.Root, unit.Dir)), "")
 	if err != nil {
-		_, setup := errors.AsType[*SetupError](err)
+		setup := failure.Setup(err)
 		_, diagnosed := errors.AsType[*Error](err)
 		if setup || diagnosed {
 			return err
@@ -320,7 +320,7 @@ func (l *loader) underscored(r *Result, unit *discoveredModule) error {
 // failure, the diagnostics of a load or the go command refusing to list it, rather
 // than about the run.
 func droppable(err error) bool {
-	_, setup := errors.AsType[*SetupError](err)
+	setup := failure.Setup(err)
 	_, diagnosed := errors.AsType[*Error](err)
 	_, listed := errors.AsType[*listError](err)
 	return setup || diagnosed || listed
@@ -354,8 +354,8 @@ func loadPackages(ctx context.Context, trees *syntaxCache, c *Configuration, spe
 		return nil, nil, err
 	}
 	if diagnostics := collect(pkgs, spec.prefix); len(diagnostics) > 0 {
-		if failure := setupFailures(diagnostics, expectedModules(spec.file, pkgs)); failure != nil {
-			return nil, nil, failure
+		if refused := setupFailures(diagnostics, expectedModules(spec.file, pkgs)); refused != nil {
+			return nil, nil, refused
 		}
 		return nil, diagnostics, nil
 	}

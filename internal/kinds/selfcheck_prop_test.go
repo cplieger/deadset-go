@@ -13,6 +13,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/edges"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
 	"github.com/cplieger/deadset-spec/v8/report"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
@@ -305,7 +306,7 @@ func writeTemp(t *rapid.T, dir, name, document string) string {
 func TestAnythingTheConfigurationNamesThatMatchesNothingIsReported(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		found := drawnFindings(t)
-		roots := rapid.SliceOfN(rapid.SampledFrom([]string{
+		configured := rapid.SliceOfN(rapid.SampledFrom([]string{
 			"go://" + drawnModulePath + "#Gone",
 			"go://" + drawnModulePath + "#Gone*",
 			"go://" + drawnModulePath + "#Go?e",
@@ -332,9 +333,9 @@ func TestAnythingTheConfigurationNamesThatMatchesNothingIsReported(t *testing.T)
 
 		// Nothing bound, so nothing was suppressed and nothing is enumerated.
 		in := inputOfRecords(records, nil, nil)
-		in.Unmatched = make([]graph.Unmatched, 0, len(roots))
-		for _, root := range roots {
-			in.Unmatched = append(in.Unmatched, graph.Unmatched{Source: root})
+		in.Unmatched = make([]roots.Unmatched, 0, len(configured))
+		for _, root := range configured {
+			in.Unmatched = append(in.Unmatched, roots.Unmatched{Source: root})
 		}
 		in.Edges = declared
 
@@ -355,9 +356,9 @@ func TestAnythingTheConfigurationNamesThatMatchesNothingIsReported(t *testing.T)
 		if err != nil {
 			t.Fatalf("UnmatchedRoots() = _, %v, want every configured string reported", err)
 		}
-		if len(unmatched) != len(roots) {
+		if len(unmatched) != len(configured) {
 			t.Errorf("UnmatchedRoots() over %d configured strings reported %d, want one each: %v",
-				len(roots), len(unmatched), summary(unmatched))
+				len(configured), len(unmatched), summary(unmatched))
 		}
 		for i := range unmatched {
 			if unmatched[i].Symbol.Ref != in.Unmatched[i].Source {

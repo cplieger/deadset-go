@@ -59,7 +59,7 @@ type ExhaustedError struct {
 // Available down, so the line never reads as if the run fitted.
 func (e *ExhaustedError) Error() string {
 	needed := e.Needed/bytesPerTenthGB + min(e.Needed%bytesPerTenthGB, 1)
-	return "memory exhausted: at least " + gigabytes(needed) + " GB were needed, " +
+	return "at least " + gigabytes(needed) + " GB were needed, " +
 		gigabytes(e.Available/bytesPerTenthGB) + " GB are available"
 }
 
@@ -192,22 +192,24 @@ func (g *governor) read() (live, held uint64) {
 }
 
 // ceiling is the most memory this process may hold: what it holds now plus the
-// least headroom any source reports, and false where no source answers. A memory
-// limit the process started with (GOMEMLIMIT), or else the machine's limit, is one
-// more bound, so a run never raises the limit its caller set.
+// least headroom any source reports, and false where nothing answers. A memory
+// limit the process started with (GOMEMLIMIT), or else the machine's limit, caps
+// it, so a run never holds more than the limit its caller set, even once the
+// runtime already holds more.
 func (g *governor) ceiling() (uint64, bool) {
 	_, held := g.read()
 	var least uint64
 	answered := false
-	if bound := max(g.callerLimit, g.machineLimit); bound > 0 {
-		least, answered = bound-min(held, bound), true
-	}
 	for _, source := range g.sources {
 		if room, ok := source(); ok && (!answered || room < least) {
 			least, answered = room, true
 		}
 	}
-	return held + least, answered
+	ceiling := held + least
+	if bound := max(g.callerLimit, g.machineLimit); bound > 0 && (!answered || bound < ceiling) {
+		ceiling, answered = bound, true
+	}
+	return ceiling, answered
 }
 
 // tick applies one reading and reports whether the run was ended.

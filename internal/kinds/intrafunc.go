@@ -9,8 +9,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/analysis"
@@ -156,15 +157,15 @@ func (in *Input) intraFunc() *intrafunc {
 		for i := range in.Merged.Roots {
 			root := &in.Merged.Roots[i]
 			switch root.Kind {
-			case graph.RootLinkname, graph.RootCgoExport, graph.RootTest, graph.RootTypeError, graph.RootFuzz:
+			case roots.RootLinkname, roots.RootCgoExport, roots.RootTest, roots.RootTypeError, roots.RootFuzz:
 				g.foreign[root.ID] = true
-			case graph.RootProgram:
+			case roots.RootProgram:
 				g.programmed[root.ID] = true
 			}
 		}
 		for i := range in.Merged.References {
 			r := &in.Merged.References[i]
-			if r.Kind != graph.RefCall {
+			if r.Kind != facts.RefCall {
 				g.valued[r.To] = true
 			}
 		}
@@ -392,11 +393,11 @@ type compiledFile struct {
 // the first variant that compiles it ([inventory.Sources]): the bodies are the
 // same bytes and the answer is about the body.
 func compiledFiles(one *Configured) []compiledFile {
-	if one.Result == nil || one.Resolve == nil {
+	if one.Facts == nil {
 		return nil
 	}
 	var found []compiledFile
-	for p, f := range inventory.Sources(one.Result.Packages, one.Result.Fset) {
+	for p, f := range one.Facts.Sources() {
 		found = append(found, compiledFile{file: f, info: p.TypesInfo})
 	}
 	return found
@@ -842,10 +843,10 @@ func (g *intrafunc) unreachableStatements() ([]Finding, error) {
 	held := newParts()
 	for i := range g.in.Per {
 		one := &g.in.Per[i]
-		if one.Result == nil || one.Resolve == nil {
+		if one.Facts == nil {
 			continue
 		}
-		for _, p := range inventory.Packages(one.Result.Packages, one.Result.Fset) {
+		for _, p := range one.Facts.Packages() {
 			if err := g.reportUnreachable(one, p, held); err != nil {
 				return nil, err
 			}

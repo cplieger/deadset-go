@@ -7,8 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 )
 
 // The files a hand-built graph declares its symbols in. The file is what decides
@@ -46,8 +48,8 @@ type graphBuilder struct {
 	lines   map[string]int
 	inner   map[inventory.SymbolID]int
 	symbols []inventory.Symbol
-	refs    []Reference
-	roots   []Root
+	refs    []facts.Reference
+	roots   []roots.Root
 	outside int
 }
 
@@ -177,11 +179,11 @@ func (b *graphBuilder) ref(from, to string) {
 	b.sink.Helper()
 	fromID := b.id(from)
 	file, _, _ := strings.Cut(string(fromID), ":")
-	b.refs = append(b.refs, Reference{
+	b.refs = append(b.refs, facts.Reference{
 		From: fromID,
 		To:   b.id(to),
 		Pos:  token.Position{Filename: file, Line: 1, Column: 1},
-		Kind: RefCall,
+		Kind: facts.RefCall,
 		Test: file == handTestFile || file == handSupportFile,
 	})
 }
@@ -202,11 +204,11 @@ func (b *graphBuilder) refFromConsumer(consumer, to string, test bool) {
 	if test {
 		file = "consumer_test.go"
 	}
-	b.refs = append(b.refs, Reference{
+	b.refs = append(b.refs, facts.Reference{
 		To:       b.id(to),
 		Consumer: consumer,
 		Pos:      token.Position{Filename: file, Line: b.outside, Column: 1},
-		Kind:     RefCall,
+		Kind:     facts.RefCall,
 		Test:     test,
 	})
 }
@@ -217,10 +219,10 @@ func (b *graphBuilder) refFromConsumer(consumer, to string, test bool) {
 func (b *graphBuilder) refFromOutside(to string) {
 	b.sink.Helper()
 	b.outside++
-	b.refs = append(b.refs, Reference{
+	b.refs = append(b.refs, facts.Reference{
 		From: inventory.SymbolID(fmt.Sprintf("../consumer/consumer.go:%d:1", b.outside)),
 		To:   b.id(to),
-		Kind: RefCall,
+		Kind: facts.RefCall,
 	})
 }
 
@@ -229,23 +231,23 @@ func (b *graphBuilder) refFromOutside(to string) {
 func (b *graphBuilder) refToOutside(from string) {
 	b.sink.Helper()
 	b.outside++
-	b.refs = append(b.refs, Reference{
+	b.refs = append(b.refs, facts.Reference{
 		From: b.id(from),
 		To:   inventory.SymbolID(fmt.Sprintf("../consumer/consumer.go:%d:1", b.outside)),
-		Kind: RefCall,
+		Kind: facts.RefCall,
 	})
 }
 
 // root keeps one root of the given kind on a declared symbol.
-func (b *graphBuilder) root(name string, kind RootKind) {
+func (b *graphBuilder) root(name string, kind roots.RootKind) {
 	b.sink.Helper()
-	b.roots = append(b.roots, Root{ID: b.id(name), Kind: kind})
+	b.roots = append(b.roots, roots.Root{ID: b.id(name), Kind: kind})
 }
 
 // rootOutside keeps one root on a symbol the inventory does not hold.
-func (b *graphBuilder) rootOutside(kind RootKind) {
+func (b *graphBuilder) rootOutside(kind roots.RootKind) {
 	b.outside++
-	b.roots = append(b.roots, Root{ID: inventory.SymbolID(fmt.Sprintf("absent.go:%d:1", b.outside)), Kind: kind})
+	b.roots = append(b.roots, roots.Root{ID: inventory.SymbolID(fmt.Sprintf("absent.go:%d:1", b.outside)), Kind: kind})
 }
 
 // id returns the identifier of one declared symbol.
@@ -357,7 +359,7 @@ func TestNewSplitsTheReferenceCountsByTheFileThatMadeThem(t *testing.T) {
 	// The test declaration references one live symbol as well, so the rule that
 	// admits a test of dead code leaves it out of this graph's answer.
 	b.ref("exercise", "entry")
-	b.root("entry", RootMain)
+	b.root("entry", roots.RootMain)
 	got := b.verdicts(b.graph().Sweep(&SweepInput{}))
 
 	want := []verdict{
@@ -372,7 +374,7 @@ func TestNewSplitsTheReferenceCountsByTheFileThatMadeThem(t *testing.T) {
 
 func TestNewKeepsNoRootAndNoReferenceNamingNoSymbol(t *testing.T) {
 	b := newGraphBuilder(t).add("alone")
-	b.rootOutside(RootMain)
+	b.rootOutside(roots.RootMain)
 	b.refToOutside("alone")
 	got := b.candidates(b.graph().Sweep(&SweepInput{}))
 

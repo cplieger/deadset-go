@@ -58,10 +58,6 @@ type Result struct {
 	// other and is not in this list.
 	ExcludedByCgo []string
 
-	// Generated holds the package clause of every file of Packages that carries the
-	// generated-code header, once per parse of the file.
-	Generated []token.Pos
-
 	// declared maps the import path of every package of Packages to the one
 	// directory declaring it, and to nothing where two do.
 	declared map[string]string
@@ -134,7 +130,6 @@ func (r *Result) Unit(dir string) *Result {
 		narrowed := *r
 		narrowed.Packages = r.Units[i].Packages
 		narrowed.Units = r.Units[i : i+1]
-		narrowed.Generated = generatedFiles(narrowed.Packages)
 		return &narrowed
 	}
 	return nil
@@ -286,4 +281,29 @@ func (c *sourceCache) check(p *packages.Package) *Source {
 	// cannot fully check still answers what it resolved.
 	_, _ = conf.Check(p.PkgPath, c.fset, files, info)
 	return &Source{Fset: c.fset, Files: files, Info: info}
+}
+
+// TypesIDs is the [PackageID] of every package the load reads, the target's
+// dependencies and its consumers' included, by its types.
+func (r *Result) TypesIDs() map[*types.Package]PackageID {
+	ids := make(map[*types.Package]PackageID)
+	record := func(p *packages.Package) {
+		if p.Types != nil {
+			ids[p.Types] = r.ID(p)
+		}
+	}
+	packages.Visit(r.Packages, nil, record)
+	for _, consumer := range r.Referencing() {
+		packages.Visit(consumer.Packages, nil, record)
+	}
+	return ids
+}
+
+// TypesID is the identity ids holds for pkg, its import path alone where the
+// load read no such package.
+func TypesID(ids map[*types.Package]PackageID, pkg *types.Package) PackageID {
+	if id, held := ids[pkg]; held {
+		return id
+	}
+	return PackageID{Path: pkg.Path()}
 }

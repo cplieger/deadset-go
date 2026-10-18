@@ -6,10 +6,12 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 )
 
 func TestLastUsesNamesTheModuleOneCandidateAloneUses(t *testing.T) {
@@ -79,12 +81,12 @@ func lastUsesOf(t *testing.T, archive string) (map[inventory.SymbolID][]string, 
 	result := loadDir(t, dir)
 	symbols, resolve := inventoryOf(t, result, dir)
 
-	refs, _, err := graph.References(result, resolve, symbols, graph.TestClasses{})
+	refs, _, err := facts.References(result, resolve, symbols, roots.TestClasses{})
 	if err != nil {
-		t.Fatalf("Setup: graph.References(%s): %v", archive, err)
+		t.Fatalf("Setup: facts.References(%s): %v", archive, err)
 	}
-	roots, _ := graph.Roots(result, resolve, symbols, graph.RootOptions{})
-	candidates := graph.New(symbols, refs, roots).Sweep(&graph.SweepInput{}).Candidates
+	rooted, _ := roots.Roots(result, resolve, symbols, roots.RootOptions{})
+	candidates := graph.New(symbols, refs, rooted).Sweep(&graph.SweepInput{}).Candidates
 	if len(candidates) == 0 {
 		t.Fatalf("Setup: Sweep(%s) returned no candidate, so the join has nothing to answer over", archive)
 	}

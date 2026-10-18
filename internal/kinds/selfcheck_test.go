@@ -11,6 +11,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
 	"github.com/cplieger/deadset-spec/v8/report"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
@@ -447,7 +448,7 @@ func TestTheRefusalKindsRefuseARefusalUnderACodeTheGrammarDoesNotReport(t *testi
 
 func TestUnmatchedRootsReportsEveryConfiguredStringAsTheConfigurationSpellsIt(t *testing.T) {
 	in := suppressed(t, "selfcheck-stale.txtar", applicationConfig())
-	in.Unmatched = []graph.Unmatched{
+	in.Unmatched = []roots.Unmatched{
 		{Source: "go://example.com/selfcheck#Vanished"},
 		{Source: "go://example.com/selfcheck#Vanish*"},
 	}
@@ -760,7 +761,7 @@ func TestUnmatchedRootsIsPositionedInTheDocumentThatDeclaredTheRoot(t *testing.T
 	} {
 		t.Run(name, func(t *testing.T) {
 			in := suppressed(t, "selfcheck-stale.txtar", applicationConfig())
-			in.Unmatched = []graph.Unmatched{{Source: "go://example.com/selfcheck#Vanished"}}
+			in.Unmatched = []roots.Unmatched{{Source: "go://example.com/selfcheck#Vanished"}}
 			in.RootsDocument = held.document
 			want := held.want
 

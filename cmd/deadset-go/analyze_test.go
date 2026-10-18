@@ -402,6 +402,8 @@ func TestAnalyzeExitsWithFailureWhenTheTemplateFailsToRender(t *testing.T) {
 	if !strings.Contains(got.stderr, "invented") {
 		t.Errorf("analyze stderr = %q, want it to name what the template named and the report does not carry", got.stderr)
 	}
+	wantOneClassLine(t, "analyze with a template naming an absent field", got.stderr,
+		vocab.RunFailurePrefix+vocab.RunUnwrittenOutput+": render "+got.reportPath+renderings[vocab.FormatTemplate]+": ")
 	if envelope := envelopeAt(t, got.reportPath); envelope.Totals.Findings == 0 {
 		t.Error("the report the run wrote before the rendering failed holds no finding, want the run's report")
 	}
@@ -507,8 +509,8 @@ func TestAnalyzeWritesNoPartialDocumentWhereTheRenameIsRefused(t *testing.T) {
 		t.Errorf("analyze with a report path the rename cannot take = %d, want %d\nstderr: %s",
 			code, want, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "publish "+reportPath) {
-		t.Errorf("analyze stderr = %q, want it to name the publish it could not make", stderr.String())
+	if !strings.HasPrefix(stderr.String(), vocab.RunFailurePrefix+vocab.RunUnwrittenOutput+": write "+reportPath) {
+		t.Errorf("analyze stderr = %q, want the unwritten-output class line naming the write it could not make", stderr.String())
 	}
 	// The directory at the report path is untouched and the temporary file the
 	// write went through is gone, so the refused write leaves nothing behind.

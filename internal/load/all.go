@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/cplieger/deadset-go/v2/internal/failure"
 )
 
 // ErrNoConfiguration reports a matrix holding no configuration. A run over none
@@ -57,7 +59,7 @@ func All(ctx context.Context, top *Topology, configurations []Configuration) ([]
 // that has no configuration left to analyze, and otherwise the first drop's error.
 func droppedError(dropped []Unbuilt) error {
 	for _, one := range dropped {
-		if _, ok := errors.AsType[*SetupError](one.Err); ok {
+		if failure.Setup(one.Err) {
 			return one.Err
 		}
 	}

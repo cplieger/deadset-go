@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -341,7 +342,7 @@ func EncodingReflectionDetector(in *Input) ([]graph.Exemption, error) {
 		assert:         assert,
 		satisfying:     make(map[satisfactionKey]map[string]bool),
 		methodNames:    make(map[*types.Named]map[string]bool),
-		typeArgs:       typeArgumentsOf(programPackages(in.Result)),
+		typeArgs:       typeArgumentsOf(in.Facts.Program()),
 	}
 	f.templates = newTemplateOrigins(in)
 	f.decode = newDecoders(f)
@@ -393,7 +394,7 @@ type encodingFlow struct {
 	reached     map[types.Type][]*types.Named // encoderReach's answers, which spell every type they meet
 	selfEncoded map[selfEncodingKey]selfEncodedTypes
 	templates   *templateOrigins   // which templates an execution's receiver holds
-	conversions []graph.Conversion // the program's, consumers' included
+	conversions []facts.Conversion // the program's, consumers' included
 
 	// unknownMembers is whether the program makes a JSON decoder refuse a document
 	// naming a member the type lacks.
@@ -454,7 +455,7 @@ func (r reach) filling() reach {
 // programPaths is the import path of every package of the analysed program.
 func programPaths(in *Input) map[string]bool {
 	held := make(map[string]bool)
-	for _, p := range programPackages(in.Result) {
+	for _, p := range in.Facts.Program() {
 		held[p.PkgPath] = true
 	}
 	return held
@@ -514,9 +515,9 @@ func (f *encodingFlow) resultsCalled(named *types.Named, d *destination) []*type
 
 // walkCalls records every value a call hands to a destination package.
 func (f *encodingFlow) walkCalls() error {
-	r := f.kept.in.Result
-	for _, p := range inventory.Packages(r.Packages, r.Fset) {
-		for _, file := range inventory.Files(p, r.Fset) {
+	x := f.kept.in.Facts
+	for _, p := range x.Packages() {
+		for _, file := range x.Files(p) {
 			if err := f.walkFile(p.TypesInfo, file); err != nil {
 				return err
 			}
@@ -1171,7 +1172,7 @@ func (f *encodingFlow) encodingDestination(fn *types.Func) (destination, bool) {
 	if pkg == nil {
 		return destination{}, false
 	}
-	if _, contains := graph.StandardContainer(fn); contains {
+	if _, contains := facts.StandardContainer(fn); contains {
 		return destination{detail: "passed to " + fn.FullName(), reach: reach{contained: []*types.Package{pkg}}}, true
 	}
 	detail := "passed to " + fn.FullName()
@@ -1202,7 +1203,7 @@ var unknownMemberRefusals = map[string]bool{"DisallowUnknownFields": true, "Reje
 // namesFunction reports whether any file of the analysed program uses a function or
 // method of one of the packages whose name is one of names.
 func namesFunction(in *Input, pkgPaths, names map[string]bool) bool {
-	for _, p := range programPackages(in.Result) {
+	for _, p := range in.Facts.Program() {
 		if p.TypesInfo == nil {
 			continue
 		}
@@ -1261,7 +1262,7 @@ func outsideClosure(in *Input) []*types.Package {
 	}
 	own := make(map[string]bool)
 	var queue []*types.Package
-	for _, p := range programPackages(in.Result) {
+	for _, p := range in.Facts.Program() {
 		if p.Types != nil {
 			own[p.PkgPath] = true
 			queue = append(queue, p.Types)
@@ -1635,11 +1636,8 @@ func (f *encodingFlow) written() map[token.Position]bool {
 		return f.writes
 	}
 	f.writes = make(map[token.Position]bool)
-	for _, p := range programPackages(f.kept.in.Result) {
-		if p.TypesInfo == nil {
-			continue
-		}
-		for _, file := range p.Syntax {
+	for _, p := range f.kept.in.Facts.Program() {
+		for _, file := range f.kept.in.Facts.Files(p) {
 			for _, field := range fieldsWritten(p.TypesInfo, file) {
 				f.writes[f.edge.sites.of(field)] = true
 			}
@@ -1667,11 +1665,8 @@ func (f *encodingFlow) writtenFor(site evidence) map[token.Position]bool {
 func (f *encodingFlow) indexWrites() {
 	f.production, f.everyWrite = make(map[token.Position]bool), make(map[token.Position]bool)
 	in := f.kept.in
-	for _, p := range programPackages(in.Result) {
-		if p.TypesInfo == nil {
-			continue
-		}
-		for _, file := range p.Syntax {
+	for _, p := range in.Facts.Program() {
+		for _, file := range in.Facts.Files(p) {
 			_, test := inventory.IsTestFile(in.Result.Fset.Position(file.FileStart).Filename)
 			for _, field := range slices.Concat(fieldsWritten(p.TypesInfo, file), fieldsConverted(p.TypesInfo, file)) {
 				f.everyWrite[f.edge.sites.of(field)] = true

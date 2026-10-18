@@ -21,6 +21,7 @@ type describeDocument struct {
 	SchemaVersionsAccepted []string           `json:"schema_versions_accepted"`
 	Languages              []vocab.Language   `json:"languages"`
 	Conformance            report.Conformance `json:"conformance"`
+	FactsVersionWritten    string             `json:"facts_version_written"`
 }
 
 // describe writes one JSON object naming this analyzer to stdout and nothing to
@@ -34,8 +35,7 @@ func describe(args []string, stdout, stderr io.Writer) int {
 
 	self, err := selfOf()
 	if err != nil {
-		fmt.Fprintf(stderr, "deadset-go: describe: %v\n", err)
-		return vocab.ExitFailure
+		return fail(stderr, err)
 	}
 	encoded, err := jsondoc.Encode(describeDocument{
 		Name:                   self.Analyzer.Name,
@@ -44,14 +44,13 @@ func describe(args []string, stdout, stderr io.Writer) int {
 		SchemaVersionsAccepted: self.Analyzer.SchemaVersionsAccepted,
 		Languages:              self.Analyzer.Languages,
 		Conformance:            self.Analyzer.Conformance,
+		FactsVersionWritten:    vocab.FactsVersion,
 	}, "  ")
 	if err != nil {
-		fmt.Fprintf(stderr, "deadset-go: describe: %v\n", err)
-		return vocab.ExitFailure
+		return fail(stderr, err)
 	}
 	if _, err := stdout.Write(encoded); err != nil {
-		fmt.Fprintf(stderr, "deadset-go: describe: %v\n", err)
-		return vocab.ExitFailure
+		return unwrittenAnswer(stderr, "describe", err)
 	}
 	return vocab.ExitClean
 }

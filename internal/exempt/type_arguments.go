@@ -161,7 +161,7 @@ func typeParamsIn(t types.Type) []*types.TypeParam {
 // entry point of each such decoder whether or not the generic's body decodes it.
 func (f *encodingFlow) walkTypeArguments() error {
 	own := make(map[string]bool)
-	pkgs := programPackages(f.kept.in.Result)
+	pkgs := f.kept.in.Facts.Program()
 	for _, p := range pkgs {
 		own[p.PkgPath] = true
 	}

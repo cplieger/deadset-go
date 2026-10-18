@@ -1,4 +1,4 @@
-package graph
+package roots
 
 import (
 	"go/ast"
@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/cplieger/deadset-go/v2/internal/gotypes"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"golang.org/x/tools/go/packages"
@@ -228,9 +229,9 @@ func (d *rootDetection) rootArguments(info *types.Info, call *ast.CallExpr) {
 		d.rootInto(info, []types.Type{fun}, call.Args)
 		return
 	}
-	sig, isSignature := underlying(fun).(*types.Signature)
+	sig, isSignature := gotypes.Underlying(fun).(*types.Signature)
 	for i, arg := range call.Args {
-		if fun == nil || unresolved(fun) || isSignature && unresolved(parameterType(sig, i, call.Ellipsis.IsValid())) {
+		if fun == nil || unresolved(fun) || isSignature && unresolved(gotypes.ParameterType(sig, i, call.Ellipsis.IsValid())) {
 			d.rootReached(info.TypeOf(arg))
 		}
 	}
@@ -278,7 +279,7 @@ func resultsOf(t types.Type) []types.Type {
 	if !ok {
 		return nil
 	}
-	return tupleTypes(sig.Results())
+	return gotypes.TupleTypes(sig.Results())
 }
 
 // typesOf lists the type of each expression.
@@ -293,8 +294,8 @@ func typesOf(info *types.Info, exprs []ast.Expr) []types.Type {
 // rootReached roots the members of the type of a value an unresolved position
 // receives, or of each result of a function value, which that position may call.
 func (d *rootDetection) rootReached(t types.Type) {
-	if sig, isFunc := underlying(t).(*types.Signature); isFunc {
-		for _, result := range tupleTypes(sig.Results()) {
+	if sig, isFunc := gotypes.Underlying(t).(*types.Signature); isFunc {
+		for _, result := range gotypes.TupleTypes(sig.Results()) {
 			d.rootMembers(result)
 		}
 		return

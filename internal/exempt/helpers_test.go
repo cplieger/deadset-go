@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
@@ -130,9 +131,14 @@ func inputOf(t *testing.T, archive string, opts Options, tags ...string) *Input 
 	if err != nil {
 		t.Fatalf("Setup: resolve.New(%s): %v", archive, err)
 	}
+	index, err := facts.NewIndex(result, resolver)
+	if err != nil {
+		t.Fatalf("Setup: facts.NewIndex(%s): %v", archive, err)
+	}
 	return &Input{
 		Result:  result,
 		Resolve: resolver,
+		Facts:   index,
 		Symbols: symbols,
 		Root:    root,
 		Read:    os.ReadFile,

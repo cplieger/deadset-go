@@ -9,6 +9,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/deps"
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
@@ -294,10 +295,10 @@ func TestFileNeverImportedReportsNoFileOfAPackageAnImportReaches(t *testing.T) {
 
 	in := inputOf(t, "artifacts-never-imported.txtar", applicationConfig(), Consumers{})
 	orphan := packageSymbol(t, in, "example.com/app/internal/orphan")
-	in.Merged.References = append(in.Merged.References, graph.Reference{
+	in.Merged.References = append(in.Merged.References, facts.Reference{
 		From: mainFunction(t, in),
 		To:   orphan,
-		Kind: graph.RefRead,
+		Kind: facts.RefRead,
 	})
 
 	found := emitted(t, "FileNeverImported", vocab.FileNeverImported, fileNeverImported, in)

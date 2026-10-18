@@ -2,14 +2,17 @@ package run
 
 import (
 	"bytes"
+	"errors"
 	"path/filepath"
 	"slices"
 
+	"github.com/cplieger/deadset-go/v2/internal/failure"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // Swept is the sweep stage: every suppression record the run read, bound or not,
@@ -87,6 +90,9 @@ func (p *Prepared) suppressions(r *round) ([]suppress.Record, []suppress.Refusal
 		{baseline, core.BaselineFileName},
 	} {
 		held, refused, err := read.of(filepath.Join(p.Root, read.name), p.Merged.Symbols)
+		if errors.Is(err, suppress.ErrUnreadable) {
+			err = failure.Wrap(vocab.SetupUnreadableDocument, err)
+		}
 		if err != nil {
 			return nil, nil, err
 		}

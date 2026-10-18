@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"slices"
 	"strings"
+	"syscall"
 
 	"github.com/cplieger/deadset-go/v2/internal/memory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -30,11 +31,11 @@ func main() {
 }
 
 // governed runs one invocation under the memory governor reading machine. An
-// interrupt reaches the toolchain a load spawns through the context, so a cancelled
+// interrupt or a termination signal reaches the toolchain a load spawns through the context, so a cancelled
 // run stops rather than waiting for the packages it asked for, and the governor ends
 // a run that cannot fit by cancelling the same context.
 func governed(args []string, stdout, stderr io.Writer, machine memory.Machine) int {
-	signalled, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	signalled, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	ctx, cancel := context.WithCancelCause(signalled)
 	defer cancel(nil)
@@ -68,7 +69,9 @@ func invoke(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 			set.Usage()
 			return vocab.ExitUsage
 		}
-		fmt.Fprintf(stdout, "deadset-go %s\ncontract %s\n", version(), vocab.ContractVersion)
+		if _, err := fmt.Fprintf(stdout, "deadset-go %s\ncontract %s\n", version(), vocab.ContractVersion); err != nil {
+			return unwrittenAnswer(stderr, "version", err)
+		}
 		return vocab.ExitClean
 	case "describe":
 		return describe(set.Args()[1:], stdout, stderr)

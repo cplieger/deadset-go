@@ -9,8 +9,6 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
-	"github.com/cplieger/deadset-go/v2/internal/load"
-	"golang.org/x/tools/go/packages"
 )
 
 // The boundary of the analysed program: a struct value handed to an empty-interface
@@ -327,11 +325,8 @@ type programFunction struct {
 // literal is not, because no call resolves to it by name.
 func programFunctions(in *Input) []programFunction {
 	var found []programFunction
-	for _, p := range programPackages(in.Result) {
-		if p.TypesInfo == nil {
-			continue
-		}
-		for _, file := range inventory.Files(p, in.Result.Fset) {
+	for _, p := range in.Facts.Program() {
+		for _, file := range in.Facts.Files(p) {
 			found = append(found, fileFunctions(p.TypesInfo, file)...)
 		}
 	}
@@ -352,16 +347,6 @@ func fileFunctions(info *types.Info, file *ast.File) []programFunction {
 			continue
 		}
 		found = append(found, programFunction{info: info, decl: fd, fn: fn})
-	}
-	return found
-}
-
-// programPackages are the packages of the analysed program: the target's own, then
-// every loaded consumer's in the order the scope declared them, each set ordered.
-func programPackages(r *load.Result) []*packages.Package {
-	found := inventory.Packages(r.Packages, r.Fset)
-	for _, one := range r.Consumers {
-		found = append(found, inventory.Packages(one.Packages, r.Fset)...)
 	}
 	return found
 }

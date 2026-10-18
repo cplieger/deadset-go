@@ -117,3 +117,30 @@ func TestAnalyzeCountsTheUnderscoredPackagesOfAWalkedModule(t *testing.T) {
 		t.Errorf("analyze of a walked module with an example reported %v, want %v", reported, want)
 	}
 }
+
+// A module below an underscore directory that builds against a module the search
+// finds below a target root holding no go.mod is a consumer of that module, as one
+// below a target root holding a go.mod is, so a declaration only it calls is live.
+func TestAnalyzeCountsAnUnderscoreConsumerModuleOfAWalkedTarget(t *testing.T) {
+	base := writeModule(t, map[string]string{
+		repositoryDocument: `{"target": {"kind": "application"}}`,
+		"app/go.mod":       "module example.com/app\n\ngo 1.27.1\n",
+		"app/main.go":      "package main\n\nfunc main() {}\n",
+		"app/lib/lib.go":   "package lib\n\n// Throttle is what the example calls.\nfunc Throttle() {}\n\n// Spare is what nothing calls.\nfunc Spare() {}\n",
+		"app/_examples/go.mod": "module example.com/examples\n\ngo 1.27.1\n\nrequire example.com/app v0.0.0\n\n" +
+			"replace example.com/app => ../\n",
+		"app/_examples/main.go": "package main\n\nimport \"example.com/app/lib\"\n\nfunc main() { lib.Throttle() }\n",
+	})
+
+	got := runAnalyze(t, base)
+	if got.code != vocab.ExitFindings {
+		t.Fatalf("analyze of a walked module with an example module = %d, want %d; stderr:\n%s", got.code, vocab.ExitFindings, got.stderr)
+	}
+	var reported []string
+	for _, f := range envelopeAt(t, got.reportPath).Findings {
+		reported = append(reported, string(f.Code)+" "+f.Symbol.Ref)
+	}
+	if want := []string{"DS1001 go://example.com/app/lib#Spare"}; !slices.Equal(reported, want) {
+		t.Errorf("analyze of a walked module with an example module reported %v, want %v", reported, want)
+	}
+}

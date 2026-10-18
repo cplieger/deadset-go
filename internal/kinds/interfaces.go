@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/report"
@@ -44,7 +45,7 @@ func unusedInterface(in *Input) ([]Finding, error) {
 	if in == nil || in.Sweep == nil {
 		return nil, nil
 	}
-	facts := interfacesOf(in)
+	known := interfacesOf(in)
 
 	var found []Finding
 	for i := range in.Sweep.Candidates {
@@ -62,7 +63,7 @@ func unusedInterface(in *Input) ([]Finding, error) {
 		}
 		one.Relation = candidate.Relation
 		one.TestOnly = testOnly(candidate)
-		one.Details.Implementations = facts.implementationsOf(candidate.ID)
+		one.Details.Implementations = known.implementationsOf(candidate.ID)
 		found = append(found, one)
 	}
 	return found, nil
@@ -79,7 +80,7 @@ func uncalledInterfaceMethod(in *Input) ([]Finding, error) {
 	if in == nil || in.Sweep == nil {
 		return nil, nil
 	}
-	facts := interfacesOf(in)
+	known := interfacesOf(in)
 
 	var found []Finding
 	for i := range in.Sweep.Candidates {
@@ -88,7 +89,7 @@ func uncalledInterfaceMethod(in *Input) ([]Finding, error) {
 		if symbol == nil || symbol.Kind != inventory.KindInterfaceMethod || symbol.InTestFile {
 			continue
 		}
-		if in.candidateOf(symbol.Parent) != nil || facts.exempt(candidate.ID) || testOnly(candidate) {
+		if in.candidateOf(symbol.Parent) != nil || known.exempt(candidate.ID) || testOnly(candidate) {
 			continue
 		}
 		one, held := in.finding(candidate.ID, vocab.UncalledInterfaceMethod, uncalledInterfaceMethodMessage)
@@ -96,7 +97,7 @@ func uncalledInterfaceMethod(in *Input) ([]Finding, error) {
 			continue
 		}
 		one.Relation = candidate.Relation
-		one.Details.Implementations = facts.implementationsOf(symbol.Parent)
+		one.Details.Implementations = known.implementationsOf(symbol.Parent)
 		found = append(found, one)
 	}
 	return found, nil
@@ -114,12 +115,12 @@ func unusedSatisfactionAssertion(in *Input) ([]Finding, error) {
 	if in == nil {
 		return nil, nil
 	}
-	facts := interfacesOf(in)
+	known := interfacesOf(in)
 
 	var found []Finding
-	for _, asserted := range facts.assertions {
+	for _, asserted := range known.assertions {
 		symbol, iface := in.symbol(asserted.Var), in.symbol(asserted.Interface)
-		if symbol == nil || iface == nil || symbol.InTestFile || facts.usedAsType[asserted.Interface] ||
+		if symbol == nil || iface == nil || symbol.InTestFile || known.usedAsType[asserted.Interface] ||
 			in.index().retained[asserted.Var] {
 			continue
 		}
@@ -132,12 +133,12 @@ func unusedSatisfactionAssertion(in *Input) ([]Finding, error) {
 		one.Symbol.Ref, one.Symbol.Name = iface.Ref, iface.Name
 		// A program the run does not hold may name a published interface, whatever consumers loaded.
 		if in.publishedAPI(iface) {
-			if concrete := in.symbol(facts.assertedType[asserted]); concrete != nil && in.publishedAPI(concrete) {
+			if concrete := in.symbol(known.assertedType[asserted]); concrete != nil && in.publishedAPI(concrete) {
 				continue
 			}
 			one.ceiling = vocab.Possible
 		}
-		one.Details.Implementations = facts.implementationsOf(asserted.Interface)
+		one.Details.Implementations = known.implementationsOf(asserted.Interface)
 		found = append(found, one)
 	}
 	return found, nil
@@ -214,7 +215,7 @@ func interfacesOf(in *Input) *interfaceFacts {
 // A selection through an interface value names the method the interface declares
 // rather than the method of the concrete type behind it, which is why a direct call
 // on a concrete value reaches nothing here.
-func (f *interfaceFacts) references(in *Input, refs []graph.Reference) {
+func (f *interfaceFacts) references(in *Input, refs []facts.Reference) {
 	for i := range refs {
 		reference := &refs[i]
 		to := in.symbol(reference.To)
@@ -233,9 +234,9 @@ func (f *interfaceFacts) references(in *Input, refs []graph.Reference) {
 
 // selects reports whether one reference kind reaches a method through the value it
 // is written on: a call, and a selection that takes the method as a value.
-func selects(kind graph.RefKind) bool {
+func selects(kind facts.RefKind) bool {
 	switch kind {
-	case graph.RefCall, graph.RefRead:
+	case facts.RefCall, facts.RefRead:
 		return true
 	default:
 		return false
@@ -245,9 +246,9 @@ func selects(kind graph.RefKind) bool {
 // namesAsType reports whether one reference kind uses its target as a type, which
 // is what an interface exists for: a type position, an embedding, a type assertion
 // or type-switch case, and a conversion.
-func namesAsType(kind graph.RefKind) bool {
+func namesAsType(kind facts.RefKind) bool {
 	switch kind {
-	case graph.RefTypeUse, graph.RefEmbed, graph.RefAssert, graph.RefConversion:
+	case facts.RefTypeUse, facts.RefEmbed, facts.RefAssert, facts.RefConversion:
 		return true
 	default:
 		return false
@@ -434,15 +435,15 @@ func (in *Input) testCalledInterfaceMethod(candidate *graph.Candidate, symbol *i
 // method's dead component. A method a test calls keeps its implementations, which the
 // test reaches through it. It reads the inventory, the references and the types alone.
 func InterfaceImplementations(in *Input) (uncalled map[inventory.SymbolID]bool, uses []graph.Use) {
-	facts := interfacesOf(in)
+	known := interfacesOf(in)
 	uncalled = make(map[inventory.SymbolID]bool)
-	for method := range facts.declaredBy {
+	for method := range known.declaredBy {
 		symbol := in.symbol(method)
-		if symbol == nil || symbol.InTestFile || facts.exempt(method) || facts.called[method] {
+		if symbol == nil || symbol.InTestFile || known.exempt(method) || known.called[method] {
 			continue
 		}
 		uncalled[method] = true
-		for _, implementor := range facts.implementors[method] {
+		for _, implementor := range known.implementors[method] {
 			uses = append(uses, graph.Use{From: method, To: implementor})
 		}
 	}
@@ -525,7 +526,7 @@ func declaredIn(one *Configured) declared {
 		written: make(map[token.Pos]*ast.FuncDecl),
 		seen:    make(map[inventory.SymbolID]bool),
 	}
-	for _, p := range inventory.Packages(one.Result.Packages, one.Result.Fset) {
+	for _, p := range one.Facts.Packages() {
 		d.collect(one, p)
 	}
 	slices.SortFunc(d.interfaces, func(a, b declaredInterface) int {
@@ -552,7 +553,7 @@ func (d *declared) collect(one *Configured, p *packages.Package) {
 		d.seen[id] = true
 		d.keep(id, name)
 	}
-	for _, file := range p.Syntax {
+	for _, file := range one.Facts.Files(p) {
 		d.declarations(p.TypesInfo, file)
 	}
 }

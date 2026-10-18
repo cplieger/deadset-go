@@ -93,16 +93,13 @@ func newValueFlow(in *Input) *valueFlow {
 		calls: make(map[*types.Func][]flowCall), uses: make(map[*types.Func]int),
 		embedded: make(map[*types.Var][]string), embedDirs: make(map[*types.Var]string),
 	}
-	for _, p := range programPackages(in.Result) {
-		if p.TypesInfo == nil {
-			continue
-		}
+	for _, p := range in.Facts.Program() {
 		for _, obj := range p.TypesInfo.Uses {
 			if fn, isFunc := obj.(*types.Func); isFunc {
 				f.uses[fn.Origin()]++
 			}
 		}
-		for _, file := range p.Syntax {
+		for _, file := range in.Facts.Files(p) {
 			f.index(p.TypesInfo, filepath.Dir(f.fset.Position(file.FileStart).Filename), file)
 		}
 	}

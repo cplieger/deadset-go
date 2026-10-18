@@ -12,10 +12,12 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/exempt"
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
 	spec "github.com/cplieger/deadset-spec/v8"
@@ -172,14 +174,14 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 	// makes, and every stage of the fixture reads the one value as the composition
 	// root hands it to every stage of a run.
 	mode := graph.Mode{Production: true}
-	rootOptions := graph.RootOptions{
+	rootOptions := roots.RootOptions{
 		Patterns:     resolved.Roots.Patterns,
 		PublishedAPI: resolved.Target.Kind == report.TargetKindLibrary,
 	}
 
 	per := make([]Configured, len(configurations))
 	passes := make([]graph.Configured, len(configurations))
-	classes := make([]graph.TestClasses, len(configurations))
+	classes := make([]roots.TestClasses, len(configurations))
 	var exemptions, testEvidence []graph.Exemption
 	var root string
 	var loadedConsumers []string
@@ -196,11 +198,16 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 		if err != nil {
 			t.Fatalf("Setup: resolve.New(%s): %v", c.ID, err)
 		}
-		roots, _ := graph.Roots(result, resolver, symbols, rootOptions)
-		classes[i] = graph.ClassifyTestSupport(result, symbols, roots, rootOptions.PublishedAPI)
+		index, err := facts.NewIndex(result, resolver)
+		if err != nil {
+			t.Fatalf("Setup: facts.NewIndex(%s): %v", c.ID, err)
+		}
+		rooted, _ := roots.Roots(result, resolver, symbols, rootOptions)
+		classes[i] = roots.ClassifyTestSupport(result, symbols, rooted, rootOptions.PublishedAPI)
 		computed, evidence, err := exempt.Compute(&exempt.Input{
 			Result:  result,
 			Resolve: resolver,
+			Facts:   index,
 			Symbols: symbols,
 			Root:    root,
 			Read:    os.ReadFile,
@@ -212,14 +219,14 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 		}
 		exemptions = append(exemptions, computed...)
 		testEvidence = append(testEvidence, evidence...)
-		per[i] = Configured{Result: result, Resolve: resolver, Symbols: symbols}
-		passes[i] = graph.Configured{Symbols: symbols, Roots: roots}
+		per[i] = Configured{Result: result, Resolve: resolver, Facts: index, Symbols: symbols}
+		passes[i] = graph.Configured{Symbols: symbols, Roots: rooted}
 	}
-	tests := graph.MatrixTests(classes)
+	tests := roots.MatrixTests(classes)
 	for i := range per {
-		references, _, err := graph.References(per[i].Result, per[i].Resolve, per[i].Symbols, tests)
+		references, _, err := facts.References(per[i].Result, per[i].Resolve, per[i].Symbols, tests)
 		if err != nil {
-			t.Fatalf("Setup: graph.References(%s): %v", configurations[i].ID, err)
+			t.Fatalf("Setup: facts.References(%s): %v", configurations[i].ID, err)
 		}
 		passes[i].References = references
 	}
@@ -266,12 +273,8 @@ func generatedPaths(t *testing.T, per []Configured) map[string]bool {
 
 	paths := make(map[string]bool)
 	for _, one := range per {
-		sites, err := exempt.GeneratedSites(one.Result, one.Resolve)
-		if err != nil {
-			t.Fatalf("Setup: render the package clause of a generated file: %v", err)
-		}
-		for path := range sites {
-			paths[path] = true
+		for _, g := range one.Facts.Generated() {
+			paths[g.Path] = true
 		}
 	}
 	return paths

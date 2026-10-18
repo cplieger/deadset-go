@@ -75,14 +75,18 @@ func (f *configuredFlags) resolution(ctx context.Context, stderr io.Writer) (res
 	}
 	resolved, err = config.Resolve(inputs)
 	if err != nil {
-		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
-		refusal := exitCodeFor(err)
-		if refusal == vocab.ExitUsage {
-			f.set.Usage()
-		}
-		return nil, refusal
+		return nil, f.refused(ctx, stderr, err)
 	}
 	return resolved, vocab.ExitClean
+}
+
+func (f *configuredFlags) refused(ctx context.Context, stderr io.Writer, err error) int {
+	if exitCodeFor(err) != vocab.ExitUsage {
+		return failed(ctx, stderr, err)
+	}
+	fmt.Fprintf(stderr, "deadset-go: %v\n", err)
+	f.set.Usage()
+	return vocab.ExitUsage
 }
 
 // unread prints why an input the invocation names was not read and returns its

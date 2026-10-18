@@ -20,7 +20,7 @@ func platformTwins(in *Input) map[string]map[string]bool {
 	fset := token.NewFileSet()
 	parsed := make(map[string]bool)
 	for one, p := range in.typedPackages() {
-		for _, f := range p.Syntax {
+		for _, f := range one.Facts.Files(p) {
 			holdFuncs(twins, p.PkgPath, one.Result.Fset.Position(f.FileStart).Filename, f)
 		}
 		for _, path := range p.IgnoredFiles {

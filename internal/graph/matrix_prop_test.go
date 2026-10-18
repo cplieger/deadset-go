@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"pgregory.net/rapid"
 )
 
@@ -52,7 +53,7 @@ func (d drawnMatrix) build(t *rapid.T) *graphBuilder {
 	b := d.graph.build(t, nil)
 	b.add(plantedGuard, plantedUser, plantedOnlyInLast)
 	b.ref(plantedUser, plantedGuard)
-	b.root(plantedUser, RootMain)
+	b.root(plantedUser, roots.RootMain)
 	return b
 }
 

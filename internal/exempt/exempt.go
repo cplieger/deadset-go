@@ -20,6 +20,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
@@ -100,18 +101,22 @@ type Input struct {
 	// there, which is how a class names the symbol it retains.
 	Resolve *resolve.Resolver
 
+	// Facts is the configuration's syntax in the walk order, and its generated
+	// files.
+	Facts *facts.Index
+
 	// conversions is the conversion set [conversionsOf] computed first, which every
 	// later class reads rather than walking the program again.
-	conversions *[]graph.Conversion
+	conversions *[]facts.Conversion
 
 	// allConversions is [allConversionsOf]'s answer, computed on first use.
-	allConversions *[]graph.Conversion
+	allConversions *[]facts.Conversion
 
 	// programConversions is [programConversions]' answer, computed on first use.
-	programConversions *[]graph.Conversion
+	programConversions *[]facts.Conversion
 
 	// published is [publishedConversions]' answer, computed on first use.
-	published *[]graph.Conversion
+	published *[]facts.Conversion
 
 	// assert is what the packages outside the program can assert, read from their
 	// source on first use and shared by every class that asks ([assertableOf]).

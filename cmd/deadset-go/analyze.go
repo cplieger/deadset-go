@@ -15,9 +15,11 @@ import (
 
 	"github.com/cplieger/atomicfile/v4"
 	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/failure"
 	"github.com/cplieger/deadset-go/v2/internal/jsondoc"
 	"github.com/cplieger/deadset-go/v2/internal/run"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
+	specfacts "github.com/cplieger/deadset-spec/v8/facts"
 	"github.com/cplieger/deadset-spec/v8/render"
 	"github.com/cplieger/deadset-spec/v8/report"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
@@ -100,6 +102,7 @@ func (l *formatList) Set(value string) error {
 type invocation struct {
 	template      *render.Template
 	report        string
+	facts         string
 	baselineWrite string
 	formats       formatList
 	exitCodeOff   bool
@@ -119,8 +122,7 @@ func analyze(ctx context.Context, args []string, stderr io.Writer) int {
 	}
 	self, err := selfOf()
 	if err != nil {
-		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
-		return vocab.ExitFailure
+		return fail(stderr, err)
 	}
 	found, err := findingsOf(ctx, req)
 	if err != nil {
@@ -148,8 +150,16 @@ func analyze(ctx context.Context, args []string, stderr io.Writer) int {
 	}
 
 	if err := asked.write(ctx, built, reporters, recorded, run.Provenance(self)); err != nil {
-		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
-		return vocab.ExitFailure
+		return failed(ctx, stderr, err)
+	}
+	if asked.facts != "" {
+		doc, err := found.Facts(self.Analyzer.Name, self.Analyzer.Version)
+		if err == nil {
+			err = publish(ctx, asked.facts, func(w io.Writer) error { return specfacts.Encode(w, doc) })
+		}
+		if err != nil {
+			return failed(ctx, stderr, fmt.Errorf("write the facts document: %w", err))
+		}
 	}
 	return asked.verdict(built, reporters.FailOn, stderr)
 }
@@ -159,6 +169,8 @@ func analyze(ctx context.Context, args []string, stderr io.Writer) int {
 func analyzeFlags(ctx context.Context, args []string, stderr io.Writer) (asked invocation, req *run.Request, code int) {
 	flags := configuredFlagSet("analyze", analyzeUsage, stderr)
 	flags.set.StringVar(&asked.report, "report", "", "the path the JSON report is written to")
+	factsOption, _ := vocab.OptionOf("facts")
+	flags.set.StringVar(&asked.facts, "facts", "", factsOption.Summary)
 	flags.set.Var(&asked.formats, "format", "one rendering written beside the report, repeatable, and one of "+formatNames())
 	templatePath := flags.set.String("template", "", "the file holding the template the template rendering reads")
 	flags.set.StringVar(&asked.baselineWrite, "baseline-write", "",
@@ -265,9 +277,13 @@ func (a *invocation) write(ctx context.Context, r *report.Report, reporters *con
 		BySize:   reporters.BySize,
 	}
 	for _, format := range a.formats {
-		err := publish(ctx, a.report+renderings[format], func(w io.Writer) error {
+		path := a.report + renderings[format]
+		err := publish(ctx, path, func(w io.Writer) error {
 			if err := render.Render(w, format, r, opts); err != nil || format != vocab.FormatText {
-				return err
+				if err != nil {
+					return failure.Wrap(vocab.RunUnwrittenOutput, fmt.Errorf("render %s: %w", path, err))
+				}
+				return nil
 			}
 			return render.Summary(w, r)
 		})
@@ -289,7 +305,7 @@ func (a *invocation) write(ctx context.Context, r *report.Report, reporters *con
 func writeBaseline(ctx context.Context, path string, recorded []core.Recorded, p core.Provenance) error {
 	held, err := suppress.BaselineRows(path)
 	if err != nil {
-		return err
+		return failure.Wrap(vocab.RunUnwrittenOutput, fmt.Errorf("read back the rows %s holds: %w", path, err))
 	}
 	return publish(ctx, path, func(w io.Writer) error {
 		return core.WriteBaseline(w, recorded, p, core.OtherRows(held, suppress.OwnScheme))
@@ -330,11 +346,11 @@ func publish(ctx context.Context, path string, write func(w io.Writer) error) er
 		return fmt.Errorf("render %s: %w", path, err)
 	}
 	absolute, err := filepath.Abs(path)
-	if err != nil {
-		return fmt.Errorf("publish %s: %w", path, err)
+	if err == nil {
+		_, err = atomicfile.WriteFile(ctx, absolute, rendered.Bytes(), atomicfile.WithMode(documentMode))
 	}
-	if _, err := atomicfile.WriteFile(ctx, absolute, rendered.Bytes(), atomicfile.WithMode(documentMode)); err != nil {
-		return fmt.Errorf("publish %s: %w", path, err)
+	if err != nil {
+		return failure.Wrap(vocab.RunUnwrittenOutput, fmt.Errorf("write %s: %w", path, err))
 	}
 	return nil
 }

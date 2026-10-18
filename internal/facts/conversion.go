@@ -1,4 +1,4 @@
-package graph
+package facts
 
 import (
 	"fmt"
@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/cplieger/deadset-go/v2/internal/gotypes"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"golang.org/x/tools/go/packages"
 )
@@ -183,19 +184,7 @@ func resultTypes(sig *types.Signature) []types.Type {
 	if sig == nil {
 		return nil
 	}
-	return tupleTypes(sig.Results())
-}
-
-// tupleTypes lists the types one tuple holds.
-func tupleTypes(t *types.Tuple) []types.Type {
-	if t == nil {
-		return nil
-	}
-	out := make([]types.Type, 0, t.Len())
-	for v := range t.Variables() {
-		out = append(out, v.Type())
-	}
-	return out
+	return gotypes.TupleTypes(sig.Results())
 }
 
 // valueSpec records a declaration that names an interface type: the satisfaction
@@ -263,13 +252,13 @@ func (s *conversionScan) call(c *ast.CallExpr) {
 	if len(c.Args) == 1 && !c.Ellipsis.IsValid() {
 		if tuple, ok := s.typeOf(c.Args[0]).(*types.Tuple); ok {
 			for i := range tuple.Len() {
-				s.keep(parameterType(sig, i, false), tuple.At(i).Type(), c.Args[0].Pos())
+				s.keep(gotypes.ParameterType(sig, i, false), tuple.At(i).Type(), c.Args[0].Pos())
 			}
 			return
 		}
 	}
 	for i, arg := range c.Args {
-		s.record(parameterType(sig, i, c.Ellipsis.IsValid()), arg)
+		s.record(gotypes.ParameterType(sig, i, c.Ellipsis.IsValid()), arg)
 	}
 }
 
@@ -339,41 +328,12 @@ func calleeName(fun ast.Expr) *ast.Ident {
 	}
 }
 
-// parameterType returns the type of the parameter the argument at index reaches.
-// An argument past the last parameter of a variadic signature reaches the
-// element type of that parameter, unless the call spreads a slice into it, where
-// it reaches the slice.
-func parameterType(sig *types.Signature, index int, spread bool) types.Type {
-	params := sig.Params()
-	if params == nil || params.Len() == 0 {
-		return nil
-	}
-	last := params.Len() - 1
-	if index < last {
-		return params.At(index).Type()
-	}
-	final := params.At(last).Type()
-	if !sig.Variadic() {
-		if index > last {
-			return nil
-		}
-		return final
-	}
-	if spread {
-		return final
-	}
-	if slice, ok := final.(*types.Slice); ok {
-		return slice.Elem()
-	}
-	return final
-}
-
 // composite records the elements of one composite literal stored into an
 // interface-typed element, key or field. The literal's own type is read from the
 // type information rather than from the syntax, so an element whose type the
 // outer literal elides is recorded too.
 func (s *conversionScan) composite(lit *ast.CompositeLit) {
-	switch u := underlying(s.typeOf(lit)).(type) {
+	switch u := gotypes.Underlying(s.typeOf(lit)).(type) {
 	case *types.Slice:
 		s.elements(u.Elem(), nil, lit.Elts)
 	case *types.Array:
@@ -424,7 +384,7 @@ func (s *conversionScan) fields(st *types.Struct, elts []ast.Expr) {
 
 // send records a value sent into a channel of interface element type.
 func (s *conversionScan) send(st *ast.SendStmt) {
-	if ch, ok := underlying(s.typeOf(st.Chan)).(*types.Chan); ok {
+	if ch, ok := gotypes.Underlying(s.typeOf(st.Chan)).(*types.Chan); ok {
 		s.record(ch.Elem(), st.Value)
 	}
 }
@@ -448,7 +408,7 @@ func (s *conversionScan) rangeStmt(r *ast.RangeStmt) {
 // rangeTypes returns the two types a range clause over x yields. A clause over
 // an integer or a channel yields one value, so the second is nil.
 func (s *conversionScan) rangeTypes(x ast.Expr) (key, value types.Type) {
-	switch u := underlying(s.typeOf(x)).(type) {
+	switch u := gotypes.Underlying(s.typeOf(x)).(type) {
 	case *types.Basic:
 		if u.Info()&types.IsString != 0 {
 			return types.Typ[types.Int], types.Typ[types.Rune]
@@ -459,7 +419,7 @@ func (s *conversionScan) rangeTypes(x ast.Expr) (key, value types.Type) {
 	case *types.Array:
 		return types.Typ[types.Int], u.Elem()
 	case *types.Pointer:
-		if a, ok := underlying(u.Elem()).(*types.Array); ok {
+		if a, ok := gotypes.Underlying(u.Elem()).(*types.Array); ok {
 			return types.Typ[types.Int], a.Elem()
 		}
 	case *types.Map:
@@ -478,11 +438,11 @@ func yieldTypes(sig *types.Signature) (key, value types.Type) {
 	if sig.Params().Len() != 1 {
 		return nil, nil
 	}
-	yield, ok := underlying(sig.Params().At(0).Type()).(*types.Signature)
+	yield, ok := gotypes.Underlying(sig.Params().At(0).Type()).(*types.Signature)
 	if !ok {
 		return nil, nil
 	}
-	declared := tupleTypes(yield.Params())
+	declared := gotypes.TupleTypes(yield.Params())
 	for len(declared) < 2 {
 		declared = append(declared, nil)
 	}
@@ -735,14 +695,6 @@ func (s *conversionScan) typeSwitch(ts *ast.TypeSwitchStmt) {
 // variants of one package declare two distinct types under one path.
 func identity(t types.Type) string {
 	return types.TypeString(t, func(p *types.Package) string { return fmt.Sprintf("%p", p) })
-}
-
-// underlying returns the underlying type of t, and nil for a nil t.
-func underlying(t types.Type) types.Type {
-	if t == nil {
-		return nil
-	}
-	return t.Underlying()
 }
 
 // typeOf returns the type one expression has, and nil when the type checker

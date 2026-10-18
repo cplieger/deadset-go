@@ -4,6 +4,7 @@ import (
 	"go/types"
 	"slices"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -78,7 +79,7 @@ func newNarrowing(in *Input) *narrowing {
 //
 // Every reference counts, whichever file made it, because the scope a narrowing
 // names is the scope the source writes and a test file of the target is inside it.
-func (n *narrowing) widen(r *graph.Reference) {
+func (n *narrowing) widen(r *facts.Reference) {
 	to := n.in.symbol(r.To)
 	if to == nil {
 		return
@@ -119,7 +120,7 @@ func (n *narrowing) holdWriteOnly() {
 // satisfaction class already holds; an assertion of satisfaction counts as naming
 // the interface, because the assertion is itself a use the narrowing would break.
 func (n *narrowing) holdInterfaceSatisfying() {
-	facts := interfacesOf(n.in)
+	known := interfacesOf(n.in)
 	for i := range n.in.Per {
 		one := &n.in.Per[i]
 		if one.Result == nil || one.Resolve == nil {
@@ -127,7 +128,7 @@ func (n *narrowing) holdInterfaceSatisfying() {
 		}
 		d := declaredIn(one)
 		for _, declared := range d.interfaces {
-			if len(facts.typeUsedBy[declared.id]) == 0 {
+			if len(known.typeUsedBy[declared.id]) == 0 {
 				continue
 			}
 			n.holdSatisfiers(one, declared, d.concrete)
@@ -165,7 +166,7 @@ func (n *narrowing) holdSatisfiers(one *Configured, declared declaredInterface, 
 // narrowing kinds however narrow the target's own references are. An external test
 // package is a package of its own, so a reference from one reaches past the package
 // it tests.
-func (n *narrowing) scopeOf(to *inventory.Symbol, r *graph.Reference) narrowScope {
+func (n *narrowing) scopeOf(to *inventory.Symbol, r *facts.Reference) narrowScope {
 	from := n.in.symbol(r.From)
 	switch {
 	case from == nil:

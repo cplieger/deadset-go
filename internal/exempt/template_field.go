@@ -336,10 +336,7 @@ func newNameIndex(in *Input) nameIndex {
 	}
 
 	index := make(nameIndex)
-	for _, p := range in.Result.Packages {
-		if p.TypesInfo == nil {
-			continue
-		}
+	for _, p := range in.Facts.Packages() {
 		for _, obj := range p.TypesInfo.Defs {
 			index.add(in.Resolve, symbols, obj)
 		}

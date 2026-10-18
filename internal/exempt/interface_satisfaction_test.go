@@ -10,8 +10,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/txtar"
@@ -82,12 +84,12 @@ func symbolRef(t *testing.T, in *Input, ref string) inventory.Symbol {
 // published API is rooted.
 func sweepWith(t *testing.T, in *Input, subject string, held []graph.Exemption) graph.Result {
 	t.Helper()
-	references, _, err := graph.References(in.Result, in.Resolve, in.Symbols, graph.TestClasses{})
+	references, _, err := facts.References(in.Result, in.Resolve, in.Symbols, roots.TestClasses{})
 	if err != nil {
-		t.Fatalf("Setup: graph.References(%s): %v", subject, err)
+		t.Fatalf("Setup: facts.References(%s): %v", subject, err)
 	}
-	roots, _ := graph.Roots(in.Result, in.Resolve, in.Symbols, graph.RootOptions{PublishedAPI: true})
-	return graph.New(in.Symbols, references, roots).Sweep(&graph.SweepInput{Exempt: held})
+	rooted, _ := roots.Roots(in.Result, in.Resolve, in.Symbols, roots.RootOptions{PublishedAPI: true})
+	return graph.New(in.Symbols, references, rooted).Sweep(&graph.SweepInput{Exempt: held})
 }
 
 // candidateOf returns the candidate one sweep reported for a symbol.

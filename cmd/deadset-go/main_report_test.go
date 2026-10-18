@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/failure"
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
 	"github.com/cplieger/deadset-go/v2/internal/run"
 	spec "github.com/cplieger/deadset-spec/v8"
@@ -529,8 +530,8 @@ func TestReportOfRefusesATargetTheRunDirectoryDoesNotContain(t *testing.T) {
 	}
 
 	_, err := reportOf(t.Context(), resolved, corpusAnswered())
-	if !errors.Is(err, run.ErrReportPath) {
-		t.Fatalf("reportOf() over a target outside the run directory = %v, want a %v", err, run.ErrReportPath)
+	if failures := failure.Of(err); failures[0].Class != vocab.RunUnreportablePath {
+		t.Fatalf("reportOf() over a target outside the run directory = %v, want the run failure %s", err, vocab.RunUnreportablePath)
 	}
 	if !strings.Contains(err.Error(), dir) {
 		t.Errorf("reportOf() = %v, want an error naming the target %s", err, dir)

@@ -8,8 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
 	spec "github.com/cplieger/deadset-spec/v8"
@@ -64,17 +66,17 @@ func loadTwoModules(t *testing.T, dir string, consumers ...string) (*load.Result
 
 // passes runs the enumeration, the reference pass and the root detection over one
 // loaded configuration, which is the order the analysis runs them in.
-func passes(t *testing.T, result *load.Result, root string) ([]inventory.Symbol, []Reference, []Root) {
+func passes(t *testing.T, result *load.Result, root string) ([]inventory.Symbol, []facts.Reference, []roots.Root) {
 	t.Helper()
 	symbols, rs, err := inventoryOf(result, root, os.ReadFile)
 	if err != nil {
 		t.Fatalf("Symbols() error: %v", err)
 	}
-	refs, _, err := References(result, rs, symbols, TestClasses{})
+	refs, _, err := facts.References(result, rs, symbols, roots.TestClasses{})
 	if err != nil {
 		t.Fatalf("References() error: %v", err)
 	}
-	roots, _ := Roots(result, rs, symbols, RootOptions{})
+	roots, _ := roots.Roots(result, rs, symbols, roots.RootOptions{})
 	return symbols, refs, roots
 }
 
@@ -356,7 +358,7 @@ func TestReferencesAndSweepOverATargetOnlyDocumentAreUnchanged(t *testing.T) {
 // a golden comparison fails on any change to either. It names no field the
 // consumer half added, so the same rendering is what the stage before consumers
 // produced.
-func renderRun(symbols []inventory.Symbol, refs []Reference, r Result) string {
+func renderRun(symbols []inventory.Symbol, refs []facts.Reference, r Result) string {
 	names := named(symbols)
 	var b strings.Builder
 	for _, ref := range refs {

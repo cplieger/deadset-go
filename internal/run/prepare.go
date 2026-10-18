@@ -57,6 +57,7 @@ func (l *Loaded) Prepare(production bool) (*Prepared, error) {
 		in := &exempt.Input{
 			Result:  &one.Result,
 			Resolve: one.Resolve,
+			Facts:   one.Facts,
 			Symbols: one.Symbols,
 			Root:    l.Root,
 			Read:    os.ReadFile,
@@ -73,7 +74,7 @@ func (l *Loaded) Prepare(production bool) (*Prepared, error) {
 		for j := range filled {
 			p.filled[filled[j].ID] = true
 		}
-		p.per[i] = kinds.Configured{Result: &one.Result, Resolve: one.Resolve, Symbols: one.Symbols}
+		p.per[i] = kinds.Configured{Result: &one.Result, Resolve: one.Resolve, Facts: one.Facts, Symbols: one.Symbols}
 	}
 	uncalled, uses := kinds.InterfaceImplementations(&kinds.Input{Merged: l.Merged, Per: p.per})
 	p.uses = uses

@@ -27,10 +27,12 @@ type Resolver struct {
 	consumers []consumerPositions
 }
 
-// consumerPositions renders the files of one loaded consumer against its own root.
+// consumerPositions renders the files of one loaded consumer against its own root,
+// the directory of its module, or against no root where its packages name none.
 type consumerPositions struct {
-	pos *inventory.Positions
-	id  string
+	pos    *inventory.Positions
+	id     string
+	rooted bool
 }
 
 // New prepares the resolver of one loaded configuration over the inventory
@@ -46,9 +48,11 @@ func New(r *load.Result, inv *inventory.Inventory) (*Resolver, error) {
 		paths:   make(map[string]bool),
 	}
 	for _, consumer := range r.Referencing() {
-		if module := ConsumerModule(&consumer); module != nil {
-			rs.consumers = append(rs.consumers, consumerPositions{id: consumer.ID, pos: rs.pos.Under(module.Dir)})
+		held := consumerPositions{id: consumer.ID, pos: rs.pos.Under("")}
+		if module := consumerModule(&consumer); module != nil {
+			held = consumerPositions{id: consumer.ID, pos: rs.pos.Under(module.Dir), rooted: true}
 		}
+		rs.consumers = append(rs.consumers, held)
 	}
 	for pos, id := range inv.Sites() {
 		rs.written[rs.pos.Offset(pos)] = id
@@ -94,9 +98,9 @@ func defined(pkgs []*packages.Package) map[token.Pos]bool {
 	return at
 }
 
-// ConsumerModule returns the module one consumer's packages belong to, which is
+// consumerModule returns the module one consumer's packages belong to, which is
 // what its files are rendered relative to.
-func ConsumerModule(consumer *load.Consumer) *packages.Module {
+func consumerModule(consumer *load.Consumer) *packages.Module {
 	for _, pkg := range consumer.Packages {
 		if pkg.Module != nil && pkg.Module.Dir != "" {
 			return pkg.Module
@@ -173,6 +177,10 @@ func (rs *Resolver) packageDir(p *types.Package) string {
 // Positions is the renderer of the target's files, the inventory's.
 func (rs *Resolver) Positions() *inventory.Positions { return rs.pos }
 
+// Consumer is the renderer of the files of the consumer at place i of
+// [load.Result.Referencing], the one [Resolver.Site] renders its evidence with.
+func (rs *Resolver) Consumer(i int) *inventory.Positions { return rs.consumers[i].pos }
+
 // Render converts pos into the position a report carries: a path relative to the
 // target root with the solidus as separator, and a column counting UTF-16 code
 // units. Every file it reads it reads once.
@@ -191,7 +199,7 @@ func (rs *Resolver) Site(pos token.Pos) (consumer string, at token.Position, err
 		held = nil
 	}
 	for _, c := range rs.consumers {
-		if c.pos.Relative(name) != "" && (held == nil || len(c.pos.Root) > len(held.Root)) {
+		if c.rooted && c.pos.Relative(name) != "" && (held == nil || len(c.pos.Root) > len(held.Root)) {
 			held, owner = c.pos, c.id
 		}
 	}
