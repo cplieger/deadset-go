@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -130,7 +130,7 @@ func TestARecordOnASymbolThatWouldJoinAWithheldComponentIsDormant(t *testing.T) 
 	const markedID inventory.SymbolID = "catalog.go:40:6"
 	in.Merged.Symbols = append(in.Merged.Symbols,
 		handSymbol(markedID, "go://example.com/app#marked", "marked", "example.com/app", "catalog.go", 40, 42, false))
-	in.Merged.References = append(in.Merged.References, graph.Reference{From: exportedID, To: markedID, Kind: graph.RefCall})
+	in.Merged.References = append(in.Merged.References, facts.Reference{From: exportedID, To: markedID, Kind: facts.RefCall})
 	in.Refs[markedID] = "go://example.com/app#marked"
 	heldBackMark(in, markedID)
 
@@ -150,7 +150,7 @@ func TestARecordOnASymbolThatReferencesAMemberOfAWithheldComponentIsDormant(t *t
 	const markedID inventory.SymbolID = "catalog.go:40:6"
 	in.Merged.Symbols = append(in.Merged.Symbols,
 		handSymbol(markedID, "go://example.com/app#marked", "marked", "example.com/app", "catalog.go", 40, 42, false))
-	in.Merged.References = append(in.Merged.References, graph.Reference{From: markedID, To: helperID, Kind: graph.RefCall})
+	in.Merged.References = append(in.Merged.References, facts.Reference{From: markedID, To: helperID, Kind: facts.RefCall})
 	in.Refs[markedID] = "go://example.com/app#marked"
 	heldBackMark(in, markedID)
 

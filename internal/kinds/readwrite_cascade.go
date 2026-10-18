@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -283,7 +283,7 @@ func fallsWithAnnotation(in *Input, symbol *inventory.Symbol) bool {
 }
 
 // holderOf is the subject whose annotation or writes hold one reference's position.
-func holderOf(spans map[inventory.SymbolID][]inventory.SourceRange, r *graph.Reference) (inventory.SymbolID, bool) {
+func holderOf(spans map[inventory.SymbolID][]inventory.SourceRange, r *facts.Reference) (inventory.SymbolID, bool) {
 	for id, held := range spans {
 		for i := range held {
 			if held[i].Holds(r.Site) {
@@ -302,12 +302,13 @@ func subjectSpans(in *Input, subjects map[inventory.SymbolID]*uses) map[inventor
 	spans := make(map[inventory.SymbolID][]inventory.SourceRange)
 	done := make(map[string]bool)
 	for typed := range in.typedFiles() {
-		site, err := typed.one.Resolve.Render(typed.file.FileStart)
-		if err != nil || done[site.Filename] {
+		positions := typed.one.Resolve.Positions()
+		file := positions.Relative(positions.Fset.PositionFor(typed.file.FileStart, false).Filename)
+		if done[file] {
 			continue
 		}
-		done[site.Filename] = true
-		annotationSpans(typed, at[site.Filename], spans)
+		done[file] = true
+		annotationSpans(typed, at[file], spans)
 	}
 	for id, u := range subjects {
 		spans[id] = append(spans[id], u.spans...)

@@ -6,6 +6,7 @@ import (
 	"go/types"
 	"slices"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -130,7 +131,7 @@ func (*errorsDuckScan) tuple(list []types.Type) *types.Tuple {
 // site the mode holds comes first, because a method keeps only its first site and a
 // test file's site retains nothing. A site an assertion derives is a chain's
 // ([errorsDuckScan.chains]).
-func (s *errorsDuckScan) sites(conversions []graph.Conversion) ([]errorsDuckSite, error) {
+func (s *errorsDuckScan) sites(conversions []facts.Conversion) ([]errorsDuckSite, error) {
 	sites := make([]errorsDuckSite, 0, len(conversions))
 	for i := range conversions {
 		c := &conversions[i]
@@ -159,9 +160,9 @@ func (s *errorsDuckScan) sites(conversions []graph.Conversion) ([]errorsDuckSite
 // writes, or one an assertion derives, brings to an interface from which a chain of
 // sites leads to error, once per chain, held by the declarations holding the sites.
 // A method a site to error retains unheld is not retained again.
-func (s *errorsDuckScan) chains(all []graph.Conversion) error {
+func (s *errorsDuckScan) chains(all []facts.Conversion) error {
 	spans := declarationSpans(s.in)
-	chains := graph.NewChains(all, func(i int) string {
+	chains := facts.NewChains(all, func(i int) string {
 		holder, _ := spans.declarationAt(s.in, &all[i], all[i].Site)
 		return string(holder)
 	})
@@ -183,7 +184,7 @@ func (s *errorsDuckScan) chains(all []graph.Conversion) error {
 
 // throughChains retains the matching methods of one site's concrete type once per
 // chain from the site's interface to error.
-func (s *errorsDuckScan) throughChains(spans *spans, chains *graph.Chains, c *graph.Conversion) error {
+func (s *errorsDuckScan) throughChains(spans *spans, chains *facts.Chains, c *facts.Conversion) error {
 	start := c.Held
 	if len(start) == 0 {
 		start = []token.Pos{c.Site}

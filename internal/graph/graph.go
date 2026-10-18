@@ -1,9 +1,12 @@
-// Package graph collects the references and the roots of one loaded
-// configuration over its inventory, classifies its test-support packages, and
-// sweeps the merged matrix for the declarations nothing keeps live.
+// Package graph merges the configurations of a matrix and sweeps it for the
+// declarations nothing keeps live.
 package graph
 
-import "github.com/cplieger/deadset-go/v2/internal/inventory"
+import (
+	"github.com/cplieger/deadset-go/v2/internal/facts"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
+)
 
 // outside is the position of a symbol the inventory does not hold.
 const outside = -1
@@ -40,7 +43,7 @@ type calls struct {
 // rooted is one root the inventory holds, at the position of the symbol it names.
 type rooted struct {
 	at   int
-	kind RootKind
+	kind roots.RootKind
 }
 
 // Graph is one build configuration's symbols, the references between them and
@@ -67,7 +70,7 @@ type Graph struct {
 // one to a symbol outside it, and a root naming none, are kept nowhere. The symbols
 // slice is held, not copied, and its order (by site) is the order every set of a
 // Result reads in.
-func New(symbols []inventory.Symbol, refs []Reference, roots []Root) *Graph {
+func New(symbols []inventory.Symbol, refs []facts.Reference, seeds []roots.Root) *Graph {
 	g := &Graph{
 		index:    make(map[inventory.SymbolID]int, len(symbols)),
 		symbols:  symbols,
@@ -94,7 +97,7 @@ func New(symbols []inventory.Symbol, refs []Reference, roots []Root) *Graph {
 	for i := range refs {
 		g.add(&refs[i])
 	}
-	for _, r := range roots {
+	for _, r := range seeds {
 		if at := g.at(r.ID); at != outside {
 			g.rooted = append(g.rooted, rooted{at: at, kind: r.Kind})
 		}
@@ -106,7 +109,7 @@ func New(symbols []inventory.Symbol, refs []Reference, roots []Root) *Graph {
 // target, and where a loaded consumer made it, in the record that a module outside
 // the target calls the symbol. It reports whether it appended an edge to From's
 // adjacency.
-func (g *Graph) add(r *Reference) bool {
+func (g *Graph) add(r *facts.Reference) bool {
 	to := g.at(r.To)
 	if to == outside {
 		return false

@@ -9,14 +9,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 )
 
 // analysis is one fixture's symbol inventory and the references over it.
 type analysis struct {
 	names   map[inventory.SymbolID]string
 	symbols []inventory.Symbol
-	refs    []Reference
+	refs    []facts.Reference
 	rules   []inventory.TestFileRule
 }
 
@@ -58,7 +60,7 @@ func (a analysis) render() string {
 }
 
 // count returns how many references of one kind run between two declarations.
-func (a analysis) count(from, to string, kind RefKind) int {
+func (a analysis) count(from, to string, kind facts.RefKind) int {
 	found := 0
 	for _, r := range a.refs {
 		if a.name(r.From) == from && a.name(r.To) == to && r.Kind == kind {
@@ -70,7 +72,7 @@ func (a analysis) count(from, to string, kind RefKind) int {
 
 // positions lists where the references of one kind to one declaration are
 // written.
-func (a analysis) positions(to string, kind RefKind) []string {
+func (a analysis) positions(to string, kind facts.RefKind) []string {
 	var found []string
 	for _, r := range a.refs {
 		if a.name(r.To) == to && r.Kind == kind {
@@ -113,48 +115,48 @@ func TestReferencesRecordsTheEnclosingDeclaration(t *testing.T) {
 	cases := []struct {
 		from string
 		to   string
-		kind RefKind
+		kind facts.RefKind
 		want int
 	}{
 		// A method selector lands on the field, from the method that selects it.
-		{from: "(*Catalog).Size", to: "Catalog.entries", kind: RefRead, want: 1},
+		{from: "(*Catalog).Size", to: "Catalog.entries", kind: facts.RefRead, want: 1},
 		// A promoted member is reached through the embedded field, which the
 		// selector references as well as the member itself.
-		{from: "Promoted", to: "Buffered.Catalog", kind: RefRead, want: 2},
-		{from: "Promoted", to: "Catalog.entries", kind: RefRead, want: 1},
-		{from: "Promoted", to: "Catalog.pair", kind: RefRead, want: 1},
-		{from: "Promoted", to: "Catalog.pair.low", kind: RefRead, want: 1},
-		{from: "Promoted", to: "Buffered.Fetcher", kind: RefRead, want: 1},
-		{from: "Promoted", to: "Fetcher.Fetch", kind: RefCall, want: 1},
+		{from: "Promoted", to: "Buffered.Catalog", kind: facts.RefRead, want: 2},
+		{from: "Promoted", to: "Catalog.entries", kind: facts.RefRead, want: 1},
+		{from: "Promoted", to: "Catalog.pair", kind: facts.RefRead, want: 1},
+		{from: "Promoted", to: "Catalog.pair.low", kind: facts.RefRead, want: 1},
+		{from: "Promoted", to: "Buffered.Fetcher", kind: facts.RefRead, want: 1},
+		{from: "Promoted", to: "Fetcher.Fetch", kind: facts.RefCall, want: 1},
 		// A self-reference counts, because the call is written in a declaration
 		// the graph holds.
-		{from: "Depth", to: "Depth", kind: RefCall, want: 1},
+		{from: "Depth", to: "Depth", kind: facts.RefCall, want: 1},
 		// A type-switch case and a type assertion name their type.
-		{from: "Classify", to: "Catalog", kind: RefAssert, want: 1},
-		{from: "Classify", to: "Fetcher", kind: RefAssert, want: 1},
-		{from: "Assert", to: "Catalog", kind: RefAssert, want: 1},
-		{from: "Classify", to: "Tier", kind: RefConversion, want: 1},
+		{from: "Classify", to: "Catalog", kind: facts.RefAssert, want: 1},
+		{from: "Classify", to: "Fetcher", kind: facts.RefAssert, want: 1},
+		{from: "Assert", to: "Catalog", kind: facts.RefAssert, want: 1},
+		{from: "Classify", to: "Tier", kind: facts.RefConversion, want: 1},
 		// An embedded field references its type from the field the language
 		// names after that type; an embedded interface has no field of its own,
 		// so the interface that embeds it is what references it.
-		{from: "Buffered.Catalog", to: "Catalog", kind: RefEmbed, want: 1},
-		{from: "Buffered.Fetcher", to: "Fetcher", kind: RefEmbed, want: 1},
-		{from: "Reader", to: "Fetcher", kind: RefEmbed, want: 1},
+		{from: "Buffered.Catalog", to: "Catalog", kind: facts.RefEmbed, want: 1},
+		{from: "Buffered.Fetcher", to: "Fetcher", kind: facts.RefEmbed, want: 1},
+		{from: "Reader", to: "Fetcher", kind: facts.RefEmbed, want: 1},
 		// A type-set element is a type use rather than an embed.
-		{from: "Stored", to: "Catalog", kind: RefTypeUse, want: 1},
-		{from: "Stored", to: "Buffered", kind: RefTypeUse, want: 1},
+		{from: "Stored", to: "Catalog", kind: facts.RefTypeUse, want: 1},
+		{from: "Stored", to: "Buffered", kind: facts.RefTypeUse, want: 1},
 		// A field's type, a variable's type and a type parameter's constraint
 		// reference from the declaration that carries them.
-		{from: "Catalog.entries", to: "Tier", kind: RefTypeUse, want: 1},
-		{from: "Catalog.pair.low", to: "Tier", kind: RefTypeUse, want: 1},
-		{from: "lonely", to: "Tier", kind: RefTypeUse, want: 1},
-		{from: "Constrained[F]", to: "Fetcher", kind: RefTypeUse, want: 1},
-		{from: "Pair[A]", to: "Fetcher", kind: RefTypeUse, want: 1},
-		{from: "Pair[B]", to: "Fetcher", kind: RefTypeUse, want: 1},
+		{from: "Catalog.entries", to: "Tier", kind: facts.RefTypeUse, want: 1},
+		{from: "Catalog.pair.low", to: "Tier", kind: facts.RefTypeUse, want: 1},
+		{from: "lonely", to: "Tier", kind: facts.RefTypeUse, want: 1},
+		{from: "Constrained[F]", to: "Fetcher", kind: facts.RefTypeUse, want: 1},
+		{from: "Pair[A]", to: "Fetcher", kind: facts.RefTypeUse, want: 1},
+		{from: "Pair[B]", to: "Fetcher", kind: facts.RefTypeUse, want: 1},
 		// A method's receiver and its results reference from the method.
-		{from: "(*Catalog).Size", to: "Catalog", kind: RefTypeUse, want: 1},
-		{from: "(*Catalog).Size", to: "Tier", kind: RefTypeUse, want: 1},
-		{from: "(*Catalog).Size", to: "Tier", kind: RefConversion, want: 1},
+		{from: "(*Catalog).Size", to: "Catalog", kind: facts.RefTypeUse, want: 1},
+		{from: "(*Catalog).Size", to: "Tier", kind: facts.RefTypeUse, want: 1},
+		{from: "(*Catalog).Size", to: "Tier", kind: facts.RefConversion, want: 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.from+"-to-"+tc.to+"-"+tc.kind.String(), func(t *testing.T) {
@@ -169,10 +171,10 @@ func TestReferencesRecordsTheEnclosingDeclaration(t *testing.T) {
 func TestReferencesRecordWhatARepeatedListNamesFromEachConstantRepeatingIt(t *testing.T) {
 	a := analyze(t, "constant-groups.txtar")
 
-	if got := a.count("running", "phase", RefTypeUse); got != 1 {
+	if got := a.count("running", "phase", facts.RefTypeUse); got != 1 {
 		t.Errorf("References(constant-groups.txtar) holds %d type uses of phase from running, want 1: running repeats the typed list of idle", got)
 	}
-	if got := a.count("tail", "phase", RefTypeUse); got != 0 {
+	if got := a.count("tail", "phase", facts.RefTypeUse); got != 0 {
 		t.Errorf("References(constant-groups.txtar) holds %d type uses of phase from tail, want none: tail writes a list of its own", got)
 	}
 }
@@ -237,73 +239,73 @@ func TestReferencesSplitsReadsFromWrites(t *testing.T) {
 		name string
 		from string
 		to   string
-		kind RefKind
+		kind facts.RefKind
 		want int
 	}{
-		{name: "assignment_writes", from: "Assign", to: "count", kind: RefWrite, want: 1},
-		{name: "assignment_reads_back", from: "Assign", to: "count", kind: RefRead, want: 1},
-		{name: "compound_writes", from: "Compound", to: "count", kind: RefWrite, want: 1},
-		{name: "compound_records_no_read", from: "Compound", to: "count", kind: RefRead, want: 0},
-		{name: "increment_writes", from: "Increment", to: "count", kind: RefWrite, want: 1},
-		{name: "increment_records_no_read", from: "Increment", to: "count", kind: RefRead, want: 0},
-		{name: "address_of_reads", from: "Address", to: "count", kind: RefRead, want: 1},
-		{name: "address_of_records_no_write", from: "Address", to: "count", kind: RefWrite, want: 0},
-		{name: "selector_writes_its_member", from: "Selector", to: "Counter.total", kind: RefWrite, want: 1},
-		{name: "selector_reads_what_it_reaches_through", from: "Selector", to: "shared", kind: RefRead, want: 1},
-		{name: "selector_does_not_write_that_value", from: "Selector", to: "shared", kind: RefWrite, want: 0},
-		{name: "range_assignment_writes_its_key", from: "Loop", to: "count", kind: RefWrite, want: 1},
-		{name: "two_value_assignment_writes_the_field", from: "Swap", to: "Counter.total", kind: RefWrite, want: 1},
-		{name: "two_value_assignment_reads_the_field", from: "Swap", to: "Counter.total", kind: RefRead, want: 1},
-		{name: "two_value_assignment_writes_the_variable", from: "Swap", to: "count", kind: RefWrite, want: 1},
-		{name: "two_value_assignment_reads_the_variable", from: "Swap", to: "count", kind: RefRead, want: 1},
-		{name: "field_holding_a_slice_stored_through_is_read", from: "Element", to: "Counter.names", kind: RefRead, want: 1},
-		{name: "field_holding_a_slice_stored_through_is_not_written", from: "Element", to: "Counter.names", kind: RefWrite, want: 0},
-		{name: "field_holding_a_map_deleted_from_is_read", from: "Forget", to: "Held.lookup", kind: RefRead, want: 1},
-		{name: "field_holding_a_map_deleted_from_is_not_written", from: "Forget", to: "Held.lookup", kind: RefWrite, want: 0},
-		{name: "field_holding_an_array_stored_through_is_written", from: "Slotted", to: "Held.slots", kind: RefWrite, want: 1},
-		{name: "field_holding_an_array_of_structs_stored_through_an_element_is_written", from: "Celled", to: "Paned.cells", kind: RefWrite, want: 1},
-		{name: "field_holding_an_array_of_structs_stored_through_an_element_is_not_read", from: "Celled", to: "Paned.cells", kind: RefRead, want: 0},
-		{name: "field_holding_a_struct_stored_through_is_written", from: "Nested", to: "Held.inner", kind: RefWrite, want: 1},
-		{name: "field_holding_a_struct_stored_through_is_not_read", from: "Nested", to: "Held.inner", kind: RefRead, want: 0},
-		{name: "keyed_collection_is_written", from: "Entry", to: "index", kind: RefWrite, want: 1},
-		{name: "keyed_collection_is_not_read", from: "Entry", to: "index", kind: RefRead, want: 0},
-		{name: "delete_writes_the_collection", from: "Remove", to: "entries", kind: RefWrite, want: 1},
-		{name: "delete_does_not_read_the_collection", from: "Remove", to: "entries", kind: RefRead, want: 0},
+		{name: "assignment_writes", from: "Assign", to: "count", kind: facts.RefWrite, want: 1},
+		{name: "assignment_reads_back", from: "Assign", to: "count", kind: facts.RefRead, want: 1},
+		{name: "compound_writes", from: "Compound", to: "count", kind: facts.RefWrite, want: 1},
+		{name: "compound_records_no_read", from: "Compound", to: "count", kind: facts.RefRead, want: 0},
+		{name: "increment_writes", from: "Increment", to: "count", kind: facts.RefWrite, want: 1},
+		{name: "increment_records_no_read", from: "Increment", to: "count", kind: facts.RefRead, want: 0},
+		{name: "address_of_reads", from: "Address", to: "count", kind: facts.RefRead, want: 1},
+		{name: "address_of_records_no_write", from: "Address", to: "count", kind: facts.RefWrite, want: 0},
+		{name: "selector_writes_its_member", from: "Selector", to: "Counter.total", kind: facts.RefWrite, want: 1},
+		{name: "selector_reads_what_it_reaches_through", from: "Selector", to: "shared", kind: facts.RefRead, want: 1},
+		{name: "selector_does_not_write_that_value", from: "Selector", to: "shared", kind: facts.RefWrite, want: 0},
+		{name: "range_assignment_writes_its_key", from: "Loop", to: "count", kind: facts.RefWrite, want: 1},
+		{name: "two_value_assignment_writes_the_field", from: "Swap", to: "Counter.total", kind: facts.RefWrite, want: 1},
+		{name: "two_value_assignment_reads_the_field", from: "Swap", to: "Counter.total", kind: facts.RefRead, want: 1},
+		{name: "two_value_assignment_writes_the_variable", from: "Swap", to: "count", kind: facts.RefWrite, want: 1},
+		{name: "two_value_assignment_reads_the_variable", from: "Swap", to: "count", kind: facts.RefRead, want: 1},
+		{name: "field_holding_a_slice_stored_through_is_read", from: "Element", to: "Counter.names", kind: facts.RefRead, want: 1},
+		{name: "field_holding_a_slice_stored_through_is_not_written", from: "Element", to: "Counter.names", kind: facts.RefWrite, want: 0},
+		{name: "field_holding_a_map_deleted_from_is_read", from: "Forget", to: "Held.lookup", kind: facts.RefRead, want: 1},
+		{name: "field_holding_a_map_deleted_from_is_not_written", from: "Forget", to: "Held.lookup", kind: facts.RefWrite, want: 0},
+		{name: "field_holding_an_array_stored_through_is_written", from: "Slotted", to: "Held.slots", kind: facts.RefWrite, want: 1},
+		{name: "field_holding_an_array_of_structs_stored_through_an_element_is_written", from: "Celled", to: "Paned.cells", kind: facts.RefWrite, want: 1},
+		{name: "field_holding_an_array_of_structs_stored_through_an_element_is_not_read", from: "Celled", to: "Paned.cells", kind: facts.RefRead, want: 0},
+		{name: "field_holding_a_struct_stored_through_is_written", from: "Nested", to: "Held.inner", kind: facts.RefWrite, want: 1},
+		{name: "field_holding_a_struct_stored_through_is_not_read", from: "Nested", to: "Held.inner", kind: facts.RefRead, want: 0},
+		{name: "keyed_collection_is_written", from: "Entry", to: "index", kind: facts.RefWrite, want: 1},
+		{name: "keyed_collection_is_not_read", from: "Entry", to: "index", kind: facts.RefRead, want: 0},
+		{name: "delete_writes_the_collection", from: "Remove", to: "entries", kind: facts.RefWrite, want: 1},
+		{name: "delete_does_not_read_the_collection", from: "Remove", to: "entries", kind: facts.RefRead, want: 0},
 		// An indirection writes through a value it reads: the pointer is read to
 		// find the pointee, which is not a declaration.
-		{name: "pointer_written_through_is_read", from: "Indirect", to: "slot", kind: RefRead, want: 1},
-		{name: "pointer_written_through_is_not_written", from: "Indirect", to: "slot", kind: RefWrite, want: 0},
+		{name: "pointer_written_through_is_read", from: "Indirect", to: "slot", kind: facts.RefRead, want: 1},
+		{name: "pointer_written_through_is_not_written", from: "Indirect", to: "slot", kind: facts.RefWrite, want: 0},
 		// A field a struct literal keys is an initialising store, whatever the
 		// literal spells of its own type; a key of a map literal names no field
 		// and is a read of what it does name.
-		{name: "literal_field_key_writes_the_field", from: "Keyed", to: "Record.label", kind: RefWrite, want: 1},
-		{name: "literal_field_key_does_not_read_the_field", from: "Keyed", to: "Record.label", kind: RefRead, want: 0},
-		{name: "literal_field_value_reads_what_it_names", from: "Keyed", to: "high", kind: RefRead, want: 1},
-		{name: "elided_literal_field_key_writes_the_field", from: "Elided", to: "Record.label", kind: RefWrite, want: 1},
-		{name: "map_literal_key_is_read", from: "Mapped", to: "high", kind: RefRead, want: 1},
-		{name: "map_literal_key_is_not_written", from: "Mapped", to: "high", kind: RefWrite, want: 0},
+		{name: "literal_field_key_writes_the_field", from: "Keyed", to: "Record.label", kind: facts.RefWrite, want: 1},
+		{name: "literal_field_key_does_not_read_the_field", from: "Keyed", to: "Record.label", kind: facts.RefRead, want: 0},
+		{name: "literal_field_value_reads_what_it_names", from: "Keyed", to: "high", kind: facts.RefRead, want: 1},
+		{name: "elided_literal_field_key_writes_the_field", from: "Elided", to: "Record.label", kind: facts.RefWrite, want: 1},
+		{name: "map_literal_key_is_read", from: "Mapped", to: "high", kind: facts.RefRead, want: 1},
+		{name: "map_literal_key_is_not_written", from: "Mapped", to: "high", kind: facts.RefWrite, want: 0},
 		// The read inside the append-back idiom is how the store is written, so
 		// both identifiers write; an append landing elsewhere reads its first
 		// argument.
-		{name: "append_back_writes_at_both_identifiers", from: "Grow", to: "queue", kind: RefWrite, want: 2},
-		{name: "append_back_records_no_read", from: "Grow", to: "queue", kind: RefRead, want: 0},
-		{name: "append_landing_elsewhere_reads_its_argument", from: "Spare", to: "queue", kind: RefRead, want: 1},
-		{name: "append_landing_elsewhere_writes_its_target", from: "Spare", to: "spare", kind: RefWrite, want: 1},
+		{name: "append_back_writes_at_both_identifiers", from: "Grow", to: "queue", kind: facts.RefWrite, want: 2},
+		{name: "append_back_records_no_read", from: "Grow", to: "queue", kind: facts.RefRead, want: 0},
+		{name: "append_landing_elsewhere_reads_its_argument", from: "Spare", to: "queue", kind: facts.RefRead, want: 1},
+		{name: "append_landing_elsewhere_writes_its_target", from: "Spare", to: "spare", kind: facts.RefWrite, want: 1},
 		// The idiom is matched on the name chain both sides are written as, so an
 		// append back to a field writes it twice, and an append whose sides name
 		// two different fields or two different values reads the one it appends
 		// from.
-		{name: "append_back_to_a_field_writes_it_at_both_selectors", from: "Fill", to: "Counter.names", kind: RefWrite, want: 2},
-		{name: "append_back_to_a_field_records_no_read", from: "Fill", to: "Counter.names", kind: RefRead, want: 0},
-		{name: "append_between_two_fields_writes_the_one_it_lands_in", from: "Crossed", to: "Bucket.spare", kind: RefWrite, want: 1},
-		{name: "append_between_two_fields_reads_the_one_it_appends_from", from: "Crossed", to: "Bucket.names", kind: RefRead, want: 1},
-		{name: "append_between_two_fields_does_not_write_the_one_it_appends_from", from: "Crossed", to: "Bucket.names", kind: RefWrite, want: 0},
-		{name: "append_between_two_values_writes_the_field_it_lands_in", from: "Mismatched", to: "Bucket.names", kind: RefWrite, want: 1},
-		{name: "append_between_two_values_reads_the_field_it_appends_from", from: "Mismatched", to: "Counter.names", kind: RefRead, want: 1},
+		{name: "append_back_to_a_field_writes_it_at_both_selectors", from: "Fill", to: "Counter.names", kind: facts.RefWrite, want: 2},
+		{name: "append_back_to_a_field_records_no_read", from: "Fill", to: "Counter.names", kind: facts.RefRead, want: 0},
+		{name: "append_between_two_fields_writes_the_one_it_lands_in", from: "Crossed", to: "Bucket.spare", kind: facts.RefWrite, want: 1},
+		{name: "append_between_two_fields_reads_the_one_it_appends_from", from: "Crossed", to: "Bucket.names", kind: facts.RefRead, want: 1},
+		{name: "append_between_two_fields_does_not_write_the_one_it_appends_from", from: "Crossed", to: "Bucket.names", kind: facts.RefWrite, want: 0},
+		{name: "append_between_two_values_writes_the_field_it_lands_in", from: "Mismatched", to: "Bucket.names", kind: facts.RefWrite, want: 1},
+		{name: "append_between_two_values_reads_the_field_it_appends_from", from: "Mismatched", to: "Counter.names", kind: facts.RefRead, want: 1},
 		// A compound assignment through a key writes the collection and records no
 		// read, the way the plain compound assignment above does.
-		{name: "compound_assignment_through_a_key_writes_the_collection", from: "Accumulate", to: "tally", kind: RefWrite, want: 1},
-		{name: "compound_assignment_through_a_key_records_no_read", from: "Accumulate", to: "tally", kind: RefRead, want: 0},
+		{name: "compound_assignment_through_a_key_writes_the_collection", from: "Accumulate", to: "tally", kind: facts.RefWrite, want: 1},
+		{name: "compound_assignment_through_a_key_records_no_read", from: "Accumulate", to: "tally", kind: facts.RefRead, want: 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -325,7 +327,7 @@ func TestReferencesKeepsEveryWritePositionOfOneSymbol(t *testing.T) {
 		"counter.go:50:34", // Swap
 		"counter.go:54:6",  // Loop
 	}
-	if got := a.positions("count", RefWrite); !slices.Equal(got, want) {
+	if got := a.positions("count", facts.RefWrite); !slices.Equal(got, want) {
 		t.Errorf("References(reference-writes.txtar) writes count at %v, want %v", got, want)
 	}
 }
@@ -350,10 +352,10 @@ func TestReferencesRecordsAProductionReferenceOncePerVariantSet(t *testing.T) {
 	// The package and its in-package test variant type-check catalog.go
 	// independently, so a walk per variant would record the production call
 	// twice and report three references where the source holds two.
-	if got := a.count("Resolve", "normalize", RefCall); got != 1 {
+	if got := a.count("Resolve", "normalize", facts.RefCall); got != 1 {
 		t.Errorf("References(variants.txtar) holds %d production calls from Resolve to normalize, want 1", got)
 	}
-	if got := a.count("TestNormalize", "normalize", RefCall); got != 1 {
+	if got := a.count("TestNormalize", "normalize", facts.RefCall); got != 1 {
 		t.Errorf("References(variants.txtar) holds %d calls from TestNormalize to normalize, want 1", got)
 	}
 	total := 0
@@ -375,9 +377,9 @@ func TestReferencesInspectsEachSourceFileOnce(t *testing.T) {
 		t.Fatalf("Setup: Symbols(variants.txtar): %v", err)
 	}
 
-	p := newReferencePass(result, rs, symbols, TestClasses{})
-	if err := p.walk(result.Packages); err != nil {
-		t.Fatalf("References(variants.txtar) walk error: %v", err)
+	refs, _, err := facts.References(result, rs, symbols, roots.TestClasses{})
+	if err != nil {
+		t.Fatalf("References(variants.txtar) error: %v", err)
 	}
 
 	// catalog.go is compiled by two variants and walked once, under the first of
@@ -391,8 +393,8 @@ func TestReferencesInspectsEachSourceFileOnce(t *testing.T) {
 		t.Errorf("References(variants.txtar) reached %v, want %v", reached, want)
 	}
 
-	seen := make(map[Reference]int, len(p.refs))
-	for _, r := range p.refs {
+	seen := make(map[facts.Reference]int, len(refs))
+	for _, r := range refs {
 		seen[r]++
 		if seen[r] > 1 {
 			t.Errorf("References(variants.txtar) recorded one %s reference from %q to %q at %s:%d:%d %d times, want once",
@@ -409,38 +411,32 @@ func TestReferencesOrderIsTheSameOnEveryCall(t *testing.T) {
 		t.Fatalf("Setup: Symbols(reference-kinds.txtar): %v", err)
 	}
 
-	first, _, err := References(result, rs, symbols, TestClasses{})
+	first, _, err := facts.References(result, rs, symbols, roots.TestClasses{})
 	if err != nil {
 		t.Fatalf("References first call error: %v", err)
 	}
-	second, _, err := References(result, rs, symbols, TestClasses{})
+	second, _, err := facts.References(result, rs, symbols, roots.TestClasses{})
 	if err != nil {
 		t.Fatalf("References second call error: %v", err)
 	}
 	if !slices.Equal(first, second) {
 		t.Errorf("References returned a different order on the second call\n--- first\n%v\n+++ second\n%v", first, second)
 	}
-	for i := 1; i < len(first); i++ {
-		if byUse(first[i-1], first[i]) >= 0 {
-			t.Fatalf("References order is not strictly increasing at %d: %s to %s then %s to %s",
-				i, first[i-1].From, first[i-1].To, first[i].From, first[i].To)
-		}
-	}
 }
 
 func TestRefKindStringNamesEveryKind(t *testing.T) {
 	cases := []struct {
-		kind RefKind
+		kind facts.RefKind
 		want string
 	}{
-		{RefRead, "read"},
-		{RefWrite, "write"},
-		{RefCall, "call"},
-		{RefTypeUse, "type-use"},
-		{RefConversion, "conversion"},
-		{RefEmbed, "embed"},
-		{RefAssert, "assert"},
-		{RefKind(200), "RefKind(200)"},
+		{facts.RefRead, "read"},
+		{facts.RefWrite, "write"},
+		{facts.RefCall, "call"},
+		{facts.RefTypeUse, "type-use"},
+		{facts.RefConversion, "conversion"},
+		{facts.RefEmbed, "embed"},
+		{facts.RefAssert, "assert"},
+		{facts.RefKind(200), "RefKind(200)"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.want, func(t *testing.T) {
@@ -535,7 +531,7 @@ func (a analysis) fieldReadsIn(prefix string) map[string][]string {
 	kinds := a.kinds()
 	reads := make(map[string][]string)
 	for _, r := range a.refs {
-		if r.Kind != RefRead || kinds[r.To] != inventory.KindField {
+		if r.Kind != facts.RefRead || kinds[r.To] != inventory.KindField {
 			continue
 		}
 		reads[names[r.From]] = append(reads[names[r.From]], names[r.To])
@@ -602,7 +598,7 @@ func TestReferencesRecordsAComparisonsReadsAtTheComparisonSite(t *testing.T) {
 
 	sites := make(map[string][]string)
 	for _, r := range a.refs {
-		if r.Kind != RefRead || kinds[r.To] != inventory.KindField {
+		if r.Kind != facts.RefRead || kinds[r.To] != inventory.KindField {
 			continue
 		}
 		from := names[r.From]
@@ -676,7 +672,7 @@ func TestReferencesReadAnIdenticalLiteralsFieldOnceWhateverTheVariants(t *testin
 
 	var vias []string
 	for _, r := range a.refs {
-		if a.name(r.From) == "use" && a.name(r.To) == "holder.X.C" && r.Kind == RefRead {
+		if a.name(r.From) == "use" && a.name(r.To) == "holder.X.C" && r.Kind == facts.RefRead {
 			vias = append(vias, r.Via.String())
 		}
 	}
@@ -702,7 +698,7 @@ func TestReferencesReadWhatAConversionRequiresOfTheValueItConverts(t *testing.T)
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := a.count(tc.from, tc.to, RefRead); got != tc.want {
+			if got := a.count(tc.from, tc.to, facts.RefRead); got != tc.want {
 				t.Errorf("References(conversion-reads.txtar) holds %d read references from %s to %s, want %d",
 					got, tc.from, tc.to, tc.want)
 			}
@@ -717,13 +713,13 @@ func TestReferencesResolveTheMembersSelectedOnAGoConversionOfACValue(t *testing.
 		name string
 		from string
 		to   string
-		kind RefKind
+		kind facts.RefKind
 		want int
 	}{
-		{name: "a_method_of_the_converted_value", from: "direct", to: "count.double", kind: RefCall, want: 1},
-		{name: "a_method_promoted_to_a_variable_a_conversion_initialized", from: "throughVariable", to: "inner.depth", kind: RefCall, want: 1},
-		{name: "the_embedded_field_the_promotion_passes_through", from: "throughVariable", to: "wrapper.inner", kind: RefRead, want: 1},
-		{name: "a_method_nothing_selects", from: "direct", to: "count.unused", kind: RefCall, want: 0},
+		{name: "a_method_of_the_converted_value", from: "direct", to: "count.double", kind: facts.RefCall, want: 1},
+		{name: "a_method_promoted_to_a_variable_a_conversion_initialized", from: "throughVariable", to: "inner.depth", kind: facts.RefCall, want: 1},
+		{name: "the_embedded_field_the_promotion_passes_through", from: "throughVariable", to: "wrapper.inner", kind: facts.RefRead, want: 1},
+		{name: "a_method_nothing_selects", from: "direct", to: "count.unused", kind: facts.RefCall, want: 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

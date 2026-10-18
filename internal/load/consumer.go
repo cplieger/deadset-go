@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/cplieger/deadset-go/v2/internal/failure"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
@@ -64,7 +65,7 @@ func (l *loader) consumers(units []Unit) ([]Consumer, error) {
 // target's run cannot count.
 func (l *loader) consumer(declared *discoveredModule, mains []*packages.Module) (Consumer, error) {
 	if _, err := os.Stat(declared.Dir); err != nil {
-		return Consumer{}, &SetupError{Failures: []setupFailure{{Class: vocab.SetupMissingConsumer, Detail: fmt.Sprintf(
+		return Consumer{}, &failure.Error{Failures: []failure.Failure{{Class: vocab.SetupMissingConsumer, Detail: fmt.Sprintf(
 			"the declared consumer %s does not exist; check it out at that path and install its dependencies",
 			declared.Dir,
 		)}}}
@@ -74,10 +75,10 @@ func (l *loader) consumer(declared *discoveredModule, mains []*packages.Module) 
 		spec.modules = append(spec.modules, main.Path)
 	}
 	pkgs, err := l.module(&spec, declared.Dir)
-	if setup, failed := errors.AsType[*SetupError](err); failed {
-		consumer := &SetupError{}
+	if setup, failed := errors.AsType[*failure.Error](err); failed && failure.Setup(err) {
+		consumer := &failure.Error{}
 		for _, one := range setup.Failures {
-			consumer.Failures = append(consumer.Failures, setupFailure{Class: vocab.SetupMissingConsumer, Detail: fmt.Sprintf(
+			consumer.Failures = append(consumer.Failures, failure.Failure{Class: vocab.SetupMissingConsumer, Detail: fmt.Sprintf(
 				"the declared consumer %s does not load (%s); check it out at that path and install its dependencies",
 				declared.Dir, one.Detail,
 			)})

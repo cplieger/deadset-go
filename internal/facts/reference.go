@@ -1,4 +1,7 @@
-package graph
+// Package facts is what one walk of a loaded configuration's syntax records: the
+// references with the rule behind each, the conversions to interface types, and
+// the walk order every later pass reads the configuration in.
+package facts
 
 import (
 	"cmp"
@@ -12,6 +15,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -153,20 +157,20 @@ type Reference struct {
 // carries Test; one to a declaration of another module or of the language is none.
 // A target file the resolver cannot render ends the walk with [inventory.ErrSource];
 // a consumer's files render against that consumer's root.
-func References(r *load.Result, rs *resolve.Resolver, symbols []inventory.Symbol, tests TestClasses) ([]Reference, []inventory.TestFileRule, error) {
+func References(r *load.Result, rs *resolve.Resolver, symbols []inventory.Symbol, tests roots.TestClasses) ([]Reference, []inventory.TestFileRule, error) {
 	p := newReferencePass(r, rs, symbols, tests)
 	if err := p.walk(r.Packages); err != nil {
 		return nil, nil, err
 	}
-	for _, consumer := range r.Referencing() {
-		if err := p.walkConsumer(&consumer); err != nil {
+	for i, consumer := range r.Referencing() {
+		if err := p.walkConsumer(i, &consumer); err != nil {
 			return nil, nil, err
 		}
 	}
 	slices.SortFunc(p.refs, byUse)
 	rules := []inventory.TestFileRule{{Rule: inventory.GoTestSuffixRule, Matched: p.testFiles}}
 	if p.supportFile > 0 {
-		rules = append(rules, inventory.TestFileRule{Rule: testSupportRule, Matched: p.supportFile})
+		rules = append(rules, inventory.TestFileRule{Rule: roots.TestSupportRule, Matched: p.supportFile})
 	}
 	return p.refs, rules, nil
 }
@@ -198,7 +202,7 @@ type referencePass struct {
 	resolve     *resolve.Resolver
 	at          *inventory.Positions // renders the file being walked, the resolver's while the target is walked
 	info        *types.Info          // the type information of the variant that compiles the file being walked
-	tests       TestClasses
+	tests       roots.TestClasses
 	packages    map[load.PackageID]inventory.SymbolID // the inventory's package symbol per package, which an import resolves to
 	pkgKeys     map[*types.Package]load.PackageID
 	kinds       map[token.Pos]RefKind  // the kind a parent node fixes for an identifier below it
@@ -219,7 +223,7 @@ type referencePass struct {
 }
 
 // newReferencePass prepares one configuration's walk.
-func newReferencePass(r *load.Result, rs *resolve.Resolver, symbols []inventory.Symbol, tests TestClasses) *referencePass {
+func newReferencePass(r *load.Result, rs *resolve.Resolver, symbols []inventory.Symbol, tests roots.TestClasses) *referencePass {
 	p := &referencePass{
 		resolve:   rs,
 		at:        rs.Positions(),
@@ -229,7 +233,7 @@ func newReferencePass(r *load.Result, rs *resolve.Resolver, symbols []inventory.
 		spans:     make(map[token.Pos]ast.Node),
 		callees:   make(map[token.Pos]bool),
 		idOf:      r.ID,
-		pkgKeys:   packageKeys(r),
+		pkgKeys:   r.TypesIDs(),
 		instances: instantiationsOf(r.Packages),
 	}
 	for i := range symbols {
@@ -248,14 +252,11 @@ func newReferencePass(r *load.Result, rs *resolve.Resolver, symbols []inventory.
 // consumer makes carries no From. The positions the consumer's files render
 // against are the consumer's own root, which is the module directory the scope
 // named, so a consumer outside the target's tree renders as readily as one inside
-// it.
-func (p *referencePass) walkConsumer(consumer *load.Consumer) error {
-	root := ""
-	if module := resolve.ConsumerModule(consumer); module != nil {
-		root = module.Dir
-	}
+// it. The renderer is the resolver's, so a consumer's file renders one way in every
+// pass.
+func (p *referencePass) walkConsumer(at int, consumer *load.Consumer) error {
 	p.consumer = consumer.ID
-	p.at = p.resolve.Positions().Under(root)
+	p.at = p.resolve.Consumer(at)
 	defer func() {
 		p.consumer = ""
 		p.at = p.resolve.Positions()
@@ -441,7 +442,7 @@ func (p *referencePass) walkImport(spec *ast.ImportSpec) {
 	if name == nil || name.Imported() == nil {
 		return
 	}
-	to, held := p.packages[typesKey(p.pkgKeys, name.Imported())]
+	to, held := p.packages[load.TypesID(p.pkgKeys, name.Imported())]
 	if !held {
 		return
 	}

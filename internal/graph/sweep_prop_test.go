@@ -9,23 +9,24 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"pgregory.net/rapid"
 )
 
 // rootKinds are the kinds a drawn root takes, which is every kind the detection
 // and the configuration produce, so a draw exercises the one kind that seeds
 // reachability alone.
-func rootKinds() []RootKind {
-	return []RootKind{
-		RootMain, RootInit, RootTest, RootLinkname, RootCgoExport,
-		RootBlank, RootPublishedAPI, RootConfigured, RootPattern,
+func rootKinds() []roots.RootKind {
+	return []roots.RootKind{
+		roots.RootMain, roots.RootInit, roots.RootTest, roots.RootLinkname, roots.RootCgoExport,
+		roots.RootBlank, roots.RootPublishedAPI, roots.RootConfigured, roots.RootPattern,
 	}
 }
 
 // drawnRoot is one root a draw places on one declaration.
 type drawnRoot struct {
 	at   int
-	kind RootKind
+	kind roots.RootKind
 }
 
 // drawnClasses are the class spellings a draw places on an exemption. They are
@@ -151,7 +152,7 @@ func (d drawnGraph) liveness(added []drawnRoot) (referenced, counted, reached ma
 	}
 	for _, r := range slices.Concat(d.roots, added) {
 		reached[drawn(r.at)] = true
-		if r.kind != RootPublishedAPI {
+		if r.kind != roots.RootPublishedAPI {
 			counted[drawn(r.at)] = true
 		}
 	}
@@ -234,7 +235,7 @@ func TestProperty07TheRelationRecordedIsTheOneThatFoundTheCandidate(t *testing.T
 		for _, name := range b.names(namesOf(b.symbols)) {
 			before := r.LiveUnder[b.id(name)].Has(ReferenceCounting)
 			now := after.LiveUnder[second.id(name)].Has(ReferenceCounting)
-			caller := name == drawn(added.at) && added.kind != RootPublishedAPI
+			caller := name == drawn(added.at) && added.kind != roots.RootPublishedAPI
 			switch {
 			case caller && !now:
 				t.Fatalf("adding a %s root to %s left it dead under %s\n%s", added.kind, name, ReferenceCounting, describeDrawn(d))
@@ -352,7 +353,7 @@ func plant(b *graphBuilder, at int, shape drawnShape) string {
 			b.declare(handSymbol{name: name(i), lines: span(i)})
 		}
 		b.declare(handSymbol{name: name(shape.size), inTest: true, lines: 2})
-		b.root(name(shape.size), RootTest)
+		b.root(name(shape.size), roots.RootTest)
 		for i := range shape.size {
 			b.ref(name(shape.size), name(i))
 		}
@@ -361,13 +362,13 @@ func plant(b *graphBuilder, at int, shape drawnShape) string {
 		// Every target carries one reference from the shape's own root, so every
 		// target is live and the rule admits nothing.
 		b.declare(handSymbol{name: name(0), lines: 2})
-		b.root(name(0), RootMain)
+		b.root(name(0), roots.RootMain)
 		for i := 1; i <= shape.size; i++ {
 			b.declare(handSymbol{name: name(i), lines: span(i)})
 			b.ref(name(0), name(i))
 		}
 		b.declare(handSymbol{name: name(shape.size + 1), inTest: true, lines: 2})
-		b.root(name(shape.size+1), RootTest)
+		b.root(name(shape.size+1), roots.RootTest)
 		for i := 1; i <= shape.size; i++ {
 			b.ref(name(shape.size+1), name(i))
 		}

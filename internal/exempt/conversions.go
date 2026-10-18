@@ -5,19 +5,19 @@ import (
 	"go/types"
 	"slices"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 )
 
 // conversionsOf returns every site in the loaded configuration where a value of a
 // concrete type reaches a position typed as an interface, in the order
-// [graph.Conversions] returns them. A site converting an interface value is the
+// [facts.Conversions] returns them. A site converting an interface value is the
 // interface kinds' subject rather than an exemption's, so it is not here.
 //
 // The set narrows interface satisfaction to the types a program converts. Three
 // classes read it: interface satisfaction, errors duck typing and the format verbs.
 // It is computed once per input, and a caller reads the slice without changing it.
-func conversionsOf(in *Input) ([]graph.Conversion, error) {
+func conversionsOf(in *Input) ([]facts.Conversion, error) {
 	if in == nil || in.Result == nil || in.Result.Fset == nil {
 		return nil, fmt.Errorf("%w: no file set", inventory.ErrIncompleteLoad)
 	}
@@ -26,7 +26,7 @@ func conversionsOf(in *Input) ([]graph.Conversion, error) {
 		if err != nil {
 			return nil, err
 		}
-		sites := slices.DeleteFunc(slices.Clone(all), func(c graph.Conversion) bool { return types.IsInterface(c.From) })
+		sites := slices.DeleteFunc(slices.Clone(all), func(c facts.Conversion) bool { return types.IsInterface(c.From) })
 		in.conversions = &sites
 	}
 	return *in.conversions, nil
@@ -35,12 +35,12 @@ func conversionsOf(in *Input) ([]graph.Conversion, error) {
 // allConversionsOf is every site of the loaded configuration, a site converting an
 // interface value included, which is what a chain of sites between two interfaces
 // is read from.
-func allConversionsOf(in *Input) ([]graph.Conversion, error) {
+func allConversionsOf(in *Input) ([]facts.Conversion, error) {
 	if in == nil || in.Result == nil || in.Result.Fset == nil {
 		return nil, fmt.Errorf("%w: no file set", inventory.ErrIncompleteLoad)
 	}
 	if in.allConversions == nil {
-		sites := graph.Conversions(in.Result.Fset, in.Result.Packages)
+		sites := facts.Conversions(in.Result.Fset, in.Result.Packages)
 		in.allConversions = &sites
 	}
 	return *in.allConversions, nil
@@ -50,7 +50,7 @@ func allConversionsOf(in *Input) ([]graph.Conversion, error) {
 // writes, in the order the scope declares the consumers. A consumer's site converts
 // the consumer's own reading of a target type, whose methods the resolver names by
 // their rendered position.
-func programConversions(in *Input) ([]graph.Conversion, error) {
+func programConversions(in *Input) ([]facts.Conversion, error) {
 	sites, err := conversionsOf(in)
 	if err != nil {
 		return nil, err
@@ -58,8 +58,8 @@ func programConversions(in *Input) ([]graph.Conversion, error) {
 	if in.programConversions == nil {
 		all := slices.Clone(sites)
 		for i := range in.Result.Consumers {
-			consumed := graph.Conversions(in.Result.Fset, in.Result.Consumers[i].Packages)
-			all = append(all, slices.DeleteFunc(consumed, func(c graph.Conversion) bool { return types.IsInterface(c.From) })...)
+			consumed := facts.Conversions(in.Result.Fset, in.Result.Consumers[i].Packages)
+			all = append(all, slices.DeleteFunc(consumed, func(c facts.Conversion) bool { return types.IsInterface(c.From) })...)
 		}
 		in.programConversions = &all
 	}

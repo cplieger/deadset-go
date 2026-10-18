@@ -1,6 +1,10 @@
 package graph
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/cplieger/deadset-go/v2/internal/facts"
+)
 
 func TestReferencesReadTheFieldsATypeParameterIsLaidOutAs(t *testing.T) {
 	a := analyze(t, "layout.txtar")
@@ -18,7 +22,7 @@ func TestReferencesReadTheFieldsATypeParameterIsLaidOutAs(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := a.count(tc.from, tc.to, RefRead); got != tc.want {
+			if got := a.count(tc.from, tc.to, facts.RefRead); got != tc.want {
 				t.Errorf("References(layout.txtar) holds %d read references from %s to %s, want %d",
 					got, tc.from, tc.to, tc.want)
 			}

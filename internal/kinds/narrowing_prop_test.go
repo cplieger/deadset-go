@@ -7,8 +7,10 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
 )
@@ -100,8 +102,8 @@ func drawnModules() *rapid.Generator[drawnModule] {
 type narrowedInventory struct {
 	lines   map[string]int
 	symbols []inventory.Symbol
-	refs    []graph.Reference
-	roots   []graph.Root
+	refs    []facts.Reference
+	roots   []roots.Root
 	uses    int
 }
 
@@ -122,18 +124,18 @@ func (d *narrowedInventory) declare(file, pkgPath, name string, exported bool) i
 		Kind:     inventory.KindFunc,
 		Exported: exported,
 	})
-	d.roots = append(d.roots, graph.Root{ID: id, Kind: graph.RootPublishedAPI})
+	d.roots = append(d.roots, roots.Root{ID: id, Kind: roots.RootPublishedAPI})
 	return id
 }
 
 // refer appends one reference to id, written in file by from.
 func (d *narrowedInventory) refer(from inventory.SymbolID, file string, id inventory.SymbolID) {
 	d.lines[file]++
-	d.refs = append(d.refs, graph.Reference{
+	d.refs = append(d.refs, facts.Reference{
 		From: from,
 		To:   id,
 		Pos:  token.Position{Filename: file, Line: d.lines[file], Column: 3},
-		Kind: graph.RefCall,
+		Kind: facts.RefCall,
 	})
 }
 
@@ -178,7 +180,7 @@ func (m drawnModule) render() *narrowedInventory {
 		files := filesOf(path)
 		if pkg.reach == reachCommand {
 			main := d.declare(files[0], path, "main", false)
-			d.roots = append(d.roots, graph.Root{ID: main, Kind: graph.RootMain})
+			d.roots = append(d.roots, roots.Root{ID: main, Kind: roots.RootMain})
 		}
 		for which, declaration := range pkg.declarations {
 			name := fmt.Sprintf("S%d%d", at, which)

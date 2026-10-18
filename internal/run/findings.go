@@ -2,13 +2,11 @@ package run
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"slices"
 
 	"github.com/cplieger/deadset-go/v2/internal/deps"
 	"github.com/cplieger/deadset-go/v2/internal/edges"
-	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 )
@@ -63,12 +61,9 @@ func (s *Swept) Findings(ctx context.Context) (*Findings, error) {
 func (s *Swept) input(ctx context.Context) (*kinds.Input, error) {
 	generated := make(map[string]bool)
 	for _, one := range s.per {
-		sites, err := exempt.GeneratedSites(one.Result, one.Resolve)
-		if err != nil {
-			return nil, fmt.Errorf("render the package clause of a generated file: %w", err)
-		}
-		for path := range sites {
-			generated[path] = true
+		all := one.Facts.Generated()
+		for i := range all {
+			generated[all[i].Path] = true
 		}
 	}
 	modules, err := s.moduleFiles()

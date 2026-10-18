@@ -7,9 +7,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -101,7 +101,7 @@ func unlinkedPackages(per []Configured, root string, x *index) map[string]bool {
 		if one.Result == nil {
 			continue
 		}
-		none := graph.UnlinkedPackages(one.Result)
+		none := roots.UnlinkedPackages(one.Result)
 		for _, p := range one.Result.Packages {
 			if p.ForTest != "" {
 				continue

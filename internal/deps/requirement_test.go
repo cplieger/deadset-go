@@ -5,6 +5,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/failure"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
@@ -114,7 +115,7 @@ func TestTheLoadFailsBeforeADependencyAnswerWhereAnImportResolvesToNoModule(t *t
 			_, err = load.Load(t.Context(), testsupport.Topology(t.Context(), t, doc), &load.Configuration{
 				ID: fixtureOS + "-" + fixtureArch, OS: fixtureOS, Arch: fixtureArch,
 			})
-			setup, isSetup := errors.AsType[*load.SetupError](err)
+			setup, isSetup := errors.AsType[*failure.Error](err)
 			_, diagnosed := errors.AsType[*load.Error](err)
 			switch {
 			case tc.setup && (!isSetup || len(setup.Failures) == 0 || setup.Failures[0].Class != vocab.SetupMissingModule):

@@ -10,7 +10,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/cplieger/deadset-go/v2/internal/graph"
-	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -190,9 +189,9 @@ type formatFlow struct {
 
 // walkCalls records every value a formatting call asks for a string.
 func (f *formatFlow) walkCalls() error {
-	r := f.kept.in.Result
-	for _, p := range inventory.Packages(r.Packages, r.Fset) {
-		for _, file := range inventory.Files(p, r.Fset) {
+	x := f.kept.in.Facts
+	for _, p := range x.Packages() {
+		for _, file := range x.Files(p) {
 			if err := f.walkFile(p.TypesInfo, file); err != nil {
 				return err
 			}

@@ -53,16 +53,13 @@ func newTemplateOrigins(in *Input) *templateOrigins {
 	if in.Options.PublishedAPI {
 		return nil
 	}
-	for _, p := range programPackages(in.Result) {
-		if p.TypesInfo == nil {
-			continue
-		}
+	for _, p := range in.Facts.Program() {
 		for _, obj := range p.TypesInfo.Uses {
 			if v, isVar := obj.(*types.Var); isVar && isTemplate(v.Type()) {
 				o.uses[v]++
 			}
 		}
-		for _, f := range p.Syntax {
+		for _, f := range in.Facts.Files(p) {
 			o.index(p.TypesInfo, filepath.Dir(o.fset.Position(f.FileStart).Filename), f)
 		}
 	}

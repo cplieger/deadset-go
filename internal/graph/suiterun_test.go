@@ -3,6 +3,8 @@ package graph
 import (
 	"slices"
 	"testing"
+
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 )
 
 // A suite runner's suite has every exported method whose name opens with one of the
@@ -11,24 +13,24 @@ import (
 // passed as an interface value, a method the runner skips and one a look-alike runner
 // receives are no root.
 func TestRootsRootsTheMethodsASuiteRunnerCalls(t *testing.T) {
-	d := detect(t, "suite-run.txtar", RootOptions{})
+	d := detect(t, "suite-run.txtar", roots.RootOptions{})
 	kinds := kindsByRef(d)
 
 	const pkg = "go://example.com/suites#"
 	cases := []struct {
 		ref  string
-		want []RootKind
+		want []roots.RootKind
 	}{
-		{ref: pkg + "Runs.TestRuns", want: []RootKind{RootTest}},
-		{ref: pkg + "Runs.Testing", want: []RootKind{RootTest}},
-		{ref: pkg + "base.TestInherited", want: []RootKind{RootTest}},
+		{ref: pkg + "Runs.TestRuns", want: []roots.RootKind{roots.RootTest}},
+		{ref: pkg + "Runs.Testing", want: []roots.RootKind{roots.RootTest}},
+		{ref: pkg + "base.TestInherited", want: []roots.RootKind{roots.RootTest}},
 		{ref: pkg + "Runs.Helper"},
 		{ref: pkg + "Runs.testHidden"},
 		{ref: pkg + "Hidden.TestBehindAnInterface"},
 		{ref: pkg + "Alike.TestOfALookAlike"},
-		{ref: pkg + "Checked.TestChecked", want: []RootKind{RootTest}},
-		{ref: pkg + "Checked.BenchmarkChecked", want: []RootKind{RootTest}},
-		{ref: pkg + "Checked.SetUpTest", want: []RootKind{RootTest}},
+		{ref: pkg + "Checked.TestChecked", want: []roots.RootKind{roots.RootTest}},
+		{ref: pkg + "Checked.BenchmarkChecked", want: []roots.RootKind{roots.RootTest}},
+		{ref: pkg + "Checked.SetUpTest", want: []roots.RootKind{roots.RootTest}},
 		{ref: pkg + "Checked.Setup"},
 	}
 	held := make(map[string]bool, len(d.symbols))

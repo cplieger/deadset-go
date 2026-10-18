@@ -18,6 +18,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/memory"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -35,6 +36,14 @@ func TestMain(m *testing.M) {
 // runTests is TestMain's body, written so that the removal of the fixture directory
 // runs before the exit.
 func runTests(m *testing.M) int {
+	if encoded := os.Getenv(execArgsVariable); encoded != "" {
+		var args []string
+		if err := json.Unmarshal([]byte(encoded), &args); err != nil {
+			fmt.Fprintf(os.Stderr, "decode %s: %v\n", execArgsVariable, err)
+			return 1
+		}
+		return governed(args, os.Stdout, os.Stderr, memory.Platform())
+	}
 	base, err := os.MkdirTemp("", "deadset-fixtures")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "create the fixture directory: %v\n", err)
@@ -348,6 +357,7 @@ func TestDescribeNamesTheContractItImplements(t *testing.T) {
 		SchemaVersionsAccepted []string           `json:"schema_versions_accepted"`
 		Languages              []string           `json:"languages"`
 		Conformance            report.Conformance `json:"conformance"`
+		FactsVersionWritten    string             `json:"facts_version_written"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(stdout.Bytes()))
 	decoder.DisallowUnknownFields()
@@ -369,6 +379,9 @@ func TestDescribeNamesTheContractItImplements(t *testing.T) {
 	}
 	if !slices.Equal(described.SchemaVersionsAccepted, schemaVersions) {
 		t.Errorf("describe accepts schema versions %v, want %v as contract/contract.json names them", described.SchemaVersionsAccepted, schemaVersions)
+	}
+	if described.FactsVersionWritten != vocab.FactsVersion {
+		t.Errorf("describe names the facts version %q, want %q", described.FactsVersionWritten, vocab.FactsVersion)
 	}
 	if want := []string{string(vocab.Go)}; !slices.Equal(described.Languages, want) {
 		t.Errorf("describe claimed languages %v, want %v", described.Languages, want)

@@ -10,9 +10,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-go/v2/internal/run"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -92,8 +94,7 @@ func explain(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return vocab.ExitUsage
 	}
 	if err := writeExplanation(stdout, set, cascadeOf(req.Config.Reporters.CascadeFull), subject); err != nil {
-		fmt.Fprintf(stderr, "deadset-go: explain: %v\n", err)
-		return vocab.ExitFailure
+		return unwrittenAnswer(stderr, "explain", err)
 	}
 	return vocab.ExitClean
 }
@@ -375,7 +376,7 @@ func writePath(held *strings.Builder, set *run.Prepared, id inventory.SymbolID) 
 
 // writeHop is one hop of a path. A loaded consumer's reference is made by that
 // consumer.
-func writeHop(held *strings.Builder, hop *graph.Reference, mode graph.Mode) {
+func writeHop(held *strings.Builder, hop *facts.Reference, mode graph.Mode) {
 	from := string(hop.From)
 	if hop.Consumer != "" {
 		from = hop.Consumer
@@ -385,7 +386,7 @@ func writeHop(held *strings.Builder, hop *graph.Reference, mode graph.Mode) {
 
 // useOf is how one reference uses its target, and the rule that made it where no
 // identifier at the site names the target.
-func useOf(r *graph.Reference) string {
+func useOf(r *facts.Reference) string {
 	if !r.Via.Synthesized() {
 		return r.Kind.String()
 	}
@@ -418,10 +419,10 @@ func writeComponent(held *strings.Builder, set *run.Findings, cascade graph.Casc
 //
 // The identifier is read from the report rather than minted here, so this command
 // holds no second copy of the rule that mints it.
-func componentIdentity(set *run.Findings, roots []inventory.SymbolID) string {
+func componentIdentity(set *run.Findings, rooted []inventory.SymbolID) string {
 	for i := range set.Result.Findings {
 		found := &set.Result.Findings[i]
-		if slices.Contains(roots, inventory.SymbolID(positionKey(&found.Position))) {
+		if slices.Contains(rooted, inventory.SymbolID(positionKey(&found.Position))) {
 			return found.Component.ID
 		}
 	}
@@ -477,18 +478,18 @@ func candidateFor(candidates []graph.Candidate, id inventory.SymbolID) *graph.Ca
 // rootReasons is every reason one symbol is a root, in the order the merge returned
 // them, with one entry per reason whatever the number of configurations that
 // detected it.
-func rootReasons(roots []graph.Root, id inventory.SymbolID) []graph.Root {
-	var held []graph.Root
-	for i := range roots {
-		if roots[i].ID != id {
+func rootReasons(rooted []roots.Root, id inventory.SymbolID) []roots.Root {
+	var held []roots.Root
+	for i := range rooted {
+		if rooted[i].ID != id {
 			continue
 		}
-		if slices.ContainsFunc(held, func(r graph.Root) bool {
-			return r.Kind == roots[i].Kind && r.Source == roots[i].Source
+		if slices.ContainsFunc(held, func(r roots.Root) bool {
+			return r.Kind == rooted[i].Kind && r.Source == rooted[i].Source
 		}) {
 			continue
 		}
-		held = append(held, roots[i])
+		held = append(held, rooted[i])
 	}
 	return held
 }
@@ -496,13 +497,13 @@ func rootReasons(roots []graph.Root, id inventory.SymbolID) []graph.Root {
 // referencesTo is every reference to one symbol, in the order the merge returned
 // them, with one entry per site whatever the number of configurations that compiled
 // it.
-func referencesTo(references []graph.Reference, id inventory.SymbolID) []graph.Reference {
-	var held []graph.Reference
+func referencesTo(references []facts.Reference, id inventory.SymbolID) []facts.Reference {
+	var held []facts.Reference
 	for i := range references {
 		if references[i].To != id {
 			continue
 		}
-		if slices.ContainsFunc(held, func(r graph.Reference) bool { return r.Pos == references[i].Pos }) {
+		if slices.ContainsFunc(held, func(r facts.Reference) bool { return r.Pos == references[i].Pos }) {
 			continue
 		}
 		held = append(held, references[i])

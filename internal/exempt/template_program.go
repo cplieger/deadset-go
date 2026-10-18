@@ -39,7 +39,7 @@ func (o *templateOrigins) readEveryParse(engine string) *templateSet {
 		inv.complete = false
 		return inv
 	}
-	for _, p := range programPackages(o.in.Result) {
+	for _, p := range o.in.Facts.Program() {
 		if p.TypesInfo != nil && inv.complete {
 			o.readPackage(p.TypesInfo, p.Syntax, engine, inv)
 		}

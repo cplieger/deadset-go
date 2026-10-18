@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/failure"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/go/packages"
 )
@@ -60,7 +61,7 @@ func TestLoadDropsAWalkedModuleThatDoesNotLoad(t *testing.T) {
 	if len(got.Dropped) != 1 || got.Dropped[0].Dir != filepath.Join(root, "tool") {
 		t.Fatalf("Load() dropped %+v, want the tool module alone", got.Dropped)
 	}
-	setup, ok := errors.AsType[*SetupError](got.Dropped[0].Err)
+	setup, ok := errors.AsType[*failure.Error](got.Dropped[0].Err)
 	if !ok || len(setup.Failures) == 0 || !strings.Contains(setup.Failures[0].Detail, "tool/main.go:") {
 		t.Errorf("Load() dropped the tool module with %v, want a setup failure positioned at tool/main.go", got.Dropped[0].Err)
 	}
@@ -96,8 +97,8 @@ func TestLoadEndsOnTheFailureOfAModuleItCannotDrop(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := loadTree(t, writeTree(t, test.files), ".")
-			setup, ok := errors.AsType[*SetupError](err)
-			if !ok || !slices.ContainsFunc(setup.Failures, func(f setupFailure) bool { return strings.HasPrefix(f.Detail, test.at+":") }) {
+			setup, ok := errors.AsType[*failure.Error](err)
+			if !ok || !slices.ContainsFunc(setup.Failures, func(f failure.Failure) bool { return strings.HasPrefix(f.Detail, test.at+":") }) {
 				t.Errorf("Load() = _, %v, want a setup failure positioned at %s", err, test.at)
 			}
 		})

@@ -8,16 +8,16 @@ import (
 )
 
 // typedPackages yields every type-checked package variant of every configuration
-// of the run that can be resolved against the inventory, with its configuration.
+// of the run, with its configuration, in the walk order.
 func (in *Input) typedPackages() iter.Seq2[*Configured, *packages.Package] {
 	return func(yield func(*Configured, *packages.Package) bool) {
 		for i := range in.Per {
 			one := &in.Per[i]
-			if one.Result == nil || one.Resolve == nil {
+			if one.Facts == nil {
 				continue
 			}
-			for _, p := range one.Result.Packages {
-				if p.TypesInfo != nil && p.Types != nil && !yield(one, p) {
+			for p := range one.Facts.Typed() {
+				if !yield(one, p) {
 					return
 				}
 			}
@@ -36,7 +36,7 @@ type typedFile struct {
 func (in *Input) typedFiles() iter.Seq[typedFile] {
 	return func(yield func(typedFile) bool) {
 		for one, p := range in.typedPackages() {
-			for _, f := range p.Syntax {
+			for _, f := range one.Facts.Files(p) {
 				if !yield(typedFile{one: one, pkg: p, file: f}) {
 					return
 				}

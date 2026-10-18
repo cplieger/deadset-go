@@ -8,6 +8,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 )
 
 // classifiedSupport loads the test-support archive and returns the packages
@@ -25,9 +26,9 @@ func classifiedSupport(t *testing.T, library bool) (support, marked []string) {
 	if kept < 0 {
 		t.Fatalf("Setup: test-support.txtar declares no Kept")
 	}
-	opts := RootOptions{Patterns: []string{symbols[kept].Ref}, PublishedAPI: library}
-	roots, _ := Roots(result, rs, symbols, opts)
-	classes := ClassifyTestSupport(result, symbols, roots, library)
+	opts := roots.RootOptions{Patterns: []string{symbols[kept].Ref}, PublishedAPI: library}
+	rooted, _ := roots.Roots(result, rs, symbols, opts)
+	classes := roots.ClassifyTestSupport(result, symbols, rooted, library)
 	for i := range symbols {
 		if classes.Support[symbols[i].Package] && !symbols[i].InTestFile && symbols[i].Kind == inventory.KindFunc {
 			marked = append(marked, symbols[i].Name)
@@ -70,8 +71,8 @@ func TestClassifyTestSupportCountsTestLibraryImportsAsEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Setup: Symbols(test-support-libraries.txtar): %v", err)
 	}
-	roots, _ := Roots(result, rs, symbols, RootOptions{})
-	classes := ClassifyTestSupport(result, symbols, roots, false)
+	rooted, _ := roots.Roots(result, rs, symbols, roots.RootOptions{})
+	classes := roots.ClassifyTestSupport(result, symbols, rooted, false)
 
 	if got, want := paths(classes.Support), []string{
 		"example.com/libs/asserted", "example.com/libs/matched", "example.com/libs/tooled",
@@ -102,8 +103,8 @@ func TestClassifyTestSupportKeepsADeclarationALineDirectiveMovesInItsPackage(t *
 	if err != nil {
 		t.Fatalf("Setup: Symbols(test-support-line-directive.txtar): %v", err)
 	}
-	roots, _ := Roots(result, rs, symbols, RootOptions{})
-	classes := ClassifyTestSupport(result, symbols, roots, false)
+	rooted, _ := roots.Roots(result, rs, symbols, roots.RootOptions{})
+	classes := roots.ClassifyTestSupport(result, symbols, rooted, false)
 
 	var marked []string
 	for i := range symbols {
@@ -138,18 +139,18 @@ func TestMatrixTestsKeepsAClassEveryConfigurationLoadingThePackageGives(t *testi
 		}
 		return held
 	}
-	first := TestClasses{
+	first := roots.TestClasses{
 		Support: set(support, reached, production, absent),
 		Loaded:  set(support, reached, production, absent),
 	}
-	second := TestClasses{
+	second := roots.TestClasses{
 		Support: set(support),
 		Reached: set(reached),
 		Loaded:  set(support, reached, production),
 	}
-	for name, per := range map[string][]TestClasses{"in order": {first, second}, "reversed": {second, first}} {
+	for name, per := range map[string][]roots.TestClasses{"in order": {first, second}, "reversed": {second, first}} {
 		t.Run(name, func(t *testing.T) {
-			got := MatrixTests(per)
+			got := roots.MatrixTests(per)
 			if want := set(support, absent); !maps.Equal(got.Support, want) {
 				t.Errorf("MatrixTests(%s).Support = %v, want %v", name, got.Support, want)
 			}

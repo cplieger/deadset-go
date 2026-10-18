@@ -5,7 +5,9 @@ import (
 	"slices"
 	"strconv"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 )
 
 // Relation names the liveness relation that decided a symbol. String returns the
@@ -265,7 +267,7 @@ func (g *Graph) using(in *SweepInput) *Graph {
 	}
 	derived.made = slices.Clone(g.made)
 	derived.rooted = slices.DeleteFunc(slices.Clone(g.rooted), func(r rooted) bool {
-		return r.kind == RootBlank && held[r.at]
+		return r.kind == roots.RootBlank && held[r.at]
 	})
 	derived.gates = append(slices.Clip(g.gates), gated...)
 	for i, use := range uses {
@@ -275,7 +277,7 @@ func (g *Graph) using(in *SweepInput) *Graph {
 		}
 		// An unappended use leaves another edge last, the base graph's or another
 		// use's, so only an edge this call appended may be gated.
-		if derived.add(&Reference{From: use.From, To: use.To, Test: g.symbols[from].InTestFile}) && gates[i] > 0 {
+		if derived.add(&facts.Reference{From: use.From, To: use.To, Test: g.symbols[from].InTestFile}) && gates[i] > 0 {
 			last := len(derived.out[from]) - 1
 			derived.out[from][last].gate = len(g.gates) + gates[i]
 		}
@@ -456,7 +458,7 @@ func (s *sweep) suppressed(marked []inventory.SymbolID) []inventory.SymbolID {
 // candidate only when nothing in the loaded graph references it.
 func (s *sweep) callers() {
 	for _, r := range s.g.rooted {
-		if r.kind != RootPublishedAPI {
+		if r.kind != roots.RootPublishedAPI {
 			s.called[r.at] = true
 		}
 	}
@@ -521,7 +523,7 @@ func (s *sweep) callerSeed(reached []bool) []int {
 // place among the roots, -1 for a consumer's seed.
 func (g *Graph) callerSeeds(m Mode, reached []bool, visit func(at, root int)) {
 	for i, r := range g.rooted {
-		if (m.Production && r.kind == RootTest) || reached[r.at] {
+		if (m.Production && r.kind == roots.RootTest) || reached[r.at] {
 			continue
 		}
 		reached[r.at] = true

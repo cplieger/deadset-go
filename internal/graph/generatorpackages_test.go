@@ -3,6 +3,8 @@ package graph
 import (
 	"slices"
 	"testing"
+
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 )
 
 // A package directory a go:generate directive passes by a relative path to a
@@ -11,7 +13,7 @@ import (
 // directive's own directory, a directory a type generator receives and a word with no
 // relative path root nothing.
 func TestRootsRootsTheExportsOfAPackageAGeneratorReceives(t *testing.T) {
-	d := detect(t, "generator-packages.txtar", RootOptions{})
+	d := detect(t, "generator-packages.txtar", roots.RootOptions{})
 	held := make(map[string]bool, len(d.symbols))
 	for _, s := range d.symbols {
 		held[s.Ref] = true
@@ -26,7 +28,7 @@ func TestRootsRootsTheExportsOfAPackageAGeneratorReceives(t *testing.T) {
 			t.Errorf("Symbols(generator-packages.txtar) holds no symbol whose reference is %s", ref)
 		}
 	}
-	got := refsOfKind(d, RootGenerate)
+	got := refsOfKind(d, roots.RootGenerate)
 	slices.Sort(got)
 	want := []string{schema + "Build", schema + "User", schema + "User.Fields", schema + "User.Name"}
 	if !slices.Equal(got, want) {

@@ -6,9 +6,11 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
@@ -42,7 +44,7 @@ func narrowingInput(
 ) *Input {
 	sink.Helper()
 
-	merged, err := graph.Merge([]graph.Configured{passes}, graph.TestClasses{})
+	merged, err := graph.Merge([]graph.Configured{passes}, roots.TestClasses{})
 	if err != nil {
 		sink.Fatalf("Setup: graph.Merge: %v", err)
 	}
@@ -436,17 +438,17 @@ func TestNarrowingYieldsADeclarationNothingReadsToTheWriteOnlyKind(t *testing.T)
 	}
 	in := narrowingInput(t, graph.Configured{
 		Symbols: []inventory.Symbol{answer, status, fill},
-		References: []graph.Reference{
+		References: []facts.Reference{
 			{
-				From: fill.ID, To: status.ID, Kind: graph.RefWrite,
+				From: fill.ID, To: status.ID, Kind: facts.RefWrite,
 				Pos: token.Position{Filename: file, Line: 8, Column: 3},
 			},
 			{
-				From: fill.ID, To: answer.ID, Kind: graph.RefTypeUse,
+				From: fill.ID, To: answer.ID, Kind: facts.RefTypeUse,
 				Pos: token.Position{Filename: file, Line: 8, Column: 12},
 			},
 		},
-		Roots: []graph.Root{{ID: fill.ID, Kind: graph.RootMain}},
+		Roots: []roots.Root{{ID: fill.ID, Kind: roots.RootMain}},
 	}, map[string]string{pkgPath: mainPackageName}, Consumers{})
 
 	narrowed, err := unnecessaryExport(in)
@@ -511,14 +513,14 @@ func TestNarrowingLeavesADeclarationReferencedFromOutsideTheModuleAlone(t *testi
 		t.Run(tc.name, func(t *testing.T) {
 			in := narrowingInput(t, graph.Configured{
 				Symbols: []inventory.Symbol{subject},
-				References: []graph.Reference{{
+				References: []facts.Reference{{
 					From:     tc.from,
 					To:       subject.ID,
 					Consumer: tc.consumer,
 					Pos:      token.Position{Filename: file, Line: 4, Column: 9},
-					Kind:     graph.RefCall,
+					Kind:     facts.RefCall,
 				}},
-				Roots: []graph.Root{{ID: subject.ID, Kind: graph.RootPublishedAPI}},
+				Roots: []roots.Root{{ID: subject.ID, Kind: roots.RootPublishedAPI}},
 			}, map[string]string{pkgPath: "catalog"}, Consumers{Complete: true})
 
 			exported, err := unnecessaryExport(in)

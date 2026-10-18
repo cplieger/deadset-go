@@ -9,30 +9,46 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/edges"
 	"github.com/cplieger/deadset-go/v2/internal/exempt"
+	"github.com/cplieger/deadset-go/v2/internal/failure"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/memory"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
-// failed prints the error a run ended with and returns its exit code. A setup
-// failure is one line per failure, each with the setup-failure prefix. A run the
-// memory governor ended prints the memory line whatever stage stopped, because the
-// governor cancels ctx and the stage running then returns its own wrapping of it.
+// failed prints the error a run ended with and returns its exit code. A run that
+// ends with exit code 3 prints the class lines of [failure.Write]. A run the
+// memory governor or a signal cancelled names that cause whatever stage stopped,
+// because the stage running then returns its own wrapping of the cancellation.
 func failed(ctx context.Context, stderr io.Writer, err error) int {
-	if exhausted, ok := errors.AsType[*memory.ExhaustedError](context.Cause(ctx)); ok {
-		fmt.Fprintln(stderr, exhausted.Error())
-		return vocab.ExitFailure
-	}
-	if setup, ok := errors.AsType[*load.SetupError](err); ok {
-		for _, one := range setup.Failures {
-			fmt.Fprintln(stderr, one.Line())
+	if ctx.Err() != nil {
+		cause := context.Cause(ctx)
+		if exhausted, ok := errors.AsType[*memory.ExhaustedError](cause); ok {
+			return fail(stderr, failure.New(vocab.RunMemoryExhausted, exhausted.Error()+"; run on a machine with more memory, or narrow the scope"))
 		}
-		return vocab.ExitFailure
+		return fail(stderr, failure.Wrap(vocab.RunInterruptedRun, cause))
 	}
-	fmt.Fprintf(stderr, "deadset-go: %v\n", err)
-	return exitCodeFor(err)
+	if _, classed := errors.AsType[*failure.Error](err); classed {
+		return fail(stderr, err)
+	}
+	if code := exitCodeFor(err); code == vocab.ExitUsage {
+		fmt.Fprintf(stderr, "deadset-go: %v\n", err)
+		return code
+	}
+	return fail(stderr, err)
+}
+
+// fail prints err's failures, a product fault where it holds none, and returns
+// exit code 3.
+func fail(stderr io.Writer, err error) int {
+	_ = failure.Write(stderr, failure.Of(err))
+	return vocab.ExitFailure
+}
+
+func unwrittenAnswer(stderr io.Writer, verb string, err error) int {
+	return fail(stderr, failure.Wrap(vocab.RunUnwrittenOutput, fmt.Errorf("%s: write the answer to standard output: %w", verb, err)))
 }
 
 // exitCodeFor maps an error to the exit code contract/exit-codes.json gives it. A
@@ -44,13 +60,8 @@ func exitCodeFor(err error) int {
 	if _, refusal := errors.AsType[*config.Error](err); refusal {
 		return vocab.ExitUsage
 	}
-	if errors.Is(err, exempt.ErrTemplateDir) {
-		return vocab.ExitUsage
-	}
-	if errors.Is(err, load.ErrNoConfiguration) || errors.Is(err, graph.ErrMatrix) {
-		return vocab.ExitUsage
-	}
-	if errors.Is(err, core.ErrMalformed) || errors.Is(err, edges.ErrMalformed) {
+	if errors.Is(err, exempt.ErrTemplateDir) || errors.Is(err, load.ErrNoConfiguration) || errors.Is(err, graph.ErrMatrix) ||
+		errors.Is(err, core.ErrMalformed) || errors.Is(err, edges.ErrMalformed) {
 		return vocab.ExitUsage
 	}
 	return vocab.ExitFailure
@@ -67,11 +78,10 @@ func namedUnbuilt(w io.Writer, unbuilt []load.Unbuilt) {
 
 // printLines writes the answer of a print verb, one line each, then every configured
 // root that names nothing on stderr by its issue kind, which fails the run.
-func printLines(stdout, stderr io.Writer, verb string, lines []string, unmatched []graph.Unmatched) int {
+func printLines(stdout, stderr io.Writer, verb string, lines []string, unmatched []roots.Unmatched) int {
 	for _, line := range lines {
 		if _, err := fmt.Fprintln(stdout, line); err != nil {
-			fmt.Fprintf(stderr, "deadset-go: %s: %v\n", verb, err)
-			return vocab.ExitFailure
+			return unwrittenAnswer(stderr, verb, err)
 		}
 	}
 	for _, one := range unmatched {

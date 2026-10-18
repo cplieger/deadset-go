@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/cplieger/deadset-go/v2/internal/failure"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -115,34 +116,6 @@ func (e *listError) Error() string {
 
 func (e *listError) Unwrap() error { return e.err }
 
-// setupFailure is one setup failure: its class, one of the vocab.Setup classes,
-// and what is missing, with the fix.
-type setupFailure struct {
-	Class  string
-	Detail string
-}
-
-// Line is the failure as one line of standard error: the setup-failure prefix, the
-// class and what is missing with the fix.
-func (f setupFailure) Line() string {
-	return vocab.SetupFailurePrefix + f.Class + ": " + f.Detail
-}
-
-// SetupError reports every setup failure one run met. A run that returns one
-// analyzed nothing, because every missing piece hides real uses.
-type SetupError struct {
-	Failures []setupFailure
-}
-
-// Error renders one line per failure.
-func (e *SetupError) Error() string {
-	lines := make([]string, len(e.Failures))
-	for i, f := range e.Failures {
-		lines[i] = f.Line()
-	}
-	return strings.Join(lines, "\n")
-}
-
 // The toolchain's messages that name a package nothing provides and a module sum
 // file missing a checksum. The toolchain reports neither as a typed error, so its
 // message is the only record of which one a listing met.
@@ -156,8 +129,8 @@ const (
 // them is a setup failure. A package nothing provides is a missing module only
 // within a module the project expects, one of expected; an import of any other
 // module is a compile error the project's own build reports too.
-func setupFailures(diagnostics []Diagnostic, expected []string) *SetupError {
-	var failures []setupFailure
+func setupFailures(diagnostics []Diagnostic, expected []string) *failure.Error {
+	var failures []failure.Failure
 	for _, d := range diagnostics {
 		at := d.Position
 		if at == "" {
@@ -166,18 +139,18 @@ func setupFailures(diagnostics []Diagnostic, expected []string) *SetupError {
 		switch {
 		case strings.Contains(d.Message, missingSumEntry):
 			module, _, _ := strings.Cut(strings.SplitN(d.Message, missingSumEntry, 2)[1], " ")
-			failures = append(failures, setupFailure{Class: vocab.SetupIncompleteModuleSum, Detail: fmt.Sprintf(
+			failures = append(failures, failure.Failure{Class: vocab.SetupIncompleteModuleSum, Detail: fmt.Sprintf(
 				"%s: the module sum file holds no checksum for the module providing %s; run go mod tidy in the module that requires it",
 				at, module,
 			)})
 		case strings.Contains(d.Message, noModuleProvides) && within(packageNamed(d.Message), expected):
 			pkg := packageNamed(d.Message)
-			failures = append(failures, setupFailure{Class: vocab.SetupMissingModule, Detail: fmt.Sprintf(
+			failures = append(failures, failure.Failure{Class: vocab.SetupMissingModule, Detail: fmt.Sprintf(
 				"%s: the import %s names a package nothing provides; run the generator, the build or the install that writes it",
 				at, pkg,
 			)})
 		case strings.Contains(d.Message, lookupDisabled):
-			failures = append(failures, setupFailure{Class: vocab.SetupMissingModule, Detail: fmt.Sprintf(
+			failures = append(failures, failure.Failure{Class: vocab.SetupMissingModule, Detail: fmt.Sprintf(
 				"%s: %s; the required module is not installed, so run go mod download in the module that requires it",
 				at, strings.TrimSuffix(d.Message, ": "+lookupDisabled),
 			)})
@@ -186,7 +159,7 @@ func setupFailures(diagnostics []Diagnostic, expected []string) *SetupError {
 	if len(failures) == 0 {
 		return nil
 	}
-	return &SetupError{Failures: failures}
+	return &failure.Error{Failures: failures}
 }
 
 // packageNamed is the package a "no required module provides" message names.

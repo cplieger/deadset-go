@@ -99,11 +99,8 @@ func ReflectiveLookupDetector(in *Input) ([]graph.Exemption, error) {
 func registeredMethods(in *Input) ([]graph.Exemption, error) {
 	own := programPaths(in)
 	var out []graph.Exemption
-	for _, p := range in.Result.Packages {
-		if p.TypesInfo == nil {
-			continue
-		}
-		for _, file := range p.Syntax {
+	for _, p := range in.Facts.Packages() {
+		for _, file := range in.Facts.Files(p) {
 			var failed error
 			ast.Inspect(file, func(n ast.Node) bool {
 				call, isCall := n.(*ast.CallExpr)
@@ -205,11 +202,8 @@ func definedReceiver(t types.Type) (*types.Named, bool) {
 // name, in the order the load reports its files.
 func allLookupCalls(in *Input) ([]lookupCall, error) {
 	var calls []lookupCall
-	for _, p := range in.Result.Packages {
-		if p.TypesInfo == nil {
-			continue
-		}
-		for _, f := range p.Syntax {
+	for _, p := range in.Facts.Packages() {
+		for _, f := range in.Facts.Files(p) {
 			found, err := lookupCalls(in, p.TypesInfo, f)
 			if err != nil {
 				return nil, err

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
@@ -58,8 +59,8 @@ type spans struct {
 // declarationSpans reads the spans of every file the configuration compiles.
 func declarationSpans(in *Input) *spans {
 	held := &spans{}
-	for _, p := range inventory.Packages(in.Result.Packages, in.Result.Fset) {
-		for _, f := range inventory.Files(p, in.Result.Fset) {
+	for _, p := range in.Facts.Packages() {
+		for _, f := range in.Facts.Files(p) {
 			for _, decl := range f.Decls {
 				held.add(in, decl)
 			}
@@ -108,9 +109,9 @@ func (s *spans) addSpec(in *Input, spec ast.Spec) {
 // holderOf is the declaration whose use one conversion is: the asserted type for a
 // satisfaction assertion, with the assertion itself, and otherwise the top-level
 // declaration that holds the site. A site derived from others is held by the
-// declaration of each [graph.Conversion.Held] position ([spans.holdersAt]). Empty
+// declaration of each [facts.Conversion.Held] position ([spans.holdersAt]). Empty
 // where no declaration of the inventory does.
-func (s *spans) holderOf(in *Input, c *graph.Conversion) (holder inventory.SymbolID, coHolders []inventory.SymbolID, asserted inventory.SymbolID) {
+func (s *spans) holderOf(in *Input, c *facts.Conversion) (holder inventory.SymbolID, coHolders []inventory.SymbolID, asserted inventory.SymbolID) {
 	if len(c.Held) == 0 {
 		holder, asserted = s.declarationAt(in, c, c.Site)
 		return holder, nil, asserted
@@ -121,7 +122,7 @@ func (s *spans) holderOf(in *Input, c *graph.Conversion) (holder inventory.Symbo
 
 // holdersAt is the declaration holding each of several positions of one conversion,
 // each once: the first the holder, the rest its co-holders, sorted.
-func (s *spans) holdersAt(in *Input, c *graph.Conversion, positions []token.Pos) (holder inventory.SymbolID, coHolders []inventory.SymbolID) {
+func (s *spans) holdersAt(in *Input, c *facts.Conversion, positions []token.Pos) (holder inventory.SymbolID, coHolders []inventory.SymbolID) {
 	for _, at := range positions {
 		one, _ := s.declarationAt(in, c, at)
 		switch {
@@ -138,7 +139,7 @@ func (s *spans) holdersAt(in *Input, c *graph.Conversion, positions []token.Pos)
 
 // declarationAt is the declaration holding one position of a conversion, and the
 // satisfaction assertion where the position is in one.
-func (s *spans) declarationAt(in *Input, c *graph.Conversion, at token.Pos) (holder, asserted inventory.SymbolID) {
+func (s *spans) declarationAt(in *Input, c *facts.Conversion, at token.Pos) (holder, asserted inventory.SymbolID) {
 	for _, a := range s.assertions {
 		if a.from <= at && at < a.to {
 			return typeDeclaration(in, c.From), a.id
@@ -156,7 +157,7 @@ func (s *spans) declarationAt(in *Input, c *graph.Conversion, at token.Pos) (hol
 // that answer the interface, the satisfaction assertion the site is, if it is one,
 // and the methods by which the type implements an interface the source of an outside
 // package asserts: the interface's own package, and for an argument the callee's.
-func (s *spans) retain(in *Input, c *graph.Conversion, retained []graph.Exemption) ([]graph.Exemption, error) {
+func (s *spans) retain(in *Input, c *facts.Conversion, retained []graph.Exemption) ([]graph.Exemption, error) {
 	generic := genericOrigin(c.From)
 	if generic && !matchesByArity(c.From, c.To) || !generic && !types.Implements(c.From, c.To) {
 		return retained, nil
@@ -226,7 +227,7 @@ var errorInterface, _ = types.Universe.Lookup("error").Type().Underlying().(*typ
 // by which the type implements an interface holding error's method that a package
 // outside the program declares and its own source asserts ([outsideAssertions.ofError]),
 // the methods error already retained excepted.
-func (s *spans) retainErrorAssertions(in *Input, c *graph.Conversion, methods []answer, held *graph.Exemption, retained []graph.Exemption) []graph.Exemption {
+func (s *spans) retainErrorAssertions(in *Input, c *facts.Conversion, methods []answer, held *graph.Exemption, retained []graph.Exemption) []graph.Exemption {
 	for _, one := range s.outside.ofError(c.From) {
 		if slices.ContainsFunc(methods, func(m answer) bool { return m.method == one.method }) {
 			continue
@@ -245,7 +246,7 @@ func (s *spans) retainErrorAssertions(in *Input, c *graph.Conversion, methods []
 // outsidePackages are the packages outside the program whose assertions one site
 // answers: the interface's own package, and an argument's callee's, one hop, since a
 // package the callee hands the value on to is not read.
-func (s *spans) outsidePackages(c *graph.Conversion) []*types.Package {
+func (s *spans) outsidePackages(c *facts.Conversion) []*types.Package {
 	pkg, asserts := s.outside.of(c.Interface)
 	var pkgs []*types.Package
 	if asserts {
@@ -261,7 +262,7 @@ func (s *spans) outsidePackages(c *graph.Conversion) []*types.Package {
 // interface the source of one outside package asserts ([outsideAssertions]), the
 // methods the converted-to interface already retained excepted, each recorded as
 // held records it.
-func (s *spans) retainOutside(in *Input, c *graph.Conversion, pkg *types.Package, methods []answer, held *graph.Exemption, retained []graph.Exemption) []graph.Exemption {
+func (s *spans) retainOutside(in *Input, c *facts.Conversion, pkg *types.Package, methods []answer, held *graph.Exemption, retained []graph.Exemption) []graph.Exemption {
 	detail := "satisfies what " + pkg.Path() + " asserts through " + c.Name
 	for _, method := range s.outside.methods(c.From, pkg) {
 		if slices.ContainsFunc(methods, func(m answer) bool { return m.method == method }) {
@@ -307,7 +308,7 @@ type outsideKey struct {
 // newOutsideAssertions answers over one input.
 func newOutsideAssertions(in *Input) *outsideAssertions {
 	program := make(map[string]bool)
-	for _, p := range programPackages(in.Result) {
+	for _, p := range in.Facts.Program() {
 		program[p.PkgPath] = true
 	}
 	return &outsideAssertions{

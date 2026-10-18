@@ -5,8 +5,10 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -106,15 +108,15 @@ func TestEnumGroupLeavesTheUnreferencedMemberOfAPlainGroupASweepCandidate(t *tes
 			exemptionRows(t, in.Symbols, vocab.EnumGroup, found))
 	}
 
-	references, _, err := graph.References(in.Result, in.Resolve, in.Symbols, graph.TestClasses{})
+	references, _, err := facts.References(in.Result, in.Resolve, in.Symbols, roots.TestClasses{})
 	if err != nil {
-		t.Fatalf("Setup: graph.References(%s): %v", archive, err)
+		t.Fatalf("Setup: facts.References(%s): %v", archive, err)
 	}
-	roots, _ := graph.Roots(in.Result, in.Resolve, in.Symbols, graph.RootOptions{PublishedAPI: true})
+	rooted, _ := roots.Roots(in.Result, in.Resolve, in.Symbols, roots.RootOptions{PublishedAPI: true})
 
 	// The class retained nothing on this fixture, so the mode carries no
 	// exemption and the sweep answers over the graph alone.
-	result := graph.New(in.Symbols, references, roots).Sweep(&graph.SweepInput{})
+	result := graph.New(in.Symbols, references, rooted).Sweep(&graph.SweepInput{})
 
 	names := make(map[inventory.SymbolID]string, len(in.Symbols))
 	for i := range in.Symbols {

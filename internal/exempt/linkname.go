@@ -90,12 +90,7 @@ func newLinkname(in *Input) *linkname {
 		found:  make(map[linknameFact]struct{}),
 		loaded: make([]*packages.Package, 0, len(in.Result.Packages)),
 	}
-	for _, p := range in.Result.Packages {
-		if p.Types != nil && p.TypesInfo != nil {
-			d.loaded = append(d.loaded, p)
-		}
-	}
-	slices.SortFunc(d.loaded, func(a, b *packages.Package) int { return strings.Compare(a.ID, b.ID) })
+	d.loaded = append(d.loaded, slices.Collect(in.Facts.Typed())...)
 	return d
 }
 

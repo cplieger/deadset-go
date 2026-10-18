@@ -28,12 +28,15 @@ var referenceBlocks = [...]referenceBlock{
 	{"TS_MEMBER", `(?:TS_IDENT|#TS_IDENT|TS_QUOTED|TS_COMPUTED)`},
 	{"TS_PACKAGE", `(?:@[A-Za-z0-9._-]+/)?[A-Za-z0-9._-]+`},
 	{"TS_FILE", `(?:[^/#\r\n]+/)*[^/#\r\n]+(?:(?:\.d)?\.[mc]?ts|\.tsx|\.[mc]?js|\.jsx)`},
+	{"PROTO_IDENT", `[A-Za-z_][A-Za-z0-9_]*`},
+	{"PROTO_PACKAGE", `(?:\.|PROTO_IDENT(?:\.PROTO_IDENT)*)`},
+	{"PROTO_PATH", `(?:[^/#:\r\n]+/)*[^/#:\r\n]+\.proto`},
 }
 
 // referenceForms is one template per form the grammar fixes, in the grammar's
-// own order: the Go forms, then the TypeScript ones. Several forms of the
-// vocabulary share one template, because they differ in what the symbol is
-// rather than in how the reference is spelled.
+// own order: the Go forms, then the TypeScript ones, then the Protocol Buffers
+// ones. Several forms of the vocabulary share one template, because they differ
+// in what the symbol is rather than in how the reference is spelled.
 var referenceForms = [...]string{
 	`^go://GO_PATH#$`,
 	`^go://GO_PATH#GO_IDENT$`,
@@ -49,9 +52,12 @@ var referenceForms = [...]string{
 	`^ts://TS_PACKAGE/TS_FILE#TS_HEAD:import$`,
 	`^ts://TS_PACKAGE/TS_FILE#TS_HEAD(?:\.TS_MEMBER)+$`,
 	`^ts://TS_PACKAGE/TS_FILE#TS_HEAD(?:\.TS_MEMBER)+:static$`,
+	`^ts://TS_PACKAGE/TS_FILE#TS_HEAD(?:\.TS_MEMBER)+\.TS_QUOTED:case$`,
 	`^ts://TS_PACKAGE/TS_FILE#TS_HEAD(?:\.TS_MEMBER)*(?::static)?<TS_IDENT>$`,
 	`^ts://TS_PACKAGE/TS_FILE#(?:TS_HEAD(?:\.TS_MEMBER)*(?::static)?)?\(TS_IDENT\)$`,
 	`^ts://TS_PACKAGE/(?:[^/#\r\n]+/)*package\.json#TS_PACKAGE:(?:dependency|dev-dependency|peer-dependency)$`,
+	`^proto://PROTO_PACKAGE#PROTO_IDENT(?:\.PROTO_IDENT)*$`,
+	`^proto://PROTO_PACKAGE#PROTO_PATH:file$`,
 }
 
 // referenceExpressions are the forms with every block substituted, compiled once.
@@ -86,8 +92,8 @@ func compileReferences() []*regexp.Regexp {
 }
 
 // referenceForm reports whether ref is a stable symbol reference of some form the
-// grammar fixes. Both languages' forms are checked: one target holds one ignore
-// file, whose entries may name symbols of either, and an entry naming a symbol
+// grammar fixes. Every language's forms are checked: one target holds one ignore
+// file, whose entries may name symbols of any of them, and an entry naming a symbol
 // this analysis enumerates nothing under binds nothing rather than being refused.
 func referenceForm(ref string) bool {
 	for _, re := range referenceExpressions {

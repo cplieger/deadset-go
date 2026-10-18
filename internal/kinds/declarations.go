@@ -273,7 +273,7 @@ func testKept(candidate *graph.Candidate) bool {
 }
 
 // testReached reports whether production code only tests reach declares one symbol
-// of the merged inventory ([graph.MatrixTests]).
+// of the merged inventory ([roots.MatrixTests]).
 func (in *Input) testReached(symbol *inventory.Symbol) bool {
 	return in.Merged.Tests.Reached[symbol.Package]
 }
@@ -418,11 +418,11 @@ func (in *Input) deprecations() map[inventory.SymbolID]bool {
 	}
 	held.deprecated = make(map[inventory.SymbolID]bool)
 	for _, one := range in.Per {
-		if one.Result == nil || one.Resolve == nil {
+		if one.Facts == nil {
 			continue
 		}
-		for _, p := range one.Result.Packages {
-			for _, file := range p.Syntax {
+		for _, p := range one.Facts.Packages() {
+			for _, file := range one.Facts.Files(p) {
 				markDeprecated(file, one.Resolve, held.deprecated)
 			}
 		}

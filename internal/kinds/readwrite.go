@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -254,7 +255,7 @@ func writesAndReads(in *Input) map[inventory.SymbolID]*uses {
 }
 
 // count adds one reference the run's mode classifies.
-func (u *uses) count(in *Input, r *graph.Reference) {
+func (u *uses) count(in *Input, r *facts.Reference) {
 	if in.uncounted(r) {
 		u.testReads += readCount(r)
 		return
@@ -267,10 +268,10 @@ func (u *uses) count(in *Input, r *graph.Reference) {
 	// A loaded consumer's write counts as a read, because deleting the
 	// subject and its writes would break code the target does not own.
 	switch {
-	case r.Kind != graph.RefWrite && in.deadReader(r):
+	case r.Kind != facts.RefWrite && in.deadReader(r):
 		u.deadReads++
 		return
-	case r.Kind != graph.RefWrite || r.Consumer != "":
+	case r.Kind != facts.RefWrite || r.Consumer != "":
 		u.reads++
 		return
 	}
@@ -289,7 +290,7 @@ func (u *uses) count(in *Input, r *graph.Reference) {
 // that nothing references, and that is dead at the class certain: the finding's
 // relation is reference counting, under which that declaration is dead, so its
 // read is no read. A reader dead at a weaker class may be live, so its read counts.
-func (in *Input) deadReader(r *graph.Reference) bool {
+func (in *Input) deadReader(r *facts.Reference) bool {
 	if r.Consumer != "" || r.From == "" || r.From == r.To {
 		return false
 	}
@@ -300,19 +301,19 @@ func (in *Input) deadReader(r *graph.Reference) bool {
 // testReference reports whether the mode classifies one reference as a test
 // reference: a test file's, and a loaded consumer's test file's unless the
 // configuration counts those as production.
-func (in *Input) testReference(r *graph.Reference) bool {
+func (in *Input) testReference(r *facts.Reference) bool {
 	return r.Test && (r.Consumer == "" || !in.Mode.ConsumerTestsProduction)
 }
 
 // uncounted reports whether the mode counts one reference as no use at all, which a
 // production mode does for every test reference.
-func (in *Input) uncounted(r *graph.Reference) bool {
+func (in *Input) uncounted(r *facts.Reference) bool {
 	return in.Mode.Production && in.testReference(r)
 }
 
 // readCount is one for a reference that reads its target and zero for a store.
-func readCount(r *graph.Reference) int {
-	if r.Kind == graph.RefWrite {
+func readCount(r *facts.Reference) int {
+	if r.Kind == facts.RefWrite {
 		return 0
 	}
 	return 1
@@ -397,14 +398,11 @@ type enumScan struct {
 // an iota group declares on the pass over those groups and keeping the constants
 // of an already registered type on the pass over every other block.
 func (s *enumScan) blocks(iotaGroups bool) {
-	if s.per.Result == nil || s.per.Resolve == nil {
+	if s.per.Facts == nil {
 		return
 	}
-	for _, p := range s.per.Result.Packages {
-		if p.TypesInfo == nil {
-			continue
-		}
-		for _, f := range p.Syntax {
+	for _, p := range s.per.Facts.Packages() {
+		for _, f := range s.per.Facts.Files(p) {
 			for _, decl := range f.Decls {
 				block, isBlock := decl.(*ast.GenDecl)
 				if !isBlock || block.Tok != token.CONST || mentionsIota(block) != iotaGroups {

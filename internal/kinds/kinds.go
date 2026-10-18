@@ -29,10 +29,12 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/deps"
 	"github.com/cplieger/deadset-go/v2/internal/edges"
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -240,6 +242,7 @@ type Consumers struct {
 type Configured struct {
 	Result  *load.Result
 	Resolve *resolve.Resolver
+	Facts   *facts.Index
 	Symbols []inventory.Symbol
 }
 
@@ -296,7 +299,7 @@ type Input struct {
 
 	// TypeErrorSkips is every declaration a type error skipped, about which
 	// nothing is reported.
-	TypeErrorSkips []graph.TypeErrorSkip
+	TypeErrorSkips []roots.TypeErrorSkip
 
 	// Marks is every suppression record the run read, bound or not, and Refusals
 	// is what the grammar refused with a finding of its own rather than with an
@@ -317,7 +320,7 @@ type Input struct {
 
 	// Unmatched is every configured root the roots pass matched nothing with,
 	// which is a configuration naming something that no longer exists.
-	Unmatched []graph.Unmatched
+	Unmatched []roots.Unmatched
 
 	// RootsDocument is the configuration document that declared the configured
 	// roots, as a target-relative path, and is empty where no document of the
@@ -519,7 +522,7 @@ func (in *Input) withoutSkipped(findings []Finding) []Finding {
 		return findings
 	}
 	return slices.DeleteFunc(findings, func(found Finding) bool {
-		return slices.ContainsFunc(in.TypeErrorSkips, func(skip graph.TypeErrorSkip) bool {
+		return slices.ContainsFunc(in.TypeErrorSkips, func(skip roots.TypeErrorSkip) bool {
 			return skip.FromLine > 0 && skip.Path == found.Position.Path &&
 				skip.FromLine <= found.Position.Line && found.Position.Line <= skip.ToLine
 		})

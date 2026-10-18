@@ -20,12 +20,12 @@ func TestExhaustedErrorIsTheContractLine(t *testing.T) {
 		available uint64
 		want      string
 	}{
-		{"fraction", 2_345_000_000, 2_000_000_000, "memory exhausted: at least 2.4 GB were needed, 2 GB are available"},
-		{"below_one", 999_999_999, 512_000_000, "memory exhausted: at least 1 GB were needed, 0.5 GB are available"},
-		{"whole", 16_000_000_000, 15_990_000_000, "memory exhausted: at least 16 GB were needed, 15.9 GB are available"},
-		{"exact_tenth", 400_000_000, 300_000_000, "memory exhausted: at least 0.4 GB were needed, 0.3 GB are available"},
-		{"one_byte_apart", 400_000_001, 400_000_000, "memory exhausted: at least 0.5 GB were needed, 0.4 GB are available"},
-		{"zero", 0, 0, "memory exhausted: at least 0 GB were needed, 0 GB are available"},
+		{"fraction", 2_345_000_000, 2_000_000_000, "at least 2.4 GB were needed, 2 GB are available"},
+		{"below_one", 999_999_999, 512_000_000, "at least 1 GB were needed, 0.5 GB are available"},
+		{"whole", 16_000_000_000, 15_990_000_000, "at least 16 GB were needed, 15.9 GB are available"},
+		{"exact_tenth", 400_000_000, 300_000_000, "at least 0.4 GB were needed, 0.3 GB are available"},
+		{"one_byte_apart", 400_000_001, 400_000_000, "at least 0.5 GB were needed, 0.4 GB are available"},
+		{"zero", 0, 0, "at least 0 GB were needed, 0 GB are available"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -252,7 +252,7 @@ func TestTickEndsARunThatDoesNotFitWithTheContractLine(t *testing.T) {
 		t.Errorf("tick() = needed %d, available %d; want needed at least %d, twice the live heap, and above available",
 			exhausted.Needed, exhausted.Available, 2*held)
 	}
-	line := regexp.MustCompile(`^memory exhausted: at least (\d+(?:\.\d)?) GB were needed, (\d+(?:\.\d)?) GB are available$`)
+	line := regexp.MustCompile(`^at least (\d+(?:\.\d)?) GB were needed, (\d+(?:\.\d)?) GB are available$`)
 	match := line.FindStringSubmatch(exhausted.Error())
 	if match == nil {
 		t.Fatalf("tick() line = %q, want %v", exhausted.Error(), line)
@@ -304,5 +304,15 @@ func TestStopRestoresTheSettingsItFound(t *testing.T) {
 	}
 	if got := debug.SetGCPercent(gogc); got != gogc {
 		t.Errorf("after stop GOGC is %d, want %d", got, gogc)
+	}
+}
+
+func TestCeilingIsTheCallerLimitOnceTheRuntimeHoldsMore(t *testing.T) {
+	g := &governor{samples: newSamples(), callerLimit: 1 << 20}
+	if _, held := g.read(); held <= g.callerLimit {
+		t.Skipf("Setup: the runtime holds %d bytes, not above the %d-byte limit", held, g.callerLimit)
+	}
+	if ceiling, read := g.ceiling(); !read || ceiling != g.callerLimit {
+		t.Errorf("ceiling() under a 1 MiB limit = %d, %t, want %d, true", ceiling, read, g.callerLimit)
 	}
 }

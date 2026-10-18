@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/failure"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
@@ -206,17 +207,17 @@ func TestLoadRefusesAConsumerWhoseDependenciesAreNotInstalledAsAMissingConsumer(
 // failure whose line names every string of want.
 func assertMissingConsumer(t *testing.T, what string, err error, want ...string) {
 	t.Helper()
-	setup, ok := errors.AsType[*SetupError](err)
+	setup, ok := errors.AsType[*failure.Error](err)
 	if !ok || len(setup.Failures) == 0 {
-		t.Fatalf("Load(%s) = _, %v, want a *load.SetupError", what, err)
+		t.Fatalf("Load(%s) = _, %v, want a setup *failure.Error", what, err)
 	}
 	for _, one := range setup.Failures {
 		if one.Class != vocab.SetupMissingConsumer {
 			t.Errorf("Load(%s) failed with the class %q, want %q", what, one.Class, vocab.SetupMissingConsumer)
 		}
 		for _, text := range want {
-			if !strings.Contains(one.Line(), text) {
-				t.Errorf("Load(%s) line = %q, want it to name %q", what, one.Line(), text)
+			if !strings.Contains(one.Class+": "+one.Detail, text) {
+				t.Errorf("Load(%s) line = %q, want it to name %q", what, one.Class+": "+one.Detail, text)
 			}
 		}
 	}

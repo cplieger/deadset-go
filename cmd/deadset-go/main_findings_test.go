@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"reflect"
 	"slices"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/run"
@@ -303,8 +305,8 @@ func TestFindingsOfRefusesAGeneratedFileWhosePackageClauseIsOutsideTheTarget(t *
 	// A line directive places the package clause outside the target, so no
 	// target-relative path names the generated file; the run fails rather than
 	// leaving the file unclassified. The malformed edge document is read after
-	// the generated file is rendered, so the generated file's failure is the one
-	// the run reports.
+	// the load indexes the generated file, so the generated file's failure is the
+	// one the run reports.
 	dir := writeModule(t, map[string]string{
 		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
 		"app.go": "package main\n\nfunc main() {}\n",
@@ -319,7 +321,7 @@ func TestFindingsOfRefusesAGeneratedFileWhosePackageClauseIsOutsideTheTarget(t *
 	}
 
 	_, err := findingsOf(t.Context(), resolved)
-	if err == nil || !strings.Contains(err.Error(), "render the package clause of a generated file") {
+	if !errors.Is(err, inventory.ErrSource) || !strings.Contains(err.Error(), "elsewhere/wire.go") {
 		t.Errorf("findingsOf() = _, %v, want the generated file's package clause refused", err)
 	}
 }

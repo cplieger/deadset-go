@@ -1,4 +1,4 @@
-package graph
+package roots
 
 import (
 	"go/token"
@@ -13,9 +13,9 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-// testSupportRule names the classification of a file as test-support code, which
+// TestSupportRule names the classification of a file as test-support code, which
 // no file-name pattern makes.
-const testSupportRule = "test-support"
+const TestSupportRule = "test-support"
 
 // testPackageSuffix ends the import path of an external test package, which
 // nothing imports.
@@ -150,7 +150,7 @@ func rootedPackages(symbols []inventory.Symbol, roots []Root) map[load.PackageID
 // test file, testUser for a test file of the target or of a consumer, and
 // outsideUser for any other file of a consumer.
 func usersOf(r *load.Result, candidates map[load.PackageID]bool) map[load.PackageID]map[load.PackageID]bool {
-	keys := packageKeys(r)
+	keys := r.TypesIDs()
 	users := make(map[load.PackageID]map[load.PackageID]bool, len(candidates))
 	add := func(to, from load.PackageID) {
 		if !candidates[to] || to == from {
@@ -174,22 +174,6 @@ func usersOf(r *load.Result, candidates map[load.PackageID]bool) map[load.Packag
 	return users
 }
 
-// packageKeys is the [load.PackageID] of every package the load reads, the
-// target's dependencies and its consumers' included, by its types.
-func packageKeys(r *load.Result) map[*types.Package]load.PackageID {
-	keys := make(map[*types.Package]load.PackageID)
-	record := func(p *packages.Package) {
-		if p.Types != nil {
-			keys[p.Types] = r.ID(p)
-		}
-	}
-	packages.Visit(r.Packages, nil, record)
-	for _, consumer := range r.Referencing() {
-		packages.Visit(consumer.Packages, nil, record)
-	}
-	return keys
-}
-
 // addUses records every import and every resolved name of one package against the
 // user its file is: testUser for a test file and production for any other.
 func addUses(fset *token.FileSet, p *packages.Package, keys map[*types.Package]load.PackageID, production load.PackageID, add func(to, from load.PackageID)) {
@@ -207,7 +191,7 @@ func addUses(fset *token.FileSet, p *packages.Package, keys map[*types.Package]l
 	}
 	for id, object := range p.TypesInfo.Uses {
 		if object.Pkg() != nil {
-			add(typesKey(keys, object.Pkg()), files.at(id.Pos()))
+			add(load.TypesID(keys, object.Pkg()), files.at(id.Pos()))
 		}
 	}
 }
@@ -215,18 +199,9 @@ func addUses(fset *token.FileSet, p *packages.Package, keys map[*types.Package]l
 // importKey is the identity of the package p imports by that path.
 func importKey(p *packages.Package, keys map[*types.Package]load.PackageID, imported string) load.PackageID {
 	if dep := p.Imports[imported]; dep != nil && dep.Types != nil {
-		return typesKey(keys, dep.Types)
+		return load.TypesID(keys, dep.Types)
 	}
 	return load.PackageID{Path: imported}
-}
-
-// typesKey is the identity of pkg, its import path alone where the load read no
-// such package.
-func typesKey(keys map[*types.Package]load.PackageID, pkg *types.Package) load.PackageID {
-	if key, held := keys[pkg]; held {
-		return key
-	}
-	return load.PackageID{Path: pkg.Path()}
 }
 
 // fileUsers is the user each file of one package is, computed once per file.

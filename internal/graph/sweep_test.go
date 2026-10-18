@@ -8,7 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 )
 
 // unreachableChain is the graph both relations disagree over: one declaration a
@@ -17,7 +19,7 @@ import (
 func unreachableChain(t *testing.T) *graphBuilder {
 	t.Helper()
 	b := newGraphBuilder(t).add("entry", "reached", "unreferenced", "referencedByDeadCode")
-	b.root("entry", RootMain)
+	b.root("entry", roots.RootMain)
 	b.ref("entry", "reached")
 	b.ref("unreferenced", "referencedByDeadCode")
 	return b
@@ -83,7 +85,7 @@ func TestSweepHoldsAMarkedSymbolLiveUnderBothRelationsWithWhatItReferences(t *te
 
 func TestSweepReportsAPublishedRootUnderReferenceCountingAndHoldsItsClosureLive(t *testing.T) {
 	b := newGraphBuilder(t).add("Exported", "helper")
-	b.root("Exported", RootPublishedAPI)
+	b.root("Exported", roots.RootPublishedAPI)
 	b.ref("Exported", "helper")
 	r := b.graph().Sweep(&SweepInput{})
 
@@ -101,18 +103,18 @@ func TestSweepReportsAPublishedRootUnderReferenceCountingAndHoldsItsClosureLive(
 
 func TestSweepHoldsEveryRootThatNamesACallerLiveUnderBothRelations(t *testing.T) {
 	cases := []struct {
-		kind RootKind
+		kind roots.RootKind
 		want []string
 	}{
-		{kind: RootMain},
-		{kind: RootInit},
-		{kind: RootTest},
-		{kind: RootLinkname},
-		{kind: RootCgoExport},
-		{kind: RootBlank},
-		{kind: RootConfigured},
-		{kind: RootPattern},
-		{kind: RootPublishedAPI, want: []string{"entry reference-counting"}},
+		{kind: roots.RootMain},
+		{kind: roots.RootInit},
+		{kind: roots.RootTest},
+		{kind: roots.RootLinkname},
+		{kind: roots.RootCgoExport},
+		{kind: roots.RootBlank},
+		{kind: roots.RootConfigured},
+		{kind: roots.RootPattern},
+		{kind: roots.RootPublishedAPI, want: []string{"entry reference-counting"}},
 	}
 	for _, test := range cases {
 		t.Run(test.kind.String(), func(t *testing.T) {
@@ -131,8 +133,8 @@ func TestSweepHoldsEveryRootThatNamesACallerLiveUnderBothRelations(t *testing.T)
 func testOnlyUse(t *testing.T) *graphBuilder {
 	t.Helper()
 	b := newGraphBuilder(t).add("entry", "usedByProduction", "usedByTestOnly").addTest("TestBoth")
-	b.root("entry", RootMain)
-	b.root("TestBoth", RootTest)
+	b.root("entry", roots.RootMain)
+	b.root("TestBoth", roots.RootTest)
 	b.ref("entry", "usedByProduction")
 	b.ref("TestBoth", "usedByProduction")
 	b.ref("TestBoth", "usedByTestOnly")
@@ -177,9 +179,9 @@ func TestTestReferencesOfCountsOneReferencePerClassAndDetail(t *testing.T) {
 
 func TestSweepAdmitsATestOfDeadCodeAndDeclinesATestOfLiveCode(t *testing.T) {
 	b := newGraphBuilder(t).add("entry", "live", "deadOne", "deadTwo").addTest("TestDead", "TestLive")
-	b.root("entry", RootMain)
-	b.root("TestDead", RootTest)
-	b.root("TestLive", RootTest)
+	b.root("entry", roots.RootMain)
+	b.root("TestDead", roots.RootTest)
+	b.root("TestLive", roots.RootTest)
 	b.ref("entry", "live")
 	b.ref("TestDead", "deadOne")
 	b.ref("TestDead", "deadTwo")
@@ -283,7 +285,7 @@ func TestSweepReportsNoExemptSymbolAndHoldsWhatItReferencesLive(t *testing.T) {
 
 func TestSweepRecordsEveryExemptionThatHeldASymbolBackAndNoOther(t *testing.T) {
 	b := newGraphBuilder(t).add("entry", "unreferenced", "alsoUnreferenced")
-	b.root("entry", RootMain)
+	b.root("entry", roots.RootMain)
 	r := b.graph().Sweep(&SweepInput{Exempt: []Exemption{
 		b.exemption("alsoUnreferenced", "enum-group"),
 		b.exemption("entry", "generated-file"),
@@ -339,7 +341,7 @@ func (b *graphBuilder) suppressedBy(r Result) []string {
 
 func TestSweepRecordsEveryMarkThatHeldASymbolBackAndNoOther(t *testing.T) {
 	b := newGraphBuilder(t).add("entry", "heldBack", "alsoHeldBack", "exemptAndMarked")
-	b.root("entry", RootMain)
+	b.root("entry", roots.RootMain)
 	r := b.graph().Sweep(&SweepInput{
 		Marked: []inventory.SymbolID{
 			b.id("alsoHeldBack"),
@@ -383,7 +385,7 @@ func TestSweepRecordsNoMarkWhenTheModeCarriesNone(t *testing.T) {
 
 func TestSweepRecordsAMarkThatHeldBackATestOfDeadCode(t *testing.T) {
 	b := newGraphBuilder(t).add("deadOne").addTest("TestDead")
-	b.root("TestDead", RootTest)
+	b.root("TestDead", roots.RootTest)
 	b.ref("TestDead", "deadOne")
 	r := b.graph().Sweep(&SweepInput{Marked: []inventory.SymbolID{b.id("TestDead")}, Mode: Mode{Production: true}})
 
@@ -439,7 +441,7 @@ func TestSweepUnderProductionModeSeedsAnExemptTestDeclaration(t *testing.T) {
 
 func TestSweepUnderProductionModeKeepsNothingATestFileRootReferences(t *testing.T) {
 	b := retainedTestDeclaration(t)
-	b.root("Hook", RootBlank)
+	b.root("Hook", roots.RootBlank)
 	r := b.graph().Sweep(&SweepInput{Mode: Mode{Production: true}})
 
 	// A blank declaration in a test file is a root of a kind a production sweep
@@ -489,7 +491,7 @@ func TestSweepWithoutTheExemptionReportsWhatTheRetainedMethodReferences(t *testi
 
 func TestSweepUnderProductionModeReadsTheReferencingFileAndNotTheTargets(t *testing.T) {
 	b := newGraphBuilder(t).add("entry").addTest("reachedFromProduction")
-	b.root("entry", RootMain)
+	b.root("entry", roots.RootMain)
 	b.ref("entry", "reachedFromProduction")
 
 	// Production mode drops a reference a test file made, which is decided by the
@@ -504,12 +506,12 @@ func TestSweepUnderProductionModeReadsTheReferencingFileAndNotTheTargets(t *test
 
 func TestThePassesOverAModuleThatHasTestFiles(t *testing.T) {
 	const pkg = "go://example.com/tested#"
-	s := sweepOf(t, "tested-module.txtar", RootOptions{PublishedAPI: true})
+	s := sweepOf(t, "tested-module.txtar", roots.RootOptions{PublishedAPI: true})
 
 	t.Run("every test function is a root", func(t *testing.T) {
 		var found []string
 		for _, root := range s.roots {
-			if root.Kind == RootTest {
+			if root.Kind == roots.RootTest {
 				found = append(found, s.byID[root.ID].Ref)
 			}
 		}
@@ -519,7 +521,7 @@ func TestThePassesOverAModuleThatHasTestFiles(t *testing.T) {
 			"go://example.com/tested_test#TestResolve",
 		}
 		if !slices.Equal(found, want) {
-			t.Errorf("Roots(tested-module.txtar) named %v under %s, want %v", found, RootTest, want)
+			t.Errorf("Roots(tested-module.txtar) named %v under %s, want %v", found, roots.RootTest, want)
 		}
 	})
 
@@ -589,14 +591,14 @@ type swept struct {
 	byID    map[inventory.SymbolID]inventory.Symbol
 	byRef   map[string]inventory.SymbolID
 	symbols []inventory.Symbol
-	refs    []Reference
-	roots   []Root
+	refs    []facts.Reference
+	roots   []roots.Root
 }
 
 // sweepOf is the three passes the sweep reads over one archive loaded for one
 // configuration, so a verdict is measured over the production pipeline rather than
 // over a graph written by hand.
-func sweepOf(t *testing.T, archive string, opts RootOptions) *swept {
+func sweepOf(t *testing.T, archive string, opts roots.RootOptions) *swept {
 	t.Helper()
 
 	shared := analysisOf(t, archive, opts.Patterns)
@@ -684,7 +686,7 @@ func (s *swept) groupsUnder(prefix string, r Result) []grouped {
 
 func TestSweepOverTheLoadedGraphNamesTheRelationThatFoundEachCandidate(t *testing.T) {
 	const pkg = "go://example.com/sweep#"
-	s := sweepOf(t, "sweep.txtar", RootOptions{PublishedAPI: true})
+	s := sweepOf(t, "sweep.txtar", roots.RootOptions{PublishedAPI: true})
 	r := s.graph.Sweep(&SweepInput{})
 
 	// The published entry point is a candidate under reference counting while the
@@ -710,7 +712,7 @@ func TestSweepOverTheLoadedGraphNamesTheRelationThatFoundEachCandidate(t *testin
 
 func TestSweepOverTheLoadedGraphReportsNothingUnderAMarkedDeclaration(t *testing.T) {
 	const pkg = "go://example.com/sweep#"
-	s := sweepOf(t, "sweep.txtar", RootOptions{PublishedAPI: true})
+	s := sweepOf(t, "sweep.txtar", roots.RootOptions{PublishedAPI: true})
 	r := s.graph.Sweep(&SweepInput{Marked: []inventory.SymbolID{s.id(t, pkg+"unreferenced")}})
 
 	// The mark holds the declaration live under both relations and seeds
@@ -723,7 +725,7 @@ func TestSweepOverTheLoadedGraphReportsNothingUnderAMarkedDeclaration(t *testing
 }
 
 func TestSweepOverTheLoadedGraphGroupsACycleAndACascade(t *testing.T) {
-	s := sweepOf(t, "sweep.txtar", RootOptions{PublishedAPI: true})
+	s := sweepOf(t, "sweep.txtar", roots.RootOptions{PublishedAPI: true})
 	r := s.graph.Sweep(&SweepInput{})
 
 	cases := map[string]struct {
@@ -779,7 +781,7 @@ func TestSweepOverTheLoadedGraphGroupsACycleAndACascade(t *testing.T) {
 
 func TestSweepOverTheLoadedGraphAdmitsATestOfDeadCode(t *testing.T) {
 	const pkg = "go://example.com/sweep/subject#"
-	s := sweepOf(t, "sweep.txtar", RootOptions{PublishedAPI: true})
+	s := sweepOf(t, "sweep.txtar", roots.RootOptions{PublishedAPI: true})
 	r := s.graph.Sweep(&SweepInput{Mode: Mode{Production: true}})
 
 	// The rule needs a mode that counts no test reference, because a test's own
@@ -819,7 +821,7 @@ func (s *swept) verdictOf(t *testing.T, r Result, ref string) (reachable bool, c
 
 func TestSweepOverEveryRootClassHoldsTheRootLiveAndReportsItsLookAlike(t *testing.T) {
 	const pkg = "go://example.com/roots#"
-	s := sweepOf(t, "roots.txtar", RootOptions{PublishedAPI: true})
+	s := sweepOf(t, "roots.txtar", roots.RootOptions{PublishedAPI: true})
 	r := s.graph.Sweep(&SweepInput{})
 
 	// One pair per detected root class: the declaration the class roots, and the
@@ -890,7 +892,7 @@ func TestSweepOverEveryRootClassHoldsTheRootLiveAndReportsItsLookAlike(t *testin
 
 func TestSweepWithoutThePublishedSeedReportsEveryExportedSymbolNothingReferences(t *testing.T) {
 	const pkg = "go://example.com/roots#"
-	s := sweepOf(t, "roots.txtar", RootOptions{})
+	s := sweepOf(t, "roots.txtar", roots.RootOptions{})
 	r := s.graph.Sweep(&SweepInput{})
 
 	// The published API is the one seed the target's kind decides, and it is the
@@ -926,7 +928,7 @@ func TestSweepWithoutThePublishedSeedReportsEveryExportedSymbolNothingReferences
 
 func TestSweepOverAConfiguredRootHoldsItLiveAndReportsTheDeclarationsNothingNames(t *testing.T) {
 	const pkg = "go://example.com/patterns#"
-	s := sweepOf(t, "root-patterns.txtar", RootOptions{Patterns: []string{pkg + "Alpha"}})
+	s := sweepOf(t, "root-patterns.txtar", roots.RootOptions{Patterns: []string{pkg + "Alpha"}})
 	r := s.graph.Sweep(&SweepInput{})
 
 	// A configured root is the maintainer's assertion of a caller, so it is live
@@ -951,7 +953,7 @@ func TestSweepOverAConfiguredRootHoldsItLiveAndReportsTheDeclarationsNothingName
 
 func TestSweepOverAPackageWithATestVariantLeavesAFunctionOutOfTheTypesComponent(t *testing.T) {
 	const pkg = "go://example.com/receivers#"
-	s := sweepOf(t, "receivers.txtar", RootOptions{})
+	s := sweepOf(t, "receivers.txtar", roots.RootOptions{})
 	r := s.graph.Sweep(&SweepInput{Mode: Mode{Production: true}})
 
 	// A package-level function's container is the package, which no sweep judges,
@@ -987,8 +989,8 @@ func (b *graphBuilder) unreferencedFlags(r Result) map[string]Relation {
 func TestSweepAdmitsEveryTestFileDeclarationNoRootReaches(t *testing.T) {
 	b := newGraphBuilder(t).add("entry", "live", "spare").
 		addTest("TestLive", "calledHelper", "unusedHelper", "checkedHelper")
-	b.root("entry", RootMain)
-	b.root("TestLive", RootTest)
+	b.root("entry", roots.RootMain)
+	b.root("TestLive", roots.RootTest)
 	b.ref("entry", "live")
 	b.ref("TestLive", "calledHelper")
 	b.ref("unusedHelper", "checkedHelper")
@@ -1017,8 +1019,8 @@ func TestSweepAdmitsEveryTestFileDeclarationNoRootReaches(t *testing.T) {
 func TestSweepHoldsTestSupportCodeAReferenceNamesLive(t *testing.T) {
 	b := newGraphBuilder(t).add("entry", "live", "onlyTested").addTest("TestLive").
 		addSupport("calledHelper", "deepHelper", "unusedHelper", "strandedHelper")
-	b.root("entry", RootMain)
-	b.root("TestLive", RootTest)
+	b.root("entry", roots.RootMain)
+	b.root("TestLive", roots.RootTest)
 	b.ref("entry", "live")
 	b.ref("TestLive", "calledHelper")
 	b.ref("calledHelper", "deepHelper")
@@ -1039,8 +1041,8 @@ func TestSweepHoldsTestSupportCodeAReferenceNamesLive(t *testing.T) {
 
 func TestMatrixSweepHoldsATestFileDeclarationTestEvidenceNamesLiveWithWhatItReaches(t *testing.T) {
 	b := newGraphBuilder(t).add("entry").addTest("TestLive", "write", "writeHelper", "unusedHelper")
-	b.root("entry", RootMain)
-	b.root("TestLive", RootTest)
+	b.root("entry", roots.RootMain)
+	b.root("TestLive", roots.RootTest)
 	b.ref("write", "writeHelper")
 	merged, err := Merge(b.configured(1, func(int, string) bool { return true }), handTests)
 	if err != nil {
@@ -1061,8 +1063,8 @@ func TestMatrixSweepHoldsATestFileDeclarationTestEvidenceNamesLiveWithWhatItReac
 
 func TestMatrixSweepHoldsTestSupportCodeTestEvidenceNamesLive(t *testing.T) {
 	b := newGraphBuilder(t).add("entry").addTest("TestLive").addSupport("Get", "Spare")
-	b.root("entry", RootMain)
-	b.root("TestLive", RootTest)
+	b.root("entry", roots.RootMain)
+	b.root("TestLive", roots.RootTest)
 	merged, err := Merge(b.configured(1, func(int, string) bool { return true }), handTests)
 	if err != nil {
 		t.Fatalf("Merge = _, %v, want no error", err)
@@ -1079,7 +1081,7 @@ func TestMatrixSweepHoldsTestSupportCodeTestEvidenceNamesLive(t *testing.T) {
 
 func TestSweepCountsAHeldExemptionAsAUseByItsHolder(t *testing.T) {
 	b := newGraphBuilder(t).add("entry", "deadHolder", "keptByLive", "keptByDead")
-	b.root("entry", RootMain)
+	b.root("entry", roots.RootMain)
 	exemptions := []Exemption{
 		{ID: b.id("keptByLive"), Class: "interface-satisfaction", Holder: b.id("entry")},
 		{ID: b.id("keptByDead"), Class: "interface-satisfaction", Holder: b.id("deadHolder")},
@@ -1097,7 +1099,7 @@ func TestSweepCountsAHeldExemptionAsAUseByItsHolder(t *testing.T) {
 
 func TestSweepRecordsAHeldExemptionAsRetainingOnlyWhileItsHolderIsLive(t *testing.T) {
 	b := newGraphBuilder(t).add("entry", "deadHolder", "keptByLive", "keptByDead")
-	b.root("entry", RootMain)
+	b.root("entry", roots.RootMain)
 	exemptions := []Exemption{
 		{ID: b.id("keptByLive"), Class: "interface-satisfaction", Holder: b.id("entry")},
 		{ID: b.id("keptByDead"), Class: "interface-satisfaction", Holder: b.id("deadHolder")},
@@ -1116,8 +1118,8 @@ func TestSweepRecordsAHeldExemptionAsRetainingOnlyWhileItsHolderIsLive(t *testin
 
 func TestSweepRetainsAnExemptionWithCoHoldersOnlyWhileEveryHolderIsLive(t *testing.T) {
 	b := newGraphBuilder(t).add("entry", "second", "deadHolder", "keptByBoth", "keptWithADead")
-	b.root("entry", RootMain)
-	b.root("second", RootMain)
+	b.root("entry", roots.RootMain)
+	b.root("second", roots.RootMain)
 	exemptions := []Exemption{
 		{ID: b.id("keptByBoth"), Class: "interface-satisfaction", Holder: b.id("entry"), CoHolders: []inventory.SymbolID{b.id("second")}},
 		{ID: b.id("keptWithADead"), Class: "interface-satisfaction", Holder: b.id("entry"), CoHolders: []inventory.SymbolID{b.id("deadHolder")}},
@@ -1138,7 +1140,7 @@ func TestSweepRetainsAnExemptionWithCoHoldersOnlyWhileEveryHolderIsLive(t *testi
 
 func TestSweepCreditsAnExemptionWithASymbolAMarkItMadeStaleNamesToo(t *testing.T) {
 	b := newGraphBuilder(t).add("entry", "kept")
-	b.root("entry", RootMain)
+	b.root("entry", roots.RootMain)
 	r := b.graph().Sweep(&SweepInput{
 		Exempt: []Exemption{{ID: b.id("kept"), Class: "interface-satisfaction", Holder: b.id("entry")}},
 		Marked: []inventory.SymbolID{b.id("kept")},
@@ -1154,7 +1156,7 @@ func TestSweepCreditsAnExemptionWithASymbolAMarkItMadeStaleNamesToo(t *testing.T
 
 func TestSweepCountsAHolderReachabilityHoldsLiveAsHoldingItsExemption(t *testing.T) {
 	b := newGraphBuilder(t).add("Published", "kept")
-	b.root("Published", RootPublishedAPI)
+	b.root("Published", roots.RootPublishedAPI)
 	r := b.graph().Sweep(&SweepInput{
 		Exempt: []Exemption{{ID: b.id("kept"), Class: "interface-satisfaction", Holder: b.id("Published")}},
 	})
@@ -1169,7 +1171,7 @@ func TestSweepCountsAHolderReachabilityHoldsLiveAsHoldingItsExemption(t *testing
 
 func TestMatrixSweepRecordsTheHolderOfAFactThatRetained(t *testing.T) {
 	b := newGraphBuilder(t).add("entry", "deadHolder", "method")
-	b.root("entry", RootMain)
+	b.root("entry", roots.RootMain)
 	merged, err := Merge(b.configured(1, func(int, string) bool { return true }), handTests)
 	if err != nil {
 		t.Fatalf("Merge = _, %v, want no error", err)
@@ -1188,8 +1190,8 @@ func TestMatrixSweepRecordsTheHolderOfAFactThatRetained(t *testing.T) {
 
 func TestSweepLeavesABlankRootAHeldExemptionNamesToItsHolder(t *testing.T) {
 	b := newGraphBuilder(t).add("entry", "asserted", "assertion")
-	b.root("entry", RootMain)
-	b.root("assertion", RootBlank)
+	b.root("entry", roots.RootMain)
+	b.root("assertion", roots.RootBlank)
 	b.ref("assertion", "asserted")
 	held := []Exemption{{ID: b.id("assertion"), Class: "interface-satisfaction", Holder: b.id("asserted")}}
 
@@ -1204,7 +1206,7 @@ func TestSweepLeavesABlankRootAHeldExemptionNamesToItsHolder(t *testing.T) {
 
 func TestSweepCountsAnInferredUseAsAReferenceItsSourceMakes(t *testing.T) {
 	b := newGraphBuilder(t).add("entry", "uncalled", "implementation")
-	b.root("entry", RootMain)
+	b.root("entry", roots.RootMain)
 	r := b.graph().Sweep(&SweepInput{Uses: []Use{{From: b.id("uncalled"), To: b.id("implementation")}}})
 
 	want := []verdict{
@@ -1222,7 +1224,7 @@ func TestSweepCountsAnInferredUseAsAReferenceItsSourceMakes(t *testing.T) {
 
 func TestSweepLeavesTheGraphUngatedByACoHeldExemptionOnASymbolItDoesNotHold(t *testing.T) {
 	b := newGraphBuilder(t).add("entry", "second", "callee")
-	b.root("entry", RootMain)
+	b.root("entry", roots.RootMain)
 	b.ref("entry", "callee")
 	g := b.graph()
 	in := &SweepInput{Exempt: []Exemption{{

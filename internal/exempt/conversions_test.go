@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"golang.org/x/tools/txtar"
@@ -29,13 +29,17 @@ func inputForDir(t *testing.T, dir, subject string) *Input {
 	if err != nil {
 		t.Fatalf("Setup: resolve.New(%s): %v", subject, err)
 	}
-	return &Input{Result: result, Symbols: symbols, Resolve: resolver, Root: root, Read: os.ReadFile}
+	index, err := facts.NewIndex(result, resolver)
+	if err != nil {
+		t.Fatalf("Setup: facts.NewIndex(%s): %v", subject, err)
+	}
+	return &Input{Result: result, Symbols: symbols, Resolve: resolver, Facts: index, Root: root, Read: os.ReadFile}
 }
 
 // renderConversions prints one conversion per line, tab-separated, for a golden
 // comparison. Each position is rendered against the target root, so the temporary
 // directory the archive was written to does not reach the golden.
-func renderConversions(t *testing.T, in *Input, sites []graph.Conversion) string {
+func renderConversions(t *testing.T, in *Input, sites []facts.Conversion) string {
 	t.Helper()
 	var b strings.Builder
 	for i := range sites {

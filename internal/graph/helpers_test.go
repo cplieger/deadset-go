@@ -5,9 +5,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
 )
 
@@ -19,10 +21,10 @@ import (
 // load it was computed from is held.
 type sharedAnalysis struct {
 	symbols       []inventory.Symbol
-	refs          []Reference
+	refs          []facts.Reference
 	rules         []inventory.TestFileRule
-	roots         map[bool][]Root
-	unmatched     map[bool][]Unmatched
+	roots         map[bool][]roots.Root
+	unmatched     map[bool][]roots.Unmatched
 	excludedByCgo []string
 }
 
@@ -55,7 +57,7 @@ func analyzeShared(t *testing.T, archive string, patterns []string) *sharedAnaly
 	if err != nil {
 		t.Fatalf("Symbols(%s) error: %v", archive, err)
 	}
-	refs, rules, err := References(result, rs, symbols, TestClasses{})
+	refs, rules, err := facts.References(result, rs, symbols, roots.TestClasses{})
 	if err != nil {
 		t.Fatalf("References(%s) error: %v", archive, err)
 	}
@@ -63,13 +65,13 @@ func analyzeShared(t *testing.T, archive string, patterns []string) *sharedAnaly
 		symbols:       symbols,
 		refs:          refs,
 		rules:         rules,
-		roots:         make(map[bool][]Root),
-		unmatched:     make(map[bool][]Unmatched),
+		roots:         make(map[bool][]roots.Root),
+		unmatched:     make(map[bool][]roots.Unmatched),
 		excludedByCgo: result.ExcludedByCgo,
 	}
 	for _, published := range []bool{false, true} {
-		opts := RootOptions{Patterns: patterns, PublishedAPI: published}
-		held.roots[published], held.unmatched[published] = Roots(result, rs, symbols, opts)
+		opts := roots.RootOptions{Patterns: patterns, PublishedAPI: published}
+		held.roots[published], held.unmatched[published] = roots.Roots(result, rs, symbols, opts)
 	}
 	return held
 }
@@ -82,7 +84,7 @@ func (a *sharedAnalysis) inventory(t *testing.T) []inventory.Symbol {
 }
 
 // references is the references the reference pass walked over the inventory.
-func (a *sharedAnalysis) references(t *testing.T) []Reference {
+func (a *sharedAnalysis) references(t *testing.T) []facts.Reference {
 	t.Helper()
 
 	return testsupport.Detached(t, a.refs)
@@ -98,7 +100,7 @@ func (a *sharedAnalysis) testFileRules(t *testing.T) []inventory.TestFileRule {
 
 // rootsUnder is the roots and the unmatched patterns one setting of the
 // published-API seed detected.
-func (a *sharedAnalysis) rootsUnder(t *testing.T, published bool) ([]Root, []Unmatched) {
+func (a *sharedAnalysis) rootsUnder(t *testing.T, published bool) ([]roots.Root, []roots.Unmatched) {
 	t.Helper()
 
 	return testsupport.Detached(t, a.roots[published]), testsupport.Detached(t, a.unmatched[published])

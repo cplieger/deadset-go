@@ -1,4 +1,4 @@
-package graph
+package facts
 
 import (
 	"go/token"

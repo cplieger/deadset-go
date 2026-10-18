@@ -423,11 +423,8 @@ func (s *enumGroupScan) exemptions() []graph.Exemption {
 
 // each calls visit for every file of every package variant the load holds.
 func (s *enumGroupScan) each(visit func(p *packages.Package, f *ast.File) error) error {
-	for _, p := range s.in.Result.Packages {
-		if p.TypesInfo == nil {
-			continue
-		}
-		for _, f := range p.Syntax {
+	for _, p := range s.in.Facts.Packages() {
+		for _, f := range s.in.Facts.Files(p) {
 			if err := visit(p, f); err != nil {
 				return err
 			}

@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 )
 
 // cgoArchive is the fixture whose every package holds a file the toolchain
@@ -22,7 +24,7 @@ type cgoGraph struct {
 	byID       map[inventory.SymbolID]inventory.Symbol
 	byRef      map[string]bool
 	references map[string][]string // a reference, and the references made to it
-	roots      map[string][]RootKind
+	roots      map[string][]roots.RootKind
 	files      map[string]bool // the files the enumeration holds a symbol for
 	excluded   []string
 	swept      Result
@@ -39,12 +41,12 @@ func sweepCgo(t *testing.T) *cgoGraph {
 	if err != nil {
 		t.Fatalf("Setup: Symbols(%s): %v", cgoArchive, err)
 	}
-	refs, _, err := References(result, rs, symbols, TestClasses{})
+	refs, _, err := facts.References(result, rs, symbols, roots.TestClasses{})
 	if err != nil {
 		t.Fatalf("Setup: References(%s): %v", cgoArchive, err)
 	}
-	roots, _ := Roots(result, rs, symbols, RootOptions{PublishedAPI: true})
-	merged, err := Merge([]Configured{{Symbols: symbols, References: refs, Roots: roots}}, TestClasses{})
+	rooted, _ := roots.Roots(result, rs, symbols, roots.RootOptions{PublishedAPI: true})
+	merged, err := Merge([]Configured{{Symbols: symbols, References: refs, Roots: rooted}}, roots.TestClasses{})
 	if err != nil {
 		t.Fatalf("Setup: Merge(%s): %v", cgoArchive, err)
 	}
@@ -53,7 +55,7 @@ func sweepCgo(t *testing.T) *cgoGraph {
 		byID:       make(map[inventory.SymbolID]inventory.Symbol, len(merged.Symbols)),
 		byRef:      make(map[string]bool, len(merged.Symbols)),
 		references: make(map[string][]string),
-		roots:      make(map[string][]RootKind),
+		roots:      make(map[string][]roots.RootKind),
 		files:      make(map[string]bool),
 		excluded:   result.ExcludedByCgo,
 		swept:      NewMatrix(&merged).Sweep(&SweepInput{}, nil),
@@ -199,23 +201,23 @@ func checkCgoRoots(t *testing.T, g *cgoGraph) {
 
 	cases := map[string]struct {
 		symbol string
-		want   []RootKind
+		want   []roots.RootKind
 	}{
 		// The directive is read from the comment map of a file the opaque-C check
 		// type-checked, so the class reaches the declaration it names.
 		"a function under a directive in a file importing \"C\"": {
 			symbol: cgoModule + "/called#viaC",
-			want:   []RootKind{RootCgoExport},
+			want:   []roots.RootKind{roots.RootCgoExport},
 		},
 		"the same in the package whose file calls nothing": {
 			symbol: cgoModule + "/uncalled#viaC",
-			want:   []RootKind{RootCgoExport},
+			want:   []roots.RootKind{roots.RootCgoExport},
 		},
 		// A declaration of such a file is a candidate for every other class the way
 		// a declaration of a compiled file is.
 		"an exported type declared in a file importing \"C\"": {
 			symbol: cgoModule + "/ctype#Holder",
-			want:   []RootKind{RootPublishedAPI},
+			want:   []roots.RootKind{roots.RootPublishedAPI},
 		},
 		"an unexported function under no directive": {
 			symbol: cgoModule + "/ctype#viaCType",

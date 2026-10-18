@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
@@ -179,8 +180,12 @@ func inputUnder(t *rapid.T, dir string) *Input {
 	if err != nil {
 		t.Fatalf("Setup: resolve.New(%s): %v", dir, err)
 	}
+	index, err := facts.NewIndex(&result, resolver)
+	if err != nil {
+		t.Fatalf("Setup: facts.NewIndex(%s): %v", dir, err)
+	}
 	return &Input{
-		Result: &result, Symbols: symbols, Resolve: resolver,
+		Result: &result, Symbols: symbols, Resolve: resolver, Facts: index,
 		Root: doc.Target.Path, Read: os.ReadFile,
 	}
 }

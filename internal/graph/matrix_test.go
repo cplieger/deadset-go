@@ -10,8 +10,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 )
 
 // configured returns what the three passes would have returned for each of
@@ -47,7 +49,7 @@ func (b *graphBuilder) configured(configs int, in func(config int, name string) 
 
 // handTests is the hand-built graph's test classes, under which its support file's
 // package is test support.
-var handTests = TestClasses{Support: map[load.PackageID]bool{handPackageOf(handSupportFile): true}}
+var handTests = roots.TestClasses{Support: map[load.PackageID]bool{handPackageOf(handSupportFile): true}}
 
 // The prefix every reference of the matrix fixture's one package carries.
 const matrixPackage = "go://example.com/matrix#"
@@ -66,7 +68,7 @@ func windowsAmd64() load.Configuration {
 // configuredOf runs over one configuration of one directory the three passes the
 // sweep reads, so a matrix is assembled from the production pipeline rather than
 // from an inventory written by hand.
-func configuredOf(t *testing.T, dir string, c load.Configuration, opts RootOptions) Configured {
+func configuredOf(t *testing.T, dir string, c load.Configuration, opts roots.RootOptions) Configured {
 	t.Helper()
 
 	result, target := loadDirUnder(t.Context(), t, dir, c)
@@ -74,11 +76,11 @@ func configuredOf(t *testing.T, dir string, c load.Configuration, opts RootOptio
 	if err != nil {
 		t.Fatalf("Setup: Symbols(%s): %v", c.ID, err)
 	}
-	refs, _, err := References(result, rs, symbols, TestClasses{})
+	refs, _, err := facts.References(result, rs, symbols, roots.TestClasses{})
 	if err != nil {
 		t.Fatalf("Setup: References(%s): %v", c.ID, err)
 	}
-	roots, _ := Roots(result, rs, symbols, opts)
+	roots, _ := roots.Roots(result, rs, symbols, opts)
 	return Configured{Symbols: symbols, References: refs, Roots: roots}
 }
 
@@ -94,7 +96,7 @@ type sweptMatrix struct {
 
 // matrixOf extracts one archive, runs the three passes over every configuration
 // named and merges them in that order.
-func matrixOf(t *testing.T, archive string, opts RootOptions, configs ...load.Configuration) *sweptMatrix {
+func matrixOf(t *testing.T, archive string, opts roots.RootOptions, configs ...load.Configuration) *sweptMatrix {
 	t.Helper()
 
 	dir := extract(t, archive)
@@ -109,7 +111,7 @@ func matrixOf(t *testing.T, archive string, opts RootOptions, configs ...load.Co
 		x.ids = append(x.ids, c.ID)
 	}
 
-	merged, err := Merge(per, TestClasses{})
+	merged, err := Merge(per, roots.TestClasses{})
 	if err != nil {
 		t.Fatalf("Merge(%s) = _, %v, want no error", archive, err)
 	}
@@ -194,7 +196,7 @@ func (x *sweptMatrix) existsIn(t *testing.T, ref string) string {
 }
 
 func TestMergeNamesTheConfigurationsEachDeclarationExistsIn(t *testing.T) {
-	x := matrixOf(t, "matrix.txtar", RootOptions{PublishedAPI: true}, linuxAmd64(), windowsAmd64())
+	x := matrixOf(t, "matrix.txtar", roots.RootOptions{PublishedAPI: true}, linuxAmd64(), windowsAmd64())
 
 	cases := map[string]string{
 		"a declaration every configuration compiles":         "linux-amd64 windows-amd64",
@@ -216,7 +218,7 @@ func TestMergeNamesTheConfigurationsEachDeclarationExistsIn(t *testing.T) {
 }
 
 func TestMatrixSweepReportsOnlyWhatIsDeadUnderEveryConfigurationItExistsIn(t *testing.T) {
-	x := matrixOf(t, "matrix.txtar", RootOptions{PublishedAPI: true}, linuxAmd64(), windowsAmd64())
+	x := matrixOf(t, "matrix.txtar", roots.RootOptions{PublishedAPI: true}, linuxAmd64(), windowsAmd64())
 	r := x.matrix.Sweep(&SweepInput{}, nil)
 
 	// usedOnWindowsOnly is the case the matrix exists for: dead under linux,
@@ -243,7 +245,7 @@ func TestMatrixSweepReportsOnlyWhatIsDeadUnderEveryConfigurationItExistsIn(t *te
 }
 
 func TestMatrixSweepGroupsOneComponentOverEveryConfigurationsEdges(t *testing.T) {
-	x := matrixOf(t, "matrix.txtar", RootOptions{PublishedAPI: true}, linuxAmd64(), windowsAmd64())
+	x := matrixOf(t, "matrix.txtar", roots.RootOptions{PublishedAPI: true}, linuxAmd64(), windowsAmd64())
 	r := x.matrix.Sweep(&SweepInput{}, nil)
 
 	// The type and the method are one component although only one configuration
@@ -264,7 +266,7 @@ func TestMatrixSweepGroupsOneComponentOverEveryConfigurationsEdges(t *testing.T)
 }
 
 func TestMatrixSweepHoldsASymbolLiveUnderTheRelationsOfEveryConfiguration(t *testing.T) {
-	x := matrixOf(t, "matrix.txtar", RootOptions{PublishedAPI: true}, linuxAmd64(), windowsAmd64())
+	x := matrixOf(t, "matrix.txtar", roots.RootOptions{PublishedAPI: true}, linuxAmd64(), windowsAmd64())
 	r := x.matrix.Sweep(&SweepInput{}, nil)
 
 	// One configuration holds the declaration live under both relations and the
@@ -282,7 +284,7 @@ func TestMatrixOverOneConfigurationAnswersWhatTheGraphOfThatConfigurationAnswers
 	one := analysisOf(t, "sweep.txtar", nil).configured(t, true)
 	direct := New(one.Symbols, one.References, one.Roots).Sweep(&SweepInput{})
 
-	merged, err := Merge([]Configured{one}, TestClasses{})
+	merged, err := Merge([]Configured{one}, roots.TestClasses{})
 	if err != nil {
 		t.Fatalf("Merge(sweep.txtar) = _, %v, want no error", err)
 	}
@@ -365,9 +367,9 @@ func TestMatrixSweepUnionsTheMarksEveryConfigurationSuppressed(t *testing.T) {
 	// reaches under both is live everywhere.
 	b := newGraphBuilder(t).add("entry", "liveEverywhere",
 		"heldBackOnTheFirst", "callerOnTheSecond", "heldBackOnTheSecond", "callerOnTheFirst")
-	b.root("entry", RootMain)
-	b.root("callerOnTheFirst", RootMain)
-	b.root("callerOnTheSecond", RootMain)
+	b.root("entry", roots.RootMain)
+	b.root("callerOnTheFirst", roots.RootMain)
+	b.root("callerOnTheSecond", roots.RootMain)
 	b.ref("entry", "liveEverywhere")
 	b.ref("callerOnTheSecond", "heldBackOnTheFirst")
 	b.ref("callerOnTheFirst", "heldBackOnTheSecond")
@@ -451,7 +453,7 @@ func TestMergeKeepsOneSymbolPerPositionWithTheFirstConfigurationsFields(t *testi
 func TestMergeCarriesEveryConfigurationsReferencesAndRoots(t *testing.T) {
 	b := newGraphBuilder(t).add("caller", "target")
 	b.ref("caller", "target")
-	b.root("caller", RootMain)
+	b.root("caller", roots.RootMain)
 	per := b.configured(2, func(int, string) bool { return true })
 
 	merged, err := Merge(per, handTests)
@@ -471,7 +473,7 @@ func TestMergeCarriesEveryConfigurationsReferencesAndRoots(t *testing.T) {
 }
 
 // configsOfRefs lists the configuration of every reference, in the order given.
-func configsOfRefs(refs []Reference) []int {
+func configsOfRefs(refs []facts.Reference) []int {
 	found := make([]int, 0, len(refs))
 	for _, r := range refs {
 		found = append(found, r.Config)
@@ -480,7 +482,7 @@ func configsOfRefs(refs []Reference) []int {
 }
 
 // configsOfRoots lists the configuration of every root, in the order given.
-func configsOfRoots(roots []Root) []int {
+func configsOfRoots(roots []roots.Root) []int {
 	found := make([]int, 0, len(roots))
 	for _, r := range roots {
 		found = append(found, r.Config)
@@ -525,7 +527,7 @@ func TestMatrixUnmatchedEverywhereIntersectsWhatEachConfigurationMatchedNothingW
 			per := b.configured(len(test.per), func(int, string) bool { return true })
 			for config, sources := range test.per {
 				for _, source := range sources {
-					per[config].Unmatched = append(per[config].Unmatched, Unmatched{Source: source})
+					per[config].Unmatched = append(per[config].Unmatched, roots.Unmatched{Source: source})
 				}
 			}
 			merged, err := Merge(per, handTests)
@@ -547,15 +549,15 @@ func TestMatrixUnmatchedEverywhereIntersectsWhatEachConfigurationMatchedNothingW
 func TestMergeCarriesEveryConfigurationsUnmatchedStrings(t *testing.T) {
 	b := newGraphBuilder(t).add("only")
 	per := b.configured(2, func(int, string) bool { return true })
-	per[0].Unmatched = []Unmatched{{Source: "first"}}
-	per[1].Unmatched = []Unmatched{{Source: "second"}}
+	per[0].Unmatched = []roots.Unmatched{{Source: "first"}}
+	per[1].Unmatched = []roots.Unmatched{{Source: "second"}}
 
 	merged, err := Merge(per, handTests)
 	if err != nil {
 		t.Fatalf("Merge = _, %v, want no error", err)
 	}
 
-	want := []Unmatched{{Source: "first"}, {Source: "second"}}
+	want := []roots.Unmatched{{Source: "first"}, {Source: "second"}}
 	if !reflect.DeepEqual(merged.Unmatched, want) {
 		t.Errorf("Merge over two configurations returned unmatched %+v, want %+v", merged.Unmatched, want)
 	}

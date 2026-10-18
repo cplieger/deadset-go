@@ -3,7 +3,9 @@ package graph
 import (
 	"slices"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 )
 
 // Path is a caller-reachability path to a symbol: the root it starts from, or the
@@ -12,8 +14,8 @@ import (
 type Path struct {
 	// Root is the root the path starts at, nil where a consumer's reference seeds
 	// it; that reference is then the first hop.
-	Root *Root
-	Hops []Reference
+	Root *roots.Root
+	Hops []facts.Reference
 }
 
 // Path is the shortest path the mode's caller reachability follows to the symbol,
@@ -57,7 +59,7 @@ type walked struct{ at, previous, seed, root int }
 
 // pathOf is the path the step at head was reached by.
 func (x *Matrix) pathOf(steps []walked, head int, m Mode) Path {
-	var hops []Reference
+	var hops []facts.Reference
 	for at := head; steps[at].previous >= 0; at = steps[at].previous {
 		hops = append(hops, x.hop(steps[steps[at].previous].at, steps[at].at, m))
 	}
@@ -66,13 +68,13 @@ func (x *Matrix) pathOf(steps []walked, head int, m Mode) Path {
 		return Path{Hops: slices.Insert(hops, 0, x.consumerHop(steps[head].seed, m))}
 	}
 	g := x.union
-	return Path{Root: &Root{ID: g.symbols[steps[head].seed].ID, Kind: g.rooted[steps[head].root].kind}, Hops: hops}
+	return Path{Root: &roots.Root{ID: g.symbols[steps[head].seed].ID, Kind: g.rooted[steps[head].root].kind}, Hops: hops}
 }
 
 // hop is the reference the walk followed from one symbol to the next: the first the
 // merge holds that the mode follows. Every followed edge is built from one, so the
 // search always finds it.
-func (x *Matrix) hop(from, to int, m Mode) Reference {
+func (x *Matrix) hop(from, to int, m Mode) facts.Reference {
 	fromID, toID := x.union.symbols[from].ID, x.union.symbols[to].ID
 	for i := range x.merged.References {
 		r := &x.merged.References[i]
@@ -80,13 +82,13 @@ func (x *Matrix) hop(from, to int, m Mode) Reference {
 			return *r
 		}
 	}
-	return Reference{From: fromID, To: toID}
+	return facts.Reference{From: fromID, To: toID}
 }
 
 // consumerHop is the first reference a loaded consumer makes to the symbol at at that
 // the mode counts, which is what made the symbol a seed, so the search always finds
 // it.
-func (x *Matrix) consumerHop(at int, m Mode) Reference {
+func (x *Matrix) consumerHop(at int, m Mode) facts.Reference {
 	id := x.union.symbols[at].ID
 	for i := range x.merged.References {
 		r := &x.merged.References[i]
@@ -94,12 +96,12 @@ func (x *Matrix) consumerHop(at int, m Mode) Reference {
 			return *r
 		}
 	}
-	return Reference{To: id}
+	return facts.Reference{To: id}
 }
 
 // TestReference reports whether the mode classifies one reference as a test file's,
 // which a loaded consumer's test reference is not where the mode counts it as
 // production.
-func (m Mode) TestReference(r *Reference) bool {
+func (m Mode) TestReference(r *facts.Reference) bool {
 	return r.Test && (r.Consumer == "" || !m.ConsumerTestsProduction)
 }

@@ -6,7 +6,7 @@ import (
 	"go/types"
 	"slices"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 )
 
 // assertable answers which interfaces a package outside the analysed program can
@@ -186,7 +186,7 @@ func assertedTypes(file *ast.File, info *types.Info) []types.Type {
 		case *ast.TypeSwitchStmt:
 			found = append(found, caseTypes(n, info)...)
 		case *ast.CallExpr:
-			if target := graph.ErrorsAsTarget(info, n); target != nil {
+			if target := facts.ErrorsAsTarget(info, n); target != nil {
 				found = append(found, target)
 			}
 		}

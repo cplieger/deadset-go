@@ -5,8 +5,10 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 )
 
 // symbolNames maps every symbol of one inventory to the name a message renders.
@@ -71,14 +73,14 @@ func candidatesOf(t *testing.T, archive string, opts Options) []string {
 	if err != nil {
 		t.Fatalf("Setup: GeneratedFileDetector(%s): %v", archive, err)
 	}
-	refs, _, err := graph.References(in.Result, in.Resolve, in.Symbols, graph.TestClasses{})
+	refs, _, err := facts.References(in.Result, in.Resolve, in.Symbols, roots.TestClasses{})
 	if err != nil {
-		t.Fatalf("Setup: graph.References(%s): %v", archive, err)
+		t.Fatalf("Setup: facts.References(%s): %v", archive, err)
 	}
-	roots, _ := graph.Roots(in.Result, in.Resolve, in.Symbols, graph.RootOptions{})
+	rooted, _ := roots.Roots(in.Result, in.Resolve, in.Symbols, roots.RootOptions{})
 
 	names := symbolNames(in.Symbols)
-	result := graph.New(in.Symbols, refs, roots).Sweep(&graph.SweepInput{Exempt: exemptions})
+	result := graph.New(in.Symbols, refs, rooted).Sweep(&graph.SweepInput{Exempt: exemptions})
 	got := make([]string, 0, len(result.Candidates))
 	for _, c := range result.Candidates {
 		got = append(got, names[c.ID])

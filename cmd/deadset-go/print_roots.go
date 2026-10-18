@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-go/v2/internal/run"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -35,11 +35,11 @@ func printRoots(ctx context.Context, args []string, stdout, stderr io.Writer) in
 // root several configurations detect is one line keyed by the symbol, the class and
 // the configured string; the configurations are a further field only where the
 // matrix holds more than one, with the third field then present even when empty.
-func rootLines(refs map[inventory.SymbolID]string, roots []graph.Root, configurations []string) []string {
-	at := make(map[rootKey]int, len(roots))
-	lines := make([]string, 0, len(roots))
-	detected := make([][]string, 0, len(roots))
-	for _, root := range roots {
+func rootLines(refs map[inventory.SymbolID]string, rooted []roots.Root, configurations []string) []string {
+	at := make(map[rootKey]int, len(rooted))
+	lines := make([]string, 0, len(rooted))
+	detected := make([][]string, 0, len(rooted))
+	for _, root := range rooted {
 		key := rootKey{id: root.ID, source: root.Source, kind: root.Kind}
 		held, seen := at[key]
 		if !seen {
@@ -63,12 +63,12 @@ func rootLines(refs map[inventory.SymbolID]string, roots []graph.Root, configura
 type rootKey struct {
 	id     inventory.SymbolID
 	source string
-	kind   graph.RootKind
+	kind   roots.RootKind
 }
 
 // rootLine renders one root. The configured string is left off a detected class,
 // which no configured string named, unless a field follows it.
-func rootLine(ref string, root graph.Root, sourceField bool) string {
+func rootLine(ref string, root roots.Root, sourceField bool) string {
 	line := ref + "\t" + root.Kind.String()
 	if root.Source == "" && !sourceField {
 		return line

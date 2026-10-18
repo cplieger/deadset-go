@@ -112,10 +112,8 @@ func Discover(ctx context.Context, doc scope.Document) (*Topology, error) {
 	if top.Units, err = discoverUnits(ctx, dirs); err != nil {
 		return nil, err
 	}
-	if !top.Walked {
-		if top.Nested, err = top.nestedModules(ctx, doc.Consumers); err != nil {
-			return nil, err
-		}
+	if top.Nested, err = top.nestedModules(ctx, doc.Consumers); err != nil {
+		return nil, err
 	}
 	if top.Readers, err = top.readers(ctx, doc.Consumers); err != nil {
 		return nil, err

@@ -4,8 +4,7 @@ import (
 	"go/token"
 	"go/types"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
-	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"golang.org/x/tools/go/packages"
@@ -19,12 +18,12 @@ import (
 // Each is positioned at the parameter or the type parameter, so the declaration
 // declaring it holds the site. There are none unless the target is a library whose
 // run loaded no consumer: a loaded consumer's sites are the run's own.
-func publishedConversions(in *Input) []graph.Conversion {
+func publishedConversions(in *Input) []facts.Conversion {
 	if !in.Options.PublishedAPI || in.Result == nil || len(in.Result.Consumers) > 0 {
 		return nil
 	}
 	if in.published == nil {
-		scan := newPublishedScan(in.Result.Packages, in.Resolve)
+		scan := newPublishedScan(in.Facts.Packages(), in.Resolve)
 		sites := scan.sites()
 		in.published = &sites
 	}
@@ -56,7 +55,7 @@ type publishedParameter struct {
 	outside bool
 }
 
-// newPublishedScan indexes the target's packages, each once.
+// newPublishedScan indexes the target's packages, given in the walk order, each once.
 func newPublishedScan(pkgs []*packages.Package, rs *resolve.Resolver) *publishedScan {
 	s := &publishedScan{
 		resolve:    rs,
@@ -67,7 +66,7 @@ func newPublishedScan(pkgs []*packages.Package, rs *resolve.Resolver) *published
 		typeParams: make(map[*types.TypeParam]bool),
 	}
 	seen := make(map[string]bool)
-	for _, p := range inventory.Packages(pkgs, rs.Positions().Fset) {
+	for _, p := range pkgs {
 		if p.Types == nil || p.Module == nil || !p.Module.Main || p.ForTest != "" || seen[rs.PackageKey(p.Types)] {
 			continue
 		}
@@ -82,7 +81,7 @@ func newPublishedScan(pkgs []*packages.Package, rs *resolve.Resolver) *published
 
 // sites reads the published API and records one site per published parameter and
 // holdable type that implements its interface.
-func (s *publishedScan) sites() []graph.Conversion {
+func (s *publishedScan) sites() []facts.Conversion {
 	for _, p := range s.published {
 		scope := p.Types.Scope()
 		for _, name := range scope.Names() {
@@ -91,7 +90,7 @@ func (s *publishedScan) sites() []graph.Conversion {
 	}
 	s.close()
 	candidates := s.candidates()
-	var sites []graph.Conversion
+	var sites []facts.Conversion
 	for _, param := range s.parameters {
 		iface := methodInterface(param.t)
 		if iface == nil {
@@ -109,7 +108,7 @@ func (s *publishedScan) sites() []graph.Conversion {
 			if param.outside {
 				at = t.Obj().Pos()
 			}
-			sites = append(sites, graph.Conversion{
+			sites = append(sites, facts.Conversion{
 				From: from, Interface: param.t, To: iface, Name: spelled(param.t), Site: at,
 			})
 		}

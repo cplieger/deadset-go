@@ -76,11 +76,8 @@ func storedTypesOf(in *Input, sites *declarationSites) *storedTypes {
 		valued:   make(map[*types.Func]bool),
 		abstract: make(map[*types.Func]bool),
 	}
-	for _, p := range programPackages(in.Result) {
-		if p.TypesInfo == nil {
-			continue
-		}
-		for _, file := range p.Syntax {
+	for _, p := range in.Facts.Program() {
+		for _, file := range in.Facts.Files(p) {
 			for _, decl := range file.Decls {
 				w := &storeWalk{
 					storedTypes: s, info: p.TypesInfo, fn: enclosingFunc(p.TypesInfo, decl),
@@ -159,7 +156,7 @@ func implementation(t *types.Named, iface *types.Interface, method *types.Func) 
 // package level that is not an interface, in package and then name order.
 func programNamedTypes(in *Input) []*types.Named {
 	var found []*types.Named
-	for _, p := range programPackages(in.Result) {
+	for _, p := range in.Facts.Program() {
 		if p.Types == nil {
 			continue
 		}

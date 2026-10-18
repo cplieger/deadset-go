@@ -62,7 +62,7 @@ Keys this analyzer reads nothing from. It validates each one and prints it in th
 | Key | Type | Default | What it is |
 | --- | --- | --- | --- |
 | `contract_version` | semantic version | this analyzer's contract version | The contract version a configuration is written against. An absent key means this analyzer's own |
-| `analysis.languages` | array of `go`, `ts` | `[]` | The orchestrator's: the languages in scope. An empty array means the orchestrator detects them from the target tree |
+| `analysis.languages` | array of `go`, `ts`, `proto` | `[]` | The orchestrator's: the languages in scope. An empty array means the orchestrator detects them from the target tree |
 | `providers.analyzers` | array of objects | `deadset-go` and `deadset-ts` | The orchestrator's: the analyzers it runs. An entry names a `name`, its `languages` and a `command`, and an entry the orchestrator acquires also names a `source`, a `version` and a `digest` |
 | `ts.test_files` | array of strings | `["**/*.test.{ts,tsx,mts,cts}", "**/*.test-d.{ts,tsx,mts,cts}", "**/*.spec-d.{ts,tsx,mts,cts}", "**/*.spec.*", "**/__tests__/**", "**/__mocks__/**", "**/test-d/**"]` | The TypeScript analyzer's: glob patterns naming its test files |
 | `ts.entry_files` | array of strings | `[]` | The TypeScript analyzer's: glob patterns naming files whose exports are roots |
@@ -72,6 +72,10 @@ Keys this analyzer reads nothing from. It validates each one and prints it in th
 | `ts.lifecycle_contracts` | array of objects | `[]` | The TypeScript analyzer's: one framework's lifecycle contract per entry, naming its `components`, its `bases` and the `members` the framework calls |
 | `ts.serializers` | array of declaration entries | `[]` | The TypeScript analyzer's: the declarations whose call reads its arguments' data members by name |
 | `ts.roots_complete` | boolean | `false` | The TypeScript analyzer's: whether the roots the analysis finds are every root the target has, so a finding under reachability alone is `certain` rather than `probable` |
+| `proto.closed` | boolean | `false` | The Protocol Buffers reader's: whether every reader and writer of the target's schemas, stored data and outside callers included, is in this target, so a schema finding can reach `certain` |
+| `proto.plugins` | array of strings | `[]` | The Protocol Buffers reader's: the plugins the target's schemas are generated with, for a target whose generation no `buf.gen.yaml` states. Empty, the reader reads every `buf.gen.yaml` of the target |
+| `proto.import_paths` | array of strings | `[]` | The Protocol Buffers reader's: the import roots, each a directory relative to the target root. Empty, the roots are the module roots of the target's `buf.yaml` files, and otherwise the target root and then each schema file's own directory |
+| `proto.vendored_paths` | array of strings | `[]` | The Protocol Buffers reader's: patterns, in the syntax of `roots.patterns`, over the paths of schema files copied from a dependency, whose declarations are kept live |
 
 A declaration entry names one declaration by `symbol`, by `module` and `name`, or by `global`. The contract's [configuration schema](https://github.com/cplieger/deadset-spec/blob/v8.0.0/contract/config.schema.json) states each shape. `go` is the section this analyzer owns, and it declares no key in this contract version.
 

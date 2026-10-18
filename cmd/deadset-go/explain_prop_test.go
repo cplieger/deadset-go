@@ -5,9 +5,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-go/v2/internal/run"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
@@ -271,9 +273,9 @@ func checkPath(t *rapid.T, set *run.Findings, subject *inventory.Symbol, text st
 }
 
 // rootNames reports whether the root set names one symbol.
-func rootNames(roots []graph.Root, id inventory.SymbolID) bool {
-	for i := range roots {
-		if roots[i].ID == id {
+func rootNames(rooted []roots.Root, id inventory.SymbolID) bool {
+	for i := range rooted {
+		if rooted[i].ID == id {
 			return true
 		}
 	}
@@ -281,6 +283,6 @@ func rootNames(roots []graph.Root, id inventory.SymbolID) bool {
 }
 
 // heldReference reports whether one reference is a reference the graph holds.
-func heldReference(references []graph.Reference, one graph.Reference) bool {
+func heldReference(references []facts.Reference, one facts.Reference) bool {
 	return slices.Contains(references, one)
 }
