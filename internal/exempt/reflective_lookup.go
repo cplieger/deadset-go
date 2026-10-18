@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -70,7 +69,7 @@ var lookups = map[string]lookup{
 // whose name argument is not a constant retains nothing: a computed name is the
 // case no exact rule can serve, and the class declines to guess rather than
 // retaining every declaration a lookup might reach.
-func ReflectiveLookupDetector(in *Input) ([]graph.Exemption, error) {
+func ReflectiveLookupDetector(in *Input) ([]Exemption, error) {
 	calls, err := allLookupCalls(in)
 	if err != nil {
 		return nil, err
@@ -96,9 +95,9 @@ func ReflectiveLookupDetector(in *Input) ([]graph.Exemption, error) {
 // outside the analysed program that also passes a value of T or *T. Each item of the
 // string separated by ";" spells one name, after an optional prefix ending in ":", the
 // verbs a route maps to the method.
-func registeredMethods(in *Input) ([]graph.Exemption, error) {
+func registeredMethods(in *Input) ([]Exemption, error) {
 	own := programPaths(in)
-	var out []graph.Exemption
+	var out []Exemption
 	for _, p := range in.Facts.Packages() {
 		for _, file := range in.Facts.Files(p) {
 			var failed error
@@ -107,7 +106,7 @@ func registeredMethods(in *Input) ([]graph.Exemption, error) {
 				if failed != nil || !isCall {
 					return failed == nil
 				}
-				var found []graph.Exemption
+				var found []Exemption
 				found, failed = registrationOf(in, p.TypesInfo, call, own)
 				out = append(out, found...)
 				return failed == nil
@@ -121,7 +120,7 @@ func registeredMethods(in *Input) ([]graph.Exemption, error) {
 }
 
 // registrationOf is what one call retains under [registeredMethods].
-func registrationOf(in *Input, info *types.Info, call *ast.CallExpr, own map[string]bool) ([]graph.Exemption, error) {
+func registrationOf(in *Input, info *types.Info, call *ast.CallExpr, own map[string]bool) ([]Exemption, error) {
 	callee, isFunc := resolveObject(info, call.Fun).(*types.Func)
 	if !isFunc || callee.Pkg() == nil || own[callee.Pkg().Path()] {
 		return nil, nil
@@ -134,7 +133,7 @@ func registrationOf(in *Input, info *types.Info, call *ast.CallExpr, own map[str
 	if err != nil {
 		return nil, err
 	}
-	var out []graph.Exemption
+	var out []Exemption
 	for _, named := range receivers {
 		set := types.NewMethodSet(types.NewPointer(named))
 		for _, name := range names {
@@ -143,7 +142,7 @@ func registrationOf(in *Input, info *types.Info, call *ast.CallExpr, own map[str
 				continue
 			}
 			if id, held := in.Resolve.Object(selection.Obj()); held {
-				out = append(out, graph.Exemption{
+				out = append(out, Exemption{
 					ID: id, Class: string(vocab.ReflectiveLookup), Site: site,
 					Detail: "named by a string passed with " + named.Obj().Name() + " to " + callee.FullName(),
 				})
@@ -224,8 +223,8 @@ type lookupCall struct {
 // retains is the exemptions one call records: every member of the inventory the
 // name reaches through this callee. seen holds the pairs already recorded, so one
 // call site type-checked by several package variants records each member once.
-func (c *lookupCall) retains(index nameIndex, seen map[string]struct{}) []graph.Exemption {
-	var out []graph.Exemption
+func (c *lookupCall) retains(index nameIndex, seen map[string]struct{}) []Exemption {
+	var out []Exemption
 	for _, m := range index[c.name] {
 		if !slices.Contains(c.lookup.kinds, m.kind) {
 			continue
@@ -238,7 +237,7 @@ func (c *lookupCall) retains(index nameIndex, seen map[string]struct{}) []graph.
 			continue
 		}
 		seen[key] = struct{}{}
-		out = append(out, graph.Exemption{
+		out = append(out, Exemption{
 			ID:     m.id,
 			Class:  string(vocab.ReflectiveLookup),
 			Site:   c.site,

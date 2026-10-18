@@ -6,10 +6,11 @@ import (
 	"path/filepath"
 	"slices"
 
+	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/failure"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -23,7 +24,7 @@ type Swept struct {
 
 	Marks    []suppress.Record
 	refusals []suppress.Refusal
-	Liveness graph.Result
+	Liveness liveness.Result
 }
 
 // Sweep reads the three suppression documents at the target root and sweeps the
@@ -49,12 +50,13 @@ func (p *Prepared) sweep(r *round) (*Swept, error) {
 		Prepared: p,
 		Marks:    marks,
 		refusals: refusals,
-		Liveness: p.Matrix.Sweep(&graph.SweepInput{
-			Marked: suppress.Bound(marks),
-			Exempt: p.Exemptions,
-			Uses:   p.uses,
-			Mode:   p.Mode,
-		}, graph.TestReferencesOf(p.testEvidence)),
+		Liveness: p.Graph.Sweep(&liveness.SweepPolicy{
+			Marked:       suppress.Bound(marks),
+			Exempt:       p.Exemptions,
+			TestEvidence: p.testEvidence,
+			Unseen:       p.unseen,
+			Mode:         p.Mode,
+		}),
 	}, nil
 }
 
@@ -105,7 +107,7 @@ func (p *Prepared) suppressions(r *round) ([]suppress.Record, []suppress.Refusal
 // Retained is every exemption the retained-symbol listing names: those that held a
 // dead symbol back, then those that held a write-only finding back, grouped by
 // symbol in inventory order.
-func (s *Swept) Retained() []graph.Exemption {
+func (s *Swept) Retained() []exempt.Exemption {
 	writeOnly := kinds.WriteOnlyRetained(&kinds.Input{
 		Config: &s.req.Config,
 		Merged: s.Merged,
@@ -117,12 +119,12 @@ func (s *Swept) Retained() []graph.Exemption {
 	if len(writeOnly) == 0 {
 		return s.Liveness.Retained
 	}
-	held := make(map[inventory.SymbolID][]graph.Exemption)
+	held := make(map[inventory.SymbolID][]exempt.Exemption)
 	all := slices.Concat(s.Liveness.Retained, writeOnly)
 	for i := range all {
 		held[all[i].ID] = append(held[all[i].ID], all[i])
 	}
-	ordered := make([]graph.Exemption, 0, len(s.Liveness.Retained)+len(writeOnly))
+	ordered := make([]exempt.Exemption, 0, len(s.Liveness.Retained)+len(writeOnly))
 	for i := range s.Merged.Symbols {
 		ordered = append(ordered, held[s.Merged.Symbols[i].ID]...)
 	}

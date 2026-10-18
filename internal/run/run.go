@@ -16,8 +16,8 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/failure"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/matrix"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
@@ -56,8 +56,9 @@ type Loaded struct {
 	// Topology is what every configuration loaded, read once.
 	Topology *load.Topology
 
-	Matrix *graph.Matrix
-	Merged *graph.Merged
+	// Graph is the merged matrix as one graph over every configuration.
+	Graph  *liveness.Graph
+	Merged *liveness.Merged
 	Refs   map[inventory.SymbolID]string
 
 	// Root is the target root every position is rendered against, and Identity
@@ -82,8 +83,8 @@ type Loaded struct {
 }
 
 // Load runs the load stage. A configuration that does not load fails the run with
-// nothing computed from the others, because an intersection missing a
-// configuration reports what that configuration uses. A configured string is
+// nothing computed from the others, because a union missing a configuration
+// reports dead what only that configuration uses. A configured string is
 // unmatched only where no configuration matched it.
 func Load(ctx context.Context, req *Request) (*Loaded, error) {
 	document, err := scope.Resolve(ctx, req.Target, req.Scope)
@@ -118,7 +119,7 @@ func Load(ctx context.Context, req *Request) (*Loaded, error) {
 	if err != nil {
 		return nil, err
 	}
-	merged, err := graph.Merge(passes, tests)
+	merged, err := liveness.Merge(passes, tests)
 	if err != nil {
 		return nil, err
 	}
@@ -127,8 +128,8 @@ func Load(ctx context.Context, req *Request) (*Loaded, error) {
 	for i := range merged.Symbols {
 		l.Refs[merged.Symbols[i].ID] = merged.Symbols[i].Ref
 	}
-	l.Matrix = graph.NewMatrix(&merged)
-	l.Unmatched = l.Matrix.UnmatchedEverywhere()
+	l.Graph = liveness.Of(&merged)
+	l.Unmatched = merged.UnmatchedEverywhere()
 	return l, nil
 }
 
@@ -145,7 +146,7 @@ func (l *Loaded) Identifiers() []string {
 // enumerate runs the passes over every loaded configuration, and returns them with
 // the matrix's test classes the reference pass read. A derived matrix checks a file
 // against the configurations that compile it elsewhere.
-func (l *Loaded) enumerate(results []load.Result, derived bool) ([]graph.Configured, roots.TestClasses, error) {
+func (l *Loaded) enumerate(results []load.Result, derived bool) ([]liveness.Configured, roots.TestClasses, error) {
 	options := roots.RootOptions{
 		Patterns:     l.req.Config.Roots.Patterns,
 		PublishedAPI: l.req.Config.Target.Kind == report.TargetKindLibrary,
@@ -155,7 +156,7 @@ func (l *Loaded) enumerate(results []load.Result, derived bool) ([]graph.Configu
 		elsewhere = roots.CheckedElsewhere(results)
 	}
 	l.Loads = make([]enumerated, len(results))
-	passes := make([]graph.Configured, len(results))
+	passes := make([]liveness.Configured, len(results))
 	classes := make([]roots.TestClasses, len(results))
 	for i := range results {
 		one := options
@@ -184,22 +185,22 @@ func (l *Loaded) enumerate(results []load.Result, derived bool) ([]graph.Configu
 // rootsOf runs the passes over one loaded configuration that come before the
 // matrix's test classes: the enumeration, the resolver, the roots, and the
 // configuration's own test classes, which read the roots.
-func rootsOf(result *load.Result, root string, options roots.RootOptions) (enumerated, graph.Configured, roots.TestClasses, error) {
+func rootsOf(result *load.Result, root string, options roots.RootOptions) (enumerated, liveness.Configured, roots.TestClasses, error) {
 	inv, err := inventory.Of(result, root, os.ReadFile)
 	if err != nil {
-		return enumerated{}, graph.Configured{}, roots.TestClasses{}, err
+		return enumerated{}, liveness.Configured{}, roots.TestClasses{}, err
 	}
 	resolver, err := resolve.New(result, inv)
 	if err != nil {
-		return enumerated{}, graph.Configured{}, roots.TestClasses{}, err
+		return enumerated{}, liveness.Configured{}, roots.TestClasses{}, err
 	}
 	index, err := facts.NewIndex(result, resolver)
 	if err != nil {
-		return enumerated{}, graph.Configured{}, roots.TestClasses{}, err
+		return enumerated{}, liveness.Configured{}, roots.TestClasses{}, err
 	}
 	found, unmatched := roots.Roots(result, resolver, inv.Symbols, options)
 	return enumerated{Symbols: inv.Symbols, Result: *result, Resolve: resolver, Facts: index},
-		graph.Configured{Symbols: inv.Symbols, Roots: found, Unmatched: unmatched},
+		liveness.Configured{Symbols: inv.Symbols, Roots: found, Unmatched: unmatched, Interfaces: index.Interfaces()},
 		roots.ClassifyTestSupport(result, inv.Symbols, found, options.PublishedAPI), nil
 }
 

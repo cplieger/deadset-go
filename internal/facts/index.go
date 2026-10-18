@@ -17,12 +17,13 @@ import (
 // generated files it holds, built once per configuration. Every pass after the
 // load reads the target's packages and files through it.
 type Index struct {
-	fset      *token.FileSet
-	packages  []*packages.Package
-	consumers map[*load.Consumer][]*packages.Package
-	order     []*load.Consumer
-	generated []Generated
-	bindings  []Binding
+	fset       *token.FileSet
+	packages   []*packages.Package
+	consumers  map[*load.Consumer][]*packages.Package
+	order      []*load.Consumer
+	generated  []Generated
+	bindings   []Binding
+	interfaces []Interface
 }
 
 // Generated is one generated file of the target: the path the report spells it
@@ -79,6 +80,7 @@ func NewIndex(r *load.Result, rs *resolve.Resolver) (*Index, error) {
 	}
 	slices.SortFunc(x.generated, func(a, b Generated) int { return strings.Compare(a.Path, b.Path) })
 	x.generated = slices.CompactFunc(x.generated, func(a, b Generated) bool { return a.Path == b.Path })
+	x.interfaces = interfacesOf(x, rs)
 	return x, nil
 }
 

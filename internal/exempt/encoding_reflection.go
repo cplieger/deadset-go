@@ -12,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/facts"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -325,7 +324,7 @@ const (
 // [destination]'s, and every argument of a destination function flows. The walk
 // reaches through an interface-typed field to the types the program stores in it
 // ([storedTypes]), and a promoted method is retained where the embedded type is.
-func EncodingReflectionDetector(in *Input) ([]graph.Exemption, error) {
+func EncodingReflectionDetector(in *Input) ([]Exemption, error) {
 	assert := assertableOf(in)
 	conversions, err := programConversions(in)
 	if err != nil {
@@ -366,7 +365,7 @@ func EncodingReflectionDetector(in *Input) ([]graph.Exemption, error) {
 	for i := range kept {
 		retained[kept[i].ID] = retained[kept[i].ID] || holdsInMode(&kept[i], in.Mode)
 	}
-	in.filled = slices.DeleteFunc(f.filled.exemptions(), func(e graph.Exemption) bool {
+	in.filled = slices.DeleteFunc(f.filled.exemptions(), func(e Exemption) bool {
 		return retained[e.ID] || !holdsInMode(&e, in.Mode)
 	})
 	return kept, nil
@@ -1561,7 +1560,7 @@ type retention struct {
 	in    *Input
 	seen  map[exemptionKey]bool
 	class vocab.Exemption
-	found []graph.Exemption
+	found []Exemption
 }
 
 // exemptionKey identifies one symbol held back at one site.
@@ -1587,7 +1586,7 @@ func (r *retention) record(obj types.Object, site evidence, detail string) {
 		return
 	}
 	r.seen[key] = true
-	r.found = append(r.found, graph.Exemption{
+	r.found = append(r.found, Exemption{
 		ID:       id,
 		Class:    string(r.class),
 		Consumer: site.consumer,
@@ -1612,7 +1611,7 @@ func (r *retention) site(pos token.Pos) (evidence, error) {
 }
 
 // exemptions returns what the class recorded, ordered by site and then by symbol.
-func (r *retention) exemptions() []graph.Exemption {
+func (r *retention) exemptions() []Exemption {
 	slices.SortFunc(r.found, byEvidence)
 	return r.found
 }

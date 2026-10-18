@@ -2,11 +2,10 @@ package kinds
 
 import (
 	"go/ast"
-	"slices"
 	"strings"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -112,7 +111,7 @@ func (in *Input) unusedDeclarations(code vocab.Code) []Finding {
 // member kind, so a method of a live type is an unused declaration. The populations
 // another kind owns are [Input.outsideTheRule]'s, an exported declaration of a package
 // nothing outside imports being the unreachable-export kind's.
-func (in *Input) codeOf(candidate *graph.Candidate) vocab.Code {
+func (in *Input) codeOf(candidate *liveness.Candidate) vocab.Code {
 	symbol := in.symbol(candidate.ID)
 	if symbol == nil || in.outsideTheRule(candidate, symbol) {
 		return ""
@@ -151,7 +150,7 @@ func (in *Input) shapeCode(symbol *inventory.Symbol) vocab.Code {
 // file's declaration that something reaches, a member of a dead parent, an
 // interface's declaration but an interface method only tests call, and a
 // read-or-write kind's subject.
-func (in *Input) outsideTheRule(candidate *graph.Candidate, symbol *inventory.Symbol) bool {
+func (in *Input) outsideTheRule(candidate *liveness.Candidate, symbol *inventory.Symbol) bool {
 	switch {
 	case candidate.TestOfDeadCode || symbol.Blank || (symbol.InTestFile && !candidate.UnreferencedTest):
 		return true
@@ -183,7 +182,7 @@ func (in *Input) deadParent(symbol *inventory.Symbol) bool {
 // candidate found by reference counting has no reference at all; one found by
 // reachability has references, every one of them from a declaration that is itself
 // dead, and saying "no reference" about it would be false.
-func (in *Input) unusedMessage(candidate *graph.Candidate, code vocab.Code) string {
+func (in *Input) unusedMessage(candidate *liveness.Candidate, code vocab.Code) string {
 	word := in.word(candidate.ID)
 	switch code {
 	case vocab.TestOnlyUse:
@@ -199,7 +198,7 @@ func (in *Input) unusedMessage(candidate *graph.Candidate, code vocab.Code) stri
 	if symbol := in.symbol(candidate.ID); symbol != nil && symbol.Exported {
 		visibility = "exported "
 	}
-	if candidate.Relation == graph.Reachability {
+	if candidate.Relation == liveness.Reachability {
 		return visibility + word + " is referenced only from declarations that are themselves dead"
 	}
 	if visibility == "exported " {
@@ -234,7 +233,7 @@ func interfaceDeclaration(kind inventory.SymbolKind) bool {
 // enumerated-member kind's. The same reading gives a type parameter to the
 // type-parameter kind, whose one subject is a parameter its own signature and body
 // leave unnamed.
-func (in *Input) readOrWriteSubject(candidate *graph.Candidate, symbol *inventory.Symbol) bool {
+func (in *Input) readOrWriteSubject(candidate *liveness.Candidate, symbol *inventory.Symbol) bool {
 	if candidate.ProductionRefs > 0 || candidate.TestRefs > 0 {
 		return false
 	}
@@ -262,14 +261,14 @@ func (in *Input) enumMembers() map[inventory.SymbolID]string {
 }
 
 // testOnly reports whether every reference to one candidate comes from a test file.
-func testOnly(candidate *graph.Candidate) bool {
+func testOnly(candidate *liveness.Candidate) bool {
 	return candidate.ProductionRefs == 0 && candidate.TestRefs > 0
 }
 
 // testKept reports whether a candidate is a test-only use: only tests reference it,
 // or every production reference is made by dead code and a test that stays keeps it.
-func testKept(candidate *graph.Candidate) bool {
-	return testOnly(candidate) || (candidate.TestRefs > 0 && candidate.Relation == graph.Reachability && candidate.KeptByTests)
+func testKept(candidate *liveness.Candidate) bool {
+	return testOnly(candidate) || (candidate.TestRefs > 0 && candidate.Relation == liveness.Reachability && candidate.KeptByTests)
 }
 
 // testReached reports whether production code only tests reach declares one symbol
@@ -287,126 +286,7 @@ var testReachedEvidence, _ = vocab.EvidenceFor("test-reached", language)
 // not the record keeps the declaration live.
 func (in *Input) testReachedUse(id inventory.SymbolID, code vocab.Code) bool {
 	symbol := in.symbol(id)
-	return testReachedEvidence.Lowers(language, code) && symbol != nil && in.testReached(symbol) && in.testUse().referenced[id]
-}
-
-// testUseFacts is what [Input.testUse] computes once per run.
-type testUseFacts struct {
-	// dead is every dead declaration whose findings are possible because production
-	// code only tests reach is: each such declaration a test references, each dead
-	// declaration one reaches through a reference or as its container, and each test
-	// of dead code every dead target of which is one. No member references a dead
-	// declaration outside the set, so reporting the rest of its component without it
-	// deletes nothing a withheld member needs.
-	dead map[inventory.SymbolID]bool
-	// referenced is every declaration a test file references.
-	referenced map[inventory.SymbolID]bool
-}
-
-// testUse computes the run's [testUseFacts] on first use.
-func (in *Input) testUse() *testUseFacts {
-	held := in.index()
-	if held.testUse != nil {
-		return held.testUse
-	}
-	facts := &testUseFacts{dead: make(map[inventory.SymbolID]bool), referenced: make(map[inventory.SymbolID]bool)}
-	held.testUse = facts
-	if in.Merged == nil || in.Sweep == nil {
-		return facts
-	}
-	out := make(map[inventory.SymbolID][]inventory.SymbolID)
-	for i := range in.Merged.References {
-		ref := &in.Merged.References[i]
-		if ref.Test {
-			facts.referenced[ref.To] = true
-		}
-		out[ref.From] = append(out[ref.From], ref.To)
-	}
-	in.walkTestUse(facts, out)
-	for admitted := true; admitted; {
-		admitted = false
-		for i := range in.Sweep.Candidates {
-			test := &in.Sweep.Candidates[i]
-			if test.TestOfDeadCode && !facts.dead[test.ID] && everyDeadTargetIn(out[test.ID], in.deadProduction, facts.dead) {
-				facts.dead[test.ID] = true
-				in.walkAdmittedTest(facts, out, test.ID)
-				admitted = true
-			}
-		}
-	}
-	return facts
-}
-
-// walkAdmittedTest adds to facts.dead every dead declaration one admitted test of
-// dead code reaches through out or holds as its container, a test file's helpers
-// included, so a reported finding is never about a declaration the withheld test
-// needs. A production declaration it adds can admit a further test.
-func (in *Input) walkAdmittedTest(facts *testUseFacts, out map[inventory.SymbolID][]inventory.SymbolID, test inventory.SymbolID) {
-	queue := []inventory.SymbolID{test}
-	children := in.index().children
-	for len(queue) > 0 {
-		id := queue[len(queue)-1]
-		queue = queue[:len(queue)-1]
-		for _, to := range slices.Concat(out[id], children[id]) {
-			if candidate := in.candidateOf(to); candidate != nil && !candidate.TestOfDeadCode && !facts.dead[to] {
-				facts.dead[to] = true
-				queue = append(queue, to)
-			}
-		}
-	}
-}
-
-// deadProduction reports whether one declaration is a dead production declaration:
-// a candidate outside the test files that is no test of dead code.
-func (in *Input) deadProduction(id inventory.SymbolID) bool {
-	candidate, symbol := in.candidateOf(id), in.symbol(id)
-	return candidate != nil && !candidate.TestOfDeadCode && symbol != nil && !symbol.InTestFile
-}
-
-// walkTestUse fills facts.dead with the dead declarations of production code only
-// tests reach that a test references, and every dead production declaration one
-// reaches through out or holds as its container.
-func (in *Input) walkTestUse(facts *testUseFacts, out map[inventory.SymbolID][]inventory.SymbolID) {
-	var queue []inventory.SymbolID
-	add := func(id inventory.SymbolID) {
-		if !facts.dead[id] && in.deadProduction(id) {
-			facts.dead[id] = true
-			queue = append(queue, id)
-		}
-	}
-	for i := range in.Sweep.Candidates {
-		id := in.Sweep.Candidates[i].ID
-		if symbol := in.symbol(id); symbol != nil && facts.referenced[id] && in.testReached(symbol) {
-			add(id)
-		}
-	}
-	children := in.index().children
-	for len(queue) > 0 {
-		id := queue[len(queue)-1]
-		queue = queue[:len(queue)-1]
-		for _, to := range out[id] {
-			add(to)
-		}
-		for _, child := range children[id] {
-			add(child)
-		}
-	}
-}
-
-// everyDeadTargetIn reports whether a test's references name at least one dead
-// production declaration and every one they name is in set.
-func everyDeadTargetIn(targets []inventory.SymbolID, production func(inventory.SymbolID) bool, set map[inventory.SymbolID]bool) bool {
-	named := false
-	for _, to := range targets {
-		if !production(to) {
-			continue
-		}
-		if !set[to] {
-			return false
-		}
-		named = true
-	}
-	return named
+	return testReachedEvidence.Lowers(language, code) && symbol != nil && in.testReached(symbol) && in.Sweep != nil && in.Sweep.TestReferenced(id)
 }
 
 // deprecations is every declaration of the inventory carrying a deprecation

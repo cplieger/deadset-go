@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -224,29 +224,29 @@ func TestEncodingReflectionRendersAConsumersEvidenceAgainstTheConsumersRoot(t *t
 func TestEvidenceOfATestFileHoldsAsTheModeClassifiesThatFile(t *testing.T) {
 	for _, test := range []struct {
 		name         string
-		mode         graph.Mode
+		mode         facts.Mode
 		targetTest   bool
 		consumerTest bool
 	}{
-		{name: "the_plain_mode", mode: graph.Mode{}, targetTest: true, consumerTest: true},
-		{name: "the_plain_mode_consumer_tests_production", mode: graph.Mode{ConsumerTestsProduction: true}, targetTest: true, consumerTest: true},
-		{name: "a_production_run", mode: graph.Mode{Production: true}},
+		{name: "the_plain_mode", mode: facts.Mode{}, targetTest: true, consumerTest: true},
+		{name: "the_plain_mode_consumer_tests_production", mode: facts.Mode{ConsumerTestsProduction: true}, targetTest: true, consumerTest: true},
+		{name: "a_production_run", mode: facts.Mode{Production: true}},
 		{
 			name: "a_production_run_consumer_tests_production",
-			mode: graph.Mode{Production: true, ConsumerTestsProduction: true}, consumerTest: true,
+			mode: facts.Mode{Production: true, ConsumerTestsProduction: true}, consumerTest: true,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			site := token.Position{Filename: "app_test.go", Line: 9, Column: 2}
-			if got := holdsInMode(&graph.Exemption{Site: site}, test.mode); got != test.targetTest {
+			if got := holdsInMode(&Exemption{Site: site}, test.mode); got != test.targetTest {
 				t.Errorf("holdsInMode(the target's %s, %+v) = %t, want %t", site, test.mode, got, test.targetTest)
 			}
-			consumed := &graph.Exemption{Consumer: "example.com/consumer", Site: site}
+			consumed := &Exemption{Consumer: "example.com/consumer", Site: site}
 			if got := holdsInMode(consumed, test.mode); got != test.consumerTest {
 				t.Errorf("holdsInMode(the consumer's %s, %+v) = %t, want %t", site, test.mode, got, test.consumerTest)
 			}
 			for _, consumer := range []string{"", "example.com/consumer"} {
-				source := &graph.Exemption{Consumer: consumer, Site: token.Position{Filename: "app.go", Line: 9, Column: 2}}
+				source := &Exemption{Consumer: consumer, Site: token.Position{Filename: "app.go", Line: 9, Column: 2}}
 				if got := holdsInMode(source, test.mode); !got {
 					t.Errorf("holdsInMode(%q app.go, %+v) = false, want true: a source file's evidence holds under every mode",
 						consumer, test.mode)

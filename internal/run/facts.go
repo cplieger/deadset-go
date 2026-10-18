@@ -56,20 +56,22 @@ func generatedEntries(held []specfacts.Generated, generated []facts.Generated, s
 // records the record's index there. Build configurations are alternative views of
 // one target, so a tuple two of them bind through different generated files is one
 // record naming the bytewise-lowest file, whatever the configuration order. A
-// fallback names its generated file's symbol, which files holds by path.
+// fallback names its generated file's symbol, which files holds by path, and
+// stands for its whole schema file.
 func (l *Loaded) bindingRecords(held []specfacts.Binding, bindings []facts.Binding, files map[string]inventory.SymbolID, seen map[[4]string]int) []specfacts.Binding {
 	for _, b := range bindings {
 		record := specfacts.Binding{
-			Role: b.Role, SchemaFile: b.SchemaFile, Schema: b.Schema,
-			GeneratedFile: b.GeneratedFile, Scope: b.Scope, Symbol: l.Refs[b.Symbol],
+			Role: specfacts.RoleConsumer, SchemaFile: b.SchemaFile, Schema: b.Schema,
+			GeneratedFile: b.GeneratedFile, Symbol: l.Refs[b.Symbol],
 		}
-		if b.Role == specfacts.RoleFallback {
+		if b.Fallback {
+			record.Role, record.Scope = specfacts.RoleFallback, specfacts.ScopeAll
 			record.Symbol, record.State = l.Refs[files[b.GeneratedFile]], specfacts.StateLive
 		}
 		if record.Symbol == "" {
 			continue
 		}
-		tuple := [4]string{string(b.Role), record.Symbol, b.SchemaFile, b.Schema}
+		tuple := [4]string{string(record.Role), record.Symbol, b.SchemaFile, b.Schema}
 		if at, ok := seen[tuple]; ok {
 			if b.GeneratedFile < held[at].GeneratedFile {
 				held[at].GeneratedFile = b.GeneratedFile

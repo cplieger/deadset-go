@@ -16,7 +16,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/exempt"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/memory"
 	spec "github.com/cplieger/deadset-spec/v8"
@@ -159,7 +159,7 @@ func TestExitCodeForMapsEveryWiredFailure(t *testing.T) {
 		{name: "a_wrapped_refusal_is_a_usage_error", err: errors.Join(errors.New("resolve"), &config.Error{Message: "malformed"}), want: codes["usage"]},
 		{name: "a_configured_template_directory_the_target_does_not_hold_is_a_usage_error", err: fmt.Errorf("exempt: %s: %w: absent", vocab.TemplateField, exempt.ErrTemplateDir), want: codes["usage"]},
 		{name: "a_matrix_holding_no_configuration_is_a_usage_error", err: fmt.Errorf("%w: %s", load.ErrNoConfiguration, "/src/app"), want: codes["usage"]},
-		{name: "a_matrix_the_merge_cannot_key_a_configuration_of_is_a_usage_error", err: fmt.Errorf("%w: %d configurations, at most 64", graph.ErrMatrix, 65), want: codes["usage"]},
+		{name: "a_matrix_the_merge_cannot_key_a_configuration_of_is_a_usage_error", err: fmt.Errorf("%w: %d configurations, at most 64", liveness.ErrMatrix, 65), want: codes["usage"]},
 		{name: "a_load_failure_is_a_failure", err: loadFailure, want: codes["failure"]},
 		{name: "a_source_that_names_no_file_or_flag_is_a_failure", err: config.ErrNoSourceLabel, want: codes["failure"]},
 		{name: "an_unclassified_error_is_a_failure", err: errors.New("write the resolved configuration"), want: codes["failure"]},

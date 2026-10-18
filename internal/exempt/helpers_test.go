@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/facts"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
@@ -152,9 +151,9 @@ func inputOf(t *testing.T, archive string, opts Options, tags ...string) *Input 
 // of the input it was computed from is held.
 type sharedAnalysis struct {
 	symbols  []inventory.Symbol
-	detected map[vocab.Exemption][]graph.Exemption
+	detected map[vocab.Exemption][]Exemption
 	failed   map[vocab.Exemption]error
-	union    map[bool][]graph.Exemption
+	union    map[bool][]Exemption
 	refused  map[bool]error
 }
 
@@ -186,16 +185,16 @@ func analysisOf(t *testing.T, archive string, opts Options) *sharedAnalysis {
 func analyzeShared(in *Input) *sharedAnalysis {
 	held := &sharedAnalysis{
 		symbols:  in.Symbols,
-		detected: make(map[vocab.Exemption][]graph.Exemption),
+		detected: make(map[vocab.Exemption][]Exemption),
 		failed:   make(map[vocab.Exemption]error),
-		union:    make(map[bool][]graph.Exemption),
+		union:    make(map[bool][]Exemption),
 		refused:  make(map[bool]error),
 	}
 	for class, detect := range goDetectors() {
 		held.detected[class], held.failed[class] = detect(in)
 	}
 	for _, production := range []bool{false, true} {
-		in.Mode = graph.Mode{Production: production}
+		in.Mode = facts.Mode{Production: production}
 		held.union[production], _, held.refused[production] = Compute(in, goDetectors())
 	}
 	return held
@@ -209,7 +208,7 @@ func (a *sharedAnalysis) inventory(t *testing.T) []inventory.Symbol {
 }
 
 // detect is what one class's detector returned when it ran alone over the input.
-func (a *sharedAnalysis) detect(t *testing.T, class vocab.Exemption) ([]graph.Exemption, error) {
+func (a *sharedAnalysis) detect(t *testing.T, class vocab.Exemption) ([]Exemption, error) {
 	t.Helper()
 
 	found, held := a.detected[class]
@@ -221,7 +220,7 @@ func (a *sharedAnalysis) detect(t *testing.T, class vocab.Exemption) ([]graph.Ex
 
 // compute is what Compute returned over every class under the plain mode or under a
 // production run.
-func (a *sharedAnalysis) compute(t *testing.T, production bool) ([]graph.Exemption, error) {
+func (a *sharedAnalysis) compute(t *testing.T, production bool) ([]Exemption, error) {
 	t.Helper()
 
 	return testsupport.Detached(t, a.union[production]), a.refused[production]

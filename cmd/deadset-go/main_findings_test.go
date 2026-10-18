@@ -9,9 +9,9 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/run"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
@@ -132,7 +132,7 @@ func TestFindingsOfCompletesAFindingWithEveryFieldTheContractRequires(t *testing
 	if got, want := found.Confidence, vocab.Certain; got != want {
 		t.Errorf("the finding's confidence is %q, want %q: the kind's ceiling is certain", got, want)
 	}
-	if got, want := found.Relation, graph.ReferenceCounting; got != want {
+	if got, want := found.Relation, liveness.ReferenceCounting; got != want {
 		t.Errorf("the finding's liveness relation is %q, want %q: nothing references the declaration at all", got, want)
 	}
 	if found.TestOnly {

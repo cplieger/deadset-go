@@ -5,10 +5,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/facts"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-go/v2/internal/run"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -20,9 +21,9 @@ import (
 // explanation's own switch, so the property compares two readings of one analysis.
 type explainedState struct {
 	found     *kinds.Finding
-	retained  []graph.Exemption
-	candidate *graph.Candidate
-	live      graph.RelationSet
+	retained  []exempt.Exemption
+	candidate *liveness.Candidate
+	live      liveness.RelationSet
 }
 
 // stateOf reads what the analysis holds about one symbol.
@@ -124,7 +125,7 @@ func checkDisjoint(t *rapid.T, subject *inventory.Symbol, held *explainedState) 
 	if held.found != nil || len(held.retained) > 0 {
 		return
 	}
-	bothHold := held.live.Has(graph.ReferenceCounting) && held.live.Has(graph.Reachability)
+	bothHold := held.live.Has(liveness.ReferenceCounting) && held.live.Has(liveness.Reachability)
 	if held.candidate != nil && bothHold {
 		t.Fatalf("%s is a candidate of the sweep and live under both relations", subject.Ref)
 	}
@@ -155,7 +156,7 @@ func checkOneFindingPerSymbol(t *rapid.T, set *run.Findings) {
 // analysis holds.
 func checkExplanation(t *rapid.T, set *run.Findings, subject *inventory.Symbol, held *explainedState) {
 	var printed strings.Builder
-	if err := writeExplanation(&printed, set, graph.CascadeRoots, subject); err != nil {
+	if err := writeExplanation(&printed, set, false, subject); err != nil {
 		t.Fatalf("writeExplanation(%s) = %v, want the explanation", subject.Ref, err)
 	}
 	text := printed.String()
@@ -205,7 +206,7 @@ func checkReported(t *rapid.T, subject *inventory.Symbol, found *kinds.Finding, 
 
 // checkRetained asserts the retained answer names every class the sweep recorded, and
 // no other.
-func checkRetained(t *rapid.T, subject *inventory.Symbol, retained []graph.Exemption, text string) {
+func checkRetained(t *rapid.T, subject *inventory.Symbol, retained []exempt.Exemption, text string) {
 	named := 0
 	for line := range strings.SplitSeq(text, "\n") {
 		if strings.HasPrefix(line, "  class: ") {
@@ -224,38 +225,43 @@ func checkRetained(t *rapid.T, subject *inventory.Symbol, retained []graph.Exemp
 	}
 }
 
-// checkPath asserts every hop the liveness answer prints is a reference the graph
-// holds, and that the path starts at a symbol the root set names or at a loaded
-// consumer's reference.
+// checkPath asserts the liveness answer prints where the path begins: a symbol the
+// root set names, a loaded consumer's reference, an exemption or a mark, each with
+// its seed line; and every hop: a reference the graph holds at its position, and a
+// use line for every hop that is no reference.
 func checkPath(t *rapid.T, set *run.Findings, subject *inventory.Symbol, text string) {
-	path, reached := set.Matrix.Path(subject.ID, set.Mode)
-	if !reached {
-		path, reached = set.Matrix.Path(subject.ID, graph.Mode{ConsumerTestsProduction: set.Mode.ConsumerTestsProduction})
-	}
+	path, reached := set.Liveness.Path(subject.ID)
 	if !reached {
 		if !strings.Contains(text, "  unreachable: ") {
 			t.Fatalf("the explanation of %s claims a path where no root reaches it:\n%s", subject.Ref, text)
 		}
 		return
 	}
-	if path.Root != nil && len(path.Hops) == 0 {
-		if len(rootReasons(set.Merged.Roots, subject.ID)) == 0 {
-			t.Fatalf("%s is reached by the empty path and the root set does not name it", subject.Ref)
-		}
-		return
-	}
 	hops := path.Hops
+	start := subject.ID
+	if len(hops) > 0 {
+		start = hops[0].From
+	}
 	switch {
+	case path.Exemption != nil:
+		if start != path.Exemption.ID || !strings.Contains(text, "  reached from: exemption "+path.Exemption.Class+" of "+string(path.Exemption.ID)+"\n") {
+			t.Fatalf("the path to %s starts at the exemption of %s and the explanation does not say so from %s:\n%s", subject.Ref, path.Exemption.ID, start, text)
+		}
+	case path.Mark != "":
+		if start != path.Mark || !strings.Contains(text, "  reached from: suppression of "+string(path.Mark)+"\n") {
+			t.Fatalf("the path to %s starts at the mark on %s and the explanation does not say so from %s:\n%s", subject.Ref, path.Mark, start, text)
+		}
 	case path.Root == nil:
-		if hops[0].Consumer == "" {
-			t.Fatalf("the path to %s starts at no root and its first hop is no consumer's reference: %+v", subject.Ref, hops[0])
+		if len(hops) == 0 || hops[0].Reference == nil || hops[0].Reference.Consumer == "" ||
+			!strings.Contains(text, "  reached from: loaded consumer "+hops[0].Reference.Consumer+"\n") {
+			t.Fatalf("the path to %s starts at no root and the explanation names no loaded consumer's reference:\n%s", subject.Ref, text)
 		}
 	case !rootNames(set.Merged.Roots, path.Root.ID):
 		t.Fatalf("the path to %s starts at %s, which the root set does not name", subject.Ref, path.Root.ID)
-	case hops[0].From != path.Root.ID:
-		t.Fatalf("the path to %s starts at %s and its first hop is made by %s", subject.Ref, path.Root.ID, hops[0].From)
+	case start != path.Root.ID:
+		t.Fatalf("the path to %s starts at %s and its first hop is made by %s", subject.Ref, path.Root.ID, start)
 	}
-	if hops[len(hops)-1].To != subject.ID {
+	if len(hops) > 0 && hops[len(hops)-1].To != subject.ID {
 		t.Fatalf("the path to %s ends at %s", subject.Ref, hops[len(hops)-1].To)
 	}
 	for i := range hops {
@@ -263,12 +269,27 @@ func checkPath(t *rapid.T, set *run.Findings, subject *inventory.Symbol, text st
 			t.Fatalf("the path to %s has a gap: hop %d reaches %s and hop %d is made by %s",
 				subject.Ref, i-1, hops[i-1].To, i, hops[i].From)
 		}
-		if !heldReference(set.Merged.References, hops[i]) {
-			t.Fatalf("hop %d of the path to %s is no reference the graph holds: %+v", i, subject.Ref, hops[i])
+		checkHop(t, set, subject, &hops[i], text)
+	}
+}
+
+// checkHop asserts one hop of a path is printed: a reference of the target as the
+// reference the graph holds at its position, a use as its use line.
+func checkHop(t *rapid.T, set *run.Findings, subject *inventory.Symbol, hop *liveness.Hop, text string) {
+	r := hop.Reference
+	if r == nil {
+		if !strings.Contains(text, "  use: ") || !strings.Contains(text, "\t"+string(hop.From)+" -> "+string(hop.To)+"\n") {
+			t.Fatalf("the explanation of %s does not carry the use %s -> %s:\n%s", subject.Ref, hop.From, hop.To, text)
 		}
-		if hops[i].Consumer == "" && !strings.Contains(text, "  reference: "+hops[i].Pos.String()+"\t") {
-			t.Fatalf("the explanation of %s does not carry hop %d at %s:\n%s", subject.Ref, i, hops[i].Pos, text)
-		}
+		return
+	}
+	if !slices.ContainsFunc(set.Merged.References, func(held facts.Reference) bool {
+		return held.Consumer == r.Consumer && held.From == r.From && held.To == r.To && held.Pos == r.Pos && r.Configs&held.Configs != 0
+	}) {
+		t.Fatalf("a hop of the path to %s is no reference the graph holds: %+v", subject.Ref, *r)
+	}
+	if r.Consumer == "" && !strings.Contains(text, "  reference: "+r.Pos.String()+"\t") {
+		t.Fatalf("the explanation of %s does not carry the hop at %s:\n%s", subject.Ref, r.Pos, text)
 	}
 }
 
@@ -280,9 +301,4 @@ func rootNames(rooted []roots.Root, id inventory.SymbolID) bool {
 		}
 	}
 	return false
-}
-
-// heldReference reports whether one reference is a reference the graph holds.
-func heldReference(references []facts.Reference, one facts.Reference) bool {
-	return slices.Contains(references, one)
 }

@@ -1,0 +1,12 @@
+reference	Resolve	normalize	call	catalog.go:7:43	test=false
+reference	TestNormalize	normalize	call	catalog_test.go:6:12	test=true
+reference	external_test.go	example.com/tested	read	external_test.go:6:2	test=true
+reference	TestResolve	Resolve	call	external_test.go:10:19	test=true
+candidate	Resolve	reference-counting	production=0	test=1	testOfDeadCode=false
+candidate	normalize	reachability	production=1	test=1	testOfDeadCode=false
+candidate	orphan	reference-counting	production=0	test=0	testOfDeadCode=false
+candidate	TestNormalize	reference-counting	production=0	test=0	testOfDeadCode=true
+candidate	TestResolve	reference-counting	production=0	test=0	testOfDeadCode=true
+component	0	members=Resolve normalize TestNormalize TestResolve	roots=Resolve TestResolve	held=false	spans=catalog.go:7-7 catalog.go:10-10 catalog_test.go:5-9 external_test.go:9-13
+component	1	members=orphan	roots=orphan	held=false	spans=catalog.go:13-13
+live	normalize	reference-counting

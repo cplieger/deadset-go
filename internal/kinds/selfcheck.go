@@ -6,8 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -215,9 +215,9 @@ func (in *Input) firstToBind(at int) bool {
 
 // staleInput is the sweep the staleness answer is read from, and an empty answer
 // where the run carries none, so a caller reads one shape.
-func (in *Input) staleInput() *graph.Result {
+func (in *Input) staleInput() *liveness.Result {
 	if in.Sweep == nil {
-		return &graph.Result{}
+		return &liveness.Result{}
 	}
 	return in.Sweep
 }

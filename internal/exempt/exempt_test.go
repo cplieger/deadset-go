@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/txtar"
@@ -35,12 +34,12 @@ func at(file string, line, column int) token.Position {
 
 // detector returns a class's detection that reads nothing and retains exactly
 // what it was given.
-func detector(retained ...graph.Exemption) Detector {
-	return func(*Input) ([]graph.Exemption, error) { return retained, nil }
+func detector(retained ...Exemption) Detector {
+	return func(*Input) ([]Exemption, error) { return retained, nil }
 }
 
 // held names every exemption of one union: the symbol, the class and the site.
-func held(found []graph.Exemption) []string {
+func held(found []Exemption) []string {
 	names := make([]string, 0, len(found))
 	for _, e := range found {
 		names = append(names, string(e.ID)+" "+e.Class+" "+e.Site.String())
@@ -52,7 +51,7 @@ func TestComputeRunsEveryClassTheTableHoldsInVocabularyOrder(t *testing.T) {
 	var ran []vocab.Exemption
 	detectors := make(map[vocab.Exemption]Detector, len(goClasses()))
 	for _, class := range goClasses() {
-		detectors[class] = func(*Input) ([]graph.Exemption, error) {
+		detectors[class] = func(*Input) ([]Exemption, error) {
 			ran = append(ran, class)
 			return nil, nil
 		}
@@ -71,10 +70,10 @@ func TestComputeRunsEveryClassTheTableHoldsInVocabularyOrder(t *testing.T) {
 }
 
 func TestComputeRunsNoDisabledClass(t *testing.T) {
-	retained := graph.Exemption{ID: "a.go:1:1", Class: string(vocab.GeneratedFile)}
+	retained := Exemption{ID: "a.go:1:1", Class: string(vocab.GeneratedFile)}
 	detectors := map[vocab.Exemption]Detector{
 		vocab.GeneratedFile:         detector(retained),
-		vocab.InterfaceSatisfaction: detector(graph.Exemption{ID: "a.go:2:1", Class: string(vocab.InterfaceSatisfaction)}),
+		vocab.InterfaceSatisfaction: detector(Exemption{ID: "a.go:2:1", Class: string(vocab.InterfaceSatisfaction)}),
 	}
 
 	in := &Input{Options: Options{Disabled: []vocab.Exemption{vocab.InterfaceSatisfaction, vocab.InterfaceSatisfaction, "not-a-class"}}}
@@ -86,7 +85,7 @@ func TestComputeRunsNoDisabledClass(t *testing.T) {
 	// A disabled class retains nothing, which is what lets an exemption suspected
 	// of hiding a defect be tested; a class named twice is disabled once and a
 	// name outside the vocabulary disables nothing.
-	if want := held([]graph.Exemption{retained}); !slices.Equal(held(found), want) {
+	if want := held([]Exemption{retained}); !slices.Equal(held(found), want) {
 		t.Errorf("Compute with %s disabled retained %v, want %v", vocab.InterfaceSatisfaction, held(found), want)
 	}
 }
@@ -94,13 +93,13 @@ func TestComputeRunsNoDisabledClass(t *testing.T) {
 func TestComputeOrdersTheUnionBySiteThenClassThenSymbol(t *testing.T) {
 	detectors := map[vocab.Exemption]Detector{
 		vocab.GeneratedFile: detector(
-			graph.Exemption{ID: "b.go:9:1", Class: string(vocab.GeneratedFile), Site: at("b.go", 9, 1)},
-			graph.Exemption{ID: "a.go:4:1", Class: string(vocab.GeneratedFile), Site: at("a.go", 4, 7)},
-			graph.Exemption{ID: "a.go:2:1", Class: string(vocab.GeneratedFile)},
+			Exemption{ID: "b.go:9:1", Class: string(vocab.GeneratedFile), Site: at("b.go", 9, 1)},
+			Exemption{ID: "a.go:4:1", Class: string(vocab.GeneratedFile), Site: at("a.go", 4, 7)},
+			Exemption{ID: "a.go:2:1", Class: string(vocab.GeneratedFile)},
 		),
 		vocab.ReflectiveLookup: detector(
-			graph.Exemption{ID: "a.go:3:1", Class: string(vocab.ReflectiveLookup), Site: at("a.go", 4, 7)},
-			graph.Exemption{ID: "a.go:1:1", Class: string(vocab.ReflectiveLookup), Site: at("a.go", 4, 7)},
+			Exemption{ID: "a.go:3:1", Class: string(vocab.ReflectiveLookup), Site: at("a.go", 4, 7)},
+			Exemption{ID: "a.go:1:1", Class: string(vocab.ReflectiveLookup), Site: at("a.go", 4, 7)},
 		),
 	}
 
@@ -130,16 +129,16 @@ func TestComputeKeepsOneEntryPerSymbolClassDetailAndHolder(t *testing.T) {
 	detectors := map[vocab.Exemption]Detector{
 		vocab.GeneratedFile: detector(
 			// One fact stated at three sites, the last of them the earliest.
-			graph.Exemption{ID: "a.go:1:1", Class: string(vocab.GeneratedFile), Site: at("b.go", 2, 1), Detail: converted},
-			graph.Exemption{ID: "a.go:1:1", Class: string(vocab.GeneratedFile), Site: at("a.go", 9, 4), Detail: converted},
-			graph.Exemption{ID: "a.go:1:1", Class: string(vocab.GeneratedFile), Site: at("a.go", 4, 7), Detail: converted},
+			Exemption{ID: "a.go:1:1", Class: string(vocab.GeneratedFile), Site: at("b.go", 2, 1), Detail: converted},
+			Exemption{ID: "a.go:1:1", Class: string(vocab.GeneratedFile), Site: at("a.go", 9, 4), Detail: converted},
+			Exemption{ID: "a.go:1:1", Class: string(vocab.GeneratedFile), Site: at("a.go", 4, 7), Detail: converted},
 			// A second reason on the same symbol and class, and the same reason
 			// on a second symbol: each is a fact of its own.
-			graph.Exemption{ID: "a.go:1:1", Class: string(vocab.GeneratedFile), Site: at("a.go", 9, 4), Detail: "satisfies io.Closer"},
-			graph.Exemption{ID: "a.go:2:1", Class: string(vocab.GeneratedFile), Site: at("a.go", 9, 4), Detail: converted},
+			Exemption{ID: "a.go:1:1", Class: string(vocab.GeneratedFile), Site: at("a.go", 9, 4), Detail: "satisfies io.Closer"},
+			Exemption{ID: "a.go:2:1", Class: string(vocab.GeneratedFile), Site: at("a.go", 9, 4), Detail: converted},
 			// The first fact again, held by a declaration: live only while that
 			// declaration is, so it is a fact of its own.
-			graph.Exemption{ID: "a.go:1:1", Class: string(vocab.GeneratedFile), Site: at("a.go", 12, 1), Detail: converted, Holder: "h.go:1:1"},
+			Exemption{ID: "a.go:1:1", Class: string(vocab.GeneratedFile), Site: at("a.go", 12, 1), Detail: converted, Holder: "h.go:1:1"},
 		),
 	}
 
@@ -187,7 +186,7 @@ func TestDetectorsNameEveryClassTheAnalyzerComputes(t *testing.T) {
 // retainedClauses names every exemption of one union as the declaration held
 // back, the class, the site and the clause, which is the line print-retained
 // carries.
-func retainedClauses(symbols []inventory.Symbol, found []graph.Exemption) []string {
+func retainedClauses(symbols []inventory.Symbol, found []Exemption) []string {
 	names := symbolNames(symbols)
 	lines := make([]string, 0, len(found))
 	for _, e := range found {
@@ -243,7 +242,7 @@ func TestComputeKeepsOneRecordPerHolderForAMethodConvertedAtSeveralSites(t *test
 const writerFact = "satisfies io.Writer"
 
 // writerSites counts the exemptions of one union stating writerFact.
-func writerSites(found []graph.Exemption) int {
+func writerSites(found []Exemption) int {
 	sites := 0
 	for _, e := range found {
 		if e.Detail == writerFact {
@@ -405,7 +404,7 @@ func TestEveryClauseIsOneRelationThenTheThingItRelatesTo(t *testing.T) {
 // checkClause reports every way one exemption's clause departs from the grammar:
 // one non-empty line opening with a lower-case relation from the closed set, and
 // no closing full stop.
-func checkClause(t *testing.T, archive string, e graph.Exemption) {
+func checkClause(t *testing.T, archive string, e Exemption) {
 	t.Helper()
 
 	stated := e.ID + " " + inventory.SymbolID(e.Class)
@@ -431,8 +430,8 @@ var errEvidence = errors.New("the template directory cannot be read")
 
 func TestComputeNamesTheClassThatFailed(t *testing.T) {
 	detectors := map[vocab.Exemption]Detector{
-		vocab.GeneratedFile: detector(graph.Exemption{ID: "a.go:1:1", Class: string(vocab.GeneratedFile)}),
-		vocab.TemplateField: func(*Input) ([]graph.Exemption, error) { return nil, errEvidence },
+		vocab.GeneratedFile: detector(Exemption{ID: "a.go:1:1", Class: string(vocab.GeneratedFile)}),
+		vocab.TemplateField: func(*Input) ([]Exemption, error) { return nil, errEvidence },
 	}
 
 	found, _, err := Compute(&Input{}, detectors)
@@ -462,7 +461,7 @@ func TestComputeHandsEveryClassTheLoadedConfigurationItReads(t *testing.T) {
 	// every class is written against that one value.
 	var seen *Input
 	detectors := map[vocab.Exemption]Detector{
-		vocab.GeneratedFile: func(in *Input) ([]graph.Exemption, error) {
+		vocab.GeneratedFile: func(in *Input) ([]Exemption, error) {
 			seen = in
 			return nil, nil
 		},

@@ -3,7 +3,6 @@ package exempt
 import (
 	"go/token"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -20,7 +19,7 @@ const detailGenerated = "declared in a generated file"
 // A package and a file are not declarations in a file: the package clause of one
 // generated file would otherwise retain every declaration of the package. The site
 // is the file's package clause.
-func GeneratedFileDetector(in *Input) ([]graph.Exemption, error) {
+func GeneratedFileDetector(in *Input) ([]Exemption, error) {
 	if in.Options.IncludeGenerated {
 		return nil, nil
 	}
@@ -30,7 +29,7 @@ func GeneratedFileDetector(in *Input) ([]graph.Exemption, error) {
 		sites[all[i].Path] = all[i].Site
 	}
 
-	var found []graph.Exemption
+	var found []Exemption
 	for i := range in.Symbols {
 		s := &in.Symbols[i]
 		if s.Kind == inventory.KindPackage || s.Kind == inventory.KindFile {
@@ -40,7 +39,7 @@ func GeneratedFileDetector(in *Input) ([]graph.Exemption, error) {
 		if !generated {
 			continue
 		}
-		found = append(found, graph.Exemption{
+		found = append(found, Exemption{
 			ID:     s.ID,
 			Class:  string(vocab.GeneratedFile),
 			Site:   site,

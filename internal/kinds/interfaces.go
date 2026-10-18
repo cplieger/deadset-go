@@ -9,11 +9,10 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/facts"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
-	"golang.org/x/tools/go/packages"
 )
 
 // satisfactionAssertionSubject is what the subject vocabulary calls a compile-time
@@ -58,7 +57,7 @@ func unusedInterface(in *Input) ([]Finding, error) {
 		if !held {
 			continue
 		}
-		if candidate.Relation == graph.Reachability {
+		if candidate.Relation == liveness.Reachability {
 			one.Message = unusedInterfaceDeadMessage
 		}
 		one.Relation = candidate.Relation
@@ -151,13 +150,6 @@ type assertion struct {
 	Interface inventory.SymbolID
 }
 
-// implementationCount counts, per method an interface declares, the implementations
-// measured and how many of them carry a body with no statement.
-type implementationCount struct {
-	implementations int
-	empty           int
-}
-
 // interfaceFacts is what the three interface kinds read, computed over the matrix
 // inventory and the type information of every configuration: the concrete
 // implementations of every interface the target declares, which methods a sealed
@@ -167,16 +159,13 @@ type implementationCount struct {
 type interfaceFacts struct {
 	implementations map[inventory.SymbolID]map[inventory.SymbolID]positioned
 	ordered         map[inventory.SymbolID][]positioned
-	sealed          map[inventory.SymbolID]bool
-	counted         map[inventory.SymbolID]*implementationCount
+	methods         map[inventory.SymbolID]*facts.InterfaceMethod
 	reached         map[inventory.SymbolID]bool
 	called          map[inventory.SymbolID]bool
 	usedAsType      map[inventory.SymbolID]bool
 	typeUsedBy      map[inventory.SymbolID][]inventory.SymbolID
 	asserted        map[assertion]bool
 	assertedType    map[assertion]inventory.SymbolID
-	implementors    map[inventory.SymbolID][]inventory.SymbolID
-	declaredBy      map[inventory.SymbolID]inventory.SymbolID
 	assertions      []assertion
 }
 
@@ -187,18 +176,15 @@ func interfacesOf(in *Input) *interfaceFacts {
 	f := &interfaceFacts{
 		implementations: make(map[inventory.SymbolID]map[inventory.SymbolID]positioned),
 		ordered:         make(map[inventory.SymbolID][]positioned),
-		sealed:          make(map[inventory.SymbolID]bool),
-		counted:         make(map[inventory.SymbolID]*implementationCount),
 		reached:         make(map[inventory.SymbolID]bool),
 		called:          make(map[inventory.SymbolID]bool),
 		usedAsType:      make(map[inventory.SymbolID]bool),
 		typeUsedBy:      make(map[inventory.SymbolID][]inventory.SymbolID),
 		asserted:        make(map[assertion]bool),
 		assertedType:    make(map[assertion]inventory.SymbolID),
-		implementors:    make(map[inventory.SymbolID][]inventory.SymbolID),
-		declaredBy:      make(map[inventory.SymbolID]inventory.SymbolID),
 	}
 	if in.Merged != nil {
+		f.methods = in.Merged.InterfaceMethods
 		f.references(in, in.Merged.References)
 	}
 	for i := range in.Per {
@@ -223,23 +209,12 @@ func (f *interfaceFacts) references(in *Input, refs []facts.Reference) {
 			continue
 		}
 		switch {
-		case to.Kind == inventory.KindInterfaceMethod && selects(reference.Kind):
+		case to.Kind == inventory.KindInterfaceMethod && reference.Kind.Selects():
 			f.called[reference.To] = true
-			f.reached[reference.To] = f.reached[reference.To] || !in.uncounted(reference)
+			f.reached[reference.To] = f.reached[reference.To] || !in.Mode.Uncounted(reference)
 		case to.Kind == inventory.KindInterface && namesAsType(reference.Kind):
 			f.typeUsedBy[reference.To] = append(f.typeUsedBy[reference.To], reference.From)
 		}
-	}
-}
-
-// selects reports whether one reference kind reaches a method through the value it
-// is written on: a call, and a selection that takes the method as a value.
-func selects(kind facts.RefKind) bool {
-	switch kind {
-	case facts.RefCall, facts.RefRead:
-		return true
-	default:
-		return false
 	}
 }
 
@@ -255,29 +230,19 @@ func namesAsType(kind facts.RefKind) bool {
 	}
 }
 
-// configuration reads one configuration's type information: which types of the
-// target implement which of its interfaces, how each interface method's
-// implementations are written, and the satisfaction assertions the configuration
-// compiles.
+// configuration reads one configuration's interfaces: which types of the target
+// implement which of its interfaces, and the satisfaction assertions the
+// configuration compiles.
 func (f *interfaceFacts) configuration(in *Input, one *Configured) {
 	if one.Result == nil || one.Resolve == nil {
 		return
 	}
-	d := declaredIn(one)
-	for _, declared := range d.interfaces {
-		if symbol := in.symbol(declared.id); symbol != nil && symbol.Exported && restrictsImplementors(declared.iface) {
-			f.seal(one, declared.iface)
-		}
-		for _, concrete := range d.concrete {
-			recv, satisfies := implementing(concrete.typ, declared.iface)
-			if !satisfies {
-				continue
-			}
-			f.addImplementation(in, declared.id, concrete.id)
-			f.count(one, declared, recv, d.written)
+	for _, iface := range one.Facts.Interfaces() {
+		for _, impl := range iface.Implementations {
+			f.addImplementation(in, iface.ID, impl.Concrete)
 		}
 	}
-	f.assertionsIn(in, one, &d)
+	f.assertionsIn(in, one, blanksIn(one))
 }
 
 // addImplementation records one concrete type of the target as an implementation of
@@ -298,43 +263,13 @@ func (f *interfaceFacts) addImplementation(in *Input, iface, concrete inventory.
 	}
 }
 
-// count records, for each method one interface declares, the implementation just
-// found and whether its body carries no statement. A method promoted from an
-// embedded field is measured where it is written, which is the declaration a
-// deletion would remove; a method the target does not declare has no body to read
-// and counts as an implementation that is not empty.
-func (f *interfaceFacts) count(one *Configured, declared declaredInterface, recv types.Type, written map[token.Pos]*ast.FuncDecl) {
-	set := types.NewMethodSet(recv)
-	for method := range declared.iface.Methods() {
-		id, held := one.Resolve.Object(method)
-		if !held {
-			continue
-		}
-		if f.counted[id] == nil {
-			f.counted[id] = &implementationCount{}
-		}
-		f.counted[id].implementations++
-		f.declaredBy[id] = declared.id
-		sel := set.Lookup(method.Pkg(), method.Name())
-		if sel == nil {
-			continue
-		}
-		if emptyBody(written, sel.Obj()) {
-			f.counted[id].empty++
-		}
-		if implementor, held := one.Resolve.Object(sel.Obj()); held && !slices.Contains(f.implementors[id], implementor) {
-			f.implementors[id] = append(f.implementors[id], implementor)
-		}
-	}
-}
-
 // assertionsIn records the satisfaction assertions one configuration compiles: a
 // package-level declaration of the blank identifier, typed as an interface the
 // target declares, whose value is of a concrete type that satisfies it. The
 // asserted type is an implementation of that interface, whatever else implements
 // it.
-func (f *interfaceFacts) assertionsIn(in *Input, one *Configured, d *declared) {
-	for _, blank := range d.blanks {
+func (f *interfaceFacts) assertionsIn(in *Input, one *Configured, blanks []blankDeclaration) {
+	for _, blank := range blanks {
 		iface, named, isInterface := interfaceNamed(blank.info, blank.spec.Type)
 		if !isInterface {
 			continue
@@ -388,28 +323,17 @@ func (f *interfaceFacts) settle() {
 	}
 }
 
-// seal records every method of one exported interface whose method set fixes its
-// implementors outside the package ([restrictsImplementors]), a method an embedded
-// interface declares included, because the exported method set is what restricts.
-func (f *interfaceFacts) seal(one *Configured, iface *types.Interface) {
-	for method := range iface.Methods() {
-		if id, held := one.Resolve.Object(method); held {
-			f.sealed[id] = true
-		}
-	}
-}
-
 // exempt reports whether one method of an interface is not reported: because a call
 // site the mode counts reaches it through the interface, because an exported
 // interface's method set that fixes its implementors holds it ([interfaceFacts.seal]),
 // or because the method is a marker, whose every implementation in the target has a
 // body with no statement; one the target does not declare has no body to read.
 func (f *interfaceFacts) exempt(method inventory.SymbolID) bool {
-	if f.reached[method] || f.sealed[method] {
+	if f.reached[method] {
 		return true
 	}
-	counted := f.counted[method]
-	return counted != nil && counted.implementations > 0 && counted.empty == counted.implementations
+	m := f.methods[method]
+	return m != nil && m.Fixed()
 }
 
 // testCalledInterfaceMethod reports whether one candidate is an interface method
@@ -417,7 +341,7 @@ func (f *interfaceFacts) exempt(method inventory.SymbolID) bool {
 // precondition does not exempt, which the test-only kind reports as it reports any
 // declaration only tests reference. A method of an interface that is itself a
 // candidate falls with the interface.
-func (in *Input) testCalledInterfaceMethod(candidate *graph.Candidate, symbol *inventory.Symbol) bool {
+func (in *Input) testCalledInterfaceMethod(candidate *liveness.Candidate, symbol *inventory.Symbol) bool {
 	if symbol.Kind != inventory.KindInterfaceMethod || !testOnly(candidate) || in.candidateOf(symbol.Parent) != nil {
 		return false
 	}
@@ -426,31 +350,6 @@ func (in *Input) testCalledInterfaceMethod(candidate *graph.Candidate, symbol *i
 		held.interfaces = interfacesOf(in)
 	}
 	return !held.interfaces.exempt(candidate.ID)
-}
-
-// InterfaceImplementations answers, before any sweep, which interface methods of
-// the target no call site of any file reaches through the interface and the DS1202
-// precondition does not exempt, and a use of each method implementing one by that
-// interface method, so an implementation nothing else keeps belongs to the interface
-// method's dead component. A method a test calls keeps its implementations, which the
-// test reaches through it. It reads the inventory, the references and the types alone.
-func InterfaceImplementations(in *Input) (uncalled map[inventory.SymbolID]bool, uses []graph.Use) {
-	known := interfacesOf(in)
-	uncalled = make(map[inventory.SymbolID]bool)
-	for method := range known.declaredBy {
-		symbol := in.symbol(method)
-		if symbol == nil || symbol.InTestFile || known.exempt(method) || known.called[method] {
-			continue
-		}
-		uncalled[method] = true
-		for _, implementor := range known.implementors[method] {
-			uses = append(uses, graph.Use{From: method, To: implementor})
-		}
-	}
-	slices.SortFunc(uses, func(a, b graph.Use) int {
-		return cmp.Or(strings.Compare(string(a.From), string(b.From)), strings.Compare(string(a.To), string(b.To)))
-	})
-	return uncalled, uses
 }
 
 // implementationsOf returns the concrete implementations of one interface, in the
@@ -482,20 +381,6 @@ func byWrittenPosition(a, b positioned) int {
 	return report.ComparePositioned(&keyA, &keyB)
 }
 
-// declaredInterface is one interface the target declares, as one configuration
-// type-checks it.
-type declaredInterface struct {
-	iface *types.Interface
-	id    inventory.SymbolID
-}
-
-// declaredType is one concrete type the target declares, as one configuration
-// type-checks it.
-type declaredType struct {
-	typ types.Type
-	id  inventory.SymbolID
-}
-
 // blankDeclaration is one package-level declaration of the blank identifier, with
 // the type information of the variant that compiled it.
 type blankDeclaration struct {
@@ -505,87 +390,20 @@ type blankDeclaration struct {
 	value ast.Expr
 }
 
-// declared is what one configuration's type information holds for these kinds.
-type declared struct {
-	written    map[token.Pos]*ast.FuncDecl
-	seen       map[inventory.SymbolID]bool
-	interfaces []declaredInterface
-	concrete   []declaredType
-	blanks     []blankDeclaration
-}
-
-// declaredIn reads one configuration's type information: the interfaces and the
-// concrete types the target declares, the function declarations the marker rule
-// measures, and the package-level blank declarations that may be satisfaction
-// assertions, each read from the first variant of the inventory's walk order.
-//
-// A generic type is in neither type set, because whether an uninstantiated generic
-// type implements an interface is not a question the type checker answers.
-func declaredIn(one *Configured) declared {
-	d := declared{
-		written: make(map[token.Pos]*ast.FuncDecl),
-		seen:    make(map[inventory.SymbolID]bool),
-	}
+// blanksIn is every package-level blank declaration of one configuration that may
+// be a satisfaction assertion, read from the first variant of the walk order.
+func blanksIn(one *Configured) []blankDeclaration {
+	var blanks []blankDeclaration
 	for _, p := range one.Facts.Packages() {
-		d.collect(one, p)
-	}
-	slices.SortFunc(d.interfaces, func(a, b declaredInterface) int {
-		return strings.Compare(string(a.id), string(b.id))
-	})
-	slices.SortFunc(d.concrete, func(a, b declaredType) int {
-		return strings.Compare(string(a.id), string(b.id))
-	})
-	return d
-}
-
-// collect reads one package variant: the named types it defines, the functions it
-// declares and the blank declarations of its files.
-func (d *declared) collect(one *Configured, p *packages.Package) {
-	for _, object := range p.TypesInfo.Defs {
-		name, isType := object.(*types.TypeName)
-		if !isType {
-			continue
-		}
-		id, held := one.Resolve.Object(name)
-		if !held || d.seen[id] {
-			continue
-		}
-		d.seen[id] = true
-		d.keep(id, name)
-	}
-	for _, file := range one.Facts.Files(p) {
-		d.declarations(p.TypesInfo, file)
-	}
-}
-
-// keep files one named type of the target under what it is: an interface whose
-// methods these kinds judge, or a concrete type that may implement one.
-func (d *declared) keep(id inventory.SymbolID, name *types.TypeName) {
-	named, isNamed := types.Unalias(name.Type()).(*types.Named)
-	if !isNamed || named.TypeParams().Len() > 0 {
-		return
-	}
-	if iface, isInterface := named.Underlying().(*types.Interface); isInterface {
-		d.interfaces = append(d.interfaces, declaredInterface{iface: iface, id: id})
-		return
-	}
-	d.concrete = append(d.concrete, declaredType{typ: named, id: id})
-}
-
-// declarations reads one file: the bodies the marker rule measures, and the
-// package-level blank declarations carrying both a type and a value, which is the
-// shape of a satisfaction assertion.
-func (d *declared) declarations(info *types.Info, file *ast.File) {
-	for _, decl := range file.Decls {
-		switch decl := decl.(type) {
-		case *ast.FuncDecl:
-			d.written[decl.Name.Pos()] = decl
-		case *ast.GenDecl:
-			if decl.Tok == token.VAR {
-				d.blanks = append(d.blanks, blanksOf(info, decl)...)
+		for _, file := range one.Facts.Files(p) {
+			for _, decl := range file.Decls {
+				if decl, isGen := decl.(*ast.GenDecl); isGen && decl.Tok == token.VAR {
+					blanks = append(blanks, blanksOf(p.TypesInfo, decl)...)
+				}
 			}
 		}
 	}
+	return blanks
 }
 
 // blanksOf returns the blank declarations of one variable declaration group that
@@ -605,43 +423,6 @@ func blanksOf(info *types.Info, decl *ast.GenDecl) []blankDeclaration {
 		}
 	}
 	return found
-}
-
-// restrictsImplementors reports whether one interface's method set holds an
-// unexported method, which is the shape whose method set exists to fix the types
-// that implement it rather than to be called through.
-func restrictsImplementors(iface *types.Interface) bool {
-	for method := range iface.Methods() {
-		if !method.Exported() {
-			return true
-		}
-	}
-	return false
-}
-
-// implementing returns the form of one concrete type that satisfies one interface,
-// the pointer to it included, and reports whether either does. An interface with no
-// method is satisfied by every type, so naming those types says nothing about it
-// and none is recorded.
-func implementing(t types.Type, iface *types.Interface) (types.Type, bool) {
-	if iface.NumMethods() == 0 {
-		return nil, false
-	}
-	if types.Implements(t, iface) {
-		return t, true
-	}
-	if pointer := types.NewPointer(t); types.Implements(pointer, iface) {
-		return pointer, true
-	}
-	return nil, false
-}
-
-// emptyBody reports whether the declaration of one method carries a body with no
-// statement. A method the target does not declare, and one declared with no body at
-// all, is a body this analysis cannot read and is not empty.
-func emptyBody(written map[token.Pos]*ast.FuncDecl, object types.Object) bool {
-	decl, held := written[object.Pos()]
-	return held && decl.Body != nil && len(decl.Body.List) == 0
 }
 
 // interfaceNamed returns the interface one type expression names and the defined
@@ -687,13 +468,4 @@ func concreteOf(one *Configured, t types.Type) inventory.SymbolID {
 	}
 	id, _ := one.Resolve.Object(named.Obj())
 	return id
-}
-
-// WithoutUncalled drops every interface-satisfaction retention through an interface
-// method no call site reaches, which [uncalledInterfaceMethod] reports with its
-// implementations.
-func WithoutUncalled(exemptions []graph.Exemption, uncalled map[inventory.SymbolID]bool) []graph.Exemption {
-	return slices.DeleteFunc(exemptions, func(e graph.Exemption) bool {
-		return e.Class == string(vocab.InterfaceSatisfaction) && e.Via != "" && uncalled[e.Via]
-	})
 }

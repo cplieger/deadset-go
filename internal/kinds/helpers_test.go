@@ -13,8 +13,8 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/facts"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
@@ -173,16 +173,16 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 	// The fixture analyses in the production mode, which is the run the analyzer
 	// makes, and every stage of the fixture reads the one value as the composition
 	// root hands it to every stage of a run.
-	mode := graph.Mode{Production: true}
+	mode := facts.Mode{Production: true}
 	rootOptions := roots.RootOptions{
 		Patterns:     resolved.Roots.Patterns,
 		PublishedAPI: resolved.Target.Kind == report.TargetKindLibrary,
 	}
 
 	per := make([]Configured, len(configurations))
-	passes := make([]graph.Configured, len(configurations))
+	passes := make([]liveness.Configured, len(configurations))
 	classes := make([]roots.TestClasses, len(configurations))
-	var exemptions, testEvidence []graph.Exemption
+	var exemptions, testEvidence []exempt.Exemption
 	var root string
 	var loadedConsumers []string
 	for i, c := range configurations {
@@ -220,7 +220,7 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 		exemptions = append(exemptions, computed...)
 		testEvidence = append(testEvidence, evidence...)
 		per[i] = Configured{Result: result, Resolve: resolver, Facts: index, Symbols: symbols}
-		passes[i] = graph.Configured{Symbols: symbols, Roots: rooted}
+		passes[i] = liveness.Configured{Symbols: symbols, Roots: rooted, Interfaces: index.Interfaces()}
 	}
 	tests := roots.MatrixTests(classes)
 	for i := range per {
@@ -231,15 +231,9 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 		passes[i].References = references
 	}
 
-	merged, err := graph.Merge(passes, tests)
+	merged, err := liveness.Merge(passes, tests)
 	if err != nil {
-		t.Fatalf("Setup: graph.Merge(%s): %v", doc.Target.Path, err)
-	}
-	swept := graph.NewMatrix(&merged).Sweep(&graph.SweepInput{Exempt: exemptions, Mode: mode}, graph.TestReferencesOf(testEvidence))
-
-	refs := make(map[inventory.SymbolID]string, len(merged.Symbols))
-	for i := range merged.Symbols {
-		refs[merged.Symbols[i].ID] = merged.Symbols[i].Ref
+		t.Fatalf("Setup: liveness.Merge(%s): %v", doc.Target.Path, err)
 	}
 	if len(loadedConsumers) > 0 {
 		consumers = Consumers{
@@ -247,6 +241,15 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 			Loaded:   loadedConsumers,
 			Complete: resolved.Consumers.Complete,
 		}
+	}
+	g := liveness.Of(&merged)
+	exemptions, testEvidence = g.WithoutUncalled(exemptions), g.WithoutUncalled(testEvidence)
+	unseen := Unseen(&Input{Config: &resolved, Root: root, Merged: &merged, Per: per, Consumers: consumers})
+	swept := g.Sweep(&liveness.SweepPolicy{Exempt: exemptions, Mode: mode, TestEvidence: testEvidence, Unseen: unseen})
+
+	refs := make(map[inventory.SymbolID]string, len(merged.Symbols))
+	for i := range merged.Symbols {
+		refs[merged.Symbols[i].ID] = merged.Symbols[i].Ref
 	}
 	generated := generatedPaths(t, per)
 	return &Input{

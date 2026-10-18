@@ -1,4 +1,4 @@
-package exempt
+package exempt_test
 
 import (
 	"fmt"
@@ -8,9 +8,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/facts"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
@@ -56,7 +57,7 @@ type drawnSet struct {
 	roots        []drawnRoot
 	retentions   []drawnRetention
 	disabled     []vocab.Exemption
-	mode         graph.Mode
+	mode         facts.Mode
 }
 
 // drawnSets draws one to eight declarations, up to twelve references between them,
@@ -84,11 +85,11 @@ func drawnSets() *rapid.Generator[drawnSet] {
 		retentions := rapid.SliceOfN(rapid.Custom(func(t *rapid.T) drawnRetention {
 			return drawnRetention{
 				at:    rapid.IntRange(0, count-1).Draw(t, "the retained declaration"),
-				class: rapid.SampledFrom(goClasses()).Draw(t, "the class that retains it"),
+				class: rapid.SampledFrom(exempt.GoClasses()).Draw(t, "the class that retains it"),
 			}
 		}), 0, 6).Draw(t, "the retentions")
 		disabled := rapid.SliceOfNDistinct(
-			rapid.SampledFrom(goClasses()), 0, len(goClasses()),
+			rapid.SampledFrom(exempt.GoClasses()), 0, len(exempt.GoClasses()),
 			func(c vocab.Exemption) vocab.Exemption { return c },
 		).Draw(t, "the disabled classes")
 
@@ -98,7 +99,7 @@ func drawnSets() *rapid.Generator[drawnSet] {
 			roots:        roots,
 			retentions:   retentions,
 			disabled:     disabled,
-			mode: graph.Mode{
+			mode: facts.Mode{
 				Production: rapid.Bool().Draw(t, "the sweep counts production references alone"),
 			},
 		}
@@ -112,7 +113,7 @@ func drawnName(at int) string { return fmt.Sprintf("d%02d", at) }
 // declaration per line of its own file, the references between them and the roots.
 // No load takes place, so a draw costs no package load and shrinks to the
 // declarations that carry a failure.
-func (d drawnSet) graphOf() (*graph.Graph, []inventory.SymbolID) {
+func (d drawnSet) graphOf() (*liveness.Graph, []inventory.SymbolID) {
 	ids := make([]inventory.SymbolID, len(d.declarations))
 	symbols := make([]inventory.Symbol, 0, len(d.declarations))
 	lines := map[string]int{}
@@ -154,16 +155,16 @@ func (d drawnSet) graphOf() (*graph.Graph, []inventory.SymbolID) {
 	slices.SortFunc(symbols, func(a, b inventory.Symbol) int {
 		return strings.Compare(string(a.ID), string(b.ID))
 	})
-	return graph.New(symbols, refs, rooted), ids
+	return liveness.New(symbols, refs, rooted), ids
 }
 
 // detectors is the table Compute runs: one detection per class the draw gave a
 // retention, each returning what that class retains and reading nothing, so the
 // property drives the framework rather than any class's own rule.
-func (d drawnSet) detectors(ids []inventory.SymbolID) map[vocab.Exemption]Detector {
-	byClass := map[vocab.Exemption][]graph.Exemption{}
+func (d drawnSet) detectors(ids []inventory.SymbolID) map[vocab.Exemption]exempt.Detector {
+	byClass := map[vocab.Exemption][]exempt.Exemption{}
 	for i, r := range d.retentions {
-		byClass[r.class] = append(byClass[r.class], graph.Exemption{
+		byClass[r.class] = append(byClass[r.class], exempt.Exemption{
 			ID:     ids[r.at],
 			Class:  string(r.class),
 			Detail: drawnName(r.at) + " retained by " + string(r.class),
@@ -171,9 +172,9 @@ func (d drawnSet) detectors(ids []inventory.SymbolID) map[vocab.Exemption]Detect
 		})
 	}
 
-	table := make(map[vocab.Exemption]Detector, len(byClass))
+	table := make(map[vocab.Exemption]exempt.Detector, len(byClass))
 	for class, retained := range byClass {
-		table[class] = func(*Input) ([]graph.Exemption, error) { return retained, nil }
+		table[class] = func(*exempt.Input) ([]exempt.Exemption, error) { return retained, nil }
 	}
 	return table
 }
@@ -199,7 +200,7 @@ func (d drawnSet) describeDrawn() string {
 }
 
 // candidateSet names every symbol one sweep reported.
-func candidateSet(r graph.Result) map[inventory.SymbolID]bool {
+func candidateSet(r liveness.Result) map[inventory.SymbolID]bool {
 	found := make(map[inventory.SymbolID]bool, len(r.Candidates))
 	for _, c := range r.Candidates {
 		found[c.ID] = true
@@ -208,7 +209,7 @@ func candidateSet(r graph.Result) map[inventory.SymbolID]bool {
 }
 
 // retainedRecord names every symbol and class one sweep's retained record holds.
-func retainedRecord(r graph.Result) map[string]bool {
+func retainedRecord(r liveness.Result) map[string]bool {
 	found := make(map[string]bool, len(r.Retained))
 	for _, e := range r.Retained {
 		found[string(e.ID)+" "+e.Class] = true
@@ -218,7 +219,7 @@ func retainedRecord(r graph.Result) map[string]bool {
 
 // heldBack names every exemption of a union whose symbol one sweep reported, which
 // is what the retained record of a sweep carrying that union must hold.
-func heldBack(union []graph.Exemption, reported map[inventory.SymbolID]bool) map[string]bool {
+func heldBack(union []exempt.Exemption, reported map[inventory.SymbolID]bool) map[string]bool {
 	found := make(map[string]bool, len(union))
 	for _, e := range union {
 		if reported[e.ID] {
@@ -230,12 +231,12 @@ func heldBack(union []graph.Exemption, reported map[inventory.SymbolID]bool) map
 
 // sweptWith computes the union of the classes the table holds under one set of
 // disabled classes, sweeps the graph with it, and returns both.
-func sweptWith(t *rapid.T, g *graph.Graph, table map[vocab.Exemption]Detector, disabled []vocab.Exemption, mode graph.Mode) ([]graph.Exemption, graph.Result) {
-	union, _, err := Compute(&Input{Options: Options{Disabled: disabled}, Mode: mode}, table)
+func sweptWith(t *rapid.T, g *liveness.Graph, table map[vocab.Exemption]exempt.Detector, disabled []vocab.Exemption, mode facts.Mode) ([]exempt.Exemption, liveness.Result) {
+	union, _, err := exempt.Compute(&exempt.Input{Options: exempt.Options{Disabled: disabled}, Mode: mode}, table)
 	if err != nil {
 		t.Fatalf("Compute over the drawn retentions error: %v", err)
 	}
-	return union, g.Sweep(&graph.SweepInput{Exempt: union, Mode: mode})
+	return union, g.Sweep(&liveness.SweepPolicy{Exempt: union, Mode: mode})
 }
 
 // Property dead-code-suite/P4: the reported set and the retained set are

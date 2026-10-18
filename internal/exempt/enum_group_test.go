@@ -5,8 +5,6 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/facts"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -15,7 +13,7 @@ import (
 // exemptionRows renders one class's answer as one row per retained symbol, the
 // declaration's name and the clause the exemption records, and fails the test for
 // a row naming another class, a symbol outside the inventory or no site.
-func exemptionRows(t *testing.T, symbols []inventory.Symbol, class vocab.Exemption, found []graph.Exemption) []string {
+func exemptionRows(t *testing.T, symbols []inventory.Symbol, class vocab.Exemption, found []Exemption) []string {
 	t.Helper()
 	names := symbolNames(symbols)
 	rows := make([]string, 0, len(found))
@@ -108,22 +106,11 @@ func TestEnumGroupLeavesTheUnreferencedMemberOfAPlainGroupASweepCandidate(t *tes
 			exemptionRows(t, in.Symbols, vocab.EnumGroup, found))
 	}
 
-	references, _, err := facts.References(in.Result, in.Resolve, in.Symbols, roots.TestClasses{})
-	if err != nil {
-		t.Fatalf("Setup: facts.References(%s): %v", archive, err)
-	}
-	rooted, _ := roots.Roots(in.Result, in.Resolve, in.Symbols, roots.RootOptions{PublishedAPI: true})
-
-	// The class retained nothing on this fixture, so the mode carries no
-	// exemption and the sweep answers over the graph alone.
-	result := graph.New(in.Symbols, references, rooted).Sweep(&graph.SweepInput{})
-
-	names := make(map[inventory.SymbolID]string, len(in.Symbols))
-	for i := range in.Symbols {
-		names[in.Symbols[i].ID] = in.Symbols[i].Name
-	}
-	candidates := make(map[string]graph.Candidate, len(result.Candidates))
-	for _, c := range result.Candidates {
+	// The class retained nothing on this fixture, so the sweep answers over the
+	// graph alone.
+	names := symbolNames(in.Symbols)
+	candidates := make(map[string]SweptCandidate)
+	for _, c := range SweepCandidates(t, in, roots.RootOptions{PublishedAPI: true}, nil) {
 		candidates[names[c.ID]] = c
 	}
 
@@ -132,9 +119,9 @@ func TestEnumGroupLeavesTheUnreferencedMemberOfAPlainGroupASweepCandidate(t *tes
 		t.Fatalf("Sweep(%s) reported no candidate for ModeWrite, want one; candidates %v",
 			archive, slices.Sorted(maps.Keys(candidates)))
 	}
-	if write.Relation != graph.ReferenceCounting || write.ProductionRefs != 0 || write.TestRefs != 0 {
-		t.Errorf("Sweep(%s) candidate ModeWrite = relation %s, production %d, test %d; want %s, 0, 0",
-			archive, write.Relation, write.ProductionRefs, write.TestRefs, graph.ReferenceCounting)
+	if write.Relation != "reference-counting" || write.ProductionRefs != 0 || write.TestRefs != 0 {
+		t.Errorf("Sweep(%s) candidate ModeWrite = relation %s, production %d, test %d; want reference-counting, 0, 0",
+			archive, write.Relation, write.ProductionRefs, write.TestRefs)
 	}
 	if _, reported := candidates["ModeRead"]; reported {
 		t.Errorf("Sweep(%s) reported ModeRead as a candidate, want it live: one reference names it",

@@ -11,7 +11,6 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
@@ -57,7 +56,7 @@ const (
 // plugin lookup call names is the other side of the plugin mechanism and belongs
 // to the reflective-lookup class, whose rule is a string literal beside a call;
 // nothing here reads a string literal.
-func LinknameCgoAsmPluginDetector(in *Input) ([]graph.Exemption, error) {
+func LinknameCgoAsmPluginDetector(in *Input) ([]Exemption, error) {
 	d := newLinkname(in)
 	for _, p := range d.loaded {
 		if err := d.mechanisms(p); err != nil {
@@ -106,12 +105,12 @@ func (d *linkname) mechanisms(p *packages.Package) error {
 
 // exemptions returns what the two mechanisms found, ordered by site and then by
 // the symbol and the clause, and once per symbol, site and clause.
-func (d *linkname) exemptions() []graph.Exemption {
-	found := make([]graph.Exemption, 0, len(d.found))
+func (d *linkname) exemptions() []Exemption {
+	found := make([]Exemption, 0, len(d.found))
 	for f := range d.found {
-		found = append(found, graph.Exemption{ID: f.id, Class: string(vocab.LinknameCgoAsmPlugin), Site: f.site, Detail: f.detail})
+		found = append(found, Exemption{ID: f.id, Class: string(vocab.LinknameCgoAsmPlugin), Site: f.site, Detail: f.detail})
 	}
-	slices.SortFunc(found, func(a, b graph.Exemption) int {
+	slices.SortFunc(found, func(a, b Exemption) int {
 		return cmp.Or(
 			inventory.ByPosition(a.Site, b.Site),
 			cmp.Compare(a.ID, b.ID),

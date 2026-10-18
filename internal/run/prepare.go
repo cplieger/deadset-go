@@ -5,7 +5,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/exempt"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
 	"github.com/cplieger/deadset-spec/v8/report"
@@ -17,24 +17,24 @@ import (
 type Prepared struct {
 	*Loaded
 
-	per []kinds.Configured
-
-	Exemptions []graph.Exemption
-
-	// testEvidence is the exemption evidence a test file carries, which the mode
-	// does not hold and the sweep counts as test references.
-	testEvidence []graph.Exemption
+	// unseen is every production declaration outside programs may call
+	// ([kinds.Unseen]).
+	unseen map[inventory.SymbolID]bool
 
 	// filled is every field a callee outside the program fills and no class
 	// retains ([exempt.FilledFields]).
 	filled map[inventory.SymbolID]bool
 
-	// uses are the references from each uncalled interface method to the methods
-	// implementing it.
-	uses []graph.Use
+	per []kinds.Configured
+
+	Exemptions []exempt.Exemption
+
+	// testEvidence is the exemption evidence a test file carries, which the mode
+	// does not hold and the sweep counts as test references.
+	testEvidence []exempt.Exemption
 
 	// Mode is the reference mode every later stage of the run reads.
-	Mode graph.Mode
+	Mode facts.Mode
 }
 
 // Prepare runs the exemption classes of every configuration under the production
@@ -44,7 +44,7 @@ type Prepared struct {
 func (l *Loaded) Prepare(production bool) (*Prepared, error) {
 	p := &Prepared{
 		Loaded: l,
-		Mode: graph.Mode{
+		Mode: facts.Mode{
 			Production:              production,
 			ConsumerTestsProduction: l.req.Config.Analysis.ConsumerTestsProduction,
 		},
@@ -76,10 +76,9 @@ func (l *Loaded) Prepare(production bool) (*Prepared, error) {
 		}
 		p.per[i] = kinds.Configured{Result: &one.Result, Resolve: one.Resolve, Facts: one.Facts, Symbols: one.Symbols}
 	}
-	uncalled, uses := kinds.InterfaceImplementations(&kinds.Input{Merged: l.Merged, Per: p.per})
-	p.uses = uses
-	p.Exemptions = kinds.WithoutUncalled(p.Exemptions, uncalled)
-	p.testEvidence = kinds.WithoutUncalled(p.testEvidence, uncalled)
+	p.Exemptions = l.Graph.WithoutUncalled(p.Exemptions)
+	p.testEvidence = l.Graph.WithoutUncalled(p.testEvidence)
+	p.unseen = kinds.Unseen(&kinds.Input{Config: &l.req.Config, Merged: l.Merged, Per: p.per, Root: l.Root, Consumers: l.consumers()})
 	return p, nil
 }
 

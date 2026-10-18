@@ -91,7 +91,7 @@ func Directives(m *load.ModuleFile) File {
 }
 
 // site is the position of the first module path one directive line writes, its
-// column counted in UTF-16 code units by [graph.Column], which is the unit every
+// column counted in UTF-16 code units by [inventory.Column], which is the unit every
 // position of a report carries. A line inside a block opens with that path; a line
 // of its own opens with the directive's keyword, which the path follows.
 func site(text []byte, line *modfile.Line) token.Position {

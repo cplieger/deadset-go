@@ -6,14 +6,13 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 )
 
 // retainedRows renders one exemption per line as the symbol held back, the class,
 // the site the evidence was found at and the detail, which is what a reader of the
 // retained listing sees.
-func retainedRows(t *testing.T, symbols []inventory.Symbol, got []graph.Exemption) []string {
+func retainedRows(t *testing.T, symbols []inventory.Symbol, got []Exemption) []string {
 	t.Helper()
 	names := symbolNames(symbols)
 	rows := make([]string, 0, len(got))

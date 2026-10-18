@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
@@ -84,11 +84,11 @@ func drawnSeverities(t *rapid.T, label string) map[string]vocab.Severity {
 // propInput is the input one drawn inventory, configuration and consumer set make,
 // with every declaration a candidate so every one of them is reported.
 func propInput(symbols []inventory.Symbol, resolved config.Config, consumers Consumers) *Input {
-	candidates := make([]graph.Candidate, len(symbols))
+	candidates := make([]liveness.Candidate, len(symbols))
 	refs := make(map[inventory.SymbolID]string, len(symbols))
 	for i := range symbols {
-		candidates[i] = graph.Candidate{
-			ID: symbols[i].ID, Relation: graph.ReferenceCounting, Configs: inventory.ConfigSet(0b1),
+		candidates[i] = liveness.Candidate{
+			ID: symbols[i].ID, Relation: liveness.ReferenceCounting, Configs: inventory.ConfigSet(0b1),
 		}
 		refs[symbols[i].ID] = symbols[i].Ref
 	}
@@ -96,8 +96,8 @@ func propInput(symbols []inventory.Symbol, resolved config.Config, consumers Con
 	copy(held, symbols)
 	return &Input{
 		Config:    &resolved,
-		Merged:    &graph.Merged{Symbols: held, Configurations: 1},
-		Sweep:     &graph.Result{Candidates: candidates},
+		Merged:    &liveness.Merged{Symbols: held, Configurations: 1},
+		Sweep:     &liveness.Result{Candidates: candidates},
 		Refs:      refs,
 		Matrix:    []string{"linux-amd64"},
 		Consumers: consumers,

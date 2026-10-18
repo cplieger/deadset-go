@@ -7,9 +7,10 @@ import (
 	"slices"
 	"strconv"
 
+	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/facts"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
@@ -19,35 +20,13 @@ import (
 // names its own subject rather than leaving the framework to.
 const enumMemberSubject = "enum-member"
 
-// writeOnlySymbol reports a symbol the counted references store into and never
-// read, under the run's own reference mode: a production mode counts no reference
-// a test file made, so a read from a test file is no read and a symbol written in
-// production and read only from a test is reported.
-//
-// The mode and the exemptions are the input's, because this is the one kind whose
-// subject is a LIVE declaration: a run's mode is not recoverable from a swept
-// graph, and an exemption on a declaration no relation found dead is in what the
-// sweep was given rather than in what it held back.
-//
-// An exemption on the subject is a read, which is why the kind reads the whole set
-// rather than the held-back record alone: a class fires because a mechanism the
-// analysis cannot see uses the declaration, and for a variable or a field that use
-// is a read of its value. A field a marshaller writes out, a template renders or a
-// reflective lookup reaches is read by something no reference names.
-//
-// The subject is a package-level variable or a struct field the counted
-// references store into and never read: at least one write, and no reference of
-// any other kind, a read, a call, a type use, a conversion, an embedding and an
-// assertion alike. A constant cannot be written, and a variable a function
-// declares is a subject of the intra-function kinds rather than of this one.
-//
-// The subject is a LIVE declaration, so the sweep's candidates are not this
-// kind's population and a candidate is never reported here. A write is a
-// reference, so the sweep, which asks whether anything names the declaration,
-// holds a written one live; this kind asks whether anything READS it, which the
-// reference kinds answer and the sweep does not. A declaration the sweep did find
-// dead is the subject of the unused kinds and of the dead component that carries
-// it.
+// writeOnlySymbol reports a package-level variable or a struct field the counted
+// references store into and never read: at least one write and no reference of any
+// other kind, under the run's mode, so a read only a test file makes is no read in
+// a production run. The subject is a LIVE declaration (a write keeps it live in the
+// sweep), so the sweep's candidates are never reported here, and the mode and the
+// exemptions are the input's: an exemption on the subject is a read by a mechanism
+// no reference names, such as a marshaller, a template or a reflective lookup.
 func writeOnlySymbol(in *Input) ([]Finding, error) {
 	exempted := make(map[inventory.SymbolID]bool, len(in.Exempt))
 	for ix := range in.Exempt {
@@ -81,7 +60,7 @@ func writeOnly(in *Input, symbol *inventory.Symbol, u *uses, exempted map[invent
 	case u.testReads > 0:
 		read = " and read only from test files"
 	}
-	cascade := append(writeCascade(in, symbol, u.spans), in.annotationCascade().named[symbol.ID]...)
+	cascade := append(writeCascade(in, symbol, u.spans), in.writeFalls().named[symbol.ID]...)
 	finding, names := in.finding(symbol.ID, vocab.WriteOnlySymbol, in.word(symbol.ID)+" "+symbol.Name+
 		" is written "+writeCount(len(u.writes))+read+cascadeClause(cascade))
 	if !names {
@@ -90,7 +69,7 @@ func writeOnly(in *Input, symbol *inventory.Symbol, u *uses, exempted map[invent
 	// The kind counts the references made to the declaration and asks what each
 	// one does, which is the reference-counting relation narrowed to reads; it
 	// walks no closure from a root.
-	finding.Relation = graph.ReferenceCounting
+	finding.Relation = liveness.ReferenceCounting
 	finding.TestOnly = u.production == 0 && u.test > 0
 	finding.Details.WritePositions = slices.Clone(u.writes)
 	finding.testRead = u.testReads > 0
@@ -101,14 +80,14 @@ func writeOnly(in *Input, symbol *inventory.Symbol, u *uses, exempted map[invent
 // into and never read: the exemption is a read, so it holds back the write-only
 // finding about a declaration the sweep judges live and lists nowhere else. One
 // symbol, class and detail is one record.
-func WriteOnlyRetained(in *Input) []graph.Exemption {
+func WriteOnlyRetained(in *Input) []exempt.Exemption {
 	type fact struct {
 		id            inventory.SymbolID
 		class, detail string
 	}
 	counted := writesAndReads(in)
 	seen := make(map[fact]bool)
-	var held []graph.Exemption
+	var held []exempt.Exemption
 	for ix := range in.Exempt {
 		exemption := &in.Exempt[ix]
 		symbol := in.symbol(exemption.ID)
@@ -135,19 +114,12 @@ func writeOnlySubject(in *Input, symbol *inventory.Symbol, u *uses, exempted map
 	return true
 }
 
-// unusedEnumMember reports a constant of an enumerated type that nothing names.
-//
-// The enumerated type is the one the enum-group exemption recognises: a defined
-// type whose constants an iota group declares. Every member of a type whose
-// values can arrive by conversion rather than by name is retained by that
-// exemption, so such a member is no candidate of the sweep and never reaches this
-// kind.
-//
-// A member a reference names is not reported, whichever file holds the reference,
-// so a member only a test names is the test-only kind's subject and not this
-// one's. This kind takes precedence over the unused-exported and the
-// unused-unexported kinds for a constant of an enumerated type, which report no
-// member of an iota group.
+// unusedEnumMember reports a constant of an enumerated type (the enum-group
+// exemption's: a defined type an iota group declares constants of) that nothing
+// names, from any file. A member of a type whose values can arrive by conversion is
+// retained by that exemption and never reaches this kind. It takes precedence over
+// the unused-exported and unused-unexported kinds, which report no member of an
+// iota group.
 func unusedEnumMember(in *Input) ([]Finding, error) {
 	members := enumGroupMembers(in)
 	referenced := referencedSymbols(in)
@@ -175,16 +147,11 @@ func unusedEnumMember(in *Input) ([]Finding, error) {
 	return found, nil
 }
 
-// unusedTypeParameter reports a type parameter of a function or a method that no
-// part of the declaration's signature and no part of its body names.
-//
-// A type parameter of a type declaration is never reported: a phantom parameter
-// such as the one a defined integer type carries makes two instantiations
-// distinct types while naming the parameter nowhere, so deleting it changes the
-// program. This kind takes precedence over the unused-exported and the
-// unused-unexported kinds for a type parameter, which report none. A type parameter
-// of a function or a method the sweep judged dead falls with that declaration, whose
-// own finding is the one reported.
+// unusedTypeParameter reports a type parameter of a function or a method that
+// neither the signature nor the body names. A type declaration's parameter is never
+// reported: a phantom parameter makes two instantiations distinct types while
+// naming it nowhere. One of a declaration the sweep judged dead falls with it. It
+// takes precedence over the unused-exported and unused-unexported kinds.
 func unusedTypeParameter(in *Input) ([]Finding, error) {
 	referenced := referencedSymbols(in)
 
@@ -256,11 +223,11 @@ func writesAndReads(in *Input) map[inventory.SymbolID]*uses {
 
 // count adds one reference the run's mode classifies.
 func (u *uses) count(in *Input, r *facts.Reference) {
-	if in.uncounted(r) {
+	if in.Mode.Uncounted(r) {
 		u.testReads += readCount(r)
 		return
 	}
-	if in.testReference(r) {
+	if in.Mode.TestReference(r) {
 		u.test++
 	} else {
 		u.production++
@@ -295,20 +262,7 @@ func (in *Input) deadReader(r *facts.Reference) bool {
 		return false
 	}
 	reader := in.candidateOf(r.From)
-	return reader != nil && reader.Relation == graph.ReferenceCounting && in.classOf(r.From) == vocab.Certain
-}
-
-// testReference reports whether the mode classifies one reference as a test
-// reference: a test file's, and a loaded consumer's test file's unless the
-// configuration counts those as production.
-func (in *Input) testReference(r *facts.Reference) bool {
-	return r.Test && (r.Consumer == "" || !in.Mode.ConsumerTestsProduction)
-}
-
-// uncounted reports whether the mode counts one reference as no use at all, which a
-// production mode does for every test reference.
-func (in *Input) uncounted(r *facts.Reference) bool {
-	return in.Mode.Production && in.testReference(r)
+	return reader != nil && reader.Relation == liveness.ReferenceCounting && in.classOf(r.From) == vocab.Certain
 }
 
 // readCount is one for a reference that reads its target and zero for a store.
@@ -359,22 +313,12 @@ func referencedSymbols(in *Input) map[inventory.SymbolID]bool {
 	return named
 }
 
-// enumGroupMembers answers which constants of the inventory are members of an
-// enumerated type, each with the name of the type that declares it.
-//
-// The enumerated type is a defined type whose constants are declared in an iota
-// group: a constant block in which at least one specification's value expression
-// mentions iota, the specifications that repeat the previous expression included.
-// Every constant of such a type is a member, including one a later block
-// declares, and a constant declared with the blank identifier names none. It is
-// the recognition the enum-group exemption applies, so the kind and the class
-// agree on what an enumerated type is, and it is what the unused-exported and
-// unused-unexported kinds read to leave such a member to the enumerated-member
-// kind.
-//
-// A constant is a member when one build configuration declares it in such a
-// group, because a group a constraint excludes from one configuration is still
-// the group the source writes.
+// enumGroupMembers is every constant of an enumerated type, with the name of the
+// type: a defined type with constants in an iota group (a constant block one of
+// whose value expressions, repeated ones included, mentions iota). Every constant of
+// such a type is a member, one a later block declares included, a blank one none;
+// one configuration declaring it in such a group is enough. It is the enum-group
+// exemption's recognition, so the kinds and the class agree on it.
 func enumGroupMembers(in *Input) map[inventory.SymbolID]string {
 	members := make(map[inventory.SymbolID]string)
 	for i := range in.Per {

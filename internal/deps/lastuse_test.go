@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/facts"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
@@ -86,7 +86,7 @@ func lastUsesOf(t *testing.T, archive string) (map[inventory.SymbolID][]string, 
 		t.Fatalf("Setup: facts.References(%s): %v", archive, err)
 	}
 	rooted, _ := roots.Roots(result, resolve, symbols, roots.RootOptions{})
-	candidates := graph.New(symbols, refs, rooted).Sweep(&graph.SweepInput{}).Candidates
+	candidates := liveness.New(symbols, refs, rooted).Sweep(&liveness.SweepPolicy{}).Candidates
 	if len(candidates) == 0 {
 		t.Fatalf("Setup: Sweep(%s) returned no candidate, so the join has nothing to answer over", archive)
 	}
