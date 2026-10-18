@@ -6,7 +6,7 @@ import (
 	"go/token"
 	"io"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/run"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -87,7 +87,7 @@ func findingsOf(ctx context.Context, req *run.Request) (*run.Findings, error) {
 
 // retainedLines renders one line per retained symbol. The listing groups a symbol's
 // classes adjacently, so one pass emits one line per symbol and nothing is re-sorted.
-func retainedLines(refs, positions map[inventory.SymbolID]string, retained []graph.Exemption) []string {
+func retainedLines(refs, positions map[inventory.SymbolID]string, retained []exempt.Exemption) []string {
 	var lines []string
 	for i := range retained {
 		held := &retained[i]
@@ -101,7 +101,7 @@ func retainedLines(refs, positions map[inventory.SymbolID]string, retained []gra
 
 // evidenceSite renders the position an exemption recorded, as an empty field where it
 // recorded none.
-func evidenceSite(e *graph.Exemption) string {
+func evidenceSite(e *exempt.Exemption) string {
 	if e.Site.Filename == "" {
 		return ""
 	}

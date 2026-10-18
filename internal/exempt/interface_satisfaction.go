@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/facts"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -21,7 +20,7 @@ import (
 // the declaration holding the site, and an assertion's is a use by the asserted
 // type, so the assertion and the methods fall with a type only dead code builds. A
 // method satisfying two interfaces at two sites is retained once per site.
-func InterfaceSatisfactionDetector(in *Input) ([]graph.Exemption, error) {
+func InterfaceSatisfactionDetector(in *Input) ([]Exemption, error) {
 	sites, err := programConversions(in)
 	if err != nil {
 		return nil, err
@@ -30,7 +29,7 @@ func InterfaceSatisfactionDetector(in *Input) ([]graph.Exemption, error) {
 	spans := declarationSpans(in)
 	spans.outside = newOutsideAssertions(in)
 
-	var retained []graph.Exemption
+	var retained []Exemption
 	for i := range sites {
 		retained, err = spans.retain(in, &sites[i], retained)
 		if err != nil {
@@ -157,7 +156,7 @@ func (s *spans) declarationAt(in *Input, c *facts.Conversion, at token.Pos) (hol
 // that answer the interface, the satisfaction assertion the site is, if it is one,
 // and the methods by which the type implements an interface the source of an outside
 // package asserts: the interface's own package, and for an argument the callee's.
-func (s *spans) retain(in *Input, c *facts.Conversion, retained []graph.Exemption) ([]graph.Exemption, error) {
+func (s *spans) retain(in *Input, c *facts.Conversion, retained []Exemption) ([]Exemption, error) {
 	generic := genericOrigin(c.From)
 	if generic && !matchesByArity(c.From, c.To) || !generic && !types.Implements(c.From, c.To) {
 		return retained, nil
@@ -172,12 +171,12 @@ func (s *spans) retain(in *Input, c *facts.Conversion, retained []graph.Exemptio
 	}
 	holder, coHolders, asserted := s.holderOf(in, c)
 	if asserted != "" && holder != "" {
-		retained = append(retained, graph.Exemption{
+		retained = append(retained, Exemption{
 			ID: asserted, Class: string(vocab.InterfaceSatisfaction), Consumer: consumer, Site: site,
 			Detail: "asserts " + c.Name, Holder: holder,
 		})
 	}
-	held := graph.Exemption{
+	held := Exemption{
 		Class: string(vocab.InterfaceSatisfaction), Consumer: consumer, Site: site,
 		Detail: "satisfies " + c.Name, Holder: holder, CoHolders: coHolders,
 	}
@@ -199,7 +198,7 @@ func (s *spans) retain(in *Input, c *facts.Conversion, retained []graph.Exemptio
 
 // retainAnswer appends what one answering method retains as base states it: the
 // method, and each embedded field it is promoted through.
-func retainAnswer(in *Input, m *answer, base *graph.Exemption, retained []graph.Exemption) []graph.Exemption {
+func retainAnswer(in *Input, m *answer, base *Exemption, retained []Exemption) []Exemption {
 	held := *base
 	held.Via, _ = in.Resolve.Object(m.answers)
 	for _, member := range append([]types.Object{m.method}, fieldObjects(m.through)...) {
@@ -227,7 +226,7 @@ var errorInterface, _ = types.Universe.Lookup("error").Type().Underlying().(*typ
 // by which the type implements an interface holding error's method that a package
 // outside the program declares and its own source asserts ([outsideAssertions.ofError]),
 // the methods error already retained excepted.
-func (s *spans) retainErrorAssertions(in *Input, c *facts.Conversion, methods []answer, held *graph.Exemption, retained []graph.Exemption) []graph.Exemption {
+func (s *spans) retainErrorAssertions(in *Input, c *facts.Conversion, methods []answer, held *Exemption, retained []Exemption) []Exemption {
 	for _, one := range s.outside.ofError(c.From) {
 		if slices.ContainsFunc(methods, func(m answer) bool { return m.method == one.method }) {
 			continue
@@ -262,7 +261,7 @@ func (s *spans) outsidePackages(c *facts.Conversion) []*types.Package {
 // interface the source of one outside package asserts ([outsideAssertions]), the
 // methods the converted-to interface already retained excepted, each recorded as
 // held records it.
-func (s *spans) retainOutside(in *Input, c *facts.Conversion, pkg *types.Package, methods []answer, held *graph.Exemption, retained []graph.Exemption) []graph.Exemption {
+func (s *spans) retainOutside(in *Input, c *facts.Conversion, pkg *types.Package, methods []answer, held *Exemption, retained []Exemption) []Exemption {
 	detail := "satisfies what " + pkg.Path() + " asserts through " + c.Name
 	for _, method := range s.outside.methods(c.From, pkg) {
 		if slices.ContainsFunc(methods, func(m answer) bool { return m.method == method }) {
@@ -497,7 +496,7 @@ func embeddedPath(from types.Type, index []int) []*types.Var {
 // detail recorded and the holder.
 //
 //nolint:gocritic // slices.SortFunc fixes a comparator's parameters to values.
-func byHeldSymbol(a, b graph.Exemption) int {
+func byHeldSymbol(a, b Exemption) int {
 	if c := bySite(&a, &b); c != 0 {
 		return c
 	}
@@ -516,7 +515,7 @@ func byHeldSymbol(a, b graph.Exemption) int {
 // sameExemption reports whether two exemptions state the same fact.
 //
 //nolint:gocritic // slices.CompactFunc fixes a comparator's parameters to values.
-func sameExemption(a, b graph.Exemption) bool {
+func sameExemption(a, b Exemption) bool {
 	return a.ID == b.ID && a.Class == b.Class && a.Consumer == b.Consumer && a.Site == b.Site && a.Detail == b.Detail &&
 		a.Holder == b.Holder && slices.Equal(a.CoHolders, b.CoHolders) && a.Via == b.Via
 }

@@ -17,6 +17,7 @@
 package kinds
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"maps"
@@ -29,9 +30,10 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/deps"
 	"github.com/cplieger/deadset-go/v2/internal/edges"
+	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/facts"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
@@ -160,7 +162,7 @@ type Finding struct {
 	Symbol     Subject
 	Class      vocab.Class
 	Confidence vocab.Class
-	Relation   graph.Relation
+	Relation   liveness.Relation
 
 	// Live reports that no liveness relation decided this finding, so a report
 	// carries none: a declaration the sweep judged live, a finding under a code of
@@ -193,7 +195,7 @@ type Finding struct {
 	// emitter whose subject's class is not its declaration's own; no class caps nothing.
 	ceiling vocab.Class
 
-	// testUsed marks a finding [Input.testUse] lowers to possible, and untested is the
+	// testUsed marks a finding [Input.capTestUsed] lowers to possible, and untested is the
 	// confidence it would carry otherwise, which is what its component's cap and the
 	// dials read: the lowering is the finding's own and no other member's.
 	testUsed bool
@@ -268,8 +270,8 @@ type Input struct {
 	// a symbol only a test references is dead and a test of dead code is
 	// admitted. A declaration a test file writes is therefore a candidate by
 	// construction and is the subject of the test-of-dead-code kind alone.
-	Merged *graph.Merged
-	Sweep  *graph.Result
+	Merged *liveness.Merged
+	Sweep  *liveness.Result
 
 	// Refs is the reference of every symbol of the inventory.
 	Refs map[inventory.SymbolID]string
@@ -282,13 +284,13 @@ type Input struct {
 	// is a use no reference names: a class fires where a mechanism the analysis
 	// cannot see reaches the declaration, and for a variable or a field that use
 	// is a read of its value.
-	Exempt []graph.Exemption
+	Exempt []exempt.Exemption
 
 	// TestEvidence is the exemption evidence a test file carries, which a
 	// production mode leaves out of Exempt. A conversion or a satisfaction a test
 	// makes still fixes the signature it reaches, so the intra-function kinds read
 	// it beside Exempt.
-	TestEvidence []graph.Exemption
+	TestEvidence []exempt.Exemption
 
 	// Filled is every field a callee outside the analysed program fills from a
 	// document and may read, which nothing retains ([Input.capFilled]).
@@ -375,7 +377,7 @@ type Input struct {
 	// Sweep is the production sweep, so the mode of the run this analyzer makes is
 	// the production one; it is a field rather than a constant because the mode is
 	// the run's and a kind must not assume it.
-	Mode graph.Mode
+	Mode facts.Mode
 }
 
 // Emitter is one kind's rule: it returns the findings of its own code.
@@ -562,7 +564,7 @@ func (f *Finding) componentConfidence() vocab.Class {
 }
 
 // capTestUsed lowers a finding about production code only tests use to possible: a
-// declaration of [testUseFacts.dead], and a declaration of a package only tests reach
+// declaration of [liveness.Result.TestUsed], and a declaration of a package only tests reach
 // that a write-only finding finds read only by test files, which the sweep holds
 // live. Its class is lowered too unless it is a test of dead code, whose class is
 // its own.
@@ -571,7 +573,7 @@ func (in *Input) capTestUsed(found *Finding, row *vocab.Kind) {
 		return
 	}
 	symbol := in.symbol(found.id)
-	dead := !row.HoldsLive && in.testUse().dead[found.id]
+	dead := !row.HoldsLive && in.Sweep != nil && in.Sweep.TestUsed[found.id]
 	if !dead && (!found.testRead || symbol == nil || !in.testReached(symbol)) {
 		return
 	}
@@ -639,10 +641,7 @@ func (in *Input) runKind(emit Emitter, row *vocab.Kind, reported map[string]stri
 			return nil, err
 		}
 		in.complete(&found, row)
-		if found.id != "" && in.annotationCascade().falls[found.id] {
-			continue
-		}
-		if row.Code == vocab.TestOfDeadCode && in.testsOutsideUse()[found.id] {
+		if found.id != "" && in.writeFalls().falls[found.id] {
 			continue
 		}
 		if in.withhold(&found) {
@@ -651,32 +650,6 @@ func (in *Input) runKind(emit Emitter, row *vocab.Kind, reported map[string]stri
 		completed = append(completed, found)
 	}
 	return completed, nil
-}
-
-// testsOutsideUse is every test of dead code that references a production
-// declaration whose reachability class is possible: outside programs may call that
-// declaration, so it counts as a live target symbol and the test is no test of dead
-// code. It is computed on first use.
-func (in *Input) testsOutsideUse() map[inventory.SymbolID]bool {
-	held := in.index()
-	if held.outsideUse != nil {
-		return held.outsideUse
-	}
-	held.outsideUse = make(map[inventory.SymbolID]bool)
-	if in.Merged == nil {
-		return held.outsideUse
-	}
-	for i := range in.Merged.References {
-		ref := &in.Merged.References[i]
-		test, target := in.candidateOf(ref.From), in.symbol(ref.To)
-		if test == nil || !test.TestOfDeadCode || target == nil || target.InTestFile || target.TestSupport {
-			continue
-		}
-		if in.classOf(ref.To) == vocab.Possible {
-			held.outsideUse[ref.From] = true
-		}
-	}
-	return held.outsideUse
 }
 
 // withhold reports whether a suppression record withholds one finding, recording
@@ -932,7 +905,7 @@ func (in *Input) complete(found *Finding, row *vocab.Kind) {
 	}
 	switch {
 	case found.local:
-		found.Live, found.Relation = false, graph.ReferenceCounting
+		found.Live, found.Relation = false, liveness.ReferenceCounting
 		found.Class = vocab.Certain
 		found.Component = held.componentOf("")
 	case shapeOf(found.Symbol.Kind) == shapeDeclaration:
@@ -979,10 +952,10 @@ func (in *Input) complete(found *Finding, row *vocab.Kind) {
 // The relation Live leaves in place is the reference-counting one, which is what a
 // consumer of a document that requires the member reads about a subject no relation
 // decided.
-func (f *Finding) relation(candidate *graph.Candidate) {
+func (f *Finding) relation(candidate *liveness.Candidate) {
 	if candidate == nil {
 		f.Live = true
-		f.Relation = graph.ReferenceCounting
+		f.Relation = liveness.ReferenceCounting
 		return
 	}
 	f.Live = false
@@ -1049,8 +1022,8 @@ func (in *Input) configurationsOf(found *Finding) []string {
 // index is what a lookup over one run's inventory needs, keyed by declaration.
 type index struct {
 	symbols    map[inventory.SymbolID]*inventory.Symbol
-	candidates map[inventory.SymbolID]*graph.Candidate
-	components map[inventory.SymbolID]*graph.Component
+	candidates map[inventory.SymbolID]*liveness.Candidate
+	components map[inventory.SymbolID]int // each member's component, by its place in the sweep's order
 	retained   map[inventory.SymbolID]bool
 	byRef      map[string]inventory.SymbolID
 	mains      map[string]bool     // by [index.packageKey]
@@ -1088,12 +1061,21 @@ type index struct {
 	// interfaces is what the interface kinds read, computed on first use by a kind
 	// that judges an interface method outside them.
 	interfaces *interfaceFacts
-	testUse    *testUseFacts
-	outsideUse map[inventory.SymbolID]bool
 	// listed is each dead component's member listing by its index, on first use.
 	listed map[int][]positioned
 
+	swept  []liveness.Component
 	minted int
+}
+
+// component is the dead component one declaration is a member of with its place in
+// the sweep's order, and nil where none holds it.
+func (x *index) component(id inventory.SymbolID) (c *liveness.Component, at int) {
+	at, held := x.components[id]
+	if !held {
+		return nil, -1
+	}
+	return &x.swept[at], at
 }
 
 // index builds the lookup on first use and returns it.
@@ -1103,8 +1085,8 @@ func (in *Input) index() *index {
 	}
 	held := &index{
 		symbols:    make(map[inventory.SymbolID]*inventory.Symbol),
-		candidates: make(map[inventory.SymbolID]*graph.Candidate),
-		components: make(map[inventory.SymbolID]*graph.Component),
+		candidates: make(map[inventory.SymbolID]*liveness.Candidate),
+		components: make(map[inventory.SymbolID]int),
 		retained:   make(map[inventory.SymbolID]bool),
 		byRef:      make(map[string]inventory.SymbolID),
 		mains:      make(map[string]bool),
@@ -1122,7 +1104,7 @@ func (in *Input) index() *index {
 // holdInventory keys every declaration of the matrix inventory by its identifier,
 // and by its reference for a finding that names no identifier. Two declarations
 // share one reference where one is blank, and the first of them answers for it.
-func (x *index) holdInventory(merged *graph.Merged) {
+func (x *index) holdInventory(merged *liveness.Merged) {
 	if merged == nil {
 		return
 	}
@@ -1141,18 +1123,18 @@ func (x *index) holdInventory(merged *graph.Merged) {
 // holdSweep keys the sweep's answers by declaration: the candidates, the dead
 // component each member belongs to, the number past the components it minted, and
 // the symbols an exemption held back.
-func (x *index) holdSweep(swept *graph.Result) {
+func (x *index) holdSweep(swept *liveness.Result) {
 	if swept == nil {
 		return
 	}
 	for i := range swept.Candidates {
 		x.candidates[swept.Candidates[i].ID] = &swept.Candidates[i]
 	}
+	x.swept = swept.Components
+	x.minted = len(swept.Components)
 	for i := range swept.Components {
-		component := &swept.Components[i]
-		x.minted = max(x.minted, component.Index+1)
-		for _, member := range component.Members {
-			x.components[member] = component
+		for _, member := range swept.Components[i].Members {
+			x.components[member] = i
 		}
 	}
 	for ix := range swept.Retained {
@@ -1222,7 +1204,7 @@ func (in *Input) symbol(id inventory.SymbolID) *inventory.Symbol {
 
 // candidateOf is the sweep's candidate for one declaration, or nil where the sweep
 // judged the declaration live.
-func (in *Input) candidateOf(id inventory.SymbolID) *graph.Candidate {
+func (in *Input) candidateOf(id inventory.SymbolID) *liveness.Candidate {
 	return in.index().candidates[id]
 }
 
@@ -1301,7 +1283,7 @@ func (x *index) kindOf(id inventory.SymbolID) inventory.SymbolKind {
 // declaration, which is deleted without the declaration; and a row of a document,
 // which names the empty identifier.
 func (x *index) componentOf(id inventory.SymbolID) findingComponent {
-	component := x.components[id]
+	component, at := x.component(id)
 	if component == nil {
 		x.minted++
 		return findingComponent{
@@ -1311,9 +1293,9 @@ func (x *index) componentOf(id inventory.SymbolID) findingComponent {
 		}
 	}
 	return findingComponent{
-		ID:             componentID(component.Index + 1),
+		ID:             componentID(at + 1),
 		SymbolCount:    len(component.Members),
-		DeletableLines: component.DeletableLines,
+		DeletableLines: DeletableLines(component),
 		Root:           slices.Contains(component.Roots, id),
 		Held:           component.Held,
 	}
@@ -1324,21 +1306,21 @@ func (x *index) componentOf(id inventory.SymbolID) findingComponent {
 // minted for a subject that belongs to none holds the subject alone. Every finding
 // of one dead component shares one listing, which no caller may change.
 func (x *index) membersOf(found *Finding) []positioned {
-	component := x.components[found.id]
+	component, at := x.component(found.id)
 	if found.id == "" || (component == nil && x.candidates[found.id] == nil) {
 		return []positioned{{Ref: found.Symbol.Ref, Name: found.Symbol.Name, Position: found.Position}}
 	}
 	if component == nil {
 		return x.listing(x.fallen(found.id))
 	}
-	if held, listed := x.listed[component.Index]; listed {
+	if held, listed := x.listed[at]; listed {
 		return held
 	}
 	if x.listed == nil {
 		x.listed = make(map[int][]positioned)
 	}
-	x.listed[component.Index] = x.listing(component.Members)
-	return x.listed[component.Index]
+	x.listed[at] = x.listing(component.Members)
+	return x.listed[at]
 }
 
 // listing is the members of one set of symbols in the order [index.membersOf] names.
@@ -1376,6 +1358,33 @@ func (x *index) fallen(id inventory.SymbolID) []inventory.SymbolID {
 		}
 	}
 	return members
+}
+
+// DeletableLines is the number of distinct source lines deleting one dead component
+// removes: the lines its spans cover, a line two of them share counted once, and 0
+// for a held component.
+func DeletableLines(c *liveness.Component) int {
+	if c.Held {
+		return 0
+	}
+	ordered := slices.Clone(c.Spans)
+	slices.SortFunc(ordered, func(a, b liveness.Span) int {
+		return cmp.Or(strings.Compare(a.Path, b.Path), cmp.Compare(a.First, b.First))
+	})
+	total := 0
+	var covered liveness.Span
+	for i, s := range ordered {
+		if i == 0 || s.Path != covered.Path || s.First > covered.Last {
+			total += s.Last - s.First + 1
+			covered = s
+			continue
+		}
+		if s.Last > covered.Last {
+			total += s.Last - covered.Last
+			covered.Last = s.Last
+		}
+	}
+	return total
 }
 
 // componentID is the identifier this analyzer mints for one component: its own

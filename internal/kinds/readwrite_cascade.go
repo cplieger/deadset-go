@@ -4,10 +4,10 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"slices"
 	"strconv"
 	"strings"
 
-	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -189,42 +189,56 @@ type annotationFalls struct {
 	falls map[inventory.SymbolID]bool
 }
 
-// annotationCascade is the declarations that fall with the write-only findings: a
-// declaration of the target, certain in class, whose every counted use is in the
-// type annotation of a write-only subject or in a write such a finding names. It is
-// computed on first use and then held, because every emitter reads it to withhold a
-// finding about such a declaration.
-func (in *Input) annotationCascade() *annotationFalls {
+// writeFalls is the declarations that fall with the write-only findings: a
+// declaration of the target, certain in class and of a shape a deletion removes,
+// every counted reference to which a write-only subject carries
+// ([liveness.Result.Carried]), named under the innermost such subject of each. It
+// is computed on first use and then held, because every emitter reads it to
+// withhold a finding about such a declaration.
+func (in *Input) writeFalls() *annotationFalls {
 	held := in.index()
-	if held.falling == nil {
-		held.falling = computeAnnotationCascade(in)
+	if held.falling != nil {
+		return held.falling
 	}
-	return held.falling
-}
-
-// computeAnnotationCascade answers annotationCascade over the whole run.
-func computeAnnotationCascade(in *Input) *annotationFalls {
 	falls := &annotationFalls{named: make(map[inventory.SymbolID][]string), falls: make(map[inventory.SymbolID]bool)}
-	if in.Merged == nil {
+	held.falling = falls
+	if in.Merged == nil || in.Sweep == nil || len(in.Sweep.Carried) == 0 {
 		return falls
 	}
 	subjects := writeOnlySubjects(in)
-	if len(subjects) == 0 {
-		return falls
-	}
-	holders, outside := annotationHolders(in, subjects, subjectSpans(in, subjects))
 	for i := range in.Merged.Symbols {
 		symbol := &in.Merged.Symbols[i]
-		if outside[symbol.ID] || len(holders[symbol.ID]) == 0 || !fallsWithAnnotation(in, symbol) {
+		chains := in.Sweep.Carried[symbol.ID]
+		if len(chains) == 0 || subjects[symbol.ID] != nil || !fallsWithAnnotation(in, symbol) {
+			continue
+		}
+		innermost := innermostSubjects(chains, subjects)
+		if innermost == nil {
 			continue
 		}
 		falls.falls[symbol.ID] = true
 		name := in.word(symbol.ID) + " " + symbol.Name
-		for holder := range holders[symbol.ID] {
-			falls.named[holder] = append(falls.named[holder], name)
+		for _, subject := range innermost {
+			falls.named[subject] = append(falls.named[subject], name)
 		}
 	}
 	return falls
+}
+
+// innermostSubjects is, once each, the innermost write-only subject of every chain,
+// and nil where a chain holds none.
+func innermostSubjects(chains [][]inventory.SymbolID, subjects map[inventory.SymbolID]*uses) []inventory.SymbolID {
+	var innermost []inventory.SymbolID
+	for _, chain := range chains {
+		at := slices.IndexFunc(chain, func(id inventory.SymbolID) bool { return subjects[id] != nil })
+		if at < 0 {
+			return nil
+		}
+		if !slices.Contains(innermost, chain[at]) {
+			innermost = append(innermost, chain[at])
+		}
+	}
+	return innermost
 }
 
 // writeOnlySubjects is every declaration the write-only kind reports, with its uses.
@@ -245,31 +259,6 @@ func writeOnlySubjects(in *Input) map[inventory.SymbolID]*uses {
 	return subjects
 }
 
-// annotationHolders is, per declaration a counted reference outside the subjects
-// names, the subjects whose annotation or writes hold those references, and the
-// declarations some such reference outside every span names.
-func annotationHolders(in *Input, subjects map[inventory.SymbolID]*uses, spans map[inventory.SymbolID][]inventory.SourceRange,
-) (holders map[inventory.SymbolID]map[inventory.SymbolID]bool, outside map[inventory.SymbolID]bool) {
-	holders = make(map[inventory.SymbolID]map[inventory.SymbolID]bool)
-	outside = make(map[inventory.SymbolID]bool)
-	for i := range in.Merged.References {
-		r := &in.Merged.References[i]
-		if in.uncounted(r) || subjects[r.To] != nil || outside[r.To] {
-			continue
-		}
-		holder, inside := holderOf(spans, r)
-		if !inside {
-			outside[r.To] = true
-			continue
-		}
-		if holders[r.To] == nil {
-			holders[r.To] = make(map[inventory.SymbolID]bool)
-		}
-		holders[r.To][holder] = true
-	}
-	return holders, outside
-}
-
 // fallsWithAnnotation reports whether one declaration is of a shape the annotation
 // cascade deletes: a declaration of its own, not a member, a type parameter, which
 // the type-parameter clause names, a package or a file, and one no code outside the
@@ -280,87 +269,4 @@ func fallsWithAnnotation(in *Input, symbol *inventory.Symbol) bool {
 		return false
 	}
 	return in.classOf(symbol.ID) == vocab.Certain
-}
-
-// holderOf is the subject whose annotation or writes hold one reference's position.
-func holderOf(spans map[inventory.SymbolID][]inventory.SourceRange, r *facts.Reference) (inventory.SymbolID, bool) {
-	for id, held := range spans {
-		for i := range held {
-			if held[i].Holds(r.Site) {
-				return id, true
-			}
-		}
-	}
-	return "", false
-}
-
-// subjectSpans is, per write-only subject, the spans of its type annotation, read
-// from the first variant that compiles each file, and of every statement and
-// literal element its writes' deletion deletes.
-func subjectSpans(in *Input, subjects map[inventory.SymbolID]*uses) map[inventory.SymbolID][]inventory.SourceRange {
-	at := subjectsByPosition(in, subjects)
-	spans := make(map[inventory.SymbolID][]inventory.SourceRange)
-	done := make(map[string]bool)
-	for typed := range in.typedFiles() {
-		positions := typed.one.Resolve.Positions()
-		file := positions.Relative(positions.Fset.PositionFor(typed.file.FileStart, false).Filename)
-		if done[file] {
-			continue
-		}
-		done[file] = true
-		annotationSpans(typed, at[file], spans)
-	}
-	for id, u := range subjects {
-		spans[id] = append(spans[id], u.spans...)
-	}
-	return spans
-}
-
-// subjectsByPosition is every subject keyed by its file, then its line and column.
-func subjectsByPosition(in *Input, subjects map[inventory.SymbolID]*uses) map[string]map[[2]int]inventory.SymbolID {
-	at := make(map[string]map[[2]int]inventory.SymbolID)
-	for id := range subjects {
-		symbol := in.symbol(id)
-		if at[symbol.Pos.Filename] == nil {
-			at[symbol.Pos.Filename] = make(map[[2]int]inventory.SymbolID)
-		}
-		at[symbol.Pos.Filename][[2]int{symbol.Pos.Line, symbol.Pos.Column}] = id
-	}
-	return at
-}
-
-// annotationSpans adds the inventory.SourceRange of the type annotation of every subject one file
-// declares, a field or a package-level variable written with a type.
-func annotationSpans(typed typedFile, declared map[[2]int]inventory.SymbolID, spans map[inventory.SymbolID][]inventory.SourceRange) {
-	if len(declared) == 0 {
-		return
-	}
-	ast.Inspect(typed.file, func(n ast.Node) bool {
-		switch n := n.(type) {
-		case *ast.Field:
-			annotationSpan(typed, declared, spans, n.Names, n.Type)
-		case *ast.ValueSpec:
-			annotationSpan(typed, declared, spans, n.Names, n.Type)
-		}
-		return true
-	})
-}
-
-// annotationSpan adds the span of one annotation to every subject among the names it
-// types.
-func annotationSpan(typed typedFile, declared map[[2]int]inventory.SymbolID, spans map[inventory.SymbolID][]inventory.SourceRange,
-	names []*ast.Ident, annotation ast.Expr,
-) {
-	if annotation == nil {
-		return
-	}
-	for _, name := range names {
-		site, err := typed.one.Resolve.Render(name.Pos())
-		if err != nil {
-			continue
-		}
-		if id, isSubject := declared[[2]int{site.Line, site.Column}]; isSubject {
-			spans[id] = append(spans[id], typed.one.Resolve.Positions().Range(annotation))
-		}
-	}
 }

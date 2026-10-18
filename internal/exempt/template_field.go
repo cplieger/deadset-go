@@ -13,7 +13,6 @@ import (
 	"strings"
 	"text/template/parse"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -45,7 +44,7 @@ var ErrTemplateDir = errors.New("exempt: template directory")
 // the grammar cannot parse names nothing and is skipped: an unparsable file is not
 // a template the project renders, and a run that refused it would fail on a
 // fixture or a partial that is not the analyzer's business.
-func TemplateFieldDetector(in *Input) ([]graph.Exemption, error) {
+func TemplateFieldDetector(in *Input) ([]Exemption, error) {
 	dirs := templateDirs(in.Options.TemplateDirs)
 	if len(dirs) == 0 {
 		return nil, nil
@@ -64,13 +63,13 @@ func TemplateFieldDetector(in *Input) ([]graph.Exemption, error) {
 	}
 
 	index := newNameIndex(in)
-	var out []graph.Exemption
+	var out []Exemption
 	for _, r := range refs {
 		for _, m := range index[r.name] {
 			if !m.exported || !templateReaches(m.kind) {
 				continue
 			}
-			out = append(out, graph.Exemption{
+			out = append(out, Exemption{
 				ID:     m.id,
 				Class:  string(vocab.TemplateField),
 				Site:   r.site,

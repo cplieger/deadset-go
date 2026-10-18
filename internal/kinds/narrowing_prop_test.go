@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/facts"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
@@ -279,7 +279,7 @@ func TestNarrowingNamesTheNarrowestScopeContainingEveryReference(t *testing.T) {
 				Complete: true,
 			}
 		}
-		in := narrowingInput(t, graph.Configured{
+		in := narrowingInput(t, liveness.Configured{
 			Symbols:    inventory.symbols,
 			References: inventory.refs,
 			Roots:      inventory.roots,

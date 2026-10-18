@@ -86,8 +86,8 @@ func (in *Input) withholdRoot(found *Finding, allowed bool) {
 	if !found.Component.Root || found.id == "" {
 		return
 	}
-	if component := in.index().components[found.id]; component != nil {
-		id := componentID(component.Index + 1)
+	if component, at := in.index().component(found.id); component != nil {
+		id := componentID(at + 1)
 		in.dialed.components[id] = true
 		if allowed {
 			in.dialed.allowed[id] = true
@@ -98,7 +98,7 @@ func (in *Input) withholdRoot(found *Finding, allowed bool) {
 // dormantNear records the symbols a suppression record bound to is dormant for:
 // every member of a withheld component, and every symbol a record held back that
 // a reference or a container joins to one, which without the record would be dead
-// and a member of that component. The declarations [testUseFacts.dead] holds, which
+// and a member of that component. The declarations [liveness.Result.TestUsed] holds, which
 // the minimum withholds one by one, count the same way, but only for a symbol one
 // of them references or contains, since only that symbol would join the set.
 func (in *Input) dormantNear() {
@@ -144,20 +144,20 @@ func (in *Input) eachJoin(joined func(a, b inventory.SymbolID)) {
 	}
 }
 
-// testUsedWithheld is [testUseFacts.dead] where the minimum withholds its findings,
+// testUsedWithheld is [liveness.Result.TestUsed] where the minimum withholds its findings,
 // and empty where the minimum is possible.
 func (in *Input) testUsedWithheld() map[inventory.SymbolID]bool {
 	if rank(in.Config.Analysis.MinConfidence) <= rank(vocab.Possible) {
 		return nil
 	}
-	return in.testUse().dead
+	return in.Sweep.TestUsed
 }
 
 // withheldMembers is every member of a component the dials withhold.
 func (in *Input) withheldMembers() map[inventory.SymbolID]bool {
 	members := make(map[inventory.SymbolID]bool)
-	for id, component := range in.index().components {
-		if in.dialed.components[componentID(component.Index+1)] {
+	for id, at := range in.index().components {
+		if in.dialed.components[componentID(at+1)] {
 			members[id] = true
 		}
 	}

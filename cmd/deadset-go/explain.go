@@ -10,10 +10,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/facts"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-go/v2/internal/run"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -93,7 +94,7 @@ func explain(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 		return vocab.ExitUsage
 	}
-	if err := writeExplanation(stdout, set, cascadeOf(req.Config.Reporters.CascadeFull), subject); err != nil {
+	if err := writeExplanation(stdout, set, req.Config.Reporters.CascadeFull, subject); err != nil {
 		return unwrittenAnswer(stderr, "explain", err)
 	}
 	return vocab.ExitClean
@@ -164,7 +165,7 @@ func namedSymbol(set *flag.FlagSet, asked map[string]*string) (string, error) {
 // the display name the inventory carries. A key several declarations answer is no
 // answer, because a run cannot know which was meant, and the candidates are returned
 // so the maintainer names one by its reference.
-func subjectOf(merged *graph.Merged, named string) (subject *inventory.Symbol, partial []string) {
+func subjectOf(merged *liveness.Merged, named string) (subject *inventory.Symbol, partial []string) {
 	keys := []func(s *inventory.Symbol) string{
 		func(s *inventory.Symbol) string { return s.Ref },
 		fragmentOf,
@@ -200,7 +201,7 @@ func fragmentOf(s *inventory.Symbol) string {
 }
 
 // refsOf is the reference of every named declaration, in the inventory's order.
-func refsOf(merged *graph.Merged, at []int) []string {
+func refsOf(merged *liveness.Merged, at []int) []string {
 	held := make([]string, 0, len(at))
 	for _, i := range at {
 		held = append(held, merged.Symbols[i].Ref+"\t"+merged.Symbols[i].Pos.String())
@@ -210,7 +211,7 @@ func refsOf(merged *graph.Merged, at []int) []string {
 
 // partialMatches is every declaration whose reference or display name holds the
 // string asked for, ignoring letter case, ordered by reference and bounded.
-func partialMatches(merged *graph.Merged, named string) []string {
+func partialMatches(merged *liveness.Merged, named string) []string {
 	folded := strings.ToLower(named)
 	var held []string
 	for i := range merged.Symbols {
@@ -231,7 +232,7 @@ func partialMatches(merged *graph.Merged, named string) []string {
 //
 // The whole text is built first and written once, so a failure partway through the
 // rendering leaves nothing half-printed and the writer is touched exactly once.
-func writeExplanation(w io.Writer, set *run.Findings, cascade graph.Cascade, subject *inventory.Symbol) error {
+func writeExplanation(w io.Writer, set *run.Findings, full bool, subject *inventory.Symbol) error {
 	var held strings.Builder
 	fmt.Fprintf(&held, "symbol: %s\n", subject.Ref)
 	fmt.Fprintf(&held, "declaration: %s %s\n", subject.Kind, subject.Name)
@@ -248,7 +249,7 @@ func writeExplanation(w io.Writer, set *run.Findings, cascade graph.Cascade, sub
 		fmt.Fprintf(&held, "answer: %s\n", stateRetained)
 		writeRetained(&held, retained)
 	default:
-		writeLiveness(&held, set, cascade, subject)
+		writeLiveness(&held, set, full, subject)
 	}
 	writeNamedElsewhere(&held, set.Result.Findings, subject)
 	_, err := io.WriteString(w, held.String())
@@ -294,7 +295,7 @@ func writeReported(held *strings.Builder, found *kinds.Finding) {
 // writeRetained is the explanation of a symbol an exemption held back: every class
 // that held it, with the site the evidence was found at and the clause naming that
 // evidence.
-func writeRetained(held *strings.Builder, retained []graph.Exemption) {
+func writeRetained(held *strings.Builder, retained []exempt.Exemption) {
 	fmt.Fprintf(held, "  held back by: %s\n", counted(len(retained), "exemption class"))
 	for i := range retained {
 		one := &retained[i]
@@ -305,7 +306,7 @@ func writeRetained(held *strings.Builder, retained []graph.Exemption) {
 // writeLiveness is the explanation of a symbol no finding names and no exemption held
 // back: the relations that hold it live, the root a path of references reaches it
 // from, and the dead component it falls with where the sweep judged it a candidate.
-func writeLiveness(held *strings.Builder, set *run.Findings, cascade graph.Cascade, subject *inventory.Symbol) {
+func writeLiveness(held *strings.Builder, set *run.Findings, full bool, subject *inventory.Symbol) {
 	candidate := candidateFor(set.Liveness.Candidates, subject.ID)
 	live := set.Liveness.LiveUnder[subject.ID]
 	fmt.Fprintf(held, "answer: %s\n", livenessState(candidate, live))
@@ -318,9 +319,9 @@ func writeLiveness(held *strings.Builder, set *run.Findings, cascade graph.Casca
 	for _, root := range rootReasons(set.Merged.Roots, subject.ID) {
 		fmt.Fprintf(held, "  root: %s%s\n", root.Kind, sourceNote(root.Source))
 	}
-	writePath(held, set.Prepared, subject.ID)
+	writePath(held, set.Swept, subject.ID)
 	if candidate != nil {
-		writeComponent(held, set, cascade, subject.ID)
+		writeComponent(held, set, full, subject.ID)
 		fmt.Fprintf(held, "  candidate: dead under %s, with %d production and %d test references\n",
 			candidate.Relation, candidate.ProductionRefs, candidate.TestRefs)
 	}
@@ -328,39 +329,27 @@ func writeLiveness(held *strings.Builder, set *run.Findings, cascade graph.Casca
 
 // livenessState is the state one symbol no finding names and no exemption held back
 // is in, read from the sweep's own answers.
-func livenessState(candidate *graph.Candidate, live graph.RelationSet) state {
+func livenessState(candidate *liveness.Candidate, live liveness.RelationSet) state {
 	switch {
 	case candidate != nil:
 		return stateDead
-	case live.Has(graph.ReferenceCounting) && live.Has(graph.Reachability):
+	case live.Has(liveness.ReferenceCounting) && live.Has(liveness.Reachability):
 		return stateLive
 	default:
 		return stateUnjudged
 	}
 }
 
-// writePath is the caller-reachability path under the run's mode, one line per hop,
-// else the path over every reference, each hop the mode counts as a test file's
-// marked, else the references to the symbol.
-func writePath(held *strings.Builder, set *run.Prepared, id inventory.SymbolID) {
-	mode := set.Mode
-	path, reached := set.Matrix.Path(id, mode)
-	if !reached {
-		mode = graph.Mode{ConsumerTestsProduction: mode.ConsumerTestsProduction}
-		path, reached = set.Matrix.Path(id, mode)
-	}
-	if reached {
-		switch {
-		case path.Root != nil:
-			if len(path.Hops) == 0 {
-				return
-			}
-			fmt.Fprintf(held, "  reached from: root %s %s\n", path.Root.Kind, path.Root.ID)
-		default:
-			fmt.Fprintf(held, "  reached from: loaded consumer %s\n", path.Hops[0].Consumer)
-		}
+// writePath is the path the run's sweep reached the symbol by
+// ([liveness.Result.Path]), from the root, the loaded consumer, the exemption or
+// the mark it starts at, one line per hop, each hop the mode counts as a test
+// file's marked and each a part of the matrix makes named with its configurations;
+// else the references to the symbol.
+func writePath(held *strings.Builder, set *run.Swept, id inventory.SymbolID) {
+	if path, reached := set.Liveness.Path(id); reached {
+		writeSeed(held, &path)
 		for i := range path.Hops {
-			writeHop(held, &path.Hops[i], mode)
+			writeHop(held, &path.Hops[i], set.Mode, set.Identifiers())
 		}
 		return
 	}
@@ -374,14 +363,48 @@ func writePath(held *strings.Builder, set *run.Prepared, id inventory.SymbolID) 
 	}
 }
 
-// writeHop is one hop of a path. A loaded consumer's reference is made by that
-// consumer.
-func writeHop(held *strings.Builder, hop *facts.Reference, mode graph.Mode) {
-	from := string(hop.From)
-	if hop.Consumer != "" {
-		from = hop.Consumer
+// writeSeed is where a path starts: a root, a loaded consumer, an exemption or a
+// mark. A root the symbol itself is needs no line: the root lines name it.
+func writeSeed(held *strings.Builder, path *liveness.Path) {
+	switch {
+	case path.Root != nil && len(path.Hops) > 0:
+		fmt.Fprintf(held, "  reached from: root %s %s\n", path.Root.Kind, path.Root.ID)
+	case path.Exemption != nil:
+		fmt.Fprintf(held, "  reached from: exemption %s of %s\n", path.Exemption.Class, path.Exemption.ID)
+	case path.Mark != "":
+		fmt.Fprintf(held, "  reached from: suppression of %s\n", path.Mark)
+	case path.Root == nil && len(path.Hops) > 0:
+		fmt.Fprintf(held, "  reached from: loaded consumer %s\n", path.Hops[0].Reference.Consumer)
 	}
-	fmt.Fprintf(held, "  reference: %s\t%s\t%s -> %s%s\n", consumerSite(hop.Consumer, hop.Pos), useOf(hop), from, hop.To, testFileNote(mode.TestReference(hop)))
+}
+
+// writeHop is one hop of a path: a reference, which a loaded consumer's is made by
+// that consumer, or a use an exemption states or the analysis infers.
+func writeHop(held *strings.Builder, hop *liveness.Hop, mode facts.Mode, identifiers []string) {
+	r := hop.Reference
+	switch {
+	case r == nil && hop.Exemption != nil:
+		fmt.Fprintf(held, "  use: exemption %s\t%s -> %s\n", hop.Exemption.Class, hop.From, hop.To)
+		return
+	case r == nil:
+		fmt.Fprintf(held, "  use: inferred\t%s -> %s\n", hop.From, hop.To)
+		return
+	}
+	from := string(r.From)
+	if r.Consumer != "" {
+		from = r.Consumer
+	}
+	fmt.Fprintf(held, "  reference: %s\t%s\t%s -> %s%s%s\n", consumerSite(r.Consumer, r.Pos), useOf(r), from, r.To,
+		testFileNote(mode.TestReference(r)), configurationNote(identifiers, r.Configs))
+}
+
+// configurationNote names the configurations one reference is made in where they
+// are not every configuration of the matrix.
+func configurationNote(identifiers []string, configs inventory.ConfigSet) string {
+	if len(configs.Indexes()) == len(identifiers) {
+		return ""
+	}
+	return "\tin " + configurationNames(identifiers, configs)
 }
 
 // useOf is how one reference uses its target, and the rule that made it where no
@@ -396,20 +419,25 @@ func useOf(r *facts.Reference) string {
 // writeComponent is the dead component one candidate falls with, listed at the depth
 // the configuration asks for, and the identifier the report mints for it where the
 // report names the component's root.
-func writeComponent(held *strings.Builder, set *run.Findings, cascade graph.Cascade, id inventory.SymbolID) {
+func writeComponent(held *strings.Builder, set *run.Findings, full bool, id inventory.SymbolID) {
 	component := componentOf(set.Liveness.Components, id)
 	if component == nil {
 		return
 	}
-	listing := component.List(cascade)
+	cascade := vocab.ReportersCascadeRoots
+	if full {
+		cascade = vocab.ReportersCascadeFull
+	}
 	fmt.Fprintf(held, "  component: %s, %s and %s fall with it, listed at cascade %s\n",
-		componentIdentity(set, listing.Roots),
-		counted(listing.SymbolCount, "symbol"), counted(listing.DeletableLines, "deletable line"), cascade)
-	for _, root := range listing.Roots {
+		componentIdentity(set, component.Roots),
+		counted(len(component.Members), "symbol"), counted(kinds.DeletableLines(component), "deletable line"), cascade)
+	for _, root := range component.Roots {
 		fmt.Fprintf(held, "  component root: %s\n", root)
 	}
-	for _, member := range listing.Members {
-		fmt.Fprintf(held, "  component member: %s\n", member)
+	if full {
+		for _, member := range component.Members {
+			fmt.Fprintf(held, "  component member: %s\n", member)
+		}
 	}
 }
 
@@ -454,8 +482,8 @@ func findingAbout(findings []kinds.Finding, subject *inventory.Symbol) *kinds.Fi
 
 // retentionsOf is every exemption that held one symbol back, in the order the sweep
 // returned them.
-func retentionsOf(retained []graph.Exemption, id inventory.SymbolID) []graph.Exemption {
-	var held []graph.Exemption
+func retentionsOf(retained []exempt.Exemption, id inventory.SymbolID) []exempt.Exemption {
+	var held []exempt.Exemption
 	for i := range retained {
 		if retained[i].ID == id {
 			held = append(held, retained[i])
@@ -466,7 +494,7 @@ func retentionsOf(retained []graph.Exemption, id inventory.SymbolID) []graph.Exe
 
 // candidateFor is the candidate record of one symbol, and nil where the sweep judged
 // the symbol live.
-func candidateFor(candidates []graph.Candidate, id inventory.SymbolID) *graph.Candidate {
+func candidateFor(candidates []liveness.Candidate, id inventory.SymbolID) *liveness.Candidate {
 	for i := range candidates {
 		if candidates[i].ID == id {
 			return &candidates[i]
@@ -513,7 +541,7 @@ func referencesTo(references []facts.Reference, id inventory.SymbolID) []facts.R
 
 // componentOf is the dead component one symbol is a member of, and nil where no
 // component holds it.
-func componentOf(components []graph.Component, id inventory.SymbolID) *graph.Component {
+func componentOf(components []liveness.Component, id inventory.SymbolID) *liveness.Component {
 	for i := range components {
 		if slices.Contains(components[i].Members, id) {
 			return &components[i]
@@ -524,9 +552,9 @@ func componentOf(components []graph.Component, id inventory.SymbolID) *graph.Com
 
 // relationsOf is the relations one symbol is live under, and the statement that none
 // is where the set is empty.
-func relationsOf(held graph.RelationSet) string {
+func relationsOf(held liveness.RelationSet) string {
 	var named []string
-	for _, relation := range []graph.Relation{graph.ReferenceCounting, graph.Reachability} {
+	for _, relation := range []liveness.Relation{liveness.ReferenceCounting, liveness.Reachability} {
 		if held.Has(relation) {
 			named = append(named, relation.String())
 		}
@@ -569,13 +597,4 @@ func testFileNote(test bool) string {
 		return ""
 	}
 	return "\tfrom a test file"
-}
-
-// cascadeOf is the graph's own spelling of the configured cascade depth, so the
-// listing a component answers is the depth the configuration asked for.
-func cascadeOf(full bool) graph.Cascade {
-	if full {
-		return graph.CascadeFull
-	}
-	return graph.CascadeRoots
 }

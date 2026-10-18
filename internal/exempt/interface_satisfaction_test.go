@@ -10,8 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/facts"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
 	spec "github.com/cplieger/deadset-spec/v8"
@@ -20,7 +18,7 @@ import (
 )
 
 // retainedBy runs the class over one input and returns the exemptions it produced.
-func retainedBy(t *testing.T, in *Input, subject string) []graph.Exemption {
+func retainedBy(t *testing.T, in *Input, subject string) []Exemption {
 	t.Helper()
 	found, err := InterfaceSatisfactionDetector(in)
 	if err != nil {
@@ -30,7 +28,7 @@ func retainedBy(t *testing.T, in *Input, subject string) []graph.Exemption {
 }
 
 // retainedSet is the set of symbols one exemption slice names.
-func retainedSet(exemptions []graph.Exemption) map[inventory.SymbolID]bool {
+func retainedSet(exemptions []Exemption) map[inventory.SymbolID]bool {
 	set := make(map[inventory.SymbolID]bool, len(exemptions))
 	for i := range exemptions {
 		set[exemptions[i].ID] = true
@@ -79,27 +77,22 @@ func symbolRef(t *testing.T, in *Input, ref string) inventory.Symbol {
 	return inventory.Symbol{}
 }
 
-// sweepWith indexes the graph of one input and sweeps it once with the given
-// exemptions held back. The target of every fixture here is a library, so its
-// published API is rooted.
-func sweepWith(t *testing.T, in *Input, subject string, held []graph.Exemption) graph.Result {
+// sweepWith sweeps the graph of one input once with the given exemptions held
+// back. The target of every fixture here is a library, so its published API is
+// rooted.
+func sweepWith(t *testing.T, in *Input, held []Exemption) []SweptCandidate {
 	t.Helper()
-	references, _, err := facts.References(in.Result, in.Resolve, in.Symbols, roots.TestClasses{})
-	if err != nil {
-		t.Fatalf("Setup: facts.References(%s): %v", subject, err)
-	}
-	rooted, _ := roots.Roots(in.Result, in.Resolve, in.Symbols, roots.RootOptions{PublishedAPI: true})
-	return graph.New(in.Symbols, references, rooted).Sweep(&graph.SweepInput{Exempt: held})
+	return SweepCandidates(t, in, roots.RootOptions{PublishedAPI: true}, held)
 }
 
 // candidateOf returns the candidate one sweep reported for a symbol.
-func candidateOf(r graph.Result, id inventory.SymbolID) (graph.Candidate, bool) {
-	for _, c := range r.Candidates {
+func candidateOf(swept []SweptCandidate, id inventory.SymbolID) (SweptCandidate, bool) {
+	for _, c := range swept {
 		if c.ID == id {
 			return c, true
 		}
 	}
-	return graph.Candidate{}, false
+	return SweptCandidate{}, false
 }
 
 func TestInterfaceSatisfactionRetainsTheMethodAConversionReaches(t *testing.T) {
@@ -131,7 +124,7 @@ func TestInterfaceSatisfactionNamesTheInterfaceAndTheSiteItWasFoundAt(t *testing
 	// The site is the position of the operand that reaches the parameter, which is
 	// the composite literal on the line Sum is declared on.
 	got := found[0]
-	want := graph.Exemption{
+	want := Exemption{
 		ID:     symbolRef(t, in, "go://example.com/conservative#Converted.Count").ID,
 		Class:  "interface-satisfaction",
 		Site:   token.Position{Filename: "counters.go", Offset: got.Site.Offset, Line: 24, Column: 31},
@@ -155,7 +148,7 @@ func TestInterfaceSatisfactionRetainsNothingWhereNoConversionReachesTheType(t *t
 	// reported, and so is the exported function nothing references.
 	write := symbolRef(t, in, "go://example.com/target#Sink.Write")
 	dead := symbolRef(t, in, "go://example.com/target#DeadExport")
-	r := sweepWith(t, in, "no-conversion.txtar", found)
+	r := sweepWith(t, in, found)
 	for _, want := range []inventory.Symbol{write, dead} {
 		got, reported := candidateOf(r, want.ID)
 		if !reported {
@@ -163,7 +156,7 @@ func TestInterfaceSatisfactionRetainsNothingWhereNoConversionReachesTheType(t *t
 				reportedRefs(in, r), want.Ref)
 			continue
 		}
-		if got.Relation != graph.ReferenceCounting {
+		if got.Relation != "reference-counting" {
 			t.Errorf("Sweep(no-conversion.txtar) reported %s under %s, want reference-counting",
 				want.Ref, got.Relation)
 		}
@@ -222,9 +215,9 @@ func TestInterfaceSatisfactionRetainsStrictlyLessThanTheConservativeRule(t *test
 }
 
 // reportedRefs names every candidate one sweep reported, for a failure message.
-func reportedRefs(in *Input, r graph.Result) []string {
-	set := make(map[inventory.SymbolID]bool, len(r.Candidates))
-	for _, c := range r.Candidates {
+func reportedRefs(in *Input, swept []SweptCandidate) []string {
+	set := make(map[inventory.SymbolID]bool, len(swept))
+	for _, c := range swept {
 		set[c.ID] = true
 	}
 	return refsOf(in, set)
@@ -364,7 +357,7 @@ func TestInterfaceSatisfactionAnswersTheCorpusConversionFixture(t *testing.T) {
 	in := inputForDir(t, writeUnder(t, archive.Files, "target/"), fixture)
 	found := retainedBy(t, in, fixture)
 	retained := retainedSet(found)
-	r := sweepWith(t, in, fixture, found)
+	r := sweepWith(t, in, found)
 
 	for _, row := range expectation.Expect {
 		t.Run(row.Symbol, func(t *testing.T) {
@@ -383,7 +376,7 @@ func TestInterfaceSatisfactionAnswersTheCorpusConversionFixture(t *testing.T) {
 				t.Fatalf("Sweep(%s) reported %v, want it to report %s as %s",
 					fixture, reportedRefs(in, r), row.Symbol, row.Report)
 			}
-			if candidate.Relation.String() != row.Relation {
+			if candidate.Relation != row.Relation {
 				t.Errorf("Sweep(%s) reported %s under %s, want %s",
 					fixture, row.Symbol, candidate.Relation, row.Relation)
 			}
@@ -393,7 +386,7 @@ func TestInterfaceSatisfactionAnswersTheCorpusConversionFixture(t *testing.T) {
 
 // assertRetainedBy checks that one expectation's classes are the classes the
 // detector recorded for its subject.
-func assertRetainedBy(t *testing.T, fixture string, row corpusRow, found []graph.Exemption,
+func assertRetainedBy(t *testing.T, fixture string, row corpusRow, found []Exemption,
 	retained map[inventory.SymbolID]bool, subject inventory.Symbol,
 ) {
 	t.Helper()

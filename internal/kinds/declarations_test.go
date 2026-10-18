@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -49,9 +49,9 @@ func TestASelfReferencingDeclarationIsReportedOnceUnderTheCodeItsVisibilitySelec
 			reported, vocab.UnusedExported)
 	}
 	found := findingOf(t, result.Findings, vocab.UnusedExported, "Recurse")
-	if found.Relation != graph.Reachability {
+	if found.Relation != liveness.Reachability {
 		t.Errorf("the pass reports Recurse under the %s relation, want %s: its own call is a reference",
-			found.Relation, graph.Reachability)
+			found.Relation, liveness.Reachability)
 	}
 	if found.Message != "exported function is referenced only from declarations that are themselves dead" {
 		t.Errorf("the pass reports Recurse with the message %q, want the one the reachability relation gives",
@@ -192,7 +192,7 @@ func TestAnAssertionInsideTheMethodItRetainsHoldsNothing(t *testing.T) {
 	result := analysisOf(t, "declarations-asserted-inside.txtar", asApplication, Consumers{}).findings(t, everyKind)
 
 	closed := findingOf(t, result.Findings, vocab.UnreachableExport, "(*wrapper).Close")
-	if closed.Relation != graph.Reachability {
+	if closed.Relation != liveness.Reachability {
 		t.Errorf("the pass reports (*wrapper).Close under %v, want reachability: main holds the conversion and only Close holds the assertion",
 			closed.Relation)
 	}
@@ -261,9 +261,9 @@ func TestAConsumersTestReferenceDecidesTheKindByHowTheReferencePassCountedIt(t *
 	} {
 		t.Run(name, func(t *testing.T) {
 			in := handInput(applicationConfig())
-			in.Sweep.Candidates = []graph.Candidate{{
+			in.Sweep.Candidates = []liveness.Candidate{{
 				ID:             exportedID,
-				Relation:       graph.Reachability,
+				Relation:       liveness.Reachability,
 				ProductionRefs: counts.production,
 				TestRefs:       counts.test,
 				Configs:        inventory.ConfigSet(0b11),
@@ -298,9 +298,9 @@ func TestAMemberWhoseContainerIsDeadIsNotReportedIndependently(t *testing.T) {
 			EndLine: 41, Kind: inventory.KindField, Parent: typeID, Configs: inventory.ConfigSet(0b11),
 		},
 	)
-	in.Sweep.Candidates = []graph.Candidate{
-		{ID: typeID, Relation: graph.ReferenceCounting, Configs: inventory.ConfigSet(0b11)},
-		{ID: fieldID, Relation: graph.ReferenceCounting, Configs: inventory.ConfigSet(0b11)},
+	in.Sweep.Candidates = []liveness.Candidate{
+		{ID: typeID, Relation: liveness.ReferenceCounting, Configs: inventory.ConfigSet(0b11)},
+		{ID: fieldID, Relation: liveness.ReferenceCounting, Configs: inventory.ConfigSet(0b11)},
 	}
 
 	result := computed(t, in, declarationEmitters())

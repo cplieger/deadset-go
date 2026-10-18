@@ -10,8 +10,8 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/deps"
 	"github.com/cplieger/deadset-go/v2/internal/facts"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
@@ -237,9 +237,9 @@ func TestFileNeverImportedReportsEveryFileOfAPackageNothingReaches(t *testing.T)
 			got, vocab.FileNeverImported, want)
 	}
 	one := result.Findings[0]
-	if one.Relation != graph.ReferenceCounting {
+	if one.Relation != liveness.ReferenceCounting {
 		t.Errorf("FileNeverImported(%s).Relation = %v, want %v: the kind decides on the references made to the package the file declares",
-			one.Position.Path, one.Relation, graph.ReferenceCounting)
+			one.Position.Path, one.Relation, liveness.ReferenceCounting)
 	}
 	if one.Symbol.Kind != symbolKinds[inventory.KindFile] {
 		t.Errorf("FileNeverImported(%s).Symbol.Kind = %q, want %q",

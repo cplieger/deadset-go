@@ -2,11 +2,11 @@
 // classes of reason for which a symbol the reference graph alone would report is
 // live all the same.
 //
-// A class is policy over type information and the class produces a set of
-// retained symbols; the graph is the mechanism that consumes them, and the value
-// that crosses the boundary is a graph.Exemption. So this package reads the graph
-// and never the configuration: the composition root converts every setting into
-// Options, the way it converts every other setting for every other stage.
+// A class is policy over type information and produces a set of retained symbols,
+// each an [Exemption], which the liveness sweep consumes. This package reads
+// neither the sweep nor the configuration: the composition root converts every
+// setting into Options, the way it converts every other setting for every other
+// stage.
 //
 // One file holds one class. [Detectors] maps every class this analyzer computes
 // to its detection, and Compute runs the table it is given, so a class absent from
@@ -16,12 +16,12 @@ package exempt
 import (
 	"fmt"
 	"go/ast"
+	"go/token"
 	"go/types"
 	"slices"
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/facts"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
@@ -90,6 +90,66 @@ type Delimiters struct {
 	Right string
 }
 
+// Exemption is one symbol an exemption class holds back, and why. Class is the
+// vocabulary's spelling of the class. Site is the evidence's position, rendered as
+// every inventory position is: target-relative, solidus-separated, UTF-16 columns. A
+// class whose evidence is a type relation rather than a source site leaves Site
+// and Detail empty.
+type Exemption struct {
+	ID     inventory.SymbolID
+	Class  string
+	Detail string // one short clause naming the evidence
+
+	// Holder is the declaration whose code holds the evidence, where the class
+	// retains as a use by that declaration: the symbol is then live only while
+	// the holder is, and falls into the holder's dead component with it. A root
+	// the exemption names is held by the holder instead. Empty, the exemption
+	// holds the symbol live whatever else is.
+	Holder inventory.SymbolID
+
+	// CoHolders are the further declarations holding the evidence where the class
+	// derives it from sites several declarations hold. The exemption is then a
+	// use by each holder, and it holds the symbol reachable only while the holder
+	// and every co-holder are.
+	CoHolders []inventory.SymbolID
+
+	// Via is the interface method a retained method answers, where the class
+	// retains through an interface the inventory declares.
+	Via inventory.SymbolID
+
+	// Consumer is the module path of the loaded consumer whose file holds the
+	// evidence, empty for a file of the target. Site is relative to that module's
+	// root.
+	Consumer string
+
+	Site token.Position // last, so the counted fields of a position end the value
+}
+
+// Fact is what one exemption states, with the site left out: this class holds this
+// symbol for this reason while these holders are live. A class that finds the same
+// fact at several sites found it once, and the sweep records it once.
+type Fact struct {
+	id        inventory.SymbolID
+	class     string
+	detail    string
+	holder    inventory.SymbolID
+	coHolders string
+}
+
+// Fact is the fact the exemption states.
+func (e *Exemption) Fact() Fact {
+	return Fact{id: e.ID, class: e.Class, detail: e.Detail, holder: e.Holder, coHolders: joinedIDs(e.CoHolders)}
+}
+
+// joinedIDs spells a list of identifiers as one comparable value.
+func joinedIDs(ids []inventory.SymbolID) string {
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = string(id)
+	}
+	return strings.Join(parts, "\x00")
+}
+
 // Input is what every class reads: one loaded configuration, the declarations
 // enumerated from it, the resolver that maps a type-checked object back to one of
 // them, and the configured half.
@@ -127,7 +187,7 @@ type Input struct {
 
 	// filled is what the encoding-reflection class found only a filling callee
 	// retains ([FilledFields]).
-	filled []graph.Exemption
+	filled []Exemption
 
 	// Symbols is the inventory, for a class that reads a declaration's own
 	// properties rather than resolving an object.
@@ -148,13 +208,13 @@ type Input struct {
 	// written in a test file holds nothing: a test that marshals a value or
 	// compares one makes no member of it live for production, exactly as a test's
 	// reference is no reference there.
-	Mode graph.Mode
+	Mode facts.Mode
 }
 
 // Detector is one class's detection over one loaded configuration. It returns
 // every symbol the class retains, each carrying the class's own spelling, and
 // fails only where the evidence it needs is unreadable.
-type Detector func(in *Input) ([]graph.Exemption, error)
+type Detector func(in *Input) ([]Exemption, error)
 
 // Compute runs every class the detector table holds and the options do not disable,
 // in vocabulary order; a class the table does not hold contributes nothing. Each
@@ -164,13 +224,13 @@ type Detector func(in *Input) ([]graph.Exemption, error)
 // found in a test file is returned as test evidence rather than held: it retains
 // nothing and counts as a test reference, and a fact a source file also carries
 // stays the source file's held entry.
-func Compute(in *Input, detectors map[vocab.Exemption]Detector) (held, testEvidence []graph.Exemption, err error) {
+func Compute(in *Input, detectors map[vocab.Exemption]Detector) (held, testEvidence []Exemption, err error) {
 	disabled := make(map[vocab.Exemption]bool, len(in.Options.Disabled))
 	for _, class := range in.Options.Disabled {
 		disabled[class] = true
 	}
 
-	var found, evidence []graph.Exemption
+	var found, evidence []Exemption
 	for _, class := range goClasses() {
 		detect, carried := detectors[class]
 		if disabled[class] || !carried {
@@ -195,26 +255,15 @@ func Compute(in *Input, detectors map[vocab.Exemption]Detector) (held, testEvide
 	return firstPerFact(found), firstPerFact(evidence), nil
 }
 
-// fact is what one exemption states, with the site left out: this class holds
-// this symbol for this reason while these holders are live. A class that finds the
-// same fact at several sites found it once.
-type fact struct {
-	id        inventory.SymbolID
-	class     string
-	detail    string
-	holder    inventory.SymbolID
-	coHolders string
-}
-
 // firstPerFact keeps one exemption per distinct fact, the first of each in the
 // order given, which after the sort by evidence is the one at the earliest
 // rendered site.
-func firstPerFact(found []graph.Exemption) []graph.Exemption {
-	seen := make(map[fact]bool, len(found))
+func firstPerFact(found []Exemption) []Exemption {
+	seen := make(map[Fact]bool, len(found))
 	kept := found[:0]
 	for ix := range found {
 		e := &found[ix]
-		stated := fact{id: e.ID, class: e.Class, detail: e.Detail, holder: e.Holder, coHolders: graph.JoinedIDs(e.CoHolders)}
+		stated := e.Fact()
 		if seen[stated] {
 			continue
 		}
@@ -228,7 +277,7 @@ func firstPerFact(found []graph.Exemption) []graph.Exemption {
 // the class, then by the symbol retained.
 //
 //nolint:gocritic // slices.SortStableFunc fixes a comparator's parameters to values.
-func byEvidence(a, b graph.Exemption) int {
+func byEvidence(a, b Exemption) int {
 	if c := bySite(&a, &b); c != 0 {
 		return c
 	}
@@ -240,7 +289,7 @@ func byEvidence(a, b graph.Exemption) int {
 
 // bySite orders two exemptions by the site their evidence was found at: the
 // target's files first, then each consumer's by module path.
-func bySite(a, b *graph.Exemption) int {
+func bySite(a, b *Exemption) int {
 	if c := strings.Compare(a.Consumer, b.Consumer); c != 0 {
 		return c
 	}

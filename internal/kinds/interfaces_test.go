@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -86,9 +86,9 @@ func TestUnusedInterface_namesEveryImplementationAndWhereItIsWritten(t *testing.
 		t.Errorf("UnusedInterface(interfaces-unused.txtar) message = %q, want %q",
 			found.Message, unusedInterfaceMessage)
 	}
-	if found.Relation != graph.ReferenceCounting {
+	if found.Relation != liveness.ReferenceCounting {
 		t.Errorf("UnusedInterface(interfaces-unused.txtar) relation = %s, want %s",
-			found.Relation, graph.ReferenceCounting)
+			found.Relation, liveness.ReferenceCounting)
 	}
 	if found.Fixability != "deletable" || found.Severity != vocab.Deny {
 		t.Errorf("UnusedInterface(interfaces-unused.txtar) fixability, severity = %q, %q, want deletable, deny",
@@ -121,9 +121,9 @@ func TestUncalledInterfaceMethod_reportsTheInterfaceMethodAndNamesTheImplementat
 		t.Errorf("UncalledInterfaceMethod(interfaces-uncalled.txtar) message = %q, want %q",
 			found.Message, uncalledInterfaceMethodMessage)
 	}
-	if found.Relation != graph.ReferenceCounting {
+	if found.Relation != liveness.ReferenceCounting {
 		t.Errorf("UncalledInterfaceMethod(interfaces-uncalled.txtar) relation = %s, want %s",
-			found.Relation, graph.ReferenceCounting)
+			found.Relation, liveness.ReferenceCounting)
 	}
 	if found.Fixability != "manual" || found.Severity != vocab.Warn {
 		t.Errorf("UncalledInterfaceMethod(interfaces-uncalled.txtar) fixability, severity = %q, %q, want manual, warn",
@@ -134,7 +134,7 @@ func TestUncalledInterfaceMethod_reportsTheInterfaceMethodAndNamesTheImplementat
 	}
 }
 
-func TestUnusedSatisfactionAssertion_reportsTheAssertionWhileTheConcreteMethodStaysRetained(t *testing.T) {
+func TestUnusedSatisfactionAssertion_reportsTheAssertionWhileTheConcreteMethodFallsWithItsInterfaceMethod(t *testing.T) {
 	in := inputOf(t, "interfaces-assertion.txtar", applicationConfig(), Consumers{})
 
 	result := computed(t, in, interfaceEmitters())
@@ -166,8 +166,10 @@ func TestUnusedSatisfactionAssertion_reportsTheAssertionWhileTheConcreteMethodSt
 	if got, want := implementationNames(found), []string{"payload"}; !slices.Equal(got, want) {
 		t.Errorf("UnusedSatisfactionAssertion(interfaces-assertion.txtar) implementations = %v, want %v", got, want)
 	}
-	if got, want := retainedUnder(in, "interface-satisfaction"), []string{"payload.Encode"}; !slices.Equal(got, want) {
-		t.Errorf("the sweep over interfaces-assertion.txtar retains %v under interface-satisfaction, want %v", got, want)
+	// Nothing calls Encoder.Encode, so payload.Encode falls with it rather than
+	// being retained through it.
+	if got := retainedUnder(in, "interface-satisfaction"); len(got) != 0 {
+		t.Errorf("the sweep over interfaces-assertion.txtar retains %v under interface-satisfaction, want none", got)
 	}
 }
 
@@ -304,19 +306,18 @@ func TestUnusedSatisfactionAssertion_anAssertionAnExemptionRetainedIsNotReported
 	}
 }
 
-func TestInterfaceImplementations_keepsTheImplementationsOfAMethodATestCalls(t *testing.T) {
+func TestTheImplementationOfAMethodATestCallsStaysRetained(t *testing.T) {
 	t.Parallel()
 
 	in := inputOf(t, "interfaces-test-called.txtar", applicationConfig(), Consumers{})
 
-	uncalled, uses := InterfaceImplementations(in)
-
-	var names []string
-	for id := range uncalled {
-		names = append(names, in.symbol(id).Name)
+	// A test reaches memory.Count through Store.Count, so the method's
+	// satisfaction exemption keeps holding it rather than a use by the
+	// interface method that leaves it dead.
+	for _, e := range in.Sweep.Retained {
+		if symbol := in.symbol(e.ID); symbol != nil && strings.HasSuffix(symbol.Ref, "#memory.Count") {
+			return
+		}
 	}
-	if len(names) != 0 || len(uses) != 0 {
-		t.Errorf("InterfaceImplementations(interfaces-test-called.txtar) answers uncalled %v and %d uses, want none: a test reaches Store.Count's implementation through it",
-			names, len(uses))
-	}
+	t.Errorf("the sweep over interfaces-test-called.txtar retained %v, want memory.Count among them", in.Sweep.Retained)
 }

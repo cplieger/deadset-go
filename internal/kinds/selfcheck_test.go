@@ -9,8 +9,9 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
 	"github.com/cplieger/deadset-spec/v8/report"
@@ -44,11 +45,11 @@ func suppressed(t *testing.T, archive string, resolved config.Config) *Input {
 
 	in.Marks = slices.Concat(inline, entries, rows)
 	in.Refusals = slices.Concat(inlineRefused, entryRefused, rowRefused)
-	swept := graph.NewMatrix(in.Merged).Sweep(&graph.SweepInput{
+	swept := liveness.Of(in.Merged).Sweep(&liveness.SweepPolicy{
 		Exempt: in.Exempt,
 		Marked: boundMarks(in.Marks),
-		Mode:   graph.Mode{Production: true},
-	}, nil)
+		Mode:   facts.Mode{Production: true},
+	})
 	in.Sweep = &swept
 	// The index caches the sweep's answers, so the sweep the marks produced is the
 	// one every lookup of this input reads.
@@ -511,7 +512,7 @@ func TestWithoutTheMarkTheDeadComponentsRootIsReportedAndTheComponentFalls(t *te
 	// The same input with the mark withdrawn, which is the run a maintainer makes
 	// after deleting the directive.
 	in.Marks = nil
-	swept := graph.NewMatrix(in.Merged).Sweep(&graph.SweepInput{Exempt: in.Exempt, Mode: graph.Mode{Production: true}}, nil)
+	swept := liveness.Of(in.Merged).Sweep(&liveness.SweepPolicy{Exempt: in.Exempt, Mode: facts.Mode{Production: true}})
 	in.Sweep = &swept
 	in.indexed = nil
 
@@ -547,7 +548,7 @@ func TestASuppressionWithholdsTheFindingItsCodeWouldHaveProducedWhateverTheKind(
 	// makes after deleting them: it is what says the two withheld findings exist.
 	bare := suppressed(t, "selfcheck-withheld.txtar", applicationConfig())
 	bare.Marks = nil
-	swept := graph.NewMatrix(bare.Merged).Sweep(&graph.SweepInput{Exempt: bare.Exempt, Mode: graph.Mode{Production: true}}, nil)
+	swept := liveness.Of(bare.Merged).Sweep(&liveness.SweepPolicy{Exempt: bare.Exempt, Mode: facts.Mode{Production: true}})
 	bare.Sweep = &swept
 	bare.indexed = nil
 	want := []string{

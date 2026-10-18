@@ -9,7 +9,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -171,7 +170,7 @@ type operand struct {
 // operands to one. A computed format string binds every operand; only a method taking
 // no argument and returning one string is retained; and an operand reaches through a
 // pointer, a slice, an array and a map, stopping at each defined type.
-func FormatVerbContractDetector(in *Input) ([]graph.Exemption, error) {
+func FormatVerbContractDetector(in *Input) ([]Exemption, error) {
 	sites := newDeclarationSites(in.Result.Fset)
 	f := &formatFlow{kept: newRetention(in, vocab.FormatVerbContract), sites: sites, wrappers: forwardingWrappers(in, sites)}
 	if err := f.walkCalls(); err != nil {

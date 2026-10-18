@@ -6,9 +6,10 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/facts"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -40,16 +41,16 @@ const (
 // is what tells a main package from an importable one.
 func narrowingInput(
 	sink narrowingSink,
-	passes graph.Configured, names map[string]string, consumers Consumers,
+	passes liveness.Configured, names map[string]string, consumers Consumers,
 ) *Input {
 	sink.Helper()
 
-	merged, err := graph.Merge([]graph.Configured{passes}, roots.TestClasses{})
+	merged, err := liveness.Merge([]liveness.Configured{passes}, roots.TestClasses{})
 	if err != nil {
-		sink.Fatalf("Setup: graph.Merge: %v", err)
+		sink.Fatalf("Setup: liveness.Merge: %v", err)
 	}
-	mode := graph.Mode{Production: true}
-	swept := graph.NewMatrix(&merged).Sweep(&graph.SweepInput{Mode: mode}, nil)
+	mode := facts.Mode{Production: true}
+	swept := liveness.Of(&merged).Sweep(&liveness.SweepPolicy{Mode: mode})
 	refs := make(map[inventory.SymbolID]string, len(merged.Symbols))
 	for i := range merged.Symbols {
 		refs[merged.Symbols[i].ID] = merged.Symbols[i].Ref
@@ -361,11 +362,13 @@ func TestUnreachableExportYieldsEverySubjectAMoreSpecificKindReports(t *testing.
 	want := map[string]vocab.Code{
 		"go://example.com/app/internal/api#Reader":      vocab.UnusedInterface,
 		"go://example.com/app/internal/api#Store.Flush": vocab.UncalledInterfaceMethod,
-		"go://example.com/app/internal/api#Quiet":       vocab.UnusedEnumMember,
-		"go://example.com/app/internal/api#Convert[T]":  vocab.UnusedTypeParameter,
-		"go://example.com/app/internal/api#Forgotten":   vocab.UnreachableExport,
-		"go://example.com/app/internal/api#Level":       vocab.UnnecessaryExport,
-		"go://example.com/app/internal/api#Loud":        vocab.UnnecessaryExport,
+		// Nothing calls Store.Flush, so its implementation falls with it.
+		"go://example.com/app/internal/api#Filesystem.Flush": vocab.UnreachableExport,
+		"go://example.com/app/internal/api#Quiet":            vocab.UnusedEnumMember,
+		"go://example.com/app/internal/api#Convert[T]":       vocab.UnusedTypeParameter,
+		"go://example.com/app/internal/api#Forgotten":        vocab.UnreachableExport,
+		"go://example.com/app/internal/api#Level":            vocab.UnnecessaryExport,
+		"go://example.com/app/internal/api#Loud":             vocab.UnnecessaryExport,
 	}
 
 	result := analysisOf(t, "narrowing-unimportable.txtar", asApplication, Consumers{}).findings(t, everyKind)
@@ -382,7 +385,7 @@ func TestUnreachableExportYieldsEverySubjectAMoreSpecificKindReports(t *testing.
 func TestNarrowingLeavesADeclarationAnExemptionHoldsLiveAlone(t *testing.T) {
 	in := inputOf(t, "narrowing-published.txtar", libraryConfig(), Consumers{})
 	exempted := narrowedIDOf(t, in, internalHelper)
-	exemptions := []graph.Exemption{{ID: exempted, Class: "interface-satisfaction"}}
+	exemptions := []exempt.Exemption{{ID: exempted, Class: "interface-satisfaction"}}
 	in.Exempt = exemptions
 
 	found, err := unnecessaryExport(in)
@@ -436,7 +439,7 @@ func TestNarrowingYieldsADeclarationNothingReadsToTheWriteOnlyKind(t *testing.T)
 		Kind:     inventory.KindFunc,
 		Exported: true,
 	}
-	in := narrowingInput(t, graph.Configured{
+	in := narrowingInput(t, liveness.Configured{
 		Symbols: []inventory.Symbol{answer, status, fill},
 		References: []facts.Reference{
 			{
@@ -511,7 +514,7 @@ func TestNarrowingLeavesADeclarationReferencedFromOutsideTheModuleAlone(t *testi
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			in := narrowingInput(t, graph.Configured{
+			in := narrowingInput(t, liveness.Configured{
 				Symbols: []inventory.Symbol{subject},
 				References: []facts.Reference{{
 					From:     tc.from,
@@ -611,9 +614,9 @@ func TestANarrowingFindingCarriesNoLivenessRelationAndAnUnreachableExportCarries
 		t.Errorf("Compute(the three narrowing kinds) reported the live subjects %v, want %v", live, want)
 	}
 	forgotten := findingOf(t, result.Findings, vocab.UnreachableExport, "Forgotten")
-	if forgotten.Relation != graph.Reachability {
+	if forgotten.Relation != liveness.Reachability {
 		t.Errorf("Compute() reports %s with the relation %q, want %q: the candidate was found by reachability",
-			internalForgotten, forgotten.Relation, graph.Reachability)
+			internalForgotten, forgotten.Relation, liveness.Reachability)
 	}
 }
 

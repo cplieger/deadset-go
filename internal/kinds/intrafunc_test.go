@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -678,7 +678,7 @@ func TestUnusedUnexportedReportsALocalConstantOrTypeItsBodyNeverReferences(t *te
 			got, vocab.UnusedUnexported, want)
 	}
 	found := findingOf(t, result.Findings, vocab.UnusedUnexported, "unused")
-	if found.Live || found.Relation != graph.ReferenceCounting || found.Confidence != vocab.Certain {
+	if found.Live || found.Relation != liveness.ReferenceCounting || found.Confidence != vocab.Certain {
 		t.Errorf("%s about the local constant unused carries live %t, relation %s, confidence %s, want a reference-counting finding at %s",
 			vocab.UnusedUnexported, found.Live, found.Relation, found.Confidence, vocab.Certain)
 	}

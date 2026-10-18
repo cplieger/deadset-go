@@ -5,8 +5,6 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/facts"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
 )
@@ -23,7 +21,7 @@ func symbolNames(symbols []inventory.Symbol) map[inventory.SymbolID]string {
 // rendered prints one exemption per line as the name of the declaration it
 // retains, the class, the site and the clause, so a want list reads as source
 // rather than as positions.
-func rendered(symbols []inventory.Symbol, exemptions []graph.Exemption) []string {
+func rendered(symbols []inventory.Symbol, exemptions []Exemption) []string {
 	names := symbolNames(symbols)
 	lines := make([]string, 0, len(exemptions))
 	for _, e := range exemptions {
@@ -73,16 +71,9 @@ func candidatesOf(t *testing.T, archive string, opts Options) []string {
 	if err != nil {
 		t.Fatalf("Setup: GeneratedFileDetector(%s): %v", archive, err)
 	}
-	refs, _, err := facts.References(in.Result, in.Resolve, in.Symbols, roots.TestClasses{})
-	if err != nil {
-		t.Fatalf("Setup: facts.References(%s): %v", archive, err)
-	}
-	rooted, _ := roots.Roots(in.Result, in.Resolve, in.Symbols, roots.RootOptions{})
-
 	names := symbolNames(in.Symbols)
-	result := graph.New(in.Symbols, refs, rooted).Sweep(&graph.SweepInput{Exempt: exemptions})
-	got := make([]string, 0, len(result.Candidates))
-	for _, c := range result.Candidates {
+	var got []string
+	for _, c := range SweepCandidates(t, in, roots.RootOptions{}, exemptions) {
 		got = append(got, names[c.ID])
 	}
 	return got

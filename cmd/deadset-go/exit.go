@@ -10,7 +10,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/edges"
 	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/failure"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/memory"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
@@ -60,7 +60,7 @@ func exitCodeFor(err error) int {
 	if _, refusal := errors.AsType[*config.Error](err); refusal {
 		return vocab.ExitUsage
 	}
-	if errors.Is(err, exempt.ErrTemplateDir) || errors.Is(err, load.ErrNoConfiguration) || errors.Is(err, graph.ErrMatrix) ||
+	if errors.Is(err, exempt.ErrTemplateDir) || errors.Is(err, load.ErrNoConfiguration) || errors.Is(err, liveness.ErrMatrix) ||
 		errors.Is(err, core.ErrMalformed) || errors.Is(err, edges.ErrMalformed) {
 		return vocab.ExitUsage
 	}

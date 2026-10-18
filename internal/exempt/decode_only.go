@@ -6,15 +6,13 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
-
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 )
 
 // FilledFields is every field the last Compute over in found that a function or
 // method outside the analysed program fills from a document and may read, and nothing
 // else retains under that class, each with the site of the call. It retains nothing:
 // a finding about such a field is reported at the class possible.
-func FilledFields(in *Input) []graph.Exemption {
+func FilledFields(in *Input) []Exemption {
 	return in.filled
 }
 

@@ -12,14 +12,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // retained is what one class's detector recorded over a shared analysis.
-func retained(t *testing.T, shared *sharedAnalysis, class vocab.Exemption) []graph.Exemption {
+func retained(t *testing.T, shared *sharedAnalysis, class vocab.Exemption) []Exemption {
 	t.Helper()
 	found, err := shared.detect(t, class)
 	if err != nil {
@@ -1186,7 +1186,7 @@ func TestEncodingReflectionReadsTheFieldsADecoderFills(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			in := inputOf(t, tt.archive, Options{})
-			in.Mode = graph.Mode{Production: true}
+			in.Mode = facts.Mode{Production: true}
 			found, err := EncodingReflectionDetector(in)
 			if err != nil {
 				t.Fatalf("EncodingReflectionDetector(%s) error: %v", tt.archive, err)
@@ -1210,10 +1210,10 @@ func TestEncodingReflectionReadsTheFieldsADecoderFills(t *testing.T) {
 func TestEncodingReflectionReadsOnlyTheFieldsTheProgramWrites(t *testing.T) {
 	tests := []struct {
 		name string
-		mode graph.Mode
+		mode facts.Mode
 		want []string
 	}{
-		{"the_plain_mode", graph.Mode{}, []string{
+		{"the_plain_mode", facts.Mode{}, []string{
 			"go://example.com/written#Draft.Title",
 			"go://example.com/written#Event.Assigned",
 			"go://example.com/written#Event.Counted",
@@ -1223,7 +1223,7 @@ func TestEncodingReflectionReadsOnlyTheFieldsTheProgramWrites(t *testing.T) {
 			"go://example.com/written#Point.Y",
 			"go://example.com/written#Tag.Label",
 		}},
-		{"a_production_run", graph.Mode{Production: true}, []string{
+		{"a_production_run", facts.Mode{Production: true}, []string{
 			"go://example.com/written#Draft.Title",
 			"go://example.com/written#Event.Assigned",
 			"go://example.com/written#Event.Counted",

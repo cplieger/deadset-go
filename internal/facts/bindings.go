@@ -17,7 +17,6 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
-	specfacts "github.com/cplieger/deadset-spec/v8/facts"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/mod/semver"
 	"golang.org/x/tools/go/packages"
@@ -30,12 +29,14 @@ var errUndecodable = errors.New("a generated file its generator row covers canno
 // Binding is one binding identity: a generated declaration of the target, or a
 // generated file, and the schema declaration it stands for.
 type Binding struct {
-	Role          specfacts.Role
 	Symbol        inventory.SymbolID // the consumer's declaration; empty for a fallback
 	SchemaFile    string
 	Schema        string // the proto:// reference; empty for a fallback
 	GeneratedFile string
-	Scope         specfacts.Scope // a fallback's scope
+
+	// Fallback marks a generated file standing for its whole schema file, which
+	// no declaration-level identity could be read for.
+	Fallback bool
 }
 
 // The cells of contract/generators.json that publish records.
@@ -158,7 +159,7 @@ func bind(rs *resolve.Resolver, p *packages.Package, f *ast.File, g *Generated, 
 		err = b.services()
 	case cellFallback:
 		for _, file := range g.SchemaFiles {
-			b.held = append(b.held, Binding{Role: specfacts.RoleFallback, SchemaFile: file, GeneratedFile: g.Path, Scope: specfacts.ScopeAll})
+			b.held = append(b.held, Binding{Fallback: true, SchemaFile: file, GeneratedFile: g.Path})
 		}
 	}
 	if err != nil {
@@ -174,7 +175,7 @@ func (b *binder) consumer(obj types.Object, schemaFile, pkg, fragment string) {
 	}
 	if id, ok := b.rs.Object(obj); ok {
 		b.held = append(b.held, Binding{
-			Role: specfacts.RoleConsumer, Symbol: id, SchemaFile: schemaFile,
+			Symbol: id, SchemaFile: schemaFile,
 			Schema: protoRef(pkg, fragment), GeneratedFile: b.g.Path,
 		})
 	}

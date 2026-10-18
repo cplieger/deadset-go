@@ -11,8 +11,8 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/edges"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
 	"github.com/cplieger/deadset-spec/v8/report"
@@ -155,8 +155,8 @@ func inputOfRecords(records []suppress.Record, symbols []inventory.Symbol, suppr
 	resolved.Target.Kind = report.TargetKindApplication
 	return &Input{
 		Config: &resolved,
-		Merged: &graph.Merged{Symbols: symbols},
-		Sweep:  &graph.Result{Suppressed: suppressed},
+		Merged: &liveness.Merged{Symbols: symbols},
+		Sweep:  &liveness.Result{Suppressed: suppressed},
 		Marks:  records,
 	}
 }

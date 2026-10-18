@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/facts"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
@@ -192,7 +191,7 @@ func inputUnder(t *rapid.T, dir string) *Input {
 
 // retainedMethods names the methods one exemption set retains, spelled the way the
 // oracle spells them.
-func retainedMethods(in *Input, held []graph.Exemption) map[string]bool {
+func retainedMethods(in *Input, held []Exemption) map[string]bool {
 	byID := make(map[inventory.SymbolID]string, len(in.Symbols))
 	for i := range in.Symbols {
 		if in.Symbols[i].Kind == inventory.KindMethod {

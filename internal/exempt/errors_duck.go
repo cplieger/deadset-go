@@ -7,7 +7,6 @@ import (
 	"slices"
 
 	"github.com/cplieger/deadset-go/v2/internal/facts"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -18,7 +17,7 @@ import (
 // converts to error retains each method once, at its first site by rendered position.
 // A type entering another interface, from which a chain of sites leads to error,
 // retains each method once per chain, held by every declaration holding a site of it.
-func ErrorsDuckTypingDetector(in *Input) ([]graph.Exemption, error) {
+func ErrorsDuckTypingDetector(in *Input) ([]Exemption, error) {
 	scan := &errorsDuckScan{in: in, held: make(map[inventory.SymbolID]struct{}), chained: make(map[string]bool)}
 	scan.build()
 
@@ -41,7 +40,7 @@ func ErrorsDuckTypingDetector(in *Input) ([]graph.Exemption, error) {
 	}
 
 	slices.SortStableFunc(scan.found, func(a, b errorsDuckRetained) int { return inventory.ByPosition(a.at, b.at) })
-	found := make([]graph.Exemption, 0, len(scan.found))
+	found := make([]Exemption, 0, len(scan.found))
 	for i := range scan.found {
 		found = append(found, scan.found[i].exemption)
 	}
@@ -69,7 +68,7 @@ type errorsDuckForm struct {
 // errorsDuckRetained is one retained method and the rendered position of its own
 // declaration, which is what orders the answer.
 type errorsDuckRetained struct {
-	exemption graph.Exemption
+	exemption Exemption
 	at        token.Position
 }
 
@@ -145,7 +144,7 @@ func (s *errorsDuckScan) sites(conversions []facts.Conversion) ([]errorsDuckSite
 		sites = append(sites, errorsDuckSite{from: c.From, at: at})
 	}
 	rank := func(at token.Position) int {
-		if holdsInMode(&graph.Exemption{Site: at}, s.in.Mode) {
+		if holdsInMode(&Exemption{Site: at}, s.in.Mode) {
 			return 0
 		}
 		return 1
@@ -240,7 +239,7 @@ func (s *errorsDuckScan) conversion(c *errorsDuckSite) error {
 		}
 		s.found = append(s.found, errorsDuckRetained{
 			at: at,
-			exemption: graph.Exemption{
+			exemption: Exemption{
 				ID:        id,
 				Class:     string(vocab.ErrorsDuckTyping),
 				Site:      c.at,
@@ -264,7 +263,7 @@ func (s *errorsDuckScan) first(id inventory.SymbolID, c *errorsDuckSite) bool {
 		s.held[id] = struct{}{}
 		return true
 	}
-	key := string(id) + "\x00" + string(c.holder) + "\x00" + graph.JoinedIDs(c.coHolders)
+	key := string(id) + "\x00" + string(c.holder) + "\x00" + joinedIDs(c.coHolders)
 	if s.chained[key] {
 		return false
 	}

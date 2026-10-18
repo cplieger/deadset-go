@@ -7,7 +7,6 @@ import (
 	"go/types"
 	"slices"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
@@ -49,7 +48,7 @@ const (
 // A conversion method matches by name alone, a decoder's target carries every type
 // reachable through pointers, elements, map keys and values and fields, and a
 // blank constant is retained by nothing.
-func EnumGroupDetector(in *Input) ([]graph.Exemption, error) {
+func EnumGroupDetector(in *Input) ([]Exemption, error) {
 	scan := &enumGroupScan{in: in, byKey: make(map[string]*enumGroupType)}
 	if err := scan.groups(); err != nil {
 		return nil, err
@@ -396,8 +395,8 @@ func (s *enumGroupScan) record(enum *enumGroupType, rank int, pos token.Pos, det
 
 // exemptions renders one exemption per member of every enumerated type that
 // fired, ordered by the defined type and then by the member's own declaration.
-func (s *enumGroupScan) exemptions() []graph.Exemption {
-	var found []graph.Exemption
+func (s *enumGroupScan) exemptions() []Exemption {
+	var found []Exemption
 	keys := slices.Clone(s.keys)
 	slices.SortFunc(keys, func(a, b string) int {
 		return cmp.Or(cmp.Compare(s.byKey[a].spelled, s.byKey[b].spelled), cmp.Compare(a, b))
@@ -410,7 +409,7 @@ func (s *enumGroupScan) exemptions() []graph.Exemption {
 		members := slices.Clone(enum.members)
 		slices.SortFunc(members, func(a, b enumGroupMember) int { return inventory.ByPosition(a.at, b.at) })
 		for _, m := range members {
-			found = append(found, graph.Exemption{
+			found = append(found, Exemption{
 				ID:     m.id,
 				Class:  string(vocab.EnumGroup),
 				Site:   enum.best.at,

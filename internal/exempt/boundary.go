@@ -7,7 +7,7 @@ import (
 	"go/types"
 	"slices"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 )
 
@@ -464,7 +464,7 @@ func parameterNamed(info *types.Info, arg ast.Expr) *types.Var {
 // mode: every exemption in the plain mode, and in a production one an exemption whose
 // evidence no test file carries, or a loaded consumer's test file the mode classifies
 // as production, as it classifies that file's references.
-func holdsInMode(e *graph.Exemption, m graph.Mode) bool {
+func holdsInMode(e *Exemption, m facts.Mode) bool {
 	if !m.Production {
 		return true
 	}

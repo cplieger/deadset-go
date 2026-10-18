@@ -5,8 +5,8 @@ import (
 	"go/types"
 	"slices"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"golang.org/x/tools/go/packages"
@@ -24,7 +24,7 @@ import (
 // neither. A use belongs to the innermost declaration the inventory holds that
 // contains it, so the type of a struct field is the field's use of a module rather
 // than the enclosing type's.
-func LastUses(r *load.Result, rs *resolve.Resolver, candidates []graph.Candidate) map[inventory.SymbolID][]string {
+func LastUses(r *load.Result, rs *resolve.Resolver, candidates []liveness.Candidate) map[inventory.SymbolID][]string {
 	if r == nil || rs == nil || len(candidates) == 0 {
 		return nil
 	}

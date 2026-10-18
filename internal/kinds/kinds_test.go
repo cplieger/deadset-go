@@ -10,8 +10,9 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -32,7 +33,7 @@ const (
 
 // handSpans are the lines the hand-built component's two declarations occupy, which
 // share the line one ends and the other starts on.
-var handSpans = []graph.Span{{Path: "catalog.go", First: 14, Last: 31}, {Path: "catalog.go", First: 31, Last: 36}}
+var handSpans = []liveness.Span{{Path: "catalog.go", First: 14, Last: 31}, {Path: "catalog.go", First: 31, Last: 36}}
 
 // handInput is an input written by hand: one inventory, one sweep answer and one
 // two-configuration matrix, so a test of the framework measures the framework
@@ -44,19 +45,17 @@ func handInput(resolved config.Config) *Input {
 		handSymbol(internalID, internalRef, "Open", "example.com/app/internal/store", "internal/store/store.go", 9, 12, true),
 		handSymbol(generatedID, generatedRef, "Wired", "example.com/app", "wire.gen.go", 12, 14, true),
 	}
-	merged := &graph.Merged{Symbols: symbols, Configurations: 2}
-	swept := &graph.Result{
-		Candidates: []graph.Candidate{
-			{ID: exportedID, Relation: graph.ReferenceCounting, Configs: inventory.ConfigSet(0b11)},
-			{ID: helperID, Relation: graph.Reachability, ProductionRefs: 1, Configs: inventory.ConfigSet(0b01)},
-			{ID: generatedID, Relation: graph.ReferenceCounting, Configs: inventory.ConfigSet(0b11)},
+	merged := &liveness.Merged{Symbols: symbols, Configurations: 2}
+	swept := &liveness.Result{
+		Candidates: []liveness.Candidate{
+			{ID: exportedID, Relation: liveness.ReferenceCounting, Configs: inventory.ConfigSet(0b11)},
+			{ID: helperID, Relation: liveness.Reachability, ProductionRefs: 1, Configs: inventory.ConfigSet(0b01)},
+			{ID: generatedID, Relation: liveness.ReferenceCounting, Configs: inventory.ConfigSet(0b11)},
 		},
-		Components: []graph.Component{{
-			Members:        []inventory.SymbolID{exportedID, helperID},
-			Roots:          []inventory.SymbolID{exportedID},
-			Spans:          handSpans,
-			Index:          0,
-			DeletableLines: 23,
+		Components: []liveness.Component{{
+			Members: []inventory.SymbolID{exportedID, helperID},
+			Roots:   []inventory.SymbolID{exportedID},
+			Spans:   handSpans,
 		}},
 	}
 	refs := make(map[inventory.SymbolID]string, len(symbols))
@@ -106,7 +105,7 @@ func oneFinding(in *Input, code vocab.Code, id inventory.SymbolID) Finding {
 func TestComputeFillsEveryFieldTheContractRequiresOfAFinding(t *testing.T) {
 	in := handInput(applicationConfig())
 	reported := oneFinding(in, vocab.UnusedExported, exportedID)
-	reported.Relation = graph.ReferenceCounting
+	reported.Relation = liveness.ReferenceCounting
 
 	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnusedExported: emitterOf(reported)})
 
@@ -122,7 +121,7 @@ func TestComputeFillsEveryFieldTheContractRequiresOfAFinding(t *testing.T) {
 		Symbol:          Subject{Ref: exportedRef, Kind: "function", Name: "Resolve", SizeLines: 18},
 		Class:           vocab.Certain,
 		Confidence:      vocab.Certain,
-		Relation:        graph.ReferenceCounting,
+		Relation:        liveness.ReferenceCounting,
 		Component:       findingComponent{ID: "deadset-go/c-1", SymbolCount: 2, DeletableLines: 23, Root: true},
 		RetainedBy:      []string{},
 		Configurations:  []string{"linux-amd64", "linux-arm64"},
@@ -282,7 +281,7 @@ func TestComputeRefusesTwoFindingsAboutOneDeclaration(t *testing.T) {
 
 func TestComputeRefusesAFindingAboutASymbolAnExemptionRetained(t *testing.T) {
 	in := handInput(applicationConfig())
-	in.Sweep.Retained = []graph.Exemption{{
+	in.Sweep.Retained = []exempt.Exemption{{
 		ID:     exportedID,
 		Class:  "interface-satisfaction",
 		Detail: "implements an interface a value of its type is converted to",
@@ -686,7 +685,7 @@ func TestComputeCompletesAFindingWhoseSubjectIsNoDeclarationOfTheInventory(t *te
 		Symbol:          reported.Symbol,
 		Class:           vocab.Certain,
 		Confidence:      vocab.Certain,
-		Relation:        graph.ReferenceCounting,
+		Relation:        liveness.ReferenceCounting,
 		Live:            true,
 		Component:       findingComponent{ID: "deadset-go/c-2", Root: true, SymbolCount: 1},
 		RetainedBy:      []string{},

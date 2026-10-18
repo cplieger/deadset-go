@@ -77,6 +77,20 @@ func (in *Input) classOf(id inventory.SymbolID) vocab.Class {
 	}
 }
 
+// Unseen is every production declaration of the inventory whose reachability class
+// is possible, which programs outside the analysis may call: the sweep counts each
+// as a live target of a test that references it. It reads no sweep.
+func Unseen(in *Input) map[inventory.SymbolID]bool {
+	unseen := make(map[inventory.SymbolID]bool)
+	for i := range in.Merged.Symbols {
+		symbol := &in.Merged.Symbols[i]
+		if !symbol.InTestFile && !symbol.TestSupport && in.classOf(symbol.ID) == vocab.Possible {
+			unseen[symbol.ID] = true
+		}
+	}
+	return unseen
+}
+
 // unlinkedApplicationPackage reports whether an importable package of an
 // application that no build links declares one symbol, in a run that declares no
 // consumer: outside programs may import it, so every declaration of it is possible.
@@ -174,18 +188,18 @@ func (in *Input) publishedAPI(symbol *inventory.Symbol) bool {
 // no class where the declaration falls with no component.
 func (in *Input) componentCap(id inventory.SymbolID) vocab.Class {
 	held := in.index()
-	component := held.components[id]
+	component, at := held.component(id)
 	if component == nil {
 		return ""
 	}
-	if least, computed := held.caps[component.Index]; computed {
+	if least, computed := held.caps[at]; computed {
 		return least
 	}
 	least := vocab.Certain
 	for _, root := range component.Roots {
 		least = lower(least, in.classOf(root))
 	}
-	held.caps[component.Index] = least
+	held.caps[at] = least
 	return least
 }
 

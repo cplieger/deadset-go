@@ -7,8 +7,9 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/graph"
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -20,9 +21,9 @@ func TestWriteOnlySymbolNamesEveryWritePositionOfAVariableNothingReads(t *testin
 	}
 
 	tally := findingOf(t, found, vocab.WriteOnlySymbol, "tally")
-	if tally.Symbol.Kind != "variable" || tally.Relation != graph.ReferenceCounting {
+	if tally.Symbol.Kind != "variable" || tally.Relation != liveness.ReferenceCounting {
 		t.Errorf("WriteOnlySymbol with Production=false reports tally as subject %q under %v, want variable under %v",
-			tally.Symbol.Kind, tally.Relation, graph.ReferenceCounting)
+			tally.Symbol.Kind, tally.Relation, liveness.ReferenceCounting)
 	}
 	if want := "variable tally is written at 2 positions and never read"; tally.Message != want {
 		t.Errorf("WriteOnlySymbol with Production=false reports tally with message %q, want %q", tally.Message, want)
@@ -305,7 +306,7 @@ func TestWriteOnlySymbolReadsTheFieldsOfAComparableTypeArgument(t *testing.T) {
 func TestWriteOnlySymbolNamesTheDeclarationsOnlyItsAnnotationUses(t *testing.T) {
 	resolved := applicationConfig()
 	in := inputOf(t, "readwrite-cascade-declarations.txtar", resolved, Consumers{})
-	in.Mode = graph.Mode{Production: true}
+	in.Mode = facts.Mode{Production: true}
 	result := computed(t, in, packageEmitters())
 
 	for subject, want := range map[string]string{
@@ -330,7 +331,7 @@ func TestWriteOnlySymbolNamesTheDeclarationsOnlyItsAnnotationUses(t *testing.T) 
 // and the cascade still names what the write or the annotation holds in source order.
 func TestWriteOnlySymbolNamesWhatAWriteHoldsInSourceOrderUnderALineDirective(t *testing.T) {
 	in := inputOf(t, "readwrite-line-directive.txtar", applicationConfig(), Consumers{})
-	in.Mode = graph.Mode{Production: true}
+	in.Mode = facts.Mode{Production: true}
 	result := computed(t, in, packageEmitters())
 
 	for subject, want := range map[string]string{
@@ -357,12 +358,12 @@ func TestWriteOnlySymbolCountsAConsumersWriteAsARead(t *testing.T) {
 	resolved := libraryConfig()
 	for _, test := range []struct {
 		name string
-		mode graph.Mode
+		mode facts.Mode
 		want []string
 	}{
-		{name: "production", mode: graph.Mode{Production: true}, want: []string{"Options.Label", "Options.Note"}},
-		{name: "consumer_tests_production", mode: graph.Mode{Production: true, ConsumerTestsProduction: true}, want: []string{"Options.Note"}},
-		{name: "test_references", mode: graph.Mode{}, want: []string{"Options.Note"}},
+		{name: "production", mode: facts.Mode{Production: true}, want: []string{"Options.Label", "Options.Note"}},
+		{name: "consumer_tests_production", mode: facts.Mode{Production: true, ConsumerTestsProduction: true}, want: []string{"Options.Note"}},
+		{name: "test_references", mode: facts.Mode{}, want: []string{"Options.Note"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			in := sectionsInput(t, "readwrite-consumer-write.txtar", data, resolved)
@@ -379,7 +380,7 @@ func TestWriteOnlySymbolCountsAConsumersWriteAsARead(t *testing.T) {
 // write-only finding, so it is what the retained listing names for it.
 func TestWriteOnlyRetainedNamesTheExemptionThatHoldsAWriteOnlyFindingBack(t *testing.T) {
 	in := inputOf(t, "readwrite-encoded.txtar", applicationConfig(), Consumers{})
-	in.Mode = graph.Mode{Production: true}
+	in.Mode = facts.Mode{Production: true}
 
 	var got []string
 	for _, exemption := range WriteOnlyRetained(in) {

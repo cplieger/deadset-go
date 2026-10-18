@@ -5,8 +5,8 @@ import (
 	"slices"
 
 	"github.com/cplieger/deadset-go/v2/internal/facts"
-	"github.com/cplieger/deadset-go/v2/internal/graph"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -126,31 +126,20 @@ func (n *narrowing) holdInterfaceSatisfying() {
 		if one.Result == nil || one.Resolve == nil {
 			continue
 		}
-		d := declaredIn(one)
-		for _, declared := range d.interfaces {
-			if len(known.typeUsedBy[declared.id]) == 0 {
-				continue
+		for _, iface := range one.Facts.Interfaces() {
+			if len(known.typeUsedBy[iface.ID]) > 0 {
+				n.holdImplementors(&iface)
 			}
-			n.holdSatisfiers(one, declared, d.concrete)
 		}
 	}
 }
 
-// holdSatisfiers keys the methods of every concrete type of the target that
-// satisfies one interface, which are the methods that interface's method set names.
-func (n *narrowing) holdSatisfiers(one *Configured, declared declaredInterface, concrete []declaredType) {
-	for _, held := range concrete {
-		recv, satisfies := implementing(held.typ, declared.iface)
-		if !satisfies {
-			continue
-		}
-		set := types.NewMethodSet(recv)
-		for method := range declared.iface.Methods() {
-			sel := set.Lookup(method.Pkg(), method.Name())
-			if sel == nil {
-				continue
-			}
-			if id, inventoried := one.Resolve.Object(sel.Obj()); inventoried {
+// holdImplementors keys every declaration of the target implementing one of the
+// interface's methods.
+func (n *narrowing) holdImplementors(iface *facts.Interface) {
+	for _, impl := range iface.Implementations {
+		for _, id := range impl.Implementors {
+			if id != "" {
 				n.unnarrowable[id] = true
 			}
 		}
@@ -470,7 +459,7 @@ func unreachableExport(in *Input) ([]Finding, error) {
 // unused-exported population of a package nothing outside can import. Every arm is
 // the unused-declaration rule's own, in its order, yielding the candidate to the
 // kind that makes the more specific claim, so one declaration is reported once.
-func (in *Input) unreachableExport(candidate *graph.Candidate, symbol *inventory.Symbol) bool {
+func (in *Input) unreachableExport(candidate *liveness.Candidate, symbol *inventory.Symbol) bool {
 	switch {
 	case !symbol.Exported:
 		return false
@@ -494,7 +483,7 @@ func (in *Input) unreachableExport(candidate *graph.Candidate, symbol *inventory
 // unreferencedTestExport reports whether an exported test-file declaration nothing
 // reaches is this kind's population, whatever its package: no other program compiles
 // a test file, so its export reaches nobody.
-func (in *Input) unreferencedTestExport(candidate *graph.Candidate, symbol *inventory.Symbol) bool {
+func (in *Input) unreferencedTestExport(candidate *liveness.Candidate, symbol *inventory.Symbol) bool {
 	return !member(symbol.Kind) && !interfaceDeclaration(symbol.Kind) && !in.deadParent(symbol) &&
 		!in.readOrWriteSubject(candidate, symbol)
 }
@@ -506,9 +495,9 @@ func (in *Input) unreferencedTestExport(candidate *graph.Candidate, symbol *inve
 // The relation decides the middle clause. A candidate found by reference counting has
 // no reference at all; one found by reachability has references, every one of them
 // from a declaration that is itself dead.
-func unreachableMessage(in *Input, candidate *graph.Candidate) string {
+func unreachableMessage(in *Input, candidate *liveness.Candidate) string {
 	found := "has no reference in the target"
-	if candidate.Relation == graph.Reachability {
+	if candidate.Relation == liveness.Reachability {
 		found = "is referenced only from declarations that are themselves dead"
 	}
 	return "exported " + in.word(candidate.ID) + " " + found +

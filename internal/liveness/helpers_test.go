@@ -1,0 +1,136 @@
+package liveness
+
+import (
+	"os"
+	"strings"
+	"testing"
+
+	"github.com/cplieger/deadset-go/v2/internal/facts"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport"
+)
+
+// sharedAnalysis is what one archive's load answers for the linux-amd64
+// configuration under one list of configured root patterns, read by every test that
+// asks the same question of it: the inventory, the references and the test-file
+// rules over it, the roots and the unmatched patterns with and without the
+// published-API seed, and the files the load excluded for importing C. No part of the
+// load it was computed from is held.
+type sharedAnalysis struct {
+	symbols       []inventory.Symbol
+	refs          []facts.Reference
+	rules         []inventory.TestFileRule
+	roots         map[bool][]roots.Root
+	unmatched     map[bool][]roots.Unmatched
+	excludedByCgo []string
+}
+
+// analysisKey is one shared analysis: the archive and its configured root patterns.
+type analysisKey struct {
+	archive  string
+	patterns string
+}
+
+// analyses holds every shared analysis the package's tests built.
+var analyses testsupport.Memo[analysisKey, *sharedAnalysis]
+
+// analysisOf is the shared analysis of one archive under the configured root
+// patterns given, loaded once for every test that reads it.
+func analysisOf(t *testing.T, archive string, patterns []string) *sharedAnalysis {
+	t.Helper()
+
+	key := analysisKey{archive: archive, patterns: strings.Join(patterns, "\n")}
+	return analyses.Of(t, key, func(t *testing.T) *sharedAnalysis {
+		return analyzeShared(t, archive, patterns)
+	})
+}
+
+// analyzeShared loads one archive and runs every pass a shared analysis answers.
+func analyzeShared(t *testing.T, archive string, patterns []string) *sharedAnalysis {
+	t.Helper()
+
+	result, root := loadDir(t, extract(t, archive), "linux", "amd64")
+	symbols, rs, err := inventoryOf(result, root, os.ReadFile)
+	if err != nil {
+		t.Fatalf("Symbols(%s) error: %v", archive, err)
+	}
+	refs, rules, err := facts.References(result, rs, symbols, roots.TestClasses{})
+	if err != nil {
+		t.Fatalf("References(%s) error: %v", archive, err)
+	}
+	held := &sharedAnalysis{
+		symbols:       symbols,
+		refs:          refs,
+		rules:         rules,
+		roots:         make(map[bool][]roots.Root),
+		unmatched:     make(map[bool][]roots.Unmatched),
+		excludedByCgo: result.ExcludedByCgo,
+	}
+	for _, published := range []bool{false, true} {
+		opts := roots.RootOptions{Patterns: patterns, PublishedAPI: published}
+		held.roots[published], held.unmatched[published] = roots.Roots(result, rs, symbols, opts)
+	}
+	return held
+}
+
+// inventory is the declarations the archive's load enumerated.
+func (a *sharedAnalysis) inventory(t *testing.T) []inventory.Symbol {
+	t.Helper()
+
+	return testsupport.Detached(t, a.symbols)
+}
+
+// references is the references the reference pass walked over the inventory.
+func (a *sharedAnalysis) references(t *testing.T) []facts.Reference {
+	t.Helper()
+
+	return testsupport.Detached(t, a.refs)
+}
+
+// testFileRules is the rule that classified each test file, as the reference pass
+// reported them.
+func (a *sharedAnalysis) testFileRules(t *testing.T) []inventory.TestFileRule {
+	t.Helper()
+
+	return testsupport.Detached(t, a.rules)
+}
+
+// rootsUnder is the roots and the unmatched patterns one setting of the
+// published-API seed detected.
+func (a *sharedAnalysis) rootsUnder(t *testing.T, published bool) ([]roots.Root, []roots.Unmatched) {
+	t.Helper()
+
+	return testsupport.Detached(t, a.roots[published]), testsupport.Detached(t, a.unmatched[published])
+}
+
+// excludedFiles is the files the load excluded for importing C.
+func (a *sharedAnalysis) excludedFiles(t *testing.T) []string {
+	t.Helper()
+
+	return testsupport.Detached(t, a.excludedByCgo)
+}
+
+// configured is the three passes a matrix merges, under one set of root options.
+func (a *sharedAnalysis) configured(t *testing.T, published bool) Configured {
+	t.Helper()
+
+	roots, _ := a.rootsUnder(t, published)
+	return Configured{Symbols: a.inventory(t), References: a.references(t), Roots: roots}
+}
+
+// inventoryOf is one load's inventory and the resolver over it, built as a run
+// builds them.
+func inventoryOf(r *load.Result, root string, read inventory.ReadFile) ([]inventory.Symbol, *resolve.Resolver, error) {
+	inv, err := inventory.Of(r, root, read)
+	if err != nil {
+		return nil, nil, err
+	}
+	rs, err := resolve.New(r, inv)
+	if err != nil {
+		return nil, nil, err
+	}
+	return inv.Symbols, rs, nil
+}

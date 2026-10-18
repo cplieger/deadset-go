@@ -109,14 +109,9 @@ func (k RefKind) String() string {
 // loaded consumer.
 type Reference struct {
 	// From is the declaration of the target that encloses the referencing
-	// identifier. A declaration the inventory does not hold makes no From, so
-	// every reference a consumer makes carries none: the declarations a run
-	// reasons about are the target's, and a consumer's are not enumerated.
-	//
-	// An import is the one reference a file makes rather than a declaration, and
-	// its From is that file's own symbol. An import belongs to the file and
-	// serves every declaration in it at once, so no declaration is the one that
-	// made it, and the file and package kinds are what read those edges.
+	// identifier; a consumer's reference has none, its declarations are not
+	// enumerated. An import's From is its file's own symbol: it serves every
+	// declaration of the file at once, and the file and package kinds read it.
 	From inventory.SymbolID
 	To   inventory.SymbolID
 
@@ -135,19 +130,69 @@ type Reference struct {
 	// does not.
 	Site inventory.Offset
 
+	// Carriers are the declarations that deleting with their writes deletes the
+	// referencing identifier, innermost first: From where the identifier is in
+	// From's own declared type, then each declaration a write stores into whose
+	// statement or element (the write's Span) holds the identifier. It is empty
+	// elsewhere and on a consumer's reference.
+	Carriers []inventory.SymbolID
+
 	// Pos is the referencing identifier's rendered position, relative to the root
 	// of the module that made the reference, with forward slashes and a Column
 	// counting UTF-16 code units. A consumer's reference is therefore read
 	// together with Consumer, which names the module the path is relative to.
 	Pos token.Position
 
-	// Config is the place in the matrix of the build configuration the reference
-	// was seen in. One walk fills none of it, because a walk is of one
-	// configuration; [Merge] is what fills it.
-	Config int
-	Kind   RefKind
-	Via    via
-	Test   bool // the referencing file is a test file
+	// Configs is the set of the matrix's build configurations the reference was
+	// seen in. One walk fills none of it, because a walk is of one configuration;
+	// the matrix merge sets each configuration's own, and the graph of the matrix
+	// holds one reference several configurations make once, with their union.
+	Configs inventory.ConfigSet
+	Kind    RefKind
+	Via     via
+	Test    bool // the referencing file is a test file
+}
+
+// Selects reports whether a reference of this kind reaches a method through the
+// value it is written on: a call, and a selection that takes the method as a value.
+// A selection through an interface value names the method the interface declares
+// rather than the method of the concrete type behind it.
+func (k RefKind) Selects() bool { return k == RefCall || k == RefRead }
+
+// Mode is the run's reference mode: which references a sweep counts, and how a
+// reference from a loaded consumer's test file is classified. The composition root
+// decides it once per run and hands it to every stage that reads it, so no two
+// stages of one run answer about different reference sets.
+type Mode struct {
+	// Production drops the references test files made and leaves the test roots
+	// out of the reachability seed; a test root itself stays live. A mark or an
+	// exemption still seeds a closure over every reference, but the symbol a
+	// retained test declaration names directly counts production references alone.
+	Production bool
+
+	// ConsumerTestsProduction classifies a reference from a loaded consumer's test
+	// file as production rather than test. It is a classification, not a filter: it
+	// decides the split a candidate reports as well as what a production sweep counts.
+	ConsumerTestsProduction bool
+}
+
+// TestReference reports whether the mode classifies one reference as a test file's,
+// which a loaded consumer's test reference is not where the mode counts it as
+// production.
+func (m Mode) TestReference(r *Reference) bool {
+	return r.Test && (r.Consumer == "" || !m.ConsumerTestsProduction)
+}
+
+// Uncounted reports whether the mode counts one reference as no use at all, which a
+// production mode does for every test reference.
+func (m Mode) Uncounted(r *Reference) bool {
+	return m.Production && m.TestReference(r)
+}
+
+// CountsConsumerTests reports whether the mode counts a loaded consumer's test-file
+// reference as a call from outside the target.
+func (m Mode) CountsConsumerTests() bool {
+	return !m.Production || m.ConsumerTestsProduction
 }
 
 // References walks each source file of one configuration once ([inventory.Sources]),
@@ -215,6 +260,7 @@ type referencePass struct {
 	file        inventory.SymbolID        // the symbol of the file being walked, empty outside the inventory
 	syntax      *ast.File                 // the file being walked
 	converted   map[*types.Var]types.Type // per file, the type a typeless variable's conversion initializer names
+	annotated   inventory.SymbolID        // the declaration whose declared type is being walked, empty elsewhere
 	err         error
 	refs        []Reference
 	testFiles   int
@@ -245,15 +291,10 @@ func newReferencePass(r *load.Result, rs *resolve.Resolver, symbols []inventory.
 }
 
 // walkConsumer walks every package of one loaded consumer, recording the
-// references it makes to the target's declarations.
-//
-// The consumer's own declarations are not the subject of anything, so no
-// declaration of the walk's symbol set encloses them and every reference the
-// consumer makes carries no From. The positions the consumer's files render
-// against are the consumer's own root, which is the module directory the scope
-// named, so a consumer outside the target's tree renders as readily as one inside
-// it. The renderer is the resolver's, so a consumer's file renders one way in every
-// pass.
+// references it makes to the target's declarations, each with no From. Its files
+// render against the consumer's own root, the module directory the scope named,
+// through the resolver's renderer, so a consumer's file renders one way in every
+// pass wherever it is.
 func (p *referencePass) walkConsumer(at int, consumer *load.Consumer) error {
 	p.consumer = consumer.ID
 	p.at = p.resolve.Consumer(at)
@@ -301,6 +342,7 @@ func (p *referencePass) walkFile(pkg *packages.Package, f *ast.File) error {
 		p.supportFile++
 	}
 
+	first := len(p.refs)
 	for _, d := range f.Decls {
 		switch d := d.(type) {
 		case *ast.FuncDecl:
@@ -313,7 +355,75 @@ func (p *referencePass) walkFile(pkg *packages.Package, f *ast.File) error {
 			return p.err
 		}
 	}
+	carryWrites(p.refs[first:])
 	return nil
+}
+
+// carryWrites appends to the Carriers of every reference of one file the
+// declaration each write stores into whose Span holds the reference, innermost
+// first. Spans nest or are disjoint, so one pass over the sites in order, with the
+// spans holding the current site open, finds them all.
+func carryWrites(refs []Reference) {
+	writes := writesBySpan(refs)
+	if len(writes) == 0 {
+		return
+	}
+	var open []int
+	next := 0
+	for _, i := range bySite(refs) {
+		r := &refs[i]
+		for ; next < len(writes); next++ {
+			span := refs[writes[next]].Span
+			if c := strings.Compare(span.File, r.Site.File); c > 0 || (c == 0 && span.From > r.Site.At) {
+				break
+			}
+			open = append(open, writes[next])
+		}
+		open = slices.DeleteFunc(open, func(w int) bool { return !refs[w].Span.Holds(r.Site) })
+		for _, w := range slices.Backward(open) {
+			if to := refs[w].To; to != r.To && !slices.Contains(r.Carriers, to) {
+				r.Carriers = append(r.Carriers, to)
+			}
+		}
+	}
+}
+
+// writesBySpan is the place of every write with a span, outermost first: by file,
+// then by where the span starts, then the longer first.
+func writesBySpan(refs []Reference) []int {
+	var writes []int
+	for i := range refs {
+		if refs[i].Span != (inventory.SourceRange{}) {
+			writes = append(writes, i)
+		}
+	}
+	slices.SortFunc(writes, func(a, b int) int {
+		x, y := refs[a].Span, refs[b].Span
+		return cmp.Or(strings.Compare(x.File, y.File), cmp.Compare(x.From, y.From), cmp.Compare(y.To, x.To))
+	})
+	return writes
+}
+
+// bySite is the place of every reference, in the order of the sites they are
+// written at.
+func bySite(refs []Reference) []int {
+	sites := make([]int, len(refs))
+	for i := range sites {
+		sites[i] = i
+	}
+	slices.SortStableFunc(sites, func(a, b int) int {
+		x, y := refs[a].Site, refs[b].Site
+		return cmp.Or(strings.Compare(x.File, y.File), cmp.Compare(x.At, y.At))
+	})
+	return sites
+}
+
+// inspectAnnotation walks the declared type of one declaration, whose references
+// the declaration carries.
+func (p *referencePass) inspectAnnotation(node ast.Node, id inventory.SymbolID, except ast.Node) {
+	p.annotated = id
+	p.inspectExcept(node, id, except)
+	p.annotated = ""
 }
 
 // walkFunc walks one function or method. Its receiver, its signature and its
@@ -419,21 +529,11 @@ func (p *referencePass) repeatedUse(ident *ast.Ident, ids []inventory.SymbolID, 
 }
 
 // walkImport records the reference one import declaration makes: a read of the
-// imported package's own symbol, at the import spec, from the file the import is
-// written in.
-//
-// The From is the file rather than a declaration because an import belongs to the
-// file: it is written once and serves every declaration below it, so no
-// declaration is the one that made it, and attributing it to the first
-// declaration of the file would make that declaration's deletion look like the
-// import's. The file and package kinds are what read these edges.
-//
-// The reference the language itself offers is not usable here: an import resolves
-// to a package name declared at the import spec, a position no symbol of the
-// inventory is written at, so the identifier walk records nothing and the rule has
-// to be stated. Nothing is recorded for a package the inventory holds no symbol
-// for, which every dependency is, nor for a consumer's import, whose file the
-// inventory does not hold either.
+// imported package's own symbol, at the import spec, from the file (an import
+// serves every declaration of it). The identifier walk records nothing here, the
+// import resolving to a package name no inventory symbol is written at. Nothing is
+// recorded for a package the inventory holds no symbol for, every dependency, nor
+// for a consumer's import.
 func (p *referencePass) walkImport(spec *ast.ImportSpec) {
 	if p.file == "" {
 		return
@@ -483,7 +583,7 @@ func (p *referencePass) walkValueSpec(s *ast.ValueSpec) {
 		}
 		ids = append(ids, id)
 		if s.Type != nil {
-			p.inspect(s.Type, id)
+			p.inspectAnnotation(s.Type, id, nil)
 		}
 	}
 	switch {
@@ -538,7 +638,7 @@ func (p *referencePass) walkField(f *ast.Field) {
 		if !ok {
 			return
 		}
-		p.inspectExcept(f.Type, id, inner)
+		p.inspectAnnotation(f.Type, id, inner)
 		if members == nil {
 			continue
 		}
@@ -784,16 +884,11 @@ func embedsComparable(constraint types.Type) bool {
 	return false
 }
 
-// readFields records one read of every field of one struct, and of every field
-// those reach by value, at pos.
-//
-// Equality over a struct compares every field, and a map key, a switch tag and a
-// switch case are equality, so a field that decides whether two values are equal
-// carries information whatever else does or does not read it. The walk follows a
-// field of struct type and an array of them, because those are compared field by
-// field too. It stops anywhere else: a pointer field is compared by address rather
-// than by what it points at, and the dynamic type of an interface field is not
-// known here. A struct cannot hold itself by value, so the walk ends.
+// readFields records one read at pos of every field of one struct and of every
+// field those reach by value: equality (a map key, a switch tag and case included)
+// compares every field. It follows struct and array fields, compared field by field
+// too, and stops at a pointer, compared by address, and an interface, whose dynamic
+// type is unknown here. A struct cannot hold itself by value, so the walk ends.
 func (p *referencePass) readFields(st *types.Struct, held map[inventory.SymbolID]bool, encl inventory.SymbolID, pos token.Pos, rule via) {
 	for field := range st.Fields() {
 		if to, ok := p.resolve.Object(field); ok && !held[to] {
@@ -1223,15 +1318,11 @@ func (p *referencePass) markDelete(call *ast.CallExpr, span ast.Node) {
 	p.markIndexed(call.Args[0], span)
 }
 
-// markAppendBack records the store the append-back idiom performs. In
-// x = append(x, v...) and in c.f = append(c.f, v...) the read inside the call is
-// how the store is written rather than a use of what the collection holds, so
-// both sides write it. An append whose result lands anywhere else, c.f included,
-// reads its first argument.
-//
-// The two sides are matched by the name chain they are written as, which is what
-// the language resolves them by: the call is evaluated in the scope the
-// assignment is written in, so one spelling names one collection there.
+// markAppendBack records the store the append-back idiom performs: in
+// x = append(x, v...) and c.f = append(c.f, v...) the read inside the call is how
+// the store is written, so both sides write it; an append landing anywhere else
+// reads its first argument. The sides are matched by the name chain they are
+// spelled as, which in one assignment's scope names one collection.
 func (p *referencePass) markAppendBack(s *ast.AssignStmt) {
 	if len(s.Lhs) != 1 || len(s.Rhs) != 1 {
 		return
@@ -1335,6 +1426,9 @@ func (p *referencePass) add(from, to inventory.SymbolID, pos token.Pos, kind Ref
 	}
 	if node := p.spans[pos]; node != nil && kind == RefWrite && p.consumer == "" {
 		r.Span = p.at.Range(node)
+	}
+	if p.annotated != "" && from == p.annotated && p.consumer == "" {
+		r.Carriers = []inventory.SymbolID{from}
 	}
 	p.refs = append(p.refs, r)
 }
