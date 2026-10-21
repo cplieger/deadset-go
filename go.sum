@@ -1,5 +1,5 @@
-github.com/cplieger/atomicfile/v4 v4.2.0-dev.1 h1:lixaaBswMeINmVqdDCLOjtrbP8Sv4A//sEZc5Job0CY=
-github.com/cplieger/atomicfile/v4 v4.2.0-dev.1/go.mod h1:hwmPt/GCOA/SHUX3hrxNRqdhQeaC2P1Ku1FxpnOi3fA=
+github.com/cplieger/atomicfile/v4 v4.2.0 h1:hbruc99AEUNLHzJWSS34NsR6k6vjGYr6uL3TRiPGcdw=
+github.com/cplieger/atomicfile/v4 v4.2.0/go.mod h1:hwmPt/GCOA/SHUX3hrxNRqdhQeaC2P1Ku1FxpnOi3fA=
 github.com/cplieger/deadset-spec/v8 v8.0.0-dev.22 h1:AS5u7fYrLpaFOOt/W3T1+5aN1Q91ORWrnBBLZzBGlY4=
 github.com/cplieger/deadset-spec/v8 v8.0.0-dev.22/go.mod h1:BQEsssrD1/MeJQU7+Z+cXwvoBCUJQRLkPg+oHn1/qY4=
 github.com/cplieger/jsoncap/v2 v2.1.0-dev.1 h1:sU0njpdWlADSt5KJy4eU4LKjN89igwzc8xNXQfY/tmI=
