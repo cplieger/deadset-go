@@ -1,6 +1,7 @@
 package exempt
 
 import (
+	"cmp"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -20,18 +21,14 @@ import (
 // the declaration holding the site, and an assertion's is a use by the asserted
 // type, so the assertion and the methods fall with a type only dead code builds. A
 // method satisfying two interfaces at two sites is retained once per site.
-func InterfaceSatisfactionDetector(in *Input) ([]Exemption, error) {
-	sites, err := programConversions(in)
-	if err != nil {
-		return nil, err
-	}
-	sites = append(slices.Clip(sites), publishedConversions(in)...)
-	spans := declarationSpans(in)
-	spans.outside = newOutsideAssertions(in)
+func InterfaceSatisfactionDetector(in *Program) ([]Exemption, error) {
+	sites := slices.Concat(in.programConversions, in.published)
+	scan := &satisfactionScan{outside: newOutsideAssertions(in)}
 
 	var retained []Exemption
+	var err error
 	for i := range sites {
-		retained, err = spans.retain(in, &sites[i], retained)
+		retained, err = scan.retain(in, &sites[i], retained)
 		if err != nil {
 			return nil, err
 		}
@@ -41,89 +38,71 @@ func InterfaceSatisfactionDetector(in *Input) ([]Exemption, error) {
 	return slices.CompactFunc(retained, sameExemption), nil
 }
 
-// span is one top-level declaration's source range and the symbol it declares.
+// span is one satisfaction assertion's value range and the blank variable the
+// inventory holds for it.
 type span struct {
 	id       inventory.SymbolID
 	from, to token.Pos
 }
 
-// spans indexes, per file, the top-level declarations and the satisfaction
-// assertions: a blank variable declared with a type and one value.
-type spans struct {
-	outside      *outsideAssertions
-	declarations []span
-	assertions   []span
-}
-
-// declarationSpans reads the spans of every file the configuration compiles.
-func declarationSpans(in *Input) *spans {
-	held := &spans{}
+// satisfactionAssertions is the value range of every satisfaction assertion of the
+// configuration's files: a blank variable declared with a type and one value.
+func satisfactionAssertions(in *Program) []span {
+	var held []span
 	for _, p := range in.Facts.Packages() {
 		for _, f := range in.Facts.Files(p) {
-			for _, decl := range f.Decls {
-				held.add(in, decl)
+			for _, one := range valueSpecs(f) {
+				if len(one.Names) != 1 || one.Names[0].Name != "_" || one.Type == nil || len(one.Values) != 1 {
+					continue
+				}
+				if id, ok := in.Resolve.At(one.Names[0].Pos()); ok {
+					held = append(held, span{from: one.Values[0].Pos(), to: one.Values[0].End(), id: id})
+				}
 			}
 		}
 	}
 	return held
 }
 
-// add records one top-level declaration.
-func (s *spans) add(in *Input, decl ast.Decl) {
-	switch d := decl.(type) {
-	case *ast.FuncDecl:
-		if id, ok := in.Resolve.At(d.Name.Pos()); ok {
-			s.declarations = append(s.declarations, span{from: d.Pos(), to: d.End(), id: id})
-		}
-	case *ast.GenDecl:
-		for _, spec := range d.Specs {
-			s.addSpec(in, spec)
+// valueSpecs is every value specification of one file's top-level declarations.
+func valueSpecs(f *ast.File) []*ast.ValueSpec {
+	var held []*ast.ValueSpec
+	for _, decl := range f.Decls {
+		if group, isGroup := decl.(*ast.GenDecl); isGroup {
+			for _, spec := range group.Specs {
+				if one, isValue := spec.(*ast.ValueSpec); isValue {
+					held = append(held, one)
+				}
+			}
 		}
 	}
+	return held
 }
 
-// addSpec records one specification of a declaration group.
-func (s *spans) addSpec(in *Input, spec ast.Spec) {
-	switch one := spec.(type) {
-	case *ast.TypeSpec:
-		if id, ok := in.Resolve.At(one.Name.Pos()); ok {
-			s.declarations = append(s.declarations, span{from: one.Pos(), to: one.End(), id: id})
-		}
-	case *ast.ValueSpec:
-		if len(one.Names) == 1 && one.Names[0].Name == "_" && one.Type != nil && len(one.Values) == 1 {
-			if id, ok := in.Resolve.At(one.Names[0].Pos()); ok {
-				s.assertions = append(s.assertions, span{from: one.Values[0].Pos(), to: one.Values[0].End(), id: id})
-			}
-			return
-		}
-		for _, name := range one.Names {
-			if id, ok := in.Resolve.At(name.Pos()); ok && name.Name != "_" {
-				s.declarations = append(s.declarations, span{from: one.Pos(), to: one.End(), id: id})
-				return
-			}
-		}
-	}
+// satisfactionScan is the interface-satisfaction class over one configuration.
+type satisfactionScan struct {
+	outside *outsideAssertions
 }
 
 // holderOf is the declaration whose use one conversion is: the asserted type for a
-// satisfaction assertion, with the assertion itself, and otherwise the top-level
-// declaration that holds the site. A site derived from others is held by the
-// declaration of each [facts.Conversion.Held] position ([spans.holdersAt]). Empty
-// where no declaration of the inventory does.
-func (s *spans) holderOf(in *Input, c *facts.Conversion) (holder inventory.SymbolID, coHolders []inventory.SymbolID, asserted inventory.SymbolID) {
+// satisfaction assertion, with the assertion itself, and otherwise the declaration
+// that holds the site ([resolve.Resolver.Holder]). A site derived from others is
+// held by the declaration of each [facts.Conversion.Held] position
+// ([Program.holdersAt]). Empty where no declaration of the inventory does.
+func (in *Program) holderOf(c *facts.Conversion) (holder inventory.SymbolID, coHolders []inventory.SymbolID, asserted inventory.SymbolID) {
 	if len(c.Held) == 0 {
-		holder, asserted = s.declarationAt(in, c, c.Site)
+		holder, asserted = in.declarationAt(c, c.Site)
 		return holder, nil, asserted
 	}
-	holder, coHolders = s.holdersAt(in, c, c.Held)
+	holder, coHolders = in.holdersAt(c, c.Held)
 	return holder, coHolders, ""
 }
 
 // holdersAt is the declaration holding each of several positions of one conversion,
 // each once: the first the holder, the rest its co-holders, sorted.
-func (s *spans) holdersAt(in *Input, c *facts.Conversion, positions []token.Pos) (holder inventory.SymbolID, coHolders []inventory.SymbolID) {
+func (in *Program) holdersAt(c *facts.Conversion, positions []token.Pos) (holder inventory.SymbolID, coHolders []inventory.SymbolID) {
 	for _, at := range positions {
-		one, _ := s.declarationAt(in, c, at)
+		one, _ := in.declarationAt(c, at)
 		switch {
 		case one == "", one == holder, slices.Contains(coHolders, one):
 		case holder == "":
@@ -138,27 +117,22 @@ func (s *spans) holdersAt(in *Input, c *facts.Conversion, positions []token.Pos)
 
 // declarationAt is the declaration holding one position of a conversion, and the
 // satisfaction assertion where the position is in one.
-func (s *spans) declarationAt(in *Input, c *facts.Conversion, at token.Pos) (holder, asserted inventory.SymbolID) {
-	for _, a := range s.assertions {
+func (in *Program) declarationAt(c *facts.Conversion, at token.Pos) (holder, asserted inventory.SymbolID) {
+	for _, a := range in.assertions {
 		if a.from <= at && at < a.to {
 			return typeDeclaration(in, c.From), a.id
 		}
 	}
-	for _, d := range s.declarations {
-		if d.from <= at && at < d.to {
-			return d.id, ""
-		}
-	}
-	return "", ""
+	holder, _ = in.Resolve.Holder(at)
+	return holder, ""
 }
 
 // retain appends what one conversion site retains: the methods of the concrete type
 // that answer the interface, the satisfaction assertion the site is, if it is one,
 // and the methods by which the type implements an interface the source of an outside
 // package asserts: the interface's own package, and for an argument the callee's.
-func (s *spans) retain(in *Input, c *facts.Conversion, retained []Exemption) ([]Exemption, error) {
-	generic := genericOrigin(c.From)
-	if generic && !matchesByArity(c.From, c.To) || !generic && !types.Implements(c.From, c.To) {
+func (s *satisfactionScan) retain(in *Program, c *facts.Conversion, retained []Exemption) ([]Exemption, error) {
+	if !facts.Satisfies(c.From, c.To) {
 		return retained, nil
 	}
 	methods := satisfying(c.From, c.To)
@@ -169,7 +143,7 @@ func (s *spans) retain(in *Input, c *facts.Conversion, retained []Exemption) ([]
 	if err != nil {
 		return nil, err
 	}
-	holder, coHolders, asserted := s.holderOf(in, c)
+	holder, coHolders, asserted := in.holderOf(c)
 	if asserted != "" && holder != "" {
 		retained = append(retained, Exemption{
 			ID: asserted, Class: string(vocab.InterfaceSatisfaction), Consumer: consumer, Site: site,
@@ -183,7 +157,7 @@ func (s *spans) retain(in *Input, c *facts.Conversion, retained []Exemption) ([]
 	for _, m := range methods {
 		retained = retainAnswer(in, &m, &held, retained)
 	}
-	if generic {
+	if facts.Uninstantiated(c.From) {
 		return retained, nil
 	}
 	held.Detail = ""
@@ -198,7 +172,7 @@ func (s *spans) retain(in *Input, c *facts.Conversion, retained []Exemption) ([]
 
 // retainAnswer appends what one answering method retains as base states it: the
 // method, and each embedded field it is promoted through.
-func retainAnswer(in *Input, m *answer, base *Exemption, retained []Exemption) []Exemption {
+func retainAnswer(in *Program, m *answer, base *Exemption, retained []Exemption) []Exemption {
 	held := *base
 	held.Via, _ = in.Resolve.Object(m.answers)
 	for _, member := range append([]types.Object{m.method}, fieldObjects(m.through)...) {
@@ -226,7 +200,7 @@ var errorInterface, _ = types.Universe.Lookup("error").Type().Underlying().(*typ
 // by which the type implements an interface holding error's method that a package
 // outside the program declares and its own source asserts ([outsideAssertions.ofError]),
 // the methods error already retained excepted.
-func (s *spans) retainErrorAssertions(in *Input, c *facts.Conversion, methods []answer, held *Exemption, retained []Exemption) []Exemption {
+func (s *satisfactionScan) retainErrorAssertions(in *Program, c *facts.Conversion, methods []answer, held *Exemption, retained []Exemption) []Exemption {
 	for _, one := range s.outside.ofError(c.From) {
 		if slices.ContainsFunc(methods, func(m answer) bool { return m.method == one.method }) {
 			continue
@@ -245,7 +219,7 @@ func (s *spans) retainErrorAssertions(in *Input, c *facts.Conversion, methods []
 // outsidePackages are the packages outside the program whose assertions one site
 // answers: the interface's own package, and an argument's callee's, one hop, since a
 // package the callee hands the value on to is not read.
-func (s *spans) outsidePackages(c *facts.Conversion) []*types.Package {
+func (s *satisfactionScan) outsidePackages(c *facts.Conversion) []*types.Package {
 	pkg, asserts := s.outside.of(c.Interface)
 	var pkgs []*types.Package
 	if asserts {
@@ -261,7 +235,7 @@ func (s *spans) outsidePackages(c *facts.Conversion) []*types.Package {
 // interface the source of one outside package asserts ([outsideAssertions]), the
 // methods the converted-to interface already retained excepted, each recorded as
 // held records it.
-func (s *spans) retainOutside(in *Input, c *facts.Conversion, pkg *types.Package, methods []answer, held *Exemption, retained []Exemption) []Exemption {
+func (s *satisfactionScan) retainOutside(in *Program, c *facts.Conversion, pkg *types.Package, methods []answer, held *Exemption, retained []Exemption) []Exemption {
 	detail := "satisfies what " + pkg.Path() + " asserts through " + c.Name
 	for _, method := range s.outside.methods(c.From, pkg) {
 		if slices.ContainsFunc(methods, func(m answer) bool { return m.method == method }) {
@@ -304,16 +278,12 @@ type outsideKey struct {
 	pkg string
 }
 
-// newOutsideAssertions answers over one input.
-func newOutsideAssertions(in *Input) *outsideAssertions {
-	program := make(map[string]bool)
-	for _, p := range in.Facts.Program() {
-		program[p.PkgPath] = true
-	}
+// newOutsideAssertions answers over one program.
+func newOutsideAssertions(in *Program) *outsideAssertions {
 	return &outsideAssertions{
 		resolve:   in.Resolve,
-		program:   program,
-		assert:    assertableOf(in),
+		program:   programPaths(in),
+		assert:    in.assert,
 		methodsOf: make(map[outsideKey][]types.Object),
 		names:     make(map[*types.Named]map[string]bool),
 		errorsOf:  make(map[string][]errorAnswer),
@@ -362,31 +332,15 @@ func (o *outsideAssertions) errorHolders() []*types.Named {
 		return *o.holding
 	}
 	var found []*types.Named
-	for _, pkg := range outsideClosure(o.assert.in) {
-		scope := pkg.Scope()
-		for _, name := range scope.Names() {
-			if named, holds := errorHolder(scope.Lookup(name)); holds {
+	for _, pkg := range o.assert.in.outside {
+		for _, named := range facts.DeclaredInterfaces(pkg) {
+			if iface, _ := named.Underlying().(*types.Interface); iface.IsMethodSet() && types.Implements(iface, errorInterface) {
 				found = append(found, named)
 			}
 		}
 	}
 	o.holding = &found
 	return found
-}
-
-// errorHolder is the defined type one package-level object declares, where it is a
-// non-generic interface whose method set holds error's.
-func errorHolder(obj types.Object) (*types.Named, bool) {
-	typeName, isType := obj.(*types.TypeName)
-	if !isType || typeName.IsAlias() {
-		return nil, false
-	}
-	named, isNamed := typeName.Type().(*types.Named)
-	if !isNamed || named.TypeParams().Len() > 0 {
-		return nil, false
-	}
-	iface, isInterface := named.Underlying().(*types.Interface)
-	return named, isInterface && iface.IsMethodSet() && types.Implements(iface, errorInterface)
 }
 
 // of is the package that declares one interface a site names, where that interface
@@ -437,7 +391,7 @@ func definedType(t types.Type) (*types.Named, bool) {
 
 // typeDeclaration is the declaration of a defined type, or of the type a pointer
 // points to.
-func typeDeclaration(in *Input, t types.Type) inventory.SymbolID {
+func typeDeclaration(in *Program, t types.Type) inventory.SymbolID {
 	if pointer, ok := t.(*types.Pointer); ok {
 		t = pointer.Elem()
 	}
@@ -518,4 +472,58 @@ func byHeldSymbol(a, b Exemption) int {
 func sameExemption(a, b Exemption) bool {
 	return a.ID == b.ID && a.Class == b.Class && a.Consumer == b.Consumer && a.Site == b.Site && a.Detail == b.Detail &&
 		a.Holder == b.Holder && slices.Equal(a.CoHolders, b.CoHolders) && a.Via == b.Via
+}
+
+// Uncalled is interface satisfaction's rule for an interface method no reference
+// calls or selects through the interface: where the method is implemented, of a
+// production file and not fixed whatever calls it ([facts.InterfaceMethod.Fixed]),
+// it holds none of its implementations, each of which is instead a use by the method
+// and falls with the method's dead component. A method a test calls keeps its
+// implementations, which the test reaches through it.
+type Uncalled struct {
+	methods map[inventory.SymbolID]bool
+
+	// Uses is a use of each declaration implementing an uncalled method by the
+	// method, ordered by method, then by implementor.
+	Uses []Use
+}
+
+// Use is one use the rule states: To falls with From.
+type Use struct {
+	From, To inventory.SymbolID
+}
+
+// UncalledMethods decides the rule over one matrix: what every configuration holds
+// about each interface method, every reference, and whether a declaration is one of
+// a production file the matrix holds.
+func UncalledMethods(methods map[inventory.SymbolID]*facts.InterfaceMethod, refs []facts.Reference, production func(inventory.SymbolID) bool) Uncalled {
+	called := make(map[inventory.SymbolID]bool)
+	for i := range refs {
+		if refs[i].Kind.Selects() {
+			called[refs[i].To] = true
+		}
+	}
+	u := Uncalled{methods: make(map[inventory.SymbolID]bool)}
+	for id, m := range methods {
+		if !production(id) || called[id] || !m.Implemented() || m.Fixed() {
+			continue
+		}
+		u.methods[id] = true
+		for _, implementor := range m.Implementors {
+			u.Uses = append(u.Uses, Use{From: id, To: implementor})
+		}
+	}
+	slices.SortFunc(u.Uses, func(a, b Use) int {
+		return cmp.Or(strings.Compare(string(a.From), string(b.From)), strings.Compare(string(a.To), string(b.To)))
+	})
+	return u
+}
+
+// Withdrawn is the exemptions with every interface-satisfaction retention through an
+// uncalled method removed: the implementation falls with that method rather than
+// being held by it.
+func (u Uncalled) Withdrawn(exemptions []Exemption) []Exemption {
+	return slices.DeleteFunc(slices.Clone(exemptions), func(e Exemption) bool {
+		return e.Class == string(vocab.InterfaceSatisfaction) && e.Via != "" && u.methods[e.Via]
+	})
 }

@@ -1,0 +1,35 @@
+Two pages call one template inside a script element. The template ends in
+another JavaScript context than it starts in, so html/template escapes what
+follows the call by whichever page it escapes first, and here the page writes
+its value as JSON whole. The set reads every field however often it is analyzed.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- a.html --
+<script>{{template "t" .}}</script>
+-- page.html --
+<p>{{.Name}}</p><script>{{template "t" .}}/{{.}}/</script>
+-- t.html --
+{{define "t"}}x{{end}}
+-- app.go --
+package main
+
+import (
+	"html/template"
+	"os"
+)
+
+type Page struct {
+	Name   string
+	Secret string
+}
+
+var pages = template.Must(template.ParseFiles("a.html", "page.html", "t.html"))
+
+func main() {
+	_ = pages.ExecuteTemplate(os.Stdout, "page.html", Page{Name: "n", Secret: "s"})
+}

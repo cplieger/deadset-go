@@ -1,0 +1,53 @@
+ParseFS parses the files a pattern matches in the order fs.Glob lists them,
+sorted by name, whatever order the //go:embed line lists its patterns in. Two
+files of each set define one template, and the one sorting last, which writes
+its value as JSON whole, replaces the other. Each set reads every field.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- a/x.html --
+{{define "content"}}<p>{{.Name}}</p>{{end}}
+-- b/y.html --
+{{define "content"}}<script>var s = {{.}};</script>{{end}}
+-- web/emails/index.html --
+<p>{{.Name}}</p>
+-- web/pages/index.html --
+<script>var state = {{.}};</script>
+-- app.go --
+package main
+
+import (
+	"embed"
+	"html/template"
+	"os"
+)
+
+//go:embed b/*.html a/*.html
+var parts embed.FS
+
+//go:embed web/pages web/emails
+var web embed.FS
+
+type Part struct {
+	Name   string
+	Secret string
+}
+
+type Page struct {
+	Name   string
+	Secret string
+}
+
+var (
+	partSet = template.Must(template.ParseFS(parts, "*/*.html"))
+	pageSet = template.Must(template.ParseFS(web, "web/*/index.html"))
+)
+
+func main() {
+	_ = partSet.ExecuteTemplate(os.Stdout, "content", Part{Name: "n", Secret: "s"})
+	_ = pageSet.ExecuteTemplate(os.Stdout, "index.html", Page{Name: "n", Secret: "s"})
+}

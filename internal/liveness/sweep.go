@@ -8,7 +8,6 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
-	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // Relation names the liveness relation that decided a symbol. String returns the
@@ -187,15 +186,6 @@ func (g *Graph) Sweep(p *SweepPolicy) Result {
 		r.Retained = s.retained(s.judge(without), all)
 	}
 	return r
-}
-
-// WithoutUncalled is the exemptions with every interface-satisfaction retention
-// through an interface method the graph's implementation uses come from withdrawn:
-// the implementation falls with that method rather than being held by it.
-func (g *Graph) WithoutUncalled(exemptions []exempt.Exemption) []exempt.Exemption {
-	return slices.DeleteFunc(slices.Clone(exemptions), func(e exempt.Exemption) bool {
-		return e.Class == string(vocab.InterfaceSatisfaction) && e.Via != "" && g.uncalled[e.Via]
-	})
 }
 
 // using is the graph with the uses the policy's held exemptions state added, and

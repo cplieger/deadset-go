@@ -6,37 +6,11 @@ import (
 	"slices"
 )
 
-// selfEncoders are, per encoding direction, the methods by which a type encodes
-// itself, so the encoder calls the method and walks no field of the type
-// (https://pkg.go.dev/encoding/json#Marshal, https://pkg.go.dev/encoding/xml#Marshal,
-// https://pkg.go.dev/encoding/gob).
-var selfEncoders = map[methodReach][]selfEncoder{
-	reachJSONEncode: {{marshalJSON, 0, 2}, {"MarshalJSONTo", 1, 1}, {marshalText, 0, 2}},
-	reachXMLEncode:  {{"MarshalXML", 2, 1}, {marshalText, 0, 2}},
-	reachGobEncode:  {{"GobEncode", 0, 2}, {"MarshalBinary", 0, 2}},
-}
-
 // selfEncoder is one method an encoder calls instead of walking fields, with the
 // parameter and result counts its signature has, the last result an error.
 type selfEncoder struct {
 	name            string
 	params, results int
-}
-
-// selfEncodedReach is [encodingFlow.encoderReach] for destinations that are standard
-// encoders of the directions given, with the types that encode themselves in every one
-// of them, which the walk does not enter.
-func (f *encodingFlow) selfEncodedReach(t types.Type, directions methodReach) (found []*types.Named, encoded map[string]bool) {
-	key := selfEncodingKey{t: t, directions: directions}
-	if held, known := f.selfEncoded[key]; known {
-		return held.found, held.encoded
-	}
-	found, encoded = f.computeSelfEncodedReach(t, directions)
-	if f.selfEncoded == nil {
-		f.selfEncoded = make(map[selfEncodingKey]selfEncodedTypes)
-	}
-	f.selfEncoded[key] = selfEncodedTypes{found: found, encoded: encoded}
-	return found, encoded
 }
 
 // selfEncodingKey is one walked type and the encoding directions of its walk.
@@ -45,24 +19,28 @@ type selfEncodingKey struct {
 	directions methodReach
 }
 
-// selfEncodedTypes is one answer of [encodingFlow.selfEncodedReach].
+// selfEncodedTypes is what a walk by standard encoders reads of one type: the types
+// it reads, and by spelling the ones among them that encode themselves in every
+// direction of the walk, which the walk does not enter.
 type selfEncodedTypes struct {
 	encoded map[string]bool
 	found   []*types.Named
 }
 
-// computeSelfEncodedReach answers [encodingFlow.selfEncodedReach] once.
-func (f *encodingFlow) computeSelfEncodedReach(t types.Type, directions methodReach) (found []*types.Named, encoded map[string]bool) {
-	encoded = make(map[string]bool)
+// selfEncodedReach is [encodingFlow.encoderReach] for destinations that are standard
+// encoders of the directions given, read once per type by [encodingFlow.index] after
+// the type's own walk.
+func (f *encodingFlow) selfEncodedReach(t types.Type, directions methodReach) selfEncodedTypes {
+	encoded := make(map[string]bool)
 	for key, met := range f.addressing(t) {
 		if encodesItself(met, directions) {
 			encoded[key] = true
 		}
 	}
 	if len(encoded) == 0 {
-		return f.encoderReach(t), nil
+		return selfEncodedTypes{found: f.walked[t]}
 	}
-	found = f.encodedTypes(t)
+	found := f.encodedTypes(t)
 	seen := make(map[string]bool, len(found))
 	for _, named := range found {
 		seen[types.TypeString(named, nil)] = true
@@ -78,7 +56,7 @@ func (f *encodingFlow) computeSelfEncodedReach(t types.Type, directions methodRe
 			}
 		}
 	}
-	return found, encoded
+	return selfEncodedTypes{found: found, encoded: encoded}
 }
 
 // meeting is one defined type a walk of a value meets, and whether it meets a value of
@@ -142,7 +120,7 @@ func (f *encodingFlow) beneath(cur walkStep) []walkStep {
 	case *types.Struct:
 		var next []walkStep
 		for field := range u.Fields() {
-			for _, stored := range f.stored.of(field) {
+			for _, stored := range f.graph.stored.of(field) {
 				next = append(next, walkStep{t: stored})
 			}
 			if !types.IsInterface(field.Type()) {

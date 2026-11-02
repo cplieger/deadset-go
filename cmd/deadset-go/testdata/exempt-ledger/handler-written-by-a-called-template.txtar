@@ -1,0 +1,48 @@
+Each page calls a template defined in another file of its set. html/template
+escapes the called template where the call sits: one writes an event handler into
+the start tag that calls it, the other leaves a start tag open that its caller
+fills with a handler. The engine encodes the value whole in each handler, so each
+set reads every field of the value, not only the fields its actions name.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- views/page/page.html --
+<a {{template "attrs" .}}>{{.Name}}</a>
+-- views/page/attrs.html --
+{{define "attrs"}}onclick="f({{.}})"{{end}}
+-- views/card/card.html --
+{{template "open" .}}onclick="f({{.}})">{{.Front}}</b>
+-- views/card/open.html --
+{{define "open"}}<b {{end}}
+-- app.go --
+package main
+
+import (
+	"embed"
+	"html/template"
+	"os"
+)
+
+//go:embed views
+var views embed.FS
+
+type Profile struct {
+	Name   string
+	Secret string
+}
+
+type Card struct {
+	Front string
+	Back  string
+}
+
+func main() {
+	page := template.Must(template.New("page.html").ParseFS(views, "views/page/*.html"))
+	_ = page.Execute(os.Stdout, Profile{Name: "a", Secret: "b"})
+	card := template.Must(template.New("card.html").ParseFS(views, "views/card/*.html"))
+	_ = card.Execute(os.Stdout, Card{Front: "a", Back: "b"})
+}

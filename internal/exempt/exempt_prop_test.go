@@ -174,7 +174,7 @@ func (d drawnSet) detectors(ids []inventory.SymbolID) map[vocab.Exemption]exempt
 
 	table := make(map[vocab.Exemption]exempt.Detector, len(byClass))
 	for class, retained := range byClass {
-		table[class] = func(*exempt.Input) ([]exempt.Exemption, error) { return retained, nil }
+		table[class] = func(*exempt.Program) ([]exempt.Exemption, error) { return retained, nil }
 	}
 	return table
 }
@@ -232,7 +232,8 @@ func heldBack(union []exempt.Exemption, reported map[inventory.SymbolID]bool) ma
 // sweptWith computes the union of the classes the table holds under one set of
 // disabled classes, sweeps the graph with it, and returns both.
 func sweptWith(t *rapid.T, g *liveness.Graph, table map[vocab.Exemption]exempt.Detector, disabled []vocab.Exemption, mode facts.Mode) ([]exempt.Exemption, liveness.Result) {
-	union, _, err := exempt.Compute(&exempt.Input{Options: exempt.Options{Disabled: disabled}, Mode: mode}, table)
+	computed, err := exempt.Compute(&exempt.Program{Options: exempt.Options{Disabled: disabled}, Mode: mode}, table)
+	union := computed.Held
 	if err != nil {
 		t.Fatalf("Compute over the drawn retentions error: %v", err)
 	}

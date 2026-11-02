@@ -1,8 +1,10 @@
-A library package declaring members of eight types: an unexported struct and an
+A library package declaring members of ten types: an unexported struct and an
 unexported interface no exported declaration names, an unexported type an
 exported function returns, an unexported type promoted through an exported
 struct's embedded field, an unexported interface an exported interface embeds,
 an unexported struct an exported alias names, an unexported interface an
+exported variable holds, an unexported interface constraining an exported
+function's type parameter, an unexported struct only an unexported field of an
 exported variable holds, and an exported type.
 
 -- go.mod --
@@ -61,6 +63,22 @@ type counter interface {
 // Counter holds a value of an unexported interface type.
 var Counter counter
 
+type bound interface {
+	Bound() int
+}
+
+// Pick constrains its type parameter by an unexported interface.
+func Pick[T bound](t T) T { return t }
+
+type stashed struct {
+	Item int
+}
+
+// Bag holds an unexported type in an unexported field alone.
+var Bag struct {
+	inner stashed
+}
+
 // Shown is exported.
 type Shown struct {
 	Size int
@@ -68,5 +86,5 @@ type Shown struct {
 
 // Use reads one member of every type.
 func Use() int {
-	return hidden{}.Area() + Make().Height + Outer{}.Depth + Shown{}.Size
+	return hidden{}.Area() + Make().Height + Outer{}.Depth + Shown{}.Size + Bag.inner.Item
 }

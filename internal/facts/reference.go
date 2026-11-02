@@ -153,6 +153,9 @@ type Reference struct {
 	Test    bool // the referencing file is a test file
 }
 
+// Layout reports whether the reference is a field a memory-layout use lays out.
+func (r *Reference) Layout() bool { return r.Via == viaLayout }
+
 // Selects reports whether a reference of this kind reaches a method through the
 // value it is written on: a call, and a selection that takes the method as a value.
 // A selection through an interface value names the method the interface declares
@@ -1035,7 +1038,7 @@ func (p *referencePass) readRequired(sites []Conversion, from func(token.Pos) in
 	seen := make(map[token.Pos]map[inventory.SymbolID]bool)
 	for i := range sites {
 		c := &sites[i]
-		if !types.Implements(c.From, c.To) {
+		if !Satisfies(c.From, c.To) {
 			continue
 		}
 		if seen[c.Site] == nil {

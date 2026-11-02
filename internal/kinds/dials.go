@@ -87,7 +87,7 @@ func (in *Input) withholdRoot(found *Finding, allowed bool) {
 		return
 	}
 	if component, at := in.index().component(found.id); component != nil {
-		id := componentID(at + 1)
+		id := ComponentID(at + 1)
 		in.dialed.components[id] = true
 		if allowed {
 			in.dialed.allowed[id] = true
@@ -147,7 +147,7 @@ func (in *Input) eachJoin(joined func(a, b inventory.SymbolID)) {
 // testUsedWithheld is [liveness.Result.TestUsed] where the minimum withholds its findings,
 // and empty where the minimum is possible.
 func (in *Input) testUsedWithheld() map[inventory.SymbolID]bool {
-	if rank(in.Config.Analysis.MinConfidence) <= rank(vocab.Possible) {
+	if !Withholds(in.Config.Analysis.MinConfidence, vocab.Possible) {
 		return nil
 	}
 	return in.Sweep.TestUsed
@@ -157,7 +157,7 @@ func (in *Input) testUsedWithheld() map[inventory.SymbolID]bool {
 func (in *Input) withheldMembers() map[inventory.SymbolID]bool {
 	members := make(map[inventory.SymbolID]bool)
 	for id, at := range in.index().components {
-		if in.dialed.components[componentID(at+1)] {
+		if in.dialed.components[ComponentID(at+1)] {
 			members[id] = true
 		}
 	}

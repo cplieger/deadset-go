@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
 	spec "github.com/cplieger/deadset-spec/v8"
@@ -18,7 +19,7 @@ import (
 )
 
 // retainedBy runs the class over one input and returns the exemptions it produced.
-func retainedBy(t *testing.T, in *Input, subject string) []Exemption {
+func retainedBy(t *testing.T, in *Program, subject string) []Exemption {
 	t.Helper()
 	found, err := InterfaceSatisfactionDetector(in)
 	if err != nil {
@@ -38,7 +39,7 @@ func retainedSet(exemptions []Exemption) map[inventory.SymbolID]bool {
 
 // refsOf names each symbol of a set by its stable reference, sorted, for a
 // failure message.
-func refsOf(in *Input, set map[inventory.SymbolID]bool) []string {
+func refsOf(in *Program, set map[inventory.SymbolID]bool) []string {
 	var named []string
 	for i := range in.Symbols {
 		if set[in.Symbols[i].ID] {
@@ -51,7 +52,7 @@ func refsOf(in *Input, set map[inventory.SymbolID]bool) []string {
 
 // symbolAtLine returns the symbol of the inventory declared on one line of one
 // target-relative file.
-func symbolAtLine(t *testing.T, in *Input, file string, line int) inventory.Symbol {
+func symbolAtLine(t *testing.T, in *Program, file string, line int) inventory.Symbol {
 	t.Helper()
 	for i := range in.Symbols {
 		s := &in.Symbols[i]
@@ -66,7 +67,7 @@ func symbolAtLine(t *testing.T, in *Input, file string, line int) inventory.Symb
 // symbolRef returns the symbol of the inventory carrying one stable reference.
 // A test names its subject this way rather than by line, so a fixture edit above
 // the subject does not move the expectation.
-func symbolRef(t *testing.T, in *Input, ref string) inventory.Symbol {
+func symbolRef(t *testing.T, in *Program, ref string) inventory.Symbol {
 	t.Helper()
 	for i := range in.Symbols {
 		if in.Symbols[i].Ref == ref {
@@ -80,7 +81,7 @@ func symbolRef(t *testing.T, in *Input, ref string) inventory.Symbol {
 // sweepWith sweeps the graph of one input once with the given exemptions held
 // back. The target of every fixture here is a library, so its published API is
 // rooted.
-func sweepWith(t *testing.T, in *Input, held []Exemption) []SweptCandidate {
+func sweepWith(t *testing.T, in *Program, held []Exemption) []SweptCandidate {
 	t.Helper()
 	return SweepCandidates(t, in, roots.RootOptions{PublishedAPI: true}, held)
 }
@@ -215,7 +216,7 @@ func TestInterfaceSatisfactionRetainsStrictlyLessThanTheConservativeRule(t *test
 }
 
 // reportedRefs names every candidate one sweep reported, for a failure message.
-func reportedRefs(in *Input, swept []SweptCandidate) []string {
+func reportedRefs(in *Program, swept []SweptCandidate) []string {
 	set := make(map[inventory.SymbolID]bool, len(swept))
 	for _, c := range swept {
 		set[c.ID] = true
@@ -224,7 +225,7 @@ func reportedRefs(in *Input, swept []SweptCandidate) []string {
 }
 
 // differenceOf names the symbols the first set holds and the second does not.
-func differenceOf(in *Input, wide, narrow map[inventory.SymbolID]bool) []string {
+func differenceOf(in *Program, wide, narrow map[inventory.SymbolID]bool) []string {
 	only := make(map[inventory.SymbolID]bool)
 	for id := range wide {
 		if !narrow[id] {
@@ -239,7 +240,7 @@ func differenceOf(in *Input, wide, narrow map[inventory.SymbolID]bool) []string 
 // interface the program mentions, on either method set, whether or not a value of
 // the type ever reaches that interface. It is the test's oracle for what the
 // conversion set removes and no production code implements it.
-func conservativeRetained(t *testing.T, in *Input) map[inventory.SymbolID]bool {
+func conservativeRetained(t *testing.T, in *Program) map[inventory.SymbolID]bool {
 	t.Helper()
 	interfaces := mentionedInterfaces(in)
 	set := make(map[inventory.SymbolID]bool)
@@ -266,7 +267,7 @@ func conservativeRetained(t *testing.T, in *Input) map[inventory.SymbolID]bool {
 }
 
 // namedTypes lists every defined non-interface type the loaded packages declare.
-func namedTypes(in *Input) []*types.Named {
+func namedTypes(in *Program) []*types.Named {
 	var declared []*types.Named
 	for _, p := range in.Result.Packages {
 		if p.Types == nil {
@@ -292,7 +293,7 @@ func namedTypes(in *Input) []*types.Named {
 
 // mentionedInterfaces lists every interface type the loaded syntax names, which is
 // the population the conservative rule tests every type against.
-func mentionedInterfaces(in *Input) []*types.Interface {
+func mentionedInterfaces(in *Program) []*types.Interface {
 	var mentioned []*types.Interface
 	for _, p := range in.Result.Packages {
 		if p.TypesInfo == nil {
@@ -409,7 +410,7 @@ func assertRetainedBy(t *testing.T, fixture string, row corpusRow, found []Exemp
 // of the inventory at the position the manifest names. A manifest path is relative
 // to the rendering root and the target is loaded on its own, so the target
 // directory is stripped from it.
-func corpusSymbol(t *testing.T, in *Input, manifest corpusManifest, name string) inventory.Symbol {
+func corpusSymbol(t *testing.T, in *Program, manifest corpusManifest, name string) inventory.Symbol {
 	t.Helper()
 	at, held := manifest.Symbols[name]
 	if !held || at.File == "" || at.Line == 0 {
@@ -637,5 +638,35 @@ func TestInterfaceSatisfactionRetainsWhatAnOutsideCalleesPackageAsserts(t *testi
 					test.typeName, got, test.want)
 			}
 		})
+	}
+}
+
+func TestUncalledMethodsWithdrawOnlyTheRetentionsThroughAProductionMethodNothingSelects(t *testing.T) {
+	const (
+		called, uncalled, inTest, marker = "go://m#I.Called", "go://m#I.Uncalled", "go://m#I.InTest", "go://m#I.Marker"
+		impl, empty                      = "go://m#T.Uncalled", "go://m#T.Marker"
+	)
+	methods := facts.InterfaceMethods([][]facts.Interface{{{
+		ID:      "go://m#I",
+		Methods: []inventory.SymbolID{called, uncalled, inTest, marker},
+		Implementations: []facts.Implementation{{
+			Concrete:     "go://m#T",
+			Implementors: []inventory.SymbolID{"go://m#T.Called", impl, "go://m#T.InTest", empty},
+			Empty:        []bool{false, false, false, true},
+		}},
+	}}})
+	refs := []facts.Reference{{To: called, Kind: facts.RefCall}}
+	rule := UncalledMethods(methods, refs, func(id inventory.SymbolID) bool { return id != inTest })
+
+	if want := []Use{{From: uncalled, To: impl}}; !slices.Equal(rule.Uses, want) {
+		t.Errorf("UncalledMethods().Uses = %v, want %v: only the production method nothing selects and no empty body fixes", rule.Uses, want)
+	}
+	retained := []Exemption{
+		{ID: impl, Class: string(vocab.InterfaceSatisfaction), Via: uncalled},
+		{ID: "go://m#T.Called", Class: string(vocab.InterfaceSatisfaction), Via: called},
+		{ID: impl, Class: string(vocab.EncodingReflection), Via: uncalled},
+	}
+	if got := rule.Withdrawn(retained); !reflect.DeepEqual(got, retained[1:]) {
+		t.Errorf("Withdrawn() = %v, want %v: an interface-satisfaction retention through the uncalled method alone goes", got, retained[1:])
 	}
 }

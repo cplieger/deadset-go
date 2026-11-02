@@ -26,6 +26,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-spec/v8/vocab"
+	"golang.org/x/tools/go/packages"
 )
 
 // Detectors is every class this analyzer computes, mapped to its detection. A test
@@ -122,6 +123,11 @@ type Exemption struct {
 	// root.
 	Consumer string
 
+	// Confidence is empty where the exemption holds the symbol. Possible, it holds
+	// nothing, and a finding about the symbol is reported at the class possible: a
+	// callee outside the program fills the field from a document and may read it.
+	Confidence vocab.Class
+
 	Site token.Position // last, so the counted fields of a position end the value
 }
 
@@ -150,10 +156,10 @@ func joinedIDs(ids []inventory.SymbolID) string {
 	return strings.Join(parts, "\x00")
 }
 
-// Input is what every class reads: one loaded configuration, the declarations
-// enumerated from it, the resolver that maps a type-checked object back to one of
-// them, and the configured half.
-type Input struct {
+// Loaded is one loaded configuration as the composition root hands it over: the
+// declarations enumerated from it, the resolver that maps a type-checked object back
+// to one of them, and the configured half.
+type Loaded struct {
 	// Result is the loaded configuration every class type-checks against.
 	Result *load.Result
 
@@ -161,33 +167,9 @@ type Input struct {
 	// there, which is how a class names the symbol it retains.
 	Resolve *resolve.Resolver
 
-	// Facts is the configuration's syntax in the walk order, and its generated
-	// files.
+	// Facts is the configuration's syntax in the walk order, its generated files
+	// and what its published API reaches.
 	Facts *facts.Index
-
-	// conversions is the conversion set [conversionsOf] computed first, which every
-	// later class reads rather than walking the program again.
-	conversions *[]facts.Conversion
-
-	// allConversions is [allConversionsOf]'s answer, computed on first use.
-	allConversions *[]facts.Conversion
-
-	// programConversions is [programConversions]' answer, computed on first use.
-	programConversions *[]facts.Conversion
-
-	// published is [publishedConversions]' answer, computed on first use.
-	published *[]facts.Conversion
-
-	// assert is what the packages outside the program can assert, read from their
-	// source on first use and shared by every class that asks ([assertableOf]).
-	assert *assertable
-
-	// outside is [outsideClosure]'s answer, computed on first use.
-	outside *[]*types.Package
-
-	// filled is what the encoding-reflection class found only a filling callee
-	// retains ([FilledFields]).
-	filled []Exemption
 
 	// Symbols is the inventory, for a class that reads a declaration's own
 	// properties rather than resolving an object.
@@ -211,10 +193,113 @@ type Input struct {
 	Mode facts.Mode
 }
 
+// Program is what every class reads: one loaded configuration and the facts about
+// it several classes share, computed by [NewProgram] before any class runs, so no
+// class depends on another having run. The one exception is assert, which
+// memoises a pure answer per outside package on first ask, so the classes must
+// run on one goroutine.
+type Program struct {
+	// conversions is every site where a value of a concrete type reaches a
+	// position typed as an interface ([facts.Conversions]); a site converting an
+	// interface value is the interface kinds' subject rather than an exemption's.
+	conversions []facts.Conversion
+
+	// allConversions is every site, a site converting an interface value
+	// included, which is what a chain of sites between two interfaces is read from.
+	allConversions []facts.Conversion
+
+	// programConversions is conversions followed by every concrete site each
+	// loaded consumer writes, in the order the scope declares the consumers.
+	programConversions []facts.Conversion
+
+	// published is [publishedConversions]' sites.
+	published []facts.Conversion
+
+	// outside is every package of the program's import closure that is neither
+	// the target's nor a loaded consumer's, by path.
+	outside []*types.Package
+
+	// assertions are the configuration's satisfaction assertions ([satisfactionAssertions]).
+	assertions []span
+
+	// functions is every function the program declares ([programFunctions]).
+	functions []programFunction
+
+	// assert is what the packages outside the program can assert, read from their
+	// source per package on a class's first ask, because most are never asked.
+	assert *assertable
+
+	Loaded
+}
+
+// NewProgram computes the shared facts of one loaded configuration.
+func NewProgram(l *Loaded) (*Program, error) {
+	if l.Result == nil || l.Result.Fset == nil {
+		return nil, fmt.Errorf("%w: no file set", inventory.ErrIncompleteLoad)
+	}
+	p := &Program{Loaded: *l}
+	p.allConversions = facts.Conversions(p.Result.Fset, p.Result.Packages)
+	p.conversions = concrete(p.allConversions)
+	p.programConversions = slices.Clone(p.conversions)
+	for i := range p.Result.Consumers {
+		p.programConversions = append(p.programConversions, concrete(facts.Conversions(p.Result.Fset, p.Result.Consumers[i].Packages))...)
+	}
+	p.published = publishedConversions(p)
+	p.functions = programFunctions(p)
+	p.outside = outsideClosure(p.Facts.Program())
+	p.assert = newAssertable(p)
+	p.assertions = satisfactionAssertions(p)
+	return p, nil
+}
+
+// outsideClosure is every package the import closure of a program's packages holds
+// that is none of them, ordered by path.
+func outsideClosure(program []*packages.Package) []*types.Package {
+	own := make(map[string]bool)
+	var queue []*types.Package
+	for _, p := range program {
+		if p.Types != nil {
+			own[p.PkgPath] = true
+			queue = append(queue, p.Types)
+		}
+	}
+	seen := make(map[string]bool)
+	var found []*types.Package
+	for len(queue) > 0 {
+		one := queue[0]
+		queue = queue[1:]
+		for _, imported := range one.Imports() {
+			if seen[imported.Path()] {
+				continue
+			}
+			seen[imported.Path()] = true
+			queue = append(queue, imported)
+			if !own[imported.Path()] {
+				found = append(found, imported)
+			}
+		}
+	}
+	slices.SortFunc(found, func(a, b *types.Package) int { return strings.Compare(a.Path(), b.Path()) })
+	return found
+}
+
 // Detector is one class's detection over one loaded configuration. It returns
 // every symbol the class retains, each carrying the class's own spelling, and
 // fails only where the evidence it needs is unreadable.
-type Detector func(in *Input) ([]Exemption, error)
+type Detector func(in *Program) ([]Exemption, error)
+
+// Computed is what the classes found over one program.
+type Computed struct {
+	Held []Exemption
+
+	// TestEvidence is the exemptions found in a test file under a production run,
+	// which retain nothing and count as test references.
+	TestEvidence []Exemption
+
+	// Filled is the records of the class possible whose symbol no held exemption
+	// holds, each found in a file the mode counts.
+	Filled []Exemption
+}
 
 // Compute runs every class the detector table holds and the options do not disable,
 // in vocabulary order; a class the table does not hold contributes nothing. Each
@@ -224,13 +309,13 @@ type Detector func(in *Input) ([]Exemption, error)
 // found in a test file is returned as test evidence rather than held: it retains
 // nothing and counts as a test reference, and a fact a source file also carries
 // stays the source file's held entry.
-func Compute(in *Input, detectors map[vocab.Exemption]Detector) (held, testEvidence []Exemption, err error) {
+func Compute(in *Program, detectors map[vocab.Exemption]Detector) (Computed, error) {
 	disabled := make(map[vocab.Exemption]bool, len(in.Options.Disabled))
 	for _, class := range in.Options.Disabled {
 		disabled[class] = true
 	}
 
-	var found, evidence []Exemption
+	var found, evidence, filled []Exemption
 	for _, class := range goClasses() {
 		detect, carried := detectors[class]
 		if disabled[class] || !carried {
@@ -238,21 +323,29 @@ func Compute(in *Input, detectors map[vocab.Exemption]Detector) (held, testEvide
 		}
 		retained, detectErr := detect(in)
 		if detectErr != nil {
-			return nil, nil, fmt.Errorf("exempt: %s: %w", class, detectErr)
+			return Computed{}, fmt.Errorf("exempt: %s: %w", class, detectErr)
 		}
 		for i := range retained {
-			e := &retained[i]
-			if holdsInMode(e, in.Mode) {
+			switch e := &retained[i]; {
+			case e.Confidence != vocab.Possible && holdsInMode(e, in.Mode):
 				found = append(found, *e)
-			} else {
+			case e.Confidence != vocab.Possible:
 				evidence = append(evidence, *e)
+			case holdsInMode(e, in.Mode):
+				filled = append(filled, *e)
 			}
 		}
 	}
 
-	slices.SortStableFunc(found, byEvidence)
-	slices.SortStableFunc(evidence, byEvidence)
-	return firstPerFact(found), firstPerFact(evidence), nil
+	held := make(map[inventory.SymbolID]bool, len(found))
+	for i := range found {
+		held[found[i].ID] = true
+	}
+	filled = slices.DeleteFunc(filled, func(e Exemption) bool { return held[e.ID] })
+	for _, set := range [][]Exemption{found, evidence, filled} {
+		slices.SortStableFunc(set, byEvidence)
+	}
+	return Computed{Held: firstPerFact(found), TestEvidence: firstPerFact(evidence), Filled: firstPerFact(filled)}, nil
 }
 
 // firstPerFact keeps one exemption per distinct fact, the first of each in the

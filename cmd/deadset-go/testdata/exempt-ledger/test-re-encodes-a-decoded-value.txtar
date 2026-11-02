@@ -1,0 +1,41 @@
+A benchmark decodes a document into a type it declares and encodes the decoded
+value again, so the encoder reads every field the decoder filled.
+
+-- go.mod --
+module example.com/lib
+
+go 1.27.1
+-- deadset.json --
+{"target": {"kind": "library"}}
+-- lib.go --
+package lib
+
+// Version is the library's version.
+const Version = 1
+-- bench_test.go --
+package lib
+
+import (
+	"bytes"
+	"encoding/json"
+	"testing"
+)
+
+type example struct {
+	Title    string `json:"title"`
+	Integers []int  `json:"integers"`
+}
+
+func BenchmarkExample(b *testing.B) {
+	data := []byte(`{"title":"t","integers":[1]}`)
+	for b.Loop() {
+		var decoded example
+		if err := json.Unmarshal(data, &decoded); err != nil {
+			b.Fatal(err)
+		}
+		var buf bytes.Buffer
+		if err := json.NewEncoder(&buf).Encode(decoded); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

@@ -1,0 +1,29 @@
+A generic type and a plain type each implement an interface whose one method no
+call site selects. Each is converted to the interface, so each implements it, and
+each implementation falls with the uncalled method.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- app.go --
+package main
+
+type Getter interface{ Get() int }
+
+type Box[T any] struct{ v T }
+
+func (b Box[T]) Get() T { return b.v }
+
+type Plain struct{ v int }
+
+func (p Plain) Get() int { return p.v }
+
+func keep(g Getter) { _ = g }
+
+func main() {
+	keep(Box[int]{v: 1})
+	keep(Plain{v: 1})
+}

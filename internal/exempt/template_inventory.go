@@ -6,15 +6,10 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strings"
+	"slices"
+	"strconv"
 	"text/template/parse"
 )
-
-var templateExecutions = map[string]bool{"Execute": true, "ExecuteTemplate": true}
-
-// htmlTemplate is the engine that escapes a value by the context it is written in.
-const htmlTemplate = "html/template"
 
 // sealedTemplateMethods are the methods a variable holding a template may be the
 // receiver of while every template it holds stays the set its initializer parsed.
@@ -25,7 +20,7 @@ var sealedTemplateMethods = map[string]bool{
 // templateOrigins answers, for the receiver of a template execution, every
 // identifier the templates it may hold name, from the program's own syntax.
 type templateOrigins struct {
-	in      *Input
+	in      *Program
 	fset    *token.FileSet
 	inits   map[*types.Var]templateInit
 	uses    map[*types.Var]int
@@ -45,7 +40,7 @@ type templateInit struct {
 
 // newTemplateOrigins indexes every variable of a template type the program declares
 // with one initializer, and how its uses read it.
-func newTemplateOrigins(in *Input) *templateOrigins {
+func newTemplateOrigins(in *Program) *templateOrigins {
 	o := &templateOrigins{
 		in: in, root: in.Root, fset: in.Result.Fset, inits: make(map[*types.Var]templateInit),
 		uses: make(map[*types.Var]int), allowed: make(map[*types.Var]int), every: make(map[string]*templateSet),
@@ -130,7 +125,7 @@ func (o *templateOrigins) executed(info *types.Info, dir string, call *ast.CallE
 	}
 	inv := o.inventory()
 	o.origin(info, dir, sel.X, inv, 0)
-	if inv.complete && inv.parsed > 0 {
+	if inv.complete && inv.parsed > 0 && !encodesWhole(inv.trees, inv.guessed) {
 		return inv.names
 	}
 	return o.everyParse(fn.Pkg().Path())
@@ -168,7 +163,7 @@ func (o *templateOrigins) origin(info *types.Info, dir string, e ast.Expr, inv *
 // call adds what the templates one call of a template engine returns name.
 func (o *templateOrigins) call(info *types.Info, dir string, call *ast.CallExpr, inv *templateSet, depth int) {
 	fn, _ := resolveObject(info, call.Fun).(*types.Func)
-	if fn == nil || fn.Pkg() == nil || !templatePackages[fn.Pkg().Path()] {
+	if fn == nil || fn.Pkg() == nil || !templateEngine(fn.Pkg().Path()) {
 		inv.complete = false
 		return
 	}
@@ -180,6 +175,7 @@ func (o *templateOrigins) call(info *types.Info, dir string, call *ast.CallExpr,
 	case name == "Must" && len(call.Args) > 0:
 		o.origin(info, dir, call.Args[0], inv, depth)
 	case name == "New":
+		inv.named(info, dir, call)
 	case templateParses[name]:
 		inv.parse(info, dir, fn.Pkg().Path(), name, call)
 	default:
@@ -187,17 +183,25 @@ func (o *templateOrigins) call(info *types.Info, dir string, call *ast.CallExpr,
 	}
 }
 
-// method adds what the templates one method call of a template engine returns name.
+// method adds what the templates one method call of a template engine returns name,
+// after its receiver's, the order the program parses them in.
 func (o *templateOrigins) method(info *types.Info, dir string, fn *types.Func, call *ast.CallExpr, inv *templateSet, depth int) {
+	var after func()
 	switch name := fn.Name(); {
 	case templateParses[name]:
-		inv.parse(info, dir, fn.Pkg().Path(), name, call)
-	case name == "New", name == "Funcs", name == "Option", name == "Lookup":
+		after = func() { inv.parse(info, dir, fn.Pkg().Path(), name, call) }
+	case name == "New":
+		after = func() { inv.named(info, dir, call) }
+	case name == "Lookup":
+		after = func() { inv.receiver = "" }
+	case name == "Funcs", name == "Option":
+		after = func() {}
 	default:
 		inv.complete = false
 		return
 	}
 	o.receiver(info, dir, call, inv, depth)
+	after()
 }
 
 // receiver adds what the templates the receiver of one method call holds name.
@@ -216,14 +220,31 @@ var templateParses = map[string]bool{"Parse": true, "ParseFiles": true, "ParseGl
 // templateSet accumulates the identifiers the templates of one set name, and whether
 // every template of the set is one the analysis read: a constant string, a constant
 // file name or pattern resolved against the target root or its file's directory, or
-// a constant pattern of an embedded file system, each of which parses, and none an
-// html/template file holding a JavaScript context ([encodesWhole]).
+// a constant pattern of an embedded file system, each of which parses. trees holds
+// an html/template set's trees by the name the engine gives each ([encodesWhole]);
+// receiver is the name the next Parse call gives its text, empty where unknown;
+// unordered says the reads are no one sequence of the engine's parses: the parses
+// of several sets, or alternatives of which the program parses one.
 type templateSet struct {
-	names    map[string]bool
-	flow     *valueFlow
-	root     string
-	parsed   int
-	complete bool
+	names     map[string]bool
+	trees     map[string]*parse.Tree
+	flow      *valueFlow
+	root      string
+	receiver  string
+	parsed    int
+	complete  bool
+	guessed   bool
+	unordered bool
+}
+
+// named records the name one New call gives the template it returns.
+func (inv *templateSet) named(info *types.Info, dir string, call *ast.CallExpr) {
+	inv.receiver = ""
+	if len(call.Args) == 1 {
+		if names, ok := inv.flow.constants(call.Args[0], flowAt{info: info, dir: dir}); ok && len(names) == 1 {
+			inv.receiver = names[0]
+		}
+	}
 }
 
 // parse reads one call that adds templates to a set of the engine at path. Each
@@ -236,10 +257,10 @@ func (inv *templateSet) parse(info *types.Info, dir, engine, name string, call *
 		inv.parseText(engine, call.Args[0], at)
 	case name == "ParseFiles" && len(call.Args) > 0 && !call.Ellipsis.IsValid():
 		for _, arg := range call.Args {
-			inv.named(engine, arg, at, false)
+			inv.fileArg(engine, arg, at, false)
 		}
 	case name == "ParseGlob" && len(call.Args) == 1:
-		inv.named(engine, call.Args[0], at, true)
+		inv.fileArg(engine, call.Args[0], at, true)
 	case name == "ParseFS" && len(call.Args) > 1 && !call.Ellipsis.IsValid():
 		inv.parseFS(engine, call, at)
 	default:
@@ -254,24 +275,32 @@ func (inv *templateSet) parseText(engine string, text ast.Expr, at flowAt) {
 		inv.complete = false
 		return
 	}
+	known := inv.receiver != "" && len(sources) == 1 && (!sources[0].file || len(sources[0].files) == 1)
+	inv.unordered = inv.unordered || len(sources) > 1 || slices.ContainsFunc(sources, func(s textSource) bool { return len(s.files) > 1 })
 	for _, source := range sources {
-		if source.file {
-			inv.files(engine, source.files)
-		} else {
-			inv.read(engine, "", []byte(source.text))
+		switch {
+		case known && source.file:
+			inv.files(engine, source.files, inv.receiver, false)
+		case known:
+			inv.read(engine, "", inv.receiver, []byte(source.text), false)
+		case source.file:
+			inv.files(engine, source.files, "", true)
+		default:
+			inv.read(engine, "", escapeEntry+strconv.Itoa(inv.parsed), []byte(source.text), true)
 		}
 	}
 }
 
-// named reads the files one file name or pattern argument names.
-func (inv *templateSet) named(engine string, arg ast.Expr, at flowAt, pattern bool) {
+// fileArg reads the files one file name or pattern argument names.
+func (inv *templateSet) fileArg(engine string, arg ast.Expr, at flowAt, pattern bool) {
 	names, ok := inv.flow.constants(arg, at)
 	if !ok {
 		inv.complete = false
 		return
 	}
+	inv.unordered = inv.unordered || len(names) > 1
 	for _, name := range names {
-		inv.files(engine, inv.matching(at.dir, name, pattern))
+		inv.files(engine, inv.matching(at.dir, name, pattern), "", false)
 	}
 }
 
@@ -283,15 +312,17 @@ func (inv *templateSet) parseFS(engine string, call *ast.CallExpr, at flowAt) {
 		inv.complete = false
 		return
 	}
+	inv.unordered = inv.unordered || len(roots) > 1
 	for _, arg := range call.Args[1:] {
 		patterns, constants := inv.flow.constants(arg, at)
 		if !constants {
 			inv.complete = false
 			return
 		}
+		inv.unordered = inv.unordered || len(patterns) > 1
 		for _, root := range roots {
 			for _, pattern := range patterns {
-				inv.files(engine, root.match(pattern))
+				inv.files(engine, root.match(pattern), "", false)
 			}
 		}
 	}
@@ -319,9 +350,10 @@ func (inv *templateSet) matching(dir, name string, pattern bool) []string {
 	return nil
 }
 
-// files reads every template file one parse names, and makes the inventory
-// incomplete where it names none.
-func (inv *templateSet) files(engine string, paths []string) {
+// files reads every template file one parse names, each named name or, where name is
+// empty, by its base name as ParseFiles names it, and makes the inventory incomplete
+// where it names none.
+func (inv *templateSet) files(engine string, paths []string, name string, guessed bool) {
 	if len(paths) == 0 {
 		inv.complete = false
 		return
@@ -332,36 +364,55 @@ func (inv *templateSet) files(engine string, paths []string) {
 			inv.complete = false
 			return
 		}
-		inv.read(engine, path, src)
+		tree := name
+		if tree == "" {
+			tree = filepath.Base(path)
+		}
+		inv.read(engine, path, tree, src, guessed)
 	}
 }
 
-// read adds the identifiers one template's text names.
-func (inv *templateSet) read(engine, name string, src []byte) {
-	if engine == htmlTemplate && encodesWhole(src) {
-		inv.complete = false
-		return
-	}
+// read adds the identifiers the template text of the file at path names, or of a
+// constant where path is empty, its top-level template named name; guessed says
+// name is the analysis's guess.
+func (inv *templateSet) read(engine, path, name string, src []byte, guessed bool) {
 	tree := parse.New(name)
 	tree.Mode = parse.SkipFuncCheck
-	if _, err := tree.Parse(string(src), "", "", make(map[string]*parse.Tree)); err != nil {
+	set := make(map[string]*parse.Tree)
+	if _, err := tree.Parse(string(src), "", "", set); err != nil {
 		inv.complete = false
 		return
 	}
-	for _, ref := range templateFileRefs(name, src, Delimiters{}) {
+	if engine == htmlTemplate {
+		inv.add(set, guessed)
+	}
+	for _, ref := range templateFileRefs(path, src, Delimiters{}) {
 		inv.names[ref.name] = true
 	}
 	inv.parsed++
 }
 
-// eventHandler matches an HTML start tag holding an event-handler attribute.
-var eventHandler = regexp.MustCompile(`(?i)<[a-z][^>]*\son[a-z]+\s*=`)
-
-// encodesWhole reports whether an html/template source holds a JavaScript context,
-// a script element or an event-handler attribute, where the engine encodes a value
-// as JSON whole (https://pkg.go.dev/html/template#hdr-Contexts).
-func encodesWhole(src []byte) bool {
-	return strings.Contains(strings.ToLower(string(src)), "<script") || eventHandler.Match(src)
+// add adds one parse's trees to an html/template set's, a non-empty tree replacing
+// the one held as the engine's does (associate in go1.27.3
+// src/text/template/template.go). Where the set is unordered, two non-empty trees
+// of one name and different text make it incomplete instead.
+func (inv *templateSet) add(trees map[string]*parse.Tree, guessed bool) {
+	if inv.trees == nil {
+		inv.trees = make(map[string]*parse.Tree, len(trees))
+	}
+	inv.guessed = inv.guessed || guessed
+	for name, tree := range trees {
+		held, found := inv.trees[name]
+		switch {
+		case !found || parse.IsEmptyTree(held.Root):
+			inv.trees[name] = tree
+		case parse.IsEmptyTree(tree.Root) || held.Root.String() == tree.Root.String():
+		case inv.unordered:
+			inv.complete = false
+		default:
+			inv.trees[name] = tree
+		}
+	}
 }
 
 func globWithin(root, pattern string) []string {
@@ -390,5 +441,5 @@ func isTemplate(t types.Type) bool {
 		t = types.Unalias(pointer.Elem())
 	}
 	named, isNamed := t.(*types.Named)
-	return isNamed && named.Obj().Pkg() != nil && templatePackages[named.Obj().Pkg().Path()] && named.Obj().Name() == "Template"
+	return isNamed && named.Obj().Pkg() != nil && templateEngine(named.Obj().Pkg().Path()) && named.Obj().Name() == "Template"
 }

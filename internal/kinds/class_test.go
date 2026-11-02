@@ -321,11 +321,13 @@ func TestTheClassOfADeclarationOfATestFileIsCertain(t *testing.T) {
 	}
 }
 
-// A field of an unexported type is certain where no exported declaration of its
-// package exposes the type, because no code outside the module can hold a value to
-// select it on. A type an exported function returns, or an exported struct embeds,
-// is exposed, so its fields are as possible as an exported type's. A method stays
-// possible, because a value converted to an interface carries it out of the module.
+// A field of an unexported type is certain where the published API does not reach
+// the type, because no code outside the module can hold a value to select it on. A
+// type an exported function returns, an exported struct embeds or an exported
+// function's type parameter is constrained by is reached, so its members are as
+// possible as an exported type's; one only an unexported field holds is not. A
+// method stays possible, because a value converted to an interface carries it out
+// of the module.
 func TestTheClassOfAFieldOfAnUnexposedUnexportedTypeIsCertain(t *testing.T) {
 	in := inputOf(t, "class-hidden-member.txtar", libraryConfig(), Consumers{})
 
@@ -338,6 +340,8 @@ func TestTheClassOfAFieldOfAnUnexposedUnexportedTypeIsCertain(t *testing.T) {
 		"spanner.Span":    vocab.Possible,
 		"aliased.Length":  vocab.Possible,
 		"counter.Count":   vocab.Possible,
+		"bound.Bound":     vocab.Possible,
+		"stashed.Item":    vocab.Certain,
 		"Shown.Size":      vocab.Possible,
 	} {
 		t.Run(member, func(t *testing.T) {

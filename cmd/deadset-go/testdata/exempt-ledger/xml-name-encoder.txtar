@@ -1,0 +1,23 @@
+encoding/xml's encoder names the element from the XMLName field's tag, so an
+encoded type's XMLName is read though nothing writes it.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- app.go --
+package main
+
+import (
+	"encoding/xml"
+	"os"
+)
+
+type Feed struct {
+	XMLName xml.Name `xml:"rss"`
+	Title   string   `xml:"title"`
+}
+
+func main() { _ = xml.NewEncoder(os.Stdout).Encode(Feed{Title: "t"}) }

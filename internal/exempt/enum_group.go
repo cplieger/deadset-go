@@ -19,18 +19,6 @@ var enumGroupConversionMethods = [...]string{
 	"String", "MarshalText", "UnmarshalText", "MarshalJSON", "UnmarshalJSON",
 }
 
-// The decoders whose target is a decoded wire value. A value reaching one of these
-// arrives from outside the program, so every member of an enumerated type the
-// target's type carries is reachable without being named.
-var enumGroupDecoders = [...]string{
-	"encoding/json.Unmarshal",
-	"encoding/json.Decoder.Decode",
-	"encoding/xml.Unmarshal",
-	"encoding/xml.Decoder.Decode",
-	"database/sql.Row.Scan",
-	"database/sql.Rows.Scan",
-}
-
 // The three rules of the class, ranked: the evidence of the lowest rank wins, and
 // the earliest rendered position wins inside one rank, so one type records one
 // reason whatever order the load parsed its files in.
@@ -48,7 +36,7 @@ const (
 // A conversion method matches by name alone, a decoder's target carries every type
 // reachable through pointers, elements, map keys and values and fields, and a
 // blank constant is retained by nothing.
-func EnumGroupDetector(in *Input) ([]Exemption, error) {
+func EnumGroupDetector(in *Program) ([]Exemption, error) {
 	scan := &enumGroupScan{in: in, byKey: make(map[string]*enumGroupType)}
 	if err := scan.groups(); err != nil {
 		return nil, err
@@ -62,7 +50,7 @@ func EnumGroupDetector(in *Input) ([]Exemption, error) {
 // enumGroupScan accumulates the enumerated types of one configuration and the
 // evidence that a value of each can arrive by conversion.
 type enumGroupScan struct {
-	in    *Input
+	in    *Program
 	byKey map[string]*enumGroupType
 	keys  []string
 }
@@ -311,11 +299,12 @@ func (s *enumGroupScan) decoded(p *packages.Package, call *ast.CallExpr) error {
 	return nil
 }
 
-// decoder names the decoder one call calls, and an empty string for every other
-// call. A method is named by its receiver's defined type and its own name.
+// decoder names the decoder one call calls ([decodesWireValue]), and an empty
+// string for every other call. A method is named by its receiver's defined type
+// and its own name.
 func (*enumGroupScan) decoder(p *packages.Package, call *ast.CallExpr) string {
 	called, ok := resolveObject(p.TypesInfo, call.Fun).(*types.Func)
-	if !ok || called.Pkg() == nil {
+	if !ok || !decodesWireValue(called) {
 		return ""
 	}
 	name := called.Pkg().Path() + "."
@@ -330,11 +319,7 @@ func (*enumGroupScan) decoder(p *packages.Package, call *ast.CallExpr) string {
 		}
 		name += named.Obj().Name() + "."
 	}
-	name += called.Name()
-	if !slices.Contains(enumGroupDecoders[:], name) {
-		return ""
-	}
-	return name
+	return name + called.Name()
 }
 
 // reach names every defined type a value of t carries: t itself when it is

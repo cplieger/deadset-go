@@ -153,7 +153,7 @@ func analyze(ctx context.Context, args []string, stderr io.Writer) int {
 		return failed(ctx, stderr, err)
 	}
 	if asked.facts != "" {
-		doc, err := found.Facts(self.Analyzer.Name, self.Analyzer.Version)
+		doc, err := found.Facts(ctx, self.Analyzer.Name, self.Analyzer.Version)
 		if err == nil {
 			err = publish(ctx, asked.facts, func(w io.Writer) error { return specfacts.Encode(w, doc) })
 		}

@@ -1,0 +1,57 @@
+A go-flags parser fills the options struct it is given and, for a field tagged
+command, runs the subcommand the field holds when the user names it. The command
+field is read; a flag field nothing reads stays possible.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+
+require github.com/jessevdk/go-flags v1.6.1
+
+replace github.com/jessevdk/go-flags => ./flags
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- app.go --
+package main
+
+import "github.com/jessevdk/go-flags"
+
+type migrateCommand struct {
+	DryRun bool `long:"dry-run"`
+}
+
+func (c *migrateCommand) Execute([]string) error { _ = c.DryRun; return nil }
+
+type Command struct {
+	Verbose bool           `long:"verbose"`
+	Migrate migrateCommand `command:"migrate"`
+}
+
+func main() {
+	var cmd Command
+	_, _ = flags.NewParser(&cmd, flags.Default).Parse()
+}
+-- flags/go.mod --
+module github.com/jessevdk/go-flags
+
+go 1.27.1
+-- flags/flags.go --
+package flags
+
+type Options uint
+
+const Default Options = 1
+
+type Commander interface {
+	Execute(args []string) error
+}
+
+type Parser struct{ data interface{} }
+
+func NewParser(data interface{}, options Options) *Parser {
+	_ = options
+	return &Parser{data: data}
+}
+
+func (p *Parser) Parse() ([]string, error) { return nil, nil }

@@ -223,3 +223,37 @@ func TestFactsBindAPlatformAlternativeOnceThroughItsLowestGeneratedFile(t *testi
 		t.Errorf("the bindings are\n%s\nwant one holding\n%s", strings.Join(got, "\n"), request)
 	}
 }
+
+// A hand-written method answering a generated server interface method is that
+// RPC's implementer, whichever site converts its type; a method of a test file and
+// one the generated Unimplemented type supplies are none (bindings.8).
+func TestFactsPublishEachHandWrittenMethodAnsweringAServerMethodAsAnImplementer(t *testing.T) {
+	dir := protobufModule(t, "var file_v1_ping_proto_rawDesc = "+byteLiteral(pingDescriptor()))
+	grpcFile := filepath.Join(dir, "gen/v1/ping_grpc.pb.go")
+	body, err := os.ReadFile(grpcFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unimplemented := "\ntype UnimplementedPingServiceServer struct{}\n\n" +
+		"func (UnimplementedPingServiceServer) Ping(in *PingRequest) (*PingRequest, error) { return in, nil }\n"
+	writeDocument(t, dir, "gen/v1/ping_grpc.pb.go", string(body)+unimplemented)
+	writeDocument(t, dir, "main.go", "package main\n\nimport v1 \"example.com/app/gen/v1\"\n\n"+
+		"type server struct{}\n\nfunc (server) Ping(in *v1.PingRequest) (*v1.PingRequest, error) { return in, nil }\n\n"+
+		"type embedded struct{ v1.UnimplementedPingServiceServer }\n\n"+
+		"func serve(s v1.PingServiceServer) { _, _ = s.Ping(nil) }\n\n"+
+		"func main() { serve(server{}); serve(embedded{}) }\n")
+	writeDocument(t, dir, "main_test.go", "package main\n\nimport (\n\t\"testing\"\n\n\tv1 \"example.com/app/gen/v1\"\n)\n\n"+
+		"type fake struct{}\n\nfunc (fake) Ping(in *v1.PingRequest) (*v1.PingRequest, error) { return in, nil }\n\n"+
+		"func TestServe(t *testing.T) { serve(fake{}) }\n")
+	facts, _ := analyzeWithFacts(t, dir)
+	var implementers []string
+	for _, line := range bindingLines(facts) {
+		if strings.HasPrefix(line, "implementer ") {
+			implementers = append(implementers, line)
+		}
+	}
+	want := []string{"implementer go://example.com/app#server.Ping proto://v1#PingService.Ping v1/ping.proto <nil>"}
+	if !slices.Equal(implementers, want) {
+		t.Errorf("the implementer records are\n%s\nwant\n%s", strings.Join(implementers, "\n"), strings.Join(want, "\n"))
+	}
+}

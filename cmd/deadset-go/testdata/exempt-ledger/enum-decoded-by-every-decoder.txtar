@@ -1,0 +1,54 @@
+An iota enum that only a decoder's target carries keeps every member, whichever
+decoding entry point fills it: encoding/xml's DecodeElement and encoding/gob's
+Decode fill a value from a document as json.Unmarshal does.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- app.go --
+package main
+
+import (
+	"encoding/gob"
+	"encoding/xml"
+	"fmt"
+	"os"
+)
+
+type Level int
+
+const (
+	Low Level = iota
+	Mid
+	High
+)
+
+type Mode int
+
+const (
+	Off Mode = iota
+	On
+)
+
+type Config struct {
+	Level Level `xml:"level"`
+}
+
+type State struct {
+	Mode Mode
+}
+
+func main() {
+	var c Config
+	if err := xml.NewDecoder(os.Stdin).DecodeElement(&c, nil); err != nil {
+		os.Exit(1)
+	}
+	var s State
+	if err := gob.NewDecoder(os.Stdin).Decode(&s); err != nil {
+		os.Exit(1)
+	}
+	fmt.Println(c.Level == Low, s.Mode == Off)
+}

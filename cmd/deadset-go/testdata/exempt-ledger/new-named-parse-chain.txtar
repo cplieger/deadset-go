@@ -1,0 +1,28 @@
+A chain of New and Parse calls names each parsed text by its New argument, so a
+call to that name reaches the text, and the set reads the fields its templates
+name.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- app.go --
+package main
+
+import (
+	"html/template"
+	"os"
+)
+
+type Nav struct {
+	Title  string
+	Unused string
+}
+
+var pages = template.Must(template.Must(template.New("base").Parse(`<h1>{{.Title}}</h1><a href="/{{template "nav" .}}">x</a>`)).New("nav").Parse(`{{.Title}}`))
+
+func main() {
+	_ = pages.ExecuteTemplate(os.Stdout, "base", Nav{Title: "t", Unused: "u"})
+}

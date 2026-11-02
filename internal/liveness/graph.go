@@ -4,9 +4,7 @@
 package liveness
 
 import (
-	"cmp"
 	"slices"
-	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
@@ -65,7 +63,6 @@ type rooted struct {
 // of sweeps.
 type Graph struct {
 	index    map[inventory.SymbolID]int
-	uncalled map[inventory.SymbolID]bool // the interface methods [Graph.implementationUses] made uses from
 	tests    roots.TestClasses
 	symbols  []inventory.Symbol
 	hops     []Hop
@@ -147,40 +144,10 @@ func Of(m *Merged) *Graph {
 			g.subject[i] = false
 		}
 	}
-	g.implementationUses(m.InterfaceMethods)
+	for _, use := range m.Uncalled.Uses {
+		g.add(Hop{From: use.From, To: use.To}, false)
+	}
 	return g
-}
-
-// implementationUses adds, for every implemented interface method of a production
-// file that no reference calls or selects through the interface and that is not
-// fixed whatever calls it, a use of each declaration implementing it by the method:
-// an implementation nothing else keeps falls with the method's dead component. A
-// method a test calls keeps its implementations, which the test reaches through it.
-func (g *Graph) implementationUses(methods map[inventory.SymbolID]*facts.InterfaceMethod) {
-	called := make(map[inventory.SymbolID]bool)
-	for i := range g.refs {
-		if g.refs[i].Kind.Selects() {
-			called[g.refs[i].To] = true
-		}
-	}
-	g.uncalled = make(map[inventory.SymbolID]bool)
-	var uses []Hop
-	for id, m := range methods {
-		at := g.at(id)
-		if at == outside || g.symbols[at].InTestFile || called[id] || !m.Implemented() || m.Fixed() {
-			continue
-		}
-		g.uncalled[id] = true
-		for _, implementor := range m.Implementors {
-			uses = append(uses, Hop{From: id, To: implementor})
-		}
-	}
-	slices.SortFunc(uses, func(a, b Hop) int {
-		return cmp.Or(strings.Compare(string(a.From), string(b.From)), strings.Compare(string(a.To), string(b.To)))
-	})
-	for _, use := range uses {
-		g.add(use, false)
-	}
 }
 
 // add keeps one hop in the adjacency and in the count of references made to its

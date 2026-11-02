@@ -159,7 +159,7 @@ func writeProgram(t *rapid.T, source string) string {
 }
 
 // inputUnder loads one written program and assembles the input the class reads.
-func inputUnder(t *rapid.T, dir string) *Input {
+func inputUnder(t *rapid.T, dir string) *Program {
 	t.Helper()
 
 	doc, err := scope.ForDir(dir)
@@ -183,15 +183,15 @@ func inputUnder(t *rapid.T, dir string) *Input {
 	if err != nil {
 		t.Fatalf("Setup: facts.NewIndex(%s): %v", dir, err)
 	}
-	return &Input{
+	return programOf(t, &Loaded{
 		Result: &result, Symbols: symbols, Resolve: resolver, Facts: index,
 		Root: doc.Target.Path, Read: os.ReadFile,
-	}
+	})
 }
 
 // retainedMethods names the methods one exemption set retains, spelled the way the
 // oracle spells them.
-func retainedMethods(in *Input, held []Exemption) map[string]bool {
+func retainedMethods(in *Program, held []Exemption) map[string]bool {
 	byID := make(map[inventory.SymbolID]string, len(in.Symbols))
 	for i := range in.Symbols {
 		if in.Symbols[i].Kind == inventory.KindMethod {

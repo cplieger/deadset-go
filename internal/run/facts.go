@@ -1,35 +1,100 @@
 package run
 
 import (
+	"context"
 	"slices"
 
+	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	specfacts "github.com/cplieger/deadset-spec/v8/facts"
+	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
-// Facts is the facts document of the run, identities only: every generated file
-// any configuration compiles and every binding identity one publishes, once each.
-func (l *Loaded) Facts(name, version string) (*specfacts.Document, error) {
+// Facts is the facts document of the run: every generated file any configuration
+// compiles and every binding record one publishes, once each, with the state the
+// carrier sweep gives each consumer and implementer.
+func (f *Findings) Facts(ctx context.Context, name, version string) (*specfacts.Document, error) {
 	doc := &specfacts.Document{
-		Analyzer: specfacts.Analyzer{Name: name, Version: version},
-		Language: vocab.Go,
+		Analyzer:  specfacts.Analyzer{Name: name, Version: version},
+		Language:  vocab.Go,
+		Evaluated: true,
 	}
 	files := make(map[string]inventory.SymbolID)
-	for i := range l.Merged.Symbols {
-		if s := &l.Merged.Symbols[i]; s.Kind == inventory.KindFile {
+	for i := range f.Merged.Symbols {
+		if s := &f.Merged.Symbols[i]; s.Kind == inventory.KindFile {
 			files[s.Pos.Filename] = s.ID
 		}
 	}
-	seen := make(map[string]bool)
+	generated := make(map[string]bool)
 	tuples := make(map[[4]string]int)
-	for i := range l.Loads {
-		x := l.Loads[i].Facts
-		doc.Generated = generatedEntries(doc.Generated, x.Generated(), seen)
-		doc.Bindings = l.bindingRecords(doc.Bindings, x.Bindings(), files, tuples)
+	served := make(map[inventory.SymbolID][]facts.Binding)
+	registrations := make(map[inventory.SymbolID]bool)
+	oneof := make(map[inventory.SymbolID]facts.OneofPart)
+	caps := make(map[string]facts.Cap)
+	var reads []facts.SchemaRead
+	for i := range f.Loads {
+		x := f.Loads[i].Facts
+		doc.Generated = generatedEntries(doc.Generated, x.Generated(), generated)
+		doc.Bindings = f.bindingRecords(doc.Bindings, x.Bindings(), files, tuples)
+		reads = append(reads, x.SchemaReads()...)
+		f.collectCaps(caps, x.Caps())
+		for _, b := range x.Bindings() {
+			switch {
+			case b.Role == facts.Served && !slices.Contains(served[b.Symbol], b):
+				served[b.Symbol] = append(served[b.Symbol], b)
+			case b.Role == facts.Registration:
+				registrations[b.Symbol] = true
+			case b.Oneof != facts.NotOneof:
+				oneof[b.Symbol] = b.Oneof
+			}
+		}
 	}
+	implementers := f.implementers(served, generated)
+	doc.Bindings = f.implementerRecords(doc.Bindings, implementers, served, tuples)
+	carriage := f.Graph.Carry(&liveness.Carrier{
+		Generated: generated, Implementers: implementers, Registrations: registrations, Exempt: f.Exemptions, Reads: reads,
+		Oneof: oneof,
+	})
+	if err := f.states(ctx, doc.Bindings, carriage, generated); err != nil {
+		return nil, err
+	}
+	f.capRecords(doc.Bindings, caps)
 	return specfacts.Build(doc)
+}
+
+// collectCaps adds each configuration's caps to caps by the record's symbol: a
+// cap any configuration's evidence shows applies, the greater [facts.Cap] where
+// two do.
+func (l *Loaded) collectCaps(caps map[string]facts.Cap, found map[inventory.SymbolID]facts.Cap) {
+	for id, capped := range found {
+		if ref := l.Refs[id]; ref != "" {
+			caps[ref] = max(caps[ref], capped)
+		}
+	}
+}
+
+// capNames is the facts document's name of each cap.
+var capNames = map[facts.Cap]specfacts.Cap{
+	facts.DescriptorExposure: specfacts.CapDescriptorExposure,
+	facts.Persistence:        specfacts.CapPersistence,
+}
+
+// capRecords gives each consumer record its cap, none where possible is below
+// the minimum confidence, because the merge must not lower a finding below the
+// minimum it was published under (grammar/analysis/bindings.md bindings.16).
+func (l *Loaded) capRecords(records []specfacts.Binding, caps map[string]facts.Cap) {
+	if kinds.Withholds(l.req.Config.Analysis.MinConfidence, vocab.Possible) {
+		return
+	}
+	for i := range records {
+		if r := &records[i]; r.Role == specfacts.RoleConsumer {
+			r.Cap = capNames[caps[r.Symbol]]
+		}
+	}
 }
 
 // generatedEntries appends the entry of each generated file whose path seen does
@@ -64,7 +129,10 @@ func (l *Loaded) bindingRecords(held []specfacts.Binding, bindings []facts.Bindi
 			Role: specfacts.RoleConsumer, SchemaFile: b.SchemaFile, Schema: b.Schema,
 			GeneratedFile: b.GeneratedFile, Symbol: l.Refs[b.Symbol],
 		}
-		if b.Fallback {
+		switch b.Role {
+		case facts.Served, facts.Registration:
+			continue
+		case facts.Fallback:
 			record.Role, record.Scope = specfacts.RoleFallback, specfacts.ScopeAll
 			record.Symbol, record.State = l.Refs[files[b.GeneratedFile]], specfacts.StateLive
 		}
@@ -82,4 +150,236 @@ func (l *Loaded) bindingRecords(held []specfacts.Binding, bindings []facts.Bindi
 		held = append(held, record)
 	}
 	return held
+}
+
+// implementers is, per served method, the hand-written methods outside test code
+// that the production sweep's interface-satisfaction exemption retains as
+// answering it, whatever site converts their type (grammar/analysis/bindings.md
+// bindings.8). A method the generated Unimplemented type supplies is declared in a
+// generated file, so it is none. Every served method is a key.
+func (p *Prepared) implementers(served map[inventory.SymbolID][]facts.Binding, generated map[string]bool) map[inventory.SymbolID][]inventory.SymbolID {
+	symbols := make(map[inventory.SymbolID]*inventory.Symbol, len(p.Merged.Symbols))
+	for i := range p.Merged.Symbols {
+		symbols[p.Merged.Symbols[i].ID] = &p.Merged.Symbols[i]
+	}
+	answering := make(map[inventory.SymbolID][]inventory.SymbolID, len(served))
+	for method := range served {
+		answering[method] = nil
+	}
+	for i := range p.Exemptions {
+		e := &p.Exemptions[i]
+		method := symbols[e.ID]
+		if _, ok := served[e.Via]; !ok || e.Class != string(vocab.InterfaceSatisfaction) || method == nil ||
+			method.Kind != inventory.KindMethod || method.InTestFile || method.TestSupport || generated[method.Pos.Filename] ||
+			slices.Contains(answering[e.Via], e.ID) {
+			continue
+		}
+		answering[e.Via] = append(answering[e.Via], e.ID)
+	}
+	return answering
+}
+
+// implementerRecords appends one record per implementer of a served method, bound
+// to that method's RPC, in the order the exemptions name them.
+func (p *Prepared) implementerRecords(held []specfacts.Binding, implementers map[inventory.SymbolID][]inventory.SymbolID, served map[inventory.SymbolID][]facts.Binding, seen map[[4]string]int) []specfacts.Binding {
+	for i := range p.Exemptions {
+		e := &p.Exemptions[i]
+		if !slices.Contains(implementers[e.Via], e.ID) {
+			continue
+		}
+		for _, rpc := range served[e.Via] {
+			tuple := [4]string{string(specfacts.RoleImplementer), p.Refs[e.ID], rpc.SchemaFile, rpc.Schema}
+			if _, ok := seen[tuple]; ok {
+				continue
+			}
+			seen[tuple] = len(held)
+			held = append(held, specfacts.Binding{
+				Role: specfacts.RoleImplementer, Symbol: p.Refs[e.ID], SchemaFile: rpc.SchemaFile, Schema: rpc.Schema,
+			})
+		}
+	}
+	return held
+}
+
+// searches is one carrier sweep as the states read it: what hand-written code
+// reaches, and the search of each implementer it does not reach.
+type searches struct {
+	k         *liveness.Carriage
+	ids       map[string]inventory.SymbolID // every reported symbol, by its reference
+	from      map[string]liveness.Reach     // per unreached implementer's reference, its search
+	generated map[string]bool
+	hand      liveness.Reach
+	order     []string // the unreached implementers, in record order
+}
+
+// states gives each consumer and implementer record its state from the carrier
+// sweep (bindings.16 to bindings.18). A record hand-written code reaches is live.
+// Otherwise the search from each implementer the sweep does not reach decides it:
+// a consumer one reaches is live with via naming them, and is unreferenced where
+// none does; an implementer is dead, with via naming the other implementers whose
+// search reaches it, carrying its pending finding ([Findings.pending]). An
+// implementer with no pending finding, one below the minimum confidence included,
+// is live.
+func (f *Findings) states(ctx context.Context, records []specfacts.Binding, k *liveness.Carriage, generated map[string]bool) error {
+	s := f.searches(records, k, generated)
+	pending, err := f.pending(ctx, s)
+	if err != nil {
+		return err
+	}
+	for i := range records {
+		if r := &records[i]; r.Role == specfacts.RoleConsumer || r.Role == specfacts.RoleImplementer {
+			s.decide(r, pending[r.Symbol])
+		}
+	}
+	return nil
+}
+
+// searches is the carrier sweep k with the search of every implementer record
+// hand-written code does not reach.
+func (f *Findings) searches(records []specfacts.Binding, k *liveness.Carriage, generated map[string]bool) *searches {
+	s := &searches{
+		k: k, hand: k.Hand(), ids: make(map[string]inventory.SymbolID, len(f.Merged.Symbols)),
+		from: make(map[string]liveness.Reach), generated: generated,
+	}
+	for i := range f.Merged.Symbols {
+		if ref := f.Refs[f.Merged.Symbols[i].ID]; ref != "" {
+			s.ids[ref] = f.Merged.Symbols[i].ID
+		}
+	}
+	for i := range records {
+		r := &records[i]
+		if _, searched := s.from[r.Symbol]; r.Role == specfacts.RoleImplementer && !searched && !s.hand.Holds(s.ids[r.Symbol]) {
+			s.from[r.Symbol] = k.Search(s.ids[r.Symbol])
+			s.order = append(s.order, r.Symbol)
+		}
+	}
+	return s
+}
+
+// decide gives one consumer or implementer record its state, its via and, for a
+// dead implementer, the pending finding found.
+func (s *searches) decide(r *specfacts.Binding, found *implementerFinding) {
+	id := s.ids[r.Symbol]
+	if s.hand.Holds(id) {
+		r.State = specfacts.StateLive
+		return
+	}
+	for _, other := range s.order {
+		if other != r.Symbol && s.from[other].Holds(id) {
+			r.Via = append(r.Via, other)
+		}
+	}
+	switch {
+	case r.Role == specfacts.RoleConsumer && len(r.Via) > 0:
+		r.State = specfacts.StateLive
+	case r.Role == specfacts.RoleConsumer:
+		r.State = specfacts.StateUnreferenced
+	case found == nil:
+		r.State, r.Via = specfacts.StateLive, nil
+	default:
+		r.State, r.Finding, r.Carried = specfacts.StateDead, &found.finding, found.carried
+	}
+}
+
+// implementerFinding is a dead implementer's pending finding and the findings it
+// carries, all in one component minted past the report's.
+type implementerFinding struct {
+	finding report.Finding
+	carried []report.Finding
+}
+
+// pending is, per unreached implementer, the finding a findings pass reports for
+// its method once nothing generated holds it: no satisfaction of a generated
+// server or handler interface, and no use by a generated interface method it
+// answers. It carries the findings of that pass about hand-written declarations
+// outside test code its search reaches that the report holds none for, hand-written
+// code does not reach, and that are no implementer and no narrowing of a live
+// declaration. Each implementer's component is minted after the report's last
+// (bindings.18).
+func (f *Findings) pending(ctx context.Context, s *searches) (map[string]*implementerFinding, error) {
+	if len(s.order) == 0 {
+		return nil, nil
+	}
+	found, err := f.withoutGenerated(ctx, s)
+	if err != nil {
+		return nil, err
+	}
+	reported := make(map[string]bool)
+	next := 0
+	for _, one := range f.reportedFindings() {
+		reported[one.Symbol.Ref] = true
+		if n, minted := kinds.ComponentNumber(one.Component.ID); minted {
+			next = max(next, n)
+		}
+	}
+	held := make(map[string]*implementerFinding, len(s.order))
+	for _, ref := range s.order {
+		at := slices.IndexFunc(found.Result.Findings, func(one kinds.Finding) bool { return one.Symbol.Ref == ref })
+		if at < 0 {
+			continue
+		}
+		next++
+		component := kinds.ComponentID(next)
+		one := &implementerFinding{finding: found.Result.Findings[at].Document()}
+		one.finding.Component.ID = component
+		for i := range found.Result.Findings {
+			c := &found.Result.Findings[i]
+			id := s.ids[c.Symbol.Ref]
+			if _, implementer := s.from[c.Symbol.Ref]; implementer || reported[c.Symbol.Ref] || c.Live || c.Generated ||
+				c.TestOnly || !s.from[ref].Holds(id) || s.hand.Holds(id) {
+				continue
+			}
+			carried := c.Document()
+			carried.Component.ID = component
+			one.carried = append(one.carried, carried)
+		}
+		held[ref] = one
+	}
+	return held, nil
+}
+
+// withoutGenerated is the findings pass over the production sweep with the
+// satisfactions of generated server and handler interfaces withdrawn, and with
+// the uses by which a generated interface method nothing calls holds an unreached
+// implementer dropped.
+func (f *Findings) withoutGenerated(ctx context.Context, s *searches) (*Findings, error) {
+	unreached := make(map[inventory.SymbolID]bool, len(s.order))
+	for _, ref := range s.order {
+		unreached[s.ids[ref]] = true
+	}
+	generated := make(map[inventory.SymbolID]bool)
+	for i := range f.Merged.Symbols {
+		if one := &f.Merged.Symbols[i]; s.generated[one.Pos.Filename] {
+			generated[one.ID] = true
+		}
+	}
+	merged := *f.Merged
+	merged.Uncalled.Uses = slices.DeleteFunc(slices.Clone(merged.Uncalled.Uses), func(u exempt.Use) bool {
+		return unreached[u.To] && generated[u.From]
+	})
+	loaded := *f.Loaded
+	loaded.Merged, loaded.Graph = &merged, liveness.Of(&merged)
+	without := *f.Prepared
+	without.Loaded = &loaded
+	without.Exemptions = slices.DeleteFunc(slices.Clone(f.Exemptions), func(e exempt.Exemption) bool { return s.k.Answers(&e) })
+	swept, err := without.sweep(nil)
+	if err != nil {
+		return nil, err
+	}
+	return swept.Findings(ctx)
+}
+
+// reportedFindings is every finding the report names: its findings and each edge
+// evaluation's pending finding.
+func (f *Findings) reportedFindings() []*kinds.Finding {
+	all := make([]*kinds.Finding, 0, len(f.Result.Findings))
+	for i := range f.Result.Findings {
+		all = append(all, &f.Result.Findings[i])
+	}
+	for i := range f.Evaluations {
+		if f.Evaluations[i].Finding != nil {
+			all = append(all, f.Evaluations[i].Finding)
+		}
+	}
+	return all
 }

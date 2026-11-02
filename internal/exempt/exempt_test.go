@@ -35,7 +35,7 @@ func at(file string, line, column int) token.Position {
 // detector returns a class's detection that reads nothing and retains exactly
 // what it was given.
 func detector(retained ...Exemption) Detector {
-	return func(*Input) ([]Exemption, error) { return retained, nil }
+	return func(*Program) ([]Exemption, error) { return retained, nil }
 }
 
 // held names every exemption of one union: the symbol, the class and the site.
@@ -51,7 +51,7 @@ func TestComputeRunsEveryClassTheTableHoldsInVocabularyOrder(t *testing.T) {
 	var ran []vocab.Exemption
 	detectors := make(map[vocab.Exemption]Detector, len(goClasses()))
 	for _, class := range goClasses() {
-		detectors[class] = func(*Input) ([]Exemption, error) {
+		detectors[class] = func(*Program) ([]Exemption, error) {
 			ran = append(ran, class)
 			return nil, nil
 		}
@@ -60,7 +60,7 @@ func TestComputeRunsEveryClassTheTableHoldsInVocabularyOrder(t *testing.T) {
 	// caller assembling the table from the classes it has produces.
 	delete(detectors, vocab.EnumGroup)
 
-	if _, _, err := Compute(&Input{}, detectors); err != nil {
+	if _, err := Compute(&Program{}, detectors); err != nil {
 		t.Fatalf("Compute over a table of every class error: %v", err)
 	}
 	want := slices.DeleteFunc(goClasses(), func(class vocab.Exemption) bool { return class == vocab.EnumGroup })
@@ -76,8 +76,9 @@ func TestComputeRunsNoDisabledClass(t *testing.T) {
 		vocab.InterfaceSatisfaction: detector(Exemption{ID: "a.go:2:1", Class: string(vocab.InterfaceSatisfaction)}),
 	}
 
-	in := &Input{Options: Options{Disabled: []vocab.Exemption{vocab.InterfaceSatisfaction, vocab.InterfaceSatisfaction, "not-a-class"}}}
-	found, _, err := Compute(in, detectors)
+	in := &Program{Options: Options{Disabled: []vocab.Exemption{vocab.InterfaceSatisfaction, vocab.InterfaceSatisfaction, "not-a-class"}}}
+	computed, err := Compute(in, detectors)
+	found := computed.Held
 	if err != nil {
 		t.Fatalf("Compute with one class disabled error: %v", err)
 	}
@@ -103,7 +104,8 @@ func TestComputeOrdersTheUnionBySiteThenClassThenSymbol(t *testing.T) {
 		),
 	}
 
-	found, _, err := Compute(&Input{}, detectors)
+	computed, err := Compute(&Program{}, detectors)
+	found := computed.Held
 	if err != nil {
 		t.Fatalf("Compute over two classes error: %v", err)
 	}
@@ -142,7 +144,8 @@ func TestComputeKeepsOneEntryPerSymbolClassDetailAndHolder(t *testing.T) {
 		),
 	}
 
-	found, _, err := Compute(&Input{}, detectors)
+	computed, err := Compute(&Program{}, detectors)
+	found := computed.Held
 	if err != nil {
 		t.Fatalf("Compute over one class error: %v", err)
 	}
@@ -431,10 +434,11 @@ var errEvidence = errors.New("the template directory cannot be read")
 func TestComputeNamesTheClassThatFailed(t *testing.T) {
 	detectors := map[vocab.Exemption]Detector{
 		vocab.GeneratedFile: detector(Exemption{ID: "a.go:1:1", Class: string(vocab.GeneratedFile)}),
-		vocab.TemplateField: func(*Input) ([]Exemption, error) { return nil, errEvidence },
+		vocab.TemplateField: func(*Program) ([]Exemption, error) { return nil, errEvidence },
 	}
 
-	found, _, err := Compute(&Input{}, detectors)
+	computed, err := Compute(&Program{}, detectors)
+	found := computed.Held
 	if !errors.Is(err, errEvidence) {
 		t.Errorf("Compute over a class that failed error = %v, want one wrapping %v", err, errEvidence)
 	}
@@ -459,14 +463,14 @@ func TestComputeHandsEveryClassTheLoadedConfigurationItReads(t *testing.T) {
 	// The framework hands a class the loaded configuration, the inventory, the
 	// resolver over it, the target root, the reader and the configured half, and
 	// every class is written against that one value.
-	var seen *Input
+	var seen *Program
 	detectors := map[vocab.Exemption]Detector{
-		vocab.GeneratedFile: func(in *Input) ([]Exemption, error) {
+		vocab.GeneratedFile: func(in *Program) ([]Exemption, error) {
 			seen = in
 			return nil, nil
 		},
 	}
-	if _, _, err := Compute(in, detectors); err != nil {
+	if _, err := Compute(in, detectors); err != nil {
 		t.Fatalf("Compute over the loaded configuration error: %v", err)
 	}
 	if seen != in {

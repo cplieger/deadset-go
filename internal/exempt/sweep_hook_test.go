@@ -19,10 +19,10 @@ type SweptCandidate struct {
 // Sweeper sweeps one input's graph with the given exemptions held back. The sweep
 // imports this package, so only the external test package can build it, and its
 // init sets this.
-var Sweeper func(in *Input, rooted roots.RootOptions, held []Exemption) ([]SweptCandidate, error)
+var Sweeper func(in *Program, rooted roots.RootOptions, held []Exemption) ([]SweptCandidate, error)
 
 // SweepCandidates is what [Sweeper] reports over one input.
-func SweepCandidates(t *testing.T, in *Input, rooted roots.RootOptions, held []Exemption) []SweptCandidate {
+func SweepCandidates(t *testing.T, in *Program, rooted roots.RootOptions, held []Exemption) []SweptCandidate {
 	t.Helper()
 	if Sweeper == nil {
 		t.Fatal("Setup: no sweeper is set")

@@ -13,10 +13,9 @@ import (
 
 // Interface is one interface the target declares, as one configuration type-checks
 // it: the methods of its method set the inventory holds, whether that method set
-// fixes its implementors, and the concrete types of the target that implement it.
-// A generic type is no interface and implements none here, because whether an
-// uninstantiated generic type implements an interface is not a question the type
-// checker answers.
+// fixes its implementors, and the concrete types of the target that implement it,
+// a generic one as [Implementing] decides. A generic interface is none here, because
+// no uninstantiated one is a method set a type implements.
 type Interface struct {
 	ID              inventory.SymbolID
 	Methods         []inventory.SymbolID
@@ -62,8 +61,8 @@ func interfacesOf(x *Index, rs *resolve.Resolver) []Interface {
 	return found
 }
 
-// declaredTypes is every non-generic named type the target defines, interfaces
-// apart from the rest, each by identifier and read once.
+// declaredTypes is every named type the target defines, the non-generic interfaces
+// apart from the concrete types, each by identifier and read once.
 func declaredTypes(x *Index, rs *resolve.Resolver) (ifaces, concrete []declaredType) {
 	seen := make(map[inventory.SymbolID]bool)
 	for p := range x.Typed() {
@@ -74,13 +73,15 @@ func declaredTypes(x *Index, rs *resolve.Resolver) (ifaces, concrete []declaredT
 			}
 			id, held := rs.Object(name)
 			named, isNamed := types.Unalias(name.Type()).(*types.Named)
-			if !held || seen[id] || !isNamed || named.TypeParams().Len() > 0 {
+			if !held || seen[id] || !isNamed {
 				continue
 			}
 			seen[id] = true
-			if iface, isInterface := named.Underlying().(*types.Interface); isInterface {
+			iface, isInterface := named.Underlying().(*types.Interface)
+			switch {
+			case isInterface && named.TypeParams().Len() == 0:
 				ifaces = append(ifaces, declaredType{named: named, iface: iface, id: id})
-			} else {
+			case !isInterface:
 				concrete = append(concrete, declaredType{named: named, id: id})
 			}
 		}
@@ -118,8 +119,8 @@ func implementedBy(rs *resolve.Resolver, declared declaredType, concrete []decla
 		}
 	}
 	for _, t := range concrete {
-		recv, satisfies := implementing(t.named, iface)
-		if !satisfies {
+		recv, satisfies := Implementing(t.named, iface)
+		if iface.NumMethods() == 0 || !satisfies {
 			continue
 		}
 		set := types.NewMethodSet(recv)
@@ -149,21 +150,71 @@ func restrictsImplementors(iface *types.Interface) bool {
 	return false
 }
 
-// implementing returns the form of one type that satisfies one interface, the
-// pointer to it included, and reports whether either does. An interface with no
-// method is satisfied by every type, so naming those types says nothing about it
-// and none is recorded.
-func implementing(t types.Type, iface *types.Interface) (types.Type, bool) {
-	if iface.NumMethods() == 0 {
-		return nil, false
-	}
-	if types.Implements(t, iface) {
+// Implementing is the form of one type a value of which implements an interface:
+// the type itself or a pointer to it, the type first, and whether either does. This
+// is the analysis's one implements relation, [Satisfies] being its rule for one form.
+func Implementing(t types.Type, iface *types.Interface) (types.Type, bool) {
+	if !Uninstantiated(t) && Satisfies(t, iface) {
 		return t, true
 	}
-	if pointer := types.NewPointer(t); types.Implements(pointer, iface) {
-		return pointer, true
+	pointer := types.NewPointer(t)
+	return pointer, Satisfies(pointer, iface)
+}
+
+// Satisfies reports whether a value of exactly t implements an interface. A generic
+// type no instantiation names, or a pointer to one, implements it where every method
+// of the interface has a method of the type of the same name with as many parameters
+// and results: the type checker decides no uninstantiated type, and some
+// instantiation of one matching by name and arity is the one a program converts.
+func Satisfies(t types.Type, iface *types.Interface) bool {
+	if !Uninstantiated(t) {
+		return types.Implements(t, iface)
 	}
-	return nil, false
+	set := types.NewMethodSet(t)
+	for m := range iface.Methods() {
+		selection := set.Lookup(m.Pkg(), m.Name())
+		if selection == nil {
+			return false
+		}
+		fn, isFunc := selection.Obj().(*types.Func)
+		if !isFunc {
+			return false
+		}
+		have, want := fn.Signature(), m.Signature()
+		if have.Params().Len() != want.Params().Len() || have.Results().Len() != want.Results().Len() {
+			return false
+		}
+	}
+	return true
+}
+
+// Uninstantiated reports whether t is a generic type no instantiation names, or a
+// pointer to one.
+func Uninstantiated(t types.Type) bool {
+	if pointer, isPointer := t.(*types.Pointer); isPointer {
+		t = pointer.Elem()
+	}
+	named, isNamed := types.Unalias(t).(*types.Named)
+	return isNamed && named.TypeParams().Len() > 0 && named.TypeArgs().Len() == 0
+}
+
+// DeclaredInterfaces is every non-generic defined interface one package declares at
+// package level, by name: the one walk of a package's interfaces, which each reader
+// narrows to the ones its rule names.
+func DeclaredInterfaces(pkg *types.Package) []*types.Named {
+	var found []*types.Named
+	scope := pkg.Scope()
+	for _, name := range scope.Names() {
+		typeName, isType := scope.Lookup(name).(*types.TypeName)
+		if !isType || typeName.IsAlias() {
+			continue
+		}
+		named, isNamed := typeName.Type().(*types.Named)
+		if isNamed && named.TypeParams().Len() == 0 && types.IsInterface(named) {
+			found = append(found, named)
+		}
+	}
+	return found
 }
 
 // InterfaceMethod is what every configuration of a matrix holds about one method an

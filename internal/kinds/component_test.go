@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/liveness"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 func TestDeletableLinesCountALineSeveralSpansCoverOnce(t *testing.T) {
@@ -51,5 +52,36 @@ func TestDeletableLinesCountALineSeveralSpansCoverOnce(t *testing.T) {
 				t.Errorf("DeletableLines(%+v) = %d, want %d", test.spans, got, test.want)
 			}
 		})
+	}
+}
+
+func TestComponentNumberReadsWhatComponentIDMints(t *testing.T) {
+	for _, n := range []int{1, 7, 120} {
+		if got, minted := ComponentNumber(ComponentID(n)); !minted || got != n {
+			t.Errorf("ComponentNumber(ComponentID(%d)) = %d, %v, want %d, true", n, got, minted, n)
+		}
+	}
+	for _, id := range []string{"", "deadset-ts/c-3", "deadset-go/c-", "deadset-go/c-x", "deadset-go/c-01", "deadset-go/c-+7", "deadset-go/c--0"} {
+		if got, minted := ComponentNumber(id); minted {
+			t.Errorf("ComponentNumber(%q) = %d, true, want false: no identifier ComponentID mints", id, got)
+		}
+	}
+}
+
+func TestWithholdsRanksTheClassBelowTheMinimum(t *testing.T) {
+	cases := []struct {
+		minimum, class vocab.Class
+		want           bool
+	}{
+		{vocab.Possible, vocab.Possible, false},
+		{vocab.Probable, vocab.Possible, true},
+		{vocab.Certain, vocab.Probable, true},
+		{vocab.Probable, vocab.Certain, false},
+		{"", vocab.Possible, false},
+	}
+	for _, c := range cases {
+		if got := Withholds(c.minimum, c.class); got != c.want {
+			t.Errorf("Withholds(%q, %q) = %v, want %v", c.minimum, c.class, got, c.want)
+		}
 	}
 }

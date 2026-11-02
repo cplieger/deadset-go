@@ -11,13 +11,14 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"golang.org/x/tools/txtar"
 )
 
 // inputForDir assembles the input of one target directory already on disk, for a
 // fixture the package's own testdata does not hold.
-func inputForDir(t *testing.T, dir, subject string) *Input {
+func inputForDir(t *testing.T, dir, subject string) *Program {
 	t.Helper()
 	result, root := loadDir(t, dir)
 	inv, err := inventory.Of(result, root, os.ReadFile)
@@ -33,13 +34,13 @@ func inputForDir(t *testing.T, dir, subject string) *Input {
 	if err != nil {
 		t.Fatalf("Setup: facts.NewIndex(%s): %v", subject, err)
 	}
-	return &Input{Result: result, Symbols: symbols, Resolve: resolver, Facts: index, Root: root, Read: os.ReadFile}
+	return programOf(t, &Loaded{Result: result, Symbols: symbols, Resolve: resolver, Facts: index, Root: root, Read: os.ReadFile})
 }
 
 // renderConversions prints one conversion per line, tab-separated, for a golden
 // comparison. Each position is rendered against the target root, so the temporary
 // directory the archive was written to does not reach the golden.
-func renderConversions(t *testing.T, in *Input, sites []facts.Conversion) string {
+func renderConversions(t *testing.T, in *Program, sites []facts.Conversion) string {
 	t.Helper()
 	var b strings.Builder
 	for i := range sites {
@@ -77,20 +78,14 @@ func compareGolden(t *testing.T, name, subject, got string) {
 
 func TestConversionsGoldenTableOverEverySyntacticShape(t *testing.T) {
 	in := inputOf(t, "conversion-shapes.txtar", Options{})
-	sites, err := conversionsOf(in)
-	if err != nil {
-		t.Fatalf("conversionsOf(conversion-shapes.txtar) error: %v", err)
-	}
+	sites := in.conversions
 	compareGolden(t, "conversion-shapes.golden",
-		"conversionsOf(conversion-shapes.txtar)", renderConversions(t, in, sites))
+		"the conversions of conversion-shapes.txtar", renderConversions(t, in, sites))
 }
 
 func TestConversionsRecordsNeitherAnAssertionNorATypeSwitchNorADeclaration(t *testing.T) {
 	in := inputOf(t, "conversion-shapes.txtar", Options{})
-	sites, err := conversionsOf(in)
-	if err != nil {
-		t.Fatalf("conversionsOf(conversion-shapes.txtar) error: %v", err)
-	}
+	sites := in.conversions
 
 	// NotConversions holds one type assertion, one two-case type switch, one short
 	// variable declaration and one comparison whose operand is written as an
@@ -100,42 +95,26 @@ func TestConversionsRecordsNeitherAnAssertionNorATypeSwitchNorADeclaration(t *te
 	rendered := renderConversions(t, in, sites)
 	got := linesInFunction(t, rendered, "NotConversions")
 	if len(got) != 1 {
-		t.Errorf("conversionsOf(conversion-shapes.txtar) recorded %d sites in NotConversions:\n%s\nwant 1, the explicit conversion",
+		t.Errorf("the conversions of conversion-shapes.txtar are %d sites in NotConversions:\n%s\nwant 1, the explicit conversion",
 			len(got), strings.Join(got, "\n"))
 	}
 }
 
-func TestConversionsIsIndependentOfTheOrderItIsCalledIn(t *testing.T) {
-	in := inputOf(t, "conversion-shapes.txtar", Options{})
-	first, err := conversionsOf(in)
-	if err != nil {
-		t.Fatalf("conversionsOf(conversion-shapes.txtar) first call error: %v", err)
-	}
-	second, err := conversionsOf(in)
-	if err != nil {
-		t.Fatalf("conversionsOf(conversion-shapes.txtar) second call error: %v", err)
-	}
-	want, got := renderConversions(t, in, first), renderConversions(t, in, second)
-	if got != want {
-		t.Errorf("conversionsOf(conversion-shapes.txtar) twice differs\n--- first\n%s\n+++ second\n%s", want, got)
-	}
-}
-
-func TestConversionsRefusesAnInputCarryingNoFileSet(t *testing.T) {
+func TestNewProgramRefusesALoadCarryingNoFileSet(t *testing.T) {
 	for _, test := range []struct {
-		in   *Input
+		in   *Loaded
 		name string
 	}{
-		{name: "no input", in: nil},
-		{name: "no load result", in: &Input{}},
+		{name: "no load result", in: &Loaded{}},
+		{name: "no file set", in: &Loaded{Result: &load.Result{}}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			sites, err := conversionsOf(test.in)
+			p, err := NewProgram(test.in)
 			if err == nil {
-				t.Fatalf("conversionsOf(%s) = %v, nil, want an error", test.name, sites)
+				t.Fatalf("NewProgram(%s) = %v, nil, want an error", test.name, p)
 			}
 			if !errors.Is(err, inventory.ErrIncompleteLoad) {
-				t.Errorf("conversionsOf(%s) error = %v, want one matching graph.ErrIncompleteLoad", test.name, err)
+				t.Errorf("NewProgram(%s) error = %v, want one matching inventory.ErrIncompleteLoad", test.name, err)
 			}
 		})
 	}

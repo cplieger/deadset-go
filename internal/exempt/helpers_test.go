@@ -112,7 +112,7 @@ func twoModules(t *testing.T, archive string) bool {
 // the input every class reads, so a class is measured over the production path
 // from the archive to the type information rather than over a graph written by
 // hand. The archive loads with the given build tags.
-func inputOf(t *testing.T, archive string, opts Options, tags ...string) *Input {
+func inputOf(t *testing.T, archive string, opts Options, tags ...string) *Program {
 	t.Helper()
 
 	dir := extract(t, archive)
@@ -134,7 +134,7 @@ func inputOf(t *testing.T, archive string, opts Options, tags ...string) *Input 
 	if err != nil {
 		t.Fatalf("Setup: facts.NewIndex(%s): %v", archive, err)
 	}
-	return &Input{
+	return programOf(t, &Loaded{
 		Result:  result,
 		Resolve: resolver,
 		Facts:   index,
@@ -142,7 +142,21 @@ func inputOf(t *testing.T, archive string, opts Options, tags ...string) *Input 
 		Root:    root,
 		Read:    os.ReadFile,
 		Options: opts,
+	})
+}
+
+// programOf computes the program of one loaded configuration.
+func programOf(t interface {
+	Helper()
+	Fatalf(format string, args ...any)
+}, l *Loaded,
+) *Program {
+	t.Helper()
+	p, err := NewProgram(l)
+	if err != nil {
+		t.Fatalf("Setup: NewProgram(%s): %v", l.Root, err)
 	}
+	return p
 }
 
 // sharedAnalysis is what one archive answers under one set of options, read by every
@@ -182,7 +196,7 @@ func analysisOf(t *testing.T, archive string, opts Options) *sharedAnalysis {
 // analyzeShared answers every question of a shared analysis from one input: each
 // detector over the input as the load built it, then the union under the plain mode
 // and under a production run.
-func analyzeShared(in *Input) *sharedAnalysis {
+func analyzeShared(in *Program) *sharedAnalysis {
 	held := &sharedAnalysis{
 		symbols:  in.Symbols,
 		detected: make(map[vocab.Exemption][]Exemption),
@@ -195,7 +209,8 @@ func analyzeShared(in *Input) *sharedAnalysis {
 	}
 	for _, production := range []bool{false, true} {
 		in.Mode = facts.Mode{Production: production}
-		held.union[production], _, held.refused[production] = Compute(in, goDetectors())
+		computed, err := Compute(in, goDetectors())
+		held.union[production], held.refused[production] = computed.Held, err
 	}
 	return held
 }

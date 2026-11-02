@@ -153,7 +153,10 @@ func TestUnreachableStatementReportsTheStatementAtThePassesOwnPosition(t *testin
 
 	result := analysisOf(t, "intrafunc-statement.txtar", asApplication, Consumers{}).findings(t, intraFunctionKinds)
 
-	want := []string{"main.go:7:2 statement halted of go://example.com/app#halted"}
+	want := []string{
+		"main.go:7:2 statement halted of go://example.com/app#halted",
+		"main.go:20:2 statement deferred of go://example.com/app#deferred",
+	}
 	if got := subjectsOf(result.Findings, vocab.UnreachableStatement); !slices.Equal(got, want) {
 		t.Errorf("the pass over intrafunc-statement.txtar reports %v under %s, want %v",
 			got, vocab.UnreachableStatement, want)

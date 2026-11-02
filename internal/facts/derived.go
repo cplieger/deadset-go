@@ -280,13 +280,13 @@ type implementsPair struct {
 	assertion int
 }
 
-// implementsOnce answers types.Implements for one type and one assertion's
+// implementsOnce answers [Satisfies] for one type and one assertion's
 // interface, each pair once.
 func implementsOnce(held map[implementsPair]bool, key string, assertion int, from types.Type, to *types.Interface) bool {
 	pair := implementsPair{key: key, assertion: assertion}
 	answer, known := held[pair]
 	if !known {
-		answer = types.Implements(from, to)
+		answer = Satisfies(from, to)
 		held[pair] = answer
 	}
 	return answer

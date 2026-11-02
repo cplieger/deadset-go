@@ -1201,15 +1201,19 @@ func TestSweepLeavesABlankRootAHeldExemptionNamesToItsHolder(t *testing.T) {
 func TestSweepCountsTheImplementationOfAnUncalledInterfaceMethodAsItsUse(t *testing.T) {
 	b := newGraphBuilder(t).add("entry", "uncalled", "implementation")
 	b.root("entry", roots.RootMain)
-	g := b.graph()
-	g.implementationUses(facts.InterfaceMethods([][]facts.Interface{{{
+	per := b.configured(1, func(int, string) bool { return true })
+	per[0].Interfaces = []facts.Interface{{
 		ID:      b.id("entry"),
 		Methods: []inventory.SymbolID{b.id("uncalled")},
 		Implementations: []facts.Implementation{
 			{Concrete: b.id("entry"), Implementors: []inventory.SymbolID{b.id("implementation")}, Empty: []bool{false}},
 		},
-	}}}))
-	r := g.Sweep(&SweepPolicy{})
+	}}
+	merged, err := Merge(per, handTests)
+	if err != nil {
+		t.Fatalf("Merge = _, %v, want no error", err)
+	}
+	r := Of(&merged).Sweep(&SweepPolicy{})
 
 	want := []verdict{
 		{name: "uncalled", relation: ReferenceCounting},

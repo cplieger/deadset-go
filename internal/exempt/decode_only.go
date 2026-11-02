@@ -8,14 +8,6 @@ import (
 	"strconv"
 )
 
-// FilledFields is every field the last Compute over in found that a function or
-// method outside the analysed program fills from a document and may read, and nothing
-// else retains under that class, each with the site of the call. It retains nothing:
-// a finding about such a field is reported at the class possible.
-func FilledFields(in *Input) []Exemption {
-	return in.filled
-}
-
 // decoders answers which parameters of a function only decode into the value they
 // are given: the body uses the parameter at least once, and every use is an
 // argument, unchanged or converted to an interface type, of a decoding entry point
@@ -39,7 +31,7 @@ func newDecoders(f *encodingFlow) *decoders {
 		declared: make(map[*types.Func]programFunction),
 		sources:  make(map[*types.Package]map[string]programFunction),
 	}
-	for _, one := range programFunctions(f.kept.in) {
+	for _, one := range f.kept.in.functions {
 		d.declared[one.fn.Origin()] = one
 	}
 	return d
@@ -181,7 +173,7 @@ func (d *decoders) readsFields(fn *types.Func, at int) bool {
 			return true
 		}
 		dest, named := d.flow.encodingDestination(callee)
-		reads = (named && dest.reach.fields) || formattingPackages[callee.Pkg().Path()]
+		reads = (named && dest.reach.fields) || destinations[callee.Pkg().Path()].prints != nil
 		return !reads
 	})
 	return reads
@@ -261,7 +253,3 @@ func (d *decoders) source(pkg *types.Package) map[string]programFunction {
 func declKey(file string, line int) string {
 	return file + ":" + strconv.Itoa(line)
 }
-
-// formattingPackages are the packages whose functions the format-verb class reads,
-// which print the fields of a value they are given.
-var formattingPackages = map[string]bool{formatPackage: true, logPackage: true, testingPackage: true, slogPackage: true}

@@ -11,7 +11,10 @@ import (
 
 // storeNode is one place the analysed program stores interface values in, keyed by
 // where it is written: a field, a variable or a composite literal, or one parameter
-// of one function, which holds every argument the program passes for it.
+// of one function, which holds every argument the program passes for it. A variable
+// holding a function stands for the function: its parameter i holds what a call
+// through the variable passes, and is the parameter of each function literal the
+// program assigns to the variable ([storeWalk.bindLiteral]).
 type storeNode struct {
 	at    token.Position
 	param int // the parameter's index, or placeNode
@@ -41,6 +44,10 @@ type storedTypes struct {
 
 	// abstract is every interface method a call takes a result of.
 	abstract map[*types.Func]bool
+
+	// literalParams is the node of each parameter of a function literal the program
+	// assigns to a variable.
+	literalParams map[*types.Var]storeNode
 }
 
 // storedValue is what one expression carries into a place: a concrete type, the node
@@ -54,20 +61,19 @@ type storedValue struct {
 // them.
 type storeWalk struct {
 	*storedTypes
-	info      *types.Info
-	fn        *types.Func
-	inLiteral map[*ast.ReturnStmt]bool // the returns of the declaration's function literals
+	info *types.Info
+	fn   *types.Func
 }
 
-// storedTypesOf reads every store of the analysed program into a place that holds an
-// interface: a field's value in a composite literal, the right side of an assignment
-// or a declaration, an element of a composite literal of a slice, array or map type,
-// an argument of append onto it, the right side of an assignment to an index of it,
-// and an argument a call passes for a parameter. A stored interface-typed parameter
-// stands for every argument the program's calls pass for it, and a parameter no call
-// passes adds nothing.
-func storedTypesOf(in *Input, sites *declarationSites) *storedTypes {
-	s := &storedTypes{
+// newStoredTypes starts the stores of one program, which the flow graph's walk reads
+// ([storeWalk.visit]): a field's value in a composite literal, the right side of an
+// assignment or a declaration, an element of a composite literal of a slice, array or
+// map type, an argument of append onto it, the right side of an assignment to an
+// index of it, and an argument a call passes for a parameter. A stored
+// interface-typed parameter stands for every argument the program's calls pass for
+// it, and a parameter no call passes adds nothing.
+func newStoredTypes(sites *declarationSites) *storedTypes {
+	return &storedTypes{
 		sites:    sites,
 		direct:   make(map[storeNode][]types.Type),
 		from:     make(map[storeNode][]storeNode),
@@ -75,21 +81,17 @@ func storedTypesOf(in *Input, sites *declarationSites) *storedTypes {
 		called:   make(map[*ast.Ident]bool),
 		valued:   make(map[*types.Func]bool),
 		abstract: make(map[*types.Func]bool),
+
+		literalParams: make(map[*types.Var]storeNode),
 	}
-	for _, p := range in.Facts.Program() {
-		for _, file := range in.Facts.Files(p) {
-			for _, decl := range file.Decls {
-				w := &storeWalk{
-					storedTypes: s, info: p.TypesInfo, fn: enclosingFunc(p.TypesInfo, decl),
-					inLiteral: literalReturns(decl),
-				}
-				ast.Inspect(decl, w.visit)
-			}
-		}
-	}
+}
+
+// link joins the stores once every declaration is read: the results of functions
+// used as values, and of the implementations of interface methods a call takes a
+// result of.
+func (s *storedTypes) link(in *Program) {
 	s.linkIndirect()
 	s.linkImplementations(programNamedTypes(in))
-	return s
 }
 
 func isAbstract(fn *types.Func) bool {
@@ -154,7 +156,7 @@ func implementation(t *types.Named, iface *types.Interface, method *types.Func) 
 
 // programNamedTypes is every non-generic defined type the analysed program declares at
 // package level that is not an interface, in package and then name order.
-func programNamedTypes(in *Input) []*types.Named {
+func programNamedTypes(in *Program) []*types.Named {
 	var found []*types.Named
 	for _, p := range in.Facts.Program() {
 		if p.Types == nil {
@@ -194,25 +196,6 @@ func (s *storedTypes) linkIndirect() {
 			}
 		}
 	}
-}
-
-// literalReturns is every return statement of the function literals one declaration
-// holds, which return from the literal rather than from the declared function.
-func literalReturns(decl ast.Decl) map[*ast.ReturnStmt]bool {
-	held := make(map[*ast.ReturnStmt]bool)
-	ast.Inspect(decl, func(n ast.Node) bool {
-		if lit, isLit := n.(*ast.FuncLit); isLit {
-			ast.Inspect(lit.Body, func(inner ast.Node) bool {
-				if ret, isReturn := inner.(*ast.ReturnStmt); isReturn {
-					held[ret] = true
-				}
-				return true
-			})
-			return false
-		}
-		return true
-	})
-	return held
 }
 
 // enclosingFunc is the function one declaration declares, and nil for any other.
@@ -273,7 +256,7 @@ func (s *storedTypes) held(info *types.Info, fn *types.Func, arg ast.Expr) []typ
 		return nil
 	}
 	w := &storeWalk{storedTypes: s, info: info, fn: fn}
-	if _, isParam := w.parameter(parameterNamed(info, arg)); isParam {
+	if _, isParam := w.declaredParameter(parameterNamed(info, arg)); isParam {
 		return nil
 	}
 	return s.value(info, fn, arg)
@@ -332,8 +315,10 @@ func holdsInterfaceElements(t types.Type) bool {
 	return false
 }
 
-// visit reads the stores one node makes.
-func (w *storeWalk) visit(n ast.Node) bool {
+// visit reads the stores one node makes, inLiteral telling whether a function
+// literal holds it, whose returns return from the literal rather than from the
+// declared function.
+func (w *storeWalk) visit(n ast.Node, inLiteral bool) {
 	switch n := n.(type) {
 	case *ast.CompositeLit:
 		w.compositeLit(n)
@@ -351,15 +336,16 @@ func (w *storeWalk) visit(n ast.Node) bool {
 			w.valued[fn] = true
 		}
 	case *ast.ReturnStmt:
-		w.returned(n)
+		if !inLiteral {
+			w.returned(n)
+		}
 	}
-	return true
 }
 
 // returned reads the values one return statement of the declared function stores
 // in its interface-typed results.
 func (w *storeWalk) returned(ret *ast.ReturnStmt) {
-	if w.fn == nil || w.inLiteral[ret] {
+	if w.fn == nil {
 		return
 	}
 	results := w.fn.Signature().Results()
@@ -510,7 +496,7 @@ func (w *storeWalk) structLit(st *types.Struct, lit *ast.CompositeLit) {
 }
 
 // assign reads the stores one assignment makes into a place, or into an index of
-// one.
+// one, and the function literals it gives variables.
 func (w *storeWalk) assign(s *ast.AssignStmt) {
 	if s.Tok != token.ASSIGN && s.Tok != token.DEFINE {
 		return
@@ -522,6 +508,7 @@ func (w *storeWalk) assign(s *ast.AssignStmt) {
 		return
 	}
 	for i, lhs := range s.Lhs {
+		w.bindLiteral(lhs, s.Rhs[i])
 		if target, indexed := ast.Unparen(lhs).(*ast.IndexExpr); indexed {
 			if node, holds := w.container(target.X); holds {
 				w.store(node, w.valueOf(s.Rhs[i]))
@@ -534,7 +521,8 @@ func (w *storeWalk) assign(s *ast.AssignStmt) {
 	}
 }
 
-// valueSpec reads the stores one variable declaration makes.
+// valueSpec reads the stores one variable declaration makes, and the function
+// literals it gives variables.
 func (w *storeWalk) valueSpec(spec *ast.ValueSpec) {
 	if len(spec.Values) == 1 {
 		names := make([]ast.Expr, 0, len(spec.Names))
@@ -547,6 +535,7 @@ func (w *storeWalk) valueSpec(spec *ast.ValueSpec) {
 		return
 	}
 	for i, name := range spec.Names {
+		w.bindLiteral(name, spec.Values[i])
 		if node, t, isPlace := w.place(name); isPlace {
 			w.storeInto(node, t, spec.Values[i])
 		}
@@ -642,9 +631,38 @@ func (w *storeWalk) literal(lit *ast.CompositeLit) storeNode {
 	return storeNode{at: w.sites.position(lit.Lbrace), param: placeNode}
 }
 
-// parameter is the node of v where v is a parameter of the enclosing function other
-// than a variadic one.
+// bindLiteral records the parameters of the function literal an assignment or a
+// declaration gives a variable, at the variable's nodes.
+func (w *storeWalk) bindLiteral(target, value ast.Expr) {
+	lit, isLiteral := ast.Unparen(value).(*ast.FuncLit)
+	id, isIdent := ast.Unparen(target).(*ast.Ident)
+	if !isLiteral || !isIdent {
+		return
+	}
+	v, isVar := w.info.ObjectOf(id).(*types.Var)
+	sig, typed := w.info.TypeOf(lit).(*types.Signature)
+	if !isVar || !typed {
+		return
+	}
+	for i := range sig.Params().Len() {
+		if !sig.Variadic() || i < sig.Params().Len()-1 {
+			w.literalParams[sig.Params().At(i)] = storeNode{at: w.sites.of(v), param: i}
+		}
+	}
+}
+
+// parameter is the node of v where v is a parameter, other than a variadic one, of
+// the enclosing function or of a function literal a variable holds.
 func (w *storeWalk) parameter(v *types.Var) (storeNode, bool) {
+	if node, declared := w.declaredParameter(v); declared {
+		return node, true
+	}
+	node, bound := w.literalParams[v]
+	return node, bound
+}
+
+// declaredParameter is [storeWalk.parameter] for the enclosing function alone.
+func (w *storeWalk) declaredParameter(v *types.Var) (storeNode, bool) {
 	if w.fn == nil || v == nil {
 		return storeNode{}, false
 	}
@@ -747,13 +765,23 @@ func (w *storeWalk) link(node, source storeNode) {
 }
 
 // call records what one call passes for every parameter of its callee that is an
-// interface or holds interface elements, other than a variadic one.
+// interface or holds interface elements, other than a variadic one. The callee is a
+// function, or a variable holding one.
 func (w *storeWalk) call(call *ast.CallExpr) {
-	callee, isFunc := resolveObject(w.info, call.Fun).(*types.Func)
-	if !isFunc {
+	var sig *types.Signature
+	var callee types.Object
+	switch obj := resolveObject(w.info, call.Fun).(type) {
+	case *types.Func:
+		sig, callee = obj.Signature(), obj
+	case *types.Var:
+		held, isFunc := types.Unalias(obj.Type()).Underlying().(*types.Signature)
+		if !isFunc || obj.IsField() {
+			return
+		}
+		sig, callee = held, obj
+	default:
 		return
 	}
-	sig := callee.Signature()
 	last := sig.Params().Len() - 1
 	for i, arg := range call.Args {
 		at, supplies := parameterAt(sig, i)

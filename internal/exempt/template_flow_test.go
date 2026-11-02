@@ -1,6 +1,7 @@
 package exempt
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -95,5 +96,44 @@ func TestEmbeddedFilesRefusesASetOverTheFileBound(t *testing.T) {
 	}
 	if files, ok := embeddedFiles(root, root, []string{"one", "two"}); ok {
 		t.Errorf("embeddedFiles(one, two) = %d files, true, want false over %d files", len(files), maxRootFiles)
+	}
+}
+
+func TestFileSystemRootsMatchFilesInTheOrderFSGlobDoes(t *testing.T) {
+	dir := t.TempDir()
+	for _, file := range []string{"a/x.html", "a.b/y.html", "b/z.html"} {
+		if err := os.MkdirAll(filepath.Join(dir, filepath.Dir(file)), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, file), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	embedded, ok := embeddedFiles(dir, dir, []string{"b", "a.b", "a", "a/x.html"})
+	if !ok {
+		t.Fatal("embeddedFiles(b, a.b, a, a/x.html) = false, want true")
+	}
+	listed, ok := (&valueFlow{root: dir}).directory(dir, ".")
+	if !ok {
+		t.Fatal("directory(.) = false, want true")
+	}
+	for _, root := range []fsRoot{{dir: dir, files: embedded}, listed} {
+		for _, pattern := range []string{"*/*.html", "a*/*"} {
+			want, err := fs.Glob(os.DirFS(dir), pattern)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, file := range root.match(pattern) {
+				rel, err := filepath.Rel(dir, file)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got = append(got, filepath.ToSlash(rel))
+			}
+			if !slices.Equal(got, want) {
+				t.Errorf("match(%q) over %v = %v, want fs.Glob's %v", pattern, root.files, got, want)
+			}
+		}
 	}
 }

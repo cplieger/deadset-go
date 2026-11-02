@@ -93,7 +93,7 @@ func (d *declarationSites) position(pos token.Pos) token.Position {
 	return at
 }
 
-// newBoundary reads the edge of the program one input describes.
+// newBoundary reads the edge of one program.
 //
 // destination is the base case of the forwarding fixpoint: a function of the program
 // that hands one of its own empty-interface parameters to a destination the calling
@@ -101,8 +101,8 @@ func (d *declarationSites) position(pos token.Pos) token.Position {
 // crossing at that parameter of its own, retaining what the parameter it forwards to
 // retains, and is then itself something a further function can forward to. The set
 // grows until no function joins it and no retained set widens.
-func newBoundary(in *Input, destination destinationTest) *boundary {
-	declared := programFunctions(in)
+func newBoundary(in *Program, destination destinationTest) *boundary {
+	declared := in.functions
 	b := &boundary{
 		sites:    newDeclarationSites(in.Result.Fset),
 		held:     make(map[token.Position]bool, len(declared)),
@@ -136,8 +136,8 @@ func newBoundary(in *Input, destination destinationTest) *boundary {
 // sinkOf reports whether the argument at position arg of one call is passed for a
 // parameter at which a value leaves the analysed program, and names the callee it
 // leaves through: the callee does not belong to the program or forwards the
-// parameter on, and the parameter is typed as the empty interface, the variadic one
-// included. A struct value carried there crosses out ([carriesStruct]).
+// parameter on, and the parameter erases the type of what it is given
+// ([erasedParameters]). A struct value carried there crosses out ([carriesStruct]).
 func (b *boundary) sinkOf(info *types.Info, call *ast.CallExpr, arg int) (crossingOut, bool) {
 	if arg >= len(call.Args) {
 		return crossingOut{}, false
@@ -175,7 +175,7 @@ func (b *boundary) sinks(fn *types.Func) ([]sinkParameter, bool) {
 		held, forwards := b.forwards[at]
 		return held, forwards
 	}
-	if namedDestinations[fn.Pkg().Path()] {
+	if namedDestination(fn.Pkg().Path()) {
 		return nil, false
 	}
 	sinks := opaqueParameters(fn)
@@ -319,11 +319,11 @@ type programFunction struct {
 }
 
 // programFunctions returns every function the analysed program declares, the
-// target's and every loaded consumer's, in one order. It is the one enumeration the
-// boundary and the forwarding walks read, so a consumer's wrapper is found for every
-// class at once. A declaration with no body is here and forwards nothing; a function
-// literal is not, because no call resolves to it by name.
-func programFunctions(in *Input) []programFunction {
+// target's and every loaded consumer's, in one order. It is the one enumeration every
+// class reads ([Program]), so a consumer's wrapper is found for every class at once.
+// A declaration with no body is here and forwards nothing; a function literal is
+// not, because no call resolves to it by name.
+func programFunctions(in *Program) []programFunction {
 	var found []programFunction
 	for _, p := range in.Facts.Program() {
 		for _, file := range in.Facts.Files(p) {
@@ -352,7 +352,7 @@ func fileFunctions(info *types.Info, file *ast.File) []programFunction {
 }
 
 // opaqueParameters are the sinks of a function the program does not declare: every
-// parameter typed as the empty interface. The callee's body is not in the program, so
+// parameter [erasedParameters] holds. The callee's body is not in the program, so
 // each reads the value's fields, resolves the encoding and decoding methods of both
 // directions, and retains what the callee's package can name ([reach]).
 func opaqueParameters(fn *types.Func) []sinkParameter {
@@ -369,8 +369,9 @@ func opaqueParameters(fn *types.Func) []sinkParameter {
 	return found
 }
 
-// erasedParameters are the parameter positions of one signature typed as the empty
-// interface, the variadic parameter among them where its elements are.
+// erasedParameters are the parameter positions of one signature whose type erases
+// the type of what it is given ([erasesTheType]), the variadic parameter among them
+// where its elements' type does.
 func erasedParameters(sig *types.Signature) []int {
 	params := sig.Params()
 	var found []int
@@ -390,10 +391,28 @@ func erasedParameters(sig *types.Signature) []int {
 }
 
 // erasesTheType reports whether a parameter of type t keeps nothing of the value it
-// is given, which is the empty interface alone. A type parameter keeps everything: it
-// stands for the type the caller instantiates the declaration with, so the value does
-// not lose its own type across the call, whatever the constraint admits.
+// is given, the empty interface, or nothing of the values it holds, a slice, an
+// array or a map whose element or value is the empty interface. A type parameter
+// keeps everything: it stands for the type the caller instantiates the declaration
+// with, so the value does not lose its own type across the call, whatever the
+// constraint admits.
 func erasesTheType(t types.Type) bool {
+	if _, parameterised := types.Unalias(t).(*types.TypeParam); parameterised {
+		return false
+	}
+	switch u := types.Unalias(t).Underlying().(type) {
+	case *types.Slice:
+		return isEmptyInterface(u.Elem())
+	case *types.Array:
+		return isEmptyInterface(u.Elem())
+	case *types.Map:
+		return isEmptyInterface(u.Elem())
+	}
+	return isEmptyInterface(t)
+}
+
+// isEmptyInterface reports whether t is the empty interface.
+func isEmptyInterface(t types.Type) bool {
 	if _, parameterised := types.Unalias(t).(*types.TypeParam); parameterised {
 		return false
 	}
@@ -403,8 +422,12 @@ func erasesTheType(t types.Type) bool {
 
 // carriesStruct reports whether a value of t is a struct or a pointer to one, which
 // is the shape a consumer reading a value by name reads the members of, or a slice,
-// an array or a map whose element, key or value is one.
+// an array or a map whose element, key or value is one, or a pointer to such a slice,
+// array or map, which a filling callee fills through.
 func carriesStruct(t types.Type) bool {
+	if p, pointer := types.Unalias(t).(*types.Pointer); pointer {
+		t = p.Elem()
+	}
 	switch collection := types.Unalias(t).Underlying().(type) {
 	case *types.Slice:
 		return isStructValue(collection.Elem())

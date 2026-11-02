@@ -2,7 +2,6 @@ package roots
 
 import (
 	"go/ast"
-	"go/token"
 	"go/types"
 	"maps"
 	"slices"
@@ -11,6 +10,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/gotypes"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -36,42 +36,27 @@ type skippedDecl struct {
 
 // skippedDecls pairs every type error of the target's packages with its declaration,
 // leaving out the packages another configuration type-checks.
-func skippedDecls(r *load.Result, checkedElsewhere map[load.PackageID]bool) []skippedDecl {
+func skippedDecls(r *load.Result, rs *resolve.Resolver, checkedElsewhere map[load.PackageID]bool) []skippedDecl {
 	var held []skippedDecl
 	for _, p := range r.Packages {
 		if p.Module == nil || !p.Module.Main || len(p.TypeErrors) == 0 || checkedElsewhere[r.ID(p)] {
 			continue
 		}
 		for _, e := range p.TypeErrors {
-			held = append(held, skippedDecl{pkg: p, decl: enclosingDecl(p.Syntax, e.Pos), err: e})
+			held = append(held, skippedDecl{pkg: p, decl: rs.Declaration(e.Pos), err: e})
 		}
 	}
 	return held
-}
-
-// enclosingDecl is the top-level declaration whose source holds pos.
-func enclosingDecl(files []*ast.File, pos token.Pos) ast.Decl {
-	for _, f := range files {
-		if pos < f.FileStart || pos > f.FileEnd {
-			continue
-		}
-		for _, d := range f.Decls {
-			if d.Pos() <= pos && pos < d.End() {
-				return d
-			}
-		}
-	}
-	return nil
 }
 
 // TypeErrorSkips lists every type error of one configuration's target, each with
 // the declaration it skipped, but none of a package checkedElsewhere holds. A package
 // and its test variant check one file twice, so an error may be listed twice; the
 // report holds each once.
-func TypeErrorSkips(r *load.Result, targetRoot string, checkedElsewhere map[load.PackageID]bool) []TypeErrorSkip {
+func TypeErrorSkips(r *load.Result, rs *resolve.Resolver, targetRoot string, checkedElsewhere map[load.PackageID]bool) []TypeErrorSkip {
 	pos := inventory.NewPositions(r.Fset, targetRoot, nil)
 	var held []TypeErrorSkip
-	for _, one := range skippedDecls(r, checkedElsewhere) {
+	for _, one := range skippedDecls(r, rs, checkedElsewhere) {
 		at := r.Fset.Position(one.err.Pos)
 		path := pos.Relative(at.Filename)
 		if path == "" {
@@ -127,7 +112,7 @@ func typeFailed(r *load.Result) map[load.PackageID]bool {
 // interface, so every method and field of the type is rooted too. A package another
 // configuration type-checks holds no such root ([CheckedElsewhere]).
 func (d *rootDetection) typeErrors(r *load.Result, checkedElsewhere map[load.PackageID]bool) {
-	for _, one := range skippedDecls(r, checkedElsewhere) {
+	for _, one := range skippedDecls(r, d.resolve, checkedElsewhere) {
 		if !d.rootDeclared(one.decl) {
 			continue
 		}
