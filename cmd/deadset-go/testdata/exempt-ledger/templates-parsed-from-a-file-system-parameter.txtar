@@ -1,0 +1,58 @@
+A generator parses its templates with ParseFS over a file system a parameter
+holds, opened on a directory the command line names, and executes them through
+a closure. The analysis cannot list that file system, so the set reads every
+field the program writes of each value the closure is given.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- authoring/docs/page.md.tmpl --
+# {{ .Title }}
+{{ range .Rows }}- {{ .Why }}
+{{ end }}
+-- app.go --
+package main
+
+import (
+	"bytes"
+	"flag"
+	"io/fs"
+	"os"
+	"text/template"
+)
+
+type row struct {
+	Why  string
+	Skip string
+}
+
+type page struct {
+	Title string
+	Rows  []row
+}
+
+func pages(fsys fs.FS) ([]byte, error) {
+	tmpl, err := template.New("docs").ParseFS(fsys, "authoring/docs/*.tmpl")
+	if err != nil {
+		return nil, err
+	}
+	var b bytes.Buffer
+	render := func(name string, v any) error { return tmpl.ExecuteTemplate(&b, name, v) }
+	if err := render("page.md.tmpl", page{Title: "t", Rows: []row{{Why: "w", Skip: "s"}}}); err != nil {
+		return nil, err
+	}
+	return b.Bytes(), nil
+}
+
+func main() {
+	root := flag.String("root", ".", "the module root")
+	flag.Parse()
+	out, err := pages(os.DirFS(*root))
+	if err != nil {
+		os.Exit(1)
+	}
+	_, _ = os.Stdout.Write(out)
+}

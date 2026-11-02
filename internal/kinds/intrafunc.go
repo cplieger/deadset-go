@@ -876,9 +876,8 @@ func (g *intrafunc) reportUnreachable(one *Configured, p *packages.Package, held
 	if _, err := unreachable.Analyzer.Run(pass); err != nil {
 		return err
 	}
-	inside := enclosingDeclarations(one, p.Syntax)
 	for _, diagnostic := range reported {
-		id, enclosed := declarationAt(inside, diagnostic.Pos)
+		id, enclosed := one.Resolve.Holder(diagnostic.Pos)
 		if !enclosed {
 			continue
 		}
@@ -899,49 +898,6 @@ func (g *intrafunc) reportUnreachable(one *Configured, p *packages.Package, held
 		})
 	}
 	return nil
-}
-
-// span is one function declaration's extent and the identifier of the declaration
-// the inventory holds for it.
-type span struct {
-	id    inventory.SymbolID
-	start token.Pos
-	end   token.Pos
-}
-
-// enclosingDeclarations is the extent of every function declaration of one
-// package's syntax, ordered so that a position inside one is found by search.
-func enclosingDeclarations(one *Configured, files []*ast.File) []span {
-	var spans []span
-	for _, f := range files {
-		for _, decl := range f.Decls {
-			fn, isFunc := decl.(*ast.FuncDecl)
-			if !isFunc || fn.Body == nil {
-				continue
-			}
-			id, inventoried := one.Resolve.At(fn.Name.Pos())
-			if !inventoried {
-				continue
-			}
-			spans = append(spans, span{id: id, start: fn.Pos(), end: fn.End()})
-		}
-	}
-	slices.SortFunc(spans, func(a, b span) int { return int(a.start - b.start) })
-	return spans
-}
-
-// declarationAt is the declaration one position is written inside, and false where
-// no declaration of the inventory holds it.
-func declarationAt(spans []span, pos token.Pos) (inventory.SymbolID, bool) {
-	at, _ := slices.BinarySearchFunc(spans, pos, func(s span, p token.Pos) int {
-		return int(s.start - p)
-	})
-	for back := min(at, len(spans)-1); back >= 0; back-- {
-		if spans[back].start <= pos && pos < spans[back].end {
-			return spans[back].id, true
-		}
-	}
-	return "", false
 }
 
 // unreachableCases is the answer of the unreachable-case kind.

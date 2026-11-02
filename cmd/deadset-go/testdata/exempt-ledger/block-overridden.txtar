@@ -1,0 +1,32 @@
+A layout's block is overridden by a later file of the same ParseFiles call,
+whose definition replaces the block's default as html/template's does. The set
+reads the fields the overriding template names.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- base.html --
+<html><body>{{block "content" .}}<p>nothing here</p>{{end}}</body></html>
+-- home.html --
+{{define "content"}}<h1>{{.Title}}</h1>{{end}}
+-- app.go --
+package main
+
+import (
+	"html/template"
+	"os"
+)
+
+type Home struct {
+	Title  string
+	Unused string
+}
+
+var pages = template.Must(template.ParseFiles("base.html", "home.html"))
+
+func main() {
+	_ = pages.ExecuteTemplate(os.Stdout, "base.html", Home{Title: "t", Unused: "u"})
+}

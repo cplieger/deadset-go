@@ -19,7 +19,7 @@ const detailGenerated = "declared in a generated file"
 // A package and a file are not declarations in a file: the package clause of one
 // generated file would otherwise retain every declaration of the package. The site
 // is the file's package clause.
-func GeneratedFileDetector(in *Input) ([]Exemption, error) {
+func GeneratedFileDetector(in *Program) ([]Exemption, error) {
 	if in.Options.IncludeGenerated {
 		return nil, nil
 	}

@@ -1,0 +1,61 @@
+Two of the program's own generic clients fill a value of their type parameter. One
+decodes it with encoding/json, which fills exactly the type's fields; the other
+hands a pointer to it to an outside function at an empty-interface parameter, which
+may fill it whatever its name. A field only the second fills is possible.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+
+require example.com/orm v0.0.0
+
+replace example.com/orm => ./orm
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- app.go --
+package main
+
+import (
+	"encoding/json"
+	"os"
+
+	"example.com/orm"
+)
+
+type Typed struct {
+	Name  string `json:"name"`
+	Spare string `json:"spare"`
+}
+
+type Untyped struct {
+	Name  string `json:"name"`
+	Spare string `json:"spare"`
+}
+
+func decode[T any]() (T, error) {
+	var v T
+	err := json.NewDecoder(os.Stdin).Decode(&v)
+	return v, err
+}
+
+func fetch[T any]() (T, error) {
+	var v T
+	err := orm.Get(&v)
+	return v, err
+}
+
+func main() {
+	a, _ := decode[Typed]()
+	println(a.Name)
+	b, _ := fetch[Untyped]()
+	println(b.Name)
+}
+-- orm/go.mod --
+module example.com/orm
+
+go 1.27.1
+-- orm/orm.go --
+package orm
+
+func Get(dest interface{}) error { _ = dest; return nil }

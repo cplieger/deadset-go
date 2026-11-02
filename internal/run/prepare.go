@@ -22,7 +22,7 @@ type Prepared struct {
 	unseen map[inventory.SymbolID]bool
 
 	// filled is every field a callee outside the program fills and no class
-	// retains ([exempt.FilledFields]).
+	// retains ([exempt.Computed.Filled]).
 	filled map[inventory.SymbolID]bool
 
 	per []kinds.Configured
@@ -54,7 +54,7 @@ func (l *Loaded) Prepare(production bool) (*Prepared, error) {
 	options := exemptOptions(&l.req.Config)
 	for i := range l.Loads {
 		one := &l.Loads[i]
-		in := &exempt.Input{
+		program, err := exempt.NewProgram(&exempt.Loaded{
 			Result:  &one.Result,
 			Resolve: one.Resolve,
 			Facts:   one.Facts,
@@ -63,21 +63,23 @@ func (l *Loaded) Prepare(production bool) (*Prepared, error) {
 			Read:    os.ReadFile,
 			Options: options,
 			Mode:    p.Mode,
-		}
-		computed, evidence, err := exempt.Compute(in, exempt.Detectors)
+		})
 		if err != nil {
 			return nil, err
 		}
-		p.Exemptions = append(p.Exemptions, computed...)
-		p.testEvidence = append(p.testEvidence, evidence...)
-		filled := exempt.FilledFields(in)
-		for j := range filled {
-			p.filled[filled[j].ID] = true
+		computed, err := exempt.Compute(program, exempt.Detectors)
+		if err != nil {
+			return nil, err
+		}
+		p.Exemptions = append(p.Exemptions, computed.Held...)
+		p.testEvidence = append(p.testEvidence, computed.TestEvidence...)
+		for j := range computed.Filled {
+			p.filled[computed.Filled[j].ID] = true
 		}
 		p.per[i] = kinds.Configured{Result: &one.Result, Resolve: one.Resolve, Facts: one.Facts, Symbols: one.Symbols}
 	}
-	p.Exemptions = l.Graph.WithoutUncalled(p.Exemptions)
-	p.testEvidence = l.Graph.WithoutUncalled(p.testEvidence)
+	p.Exemptions = l.Merged.Uncalled.Withdrawn(p.Exemptions)
+	p.testEvidence = l.Merged.Uncalled.Withdrawn(p.testEvidence)
 	p.unseen = kinds.Unseen(&kinds.Input{Config: &l.req.Config, Merged: l.Merged, Per: p.per, Root: l.Root, Consumers: l.consumers()})
 	return p, nil
 }

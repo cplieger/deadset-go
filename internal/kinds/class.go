@@ -1,8 +1,6 @@
 package kinds
 
 import (
-	"go/types"
-	"iter"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -30,6 +28,10 @@ func rank(c vocab.Class) int {
 	}
 	return len(classOrder) - at
 }
+
+// Withholds reports whether a minimum confidence withholds a finding of class c. A
+// minimum outside the set withholds nothing.
+func Withholds(minimum, c vocab.Class) bool { return rank(c) < rank(minimum) }
 
 // lower returns the weaker of two classes, and c where other is not a class.
 func lower(c, other vocab.Class) vocab.Class {
@@ -247,8 +249,8 @@ func (in *Input) consumersLoaded() bool {
 }
 
 // hiddenMember reports whether one declaration is a field of an unexported type,
-// or a method of an unexported interface, that no exported declaration of its
-// package exposes, so no code outside the module holds a value to select it on. A
+// or a method of an unexported interface, that the published API does not reach, so
+// no code outside the module holds a value to select it on. A
 // concrete type's method is never hidden: a value converted to an interface carries
 // it out, where an assertion calls it. A field of an anonymous struct belongs to
 // the type that holds the struct.
@@ -272,80 +274,20 @@ func (in *Input) hiddenMember(symbol *inventory.Symbol) bool {
 	return !held.exposed[owner.ID]
 }
 
-// exposedTypes is every type of the target that code outside its package can name
-// or hold a value of: an exported type, and every type an exported declaration's
-// type spells, closed over the exported fields, the embedded fields and the
-// exported methods of every type it holds.
+// exposedTypes is every type of the target the published API of some
+// configuration reaches ([facts.Published]).
 func exposedTypes(in *Input) map[inventory.SymbolID]bool {
 	exposed := make(map[inventory.SymbolID]bool)
-	for one, p := range in.typedPackages() {
-		for name := range exposedIn(p.Types) {
+	for i := range in.Per {
+		one := &in.Per[i]
+		if one.Facts == nil {
+			continue
+		}
+		for _, name := range one.Facts.Published().Names() {
 			if id, held := one.Resolve.Object(name); held {
 				exposed[id] = true
 			}
 		}
 	}
 	return exposed
-}
-
-// exposedIn is every type of one package that code outside it can name or hold a
-// value of.
-func exposedIn(pkg *types.Package) map[*types.TypeName]bool {
-	reached := make(map[*types.TypeName]bool)
-	var queue []*types.TypeName
-	visit := func(t types.Type) {
-		named := make(map[*types.TypeName]bool)
-		typeNamesIn(named, pkg.Path(), t)
-		for name := range named {
-			if !reached[name] {
-				reached[name] = true
-				queue = append(queue, name)
-			}
-		}
-	}
-	scope := pkg.Scope()
-	for _, name := range scope.Names() {
-		if object := scope.Lookup(name); object.Exported() {
-			visit(object.Type())
-		}
-	}
-	for len(queue) > 0 {
-		name := queue[0]
-		queue = queue[1:]
-		visitMembers(name, visit)
-	}
-	return reached
-}
-
-// visitMembers visits the type of every member of one type that code outside its
-// package can reach: the exported methods, the exported and embedded fields, and
-// the embedded interfaces, an embedded type promoting its own exported members.
-func visitMembers(name *types.TypeName, visit func(types.Type)) {
-	if named, ok := name.Type().(*types.Named); ok {
-		visitExported(named.Methods(), visit)
-	}
-	switch u := name.Type().Underlying().(type) {
-	case *types.Struct:
-		for field := range u.Fields() {
-			if field.Exported() || field.Embedded() {
-				visit(field.Type())
-			}
-		}
-	case *types.Interface:
-		visitExported(u.Methods(), visit)
-		for embedded := range u.EmbeddedTypes() {
-			visit(embedded)
-		}
-	default:
-		visit(u)
-	}
-}
-
-// visitExported visits the type of every exported method of a sequence.
-func visitExported(methods iter.Seq[*types.Func], visit func(types.Type)) {
-	for method := range methods {
-		if method.Exported() {
-			visit(method.Type())
-		}
-	}
 }

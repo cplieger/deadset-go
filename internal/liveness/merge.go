@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
@@ -35,6 +36,10 @@ type Merged struct {
 	// InterfaceMethods is every method an interface of the target declares, with
 	// what every configuration holds about it ([facts.InterfaceMethods]).
 	InterfaceMethods map[inventory.SymbolID]*facts.InterfaceMethod
+
+	// Uncalled is interface satisfaction's rule over the matrix's uncalled
+	// interface methods.
+	Uncalled exempt.Uncalled
 
 	Tests          roots.TestClasses // the matrix's, [MatrixTests]
 	Symbols        []inventory.Symbol
@@ -89,6 +94,10 @@ func Merge(per []Configured, tests roots.TestClasses) (Merged, error) {
 		ifaces[config] = one.Interfaces
 	}
 	m.InterfaceMethods = facts.InterfaceMethods(ifaces)
+	m.Uncalled = exempt.UncalledMethods(m.InterfaceMethods, m.References, func(id inventory.SymbolID) bool {
+		i, held := at[id]
+		return held && !m.Symbols[i].InTestFile
+	})
 	slices.SortFunc(m.Symbols, inventory.BySite)
 	return m, nil
 }

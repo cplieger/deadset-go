@@ -1,0 +1,104 @@
+Templates are listed with fs.ReadDir, opened and read with io.ReadAll, then parsed
+into one set held in a map, and a page renders a slice an ORM fills through a
+pointer to it. The fields the templates name are read; a field the ORM fills that no
+template names is possible.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+
+require example.com/orm v0.0.0
+
+replace example.com/orm => ./orm
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- orm/go.mod --
+module example.com/orm
+
+go 1.27.1
+-- orm/orm.go --
+package orm
+
+func Find(dest interface{}) error { _ = dest; return nil }
+-- views/views.go --
+package views
+
+import "embed"
+
+//go:embed *.html
+var TemplateFiles embed.FS
+-- views/head.tpl.html --
+<title>{{ .Title }}</title>
+-- views/projects.tpl.html --
+<ul>{{ range . }}<li>{{ .Project }} {{ .TopLanguage }}</li>{{ end }}</ul>
+-- app.go --
+package main
+
+import (
+	"html/template"
+	"io"
+	"io/fs"
+	"os"
+	"path"
+
+	"example.com/app/views"
+	"example.com/orm"
+)
+
+type ProjectStats struct {
+	Project     string
+	TopLanguage string
+	UserID      string
+}
+
+type TemplateMap map[string]*template.Template
+
+func chooseFS(localDir string, embedded fs.FS) fs.FS {
+	if os.Getenv("DEV") != "" {
+		return os.DirFS(localDir)
+	}
+	return embedded
+}
+
+func loadTemplates(templateFs fs.FS) (TemplateMap, error) {
+	tpls := template.New("")
+	templates := make(TemplateMap)
+	files, err := fs.ReadDir(templateFs, ".")
+	if err != nil {
+		return nil, err
+	}
+	for _, file := range files {
+		tplName := file.Name()
+		if file.IsDir() || path.Ext(tplName) != ".html" {
+			continue
+		}
+		templateFile, err := templateFs.Open(tplName)
+		if err != nil {
+			return nil, err
+		}
+		templateData, err := io.ReadAll(templateFile)
+		if err != nil {
+			return nil, err
+		}
+		_ = templateFile.Close()
+		tpl, err := tpls.New(tplName).Parse(string(templateData))
+		if err != nil {
+			return nil, err
+		}
+		templates[tplName] = tpl
+	}
+	return templates, nil
+}
+
+func main() {
+	tpls, err := loadTemplates(chooseFS("views", views.TemplateFiles))
+	if err != nil {
+		return
+	}
+	var stats []ProjectStats
+	if orm.Find(&stats) != nil {
+		return
+	}
+	_ = tpls["projects.tpl.html"].Execute(os.Stdout, stats)
+}

@@ -12,7 +12,7 @@ import (
 // assertable answers which interfaces a package outside the analysed program can
 // assert on a value it holds, each package's answer computed once.
 type assertable struct {
-	in         *Input
+	in         *Program
 	own        map[*types.Package][]*types.Interface // per reading of a package, as each states its types
 	imported   map[*types.Package]importedSet
 	assertions map[*types.Package][]*types.Interface
@@ -26,18 +26,15 @@ type importedSet struct {
 	templates  bool
 }
 
-// assertableOf is the one answer over an input, made on first use.
-func assertableOf(in *Input) *assertable {
-	if in.assert == nil {
-		in.assert = &assertable{
-			in:         in,
-			own:        make(map[*types.Package][]*types.Interface),
-			imported:   make(map[*types.Package]importedSet),
-			assertions: make(map[*types.Package][]*types.Interface),
-			selfNamed:  make(map[string]map[string]bool),
-		}
+// newAssertable starts the answer over one program.
+func newAssertable(in *Program) *assertable {
+	return &assertable{
+		in:         in,
+		own:        make(map[*types.Package][]*types.Interface),
+		imported:   make(map[*types.Package]importedSet),
+		assertions: make(map[*types.Package][]*types.Interface),
+		selfNamed:  make(map[string]map[string]bool),
 	}
-	return in.assert
 }
 
 // ownInterfaces is every interface one package declares, exported or not, and every
@@ -57,7 +54,7 @@ func (a *assertable) importedBy(pkg *types.Package) importedSet {
 	if held, known := a.imported[pkg]; known {
 		return held
 	}
-	held := importedSet{templates: templatePackages[pkg.Path()]}
+	held := importedSet{templates: templateEngine(pkg.Path())}
 	seen := map[string]bool{pkg.Path(): true}
 	queue := slices.Clone(pkg.Imports())
 	for _, one := range queue {
@@ -66,7 +63,7 @@ func (a *assertable) importedBy(pkg *types.Package) importedSet {
 	for len(queue) > 0 {
 		one := queue[0]
 		queue = queue[1:]
-		held.templates = held.templates || templatePackages[one.Path()]
+		held.templates = held.templates || templateEngine(one.Path())
 		held.interfaces = append(held.interfaces, declaredInterfaces(one, false)...)
 		for _, imported := range one.Imports() {
 			if !seen[imported.Path()] {

@@ -8,7 +8,7 @@ import (
 )
 
 func init() {
-	exempt.Sweeper = func(in *exempt.Input, rooted roots.RootOptions, held []exempt.Exemption) ([]exempt.SweptCandidate, error) {
+	exempt.Sweeper = func(in *exempt.Program, rooted roots.RootOptions, held []exempt.Exemption) ([]exempt.SweptCandidate, error) {
 		refs, _, err := facts.References(in.Result, in.Resolve, in.Symbols, roots.TestClasses{})
 		if err != nil {
 			return nil, err

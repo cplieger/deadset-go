@@ -57,7 +57,7 @@ func TestATypeErrorAnotherConfigurationDoesNotReportRootsAndSkipsNothing(t *test
 				t.Errorf("Roots(windows) rooted %v by a type error, want %v", got, test.rooted)
 			}
 			var skipped []string
-			for _, skip := range roots.TypeErrorSkips(windows, dir, test.elsewhere) {
+			for _, skip := range roots.TypeErrorSkips(windows, rs, dir, test.elsewhere) {
 				skipped = append(skipped, skip.Path)
 			}
 			if !slices.Equal(skipped, test.skipped) {

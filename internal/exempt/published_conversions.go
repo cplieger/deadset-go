@@ -5,9 +5,7 @@ import (
 	"go/types"
 
 	"github.com/cplieger/deadset-go/v2/internal/facts"
-	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
-	"golang.org/x/tools/go/packages"
 )
 
 // publishedConversions is the sites a program outside the analysis can write into
@@ -18,30 +16,23 @@ import (
 // Each is positioned at the parameter or the type parameter, so the declaration
 // declaring it holds the site. There are none unless the target is a library whose
 // run loaded no consumer: a loaded consumer's sites are the run's own.
-func publishedConversions(in *Input) []facts.Conversion {
-	if !in.Options.PublishedAPI || in.Result == nil || len(in.Result.Consumers) > 0 {
+func publishedConversions(in *Program) []facts.Conversion {
+	if !in.Options.PublishedAPI || len(in.Result.Consumers) > 0 {
 		return nil
 	}
-	if in.published == nil {
-		scan := newPublishedScan(in.Facts.Packages(), in.Resolve)
-		sites := scan.sites()
-		in.published = &sites
-	}
-	return *in.published
+	return newPublishedScan(in.Facts.Published(), in.Resolve).sites()
 }
 
-// publishedScan reads one configuration's target packages for what an outside
-// program can hold and where it can hand a value over.
+// publishedScan reads what an outside program can hold of one configuration's
+// published API and where it can hand a value over.
 type publishedScan struct {
 	resolve    *resolve.Resolver
-	target     map[string]bool       // the target's packages, by [resolve.Resolver.PackageKey]
+	published  *facts.Published
 	holdable   map[string]types.Type // by [resolve.Resolver.TypeKey]
-	reached    map[string]bool       // the types the published API reaches, by [resolve.Resolver.TypeKey]
 	functions  map[*types.Func]bool  // the published functions read
 	typeParams map[*types.TypeParam]bool
 	queue      []types.Type         // holdable types not yet read
 	parameters []publishedParameter // every published parameter and type parameter
-	published  []*packages.Package  // the packages of the published API
 	order      []string             // holdable type keys in the order they joined
 }
 
@@ -55,38 +46,28 @@ type publishedParameter struct {
 	outside bool
 }
 
-// newPublishedScan indexes the target's packages, given in the walk order, each once.
-func newPublishedScan(pkgs []*packages.Package, rs *resolve.Resolver) *publishedScan {
-	s := &publishedScan{
+// newPublishedScan starts the scan over one configuration's published API.
+func newPublishedScan(published *facts.Published, rs *resolve.Resolver) *publishedScan {
+	return &publishedScan{
 		resolve:    rs,
-		target:     make(map[string]bool),
+		published:  published,
 		holdable:   make(map[string]types.Type),
-		reached:    make(map[string]bool),
 		functions:  make(map[*types.Func]bool),
 		typeParams: make(map[*types.TypeParam]bool),
 	}
-	seen := make(map[string]bool)
-	for _, p := range pkgs {
-		if p.Types == nil || p.Module == nil || !p.Module.Main || p.ForTest != "" || seen[rs.PackageKey(p.Types)] {
-			continue
-		}
-		seen[rs.PackageKey(p.Types)] = true
-		s.target[rs.PackageKey(p.Types)] = true
-		if load.Published(p.PkgPath, p.Name == "main") {
-			s.published = append(s.published, p)
-		}
-	}
-	return s
 }
 
 // sites reads the published API and records one site per published parameter and
 // holdable type that implements its interface.
 func (s *publishedScan) sites() []facts.Conversion {
-	for _, p := range s.published {
+	for _, p := range s.published.Packages() {
 		scope := p.Types.Scope()
 		for _, name := range scope.Names() {
 			s.seed(scope.Lookup(name))
 		}
+	}
+	for _, iface := range s.published.Interfaces() {
+		s.interfaceMethods(iface)
 	}
 	s.close()
 	candidates := s.candidates()
@@ -97,7 +78,7 @@ func (s *publishedScan) sites() []facts.Conversion {
 			continue
 		}
 		for _, t := range candidates {
-			from, implements := implementing(t, iface)
+			from, implements := facts.Implementing(t, iface)
 			if !implements {
 				continue
 			}
@@ -121,7 +102,6 @@ func (s *publishedScan) seed(obj types.Object) {
 	if !obj.Exported() {
 		return
 	}
-	s.reach(obj.Type())
 	switch o := obj.(type) {
 	case *types.TypeName:
 		s.hold(o.Type())
@@ -266,7 +246,7 @@ func (s *publishedScan) function(fn *types.Func, sig *types.Signature) {
 		return
 	}
 	s.functions[fn] = true
-	outside := fn.Pkg() == nil || !s.target[s.resolve.PackageKey(fn.Pkg())]
+	outside := !s.published.Target(fn.Pkg())
 	for v := range sig.Results().Variables() {
 		s.hold(v.Type())
 	}
@@ -299,78 +279,6 @@ func (s *publishedScan) typeParameters(list *types.TypeParamList, outside bool) 
 	}
 }
 
-// reach reads the types the published API reaches, as the confidence rule states,
-// for the interfaces among them: each such interface's methods are published
-// functions or take values the published code supplies.
-func (s *publishedScan) reach(t types.Type) {
-	if t == nil {
-		return
-	}
-	t = types.Unalias(t)
-	key := s.resolve.TypeKey(t)
-	if s.reached[key] {
-		return
-	}
-	s.reached[key] = true
-	switch u := t.(type) {
-	case *types.Named:
-		s.reachNamed(u)
-	case interface{ Elem() types.Type }:
-		if m, isMap := u.(*types.Map); isMap {
-			s.reach(m.Key())
-		}
-		s.reach(u.Elem())
-	case *types.Signature:
-		s.reachSignature(u)
-	case *types.Struct:
-		for field := range u.Fields() {
-			if field.Exported() || field.Embedded() {
-				s.reach(field.Type())
-			}
-		}
-	case *types.Interface:
-		s.interfaceMethods(u)
-		for embedded := range u.EmbeddedTypes() {
-			s.reach(embedded)
-		}
-	}
-}
-
-// reachNamed reaches what a defined type the published API reaches holds: its
-// type arguments, its exported methods' signatures and its underlying type.
-func (s *publishedScan) reachNamed(u *types.Named) {
-	if iface, isInterface := u.Underlying().(*types.Interface); isInterface {
-		s.interfaceMethods(iface)
-	}
-	for arg := range u.TypeArgs().Types() {
-		s.reach(arg)
-	}
-	set := types.NewMethodSet(types.NewPointer(u))
-	if types.IsInterface(u) {
-		set = types.NewMethodSet(u)
-	}
-	for selection := range set.Methods() {
-		if selection.Obj().Exported() {
-			s.reach(selection.Obj().Type())
-		}
-	}
-	s.reach(u.Underlying())
-}
-
-// reachSignature reaches the parameters, results and constraints of one function
-// type.
-func (s *publishedScan) reachSignature(u *types.Signature) {
-	for v := range u.Params().Variables() {
-		s.reach(v.Type())
-	}
-	for v := range u.Results().Variables() {
-		s.reach(v.Type())
-	}
-	for tp := range u.TypeParams().TypeParams() {
-		s.reach(tp.Constraint())
-	}
-}
-
 // candidates is every defined type of the target, not an interface, a value of
 // which or of a pointer to which an outside program can hold, each once, in the
 // order it joined the holdable set.
@@ -383,7 +291,7 @@ func (s *publishedScan) candidates() []*types.Named {
 			t = types.Unalias(pointer.Elem())
 		}
 		named, isNamed := t.(*types.Named)
-		if !isNamed || named.Obj().Pkg() == nil || !s.target[s.resolve.PackageKey(named.Obj().Pkg())] || types.IsInterface(named) {
+		if !isNamed || !s.published.Target(named.Obj().Pkg()) || types.IsInterface(named) {
 			continue
 		}
 		named = named.Origin()
@@ -407,54 +315,6 @@ func methodInterface(t types.Type) *types.Interface {
 		return nil
 	}
 	return iface
-}
-
-// implementing is the type a site converts for one candidate: the type itself or a
-// pointer to it, whichever implements the interface, the type first. A generic type
-// implements it where every method of the interface has a method of the type of the
-// same name with as many parameters and results, and the site converts a pointer to
-// the generic type.
-func implementing(named *types.Named, iface *types.Interface) (types.Type, bool) {
-	if named.TypeParams().Len() > 0 {
-		pointer := types.NewPointer(named)
-		return pointer, matchesByArity(pointer, iface)
-	}
-	if types.Implements(named, iface) {
-		return named, true
-	}
-	pointer := types.NewPointer(named)
-	return pointer, types.Implements(pointer, iface)
-}
-
-// matchesByArity reports whether a value of t has, for every method of the
-// interface, a method of the same name with as many parameters and as many results.
-func matchesByArity(t types.Type, iface *types.Interface) bool {
-	set := types.NewMethodSet(t)
-	for m := range iface.Methods() {
-		selection := set.Lookup(m.Pkg(), m.Name())
-		if selection == nil {
-			return false
-		}
-		fn, isFunc := selection.Obj().(*types.Func)
-		if !isFunc {
-			return false
-		}
-		have, want := fn.Signature(), m.Signature()
-		if have.Params().Len() != want.Params().Len() || have.Results().Len() != want.Results().Len() {
-			return false
-		}
-	}
-	return true
-}
-
-// genericOrigin reports whether t is a generic type no instantiation names, or a
-// pointer to one, which a published site converts under the name-and-arity bound.
-func genericOrigin(t types.Type) bool {
-	if pointer, isPointer := t.(*types.Pointer); isPointer {
-		t = pointer.Elem()
-	}
-	named, isNamed := types.Unalias(t).(*types.Named)
-	return isNamed && named.TypeParams().Len() > 0 && named.TypeArgs().Len() == 0
 }
 
 // spelled names one interface type the way a message carries it.

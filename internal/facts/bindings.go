@@ -29,15 +29,48 @@ var errUndecodable = errors.New("a generated file its generator row covers canno
 // Binding is one binding identity: a generated declaration of the target, or a
 // generated file, and the schema declaration it stands for.
 type Binding struct {
-	Symbol        inventory.SymbolID // the consumer's declaration; empty for a fallback
+	Symbol        inventory.SymbolID // the declaration; empty for a fallback
 	SchemaFile    string
 	Schema        string // the proto:// reference; empty for a fallback
 	GeneratedFile string
-
-	// Fallback marks a generated file standing for its whole schema file, which
-	// no declaration-level identity could be read for.
-	Fallback bool
+	Role          bindingRole
+	Oneof         OneofPart
 }
+
+// OneofPart is the part of a oneof member a consumer's declaration is, which the
+// carrier sweep reads by grammar/analysis/references-go.md references-go.15's
+// forms alone.
+type OneofPart uint8
+
+// The parts of a oneof member.
+const (
+	NotOneof     OneofPart = iota // no part of a oneof member
+	OneofWrapper                  // the member's wrapper type
+	oneofField                    // the wrapper's one field
+	oneofCase                     // the member's case constant
+)
+
+// bindingRole is what a binding identity's declaration is to its schema declaration.
+type bindingRole uint8
+
+const (
+	// consumerRole is a generated declaration the schema declaration became.
+	consumerRole bindingRole = iota
+
+	// Fallback is a generated file standing for its whole schema file, which no
+	// declaration-level identity could be read for.
+	Fallback
+
+	// Served is a method of a generated server or handler interface, which
+	// publishes no record: the hand-written methods answering it are the
+	// implementers of its RPC (grammar/analysis/bindings.md bindings.8).
+	Served
+
+	// Registration is a generated registration function of a service, which
+	// publishes no record: the carrier sweep follows none of its references
+	// (bindings.13).
+	Registration
+)
 
 // The cells of contract/generators.json that publish records.
 const (
@@ -45,6 +78,10 @@ const (
 	cellRPCOnly  = "rpc-only"
 	cellFallback = "fallback"
 )
+
+// cellExposureOnly is the cell of a row that publishes no record but registers
+// services, whose registration functions the carrier sweep cuts.
+const cellExposureOnly = "exposure-only"
 
 // goRows is every generator row of Go, in document order, with its compiled header.
 var goRows = sync.OnceValue(func() []generatorRow {
@@ -156,10 +193,12 @@ func bind(rs *resolve.Resolver, p *packages.Package, f *ast.File, g *Generated, 
 	case cellExact:
 		err = b.descriptor()
 	case cellRPCOnly:
-		err = b.services()
+		err = b.services(row.Registration)
+	case cellExposureOnly:
+		b.registrations(row.Registration)
 	case cellFallback:
 		for _, file := range g.SchemaFiles {
-			b.held = append(b.held, Binding{Fallback: true, SchemaFile: file, GeneratedFile: g.Path})
+			b.held = append(b.held, Binding{Role: Fallback, SchemaFile: file, GeneratedFile: g.Path})
 		}
 	}
 	if err != nil {
@@ -170,12 +209,18 @@ func bind(rs *resolve.Resolver, p *packages.Package, f *ast.File, g *Generated, 
 
 // consumer publishes obj as standing for the schema declaration fragment of pkg.
 func (b *binder) consumer(obj types.Object, schemaFile, pkg, fragment string) {
+	b.identity(consumerRole, NotOneof, obj, schemaFile, pkg, fragment)
+}
+
+// identity publishes obj in role, as part of a oneof member or not, as standing
+// for the schema declaration fragment of pkg.
+func (b *binder) identity(role bindingRole, part OneofPart, obj types.Object, schemaFile, pkg, fragment string) {
 	if obj == nil {
 		return
 	}
 	if id, ok := b.rs.Object(obj); ok {
 		b.held = append(b.held, Binding{
-			Symbol: id, SchemaFile: schemaFile,
+			Symbol: id, SchemaFile: schemaFile, Role: role, Oneof: part,
 			Schema: protoRef(pkg, fragment), GeneratedFile: b.g.Path,
 		})
 	}
@@ -389,59 +434,104 @@ func (b *binder) message(d *fileDescriptor, obj *types.TypeName, fragment string
 	methods := types.NewMethodSet(types.NewPointer(obj.Type()))
 	for i := range structure.NumFields() {
 		if at, ok := member(structure.Tag(i)); ok {
-			b.field(d, obj, methods, structure.Field(i), at)
+			b.field(d, obj, methods, structure.Field(i), at, NotOneof)
 		}
 	}
-	for _, w := range wrappers(obj) {
-		if at, ok := member(w.fields.Tag(0)); ok {
-			b.consumer(w.name, d.name, d.pkg, at)
-			b.field(d, obj, methods, w.fields.Field(0), at)
+	for _, o := range oneofsOf(obj) {
+		for _, m := range o.members {
+			if at, ok := member(m.tag); ok {
+				b.oneofMember(d, obj, methods, m, at)
+			}
 		}
 	}
 }
 
-// field publishes one field of message obj as the schema member at, with its
-// getter, Has and Clear methods and its oneof case constant.
-func (b *binder) field(d *fileDescriptor, obj *types.TypeName, methods *types.MethodSet, field *types.Var, at string) {
-	b.consumer(field, d.name, d.pkg, at)
+// oneofMember publishes one oneof member of message obj as the schema member at:
+// its wrapper type, the wrapper's field with its accessors, and its case constant.
+func (b *binder) oneofMember(d *fileDescriptor, obj *types.TypeName, methods *types.MethodSet, m oneofMember, at string) {
+	b.identity(consumerRole, OneofWrapper, m.wrapper, d.name, d.pkg, at)
+	b.field(d, obj, methods, m.field, at, oneofField)
+	if m.caseConst != nil {
+		b.identity(consumerRole, oneofCase, m.caseConst, d.name, d.pkg, at)
+	}
+}
+
+// field publishes one field of message obj, the part of a oneof member it is, as
+// the schema member at, with its getter, Has and Clear methods.
+func (b *binder) field(d *fileDescriptor, obj *types.TypeName, methods *types.MethodSet, field *types.Var, at string, part OneofPart) {
+	b.identity(consumerRole, part, field, d.name, d.pkg, at)
 	name := strings.TrimPrefix(field.Name(), "xxx_hidden_")
 	for _, prefix := range []string{"Get", "Has", "Clear"} {
 		if sel := methods.Lookup(obj.Pkg(), prefix+name); sel != nil {
 			b.consumer(sel.Obj(), d.name, d.pkg, at)
 		}
 	}
-	if c, ok := obj.Pkg().Scope().Lookup(obj.Name() + "_" + name + "_case").(*types.Const); ok {
-		b.consumer(c, d.name, d.pkg, at)
+}
+
+// oneof is one oneof of a generated message: the message's field of it and its
+// members.
+type oneof struct {
+	field   *types.Var
+	name    string // the oneof's Go name: Pick for the field Pick or, opaque, xxx_hidden_Pick
+	members []oneofMember
+}
+
+// oneofMember is one member of a oneof: its wrapper type, the wrapper's one field
+// with its struct tag, and the member's case constant, nil in the open API.
+type oneofMember struct {
+	wrapper   *types.TypeName
+	field     *types.Var
+	caseConst *types.Const
+	tag       string
+}
+
+// declarations is every declaration of the member a read of it reads.
+func (m oneofMember) declarations() []types.Object {
+	if m.caseConst == nil {
+		return []types.Object{m.wrapper, m.field}
 	}
+	return []types.Object{m.wrapper, m.field, m.caseConst}
 }
 
-// oneofWrapper is a oneof wrapper type and the one-field struct it is.
-type oneofWrapper struct {
-	name   *types.TypeName
-	fields *types.Struct
+// oneofsOf is every oneof of message obj: a field tagged protobuf_oneof, whose
+// members are the one-field structs of the package a pointer to which implements
+// the field's interface type, each with its <Msg>_<Field>_case constant.
+func oneofsOf(obj *types.TypeName) []oneof {
+	structure, isStruct := obj.Type().Underlying().(*types.Struct)
+	if !isStruct {
+		return nil
+	}
+	var held []oneof
+	for i := range structure.NumFields() {
+		iface, isInterface := structure.Field(i).Type().Underlying().(*types.Interface)
+		if !isInterface || iface.NumMethods() == 0 || reflect.StructTag(structure.Tag(i)).Get("protobuf_oneof") == "" {
+			continue
+		}
+		held = append(held, oneof{
+			field:   structure.Field(i),
+			name:    strings.TrimPrefix(structure.Field(i).Name(), "xxx_hidden_"),
+			members: oneofMembers(obj, iface),
+		})
+	}
+	return held
 }
 
-// wrappers is every oneof wrapper type of message obj its package declares: a
-// struct of one oneof-tagged field whose method set holds an is<Msg>_ method.
-func wrappers(obj *types.TypeName) []oneofWrapper {
-	var held []oneofWrapper
+// oneofMembers is every member of message obj's oneof whose interface type iface is.
+func oneofMembers(obj *types.TypeName, iface *types.Interface) []oneofMember {
+	var held []oneofMember
 	scope := obj.Pkg().Scope()
 	for _, name := range scope.Names() {
-		wrapper, ok := scope.Lookup(name).(*types.TypeName)
-		if !ok || !strings.HasPrefix(name, obj.Name()+"_") {
+		wrapper, isType := scope.Lookup(name).(*types.TypeName)
+		if !isType || wrapper.IsAlias() {
 			continue
 		}
-		ws, ok := wrapper.Type().Underlying().(*types.Struct)
-		if !ok || ws.NumFields() != 1 || !strings.Contains(reflect.StructTag(ws.Tag(0)).Get("protobuf"), ",oneof") {
+		ws, isStruct := wrapper.Type().Underlying().(*types.Struct)
+		if !isStruct || ws.NumFields() != 1 || !types.Implements(types.NewPointer(wrapper.Type()), iface) {
 			continue
 		}
-		set := types.NewMethodSet(types.NewPointer(wrapper.Type()))
-		for selection := range set.Methods() {
-			if strings.HasPrefix(selection.Obj().Name(), "is"+obj.Name()+"_") {
-				held = append(held, oneofWrapper{name: wrapper, fields: ws})
-				break
-			}
-		}
+		m := oneofMember{wrapper: wrapper, field: ws.Field(0), tag: ws.Tag(0)}
+		m.caseConst, _ = scope.Lookup(obj.Name() + "_" + ws.Field(0).Name() + "_case").(*types.Const)
+		held = append(held, m)
 	}
 	return held
 }
@@ -547,21 +637,29 @@ func (b *binder) ident(name string) *ast.Ident {
 // fullMethod is a gRPC or Connect full method name, /pkg.Service/Method.
 var fullMethod = regexp.MustCompile(`^/((?:[A-Za-z_]\w*\.)*)([A-Za-z_]\w*)/([A-Za-z_]\w*)$`)
 
-// services publishes the records of a gRPC or Connect file: each RPC its full
-// method names name, by the client interface's method, and each service by its
-// client interface, its client constructor and its server or handler interface.
-func (b *binder) services() error {
+// services publishes the records of a gRPC or Connect file of the row id: each
+// RPC its full method names name, by the client interface's method, each service
+// by its client interface, its client constructor and its server or handler
+// interface, each RPC's method of that interface as served, and each service's
+// registration functions.
+func (b *binder) services(registration []string) error {
 	if len(b.g.SchemaFiles) == 0 {
 		return errors.New("the output names no schema file")
 	}
 	schemaFile := b.g.SchemaFiles[0]
+	b.registrations(registration)
 	bound := make(map[string]bool)
 	for _, r := range fullMethods(b.f) {
 		client := b.inFile(r.service + "Client")
 		if client == nil {
 			continue
 		}
-		b.rpcMethod(client, schemaFile, r)
+		b.rpcMethod(consumerRole, client, schemaFile, r)
+		for _, name := range []string{r.service + "Server", r.service + "Handler"} {
+			if server := b.inFile(name); server != nil {
+				b.rpcMethod(Served, server, schemaFile, r)
+			}
+		}
 		if service := r.pkg + "." + r.service; !bound[service] {
 			bound[service] = true
 			for _, name := range []string{r.service + "Client", "New" + r.service + "Client", r.service + "Server", r.service + "Handler"} {
@@ -570,6 +668,24 @@ func (b *binder) services() error {
 		}
 	}
 	return nil
+}
+
+// registrations publishes, for each service a full method name of b's file names,
+// the registration functions of a row's registration names that the file declares.
+func (b *binder) registrations(names []string) {
+	schemaFile := ""
+	if len(b.g.SchemaFiles) > 0 {
+		schemaFile = b.g.SchemaFiles[0]
+	}
+	bound := make(map[string]bool)
+	for _, r := range fullMethods(b.f) {
+		if service := r.pkg + "." + r.service; !bound[service] {
+			bound[service] = true
+			for _, name := range names {
+				b.identity(Registration, NotOneof, b.inFile(strings.ReplaceAll(name, "<Svc>", r.service)), schemaFile, r.pkg, r.service)
+			}
+		}
+	}
 }
 
 // rpc is one method of a service, as a full method name spells it.
@@ -603,15 +719,15 @@ func (b *binder) inFile(name string) types.Object {
 	return obj
 }
 
-// rpcMethod publishes the method of the client interface client that r names.
-func (b *binder) rpcMethod(client types.Object, schemaFile string, r rpc) {
-	iface, ok := client.Type().Underlying().(*types.Interface)
+// rpcMethod publishes, in role, the method of the interface named by obj that r names.
+func (b *binder) rpcMethod(role bindingRole, obj types.Object, schemaFile string, r rpc) {
+	iface, ok := obj.Type().Underlying().(*types.Interface)
 	if !ok {
 		return
 	}
 	for method := range iface.ExplicitMethods() {
 		if method.Name() == r.method {
-			b.consumer(method, schemaFile, r.pkg, r.service+"."+r.method)
+			b.identity(role, NotOneof, method, schemaFile, r.pkg, r.service+"."+r.method)
 		}
 	}
 }

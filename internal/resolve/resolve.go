@@ -3,9 +3,12 @@
 package resolve
 
 import (
+	"cmp"
+	"go/ast"
 	"go/token"
 	"go/types"
 	"path/filepath"
+	"slices"
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
@@ -25,6 +28,14 @@ type Resolver struct {
 	paths     map[string]bool           // the import paths of the target's packages, the only ones declaring a symbol
 	dirs      map[*types.Package]string // TypeKey's directory of each package, on first use
 	consumers []consumerPositions
+	decls     []ast.Decl // every top-level declaration, by position
+	holders   []extent   // every range declaring a symbol of the inventory, by position
+}
+
+// extent is one declaration's source range, with the symbol it declares.
+type extent struct {
+	id       inventory.SymbolID
+	from, to token.Pos
 }
 
 // consumerPositions renders the files of one loaded consumer against its own root,
@@ -60,6 +71,7 @@ func New(r *load.Result, inv *inventory.Inventory) (*Resolver, error) {
 	for _, p := range r.Packages {
 		rs.paths[p.PkgPath] = true
 	}
+	rs.decls, rs.holders = declarationsOf(r.Packages, inv)
 	if err := rs.renders(r.Packages); err != nil {
 		return nil, err
 	}
@@ -123,6 +135,106 @@ func (rs *Resolver) Object(obj types.Object) (inventory.SymbolID, bool) {
 	}
 	id, held := rs.written[rs.pos.Offset(obj.Pos())]
 	return id, held
+}
+
+// declarationsOf indexes every file the packages parse, once: each top-level
+// declaration, and each range declaring a symbol of the inventory ([holdersOf]).
+func declarationsOf(pkgs []*packages.Package, inv *inventory.Inventory) (decls []ast.Decl, holders []extent) {
+	seen := make(map[*ast.File]bool)
+	for _, p := range pkgs {
+		for _, f := range p.Syntax {
+			if seen[f] {
+				continue
+			}
+			seen[f] = true
+			for _, decl := range f.Decls {
+				decls = append(decls, decl)
+				holders = append(holders, holdersOf(decl, inv)...)
+			}
+		}
+	}
+	slices.SortFunc(decls, func(a, b ast.Decl) int { return cmp.Compare(a.Pos(), b.Pos()) })
+	slices.SortFunc(holders, func(a, b extent) int { return cmp.Compare(a.from, b.from) })
+	return decls, holders
+}
+
+// holdersOf is each range of one top-level declaration that declares a symbol of
+// the inventory: a function, a type specification, or a value specification by the
+// first name it declares that the inventory holds.
+func holdersOf(decl ast.Decl, inv *inventory.Inventory) []extent {
+	var held []extent
+	switch d := decl.(type) {
+	case *ast.FuncDecl:
+		held = appendHolder(held, inv, d, d.Name)
+	case *ast.GenDecl:
+		for _, spec := range d.Specs {
+			held = append(held, specHolder(spec, inv)...)
+		}
+	}
+	return held
+}
+
+// specHolder is [holdersOf] for one specification of a declaration group.
+func specHolder(spec ast.Spec, inv *inventory.Inventory) []extent {
+	switch s := spec.(type) {
+	case *ast.TypeSpec:
+		return appendHolder(nil, inv, s, s.Name)
+	case *ast.ValueSpec:
+		for _, name := range s.Names {
+			if one := appendHolder(nil, inv, s, name); one != nil {
+				return one
+			}
+		}
+	}
+	return nil
+}
+
+// appendHolder appends node's range where name is no blank and declares a symbol
+// of the inventory.
+func appendHolder(held []extent, inv *inventory.Inventory, node ast.Node, name *ast.Ident) []extent {
+	if id, ok := inv.At(name.Pos()); ok && name.Name != "_" {
+		return append(held, extent{id: id, from: node.Pos(), to: node.End()})
+	}
+	return held
+}
+
+// Holder returns the identifier of the declaration of the inventory whose source
+// holds pos: the function, the type specification or the value specification
+// [declarationsOf] indexes. A position no such declaration holds names none.
+func (rs *Resolver) Holder(pos token.Pos) (inventory.SymbolID, bool) {
+	at := enclosing(rs.holders, pos, func(e extent) (token.Pos, token.Pos) { return e.from, e.to })
+	if at < 0 {
+		return "", false
+	}
+	return rs.holders[at].id, true
+}
+
+// Declaration returns the top-level declaration whose source holds pos, a whole
+// group for a position inside one, and nil where none does.
+func (rs *Resolver) Declaration(pos token.Pos) ast.Decl {
+	at := enclosing(rs.decls, pos, func(d ast.Decl) (token.Pos, token.Pos) { return d.Pos(), d.End() })
+	if at < 0 {
+		return nil
+	}
+	return rs.decls[at]
+}
+
+// enclosing is the index of the range of spans, ordered by start and disjoint, that
+// holds pos, and -1 where none does.
+func enclosing[S any](spans []S, pos token.Pos, bounds func(S) (from, to token.Pos)) int {
+	at, exact := slices.BinarySearchFunc(spans, pos, func(s S, p token.Pos) int {
+		from, _ := bounds(s)
+		return cmp.Compare(from, p)
+	})
+	if exact {
+		return at
+	}
+	if at > 0 {
+		if _, to := bounds(spans[at-1]); pos < to {
+			return at - 1
+		}
+	}
+	return -1
 }
 
 // At returns the identifier of the declaration this configuration's parse writes

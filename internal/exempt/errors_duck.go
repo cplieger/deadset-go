@@ -17,15 +17,11 @@ import (
 // converts to error retains each method once, at its first site by rendered position.
 // A type entering another interface, from which a chain of sites leads to error,
 // retains each method once per chain, held by every declaration holding a site of it.
-func ErrorsDuckTypingDetector(in *Input) ([]Exemption, error) {
+func ErrorsDuckTypingDetector(in *Program) ([]Exemption, error) {
 	scan := &errorsDuckScan{in: in, held: make(map[inventory.SymbolID]struct{}), chained: make(map[string]bool)}
 	scan.build()
 
-	all, err := allConversionsOf(in)
-	if err != nil {
-		return nil, err
-	}
-	all = append(slices.Clip(all), publishedConversions(in)...)
+	all := slices.Concat(in.allConversions, in.published)
 	sites, err := scan.sites(all)
 	if err != nil {
 		return nil, err
@@ -49,7 +45,7 @@ func ErrorsDuckTypingDetector(in *Input) ([]Exemption, error) {
 
 // errorsDuckScan accumulates the methods one configuration retains.
 type errorsDuckScan struct {
-	in         *Input
+	in         *Program
 	held       map[inventory.SymbolID]struct{} // retained unheld, through a site the program writes to error
 	chained    map[string]bool                 // retained held, by method and holders
 	errorIface *types.Interface
@@ -160,9 +156,8 @@ func (s *errorsDuckScan) sites(conversions []facts.Conversion) ([]errorsDuckSite
 // sites leads to error, once per chain, held by the declarations holding the sites.
 // A method a site to error retains unheld is not retained again.
 func (s *errorsDuckScan) chains(all []facts.Conversion) error {
-	spans := declarationSpans(s.in)
 	chains := facts.NewChains(all, func(i int) string {
-		holder, _ := spans.declarationAt(s.in, &all[i], all[i].Site)
+		holder, _ := s.in.declarationAt(&all[i], all[i].Site)
 		return string(holder)
 	})
 	for i := range all {
@@ -174,7 +169,7 @@ func (s *errorsDuckScan) chains(all []facts.Conversion) error {
 		if direct && len(c.Held) == 0 {
 			continue
 		}
-		if err := s.throughChains(spans, chains, c); err != nil {
+		if err := s.throughChains(chains, c); err != nil {
 			return err
 		}
 	}
@@ -183,14 +178,14 @@ func (s *errorsDuckScan) chains(all []facts.Conversion) error {
 
 // throughChains retains the matching methods of one site's concrete type once per
 // chain from the site's interface to error.
-func (s *errorsDuckScan) throughChains(spans *spans, chains *facts.Chains, c *facts.Conversion) error {
+func (s *errorsDuckScan) throughChains(chains *facts.Chains, c *facts.Conversion) error {
 	start := c.Held
 	if len(start) == 0 {
 		start = []token.Pos{c.Site}
 	}
 	for _, route := range chains.Routes(c.To, s.errorIface) {
 		positions := append(slices.Clone(start), route...)
-		holder, coHolders := spans.holdersAt(s.in, c, positions)
+		holder, coHolders := s.in.holdersAt(c, positions)
 		at, err := s.site(s.evidence(c.Site, positions))
 		if err != nil {
 			return err

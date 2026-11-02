@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -85,7 +86,7 @@ type flowLeaf struct {
 // through, which also stops a cycle of variables written from each other.
 const maxFlowDepth = 12
 
-func newValueFlow(in *Input) *valueFlow {
+func newValueFlow(in *Program) *valueFlow {
 	f := &valueFlow{
 		root: in.Root, fset: in.Result.Fset,
 		writes: make(map[*types.Var][]flowWrite), escaped: make(map[*types.Var]bool),
@@ -676,8 +677,9 @@ func (f *valueFlow) directory(callerDir, dir string) (fsRoot, bool) {
 // embeddedFiles is the files a set of //go:embed patterns of a package in dir
 // embeds: each file a pattern matches, and every file below a directory it
 // matches but those whose name starts with . or _, which only the all: prefix
-// keeps. A pattern that matches nothing fails the build, so it fails here, and so
-// does a set holding more than maxRootFiles, which [regularFiles] stops reading.
+// keeps, in the order fs.Glob lists them. A pattern that matches nothing fails
+// the build, so it fails here, and so does a set holding more than maxRootFiles,
+// which [regularFiles] stops reading.
 func embeddedFiles(root, dir string, patterns []string) ([]string, bool) {
 	if len(patterns) == 0 {
 		return nil, false
@@ -689,7 +691,12 @@ func embeddedFiles(root, dir string, patterns []string) ([]string, bool) {
 			return nil, false
 		}
 	}
-	return held, true
+	// fs.Glob lists ReadDir's sorted entries depth first (go1.27.3 src/io/fs/glob.go),
+	// so a/x precedes a.b/y, which a plain string sort puts first.
+	slices.SortFunc(held, func(a, b string) int {
+		return slices.Compare(strings.Split(a, string(filepath.Separator)), strings.Split(b, string(filepath.Separator)))
+	})
+	return slices.Compact(held), true
 }
 
 // patternFiles is the files one //go:embed pattern of a package in dir embeds,

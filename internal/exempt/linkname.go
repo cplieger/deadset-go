@@ -56,7 +56,7 @@ const (
 // plugin lookup call names is the other side of the plugin mechanism and belongs
 // to the reflective-lookup class, whose rule is a string literal beside a call;
 // nothing here reads a string literal.
-func LinknameCgoAsmPluginDetector(in *Input) ([]Exemption, error) {
+func LinknameCgoAsmPluginDetector(in *Program) ([]Exemption, error) {
 	d := newLinkname(in)
 	for _, p := range d.loaded {
 		if err := d.mechanisms(p); err != nil {
@@ -68,7 +68,7 @@ func LinknameCgoAsmPluginDetector(in *Input) ([]Exemption, error) {
 
 // linkname accumulates one configuration's exemptions of the class.
 type linkname struct {
-	in     *Input
+	in     *Program
 	found  map[linknameFact]struct{}
 	loaded []*packages.Package
 }
@@ -83,7 +83,7 @@ type linknameFact struct {
 
 // newLinkname keeps every type-checked package of one configuration, in one
 // order.
-func newLinkname(in *Input) *linkname {
+func newLinkname(in *Program) *linkname {
 	d := &linkname{
 		in:     in,
 		found:  make(map[linknameFact]struct{}),

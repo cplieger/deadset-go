@@ -3,6 +3,7 @@ package kinds
 import (
 	"go/types"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
@@ -99,20 +100,11 @@ func outsideInterfaceMethods(r *load.Result) map[string][]*types.Func {
 // indexExportedInterfaces adds the exported methods of one package's exported,
 // non-generic interface types to found.
 func indexExportedInterfaces(pkg *types.Package, found map[string][]*types.Func) {
-	scope := pkg.Scope()
-	for _, name := range scope.Names() {
-		typeName, isType := scope.Lookup(name).(*types.TypeName)
-		if !isType || !typeName.Exported() || typeName.IsAlias() {
+	for _, named := range facts.DeclaredInterfaces(pkg) {
+		if !named.Obj().Exported() {
 			continue
 		}
-		named, isNamed := typeName.Type().(*types.Named)
-		if !isNamed || named.TypeParams().Len() > 0 {
-			continue
-		}
-		iface, isInterface := named.Underlying().(*types.Interface)
-		if !isInterface {
-			continue
-		}
+		iface, _ := named.Underlying().(*types.Interface)
 		for method := range iface.Methods() {
 			if method.Exported() {
 				found[method.Name()] = append(found[method.Name()], method)

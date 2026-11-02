@@ -204,7 +204,7 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 		}
 		rooted, _ := roots.Roots(result, resolver, symbols, rootOptions)
 		classes[i] = roots.ClassifyTestSupport(result, symbols, rooted, rootOptions.PublishedAPI)
-		computed, evidence, err := exempt.Compute(&exempt.Input{
+		program, err := exempt.NewProgram(&exempt.Loaded{
 			Result:  result,
 			Resolve: resolver,
 			Facts:   index,
@@ -213,12 +213,16 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 			Read:    os.ReadFile,
 			Options: options,
 			Mode:    mode,
-		}, detectors)
+		})
+		if err != nil {
+			t.Fatalf("Setup: exempt.NewProgram(%s): %v", c.ID, err)
+		}
+		computed, err := exempt.Compute(program, detectors)
 		if err != nil {
 			t.Fatalf("Setup: exempt.Compute(%s): %v", c.ID, err)
 		}
-		exemptions = append(exemptions, computed...)
-		testEvidence = append(testEvidence, evidence...)
+		exemptions = append(exemptions, computed.Held...)
+		testEvidence = append(testEvidence, computed.TestEvidence...)
 		per[i] = Configured{Result: result, Resolve: resolver, Facts: index, Symbols: symbols}
 		passes[i] = liveness.Configured{Symbols: symbols, Roots: rooted, Interfaces: index.Interfaces()}
 	}
@@ -243,7 +247,7 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 		}
 	}
 	g := liveness.Of(&merged)
-	exemptions, testEvidence = g.WithoutUncalled(exemptions), g.WithoutUncalled(testEvidence)
+	exemptions, testEvidence = merged.Uncalled.Withdrawn(exemptions), merged.Uncalled.Withdrawn(testEvidence)
 	unseen := Unseen(&Input{Config: &resolved, Root: root, Merged: &merged, Per: per, Consumers: consumers})
 	swept := g.Sweep(&liveness.SweepPolicy{Exempt: exemptions, Mode: mode, TestEvidence: testEvidence, Unseen: unseen})
 

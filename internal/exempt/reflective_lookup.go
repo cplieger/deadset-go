@@ -69,7 +69,7 @@ var lookups = map[string]lookup{
 // whose name argument is not a constant retains nothing: a computed name is the
 // case no exact rule can serve, and the class declines to guess rather than
 // retaining every declaration a lookup might reach.
-func ReflectiveLookupDetector(in *Input) ([]Exemption, error) {
+func ReflectiveLookupDetector(in *Program) ([]Exemption, error) {
 	calls, err := allLookupCalls(in)
 	if err != nil {
 		return nil, err
@@ -95,7 +95,7 @@ func ReflectiveLookupDetector(in *Input) ([]Exemption, error) {
 // outside the analysed program that also passes a value of T or *T. Each item of the
 // string separated by ";" spells one name, after an optional prefix ending in ":", the
 // verbs a route maps to the method.
-func registeredMethods(in *Input) ([]Exemption, error) {
+func registeredMethods(in *Program) ([]Exemption, error) {
 	own := programPaths(in)
 	var out []Exemption
 	for _, p := range in.Facts.Packages() {
@@ -120,7 +120,7 @@ func registeredMethods(in *Input) ([]Exemption, error) {
 }
 
 // registrationOf is what one call retains under [registeredMethods].
-func registrationOf(in *Input, info *types.Info, call *ast.CallExpr, own map[string]bool) ([]Exemption, error) {
+func registrationOf(in *Program, info *types.Info, call *ast.CallExpr, own map[string]bool) ([]Exemption, error) {
 	callee, isFunc := resolveObject(info, call.Fun).(*types.Func)
 	if !isFunc || callee.Pkg() == nil || own[callee.Pkg().Path()] {
 		return nil, nil
@@ -199,7 +199,7 @@ func definedReceiver(t types.Type) (*types.Named, bool) {
 
 // allLookupCalls returns every recognised lookup the target makes with a constant
 // name, in the order the load reports its files.
-func allLookupCalls(in *Input) ([]lookupCall, error) {
+func allLookupCalls(in *Program) ([]lookupCall, error) {
 	var calls []lookupCall
 	for _, p := range in.Facts.Packages() {
 		for _, f := range in.Facts.Files(p) {
@@ -249,7 +249,7 @@ func (c *lookupCall) retains(index nameIndex, seen map[string]struct{}) []Exempt
 
 // lookupCalls returns every recognised lookup one file makes with a constant
 // name, in the order the file writes them.
-func lookupCalls(in *Input, info *types.Info, f *ast.File) ([]lookupCall, error) {
+func lookupCalls(in *Program, info *types.Info, f *ast.File) ([]lookupCall, error) {
 	var calls []lookupCall
 	var failure error
 	ast.Inspect(f, func(n ast.Node) bool {

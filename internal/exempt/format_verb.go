@@ -5,7 +5,6 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
-	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -16,12 +15,8 @@ import (
 // the two methods that machinery reaches through an interface when a verb asks for
 // a string.
 const (
-	formatPackage  = "fmt"
-	logPackage     = "log"
-	testingPackage = "testing"
-	slogPackage    = "log/slog"
-	stringMethod   = "String"
-	errorMethod    = "Error"
+	stringMethod = "String"
+	errorMethod  = "Error"
 )
 
 // stringVerbs are the verbs a string operand is valid under, and so the verbs
@@ -41,78 +36,6 @@ const formatFlags = "+-# 0"
 // every operand is formatted as if under the default verb.
 const verbless = -1
 
-// formatFunctions are the print, format and error-construction functions of the
-// formatting package, each with the position of its format string and of its first
-// operand. The scanning functions read values rather than format them, and the
-// remaining function of the package formats a verb rather than an operand, so
-// neither is here.
-var formatFunctions = map[string]printSignature{
-	"Append":   {format: verbless, operands: 1},
-	"Appendf":  {format: 1, operands: 2},
-	"Appendln": {format: verbless, operands: 1},
-	"Errorf":   {format: 0, operands: 1, wraps: true},
-	"Fprint":   {format: verbless, operands: 1},
-	"Fprintf":  {format: 1, operands: 2},
-	"Fprintln": {format: verbless, operands: 1},
-	"Print":    {format: verbless, operands: 0},
-	"Printf":   {format: 0, operands: 1},
-	"Println":  {format: verbless, operands: 0},
-	"Sprint":   {format: verbless, operands: 0},
-	"Sprintf":  {format: 0, operands: 1},
-	"Sprintln": {format: verbless, operands: 0},
-}
-
-// logFunctions are the print, fatal and panic functions of the logging package,
-// which are also the methods of its logger: a method call carries no receiver
-// among its arguments, so one entry answers both forms.
-var logFunctions = map[string]printSignature{
-	"Fatal":   {format: verbless, operands: 0},
-	"Fatalf":  {format: 0, operands: 1},
-	"Fatalln": {format: verbless, operands: 0},
-	"Panic":   {format: verbless, operands: 0},
-	"Panicf":  {format: 0, operands: 1},
-	"Panicln": {format: verbless, operands: 0},
-	"Print":   {format: verbless, operands: 0},
-	"Printf":  {format: 0, operands: 1},
-	"Println": {format: verbless, operands: 0},
-}
-
-// testingFunctions are the log, error, fatal and skip methods a test reports
-// through. The methods are declared once for every testing type, on the type they
-// all embed and on the interface over them, so a call on a test, a benchmark or a
-// fuzz target names one of two objects of this package and both carry the name this
-// table is keyed by.
-var testingFunctions = map[string]printSignature{
-	"Error":  {format: verbless, operands: 0},
-	"Errorf": {format: 0, operands: 1},
-	"Fatal":  {format: verbless, operands: 0},
-	"Fatalf": {format: 0, operands: 1},
-	"Log":    {format: verbless, operands: 0},
-	"Logf":   {format: 0, operands: 1},
-	"Skip":   {format: verbless, operands: 0},
-	"Skipf":  {format: 0, operands: 1},
-}
-
-// slogFunctions are the logging functions of the structured-logging package, the
-// methods of its logger, which carry the same names and operand positions, and the
-// attribute constructors whose value is typed as any. Every argument after the
-// message, the level and the context is an operand. The encoding class reads this
-// table for its own destinations, so it is the one declaration of the set.
-var slogFunctions = map[string]printSignature{
-	"Any":          {format: verbless, operands: 1},
-	"Debug":        {format: verbless, operands: 1},
-	"DebugContext": {format: verbless, operands: 2},
-	"Error":        {format: verbless, operands: 1},
-	"ErrorContext": {format: verbless, operands: 2},
-	"Group":        {format: verbless, operands: 1},
-	"Info":         {format: verbless, operands: 1},
-	"InfoContext":  {format: verbless, operands: 2},
-	"Log":          {format: verbless, operands: 3},
-	"LogAttrs":     {format: verbless, operands: 3},
-	"Warn":         {format: verbless, operands: 1},
-	"WarnContext":  {format: verbless, operands: 2},
-}
-
 // printSignature is where one formatting function carries its format string and
 // its operands, and whether it wraps an error.
 type printSignature struct {
@@ -130,20 +53,7 @@ func declaredPrintFunction(fn *types.Func) (printSignature, bool) {
 	if pkg == nil {
 		return printSignature{}, false
 	}
-	var table map[string]printSignature
-	switch pkg.Path() {
-	case formatPackage:
-		table = formatFunctions
-	case logPackage:
-		table = logFunctions
-	case testingPackage:
-		table = testingFunctions
-	case slogPackage:
-		table = slogFunctions
-	default:
-		return printSignature{}, false
-	}
-	sig, formats := table[fn.Name()]
+	sig, formats := destinations[pkg.Path()].prints[fn.Name()]
 	return sig, formats
 }
 
@@ -170,7 +80,7 @@ type operand struct {
 // operands to one. A computed format string binds every operand; only a method taking
 // no argument and returning one string is retained; and an operand reaches through a
 // pointer, a slice, an array and a map, stopping at each defined type.
-func FormatVerbContractDetector(in *Input) ([]Exemption, error) {
+func FormatVerbContractDetector(in *Program) ([]Exemption, error) {
 	sites := newDeclarationSites(in.Result.Fset)
 	f := &formatFlow{kept: newRetention(in, vocab.FormatVerbContract), sites: sites, wrappers: forwardingWrappers(in, sites)}
 	if err := f.walkCalls(); err != nil {
@@ -241,7 +151,7 @@ type printWrappers map[token.Position]printSignature
 // carries the rule of the one it calls. A wrapper's callers write the format string
 // when the wrapper passes its own parameter to the format position; otherwise the
 // wrapper formats every operand as the verb-less forms do.
-func forwardingWrappers(in *Input, sites *declarationSites) printWrappers {
+func forwardingWrappers(in *Program, sites *declarationSites) printWrappers {
 	candidates := variadicWrappers(in, sites)
 	found := make(printWrappers, len(candidates))
 	for joined := true; joined; {
@@ -302,11 +212,11 @@ func (w *variadicWrapper) signature(sites *declarationSites, found printWrappers
 
 // variadicWrappers returns every function of the analysed program whose final
 // parameter is a variadic list of any, with the calls that pass that list on. It
-// reads the program's own declarations through the one enumeration the boundary
+// reads the program's own declarations through the one enumeration [Program]
 // holds, so a loaded consumer's print wrapper is found exactly as the target's is.
-func variadicWrappers(in *Input, sites *declarationSites) []variadicWrapper {
+func variadicWrappers(in *Program, sites *declarationSites) []variadicWrapper {
 	var found []variadicWrapper
-	for _, declared := range programFunctions(in) {
+	for _, declared := range in.functions {
 		if declared.decl.Body == nil {
 			continue
 		}
@@ -320,8 +230,8 @@ func variadicWrappers(in *Input, sites *declarationSites) []variadicWrapper {
 // variadicOperands reports whether one declaration takes a variadic list of any as
 // its final parameter and hands that whole list to another function, and returns the
 // calls that do. A list passed element by element, or a list of its own, is not one.
-// The final parameter's type is read through the boundary's own test of the empty
-// interface.
+// The final parameter's element type is read through the boundary's own test of the
+// empty interface.
 func variadicOperands(sites *declarationSites, declared programFunction) (variadicWrapper, bool) {
 	sig := declared.fn.Signature()
 	params := sig.Params()
@@ -329,7 +239,7 @@ func variadicOperands(sites *declarationSites, declared programFunction) (variad
 		return variadicWrapper{}, false
 	}
 	last := params.Len() - 1
-	if !slices.Contains(erasedParameters(sig), last) {
+	if list, isSlice := types.Unalias(params.At(last).Type()).(*types.Slice); !isSlice || !isEmptyInterface(list.Elem()) {
 		return variadicWrapper{}, false
 	}
 

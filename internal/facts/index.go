@@ -18,12 +18,15 @@ import (
 // load reads the target's packages and files through it.
 type Index struct {
 	fset       *token.FileSet
-	packages   []*packages.Package
+	published  *Published
 	consumers  map[*load.Consumer][]*packages.Package
+	caps       map[inventory.SymbolID]Cap
+	packages   []*packages.Package
 	order      []*load.Consumer
 	generated  []Generated
 	bindings   []Binding
 	interfaces []Interface
+	reads      []SchemaRead
 }
 
 // Generated is one generated file of the target: the path the report spells it
@@ -59,6 +62,7 @@ func NewIndex(r *load.Result, rs *resolve.Resolver) (*Index, error) {
 		x.consumers[&r.Consumers[i]] = inventory.Packages(r.Consumers[i].Packages, r.Fset)
 		x.order = append(x.order, &r.Consumers[i])
 	}
+	generatedFiles := make(map[*token.File]generatedFile)
 	for p, f := range x.Sources() {
 		if !ast.IsGenerated(f) {
 			continue
@@ -68,6 +72,7 @@ func NewIndex(r *load.Result, rs *resolve.Resolver) (*Index, error) {
 			return nil, err
 		}
 		g := Generated{Site: site, Path: site.Filename}
+		generatedFiles[r.Fset.File(f.Package)] = generatedFile{path: g.Path, pkg: p.PkgPath}
 		g.Line, g.Detail = header(r.Fset, f)
 		if row := recognise(&g, f); row != nil {
 			held, err := bind(rs, p, f, &g, row)
@@ -81,6 +86,8 @@ func NewIndex(r *load.Result, rs *resolve.Resolver) (*Index, error) {
 	slices.SortFunc(x.generated, func(a, b Generated) int { return strings.Compare(a.Path, b.Path) })
 	x.generated = slices.CompactFunc(x.generated, func(a, b Generated) bool { return a.Path == b.Path })
 	x.interfaces = interfacesOf(x, rs)
+	x.published = publishedOf(x, rs)
+	x.reads, x.caps = schemaReadsOf(x, rs, generatedFiles)
 	return x, nil
 }
 
@@ -137,6 +144,14 @@ func (x *Index) Program() []*packages.Package {
 
 // Bindings is every binding identity the target's generated files publish.
 func (x *Index) Bindings() []Binding { return x.bindings }
+
+// SchemaReads is every read the target's hand-written serializer calls and enum
+// name conversions make of generated declarations.
+func (x *Index) SchemaReads() []SchemaRead { return x.reads }
+
+// Caps is the cap of every consumer binding hand-written code gives one
+// (grammar/analysis/references-go.md references-go.17), by its declaration.
+func (x *Index) Caps() map[inventory.SymbolID]Cap { return x.caps }
 
 // Generated is every generated file of the target, by path.
 func (x *Index) Generated() []Generated { return x.generated }

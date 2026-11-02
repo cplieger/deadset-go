@@ -60,8 +60,8 @@ func TestAnalyzeWritesAFactsDocumentAndTheSameReport(t *testing.T) {
 	if !bytes.Equal(plain, withFacts) {
 		t.Errorf("the report with --facts differs from the one without it:\nwith:\n%s\nwithout:\n%s", withFacts, plain)
 	}
-	if facts["language"] != "go" || facts["evaluated"] != false {
-		t.Errorf("the facts document names language %v and evaluated %v, want go and false", facts["language"], facts["evaluated"])
+	if facts["language"] != "go" || facts["evaluated"] != true {
+		t.Errorf("the facts document names language %v and evaluated %v, want go and true", facts["language"], facts["evaluated"])
 	}
 	analyzer, _ := facts["analyzer"].(map[string]any)
 	if analyzer["name"] != name || analyzer["version"] != version() {

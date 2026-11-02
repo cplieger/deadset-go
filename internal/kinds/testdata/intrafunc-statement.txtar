@@ -1,4 +1,5 @@
-A function holding a statement after a return, and one whose every statement
+A function holding a statement after a return, a function value a package
+variable holds with the same statement, and a function whose every statement
 control flow reaches.
 
 -- go.mod --
@@ -21,7 +22,15 @@ func reached() {
 	return
 }
 
+// deferred is a function value whose last statement nothing reaches.
+var deferred = func() {
+	println("before the return")
+	return
+	println("after the return")
+}
+
 func main() {
 	halted()
 	reached()
+	deferred()
 }

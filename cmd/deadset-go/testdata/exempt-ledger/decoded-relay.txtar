@@ -1,0 +1,58 @@
+Two decoded values are relayed whole to code outside the program: a pointer to one
+is handed to an ORM's insert at an empty-interface parameter, and the other is
+logged inside a map of empty-interface values. The outside code reads every field
+that was decoded.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+
+require example.com/orm v0.0.0
+
+replace example.com/orm => ./orm
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- app.go --
+package main
+
+import (
+	"encoding/json"
+	"os"
+
+	"example.com/orm"
+)
+
+type Diagnostics struct {
+	Platform string `json:"platform"`
+	Logs     string `json:"logs"`
+}
+
+type Signal struct {
+	Name string `json:"name"`
+}
+
+func main() {
+	var d Diagnostics
+	if json.NewDecoder(os.Stdin).Decode(&d) != nil {
+		return
+	}
+	_ = orm.Create(&d)
+	var s Signal
+	if json.NewDecoder(os.Stdin).Decode(&s) != nil {
+		return
+	}
+	orm.Info("signal", orm.Data{"signal": s})
+}
+-- orm/go.mod --
+module example.com/orm
+
+go 1.27.1
+-- orm/orm.go --
+package orm
+
+type Data map[string]interface{}
+
+func Create(value interface{}) error { _ = value; return nil }
+
+func Info(action string, data ...Data) { _, _ = action, data }

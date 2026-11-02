@@ -44,7 +44,7 @@ var ErrTemplateDir = errors.New("exempt: template directory")
 // the grammar cannot parse names nothing and is skipped: an unparsable file is not
 // a template the project renders, and a run that refused it would fail on a
 // fixture or a partial that is not the analyzer's business.
-func TemplateFieldDetector(in *Input) ([]Exemption, error) {
+func TemplateFieldDetector(in *Program) ([]Exemption, error) {
 	dirs := templateDirs(in.Options.TemplateDirs)
 	if len(dirs) == 0 {
 		return nil, nil
@@ -328,7 +328,7 @@ type nameIndex map[string][]member
 // written with, taken from the type checker rather than from a symbol's rendered
 // name. A declaration outside the inventory, a local variable among them, is not
 // indexed.
-func newNameIndex(in *Input) nameIndex {
+func newNameIndex(in *Program) nameIndex {
 	symbols := make(map[inventory.SymbolID]*inventory.Symbol, len(in.Symbols))
 	for i := range in.Symbols {
 		symbols[in.Symbols[i].ID] = &in.Symbols[i]

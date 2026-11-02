@@ -1,21 +1,13 @@
 package exempt
 
 import (
-	"cmp"
 	"go/ast"
 	"go/token"
 	"go/types"
-	"maps"
 	"slices"
 
 	"golang.org/x/tools/go/packages"
 )
-
-// standardDecoder reports whether one package is a standard decoder, whose decoding
-// entry points a type argument of a generic of a package importing it reaches.
-func standardDecoder(path string) bool {
-	return destinationPackages[path]&reachDecoding != 0
-}
 
 // typeArguments is every type argument each type parameter of the program takes in
 // an instantiation the program holds, a parameter keyed by the position it is
@@ -154,58 +146,28 @@ func typeParamsIn(t types.Type) []*types.TypeParam {
 	return found
 }
 
-// walkTypeArguments records every type argument the program passes to a generic
-// that reaches a destination by its declaration alone: a generic function of a
-// destination package, and a generic function, method or type of a package outside
-// the program whose own imports name a standard decoder, which reaches a decoding
-// entry point of each such decoder whether or not the generic's body decodes it.
-func (f *encodingFlow) walkTypeArguments() error {
-	own := make(map[string]bool)
-	pkgs := f.kept.in.Facts.Program()
-	for _, p := range pkgs {
-		own[p.PkgPath] = true
+// typeArgumentArrival is what the type arguments of one instantiation carry: every
+// one of a generic that reaches a destination by its declaration alone, a generic
+// function of a destination package, and a generic function, method or type of a
+// package outside the program whose own imports name a standard decoder, which
+// reaches a decoding entry point of each such decoder whether or not the generic's
+// body decodes it; and otherwise the ones [encodingFlow.madeOutside] fills.
+func (f *encodingFlow) typeArgumentArrival(info *types.Info, id *ast.Ident, imports map[string][]string) (arrival, bool) {
+	d, reaches := f.typeArgumentDestination(info.Uses[id], imports)
+	if !reaches {
+		return f.madeOutside(info, id)
 	}
-	imports := sourceImports(pkgs)
-	for _, p := range pkgs {
-		if p.TypesInfo == nil {
-			continue
-		}
-		if err := f.packageTypeArguments(p.TypesInfo, own, imports); err != nil {
-			return err
-		}
-	}
-	return nil
+	return arrival{d: d, types: slices.Collect(info.Instances[id].TypeArgs.Types()), at: id.Pos()}, true
 }
 
-// packageTypeArguments records the type arguments of one package's instantiations,
-// in position order.
-func (f *encodingFlow) packageTypeArguments(info *types.Info, own map[string]bool, imports map[string][]string) error {
-	ids := slices.SortedFunc(maps.Keys(info.Instances), func(a, b *ast.Ident) int { return cmp.Compare(a.Pos(), b.Pos()) })
-	for _, id := range ids {
-		d, reaches := f.typeArgumentDestination(info.Uses[id], own, imports)
-		if !reaches {
-			if err := f.madeOutside(info, id, own); err != nil {
-				return err
-			}
-			continue
-		}
-		for arg := range info.Instances[id].TypeArgs.Types() {
-			if err := f.retain(arg, id.Pos(), &d); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// madeOutside records as filled the type arguments of one instantiated generic
-// function outside the program that bind a type parameter its results mention and
-// none of its parameters does: no argument hands the value over, so the callee makes
+// madeOutside is the type arguments of one instantiated generic function outside the
+// program that bind a type parameter its results mention and none of its parameters
+// does, recorded as filled: no argument hands the value over, so the callee makes
 // it, filling it where the analysis cannot see, as a decoding client does.
-func (f *encodingFlow) madeOutside(info *types.Info, id *ast.Ident, own map[string]bool) error {
+func (f *encodingFlow) madeOutside(info *types.Info, id *ast.Ident) (arrival, bool) {
 	fn, isFunc := info.Uses[id].(*types.Func)
-	if !isFunc || fn.Pkg() == nil || own[fn.Pkg().Path()] || namedDestinations[fn.Pkg().Path()] {
-		return nil
+	if !isFunc || fn.Pkg() == nil || f.own[fn.Pkg().Path()] || namedDestination(fn.Pkg().Path()) {
+		return arrival{}, false
 	}
 	sig := fn.Signature()
 	passed := make(map[*types.TypeParam]bool)
@@ -220,23 +182,19 @@ func (f *encodingFlow) madeOutside(info *types.Info, id *ast.Ident, own map[stri
 			made[tp] = !passed[tp]
 		}
 	}
-	d := destination{detail: "made by " + fn.FullName(), reach: reach{}.filling()}
+	a := arrival{d: destination{detail: "made by " + fn.FullName(), reach: reach{}.filling()}, at: id.Pos()}
 	args := info.Instances[id].TypeArgs
 	for i := range sig.TypeParams().Len() {
 		if i < args.Len() && made[sig.TypeParams().At(i)] {
-			if err := f.retain(args.At(i), id.Pos(), &d); err != nil {
-				return err
-			}
+			a.types = append(a.types, args.At(i))
 		}
 	}
-	return nil
+	return a, len(a.types) > 0
 }
 
 // typeArgumentDestination is what a type argument of one instantiated generic
 // reaches, and false for a generic that reaches no destination by its declaration.
-func (f *encodingFlow) typeArgumentDestination(object types.Object, own map[string]bool,
-	imports map[string][]string,
-) (destination, bool) {
+func (f *encodingFlow) typeArgumentDestination(object types.Object, imports map[string][]string) (destination, bool) {
 	if object == nil || object.Pkg() == nil {
 		return destination{}, false
 	}
@@ -247,14 +205,14 @@ func (f *encodingFlow) typeArgumentDestination(object types.Object, own map[stri
 		}
 	}
 	pkg := object.Pkg()
-	if own[pkg.Path()] {
+	if f.own[pkg.Path()] {
 		return destination{}, false
 	}
 	var decoded reach
 	var decodes bool
 	for _, path := range imports[pkg.Path()] {
-		if standardDecoder(path) {
-			decoded = decoded.union(entryPoint(path, "Decode", destinationPackages[path], f.unknownMembers))
+		if row := destinations[path]; row.methods&reachDecoding != 0 {
+			decoded = decoded.union(entryPoint(&row, "Decode", f.unknownMembers))
 			decodes = true
 		}
 	}

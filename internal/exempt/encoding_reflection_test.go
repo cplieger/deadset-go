@@ -828,7 +828,7 @@ func TestFormatVerbContractAloneRecordsAnOperandOfTheFormattingPackage(t *testin
 // The mechanism text of the class, as the Contract states it for this language. The
 // class implements this text; a pin bump that moves it must be read against the
 // destination table before this literal moves with it.
-const encodingReflectionMechanismSHA256 = "a34e889b4dd5229f0638fe366cd835a2fba5abe8aacfdb174810bad066e46bf2"
+const encodingReflectionMechanismSHA256 = "b14f1671f3c21d22e05cdfb81edef960baa807fd2149010313ab55e92c36d4cb"
 
 func TestEncodingReflectionImplementsTheContractsMechanismText(t *testing.T) {
 	body, err := spec.Contract.ReadFile("contract/exemptions.json")
@@ -965,19 +965,19 @@ func TestEncodingReflectionFollowsContainersAndInterfaceMethodResults(t *testing
 // argument reads every field the program writes, and fills the others.
 func TestEncodingReflectionFillsTheFieldsADecodingCalleeOutsideReceives(t *testing.T) {
 	in := inputOf(t, "encoding-reflection-any-flow.txtar", Options{})
-	found, err := EncodingReflectionDetector(in)
+	computed, err := Compute(in, map[vocab.Exemption]Detector{vocab.EncodingReflection: EncodingReflectionDetector})
 	if err != nil {
-		t.Fatalf("EncodingReflectionDetector(encoding-reflection-any-flow.txtar) error: %v", err)
+		t.Fatalf("Compute(encoding-reflection-any-flow.txtar, encoding reflection) error: %v", err)
 	}
 	refOf := make(map[inventory.SymbolID]string, len(in.Symbols))
 	for i := range in.Symbols {
 		refOf[in.Symbols[i].ID] = in.Symbols[i].Ref
 	}
 	var kept, filled []string
-	for _, e := range found {
+	for _, e := range computed.Held {
 		kept = append(kept, refOf[e.ID])
 	}
-	for _, e := range FilledFields(in) {
+	for _, e := range computed.Filled {
 		filled = append(filled, refOf[e.ID]+" "+e.Detail)
 	}
 	slices.Sort(kept)
@@ -1000,7 +1000,7 @@ func TestEncodingReflectionFillsTheFieldsADecodingCalleeOutsideReceives(t *testi
 	}
 	slices.Sort(filled)
 	if !slices.Equal(filled, want) {
-		t.Errorf("FilledFields(encoding-reflection-any-flow.txtar) = %q, want %q", filled, want)
+		t.Errorf("Compute(encoding-reflection-any-flow.txtar).Filled = %q, want %q", filled, want)
 	}
 }
 

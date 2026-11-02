@@ -167,7 +167,7 @@ func (l *Loaded) enumerate(results []load.Result, derived bool) ([]liveness.Conf
 		if l.Loads[i], passes[i], classes[i], err = rootsOf(&results[i], l.Root, one); err != nil {
 			return nil, roots.TestClasses{}, err
 		}
-		l.TypeErrorSkips = append(l.TypeErrorSkips, roots.TypeErrorSkips(&results[i], l.Root, one.CheckedElsewhere)...)
+		l.TypeErrorSkips = append(l.TypeErrorSkips, roots.TypeErrorSkips(&results[i], l.Loads[i].Resolve, l.Root, one.CheckedElsewhere)...)
 		l.Configurations = append(l.Configurations, results[i].Configuration)
 	}
 	tests := roots.MatrixTests(classes)

@@ -35,6 +35,7 @@ func (o *templateOrigins) everyParse(engine string) map[string]bool {
 
 func (o *templateOrigins) readEveryParse(engine string) *templateSet {
 	inv := o.inventory()
+	inv.unordered = true
 	if outsideMentionsTemplate(o.in, engine) {
 		inv.complete = false
 		return inv
@@ -44,6 +45,7 @@ func (o *templateOrigins) readEveryParse(engine string) *templateSet {
 			o.readPackage(p.TypesInfo, p.Syntax, engine, inv)
 		}
 	}
+	inv.complete = inv.complete && !encodesWhole(inv.trees, inv.guessed)
 	return inv
 }
 
@@ -118,7 +120,7 @@ func writesTemplateField(info *types.Info, lhs ast.Expr) bool {
 	}
 	field, isVar := info.Uses[sel.Sel].(*types.Var)
 	return isVar && field.IsField() && field.Pkg() != nil &&
-		(templatePackages[field.Pkg().Path()] || field.Pkg().Path() == templateParsePackage)
+		(templateEngine(field.Pkg().Path()) || field.Pkg().Path() == templateParsePackage)
 }
 
 // calledIdent is the identifier naming the function a call's callee expression
@@ -146,10 +148,10 @@ func isEngineFunc(fn *types.Func, engine string) bool {
 // program imports, directly or not, mentions the template type of the engine at
 // path in its exported API, through which the program could receive a template it
 // does not parse. The engines and their parse package are the template's own.
-func outsideMentionsTemplate(in *Input, engine string) bool {
+func outsideMentionsTemplate(in *Program, engine string) bool {
 	seen := make(map[types.Type]bool)
-	for _, pkg := range outsideClosure(in) {
-		if templatePackages[pkg.Path()] || pkg.Path() == templateParsePackage {
+	for _, pkg := range in.outside {
+		if templateEngine(pkg.Path()) || pkg.Path() == templateParsePackage {
 			continue
 		}
 		scope := pkg.Scope()

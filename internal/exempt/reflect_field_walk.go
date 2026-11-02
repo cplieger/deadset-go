@@ -2,7 +2,6 @@ package exempt
 
 import (
 	"go/ast"
-	"go/token"
 	"go/types"
 )
 
@@ -19,69 +18,49 @@ const (
 	reflectInterface = "Interface"
 )
 
-// walkFieldAssertions records every assertion to an interface type of what Interface
-// returns for a reflect.Value holding a field of a struct: the assertion converts the
-// field's value, whichever field the index or the name selects, so it retains the
-// methods by which each exported field type of the struct implements the interface.
-func (f *encodingFlow) walkFieldAssertions() error {
-	for _, one := range programFunctions(f.kept.in) {
-		if one.decl.Body == nil {
-			continue
-		}
-		walk := reflectWalk{info: one.info, assigned: reflectValueAssignments(one.info, one.decl.Body)}
-		var failed error
-		ast.Inspect(one.decl.Body, func(n ast.Node) bool {
-			if assertion, isAssertion := n.(*ast.TypeAssertExpr); isAssertion && failed == nil {
-				failed = f.assertedField(&walk, assertion)
-			}
-			return failed == nil
-		})
-		if failed != nil {
-			return failed
-		}
-	}
-	return nil
-}
-
-// assertedField records what one type assertion retains under [encodingFlow.walkFieldAssertions].
-func (f *encodingFlow) assertedField(walk *reflectWalk, assertion *ast.TypeAssertExpr) error {
+// assertedField reads one type assertion where it asserts to an interface type what
+// Interface returns for a reflect.Value holding a field of a struct: the assertion
+// converts the field's value, whichever field the index or the name selects, so it
+// retains the methods by which each exported field type of the struct implements
+// the interface.
+func assertedField(walk *reflectWalk, assertion *ast.TypeAssertExpr) (fieldAssertion, bool) {
 	if assertion.Type == nil {
-		return nil
+		return fieldAssertion{}, false
 	}
 	asserted := walk.info.TypeOf(assertion.Type)
 	if asserted == nil {
-		return nil
+		return fieldAssertion{}, false
 	}
 	iface, isInterface := types.Unalias(asserted).Underlying().(*types.Interface)
 	call, isCall := ast.Unparen(assertion.X).(*ast.CallExpr)
 	if !isInterface || !isCall {
-		return nil
+		return fieldAssertion{}, false
 	}
 	held, reads := walk.method(call, map[string]bool{reflectInterface: true})
 	if !reads {
-		return nil
+		return fieldAssertion{}, false
 	}
 	st, walks := walk.fieldOf(held, 0)
 	if !walks {
-		return nil
+		return fieldAssertion{}, false
 	}
-	return f.fieldAssertion(st, iface, types.TypeString(asserted, nil), assertion.Pos())
+	return fieldAssertion{st: st, iface: iface, name: types.TypeString(asserted, nil), at: assertion.Pos()}, true
 }
 
-// fieldAssertion records the methods by which each exported field type of one struct
-// implements one interface.
-func (f *encodingFlow) fieldAssertion(st *types.Struct, iface *types.Interface, name string, at token.Pos) error {
-	site, err := f.kept.site(at)
+// fieldAssertion records the methods by which each exported field type of the
+// asserted struct implements the asserted interface.
+func (f *encodingFlow) fieldAssertion(a *fieldAssertion) error {
+	site, err := f.kept.site(a.at)
 	if err != nil {
 		return err
 	}
-	for field := range st.Fields() {
-		if !field.Exported() || !types.Implements(field.Type(), iface) {
+	for field := range a.st.Fields() {
+		if !field.Exported() || !types.Implements(field.Type(), a.iface) {
 			continue
 		}
-		for m := range iface.Methods() {
+		for m := range a.iface.Methods() {
 			if impl, isFunc := lookupMethod(field.Type(), m); isFunc {
-				f.kept.record(impl, site, "converted to "+name+" from a field read by reflection")
+				f.kept.record(impl, site, "converted to "+a.name+" from a field read by reflection")
 			}
 		}
 	}

@@ -1,0 +1,35 @@
+Two html/template sources each hold a start tag with an event-handler attribute:
+one with no value, one after a quoted value holding a '>'. The engine encodes a
+value whole only in an action a handler holds, so the template with the valueless
+handler reads only the field it names, and the other reads every field.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- app.go --
+package main
+
+import (
+	"html/template"
+	"os"
+)
+
+type Widget struct {
+	Label string
+	Spare string
+}
+
+type Card struct {
+	Front string
+	Back  string
+}
+
+func main() {
+	w := template.Must(template.New("w").Parse(`<button onclick>{{.Label}}</button>`))
+	_ = w.Execute(os.Stdout, Widget{Label: "a", Spare: "b"})
+	c := template.Must(template.New("c").Parse(`<a title="a>b" onclick="go({{.}})">{{.Front}}</a>`))
+	_ = c.Execute(os.Stdout, Card{Front: "a", Back: "b"})
+}

@@ -1033,8 +1033,8 @@ type index struct {
 	// caps is each dead component's confidence cap by its index, computed on first use.
 	caps map[int]vocab.Class
 
-	// exposed is every type code outside its package can reach, computed on first
-	// use and nil until then.
+	// exposed is every type the published API reaches ([exposedTypes]), computed
+	// on first use and nil until then.
 	exposed map[inventory.SymbolID]bool
 
 	// deprecated is every declaration carrying a deprecation marker, and
@@ -1287,13 +1287,13 @@ func (x *index) componentOf(id inventory.SymbolID) findingComponent {
 	if component == nil {
 		x.minted++
 		return findingComponent{
-			ID:          componentID(x.minted),
+			ID:          ComponentID(x.minted),
 			Root:        true,
 			SymbolCount: len(x.fallen(id)),
 		}
 	}
 	return findingComponent{
-		ID:             componentID(at + 1),
+		ID:             ComponentID(at + 1),
 		SymbolCount:    len(component.Members),
 		DeletableLines: DeletableLines(component),
 		Root:           slices.Contains(component.Roots, id),
@@ -1387,10 +1387,20 @@ func DeletableLines(c *liveness.Component) int {
 	return total
 }
 
-// componentID is the identifier this analyzer mints for one component: its own
+// ComponentID is the identifier this analyzer mints for one component: its own
 // name, a solidus, and the component's number.
-func componentID(number int) string {
-	return analyzerName + "/c-" + strconv.Itoa(number)
+func ComponentID(number int) string {
+	return componentPrefix + strconv.Itoa(number)
+}
+
+const componentPrefix = analyzerName + "/c-"
+
+// ComponentNumber is the number of an identifier [ComponentID] minted, and false
+// for any other identifier.
+func ComponentNumber(id string) (int, bool) {
+	digits, minted := strings.CutPrefix(id, componentPrefix)
+	n, err := strconv.Atoi(digits)
+	return n, minted && err == nil && ComponentID(n) == id
 }
 
 // holdsLive reports whether the kind of one code reports a subject the analysis
