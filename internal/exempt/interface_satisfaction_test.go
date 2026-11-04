@@ -321,10 +321,7 @@ func mentionedInterfaces(in *Program) []*types.Interface {
 
 // corpusExpectation is the part of one corpus expectation file this test reads.
 type corpusExpectation struct {
-	Name       string      `json:"name"`
-	TargetKind string      `json:"target_kind"`
-	Consumers  []string    `json:"consumers"`
-	Expect     []corpusRow `json:"expect"`
+	Expect []corpusRow `json:"expect"`
 }
 
 // corpusRow is one subject of one corpus expectation.

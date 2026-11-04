@@ -12,15 +12,15 @@ import (
 // destinationRow is what one standard package is to the encoding-reflection and
 // format-verb rules.
 type destinationRow struct {
-	// refusals are the functions by which a program makes the package's decoder
-	// refuse a document naming a member the type lacks.
-	refusals map[string]bool
 	// executions are a template engine's methods that execute a template.
 	executions map[string]bool
 	// finders are the methods by which a program finds a method of a value through
 	// reflection, and fieldsOnly the one function that reads fields and reaches no
 	// method whatever the program finds.
 	finders map[string]bool
+	// walkers are the methods and the function by which a program walks a type's
+	// fields by position, which reads every field.
+	walkers map[string]bool
 	// prints are the functions formatting their operands, each with where it
 	// carries its format string and its operands.
 	prints map[string]printSignature
@@ -49,10 +49,42 @@ const (
 	htmlTemplate   = "html/template"
 )
 
+const disallowUnknownFields = "DisallowUnknownFields"
+
 var (
-	unknownMemberRefusals = map[string]bool{"DisallowUnknownFields": true, "RejectUnknownMembers": true}
-	templateExecutions    = map[string]bool{"Execute": true, "ExecuteTemplate": true}
+	jsonSwitches       = map[string]bool{disallowUnknownFields: true, "RejectUnknownMembers": true}
+	yamlV2Strict       = strictDecoder{key: yamlKey, switches: map[string]bool{"SetStrict": true, "UnmarshalStrict": true}}
+	yamlV3Strict       = strictDecoder{key: yamlKey, switches: map[string]bool{"KnownFields": true}}
+	templateExecutions = map[string]bool{"Execute": true, "ExecuteTemplate": true}
 )
+
+// strictDecoder is one decoder package that can refuse a document naming a member
+// the type lacks: the functions and methods by which a program makes a decoder of it
+// do so ([encodingFlow.strictAt] decides which call that is), and the tag key it
+// names a field by.
+type strictDecoder struct {
+	switches map[string]bool
+	key      tagKeys
+}
+
+// strictDecoders are the decoder packages a strict decoder of which reads every
+// field it decodes.
+var strictDecoders = map[string]strictDecoder{
+	"encoding/json":                   {key: jsonKey, switches: jsonSwitches},
+	"encoding/json/v2":                {key: jsonV2Key, switches: jsonSwitches},
+	"github.com/goccy/go-json":        {key: jsonKey, switches: map[string]bool{disallowUnknownFields: true}},
+	"gopkg.in/yaml.v2":                yamlV2Strict,
+	"go.yaml.in/yaml/v2":              yamlV2Strict,
+	"gopkg.in/yaml.v3":                yamlV3Strict,
+	"go.yaml.in/yaml/v3":              yamlV3Strict,
+	"github.com/goccy/go-yaml":        {key: yamlKey, switches: map[string]bool{"DisallowUnknownField": true, "Strict": true}},
+	"sigs.k8s.io/yaml":                {key: jsonKey, switches: map[string]bool{disallowUnknownFields: true, "UnmarshalStrict": true}},
+	"github.com/pelletier/go-toml/v2": {key: tomlKey, switches: map[string]bool{disallowUnknownFields: true}},
+}
+
+// positionalCodecs are the packages that encode and decode a struct's fields in
+// their declared order, so deleting any field moves every later element.
+var positionalCodecs = map[string]bool{"encoding/asn1": true, "encoding/binary": true}
 
 // destinations is every standard package a destination rule names, by import path.
 // The rule for a callee the analysis cannot read passes over them, so one call is
@@ -60,14 +92,15 @@ var (
 // read no field.
 var destinations = map[string]destinationRow{
 	"encoding/gob":     {methods: reachGobEncode | reachGobDecode},
-	"encoding/json":    {methods: reachJSONEncode | reachJSONDecode, key: jsonKey, refusals: unknownMemberRefusals},
-	"encoding/json/v2": {methods: reachJSONEncode | reachJSONDecode, key: jsonKey, refusals: unknownMemberRefusals},
+	"encoding/json":    {methods: reachJSONEncode | reachJSONDecode, key: jsonKey},
+	"encoding/json/v2": {methods: reachJSONEncode | reachJSONDecode, key: jsonV2Key},
 	xmlPackage:         {methods: reachXMLEncode | reachXMLDecode, key: xmlKey, xmlName: true},
 	htmlTemplate:       {methods: reachExportedMethods, executions: templateExecutions},
 	"text/template":    {methods: reachExportedMethods, executions: templateExecutions},
 	reflectPackage: {
 		methods:    reachExportedMethods,
 		finders:    map[string]bool{"Method": true, "MethodByName": true, "NumMethod": true},
+		walkers:    map[string]bool{"Field": true, "FieldByIndex": true, "NumField": true, "VisibleFields": true},
 		fieldsOnly: "DeepEqual",
 	},
 	"database/sql": {scanners: map[string]bool{"Rows": true, "Row": true}},
@@ -138,13 +171,14 @@ var methodsResolvedByName = map[string]methodReach{
 }
 
 // selfEncoders are, per encoding direction, the methods by which a type encodes
-// itself, so the encoder calls the method and walks no field of the type
-// (https://pkg.go.dev/encoding/json#Marshal, https://pkg.go.dev/encoding/xml#Marshal,
-// https://pkg.go.dev/encoding/gob).
+// itself, so the encoder calls the method and walks no field of the type, in the
+// order the encoders prefer them; encoding/json/v2 alone calls MarshalJSONTo
+// (https://pkg.go.dev/encoding/json#Marshal, https://pkg.go.dev/encoding/json/v2#Marshal,
+// https://pkg.go.dev/encoding/xml#Marshal, https://pkg.go.dev/encoding/gob).
 var selfEncoders = map[methodReach][]selfEncoder{
-	reachJSONEncode: {{marshalJSON, 0, 2}, {"MarshalJSONTo", 1, 1}, {marshalText, 0, 2}},
-	reachXMLEncode:  {{"MarshalXML", 2, 1}, {marshalText, 0, 2}},
-	reachGobEncode:  {{"GobEncode", 0, 2}, {"MarshalBinary", 0, 2}},
+	reachJSONEncode: {{"MarshalJSONTo", 1, 1, true}, {marshalJSON, 0, 2, false}, {marshalText, 0, 2, false}},
+	reachXMLEncode:  {{"MarshalXML", 2, 1, false}, {marshalText, 0, 2, false}},
+	reachGobEncode:  {{"GobEncode", 0, 2, false}, {"MarshalBinary", 0, 2, false}},
 }
 
 // The prefixes an entry point of an encoder names its direction by.
@@ -164,21 +198,21 @@ var fillingNames = [...]string{"Bind", "Decode", "MustBind", "ShouldBind", "Unma
 var printingMethods = map[string]bool{errorMethod: true, "Format": true, stringMethod: true}
 
 // entryPoint is what one function of an encoder retains of a value it is given: an
-// encoding entry point reads fields and resolves the encoding methods, a decoding one
-// fills fields through reflection, which reads none, and resolves the decoding
-// methods, and any other, a registration among them, retains both. A JSON decoder
-// retains fields as well where the program makes it refuse unknown members. Every
+// encoding entry point reads and emits fields and resolves the encoding methods, a
+// decoding one fills fields through reflection, which reads none, and resolves the
+// decoding methods, and any other, a registration among them, retains both. A
+// strict decoder ([strictDecoders]) reads every field it decodes as well. Every
 // entry point of the XML package reads XMLName.
-func entryPoint(row *destinationRow, name string, unknownMembers bool) reach {
+func entryPoint(row *destinationRow, name string, strict bool) reach {
 	switch {
 	case hasAnyPrefix(name, encodingEntryPoints[:]):
 		return reach{
 			methods: row.methods &^ reachDecoding, fields: true, keys: row.key, encoders: row.methods & reachEncoding,
-			xmlName: row.xmlName,
+			xmlName: row.xmlName, emits: true,
 		}
 	case decodingEntryPoint(row, name):
 		return reach{
-			methods: row.methods &^ reachEncoding, fields: unknownMembers && row.refusals != nil, keys: row.key,
+			methods: row.methods &^ reachEncoding, fields: strict, strict: strict, keys: row.key,
 			xmlName: row.xmlName, holders: true,
 		}
 	default:
@@ -222,10 +256,17 @@ func (f *encodingFlow) encodingDestination(fn *types.Func) (destination, bool) {
 	switch {
 	case !named:
 		return destination{}, false
-	case row.finders != nil && (fn.Name() == row.fieldsOnly || !f.findsMethods):
-		return destination{detail: detail, reach: reach{fields: true}}, true
+	case row.finders != nil:
+		reflected := reach{fields: true}
+		if fn.Name() != row.fieldsOnly {
+			reflected.layout = f.walksFields
+			if f.findsMethods {
+				reflected.methods = row.methods
+			}
+		}
+		return destination{detail: detail, reach: reflected}, true
 	case row.methods&reachEncoding != 0:
-		return destination{detail: detail, reach: entryPoint(&row, fn.Name(), f.unknownMembers)}, true
+		return destination{detail: detail, reach: entryPoint(&row, fn.Name(), f.strict[pkg.Path()])}, true
 	case row.methods != 0:
 		return destination{detail: detail, reach: reach{methods: row.methods, fields: true, results: row.executions[fn.Name()]}}, true
 	case scansARow(fn, row.scanners):
@@ -252,21 +293,22 @@ func scansARow(fn *types.Func, receivers map[string]bool) bool {
 	return isNamed && receivers[named.Obj().Name()]
 }
 
-// namesFunction reports whether any file of the analysed program uses a function or
-// method of a package of [destinations] whose name the row's names hold.
-func namesFunction(in *Program, names func(destinationRow) map[string]bool) bool {
+// namingPackages is the paths of the packages one of whose functions or methods,
+// among the names each package's path gives, some file of the analysed program uses.
+func namingPackages(in *Program, names func(path string) map[string]bool) map[string]bool {
+	named := make(map[string]bool)
 	for _, p := range in.Facts.Program() {
 		if p.TypesInfo == nil {
 			continue
 		}
 		for _, object := range p.TypesInfo.Uses {
 			if _, isFunc := object.(*types.Func); isFunc && object.Pkg() != nil &&
-				names(destinations[object.Pkg().Path()])[object.Name()] {
-				return true
+				names(object.Pkg().Path())[object.Name()] {
+				named[object.Pkg().Path()] = true
 			}
 		}
 	}
-	return false
+	return named
 }
 
 // formatFunctions are the print, format and error-construction functions of the

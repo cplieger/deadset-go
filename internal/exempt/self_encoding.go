@@ -7,10 +7,12 @@ import (
 )
 
 // selfEncoder is one method an encoder calls instead of walking fields, with the
-// parameter and result counts its signature has, the last result an error.
+// parameter and result counts its signature has, the last result an error. some is
+// whether only some encoders of the direction call it, the others never.
 type selfEncoder struct {
 	name            string
 	params, results int
+	some            bool
 }
 
 // selfEncodingKey is one walked type and the encoding directions of its walk.
@@ -132,6 +134,46 @@ func (f *encodingFlow) beneath(cur walkStep) []walkStep {
 	return nil
 }
 
+// keepPromoting keeps each embedded field through which a type that encodes itself
+// has the encoding method an encoder calls, the first of its direction's [selfEncoders]
+// the type has, because calling the method reads that field. A method only some
+// encoders call ([selfEncoder.some]) leaves the others to go on to the next.
+func (f *encodingFlow) keepPromoting(named *types.Named, site evidence, d *destination) {
+	set := types.NewMethodSet(types.NewPointer(named))
+	for direction, methods := range selfEncoders {
+		if d.reach.encoders&direction == 0 {
+			continue
+		}
+		for _, m := range methods {
+			sel := declares(set, m)
+			if sel == nil {
+				continue
+			}
+			if len(sel.Index()) > 1 {
+				f.keepEmbedded(named, sel.Index()[:len(sel.Index())-1], site, d)
+			}
+			if !m.some {
+				break
+			}
+		}
+	}
+}
+
+// keepEmbedded keeps each embedded field a path of field indices crosses from t.
+func (f *encodingFlow) keepEmbedded(t types.Type, path []int, site evidence, d *destination) {
+	for _, i := range path {
+		if pointer, isPointer := t.Underlying().(*types.Pointer); isPointer {
+			t = pointer.Elem()
+		}
+		st, isStruct := t.Underlying().(*types.Struct)
+		if !isStruct {
+			return
+		}
+		f.kept.record(st.Field(i), site, d.detail)
+		t = st.Field(i).Type()
+	}
+}
+
 // encodesItself reports whether a type met by a walk encodes itself in every one of
 // the directions: its own method set holds a method of [selfEncoders] for the
 // direction, or a pointer's does where every value of it the walk meets is addressable.
@@ -151,13 +193,20 @@ func encodesItself(met *meeting, directions methodReach) bool {
 // signature its row gives.
 func declaresAny(t types.Type, methods []selfEncoder) bool {
 	set := types.NewMethodSet(t)
-	return slices.ContainsFunc(methods, func(m selfEncoder) bool {
-		selection := set.Lookup(nil, m.name)
-		if selection == nil {
-			return false
-		}
-		sig, isSignature := selection.Type().(*types.Signature)
-		return isSignature && sig.Params().Len() == m.params && sig.Results().Len() == m.results &&
-			types.Identical(sig.Results().At(m.results-1).Type(), types.Universe.Lookup("error").Type())
-	})
+	return slices.ContainsFunc(methods, func(m selfEncoder) bool { return declares(set, m) != nil })
+}
+
+// declares is the selection of m in a method set where it has the signature m's row
+// gives, nil where it has not.
+func declares(set *types.MethodSet, m selfEncoder) *types.Selection {
+	selection := set.Lookup(nil, m.name)
+	if selection == nil {
+		return nil
+	}
+	sig, isSignature := selection.Type().(*types.Signature)
+	if !isSignature || sig.Params().Len() != m.params || sig.Results().Len() != m.results ||
+		!types.Identical(sig.Results().At(m.results-1).Type(), types.Universe.Lookup("error").Type()) {
+		return nil
+	}
+	return selection
 }

@@ -74,16 +74,42 @@ type reach struct {
 	// results is whether the destination also reads what each method it calls
 	// returns, as a template engine evaluating a chain does.
 	results bool
+
+	// strict is whether a decoder refusing unknown members reads the fields
+	// ([strictDecoders]), and layout whether a positional codec or a reflective field
+	// walk does, which visits every field, exported or not: each reads a field it
+	// visits whether or not anything writes it.
+	strict bool
+	layout bool
+
+	// emits is whether an encoder, or a destination that may hand the value to one,
+	// writes the fields to its output, where a field nothing writes is kept at the
+	// class possible unless its tag leaves the zero value out ([tagKeys.omitsZero]).
+	emits bool
+
+	// opaque is whether a callee whose body the program does not hold reads the value,
+	// which no destination row names and which may hand it to any encoder, so it
+	// emits the fields and may call their IsZero methods ([encodingFlow.keepZeroMethod]).
+	// emits is set with it.
+	opaque bool
 }
 
 // tagKeys is a set of the struct tag keys an encoder names a field by.
 type tagKeys uint8
 
-// The tag keys an encoder skips a field by, each one bit.
+// The tag keys an encoder skips a field by, each one bit. encoding/json/v2 has a bit
+// of its own beside jsonKey, the key of encoding/json and its kin, because the two
+// leave different zero values out by the same key ([tagKeys.omitsZero]).
 const (
 	jsonKey tagKeys = 1 << iota
+	jsonV2Key
 	xmlKey
+	yamlKey
+	tomlKey
 )
+
+// tagNames are the tag keys by name.
+var tagNames = map[tagKeys]string{jsonKey: "json", jsonV2Key: "json", xmlKey: "xml", yamlKey: "yaml", tomlKey: "toml"}
 
 // skips reports whether every encoder the fields are read through skips one field,
 // its tag naming the key "-" for each of them. A tag of "-," names the key "-".
@@ -92,7 +118,7 @@ func (k tagKeys) skips(tag string) bool {
 		return false
 	}
 	st := reflect.StructTag(tag)
-	for key, name := range map[tagKeys]string{jsonKey: "json", xmlKey: "xml"} {
+	for key, name := range tagNames {
 		if k&key != 0 && st.Get(name) != "-" {
 			return false
 		}
@@ -109,23 +135,36 @@ func (r reach) union(other reach) reach {
 		holders: r.holders || other.holders,
 		fills:   r.fills || other.fills,
 		results: r.results || other.results,
+		strict:  r.strict || other.strict,
+		layout:  r.layout || other.layout,
+		emits:   r.emits || other.emits,
+		opaque:  r.opaque || other.opaque,
 	}
-	switch {
-	case !r.fields:
-		joined.keys, joined.encoders = other.keys, other.encoders
-	case !other.fields:
-		joined.keys, joined.encoders = r.keys, r.encoders
-	default:
-		if r.keys != 0 && other.keys != 0 {
-			joined.keys = r.keys | other.keys
-		}
-		if r.encoders != 0 && other.encoders != 0 {
-			joined.encoders = r.encoders | other.encoders
-		}
-	}
+	joined.keys, joined.encoders = r.joinReaders(other)
 	joined.outside = joinPackages(r.outside, other.outside)
 	joined.contained = joinPackages(r.contained, other.contained)
 	return joined
+}
+
+// joinReaders is the tag keys and the standard encoders of a value both reaches read
+// the fields of: a reach that reads no field adds none, and one of zero, which names
+// no encoder by its tag or reads the fields whatever methods the type has, zeroes it.
+func (r reach) joinReaders(other reach) (tagKeys, methodReach) {
+	switch {
+	case !r.fields:
+		return other.keys, other.encoders
+	case !other.fields:
+		return r.keys, r.encoders
+	}
+	var keys tagKeys
+	var encoders methodReach
+	if r.keys != 0 && other.keys != 0 {
+		keys = r.keys | other.keys
+	}
+	if r.encoders != 0 && other.encoders != 0 {
+		encoders = r.encoders | other.encoders
+	}
+	return keys, encoders
 }
 
 // joinPackages is the packages of two lists ordered by path, each once.
@@ -148,7 +187,8 @@ func (r reach) covers(other reach) bool {
 	return widened.methods == r.methods && widened.fields == r.fields && len(widened.outside) == len(r.outside) &&
 		len(widened.contained) == len(r.contained) && widened.keys == r.keys && widened.xmlName == r.xmlName &&
 		widened.holders == r.holders && widened.encoders == r.encoders && widened.fills == r.fills &&
-		widened.results == r.results
+		widened.results == r.results && widened.strict == r.strict && widened.layout == r.layout &&
+		widened.emits == r.emits && widened.opaque == r.opaque
 }
 
 // storesOnly reports whether every destination of this reach is a standard
@@ -176,22 +216,23 @@ func (r methodReach) reads(m *types.Func) bool {
 // ([storedTypes]), and a promoted method is retained where the embedded type is.
 func EncodingReflectionDetector(in *Program) ([]Exemption, error) {
 	f := &encodingFlow{
-		conversions:    in.programConversions,
-		kept:           newRetention(in, vocab.EncodingReflection),
-		filled:         newRetention(in, vocab.EncodingReflection),
-		own:            programPaths(in),
-		unknownMembers: namesFunction(in, func(row destinationRow) map[string]bool { return row.refusals }),
-		findsMethods:   namesFunction(in, func(row destinationRow) map[string]bool { return row.finders }),
-		assert:         in.assert,
-		byName:         outsideInterfaceMethods(in.outside),
-		satisfying:     make(map[satisfactionKey]map[string]bool),
-		methodNames:    make(map[*types.Named]map[string]bool),
-		decoded:        make(map[token.Position][]evidence),
-		typeArgs:       typeArgumentsOf(in.Facts.Program()),
+		conversions:  in.programConversions,
+		kept:         newRetention(in, vocab.EncodingReflection),
+		filled:       newRetention(in, vocab.EncodingReflection),
+		own:          programPaths(in),
+		strict:       enabledSwitches(in),
+		findsMethods: len(namingPackages(in, func(path string) map[string]bool { return destinations[path].finders })) > 0,
+		walksFields:  len(namingPackages(in, func(path string) map[string]bool { return destinations[path].walkers })) > 0,
+		assert:       in.assert,
+		byName:       outsideInterfaceMethods(in.outside),
+		satisfying:   make(map[satisfactionKey]map[string]bool),
+		methodNames:  make(map[*types.Named]map[string]bool),
+		decoded:      make(map[token.Position][]evidence),
+		typeArgs:     typeArgumentsOf(in.Facts.Program()),
 	}
 	f.templates = newTemplateOrigins(in)
 	f.decode = newDecoders(f)
-	f.edge = newBoundary(in, f.namedDestinationParameter)
+	f.edge = newBoundary(in, f.namedDestinationParameter, f.opaqueParameters)
 	f.readFlow()
 	if err := f.solve(); err != nil {
 		return nil, err
@@ -209,7 +250,7 @@ type encodingFlow struct {
 	graph       flowGraph
 	typeArgs    *typeArguments
 	kept        *retention
-	filled      *retention      // the fields only a filling callee retains ([fillingNames])
+	filled      *retention      // the fields kept only at the class possible ([unwrittenRead])
 	own         map[string]bool // the program's package paths
 	edge        *boundary
 	assert      *assertable
@@ -228,14 +269,17 @@ type encodingFlow struct {
 	satisfying  map[satisfactionKey]map[string]bool // the method names retained
 	methodNames map[*types.Named]map[string]bool    // the names a type or a pointer to it declares
 
+	// strict is the decoder packages a switch of which the program enables
+	// ([enabledSwitches]).
+	strict map[string]bool
+
 	decoded   map[token.Position][]evidence // the sites of the decoders that fill each field
 	unwritten []unwrittenRead               // the fields a destination reads that no code writes
 
-	// unknownMembers is whether the program makes a JSON decoder refuse a document
-	// naming a member the type lacks.
-	unknownMembers bool
-	// findsMethods is whether the program names a reflection method finder.
+	// findsMethods is whether the program names a reflection method finder, and
+	// walksFields whether it names a reflective field walker.
 	findsMethods bool
+	walksFields  bool
 }
 
 // solve retains what every arrival of the graph reaches, in the graph's order, then
@@ -324,13 +368,16 @@ func (f *encodingFlow) indexSelfEncoded(a *arrival) {
 func (f *encodingFlow) namedDestinationParameter(fn *types.Func, at int, site callSite) (reach, bool) {
 	if d, found := f.encodingDestination(fn); found {
 		narrowReflection(fn, site, &d)
+		f.narrowStrict(fn, site.info, site.decl, site.call, &d.reach)
 		return d.reach, true
 	}
 	if decoded, decodes := f.decode.at(fn, at); decodes {
 		return decoded, true
 	}
 	if f.fills(fn, at) {
-		return opaqueParameters(fn)[0].reach.filling(), true
+		filled := f.opaqueParameters(fn)[0].reach
+		f.narrowStrict(fn, site.info, site.decl, site.call, &filled)
+		return filled.filling(), true
 	}
 	return reach{}, false
 }
@@ -356,7 +403,10 @@ func (f *encodingFlow) fillsByName(fn *types.Func, at int) bool {
 // filling is what a filling callee retains in place of the fields an opaque callee
 // reads.
 func (r reach) filling() reach {
-	r.fields, r.fills, r.keys, r.encoders = false, true, 0, 0
+	r.fields, r.fills, r.encoders, r.emits, r.opaque = r.strict || r.layout, true, 0, false, false
+	if !r.strict {
+		r.keys = 0
+	}
 	return r
 }
 
@@ -427,27 +477,34 @@ func (f *encodingFlow) templateNames(info *types.Info, dir string, fn *types.Fun
 }
 
 // narrowReflection drops the methods a reflect destination reads where what the call
-// returns reaches no method finder ([findsMethodsFrom]).
+// returns reaches no method finder, and its walk of every field where that reaches no
+// field walker ([reachesFrom]).
 func narrowReflection(fn *types.Func, site callSite, d *destination) {
-	if destinations[fn.Pkg().Path()].finders != nil && d.reach.methods != 0 && site.call != nil &&
-		!findsMethodsFrom(site.info, site.decl, site.call) {
+	row := destinations[fn.Pkg().Path()]
+	if row.finders == nil || site.call == nil {
+		return
+	}
+	if d.reach.methods != 0 && !reachesFrom(site.info, site.decl, site.call, row.finders) {
 		d.reach.methods = 0
+	}
+	if d.reach.layout && !reachesFrom(site.info, site.decl, site.call, row.walkers) {
+		d.reach.layout = false
 	}
 }
 
-// findsMethodsFrom reports whether what one reflect call returns may reach a method
-// finder: false only where the call heads a chain of reflect method calls, none a
-// finder, whose last result is neither a reflect.Value nor a reflect.Type, or is one
-// a local variable of decl takes whose every use heads such a chain.
-func findsMethodsFrom(info *types.Info, decl ast.Node, call *ast.CallExpr) bool {
-	return chainFindsMethods(info, decl, call, map[types.Object]bool{})
+// reachesFrom reports whether what one reflect call returns may reach a call of one
+// of the names: false only where the call heads a chain of reflect method calls, none
+// of them named, whose last result is neither a reflect.Value nor a reflect.Type, or
+// is one a local variable of decl takes whose every use heads such a chain.
+func reachesFrom(info *types.Info, decl ast.Node, call *ast.CallExpr, names map[string]bool) bool {
+	return chainReaches(info, decl, call, names, map[types.Object]bool{})
 }
 
-// chainFindsMethods is [findsMethodsFrom] for the chain start heads, seen holding the
-// local variables already followed.
-func chainFindsMethods(info *types.Info, decl ast.Node, start ast.Expr, seen map[types.Object]bool) bool {
+// chainReaches is [reachesFrom] for the chain start heads, seen holding the local
+// variables already followed.
+func chainReaches(info *types.Info, decl ast.Node, start ast.Expr, names map[string]bool, seen map[types.Object]bool) bool {
 	path := pathTo(decl, start)
-	at, end, finds := chainEnd(info, path, start)
+	at, end, finds := chainEnd(info, path, start, names)
 	if finds || !isReflectHandle(info.TypeOf(at)) {
 		return finds
 	}
@@ -462,7 +519,7 @@ func chainFindsMethods(info *types.Info, decl ast.Node, start ast.Expr, seen map
 	found := false
 	ast.Inspect(decl, func(n ast.Node) bool {
 		if id, isIdent := n.(*ast.Ident); isIdent && !found && info.Uses[id] == local {
-			found = chainFindsMethods(info, decl, id, seen)
+			found = chainReaches(info, decl, id, names, seen)
 		}
 		return !found
 	})
@@ -471,9 +528,8 @@ func chainFindsMethods(info *types.Info, decl ast.Node, start ast.Expr, seen map
 
 // chainEnd follows the chain of reflect method calls start heads along path, the
 // nodes from the enclosing declaration down to start: it returns the chain's last
-// expression and its index in path, or finds true where a call of it is a method
-// finder.
-func chainEnd(info *types.Info, path []ast.Node, start ast.Expr) (at ast.Expr, end int, finds bool) {
+// expression and its index in path, or finds true where a call of it is named.
+func chainEnd(info *types.Info, path []ast.Node, start ast.Expr, names map[string]bool) (at ast.Expr, end int, finds bool) {
 	at, end = start, len(path)-1
 	for i := len(path) - 2; i >= 1; i-- {
 		if _, paren := path[i].(*ast.ParenExpr); paren {
@@ -484,7 +540,7 @@ func chainEnd(info *types.Info, path []ast.Node, start ast.Expr) (at ast.Expr, e
 		if !selects || !calls || ast.Unparen(sel.X) != at || ast.Unparen(next.Fun) != sel {
 			break
 		}
-		if destinations[reflectPackage].finders[sel.Sel.Name] {
+		if names[sel.Sel.Name] {
 			return at, end, true
 		}
 		at, end, i = next, i-1, i-1
@@ -580,6 +636,7 @@ func (f *encodingFlow) readCall(info *types.Info, decl ast.Decl, enclosing *type
 	}
 	if d, reaches := f.encodingDestination(fn); reaches {
 		narrowReflection(fn, callSite{info: info, decl: decl, call: call}, &d)
+		f.narrowStrict(fn, info, decl, call, &d.reach)
 		d.named = f.templateNames(info, dir, fn, call)
 		f.readArguments(info, enclosing, calledSignature(info, fn, call), call.Args, &d)
 		return
@@ -592,7 +649,7 @@ func (f *encodingFlow) readCall(info *types.Info, decl ast.Decl, enclosing *type
 				continue
 			}
 		}
-		f.readCrossing(info, enclosing, call, i)
+		f.readCrossing(info, decl, enclosing, call, i)
 	}
 }
 
@@ -605,11 +662,12 @@ func (f *encodingFlow) readArgument(info *types.Info, enclosing *types.Func, arg
 // value out of the analysed program, which the boundary's crossing test decides.
 // What is retained is what the boundary carries for the callee, and the detail names
 // the immediate callee, so a wrapper's caller reads the wrapper's name.
-func (f *encodingFlow) readCrossing(info *types.Info, enclosing *types.Func, call *ast.CallExpr, i int) {
+func (f *encodingFlow) readCrossing(info *types.Info, decl ast.Decl, enclosing *types.Func, call *ast.CallExpr, i int) {
 	out, sinks := f.edge.sinkOf(info, call, i)
 	if !sinks {
 		return
 	}
+	f.narrowStrict(out.callee, info, decl, call, &out.reach)
 	arg := call.Args[i]
 	d := destination{detail: "passed to " + out.callee.FullName(), reach: out.reach}
 	if at, supplies := parameterAt(out.callee.Signature(), i); supplies && !f.edge.declares(out.callee) {
@@ -628,12 +686,11 @@ func (f *encodingFlow) readCrossing(info *types.Info, enclosing *types.Func, cal
 // carried is the arrival one argument is, with the types its rule carries: for a
 // destination, its own type, the types the program stores in a container it names
 // ([storedTypes.argument], [storedTypes.value]) and the ones it reaches of its own
-// ([encodingFlow.ownTypes]); for a decoding parameter, its own type; and for a
-// crossing, its own struct value, the types it reaches of its own, each struct
-// value an interface-typed local or call result holds ([storedTypes.held]), where an
-// empty-interface parameter's values cross at its callers' sites, and what a
-// container of interface values it names holds, a type parameter's type counting
-// where a type argument it stands for is a struct value.
+// ([encodingFlow.ownTypes]); for a decoding parameter, its own type; for a crossing,
+// its own struct value, the types it reaches of its own, each struct value an
+// interface-typed local or call result holds ([storedTypes.held]), an empty-interface
+// parameter's values crossing at its callers' sites, and what a container of interface
+// values it names holds, a type parameter's type counting where its argument is one.
 func (f *encodingFlow) carried(site *argumentSite) arrival {
 	info, enclosing, arg := site.info, site.enclosing, site.arg
 	a := arrival{d: site.d, at: arg.Pos()}
@@ -820,7 +877,10 @@ func (f *encodingFlow) returnDestination(decl ast.Decl, fn *types.Func) (destina
 	}
 	return destination{
 		detail: "returned through " + answered.FullName(),
-		reach:  reach{methods: reachEncoding | reachDecoding, fields: true, outside: []*types.Package{answered.Pkg()}},
+		reach: reach{
+			methods: reachEncoding | reachDecoding, fields: true, outside: []*types.Package{answered.Pkg()},
+			emits: true, opaque: true,
+		},
 	}, true
 }
 
@@ -925,7 +985,12 @@ func (f *encodingFlow) members(named *types.Named, site evidence, d *destination
 			f.kept.record(m, site, d.detail)
 		}
 	}
-	if st, isStruct := origin.Underlying().(*types.Struct); isStruct && !encodesItself {
+	st, isStruct := origin.Underlying().(*types.Struct)
+	switch {
+	case !isStruct:
+	case encodesItself:
+		f.keepPromoting(origin, site, d)
+	default:
 		f.fields(st, site, d)
 	}
 }
@@ -933,26 +998,32 @@ func (f *encodingFlow) members(named *types.Named, site evidence, d *destination
 // fields records the fields of one struct a destination reads, and those of each
 // struct type with no name a field it visits holds, whose fields are symbols of the
 // type that holds the struct. An exported, a tagged and an embedded struct field are
-// visited (https://pkg.go.dev/encoding/json#Marshal).
+// visited (https://pkg.go.dev/encoding/json#Marshal), and every field where the
+// destination reads the struct's layout.
 func (f *encodingFlow) fields(st *types.Struct, site evidence, d *destination) {
 	for i := range st.NumFields() {
 		field := st.Field(i)
-		visited := (field.Exported() || st.Tag(i) != "" || embedsStruct(field)) && !d.reach.keys.skips(st.Tag(i))
+		visited := d.reach.layout ||
+			(field.Exported() || st.Tag(i) != "" || embedsStruct(field)) && !d.reach.keys.skips(st.Tag(i))
 		f.noteDecoded(field, visited, site, d)
+		emits := d.reach.emits && !d.reach.keys.omitsZero(field.Type(), st.Tag(i))
+		unwritten := unwrittenRead{field: field, site: site, detail: d.detail, emits: emits}
 		switch {
 		case f.reads(field, st.Tag(i), visited, site, d):
 			f.kept.record(field, site, d.detail)
 		case d.reach.fills && visited:
 			f.filled.record(field, site, d.detail)
 			if f.readsAny(field, visited, d) {
-				f.unwritten = append(f.unwritten, unwrittenRead{field: field, site: site, detail: d.detail, fills: true})
+				unwritten.fills = true
+				f.unwritten = append(f.unwritten, unwritten)
 			}
 		case f.readsAny(field, visited, d):
-			f.unwritten = append(f.unwritten, unwrittenRead{field: field, site: site, detail: d.detail})
+			f.unwritten = append(f.unwritten, unwritten)
 		}
 		if !visited {
 			continue
 		}
+		f.keepZeroMethod(field.Type(), st.Tag(i), site, d)
 		_, inner := typesReached(field.Type())
 		for _, held := range inner {
 			f.fields(held, site, d)
@@ -964,13 +1035,14 @@ func (f *encodingFlow) fields(st *types.Struct, site evidence, d *destination) {
 // reads fields and, for a template engine, a template names, an XML entry point's
 // XMLName, a field whose tag an outside package it reaches reads by ([taggedReads]),
 // or a written holder a decoder fills through. A field it visits is read only where
-// production code writes it ([fieldWrites.forSite]) or the field is
-// embedded, which a write of a promoted field writes through: the reader of an
-// unwritten field reads a value no code of the program gave it.
+// production code writes it ([fieldWrites.forSite]), the field is embedded, which a
+// write of a promoted field writes through, or the destination reads the set of fields
+// itself ([reach.strict], [reach.layout]): any other reader of an unwritten field
+// reads a value no code of the program gave it.
 func (f *encodingFlow) reads(field *types.Var, tag string, visited bool, site evidence, d *destination) bool {
 	switch {
-	case f.readsAny(field, visited, d) &&
-		(field.Embedded() || f.graph.writes.forSite(site, f.kept.in.Mode.Production)[f.edge.sites.of(field)]):
+	case f.readsAny(field, visited, d) && (field.Embedded() || d.reach.strict || d.reach.layout ||
+		f.graph.writes.forSite(site, f.kept.in.Mode.Production)[f.edge.sites.of(field)]):
 		return true
 	case d.reach.xmlName && field.Name() == "XMLName" && isXMLName(field.Type()):
 		return true
@@ -990,12 +1062,14 @@ func (*encodingFlow) readsAny(field *types.Var, visited bool, d *destination) bo
 // unwrittenRead is one field a destination reads that no code the destination's site
 // stands for writes, kept where a decoder fills it ([encodingFlow.keepDecoded]). fills
 // is whether the reader may fill the field itself, as an outside callee handed a
-// pointer may.
+// pointer may, and emits whether the reader writes the field, zero value and all, to
+// its output, where deleting the field drops a key some reader of that output may need.
 type unwrittenRead struct {
 	field  *types.Var
 	detail string
 	site   evidence
 	fills  bool
+	emits  bool
 }
 
 // noteDecoded records the site of a decoding destination that fills a field: a
@@ -1012,13 +1086,16 @@ func (f *encodingFlow) noteDecoded(field *types.Var, visited bool, site evidence
 
 // keepDecoded keeps each field a destination reads that no code writes where a decoder
 // fills it, because the value then carries what the decoded document held: a program
-// that decodes a value and encodes it again sends its fields on. It runs once every
+// that decodes a value and encodes it again sends its fields on. A field no decoder
+// fills that an encoder emits is kept at the class possible. It runs once every
 // destination has been walked, since a decoder may be met after the encoder.
 func (f *encodingFlow) keepDecoded() {
 	for i := range f.unwritten {
-		u := &f.unwritten[i]
-		if slices.ContainsFunc(f.decoded[f.edge.sites.of(u.field)], u.filledBy) {
+		switch u := &f.unwritten[i]; {
+		case slices.ContainsFunc(f.decoded[f.edge.sites.of(u.field)], u.filledBy):
 			f.kept.record(u.field, u.site, u.detail)
+		case u.emits:
+			f.filled.record(u.field, u.site, u.detail)
 		}
 	}
 }

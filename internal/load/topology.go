@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/cplieger/deadset-go/v2/internal/failure"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/mod/modfile"
@@ -108,6 +109,9 @@ func Discover(ctx context.Context, doc scope.Document) (*Topology, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load: find the modules under %s: %w", target, err)
 	}
+	if empty := holdsProgram(ctx, target, dirs); empty != nil {
+		return nil, empty
+	}
 	top := &Topology{Root: target, Walked: walkedUnits(target, dirs), ConsumerWorkspace: workspaceOff}
 	if top.Units, err = discoverUnits(ctx, dirs); err != nil {
 		return nil, err
@@ -164,8 +168,8 @@ func discoverUnits(ctx context.Context, dirs []string) ([]discoveredModule, erro
 // workspace listing it lists; another module nested below it is a dependency or
 // nothing. A directory a module file above it governs is its own one unit. Any
 // other target is every module rooted below it, in directory order, searching no
-// directory the Go row of the language table skips, and is its own one unit where
-// it holds none.
+// directory the Go row of the language table skips, and holds no unit where it
+// holds none.
 func unitDirs(ctx context.Context, target string) ([]string, error) {
 	if IsModuleRoot(target) {
 		return withMembers(ctx, target)
@@ -192,10 +196,52 @@ func unitDirs(ctx context.Context, target string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(dirs) == 0 {
-		return []string{target}, nil
-	}
 	return dirs, nil
+}
+
+// holdsProgram is the setup failure no-program where target holds no unit, or no
+// unit holds a Go file [holdsGoFile] finds, and nil otherwise.
+func holdsProgram(ctx context.Context, target string, dirs []string) error {
+	if len(dirs) == 0 {
+		return failure.New(vocab.SetupNoProgram, fmt.Sprintf(
+			"%s holds no go.mod file and none above it governs it; run from the directory that holds a module's go.mod file, or name the languages to analyze",
+			target,
+		))
+	}
+	for _, dir := range dirs {
+		found, err := holdsGoFile(ctx, dir)
+		if err != nil {
+			return fmt.Errorf("load: find the Go files under %s: %w", dir, err)
+		}
+		if found {
+			return nil
+		}
+	}
+	return failure.New(vocab.SetupNoProgram, fmt.Sprintf(
+		"the modules of %s hold no .go file; run from the directory that holds the module's Go source files, or name the languages to analyze",
+		target,
+	))
+}
+
+// holdsGoFile reports whether the module rooted at dir holds a Go source file of
+// the Go row, in a directory the underscored-package search enters.
+func holdsGoFile(ctx context.Context, dir string) (bool, error) {
+	found := false
+	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+		switch {
+		case err != nil:
+			return err
+		case ctx.Err() != nil:
+			return ctx.Err()
+		case entry.IsDir() && path != dir && (!searchedBelowUnderscore(entry.Name()) || IsModuleRoot(path)):
+			return fs.SkipDir
+		case !entry.IsDir() && goRow.Sources(entry.Name()):
+			found = true
+			return fs.SkipAll
+		}
+		return nil
+	})
+	return found, err
 }
 
 // withMembers is the module rooted at target, then every other module below it the

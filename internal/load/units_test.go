@@ -13,6 +13,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/failure"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -408,6 +409,36 @@ func TestDiscoverReadsAReaderModuleFileInItsOwnDirectoryAlone(t *testing.T) {
 	top := discovered(t, scope.Document{Target: scope.Module{Path: filepath.Join(root, "lib")}})
 	if len(top.Readers) != 1 || top.Readers[0].Dir != filepath.Join(root, "outer", "reader") || !errors.Is(top.Readers[0].FileErr, ErrModuleFile) {
 		t.Errorf("Discover() read the readers %+v, want outer/reader alone, with %v", top.Readers, ErrModuleFile)
+	}
+}
+
+// A target that holds no module and none above governs, or whose modules hold no Go
+// file outside a skipped directory and a nested module, holds no program: discovery
+// ends with the setup failure no-program, which the run reports as a setup class.
+func TestDiscoverRefusesATargetHoldingNoProgramAsNoProgram(t *testing.T) {
+	tests := map[string]map[string]string{
+		"no module":           {"tools/x.go": "package main\n", "src/index.ts": "export {};\n"},
+		"a module with no Go": {"go.mod": "module example.com/empty\n\ngo 1.27.1\n", "testdata/x.go": "package x\n", "inner/go.mod": "module example.com/inner\n\ngo 1.27.1\n", "inner/x.go": "package inner\n"},
+		"skipped Go files":    {"go.mod": "module example.com/hidden\n\ngo 1.27.1\n", "_hidden.go": "package hidden\n", "_examples/.x.go": "package main\n"},
+	}
+	for name, files := range tests {
+		t.Run(name, func(t *testing.T) {
+			root := writeTree(t, files)
+			_, err := Discover(t.Context(), scope.Document{Target: scope.Module{Path: root}})
+			failures := failure.Of(err)
+			if err == nil || !failure.Setup(err) || failures[0].Class != vocab.SetupNoProgram {
+				t.Errorf("Discover(%s) = %v, want the setup failure %s", name, err, vocab.SetupNoProgram)
+			}
+		})
+	}
+}
+
+// A module whose only Go file sits below a directory an underscore starts holds a
+// program: the run loads that package as a consumer of its module.
+func TestDiscoverAcceptsAModuleWhoseOnlyGoFileIsUnderscored(t *testing.T) {
+	root := writeTree(t, map[string]string{"go.mod": "module example.com/ex\n\ngo 1.27.1\n", "_examples/main.go": "package main\n\nfunc main() {}\n"})
+	if _, err := Discover(t.Context(), scope.Document{Target: scope.Module{Path: root}}); err != nil {
+		t.Errorf("Discover(a module whose only Go file is under _examples) = %v, want nil", err)
 	}
 }
 
