@@ -292,8 +292,8 @@ type Input struct {
 	// it beside Exempt.
 	TestEvidence []exempt.Exemption
 
-	// Filled is every field a callee outside the analysed program fills from a
-	// document and may read, which nothing retains ([Input.capFilled]).
+	// Filled is every field the encoding-reflection class keeps only at the class
+	// possible and nothing retains ([Input.capFilled]).
 	Filled map[inventory.SymbolID]bool
 
 	// Generated reports whether one target-relative path is a generated file.

@@ -95,7 +95,7 @@ func (d *decoders) decodesInto(info *types.Info, body *ast.BlockStmt, param *typ
 	var held reach
 	ast.Inspect(body, func(n ast.Node) bool {
 		if call, isCall := n.(*ast.CallExpr); isCall {
-			count, r := d.decodedArguments(info, call, param)
+			count, r := d.decodedArguments(info, body, call, param)
 			decoded += count
 			held = held.union(r)
 		}
@@ -106,7 +106,7 @@ func (d *decoders) decodesInto(info *types.Info, body *ast.BlockStmt, param *typ
 
 // decodedArguments counts the arguments of one call that pass the parameter to a
 // callee parameter that decodes into it, and what those callee parameters retain.
-func (d *decoders) decodedArguments(info *types.Info, call *ast.CallExpr, param *types.Var) (int, reach) {
+func (d *decoders) decodedArguments(info *types.Info, body ast.Node, call *ast.CallExpr, param *types.Var) (int, reach) {
 	callee, isFunc := resolveObject(info, call.Fun).(*types.Func)
 	if !isFunc {
 		return 0, reach{}
@@ -121,7 +121,7 @@ func (d *decoders) decodedArguments(info *types.Info, call *ast.CallExpr, param 
 		if !supplies {
 			continue
 		}
-		if r, decodes := d.receives(callee, at); decodes {
+		if r, decodes := d.receives(callSite{info: info, decl: body, call: call}, callee, at); decodes {
 			decoded++
 			held = held.union(r)
 		}
@@ -129,9 +129,11 @@ func (d *decoders) decodedArguments(info *types.Info, call *ast.CallExpr, param 
 	return decoded, held
 }
 
-// receives reports whether one parameter of a callee decodes into its argument.
-func (d *decoders) receives(callee *types.Func, at int) (reach, bool) {
+// receives reports whether one parameter of a callee, called at site, decodes into
+// its argument.
+func (d *decoders) receives(site callSite, callee *types.Func, at int) (reach, bool) {
 	if dest, named := d.flow.encodingDestination(callee); named {
+		d.flow.narrowStrict(callee, site.info, site.decl, site.call, &dest.reach)
 		if decodingOnly(dest.reach) {
 			return dest.reach, true
 		}
@@ -173,6 +175,7 @@ func (d *decoders) readsFields(fn *types.Func, at int) bool {
 			return true
 		}
 		dest, named := d.flow.encodingDestination(callee)
+		d.flow.narrowStrict(callee, info, decl, call, &dest.reach)
 		reads = (named && dest.reach.fields) || destinations[callee.Pkg().Path()].prints != nil
 		return !reads
 	})

@@ -828,7 +828,7 @@ func TestFormatVerbContractAloneRecordsAnOperandOfTheFormattingPackage(t *testin
 // The mechanism text of the class, as the Contract states it for this language. The
 // class implements this text; a pin bump that moves it must be read against the
 // destination table before this literal moves with it.
-const encodingReflectionMechanismSHA256 = "b14f1671f3c21d22e05cdfb81edef960baa807fd2149010313ab55e92c36d4cb"
+const encodingReflectionMechanismSHA256 = "6f44043f50eb6ea8f254f953bc33d28545c45997f32021d55bc5685e45bbb5fc"
 
 func TestEncodingReflectionImplementsTheContractsMechanismText(t *testing.T) {
 	body, err := spec.Contract.ReadFile("contract/exemptions.json")
@@ -1013,7 +1013,8 @@ func selfEncodingRefs(typeName string, members ...string) []string {
 // An encoder calls the encoding method of a type that has one instead of walking its
 // fields, so it reads none of them and walks no further: a pointer-receiver method
 // counts only where every value the walk meets is addressable, and a promoted method
-// counts on the type that embeds it.
+// counts on the type that embeds it, which then reads the embedded field the method
+// comes through.
 func TestEncodingReflectionReadsNoFieldOfATypeThatEncodesItself(t *testing.T) {
 	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-self-encoding.txtar", Options{}), vocab.EncodingReflection)
 
@@ -1026,7 +1027,7 @@ func TestEncodingReflectionReadsNoFieldOfATypeThatEncodesItself(t *testing.T) {
 		{how: "reached only through a type that encodes itself", typeName: "Unit", want: nil},
 		{how: "encoded as a value with a pointer-receiver method", typeName: "Copied", want: selfEncodingRefs("Copied", "MarshalJSON", "Shown")},
 		{how: "a map value with a value-receiver method", typeName: "Valued", want: selfEncodingRefs("Valued", "MarshalJSON")},
-		{how: "promoting an embedded type's method", typeName: "Outer", want: nil},
+		{how: "promoting an embedded type's method", typeName: "Outer", want: selfEncodingRefs("Outer", "Self")},
 	} {
 		t.Run(strings.ReplaceAll(test.how, " ", "_"), func(t *testing.T) {
 			if got := membersOf(refs, test.typeName); !slices.Equal(got, test.want) {
@@ -1167,20 +1168,29 @@ func TestEncodingReflectionKeepsMethodsOnlyWhereReflectionMayFindThem(t *testing
 
 // A field a decoder fills is written for an encoder that reads it: a program that
 // decodes a value and encodes it again sends the decoded fields on, whichever of the
-// two calls the walk meets first. A field nothing writes or decodes is not kept.
+// two calls the walk meets first. A field nothing writes or decodes is kept only at
+// the class possible, because the encoder still emits its key.
 func TestEncodingReflectionReadsTheFieldsADecoderFills(t *testing.T) {
 	tests := []struct {
-		name    string
-		archive string
-		want    []string
+		name     string
+		archive  string
+		want     []string
+		possible []string
 	}{
 		{"standard_decoder", "encoding-reflection-relayed-fields.txtar", []string{
 			"go://example.com/relayed#Event.Kind",
 			"go://example.com/relayed#Event.Seq",
+		}, []string{
+			"go://example.com/relayed#Probe.Ready",
+			"go://example.com/relayed#Status.Spare",
 		}},
 		{"outside_callee_and_generic", "encoding-reflection-relayed-outside.txtar", []string{
 			"go://example.com/relayed#Made.Label",
 			"go://example.com/relayed#Row.Title",
+		}, []string{
+			"go://example.com/relayed#Made.Label",
+			"go://example.com/relayed#Row.Title",
+			"go://example.com/relayed#Status.Spare",
 		}},
 	}
 	for _, tt := range tests {
@@ -1195,23 +1205,26 @@ func TestEncodingReflectionReadsTheFieldsADecoderFills(t *testing.T) {
 			for i := range in.Symbols {
 				refOf[in.Symbols[i].ID] = in.Symbols[i].Ref
 			}
-			var got []string
-			for _, e := range found {
-				got = append(got, refOf[e.ID])
+			got, possible := splitByConfidence(found, refOf)
+			if !slices.Equal(possible, slices.Sorted(slices.Values(tt.possible))) {
+				t.Errorf("EncodingReflectionDetector kept at the class possible %v, want %v", possible, tt.possible)
 			}
-			slices.Sort(got)
-			if got = slices.Compact(got); !slices.Equal(got, tt.want) {
+			if !slices.Equal(got, tt.want) {
 				t.Errorf("EncodingReflectionDetector(%s) retained %v, want %v", tt.archive, got, tt.want)
 			}
 		})
 	}
 }
 
+// An encoder reads the fields the program writes, and emits a field nothing writes,
+// which is kept only at the class possible.
 func TestEncodingReflectionReadsOnlyTheFieldsTheProgramWrites(t *testing.T) {
+	unwritten := []string{"go://example.com/written#Event.Draft", "go://example.com/written#Event.Never"}
 	tests := []struct {
-		name string
-		mode facts.Mode
-		want []string
+		name     string
+		mode     facts.Mode
+		want     []string
+		possible []string
 	}{
 		{"the_plain_mode", facts.Mode{}, []string{
 			"go://example.com/written#Draft.Title",
@@ -1222,7 +1235,7 @@ func TestEncodingReflectionReadsOnlyTheFieldsTheProgramWrites(t *testing.T) {
 			"go://example.com/written#Point.X",
 			"go://example.com/written#Point.Y",
 			"go://example.com/written#Tag.Label",
-		}},
+		}, unwritten},
 		{"a_production_run", facts.Mode{Production: true}, []string{
 			"go://example.com/written#Draft.Title",
 			"go://example.com/written#Event.Assigned",
@@ -1231,7 +1244,7 @@ func TestEncodingReflectionReadsOnlyTheFieldsTheProgramWrites(t *testing.T) {
 			"go://example.com/written#Point.X",
 			"go://example.com/written#Point.Y",
 			"go://example.com/written#Tag.Label",
-		}},
+		}, append([]string{"go://example.com/written#Event.TestOnly"}, unwritten...)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1245,14 +1258,28 @@ func TestEncodingReflectionReadsOnlyTheFieldsTheProgramWrites(t *testing.T) {
 			for i := range in.Symbols {
 				refOf[in.Symbols[i].ID] = in.Symbols[i].Ref
 			}
-			var got []string
-			for _, e := range found {
-				got = append(got, refOf[e.ID])
+			got, possible := splitByConfidence(found, refOf)
+			if !slices.Equal(possible, slices.Sorted(slices.Values(tt.possible))) {
+				t.Errorf("EncodingReflectionDetector kept at the class possible %v, want %v", possible, tt.possible)
 			}
-			slices.Sort(got)
-			if got = slices.Compact(got); !slices.Equal(got, tt.want) {
+			if !slices.Equal(got, tt.want) {
 				t.Errorf("EncodingReflectionDetector(encoding-reflection-written-fields.txtar) retained %v, want %v", got, tt.want)
 			}
 		})
 	}
+}
+
+// splitByConfidence is the refs of the exemptions that retain and of those of the
+// class possible, each sorted and listed once.
+func splitByConfidence(found []Exemption, refOf map[inventory.SymbolID]string) (held, possible []string) {
+	for _, e := range found {
+		if e.Confidence == vocab.Possible {
+			possible = append(possible, refOf[e.ID])
+		} else {
+			held = append(held, refOf[e.ID])
+		}
+	}
+	slices.Sort(held)
+	slices.Sort(possible)
+	return slices.Compact(held), slices.Compact(possible)
 }

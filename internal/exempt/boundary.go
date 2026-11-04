@@ -24,6 +24,7 @@ type boundary struct {
 	sites    *declarationSites
 	held     map[token.Position]bool
 	forwards destinationParameters
+	opaque   func(*types.Func) []sinkParameter
 }
 
 // destinationParameters are the parameters of the analysed program's own functions
@@ -101,12 +102,13 @@ func (d *declarationSites) position(pos token.Pos) token.Position {
 // crossing at that parameter of its own, retaining what the parameter it forwards to
 // retains, and is then itself something a further function can forward to. The set
 // grows until no function joins it and no retained set widens.
-func newBoundary(in *Program, destination destinationTest) *boundary {
+func newBoundary(in *Program, destination destinationTest, opaque func(*types.Func) []sinkParameter) *boundary {
 	declared := in.functions
 	b := &boundary{
 		sites:    newDeclarationSites(in.Result.Fset),
 		held:     make(map[token.Position]bool, len(declared)),
 		forwards: make(destinationParameters),
+		opaque:   opaque,
 	}
 	for _, one := range declared {
 		b.held[b.sites.of(one.fn)] = true
@@ -178,7 +180,7 @@ func (b *boundary) sinks(fn *types.Func) ([]sinkParameter, bool) {
 	if namedDestination(fn.Pkg().Path()) {
 		return nil, false
 	}
-	sinks := opaqueParameters(fn)
+	sinks := b.opaque(fn)
 	return sinks, len(sinks) > 0
 }
 
@@ -354,16 +356,29 @@ func fileFunctions(info *types.Info, file *ast.File) []programFunction {
 // opaqueParameters are the sinks of a function the program does not declare: every
 // parameter [erasedParameters] holds. The callee's body is not in the program, so
 // each reads the value's fields, resolves the encoding and decoding methods of both
-// directions, and retains what the callee's package can name ([reach]).
-func opaqueParameters(fn *types.Func) []sinkParameter {
+// directions, and retains what the callee's package can name ([reach]). A positional
+// codec reads every field, a decoding entry point of a decoder package the program
+// makes strict reads every field it decodes by its tag key, which a call site may
+// narrow ([encodingFlow.narrowStrict]), and each is [reach.opaque].
+func (f *encodingFlow) opaqueParameters(fn *types.Func) []sinkParameter {
 	erased := erasedParameters(fn.Signature())
 	found := make([]sinkParameter, 0, len(erased))
-	outside := []*types.Package{fn.Pkg()}
+	path := fn.Pkg().Path()
+	strict := f.strict[path] && hasAnyPrefix(fn.Name(), decodingEntryPoints[:])
+	var keys tagKeys
+	if strict {
+		keys = strictDecoders[path].key
+	}
 	for _, at := range erased {
 		found = append(found, sinkParameter{at: at, reach: reach{
+			keys:    keys,
 			methods: reachEncoding | reachDecoding,
 			fields:  true,
-			outside: outside,
+			outside: []*types.Package{fn.Pkg()},
+			layout:  positionalCodecs[path],
+			strict:  strict,
+			emits:   true,
+			opaque:  true,
 		}})
 	}
 	return found

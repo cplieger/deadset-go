@@ -21,7 +21,7 @@ type Prepared struct {
 	// ([kinds.Unseen]).
 	unseen map[inventory.SymbolID]bool
 
-	// filled is every field a callee outside the program fills and no class
+	// filled is every field a class keeps only at the class possible and no class
 	// retains ([exempt.Computed.Filled]).
 	filled map[inventory.SymbolID]bool
 

@@ -234,9 +234,9 @@ func TestATestThatEncodesADecodedValueAgainReadsItsFields(t *testing.T) {
 		"go://example.com/lib#example.Title", "go://example.com/lib#example.Integers")
 }
 
-func TestKeyEnumeratingReflectionReadsOnlyWhatTheProgramWrites(t *testing.T) {
+func TestKeyEnumeratingReflectionReadsEveryField(t *testing.T) {
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/key-enumerating-reflection.txtar"))
 
-	wantNoFinding(t, about, "the program writes URI and reflection reads it", "go://example.com/app#HTTPTarget.URI")
-	wantFinding(t, about, "go://example.com/app#HTTPTarget.Body", vocab.UnusedMember, vocab.Certain)
+	wantNoFinding(t, about, "a walk over the fields reads every field, written or not",
+		"go://example.com/app#HTTPTarget.URI", "go://example.com/app#HTTPTarget.Body")
 }

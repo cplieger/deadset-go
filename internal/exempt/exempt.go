@@ -125,7 +125,8 @@ type Exemption struct {
 
 	// Confidence is empty where the exemption holds the symbol. Possible, it holds
 	// nothing, and a finding about the symbol is reported at the class possible: a
-	// callee outside the program fills the field from a document and may read it.
+	// callee outside the program fills the field from a document and may read it, or
+	// an encoder emits the field though nothing writes it.
 	Confidence vocab.Class
 
 	Site token.Position // last, so the counted fields of a position end the value
@@ -297,7 +298,8 @@ type Computed struct {
 	TestEvidence []Exemption
 
 	// Filled is the records of the class possible whose symbol no held exemption
-	// holds, each found in a file the mode counts.
+	// holds, each found in a file the mode counts or naming a symbol a test file
+	// declares, whose finding a test file's evidence may lower under any mode.
 	Filled []Exemption
 }
 
@@ -315,6 +317,7 @@ func Compute(in *Program, detectors map[vocab.Exemption]Detector) (Computed, err
 		disabled[class] = true
 	}
 
+	testDeclared := testDeclarations(in.Symbols)
 	var found, evidence, filled []Exemption
 	for _, class := range goClasses() {
 		detect, carried := detectors[class]
@@ -326,12 +329,12 @@ func Compute(in *Program, detectors map[vocab.Exemption]Detector) (Computed, err
 			return Computed{}, fmt.Errorf("exempt: %s: %w", class, detectErr)
 		}
 		for i := range retained {
-			switch e := &retained[i]; {
-			case e.Confidence != vocab.Possible && holdsInMode(e, in.Mode):
+			switch e := &retained[i]; sortRecord(e, in.Mode, testDeclared) {
+			case recordHeld:
 				found = append(found, *e)
-			case e.Confidence != vocab.Possible:
+			case recordTestEvidence:
 				evidence = append(evidence, *e)
-			case holdsInMode(e, in.Mode):
+			case recordFilled:
 				filled = append(filled, *e)
 			}
 		}
@@ -346,6 +349,43 @@ func Compute(in *Program, detectors map[vocab.Exemption]Detector) (Computed, err
 		slices.SortStableFunc(set, byEvidence)
 	}
 	return Computed{Held: firstPerFact(found), TestEvidence: firstPerFact(evidence), Filled: firstPerFact(filled)}, nil
+}
+
+// recordSet is which part of [Computed] one record of a class goes to, if any.
+type recordSet uint8
+
+const (
+	recordDropped recordSet = iota
+	recordHeld
+	recordTestEvidence
+	recordFilled
+)
+
+// sortRecord is the part of [Computed] one record goes to under mode m: a record of
+// the class possible goes to Filled where the mode counts its file or a test file
+// declares its symbol, testDeclared being those symbols.
+func sortRecord(e *Exemption, m facts.Mode, testDeclared map[inventory.SymbolID]bool) recordSet {
+	switch counted := holdsInMode(e, m); {
+	case e.Confidence != vocab.Possible && counted:
+		return recordHeld
+	case e.Confidence != vocab.Possible:
+		return recordTestEvidence
+	case counted || testDeclared[e.ID]:
+		return recordFilled
+	default:
+		return recordDropped
+	}
+}
+
+// testDeclarations is the symbols a test file declares.
+func testDeclarations(symbols []inventory.Symbol) map[inventory.SymbolID]bool {
+	declared := make(map[inventory.SymbolID]bool)
+	for i := range symbols {
+		if symbols[i].InTestFile {
+			declared[symbols[i].ID] = true
+		}
+	}
+	return declared
 }
 
 // firstPerFact keeps one exemption per distinct fact, the first of each in the

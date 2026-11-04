@@ -212,7 +212,7 @@ func (f *encodingFlow) typeArgumentDestination(object types.Object, imports map[
 	var decodes bool
 	for _, path := range imports[pkg.Path()] {
 		if row := destinations[path]; row.methods&reachDecoding != 0 {
-			decoded = decoded.union(entryPoint(&row, "Decode", f.unknownMembers))
+			decoded = decoded.union(entryPoint(&row, "Decode", f.strict[path]))
 			decodes = true
 		}
 	}

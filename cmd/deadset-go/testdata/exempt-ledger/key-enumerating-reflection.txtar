@@ -1,6 +1,6 @@
 A function enumerates the fields of the value it is given by reflection and names
-those that are set. It reads only what the program writes, so a field nothing
-writes stays unused.
+those that are set. A walk over a type's fields reads every field, so a field
+nothing writes is read too.
 
 -- go.mod --
 module example.com/app
