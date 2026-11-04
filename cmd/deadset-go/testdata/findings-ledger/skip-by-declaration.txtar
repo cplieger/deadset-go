@@ -1,0 +1,16 @@
+A command whose Broken holds a type error and shares its line with helper, a dead
+declaration of its own. The type error skips Broken, so nothing is reported about
+it, and leaves helper, whose source does not hold the error, to be reported.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() {}
+
+func Broken() int { return undefinedName }; func helper() {}

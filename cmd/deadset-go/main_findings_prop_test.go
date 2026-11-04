@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/findings"
 	"pgregory.net/rapid"
 )
 
@@ -125,7 +125,7 @@ func libraryFindings(t *rapid.T, files map[string]string) []string {
 }
 
 // renderedFinding is one finding as the property compares it.
-func renderedFinding(found *kinds.Finding) string {
+func renderedFinding(found *findings.Finding) string {
 	return fmt.Sprintf("%s\t%s\t%s\t%s\t%s\t%s",
 		positionKey(&found.Position), found.Code, found.Symbol.Ref,
 		found.Class, found.Confidence, found.Severity)

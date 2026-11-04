@@ -1,0 +1,31 @@
+A command with two init functions in one file, each holding a dead store, and an
+ignore entry naming their shared reference and the file. The entry binds both, one
+record per init, and each record withholds its own init's store, so two records are
+in effect.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- deadset-ignore.json --
+{"ignore": [
+  {"code": "DS1404", "symbol": "go://example.com/app#init", "path": "main.go", "reason": "kept"}
+]}
+-- main.go --
+package main
+
+func main() {}
+
+func init() {
+	v := 1
+	v = 2
+	_ = v
+}
+
+func init() {
+	w := 1
+	w = 2
+	_ = w
+}

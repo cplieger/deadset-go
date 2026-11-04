@@ -8,8 +8,8 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/failure"
+	"github.com/cplieger/deadset-go/v2/internal/findings"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
-	"github.com/cplieger/deadset-go/v2/internal/kinds"
 	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
@@ -108,7 +108,7 @@ func (p *Prepared) suppressions(r *round) ([]suppress.Record, []suppress.Refusal
 // dead symbol back, then those that held a write-only finding back, grouped by
 // symbol in inventory order.
 func (s *Swept) Retained() []exempt.Exemption {
-	writeOnly := kinds.WriteOnlyRetained(&kinds.Input{
+	writeOnly := findings.WriteOnlyRetained(&findings.Input{
 		Config: &s.req.Config,
 		Merged: s.Merged,
 		Sweep:  &s.Liveness,

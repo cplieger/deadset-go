@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
-	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/findings"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 )
 
@@ -16,11 +16,11 @@ func TestConsumersNamesWhatTheRunLoaded(t *testing.T) {
 		name     string
 		complete bool
 		loads    []enumerated
-		want     kinds.Consumers
+		want     findings.Consumers
 	}{
 		{
 			name: "a_run_that_loaded_no_consumer",
-			want: kinds.Consumers{},
+			want: findings.Consumers{},
 		},
 		{
 			name:     "a_run_whose_configuration_declares_the_set_complete",
@@ -28,7 +28,7 @@ func TestConsumersNamesWhatTheRunLoaded(t *testing.T) {
 			loads: []enumerated{{Result: load.Result{Consumers: []load.Consumer{
 				{ID: "example.com/one"}, {ID: "example.com/two"},
 			}}}},
-			want: kinds.Consumers{
+			want: findings.Consumers{
 				Declared: []string{"example.com/one", "example.com/two"},
 				Loaded:   []string{"example.com/one", "example.com/two"},
 				Complete: true,

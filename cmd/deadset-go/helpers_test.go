@@ -174,7 +174,6 @@ func cachedFindings(ctx context.Context, sink failureSink, files map[string]stri
 	}
 	held := *set
 	held.Result = testsupport.Detached(sink, set.Result)
-	held.Evaluations = testsupport.Detached(sink, set.Evaluations)
 	return &held
 }
 

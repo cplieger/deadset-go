@@ -1,0 +1,59 @@
+A command and a package whose declarations each hold a type error and carry a record
+naming a code no kind reports about them: the type error roots each declaration, so
+none is unused, test-only or deprecated and unused, and a plain function and a type
+have no receiver or result to report. Every record is stale.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+import _ "example.com/app/lib"
+
+func main() {}
+
+//deadset:ignore DS1001 -- kept for the loader
+func Exported() int { return undefinedName }
+
+// Deprecated: gone.
+//
+//deadset:ignore DS1002 -- kept for the loader
+func deprecated() int { return undefinedName }
+
+//deadset:ignore DS1002 -- kept for the loader
+func tested() int { return undefinedName }
+
+//deadset:ignore DS1102 -- kept for the loader
+func untested() int { return undefinedName }
+
+//deadset:ignore DS1103 -- kept for the loader
+func production() int { return undefinedName }
+
+//deadset:ignore DS1104 -- kept for the loader
+func current() int { return undefinedName }
+
+//deadset:ignore DS1402 -- kept for the loader
+func plain() int { return undefinedName }
+
+//deadset:ignore DS1403 -- kept for the loader
+type sized [undefinedName]int
+-- main_test.go --
+package main
+
+import "testing"
+
+func TestTested(t *testing.T) { _ = tested() }
+-- lib/lib.go --
+package lib
+
+// Deprecated: gone.
+//
+//deadset:ignore DS1001 -- kept for the loader
+func Old() int { return undefinedName }
+
+//deadset:ignore DS1101 -- kept for the loader
+func Importable() int { return undefinedName }

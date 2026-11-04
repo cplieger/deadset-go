@@ -1,0 +1,70 @@
+A target of two modules, each requiring one dependency outside the target and
+implementing its interface with a method that returns a value at an interface
+result. Each module type-checks the dependency anew, so each has a reading of it
+of its own: the value each returns reaches the dependency, so the fields each
+writes are read there.
+
+-- target/deadset.json --
+{"target": {"kind": "application"}}
+-- target/a/go.mod --
+module example.com/a
+
+go 1.27.0
+
+require example.com/plugin v0.0.0
+
+replace example.com/plugin => ../../plugin
+-- target/a/main.go --
+package main
+
+import "example.com/plugin"
+
+type cluster struct{}
+
+func (cluster) Resource(c *plugin.Context) (any, error) { return &deployment{Replicas: 1}, nil }
+
+type deployment struct {
+	Replicas int
+}
+
+func main() { plugin.Serve(cluster{}) }
+-- target/b/go.mod --
+module example.com/b
+
+go 1.27.0
+
+require example.com/plugin v0.0.0
+
+replace example.com/plugin => ../../plugin
+-- target/b/main.go --
+package main
+
+import "example.com/plugin"
+
+type pods struct{}
+
+func (pods) Resource(c *plugin.Context) (any, error) { return &pod{Phase: "running"}, nil }
+
+type pod struct {
+	Phase string
+}
+
+func main() { plugin.Serve(pods{}) }
+-- plugin/go.mod --
+module example.com/plugin
+
+go 1.27.0
+-- plugin/plugin.go --
+// Package plugin serves sources.
+package plugin
+
+// Context is one request.
+type Context struct{}
+
+// Source returns a resource.
+type Source interface {
+	Resource(c *Context) (any, error)
+}
+
+// Serve hands what s returns to the network.
+func Serve(s Source) { _, _ = s.Resource(&Context{}) }

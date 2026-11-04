@@ -95,7 +95,7 @@ func (a *assertable) literals(pkg *types.Package) []*types.Interface {
 				return true
 			}
 			iface, checked := source.Info.TypeOf(literal).(*types.Interface)
-			if !checked || !iface.IsMethodSet() || iface.NumMethods() == 0 {
+			if !checked || !facts.HoldsValues(iface) {
 				return true
 			}
 			if loaded, stated := local.iface(iface); stated {
@@ -368,7 +368,7 @@ func (l localizer) assertedInterface(t types.Type) (*types.Interface, bool) {
 		return nil, false
 	}
 	iface, isInterface := loaded.Underlying().(*types.Interface)
-	if !isInterface || !iface.IsMethodSet() || iface.NumMethods() == 0 {
+	if !isInterface || !facts.HoldsValues(iface) {
 		return nil, false
 	}
 	return iface, true

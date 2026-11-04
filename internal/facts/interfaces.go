@@ -217,6 +217,14 @@ func DeclaredInterfaces(pkg *types.Package) []*types.Named {
 	return found
 }
 
+// HoldsValues reports whether iface is a method set with a method, the population
+// every rule about values reaching an interface reads. An interface holding a type
+// term or embedding comparable only constrains a type parameter, and an empty one
+// accepts every value whatever its methods.
+func HoldsValues(iface *types.Interface) bool {
+	return iface.IsMethodSet() && iface.NumMethods() > 0
+}
+
 // InterfaceMethod is what every configuration of a matrix holds about one method an
 // interface of the target declares: the declarations implementing it, and whether
 // it is fixed whatever calls it.

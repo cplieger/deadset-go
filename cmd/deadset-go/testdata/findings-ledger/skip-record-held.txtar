@@ -1,0 +1,35 @@
+A command whose broken struct and helper function each hold a type error and carry a
+record naming a finding the kinds make about them: the write-only field w and the
+dead store in helper. The type error skips both declarations, so neither finding is
+reported and each record, matching only a skipped finding, is neither in effect nor
+stale.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() {
+	var b broken
+	b.w = 1
+	_ = b
+	_ = helper()
+}
+
+type broken struct {
+	x undefinedType
+	//deadset:ignore DS1301 -- kept for the loader
+	w int
+}
+
+//deadset:ignore DS1404 -- kept for the loader
+func helper() int {
+	v := 1
+	v = 2
+	_ = v
+	return undefinedName
+}

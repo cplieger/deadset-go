@@ -1,0 +1,28 @@
+A command analysed for linux and windows, with one init function per platform file.
+The dead store is in the windows file's init, so its finding holds under windows
+alone, though the two inits share one reference.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}, "analysis": {"configurations": [
+  {"id": "linux-amd64", "os": "linux", "arch": "amd64"},
+  {"id": "windows-amd64", "os": "windows", "arch": "amd64"}]}}
+-- main.go --
+package main
+
+func main() {}
+-- a_linux.go --
+package main
+
+func init() { println() }
+-- b_windows.go --
+package main
+
+func init() {
+	v := 1
+	v = 2
+	_ = v
+}

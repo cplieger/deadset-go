@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/findings"
 	"github.com/cplieger/deadset-go/v2/internal/run"
 )
 
@@ -23,7 +23,7 @@ func cascadeModule(t *testing.T, document string) string {
 }
 
 // findingOf is the one finding of a set naming one reference.
-func findingOf(t *testing.T, set *run.Findings, ref string) *kinds.Finding {
+func findingOf(t *testing.T, set *run.Findings, ref string) *findings.Finding {
 	t.Helper()
 
 	for i := range set.Result.Findings {
@@ -41,7 +41,8 @@ func TestACascadeListedInFullNamesEveryMemberOfTheComponent(t *testing.T) {
 	found := findingOf(t, set, "go://example.com/app#outer")
 
 	var got []string
-	for _, member := range found.Component.Members {
+	members := set.Result.Members[found.Component.ID]
+	for _, member := range members {
 		got = append(got, member.Ref)
 	}
 	want := []string{"go://example.com/app#outer", "go://example.com/app#inner"}
@@ -49,9 +50,9 @@ func TestACascadeListedInFullNamesEveryMemberOfTheComponent(t *testing.T) {
 		t.Errorf("the finding about outer lists the members %v at cascade full, want %v, every member in position order",
 			got, want)
 	}
-	if found.Component.SymbolCount != len(found.Component.Members) {
+	if found.Component.SymbolCount != len(members) {
 		t.Errorf("the finding about outer counts %d symbols and lists %d members, want the two equal",
-			found.Component.SymbolCount, len(found.Component.Members))
+			found.Component.SymbolCount, len(members))
 	}
 }
 
@@ -59,7 +60,7 @@ func TestACascadeListedByItsRootsNamesNoMember(t *testing.T) {
 	dir := cascadeModule(t, `{"target": {"kind": "application"}}`)
 	set := findingsOfDir(t, dir)
 
-	if members := findingOf(t, set, "go://example.com/app#outer").Component.Members; len(members) != 0 {
-		t.Errorf("the finding about outer lists the members %+v at the default cascade, want none", members)
+	if members := set.Result.Members; members != nil {
+		t.Errorf("the run lists the members %+v at the default cascade, want none", members)
 	}
 }

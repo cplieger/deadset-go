@@ -1,0 +1,17 @@
+A command whose unexported broken holds a type error and carries a record naming
+DS1001, the code of an unused exported declaration. No finding about broken can
+carry DS1001 whatever the type error hides, so the record is stale.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() {}
+
+//deadset:ignore DS1001 -- kept for the loader
+func broken() int { return undefinedName }

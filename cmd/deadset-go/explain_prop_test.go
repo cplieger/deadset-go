@@ -7,8 +7,8 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/facts"
+	"github.com/cplieger/deadset-go/v2/internal/findings"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
-	"github.com/cplieger/deadset-go/v2/internal/kinds"
 	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-go/v2/internal/run"
@@ -20,7 +20,7 @@ import (
 // from the answers the sweep and the findings pass produced rather than from the
 // explanation's own switch, so the property compares two readings of one analysis.
 type explainedState struct {
-	found     *kinds.Finding
+	found     *findings.Finding
 	retained  []exempt.Exemption
 	candidate *liveness.Candidate
 	live      liveness.RelationSet
@@ -189,7 +189,7 @@ func checkExplanation(t *rapid.T, set *run.Findings, subject *inventory.Symbol, 
 }
 
 // checkReported asserts the reported answer carries what the finding carries.
-func checkReported(t *rapid.T, subject *inventory.Symbol, found *kinds.Finding, text string) {
+func checkReported(t *rapid.T, subject *inventory.Symbol, found *findings.Finding, text string) {
 	for _, want := range []string{
 		"code: " + string(found.Code) + " " + found.Kind,
 		"message: " + found.Message,

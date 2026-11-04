@@ -1,0 +1,17 @@
+A command whose broken holds a type error and carries a record naming DS1002, the
+code broken's shape selects. A type error roots the declaration it skips, so no kind
+finds broken unused, the record matches no finding and is stale.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() {}
+
+//deadset:ignore DS1002 -- kept for the loader
+func broken() int { return undefinedName }

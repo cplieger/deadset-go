@@ -12,8 +12,8 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/facts"
+	"github.com/cplieger/deadset-go/v2/internal/findings"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
-	"github.com/cplieger/deadset-go/v2/internal/kinds"
 	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-go/v2/internal/run"
@@ -262,9 +262,9 @@ func writeExplanation(w io.Writer, set *run.Findings, full bool, subject *invent
 // compile-time assertion of an interface, and a suppression record. Each is published
 // under the reference asked about, so leaving it out would disagree with the report;
 // none changes the answer above, which is about the declaration itself.
-func writeNamedElsewhere(held *strings.Builder, findings []kinds.Finding, subject *inventory.Symbol) {
-	for i := range findings {
-		found := &findings[i]
+func writeNamedElsewhere(held *strings.Builder, set []findings.Finding, subject *inventory.Symbol) {
+	for i := range set {
+		found := &set[i]
 		if found.DeclarationRef() != subject.Ref || positionKey(&found.Position) == string(subject.ID) {
 			continue
 		}
@@ -277,7 +277,7 @@ func writeNamedElsewhere(held *strings.Builder, findings []kinds.Finding, subjec
 // and kind, its message, the reachability class and confidence, the liveness
 // relation that decided it, the configurations it holds under and the consumers the
 // run loaded.
-func writeReported(held *strings.Builder, found *kinds.Finding) {
+func writeReported(held *strings.Builder, found *findings.Finding) {
 	fmt.Fprintf(held, "  code: %s %s\n", found.Code, found.Kind)
 	fmt.Fprintf(held, "  message: %s\n", found.Message)
 	fmt.Fprintf(held, "  class: %s\n", found.Class)
@@ -430,7 +430,7 @@ func writeComponent(held *strings.Builder, set *run.Findings, full bool, id inve
 	}
 	fmt.Fprintf(held, "  component: %s, %s and %s fall with it, listed at cascade %s\n",
 		componentIdentity(set, component.Roots),
-		counted(len(component.Members), "symbol"), counted(kinds.DeletableLines(component), "deletable line"), cascade)
+		counted(len(component.Members), "symbol"), counted(findings.DeletableLines(component), "deletable line"), cascade)
 	for _, root := range component.Roots {
 		fmt.Fprintf(held, "  component root: %s\n", root)
 	}
@@ -460,7 +460,7 @@ func componentIdentity(set *run.Findings, rooted []inventory.SymbolID) string {
 // positionKey is the position of one finding as the inventory keys a declaration by
 // it: the target-relative path, the line and the column, which is what a symbol
 // identifier renders.
-func positionKey(at *kinds.Position) string {
+func positionKey(at *findings.Position) string {
 	return at.Path + ":" + strconv.Itoa(at.Line) + ":" + strconv.Itoa(at.Column)
 }
 
@@ -470,11 +470,11 @@ func positionKey(at *kinds.Position) string {
 // The match is on the declaration's position rather than on its reference, because a
 // reference is not one declaration's alone: a declaration written with the blank
 // identifier carries the reference of its container.
-func findingAbout(findings []kinds.Finding, subject *inventory.Symbol) *kinds.Finding {
+func findingAbout(set []findings.Finding, subject *inventory.Symbol) *findings.Finding {
 	key := string(subject.ID)
-	for i := range findings {
-		if positionKey(&findings[i].Position) == key {
-			return &findings[i]
+	for i := range set {
+		if positionKey(&set[i].Position) == key {
+			return &set[i]
 		}
 	}
 	return nil

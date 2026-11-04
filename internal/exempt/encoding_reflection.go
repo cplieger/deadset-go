@@ -224,7 +224,6 @@ func EncodingReflectionDetector(in *Program) ([]Exemption, error) {
 		findsMethods: len(namingPackages(in, func(path string) map[string]bool { return destinations[path].finders })) > 0,
 		walksFields:  len(namingPackages(in, func(path string) map[string]bool { return destinations[path].walkers })) > 0,
 		assert:       in.assert,
-		byName:       outsideInterfaceMethods(in.outside),
 		satisfying:   make(map[satisfactionKey]map[string]bool),
 		methodNames:  make(map[*types.Named]map[string]bool),
 		decoded:      make(map[token.Position][]evidence),
@@ -254,7 +253,6 @@ type encodingFlow struct {
 	own         map[string]bool // the program's package paths
 	edge        *boundary
 	assert      *assertable
-	byName      map[string][]interfaceMethod // the outside packages' interface methods by name
 	decode      *decoders
 	templates   *templateOrigins   // which templates an execution's receiver holds
 	conversions []facts.Conversion // the program's, consumers' included
@@ -892,33 +890,12 @@ func (f *encodingFlow) outsideMethod(fn *types.Func) (*types.Func, bool) {
 		return nil, false
 	}
 	recv := sig.Recv().Type()
-	for _, candidate := range f.byName[fn.Name()] {
-		if types.Implements(recv, candidate.iface) {
-			return candidate.method, true
+	for _, candidate := range f.kept.in.Facts.OutsideMethods(fn.Name()) {
+		if !candidate.Consumer && facts.HoldsValues(candidate.Interface) && types.Implements(recv, candidate.Interface) {
+			return candidate.Method, true
 		}
 	}
 	return nil, false
-}
-
-// interfaceMethod is one method of one exported interface an outside package
-// declares.
-type interfaceMethod struct {
-	iface  *types.Interface
-	method *types.Func
-}
-
-// outsideInterfaceMethods indexes by name the methods of the exported interfaces
-// the outside packages declare.
-func outsideInterfaceMethods(outside []*types.Package) map[string][]interfaceMethod {
-	byName := make(map[string][]interfaceMethod)
-	for _, pkg := range outside {
-		for _, iface := range declaredInterfaces(pkg, false) {
-			for m := range iface.Methods() {
-				byName[m.Name()] = append(byName[m.Name()], interfaceMethod{iface: iface, method: m})
-			}
-		}
-	}
-	return byName
 }
 
 // returnedValues reads the values one return statement of a method hands back at
@@ -1154,15 +1131,14 @@ func (f *encodingFlow) outsidePackages() []*types.Package {
 	return f.kept.in.outside
 }
 
-// declaredInterfaces is the method-set interfaces with methods among the ones one
-// package declares ([facts.DeclaredInterfaces]), the unexported ones only where
-// every is set. An interface holding a type term or embedding comparable only
-// constrains a type parameter.
+// declaredInterfaces is the interfaces that hold values ([facts.HoldsValues]) among
+// the ones one package declares ([facts.DeclaredInterfaces]), the unexported ones
+// only where every is set.
 func declaredInterfaces(pkg *types.Package, every bool) []*types.Interface {
 	var found []*types.Interface
 	for _, named := range facts.DeclaredInterfaces(pkg) {
 		iface, _ := named.Underlying().(*types.Interface)
-		if (every || named.Obj().Exported()) && iface.IsMethodSet() && iface.NumMethods() > 0 {
+		if (every || named.Obj().Exported()) && facts.HoldsValues(iface) {
 			found = append(found, iface)
 		}
 	}

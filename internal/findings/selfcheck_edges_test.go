@@ -1,0 +1,207 @@
+package findings
+
+import (
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/edges"
+	"github.com/cplieger/deadset-spec/v8/vocab"
+)
+
+// edged is the harness input over one archive with the target's edges document read,
+// which is what the composition root hands a findings pass.
+func edged(t *testing.T, archive string, resolved config.Config) *Input {
+	t.Helper()
+
+	dir := extract(t, archive)
+	in := inputOfDir(t, dir, resolved, Consumers{})
+	declared, err := edges.Read(t.Context(), dir)
+	if err != nil {
+		t.Fatalf("Setup: edges.Read(%s): %v", archive, err)
+	}
+	in.Edges = declared
+	return in
+}
+
+// evaluated is one evaluation as a test names it.
+type evaluated struct {
+	edge    string
+	side    string
+	symbol  string
+	state   string
+	finding vocab.Code
+}
+
+// asNamed is every evaluation as a test names it, with the code of the pending finding
+// where the record carries one.
+func asNamed(evaluations []evaluation) []evaluated {
+	held := make([]evaluated, 0, len(evaluations))
+	for i := range evaluations {
+		one := &evaluations[i]
+		var code vocab.Code
+		if one.Finding != nil {
+			code = one.Finding.Code
+		}
+		held = append(held, evaluated{
+			edge:    one.Edge,
+			side:    string(one.Side),
+			symbol:  one.Symbol,
+			state:   string(one.State),
+			finding: code,
+		})
+	}
+	return held
+}
+
+func TestEvaluatePublishesOneRecordPerOwnSideWithItsState(t *testing.T) {
+	in := edged(t, "selfcheck-edges.txtar", applicationConfig())
+	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnreachableExport: unreachableExport})
+
+	all := unevaluated(result)
+	kept, evaluations := newPass(in).evaluate(all)
+	const declaring = "go://example.com/selfcheckedges#"
+	want := []evaluated{
+		{edge: "wire/Event", side: "provides", symbol: declaring + "Event", state: "dead", finding: vocab.UnreachableExport},
+		{edge: "wire/Local", side: "provides", symbol: declaring + "Local", state: "live"},
+		{edge: "wire/Vanished", side: "provides", symbol: declaring + "Vanished", state: "absent"},
+		{edge: "wire/kept", side: "provides", symbol: declaring + "kept", state: "live"},
+	}
+	if got := asNamed(evaluations); !slices.Equal(got, want) {
+		t.Errorf("Evaluate() published %+v, want %+v", got, want)
+	}
+	if slices.Contains(namesUnder(kept, vocab.UnreachableExport), "Event") {
+		t.Errorf("Evaluate() left the finding about Event reported, want it published inside the evaluation alone: %v",
+			summary(kept))
+	}
+	if !slices.Contains(namesUnder(kept, vocab.UnreachableExport), "Orphan") {
+		t.Errorf("Evaluate() dropped the finding about Orphan, want every finding no edge names kept: %v",
+			summary(kept))
+	}
+	if len(kept) != len(all)-1 {
+		t.Errorf("Evaluate() kept %d of %d findings, want one moved into the evaluation",
+			len(kept), len(all))
+	}
+}
+
+func TestEvaluateCarriesTheFindingTheAnalyzerWouldHaveReported(t *testing.T) {
+	in := edged(t, "selfcheck-edges.txtar", applicationConfig())
+	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnreachableExport: unreachableExport})
+	reported := findingOf(t, unevaluated(result), vocab.UnreachableExport, "Event")
+
+	evaluations := result.Evaluations
+	pending := evaluations[0].Finding
+	if pending == nil {
+		t.Fatalf("Evaluate() published %+v with no pending finding, want the finding about Event", evaluations[0])
+	}
+	switch {
+	case pending.Code != reported.Code || pending.Symbol.Ref != reported.Symbol.Ref:
+		t.Errorf("the pending finding is %s about %s, want %s about %s",
+			pending.Code, pending.Symbol.Ref, reported.Code, reported.Symbol.Ref)
+	case pending.Confidence != reported.Confidence || pending.Severity != reported.Severity:
+		t.Errorf("the pending finding carries confidence %s at %s, want %s at %s: a pending finding is not a weaker one",
+			pending.Confidence, pending.Severity, reported.Confidence, reported.Severity)
+	}
+}
+
+func TestEvaluatePublishesTheFindingAboutTheDeclarationAnEdgeNamesAndNeverAPartOfIt(t *testing.T) {
+	in := edged(t, "selfcheck-edges.txtar", applicationConfig())
+	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnreachableExport: unreachableExport})
+	const declaring = "go://example.com/selfcheckedges#"
+
+	// A part of the declaration one edge names, reported beside the declaration's own
+	// finding. The edge stands for a consumer of the declaration, so what moves into
+	// the evaluation is the finding about the declaration; the part's is about the
+	// part and stays reported whatever the paired side answers.
+	part := findingAt(vocab.UnusedParameter, Subject{
+		Ref:       declaring + "Event",
+		Kind:      parameterSubject,
+		Name:      "label",
+		SizeLines: 1,
+	}, Position{Path: "main.go", Line: 4, Column: 20, EndLine: 4},
+		"parameter label is never read in the body")
+
+	p := newPass(in)
+	row, _ := vocab.KindOf(vocab.UnusedParameter)
+	kept, evaluations := p.evaluate(append(unevaluated(result), p.complete(&part, &row)))
+
+	pending := evaluations[0].Finding
+	if pending == nil || pending.Code != vocab.UnreachableExport {
+		t.Fatalf("Evaluate() published %+v, want the finding about the declaration", asNamed(evaluations))
+	}
+	if !slices.Contains(codesOf(kept), vocab.UnusedParameter) {
+		t.Errorf("Evaluate() moved the finding about a part of Event into the evaluation, want it kept: %v",
+			summary(kept))
+	}
+}
+
+func TestEvaluatePublishesANarrowingCandidateWhoseOnlyOutsideReferenceIsAnEdge(t *testing.T) {
+	in := edged(t, "selfcheck-edges.txtar", applicationConfig())
+	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnnecessaryExport: unnecessaryExport})
+	if !slices.Contains(namesUnder(unevaluated(result), vocab.UnnecessaryExport), "Local") {
+		t.Fatalf("the narrowing kind reports %v, want a finding about Local for the evaluation to publish",
+			summary(unevaluated(result)))
+	}
+
+	kept, evaluations := result.Findings, result.Evaluations
+	local := -1
+	for i := range evaluations {
+		if evaluations[i].Edge == "wire/Local" {
+			local = i
+		}
+	}
+	if local < 0 {
+		t.Fatalf("Evaluate() published %+v, want a record for wire/Local", asNamed(evaluations))
+	}
+	one := evaluations[local]
+	if one.State != stateDead || one.Finding == nil || one.Finding.Code != vocab.UnnecessaryExport {
+		t.Errorf("Evaluate() published %+v for wire/Local, want it dead and carrying the narrowing finding",
+			asNamed(evaluations)[local])
+	}
+	if slices.Contains(namesUnder(kept, vocab.UnnecessaryExport), "Local") {
+		t.Errorf("Evaluate() left the narrowing finding about Local reported, want it published pending: %v",
+			summary(kept))
+	}
+}
+
+func TestEvaluateReadsOnlyItsOwnSideOfEveryEdge(t *testing.T) {
+	in := edged(t, "selfcheck-edges.txtar", applicationConfig())
+	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnreachableExport: unreachableExport})
+
+	evaluations := result.Evaluations
+	for i := range evaluations {
+		if !strings.HasPrefix(evaluations[i].Symbol, "go://") {
+			t.Errorf("Evaluate() published %+v, want no record for a side of another language",
+				asNamed(evaluations)[i])
+		}
+	}
+	if got, want := len(evaluations), len(in.Edges.Own(string(language))); got != want {
+		t.Errorf("Evaluate() published %d records, want %d, one per own side the document declares", got, want)
+	}
+}
+
+func TestEvaluateWithNoDeclaredEdgeChangesNothing(t *testing.T) {
+	in := edged(t, "selfcheck-edges.txtar", applicationConfig())
+	in.Edges = nil
+	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnreachableExport: unreachableExport})
+
+	if result.Evaluations != nil {
+		t.Errorf("Evaluate() over a target with no edges document published %+v, want no record", asNamed(result.Evaluations))
+	}
+	if got := namesUnder(result.Findings, vocab.UnreachableExport); !slices.Contains(got, "Event") || !slices.Contains(got, "Orphan") {
+		t.Errorf("Evaluate() over a target with no edges document kept %v, want every finding", got)
+	}
+}
+
+// unevaluated is every finding of one pass as it stood before the edges were
+// evaluated: the reported ones and each evaluation's pending one.
+func unevaluated(result Result) []Finding {
+	all := slices.Clone(result.Findings)
+	for i := range result.Evaluations {
+		if pending := result.Evaluations[i].Finding; pending != nil {
+			all = append(all, *pending)
+		}
+	}
+	return all
+}

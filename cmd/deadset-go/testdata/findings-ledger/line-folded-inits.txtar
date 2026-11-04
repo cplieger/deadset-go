@@ -1,0 +1,27 @@
+A command with two init functions whose dead stores a line directive renders at
+one position. Each store is its own part, so both are reported.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() {}
+
+func init() {
+//line main.go:4:1
+	v := 1
+	v = 2
+	_ = v
+}
+
+func init() {
+//line main.go:4:1
+	w := 1
+	w = 2
+	_ = w
+}

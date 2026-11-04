@@ -5,7 +5,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/findings"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/txtar"
 )
@@ -35,11 +35,11 @@ func archiveFiles(t *testing.T, archive string) map[string]string {
 
 // findingsAbout maps the subject of every finding of a run, reported or withheld
 // by the minimum confidence, to the finding.
-func findingsAbout(t *testing.T, dir string) map[string]*kinds.Finding {
+func findingsAbout(t *testing.T, dir string) map[string]*findings.Finding {
 	t.Helper()
 
 	set := findingsOfDir(t, dir)
-	about := make(map[string]*kinds.Finding)
+	about := make(map[string]*findings.Finding)
 	for _, found := range slices.Concat(set.Result.Findings, set.Result.Withheld) {
 		about[found.Symbol.Ref] = &found
 	}
@@ -48,7 +48,7 @@ func findingsAbout(t *testing.T, dir string) map[string]*kinds.Finding {
 
 // wantNoFinding fails for every one of refs a run reports or withholds a finding
 // about.
-func wantNoFinding(t *testing.T, about map[string]*kinds.Finding, why string, refs ...string) {
+func wantNoFinding(t *testing.T, about map[string]*findings.Finding, why string, refs ...string) {
 	t.Helper()
 
 	for _, ref := range refs {
@@ -60,7 +60,7 @@ func wantNoFinding(t *testing.T, about map[string]*kinds.Finding, why string, re
 
 // wantFinding fails unless a run reports or withholds a finding about ref under
 // code at confidence.
-func wantFinding(t *testing.T, about map[string]*kinds.Finding, ref string, code vocab.Code, confidence vocab.Class) {
+func wantFinding(t *testing.T, about map[string]*findings.Finding, ref string, code vocab.Code, confidence vocab.Class) {
 	t.Helper()
 
 	found := about[ref]
@@ -239,4 +239,17 @@ func TestKeyEnumeratingReflectionReadsEveryField(t *testing.T) {
 
 	wantNoFinding(t, about, "a walk over the fields reads every field, written or not",
 		"go://example.com/app#HTTPTarget.URI", "go://example.com/app#HTTPTarget.Body")
+}
+
+func TestAValueReturnedThroughAnOutsideInterfaceIsSentFromEveryModulesReading(t *testing.T) {
+	about := findingsAbout(t, filepath.Join(archiveModule(t, "exempt-ledger/returned-through-in-two-modules.txtar"), "target"))
+
+	wantNoFinding(t, about, "the value Resource returns reaches the dependency, whichever module's reading of it the method implements",
+		"go://example.com/a#deployment.Replicas", "go://example.com/b#pod.Phase")
+}
+
+func TestAValueReturnedThroughAnOutsideConstraintIsNotSent(t *testing.T) {
+	about := findingsAbout(t, filepath.Join(archiveModule(t, "exempt-ledger/returned-through-a-constraint.txtar"), "target"))
+
+	wantFinding(t, about, "go://example.com/app#deployment.Replicas", vocab.WriteOnlySymbol, vocab.Certain)
 }

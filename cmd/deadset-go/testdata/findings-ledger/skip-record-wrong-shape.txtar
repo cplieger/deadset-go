@@ -1,0 +1,25 @@
+A command importing a package whose exported Broken holds a type error and carries
+a record naming DS1002, the code of an unused unexported declaration, beside Kept,
+whose record names DS1001. A type error roots the declaration it skips, so no kind
+finds either declaration unused and both records are stale.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+import _ "example.com/app/lib"
+
+func main() {}
+-- lib/lib.go --
+package lib
+
+//deadset:ignore DS1002 -- kept for the loader
+func Broken() int { return undefinedName }
+
+//deadset:ignore DS1001 -- kept for the loader
+func Kept() int { return undefinedName }

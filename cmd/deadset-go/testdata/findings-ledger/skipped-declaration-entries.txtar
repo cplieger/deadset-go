@@ -1,0 +1,23 @@
+A command whose broken holds a type error, and an ignore file whose entries name
+broken: one with no reason, one with no path, one complete. A refused entry is a row
+of the ignore file, so DS9001 and DS9002 are reported although the type error skips
+broken, and the complete entry, which matches no finding, is stale.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() {}
+
+func broken() int { return undefinedName }
+-- deadset-ignore.json --
+{"ignore": [
+  {"code": "DS1002", "symbol": "go://example.com/app#broken", "path": "main.go"},
+  {"code": "DS1002", "symbol": "go://example.com/app#broken", "reason": "kept"},
+  {"code": "DS1002", "symbol": "go://example.com/app#broken", "path": "main.go", "reason": "kept for the loader"}
+]}

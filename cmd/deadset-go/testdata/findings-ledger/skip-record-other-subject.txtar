@@ -1,0 +1,36 @@
+A command whose functions each hold a type error and carry a record naming a code
+no finding about a function can carry: a code about a record, a file or a
+dependency, codes Go never reports, and declaration codes about an enum member or
+an interface. Each record is stale although the type error skips its function.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() {}
+
+//deadset:ignore DS9003 -- kept for the loader
+func record() int { return undefinedName }
+
+//deadset:ignore DS1601 -- kept for the loader
+func file() int { return undefinedName }
+
+//deadset:ignore DS1701 -- kept for the loader
+func dependency() int { return undefinedName }
+
+//deadset:ignore DS1004 -- kept for the loader
+func binding() int { return undefinedName }
+
+//deadset:ignore DS1801 -- kept for the loader
+func schema() int { return undefinedName }
+
+//deadset:ignore DS1005 -- kept for the loader
+func enumMember() int { return undefinedName }
+
+//deadset:ignore DS1201 -- kept for the loader
+func iface() int { return undefinedName }

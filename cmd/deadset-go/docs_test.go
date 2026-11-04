@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/exempt"
-	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/findings"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -43,7 +43,7 @@ var (
 // TestEveryReportedKindHasADocumentationEntry reads the kinds page and refuses a
 // code this command answers that the page says nothing about.
 //
-// The population is kinds.Emitters plus the live Go kinds it holds no rule for,
+// The population is findings.Emitters plus the live Go kinds it holds no rule for,
 // which another product reports, which is every code a reader of this analyzer's
 // documentation can meet: one in a report it wrote, and one in a merged report the
 // edge evaluations it published produced.
@@ -56,16 +56,16 @@ func TestEveryReportedKindHasADocumentationEntry(t *testing.T) {
 
 	page := docPage(t, "kinds.md")
 	sections := matched(docsKindHeading, page)
-	for _, code := range slices.Sorted(maps.Keys(kinds.Emitters)) {
+	for _, code := range slices.Sorted(maps.Keys(findings.Emitters)) {
 		if !slices.Contains(sections, string(code)) {
-			t.Errorf("docs/kinds.md carries %d kind sections and none for %s, which kinds.Emitters reports",
+			t.Errorf("docs/kinds.md carries %d kind sections and none for %s, which findings.Emitters reports",
 				len(sections), code)
 		}
 	}
 	entries := docsKindEntries(page)
 	for _, row := range vocab.Kinds() {
 		code := row.Code
-		if !row.AppliesTo(vocab.Go) || kinds.Emitters[code] != nil {
+		if !row.AppliesTo(vocab.Go) || findings.Emitters[code] != nil {
 			continue
 		}
 		if !slices.Contains(entries, string(code)) {
@@ -87,9 +87,9 @@ func TestEveryDocumentedKindSectionIsOneThisAnalyzerReports(t *testing.T) {
 
 	sections := matched(docsKindHeading, docPage(t, "kinds.md"))
 	for _, code := range sections {
-		if kinds.Emitters[vocab.Code(code)] == nil {
-			t.Errorf("docs/kinds.md carries a section for %s, want a section only for a code kinds.Emitters reports: %v",
-				code, slices.Sorted(maps.Keys(kinds.Emitters)))
+		if findings.Emitters[vocab.Code(code)] == nil {
+			t.Errorf("docs/kinds.md carries a section for %s, want a section only for a code findings.Emitters reports: %v",
+				code, slices.Sorted(maps.Keys(findings.Emitters)))
 		}
 	}
 }

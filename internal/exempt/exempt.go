@@ -26,7 +26,6 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-spec/v8/vocab"
-	"golang.org/x/tools/go/packages"
 )
 
 // Detectors is every class this analyzer computes, mapped to its detection. A test
@@ -216,8 +215,7 @@ type Program struct {
 	// published is [publishedConversions]' sites.
 	published []facts.Conversion
 
-	// outside is every package of the program's import closure that is neither
-	// the target's nor a loaded consumer's, by path.
+	// outside is [facts.Index.Outside].
 	outside []*types.Package
 
 	// assertions are the configuration's satisfaction assertions ([satisfactionAssertions]).
@@ -247,41 +245,10 @@ func NewProgram(l *Loaded) (*Program, error) {
 	}
 	p.published = publishedConversions(p)
 	p.functions = programFunctions(p)
-	p.outside = outsideClosure(p.Facts.Program())
+	p.outside = p.Facts.Outside()
 	p.assert = newAssertable(p)
 	p.assertions = satisfactionAssertions(p)
 	return p, nil
-}
-
-// outsideClosure is every package the import closure of a program's packages holds
-// that is none of them, ordered by path.
-func outsideClosure(program []*packages.Package) []*types.Package {
-	own := make(map[string]bool)
-	var queue []*types.Package
-	for _, p := range program {
-		if p.Types != nil {
-			own[p.PkgPath] = true
-			queue = append(queue, p.Types)
-		}
-	}
-	seen := make(map[string]bool)
-	var found []*types.Package
-	for len(queue) > 0 {
-		one := queue[0]
-		queue = queue[1:]
-		for _, imported := range one.Imports() {
-			if seen[imported.Path()] {
-				continue
-			}
-			seen[imported.Path()] = true
-			queue = append(queue, imported)
-			if !own[imported.Path()] {
-				found = append(found, imported)
-			}
-		}
-	}
-	slices.SortFunc(found, func(a, b *types.Package) int { return strings.Compare(a.Path(), b.Path()) })
-	return found
 }
 
 // Detector is one class's detection over one loaded configuration. It returns

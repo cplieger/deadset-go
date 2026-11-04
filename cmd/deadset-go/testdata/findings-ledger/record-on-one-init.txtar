@@ -1,0 +1,27 @@
+A command with two init functions in one file, which share one reference, each
+holding a dead store. The directive above the second binds the second, so it
+withholds only the second's store, and the first's is reported.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() {}
+
+func init() {
+	v := 1
+	v = 2
+	_ = v
+}
+
+//deadset:ignore DS1404 -- kept for the loader
+func init() {
+	w := 1
+	w = 2
+	_ = w
+}
