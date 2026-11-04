@@ -1,0 +1,23 @@
+A command with three findings that sweep no component holds: the unused parameter of
+early at line 5, the unnecessary export of Late at line 9 and the unused parameter of
+later at line 11. Their components are minted in the report's order, so the numbers
+follow the lines: the vocabulary's order would mint Late's first.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() { early(1); println(Late()); later(2) }
+
+func early(unused int) { println("early") }
+
+// Late is exported and read only inside this package.
+
+func Late() int { return 1 }
+
+func later(unused int) { println("later") }

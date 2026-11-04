@@ -1,0 +1,17 @@
+A command whose unreferenced helper carries a record naming DS1701, a code about a
+dependency row. A record for a dependency kind marks nothing live and can match no
+finding about a function, so helper is reported and the record is stale.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() {}
+
+//deadset:ignore DS1701 -- kept for the loader
+func helper() {}

@@ -20,7 +20,7 @@ func TestLivenessImportsNoStageAfterItAndNoReportOrConfigurationPackage(t *testi
 		return strings.Fields(string(out))
 	}
 	later := []string{
-		"cmd/", "internal/config", "internal/kinds", "internal/findings", "internal/run",
+		"cmd/", "internal/config", "internal/findings", "internal/run",
 		"internal/suppress", "internal/edges", "internal/deps",
 	}
 	for _, dep := range list(`{{join .Deps " "}}`) {

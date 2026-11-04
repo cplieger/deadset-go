@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/failure"
-	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/findings"
 	"github.com/cplieger/deadset-go/v2/internal/run"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/render"
@@ -572,7 +572,7 @@ func reportedUnder(t *testing.T, findings []report.Finding, code vocab.Code) rep
 }
 
 // findingCodes is the code of every finding, in order.
-func findingCodes(findings []kinds.Finding) []vocab.Code {
+func findingCodes(findings []findings.Finding) []vocab.Code {
 	codes := make([]vocab.Code, len(findings))
 	for i := range findings {
 		codes[i] = findings[i].Code

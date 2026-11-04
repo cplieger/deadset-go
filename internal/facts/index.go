@@ -17,6 +17,7 @@ import (
 // generated files it holds, built once per configuration. Every pass after the
 // load reads the target's packages and files through it.
 type Index struct {
+	outside    outside
 	fset       *token.FileSet
 	published  *Published
 	consumers  map[*load.Consumer][]*packages.Package
@@ -86,6 +87,7 @@ func NewIndex(r *load.Result, rs *resolve.Resolver) (*Index, error) {
 	slices.SortFunc(x.generated, func(a, b Generated) int { return strings.Compare(a.Path, b.Path) })
 	x.generated = slices.CompactFunc(x.generated, func(a, b Generated) bool { return a.Path == b.Path })
 	x.interfaces = interfacesOf(x, rs)
+	x.outside = outsideOf(x)
 	x.published = publishedOf(x, rs)
 	x.reads, x.caps = schemaReadsOf(x, rs, generatedFiles)
 	return x, nil

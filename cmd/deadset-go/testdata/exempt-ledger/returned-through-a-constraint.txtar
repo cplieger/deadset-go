@@ -1,0 +1,44 @@
+A command whose cluster implements the method of an outside constraint holding a
+type term. A constraint only constrains a type parameter, so no value is returned
+through it: the field deployment's Resource writes is still written and never read.
+
+-- target/go.mod --
+module example.com/app
+
+go 1.27.0
+
+require example.com/plugin v0.0.0
+
+replace example.com/plugin => ../plugin
+-- target/deadset.json --
+{"target": {"kind": "application"}}
+-- target/main.go --
+package main
+
+import "example.com/plugin"
+
+type cluster struct{}
+
+func (cluster) Resource() any { return &deployment{Replicas: 1} }
+
+type deployment struct {
+	Replicas int
+}
+
+func main() { plugin.Serve(cluster{}) }
+-- plugin/go.mod --
+module example.com/plugin
+
+go 1.27.0
+-- plugin/plugin.go --
+// Package plugin serves sources.
+package plugin
+
+// Source is a struct type that returns a resource.
+type Source interface {
+	~struct{}
+	Resource() any
+}
+
+// Serve calls Resource of s.
+func Serve[S Source](s S) { _ = s.Resource() }

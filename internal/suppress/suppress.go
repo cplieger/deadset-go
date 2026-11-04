@@ -8,14 +8,9 @@
 // findings of their own, and an error for a directive or a document the grammar
 // refuses before any finding exists.
 //
-// The findings pass reads four things from a record: the declaration it bound,
-// which is marked live before the sweep so the suppressed symbol keeps every
-// symbol it references alive; the code, which decides the finding withheld for
-// that declaration; the mechanism and the entry, which a stale-suppression
-// finding carries; and the reason, which the counted totals report. A refusal
-// binds nothing: Reported is the code its finding carries, and its remaining
-// fields are the suppression as written, a field empty exactly where the
-// suppression lacks it.
+// A refusal binds nothing: Reported is the code its finding carries, and its
+// remaining fields are the suppression as written, a field empty exactly where the
+// suppression lacks it. [Bound] owns which records mark their declaration live.
 package suppress
 
 import (
@@ -120,11 +115,13 @@ func (*malformedError) Unwrap() error { return errMalformed }
 
 // Bound is the declarations the records mark live, which seed the sweep. A record
 // that bound nothing marks nothing, which is what makes it stale; a record for a
-// part kind marks nothing either: it withholds its finding and keeps nothing alive.
+// part kind or a dependency kind marks nothing either: it withholds its finding and
+// keeps nothing alive (suppression.md, "a record for a dependency kind").
 func Bound(records []Record) []inventory.SymbolID {
 	var marked []inventory.SymbolID
 	for i := range records {
-		if records[i].Bound != "" && records[i].Code.Subject() != vocab.SubjectPart {
+		subject := records[i].Code.Subject()
+		if records[i].Bound != "" && subject != vocab.SubjectPart && subject != vocab.SubjectDependency {
 			marked = append(marked, records[i].Bound)
 		}
 	}

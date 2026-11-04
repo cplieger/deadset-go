@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/findings"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
-	"github.com/cplieger/deadset-go/v2/internal/kinds"
 	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/run"
@@ -115,10 +115,10 @@ func TestFindingsOfCompletesAFindingWithEveryFieldTheContractRequires(t *testing
 	if got, want := found.Language, vocab.Go; got != want {
 		t.Errorf("the finding's language is %q, want %q", got, want)
 	}
-	if got, want := found.Position, (kinds.Position{Path: "app.go", Line: 9, Column: 6, EndLine: 9}); got != want {
+	if got, want := found.Position, (findings.Position{Path: "app.go", Line: 9, Column: 6, EndLine: 9}); got != want {
 		t.Errorf("the finding's position is %+v, want %+v", got, want)
 	}
-	if got, want := found.Symbol, (kinds.Subject{
+	if got, want := found.Symbol, (findings.Subject{
 		Ref:       "go://example.com/app#forgotten",
 		Kind:      "function",
 		Name:      "forgotten",
@@ -153,7 +153,7 @@ func TestFindingsOfCompletesAFindingWithEveryFieldTheContractRequires(t *testing
 	if got, want := found.Message, "unexported function has no reference in the target"; got != want {
 		t.Errorf("the finding says %q, want %q", got, want)
 	}
-	if got := found.Details; !reflect.DeepEqual(got, kinds.Details{}) {
+	if got := found.Details; !reflect.DeepEqual(got, findings.Details{}) {
 		t.Errorf("the finding carries details %+v, want none: an unreferenced declaration has no per-kind member", got)
 	}
 
@@ -281,18 +281,18 @@ func TestFindingsOfRefusesATableRegisteredUnderACodeTheVocabularyDoesNotHold(t *
 
 	// The pass a defect in a kind's table produces is a failure rather than a
 	// finding list, which is the exit code an emitter's own error takes as well.
-	in := &kinds.Input{Config: &config.Config{}}
-	_, err := kinds.Compute(in, map[vocab.Code]kinds.Emitter{"DS1499": kinds.UnusedExported})
+	in := &findings.Input{Config: &config.Config{}}
+	_, err := findings.Compute(in, map[vocab.Code]findings.Emitter{"DS1499": findings.UnusedExported})
 	if err == nil {
-		t.Fatal("kinds.Compute(a table naming a code no kind carries) = _, <nil>, want an error")
+		t.Fatal("findings.Compute(a table naming a code no kind carries) = _, <nil>, want an error")
 	}
 	if got, want := exitCodeFor(err), vocab.ExitFailure; got != want {
 		t.Errorf("exitCodeFor(%v) = %d, want %d", err, got, want)
 	}
 
-	_, err = kinds.Compute(nil, kinds.Emitters)
+	_, err = findings.Compute(nil, findings.Emitters)
 	if err == nil {
-		t.Fatal("kinds.Compute(no input) = _, <nil>, want an error")
+		t.Fatal("findings.Compute(no input) = _, <nil>, want an error")
 	}
 	if got, want := exitCodeFor(err), vocab.ExitFailure; got != want {
 		t.Errorf("exitCodeFor(%v) = %d, want %d", err, got, want)
@@ -357,9 +357,9 @@ func TestFindingsOfSaysAFindingAboutGeneratedSourceIsGenerated(t *testing.T) {
 
 // reported is one line per finding, in the order the pass returned them: the file
 // and line, the code and the symbol.
-func reported(findings []kinds.Finding) []string {
-	lines := make([]string, len(findings))
-	for i, found := range findings {
+func reported(set []findings.Finding) []string {
+	lines := make([]string, len(set))
+	for i, found := range set {
 		lines[i] = fmt.Sprintf("%s\t%d\t%s\t%s", found.Position.Path, found.Position.Line, found.Code, found.Symbol.Ref)
 	}
 	return lines
@@ -367,17 +367,17 @@ func reported(findings []kinds.Finding) []string {
 
 // findingUnder is the one finding a code reports, and a failure where the pass
 // reported none or more than one.
-func findingUnder(t *testing.T, findings []kinds.Finding, code vocab.Code) kinds.Finding {
+func findingUnder(t *testing.T, set []findings.Finding, code vocab.Code) findings.Finding {
 	t.Helper()
 
-	var held []kinds.Finding
-	for _, found := range findings {
+	var held []findings.Finding
+	for _, found := range set {
 		if found.Code == code {
 			held = append(held, found)
 		}
 	}
 	if len(held) != 1 {
-		t.Fatalf("the pass reports %d findings under %s, want 1:\n%s", len(held), code, strings.Join(reported(findings), "\n"))
+		t.Fatalf("the pass reports %d findings under %s, want 1:\n%s", len(held), code, strings.Join(reported(set), "\n"))
 	}
 	return held[0]
 }
@@ -444,7 +444,7 @@ func TestAnalysisOfComputesItsExemptionsUnderTheModeItSweepsIn(t *testing.T) {
 	// What the mode decides is what the run reports: the field is a candidate of the
 	// production sweep and a kind names it, retained by nothing.
 	set := findingsOfDir(t, dir)
-	var reported *kinds.Finding
+	var reported *findings.Finding
 	for i := range set.Result.Findings {
 		if set.Result.Findings[i].Symbol.Ref == subject {
 			reported = &set.Result.Findings[i]

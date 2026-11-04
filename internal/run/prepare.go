@@ -6,8 +6,8 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/facts"
+	"github.com/cplieger/deadset-go/v2/internal/findings"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
-	"github.com/cplieger/deadset-go/v2/internal/kinds"
 	"github.com/cplieger/deadset-spec/v8/report"
 )
 
@@ -18,14 +18,14 @@ type Prepared struct {
 	*Loaded
 
 	// unseen is every production declaration outside programs may call
-	// ([kinds.Unseen]).
+	// ([findings.Unseen]).
 	unseen map[inventory.SymbolID]bool
 
 	// filled is every field a class keeps only at the class possible and no class
 	// retains ([exempt.Computed.Filled]).
 	filled map[inventory.SymbolID]bool
 
-	per []kinds.Configured
+	per []findings.Configured
 
 	Exemptions []exempt.Exemption
 
@@ -48,7 +48,7 @@ func (l *Loaded) Prepare(production bool) (*Prepared, error) {
 			Production:              production,
 			ConsumerTestsProduction: l.req.Config.Analysis.ConsumerTestsProduction,
 		},
-		per:    make([]kinds.Configured, len(l.Loads)),
+		per:    make([]findings.Configured, len(l.Loads)),
 		filled: make(map[inventory.SymbolID]bool),
 	}
 	options := exemptOptions(&l.req.Config)
@@ -76,11 +76,11 @@ func (l *Loaded) Prepare(production bool) (*Prepared, error) {
 		for j := range computed.Filled {
 			p.filled[computed.Filled[j].ID] = true
 		}
-		p.per[i] = kinds.Configured{Result: &one.Result, Resolve: one.Resolve, Facts: one.Facts, Symbols: one.Symbols}
+		p.per[i] = findings.Configured{Result: &one.Result, Resolve: one.Resolve, Facts: one.Facts, Symbols: one.Symbols}
 	}
 	p.Exemptions = l.Merged.Uncalled.Withdrawn(p.Exemptions)
 	p.testEvidence = l.Merged.Uncalled.Withdrawn(p.testEvidence)
-	p.unseen = kinds.Unseen(&kinds.Input{Config: &l.req.Config, Merged: l.Merged, Per: p.per, Root: l.Root, Consumers: l.consumers()})
+	p.unseen = findings.Unseen(&findings.Input{Config: &l.req.Config, Merged: l.Merged, Per: p.per, Root: l.Root, Consumers: l.consumers()})
 	return p, nil
 }
 

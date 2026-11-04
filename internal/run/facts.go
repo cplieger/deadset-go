@@ -6,8 +6,8 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/facts"
+	"github.com/cplieger/deadset-go/v2/internal/findings"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
-	"github.com/cplieger/deadset-go/v2/internal/kinds"
 	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	specfacts "github.com/cplieger/deadset-spec/v8/facts"
 	"github.com/cplieger/deadset-spec/v8/report"
@@ -87,7 +87,7 @@ var capNames = map[facts.Cap]specfacts.Cap{
 // the minimum confidence, because the merge must not lower a finding below the
 // minimum it was published under (grammar/analysis/bindings.md bindings.16).
 func (l *Loaded) capRecords(records []specfacts.Binding, caps map[string]facts.Cap) {
-	if kinds.Withholds(l.req.Config.Analysis.MinConfidence, vocab.Possible) {
+	if findings.Withholds(l.req.Config.Analysis.MinConfidence, vocab.Possible) {
 		return
 	}
 	for i := range records {
@@ -308,18 +308,18 @@ func (f *Findings) pending(ctx context.Context, s *searches) (map[string]*implem
 	next := 0
 	for _, one := range f.reportedFindings() {
 		reported[one.Symbol.Ref] = true
-		if n, minted := kinds.ComponentNumber(one.Component.ID); minted {
+		if n, minted := findings.ComponentNumber(one.Component.ID); minted {
 			next = max(next, n)
 		}
 	}
 	held := make(map[string]*implementerFinding, len(s.order))
 	for _, ref := range s.order {
-		at := slices.IndexFunc(found.Result.Findings, func(one kinds.Finding) bool { return one.Symbol.Ref == ref })
+		at := slices.IndexFunc(found.Result.Findings, func(one findings.Finding) bool { return one.Symbol.Ref == ref })
 		if at < 0 {
 			continue
 		}
 		next++
-		component := kinds.ComponentID(next)
+		component := findings.ComponentID(next)
 		one := &implementerFinding{finding: found.Result.Findings[at].Document()}
 		one.finding.Component.ID = component
 		for i := range found.Result.Findings {
@@ -371,14 +371,14 @@ func (f *Findings) withoutGenerated(ctx context.Context, s *searches) (*Findings
 
 // reportedFindings is every finding the report names: its findings and each edge
 // evaluation's pending finding.
-func (f *Findings) reportedFindings() []*kinds.Finding {
-	all := make([]*kinds.Finding, 0, len(f.Result.Findings))
+func (f *Findings) reportedFindings() []*findings.Finding {
+	all := make([]*findings.Finding, 0, len(f.Result.Findings))
 	for i := range f.Result.Findings {
 		all = append(all, &f.Result.Findings[i])
 	}
-	for i := range f.Evaluations {
-		if f.Evaluations[i].Finding != nil {
-			all = append(all, f.Evaluations[i].Finding)
+	for i := range f.Result.Evaluations {
+		if f.Result.Evaluations[i].Finding != nil {
+			all = append(all, f.Result.Evaluations[i].Finding)
 		}
 	}
 	return all

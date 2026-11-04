@@ -1,0 +1,29 @@
+A command with two init functions whose dead stores a line directive renders at
+one position. The first holds a type error, so it is skipped, and the second's
+store is still reported.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() {}
+
+func init() {
+//line main.go:4:1
+	v := 1
+	v = 2
+	_ = v
+	println(undefinedName)
+}
+
+func init() {
+//line main.go:4:1
+	w := 1
+	w = 2
+	_ = w
+}

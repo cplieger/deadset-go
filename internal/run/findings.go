@@ -7,22 +7,16 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/deps"
 	"github.com/cplieger/deadset-go/v2/internal/edges"
-	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/findings"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 )
 
-// Findings is the findings stage: every kind of [kinds.Emitters] over the production
-// sweep, completed and evaluated against the declared edges, and the two suppression
-// counts a summary prints.
+// Findings is the findings stage: every kind of [findings.Emitters] over the production
+// sweep, as [findings.Compute] finishes it.
 type Findings struct {
 	*Swept
 
-	Result      kinds.Result
-	Evaluations []kinds.Evaluation
-
-	// inEffect and reasons count the suppression records that bound a would-be
-	// finding and those that carry a reason.
-	inEffect, reasons int
+	Result findings.Result
 }
 
 // Findings runs the findings pass. A pass that refuses a finding fails the run,
@@ -33,32 +27,20 @@ func (s *Swept) Findings(ctx context.Context) (*Findings, error) {
 	if err != nil {
 		return nil, err
 	}
-	computed, err := kinds.Compute(in, kinds.Emitters)
+	computed, err := findings.Compute(in, findings.Emitters)
 	if err != nil {
 		return nil, err
 	}
-	// The dependency a deletion orphans completes the findings rather than being a
-	// kind of its own, so it runs over what the pass answered.
-	kinds.Annotate(in, computed.Findings)
-
-	// A finding about a symbol a declared edge names dead is published inside that
-	// edge's evaluation and nowhere else, so the edges are evaluated last; a
-	// withheld finding passes the same filter.
-	kept, evaluations := kinds.Evaluate(in, computed.Findings)
-	computed.Findings = kept
-	computed.Withheld, _ = kinds.Evaluate(in, computed.Withheld)
-
 	// The passes after the load read no context, so a run cancelled while they ran
 	// ends here rather than writing a report the cancellation outdated.
 	if cause := context.Cause(ctx); cause != nil {
 		return nil, cause
 	}
-	inEffect, reasons := kinds.Totals(in)
-	return &Findings{Swept: s, Result: computed, Evaluations: evaluations, inEffect: inEffect, reasons: reasons}, nil
+	return &Findings{Swept: s, Result: computed}, nil
 }
 
 // input is everything a kind reads.
-func (s *Swept) input(ctx context.Context) (*kinds.Input, error) {
+func (s *Swept) input(ctx context.Context) (*findings.Input, error) {
 	generated := make(map[string]bool)
 	for _, one := range s.per {
 		all := one.Facts.Generated()
@@ -74,7 +56,7 @@ func (s *Swept) input(ctx context.Context) (*kinds.Input, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &kinds.Input{
+	return &findings.Input{
 		Config:         &s.req.Config,
 		Merged:         s.Merged,
 		Sweep:          &s.Liveness,
@@ -101,11 +83,11 @@ func (s *Swept) input(ctx context.Context) (*kinds.Input, error) {
 // moduleFiles is the module file of every unit the first configuration loaded
 // whose file sits at its root, in unit order. Every configuration loads the same
 // units, and a file above the target root has no directive a report can position.
-func (l *Loaded) moduleFiles() ([]kinds.ModuleFile, error) {
+func (l *Loaded) moduleFiles() ([]findings.ModuleFile, error) {
 	if len(l.Loads) == 0 {
 		return nil, nil
 	}
-	var files []kinds.ModuleFile
+	var files []findings.ModuleFile
 	for i := range l.Topology.Units {
 		unit := &l.Topology.Units[i]
 		if !slices.ContainsFunc(l.Loads[0].Result.Units, func(u load.Unit) bool { return u.Dir == unit.Dir }) {
@@ -117,7 +99,7 @@ func (l *Loaded) moduleFiles() ([]kinds.ModuleFile, error) {
 		if unit.File == nil || filepath.Dir(unit.File.Path) != filepath.Clean(unit.Dir) {
 			continue
 		}
-		files = append(files, kinds.ModuleFile{Dir: unit.Dir, Path: unit.Path, File: deps.Directives(unit.File)})
+		files = append(files, findings.ModuleFile{Dir: unit.Dir, Path: unit.Path, File: deps.Directives(unit.File)})
 	}
 	return files, nil
 }
@@ -154,7 +136,7 @@ const rootsPatternsSetting = "roots.patterns"
 // load: a declared consumer that fails to load under any configuration fails the run,
 // so the two sets are the same modules, kept apart because the reachability class
 // asks a different question of each.
-func (l *Loaded) consumers() kinds.Consumers {
+func (l *Loaded) consumers() findings.Consumers {
 	var loaded []string
 	if len(l.Loads) > 0 {
 		loaded = make([]string, len(l.Loads[0].Result.Consumers))
@@ -162,5 +144,5 @@ func (l *Loaded) consumers() kinds.Consumers {
 			loaded[i] = consumer.ID
 		}
 	}
-	return kinds.Consumers{Declared: loaded, Loaded: loaded, Complete: l.req.Config.Consumers.Complete}
+	return findings.Consumers{Declared: loaded, Loaded: loaded, Complete: l.req.Config.Consumers.Complete}
 }

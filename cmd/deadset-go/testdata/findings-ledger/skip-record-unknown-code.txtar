@@ -1,0 +1,17 @@
+A command whose broken holds a type error and carries a suppression record naming a
+code no kind holds. The record can match nothing whatever the type error hides, so it
+is stale although the type error skips broken.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() {}
+
+//deadset:ignore DS1999 -- kept for the loader
+func broken() int { return undefinedName }

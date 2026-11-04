@@ -16,14 +16,13 @@ import (
 
 // TypeErrorSkip is one type error the compiler reported in the target and the
 // declaration it skipped: the target-relative file, the line of the error, the
-// compiler's message on one line, and the first and last line of the top-level
-// declaration that holds the error, zero where no declaration does.
+// compiler's message on one line, and every declaration of the inventory the
+// top-level declaration holding the error declares, none where no declaration does.
 type TypeErrorSkip struct {
-	Path     string
-	Message  string
-	Line     int
-	FromLine int
-	ToLine   int
+	Path         string
+	Message      string
+	Declarations []inventory.SymbolID
+	Line         int
 }
 
 // skippedDecl is one type error of a target package with the top-level declaration
@@ -63,9 +62,10 @@ func TypeErrorSkips(r *load.Result, rs *resolve.Resolver, targetRoot string, che
 			continue
 		}
 		skip := TypeErrorSkip{Path: path, Line: at.Line, Message: strings.Join(strings.Fields(one.err.Msg), " ")}
-		if one.decl != nil {
-			skip.FromLine = r.Fset.Position(one.decl.Pos()).Line
-			skip.ToLine = r.Fset.Position(one.decl.End()).Line
+		for _, name := range declaredNames(one.decl) {
+			if id, inventoried := rs.At(name.Pos()); inventoried {
+				skip.Declarations = append(skip.Declarations, id)
+			}
 		}
 		held = append(held, skip)
 	}
@@ -126,24 +126,33 @@ func (d *rootDetection) typeErrors(r *load.Result, checkedElsewhere map[load.Pac
 // rootDeclared roots every name one declaration declares, and reports false for a
 // node that is not a declaration.
 func (d *rootDetection) rootDeclared(node ast.Node) bool {
+	names := declaredNames(node)
+	for _, name := range names {
+		d.addAt(name.Pos(), RootTypeError)
+	}
+	return names != nil
+}
+
+// declaredNames is every name one top-level declaration declares, and nil for a
+// node that is not a declaration.
+func declaredNames(node ast.Node) []*ast.Ident {
 	switch decl := node.(type) {
 	case *ast.FuncDecl:
-		d.addAt(decl.Name.Pos(), RootTypeError)
+		return []*ast.Ident{decl.Name}
 	case *ast.GenDecl:
+		names := []*ast.Ident{}
 		for _, spec := range decl.Specs {
 			switch spec := spec.(type) {
 			case *ast.ValueSpec:
-				for _, name := range spec.Names {
-					d.addAt(name.Pos(), RootTypeError)
-				}
+				names = append(names, spec.Names...)
 			case *ast.TypeSpec:
-				d.addAt(spec.Name.Pos(), RootTypeError)
+				names = append(names, spec.Name)
 			}
 		}
+		return names
 	default:
-		return false
+		return nil
 	}
-	return true
 }
 
 // rootUnresolvedSelections roots every member of the operand type of each selector

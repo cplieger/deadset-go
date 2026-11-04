@@ -5,13 +5,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/findings"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // reportedOrWithheld is the one finding of a run, reported or withheld by the
 // minimum confidence, whose subject is ref.
-func reportedOrWithheld(t *testing.T, dir, ref string) *kinds.Finding {
+func reportedOrWithheld(t *testing.T, dir, ref string) *findings.Finding {
 	t.Helper()
 
 	set := findingsOfDir(t, dir)

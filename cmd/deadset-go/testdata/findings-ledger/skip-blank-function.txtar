@@ -1,0 +1,20 @@
+A command whose blank function holds a type error and a dead store. A blank function
+shares its package's reference, and the type error skips it, so its store is not
+reported.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() {}
+
+func _(unused int) int {
+	v := 1
+	v = 2
+	return undefinedName
+}

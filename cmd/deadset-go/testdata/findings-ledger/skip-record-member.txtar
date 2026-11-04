@@ -1,0 +1,23 @@
+A command whose broken struct holds a type error and an unused field y, whose record
+names the finding the kinds make about y. The record's mark withholds that finding,
+which the type error skips anyway, so the record is neither in effect nor stale.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() {
+	var b broken
+	_ = b
+}
+
+type broken struct {
+	x undefinedType
+	//deadset:ignore DS1003 -- kept for the loader
+	y int
+}

@@ -1,0 +1,29 @@
+A command whose shifted sits under a line directive naming another file of the
+module. Its unused parameter is found by the one configuration that compiled
+main.go, so it is reported, at the position the directive gives it, as plain's is.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() { println(plain(1), shifted(2)) }
+
+func plain(unused int) int {
+	return 0
+}
+
+//line shadow.txt:3:1
+func shifted(also int) int {
+	return 0
+}
+-- shadow.txt --
+a generated listing the directive above points into, long enough to render
+every column the shifted declaration's lines use once remapped onto it here
+func shifted(also int) int { and the rest of the third line of this listing }
+	return 0, which is the second line of the remapped declaration of shifted
+}, which closes the declaration the line directive moved onto this listing

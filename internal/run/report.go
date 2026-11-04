@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cplieger/deadset-go/v2/internal/kinds"
+	"github.com/cplieger/deadset-go/v2/internal/findings"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-spec/v8/report"
 )
@@ -30,13 +30,13 @@ func (f *Findings) Report(self *Self) (*report.Report, error) {
 	if err != nil {
 		return nil, err
 	}
-	findings := make([]report.Finding, len(f.Result.Findings))
+	reported := make([]report.Finding, len(f.Result.Findings))
 	for i := range f.Result.Findings {
-		findings[i] = f.Result.Findings[i].Document()
+		reported[i] = f.Result.Findings[i].Document()
 	}
-	evaluations := make([]report.EdgeEvaluation, len(f.Evaluations))
-	for i := range f.Evaluations {
-		evaluations[i] = f.Evaluations[i].Document()
+	evaluations := make([]report.EdgeEvaluation, len(f.Result.Evaluations))
+	for i := range f.Result.Evaluations {
+		evaluations[i] = f.Result.Evaluations[i].Document()
 	}
 	var excluded []string
 	for i := range f.Loads {
@@ -51,22 +51,22 @@ func (f *Findings) Report(self *Self) (*report.Report, error) {
 		skips[i] = report.TypeErrorSkip{Path: skip.Path, Line: skip.Line, Message: skip.Message}
 	}
 	return report.Build(&report.Input{
-		Members:                kinds.Listing(f.Result.Findings, f.Evaluations),
+		Members:                f.Result.Members,
 		Analyzer:               self.Analyzer,
 		Target:                 target,
 		Configurations:         configurationsReported(f.Configurations),
 		ConfigurationsNotBuilt: configurationsNotBuilt(f.Unbuilt),
 		Loaded:                 loaded,
-		Findings:               findings,
+		Findings:               reported,
 		EdgeEvaluations:        evaluations,
 		DeclaredGaps:           self.Gaps,
 		ExcludedByCgo:          excluded,
 		TestFileRules:          rules,
 		TypeErrorSkips:         skips,
 		Notes:                  f.notes(),
-		SuppressionsInEffect:   f.inEffect,
-		ReasonsRecorded:        f.reasons,
-		Withheld:               kinds.WithheldOf(f.Result.Withheld),
+		SuppressionsInEffect:   f.Result.InEffect,
+		ReasonsRecorded:        f.Result.Reasons,
+		Withheld:               findings.WithheldOf(f.Result.Withheld),
 	})
 }
 

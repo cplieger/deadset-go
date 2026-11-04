@@ -1,0 +1,23 @@
+A command whose lit.go spells helper's name in a string literal under a line
+directive naming a test file. The literal is written in a production file, so it
+lowers helper's finding to possible, as a literal anywhere else in lit.go would.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() { println(len(names)) }
+
+func helper() {}
+-- lit.go --
+package main
+
+//line lit_test.go:1:1
+var names = []string{"helper"}
+-- lit_test.go --
+package main // a listing long enough to hold the line lit.go's directive remaps here

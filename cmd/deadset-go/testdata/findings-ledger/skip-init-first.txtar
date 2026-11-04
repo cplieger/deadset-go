@@ -1,0 +1,24 @@
+A command with two init functions, which share one reference. The first holds a
+type error, the second a dead store, so the second's store is reported: the type
+error skips the first init alone.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() {}
+
+func init() {
+	println(undefinedName)
+}
+
+func init() {
+	v := 1
+	v = 2
+	_ = v
+}

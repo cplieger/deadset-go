@@ -1,0 +1,683 @@
+package findings
+
+import (
+	"fmt"
+	"maps"
+	"os"
+	"path/filepath"
+	"reflect"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/exempt"
+	"github.com/cplieger/deadset-go/v2/internal/facts"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
+	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport"
+	spec "github.com/cplieger/deadset-spec/v8"
+	"github.com/cplieger/deadset-spec/v8/report"
+	"github.com/cplieger/deadset-spec/v8/vocab"
+	"golang.org/x/tools/txtar"
+)
+
+// The build configuration every fixture of this package is loaded for, stated
+// rather than read, so a fixture's expected configuration identifiers are the same
+// on every machine.
+const (
+	fixtureOS   = "linux"
+	fixtureArch = "amd64"
+)
+
+// detectors are the exemption classes a findings pass runs behind, which is every
+// class the analyzer computes: a kind reports what the exemptions did not hold
+// back, so a fixture measured without them would report symbols a run never sees.
+var detectors = map[vocab.Exemption]exempt.Detector{
+	vocab.InterfaceSatisfaction: exempt.InterfaceSatisfactionDetector,
+	vocab.EncodingReflection:    exempt.EncodingReflectionDetector,
+	vocab.FormatVerbContract:    exempt.FormatVerbContractDetector,
+	vocab.ErrorsDuckTyping:      exempt.ErrorsDuckTypingDetector,
+	vocab.EnumGroup:             exempt.EnumGroupDetector,
+	vocab.GeneratedFile:         exempt.GeneratedFileDetector,
+	vocab.LinknameCgoAsmPlugin:  exempt.LinknameCgoAsmPluginDetector,
+	vocab.TemplateField:         exempt.TemplateFieldDetector,
+	vocab.ReflectiveLookup:      exempt.ReflectiveLookupDetector,
+}
+
+// fixtureConfiguration is the one build configuration a fixture is analyzed under
+// unless a test names more.
+func fixtureConfiguration() load.Configuration {
+	return load.Configuration{ID: fixtureOS + "-" + fixtureArch, OS: fixtureOS, Arch: fixtureArch}
+}
+
+// applicationConfig is the resolved configuration of a target whose every caller is
+// in the graph.
+func applicationConfig() config.Config {
+	resolved := defaultConfig()
+	resolved.Target.Kind = report.TargetKindApplication
+	return resolved
+}
+
+// libraryConfig is the resolved configuration of a target whose published API has
+// callers outside the graph, with every finding reported whatever its class, so a
+// test reads what each kind decides rather than what the minimum withholds.
+func libraryConfig() config.Config {
+	resolved := defaultConfig()
+	resolved.Target.Kind = report.TargetKindLibrary
+	resolved.Analysis.MinConfidence = vocab.Possible
+	return resolved
+}
+
+// extract writes one txtar archive of testdata into a directory of its own and
+// returns the directory, which is the target root the load resolves.
+func extract(t *testing.T, archive string) string {
+	t.Helper()
+
+	parsed, err := txtar.ParseFile(filepath.Join("testdata", archive))
+	if err != nil {
+		t.Fatalf("Setup: parse testdata/%s: %v", archive, err)
+	}
+	dir := t.TempDir()
+	for _, f := range parsed.Files {
+		path := filepath.Join(dir, filepath.FromSlash(f.Name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			t.Fatalf("Setup: create %s: %v", filepath.Dir(path), err)
+		}
+		if err := os.WriteFile(path, f.Data, 0o600); err != nil {
+			t.Fatalf("Setup: write %s: %v", path, err)
+		}
+	}
+	return dir
+}
+
+// loadScope resolves one scope through the production load, so the Need bits the
+// passes depend on have one owner.
+func loadScope(t *testing.T, doc scope.Document, c load.Configuration) *load.Result {
+	t.Helper()
+
+	result, err := load.Load(t.Context(), testsupport.Topology(t.Context(), t, doc), &c)
+	if err != nil {
+		t.Fatalf("Setup: load.Load(%s, %s): %v", doc.Target.Path, c.ID, err)
+	}
+	return &result
+}
+
+// consumerIDs is the module path of every consumer one load resolved, in the order
+// the scope declared them.
+func consumerIDs(result *load.Result) []string {
+	ids := make([]string, 0, len(result.Consumers))
+	for _, one := range result.Consumers {
+		ids = append(ids, one.ID)
+	}
+	return ids
+}
+
+// inputOf extracts one archive and builds what every kind reads from it, over the
+// production path: one load per configuration, the three passes, the exemption
+// classes, the merge and the matrix sweep.
+//
+// The sweep is the production one, for the reason the input's own documentation
+// gives: it is the only sweep under which a declaration only a test references is
+// dead and a test of dead code is admitted.
+func inputOf(t *testing.T, archive string, resolved config.Config, consumers Consumers,
+	configurations ...load.Configuration,
+) *Input {
+	t.Helper()
+
+	return inputOfDir(t, extract(t, archive), resolved, consumers, configurations...)
+}
+
+// inputOfDir is inputOf over a directory that is already on disk, which is what a
+// measurement over a real module reads.
+func inputOfDir(t *testing.T, dir string, resolved config.Config, consumers Consumers,
+	configurations ...load.Configuration,
+) *Input {
+	t.Helper()
+
+	doc, err := scope.ForDir(dir)
+	if err != nil {
+		t.Fatalf("Setup: scope.ForDir(%s): %v", dir, err)
+	}
+	return inputOfScope(t, doc, resolved, consumers, configurations...)
+}
+
+// inputOfScope is inputOf over one resolved scope, which is what a run whose scope
+// declares consumers reads.
+//
+// The consumer set is the load's own where the scope declared consumers, which is
+// what the composition root does: a scope document leaves the module path to the
+// load, so the declared list and the loaded list are one list and a caller that read
+// the declared one from the document would put an empty string in it. A scope that
+// declares no consumer leaves the caller's value standing.
+func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, consumers Consumers,
+	configurations ...load.Configuration,
+) *Input {
+	t.Helper()
+
+	if len(configurations) == 0 {
+		configurations = []load.Configuration{fixtureConfiguration()}
+	}
+	options := exempt.Options{
+		TemplateDelimiters: exempt.Delimiters{
+			Left:  resolved.Analysis.TemplateDelimiters.Left,
+			Right: resolved.Analysis.TemplateDelimiters.Right,
+		},
+		TemplateDirs:     resolved.Analysis.TemplateDirs,
+		IncludeGenerated: resolved.Analysis.IncludeGenerated,
+	}
+	// The fixture analyses in the production mode, which is the run the analyzer
+	// makes, and every stage of the fixture reads the one value as the composition
+	// root hands it to every stage of a run.
+	mode := facts.Mode{Production: true}
+	rootOptions := roots.RootOptions{
+		Patterns:     resolved.Roots.Patterns,
+		PublishedAPI: resolved.Target.Kind == report.TargetKindLibrary,
+	}
+
+	per := make([]Configured, len(configurations))
+	passes := make([]liveness.Configured, len(configurations))
+	classes := make([]roots.TestClasses, len(configurations))
+	var exemptions, testEvidence []exempt.Exemption
+	var root string
+	var loadedConsumers []string
+	for i, c := range configurations {
+		result := loadScope(t, doc, c)
+		root = doc.Target.Path
+		loadedConsumers = consumerIDs(result)
+		inv, err := inventory.Of(result, root, os.ReadFile)
+		if err != nil {
+			t.Fatalf("Setup: inventory.Of(%s): %v", c.ID, err)
+		}
+		symbols := inv.Symbols
+		resolver, err := resolve.New(result, inv)
+		if err != nil {
+			t.Fatalf("Setup: resolve.New(%s): %v", c.ID, err)
+		}
+		index, err := facts.NewIndex(result, resolver)
+		if err != nil {
+			t.Fatalf("Setup: facts.NewIndex(%s): %v", c.ID, err)
+		}
+		rooted, _ := roots.Roots(result, resolver, symbols, rootOptions)
+		classes[i] = roots.ClassifyTestSupport(result, symbols, rooted, rootOptions.PublishedAPI)
+		program, err := exempt.NewProgram(&exempt.Loaded{
+			Result:  result,
+			Resolve: resolver,
+			Facts:   index,
+			Symbols: symbols,
+			Root:    root,
+			Read:    os.ReadFile,
+			Options: options,
+			Mode:    mode,
+		})
+		if err != nil {
+			t.Fatalf("Setup: exempt.NewProgram(%s): %v", c.ID, err)
+		}
+		computed, err := exempt.Compute(program, detectors)
+		if err != nil {
+			t.Fatalf("Setup: exempt.Compute(%s): %v", c.ID, err)
+		}
+		exemptions = append(exemptions, computed.Held...)
+		testEvidence = append(testEvidence, computed.TestEvidence...)
+		per[i] = Configured{Result: result, Resolve: resolver, Facts: index, Symbols: symbols}
+		passes[i] = liveness.Configured{Symbols: symbols, Roots: rooted, Interfaces: index.Interfaces()}
+	}
+	tests := roots.MatrixTests(classes)
+	for i := range per {
+		references, _, err := facts.References(per[i].Result, per[i].Resolve, per[i].Symbols, tests)
+		if err != nil {
+			t.Fatalf("Setup: facts.References(%s): %v", configurations[i].ID, err)
+		}
+		passes[i].References = references
+	}
+
+	merged, err := liveness.Merge(passes, tests)
+	if err != nil {
+		t.Fatalf("Setup: liveness.Merge(%s): %v", doc.Target.Path, err)
+	}
+	if len(loadedConsumers) > 0 {
+		consumers = Consumers{
+			Declared: loadedConsumers,
+			Loaded:   loadedConsumers,
+			Complete: resolved.Consumers.Complete,
+		}
+	}
+	g := liveness.Of(&merged)
+	exemptions, testEvidence = merged.Uncalled.Withdrawn(exemptions), merged.Uncalled.Withdrawn(testEvidence)
+	unseen := Unseen(&Input{Config: &resolved, Root: root, Merged: &merged, Per: per, Consumers: consumers})
+	swept := g.Sweep(&liveness.SweepPolicy{Exempt: exemptions, Mode: mode, TestEvidence: testEvidence, Unseen: unseen})
+
+	refs := make(map[inventory.SymbolID]string, len(merged.Symbols))
+	for i := range merged.Symbols {
+		refs[merged.Symbols[i].ID] = merged.Symbols[i].Ref
+	}
+	generated := generatedPaths(t, per)
+	return &Input{
+		Config:       &resolved,
+		Root:         doc.Target.Path,
+		Merged:       &merged,
+		Sweep:        &swept,
+		Refs:         refs,
+		Exempt:       exemptions,
+		TestEvidence: testEvidence,
+		Generated:    func(path string) bool { return generated[path] },
+		Matrix:       identifiers(configurations),
+		Per:          per,
+		Consumers:    consumers,
+		Mode:         mode,
+	}
+}
+
+// generatedPaths is every generated file of the load, keyed by the target-relative
+// path the inventory spells its positions with. It asks the same owner the
+// exemption class asks, so a fixture and a run agree on which files are generated.
+func generatedPaths(t *testing.T, per []Configured) map[string]bool {
+	t.Helper()
+
+	paths := make(map[string]bool)
+	for _, one := range per {
+		for _, g := range one.Facts.Generated() {
+			paths[g.Path] = true
+		}
+	}
+	return paths
+}
+
+// identifiers is the identifier of every configuration of a matrix, in order.
+func identifiers(configurations []load.Configuration) []string {
+	ids := make([]string, len(configurations))
+	for i, c := range configurations {
+		ids[i] = c.ID
+	}
+	return ids
+}
+
+// declarationEmitters are the emitters of the six unused-declaration kinds, which
+// is the table a run over a fixture of this package computes with.
+func declarationEmitters() map[vocab.Code]Emitter {
+	return map[vocab.Code]Emitter{
+		vocab.UnusedExported:   UnusedExported,
+		vocab.UnusedUnexported: unusedUnexported,
+		vocab.UnusedMember:     unusedMember,
+		vocab.TestOnlyUse:      testOnlyUse,
+		vocab.TestOfDeadCode:   testOfDeadCode,
+		vocab.DeprecatedUnused: deprecatedAndUnused,
+	}
+}
+
+// packageEmitters is a copy of [Emitters] a test may change. The once rule is
+// measured over it: one position carries one finding, so the kinds agree on
+// precedence or a pass over any fixture fails.
+func packageEmitters() map[vocab.Code]Emitter { return maps.Clone(Emitters) }
+
+// fixtures is every one-module archive under testdata, which is every fixture of every
+// kind of this package but the archives of testdata/sections, which hold a consumer.
+func fixtures(t *testing.T) []string {
+	t.Helper()
+
+	entries, err := filepath.Glob(filepath.Join("testdata", "*.txtar"))
+	if err != nil {
+		t.Fatalf("Setup: list testdata: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("Setup: testdata holds no archive, so a measurement over every fixture measures nothing")
+	}
+	archives := make([]string, len(entries))
+	for i, entry := range entries {
+		archives[i] = filepath.Base(entry)
+	}
+	return archives
+}
+
+// computed runs one findings pass and fails the test where the pass refuses a
+// finding, because a refusal is a defect in an emitter rather than an answer.
+func computed(t *testing.T, in *Input, emitters map[vocab.Code]Emitter) Result {
+	t.Helper()
+
+	result, err := Compute(in, emitters)
+	if err != nil {
+		t.Fatalf("Compute() = error %v, want the findings of the pass", err)
+	}
+	return result
+}
+
+// setup is the resolved configuration a shared analysis is built under.
+type setup int
+
+const (
+	asApplication setup = iota
+	asLibrary
+)
+
+// resolved is the configuration one setup names.
+func (s setup) resolved() config.Config {
+	if s == asLibrary {
+		return libraryConfig()
+	}
+	return applicationConfig()
+}
+
+// table names an emitter table a shared analysis computes the findings of.
+type table int
+
+const (
+	everyKind table = iota
+	declarationKinds
+	interfaceKinds
+	intraFunctionKinds
+	narrowingKinds
+	writeOnlyKind
+	testOnlyAndUnreachableExport
+)
+
+// sharedTables is every table a shared analysis answers for.
+var sharedTables = []table{
+	everyKind, declarationKinds, interfaceKinds, intraFunctionKinds,
+	narrowingKinds, writeOnlyKind, testOnlyAndUnreachableExport,
+}
+
+// emitters is the table one name stands for.
+func (tb table) emitters() map[vocab.Code]Emitter {
+	switch tb {
+	case declarationKinds:
+		return declarationEmitters()
+	case interfaceKinds:
+		return interfaceEmitters()
+	case intraFunctionKinds:
+		return intraFuncEmitters()
+	case narrowingKinds:
+		return map[vocab.Code]Emitter{
+			vocab.UnnecessaryExport:   unnecessaryExport,
+			vocab.UnnecessaryExposure: unnecessaryExposure,
+			vocab.UnreachableExport:   unreachableExport,
+		}
+	case writeOnlyKind:
+		return map[vocab.Code]Emitter{vocab.WriteOnlySymbol: writeOnlySymbol}
+	case testOnlyAndUnreachableExport:
+		return map[vocab.Code]Emitter{vocab.TestOnlyUse: testOnlyUse, vocab.UnreachableExport: unreachableExport}
+	default:
+		return packageEmitters()
+	}
+}
+
+// passKey is one findings pass of a shared analysis: a table, under the production mode
+// the fixture is analyzed in or under the plain mode.
+type passKey struct {
+	table      table
+	production bool
+}
+
+// sharedAnalysis is what one fixture answers under one setup and one consumer set,
+// read by every test that asks the same question of it: the result of each pass, the
+// findings each emitter of the package returns, and the reachability class of every
+// declaration by its reference. No part of the input it was computed from is held.
+type sharedAnalysis struct {
+	computed map[passKey]Result
+	refused  map[passKey]error
+	emitted  map[vocab.Code][]draft
+	failed   map[vocab.Code]error
+	classes  map[string]vocab.Class
+}
+
+// analysisKey is one shared analysis: the archive, the setup and the consumer set as
+// fmt renders it in Go syntax, which quotes every string so two different sets never
+// spell one key.
+type analysisKey struct {
+	archive   string
+	setup     setup
+	consumers string
+}
+
+// analyses holds every shared analysis the package's tests built.
+var analyses testsupport.Memo[analysisKey, *sharedAnalysis]
+
+// analysisOf is the shared analysis of one archive under one setup and one consumer
+// set, analyzed once for every test that reads it.
+func analysisOf(t *testing.T, archive string, s setup, consumers Consumers) *sharedAnalysis {
+	t.Helper()
+
+	key := analysisKey{archive: archive, setup: s, consumers: fmt.Sprintf("%#v", consumers)}
+	return analyses.Of(t, key, func(t *testing.T) *sharedAnalysis {
+		return analyzeShared(t, inputOf(t, archive, s.resolved(), consumers))
+	})
+}
+
+// analyzeShared answers every question of a shared analysis from one input.
+func analyzeShared(t *testing.T, in *Input) *sharedAnalysis {
+	t.Helper()
+
+	held := &sharedAnalysis{
+		computed: make(map[passKey]Result),
+		refused:  make(map[passKey]error),
+		emitted:  make(map[vocab.Code][]draft),
+		failed:   make(map[vocab.Code]error),
+		classes:  make(map[string]vocab.Class),
+	}
+	analyzed := in.Mode
+	fresh := func(production bool) {
+		in.Mode.Production = production
+	}
+	emitting := newPass(in)
+	for code, emit := range packageEmitters() {
+		held.emitted[code], held.failed[code] = emit(emitting)
+	}
+	passes := []passKey{{table: writeOnlyKind, production: false}}
+	for _, tb := range sharedTables {
+		passes = append(passes, passKey{table: tb, production: analyzed.Production})
+	}
+	for _, one := range passes {
+		fresh(one.production)
+		held.computed[one], held.refused[one] = Compute(in, one.table.emitters())
+	}
+	fresh(analyzed.Production)
+	for ref, id := range emitting.byRef {
+		held.classes[ref] = emitting.classOf(id)
+	}
+	return held
+}
+
+func TestASharedAnalysisAnswersTheEveryKindPassAFreshInputAnswers(t *testing.T) {
+	t.Parallel()
+
+	// The archive reports subjects that fall with no dead component, so a pass mints
+	// a component for each, and a pass that inherited an earlier question's lookup
+	// would number those components differently.
+	const archive = "artifacts-never-imported.txtar"
+	shared := analysisOf(t, archive, asApplication, Consumers{}).findings(t, everyKind).Findings
+	fresh := computed(t, inputOf(t, archive, applicationConfig(), Consumers{}), packageEmitters()).Findings
+
+	if len(shared) != len(fresh) {
+		t.Fatalf("Compute(%s, every kind) as its shared analysis answered it reports %v, want %v, what a fresh input reports",
+			archive, summary(shared), summary(fresh))
+	}
+	for i := range fresh {
+		if !reflect.DeepEqual(shared[i], fresh[i]) {
+			t.Errorf("finding %d of Compute(%s, every kind) as its shared analysis answered it = %+v, want %+v, what a fresh input reports",
+				i, archive, shared[i], fresh[i])
+		}
+	}
+}
+
+// compute is what one table's pass answered under the mode the fixture is analyzed
+// in, as Compute returned it.
+func (a *sharedAnalysis) compute(t *testing.T, tb table) (Result, error) {
+	t.Helper()
+
+	return a.computeUnder(t, tb, true)
+}
+
+// computeUnder is what one table's pass answered under the production mode or under
+// the plain mode.
+func (a *sharedAnalysis) computeUnder(t *testing.T, tb table, production bool) (Result, error) {
+	t.Helper()
+
+	one := passKey{table: tb, production: production}
+	result, held := a.computed[one]
+	if !held {
+		t.Fatalf("Setup: a shared analysis computes no pass %+v", one)
+	}
+	return testsupport.Detached(t, result), a.refused[one]
+}
+
+// findings is what one table's pass answered, failing the test where the pass refused
+// a finding, as computed does.
+func (a *sharedAnalysis) findings(t *testing.T, tb table) Result {
+	t.Helper()
+
+	return a.findingsUnder(t, tb, true)
+}
+
+// findingsUnder is findings under the production mode or under the plain mode.
+func (a *sharedAnalysis) findingsUnder(t *testing.T, tb table, production bool) Result {
+	t.Helper()
+
+	result, err := a.computeUnder(t, tb, production)
+	if err != nil {
+		t.Fatalf("Compute() = error %v, want the findings of the pass", err)
+	}
+	return result
+}
+
+// emit is what the emitter of one code returned when it ran alone over the input.
+func (a *sharedAnalysis) emit(t *testing.T, code vocab.Code) ([]draft, error) {
+	t.Helper()
+
+	found, held := a.emitted[code]
+	if !held {
+		t.Fatalf("Setup: the package registers no emitter under %s", code)
+	}
+	return testsupport.Detached(t, found), a.failed[code]
+}
+
+// classOf is the reachability class of the declaration whose reference is ref.
+func (a *sharedAnalysis) classOf(t *testing.T, ref string) vocab.Class {
+	t.Helper()
+
+	class, held := a.classes[ref]
+	if !held {
+		t.Fatalf("Setup: the inventory holds no declaration whose reference is %q", ref)
+	}
+	return class
+}
+
+// codesOf is the code of every finding, in the order the pass returned them.
+func codesOf(findings []Finding) []vocab.Code {
+	codes := make([]vocab.Code, len(findings))
+	for i := range findings {
+		codes[i] = findings[i].Code
+	}
+	return codes
+}
+
+// namesUnder is the name of every finding of one code, in the order the pass
+// returned them.
+func namesUnder(findings []Finding, code vocab.Code) []string {
+	var names []string
+	for i := range findings {
+		if findings[i].Code == code {
+			names = append(names, findings[i].Symbol.Name)
+		}
+	}
+	return names
+}
+
+// findingOf is the finding one code reports about the symbol one name spells.
+func findingOf(t *testing.T, findings []Finding, code vocab.Code, name string) Finding {
+	t.Helper()
+
+	for i := range findings {
+		if findings[i].Code == code && findings[i].Symbol.Name == name {
+			return findings[i]
+		}
+	}
+	t.Fatalf("the pass reports no %s finding about %s: it reports %v", code, name, summary(findings))
+	return Finding{}
+}
+
+// draftSummary is [summary] of what an emitter returned.
+func draftSummary(found []draft) []string {
+	lines := make([]string, len(found))
+	for i := range found {
+		lines[i] = string(found[i].Code) + " " + found[i].Symbol.Name
+	}
+	return lines
+}
+
+// summary is one line per finding, for a failure message that has to say what the
+// pass did report.
+func summary(findings []Finding) []string {
+	lines := make([]string, len(findings))
+	for i := range findings {
+		lines[i] = string(findings[i].Code) + " " + findings[i].Symbol.Name
+	}
+	return lines
+}
+
+// corpusInput builds what every kind reads from one fixture of the pinned corpus,
+// with the fixture's consumer section loaded.
+//
+// A rendering's sections are directories of one archive: target holds the module
+// being analyzed and every other top-level directory is a consumer module, which
+// reaches the target through the relative replace its own module file carries. So a
+// fixture is loaded the way a run with a scope document is, and the consumer set the
+// class ladder reads is the load's own.
+func corpusInput(t *testing.T, fixture string, resolved config.Config) *Input {
+	t.Helper()
+
+	data, err := spec.Corpus.ReadFile("corpus/fixtures/" + fixture + "/go.txtar")
+	if err != nil {
+		t.Fatalf("Setup: read the Go rendering of %s: %v", fixture, err)
+	}
+	return sectionsInput(t, fixture, data, resolved)
+}
+
+// sectionsInput builds what every kind reads from one archive whose target section
+// is the module analyzed and whose every other top-level directory is a consumer.
+func sectionsInput(t *testing.T, fixture string, data []byte, resolved config.Config) *Input {
+	t.Helper()
+
+	dir := t.TempDir()
+	sections := make(map[string]bool)
+	for _, f := range txtar.Parse(data).Files {
+		path := filepath.Join(dir, filepath.FromSlash(f.Name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			t.Fatalf("Setup: create %s: %v", filepath.Dir(path), err)
+		}
+		if err := os.WriteFile(path, f.Data, 0o600); err != nil {
+			t.Fatalf("Setup: write %s: %v", path, err)
+		}
+		if section, _, nested := strings.Cut(f.Name, "/"); nested {
+			sections[section] = true
+		}
+	}
+	if !sections[corpusTargetSection] {
+		t.Fatalf("Setup: the rendering of %s carries no %s section", fixture, corpusTargetSection)
+	}
+	doc := scope.Document{Target: scope.Module{Path: filepath.Join(dir, corpusTargetSection)}}
+	for _, section := range slices.Sorted(maps.Keys(sections)) {
+		if section != corpusTargetSection {
+			doc.Consumers = append(doc.Consumers, scope.Module{Path: filepath.Join(dir, section)})
+		}
+	}
+	return inputOfScope(t, doc, resolved, Consumers{})
+}
+
+// corpusTargetSection is the directory of a fixture rendering that holds the module
+// being analyzed.
+const corpusTargetSection = "target"
+
+// defaultConfig is the configuration every default states, of an application:
+// what a repository configuration naming the target kind alone resolves to.
+func defaultConfig() config.Config {
+	resolved, err := config.Resolve(&config.Inputs{Repository: config.Document{
+		Path: "deadset.json", Data: []byte(`{"target": {"kind": "application"}}`),
+	}})
+	if err != nil {
+		panic(err)
+	}
+	return resolved.Config
+}

@@ -1,0 +1,323 @@
+package findings
+
+import (
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
+	"github.com/cplieger/deadset-spec/v8/vocab"
+)
+
+// interfaceEmitters is the three interface rules as the composition root's table
+// holds them, which is what fixes each of them to the framework's emitter
+// signature.
+func interfaceEmitters() map[vocab.Code]Emitter {
+	return map[vocab.Code]Emitter{
+		vocab.UnusedInterface:             unusedInterface,
+		vocab.UncalledInterfaceMethod:     uncalledInterfaceMethod,
+		vocab.UnusedSatisfactionAssertion: unusedSatisfactionAssertion,
+	}
+}
+
+func TestInterfaceKinds_reportEachShapeOnceUnderItsOwnCode(t *testing.T) {
+	cases := map[string]struct {
+		archive string
+		want    []string
+	}{
+		"an interface nothing names as a type, with its members inside its own component": {
+			archive: "interfaces-unused.txtar",
+			want:    []string{"DS1201 Reader"},
+		},
+		"an interface a parameter type names, whose method the function calls through it": {
+			archive: "interfaces-used.txtar",
+			want:    nil,
+		},
+		"a method the program calls on the concrete type and never through the interface": {
+			archive: "interfaces-uncalled.txtar",
+			want:    []string{"DS1202 Store.Put"},
+		},
+		"an interface whose method set holds an unexported method": {
+			archive: "interfaces-sum-type.txtar",
+			want:    nil,
+		},
+		"an unexported interface whose method set holds an unexported method, beside an exported one": {
+			archive: "interfaces-sum-type-unexported.txtar",
+			want:    []string{"DS1202 shape.sides"},
+		},
+		"a method only a test calls through the interface, which the test-only kind reports": {
+			archive: "interfaces-test-called.txtar",
+			want:    nil,
+		},
+		"a marker method whose every implementation carries an empty body": {
+			archive: "interfaces-marker.txtar",
+			want:    nil,
+		},
+		"an interface a test file declares, whose liveness a production sweep cannot judge": {
+			archive: "interfaces-test-file.txtar",
+			want:    nil,
+		},
+		"a satisfaction assertion that is the only thing naming its interface": {
+			archive: "interfaces-assertion.txtar",
+			want:    []string{"DS1202 Encoder.Encode", "DS1203 Encoder"},
+		},
+	}
+	for description, tc := range cases {
+		t.Run(description, func(t *testing.T) {
+			result := analysisOf(t, tc.archive, asApplication, Consumers{}).findings(t, interfaceKinds)
+
+			if got := summary(result.Findings); !slices.Equal(got, tc.want) {
+				t.Errorf("the interface kinds over %s report %v, want %v", tc.archive, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestUnusedInterface_namesEveryImplementationAndWhereItIsWritten(t *testing.T) {
+	result := analysisOf(t, "interfaces-unused.txtar", asApplication, Consumers{}).findings(t, interfaceKinds)
+
+	found := findingOf(t, result.Findings, vocab.UnusedInterface, "Reader")
+	if found.Kind != "unused-interface" || found.Symbol.Kind != "interface" {
+		t.Errorf("UnusedInterface(interfaces-unused.txtar) kind, subject kind = %q, %q, want %q, %q",
+			found.Kind, found.Symbol.Kind, "unused-interface", "interface")
+	}
+	if found.Message != unusedInterfaceMessage {
+		t.Errorf("UnusedInterface(interfaces-unused.txtar) message = %q, want %q",
+			found.Message, unusedInterfaceMessage)
+	}
+	if found.Relation != liveness.ReferenceCounting {
+		t.Errorf("UnusedInterface(interfaces-unused.txtar) relation = %s, want %s",
+			found.Relation, liveness.ReferenceCounting)
+	}
+	if found.Fixability != "deletable" || found.Severity != vocab.Deny {
+		t.Errorf("UnusedInterface(interfaces-unused.txtar) fixability, severity = %q, %q, want deletable, deny",
+			found.Fixability, found.Severity)
+	}
+	if got, want := implementationNames(found), []string{"file", "socket"}; !slices.Equal(got, want) {
+		t.Errorf("UnusedInterface(interfaces-unused.txtar) implementations = %v, want %v", got, want)
+	}
+	for _, implementation := range found.Details.Implementations {
+		if implementation.Position.Path != "main.go" || implementation.Position.Line == 0 {
+			t.Errorf("UnusedInterface(interfaces-unused.txtar) implementation %q is at %s:%d, want a position in main.go",
+				implementation.Name, implementation.Position.Path, implementation.Position.Line)
+		}
+		if !strings.HasSuffix(implementation.Ref, "#"+implementation.Name) {
+			t.Errorf("UnusedInterface(interfaces-unused.txtar) implementation %q carries the reference %q, want one naming the type",
+				implementation.Name, implementation.Ref)
+		}
+	}
+}
+
+func TestUncalledInterfaceMethod_reportsTheInterfaceMethodAndNamesTheImplementation(t *testing.T) {
+	result := analysisOf(t, "interfaces-uncalled.txtar", asApplication, Consumers{}).findings(t, interfaceKinds)
+
+	found := findingOf(t, result.Findings, vocab.UncalledInterfaceMethod, "Store.Put")
+	if found.Kind != "uncalled-interface-method" || found.Symbol.Kind != "interface-method" {
+		t.Errorf("UncalledInterfaceMethod(interfaces-uncalled.txtar) kind, subject kind = %q, %q, want %q, %q",
+			found.Kind, found.Symbol.Kind, "uncalled-interface-method", "interface-method")
+	}
+	if found.Message != uncalledInterfaceMethodMessage {
+		t.Errorf("UncalledInterfaceMethod(interfaces-uncalled.txtar) message = %q, want %q",
+			found.Message, uncalledInterfaceMethodMessage)
+	}
+	if found.Relation != liveness.ReferenceCounting {
+		t.Errorf("UncalledInterfaceMethod(interfaces-uncalled.txtar) relation = %s, want %s",
+			found.Relation, liveness.ReferenceCounting)
+	}
+	if found.Fixability != "manual" || found.Severity != vocab.Warn {
+		t.Errorf("UncalledInterfaceMethod(interfaces-uncalled.txtar) fixability, severity = %q, %q, want manual, warn",
+			found.Fixability, found.Severity)
+	}
+	if got, want := implementationNames(found), []string{"disk"}; !slices.Equal(got, want) {
+		t.Errorf("UncalledInterfaceMethod(interfaces-uncalled.txtar) implementations = %v, want %v", got, want)
+	}
+}
+
+func TestUnusedSatisfactionAssertion_reportsTheAssertionWhileTheConcreteMethodFallsWithItsInterfaceMethod(t *testing.T) {
+	in := inputOf(t, "interfaces-assertion.txtar", applicationConfig(), Consumers{})
+
+	result := computed(t, in, interfaceEmitters())
+
+	found := findingOf(t, result.Findings, vocab.UnusedSatisfactionAssertion, "Encoder")
+	if found.Kind != "unused-satisfaction-assertion" || found.Symbol.Kind != satisfactionAssertionSubject {
+		t.Errorf("UnusedSatisfactionAssertion(interfaces-assertion.txtar) kind, subject kind = %q, %q, want %q, %q",
+			found.Kind, found.Symbol.Kind, "unused-satisfaction-assertion", satisfactionAssertionSubject)
+	}
+	// The subject is named by the interface, at the assertion's own position: a blank
+	// declaration renders as the reference of the package that holds it, which names
+	// the package too, and the interface is what the assertion asserts.
+	if found.Symbol.Ref != "go://example.com/app#Encoder" {
+		t.Errorf("UnusedSatisfactionAssertion(interfaces-assertion.txtar) names %q, want the interface's reference go://example.com/app#Encoder",
+			found.Symbol.Ref)
+	}
+	if got, want := found.Position, (Position{Path: "main.go", Line: 12, Column: 5, EndLine: 12}); got != want {
+		t.Errorf("UnusedSatisfactionAssertion(interfaces-assertion.txtar) reports at %+v, want %+v: the position is the assertion's",
+			got, want)
+	}
+	if found.Message != unusedSatisfactionAssertionMessage {
+		t.Errorf("UnusedSatisfactionAssertion(interfaces-assertion.txtar) message = %q, want %q",
+			found.Message, unusedSatisfactionAssertionMessage)
+	}
+	if found.Fixability != "deletable" || found.Severity != vocab.Deny {
+		t.Errorf("UnusedSatisfactionAssertion(interfaces-assertion.txtar) fixability, severity = %q, %q, want deletable, deny",
+			found.Fixability, found.Severity)
+	}
+	if got, want := implementationNames(found), []string{"payload"}; !slices.Equal(got, want) {
+		t.Errorf("UnusedSatisfactionAssertion(interfaces-assertion.txtar) implementations = %v, want %v", got, want)
+	}
+	// Nothing calls Encoder.Encode, so payload.Encode falls with it rather than
+	// being retained through it.
+	if got := retainedUnder(in, "interface-satisfaction"); len(got) != 0 {
+		t.Errorf("the sweep over interfaces-assertion.txtar retains %v under interface-satisfaction, want none", got)
+	}
+}
+
+// implementationNames names every implementation one finding carries, in the order
+// the finding carries them.
+func implementationNames(found Finding) []string {
+	names := make([]string, 0, len(found.Details.Implementations))
+	for _, implementation := range found.Details.Implementations {
+		names = append(names, implementation.Name)
+	}
+	return names
+}
+
+// retainedUnder names every declaration the sweep recorded as held back by one
+// exemption class, which is the record a finding's retained field reads.
+func retainedUnder(in *Input, class string) []string {
+	var names []string
+	for _, exemption := range in.Sweep.Retained {
+		if exemption.Class != class {
+			continue
+		}
+		if symbol := newPass(in).symbol(exemption.ID); symbol != nil {
+			names = append(names, symbol.Name)
+		}
+	}
+	return names
+}
+
+func TestUnusedSatisfactionAssertion_aPublishedInterfaceOfALibraryIsPossibleWhateverTheConsumers(t *testing.T) {
+	everyLoaded := Consumers{Declared: []string{"example.com/consumer"}, Loaded: []string{"example.com/consumer"}, Complete: true}
+	// The three assertions are roots of the one component of the type they assert, so
+	// every finding of it carries the confidence of the published one.
+	cases := map[string]struct {
+		resolved   config.Config
+		consumers  Consumers
+		want       map[string]vocab.Class
+		confidence vocab.Class
+	}{
+		"a library with no consumer information": {
+			resolved:   libraryConfig(),
+			want:       map[string]vocab.Class{"Published": vocab.Possible, "hidden": vocab.Certain, "Runner": vocab.Certain},
+			confidence: vocab.Possible,
+		},
+		"a library whose every declared consumer loaded": {
+			resolved:   libraryConfig(),
+			consumers:  everyLoaded,
+			want:       map[string]vocab.Class{"Published": vocab.Possible, "hidden": vocab.Certain, "Runner": vocab.Certain},
+			confidence: vocab.Possible,
+		},
+		"an application": {
+			resolved:   applicationConfig(),
+			want:       map[string]vocab.Class{"Published": vocab.Certain, "hidden": vocab.Certain, "Runner": vocab.Certain},
+			confidence: vocab.Certain,
+		},
+	}
+	for description, tc := range cases {
+		t.Run(description, func(t *testing.T) {
+			in := inputOf(t, "interfaces-assertion-published.txtar", tc.resolved, tc.consumers)
+
+			result := computed(t, in, interfaceEmitters())
+
+			for name, want := range tc.want {
+				found := findingOf(t, result.Findings, vocab.UnusedSatisfactionAssertion, name)
+				if found.Class != want || found.Confidence != tc.confidence {
+					t.Errorf("UnusedSatisfactionAssertion over the assertion of %s gives class %s and confidence %s, want class %s and confidence %s",
+						name, found.Class, found.Confidence, want, tc.confidence)
+				}
+			}
+		})
+	}
+}
+
+func TestTestOnlyUse_reportsAnInterfaceMethodOnlyATestCallsThroughTheInterface(t *testing.T) {
+	t.Parallel()
+
+	in := inputOf(t, "interfaces-test-called.txtar", applicationConfig(), Consumers{})
+	emitters := interfaceEmitters()
+	emitters[vocab.TestOnlyUse] = testOnlyUse
+
+	result := computed(t, in, emitters)
+
+	if got, want := summary(result.Findings), []string{"DS1102 Store.Count"}; !slices.Equal(got, want) {
+		t.Fatalf("the interface kinds and the test-only kind over interfaces-test-called.txtar report %v, want %v",
+			got, want)
+	}
+	found := findingOf(t, result.Findings, vocab.TestOnlyUse, "Store.Count")
+	if found.Symbol.Kind != "interface-method" || !found.TestOnly {
+		t.Errorf("%s about Store.Count carries subject kind %q and test-only %t, want an interface method only tests reference",
+			vocab.TestOnlyUse, found.Symbol.Kind, found.TestOnly)
+	}
+}
+
+func TestUnusedSatisfactionAssertion_anAssertionBetweenPublishedTypesOfALibraryIsNotReported(t *testing.T) {
+	cases := map[string]struct {
+		resolved config.Config
+		want     []int
+	}{
+		"a library, whose published type states the promise to its importers": {
+			resolved: libraryConfig(),
+			want:     []int{17},
+		},
+		"an application, which has no importers": {
+			resolved: applicationConfig(),
+			want:     []int{15, 17},
+		},
+	}
+	for description, tc := range cases {
+		t.Run(description, func(t *testing.T) {
+			in := inputOf(t, "interfaces-assertion-between-published.txtar", tc.resolved, Consumers{})
+
+			result := computed(t, in, map[vocab.Code]Emitter{vocab.UnusedSatisfactionAssertion: unusedSatisfactionAssertion})
+
+			var got []int
+			for i := range result.Findings {
+				got = append(got, result.Findings[i].Position.Line)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("UnusedSatisfactionAssertion over interfaces-assertion-between-published.txtar reports at lines %v, want %v",
+					got, tc.want)
+			}
+		})
+	}
+}
+
+// An assertion an exemption retains is live, so no satisfaction-assertion finding
+// names it, and the run reports rather than refusing an emitter defect.
+func TestUnusedSatisfactionAssertion_anAssertionAnExemptionRetainedIsNotReported(t *testing.T) {
+	in := inputOf(t, "interfaces-assertion-retained.txtar", applicationConfig(), Consumers{})
+
+	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnusedSatisfactionAssertion: unusedSatisfactionAssertion})
+
+	if len(result.Findings) != 0 {
+		t.Errorf("UnusedSatisfactionAssertion over interfaces-assertion-retained.txtar reports %v, want nothing", result.Findings)
+	}
+}
+
+func TestTheImplementationOfAMethodATestCallsStaysRetained(t *testing.T) {
+	t.Parallel()
+
+	in := inputOf(t, "interfaces-test-called.txtar", applicationConfig(), Consumers{})
+
+	// A test reaches memory.Count through Store.Count, so the method's
+	// satisfaction exemption keeps holding it rather than a use by the
+	// interface method that leaves it dead.
+	for _, e := range in.Sweep.Retained {
+		if symbol := newPass(in).symbol(e.ID); symbol != nil && strings.HasSuffix(symbol.Ref, "#memory.Count") {
+			return
+		}
+	}
+	t.Errorf("the sweep over interfaces-test-called.txtar retained %v, want memory.Count among them", in.Sweep.Retained)
+}
