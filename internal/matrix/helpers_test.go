@@ -3,14 +3,12 @@ package matrix
 import (
 	"go/build"
 	"go/build/constraint"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/buildconstraint"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/txtar"
@@ -151,26 +149,10 @@ type pathed struct {
 func pathedFiles(t *testing.T, root string) []pathed {
 	t.Helper()
 
+	unit := topOf(t, root).Units[0]
 	var found []pathed
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-		switch {
-		case err != nil:
-			return err
-		case entry.IsDir() && path != root && (buildconstraint.SkipsDir(entry.Name()) || load.IsModuleRoot(path)):
-			return fs.SkipDir
-		case entry.IsDir() || !buildconstraint.IsGoFile(entry.Name()):
-			return nil
-		}
-		content, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		file, err := buildconstraint.Of(filepath.Base(path), content)
-		if err != nil {
-			return err
-		}
-		found = append(found, pathed{path: load.RelativeSlash(root, path), file: file})
-		return nil
+	err := collect(root, unit.Dir, unit.Path, unit.File, func(path string, expression constraint.Expr) {
+		found = append(found, pathed{path: load.RelativeSlash(root, path), file: expression})
 	})
 	if err != nil {
 		t.Fatalf("Setup: read the constraints under %s: %v", root, err)

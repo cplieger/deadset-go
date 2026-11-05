@@ -1,0 +1,76 @@
+Three targets whose module's own packages outside its loaded packages reference
+it: an example below an underscore directory and, where production code imports
+one, a package below node_modules. The module is the target root in rooted, one
+directory below a target that holds no module file in walked, and the directory
+above the target in governed.
+
+-- rooted/go.mod --
+module example.com/app
+
+go 1.27.0
+-- rooted/main.go --
+package main
+
+import "example.com/app/node_modules/helper"
+
+func main() { helper.Run() }
+-- rooted/lib/lib.go --
+package lib
+
+func Back() {}
+
+func Shown() {}
+-- rooted/node_modules/helper/helper.go --
+package helper
+
+import "example.com/app/lib"
+
+func Run() { lib.Back() }
+-- rooted/_examples/demo/main.go --
+package main
+
+import "example.com/app/lib"
+
+func main() { lib.Shown() }
+-- walked/app/go.mod --
+module example.com/app
+
+go 1.27.0
+-- walked/app/main.go --
+package main
+
+import "example.com/app/node_modules/helper"
+
+func main() { helper.Run() }
+-- walked/app/lib/lib.go --
+package lib
+
+func Back() {}
+
+func Shown() {}
+-- walked/app/node_modules/helper/helper.go --
+package helper
+
+import "example.com/app/lib"
+
+func Run() { lib.Back() }
+-- walked/app/_examples/demo/main.go --
+package main
+
+import "example.com/app/lib"
+
+func main() { lib.Shown() }
+-- governed/go.mod --
+module example.com/m
+
+go 1.27.0
+-- governed/pkg/lib/lib.go --
+package lib
+
+func Shown() {}
+-- governed/pkg/_examples/demo/main.go --
+package main
+
+import "example.com/m/pkg/lib"
+
+func main() { lib.Shown() }

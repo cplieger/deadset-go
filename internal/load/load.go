@@ -28,7 +28,8 @@ import (
 const metadataMode = packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles |
 	packages.NeedImports | packages.NeedDeps | packages.NeedModule | packages.NeedForTest
 
-// loadPattern matches every package of the target directory's module tree.
+// loadPattern matches every package of the target directory's module tree, and
+// every package below a node_modules directory too, which [loadPackages] drops.
 const loadPattern = "./..."
 
 // goFileExt is the extension of a Go source file, which IgnoredFiles lists among
@@ -146,8 +147,8 @@ type loader struct {
 
 // readers loads into r every module whose references count as a declared
 // consumer's without being one: the nested modules, then the units' underscored
-// packages, then the scripts of every module dropped so far, then the workspace
-// readers.
+// packages, then the packages each unit imports from outside its packages, then the
+// scripts of every module dropped so far, then the workspace readers.
 func (l *loader) readers(r *Result) error {
 	for i := range l.top.Nested {
 		if err := l.nested(r, &l.top.Nested[i], unitPrefix(l.top.Root, l.top.Nested[i].Dir)); err != nil {
@@ -157,6 +158,11 @@ func (l *loader) readers(r *Result) error {
 	for i := range l.top.Units {
 		if err := l.underscored(r, &l.top.Units[i]); err != nil {
 			return err
+		}
+	}
+	for i := range r.Units {
+		if imported := importedOutside(&r.Units[i]); len(imported) > 0 {
+			r.Nested = append(r.Nested, Consumer{ID: r.Units[i].Path, Packages: imported})
 		}
 	}
 	for _, dropped := range r.Dropped {
@@ -283,6 +289,30 @@ func (l *loader) reader(r *Result, m *discoveredModule) error {
 	return l.nested(r, m, "")
 }
 
+// importedOutside is every package of unit's module outside its packages
+// ([ModuleTree.OutsideDir]) that the production code of one of them imports, which
+// the module's build compiles all the same, so its references count and nothing of
+// it is reported.
+func importedOutside(unit *Unit) []*packages.Package {
+	if unit.Path == "" {
+		return nil
+	}
+	tree := treeAt(unit.Dir)
+	production := make([]*packages.Package, 0, len(unit.Packages))
+	for _, p := range unit.Packages {
+		if p.ForTest == "" {
+			production = append(production, p)
+		}
+	}
+	var imported []*packages.Package
+	packages.Visit(production, nil, func(p *packages.Package) {
+		if p.Module != nil && p.Module.Path == unit.Path && tree.outside(unit.Dir, p.Dir) {
+			imported = append(imported, p)
+		}
+	})
+	return imported
+}
+
 // underscored loads the packages of unit's own module below an underscore directory
 // ([underscoredPackages]), an example tree among them, as a nested consumer of the
 // unit. No build of the module compiles them, so where they do not load together
@@ -327,7 +357,8 @@ func droppable(err error) bool {
 }
 
 // loadPackages resolves and type-checks every package of the module rooted at
-// spec's directory, or the packages its patterns name there, under configuration c.
+// spec's directory, in no directory [leavesOut] names, or the packages its patterns
+// name there, under configuration c.
 // A load that reports errors returns them as diagnostics and no packages, each
 // position the toolchain wrote relative to the directory rewritten below the prefix.
 func loadPackages(ctx context.Context, trees *syntaxCache, c *Configuration, spec *loadSpec) ([]*packages.Package, []Diagnostic, error) {
@@ -346,6 +377,9 @@ func loadPackages(ctx context.Context, trees *syntaxCache, c *Configuration, spe
 	pkgs, err := packages.Load(cfg, patterns...)
 	if err != nil {
 		return nil, nil, &listError{err: err}
+	}
+	if len(spec.patterns) == 0 {
+		pkgs = slices.DeleteFunc(pkgs, func(p *packages.Package) bool { return leftOutBelow(spec.dir, p.Dir) })
 	}
 	if spec.workspace != workspaceOff && len(spec.modules) == 0 {
 		demoteOtherMembers(pkgs, spec.dir)

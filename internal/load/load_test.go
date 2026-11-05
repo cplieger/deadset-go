@@ -724,6 +724,49 @@ func TestLoadReadsEveryModuleUnderATargetThatIsNoModuleRoot(t *testing.T) {
 	}
 }
 
+// A package below a node_modules directory, which ./... matches, is no package of
+// the module, one with a type error included, and one the module's production code
+// imports is read as a dependency whose references count as a consumer's; one only
+// a test imports is not.
+func TestLoadLeavesOutThePackagesBelowNodeModules(t *testing.T) {
+	stableToolchain(t)
+	root := writeTree(t, map[string]string{
+		"go.mod":                       "module example.com/m\n\ngo 1.27.1\n",
+		"main.go":                      "package main\n\nimport \"example.com/m/node_modules/helper\"\n\nfunc main() { helper.Used() }\n",
+		"node_modules/helper/h.go":     "package helper\n\n// Used is what main calls.\nfunc Used() {}\n",
+		"main_test.go":                 "package main\n\nimport (\n\t\"testing\"\n\n\t\"example.com/m/node_modules/testonly\"\n)\n\nfunc TestRun(t *testing.T) { testonly.Used() }\n",
+		"node_modules/testonly/t.go":   "package testonly\n\n// Used is what a test calls.\nfunc Used() {}\n",
+		"web/node_modules/broken/b.go": "package broken\n\nvar x int = \"not an int\"\n",
+	})
+	doc, err := scope.ForDir(root)
+	if err != nil {
+		t.Fatalf("Setup: scope.ForDir = _, %v", err)
+	}
+
+	got, err := loadScope(t.Context(), doc, HostConfiguration())
+	if err != nil {
+		t.Fatalf("Load(a module with Go code below node_modules) = _, %v, want no error", err)
+	}
+	for _, p := range got.Packages {
+		if strings.Contains(p.PkgPath, "/node_modules/") {
+			t.Errorf("Load() carries %s as a package of the module, want it left out", p.PkgPath)
+		}
+	}
+	reached := map[string]bool{}
+	packages.Visit(got.Packages, nil, func(p *packages.Package) { reached[p.PkgPath] = true })
+	if !reached["example.com/m/node_modules/helper"] || !reached["example.com/m/node_modules/testonly"] {
+		t.Error("Load() reaches no example.com/m/node_modules/helper or testonly, want both read as the dependencies main and its test import")
+	}
+	counted := func(path string) bool {
+		return slices.ContainsFunc(got.Nested, func(c Consumer) bool {
+			return slices.ContainsFunc(c.Packages, func(p *packages.Package) bool { return p.PkgPath == path })
+		})
+	}
+	if !counted("example.com/m/node_modules/helper") || counted("example.com/m/node_modules/testonly") {
+		t.Errorf("Load() read the nested consumers %v, want example.com/m/node_modules/helper among them and no testonly", got.Nested)
+	}
+}
+
 // A directory a module file above it governs is a directory of that module, and a
 // module nested below it is no module of the target: the target is its own unit.
 func TestUnitsOfADirectoryAModuleAboveGovernsIsTheDirectory(t *testing.T) {
