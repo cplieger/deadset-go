@@ -39,7 +39,9 @@ type extent struct {
 }
 
 // consumerPositions renders the files of one loaded consumer against its own root,
-// the directory of its module, or against no root where its packages name none.
+// the directory of its module, or against no root where its packages name none. A
+// consumer reading a unit's own module holds no file a site falls in, since its
+// root holds the unit's files too.
 type consumerPositions struct {
 	pos    *inventory.Positions
 	id     string
@@ -58,9 +60,16 @@ func New(r *load.Result, inv *inventory.Inventory) (*Resolver, error) {
 		written: make(map[inventory.Offset]inventory.SymbolID, len(inv.Symbols)),
 		paths:   make(map[string]bool),
 	}
+	units := make(map[string]bool, len(r.Units))
+	for i := range r.Units {
+		units[r.Units[i].Path] = r.Units[i].Path != ""
+	}
 	for _, consumer := range r.Referencing() {
 		held := consumerPositions{id: consumer.ID, pos: rs.pos.Under("")}
-		if module := consumerModule(&consumer); module != nil {
+		switch module := consumerModule(&consumer); {
+		case module != nil && units[module.Path]:
+			held.pos = rs.pos.Under(module.Dir)
+		case module != nil:
 			held = consumerPositions{id: consumer.ID, pos: rs.pos.Under(module.Dir), rooted: true}
 		}
 		rs.consumers = append(rs.consumers, held)

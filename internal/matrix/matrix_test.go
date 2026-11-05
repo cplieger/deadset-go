@@ -62,6 +62,13 @@ func TestDeriveEmitsOneConfigurationPerAtomAndNeverTheirProduct(t *testing.T) {
 			wantUnbuilt: []string{"combined.go"},
 		},
 		{
+			name:        "a_package_the_build_compiles_from_a_left_out_or_ignored_directory_is_read",
+			archive:     "imported-outside.txtar",
+			wantIDs:     []string{"linux-amd64", "plan9-amd64", "windows-amd64", "linux-arm64"},
+			wantDerived: []string{"plan9-amd64", "windows-amd64", "linux-arm64"},
+			wantAtoms:   atomSet{OS: []string{"plan9", "windows"}, Arch: []string{"arm64"}},
+		},
+		{
 			name:      "no_path_the_toolchain_builds_nothing_from_is_read",
 			archive:   "walk-skips.txtar",
 			wantIDs:   []string{"linux-amd64"},
@@ -204,6 +211,7 @@ func TestDeriveAgreesWithTheToolchainOnEveryFileOfEveryConfiguration(t *testing.
 	archives := []string{
 		"three-platforms.txtar", "boolean.txtar", "custom-tags.txtar",
 		"vanished-dir.txtar", "legacy-lines.txtar", "walk-skips.txtar",
+		"imported-outside.txtar",
 	}
 	for _, archive := range archives {
 		t.Run(archive, func(t *testing.T) {

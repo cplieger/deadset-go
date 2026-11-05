@@ -48,14 +48,14 @@ func checkPrograms(ctx context.Context, fset *token.FileSet, from unitDir, pkgs 
 // script imports that pkgs do not hold is loaded from dir, so the script's own module
 // file decides it.
 func checkScripts(ctx context.Context, fset *token.FileSet, dir string, pkgs []*packages.Package, c *Configuration) []programFile {
-	return checkProgramFiles(ctx, fset, unitDir{dir: dir, workspace: workspaceOff}, pkgs, c, scriptPaths(dir, c))
+	return checkProgramFiles(ctx, fset, unitDir{dir: dir, workspace: workspaceOff}, pkgs, c, scriptPaths(dir, treeAt(dir), c))
 }
 
 // scriptPaths lists, sorted, every Go file below the module root dir, in no nested
-// module and no directory discovery skips, other than a test file, that
-// configuration c builds with or without the ignore tag and that declares a function
-// main with no receiver in package main, where another such file shares its directory.
-func scriptPaths(dir string, c *Configuration) []string {
+// module and no directory tree skips, other than a test file, that configuration c
+// builds with or without the ignore tag and that declares a function main with no
+// receiver in package main, where another such file shares its directory.
+func scriptPaths(dir string, tree ModuleTree, c *Configuration) []string {
 	without := cgoEnabledContext(c)
 	with := cgoEnabledContext(c)
 	with.BuildTags = append(with.BuildTags, buildconstraint.IgnoreTag)
@@ -64,7 +64,7 @@ func scriptPaths(dir string, c *Configuration) []string {
 		switch {
 		case err != nil:
 			return nil
-		case entry.IsDir() && path != dir && (goRow.Skips(entry.Name()) || IsModuleRoot(path)):
+		case entry.IsDir() && path != dir && (tree.Skips(path) || IsModuleRoot(path)):
 			return filepath.SkipDir
 		case !entry.IsDir() && isScript(&without, &with, path):
 			parent := filepath.Dir(path)

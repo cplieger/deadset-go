@@ -1,12 +1,19 @@
 Every path the toolchain builds nothing from, each naming a platform no
 configuration of this tree should ever carry: a nested module, the two reserved
-directory names, a directory whose name opens with a full stop and one whose
-name opens with an underscore, and a file whose name opens with an underscore.
+directory names, a node_modules directory, a directory whose name opens with a
+full stop and one whose name opens with an underscore, a file whose name opens
+with an underscore, and the directories the module file's ignore directive names,
+one from the module root and one at any depth.
 
 -- go.mod --
 module example.com/app
 
 go 1.27.0
+
+ignore (
+	./gen
+	assets
+)
 -- app.go --
 package app
 
@@ -31,6 +38,21 @@ package dep
 
 // Value is the dependency's value.
 const Value = 2
+-- web/node_modules/flatted/golang/flatted_dragonfly.go --
+package flatted
+
+// Value is the installed package's value.
+const Value = 5
+-- gen/gen_plan9.go --
+package gen
+
+// Value is the generated value.
+const Value = 6
+-- web/assets/asset_aix.go --
+package assets
+
+// Value is the asset's value.
+const Value = 7
 -- .hidden/hidden_netbsd.go --
 package hidden
 

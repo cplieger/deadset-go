@@ -22,9 +22,111 @@ const moduleFileName = "go.mod"
 // ErrModuleFile reports a module file that cannot be read or parsed.
 var ErrModuleFile = errors.New("load: unreadable module file")
 
-// goRow is the Go row of the Contract's language table, whose skipped
-// directories are the ones discovery never searches.
+// goRow is the Go row of the Contract's language table.
 var goRow, _ = vocab.LanguageRowOf(vocab.Go)
+
+// leavesOut reports whether a directory of that name, met below where a search or a
+// load starts, is one the Go program leaves out ([program.4]): one the Go row of the
+// language table skips.
+func leavesOut(name string) bool { return goRow.Skips(name) }
+
+// ModuleTree is the Go of one module ([program.4]): every directory below where a
+// walk of it starts but one [leavesOut] names and one the module ignores.
+type ModuleTree struct {
+	root             string
+	rooted, anywhere []string
+}
+
+// TreeOf is the tree of the module whose module file is f, which ignores nothing
+// where f is nil.
+func TreeOf(f *ModuleFile) ModuleTree {
+	if f == nil {
+		return ModuleTree{}
+	}
+	t := ModuleTree{root: filepath.Dir(f.Path)}
+	for _, ignore := range f.Syntax.Ignore {
+		if rel, rooted := strings.CutPrefix(ignore.Path, "./"); rooted {
+			t.rooted = append(t.rooted, enclosed(rel))
+		} else {
+			t.anywhere = append(t.anywhere, enclosed(ignore.Path))
+		}
+	}
+	return t
+}
+
+// Skips reports whether a walk of t skips the directory at path, met below where
+// it starts.
+func (t ModuleTree) Skips(path string) bool {
+	return leavesOut(filepath.Base(path)) || t.ignores(path)
+}
+
+// outside reports whether dir, strictly below the directory unit loads from, holds
+// a package of t's module that is none of unit's packages ([program.4]): a
+// directory between them, dir included, is one t skips, and none roots a module.
+func (t ModuleTree) outside(unit, dir string) bool {
+	if !below(unit, dir) {
+		return false
+	}
+	skipped := false
+	for at := dir; at != unit && filepath.Dir(at) != at; at = filepath.Dir(at) {
+		if IsModuleRoot(at) {
+			return false
+		}
+		skipped = skipped || t.Skips(at)
+	}
+	return skipped
+}
+
+// OutsideDir is the directory the import path names in t's module, whose module
+// path is module, where it holds a package outside unit's packages that the
+// module's build compiles all the same when a package of unit imports it
+// ([program.4]), and false for any other path.
+func (t ModuleTree) OutsideDir(module, unit, importPath string) (string, bool) {
+	rest, found := strings.CutPrefix(importPath, module)
+	if module == "" || !found || (rest != "" && rest[0] != '/') {
+		return "", false
+	}
+	dir := filepath.Join(t.root, filepath.FromSlash(rest))
+	return dir, t.outside(unit, dir)
+}
+
+// ignores reports whether the module file's ignore directive names the directory at
+// path, as the go command matches it: a ./ path is a prefix of path's elements below
+// the module root, any other path a run of them.
+func (t ModuleTree) ignores(path string) bool {
+	if t.root == "" || !below(t.root, path) {
+		return false
+	}
+	dir := enclosed(unitPrefix(t.root, path))
+	return slices.ContainsFunc(t.rooted, func(p string) bool { return strings.HasPrefix(dir, p) }) ||
+		slices.ContainsFunc(t.anywhere, func(p string) bool { return strings.Contains(dir, p) })
+}
+
+// enclosed is the path p in forward slashes between a leading and a trailing slash,
+// so a prefix or a substring of one enclosed path in another ends at whole elements.
+func enclosed(p string) string {
+	p = filepath.ToSlash(p)
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	if !strings.HasSuffix(p, "/") {
+		p += "/"
+	}
+	return p
+}
+
+// treeAt is the tree of the module the toolchain run in dir reads, which ignores
+// nothing where that module file cannot be read: the load reports that file.
+func treeAt(dir string) ModuleTree {
+	f, _ := readModuleFile(dir)
+	return TreeOf(f)
+}
+
+// leftOutBelow reports whether path lies strictly below dir inside a directory
+// [leavesOut] names, path's own last element included.
+func leftOutBelow(dir, path string) bool {
+	return slices.ContainsFunc(strings.Split(unitPrefix(dir, path), "/"), leavesOut)
+}
 
 // Topology is what every configuration of one run loads, decided once from the
 // scope and the file system: the units of the target, the modules below it that
@@ -154,7 +256,7 @@ func discoverUnits(ctx context.Context, dirs []string) ([]discoveredModule, erro
 			return nil, err
 		}
 		if unit.Path != "" {
-			if unit.Underscored, err = underscoredPackages(ctx, dir); err != nil {
+			if unit.Underscored, err = underscoredPackages(ctx, dir, TreeOf(unit.File)); err != nil {
 				return nil, fmt.Errorf("load: find the packages under %s: %w", dir, err)
 			}
 		}
@@ -168,8 +270,7 @@ func discoverUnits(ctx context.Context, dirs []string) ([]discoveredModule, erro
 // workspace listing it lists; another module nested below it is a dependency or
 // nothing. A directory a module file above it governs is its own one unit. Any
 // other target is every module rooted below it, in directory order, searching no
-// directory the Go row of the language table skips, and holds no unit where it
-// holds none.
+// directory [leavesOut] names, and holds no unit where it holds none.
 func unitDirs(ctx context.Context, target string) ([]string, error) {
 	if IsModuleRoot(target) {
 		return withMembers(ctx, target)
@@ -186,7 +287,7 @@ func unitDirs(ctx context.Context, target string) ([]string, error) {
 			return ctx.Err()
 		case !entry.IsDir():
 			return nil
-		case path != target && goRow.Skips(entry.Name()):
+		case path != target && leavesOut(entry.Name()):
 			return fs.SkipDir
 		case IsModuleRoot(path):
 			dirs = append(dirs, path)
@@ -209,7 +310,7 @@ func holdsProgram(ctx context.Context, target string, dirs []string) error {
 		))
 	}
 	for _, dir := range dirs {
-		found, err := holdsGoFile(ctx, dir)
+		found, err := holdsGoFile(ctx, dir, treeAt(dir))
 		if err != nil {
 			return fmt.Errorf("load: find the Go files under %s: %w", dir, err)
 		}
@@ -223,9 +324,9 @@ func holdsProgram(ctx context.Context, target string, dirs []string) error {
 	))
 }
 
-// holdsGoFile reports whether the module rooted at dir holds a Go source file of
-// the Go row, in a directory the underscored-package search enters.
-func holdsGoFile(ctx context.Context, dir string) (bool, error) {
+// holdsGoFile reports whether the module tree at dir holds a Go source file of the
+// Go row, in a directory the underscored-package search enters.
+func holdsGoFile(ctx context.Context, dir string, tree ModuleTree) (bool, error) {
 	found := false
 	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
 		switch {
@@ -233,7 +334,7 @@ func holdsGoFile(ctx context.Context, dir string) (bool, error) {
 			return err
 		case ctx.Err() != nil:
 			return ctx.Err()
-		case entry.IsDir() && path != dir && (!searchedBelowUnderscore(entry.Name()) || IsModuleRoot(path)):
+		case entry.IsDir() && path != dir && underscoredSkips(tree, path):
 			return fs.SkipDir
 		case !entry.IsDir() && goRow.Sources(entry.Name()):
 			found = true
@@ -484,10 +585,11 @@ func unitPrefix(target, dir string) string {
 }
 
 // underscoredPackages is the pattern of every directory of the module rooted at dir
-// that holds a non-test Go file below a directory an underscore starts, outside every
-// module below dir, in directory order. The go tool's wildcard matches none of them, even
-// with the underscore directory as its root, so each is named by its own path.
-func underscoredPackages(ctx context.Context, dir string) ([]string, error) {
+// that holds a non-test Go file below a directory an underscore starts, outside
+// every module below dir and every directory the module tree ignores, in directory
+// order. The go tool's wildcard matches none of them, even with the underscore
+// directory as its root, so each is named by its own path.
+func underscoredPackages(ctx context.Context, dir string, tree ModuleTree) ([]string, error) {
 	var patterns []string
 	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
 		switch {
@@ -497,7 +599,7 @@ func underscoredPackages(ctx context.Context, dir string) ([]string, error) {
 			return ctx.Err()
 		}
 		if entry.IsDir() {
-			if !searchedBelowUnderscore(entry.Name()) || IsModuleRoot(path) {
+			if underscoredSkips(tree, path) {
 				return fs.SkipDir
 			}
 			return nil
@@ -515,12 +617,19 @@ func underscoredPackages(ctx context.Context, dir string) ([]string, error) {
 }
 
 // searchedBelowUnderscore reports whether the nested-module and underscored-package
-// searches enter a directory of that name: one the Go row of the language table
-// does not skip, or one an underscore starts. The go tool's wildcard skips an
+// searches enter a directory of that name: one [leavesOut] does not name, or one
+// an underscore starts. The go tool's wildcard skips an
 // underscore directory, and a module of its own below one, an example module
 // among them, still builds against the target.
 func searchedBelowUnderscore(name string) bool {
-	return strings.HasPrefix(name, "_") || !goRow.Skips(name)
+	return strings.HasPrefix(name, "_") || !leavesOut(name)
+}
+
+// underscoredSkips reports whether the walk of one module's underscored packages
+// skips the directory at path: one it does not search below an underscore, one the
+// module ignores, or another module's root.
+func underscoredSkips(tree ModuleTree, path string) bool {
+	return !searchedBelowUnderscore(filepath.Base(path)) || tree.ignores(path) || IsModuleRoot(path)
 }
 
 // underscoredSource reports whether the relative path rel names a non-test Go file

@@ -6,6 +6,8 @@ import (
 	"maps"
 	"math"
 	"os"
+	"os/exec"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -124,7 +126,7 @@ func TestLoadReadsTheUnderscoredPackagesOfTheModuleAsANestedConsumer(t *testing.
 		"_examples/own/main.go":        "package main\n\nfunc main() {}\n",
 		"testdata/_input/in.go":        "package in\n",
 	})
-	patterns, err := underscoredPackages(t.Context(), root)
+	patterns, err := underscoredPackages(t.Context(), root, treeAt(root))
 	if want := []string{"./_examples/_nested/x", "./_examples/absent", "./_examples/limits", "./_examples/stale"}; err != nil || !slices.Equal(patterns, want) {
 		t.Errorf("underscoredPackages() = %v, %v, want %v, nil", patterns, err, want)
 	}
@@ -395,6 +397,33 @@ func TestDiscoveryLeavesEveryDirectoryTheGoRowSkipsUnsearched(t *testing.T) {
 	}
 }
 
+// A module ignores the directories its module file's ignore directive names exactly
+// where the go command's ./... matches no package: a ./ path from the module root,
+// any other path at any depth, each with every directory below it.
+func TestModuleTreeIgnoresTheDirectoriesTheGoCommandIgnores(t *testing.T) {
+	stableToolchain(t)
+	files := map[string]string{"go.mod": "module example.com/m\n\ngo 1.27.1\n\nignore (\n\t./gen\n\tassets\n\ta/b\n)\n"}
+	dirs := []string{"", "gen", "gen/x", "x/gen", "generated", "web/assets", "web/assets/x", "myassets", "a/b", "x/a/b/c", "a/bc", "b"}
+	for _, dir := range dirs {
+		files[path.Join(dir, "p.go")] = "package p\n"
+	}
+	root := writeTree(t, files)
+	list := exec.CommandContext(t.Context(), "go", "list", "-f", "{{.Dir}}", "./...")
+	list.Dir = root
+	out, err := list.Output()
+	if err != nil {
+		t.Fatalf("Setup: go list ./... = %v", err)
+	}
+	listed := strings.Fields(string(out))
+	tree := treeAt(root)
+	for _, dir := range dirs {
+		at := filepath.Join(root, filepath.FromSlash(dir))
+		if got, want := tree.ignores(at), !slices.Contains(listed, at); got != want {
+			t.Errorf("ignores(%q) = %t, want the go command's %t", dir, got, want)
+		}
+	}
+}
+
 // A workspace member is a module root of its own, so a reader whose directory holds
 // no module file is one whose module file cannot be read, whatever module file a
 // directory above it holds.
@@ -413,13 +442,15 @@ func TestDiscoverReadsAReaderModuleFileInItsOwnDirectoryAlone(t *testing.T) {
 }
 
 // A target that holds no module and none above governs, or whose modules hold no Go
-// file outside a skipped directory and a nested module, holds no program: discovery
-// ends with the setup failure no-program, which the run reports as a setup class.
+// file outside a skipped directory, a directory the module ignores and a nested
+// module, holds no program: discovery ends with the setup failure no-program, which
+// the run reports as a setup class.
 func TestDiscoverRefusesATargetHoldingNoProgramAsNoProgram(t *testing.T) {
 	tests := map[string]map[string]string{
 		"no module":           {"tools/x.go": "package main\n", "src/index.ts": "export {};\n"},
 		"a module with no Go": {"go.mod": "module example.com/empty\n\ngo 1.27.1\n", "testdata/x.go": "package x\n", "inner/go.mod": "module example.com/inner\n\ngo 1.27.1\n", "inner/x.go": "package inner\n"},
 		"skipped Go files":    {"go.mod": "module example.com/hidden\n\ngo 1.27.1\n", "_hidden.go": "package hidden\n", "_examples/.x.go": "package main\n"},
+		"ignored Go files":    {"go.mod": "module example.com/ignored\n\ngo 1.27.1\n\nignore ./gen\n", "gen/x.go": "package gen\n", "gen/_examples/main.go": "package main\n\nfunc main() {}\n"},
 	}
 	for name, files := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -492,9 +523,12 @@ func TestDiscoveryStopsWhenCancelledAfterItBegins(t *testing.T) {
 			_, err := (&Topology{Root: module}).nestedModules(ctx, nil)
 			return err
 		},
-		"underscoredPackages": func(ctx context.Context) error { _, err := underscoredPackages(ctx, module); return err },
-		"readers":             func(ctx context.Context) error { _, err := top.readers(ctx, nil); return err },
-		"declaredConsumers":   func(ctx context.Context) error { _, err := declaredConsumers(ctx, consumers); return err },
+		"underscoredPackages": func(ctx context.Context) error {
+			_, err := underscoredPackages(ctx, module, treeAt(module))
+			return err
+		},
+		"readers":           func(ctx context.Context) error { _, err := top.readers(ctx, nil); return err },
+		"declaredConsumers": func(ctx context.Context) error { _, err := declaredConsumers(ctx, consumers); return err },
 	} {
 		counted := &stagedContext{Context: t.Context(), live: math.MaxInt}
 		if err := search(counted); err != nil {

@@ -32,8 +32,9 @@ type Result struct {
 
 	// Nested holds one entry per module that is no declared consumer and whose
 	// references count as a declared consumer's do: each nested module of the
-	// topology, then each unit's packages below an underscore directory, then each
-	// workspace reader.
+	// topology, then each unit's packages below an underscore directory, then the
+	// packages each unit imports from outside its packages, then each workspace
+	// reader.
 	Nested []Consumer
 
 	// Dropped holds every walked unit, nested module and reader that did not load.

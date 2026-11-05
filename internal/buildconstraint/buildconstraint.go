@@ -123,13 +123,6 @@ func OnlyUnderIgnore(expression constraint.Expr) bool {
 	return expression != nil && Tags(expression)[IgnoreTag] && !HoldsWith(expression, IgnoreTag, false)
 }
 
-// SkipsDir reports whether the toolchain builds nothing below a directory of that
-// name: one it reserves for test inputs or vendored sources, or one whose name
-// opens with a character that keeps every path under it out of a package.
-func SkipsDir(name string) bool {
-	return name == "" || name[0] == '.' || name[0] == '_' || name == "testdata" || name == "vendor"
-}
-
 // IsGoFile reports whether a file of that name is a Go source file the toolchain
 // reads. A name opening with an underscore or a full stop is one it ignores.
 func IsGoFile(name string) bool {

@@ -1,0 +1,76 @@
+A module whose production code imports a package below node_modules and one in a
+directory its ignore directive names, and the ignored package imports a second
+node_modules package. The module's build compiles each of them, so the platform
+atoms of their files derive configurations: windows from the first, arm64 from
+the ignored package and plan9 from the second. A test file of an imported
+package, a package only a test file imports and one nothing imports name a
+platform no configuration of this tree should carry.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+
+ignore ./gen
+-- main.go --
+package main
+
+import (
+	"example.com/app/gen"
+	"example.com/app/node_modules/helper"
+)
+
+func main() {
+	helper.Run()
+	gen.Run()
+}
+-- main_test.go --
+package main
+
+import (
+	"testing"
+
+	"example.com/app/node_modules/testonly"
+)
+
+func TestMain(t *testing.T) { testonly.Run() }
+-- node_modules/helper/helper.go --
+package helper
+
+// Run runs the platform's own code.
+func Run() { run() }
+-- node_modules/helper/helper_windows.go --
+package helper
+
+func run() {}
+-- node_modules/helper/helper_other.go --
+//go:build !windows
+
+package helper
+
+func run() {}
+-- node_modules/helper/helper_freebsd_test.go --
+package helper
+-- node_modules/testonly/testonly_aix.go --
+package testonly
+
+// Run runs nothing.
+func Run() {}
+-- node_modules/unused/unused_netbsd.go --
+package unused
+-- gen/gen.go --
+package gen
+
+import "example.com/app/node_modules/deep"
+
+// Run runs the generated code.
+func Run() { deep.Run() }
+-- gen/gen_arm64.go --
+package gen
+-- node_modules/deep/deep.go --
+package deep
+
+// Run runs nothing.
+func Run() {}
+-- node_modules/deep/deep_plan9.go --
+package deep

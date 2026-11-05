@@ -153,6 +153,52 @@ func TestReferencesRecordsWhatALoadedConsumerReferences(t *testing.T) {
 	}
 }
 
+func TestReferencesRendersAUnitsOwnConsumerAgainstItsModuleRoot(t *testing.T) {
+	dir := extractArchive(t, "unit-own-consumers.txtar", mustReadTestdata(t, "unit-own-consumers.txtar"))
+
+	// A reference from the module's own packages outside its loaded ones names its
+	// file relative to the module root, as any consumer's does, wherever the target
+	// root lies against that module.
+	cases := map[string]struct {
+		target, module string
+		want           []string
+	}{
+		"module at the target root": {
+			target: "rooted", module: "example.com/app",
+			want: []string{"Back node_modules/helper/helper.go", "Shown _examples/demo/main.go"},
+		},
+		"module below a walked target": {
+			target: "walked", module: "example.com/app",
+			want: []string{"Back node_modules/helper/helper.go", "Shown _examples/demo/main.go"},
+		},
+		"module above the target": {
+			target: "governed/pkg", module: "example.com/m",
+			want: []string{"Shown pkg/_examples/demo/main.go"},
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			doc := scope.Document{Target: scope.Module{Path: filepath.Join(dir, filepath.FromSlash(tc.target))}}
+			result, err := load.Load(t.Context(), testsupport.Topology(t.Context(), t, doc), &load.Configuration{ID: "linux-amd64", OS: "linux", Arch: "amd64"})
+			if err != nil {
+				t.Fatalf("Setup: load %s: %v", tc.target, err)
+			}
+			symbols, refs, _ := passes(t, &result, doc.Target.Path)
+			names := named(symbols)
+			var got []string
+			for _, r := range refs {
+				if r.Consumer == tc.module {
+					got = append(got, names[r.To]+" "+r.Pos.Filename)
+				}
+			}
+			slices.Sort(got)
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("References(%s) recorded %q from the module's own consumer, want %q", tc.target, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSweepHoldsWhatAConsumerReferencesLiveAndReportsTheRest(t *testing.T) {
 	dir := extractArchive(t, "consumer.txtar", mustReadTestdata(t, "consumer.txtar"))
 

@@ -15,12 +15,16 @@
 package matrix
 
 import (
+	"errors"
 	"fmt"
 	"go/build/constraint"
+	"go/parser"
+	"go/token"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/buildconstraint"
@@ -57,57 +61,120 @@ func Derive(top *load.Topology) ([]load.Configuration, error) {
 func derive(top *load.Topology, host *load.Configuration) ([]load.Configuration, error) {
 	var files []constraint.Expr
 	for i := range top.Units {
-		held, err := collect(top.Root, top.Units[i].Dir)
+		unit := &top.Units[i]
+		err := collect(top.Root, unit.Dir, unit.Path, unit.File, func(_ string, expression constraint.Expr) {
+			files = append(files, expression)
+		})
 		if err != nil {
 			return nil, err
 		}
-		files = append(files, held...)
 	}
 	return configurationsOf(host, atomsOf(files)), nil
 }
 
-// collect reads the build constraint of every Go file in the module tree rooted
-// at unit, in the order the walk meets them, nil for a file none decides; a
-// refusal names the file relative to root.
+// collector reads the Go files of one unit's module tree.
+type collector struct {
+	root, unit, module string
+	tree               load.ModuleTree
+	visit              func(path string, expression constraint.Expr)
+	queued             map[string]bool
+	queue              []string
+}
+
+// collect hands visit the path and build constraint, nil where none decides it, of
+// every Go file of the tree of module file f below the directory unit of module, in
+// the order the walk meets them, then of every file other than a test file of each
+// package outside the unit's packages ([load.ModuleTree.OutsideDir]) that a file
+// it read other than a test file imports, under any constraint but the ignore tag
+// alone. A refusal names the file relative to root.
 //
 // The walk is the toolchain's own reading of a directory rather than a loaded
 // package set, which is what lets it see a directory whose every file one
 // configuration excludes: such a directory holds no package for that
 // configuration and a load reports nothing at all for it.
-func collect(root, unit string) ([]constraint.Expr, error) {
-	var files []constraint.Expr
+func collect(root, unit, module string, f *load.ModuleFile, visit func(path string, expression constraint.Expr)) error {
+	tree := load.TreeOf(f)
+	c := &collector{root: root, unit: unit, module: module, tree: tree, visit: visit, queued: make(map[string]bool)}
 	walk := func(path string, entry fs.DirEntry, err error) error {
 		switch {
 		case err != nil:
 			return err
-		case entry.IsDir() && path != unit && (buildconstraint.SkipsDir(entry.Name()) || load.IsModuleRoot(path)):
+		case entry.IsDir() && path != unit && (tree.Skips(path) || load.IsModuleRoot(path)):
 			return fs.SkipDir
 		case entry.IsDir() || !buildconstraint.IsGoFile(entry.Name()):
 			return nil
 		}
-		expression, err := constraintOf(root, path)
-		files = append(files, expression)
-		return err
+		return c.read(path)
 	}
 	if err := filepath.WalkDir(unit, walk); err != nil {
-		return nil, fmt.Errorf("read the build constraints under %s: %w", unit, err)
+		return fmt.Errorf("read the build constraints under %s: %w", unit, err)
 	}
-	return files, nil
+	for len(c.queue) > 0 {
+		dir := c.queue[0]
+		c.queue = c.queue[1:]
+		if err := c.readPackage(dir); err != nil {
+			return fmt.Errorf("read the build constraints under %s: %w", dir, err)
+		}
+	}
+	return nil
 }
 
-// constraintOf is the build constraint of the Go file at path, a refusal naming it
-// relative to root.
-func constraintOf(root, path string) (constraint.Expr, error) {
+// readPackage reads every Go file of the directory dir other than a test file. A
+// directory that does not exist holds none: the load reports the import.
+func (c *collector) readPackage(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && buildconstraint.IsGoFile(entry.Name()) && !isTestFile(entry.Name()) {
+			if err := c.read(filepath.Join(dir, entry.Name())); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// read records the build constraint of the Go file at path and queues each package
+// outside the unit's packages it imports. A file whose imports do not parse queues
+// what parsed: the load reports that file.
+func (c *collector) read(path string) error {
 	content, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	expression, err := buildconstraint.Of(filepath.Base(path), content)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", load.RelativeSlash(root, path), err)
+		return fmt.Errorf("%s: %w", load.RelativeSlash(c.root, path), err)
 	}
-	return expression, nil
+	c.visit(path, expression)
+	if isTestFile(path) || buildconstraint.OnlyUnderIgnore(expression) {
+		return nil
+	}
+	parsed, _ := parser.ParseFile(token.NewFileSet(), path, content, parser.ImportsOnly)
+	if parsed == nil {
+		return nil
+	}
+	for _, spec := range parsed.Imports {
+		imported, err := strconv.Unquote(spec.Path.Value)
+		if err != nil {
+			continue
+		}
+		if dir, outside := c.tree.OutsideDir(c.module, c.unit, imported); outside && !c.queued[dir] {
+			c.queued[dir] = true
+			c.queue = append(c.queue, dir)
+		}
+	}
+	return nil
 }
+
+// isTestFile reports whether the Go file at path is a test file, which only the
+// test binary of its own package compiles.
+func isTestFile(path string) bool { return strings.HasSuffix(path, "_test.go") }
 
 // atomsOf classifies every tag the files name onto the axis it belongs to. A test
 // file's tags count as any file's. A file built only under the ignore tag names no
