@@ -7,8 +7,8 @@
   },
   "result": "pass",
   "totals": {
-    "fixtures": 218,
-    "pass": 210,
+    "fixtures": 224,
+    "pass": 216,
     "gap": 0,
     "fail": 0,
     "pending": 8
@@ -5638,6 +5638,49 @@
       "unexpected": []
     },
     {
+      "fixture": "module-build-compiles-every-platform-of-an-imported-package",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Any",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "PlanOnly",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Unused",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "WinOnly",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
       "fixture": "module-directive-suppression",
       "result": "pass",
       "expectations": [
@@ -5664,6 +5707,156 @@
         },
         {
           "symbol": "RequirementEntry",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "module-ignore-directive-leaves-out-directories",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "All",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Asset",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Gen",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Helper",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "symbol_kind": "method",
+            "confidence": "possible",
+            "reachability_class": "possible",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Legacy",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "symbol_kind": "method",
+            "confidence": "possible",
+            "reachability_class": "possible",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Wired",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "module-packages-leave-out-skipped-directories",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Cached",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Callback",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Deep",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Fixture",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Imported",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "ImportedSpare",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Installed",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Underscored",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Unused",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Used",
           "result": "pass",
           "actual": {
             "report": "none"
@@ -13276,6 +13469,78 @@
       "unexpected": []
     },
     {
+      "fixture": "walked-module-imports-a-node-modules-package",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Back",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Named",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "symbol_kind": "function",
+            "confidence": "possible",
+            "reachability_class": "possible",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Shown",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Spare",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "walked-module-leaves-out-node-modules",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "F",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "symbol_kind": "function",
+            "confidence": "possible",
+            "reachability_class": "possible",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "ToJSON",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
       "fixture": "walked-module-not-loaded",
       "result": "pass",
       "expectations": [
@@ -13309,6 +13574,43 @@
             "symbol_kind": "function",
             "confidence": "certain",
             "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "workspace-member-in-a-left-out-directory",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "R",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "symbol_kind": "function",
+            "confidence": "possible",
+            "reachability_class": "possible",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "T",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "symbol_kind": "function",
+            "confidence": "possible",
+            "reachability_class": "possible",
             "liveness_relation": "reference-counting"
           },
           "suppression": {
