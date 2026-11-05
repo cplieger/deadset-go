@@ -1,0 +1,31 @@
+One interface is asserted twice in main.go. One directive above the
+interface names both assertions, so neither is reported and the directive is
+one suppression in effect.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() { _ = impl{}.write() + other{}.write() }
+
+//deadset:ignore DS1203 -- wanted
+type writer interface {
+	write() int
+}
+
+type impl struct{}
+
+func (impl) write() int { return 2 }
+
+type other struct{}
+
+func (other) write() int { return 3 }
+
+var _ writer = impl{}
+
+var _ writer = other{}

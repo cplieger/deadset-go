@@ -224,9 +224,10 @@ func References(r *load.Result, rs *resolve.Resolver, symbols []inventory.Symbol
 }
 
 // byUse orders two references by the module that made them, the target's own
-// first, then by position, the symbol referenced, the declaration referencing it,
-// the kind and the rule: a total order, because one identifier never references one
-// symbol twice from one declaration, and a position is unique within one module.
+// first, then by rendered position, the written site, the symbol referenced, the
+// declaration referencing it, the kind and the rule: a total order, because one
+// identifier never references one symbol twice from one declaration, and a line
+// directive can render two sites at one position but never write them at one byte.
 //
 //nolint:gocritic // slices.SortFunc fixes a comparator's parameters to values.
 func byUse(a, b Reference) int {
@@ -234,6 +235,9 @@ func byUse(a, b Reference) int {
 		return c
 	}
 	if c := inventory.ByPosition(a.Pos, b.Pos); c != 0 {
+		return c
+	}
+	if c := cmp.Or(strings.Compare(a.Site.File, b.Site.File), cmp.Compare(a.Site.At, b.Site.At)); c != 0 {
 		return c
 	}
 	if c := strings.Compare(string(a.To), string(b.To)); c != 0 {
@@ -257,7 +261,7 @@ type referencePass struct {
 	spans       map[token.Pos]ast.Node // the statement or element a write's deletion deletes, by the written identifier
 	callees     map[token.Pos]bool     // the identifiers a call expression names as its callee
 	idOf        func(*packages.Package) load.PackageID
-	instances   *instantiations           // the type arguments a layout read lays a type parameter out as
+	instances   *Instantiations           // the type arguments a layout read lays a type parameter out as
 	literals    literalStructs            // the struct type literals walked, by identity
 	consumer    string                    // the module path of the consumer being walked, empty while the target is
 	file        inventory.SymbolID        // the symbol of the file being walked, empty outside the inventory
@@ -283,7 +287,7 @@ func newReferencePass(r *load.Result, rs *resolve.Resolver, symbols []inventory.
 		callees:   make(map[token.Pos]bool),
 		idOf:      r.ID,
 		pkgKeys:   r.TypesIDs(),
-		instances: instantiationsOf(r.Packages),
+		instances: instantiationsOf(walked(r), rs.Positions()),
 	}
 	for i := range symbols {
 		if s := &symbols[i]; s.Kind == inventory.KindPackage {
@@ -291,6 +295,15 @@ func newReferencePass(r *load.Result, rs *resolve.Resolver, symbols []inventory.
 		}
 	}
 	return p
+}
+
+// walked is every package the pass walks: the target's, then each loaded consumer's.
+func walked(r *load.Result) []*packages.Package {
+	pkgs := slices.Clone(r.Packages)
+	for _, consumer := range r.Referencing() {
+		pkgs = append(pkgs, consumer.Packages...)
+	}
+	return pkgs
 }
 
 // walkConsumer walks every package of one loaded consumer, recording the
@@ -311,7 +324,7 @@ func (p *referencePass) walkConsumer(at int, consumer *load.Consumer) error {
 // walk visits every file of every variant of one module, in one order, and
 // returns the first failure the walk met.
 func (p *referencePass) walk(pkgs []*packages.Package) error {
-	p.literals.add(pkgs, p.at.Fset)
+	p.literals.add(pkgs, p.at)
 	for pkg, f := range inventory.Sources(pkgs, p.at.Fset) {
 		if err := p.walkFile(pkg, f); err != nil {
 			return err
@@ -322,8 +335,7 @@ func (p *referencePass) walk(pkgs []*packages.Package) error {
 
 // walkFile walks one source file under the variant that compiles it first.
 func (p *referencePass) walkFile(pkg *packages.Package, f *ast.File) error {
-	position, err := p.at.Render(f.FileStart)
-	if err != nil {
+	if _, err := p.at.Render(f.FileStart); err != nil {
 		return err
 	}
 
@@ -336,7 +348,7 @@ func (p *referencePass) walkFile(pkg *packages.Package, f *ast.File) error {
 	if p.consumer == "" {
 		p.file, _ = p.resolve.At(f.FileStart)
 	}
-	_, p.test = inventory.IsTestFile(position.Filename)
+	p.test = p.at.InTestFile(f.FileStart)
 	switch {
 	case p.test:
 		p.testFiles++

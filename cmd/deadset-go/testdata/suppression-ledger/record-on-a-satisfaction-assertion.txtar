@@ -1,0 +1,36 @@
+A satisfaction assertion's finding carries the reference of the interface it
+names. A directive above the assertion binds the blank declaration, and an
+entry naming the interface and the assertion's file binds the interface; each
+names the assertion's finding by its reference and path, so each is in effect.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- deadset-ignore.json --
+{"ignore": [{"code": "DS1203", "symbol": "go://example.com/app#writer", "path": "main.go", "reason": "wanted"}]}
+-- main.go --
+package main
+
+func main() { _ = impl{}.check() + impl{}.write() }
+
+type checker interface {
+	check() int
+}
+
+type writer interface {
+	write() int
+}
+
+type impl struct{}
+
+func (impl) check() int { return 1 }
+
+func (impl) write() int { return 2 }
+
+//deadset:ignore DS1203 -- wanted
+var _ checker = impl{}
+
+var _ writer = impl{}

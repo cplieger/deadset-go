@@ -1,0 +1,33 @@
+An interface declared in z.go is asserted in z.go and in a.go, which sorts
+first. A directive above the interface names the assertion in its own file,
+so the one in a.go is still reported.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- z.go --
+package main
+
+func main() { _ = impl{}.write() + other{}.write() }
+
+//deadset:ignore DS1203 -- wanted
+type writer interface {
+	write() int
+}
+
+type impl struct{}
+
+func (impl) write() int { return 2 }
+
+var _ writer = impl{}
+-- a.go --
+package main
+
+type other struct{}
+
+func (other) write() int { return 3 }
+
+var _ writer = other{}

@@ -174,7 +174,7 @@ func (o *opaqueCheck) attempt(g cgoGroup, accept []*ast.File) ([]replacement, ma
 	for _, p := range g.pkgs {
 		checked, info, errs := o.check(p, accept)
 		for _, e := range errs {
-			at := o.fset.Position(e.Pos).Filename
+			at := o.fset.PositionFor(e.Pos, false).Filename
 			switch {
 			case o.atOpaqueImport(e.Pos):
 			case accepted[at]:

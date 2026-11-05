@@ -256,3 +256,30 @@ func TestFactsCapTheFilesALoadedConsumersProgramServingReflectionLinks(t *testin
 		"Item.Number": "descriptor-exposure", "Envelope": "descriptor-exposure", "Aside.N": "",
 	})
 }
+
+// A loaded consumer converting one of the target's generated descriptors exposes
+// that file's consumers, though the consumer type-checks the file in its own parse.
+func TestFactsCapTheConsumersOfTheFileWhoseDescriptorALoadedConsumerConverts(t *testing.T) {
+	files := make(map[string]string)
+	for name, data := range archiveFiles(t, "schema-reads/caps.txtar") {
+		if name != "main.go" {
+			files["target/"+name] = data
+		}
+	}
+	files["target/"+repositoryDocument] = `{"target": {"kind": "library"}, "consumers": {"complete": true}, "analysis": {"min_confidence": "possible"}}`
+	files["consumer/go.mod"] = "module example.com/consumer\n\ngo 1.27.0\n\n" +
+		"require (\n\texample.com/app v0.0.0\n\tgoogle.golang.org/grpc v0.0.0\n\tgoogle.golang.org/protobuf v0.0.0\n)\n\n" +
+		"replace (\n\texample.com/app => ../target\n\tgoogle.golang.org/grpc v0.0.0 => ../target/grpc\n" +
+		"\tgoogle.golang.org/protobuf v0.0.0 => ../target/protobuf\n)\n"
+	files["consumer/main.go"] = "package main\n\nimport (\n\t\"fmt\"\n\n\tv2 \"example.com/app/gen/v2\"\n" +
+		"\t\"google.golang.org/protobuf/reflect/protodesc\"\n)\n\n" +
+		"func main() { fmt.Println(protodesc.ToFileDescriptorProto(v2.File_v2_aside_proto)) }\n"
+	files["scope.json"] = `{
+  "target": {"id": "example.com/app", "role": "target", "path": "target"},
+  "consumers": [{"id": "example.com/consumer", "role": "consumer", "path": "consumer"}]
+}
+`
+	wantCaps(t, consumerCaps(analyzeScopeWithFacts(t, files)), map[string]string{
+		"Aside.N": "descriptor-exposure", "Aside.GetN": "descriptor-exposure", "Item.Number": "",
+	})
+}

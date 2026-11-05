@@ -9,6 +9,8 @@ import (
 	"go/types"
 	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
@@ -94,7 +96,7 @@ func (rs *Resolver) renders(pkgs []*packages.Package) error {
 	var failed token.Position
 	for pos := range defined(pkgs) {
 		if _, err := rs.pos.Render(pos); err != nil {
-			if at := rs.pos.Fset.Position(pos); failure == nil || inventory.ByPosition(at, failed) < 0 {
+			if at := rs.pos.Fset.PositionFor(pos, false); failure == nil || inventory.ByPosition(at, failed) < 0 {
 				failure, failed = err, at
 			}
 		}
@@ -255,18 +257,109 @@ func (rs *Resolver) At(pos token.Pos) (inventory.SymbolID, bool) {
 // Inside reports whether pos is written in a file under the target root, which is
 // what Render can render. It reads no source.
 func (rs *Resolver) Inside(pos token.Pos) bool {
-	q := rs.pos.Fset.Position(pos)
+	q := rs.pos.Fset.PositionFor(pos, false)
 	return q.IsValid() && rs.pos.Relative(q.Filename) != ""
 }
 
-// TypeKey spells t as one type's identity across the variants of a load: the
-// spelling types.TypeString gives, each package qualified by its import path and
-// the directory its declarations are read from. Two readings of one package's
-// files spell alike, and two packages of one import path read from two
-// directories, two modules of the target declaring one module path among them,
-// do not.
+// TypeKey spells t as one type's identity across the variants of a load: [Spell]'s
+// spelling, each package qualified by its import path and the directory its
+// declarations are read from, and each function-local type and type parameter by
+// the file and byte it is declared at. Two readings of one package's files spell
+// alike, and two packages of one import path read from two directories, two
+// modules of the target declaring one module path among them, do not.
 func (rs *Resolver) TypeKey(t types.Type) string {
-	return types.TypeString(t, rs.PackageKey)
+	return spell(t, rs.PackageKey, func(obj types.Object) string {
+		at := rs.pos.Offset(obj.Pos())
+		return at.File + ":" + strconv.Itoa(at.At)
+	})
+}
+
+// Spell spells t as one type's identity among the types of one type check: the
+// spelling types.TypeString gives with q, which names a function-local type or a
+// type parameter by its name alone, followed by the position each such name's
+// declaration is parsed at.
+func Spell(t types.Type, q types.Qualifier) string {
+	return spell(t, q, func(obj types.Object) string { return strconv.Itoa(int(obj.Pos())) })
+}
+
+// spell is types.TypeString(t, q) followed by place of each declaration it names
+// by its name alone, in the order the walk meets them. Two types the string spells
+// alike have one shape, so the walk meets their names in one order.
+func spell(t types.Type, q types.Qualifier, place func(types.Object) string) string {
+	spelled := types.TypeString(t, q)
+	var places []string
+	localNames(t, func(obj types.Object) { places = append(places, place(obj)) })
+	if len(places) == 0 {
+		return spelled
+	}
+	return spelled + "\x00" + strings.Join(places, "\x00")
+}
+
+// localNames calls found with every function-local type and type parameter t's
+// spelling names, walking the parts types.TypeString writes: a defined type or an
+// alias by its name and type arguments alone, a type parameter by its name.
+func localNames(t types.Type, found func(types.Object)) {
+	switch t := t.(type) {
+	case *types.Named:
+		nameOf(t.Obj(), t.TypeArgs(), found)
+	case *types.Alias:
+		nameOf(t.Obj(), t.TypeArgs(), found)
+	case *types.TypeParam:
+		found(t.Obj())
+	case *types.Signature:
+		for p := range t.TypeParams().TypeParams() {
+			found(p.Obj())
+			localNames(p.Constraint(), found)
+		}
+		localNames(t.Params(), found)
+		localNames(t.Results(), found)
+	default:
+		for _, part := range partsOf(t) {
+			localNames(part, found)
+		}
+	}
+}
+
+// partsOf is the types the spelling of a composite type writes, in its order.
+func partsOf(t types.Type) []types.Type {
+	var parts []types.Type
+	switch t := t.(type) {
+	case *types.Map:
+		return []types.Type{t.Key(), t.Elem()}
+	case interface{ Elem() types.Type }: // a pointer, slice, array or channel
+		return []types.Type{t.Elem()}
+	case *types.Struct:
+		for field := range t.Fields() {
+			parts = append(parts, field.Type())
+		}
+	case *types.Tuple:
+		for v := range t.Variables() {
+			parts = append(parts, v.Type())
+		}
+	case *types.Interface:
+		for m := range t.ExplicitMethods() {
+			parts = append(parts, m.Type())
+		}
+		for embedded := range t.EmbeddedTypes() {
+			parts = append(parts, embedded)
+		}
+	case *types.Union:
+		for term := range t.Terms() {
+			parts = append(parts, term.Type())
+		}
+	}
+	return parts
+}
+
+// nameOf is [localNames] for a defined type or an alias: obj where a function
+// declares it, then its type arguments.
+func nameOf(obj *types.TypeName, args *types.TypeList, found func(types.Object)) {
+	if pkg := obj.Pkg(); pkg != nil && pkg.Scope().Lookup(obj.Name()) != obj {
+		found(obj)
+	}
+	for arg := range args.Types() {
+		localNames(arg, found)
+	}
 }
 
 // PackageKey is the qualifier [Resolver.TypeKey] spells p with.
@@ -314,7 +407,22 @@ func (rs *Resolver) Render(pos token.Pos) (token.Position, error) {
 // that consumer, whose module path it returns. A consumer whose root lies under the
 // target root holds the files under its own.
 func (rs *Resolver) Site(pos token.Pos) (consumer string, at token.Position, err error) {
-	name := rs.pos.Fset.Position(pos).Filename
+	consumer, held := rs.owner(pos)
+	at, err = held.Render(pos)
+	return consumer, at, err
+}
+
+// File is the path of the file that writes pos, relative to the root [Resolver.Site]
+// renders it against, which a line directive does not move.
+func (rs *Resolver) File(pos token.Pos) string {
+	_, held := rs.owner(pos)
+	return held.File(pos)
+}
+
+// owner is the loaded consumer whose file writes pos, empty for the target's, and
+// the renderer of that file.
+func (rs *Resolver) owner(pos token.Pos) (string, *inventory.Positions) {
+	name := rs.pos.Offset(pos).File
 	held, owner := rs.pos, ""
 	if rs.pos.Relative(name) == "" {
 		held = nil
@@ -327,6 +435,5 @@ func (rs *Resolver) Site(pos token.Pos) (consumer string, at token.Position, err
 	if held == nil {
 		held = rs.pos
 	}
-	at, err = held.Render(pos)
-	return owner, at, err
+	return owner, held
 }

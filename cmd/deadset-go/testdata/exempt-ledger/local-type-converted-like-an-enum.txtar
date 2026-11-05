@@ -1,0 +1,29 @@
+A block declares a local type mode that shadows the enumerated mode and converts
+to it. That converts to no enumeration, so slow stays unused.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+import "fmt"
+
+type mode int
+
+const (
+	fast mode = iota
+	slow
+)
+
+func main() {
+	fmt.Println(fast)
+	{
+		type mode int
+		n := len("ab")
+		fmt.Println(mode(n))
+	}
+}

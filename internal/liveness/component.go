@@ -21,8 +21,8 @@ type Component struct {
 	// Members are every symbol of the component, by site.
 	Members []inventory.SymbolID
 
-	// Roots are the members of the component's root cycles whose container is not
-	// itself dead, by site: the symbols a deletion starts at. Every component has
+	// Roots are the members of the component's root cycles not every container of
+	// which is dead, by site: the symbols a deletion starts at. Every component has
 	// at least one, because a member's dead container sits on the member's own
 	// cycle.
 	Roots []inventory.SymbolID
@@ -73,9 +73,10 @@ func (g *Graph) componentsOf(dead, testOfDeadCode, unreferencedTest, reachable [
 		id := g.symbols[i].ID
 		component.Members = append(component.Members, id)
 		component.Spans = append(component.Spans, spanOf(&g.symbols[i]))
-		// A dead member of a dead container is never a root: the container is
-		// the site the deletion starts at and the member falls with it.
-		contained := g.parent[i] != outside && place[g.parent[i]] != outside
+		// A member is no root only when every container is in the dead subgraph:
+		// a container one configuration keeps is not deleted, so the member is a
+		// deletion site of its own.
+		contained := len(g.parents[i]) > 0 && !slices.ContainsFunc(g.parents[i], func(p int) bool { return place[p] == outside })
 		if into[cycle] == 0 && !contained {
 			component.Roots = append(component.Roots, id)
 		}
@@ -127,8 +128,8 @@ func (g *Graph) heldSet(dead, reachable []bool, place []int) []bool {
 		return held
 	}
 	children := make([][]int, len(g.symbols))
-	for i, p := range g.parent {
-		if p != outside {
+	for i, containers := range g.parents {
+		for _, p := range containers {
 			children[p] = append(children[p], i)
 		}
 	}
@@ -145,13 +146,11 @@ func (g *Graph) heldSet(dead, reachable []bool, place []int) []bool {
 // heldWith is every symbol a held declaration holds: each it references, its
 // container, its members, and each declaration it is a dependent of.
 func (g *Graph) heldWith(i int, children, dependedOn [][]int) []int {
-	with := make([]int, 0, len(g.out[i])+len(children[i])+len(dependedOn[i])+1)
+	with := make([]int, 0, len(g.out[i])+len(children[i])+len(dependedOn[i])+len(g.parents[i]))
 	for _, e := range g.out[i] {
 		with = append(with, e.to)
 	}
-	if p := g.parent[i]; p != outside {
-		with = append(with, p)
-	}
+	with = append(with, g.parents[i]...)
 	with = append(with, children[i]...)
 	return append(with, dependedOn[i]...)
 }
@@ -248,25 +247,40 @@ func (g *Graph) deadSubgraph(dead, testOfDeadCode, unreferencedTest []bool) (at 
 	adj = make([][]int, len(at))
 	for from, i := range at {
 		g.referenceEdges(adj, position, from, i, testOfDeadCode, unreferencedTest)
-		if p := g.parent[i]; p != outside && position[p] != outside {
-			adj[from] = append(adj[from], position[p])
-			adj[position[p]] = append(adj[position[p]], from)
+		for _, p := range g.parents[i] {
+			if position[p] != outside {
+				adj[from] = append(adj[from], position[p])
+				adj[position[p]] = append(adj[position[p]], from)
+			}
 		}
 	}
 	return at, adj, position
 }
 
 // unreferencedSupport reports whether one symbol is a declaration of test-support
-// code whose outermost declaration nothing references, which is dead as a
+// code whose outermost declarations nothing references, which is dead as a
 // production declaration nothing references is.
 func (g *Graph) unreferencedSupport(i int) bool {
 	if !g.symbols[i].TestSupport || g.symbols[i].InTestFile {
 		return false
 	}
-	for g.parent[i] != outside && g.subject[g.parent[i]] {
-		i = g.parent[i]
+	return g.outermostUnreferenced(i)
+}
+
+// outermostUnreferenced reports whether nothing references the outermost
+// declaration of the symbol at i, of every container it has, a package not
+// counted.
+func (g *Graph) outermostUnreferenced(i int) bool {
+	outermost := true
+	for _, p := range g.parents[i] {
+		if g.subject[p] {
+			outermost = false
+			if !g.outermostUnreferenced(p) {
+				return false
+			}
+		}
 	}
-	return g.made[i].test == 0 && g.made[i].production == 0
+	return !outermost || g.made[i].test == 0 && g.made[i].production == 0
 }
 
 // referenceEdges adds the references the dead symbol at one position makes to

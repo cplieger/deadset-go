@@ -1,0 +1,30 @@
+wrap embeds selfish, whose String fmt calls on a wrap through promotion: the call
+reads the embedded field, and selfish's Z, which String never reads, stays unread.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"encoding/xml"
+)
+
+var _ = json.Marshal
+var _ = xml.Marshal
+
+type selfish struct{ Z int }
+
+func (selfish) String() string { return "s" }
+
+type wrap struct{ selfish }
+
+func main() {
+	fmt.Println(wrap{})
+}

@@ -1,0 +1,37 @@
+An entry naming the interface and the assertion's file names the one finding
+of an assertion of an interface declared once per platform.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}, "analysis": {"configurations": [
+  {"id": "linux-amd64", "os": "linux", "arch": "amd64"},
+  {"id": "windows-amd64", "os": "windows", "arch": "amd64"}]}}
+-- deadset-ignore.json --
+{"ignore": [{"code": "DS1203", "symbol": "go://example.com/app#writer", "path": "a.go", "reason": "wanted"}]}
+-- main.go --
+package main
+
+func main() { _ = impl{}.write() }
+
+type impl struct{}
+
+func (impl) write() int { return 2 }
+-- iface_linux.go --
+package main
+
+type writer interface {
+	write() int
+}
+-- iface_windows.go --
+package main
+
+type writer interface {
+	write() int
+}
+-- a.go --
+package main
+
+var _ writer = impl{}

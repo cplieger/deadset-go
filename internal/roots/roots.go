@@ -276,7 +276,7 @@ func (d *rootDetection) classOf(s *inventory.Symbol) packageClass {
 		return classes[0]
 	}
 	for _, class := range classes {
-		if class.dir == path.Dir(s.Pos.Filename) {
+		if class.dir == path.Dir(s.File) {
 			return class
 		}
 	}
@@ -293,7 +293,7 @@ func (d *rootDetection) walkFile(p *packages.Package, f *ast.File) {
 
 // functionRoots reads one file's test functions and cgo exports.
 func (d *rootDetection) functionRoots(p *packages.Package, f *ast.File) {
-	_, test := inventory.IsTestFile(d.pos.Base(f.FileStart))
+	test := d.pos.InTestFile(f.FileStart)
 	cgo := importsPath(f, cgoImport)
 	for _, decl := range f.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
@@ -391,7 +391,7 @@ func (d *rootDetection) publishedAPI(symbols []inventory.Symbol) {
 		switch {
 		case !s.Exported || s.Kind == inventory.KindTypeParam:
 		case !d.classOf(s).published || s.InTestFile:
-		case !d.exportedContainers(s.Parent):
+		case !d.exportedContainers(s.Parents):
 		default:
 			d.add(s.ID, RootPublishedAPI, "")
 		}
@@ -432,19 +432,19 @@ func (d *rootDetection) promotedBy(t types.Type) {
 	}
 }
 
-// exportedContainers reports whether parent and every container above it is
-// exported. A container the enumeration does not hold is not evidence that
-// nothing outside reaches the symbol below it, so it counts as exported.
-func (d *rootDetection) exportedContainers(parent inventory.SymbolID) bool {
-	for parent != "" {
+// exportedContainers reports whether every container in parents and every
+// container above each is exported. A container the enumeration does not hold is
+// not evidence that nothing outside reaches the symbol below it, so it counts as
+// exported.
+func (d *rootDetection) exportedContainers(parents []inventory.SymbolID) bool {
+	for _, parent := range parents {
 		container, ok := d.byID[parent]
 		if !ok || container.Kind == inventory.KindPackage || container.Kind == inventory.KindFile {
-			return true
+			continue
 		}
-		if !container.Exported {
+		if !container.Exported || !d.exportedContainers(container.Parents) {
 			return false
 		}
-		parent = container.Parent
 	}
 	return true
 }

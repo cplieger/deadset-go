@@ -164,7 +164,7 @@ func TestProperty16ASuppressionMatchesOnlyWhatItNames(t *testing.T) {
 				t.Fatalf("IgnoreFile(%s) returned the record %+v, which names something the entry does not\n%s",
 					document, r, drawn.describeDrawn())
 			}
-			bound = append(bound, r.Bound)
+			bound = append(bound, inventory.SymbolID(r.Bound))
 		}
 		if !slices.Equal(bound, want) {
 			t.Fatalf("IgnoreFile(%s) bound %v, want %v\n%s", document, bound, want, drawn.describeDrawn())

@@ -367,10 +367,10 @@ func (b *binder) bytesOf(expr ast.Expr) ([]byte, bool) {
 // protoc-gen-go writes `// 0: pkg.Msg` after each goTypes entry.
 func (b *binder) trailing(element ast.Expr) (string, bool) {
 	fset := b.rs.Positions().Fset
-	line := fset.Position(element.End()).Line
+	line := fset.PositionFor(element.End(), false).Line
 	for _, group := range b.f.Comments {
 		for _, c := range group.List {
-			if fset.Position(c.Pos()).Line != line || c.Pos() < element.End() {
+			if fset.PositionFor(c.Pos(), false).Line != line || c.Pos() < element.End() {
 				continue
 			}
 			_, full, ok := strings.Cut(strings.TrimPrefix(c.Text, "//"), ": ")

@@ -41,7 +41,6 @@ type pass struct {
 	interfaces *interfaceFacts
 	fixed      map[inventory.SymbolID]bool          // [pass.fixedByOutsideInterface]
 	exempted   map[inventory.SymbolID]bool          // every declaration of Exempt
-	suppressed map[inventory.SymbolID]bool          // every declaration a record's mark held back
 	unused     map[vocab.Code][]*liveness.Candidate // [unusedByCode]
 	referenced map[inventory.SymbolID]bool          // every declaration any reference of any file names
 	counted    map[inventory.SymbolID]*uses
@@ -52,12 +51,16 @@ type pass struct {
 	listed     map[int][]positioned        // each dead component's member listing, where the run lists them in full
 	skipped    map[inventory.SymbolID]bool // every declaration a type error skipped
 
-	// dialed is the dials' answer over the first phase, empty until [pass.dial] gives
-	// it, once, before the second.
+	// dialed is the dials' answer over the pass's findings, empty until [pass.dial]
+	// gives it.
 	dialed *dialed
 
 	swept   []liveness.Component
 	sources []typedFile // [sourcesOf]
+
+	// withdrawnMarks marks the pass over the sweep with every mark withdrawn
+	// ([pass.withdrawn]), which reports a member of a dead container on its own.
+	withdrawnMarks bool
 }
 
 // classesOf is the facts the reachability class reads, which need no sweep.
@@ -100,12 +103,6 @@ func newPass(in *Input) *pass {
 		a.counted = writesAndReads(a)
 		a.writeOnly = writeOnlySubjects(a)
 	}
-	a.suppressed = make(map[inventory.SymbolID]bool)
-	if in.Sweep != nil {
-		for _, id := range in.Sweep.Suppressed {
-			a.suppressed[id] = true
-		}
-	}
 	a.skipped = make(map[inventory.SymbolID]bool)
 	for i := range in.TypeErrorSkips {
 		for _, id := range in.TypeErrorSkips[i].Declarations {
@@ -147,8 +144,8 @@ func (in *pass) holdInventory(merged *liveness.Merged) {
 	for i := range merged.Symbols {
 		symbol := &merged.Symbols[i]
 		in.symbols[symbol.ID] = symbol
-		if symbol.Parent != "" {
-			in.children[symbol.Parent] = append(in.children[symbol.Parent], symbol.ID)
+		for _, parent := range symbol.Parents {
+			in.children[parent] = append(in.children[parent], symbol.ID)
 		}
 		if _, collides := in.byRef[symbol.Ref]; !collides {
 			in.byRef[symbol.Ref] = symbol.ID
@@ -204,7 +201,7 @@ func eachPackage(per []Configured, visit func(*packages.Package)) {
 }
 
 // packageDir is the directory of p's first file relative to root, with forward
-// slashes, as a symbol's position names its file.
+// slashes, as a symbol's File names its file.
 func packageDir(p *packages.Package, root string) string {
 	if len(p.GoFiles) == 0 {
 		return ""
@@ -227,13 +224,23 @@ func (in *pass) packageKey(pkgPath, dir string) string {
 
 // packageOf is the [pass.packageKey] of the package declaring symbol.
 func (in *pass) packageOf(symbol *inventory.Symbol) string {
-	return in.packageKey(symbol.PkgPath, path.Dir(symbol.Pos.Filename))
+	return in.packageKey(symbol.PkgPath, path.Dir(symbol.File))
 }
 
 // symbol is the declaration of the inventory one identifier names, or nil where the
 // inventory holds none.
 func (in *pass) symbol(id inventory.SymbolID) *inventory.Symbol {
 	return in.symbols[id]
+}
+
+// container is the declaration one declaration is declared in, or nil for a
+// package and for a declaration with several: only a method has several, one
+// receiver type per configuration that declares the type in a file of its own.
+func (in *pass) container(symbol *inventory.Symbol) *inventory.Symbol {
+	if len(symbol.Parents) != 1 {
+		return nil
+	}
+	return in.symbols[symbol.Parents[0]]
 }
 
 // candidateOf is the sweep's candidate for one declaration, or nil where the sweep
@@ -260,7 +267,7 @@ func (in *pass) skips(found *Finding) bool {
 // skippedWithin reports whether a type error skipped one declaration or the
 // declaration it is declared inside. A method is a declaration of its own.
 func (in *pass) skippedWithin(id inventory.SymbolID) bool {
-	for symbol := in.symbols[id]; symbol != nil; symbol = in.symbols[symbol.Parent] {
+	for symbol := in.symbols[id]; symbol != nil; symbol = in.container(symbol) {
 		if in.skipped[symbol.ID] {
 			return true
 		}

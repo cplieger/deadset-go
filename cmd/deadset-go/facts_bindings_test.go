@@ -180,29 +180,40 @@ func TestFactsBindEveryGeneratedDeclarationToItsSchemaDeclaration(t *testing.T) 
 	}
 }
 
+const (
+	linuxConfiguration   = `{"id":"linux-amd64","os":"linux","arch":"amd64"}`
+	windowsConfiguration = `{"id":"windows-amd64","os":"windows","arch":"amd64"}`
+)
+
+// platformProtobufModule is protobufModule with gen/v1/ping.pb.go written twice,
+// as ping_linux.pb.go and ping_windows.pb.go, analysed for the configurations.
+func platformProtobufModule(t *testing.T, configurations string) string {
+	t.Helper()
+	dir := protobufModule(t, "var file_v1_ping_proto_rawDesc = "+byteLiteral(pingDescriptor()))
+	original := filepath.Join(dir, "gen/v1/ping.pb.go")
+	body, err := os.ReadFile(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(original); err != nil {
+		t.Fatal(err)
+	}
+	for _, goos := range []string{"linux", "windows"} {
+		tagged := strings.Replace(string(body), "\n\npackage v1", "\n\n//go:build "+goos+"\n\npackage v1", 1)
+		if err := os.WriteFile(filepath.Join(dir, "gen/v1/ping_"+goos+".pb.go"), []byte(tagged), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeDocument(t, dir, repositoryDocument, `{"target":{"kind":"application"},"analysis":{"configurations":[`+configurations+`]}}`)
+	return dir
+}
+
 func TestFactsBindAPlatformAlternativeOnceThroughItsLowestGeneratedFile(t *testing.T) {
-	const (
-		linux   = `{"id":"linux-amd64","os":"linux","arch":"amd64"}`
-		windows = `{"id":"windows-amd64","os":"windows","arch":"amd64"}`
-	)
+	linux, windows := linuxConfiguration, windowsConfiguration
 	written := make(map[string][]byte)
 	for order, configurations := range map[string]string{"linux-first": linux + "," + windows, "windows-first": windows + "," + linux} {
-		dir := protobufModule(t, "var file_v1_ping_proto_rawDesc = "+byteLiteral(pingDescriptor()))
-		original := filepath.Join(dir, "gen/v1/ping.pb.go")
-		body, err := os.ReadFile(original)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Remove(original); err != nil {
-			t.Fatal(err)
-		}
-		for _, goos := range []string{"linux", "windows"} {
-			tagged := strings.Replace(string(body), "\n\npackage v1", "\n\n//go:build "+goos+"\n\npackage v1", 1)
-			if err := os.WriteFile(filepath.Join(dir, "gen/v1/ping_"+goos+".pb.go"), []byte(tagged), 0o600); err != nil {
-				t.Fatal(err)
-			}
-		}
-		writeDocument(t, dir, repositoryDocument, `{"target":{"kind":"application"},"analysis":{"configurations":[`+configurations+`]}}`)
+		dir := platformProtobufModule(t, configurations)
+		var err error
 		factsPath := filepath.Join(t.TempDir(), "facts.json")
 		if got := runAnalyze(t, dir, "--facts="+factsPath); got.code == vocab.ExitUsage || got.code == vocab.ExitFailure {
 			t.Fatalf("%s: analyze --facts = %d, want a verdict\nstderr:\n%s", order, got.code, got.stderr)
@@ -221,6 +232,75 @@ func TestFactsBindAPlatformAlternativeOnceThroughItsLowestGeneratedFile(t *testi
 	const request = "consumer go://example.com/app/gen/v1#PingRequest proto://v1#PingRequest v1/ping.proto gen/v1/ping_linux.pb.go"
 	if got := bindingLines(facts); !slices.Contains(got, request) {
 		t.Errorf("the bindings are\n%s\nwant one holding\n%s", strings.Join(got, "\n"), request)
+	}
+}
+
+// One consumer record names a symbol's every platform alternative, so it is live
+// where the hand-written code of one configuration reaches the alternative that
+// configuration compiles, whichever alternative's file sorts last.
+func TestFactsGiveAPlatformAlternativesRecordTheStateOfEveryAlternative(t *testing.T) {
+	const request = "go://example.com/app/gen/v1#PingRequest"
+	for _, reaching := range []string{"linux", "windows"} {
+		t.Run("reached-on-"+reaching, func(t *testing.T) {
+			dir := platformProtobufModule(t, linuxConfiguration+","+windowsConfiguration)
+			if err := os.Remove(filepath.Join(dir, "main.go")); err != nil {
+				t.Fatal(err)
+			}
+			for _, goos := range []string{"linux", "windows"} {
+				body := "package main\n\nfunc main() {}\n"
+				if goos == reaching {
+					body = "package main\n\nimport v1 \"example.com/app/gen/v1\"\n\nfunc main() { _ = v1.PingRequest{} }\n"
+				}
+				writeDocument(t, dir, "main_"+goos+".go", body)
+			}
+			facts, _ := analyzeWithFacts(t, dir)
+			var states []any
+			for _, entry := range facts["bindings"].([]any) {
+				if b := entry.(map[string]any); b["role"] == "consumer" && b["symbol"] == request {
+					states = append(states, b["state"])
+				}
+			}
+			if !slices.Equal(states, []any{"live"}) {
+				t.Errorf("the consumer records of %s have the states %v, want one live", request, states)
+			}
+		})
+	}
+}
+
+// A dead implementer carries the platform alternative of a declaration that only
+// its search reaches, though hand-written code reaches the other alternative.
+func TestADeadImplementerCarriesThePlatformAlternativeOnlyItsSearchReaches(t *testing.T) {
+	dir := platformProtobufModule(t, linuxConfiguration+","+windowsConfiguration)
+	grpcFile := filepath.Join(dir, "gen/v1/ping_grpc.pb.go")
+	body, err := os.ReadFile(grpcFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeDocument(t, dir, "gen/v1/ping_grpc.pb.go", string(body)+
+		"\nfunc RegisterPingServiceServer(srv PingServiceServer) { _, _ = srv.Ping(nil) }\n")
+	writeDocument(t, dir, "main.go", "package main\n\nimport v1 \"example.com/app/gen/v1\"\n\n"+
+		"type server struct{}\n\nfunc (server) Ping(in *v1.PingRequest) (*v1.PingRequest, error) { work(); return in, nil }\n\n"+
+		"func main() { v1.RegisterPingServiceServer(server{}); _ = v1.PingRequest{}; start() }\n")
+	writeDocument(t, dir, "start_linux.go", "package main\n\nfunc start() {}\n")
+	writeDocument(t, dir, "start_windows.go", "package main\n\nfunc start() { work() }\n")
+	writeDocument(t, dir, "work_linux.go", "package main\n\nfunc work() {}\n")
+	writeDocument(t, dir, "work_windows.go", "package main\n\nfunc work() {}\n")
+	facts, _ := analyzeWithFacts(t, dir)
+	var carried []string
+	for _, entry := range facts["bindings"].([]any) {
+		b := entry.(map[string]any)
+		if b["role"] != "implementer" {
+			continue
+		}
+		list, _ := b["carried"].([]any)
+		for _, one := range list {
+			c := one.(map[string]any)
+			at := c["position"].(map[string]any)
+			carried = append(carried, fmt.Sprint(c["symbol"].(map[string]any)["name"], " ", at["path"]))
+		}
+	}
+	if want := []string{"work work_linux.go"}; !slices.Equal(carried, want) {
+		t.Errorf("the dead implementer carries %v, want %v", carried, want)
 	}
 }
 

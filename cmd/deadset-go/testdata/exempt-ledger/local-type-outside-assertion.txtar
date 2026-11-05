@@ -1,0 +1,65 @@
+Two functions each hand sizes.Print a local type e as a fmt.Stringer. sizes
+asserts Sizer on it, which only second's e implements, so second.Size is kept
+although first's e is met first.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+
+require example.com/sizes v0.0.0
+
+replace example.com/sizes => ./sizes
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+import "example.com/sizes"
+
+type first struct{}
+
+func (first) String() string { return "first" }
+
+type second struct{}
+
+func (second) String() string { return "second" }
+
+func (second) Size() int { return 2 }
+
+func one() {
+	type e struct{ first }
+	sizes.Print(e{})
+}
+
+func two() {
+	type e struct{ second }
+	sizes.Print(e{})
+}
+
+func main() {
+	one()
+	two()
+}
+-- sizes/go.mod --
+module example.com/sizes
+
+go 1.27.1
+-- sizes/sizes.go --
+// Package sizes prints a value and its size where it has one.
+package sizes
+
+import "fmt"
+
+// Sizer is a value that knows its size.
+type Sizer interface {
+	Size() int
+}
+
+// Print prints v, and its size where it has one.
+func Print(v fmt.Stringer) {
+	fmt.Println(v.String())
+	if s, ok := v.(Sizer); ok {
+		fmt.Println(s.Size())
+	}
+}

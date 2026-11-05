@@ -69,7 +69,7 @@ func (in *pass) spelling(id inventory.SymbolID, symbol *inventory.Symbol) (token
 // packageLevel reports whether one declaration is declared at package level rather
 // than inside a type.
 func (in *pass) packageLevel(symbol *inventory.Symbol) bool {
-	parent := in.symbol(symbol.Parent)
+	parent := in.container(symbol)
 	return parent != nil && (parent.Kind == inventory.KindPackage || parent.Kind == inventory.KindFile)
 }
 
@@ -81,7 +81,7 @@ func (in *pass) packageLevel(symbol *inventory.Symbol) bool {
 func nameLiterals(a *pass) (literals map[string][]literalSite, constTypes map[inventory.SymbolID]inventory.SymbolID) {
 	literals = make(map[string][]literalSite)
 	constTypes = make(map[inventory.SymbolID]inventory.SymbolID)
-	seen := make(map[token.Position]bool)
+	seen := make(map[inventory.Offset]bool)
 	for _, typed := range a.sources {
 		rs := typed.one.Resolve
 		for _, decl := range typed.file.Decls {
@@ -99,7 +99,7 @@ func nameLiterals(a *pass) (literals map[string][]literalSite, constTypes map[in
 
 // keepLiteralsOf records every string literal one declaration node holds, as written
 // within the declarations that node declares, an import path and a struct tag left out.
-func keepLiteralsOf(node ast.Node, rs *resolve.Resolver, seen map[token.Position]bool, literals map[string][]literalSite) {
+func keepLiteralsOf(node ast.Node, rs *resolve.Resolver, seen map[inventory.Offset]bool, literals map[string][]literalSite) {
 	within := declaredBy(node, rs)
 	ast.Inspect(node, func(n ast.Node) bool {
 		switch n := n.(type) {
@@ -116,26 +116,27 @@ func keepLiteralsOf(node ast.Node, rs *resolve.Resolver, seen map[token.Position
 }
 
 // keepLiteral records one node where it is a string literal of a production file
-// of the target, once per position however many configurations build the file.
+// of the target, once per written byte however many configurations build the file.
 func keepLiteral(n ast.Node, rs *resolve.Resolver, within []inventory.SymbolID,
-	seen map[token.Position]bool, literals map[string][]literalSite,
+	seen map[inventory.Offset]bool, literals map[string][]literalSite,
 ) bool {
 	lit, isLit := n.(*ast.BasicLit)
 	if !isLit || lit.Kind != token.STRING {
 		return true
 	}
+	written := rs.Positions().Offset(lit.Pos())
 	consumer, at, err := rs.Site(lit.Pos())
-	if err != nil || consumer != "" || at.Filename == "" || seen[at] {
+	if err != nil || consumer != "" || at.Filename == "" || seen[written] {
 		return false
 	}
-	if _, test := inventory.IsTestFile(rs.Positions().Offset(lit.Pos()).File); test {
+	if rs.Positions().InTestFile(lit.Pos()) {
 		return false
 	}
 	value, err := strconv.Unquote(lit.Value)
 	if err != nil {
 		return false
 	}
-	seen[at] = true
+	seen[written] = true
 	literals[value] = append(literals[value], literalSite{at: at, within: within})
 	return false
 }

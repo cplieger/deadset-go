@@ -74,6 +74,7 @@ type errorsDuckSite struct {
 	from      types.Type
 	holder    inventory.SymbolID
 	coHolders []inventory.SymbolID
+	file      string // [Exemption.File]
 	at        token.Position
 }
 
@@ -137,16 +138,16 @@ func (s *errorsDuckScan) sites(conversions []facts.Conversion) ([]errorsDuckSite
 		if err != nil {
 			return nil, err
 		}
-		sites = append(sites, errorsDuckSite{from: c.From, at: at})
+		sites = append(sites, errorsDuckSite{from: c.From, at: at, file: s.in.Resolve.File(c.Site)})
 	}
-	rank := func(at token.Position) int {
-		if holdsInMode(&Exemption{Site: at}, s.in.Mode) {
+	rank := func(site *errorsDuckSite) int {
+		if holdsInMode(&Exemption{File: site.file, Site: site.at}, s.in.Mode) {
 			return 0
 		}
 		return 1
 	}
 	slices.SortFunc(sites, func(a, b errorsDuckSite) int {
-		return cmp.Or(cmp.Compare(rank(a.at), rank(b.at)), inventory.ByPosition(a.at, b.at))
+		return cmp.Or(cmp.Compare(rank(&a), rank(&b)), inventory.ByPosition(a.at, b.at))
 	})
 	return sites, nil
 }
@@ -186,11 +187,13 @@ func (s *errorsDuckScan) throughChains(chains *facts.Chains, c *facts.Conversion
 	for _, route := range chains.Routes(c.To, s.errorIface) {
 		positions := append(slices.Clone(start), route...)
 		holder, coHolders := s.in.holdersAt(c, positions)
-		at, err := s.site(s.evidence(c.Site, positions))
+		evidence := s.evidence(c.Site, positions)
+		at, err := s.site(evidence)
 		if err != nil {
 			return err
 		}
-		if err := s.conversion(&errorsDuckSite{from: c.From, holder: holder, coHolders: coHolders, at: at}); err != nil {
+		site := errorsDuckSite{from: c.From, holder: holder, coHolders: coHolders, at: at, file: s.in.Resolve.File(evidence)}
+		if err := s.conversion(&site); err != nil {
 			return err
 		}
 	}
@@ -201,7 +204,7 @@ func (s *errorsDuckScan) throughChains(chains *facts.Chains, c *facts.Conversion
 // holds, because the chain is then a test's evidence, and its first site otherwise.
 func (s *errorsDuckScan) evidence(first token.Pos, positions []token.Pos) token.Pos {
 	for _, at := range positions {
-		if _, test := inventory.IsTestFile(s.in.Result.Fset.Position(at).Filename); test {
+		if s.in.Resolve.Positions().InTestFile(at) {
 			return at
 		}
 	}
@@ -237,6 +240,7 @@ func (s *errorsDuckScan) conversion(c *errorsDuckSite) error {
 			exemption: Exemption{
 				ID:        id,
 				Class:     string(vocab.ErrorsDuckTyping),
+				File:      c.file,
 				Site:      c.at,
 				Detail:    detail,
 				Holder:    c.holder,

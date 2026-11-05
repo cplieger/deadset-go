@@ -10,7 +10,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -177,14 +176,14 @@ func TestIgnoreFileCarriesTheReasonAndTheCodeOfABoundEntry(t *testing.T) {
 		t.Fatalf("IgnoreFile returned %d records, want 1: %+v", len(records), records)
 	}
 
-	want := Record{
+	want := core.Record{
 		Code:      "DS1001",
 		Symbol:    "go://example.com/samename#Helper",
 		Path:      "catalog.go",
 		Reason:    "Kept for the promise the next major breaks.",
 		Bound:     "catalog.go:6:6",
 		Site:      records[0].Site,
-		Mechanism: MechanismIgnore,
+		Mechanism: core.Ignore,
 	}
 	if records[0] != want {
 		t.Errorf("IgnoreFile record = %+v, want %+v", records[0], want)
@@ -210,7 +209,7 @@ func TestIgnoreFileBindsOnCodeSymbolAndPathTogether(t *testing.T) {
 		name   string
 		symbol string
 		path   string
-		want   inventory.SymbolID
+		want   string
 	}{
 		{"the function the entry names", "go://example.com/samename#Helper", "catalog.go", "catalog.go:6:6"},
 		{"the method of another file", "go://example.com/samename#Queue.Helper", "other.go", "other.go:7:16"},
@@ -254,13 +253,13 @@ func TestIgnoreFileRefusesAnEntryNamingASymbolAndNoPath(t *testing.T) {
 	if len(refusals) != 1 {
 		t.Fatalf("IgnoreFile returned %d refusals, want 1: %+v", len(refusals), refusals)
 	}
-	want := Refusal{
+	want := core.Refusal{
 		Reported:  vocab.UnscopedIgnoreEntry,
 		Code:      "DS1001",
 		Symbol:    "go://example.com/samename#Helper",
 		Reason:    "no path at all.",
 		Site:      refusals[0].Site,
-		Mechanism: MechanismIgnore,
+		Mechanism: core.Ignore,
 	}
 	if refusals[0] != want {
 		t.Errorf("IgnoreFile refusal = %+v, want %+v", refusals[0], want)
@@ -317,8 +316,8 @@ func TestIgnoreFileNamesThePositionOfTheBraceThatOpensEachEntry(t *testing.T) {
 	for i, c := range cases {
 		t.Run(string(c.code), func(t *testing.T) {
 			at := records[i].Site
-			if at.Filename != core.IgnoreFileName || at.Line != c.line || at.Column != c.col {
-				t.Errorf("IgnoreFile record %s sits at %s, want %s:%d:%d", c.code, at, core.IgnoreFileName, c.line, c.col)
+			if at.Path != core.IgnoreFileName || at.Line != c.line || at.Column != c.col {
+				t.Errorf("IgnoreFile record %s sits at %+v, want %s:%d:%d", c.code, at, core.IgnoreFileName, c.line, c.col)
 			}
 		})
 	}
@@ -405,14 +404,16 @@ func TestIgnoreFileLeavesEveryRecordOfAnotherSchemeToItsOwnAnalyzer(t *testing.T
 	}
 }
 
-// A dependency of a manifest nested below the target root in a package with no
-// name is spelled with the manifest's path, as a source file of that package is, and
-// an entry copying the reference reads as the other analyzer's record.
-func TestIgnoreFileReadsTheReferenceOfANestedManifestsDependency(t *testing.T) {
+// An entry of another scheme is that analyzer's to read, so one spelling a nested
+// manifest's dependency is left to it whether its form is well formed or not.
+func TestIgnoreFileLeavesAnotherSchemesEntryUnreadWhateverItsForm(t *testing.T) {
 	for _, symbol := range []string{
 		"ts://./static-src/package.json#html-validate:dev-dependency",
 		"ts://./package.json#html-validate:dev-dependency",
 		"ts://@example/app/package.json#lodash:dependency",
+		"ts://./static-src#html-validate:dev-dependency",
+		"ts://./static-src/package.json/#html-validate:dev-dependency",
+		"ts://./static-src/manifest.json#html-validate:dev-dependency",
 	} {
 		t.Run(symbol, func(t *testing.T) {
 			document := `{"ignore": [{"code": "DS1701", "symbol": "` + symbol + `", "path": "static-src/package.json", "reason": "Run by hand."}]}`
@@ -422,17 +423,9 @@ func TestIgnoreFileReadsTheReferenceOfANestedManifestsDependency(t *testing.T) {
 			}
 		})
 	}
-	for _, symbol := range []string{
-		"ts://./static-src#html-validate:dev-dependency",
-		"ts://./static-src/package.json/#html-validate:dev-dependency",
-		"ts://./static-src/manifest.json#html-validate:dev-dependency",
-	} {
-		t.Run(symbol, func(t *testing.T) {
-			document := `{"ignore": [{"code": "DS1701", "symbol": "` + symbol + `", "path": "static-src/package.json", "reason": "Run by hand."}]}`
-			if _, _, err := IgnoreFile(writeIgnoreFile(t, document), nil); !errors.Is(err, core.ErrMalformed) {
-				t.Errorf("IgnoreFile(an entry naming %s) error = %v, want core.ErrMalformed: the scope ends in package.json", symbol, err)
-			}
-		})
+	const malformed = `{"ignore": [{"code": "DS1002", "symbol": "go://example.com/app#!", "path": "a.go", "reason": "Run by hand."}]}`
+	if _, _, err := IgnoreFile(writeIgnoreFile(t, malformed), nil); !errors.Is(err, core.ErrMalformed) {
+		t.Errorf("IgnoreFile(an entry naming a go:// reference in no form) error = %v, want core.ErrMalformed", err)
 	}
 }
 

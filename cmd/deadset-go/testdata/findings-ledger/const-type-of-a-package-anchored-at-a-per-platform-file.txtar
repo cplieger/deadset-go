@@ -1,0 +1,30 @@
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}, "analysis": {"configurations": [
+  {"id": "linux-amd64", "os": "linux", "arch": "amd64"},
+  {"id": "windows-amd64", "os": "windows", "arch": "amd64"}]}}
+-- a_linux.go --
+package main
+
+const osName = "linux"
+-- a_windows.go --
+package main
+
+const osName = "windows"
+-- main.go --
+package main
+
+var spelled = "mode"
+
+func main() { counter = 1; println(osName, spelled) }
+-- z.go --
+package main
+
+var counter int
+
+type mode int
+
+const modeA mode = 1

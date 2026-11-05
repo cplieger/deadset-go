@@ -66,9 +66,9 @@ type crossingOut struct {
 // declarationSites answers the key one declaration of the program is kept under, and
 // remembers each answer, because a walk asks once per argument of every call.
 //
-// The key is the toolchain's position: a file two modules' loads both read is parsed
-// twice into one file set, so token.Pos differs between the readings, and a consumer's
-// file renders nowhere against the target root.
+// The key is the written position, before any line directive: a file two modules'
+// loads both read is parsed twice into one file set, so token.Pos differs between the
+// readings, and a consumer's file renders nowhere against the target root.
 type declarationSites struct {
 	fset  *token.FileSet
 	known map[token.Pos]token.Position
@@ -89,7 +89,7 @@ func (d *declarationSites) position(pos token.Pos) token.Position {
 	if held, known := d.known[pos]; known {
 		return held
 	}
-	at := d.fset.Position(pos)
+	at := d.fset.PositionFor(pos, false)
 	d.known[pos] = at
 	return at
 }
@@ -506,7 +506,7 @@ func holdsInMode(e *Exemption, m facts.Mode) bool {
 	if !m.Production {
 		return true
 	}
-	if _, test := inventory.IsTestFile(e.Site.Filename); !test {
+	if _, test := inventory.IsTestFile(e.File); !test {
 		return true
 	}
 	return e.Consumer != "" && m.ConsumerTestsProduction

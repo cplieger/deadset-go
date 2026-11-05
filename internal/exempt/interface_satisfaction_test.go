@@ -128,6 +128,7 @@ func TestInterfaceSatisfactionNamesTheInterfaceAndTheSiteItWasFoundAt(t *testing
 	want := Exemption{
 		ID:     symbolRef(t, in, "go://example.com/conservative#Converted.Count").ID,
 		Class:  "interface-satisfaction",
+		File:   "counters.go",
 		Site:   token.Position{Filename: "counters.go", Offset: got.Site.Offset, Line: 24, Column: 31},
 		Detail: "satisfies conservative.Counter",
 		Holder: symbolRef(t, in, "go://example.com/conservative#Sum").ID,

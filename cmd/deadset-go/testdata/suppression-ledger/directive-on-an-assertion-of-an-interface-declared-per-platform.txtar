@@ -1,0 +1,36 @@
+A directive above an assertion of an interface declared once per platform
+names the assertion's one finding.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}, "analysis": {"configurations": [
+  {"id": "linux-amd64", "os": "linux", "arch": "amd64"},
+  {"id": "windows-amd64", "os": "windows", "arch": "amd64"}]}}
+-- main.go --
+package main
+
+func main() { _ = impl{}.write() }
+
+type impl struct{}
+
+func (impl) write() int { return 2 }
+-- iface_linux.go --
+package main
+
+type writer interface {
+	write() int
+}
+-- iface_windows.go --
+package main
+
+type writer interface {
+	write() int
+}
+-- a.go --
+package main
+
+//deadset:ignore DS1203 -- wanted
+var _ writer = impl{}

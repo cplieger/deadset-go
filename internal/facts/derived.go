@@ -6,8 +6,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-
-	"github.com/cplieger/deadset-go/v2/internal/inventory"
 )
 
 // The bounds of a chain search and of the sites one assertion derives. Past
@@ -298,7 +296,7 @@ func implementsOnce(held map[implementsPair]bool, key string, assertion int, fro
 func (s *conversionScan) derivedSite(d *derivable, a *assertion) Conversion {
 	site := a.site
 	for _, at := range d.held {
-		if _, test := inventory.IsTestFile(s.fset.Position(at).Filename); test {
+		if s.at.InTestFile(at) {
 			site = at
 			break
 		}

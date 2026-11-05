@@ -1,0 +1,37 @@
+Two functions return a local type e as any; only the second's implements sizer.
+The assertion derives a conversion for the second, so second.size is kept.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+import "fmt"
+
+type sizer interface{ size() int }
+
+type second struct{}
+
+func (second) size() int { return 2 }
+
+func one() any {
+	type e struct{ n int }
+	return e{}
+}
+
+func two() any {
+	type e struct{ second }
+	return e{}
+}
+
+func main() {
+	for _, v := range []any{one(), two()} {
+		if s, ok := v.(sizer); ok {
+			fmt.Println(s.size())
+		}
+	}
+}

@@ -56,12 +56,11 @@ func TypeErrorSkips(r *load.Result, rs *resolve.Resolver, targetRoot string, che
 	pos := inventory.NewPositions(r.Fset, targetRoot, nil)
 	var held []TypeErrorSkip
 	for _, one := range skippedDecls(r, rs, checkedElsewhere) {
-		at := r.Fset.Position(one.err.Pos)
-		path := pos.Relative(at.Filename)
-		if path == "" {
+		at, err := pos.Place(one.err.Pos)
+		if err != nil {
 			continue
 		}
-		skip := TypeErrorSkip{Path: path, Line: at.Line, Message: strings.Join(strings.Fields(one.err.Msg), " ")}
+		skip := TypeErrorSkip{Path: at.Filename, Line: at.Line, Message: strings.Join(strings.Fields(one.err.Msg), " ")}
 		for _, name := range declaredNames(one.decl) {
 			if id, inventoried := rs.At(name.Pos()); inventoried {
 				skip.Declarations = append(skip.Declarations, id)

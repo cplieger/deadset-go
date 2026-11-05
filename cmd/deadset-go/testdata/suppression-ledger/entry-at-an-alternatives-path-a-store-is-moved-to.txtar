@@ -1,0 +1,41 @@
+Two build-tagged files declare compute. A line directive inside the one in
+a_linux.go renders its dead store under z_windows.go, where the other
+alternative renders. One ignore entry names compute at z_windows.go: it binds
+the windows compute and names both stores, since both report that reference
+and path, so neither is reported and the entry is in effect.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- deadset-ignore.json --
+{"ignore": [{"code": "DS1404", "symbol": "go://example.com/app#compute", "path": "z_windows.go", "reason": "wanted"}]}
+-- main.go --
+package main
+
+func main() { println(compute()) }
+-- a_linux.go --
+//go:build linux
+
+package main
+
+func compute() int {
+	v := 1
+	_ = v
+//line z_windows.go:7:1
+	v = 2
+	return 3
+}
+-- z_windows.go --
+//go:build windows
+
+package main
+
+func compute() int {
+	w := 1
+	_ = w
+	w = 2
+	return 3
+}

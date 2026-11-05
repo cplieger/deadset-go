@@ -7,11 +7,11 @@
   },
   "result": "pass",
   "totals": {
-    "fixtures": 224,
-    "pass": 214,
+    "fixtures": 218,
+    "pass": 210,
     "gap": 0,
     "fail": 0,
-    "pending": 10
+    "pending": 8
   },
   "fixtures": [
     {
@@ -1230,16 +1230,14 @@
     },
     {
       "fixture": "directive-in-one-configuration",
-      "result": "pending",
+      "result": "pass",
       "expectations": [
         {
           "symbol": "probeArm64",
-          "result": "fail",
+          "result": "pass",
           "actual": {
-            "report": "DS1002",
-            "confidence": "certain"
-          },
-          "message": "want no finding at target/boot_arm64.go:6, got DS1002"
+            "report": "none"
+          }
         },
         {
           "symbol": "unusedEverywhere",
@@ -1260,18 +1258,11 @@
           }
         }
       ],
-      "unexpected": [
-        {
-          "file": "target/boot_arm64.go",
-          "line": 6,
-          "report": "DS1002"
-        }
-      ],
-      "message": "suppressions_in_effect want 1 got 0"
+      "unexpected": []
     },
     {
       "fixture": "directive-naming-the-base-of-a-derived-code",
-      "result": "pending",
+      "result": "pass",
       "expectations": [
         {
           "symbol": "Helper",
@@ -1282,15 +1273,18 @@
         },
         {
           "symbol": "WrongCode",
-          "result": "fail",
+          "result": "pass",
           "actual": {
-            "report": "none"
-          },
-          "message": "want exactly one DS9003 record at target/internal/util/util.go:4, got 0"
+            "report": "DS9003",
+            "symbol_kind": "suppression",
+            "confidence": "certain",
+            "details": {
+              "mechanism": "inline"
+            }
+          }
         }
       ],
-      "unexpected": [],
-      "message": "suppressions_in_effect want 0 got 1"
+      "unexpected": []
     },
     {
       "fixture": "dormant-directive-over-a-name-literal",
@@ -5644,49 +5638,6 @@
       "unexpected": []
     },
     {
-      "fixture": "module-build-compiles-every-platform-of-an-imported-package",
-      "result": "pass",
-      "expectations": [
-        {
-          "symbol": "Any",
-          "result": "pass",
-          "actual": {
-            "report": "none"
-          }
-        },
-        {
-          "symbol": "PlanOnly",
-          "result": "pass",
-          "actual": {
-            "report": "none"
-          }
-        },
-        {
-          "symbol": "Unused",
-          "result": "pass",
-          "actual": {
-            "report": "DS1001",
-            "symbol_kind": "function",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reference-counting"
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
-          }
-        },
-        {
-          "symbol": "WinOnly",
-          "result": "pass",
-          "actual": {
-            "report": "none"
-          }
-        }
-      ],
-      "unexpected": []
-    },
-    {
       "fixture": "module-directive-suppression",
       "result": "pass",
       "expectations": [
@@ -5713,156 +5664,6 @@
         },
         {
           "symbol": "RequirementEntry",
-          "result": "pass",
-          "actual": {
-            "report": "none"
-          }
-        }
-      ],
-      "unexpected": []
-    },
-    {
-      "fixture": "module-ignore-directive-leaves-out-directories",
-      "result": "pass",
-      "expectations": [
-        {
-          "symbol": "All",
-          "result": "pass",
-          "actual": {
-            "report": "none"
-          }
-        },
-        {
-          "symbol": "Asset",
-          "result": "pass",
-          "actual": {
-            "report": "none"
-          }
-        },
-        {
-          "symbol": "Gen",
-          "result": "pass",
-          "actual": {
-            "report": "none"
-          }
-        },
-        {
-          "symbol": "Helper",
-          "result": "pass",
-          "actual": {
-            "report": "DS1001",
-            "symbol_kind": "method",
-            "confidence": "possible",
-            "reachability_class": "possible",
-            "liveness_relation": "reference-counting"
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
-          }
-        },
-        {
-          "symbol": "Legacy",
-          "result": "pass",
-          "actual": {
-            "report": "DS1001",
-            "symbol_kind": "method",
-            "confidence": "possible",
-            "reachability_class": "possible",
-            "liveness_relation": "reference-counting"
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
-          }
-        },
-        {
-          "symbol": "Wired",
-          "result": "pass",
-          "actual": {
-            "report": "none"
-          }
-        }
-      ],
-      "unexpected": []
-    },
-    {
-      "fixture": "module-packages-leave-out-skipped-directories",
-      "result": "pass",
-      "expectations": [
-        {
-          "symbol": "Cached",
-          "result": "pass",
-          "actual": {
-            "report": "none"
-          }
-        },
-        {
-          "symbol": "Callback",
-          "result": "pass",
-          "actual": {
-            "report": "none"
-          }
-        },
-        {
-          "symbol": "Deep",
-          "result": "pass",
-          "actual": {
-            "report": "none"
-          }
-        },
-        {
-          "symbol": "Fixture",
-          "result": "pass",
-          "actual": {
-            "report": "none"
-          }
-        },
-        {
-          "symbol": "Imported",
-          "result": "pass",
-          "actual": {
-            "report": "none"
-          }
-        },
-        {
-          "symbol": "ImportedSpare",
-          "result": "pass",
-          "actual": {
-            "report": "none"
-          }
-        },
-        {
-          "symbol": "Installed",
-          "result": "pass",
-          "actual": {
-            "report": "none"
-          }
-        },
-        {
-          "symbol": "Underscored",
-          "result": "pass",
-          "actual": {
-            "report": "none"
-          }
-        },
-        {
-          "symbol": "Unused",
-          "result": "pass",
-          "actual": {
-            "report": "DS1001",
-            "symbol_kind": "function",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reference-counting"
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
-          }
-        },
-        {
-          "symbol": "Used",
           "result": "pass",
           "actual": {
             "report": "none"
@@ -13475,78 +13276,6 @@
       "unexpected": []
     },
     {
-      "fixture": "walked-module-imports-a-node-modules-package",
-      "result": "pass",
-      "expectations": [
-        {
-          "symbol": "Back",
-          "result": "pass",
-          "actual": {
-            "report": "none"
-          }
-        },
-        {
-          "symbol": "Named",
-          "result": "pass",
-          "actual": {
-            "report": "DS1001",
-            "symbol_kind": "function",
-            "confidence": "possible",
-            "reachability_class": "possible",
-            "liveness_relation": "reference-counting"
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
-          }
-        },
-        {
-          "symbol": "Shown",
-          "result": "pass",
-          "actual": {
-            "report": "none"
-          }
-        },
-        {
-          "symbol": "Spare",
-          "result": "pass",
-          "actual": {
-            "report": "none"
-          }
-        }
-      ],
-      "unexpected": []
-    },
-    {
-      "fixture": "walked-module-leaves-out-node-modules",
-      "result": "pass",
-      "expectations": [
-        {
-          "symbol": "F",
-          "result": "pass",
-          "actual": {
-            "report": "DS1001",
-            "symbol_kind": "function",
-            "confidence": "possible",
-            "reachability_class": "possible",
-            "liveness_relation": "reference-counting"
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
-          }
-        },
-        {
-          "symbol": "ToJSON",
-          "result": "pass",
-          "actual": {
-            "report": "none"
-          }
-        }
-      ],
-      "unexpected": []
-    },
-    {
       "fixture": "walked-module-not-loaded",
       "result": "pass",
       "expectations": [
@@ -13580,43 +13309,6 @@
             "symbol_kind": "function",
             "confidence": "certain",
             "reachability_class": "certain",
-            "liveness_relation": "reference-counting"
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
-          }
-        }
-      ],
-      "unexpected": []
-    },
-    {
-      "fixture": "workspace-member-in-a-left-out-directory",
-      "result": "pass",
-      "expectations": [
-        {
-          "symbol": "R",
-          "result": "pass",
-          "actual": {
-            "report": "DS1001",
-            "symbol_kind": "function",
-            "confidence": "possible",
-            "reachability_class": "possible",
-            "liveness_relation": "reference-counting"
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
-          }
-        },
-        {
-          "symbol": "T",
-          "result": "pass",
-          "actual": {
-            "report": "DS1001",
-            "symbol_kind": "function",
-            "confidence": "possible",
-            "reachability_class": "possible",
             "liveness_relation": "reference-counting"
           },
           "suppression": {

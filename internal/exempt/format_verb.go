@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -521,13 +522,27 @@ func (f *formatFlow) retain(t types.Type, at token.Pos, detail string) error {
 		return err
 	}
 	for _, named := range formattedTypes(t) {
-		for m := range named.Origin().Methods() {
-			if rendersAString(m) {
-				f.kept.record(m, site, detail)
+		f.keepPrinting(named, site, detail)
+	}
+	return nil
+}
+
+// keepPrinting records the string and error methods of one type, a method it has
+// by promotion with the embedded fields the call reads.
+func (f *formatFlow) keepPrinting(named *types.Named, site evidence, detail string) {
+	for m := range named.Origin().Methods() {
+		if rendersAString(m) {
+			f.kept.record(m, site, detail)
+		}
+	}
+	set := types.NewMethodSet(types.NewPointer(named))
+	for _, name := range [...]string{stringMethod, errorMethod} {
+		if sel := set.Lookup(nil, name); sel != nil {
+			if m, isFunc := sel.Obj().(*types.Func); isFunc && rendersAString(m) {
+				f.kept.promoted(named, sel, site, detail)
 			}
 		}
 	}
-	return nil
 }
 
 // rendersAString reports whether m is one of the two methods a verb calls, in the
@@ -570,7 +585,7 @@ func (w *formatWalk) step(t types.Type) []types.Type {
 	named, structs := typesReached(t)
 	var next []types.Type
 	for _, one := range named {
-		key := types.TypeString(one, nil)
+		key := resolve.Spell(one, nil)
 		if w.seen[key] {
 			continue
 		}

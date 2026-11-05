@@ -137,7 +137,7 @@ func (n *narrowing) scopeOf(to *inventory.Symbol, r *facts.Reference) narrowScop
 		return scopeOutside
 	case from.PkgPath != to.PkgPath:
 		return scopeModule
-	case r.Pos.Filename != to.Pos.Filename:
+	case from.File != to.File:
 		return scopePackage
 	default:
 		return scopeFile

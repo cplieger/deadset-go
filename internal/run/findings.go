@@ -60,6 +60,7 @@ func (s *Swept) input(ctx context.Context) (*findings.Input, error) {
 		Config:         &s.req.Config,
 		Merged:         s.Merged,
 		Sweep:          &s.Liveness,
+		Unmarked:       s.unmarked,
 		Refs:           s.Refs,
 		Exempt:         s.Exemptions,
 		TestEvidence:   s.testEvidence,

@@ -1,0 +1,50 @@
+A directive in a.go binds the declaration a.go writes below it, though a line
+directive in b.go renders bravo on that line: bravo is reported.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- a.go --
+package main
+
+//line main.go:19:1
+//deadset:ignore DS1002 -- kept for the loader
+func alpha() {}
+-- b.go --
+package main
+
+//line main.go:20:1
+func bravo() {}
+-- main.go --
+package main
+
+func main() {}
+// filler line 4, long enough for every column the directives render
+// filler line 5, long enough for every column the directives render
+// filler line 6, long enough for every column the directives render
+// filler line 7, long enough for every column the directives render
+// filler line 8, long enough for every column the directives render
+// filler line 9, long enough for every column the directives render
+// filler line 10, long enough for every column the directives render
+// filler line 11, long enough for every column the directives render
+// filler line 12, long enough for every column the directives render
+// filler line 13, long enough for every column the directives render
+// filler line 14, long enough for every column the directives render
+// filler line 15, long enough for every column the directives render
+// filler line 16, long enough for every column the directives render
+// filler line 17, long enough for every column the directives render
+// filler line 18, long enough for every column the directives render
+// filler line 19, long enough for every column the directives render
+// filler line 20, long enough for every column the directives render
+// filler line 21, long enough for every column the directives render
+// filler line 22, long enough for every column the directives render
+// filler line 23, long enough for every column the directives render
+// filler line 24, long enough for every column the directives render
+// filler line 25, long enough for every column the directives render
+// filler line 26, long enough for every column the directives render
+// filler line 27, long enough for every column the directives render
+// filler line 28, long enough for every column the directives render
+// filler line 29, long enough for every column the directives render

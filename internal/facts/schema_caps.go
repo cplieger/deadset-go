@@ -31,9 +31,9 @@ type generatedFile struct {
 // capEvidence is the hand-written evidence of grammar/analysis/references-go.md
 // references-go.17 one schema scan gathers outside test files.
 type capEvidence struct {
-	converted map[*token.File]bool // the generated files whose descriptor is converted
-	persisted []types.Object       // what a ProtoJSON decode keeping unknown fields fills
-	serving   []*packages.Package  // the packages serving server reflection
+	converted map[string]bool     // the written generated files whose descriptor is converted
+	persisted []types.Object      // what a ProtoJSON decode keeping unknown fields fills
+	serving   []*packages.Package // the packages serving server reflection
 }
 
 // The packages of references-go.17's ProtoJSON decoding and descriptor conversion.
@@ -78,9 +78,9 @@ func (s *schemaScan) converts(args []ast.Expr) {
 	for _, arg := range args {
 		if v := s.generatedVar(arg); v != nil {
 			if s.evidence.converted == nil {
-				s.evidence.converted = make(map[*token.File]bool)
+				s.evidence.converted = make(map[string]bool)
 			}
-			s.evidence.converted[s.fset.File(v.Pos())] = true
+			s.evidence.converted[s.rs.Positions().Offset(v.Pos()).File] = true
 		}
 	}
 }
@@ -151,9 +151,9 @@ func (s *schemaScan) capsOf(bindings []Binding, program []*packages.Package) map
 	linked := linkedBy(s.evidence.serving, program)
 	pkgOf := make(map[string]string, len(s.generatedFiles))
 	converted := make(map[string]bool)
-	for tf, g := range s.generatedFiles {
+	for name, g := range s.generatedFiles {
 		pkgOf[g.path] = g.pkg
-		converted[g.path] = s.evidence.converted[tf]
+		converted[g.path] = s.evidence.converted[name]
 	}
 	persistedSchemas := make(map[[2]string]bool)
 	exposedSchemaFiles := make(map[string]bool)

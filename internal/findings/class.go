@@ -141,7 +141,7 @@ func (in *pass) unanalysedConsumer(symbol *inventory.Symbol) bool {
 		length := len(unit)
 		if unit == "." {
 			length = 0
-		} else if !strings.HasPrefix(symbol.Pos.Filename, unit+"/") {
+		} else if !strings.HasPrefix(symbol.File, unit+"/") {
 			continue
 		}
 		if length > depth {
@@ -232,9 +232,9 @@ func (in *pass) hiddenMember(symbol *inventory.Symbol) bool {
 	default:
 		return false
 	}
-	owner := in.symbol(symbol.Parent)
+	owner := in.container(symbol)
 	for owner != nil && owner.Kind == inventory.KindField {
-		owner = in.symbol(owner.Parent)
+		owner = in.container(owner)
 	}
 	if owner == nil || owner.Exported || (owner.Kind != inventory.KindType && owner.Kind != inventory.KindInterface) {
 		return false

@@ -252,7 +252,7 @@ func TestUnusedTypeParameterTakesNoSubjectFromATypeDeclaration(t *testing.T) {
 		if symbol.Kind != inventory.KindTypeParam {
 			continue
 		}
-		if !declaresTypeParameters(newPass(in).symbol(symbol.Parent)) {
+		if !declaresTypeParameters(newPass(in).container(symbol)) {
 			t.Errorf("the inventory holds %s, a type parameter of a container whose parameters nothing reports",
 				symbol.Name)
 		}

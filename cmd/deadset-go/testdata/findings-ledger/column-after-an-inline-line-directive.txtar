@@ -1,0 +1,16 @@
+A command whose main.go writes a two-byte character before an inline line
+directive on one line. The rendered column of t counts only the bytes after the
+directive, all ASCII, so t is reported at main.go:30:45.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() { println(s) }
+
+var s = "é"; /*line main.go:30:40*/ var t = 1

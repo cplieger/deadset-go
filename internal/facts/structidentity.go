@@ -2,7 +2,6 @@ package facts
 
 import (
 	"go/ast"
-	"go/token"
 	"go/types"
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
@@ -16,7 +15,8 @@ import (
 // own field objects.
 type literalStructs struct {
 	byKey  map[string][]literalStruct
-	fields map[token.Pos]fieldAt // by the position a field is written at, which every variant shares
+	fields map[inventory.Offset]fieldAt // by where a field is written, which every reading of its file shares
+	at     *inventory.Positions
 }
 
 // literalStruct is one struct type literal and the type the variant that indexed it
@@ -34,12 +34,13 @@ type fieldAt struct {
 
 // add indexes the struct type literals of every source file of the packages, under
 // the variant [inventory.Sources] reads each with.
-func (l *literalStructs) add(pkgs []*packages.Package, fset *token.FileSet) {
+func (l *literalStructs) add(pkgs []*packages.Package, at *inventory.Positions) {
 	if l.byKey == nil {
 		l.byKey = make(map[string][]literalStruct)
-		l.fields = make(map[token.Pos]fieldAt)
+		l.fields = make(map[inventory.Offset]fieldAt)
+		l.at = at
 	}
-	for pkg, f := range inventory.Sources(pkgs, fset) {
+	for pkg, f := range inventory.Sources(pkgs, at.Fset) {
 		l.addFile(pkg.TypesInfo, f)
 	}
 }
@@ -60,7 +61,7 @@ func (l *literalStructs) addFile(info *types.Info, f *ast.File) {
 				key := types.TypeString(st, nil)
 				l.byKey[key] = append(l.byKey[key], lit)
 				for i := range st.NumFields() {
-					l.fields[st.Field(i).Pos()] = fieldAt{lit: lit, index: i}
+					l.fields[l.at.Offset(st.Field(i).Pos())] = fieldAt{lit: lit, index: i}
 				}
 			}
 		}
@@ -72,7 +73,7 @@ func (l *literalStructs) addFile(info *types.Info, f *ast.File) {
 // the one that declares field, each literal typed as info's variant types it where
 // that variant compiles it: a variant's types are identical only to its own.
 func (l *literalStructs) twins(info *types.Info, field *types.Var) []*types.Var {
-	at, held := l.fields[field.Pos()]
+	at, held := l.fields[l.at.Offset(field.Pos())]
 	if !held {
 		return nil
 	}

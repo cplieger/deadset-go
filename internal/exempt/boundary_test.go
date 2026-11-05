@@ -238,15 +238,15 @@ func TestEvidenceOfATestFileHoldsAsTheModeClassifiesThatFile(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			site := token.Position{Filename: "app_test.go", Line: 9, Column: 2}
-			if got := holdsInMode(&Exemption{Site: site}, test.mode); got != test.targetTest {
+			if got := holdsInMode(&Exemption{File: site.Filename, Site: site}, test.mode); got != test.targetTest {
 				t.Errorf("holdsInMode(the target's %s, %+v) = %t, want %t", site, test.mode, got, test.targetTest)
 			}
-			consumed := &Exemption{Consumer: "example.com/consumer", Site: site}
+			consumed := &Exemption{Consumer: "example.com/consumer", File: site.Filename, Site: site}
 			if got := holdsInMode(consumed, test.mode); got != test.consumerTest {
 				t.Errorf("holdsInMode(the consumer's %s, %+v) = %t, want %t", site, test.mode, got, test.consumerTest)
 			}
 			for _, consumer := range []string{"", "example.com/consumer"} {
-				source := &Exemption{Consumer: consumer, Site: token.Position{Filename: "app.go", Line: 9, Column: 2}}
+				source := &Exemption{Consumer: consumer, File: "app.go", Site: token.Position{Filename: "app.go", Line: 9, Column: 2}}
 				if got := holdsInMode(source, test.mode); !got {
 					t.Errorf("holdsInMode(%q app.go, %+v) = false, want true: a source file's evidence holds under every mode",
 						consumer, test.mode)

@@ -1,0 +1,45 @@
+A library generic that lays a buffer out as its type parameter, which only a
+declared consumer instantiates, with the target's own S. The consumer's reading of
+lib.go is a second parse of it, so its instantiation reaches the target's View only
+when a type parameter is keyed by where it is written.
+
+-- target/go.mod --
+module example.com/app
+
+go 1.27.1
+-- target/deadset.json --
+{"target": {"kind": "library"}, "consumers": {"complete": true}}
+-- target/lib.go --
+// Package app exports a type a consumer lays out.
+package app
+
+import "unsafe"
+
+// S is laid out by the consumer through View.
+type S struct{ x int }
+
+// View lays a buffer out as a T.
+func View[T any](b []byte) *T { return (*T)(unsafe.Pointer(&b[0])) }
+-- consumer/go.mod --
+module example.com/consumer
+
+go 1.27.1
+
+require example.com/app v0.0.0
+
+replace example.com/app => ../target
+-- consumer/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/app"
+)
+
+func main() { fmt.Println(app.View[app.S](make([]byte, 64)) != nil) }
+-- scope.json --
+{
+  "target": {"id": "example.com/app", "role": "target", "path": "target"},
+  "consumers": [{"id": "example.com/consumer", "role": "consumer", "path": "consumer"}]
+}

@@ -70,7 +70,7 @@ type Graph struct {
 	made     []counts // per symbol, the references made to the symbol
 	heldMade []counts // per symbol, the part of made an exemption's holders make
 	consumed []calls  // per symbol, how a loaded consumer references it
-	parent   []int    // per symbol, the position of its container
+	parents  [][]int  // per symbol, the positions of its containers the inventory holds
 	test     []bool   // per symbol, test code declares it: a test file or a test-support package
 	subject  []bool   // per symbol, the sweep judges its liveness
 	rooted   []rooted
@@ -98,7 +98,7 @@ func New(symbols []inventory.Symbol, refs []facts.Reference, seeds []roots.Root)
 		made:     make([]counts, len(symbols)),
 		heldMade: make([]counts, len(symbols)),
 		consumed: make([]calls, len(symbols)),
-		parent:   make([]int, len(symbols)),
+		parents:  make([][]int, len(symbols)),
 		test:     make([]bool, len(symbols)),
 		subject:  make([]bool, len(symbols)),
 	}
@@ -107,7 +107,11 @@ func New(symbols []inventory.Symbol, refs []facts.Reference, seeds []roots.Root)
 	}
 	for i := range symbols {
 		s := &symbols[i]
-		g.parent[i] = g.at(s.Parent)
+		for _, id := range s.Parents {
+			if at := g.at(id); at != outside {
+				g.parents[i] = append(g.parents[i], at)
+			}
+		}
 		g.test[i] = s.InTestFile || s.TestSupport
 		// A package and a file are not judged by either relation. Their liveness
 		// is the subject of the file and package kinds, which read the load and

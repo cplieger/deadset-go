@@ -332,8 +332,8 @@ func TestSweepRecordsNoExemptionNamingASymbolTheInventoryDoesNotHold(t *testing.
 // suppressedBy names the symbols of one sweep's suppression record, which are the
 // marks that held a symbol back.
 func (b *graphBuilder) suppressedBy(r Result) []string {
-	found := make([]string, 0, len(r.Suppressed))
-	for _, id := range r.Suppressed {
+	found := make([]string, 0, len(r.suppressed))
+	for _, id := range r.suppressed {
 		found = append(found, b.named[id])
 	}
 	return found
@@ -1140,8 +1140,8 @@ func TestSweepCreditsAnExemptionWithASymbolAMarkItMadeStaleNamesToo(t *testing.T
 		Marked: []inventory.SymbolID{b.id("kept")},
 	})
 
-	if len(r.Suppressed) != 0 {
-		t.Errorf("Sweep() suppressed %v, want nothing: the exemption holds the symbol, so the mark is stale", r.Suppressed)
+	if len(r.suppressed) != 0 {
+		t.Errorf("Sweep() suppressed %v, want nothing: the exemption holds the symbol, so the mark is stale", r.suppressed)
 	}
 	if len(r.Retained) != 1 || r.Retained[0].ID != b.id("kept") {
 		t.Errorf("Sweep() retained %+v, want the exemption the stale mark leaves the symbol to", r.Retained)

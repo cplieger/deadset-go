@@ -89,14 +89,14 @@ func TestBaselineBindsARowAndCarriesItsProvenanceAsTheReason(t *testing.T) {
 	}
 	one := records[0]
 	switch {
-	case one.Mechanism != MechanismBaseline:
-		t.Errorf("Baseline(a bound row) carries mechanism %s, want %s", one.Mechanism, MechanismBaseline)
+	case one.Mechanism != core.Baseline:
+		t.Errorf("Baseline(a bound row) carries mechanism %s, want %s", one.Mechanism, core.Baseline)
 	case one.Bound == "":
 		t.Errorf("Baseline(a bound row) bound nothing, want the declaration %s names", ref)
 	case one.Reason != "recorded by deadset-go 1.6.0":
 		t.Errorf("Baseline(a bound row) carries reason %q, want the provenance the row holds", one.Reason)
-	case one.Site.Filename != core.BaselineFileName || one.Site.Line != 3 || one.Site.Column != 5:
-		t.Errorf("Baseline(a bound row) sites the record at %s, want %s:3:5", one.Site, core.BaselineFileName)
+	case one.Site.Path != core.BaselineFileName || one.Site.Line != 3 || one.Site.Column != 5:
+		t.Errorf("Baseline(a bound row) sites the record at %+v, want %s:3:5", one.Site, core.BaselineFileName)
 	}
 }
 

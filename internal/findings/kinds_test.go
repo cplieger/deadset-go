@@ -82,6 +82,7 @@ func handSymbol(id inventory.SymbolID, ref, name, pkgPath, path string, line, en
 		PkgPath:  pkgPath,
 		Pos:      token.Position{Filename: path, Line: line, Column: 6},
 		EndLine:  endLine,
+		File:     path,
 		Kind:     inventory.KindFunc,
 		Exported: exported,
 		Configs:  inventory.ConfigSet(0b11),
@@ -760,7 +761,6 @@ func TestASuppressionWithholdsAFindingReportedInAnotherFileThanTheDeclarationItN
 	in := suppressed(t, "interfaces-assertion-elsewhere.txtar", applicationConfig())
 	emitters := map[vocab.Code]Emitter{
 		vocab.UnusedSatisfactionAssertion: unusedSatisfactionAssertion,
-		vocab.StaleSuppression:            staleSuppressions,
 	}
 
 	// The premise the entry is written against: the reference it names is the
@@ -807,18 +807,16 @@ func TestASuppressionWithholdsNoFindingReportedInAFileTheRecordDoesNotName(t *te
 	// the interface is declared in rather than the one the finding is reported in.
 	in.Marks[0].Path = "iface.go"
 
-	found := computed(t, in, map[vocab.Code]Emitter{
+	result := computed(t, in, map[vocab.Code]Emitter{
 		vocab.UnusedSatisfactionAssertion: unusedSatisfactionAssertion,
-		vocab.StaleSuppression:            staleSuppressions,
-	}).Findings
+	})
 
-	want := []string{
-		"DS1203 encoder",
-		"DS9003 go://example.com/app#encoder",
-	}
-	if got := summary(found); !slices.Equal(got, want) {
+	if got, want := summary(result.Findings), []string{"DS1203 encoder"}; !slices.Equal(got, want) {
 		t.Errorf("the pass with the entry naming another file reports %v, want %v: an entry matches the path the finding carries",
 			got, want)
+	}
+	if len(result.Stale) != 1 || result.Stale[0].Symbol != "go://example.com/app#encoder" {
+		t.Errorf("the pass reports %+v stale, want the entry naming encoder", result.Stale)
 	}
 }
 
@@ -827,8 +825,10 @@ func TestASuppressionWithholdsNoFindingReportedInAFileTheRecordDoesNotName(t *te
 // the table's test says which kinds the table is silent about instead of allowing a
 // kind to go missing unnoticed.
 //
-// DS9005 is the merge's, which is another product.
+// DS9005 is the merge's, which is another product, and DS9003 the suppression
+// ledger's, which reports a stale record as a record of its own.
 var goKindsWithoutEmitter = []vocab.Code{
+	"DS9003", // the stale suppression, which [pass.decide] answers
 	"DS9005", // the stale cross-language edge, which the merge answers
 }
 

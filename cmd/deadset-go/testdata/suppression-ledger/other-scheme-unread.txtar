@@ -1,0 +1,19 @@
+A command whose ignore file holds entries of two other languages' schemes, one
+of them outside that language's reference grammar. Neither is this analyzer's to
+read, so the run accepts both unread and counts neither.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- deadset-ignore.json --
+{"ignore": [
+  {"code": "DS1002", "symbol": "ts://app/src/index.ts#not a reference", "path": "src/index.ts", "reason": "the TypeScript analyzer's"},
+  {"code": "DS1002", "symbol": "proto://pkg#Thing", "path": "thing.proto", "reason": "the schema reader's"}
+]}
+-- main.go --
+package main
+
+func main() {}

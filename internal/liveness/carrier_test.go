@@ -25,6 +25,7 @@ func TestCarryFollowsHandWrittenCodeThroughGeneratedCodeAndCutsRegistrationWrite
 	b.declare(handSymbol{name: "ServerPing", parent: "Server", kind: inventory.KindInterfaceMethod, nested: true})
 	for _, name := range []string{"Register", "Desc", "GenHandler", "Dispatch", "Getter", "Read", "Written", "Server", "ServerPing"} {
 		b.symbols[b.at(name)].Pos.Filename = handGeneratedFile
+		b.symbols[b.at(name)].File = handGeneratedFile
 	}
 	b.symbols[b.at("assertion")].Blank = true
 	b.root("main", roots.RootMain)
@@ -53,10 +54,10 @@ func TestCarryFollowsHandWrittenCodeThroughGeneratedCodeAndCutsRegistrationWrite
 	)
 	satisfaction := exempt.Exemption{
 		ID: b.id("impl"), Class: string(vocab.InterfaceSatisfaction), Via: b.id("ServerPing"), Holder: b.id("main"),
-		Site: token.Position{Filename: handFile, Line: 1},
+		File: handFile, Site: token.Position{Filename: handFile, Line: 1},
 	}
 	declared := exempt.Exemption{
-		ID: b.id("GenHandler"), Class: string(vocab.GeneratedFile), Site: token.Position{Filename: handGeneratedFile, Line: 1},
+		ID: b.id("GenHandler"), Class: string(vocab.GeneratedFile), File: handGeneratedFile, Site: token.Position{Filename: handGeneratedFile, Line: 1},
 	}
 	k := b.graph().Carry(&Carrier{
 		Generated:     map[string]bool{handGeneratedFile: true},

@@ -1,0 +1,28 @@
+A command whose a.go and b.go each hold a string literal, both written at the same
+byte and rendered by a line directive at the same position of main.go. One spells
+alpha and the other bravo, so each lowers its function's finding to possible.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- a.go --
+package main
+
+//line main.go:20:1
+var x = "alpha"
+-- b.go --
+package main
+
+//line main.go:20:1
+var y = "bravo"
+-- main.go --
+package main
+
+func main() { println(x, y) }
+
+func alpha() {}
+
+func bravo() {}

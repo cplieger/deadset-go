@@ -267,7 +267,7 @@ func (d *rootDetection) generatorPackageInputs(symbols []inventory.Symbol) {
 	}
 	for i := range symbols {
 		s := &symbols[i]
-		if d.inputDirs[path.Dir(s.Pos.Filename)] && s.Exported && s.Kind != inventory.KindTypeParam && !s.InTestFile && d.exportedContainers(s.Parent) {
+		if d.inputDirs[path.Dir(s.File)] && s.Exported && s.Kind != inventory.KindTypeParam && !s.InTestFile && d.exportedContainers(s.Parents) {
 			d.add(s.ID, RootGenerate, "")
 		}
 	}

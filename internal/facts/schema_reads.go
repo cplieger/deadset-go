@@ -64,7 +64,7 @@ type schemaScan struct {
 	pkg            *packages.Package
 	rs             *resolve.Resolver
 	fset           *token.FileSet
-	generatedFiles map[*token.File]generatedFile
+	generatedFiles map[string]generatedFile // by the name a file is written at, which every reading of it shares
 	oneofs         map[*types.TypeName][]oneof
 	told           map[ast.Expr]bool // the oneof reads that tell a member apart, or are written
 	evidence       capEvidence
@@ -80,7 +80,7 @@ type schemaScan struct {
 // handed, a name conversion reads every value of the enum, and a oneof read
 // telling no member apart reads every member. It is also the cap of every
 // consumer binding that hand-written code outside tests gives one ([schemaScan.capsOf]).
-func schemaReadsOf(x *Index, rs *resolve.Resolver, generated map[*token.File]generatedFile) (reads []SchemaRead, caps map[inventory.SymbolID]Cap) {
+func schemaReadsOf(x *Index, rs *resolve.Resolver, generated map[string]generatedFile) (reads []SchemaRead, caps map[inventory.SymbolID]Cap) {
 	s := &schemaScan{
 		rs: rs, fset: x.fset, generatedFiles: generated,
 		oneofs: make(map[*types.TypeName][]oneof), told: make(map[ast.Expr]bool),
@@ -399,7 +399,7 @@ func ownerOf(selection *types.Selection) *types.TypeName {
 
 // generated reports whether obj is declared in a generated file of the target.
 func (s *schemaScan) generated(obj types.Object) bool {
-	_, generated := s.generatedFiles[s.fset.File(obj.Pos())]
+	_, generated := s.generatedFiles[s.rs.Positions().Offset(obj.Pos()).File]
 	return generated
 }
 

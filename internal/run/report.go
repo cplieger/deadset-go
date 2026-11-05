@@ -58,6 +58,7 @@ func (f *Findings) Report(self *Self) (*report.Report, error) {
 		ConfigurationsNotBuilt: configurationsNotBuilt(f.Unbuilt),
 		Loaded:                 loaded,
 		Findings:               reported,
+		StaleSuppressions:      f.Result.Stale,
 		EdgeEvaluations:        evaluations,
 		DeclaredGaps:           self.Gaps,
 		ExcludedByCgo:          excluded,

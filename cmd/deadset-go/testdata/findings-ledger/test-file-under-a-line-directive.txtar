@@ -1,0 +1,27 @@
+A command whose main.go writes a function only a test calls under a line
+directive naming a test file. The function is written in a production file, so
+it is production code only a test uses, and the test is a test of dead code.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() {}
+
+//line helper_test.go:3:1
+func helper() {}
+-- helper_test.go --
+package main
+
+// a listing long enough to hold the line main.go's directive remaps here
+-- main_test.go --
+package main
+
+import "testing"
+
+func TestHelper(t *testing.T) { helper() }

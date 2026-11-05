@@ -1,0 +1,36 @@
+A command whose a.go, b.go and c.go each write a directive that a line directive
+renders at main.go:19:1, above alpha, bravo and charlie. Alpha is dead, so its
+directive is in effect; bravo and charlie are called, so each of their directives
+is stale, and each is reported where it renders.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- a.go --
+package main
+
+//line main.go:19:1
+//deadset:ignore DS1002 -- kept for the loader
+func alpha() {}
+-- b.go --
+package main
+
+//line main.go:19:1
+//deadset:ignore DS1002 -- kept for the loader
+func bravo() {}
+-- c.go --
+package main
+
+//line main.go:19:1
+//deadset:ignore DS1002 -- kept for the loader
+func charlie() {}
+-- main.go --
+package main
+
+func main() {
+	bravo()
+	charlie()
+}

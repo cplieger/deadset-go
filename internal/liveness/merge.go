@@ -27,7 +27,7 @@ type Configured struct {
 }
 
 // Merged is one matrix's inventory. Symbols holds every declaration any
-// configuration declares, once per source position and by site, each carrying the
+// configuration declares, once per identifier and by site, each carrying the
 // set of configurations it exists in. References and Roots hold every
 // configuration's own, each carrying the configuration it was seen in. Unmatched
 // holds one row per configuration that left a string unmatched, with no
@@ -52,10 +52,12 @@ type Merged struct {
 // Merge combines what the passes returned for each configuration of a matrix into
 // one inventory, per's order being the configuration index, under the matrix's test
 // classes ([MatrixTests]). A declaration is keyed across configurations by its
-// identifier, the rendered position: the first configuration that declares it gives
+// identifier ([inventory.SymbolID]): the first configuration that declares it gives
 // its fields, tests its test support, and every configuration that declares it adds
-// its bit. A declaration one configuration alone holds is analyzed under that
-// configuration rather than skipped.
+// its bit and its containers. A package's Pos, EndLine, File and Line are the
+// exception: they come from the first-sorting of its configurations' anchors
+// ([anchoredFirst]). A declaration one configuration alone holds is analyzed under
+// that configuration rather than skipped.
 func Merge(per []Configured, tests roots.TestClasses) (Merged, error) {
 	if len(per) == 0 {
 		return Merged{}, fmt.Errorf("%w: no configuration", ErrMatrix)
@@ -72,6 +74,8 @@ func Merge(per []Configured, tests roots.TestClasses) (Merged, error) {
 		for i := range one.Symbols {
 			if held, ok := at[one.Symbols[i].ID]; ok {
 				m.Symbols[held].Configs = m.Symbols[held].Configs.With(config)
+				m.Symbols[held].Parents = withParents(m.Symbols[held].Parents, one.Symbols[i].Parents)
+				anchoredFirst(&m.Symbols[held], &one.Symbols[i])
 				continue
 			}
 			s := one.Symbols[i]
@@ -102,21 +106,35 @@ func Merge(per []Configured, tests roots.TestClasses) (Merged, error) {
 	return m, nil
 }
 
-// referenceSite keys where a reference is made: the module that makes it, the
-// declaration that makes it, the declaration it names, and the position it is
-// written at. The position's byte offset is not part of the key, so the key holds
-// whether or not a rendering carries one.
-//
-// The module is part of the key because a position is only unique inside one
-// module: two consumers hold a file of one name, and a reference each makes at one
-// line of it is two references.
+// anchoredFirst places a package at the first-sorting of the files each
+// configuration anchors it at, so its position does not depend on the order the
+// matrix lists its configurations in.
+func anchoredFirst(held, added *inventory.Symbol) {
+	if held.Kind == inventory.KindPackage && inventory.ByPosition(added.Pos, held.Pos) < 0 {
+		held.Pos, held.EndLine, held.File, held.Line = added.Pos, added.EndLine, added.File, added.Line
+	}
+}
+
+// withParents is held with every container of added it lacks, in identifier order,
+// so the merge's answer does not depend on the order the matrix lists its
+// configurations in.
+func withParents(held, added []inventory.SymbolID) []inventory.SymbolID {
+	for _, id := range added {
+		if !slices.Contains(held, id) {
+			held = append(slices.Clone(held), id)
+			slices.Sort(held)
+		}
+	}
+	return held
+}
+
+// referenceSite keys where a reference is made: the declaration that makes it, the
+// declaration it names, and the byte that writes it, which every configuration
+// compiling the file agrees on whatever line directive renders it.
 type referenceSite struct {
-	consumer string
-	from     inventory.SymbolID
-	to       inventory.SymbolID
-	file     string
-	line     int
-	col      int
+	from inventory.SymbolID
+	to   inventory.SymbolID
+	site inventory.Offset
 }
 
 // distinct returns every configuration's references with the duplicates a matrix
@@ -132,14 +150,7 @@ func distinct(refs []facts.Reference) []facts.Reference {
 	kept := make([]facts.Reference, 0, len(refs))
 	for i := range refs {
 		r := &refs[i]
-		site := referenceSite{
-			consumer: r.Consumer,
-			from:     r.From,
-			to:       r.To,
-			file:     r.Pos.Filename,
-			line:     r.Pos.Line,
-			col:      r.Pos.Column,
-		}
+		site := referenceSite{from: r.From, to: r.To, site: r.Site}
 		like := slices.IndexFunc(held[site], func(at int) bool {
 			k := &kept[at]
 			return k.Configs&r.Configs == 0 && k.Kind == r.Kind && k.Via == r.Via && k.Test == r.Test

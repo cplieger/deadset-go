@@ -35,13 +35,14 @@ func GeneratedFileDetector(in *Program) ([]Exemption, error) {
 		if s.Kind == inventory.KindPackage || s.Kind == inventory.KindFile {
 			continue
 		}
-		site, generated := sites[s.Pos.Filename]
+		site, generated := sites[s.File]
 		if !generated {
 			continue
 		}
 		found = append(found, Exemption{
 			ID:     s.ID,
 			Class:  string(vocab.GeneratedFile),
+			File:   s.File,
 			Site:   site,
 			Detail: detailGenerated,
 		})

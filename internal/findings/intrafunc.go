@@ -343,7 +343,7 @@ func comparePositions(a, b Position) int {
 func (g *intrafunc) findings(held *parts) []draft {
 	slices.SortFunc(held.order, func(a, b partKey) int {
 		return cmp.Or(comparePositions(held.keyed[a].draft.Position, held.keyed[b].draft.Position),
-			strings.Compare(string(a.decl), string(b.decl)), cmp.Compare(a.written, b.written))
+			strings.Compare(held.keyed[a].file, held.keyed[b].file), cmp.Compare(a.written, b.written))
 	})
 	found := make([]draft, 0, len(held.order))
 	for _, at := range held.order {

@@ -28,9 +28,8 @@ const (
 // tests is drawn from.
 const corpusPath = "contract/grammar/suppression-corpus.json"
 
-// corpusCase is one case of that corpus. The input is either an inline
-// comment with its line offset or the entry object itself, which is why it stays
-// raw until the case's kind is known.
+// corpusCase is one case of that corpus. The input stays raw until the case's
+// kind is known.
 type corpusCase struct {
 	Input json.RawMessage `json:"input"`
 	Kind  string          `json:"kind"`
@@ -43,14 +42,6 @@ type corpusCase struct {
 	Reports  []string `json:"reports"`
 	Reason   string   `json:"reason"`
 	Accepted bool     `json:"accepted"`
-}
-
-// inlineInput is the input of an inline case: the text of the comment from its
-// first solidus to the end of its line, and the comment's line number minus the
-// first line of the declaration it targets.
-type inlineInput struct {
-	Comment    string `json:"comment"`
-	LineOffset int    `json:"line_offset"`
 }
 
 // readCorpus returns every case of the published corpus whose kind is kind.
@@ -74,16 +65,6 @@ func readCorpus(t *testing.T, kind string) []corpusCase {
 		t.Fatalf("Setup: %s holds no %s case", corpusPath, kind)
 	}
 	return of
-}
-
-// readPage returns one page of the published grammar.
-func readPage(t *testing.T, path string) string {
-	t.Helper()
-	body, err := spec.Contract.ReadFile(path)
-	if err != nil {
-		t.Fatalf("Setup: read %s from the contract: %v", path, err)
-	}
-	return string(body)
 }
 
 // extract writes one txtar archive of testdata into a directory of its own and
@@ -178,4 +159,10 @@ func writeDocument(t *testing.T, name, document string) string {
 		t.Fatalf("Setup: write %s: %v", path, err)
 	}
 	return path
+}
+
+// configured is one loaded fixture as the one configuration [Inline] reads.
+func configured(t *testing.T, result *load.Result, root string, symbols []inventory.Symbol) []Configuration {
+	t.Helper()
+	return []Configuration{{Result: result, Resolve: resolverOf(t, result, root, symbols), Symbols: symbols}}
 }

@@ -1,0 +1,16 @@
+A command with a directive whose code is not DS and four digits. The grammar
+refuses it before any finding exists, which ends the run with the usage code.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() {}
+
+//deadset:ignore DS12 -- not a code
+func helper() {}

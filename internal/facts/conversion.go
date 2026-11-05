@@ -10,6 +10,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/gotypes"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -43,9 +44,9 @@ type Conversion struct {
 // A type assertion takes a value out of an interface, so it is no site itself; a
 // concrete type whose value reaches the operand's interface and that implements the
 // asserted one reaches the asserted interface there ([conversionScan.asserted]).
-func Conversions(fset *token.FileSet, pkgs []*packages.Package) []Conversion {
-	s := &conversionScan{fset: fset}
-	for p, f := range inventory.Sources(pkgs, fset) {
+func Conversions(at *inventory.Positions, pkgs []*packages.Package) []Conversion {
+	s := &conversionScan{at: at}
+	for p, f := range inventory.Sources(pkgs, at.Fset) {
 		s.info = p.TypesInfo
 		s.walk(f)
 	}
@@ -64,7 +65,7 @@ func conversionsIn(info *types.Info, decl ast.Node) []Conversion {
 
 // conversionScan accumulates the conversion sites of one loaded configuration.
 type conversionScan struct {
-	fset       *token.FileSet
+	at         *inventory.Positions
 	info       *types.Info    // the type information of the variant compiling the file being walked
 	callee     *types.Package // the package of the call whose arguments are being recorded
 	results    []types.Type   // the result types of the enclosing function
@@ -100,16 +101,16 @@ type assertion struct {
 	holder  token.Pos
 }
 
-// bySite orders two conversions by position, then by the type converted and the
-// interface reached.
+// bySite orders two conversions by where they are written, then by the type
+// converted and the interface reached.
 //
 //nolint:gocritic // slices.SortFunc fixes a comparator's parameters to values.
 func (s *conversionScan) bySite(a, b Conversion) int {
-	p, q := s.fset.Position(a.Site), s.fset.Position(b.Site)
-	if c := strings.Compare(p.Filename, q.Filename); c != 0 {
+	p, q := s.at.Offset(a.Site), s.at.Offset(b.Site)
+	if c := strings.Compare(p.File, q.File); c != 0 {
 		return c
 	}
-	if c := p.Offset - q.Offset; c != 0 {
+	if c := p.At - q.At; c != 0 {
 		return c
 	}
 	if c := strings.Compare(a.From.String(), b.From.String()); c != 0 {
@@ -694,7 +695,7 @@ func (s *conversionScan) typeSwitch(ts *ast.TypeSwitchStmt) {
 // identical: the package of each name is spelled by its own identity, because two
 // variants of one package declare two distinct types under one path.
 func identity(t types.Type) string {
-	return types.TypeString(t, func(p *types.Package) string { return fmt.Sprintf("%p", p) })
+	return resolve.Spell(t, func(p *types.Package) string { return fmt.Sprintf("%p", p) })
 }
 
 // typeOf returns the type one expression has, and nil when the type checker

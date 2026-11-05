@@ -1,125 +1,19 @@
 package suppress
 
 import (
-	"encoding/json"
 	"errors"
-	"maps"
 	"slices"
 	"strings"
 	"testing"
 
+	core "github.com/cplieger/deadset-spec/v8/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
-
-// grammarPage is the page that fixes the suppression grammar.
-const grammarPage = "contract/grammar/suppression.md"
-
-// expressions are the three expressions of the inline grammar, transcribed from
-// that page and named by the step of the decision procedure each one is.
-func expressions() map[string]string {
-	return map[string]string{
-		"candidate":   directiveCandidate.String(),
-		"well-formed": directiveWellFormed.String(),
-		"no-reason":   directiveNoReason.String(),
-	}
-}
-
-// outcomes maps one rule of the corpus vocabulary to what the decision procedure
-// makes of a case under it: the verdict for an accepted case and the verdict for a
-// refused one. A rule whose refused case is well formed all the same, so that the
-// binding is what refuses it, wants a directive in both columns.
-func outcomes() map[string][2]verdict {
-	return map[string][2]verdict{
-		"spelling-no-space": {verdictDirective, verdictDirective},
-		"spelling-space":    {verdictDirective, verdictDirective},
-		"reason-text":       {verdictDirective, verdictDirective},
-		"code-list":         {verdictDirective, verdictMalformed},
-		"namespace":         {verdictDirective, verdictNone},
-		"first-token":       {verdictDirective, verdictNone},
-		"line-comment-only": {verdictDirective, verdictNone},
-		"directive-name":    {verdictDirective, verdictMalformed},
-		"reason-separator":  {verdictDirective, verdictMalformed},
-		"reason-required":   {verdictDirective, verdictNoReason},
-		"line-above":        {verdictDirective, verdictDirective},
-		"trailing":          {verdictDirective, verdictDirective},
-	}
-}
-
-// boundOffsets are the line offsets the grammar accepts: a comment alone on the line
-// immediately above the declaration it targets, and one after the code on the line
-// the declaration begins on.
-var boundOffsets = []int{-1, 0}
-
-func TestPublishedGrammarCarriesEveryInlineExpression(t *testing.T) {
-	page := readPage(t, grammarPage)
-	for step, expression := range expressions() {
-		t.Run(step, func(t *testing.T) {
-			if !strings.Contains(page, "\n"+expression+"\n") {
-				t.Errorf("%s carries no line equal to the expression transcribed for the %s step:\n%s", grammarPage, step, expression)
-			}
-		})
-	}
-}
-
-func TestClassifyDecidesEveryPublishedCorpusCase(t *testing.T) {
-	for _, c := range readCorpus(t, "inline") {
-		var in inlineInput
-		if err := json.Unmarshal(c.Input, &in); err != nil {
-			t.Fatalf("Setup: decode the input of the %s case: %v", c.Rule, err)
-		}
-		t.Run(c.Rule+" "+in.Comment, func(t *testing.T) {
-			outcome, declared := outcomes()[c.Rule]
-			if !declared {
-				t.Fatalf("the corpus names rule %s and no outcome is declared for it: %s", c.Rule, c.Reason)
-			}
-			want := outcome[1]
-			if c.Accepted {
-				want = outcome[0]
-			}
-			is, codes, reason := classify(in.Comment)
-			if is != want {
-				t.Errorf("classify(%q) = %v, want %v: %s", in.Comment, is, want, c.Reason)
-			}
-			if c.Accepted && (len(codes) == 0 || reason == "") {
-				t.Errorf("classify(%q) = %v with codes %v and reason %q, want at least one code and a reason: %s",
-					in.Comment, is, codes, reason, c.Reason)
-			}
-			if got := is == verdictDirective && slices.Contains(boundOffsets, in.LineOffset); got != c.Accepted {
-				t.Errorf("the comment %q at line offset %d is a bound suppression = %t, want %t: %s",
-					in.Comment, in.LineOffset, got, c.Accepted, c.Reason)
-			}
-		})
-	}
-}
-
-func TestClassifyHasAnArmForEveryPublishedRuleAndNoneTheCorpusLacks(t *testing.T) {
-	exercised := make(map[string]bool)
-	for _, c := range readCorpus(t, "inline") {
-		exercised[c.Rule] = true
-	}
-	if got, want := slices.Sorted(maps.Keys(outcomes())), slices.Sorted(maps.Keys(exercised)); !slices.Equal(got, want) {
-		t.Errorf("the declared outcomes cover %v, and the published corpus exercises %v", got, want)
-	}
-}
-
-func TestClassifyReadsTheTwoCodesOfOneDirectiveAsTwo(t *testing.T) {
-	const comment = "//deadset:ignore DS1001,DS1501 -- one reason for both codes."
-	is, codes, reason := classify(comment)
-	if is != verdictDirective {
-		t.Fatalf("classify(%q) = %v, want %v", comment, is, verdictDirective)
-	}
-	if want := []vocab.Code{"DS1001", "DS1501"}; !slices.Equal(codes, want) {
-		t.Errorf("classify(%q) codes = %v, want %v", comment, codes, want)
-	}
-	if want := "one reason for both codes."; reason != want {
-		t.Errorf("classify(%q) reason = %q, want %q", comment, reason, want)
-	}
-}
 
 // boundRefs lists, per record reason, the references of the declarations the
 // records bound, in the order the read returned them. A reason names one case of
 // the fixture, so a table keys on the case rather than on a line number.
-func boundRefs(records []Record) map[string][]string {
+func boundRefs(records []core.Record) map[string][]string {
 	bound := make(map[string][]string, len(records))
 	for _, r := range records {
 		bound[r.Reason] = append(bound[r.Reason], r.Symbol)
@@ -129,7 +23,7 @@ func boundRefs(records []Record) map[string][]string {
 
 func TestInlineBindsADirectiveToEveryDeclarationOnTheLineBelowIt(t *testing.T) {
 	result, root, symbols := loaded(t, "directives.txtar")
-	records, _, err := Inline(result, resolverOf(t, result, root, symbols), symbols)
+	records, _, err := Inline(configured(t, result, root, symbols))
 	if err != nil {
 		t.Fatalf("Inline(directives.txtar) error: %v", err)
 	}
@@ -179,7 +73,7 @@ func TestInlineBindsADirectiveToEveryDeclarationOnTheLineBelowIt(t *testing.T) {
 }
 
 // codesOfReason lists the codes the records carrying one reason suppress.
-func codesOfReason(records []Record, reason string) []vocab.Code {
+func codesOfReason(records []core.Record, reason string) []vocab.Code {
 	var codes []vocab.Code
 	for _, r := range records {
 		if r.Reason == reason {
@@ -191,7 +85,7 @@ func codesOfReason(records []Record, reason string) []vocab.Code {
 
 func TestInlineReadsACommentInAnotherNamespaceAsNothing(t *testing.T) {
 	result, root, symbols := loaded(t, "directives.txtar")
-	records, refusals, err := Inline(result, resolverOf(t, result, root, symbols), symbols)
+	records, refusals, err := Inline(configured(t, result, root, symbols))
 	if err != nil {
 		t.Fatalf("Inline(directives.txtar) error: %v", err)
 	}
@@ -209,7 +103,7 @@ func TestInlineReadsACommentInAnotherNamespaceAsNothing(t *testing.T) {
 
 func TestInlineRefusesADirectiveThatCarriesNoReason(t *testing.T) {
 	result, root, symbols := loaded(t, "directives.txtar")
-	records, refusals, err := Inline(result, resolverOf(t, result, root, symbols), symbols)
+	records, refusals, err := Inline(configured(t, result, root, symbols))
 	if err != nil {
 		t.Fatalf("Inline(directives.txtar) error: %v", err)
 	}
@@ -224,8 +118,8 @@ func TestInlineRefusesADirectiveThatCarriesNoReason(t *testing.T) {
 	if refusal.Code != "DS1001" || refusal.Reason != "" || refusal.Symbol != "" {
 		t.Errorf("Inline(directives.txtar) refusal = %+v, want the code named, no reason and no symbol bound", refusal)
 	}
-	if refusal.Mechanism != MechanismInline || refusal.Path != "catalog.go" {
-		t.Errorf("Inline(directives.txtar) refusal = %+v, want mechanism %s in catalog.go", refusal, MechanismInline)
+	if refusal.Mechanism != core.Inline || refusal.Path != "catalog.go" {
+		t.Errorf("Inline(directives.txtar) refusal = %+v, want mechanism %s in catalog.go", refusal, core.Inline)
 	}
 
 	// The refused directive binds nothing, so no record names the declaration
@@ -239,24 +133,24 @@ func TestInlineRefusesADirectiveThatCarriesNoReason(t *testing.T) {
 
 func TestInlineEndsTheReadOnADirectiveNameTheGrammarDoesNotDefine(t *testing.T) {
 	result, root, symbols := loaded(t, "malformed.txtar")
-	records, refusals, err := Inline(result, resolverOf(t, result, root, symbols), symbols)
+	records, refusals, err := Inline(configured(t, result, root, symbols))
 
-	if !errors.Is(err, errMalformed) {
-		t.Fatalf("Inline(malformed.txtar) error = %v, want one satisfying errors.Is(err, errMalformed)", err)
+	if !errors.Is(err, core.ErrMalformed) {
+		t.Fatalf("Inline(malformed.txtar) error = %v, want one satisfying errors.Is(err, core.ErrMalformed)", err)
 	}
 	if records != nil || refusals != nil {
 		t.Errorf("Inline(malformed.txtar) returned %d records and %d refusals with its error, want none of either", len(records), len(refusals))
 	}
 
-	var malformed *malformedError
-	if !errors.As(err, &malformed) {
-		t.Fatalf("Inline(malformed.txtar) error = %v, want one errors.As reads as *malformedError", err)
+	malformed, ok := errors.AsType[*core.MalformedError](err)
+	if !ok {
+		t.Fatalf("Inline(malformed.txtar) error = %v, want one errors.As reads as *core.MalformedError", err)
 	}
-	if malformed.Site.Filename != "catalog.go" || malformed.Site.Line != 3 {
-		t.Errorf("Inline(malformed.txtar) refused at %s, want catalog.go:3", malformed.Site)
+	if malformed.Site.Path != "catalog.go" || malformed.Site.Line != 3 {
+		t.Errorf("Inline(malformed.txtar) refused at %+v, want catalog.go:3", malformed.Site)
 	}
-	if !strings.Contains(malformed.Error(), directiveForm) {
-		t.Errorf("Inline(malformed.txtar) error = %q, want it to name the form %q", malformed.Error(), directiveForm)
+	if want := "want //deadset:ignore <CODE>"; !strings.Contains(malformed.Error(), want) {
+		t.Errorf("Inline(malformed.txtar) error = %q, want it to name the form %q", malformed.Error(), want)
 	}
 }
 
@@ -270,7 +164,7 @@ func TestInlineReadsOneCommentPerSourceSiteAcrossPackageVariants(t *testing.T) {
 		t.Fatalf("Setup: the load returned %d packages, want the package, its nested package and at least one test variant", len(result.Packages))
 	}
 
-	records, _, err := Inline(result, resolverOf(t, result, root, symbols), symbols)
+	records, _, err := Inline(configured(t, result, root, symbols))
 	if err != nil {
 		t.Fatalf("Inline(same-name.txtar) error: %v", err)
 	}
@@ -285,7 +179,7 @@ func TestInlineReadsOneCommentPerSourceSiteAcrossPackageVariants(t *testing.T) {
 func TestInlineRefusesAReasonlessDirectiveOncePerCodeItNames(t *testing.T) {
 	result, root, symbols := loaded(t, "two-codes.txtar")
 
-	records, refusals, err := Inline(result, resolverOf(t, result, root, symbols), symbols)
+	records, refusals, err := Inline(configured(t, result, root, symbols))
 	if err != nil {
 		t.Fatalf("Inline(two-codes.txtar) error: %v", err)
 	}
@@ -305,5 +199,22 @@ func TestInlineRefusesAReasonlessDirectiveOncePerCodeItNames(t *testing.T) {
 			t.Errorf("Inline(two-codes.txtar) refusal = %+v, want %s at catalog.go:3 with no reason",
 				refusal, vocab.SuppressionWithoutReason)
 		}
+	}
+}
+
+func TestInlineReadsADirectiveEveryConfigurationCompilesOnce(t *testing.T) {
+	result, root, symbols := loaded(t, "directives.txtar")
+	once, refusedOnce, err := Inline(configured(t, result, root, symbols))
+	if err != nil {
+		t.Fatalf("Inline(directives.txtar) error: %v", err)
+	}
+	both := slices.Concat(configured(t, result, root, symbols), configured(t, result, root, symbols))
+	twice, refusedTwice, err := Inline(both)
+	if err != nil {
+		t.Fatalf("Inline(directives.txtar, twice) error: %v", err)
+	}
+	if !slices.Equal(once, twice) || !slices.Equal(refusedOnce, refusedTwice) {
+		t.Errorf("Inline over two configurations compiling one tree = %+v, %+v, want the one configuration's %+v, %+v",
+			twice, refusedTwice, once, refusedOnce)
 	}
 }

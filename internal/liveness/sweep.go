@@ -146,10 +146,10 @@ type Result struct {
 	// symbol live anyway, or naming no inventory symbol, is not here.
 	Retained []exempt.Exemption
 
-	// Suppressed are the marks that held back a symbol, in inventory order and each
+	// suppressed are the marks that held back a symbol, in inventory order and each
 	// once; a mark on a symbol live anyway, exempt, or outside the inventory is
 	// stale and not here.
-	Suppressed []inventory.SymbolID
+	suppressed []inventory.SymbolID
 }
 
 // Sweep answers which symbols of the graph are dead under the policy, which
@@ -176,16 +176,30 @@ func (g *Graph) Sweep(p *SweepPolicy) Result {
 	all := s.judge(&view{exemptions: true, marked: s.marked})
 	r := s.result(all)
 	if len(p.Marked) > 0 {
-		r.Suppressed = s.suppressed(s.judge(&view{exemptions: true}))
+		r.suppressed = s.suppressed(s.judge(&view{exemptions: true}))
 	}
 	if len(p.Exempt) > 0 {
 		// A mark the exemptions made stale leaves its symbol to them, so the view
 		// an exemption held back from counts the marks in effect alone.
-		without := &view{marked: g.positions(r.Suppressed)}
+		without := &view{marked: g.positions(r.suppressed)}
 		without.reached, _, _ = s.pass(false, without.marked, true, p.Mode)
 		r.Retained = s.retained(s.judge(without), all)
 	}
 	return r
+}
+
+// Sweeps is the sweep under the policy and, where the policy marks a symbol, the
+// sweep with every mark withdrawn, which a suppression record's own finding is read
+// from (suppression.md "Staleness"); unmarked is nil where nothing is marked.
+func (g *Graph) Sweeps(p *SweepPolicy) (marked Result, unmarked *Result) {
+	marked = g.Sweep(p)
+	if len(p.Marked) == 0 {
+		return marked, nil
+	}
+	withdrawn := *p
+	withdrawn.Marked = nil
+	without := g.Sweep(&withdrawn)
+	return marked, &without
 }
 
 // using is the graph with the uses the policy's held exemptions state added, and
@@ -574,15 +588,6 @@ func (s *sweep) carried() map[inventory.SymbolID][][]inventory.SymbolID {
 		}
 	}
 	return carried
-}
-
-// TestReferenced reports whether a test file references the declaration.
-func (r *Result) TestReferenced(id inventory.SymbolID) bool {
-	if r.paths == nil {
-		return false
-	}
-	at := r.paths.g.at(id)
-	return at != outside && r.paths.g.testReferenced(at)
 }
 
 // suppressed lists the marks that name a symbol the view without them judges dead,

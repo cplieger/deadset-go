@@ -265,7 +265,7 @@ func writeExplanation(w io.Writer, set *run.Findings, full bool, subject *invent
 func writeNamedElsewhere(held *strings.Builder, set []findings.Finding, subject *inventory.Symbol) {
 	for i := range set {
 		found := &set[i]
-		if found.DeclarationRef() != subject.Ref || positionKey(&found.Position) == string(subject.ID) {
+		if found.DeclarationRef() != subject.Ref || found.Declaration() == subject.ID {
 			continue
 		}
 		fmt.Fprintf(held, "also reported: %s %s\t%s\t%s %s\n", found.Code, found.Kind,
@@ -450,16 +450,15 @@ func writeComponent(held *strings.Builder, set *run.Findings, full bool, id inve
 func componentIdentity(set *run.Findings, rooted []inventory.SymbolID) string {
 	for i := range set.Result.Findings {
 		found := &set.Result.Findings[i]
-		if slices.Contains(rooted, inventory.SymbolID(positionKey(&found.Position))) {
+		if found.Declaration() != "" && slices.Contains(rooted, found.Declaration()) {
 			return found.Component.ID
 		}
 	}
 	return "named by no finding of this run"
 }
 
-// positionKey is the position of one finding as the inventory keys a declaration by
-// it: the target-relative path, the line and the column, which is what a symbol
-// identifier renders.
+// positionKey is the position one finding renders at: the target-relative path, the
+// line and the column.
 func positionKey(at *findings.Position) string {
 	return at.Path + ":" + strconv.Itoa(at.Line) + ":" + strconv.Itoa(at.Column)
 }
@@ -467,13 +466,12 @@ func positionKey(at *findings.Position) string {
 // findingAbout is the one finding of the run whose subject is this declaration, and
 // nil where none is.
 //
-// The match is on the declaration's position rather than on its reference, because a
-// reference is not one declaration's alone: a declaration written with the blank
-// identifier carries the reference of its container.
+// The match is on the declaration rather than on its reference, because a reference
+// is not one declaration's alone: a declaration written with the blank identifier
+// carries the reference of its container.
 func findingAbout(set []findings.Finding, subject *inventory.Symbol) *findings.Finding {
-	key := string(subject.ID)
 	for i := range set {
-		if positionKey(&set[i].Position) == key {
+		if set[i].Declaration() == subject.ID {
 			return &set[i]
 		}
 	}
@@ -523,15 +521,15 @@ func rootReasons(rooted []roots.Root, id inventory.SymbolID) []roots.Root {
 }
 
 // referencesTo is every reference to one symbol, in the order the merge returned
-// them, with one entry per site whatever the number of configurations that compiled
-// it.
+// them, with one entry per written site whatever the number of configurations that
+// compiled it.
 func referencesTo(references []facts.Reference, id inventory.SymbolID) []facts.Reference {
 	var held []facts.Reference
 	for i := range references {
 		if references[i].To != id {
 			continue
 		}
-		if slices.ContainsFunc(held, func(r facts.Reference) bool { return r.Pos == references[i].Pos }) {
+		if slices.ContainsFunc(held, func(r facts.Reference) bool { return r.Site == references[i].Site }) {
 			continue
 		}
 		held = append(held, references[i])

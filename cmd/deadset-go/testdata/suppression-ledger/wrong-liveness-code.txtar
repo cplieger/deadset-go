@@ -1,0 +1,52 @@
+A command whose unreferenced declarations each carry a record naming a code
+about a declaration that no finding about it carries with every mark withdrawn:
+each would be reported under another code, or under none. Each record is stale,
+and each mark still keeps its declaration live, so the stale records are all the
+run reports.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+import _ "example.com/app/lib"
+
+func main() {}
+
+//deadset:ignore DS1104 -- would be DS1002
+func notDeprecated() {}
+
+// Deprecated: gone.
+//
+//deadset:ignore DS1002 -- would be DS1104
+func deprecated() {}
+
+//deadset:ignore DS1103 -- would be DS1002
+func production() {}
+
+//deadset:ignore DS1102 -- would be DS1002
+func untested() {}
+
+//deadset:ignore DS1006 -- would be DS1002
+func untyped() {}
+
+//deadset:ignore DS1001 -- would be DS1101
+func Exported() {}
+
+//deadset:ignore DS1005 -- would be DS1002
+func notAnEnum() {}
+
+//deadset:ignore DS1801 -- no Go kind reports it
+func notASchema() {}
+
+//deadset:ignore DS1503 -- no finding about it is possible
+func unexported() {}
+-- lib/lib.go --
+package lib
+
+//deadset:ignore DS1101 -- would be DS1001
+func Importable() {}

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -57,7 +59,8 @@ func TestMintedComponentsAreNumberedInTheReportsOrder(t *testing.T) {
 	}
 }
 
-// reportedAt is every finding the run reports or withholds, as its code and line.
+// reportedAt is every finding the run reports or withholds, then every stale
+// suppression, as its code and line.
 func reportedAt(t *testing.T, fixture string) []string {
 	t.Helper()
 
@@ -65,6 +68,9 @@ func reportedAt(t *testing.T, fixture string) []string {
 	var got []string
 	for _, found := range slices.Concat(set.Result.Findings, set.Result.Withheld) {
 		got = append(got, string(found.Code)+" "+found.Position.Path+":"+strconv.Itoa(found.Position.Line))
+	}
+	for _, stale := range set.Result.Stale {
+		got = append(got, string(stale.Code)+" "+stale.Position.Path+":"+strconv.Itoa(stale.Position.Line))
 	}
 	return got
 }
@@ -127,7 +133,7 @@ func TestARecordNoFindingAboutAFunctionCanCarryIsStaleWhenATypeErrorSkipsIt(t *t
 }
 
 func TestARecordForADependencyKindKeepsNothingLive(t *testing.T) {
-	if got, want := reportedAt(t, "findings-ledger/dependency-record-marks-nothing.txtar"), []string{"DS9003 main.go:5", "DS1002 main.go:6"}; !slices.Equal(got, want) {
+	if got, want := reportedAt(t, "findings-ledger/dependency-record-marks-nothing.txtar"), []string{"DS1002 main.go:6", "DS9003 main.go:5"}; !slices.Equal(got, want) {
 		t.Errorf("findings = %q, want %q: a DS1701 record marks nothing live, so helper is reported beside the stale record", got, want)
 	}
 }
@@ -160,6 +166,33 @@ func TestANameLiteralUnderALineDirectiveNamingATestFileStillLowers(t *testing.T)
 	about := findingsAbout(t, archiveModule(t, "findings-ledger/name-literal-under-a-line-directive.txtar"))
 
 	wantFinding(t, about, "go://example.com/app#helper", vocab.UnusedUnexported, vocab.Possible)
+}
+
+func TestEachOfTwoLiteralsALineDirectiveRendersAtOnePositionLowers(t *testing.T) {
+	about := findingsAbout(t, archiveModule(t, "findings-ledger/literal-fold.txtar"))
+
+	wantFinding(t, about, "go://example.com/app#alpha", vocab.UnusedUnexported, vocab.Possible)
+	wantFinding(t, about, "go://example.com/app#bravo", vocab.UnusedUnexported, vocab.Possible)
+}
+
+func TestEachOfTwoWritesALineDirectiveRendersAtOnePositionCounts(t *testing.T) {
+	found := findingsAbout(t, archiveModule(t, "findings-ledger/write-fold.txtar"))["go://example.com/app#settings.level"]
+	if found == nil {
+		t.Fatal("no finding about settings.level")
+	}
+	if !strings.Contains(found.Message, "is written at 2 positions") || len(found.Details.WritePositions) != 2 {
+		t.Errorf("message %q with write positions %v, want two writes", found.Message, found.Details.WritePositions)
+	}
+}
+
+func TestAColumnAfterAnInlineLineDirectiveCountsOnlyTheBytesAfterIt(t *testing.T) {
+	found := findingsAbout(t, archiveModule(t, "findings-ledger/column-after-an-inline-line-directive.txtar"))["go://example.com/app#t"]
+	if found == nil {
+		t.Fatal("no finding about t")
+	}
+	if got := found.Position.Path + ":" + strconv.Itoa(found.Position.Line) + ":" + strconv.Itoa(found.Position.Column); got != "main.go:30:45" {
+		t.Errorf("t is reported at %s, want main.go:30:45", got)
+	}
 }
 
 func TestATypeErrorInOneInitSkipsThatInitsPartsAlone(t *testing.T) {
@@ -254,5 +287,191 @@ func TestPartsALineDirectiveRendersAtOnePositionAreEachReported(t *testing.T) {
 	}
 	if got, want := storesAt(t, "findings-ledger/line-folded-inits-skip.txtar"), []string{"main.go:4 w"}; !slices.Equal(got, want) {
 		t.Errorf("dead stores = %q, want %q: the type error skips the first init alone", got, want)
+	}
+	const onto = "findings-ledger/line-folded-onto-a-declaration.txtar"
+	if got, want := reportedAt(t, onto), []string{"DS1002 main.go:5", "DS1404 main.go:5"}; !slices.Equal(got, want) {
+		t.Errorf("findings = %q, want %q: the store and the function it is rendered onto are two subjects", got, want)
+	}
+	if got, want := storesAt(t, onto), []string{"main.go:5 v"}; !slices.Equal(got, want) {
+		t.Errorf("dead stores = %q, want %q", got, want)
+	}
+	if got, want := storesAt(t, "findings-ledger/equal-offset.txtar"), []string{"a.go:5 v", "a.go:5 w"}; !slices.Equal(got, want) {
+		t.Errorf("dead stores = %q, want %q: the two inits are written in two files", got, want)
+	}
+	if got, want := storesAt(t, "findings-ledger/equal-offset-skip.txtar"), []string{"a.go:5 w"}; !slices.Equal(got, want) {
+		t.Errorf("dead stores = %q, want %q: the type error skips a.go's init alone", got, want)
+	}
+}
+
+// subjectsAt is every finding the run reports or withholds, as its code, line and
+// reference, sorted.
+func subjectsAt(t *testing.T, fixture string) []string {
+	t.Helper()
+
+	set := findingsOfDir(t, archiveModule(t, fixture))
+	var got []string
+	for _, found := range slices.Concat(set.Result.Findings, set.Result.Withheld) {
+		got = append(got, string(found.Code)+" "+found.Position.Path+":"+strconv.Itoa(found.Position.Line)+" "+found.Symbol.Ref)
+	}
+	slices.Sort(got)
+	return got
+}
+
+func TestDeclarationsALineDirectiveRendersAtOnePositionAreEachReported(t *testing.T) {
+	want := []string{"DS1002 main.go:20 go://example.com/app#alpha", "DS1002 main.go:20 go://example.com/app#bravo"}
+	if got := subjectsAt(t, "findings-ledger/decl-fold.txtar"); !slices.Equal(got, want) {
+		t.Errorf("findings = %q, want %q", got, want)
+	}
+	want = append(want, "DS1404 main.go:21 go://example.com/app#alpha", "DS1404 main.go:21 go://example.com/app#bravo")
+	if got := subjectsAt(t, "findings-ledger/decl-fold-two-files.txtar"); !slices.Equal(got, want) {
+		t.Errorf("findings = %q, want %q: each function holds its own store", got, want)
+	}
+}
+
+func TestADependencysFunctionALineDirectiveRendersOntoAnothersLineKeepsItsOwnBody(t *testing.T) {
+	want := []string{"DS1101 app.go:9 go://example.com/app#settings.String"}
+	if got := subjectsAt(t, "findings-ledger/decoder-fold.txtar"); !slices.Equal(got, want) {
+		t.Errorf("findings = %q, want %q: Load only decodes, whatever Show's body does", got, want)
+	}
+}
+
+func TestATypeErrorALineDirectiveRendersOutsideTheTreeIsSkippedWhereItIsWritten(t *testing.T) {
+	set := findingsOfDir(t, archiveModule(t, "findings-ledger/skip-under-a-line-directive-outside-the-tree.txtar"))
+	var got []string
+	for _, skip := range set.TypeErrorSkips {
+		got = append(got, skip.Path+":"+strconv.Itoa(skip.Line)+" "+strconv.Itoa(len(skip.Declarations)))
+	}
+	if want := []string{"main.go:6 1"}; !slices.Equal(got, want) {
+		t.Errorf("type error skips (position, declarations) = %q, want %q", got, want)
+	}
+}
+
+func TestADeclarationIsOfThePackageThatWritesIt(t *testing.T) {
+	about := findingsAbout(t, filepath.Join(archiveModule(t, "findings-ledger/package-of-a-folded-declaration.txtar"), "target"))
+
+	wantFinding(t, about, "go://example.com/app#Exported", vocab.UnreachableExport, vocab.Certain)
+}
+
+func TestALineDirectiveNamingATestFileMakesNoProductionCodeATest(t *testing.T) {
+	want := []string{"DS1102 helper_test.go:3", "DS1103 main_test.go:5"}
+	if got := reportedAt(t, "findings-ledger/test-file-under-a-line-directive.txtar"); !slices.Equal(got, want) {
+		t.Errorf("findings = %q, want %q: helper is written in main.go", got, want)
+	}
+	if got, want := reportedAt(t, "findings-ledger/test-evidence-under-a-line-directive.txtar"), []string{"DS1402 main.go:7"}; !slices.Equal(got, want) {
+		t.Errorf("findings = %q, want %q: main converts the error in a production file", got, want)
+	}
+}
+
+// renderedAt is every reported finding as its code and full rendered position.
+func renderedAt(t *testing.T, fixture string) []string {
+	t.Helper()
+
+	var got []string
+	for _, found := range findingsOfDir(t, archiveModule(t, fixture)).Result.Findings {
+		got = append(got, string(found.Code)+" "+positionKey(&found.Position))
+	}
+	return got
+}
+
+func TestALineDirectiveRendersAPositionAndMovesNothingElse(t *testing.T) {
+	if got := renderedAt(t, "findings-ledger/generated-file-under-a-line-directive.txtar"); len(got) != 0 {
+		t.Errorf("findings = %q, want none: yyUnused is written in a generated file", got)
+	}
+	if got, want := renderedAt(t, "findings-ledger/line-directive-naming-a-missing-file.txtar"), []string{"DS1002 grammar.y:10:6"}; !slices.Equal(got, want) {
+		t.Errorf("findings = %q, want %q: the directive renders the position, main.go's line counts the column", got, want)
+	}
+	if got, want := renderedAt(t, "findings-ledger/line-directive-naming-a-file-outside-the-tree.txtar"), []string{"DS1002 main.go:6:6"}; !slices.Equal(got, want) {
+		t.Errorf("findings = %q, want %q: no report can name a file outside the tree", got, want)
+	}
+}
+
+// scopedReport is every finding a run over one archive reports, the archive's
+// scope.json naming the target and its consumers.
+func scopedReport(t *testing.T, fixture string) []string {
+	t.Helper()
+
+	t.Chdir(archiveModule(t, fixture))
+	reportPath := filepath.Join(t.TempDir(), "report.json")
+	var stdout, stderr strings.Builder
+	code := invoke(t.Context(), []string{
+		"analyze", "--scope=scope.json", "--config=target/" + repositoryDocument, "--report=" + reportPath,
+	}, &stdout, &stderr)
+	if code != vocab.ExitClean && code != vocab.ExitFindings {
+		t.Fatalf("analyze --scope=scope.json = %d, want a verdict\nstderr:\n%s", code, stderr.String())
+	}
+	var got []string
+	for _, found := range envelopeAt(t, reportPath).Findings {
+		got = append(got, string(found.Code)+" "+found.Symbol.Ref)
+	}
+	return got
+}
+
+func TestAConsumersInstantiationReachesTheTypeParameterItInstantiates(t *testing.T) {
+	for fixture, why := range map[string]string{
+		"layout-through-a-consumers-generic":                                 "the consumer's conversion lays S out",
+		"layout-through-a-target-generic-a-consumer-instantiates":            "View lays out the S the consumer gives it",
+		"struct-conversion-through-a-target-generic-a-consumer-instantiates": "Wire converts the S the consumer gives it",
+	} {
+		t.Run(fixture, func(t *testing.T) {
+			if got := scopedReport(t, "findings-ledger/"+fixture+".txtar"); len(got) != 0 {
+				t.Errorf("findings = %q, want none: %s", got, why)
+			}
+		})
+	}
+}
+
+func TestAConsumersReadOfAStructLiteralsFieldReadsEachIdenticalLiteralsField(t *testing.T) {
+	got := scopedReport(t, "findings-ledger/struct-literal-twin-read-from-a-consumer.txtar")
+	want := []string{"DS1003 go://example.com/app#P.In.Y", "DS1003 go://example.com/app#Q.In.Y"}
+	if !slices.Equal(got, want) {
+		t.Errorf("findings = %q, want %q: the consumer's read of P.In.X reads Q.In.X", got, want)
+	}
+}
+
+func TestAMethodOfATypeDeclaredPerPlatformIsJudgedUnderTheTypeOfEachPlatform(t *testing.T) {
+	linux := `{"id": "linux-amd64", "os": "linux", "arch": "amd64"}`
+	windows := `{"id": "windows-amd64", "os": "windows", "arch": "amd64"}`
+	for _, tc := range []struct {
+		fixture string
+		want    []string
+	}{
+		{"method-of-a-type-live-on-one-platform", []string{
+			"DS1002 impl impl_linux.go linux-amd64 root of 2",
+			"DS1002 impl.helper m.go linux-amd64,windows-amd64 root of 2",
+		}},
+		{"method-of-a-type-live-on-the-other-platform", []string{
+			"DS1002 impl impl_windows.go windows-amd64 root of 2",
+			"DS1002 impl.helper m.go linux-amd64,windows-amd64 root of 2",
+		}},
+		{"method-of-a-type-dead-on-every-platform", []string{
+			"DS1002 impl impl_linux.go linux-amd64 root of 3",
+			"DS1002 impl impl_windows.go windows-amd64 root of 3",
+		}},
+		{"method-of-a-type-live-on-every-platform", []string{"DS1002 impl.helper m.go linux-amd64,windows-amd64 root of 1"}},
+		{"method-of-a-type-a-platform-calls-it-on", nil},
+	} {
+		for _, order := range [][2]string{{linux, windows}, {windows, linux}} {
+			t.Run(tc.fixture+"/"+order[0][8:13], func(t *testing.T) {
+				files := archiveFiles(t, "findings-ledger/"+tc.fixture+".txtar")
+				files["deadset.json"] = `{"target": {"kind": "application"}, "analysis": {"configurations": [` +
+					order[0] + ", " + order[1] + `]}}`
+				ran := runAnalyze(t, writeModule(t, files))
+				if ran.code != vocab.ExitClean && ran.code != vocab.ExitFindings {
+					t.Fatalf("analyze = %d, want a verdict\nstderr: %s", ran.code, ran.stderr)
+				}
+				var got []string
+				for _, found := range envelopeAt(t, ran.reportPath).Findings {
+					root := "member"
+					if found.Component.Root {
+						root = "root"
+					}
+					got = append(got, fmt.Sprintf("%s %s %s %s %s of %d", found.Code, found.Symbol.Name, found.Position.Path,
+						strings.Join(slices.Sorted(slices.Values(found.Configurations)), ","), root, found.Component.SymbolCount))
+				}
+				if !slices.Equal(got, tc.want) {
+					t.Errorf("findings = %q, want %q whatever order the configurations are listed in", got, tc.want)
+				}
+			})
+		}
 	}
 }

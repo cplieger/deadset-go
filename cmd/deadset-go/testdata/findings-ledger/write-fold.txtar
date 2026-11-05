@@ -1,0 +1,31 @@
+A command whose a.go and b.go each write settings.level, at one byte of each
+file that a line directive renders at main.go:20:25. Nothing reads the field, so
+it is reported written at two positions.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- a.go --
+package main
+
+//line main.go:20:1
+func a(s *settings) { s.level = 1 }
+-- b.go --
+package main
+
+//line main.go:20:1
+func b(s *settings) { s.level = 2 }
+-- main.go --
+package main
+
+type settings struct{ level int }
+
+func main() {
+	var s settings
+	a(&s)
+	b(&s)
+	println(&s)
+}

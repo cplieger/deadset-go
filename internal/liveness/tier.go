@@ -294,7 +294,7 @@ func (s *sweep) deadEdges(v *view) [][]edge {
 		}
 	}
 	for i := range s.g.symbols {
-		if p := s.g.parent[i]; p != outside {
+		for _, p := range s.g.parents[i] {
 			follow(p, i)
 		}
 		for _, e := range s.g.out[i] {

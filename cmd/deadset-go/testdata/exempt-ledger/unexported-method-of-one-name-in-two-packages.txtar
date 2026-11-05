@@ -1,0 +1,55 @@
+T embeds dep.Base, whose unexported mark completes dep's Marker, which Take asserts
+on the value main hands it. T also declares its own unexported mark, a second
+method of that name that nothing calls: dep's assertion retains dep's mark alone.
+
+-- target/go.mod --
+module example.com/app
+
+go 1.27.1
+
+require example.com/dep v0.0.0
+
+replace example.com/dep => ../dep
+-- target/deadset.json --
+{"target": {"kind": "application"}}
+-- target/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/dep"
+)
+
+type T struct{ dep.Base }
+
+func (T) Name() string { return "t" }
+
+func (T) mark() {}
+
+func main() { fmt.Println(dep.Take(T{})) }
+-- dep/go.mod --
+module example.com/dep
+
+go 1.27.1
+-- dep/dep.go --
+package dep
+
+// Marker is what Take asserts.
+type Marker interface {
+	Name() string
+	mark()
+}
+
+// Base supplies Marker's unexported method.
+type Base struct{}
+
+func (Base) mark() {}
+
+// Take names a Marker.
+func Take(v any) string {
+	if m, ok := v.(Marker); ok {
+		return m.Name()
+	}
+	return ""
+}

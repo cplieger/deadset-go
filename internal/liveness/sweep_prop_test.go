@@ -444,7 +444,7 @@ func TestProperty06EveryDeadSymbolLandsInOneComponentReportedAtItsRoots(t *testi
 func (b *graphBuilder) describe(r Result) string {
 	var out strings.Builder
 	for _, s := range b.symbols {
-		fmt.Fprintf(&out, "declaration %s parent=%s lines=%d-%d\n", b.named[s.ID], b.named[s.Parent], s.Pos.Line, s.EndLine)
+		fmt.Fprintf(&out, "declaration %s parent=%s lines=%d-%d\n", b.named[s.ID], b.named[onlyParent(s)], s.Pos.Line, s.EndLine)
 	}
 	for _, ref := range b.refs {
 		fmt.Fprintf(&out, "reference %s -> %s test=%t\n", b.named[ref.From], b.named[ref.To], ref.Test)
@@ -509,7 +509,7 @@ func (b *graphBuilder) slowComponents(g *Graph, r Result, dead []string, admitte
 			}
 			componentOf[other] = len(found)
 			members = append(members, other)
-			container := b.named[g.symbols[g.at(b.id(other))].Parent]
+			container := b.named[onlyParent(g.symbols[g.at(b.id(other))])]
 			if rootCycle[cycleOf[other]] && !slices.Contains(dead, container) {
 				roots = append(roots, other)
 			}
@@ -549,7 +549,7 @@ func (b *graphBuilder) slowSubgraph(dead []string, admitted map[string]bool) map
 		}
 	}
 	for _, s := range b.symbols {
-		child, container := b.named[s.ID], b.named[s.Parent]
+		child, container := b.named[s.ID], b.named[onlyParent(s)]
 		if container == "" || !isDead[child] || !isDead[container] {
 			continue
 		}

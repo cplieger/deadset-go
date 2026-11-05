@@ -87,14 +87,14 @@ func uncalledInterfaceMethod(in *pass) ([]draft, error) {
 		if symbol == nil || !interfaceSubject(symbol, inventory.KindInterfaceMethod) {
 			continue
 		}
-		if in.candidateOf(symbol.Parent) != nil || known.exempt(candidate.ID) || testOnly(candidate) {
+		if in.fallsWithInterface(symbol) || known.exempt(candidate.ID) || testOnly(candidate) {
 			continue
 		}
 		one, held := in.finding(candidate.ID, vocab.UncalledInterfaceMethod, uncalledInterfaceMethodMessage)
 		if !held {
 			continue
 		}
-		one.Details.Implementations = known.implementationsOf(symbol.Parent)
+		one.Details.Implementations = known.implementationsOfAll(symbol.Parents)
 		found = append(found, one)
 	}
 	return found, nil
@@ -103,11 +103,11 @@ func uncalledInterfaceMethod(in *pass) ([]draft, error) {
 // unusedSatisfactionAssertion reports a compile-time satisfaction assertion, a
 // package-level blank declaration typed as an interface of the target with a value of
 // a concrete type, when nothing but such assertions names that interface as a type.
-// Each assertion is one finding at its own position under the interface's reference
-// and name, because every blank declaration renders as its package's reference. An
-// assertion of a test file or one an exemption retained is not reported, and neither
-// is a library's assertion whose interface and type are both published API, a promise
-// it states to every importer.
+// Each assertion is one finding at its own position, whatever number of platform
+// alternatives of the interface its configurations name, because every blank
+// declaration renders as its package's reference. An assertion of a test file, one an
+// exemption retained, and one an alternative keeps ([pass.assertedAlternatives]) are
+// not reported.
 func unusedSatisfactionAssertion(in *pass) ([]draft, error) {
 	if in == nil {
 		return nil, nil
@@ -116,9 +116,12 @@ func unusedSatisfactionAssertion(in *pass) ([]draft, error) {
 
 	var found []draft
 	for _, asserted := range known.assertions {
-		symbol, iface := in.symbol(asserted.Var), in.symbol(asserted.Interface)
-		if symbol == nil || iface == nil || symbol.InTestFile || known.usedAsType[asserted.Interface] ||
-			in.retained[asserted.Var] {
+		symbol := in.symbol(asserted.Var)
+		if symbol == nil || symbol.InTestFile || in.retained[asserted.Var] {
+			continue
+		}
+		ifaces, kept, unseen := in.assertedAlternatives(asserted)
+		if len(ifaces) == 0 || kept {
 			continue
 		}
 		one, held := in.finding(asserted.Var, vocab.UnusedSatisfactionAssertion,
@@ -127,25 +130,51 @@ func unusedSatisfactionAssertion(in *pass) ([]draft, error) {
 			continue
 		}
 		one.Symbol.Kind = satisfactionAssertionSubject
-		one.Symbol.Ref, one.Symbol.Name = iface.Ref, iface.Name
-		// A program the run does not hold may name a published interface, whatever consumers loaded.
-		if in.publishedAPI(iface) {
-			if concrete := in.symbol(known.assertedType[asserted]); concrete != nil && in.publishedAPI(concrete) {
-				continue
-			}
-			one.unseen = true
-		}
-		one.Details.Implementations = known.implementationsOf(asserted.Interface)
+		one.Symbol.Ref, one.Symbol.Name = ifaces[0].Ref, ifaces[0].Name
+		one.unseen = unseen
+		one.Details.Implementations = known.implementationsOfAll(asserted.Interfaces)
 		found = append(found, one)
 	}
 	return found, nil
 }
 
-// assertion is one compile-time satisfaction assertion: the blank declaration and
-// the interface of the target it names.
+// assertedAlternatives reads the interface alternatives of one assertion the
+// inventory holds and whether any keeps the assertion: one something else names as
+// a type, or a library's whose interface and asserted type are both published API, a
+// promise it states to every importer. unseen is whether any alternative is
+// published, so a program the run does not hold may name it, whatever consumers
+// loaded.
+func (in *pass) assertedAlternatives(asserted assertedVar) (ifaces []*inventory.Symbol, kept, unseen bool) {
+	known := in.interfaces
+	for _, alternative := range asserted.Interfaces {
+		iface := in.symbol(alternative)
+		if iface == nil {
+			continue
+		}
+		ifaces = append(ifaces, iface)
+		kept = kept || known.usedAsType[alternative]
+		if in.publishedAPI(iface) {
+			concrete := in.symbol(known.assertedType[assertion{Var: asserted.Var, Interface: alternative}])
+			kept = kept || concrete != nil && in.publishedAPI(concrete)
+			unseen = true
+		}
+	}
+	return ifaces, kept, unseen
+}
+
+// assertion is one compile-time satisfaction assertion as one configuration
+// compiles it: the blank declaration and the interface of the target it names.
 type assertion struct {
 	Var       inventory.SymbolID
 	Interface inventory.SymbolID
+}
+
+// assertedVar is one satisfaction assertion over every configuration: the blank
+// declaration and every platform alternative of the interface it names, in
+// identifier order, whose references its finding carries ([core.Finding.Named]).
+type assertedVar struct {
+	Var        inventory.SymbolID
+	Interfaces []inventory.SymbolID
 }
 
 // interfaceSubject reports whether one declaration is of the kind an interface kind
@@ -170,7 +199,8 @@ type interfaceFacts struct {
 	typeUsedBy      map[inventory.SymbolID][]inventory.SymbolID
 	asserted        map[assertion]bool
 	assertedType    map[assertion]inventory.SymbolID
-	assertions      []assertion
+	named           map[inventory.SymbolID][]inventory.SymbolID // an assertion's [assertedVar.Interfaces]
+	assertions      []assertedVar
 }
 
 // interfacesOf computes the facts the three kinds read: the reference set's answers
@@ -186,6 +216,7 @@ func interfacesOf(in *pass) *interfaceFacts {
 		typeUsedBy:      make(map[inventory.SymbolID][]inventory.SymbolID),
 		asserted:        make(map[assertion]bool),
 		assertedType:    make(map[assertion]inventory.SymbolID),
+		named:           make(map[inventory.SymbolID][]inventory.SymbolID),
 	}
 	if in.Merged != nil {
 		f.methods = in.Merged.InterfaceMethods
@@ -299,18 +330,18 @@ func (f *interfaceFacts) assertionsIn(in *pass, one *Configured, blanks []blankD
 }
 
 // settle fixes the facts that need every configuration's answer: the assertions in
-// one order, which interfaces something other than an assertion names as a type,
-// and each interface's implementations in the order they are written.
+// one order, each with every interface alternative it names, which interfaces
+// something other than an assertion names as a type, and each interface's
+// implementations in the order they are written.
 func (f *interfaceFacts) settle() {
 	for asserted := range f.asserted {
-		f.assertions = append(f.assertions, asserted)
+		f.named[asserted.Var] = append(f.named[asserted.Var], asserted.Interface)
 	}
-	slices.SortFunc(f.assertions, func(a, b assertion) int {
-		return cmp.Or(
-			strings.Compare(string(a.Var), string(b.Var)),
-			strings.Compare(string(a.Interface), string(b.Interface)),
-		)
-	})
+	for v, ifaces := range f.named {
+		slices.Sort(ifaces)
+		f.assertions = append(f.assertions, assertedVar{Var: v, Interfaces: ifaces})
+	}
+	slices.SortFunc(f.assertions, func(a, b assertedVar) int { return strings.Compare(string(a.Var), string(b.Var)) })
 	for iface, users := range f.typeUsedBy {
 		for _, from := range users {
 			if !f.asserted[assertion{Var: from, Interface: iface}] {
@@ -347,10 +378,17 @@ func (f *interfaceFacts) exempt(method inventory.SymbolID) bool {
 // declaration only tests reference. A method of an interface that is itself a
 // candidate falls with the interface.
 func (in *pass) testCalledInterfaceMethod(candidate *liveness.Candidate, symbol *inventory.Symbol) bool {
-	if symbol.Kind != inventory.KindInterfaceMethod || !testOnly(candidate) || in.candidateOf(symbol.Parent) != nil {
+	if symbol.Kind != inventory.KindInterfaceMethod || !testOnly(candidate) || in.fallsWithInterface(symbol) {
 		return false
 	}
 	return !in.interfaces.exempt(candidate.ID)
+}
+
+// fallsWithInterface reports whether an interface method falls with its interface,
+// which a pass with every mark withdrawn never reports ([pass.withdrawn]).
+func (in *pass) fallsWithInterface(method *inventory.Symbol) bool {
+	container := in.container(method)
+	return !in.withdrawnMarks && container != nil && in.candidateOf(container.ID) != nil
 }
 
 // implementationsOf returns the concrete implementations of one interface, in the
@@ -360,6 +398,25 @@ func (f *interfaceFacts) implementationsOf(iface inventory.SymbolID) []positione
 		return held
 	}
 	return []positioned{}
+}
+
+// implementationsOfAll is [interfaceFacts.implementationsOf] over every platform
+// alternative of one interface, each implementation once, in the order they are
+// written.
+func (f *interfaceFacts) implementationsOfAll(ifaces []inventory.SymbolID) []positioned {
+	if len(ifaces) == 1 {
+		return f.implementationsOf(ifaces[0])
+	}
+	all := []positioned{}
+	for _, iface := range ifaces {
+		for _, one := range f.implementationsOf(iface) {
+			if !slices.Contains(all, one) {
+				all = append(all, one)
+			}
+		}
+	}
+	slices.SortFunc(all, byWrittenPosition)
+	return all
 }
 
 // positionOf renders one declaration's position the way a finding carries it. The

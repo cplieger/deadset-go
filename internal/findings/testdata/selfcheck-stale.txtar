@@ -25,14 +25,15 @@ func gap() string { return "g" }
 // Reached is called from main.
 func Reached() string { return "r" }
 
-// Dropped is called by nothing, so the entry naming it holds a finding back.
+// Dropped is called by nothing, and nothing can import a main package, so the
+// entry naming its unreachable export holds a finding back.
 func Dropped() string { return "d" }
 -- deadset-ignore.json --
 {
   "description": "One entry in effect, one on a live declaration, one no declaration answers.",
   "ignore": [
     {
-      "code": "DS1001",
+      "code": "DS1101",
       "symbol": "go://example.com/selfcheck#Dropped",
       "path": "main.go",
       "reason": "in effect: nothing reaches Dropped"

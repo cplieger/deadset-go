@@ -90,9 +90,10 @@ func (b *graphBuilder) declare(d handSymbol) {
 		Ref:         "hand://" + d.name,
 		Name:        d.name,
 		PkgPath:     handPackage,
-		Parent:      parent,
+		Parents:     parentsOf(parent),
 		Pos:         token.Position{Filename: file, Line: line, Column: 1},
 		EndLine:     end,
+		File:        file,
 		Kind:        d.kind,
 		TestSupport: d.support,
 		InTestFile:  d.inTest,
@@ -404,4 +405,13 @@ func TestSpanOfCoversTheLinesOneDeclarationOccupies(t *testing.T) {
 			}
 		})
 	}
+}
+
+// parentsOf is the one container a hand-built declaration has, none for the
+// empty identifier.
+func parentsOf(parent inventory.SymbolID) []inventory.SymbolID {
+	if parent == "" {
+		return nil
+	}
+	return []inventory.SymbolID{parent}
 }
