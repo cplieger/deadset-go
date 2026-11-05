@@ -143,7 +143,7 @@ func registrationOf(in *Program, info *types.Info, call *ast.CallExpr, own map[s
 			}
 			if id, held := in.Resolve.Object(selection.Obj()); held {
 				out = append(out, Exemption{
-					ID: id, Class: string(vocab.ReflectiveLookup), Site: site,
+					ID: id, Class: string(vocab.ReflectiveLookup), File: in.Resolve.File(call.Pos()), Site: site,
 					Detail: "named by a string passed with " + named.Obj().Name() + " to " + callee.FullName(),
 				})
 			}
@@ -217,6 +217,7 @@ func allLookupCalls(in *Program) ([]lookupCall, error) {
 type lookupCall struct {
 	lookup lookup
 	name   string
+	file   string // [Exemption.File]
 	site   token.Position
 }
 
@@ -240,6 +241,7 @@ func (c *lookupCall) retains(index nameIndex, seen map[string]struct{}) []Exempt
 		out = append(out, Exemption{
 			ID:     m.id,
 			Class:  string(vocab.ReflectiveLookup),
+			File:   c.file,
 			Site:   c.site,
 			Detail: "looked up by " + c.lookup.callee,
 		})
@@ -273,7 +275,7 @@ func lookupCalls(in *Program, info *types.Info, f *ast.File) ([]lookupCall, erro
 			failure = err
 			return false
 		}
-		calls = append(calls, lookupCall{lookup: l, name: name, site: site})
+		calls = append(calls, lookupCall{lookup: l, name: name, site: site, file: in.Resolve.File(call.Pos())})
 		return true
 	})
 	return calls, failure

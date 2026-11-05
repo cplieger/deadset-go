@@ -11,6 +11,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -225,9 +226,9 @@ func EncodingReflectionDetector(in *Program) ([]Exemption, error) {
 		walksFields:  len(namingPackages(in, func(path string) map[string]bool { return destinations[path].walkers })) > 0,
 		assert:       in.assert,
 		satisfying:   make(map[satisfactionKey]map[string]bool),
-		methodNames:  make(map[*types.Named]map[string]bool),
+		methodIDs:    make(map[*types.Named]map[string]bool),
 		decoded:      make(map[token.Position][]evidence),
-		typeArgs:     typeArgumentsOf(in.Facts.Program()),
+		typeArgs:     in.Facts.Instantiations(),
 	}
 	f.templates = newTemplateOrigins(in)
 	f.decode = newDecoders(f)
@@ -247,7 +248,7 @@ func EncodingReflectionDetector(in *Program) ([]Exemption, error) {
 // flow graph its one walk reads ([flowGraph]), and what solving the graph records.
 type encodingFlow struct {
 	graph       flowGraph
-	typeArgs    *typeArguments
+	typeArgs    *facts.Instantiations
 	kept        *retention
 	filled      *retention      // the fields kept only at the class possible ([unwrittenRead])
 	own         map[string]bool // the program's package paths
@@ -264,8 +265,8 @@ type encodingFlow struct {
 	walked      map[types.Type][]*types.Named
 	selfEncoded map[selfEncodingKey]selfEncodedTypes
 
-	satisfying  map[satisfactionKey]map[string]bool // the method names retained
-	methodNames map[*types.Named]map[string]bool    // the names a type or a pointer to it declares
+	satisfying map[satisfactionKey]map[string]bool // the method ids retained
+	methodIDs  map[*types.Named]map[string]bool    // [declaredMethodIDs], by type
 
 	// strict is the decoder packages a switch of which the program enables
 	// ([enabledSwitches]).
@@ -313,7 +314,7 @@ func (f *encodingFlow) bound(carried []types.Type) []types.Type {
 	found := make([]types.Type, 0, len(carried))
 	for _, t := range carried {
 		if t != nil {
-			found = append(append(found, t), f.typeArgs.bindings(t)...)
+			found = append(append(found, t), bindings(f.typeArgs, t)...)
 		}
 	}
 	return found
@@ -943,7 +944,7 @@ func (f *encodingFlow) retain(a *arrival) error {
 			reached = f.calledResults(slices.Clone(reached), d)
 		}
 		for _, named := range reached {
-			f.members(named, site, d, encoded[types.TypeString(named, nil)])
+			f.members(named, site, d, encoded[resolve.Spell(named, nil)])
 		}
 	}
 	return nil
@@ -958,7 +959,7 @@ func (f *encodingFlow) members(named *types.Named, site evidence, d *destination
 	every, satisfying := f.outsideMethods(named, d.reach)
 	for m := range origin.Methods() {
 		resolved := d.reach.methods.reads(m) && (d.named == nil || d.named[m.Name()] || printingMethods[m.Name()])
-		if resolved || (every && m.Exported()) || satisfying[m.Name()] {
+		if resolved || (every && m.Exported()) || satisfying[m.Id()] {
 			f.kept.record(m, site, d.detail)
 		}
 	}
@@ -1084,10 +1085,10 @@ func (u *unwrittenRead) filledBy(decoder evidence) bool {
 	if u.fills && decoder == u.site {
 		return false
 	}
-	if _, test := inventory.IsTestFile(decoder.at.Filename); !test {
+	if _, test := inventory.IsTestFile(decoder.file); !test {
 		return true
 	}
-	_, test := inventory.IsTestFile(u.site.at.Filename)
+	_, test := inventory.IsTestFile(u.site.file)
 	return test
 }
 
@@ -1150,31 +1151,31 @@ func declaredInterfaces(pkg *types.Package, every bool) []*types.Interface {
 // engine, and otherwise the methods by which the type, or a pointer to it,
 // implements an interface a closure declares, or an interface a container that
 // stores the value declares or writes.
-func (f *encodingFlow) outsideMethods(named *types.Named, r reach) (every bool, names map[string]bool) {
+func (f *encodingFlow) outsideMethods(named *types.Named, r reach) (every bool, ids map[string]bool) {
 	if len(r.outside) == 0 && len(r.contained) == 0 {
 		return false, nil
 	}
-	names = make(map[string]bool)
+	ids = make(map[string]bool)
 	for _, pkg := range r.outside {
 		closure := f.closures[pkg.Path()]
 		if closure.templates {
 			return true, nil
 		}
-		maps.Copy(names, f.satisfied(satisfactionKey{named: named, pkg: pkg.Path()}, closure.interfaces))
+		maps.Copy(ids, f.satisfied(satisfactionKey{named: named, pkg: pkg.Path()}, closure.interfaces))
 	}
 	for _, pkg := range r.contained {
 		key := satisfactionKey{named: named, pkg: pkg.Path(), contained: true}
-		maps.Copy(names, f.satisfied(key, f.assert.ownInterfaces(pkg)))
+		maps.Copy(ids, f.satisfied(key, f.assert.ownInterfaces(pkg)))
 	}
-	return false, names
+	return false, ids
 }
 
-// satisfied names the methods by which one type satisfies one package's interfaces,
-// computed once per type and package.
+// satisfied is the [types.Object.Id] of each method by which one type satisfies one
+// package's interfaces, computed once per type and package.
 func (f *encodingFlow) satisfied(key satisfactionKey, interfaces []*types.Interface) map[string]bool {
 	held, known := f.satisfying[key]
 	if !known {
-		held = satisfiedMethods(key.named, f.declaredNames(key.named), interfaces)
+		held = satisfiedMethods(key.named, f.declaredIDs(key.named), interfaces)
 		f.satisfying[key] = held
 	}
 	return held
@@ -1188,52 +1189,53 @@ type satisfactionKey struct {
 	contained bool
 }
 
-// declaredNames is the name of every method in the method set of a pointer to the
-// type, which holds the type's own.
-func (f *encodingFlow) declaredNames(named *types.Named) map[string]bool {
-	if held, known := f.methodNames[named]; known {
+// declaredIDs is [declaredMethodIDs] of one type, computed once per type.
+func (f *encodingFlow) declaredIDs(named *types.Named) map[string]bool {
+	if held, known := f.methodIDs[named]; known {
 		return held
 	}
-	held := declaredMethodNames(named)
-	f.methodNames[named] = held
+	held := declaredMethodIDs(named)
+	f.methodIDs[named] = held
 	return held
 }
 
-// declaredMethodNames is the name of every method in the method set of a pointer
-// to the type.
-func declaredMethodNames(named *types.Named) map[string]bool {
+// declaredMethodIDs is the [types.Object.Id] of every method in the method set of a
+// pointer to the type, which holds the type's own. A method set can hold two
+// unexported methods of one name from two packages, which the name alone conflates.
+func declaredMethodIDs(named *types.Named) map[string]bool {
 	set := types.NewMethodSet(types.NewPointer(named))
 	held := make(map[string]bool, set.Len())
 	for selection := range set.Methods() {
-		held[selection.Obj().Name()] = true
+		held[selection.Obj().Id()] = true
 	}
 	return held
 }
 
-// satisfiedMethods names the methods of every interface the type, or a pointer to
-// it, implements. An interface naming a method the type's names lack is one
-// neither implements, so [types.Implements] is asked only of the rest.
+// satisfiedMethods is the [types.Object.Id] of each method of every interface the
+// type, or a pointer to it, implements. An interface with a method the type's set
+// lacks is one neither implements, so [types.Implements] is asked only of the rest.
 func satisfiedMethods(named *types.Named, declared map[string]bool, interfaces []*types.Interface) map[string]bool {
-	names := make(map[string]bool)
+	ids := make(map[string]bool)
 	pointer := types.NewPointer(named)
 	for _, iface := range interfaces {
-		if !namesEvery(declared, iface) {
+		if !declaresEvery(declared, iface) {
 			continue
 		}
 		if !types.Implements(named, iface) && !types.Implements(pointer, iface) {
 			continue
 		}
 		for method := range iface.Methods() {
-			names[method.Name()] = true
+			ids[method.Id()] = true
 		}
 	}
-	return names
+	return ids
 }
 
-// namesEvery reports whether every method of the interface has a name among names.
-func namesEvery(names map[string]bool, iface *types.Interface) bool {
+// declaresEvery reports whether every method of the interface has its
+// [types.Object.Id] among ids.
+func declaresEvery(ids map[string]bool, iface *types.Interface) bool {
 	for method := range iface.Methods() {
-		if !names[method.Name()] {
+		if !ids[method.Id()] {
 			return false
 		}
 	}
@@ -1291,11 +1293,11 @@ func (f *encodingFlow) encoderReach(t types.Type) []*types.Named {
 	found := f.encodedTypes(t)
 	seen := make(map[string]bool, len(found))
 	for _, named := range found {
-		seen[types.TypeString(named, nil)] = true
+		seen[resolve.Spell(named, nil)] = true
 	}
 	for at := 0; at < len(found); at++ {
 		for _, next := range f.membersReached(found[at]) {
-			key := types.TypeString(next, nil)
+			key := resolve.Spell(next, nil)
 			if seen[key] {
 				continue
 			}
@@ -1396,6 +1398,7 @@ func (r *retention) record(obj types.Object, site evidence, detail string) {
 		ID:       id,
 		Class:    string(r.class),
 		Consumer: site.consumer,
+		File:     site.file,
 		Site:     site.at,
 		Detail:   detail,
 	})
@@ -1405,6 +1408,7 @@ func (r *retention) record(obj types.Object, site evidence, detail string) {
 // of the loaded consumer consumer names, relative to that consumer's root.
 type evidence struct {
 	consumer string
+	file     string // [Exemption.File]
 	at       token.Position
 }
 
@@ -1413,7 +1417,7 @@ type evidence struct {
 // the run rather than a site to pass over.
 func (r *retention) site(pos token.Pos) (evidence, error) {
 	consumer, at, err := r.in.Resolve.Site(pos)
-	return evidence{consumer: consumer, at: at}, err
+	return evidence{consumer: consumer, file: r.in.Resolve.File(pos), at: at}, err
 }
 
 // exemptions returns what the class recorded, ordered by site and then by symbol.

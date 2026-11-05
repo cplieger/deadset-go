@@ -2,6 +2,9 @@ package inventory
 
 import (
 	"errors"
+	"fmt"
+	"go/ast"
+	"go/parser"
 	"go/token"
 	"testing"
 )
@@ -111,11 +114,58 @@ func TestPositionsColumnRefusesAPositionOutsideTheFile(t *testing.T) {
 	}
 }
 
-func TestPositionsColumnCountsAnUnknownColumnAsTheFirst(t *testing.T) {
-	src := []byte("package app\n")
-	p := NewPositions(token.NewFileSet(), "/root", func(string) ([]byte, error) { return src, nil })
-	q := token.Position{Filename: "/root/app.go", Line: 2, Column: 0, Offset: len(src)}
-	if got, err := p.column(q); err != nil || got != 1 {
-		t.Errorf("column(a line directive's unknown column at the end of the file) = %d, %v, want 1, <nil>", got, err)
+func TestRenderCountsUTF16UnitsFromWhereTheColumnsDirectiveTakesEffect(t *testing.T) {
+	for name, test := range map[string]struct{ line, want string }{
+		"a two-byte rune before an inline directive":  {line: `var s = "é"; /*line main.go:30:40*/ var t = 1`, want: "main.go:30:45"},
+		"a two-byte rune after an inline directive":   {line: `var s = 1; /*line main.go:30:40*/ var u = "é"; var t = 1`, want: "main.go:30:58"},
+		"a two-byte rune in an inline directive":      {line: `/*line é.go:30:40*/ var t = 1`, want: "é.go:30:45"},
+		"a directive's text in a string literal":      {line: `var s = "é /*line x.go:1:1*/"; var t = 1`, want: "main.go:3:36"},
+		"a directive on the line above":               {line: "//line main.go:30:40\nvar s = \"é\"; var t = 1", want: "main.go:30:57"},
+		"a directive naming a file outside the root":  {line: `var s = "é"; /*line /elsewhere/x.go:30:40*/ var t = 1`, want: "main.go:3:49"},
+		"an inline directive with no column":          {line: `var s = "é"; /*line main.go:30*/ var t = 1`, want: "main.go:30:1"},
+		"a line after an inline directive's own line": {line: "var s = \"é\"; /*line main.go:30:40*/\nvar t = 1", want: "main.go:31:5"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			src := "package p\n\n" + test.line + "\n"
+			fset := token.NewFileSet()
+			file, err := parser.ParseFile(fset, "/root/main.go", src, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var at token.Pos
+			ast.Inspect(file, func(n ast.Node) bool {
+				if id, ok := n.(*ast.Ident); ok && id.Name == "t" {
+					at = id.Pos()
+				}
+				return true
+			})
+			p := NewPositions(fset, "/root", func(string) ([]byte, error) { return []byte(src), nil })
+			q, err := p.Render(at)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := fmt.Sprintf("%s:%d:%d", q.Filename, q.Line, q.Column); got != test.want {
+				t.Errorf("Render(t) = %s, want %s", got, test.want)
+			}
+		})
+	}
+}
+
+func TestRenderedShiftsADirectivesColumnByTheWrittenLinesUnits(t *testing.T) {
+	for name, test := range map[string]struct {
+		at   int
+		run  string
+		want int
+	}{
+		"an unknown column counts as the first":       {at: 0, run: "ab🎉", want: 1},
+		"a line no directive shifts":                  {at: 9, run: "ab🎉", want: 7},
+		"a directive's own line":                      {at: 14, run: "ab🎉", want: 12},
+		"a shift past the line start counts as first": {at: 2, run: "ab🎉", want: 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := rendered(test.at, []byte(test.run)); got != test.want {
+				t.Errorf("rendered(%d, %q) = %d, want %d", test.at, test.run, got, test.want)
+			}
+		})
 	}
 }

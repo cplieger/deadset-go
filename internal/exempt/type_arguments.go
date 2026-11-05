@@ -2,99 +2,29 @@ package exempt
 
 import (
 	"go/ast"
-	"go/token"
 	"go/types"
 	"slices"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"golang.org/x/tools/go/packages"
 )
-
-// typeArguments is every type argument each type parameter of the program takes in
-// an instantiation the program holds, a parameter keyed by the position it is
-// declared at so the variants that type-check one file share it, and a generic
-// method's receiver type parameter answering for its type's own.
-type typeArguments struct {
-	args     map[token.Pos][]types.Type
-	receiver map[token.Pos]token.Pos
-}
-
-// typeArgumentsOf collects the instantiations of every package of the program.
-func typeArgumentsOf(pkgs []*packages.Package) *typeArguments {
-	held := &typeArguments{args: make(map[token.Pos][]types.Type), receiver: make(map[token.Pos]token.Pos)}
-	for _, p := range pkgs {
-		if p.TypesInfo == nil {
-			continue
-		}
-		for id, instance := range p.TypesInfo.Instances {
-			params := typeParameters(p.TypesInfo.Uses[id])
-			for i := range min(params.Len(), instance.TypeArgs.Len()) {
-				key := params.At(i).Obj().Pos()
-				held.args[key] = append(held.args[key], instance.TypeArgs.At(i))
-			}
-		}
-		for _, object := range p.TypesInfo.Defs {
-			held.keepReceiver(object)
-		}
-	}
-	return held
-}
-
-// keepReceiver keys the receiver type parameters of one generic method to the type
-// parameters of the type it is declared on.
-func (a *typeArguments) keepReceiver(object types.Object) {
-	method, isFunc := object.(*types.Func)
-	if !isFunc || method.Signature().RecvTypeParams().Len() == 0 {
-		return
-	}
-	recv := types.Unalias(method.Signature().Recv().Type())
-	if pointer, isPointer := recv.(*types.Pointer); isPointer {
-		recv = types.Unalias(pointer.Elem())
-	}
-	named, isNamed := recv.(*types.Named)
-	if !isNamed {
-		return
-	}
-	declared, own := method.Signature().RecvTypeParams(), named.Origin().TypeParams()
-	for i := range min(declared.Len(), own.Len()) {
-		a.receiver[declared.At(i).Obj().Pos()] = own.At(i).Obj().Pos()
-	}
-}
-
-// typeParameters is the type parameters of the generic declaration one instantiated
-// identifier names.
-func typeParameters(object types.Object) *types.TypeParamList {
-	switch t := object.(type) {
-	case *types.Func:
-		return t.Signature().TypeParams()
-	case *types.TypeName:
-		switch declared := t.Type().(type) {
-		case *types.Named:
-			return declared.TypeParams()
-		case *types.Alias:
-			return declared.TypeParams()
-		}
-	}
-	return nil
-}
 
 // bindings is every type with no type parameter in it that a type parameter t holds
 // stands for in an instantiation the program holds, through the type parameters of
 // other generic declarations it is passed on to as a type argument.
-func (a *typeArguments) bindings(t types.Type) []types.Type {
+func bindings(in *facts.Instantiations, t types.Type) []types.Type {
 	var found []types.Type
-	seen := make(map[token.Pos]bool)
+	seen := make(map[inventory.Offset]bool)
 	var expand func(types.Type)
 	expand = func(t types.Type) {
 		for _, param := range typeParamsIn(t) {
-			key := param.Obj().Pos()
-			if own, isReceiver := a.receiver[key]; isReceiver {
-				key = own
-			}
+			key := in.Declared(param)
 			if seen[key] {
 				continue
 			}
 			seen[key] = true
-			for _, arg := range a.args[key] {
+			for _, arg := range in.Args(key) {
 				if len(typeParamsIn(arg)) == 0 {
 					found = append(found, arg)
 				}

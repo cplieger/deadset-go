@@ -15,7 +15,7 @@ cmd/deadset-go/deadset-go
 
 # pgregory.net/rapid writes a counterexample here on a failing property; it is a
 # run artifact, never a reviewed fixture, unlike a committed testdata/fuzz corpus
-testdata/rapid/
+**/testdata/rapid/
 
 # Go workspace
 go.work

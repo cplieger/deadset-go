@@ -106,9 +106,9 @@ func writeOnlySubject(in *pass, symbol *inventory.Symbol, u *uses, exempted map[
 // unusedEnumMember reports a constant of an enumerated type (the enum-group
 // exemption's: a defined type an iota group declares constants of) that nothing
 // names, from any file. A member of a type whose values can arrive by conversion is
-// retained by that exemption and never reaches this kind. It takes precedence over
-// the unused-exported and unused-unexported kinds, which report no member of an
-// iota group.
+// retained by that exemption and never reaches this kind, and one only a test's
+// evidence retains is the unused-declaration kinds' ([pass.readOrWriteSubject]),
+// which report no other member of an iota group.
 func unusedEnumMember(in *pass) ([]draft, error) {
 	referenced := in.referenced
 
@@ -116,7 +116,7 @@ func unusedEnumMember(in *pass) ([]draft, error) {
 	for i := range in.Sweep.Candidates {
 		candidate := &in.Sweep.Candidates[i]
 		symbol := in.symbol(candidate.ID)
-		if symbol == nil || !in.enumMember(symbol) || referenced[candidate.ID] {
+		if symbol == nil || !in.enumMember(symbol) || !in.readOrWriteSubject(candidate, symbol) || referenced[candidate.ID] {
 			continue
 		}
 		finding, names := in.finding(candidate.ID, vocab.UnusedEnumMember,
@@ -165,7 +165,7 @@ func (in *pass) enumMember(symbol *inventory.Symbol) bool {
 // typeParameterSubject reports whether one declaration is a type parameter of a
 // declaration whose parameters the type-parameter kind reports.
 func (in *pass) typeParameterSubject(symbol *inventory.Symbol) bool {
-	return symbol.Kind == inventory.KindTypeParam && declaresTypeParameters(in.symbol(symbol.Parent))
+	return symbol.Kind == inventory.KindTypeParam && declaresTypeParameters(in.container(symbol))
 }
 
 // declaresTypeParameters reports whether a type parameter's container is a
@@ -182,6 +182,7 @@ func declaresTypeParameters(owner *inventory.Symbol) bool {
 // counts the reads of test files a production mode does not count.
 type uses struct {
 	writes     []Position
+	sites      []inventory.Offset // where each of writes is written
 	spans      []inventory.SourceRange
 	reads      int
 	production int
@@ -196,9 +197,9 @@ type uses struct {
 // which is what leaves a declaration read only from a test reported and makes the
 // written positions the production writes alone.
 //
-// One write position is kept once however many build configurations saw it: the
-// merged reference set holds one reference per configuration it was seen in, and
-// the deletion set the finding names is a set of positions in the source.
+// One write is kept once by the byte that writes it, however many build
+// configurations saw it or whichever line directive renders it at another's
+// position: the deletion set the finding names is a set of writes in the source.
 func writesAndReads(in *pass) map[inventory.SymbolID]*uses {
 	counted := make(map[inventory.SymbolID]*uses)
 	for i := range in.Merged.References {
@@ -237,8 +238,9 @@ func (u *uses) count(in *pass, r *facts.Reference) {
 	if !in.deadReader(r) {
 		u.liveWrites++
 	}
-	if at := positionAt(r.Pos); !slices.Contains(u.writes, at) {
-		u.writes = append(u.writes, at)
+	if !slices.Contains(u.sites, r.Site) {
+		u.sites = append(u.sites, r.Site)
+		u.writes = append(u.writes, positionAt(r.Pos))
 		if r.Span != (inventory.SourceRange{}) {
 			u.spans = append(u.spans, r.Span)
 		}
@@ -272,7 +274,7 @@ func readCount(r *facts.Reference) int {
 func writableSubject(in *pass, symbol *inventory.Symbol) bool {
 	switch symbol.Kind {
 	case inventory.KindVar:
-		owner := in.symbol(symbol.Parent)
+		owner := in.container(symbol)
 		return !symbol.Blank && (owner == nil || owner.Kind == inventory.KindPackage)
 	case inventory.KindField:
 		return !symbol.Blank

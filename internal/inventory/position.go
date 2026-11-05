@@ -1,6 +1,7 @@
 package inventory
 
 import (
+	"bytes"
 	"cmp"
 	"errors"
 	"fmt"
@@ -44,8 +45,8 @@ func NewPositions(fset *token.FileSet, root string, read ReadFile) *Positions {
 // how a loaded consumer's files render against the consumer's own root.
 func (p *Positions) Under(root string) *Positions { return NewPositions(p.Fset, root, p.read) }
 
-// Base returns the file name of the file holding pos, without its directory.
-func (p *Positions) Base(pos token.Pos) string {
+// base returns the file name of the file holding pos, without its directory.
+func (p *Positions) base(pos token.Pos) string {
 	return filepath.Base(p.Fset.Position(pos).Filename)
 }
 
@@ -87,32 +88,117 @@ func (s *SourceRange) Holds(at Offset) bool {
 	return at.File == s.File && at.At >= s.From && at.At < s.To
 }
 
-// Render converts pos into the position a report carries.
+// Render converts pos into the position a report carries: [Positions.Place], with
+// its column in UTF-16 units. Only the written file is read, because a directive
+// may name a file that does not exist.
 func (p *Positions) Render(pos token.Pos) (token.Position, error) {
-	q := p.Fset.Position(pos)
-	if !q.IsValid() {
-		return token.Position{}, fmt.Errorf("%w: invalid position %d", ErrSource, pos)
-	}
-	rel := p.Relative(q.Filename)
-	if rel == "" {
-		return token.Position{}, fmt.Errorf("%w: %s is outside %s", ErrSource, q.Filename, p.Root)
-	}
-	column, err := p.column(q)
+	q, moved, err := p.place(pos)
 	if err != nil {
 		return token.Position{}, err
 	}
-	q.Filename = rel
-	q.Column = column
+	w := p.Fset.PositionFor(pos, false)
+	line, err := p.before(w)
+	if err != nil {
+		return token.Position{}, err
+	}
+	if moved {
+		line = line[p.counted(pos, line):]
+	}
+	q.Column = rendered(q.Column, line)
 	return q, nil
 }
 
-// symbolID spells the identifier of the declaration written at one rendered
-// position: the target-relative path, the line and the column, joined by
-// colons. Every pass that resolves an object to a declaration renders the
-// object's position and looks the identifier up, so the form is written here and
-// nowhere else.
-func (*Positions) symbolID(q token.Position) SymbolID {
-	return SymbolID(fmt.Sprintf("%s:%d:%d", q.Filename, q.Line, q.Column))
+// Place is the root-relative file and line a report names pos at, reading no file:
+// where a line directive renders it, and where the file writes it when the
+// directive names a file outside the root, which no report can name. Its column is
+// the rendered byte column.
+func (p *Positions) Place(pos token.Pos) (token.Position, error) {
+	q, _, err := p.place(pos)
+	return q, err
+}
+
+// place is [Positions.Place], and whether the position is the one a line directive
+// renders rather than the written one.
+func (p *Positions) place(pos token.Pos) (token.Position, bool, error) {
+	w := p.Fset.PositionFor(pos, false)
+	if !w.IsValid() {
+		return token.Position{}, false, fmt.Errorf("%w: invalid position %d", ErrSource, pos)
+	}
+	q, moved := p.Fset.Position(pos), true
+	rel := p.Relative(q.Filename)
+	if rel == "" {
+		q, moved, rel = w, false, p.Relative(w.Filename)
+	}
+	if rel == "" {
+		return token.Position{}, false, fmt.Errorf("%w: %s is outside %s", ErrSource, w.Filename, p.Root)
+	}
+	q.Filename = rel
+	return q, moved, nil
+}
+
+// counted is the index in line, the written bytes before pos on its line, of the
+// first byte pos's rendered column counts: the byte after an inline /*line*/
+// directive in effect at pos, else the line start, where a //line directive above
+// takes effect. go/token counts the column from there and exposes no directive, so
+// the run is the bytes before pos whose rendered columns step by one to pos's.
+func (p *Positions) counted(pos token.Pos, line []byte) int {
+	if !bytes.Contains(line, []byte("/*line ")) {
+		return 0
+	}
+	at := p.Fset.Position(pos)
+	from := len(line)
+	for from > 0 {
+		q := p.Fset.Position(pos - token.Pos(len(line)-from+1))
+		if q.Filename != at.Filename || q.Line != at.Line || q.Column != at.Column-(len(line)-from+1) {
+			break
+		}
+		from--
+	}
+	return from
+}
+
+// rendered is the UTF-16 column of a byte a line directive renders at byte column
+// at, where run is the written bytes the byte column counts before it. A directive
+// that names no column leaves it unknown, which counts as the first.
+func rendered(at int, run []byte) int {
+	if at == 0 {
+		return 1
+	}
+	return max(at-(len(run)-(Column(run, len(run))-1)), 1)
+}
+
+// symbolID spells the identifier of the declaration written at pos: the
+// target-relative path of the file that writes it, the line and the UTF-16 column
+// there, joined by colons, all read before any line directive. A line directive
+// can render two declarations at one position, never write them at one, so the
+// identifier is the rendered position only where no directive moves it.
+func (p *Positions) symbolID(pos token.Pos) (SymbolID, error) {
+	q := p.Fset.PositionFor(pos, false)
+	rel := p.Relative(q.Filename)
+	if rel == "" {
+		return "", fmt.Errorf("%w: %s is outside %s", ErrSource, q.Filename, p.Root)
+	}
+	column, err := p.column(q)
+	if err != nil {
+		return "", err
+	}
+	return SymbolID(fmt.Sprintf("%s:%d:%d", rel, q.Line, column)), nil
+}
+
+// File is the root-relative path of the file that writes pos, which a line
+// directive does not move, and empty where the root does not hold it.
+func (p *Positions) File(pos token.Pos) string { return p.Relative(p.Offset(pos).File) }
+
+// Line is the line of [Positions.File] that writes pos, which a line directive
+// does not move.
+func (p *Positions) Line(pos token.Pos) int { return p.Fset.PositionFor(pos, false).Line }
+
+// InTestFile reports whether the file that writes pos is a test file
+// ([IsTestFile]). A line directive naming a test file makes no production code a
+// test's, so the name is the one the file set holds before any directive.
+func (p *Positions) InTestFile(pos token.Pos) bool {
+	_, test := IsTestFile(p.Offset(pos).File)
+	return test
 }
 
 // Relative returns name relative to the target root with forward slashes, and an
@@ -129,21 +215,28 @@ func (p *Positions) Relative(name string) string {
 	return rel
 }
 
-// column converts the byte column Go reports into the number of UTF-16 code
-// units before it on the same line, counted from one.
+// column converts the byte column of q, a position read before any line directive,
+// into the number of UTF-16 code units before it on the same line, counted from one.
 func (p *Positions) column(q token.Position) (int, error) {
-	src, err := p.source(q.Filename)
+	line, err := p.before(q)
 	if err != nil {
 		return 0, err
 	}
-	// A line directive naming no column leaves the column unknown, which Go reports
-	// as 0 and which counts as the first.
-	start := q.Offset - max(q.Column-1, 0)
+	return Column(line, len(line)), nil
+}
+
+// before returns the bytes of q's line before q, q read before any line directive.
+func (p *Positions) before(q token.Position) ([]byte, error) {
+	src, err := p.source(q.Filename)
+	if err != nil {
+		return nil, err
+	}
+	start := q.Offset - (q.Column - 1)
 	if start < 0 || q.Offset > len(src) {
-		return 0, fmt.Errorf("%w: %s:%d:%d is outside the file's %d bytes",
+		return nil, fmt.Errorf("%w: %s:%d:%d is outside the file's %d bytes",
 			ErrSource, q.Filename, q.Line, q.Column, len(src))
 	}
-	return Column(src[start:], q.Offset-start), nil
+	return src[start:q.Offset], nil
 }
 
 // Column is the column of the byte at offset of line, counting UTF-16 code units

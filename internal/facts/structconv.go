@@ -29,7 +29,7 @@ func (p *referencePass) readStructConversion(call *ast.CallExpr, encl inventory.
 	}
 	site := &identityRead{read: make(map[inventory.SymbolID]bool), encl: encl, pos: call.Pos()}
 	to := coreOf(target.Type)
-	for _, operand := range p.operandTypes(from, make(map[token.Pos]bool)) {
+	for _, operand := range p.operandTypes(from, make(map[inventory.Offset]bool)) {
 		a, b, convertible := convertedStructs(operand, to)
 		if convertible {
 			p.readIdentity(a, b, site)
@@ -48,18 +48,18 @@ type identityRead struct {
 // operandTypes is the types one conversion operand stands for: itself, or for a type
 // parameter every type argument the program's instantiations give it, through the
 // type parameters of other generic declarations.
-func (p *referencePass) operandTypes(t types.Type, seen map[token.Pos]bool) []types.Type {
+func (p *referencePass) operandTypes(t types.Type, seen map[inventory.Offset]bool) []types.Type {
 	param, isParam := types.Unalias(t).(*types.TypeParam)
 	if !isParam {
 		return []types.Type{t}
 	}
-	key := p.instances.declared(param)
+	key := p.instances.Declared(param)
 	if seen[key] {
 		return nil
 	}
 	seen[key] = true
 	var held []types.Type
-	for _, arg := range p.instances.args[key] {
+	for _, arg := range p.instances.Args(key) {
 		held = append(held, p.operandTypes(arg, seen)...)
 	}
 	return held

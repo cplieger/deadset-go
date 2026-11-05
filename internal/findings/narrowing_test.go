@@ -426,7 +426,7 @@ func TestNarrowingYieldsADeclarationNothingReadsToTheWriteOnlyKind(t *testing.T)
 		Pos:      token.Position{Filename: file, Line: 4, Column: 2},
 		EndLine:  4,
 		Kind:     inventory.KindField,
-		Parent:   answer.ID,
+		Parents:  []inventory.SymbolID{answer.ID},
 		Exported: true,
 	}
 	fill := inventory.Symbol{

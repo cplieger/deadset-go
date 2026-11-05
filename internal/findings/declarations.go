@@ -176,16 +176,25 @@ func (in *pass) outsideTheRule(candidate *liveness.Candidate, symbol *inventory.
 	}
 }
 
-// deadParent reports whether a declaration's container is dead. A test file's
-// declaration a test reaches is a candidate of the production sweep alone, so its
-// members are judged on their own.
+// deadParent reports whether every container of a declaration is dead, so the
+// containers' findings stand for it: a method of a type one configuration keeps
+// is judged on its own. The pass with every mark withdrawn reports no dead parent,
+// so a member is judged on its own there; so are the members of a test file's
+// declaration a test reaches, a candidate of the production sweep alone.
 func (in *pass) deadParent(symbol *inventory.Symbol) bool {
-	parent := in.candidateOf(symbol.Parent)
-	if parent == nil {
+	if len(symbol.Parents) == 0 || in.withdrawnMarks {
 		return false
 	}
-	container := in.symbol(symbol.Parent)
-	return container == nil || !container.InTestFile || parent.UnreferencedTest || parent.TestOfDeadCode
+	for _, id := range symbol.Parents {
+		parent := in.candidateOf(id)
+		if parent == nil {
+			return false
+		}
+		if container := in.symbol(id); container != nil && container.InTestFile && !parent.UnreferencedTest && !parent.TestOfDeadCode {
+			return false
+		}
+	}
+	return true
 }
 
 // unusedMessage is what one unused-declaration finding says, in the reader's words:
@@ -262,18 +271,6 @@ func testKept(candidate *liveness.Candidate) bool {
 // of the merged inventory ([roots.MatrixTests]).
 func (in *pass) testReached(symbol *inventory.Symbol) bool {
 	return in.Merged.Tests.Reached[symbol.Package]
-}
-
-// testReachedEvidence is the row of the Contract's evidence table that names the
-// codes a finding about production code only tests reach is possible under.
-var testReachedEvidence, _ = vocab.EvidenceFor("test-reached", language)
-
-// testReachedUse reports whether a record under code holds a declaration of production
-// code only tests reach that a test references, whose finding is possible whether or
-// not the record keeps the declaration live.
-func (in *pass) testReachedUse(id inventory.SymbolID, code vocab.Code) bool {
-	symbol := in.symbol(id)
-	return testReachedEvidence.Lowers(language, code) && symbol != nil && in.testReached(symbol) && in.Sweep != nil && in.Sweep.TestReferenced(id)
 }
 
 // deprecations is every declaration of the inventory carrying a deprecation

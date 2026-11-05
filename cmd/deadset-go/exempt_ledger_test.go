@@ -196,6 +196,13 @@ func TestAnEnumFilledByAnyDecodingEntryPointKeepsEveryMember(t *testing.T) {
 		"go://example.com/app#Mid", "go://example.com/app#High", "go://example.com/app#On")
 }
 
+func TestAnEnumALineDirectiveRendersOutsideTheTreeIsTheTargetsOwn(t *testing.T) {
+	about := findingsAbout(t, archiveModule(t, "exempt-ledger/enum-under-a-line-directive-outside-the-tree.txtar"))
+
+	wantNoFinding(t, about, "the target writes the enum, so a decoder can fill any member",
+		"go://example.com/app#Mid", "go://example.com/app#High")
+}
+
 func TestAGoFlagsCommandFieldIsRead(t *testing.T) {
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/go-flags-command.txtar"))
 
@@ -248,8 +255,71 @@ func TestAValueReturnedThroughAnOutsideInterfaceIsSentFromEveryModulesReading(t 
 		"go://example.com/a#deployment.Replicas", "go://example.com/b#pod.Phase")
 }
 
+func TestTwoTypesOneNameSpellsInTwoFunctionsAreTwoTypes(t *testing.T) {
+	kept := []struct {
+		archive string
+		why     string
+		refs    []string
+	}{
+		{"local-type-error-assertion", "second's e answers retry's Transient assertion itself", []string{"go://example.com/errs#second.IsTransient"}},
+		{"local-type-outside-assertion", "second's e answers sizes' Sizer assertion itself", []string{"go://example.com/app#second.Size"}},
+		{"local-type-format", "printing the inner e prints the outer e's field", []string{"go://example.com/app#alpha.String", "go://example.com/app#bravo.String"}},
+		{"local-type-encoder", "encoding the inner e reads the outer e's field", []string{"go://example.com/app#alpha.X", "go://example.com/app#bravo.Y"}},
+		{"local-type-self-encoder", "only the outer e holds a self-encoder", []string{"go://example.com/app#selfish.MarshalJSON", "go://example.com/app#plain.Y"}},
+		{"local-type-interface-store", "box.V holds each function's e", []string{"go://example.com/app#alpha.X", "go://example.com/app#bravo.Y"}},
+		{"local-type-layout", "view lays out each function's e", []string{"go://example.com/app#alpha.X", "go://example.com/app#bravo.Y"}},
+		{"local-type-derived-assertion", "the second's e implements sizer", []string{"go://example.com/app#second.size"}},
+		{"type-parameter-layout", "view lays out each function's T", []string{"go://example.com/app#alpha.X", "go://example.com/app#bravo.Y"}},
+	}
+	for _, c := range kept {
+		t.Run(c.archive, func(t *testing.T) {
+			about := findingsAbout(t, archiveModule(t, "exempt-ledger/"+c.archive+".txtar"))
+			wantNoFinding(t, about, c.why, c.refs...)
+		})
+	}
+	for _, archive := range []string{"local-type-converted-like-an-enum", "local-type-decoded-like-an-enum"} {
+		t.Run(archive, func(t *testing.T) {
+			about := findingsAbout(t, archiveModule(t, "exempt-ledger/"+archive+".txtar"))
+			wantFinding(t, about, "go://example.com/app#slow", vocab.UnusedEnumMember, vocab.Certain)
+		})
+	}
+}
+
 func TestAValueReturnedThroughAnOutsideConstraintIsNotSent(t *testing.T) {
 	about := findingsAbout(t, filepath.Join(archiveModule(t, "exempt-ledger/returned-through-a-constraint.txtar"), "target"))
 
 	wantFinding(t, about, "go://example.com/app#deployment.Replicas", vocab.WriteOnlySymbol, vocab.Certain)
+}
+
+func TestAnOutsideAssertionRetainsTheUnexportedMethodOfItsOwnPackageAlone(t *testing.T) {
+	about := findingsAbout(t, filepath.Join(archiveModule(t, "exempt-ledger/unexported-method-of-one-name-in-two-packages.txtar"), "target"))
+
+	wantFinding(t, about, "go://example.com/app#T.mark", vocab.UnusedUnexported, vocab.Certain)
+	wantNoFinding(t, about, "Take asserts Marker on T", "go://example.com/app#T.Name")
+}
+
+func TestAMethodATypeHasByPromotionIsCalledThroughTheEmbeddedField(t *testing.T) {
+	for _, c := range []struct{ archive, method, why string }{
+		{"promoted-self-encoder", "selfish.MarshalJSON", "json.Marshal calls wrap's promoted MarshalJSON"},
+		{"promoted-pointer-self-encoder", "selfish.MarshalJSON", "json.Marshal calls *wrap's promoted MarshalJSON"},
+		{"promoted-text-marshaler-map-key", "selfish.MarshalText", "json.Marshal spells a wrap key by its promoted MarshalText"},
+		{"promoted-xml-marshaler", "selfish.MarshalXML", "xml.Marshal calls wrap's promoted MarshalXML"},
+		{"promoted-string-method", "wrap.selfish", "fmt.Println calls wrap's promoted String, which reads the field"},
+	} {
+		t.Run(c.archive, func(t *testing.T) {
+			about := findingsAbout(t, archiveModule(t, "exempt-ledger/"+c.archive+".txtar"))
+			wantNoFinding(t, about, c.why, "go://example.com/app#"+c.method)
+			if c.archive != "promoted-text-marshaler-map-key" {
+				wantFinding(t, about, "go://example.com/app#selfish.Z", vocab.UnusedMember, vocab.Certain)
+			}
+		})
+	}
+}
+
+func TestAnEnumMemberIsRetainedByTheEvidenceTheRunsModeHolds(t *testing.T) {
+	about := findingsAbout(t, archiveModule(t, "exempt-ledger/enum-converted-in-a-test-file-and-in-production.txtar"))
+	wantNoFinding(t, about, "main converts to mode", "go://example.com/app#slow")
+
+	about = findingsAbout(t, archiveModule(t, "exempt-ledger/enum-converted-only-in-a-test-file.txtar"))
+	wantFinding(t, about, "go://example.com/app#slow", vocab.TestOnlyUse, vocab.Certain)
 }

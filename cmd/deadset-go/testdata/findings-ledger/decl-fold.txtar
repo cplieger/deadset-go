@@ -1,0 +1,19 @@
+A command with two unreferenced functions that one line directive each renders
+at the same line. They are two declarations, so each is reported.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() {}
+
+//line main.go:20:1
+func alpha() {}
+
+//line main.go:20:1
+func bravo() {}

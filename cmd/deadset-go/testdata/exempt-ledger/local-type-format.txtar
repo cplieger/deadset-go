@@ -1,0 +1,33 @@
+A local type e holds a field of the outer local type e that a block shadows.
+Printing the inner e prints both, so alpha.String and bravo.String are kept.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+import "fmt"
+
+type alpha int
+
+func (alpha) String() string { return "a" }
+
+type bravo int
+
+func (bravo) String() string { return "b" }
+
+func main() {
+	type e struct{ A alpha }
+	type outer = e
+	{
+		type e struct {
+			B bravo
+			O outer
+		}
+		fmt.Printf("%v\n", e{})
+	}
+}

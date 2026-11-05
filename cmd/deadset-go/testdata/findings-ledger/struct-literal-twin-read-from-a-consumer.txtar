@@ -1,0 +1,50 @@
+Two library types whose field In has one struct literal type. A declared consumer
+reads P.In.X and copies P.In into Q.In; identical unnamed struct types are one
+type, so the read of P.In.X reads Q.In.X as well. The consumer's own parse of the
+target's file meets the target's literal by where its field is written.
+
+-- target/go.mod --
+module example.com/app
+
+go 1.27.1
+-- target/deadset.json --
+{"target": {"kind": "library"}, "consumers": {"complete": true}}
+-- target/lib.go --
+// Package app exports two types holding one struct literal type.
+package app
+
+// P is read by the consumer.
+type P struct{ In struct{ X, Y int } }
+
+// Q holds the same literal.
+type Q struct{ In struct{ X, Y int } }
+
+// Both hands both out.
+func Both() (P, Q) { return P{}, Q{} }
+-- consumer/go.mod --
+module example.com/consumer
+
+go 1.27.1
+
+require example.com/app v0.0.0
+
+replace example.com/app => ../target
+-- consumer/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/app"
+)
+
+func main() {
+	p, q := app.Both()
+	q.In = p.In
+	fmt.Println(p.In.X, q.In)
+}
+-- scope.json --
+{
+  "target": {"id": "example.com/app", "role": "target", "path": "target"},
+  "consumers": [{"id": "example.com/consumer", "role": "consumer", "path": "consumer"}]
+}

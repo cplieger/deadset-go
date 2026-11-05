@@ -77,10 +77,13 @@ func (k SymbolKind) String() string {
 	return kindNames[k]
 }
 
-// SymbolID identifies one declaration across build configurations and in every
-// report: the target-relative path of the file that declares it, its line and
-// its column. Inside one configuration the enumeration keys on the raw token.Pos
-// instead, which needs no allocation.
+// SymbolID identifies one declaration across build configurations: the
+// target-relative path of the file that writes it, its line and its UTF-16
+// column, read before any line directive, so it is no report position. A
+// package is written by every file it holds, so its identifier is its import
+// path and its target-relative directory with a trailing slash, the same
+// whichever files a configuration compiles. Inside one configuration the
+// enumeration keys on the raw token.Pos instead, which needs no allocation.
 type SymbolID string
 
 // Symbol is one declaration of the target.
@@ -89,7 +92,17 @@ type Symbol struct {
 	Ref     string
 	Name    string
 	PkgPath string
-	Parent  SymbolID // the container's ID; empty for a package
+
+	// Parents are the IDs of the declarations it is declared in, none for a
+	// package. A configuration's inventory gives it one; a merged matrix gives a
+	// method one per receiver type, where configurations declare that type in
+	// different files ([liveness.Merge]).
+	Parents []SymbolID
+
+	// File is the target-relative path of the file that writes the declaration,
+	// which a line directive does not move: what classifies the declaration as
+	// generated code and places it in its package's directory.
+	File string
 
 	// Dependents are, for a constant of a parenthesized constant declaration, the
 	// other constants of the group whose value its specification's deletion
@@ -105,6 +118,10 @@ type Symbol struct {
 	Pos     token.Position
 	EndLine int
 
+	// Line is the line of File the declaration begins on, which is what an
+	// inline directive written above it binds; Pos.Line is where it renders.
+	Line int
+
 	// Configs is the set of build configurations the declaration exists in. One
 	// enumeration fills none of it, because a load is of one configuration and
 	// the set is a fact about the matrix; graph.Merge is what fills it.
@@ -114,7 +131,7 @@ type Symbol struct {
 	Blank    bool // declared with the blank identifier
 
 	// InTestFile reports a declaration of a file the Go test-file rule classifies
-	// ([IsTestFile]).
+	// ([Positions.InTestFile]).
 	InTestFile bool
 
 	// TestSupport reports a declaration of a test-support package, which is test
@@ -193,15 +210,19 @@ func (inv *Inventory) Sites() iter.Seq2[token.Pos, SymbolID] { return maps.All(i
 // over the configuration renders target positions with, so each file is read once.
 func (inv *Inventory) Positions() *Positions { return inv.pos }
 
-// BySite orders two symbols by rendered position and then by reference. It is a
-// total order because two symbols never share a position.
+// BySite orders two symbols by rendered position, then by reference, then by
+// identifier, which no two symbols share, where a line directive renders two at
+// one position.
 //
 //nolint:gocritic // slices.SortFunc fixes a comparator's parameters to values.
 func BySite(a, b Symbol) int {
 	if c := ByPosition(a.Pos, b.Pos); c != 0 {
 		return c
 	}
-	return strings.Compare(a.Ref, b.Ref)
+	if c := strings.Compare(a.Ref, b.Ref); c != 0 {
+		return c
+	}
+	return strings.Compare(string(a.ID), string(b.ID))
 }
 
 // enumeration accumulates the symbols of one loaded configuration.
@@ -309,6 +330,7 @@ type declaration struct {
 	name     string // the display name a text line renders
 	pkgPath  string
 	parent   SymbolID
+	id       SymbolID // set for a package only; any other's is its written position
 	chain    []string // the name chain from the package inward, own name last
 	pos, end token.Pos
 	kind     SymbolKind
@@ -335,7 +357,12 @@ func (e *enumeration) append(d *declaration) (SymbolID, error) {
 	}
 	named := d.kind != KindPackage && d.kind != KindFile
 	blank := named && own == "_"
-	id := e.pos.symbolID(position)
+	id := d.id
+	if id == "" {
+		if id, err = e.pos.symbolID(d.pos); err != nil {
+			return "", err
+		}
+	}
 
 	// A package may hold any number of blank declarations, so the name identifies
 	// none of them and the declaration takes its container's reference.
@@ -351,15 +378,18 @@ func (e *enumeration) append(d *declaration) (SymbolID, error) {
 		Ref:      ref,
 		Name:     d.name,
 		PkgPath:  d.pkgPath,
-		Parent:   d.parent,
+		Parents:  parents(d.parent),
 		Pos:      position,
 		EndLine:  end.Line,
+		File:     e.pos.File(d.pos),
+		Line:     e.pos.Line(d.pos),
 		Kind:     d.kind,
 		Exported: named && ast.IsExported(own),
 		Blank:    blank,
 		Package:  e.pkg,
+
+		InTestFile: e.pos.InTestFile(d.pos),
 	})
-	_, e.symbols[len(e.symbols)-1].InTestFile = IsTestFile(position.Filename)
 	return id, nil
 }
 
@@ -368,6 +398,7 @@ func (e *enumeration) append(d *declaration) (SymbolID, error) {
 func (e *enumeration) walkPackage(g Variants, id load.PackageID) error {
 	e.pkg = id
 	pkgID, err := e.append(&declaration{
+		id:      SymbolID(g.PkgPath + " " + e.pos.Relative(g.Dir) + "/"),
 		pos:     g.Anchor.Name.Pos(),
 		end:     g.Anchor.Name.End(),
 		kind:    KindPackage,
@@ -389,7 +420,7 @@ func (e *enumeration) walkPackage(g Variants, id load.PackageID) error {
 
 // walkFile enumerates one source file and the declarations it holds.
 func (e *enumeration) walkFile(p *packages.Package, f *ast.File, pkgID SymbolID) error {
-	base := e.pos.Base(f.FileStart)
+	base := e.pos.base(f.FileStart)
 	if _, err := e.append(&declaration{
 		pos:     f.FileStart,
 		end:     f.FileEnd,
@@ -624,9 +655,17 @@ func (e *enumeration) walkTypeParams(list *ast.FieldList, owner *declaration, ow
 func (e *enumeration) resolveReceivers() {
 	for _, m := range e.pending {
 		if id, ok := e.typeIDs[m.owner]; ok {
-			e.symbols[m.index].Parent = id
+			e.symbols[m.index].Parents = []SymbolID{id}
 		}
 	}
+}
+
+// parents is the one container a configuration's walk gives a declaration.
+func parents(id SymbolID) []SymbolID {
+	if id == "" {
+		return nil
+	}
+	return []SymbolID{id}
 }
 
 // typeKey names one type of the package of that import path read from dir.

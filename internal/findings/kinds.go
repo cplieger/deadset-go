@@ -29,8 +29,8 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
-	"github.com/cplieger/deadset-go/v2/internal/suppress"
 	"github.com/cplieger/deadset-spec/v8/report"
+	core "github.com/cplieger/deadset-spec/v8/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -131,6 +131,7 @@ type draft struct {
 	Message  string
 	id       inventory.SymbolID // [Finding]'s
 	decl     inventory.SymbolID // [Finding]'s
+	record   string             // [Finding]'s
 	Details  Details
 	Symbol   Subject
 	Position Position
@@ -196,13 +197,13 @@ type Finding struct {
 	// written is the byte of decl's file a part's token is written at ([partKey]).
 	written int
 
+	// record is where a row's suppression record is written ([core.Site.Written]),
+	// which tells apart two records a line directive renders at one site.
+	record string
+
 	// shared is the confidence the finding gives its component's cap and the dials:
 	// its own, but for the possible [pass.capTestUsed] lowers it to alone.
 	shared vocab.Class
-
-	// record is the place in Marks of the suppression record that withholds the
-	// finding, plus one, and 0 where none does.
-	record int
 
 	// local marks a finding about a declaration a function body makes, which the
 	// inventory does not hold: the enclosing declaration's reference names it, as it
@@ -218,6 +219,10 @@ func (f *Finding) shape() shape {
 	}
 	return shapeOf(f.Symbol.Kind)
 }
+
+// Declaration is the declaration of the inventory the finding is about, and empty
+// on a finding about anything else.
+func (f *Finding) Declaration() inventory.SymbolID { return f.id }
 
 // DeclarationRef is the reference of the declaration a finding's subject is or is a
 // part of. A parameter has a reference of its own, under its holder's.
@@ -267,6 +272,10 @@ type Input struct {
 	Merged *liveness.Merged
 	Sweep  *liveness.Result
 
+	// Unmarked is the sweep with every suppression record's mark withdrawn, which
+	// a record on a declaration is decided against, and nil where no record marks.
+	Unmarked *liveness.Result
+
 	// Refs is the reference of every symbol of the inventory.
 	Refs map[inventory.SymbolID]string
 
@@ -297,14 +306,11 @@ type Input struct {
 	// nothing is reported.
 	TypeErrorSkips []roots.TypeErrorSkip
 
-	// Marks is every suppression record the run read, bound or not, and Refusals
-	// is what the grammar refused with a finding of its own rather than with an
-	// exit. The self-check kinds read both: a record the sweep did not hold back
-	// is stale, a record whose code the configuration disables is dormant and
-	// reported by nothing, and a refusal is reported as the suppression was
-	// written.
-	Marks    []suppress.Record
-	Refusals []suppress.Refusal
+	// Marks is every suppression record the run read, bound or not, in the
+	// reading order the ledger decides them in, and Refusals is what the grammar
+	// refused with a finding of its own rather than with an exit.
+	Marks    []core.Record
+	Refusals []core.Refusal
 
 	// Root is the target root, which every position a kind reports is relative
 	// to.
@@ -369,7 +375,6 @@ var Emitters = map[vocab.Code]Emitter{
 	vocab.UnusedModuleDirective:       unusedReplace,
 	vocab.SuppressionWithoutReason:    suppressionsWithoutReason,
 	vocab.UnscopedIgnoreEntry:         unscopedEntries,
-	vocab.StaleSuppression:            staleSuppressions,
 	vocab.UnmatchedRoot:               unmatchedRoots,
 	vocab.UnusedParameter:             unusedParameter,
 	vocab.UnusedReceiver:              unusedReceiver,
@@ -381,8 +386,8 @@ var Emitters = map[vocab.Code]Emitter{
 
 // Result is what one findings pass produced: the findings in the canonical order,
 // the findings the configured minimum confidence alone withheld, the evaluation of
-// every declared edge side this analyzer enumerated, and the two suppression counts
-// [pass.totals] answers.
+// every declared edge side this analyzer enumerated, the stale suppressions and the
+// two suppression counts, which the ledger ([pass.decide]) answers.
 type Result struct {
 	// Members is every component's members by identifier, in the order a full
 	// listing names them, where the run lists components in full, and nil otherwise.
@@ -391,6 +396,7 @@ type Result struct {
 	Findings    []Finding
 	Withheld    []Finding
 	Evaluations []evaluation
+	Stale       []report.StaleSuppression
 	InEffect    int
 	Reasons     int
 }
@@ -431,20 +437,12 @@ var symbolKinds = map[inventory.SymbolKind]string{
 // a finding's confidence is otherwise unreachable.
 var vocabularyKinds = vocab.Kinds
 
-// readsThePass names the kinds whose rule is about what this pass produced rather
-// than about what the analysis answered, so their emitters run after every other
-// one and read the dials' answer over it: which records withheld nothing is known
-// only once every other kind has answered, which no vocabulary position promises.
-var readsThePass = map[vocab.Code]bool{
-	vocab.StaleSuppression: true,
-}
-
 // Compute runs every kind of the language, in the vocabulary's order, and returns
-// the finished findings of the run, the edge evaluations and the suppression counts.
-// A draft the Contract cannot carry fails the pass: it is an emitter's defect. The
-// order is fixed: complete, pair with a record, skip, the component cap ([cohere]),
-// the dials ([pass.dial]), the kinds of readsThePass, which read the dials' answer,
-// then the edge evaluations and the counts. One identity check spans both phases.
+// the finished findings of the run, the edge evaluations and the suppression
+// ledger's answer. A draft the Contract cannot carry fails the pass: it is an
+// emitter's defect. The order is fixed: complete, skip, the component cap
+// ([cohere]), the dials ([pass.dial]), the ledger ([pass.decide]), then the edge
+// evaluations.
 func Compute(in *Input, emitters map[vocab.Code]Emitter) (Result, error) {
 	if in == nil || in.Config == nil {
 		return Result{}, fmt.Errorf("%w: no resolved configuration", errInput)
@@ -458,27 +456,24 @@ func Compute(in *Input, emitters map[vocab.Code]Emitter) (Result, error) {
 
 // compute is [Compute] over the facts of p.
 func (in *pass) compute(emitters map[vocab.Code]Emitter) (Result, error) {
-	reported := make(map[string]string)
-	published := vocabularyKinds()
-	findings, skipped, err := in.phase(published, emitters, reported, false)
+	findings, skipped, err := in.phase(vocabularyKinds(), emitters)
 	if err != nil {
 		return Result{}, err
 	}
 	cohere(findings)
-	in.dialed = in.dial(findings, skipped)
-	second, _, err := in.phase(published, emitters, reported, true)
+	in.dialed = in.dial(findings)
+	ledger, would, err := in.decide(findings, skipped, emitters)
 	if err != nil {
 		return Result{}, err
 	}
-	findings = append(findings, second...)
 
-	kept, withheld := in.reportable(findings)
+	kept, withheld := in.reportable(findings, ledger)
 	slices.SortStableFunc(kept, compare)
 	in.annotate(kept)
-	result := Result{Withheld: withheld}
+	result := Result{Withheld: withheld, Stale: in.stale(ledger, would)}
 	result.Findings, result.Evaluations = in.evaluate(kept)
 	result.Withheld, _ = in.evaluate(result.Withheld)
-	result.InEffect, result.Reasons = in.totals()
+	result.InEffect, result.Reasons = core.Counts(in.Marks, ledger)
 	in.mint(&result)
 	return result, nil
 }
@@ -536,18 +531,14 @@ func (in *pass) members(result *Result) map[string][]report.Positioned {
 	return members
 }
 
-// phase runs the emitters of one phase in the vocabulary's order: every kind of the
-// language this analyzer has an emitter for, one the severity allows included,
-// because its root findings withhold their components. It returns the findings and,
-// apart, those a type error skips ([pass.runKind]).
-func (in *pass) phase(published []vocab.Kind, emitters map[vocab.Code]Emitter,
-	reported map[string]string, second bool,
-) (findings, skipped []Finding, err error) {
+// phase runs the emitters of the published kinds in the vocabulary's order: every
+// kind of the language this analyzer has an emitter for, one the severity allows
+// included, because its root findings withhold their components. It returns the
+// findings and, apart, those a type error skips ([pass.runKind]).
+func (in *pass) phase(published []vocab.Kind, emitters map[vocab.Code]Emitter) (findings, skipped []Finding, err error) {
+	reported := make(map[string]string)
 	for i := range published {
 		row := &published[i]
-		if readsThePass[row.Code] != second {
-			continue
-		}
 		emit, runs := emitters[row.Code]
 		if !runs || !row.AppliesTo(vocab.Go) {
 			continue
@@ -562,10 +553,9 @@ func (in *pass) phase(published []vocab.Kind, emitters map[vocab.Code]Emitter,
 }
 
 // runKind runs one kind's emitter and completes every draft it returned, in the order
-// the emitter returned them, dropping each that falls, and marks each with the
-// suppression record that names it. A finding a type error skips is returned apart:
-// only the record it names reads it ([pass.dial]); no cap, severity or confidence
-// dial, or report does.
+// the emitter returned them, dropping each that falls. A finding a type error skips
+// is returned apart: only the record naming it reads it ([pass.decide]); no cap,
+// severity or confidence dial, or report does.
 func (in *pass) runKind(emit Emitter, row *vocab.Kind, reported map[string]string) (completed, skipped []Finding, err error) {
 	produced, err := emit(in)
 	if err != nil {
@@ -580,7 +570,6 @@ func (in *pass) runKind(emit Emitter, row *vocab.Kind, reported map[string]strin
 		if found.id != "" && in.falling.falls[found.id] {
 			continue
 		}
-		found.record = in.recordOf(&found)
 		if in.skips(&found) {
 			skipped = append(skipped, found)
 			continue
@@ -588,42 +577,6 @@ func (in *pass) runKind(emit Emitter, row *vocab.Kind, reported map[string]strin
 		completed = append(completed, found)
 	}
 	return completed, skipped, nil
-}
-
-// recordOf is the place in Marks, plus one, of the first record in Marks' reading
-// order that pairs with one finding, and 0 where none does: a record's mark changes
-// nothing for a finding about a declaration the analysis holds live or about a part,
-// so the record withholds the finding instead. A dependency row is withheld by a
-// record naming its reference and path; any other row of a document binds no record.
-func (in *pass) recordOf(found *Finding) int {
-	if shapeOf(found.Symbol.Kind) == shapeRow {
-		return 0
-	}
-	for i := range in.Marks {
-		if pairs(&in.Marks[i], found) {
-			return i + 1
-		}
-	}
-	return 0
-}
-
-// pairs reports whether one suppression record is a record of one finding: it marked
-// the finding's own declaration, as a directive does, or it names the finding's code,
-// reference and path exactly, as an entry and a baseline row do. A satisfaction
-// assertion's subject and a part are reachable only the second way, a part only where
-// the record bound its declaration and not another of its reference, as one init is of
-// another. A record naming a parameter's own reference reaches that parameter alone.
-// The path is the finding's position, so an entry for one file never masks a
-// same-named symbol in another.
-func pairs(mark *suppress.Record, found *Finding) bool {
-	if mark.Code != found.Code {
-		return false
-	}
-	if mark.Bound != "" && mark.Bound == found.id {
-		return true
-	}
-	named := mark.Symbol == found.Symbol.Ref || mark.Symbol == found.DeclarationRef()
-	return named && mark.Path == found.Position.Path && (mark.Bound == "" || found.decl == "" || mark.Bound == found.decl)
 }
 
 // checkTable refuses a table registering an emitter under a code the vocabulary
@@ -699,23 +652,27 @@ func livenessAbsent(found *Finding) bool {
 	return shapeOf(found.Symbol.Kind) != shapeDeclaration || holdsLive(found.Code) || found.Live
 }
 
-// key is one finding's identity: the rendered position of the thing it names, so a
-// declaration's key is its identifier and a part's is its own token; two findings of
-// one key is a defect. A part adds its [partKey], which a line directive cannot
-// share. A row of a document adds the rule it breaks and the record (reference and
-// code): an entry lacking both its reason and its path is one finding per rule at
-// one position, a reasonless directive one per code, and every unmatched configured
-// root renders at its document's first position.
+// key is one finding's identity, and two findings of one key is a defect: a part's
+// is its [partKey], a declaration's its identifier, and anything else's the rendered
+// position of the thing it names. A row of a document adds where its record is
+// written, the rule it breaks and the record (reference and code): an entry lacking
+// both its reason and its path is one finding per rule at one position, a
+// reasonless directive one per code, two directives a line directive renders at one
+// site are two, and every unmatched configured root renders at its document's first
+// position.
 func key(found *Finding) string {
+	switch {
+	case found.decl != "":
+		return string(found.decl) + "@" + strconv.Itoa(found.written)
+	case found.id != "":
+		return string(found.id)
+	}
 	at := found.Position.Path + ":" + strconv.Itoa(found.Position.Line) +
 		":" + strconv.Itoa(found.Position.Column)
-	if found.decl != "" {
-		return at + " " + string(found.decl) + "@" + strconv.Itoa(found.written)
-	}
 	if !aboutRow(found) {
 		return at
 	}
-	record := at + " " + string(found.Code) + " " + found.Symbol.Ref
+	record := at + "@" + found.record + " " + string(found.Code) + " " + found.Symbol.Ref
 	if found.Details.Entry != nil {
 		record += " " + string(found.Details.Entry.Code)
 	}
@@ -823,6 +780,7 @@ func (in *pass) complete(d *draft, row *vocab.Kind) Finding {
 		id:       d.id,
 		decl:     d.decl,
 		written:  d.written,
+		record:   d.record,
 		local:    d.local,
 	}
 	held := false
@@ -857,7 +815,7 @@ func (in *pass) complete(d *draft, row *vocab.Kind) Finding {
 	}
 	found.Configurations = in.configurationsOf(&found)
 	found.Details.Overlap = row.Overlap[vocab.Go]
-	found.Generated = in.generated(found.Position.Path)
+	found.Generated = in.generated(in.fileOf(&found))
 	if found.Generated {
 		found.Fixability = vocab.None
 	}
@@ -887,6 +845,15 @@ func (f *Finding) relation(candidate *liveness.Candidate) {
 func compare(a, b Finding) int {
 	keyA, keyB := a.orderKey(), b.orderKey()
 	return report.CompareFindings(&keyA, &keyB)
+}
+
+// fileOf is the file that writes one finding's subject, or the declaration holding
+// it, which a line directive does not move; and a row's document.
+func (in *pass) fileOf(found *Finding) string {
+	if symbol := in.symbol(cmp.Or(found.id, found.decl)); symbol != nil {
+		return symbol.File
+	}
+	return found.Position.Path
 }
 
 // generated reports whether one path is a generated file, and false where the run

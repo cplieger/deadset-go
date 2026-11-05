@@ -146,6 +146,15 @@ func TestLoadFallsBackPerFileOnAnErrorOfItsOwn(t *testing.T) {
 	}
 }
 
+func TestLoadFallsBackTheFileThatWritesAnErrorALineDirectiveRendersElsewhere(t *testing.T) {
+	stableToolchain(t)
+	got := loadFixture(t, "cgo-fallback-line")
+
+	if want := []string{"broken.go"}; !slices.Equal(got.ExcludedByCgo, want) {
+		t.Errorf("Load(testdata/cgo-fallback-line).ExcludedByCgo = %v, want %v: the error is broken.go's", got.ExcludedByCgo, want)
+	}
+}
+
 func TestLoadResolvesAnImportOnlyAFileImportingCWrites(t *testing.T) {
 	stableToolchain(t)
 	got := loadFixture(t, "cgo-import")

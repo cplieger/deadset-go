@@ -1,0 +1,32 @@
+One interface is asserted twice in main.go. One ignore entry naming the
+interface at main.go names both assertions, so neither is reported and the
+entry is one suppression in effect.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- deadset-ignore.json --
+{"ignore": [{"code": "DS1203", "symbol": "go://example.com/app#writer", "path": "main.go", "reason": "wanted"}]}
+-- main.go --
+package main
+
+func main() { _ = impl{}.write() + other{}.write() }
+
+type writer interface {
+	write() int
+}
+
+type impl struct{}
+
+func (impl) write() int { return 2 }
+
+type other struct{}
+
+func (other) write() int { return 3 }
+
+var _ writer = impl{}
+
+var _ writer = other{}

@@ -24,7 +24,7 @@ func writeCascade(in *pass, symbol *inventory.Symbol, spans []inventory.SourceRa
 // the field's own type expression holds every use of in that declaration, where
 // the field is the one name its line declares.
 func cascadingTypeParams(in *pass, symbol *inventory.Symbol) []string {
-	container := in.symbol(symbol.Parent)
+	container := in.container(symbol)
 	if symbol.Kind != inventory.KindField || container == nil {
 		return nil
 	}

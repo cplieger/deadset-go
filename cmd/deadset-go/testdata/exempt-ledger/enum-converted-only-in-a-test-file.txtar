@@ -1,0 +1,35 @@
+Only a test file converts an integer to mode, so a production run holds no evidence
+for slow, and the test's conversion keeps it for tests alone.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+type mode int
+
+const (
+	fast mode = iota
+	slow
+)
+
+func main() { fmt.Println(fast, len(os.Args)) }
+-- a_test.go --
+package main
+
+import "testing"
+
+func TestMode(t *testing.T) {
+	if mode(len(t.Name())) == fast {
+		t.Fatal("zero")
+	}
+}

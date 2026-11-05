@@ -32,7 +32,7 @@ type flowGraph struct {
 
 // arrival is one value that reaches a destination: where, what reads it there, and
 // every type it carries, a type parameter's followed by each type argument the
-// program instantiates the parameter with ([typeArguments.bindings]).
+// program instantiates the parameter with ([bindings]).
 type arrival struct {
 	types []types.Type
 	d     destination
@@ -126,7 +126,7 @@ func (f *encodingFlow) readInstances(info *types.Info, imports map[string][]stri
 // records collapse on the site.
 func (f *encodingFlow) readFile(info *types.Info, file *ast.File, target bool) {
 	name := f.kept.in.Result.Fset.Position(file.FileStart).Filename
-	_, test := inventory.IsTestFile(name)
+	test := f.kept.in.Resolve.Positions().InTestFile(file.FileStart)
 	for _, decl := range file.Decls {
 		enclosing := enclosingFunc(info, decl)
 		r := &declarationReader{
@@ -237,7 +237,7 @@ func (w *fieldWrites) read(sites *declarationSites, info *types.Info, n ast.Node
 // program's production code, and its test files too where the site is in a test
 // file or the run counts test references.
 func (w *fieldWrites) forSite(site evidence, production bool) map[token.Position]bool {
-	if _, test := inventory.IsTestFile(site.at.Filename); test || !production {
+	if _, test := inventory.IsTestFile(site.file); test || !production {
 		return w.every
 	}
 	return w.production

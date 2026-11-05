@@ -1,0 +1,17 @@
+A command whose broken holds a type error under a line directive naming a file
+outside the tree. The report names the skip where the file writes it, and the
+skip still holds broken.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() {}
+
+//line /nowhere/gen.go:10
+func broken() int { return "x" }

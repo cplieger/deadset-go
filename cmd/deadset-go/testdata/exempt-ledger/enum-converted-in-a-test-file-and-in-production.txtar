@@ -1,0 +1,36 @@
+main converts an integer to mode, and so does a test file whose name sorts before
+main.go. The production conversion is the evidence a production run holds, so slow
+is retained whatever file renders first.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+type mode int
+
+const (
+	fast mode = iota
+	slow
+)
+
+func main() { fmt.Println(fast, mode(len(os.Args))) }
+-- a_test.go --
+package main
+
+import "testing"
+
+func TestMode(t *testing.T) {
+	if mode(len(t.Name())) == fast {
+		t.Fatal("zero")
+	}
+}

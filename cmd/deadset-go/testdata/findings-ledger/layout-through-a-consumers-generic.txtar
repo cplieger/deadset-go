@@ -1,0 +1,42 @@
+A library type a declared consumer lays out through unsafe in its own generic
+function, instantiated with the target's S. The consumer's instantiations are the
+program's, as its references are, so the conversion reads S.x.
+
+-- target/go.mod --
+module example.com/app
+
+go 1.27.1
+-- target/deadset.json --
+{"target": {"kind": "library"}, "consumers": {"complete": true}}
+-- target/lib.go --
+// Package app exports a type a consumer lays out.
+package app
+
+// S is laid out by the consumer through unsafe.
+type S struct{ x int }
+-- consumer/go.mod --
+module example.com/consumer
+
+go 1.27.1
+
+require example.com/app v0.0.0
+
+replace example.com/app => ../target
+-- consumer/main.go --
+package main
+
+import (
+	"fmt"
+	"unsafe"
+
+	"example.com/app"
+)
+
+func view[T any](b []byte) *T { return (*T)(unsafe.Pointer(&b[0])) }
+
+func main() { fmt.Println(view[app.S](make([]byte, 64)) != nil) }
+-- scope.json --
+{
+  "target": {"id": "example.com/app", "role": "target", "path": "target"},
+  "consumers": [{"id": "example.com/consumer", "role": "consumer", "path": "consumer"}]
+}

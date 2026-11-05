@@ -476,3 +476,16 @@ func TestExplainNamesTheConstantRepetitionBehindARead(t *testing.T) {
 		t.Errorf("explain stdout =\n%s\nwant it to contain %q", got.stdout, want)
 	}
 }
+
+func TestExplainListsEachOfTwoReferencesALineDirectiveRendersAtOnePosition(t *testing.T) {
+	got := runExplain(t, archiveModule(t, "findings-ledger/reference-fold.txtar"), "go://example.com/app#helper")
+
+	if want := contractExitCodes(t)["clean"]; got.code != want {
+		t.Fatalf("explain over a folded reference = %d, want %d\nstderr: %s", got.code, want, got.stderr)
+	}
+	for _, want := range []string{"references: 2", "from a.go:4:6", "from b.go:4:6"} {
+		if !strings.Contains(got.stdout, want) {
+			t.Errorf("explain stdout =\n%s\nwant it to contain %q", got.stdout, want)
+		}
+	}
+}

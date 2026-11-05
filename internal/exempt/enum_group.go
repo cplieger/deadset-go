@@ -75,8 +75,10 @@ type enumGroupMember struct {
 // position a maintainer reads, and the clause an exemption records.
 type enumGroupEvidence struct {
 	detail string
+	file   string // [Exemption.File]
 	at     token.Position
 	rank   int
+	held   bool // [holdsInMode]
 }
 
 // groups collects every defined type whose constants an iota group declares, and
@@ -364,18 +366,32 @@ func (s *enumGroupScan) reach(t types.Type) []string {
 	return keys
 }
 
-// record keeps one piece of evidence when it outranks what the type already holds,
-// and at the same rank when it is written earlier.
+// record keeps one piece of evidence when it outranks what the type already holds:
+// evidence that holds in the run's mode first, since every member's exemption cites
+// the one kept, then the lower rank, then the site written earlier.
 func (s *enumGroupScan) record(enum *enumGroupType, rank int, pos token.Pos, detail string) error {
 	at, err := s.site(pos)
 	if err != nil {
 		return err
 	}
-	if enum.best == nil || rank < enum.best.rank ||
-		(rank == enum.best.rank && inventory.ByPosition(at, enum.best.at) < 0) {
-		enum.best = &enumGroupEvidence{rank: rank, at: at, detail: detail}
+	file := s.in.Resolve.File(pos)
+	held := holdsInMode(&Exemption{File: file}, s.in.Mode)
+	best := enum.best
+	if best == nil || cmp.Or(compareHeld(held, best.held), cmp.Compare(rank, best.rank), inventory.ByPosition(at, best.at)) < 0 {
+		enum.best = &enumGroupEvidence{rank: rank, at: at, file: file, detail: detail, held: held}
 	}
 	return nil
+}
+
+// compareHeld orders evidence that holds in the run's mode before evidence that does not.
+func compareHeld(a, b bool) int {
+	switch {
+	case a == b:
+		return 0
+	case a:
+		return -1
+	}
+	return 1
 }
 
 // exemptions renders one exemption per member of every enumerated type that
@@ -397,6 +413,7 @@ func (s *enumGroupScan) exemptions() []Exemption {
 			found = append(found, Exemption{
 				ID:     m.id,
 				Class:  string(vocab.EnumGroup),
+				File:   enum.best.file,
 				Site:   enum.best.at,
 				Detail: enum.best.detail,
 			})

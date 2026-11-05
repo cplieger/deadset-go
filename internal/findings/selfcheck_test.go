@@ -29,7 +29,7 @@ func suppressed(t *testing.T, archive string, resolved config.Config) *Input {
 	in := inputOfDir(t, dir, resolved, Consumers{})
 	one := in.Per[0]
 
-	inline, inlineRefused, err := suppress.Inline(one.Result, one.Resolve, one.Symbols)
+	inline, inlineRefused, err := suppress.Inline([]suppress.Configuration{{Result: one.Result, Resolve: one.Resolve, Symbols: one.Symbols}})
 	if err != nil {
 		t.Fatalf("Setup: suppress.Inline(%s): %v", archive, err)
 	}
@@ -44,20 +44,23 @@ func suppressed(t *testing.T, archive string, resolved config.Config) *Input {
 
 	in.Marks = slices.Concat(inline, entries, rows)
 	in.Refusals = slices.Concat(inlineRefused, entryRefused, rowRefused)
-	swept := liveness.Of(in.Merged).Sweep(&liveness.SweepPolicy{
+	swept, unmarked := liveness.Of(in.Merged).Sweeps(&liveness.SweepPolicy{
 		Exempt: in.Exempt,
-		Marked: suppress.Bound(in.Marks),
+		Marked: suppress.Marked(in.Marks),
 		Mode:   facts.Mode{Production: true},
 	})
-	in.Sweep = &swept
+	in.Sweep, in.Unmarked = &swept, unmarked
 	return in
 }
 
-// The three sentences a stale record of these fixtures reports, one per mechanism.
+// The sentences a stale record of these fixtures reports, one per mechanism, and
+// for a record whose declaration reports another code, one naming that code.
 const (
-	staleInline   = "inline directive for DS1002 matches no current finding"
-	staleIgnore   = "ignore entry for DS1001 matches no current finding"
-	staleBaseline = "baseline row for DS1001 matches no current finding"
+	staleInline          = "inline directive for DS1002 matches no current finding"
+	staleIgnore          = "ignore entry for DS1001 matches no current finding"
+	staleIgnoreReports   = staleIgnore + ", and its declaration reports DS1501"
+	staleBaseline        = "baseline row for DS1001 matches no current finding"
+	staleBaselineReports = staleBaseline + ", and its declaration reports DS1501"
 )
 
 // staleAt is one stale-suppression finding as a test names it: where it is, which
@@ -74,32 +77,51 @@ type staleAt struct {
 func staleFindings(t *testing.T, in *Input, emitters map[vocab.Code]Emitter) []staleAt {
 	t.Helper()
 
-	p := newPass(in)
-	if _, err := p.compute(emitters); err != nil {
-		t.Fatalf("Compute() = error %v, want the findings of the pass", err)
-	}
-	found, err := staleSuppressions(p)
-	if err != nil {
-		t.Fatalf("StaleSuppressions() = _, %v, want the stale records", err)
-	}
-	named := make([]staleAt, 0, len(found))
-	for i := range found {
+	return staleOf(computed(t, in, orPackage(emitters)).Stale)
+}
+
+// staleOf names every stale suppression of a list as a test names it.
+func staleOf(stale []report.StaleSuppression) []staleAt {
+	named := make([]staleAt, 0, len(stale))
+	for i := range stale {
 		named = append(named, staleAt{
-			path:      found[i].Position.Path,
-			line:      found[i].Position.Line,
-			mechanism: found[i].Details.Mechanism,
-			message:   found[i].Message,
+			path:      stale[i].Position.Path,
+			line:      stale[i].Position.Line,
+			mechanism: stale[i].Mechanism,
+			message:   stale[i].Message,
 		})
 	}
 	return named
+}
+
+// staleAtSite is the stale suppression reported at one site.
+func staleAtSite(t *testing.T, stale []report.StaleSuppression, path string, line int) report.StaleSuppression {
+	t.Helper()
+
+	for i := range stale {
+		if stale[i].Position.Path == path && stale[i].Position.Line == line {
+			return stale[i]
+		}
+	}
+	t.Fatalf("the pass reports no stale suppression at %s:%d: it reports %+v", path, line, stale)
+	return report.StaleSuppression{}
 }
 
 // totalsOf is the two suppression counts of one pass over in with emitters.
 func totalsOf(t *testing.T, in *Input, emitters map[vocab.Code]Emitter) (inEffect, reasons int) {
 	t.Helper()
 
-	result := computed(t, in, emitters)
+	result := computed(t, in, orPackage(emitters))
 	return result.InEffect, result.Reasons
+}
+
+// orPackage is emitters, or every kind of the package where it names none: a record
+// is decided against the findings the kinds produce.
+func orPackage(emitters map[vocab.Code]Emitter) map[vocab.Code]Emitter {
+	if emitters == nil {
+		return packageEmitters()
+	}
+	return emitters
 }
 
 func TestStaleSuppressionsReportsEveryRecordAtEveryMechanismTheMarkHeldNothingBackFor(t *testing.T) {
@@ -108,84 +130,48 @@ func TestStaleSuppressionsReportsEveryRecordAtEveryMechanismTheMarkHeldNothingBa
 	want := []staleAt{
 		{path: "main.go", line: 5, mechanism: "inline", message: staleInline},
 		{path: "main.go", line: 11, mechanism: "inline", message: staleInline},
-		{path: core.IgnoreFileName, line: 10, mechanism: "ignore", message: staleIgnore},
+		{path: core.IgnoreFileName, line: 10, mechanism: "ignore", message: staleIgnoreReports},
 		{path: core.IgnoreFileName, line: 16, mechanism: "ignore", message: staleIgnore},
-		{path: core.BaselineFileName, line: 10, mechanism: "baseline", message: staleBaseline},
+		{path: core.BaselineFileName, line: 10, mechanism: "baseline", message: staleBaselineReports},
 	}
 	if got := staleFindings(t, in, nil); !slices.Equal(got, want) {
 		t.Errorf("StaleSuppressions() = %+v, want %+v", got, want)
 	}
 }
 
-func TestStaleSuppressionsCarriesTheRecordAsWrittenAtTheFixedSeverity(t *testing.T) {
+func TestStaleSuppressionsCarriesTheRecordAsWritten(t *testing.T) {
 	in := suppressed(t, "selfcheck-stale.txtar", applicationConfig())
 
-	// Through the framework, because no emitter completes its own finding: the kind
-	// name, the class, the severity, the fixability and the component are the
-	// completion's and a reader of the report sees them.
-	found := computed(t, in, map[vocab.Code]Emitter{vocab.StaleSuppression: staleSuppressions}).Findings
-	if len(found) == 0 {
-		t.Fatal("the stale-suppression kind reports nothing, want the fixture's stale records")
+	stale := computed(t, in, packageEmitters()).Stale
+	if len(stale) == 0 {
+		t.Fatal("the pass reports no stale suppression, want the fixture's stale records")
 	}
-
-	for i := range found {
-		one := &found[i]
-		switch {
-		case one.Code != vocab.StaleSuppression:
-			t.Errorf("StaleSuppressions() reports %s, want every record under %s", one.Code, vocab.StaleSuppression)
-		case one.Kind != "stale-suppression":
-			t.Errorf("StaleSuppressions() names the kind %q, want the vocabulary's own name", one.Kind)
-		case one.Severity != vocab.Deny:
-			t.Errorf("StaleSuppressions() reports at %s, want %s: the kind is fixed on at deny", one.Severity, vocab.Deny)
-		case one.Confidence != vocab.Certain || one.Class != vocab.Certain:
-			t.Errorf("StaleSuppressions() reports class %s and confidence %s, want both certain", one.Class, one.Confidence)
-		case one.Symbol.Kind != suppressionSubject:
-			t.Errorf("StaleSuppressions() names the subject %q, want %q", one.Symbol.Kind, suppressionSubject)
-		case one.Fixability != "none":
-			t.Errorf("StaleSuppressions() reports fixability %q, want none", one.Fixability)
-		case one.Details.Entry == nil:
-			t.Errorf("StaleSuppressions() carries no entry for the record at %s:%d", one.Position.Path, one.Position.Line)
-		case one.Component.SymbolCount != 1 || !one.Component.Root || one.Component.DeletableLines != 0:
-			t.Errorf("StaleSuppressions() puts the record in %+v, want a one-member root component with no deletable line",
-				one.Component)
+	for i := range stale {
+		if stale[i].Code != vocab.StaleSuppression {
+			t.Errorf("the pass reports a stale suppression under %s, want %s", stale[i].Code, vocab.StaleSuppression)
 		}
 	}
 
 	// The record of the entry no declaration answers names the reference the entry
 	// spells, and the record of the directive that bound nothing names the file that
 	// holds it, because no declaration answered either.
-	entry := recordAt(t, found, core.IgnoreFileName, 16)
-	if entry.Symbol.Ref != "go://example.com/selfcheck#Vanished" {
-		t.Errorf("the record of the unanswered entry names %q, want the reference the entry spells", entry.Symbol.Ref)
+	entry := staleAtSite(t, stale, core.IgnoreFileName, 16)
+	if entry.Symbol != "go://example.com/selfcheck#Vanished" {
+		t.Errorf("the record of the unanswered entry names %q, want the reference the entry spells", entry.Symbol)
 	}
-	if want := (&suppressionEntry{
+	if want := (report.SuppressionEntry{
 		Code:   "DS1001",
 		Symbol: "go://example.com/selfcheck#Vanished",
 		Path:   "main.go",
 		Reason: "stale: no declaration answers this reference",
-	}); *entry.Details.Entry != *want {
-		t.Errorf("the record of the unanswered entry carries %+v, want %+v", *entry.Details.Entry, *want)
+	}); entry.Entry != want {
+		t.Errorf("the record of the unanswered entry carries %+v, want %+v", entry.Entry, want)
 	}
-	directive := recordAt(t, found, "main.go", 11)
-	if directive.Symbol.Ref != "go://example.com/selfcheck#main.go:file" {
+	directive := staleAtSite(t, stale, "main.go", 11)
+	if directive.Symbol != "go://example.com/selfcheck#main.go:file" {
 		t.Errorf("the record of the directive that bound nothing names %q, want the file form of main.go",
-			directive.Symbol.Ref)
+			directive.Symbol)
 	}
-}
-
-// recordAt is the finding reported at one site, which is how a test names a row of a
-// document: the pass returns the findings in the canonical order, which orders the
-// rows of several documents by path rather than by the order they were read in.
-func recordAt(t *testing.T, found []Finding, path string, line int) Finding {
-	t.Helper()
-
-	for i := range found {
-		if found[i].Position.Path == path && found[i].Position.Line == line {
-			return found[i]
-		}
-	}
-	t.Fatalf("the pass reports nothing at %s:%d: it reports %+v", path, line, found)
-	return Finding{}
 }
 
 func TestTotalsCountsBoundRecordsInEffectAndEveryReasonOnce(t *testing.T) {
@@ -212,9 +198,9 @@ func TestStaleSuppressionsLeavesARecordDormantWhoseCodeTheConfigurationSilences(
 	// stale whatever the severity map holds.
 	want := []staleAt{
 		{path: "main.go", line: 11, mechanism: "inline", message: staleInline},
-		{path: core.IgnoreFileName, line: 10, mechanism: "ignore", message: staleIgnore},
+		{path: core.IgnoreFileName, line: 10, mechanism: "ignore", message: staleIgnoreReports},
 		{path: core.IgnoreFileName, line: 16, mechanism: "ignore", message: staleIgnore},
-		{path: core.BaselineFileName, line: 10, mechanism: "baseline", message: staleBaseline},
+		{path: core.BaselineFileName, line: 10, mechanism: "baseline", message: staleBaselineReports},
 	}
 	if got := staleFindings(t, in, nil); !slices.Equal(got, want) {
 		t.Errorf("StaleSuppressions() with DS1002 allowed = %+v, want %+v", got, want)
@@ -285,21 +271,21 @@ func TestStaleSuppressionsCollapsesTheRecordsAtOneSiteIntoOneFindingNamingEveryC
 
 func TestTheRefusalKindsReportEachRefusalAsTheSuppressionWasWritten(t *testing.T) {
 	in := suppressed(t, "selfcheck-stale.txtar", applicationConfig())
-	in.Refusals = []suppress.Refusal{
+	in.Refusals = []core.Refusal{
 		{
 			Reported:  vocab.SuppressionWithoutReason,
 			Code:      "DS1001",
 			Path:      "main.go",
-			Site:      position("main.go", 21, 1),
-			Mechanism: suppress.MechanismInline,
+			Site:      directiveSite(position("main.go", 21, 1)),
+			Mechanism: core.Inline,
 		},
 		{
 			Reported:  vocab.UnscopedIgnoreEntry,
 			Code:      "DS1002",
 			Symbol:    "go://example.com/selfcheck#Dropped",
 			Reason:    "an entry naming a symbol and no path",
-			Site:      position(core.IgnoreFileName, 4, 5),
-			Mechanism: suppress.MechanismIgnore,
+			Site:      siteOf(position(core.IgnoreFileName, 4, 5)),
+			Mechanism: core.Ignore,
 		},
 	}
 
@@ -352,14 +338,14 @@ func oneRefusal(t *testing.T, emit Emitter, in *Input, code vocab.Code) draft {
 func TestAnEntryLackingBothItsReasonAndItsPathIsTwoFindingsAtOnePosition(t *testing.T) {
 	in := suppressed(t, "selfcheck-stale.txtar", applicationConfig())
 	site := position(core.IgnoreFileName, 4, 5)
-	refusal := suppress.Refusal{
+	refusal := core.Refusal{
 		Code:      "DS1002",
 		Symbol:    "go://example.com/selfcheck#Dropped",
-		Site:      site,
-		Mechanism: suppress.MechanismIgnore,
+		Site:      siteOf(site),
+		Mechanism: core.Ignore,
 	}
 	refusal.Reported = vocab.SuppressionWithoutReason
-	in.Refusals = []suppress.Refusal{refusal}
+	in.Refusals = []core.Refusal{refusal}
 	refusal.Reported = vocab.UnscopedIgnoreEntry
 	in.Refusals = append(in.Refusals, refusal)
 
@@ -384,14 +370,14 @@ func TestAnEntryLackingBothItsReasonAndItsPathIsTwoFindingsAtOnePosition(t *test
 func TestADirectiveNamingTwoCodesAndNoReasonIsOneFindingPerCodeAtOnePosition(t *testing.T) {
 	in := suppressed(t, "selfcheck-stale.txtar", applicationConfig())
 	site := position("main.go", 21, 1)
-	refusal := suppress.Refusal{
+	refusal := core.Refusal{
 		Reported:  vocab.SuppressionWithoutReason,
 		Path:      "main.go",
-		Site:      site,
-		Mechanism: suppress.MechanismInline,
+		Site:      directiveSite(site),
+		Mechanism: core.Inline,
 	}
 	refusal.Code = "DS1001"
-	in.Refusals = []suppress.Refusal{refusal}
+	in.Refusals = []core.Refusal{refusal}
 	refusal.Code = "DS1002"
 	in.Refusals = append(in.Refusals, refusal)
 
@@ -417,7 +403,7 @@ func TestADirectiveNamingTwoCodesAndNoReasonIsOneFindingPerCodeAtOnePosition(t *
 			t.Errorf("the record of %s is sited at %s:%d:%d, want %s:%d:%d, the position the directive is written on",
 				one.Details.Entry.Code, one.Position.Path, one.Position.Line, one.Position.Column,
 				site.Filename, site.Line, site.Column)
-		case one.Message != written(suppress.MechanismInline)+" for "+string(one.Details.Entry.Code)+" carries no reason":
+		case one.Message != written(core.Inline)+" for "+string(one.Details.Entry.Code)+" carries no reason":
 			t.Errorf("the record of %s reports %q, want the sentence naming the mechanism and that code",
 				one.Details.Entry.Code, one.Message)
 		}
@@ -430,12 +416,12 @@ func TestADirectiveNamingTwoCodesAndNoReasonIsOneFindingPerCodeAtOnePosition(t *
 
 func TestTheRefusalKindsRefuseARefusalUnderACodeTheGrammarDoesNotReport(t *testing.T) {
 	in := suppressed(t, "selfcheck-stale.txtar", applicationConfig())
-	in.Refusals = []suppress.Refusal{{
+	in.Refusals = []core.Refusal{{
 		Reported:  vocab.StaleSuppression,
 		Code:      "DS1001",
 		Path:      "main.go",
-		Site:      position("main.go", 5, 1),
-		Mechanism: suppress.MechanismInline,
+		Site:      directiveSite(position("main.go", 5, 1)),
+		Mechanism: core.Inline,
 	}}
 
 	if _, err := suppressionsWithoutReason(newPass(in)); !errors.Is(err, errEmitter) {
@@ -523,7 +509,21 @@ func TestWithoutTheMarkTheDeadComponentsRootIsReportedAndTheComponentFalls(t *te
 	}
 }
 
+// siteOf is a finding's position as the site an entry or a row carries.
+func siteOf(at token.Position) core.Site {
+	return core.Site{Path: at.Filename, Line: at.Line, Column: at.Column}
+}
+
+// directiveSite is the site of a directive written where no line directive
+// renders it elsewhere.
+func directiveSite(at token.Position) core.Site {
+	site := siteOf(at)
+	site.File = at.Filename
+	return site
+}
+
 // position is one rendered site, spelled the way a reader returns it.
+
 func position(path string, line, column int) token.Position {
 	return token.Position{Filename: path, Line: line, Column: column}
 }
@@ -535,7 +535,7 @@ func TestASuppressionWithholdsTheFindingItsCodeWouldHaveProducedWhateverTheKind(
 	}
 	for i := range in.Marks {
 		if in.Marks[i].Bound == "" {
-			t.Fatalf("Setup: the record for %s at %s bound no declaration",
+			t.Fatalf("Setup: the record for %s at %+v bound no declaration",
 				in.Marks[i].Code, in.Marks[i].Site)
 		}
 	}
@@ -545,7 +545,7 @@ func TestASuppressionWithholdsTheFindingItsCodeWouldHaveProducedWhateverTheKind(
 	bare := suppressed(t, "selfcheck-withheld.txtar", applicationConfig())
 	bare.Marks = nil
 	swept := liveness.Of(bare.Merged).Sweep(&liveness.SweepPolicy{Exempt: bare.Exempt, Mode: facts.Mode{Production: true}})
-	bare.Sweep = &swept
+	bare.Sweep, bare.Unmarked = &swept, nil
 	want := []string{
 		"DS1501 Narrowed",
 		"DS1401 tag",
@@ -560,11 +560,18 @@ func TestASuppressionWithholdsTheFindingItsCodeWouldHaveProducedWhateverTheKind(
 	// no record binds to a row of a document. The two stale findings are in the
 	// canonical order, which is the line each directive is written on.
 	result := computed(t, in, packageEmitters())
-	if got := summary(result.Findings); !slices.Equal(got, []string{
-		"DS9003 go://example.com/app/internal/store#Shared",
-		"DS9003 go://example.com/app/internal/store#Rowless",
-	}) {
-		t.Errorf("the pass with the fixture's directives reports %v, want the two stale records alone", got)
+	if got := summary(result.Findings); len(got) != 0 {
+		t.Errorf("the pass with the fixture's directives reports %v, want nothing", got)
+	}
+	var stale []string
+	for i := range result.Stale {
+		stale = append(stale, result.Stale[i].Symbol)
+	}
+	if want := []string{
+		"go://example.com/app/internal/store#Shared",
+		"go://example.com/app/internal/store#Rowless",
+	}; !slices.Equal(stale, want) {
+		t.Errorf("the pass with the fixture's directives reports %v stale, want %v", stale, want)
 	}
 	if inEffect, reasons := result.InEffect, result.Reasons; inEffect != 2 || reasons != 4 {
 		t.Errorf("Totals() = %d in effect and %d reasons, want 2 and 4", inEffect, reasons)
@@ -578,16 +585,11 @@ func TestTheStaleSuppressionKindReadsWhatTheSamePassWithheldWhateverTheVocabular
 	// vocabulary's order, so a pass that answered staleness in that order would call
 	// the record over tagged stale. Only these two kinds run, so the pass has nothing
 	// else that could withhold a finding.
-	found := computed(t, in, map[vocab.Code]Emitter{
-		vocab.StaleSuppression: staleSuppressions,
-		vocab.UnusedParameter:  unusedParameter,
-	}).Findings
+	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnusedParameter: unusedParameter})
 
-	stale := make([]string, 0, len(found))
-	for i := range found {
-		if found[i].Code == vocab.StaleSuppression {
-			stale = append(stale, found[i].Symbol.Ref)
-		}
+	stale := make([]string, 0, len(result.Stale))
+	for i := range result.Stale {
+		stale = append(stale, result.Stale[i].Symbol)
 	}
 	// The narrowing kind does not run in this pass, so the record over Narrowed
 	// withheld nothing here and is stale beside the records over Shared and Rowless.
@@ -622,8 +624,12 @@ func TestARecordIsDormantRatherThanInEffectWhereTheMinimumConfidenceWithholdsIts
 
 			// The narrowing finding is withheld either way, so what the two runs
 			// differ in is whether the record that withheld it is counted.
-			for _, found := range computed(t, in, packageEmitters()).Findings {
-				if found.Code == vocab.UnnecessaryExport || found.Code == vocab.StaleSuppression {
+			result := computed(t, in, packageEmitters())
+			if len(result.Stale) != 0 {
+				t.Errorf("the pass under %s reports %+v stale, want none: the record withheld the narrowing finding", name, result.Stale)
+			}
+			for _, found := range result.Findings {
+				if found.Code == vocab.UnnecessaryExport {
 					t.Errorf("the pass under %s reports %s about %s, want neither: the record withheld the narrowing finding",
 						name, found.Code, found.Symbol.Name)
 				}
@@ -656,26 +662,23 @@ func TestTheFirstRecordOfTheReadingOrderIsInEffectAndALaterOneIsStale(t *testing
 		t.Errorf("StaleSuppressions() = %+v, want %+v: the entry naming a code a directive already named is the later record",
 			got, want)
 	}
-	for i := range found {
-		if found[i].Code != vocab.StaleSuppression {
-			t.Errorf("the pass reports %s about %s, want the two stale entries alone: both declarations are adjudicated",
-				found[i].Code, found[i].Symbol.Name)
-		}
+	if len(found) != 0 {
+		t.Errorf("the pass reports %v, want nothing: both declarations are adjudicated", summary(found))
 	}
 
-	// Each stale finding carries the entry as the document writes it, so a reader is
+	// Each stale record carries the entry as the document writes it, so a reader is
 	// told which of the two records to delete.
-	entry := recordAt(t, found, core.IgnoreFileName, 10)
-	if entry.Details.Mechanism != "ignore" {
-		t.Errorf("the stale finding names the mechanism %q, want ignore", entry.Details.Mechanism)
+	entry := staleAtSite(t, result.Stale, core.IgnoreFileName, 10)
+	if entry.Mechanism != "ignore" {
+		t.Errorf("the stale record names the mechanism %q, want ignore", entry.Mechanism)
 	}
-	if want := (&suppressionEntry{
+	if want := (report.SuppressionEntry{
 		Code:   "DS1002",
 		Symbol: "go://example.com/selfcheck#late",
 		Path:   "zz.go",
 		Reason: "the second record naming DS1002 at late",
-	}); entry.Details.Entry == nil || *entry.Details.Entry != *want {
-		t.Errorf("the stale finding carries %+v, want %+v", entry.Details.Entry, want)
+	}); entry.Entry != want {
+		t.Errorf("the stale record carries %+v, want %+v", entry.Entry, want)
 	}
 
 	// Two records bound each declaration and one of each pair is in effect, which is
@@ -692,15 +695,13 @@ func TestTheRecordInEffectIsTheFirstOfTheReadingOrderAndNotOfAnyFileOrder(t *tes
 	// written in the last file of the target and on a line below every entry of the
 	// ignore document. The record in effect is that directive all the same, because a
 	// directive is read before the ignore file whatever either is written in.
-	inEffect := make([]string, 0, len(in.Marks))
-	p := newPass(in)
-	for i := range in.Marks {
-		if p.inEffect(i) {
-			inEffect = append(inEffect, in.Marks[i].Mechanism.String()+" "+in.Marks[i].Site.Filename)
-		}
+	result := computed(t, in, packageEmitters())
+	var stale []string
+	for i := range result.Stale {
+		stale = append(stale, result.Stale[i].Mechanism+" "+result.Stale[i].Entry.Path)
 	}
-	if want := []string{"inline app.go", "inline zz.go"}; !slices.Equal(inEffect, want) {
-		t.Errorf("the records in effect are %v, want %v", inEffect, want)
+	if want := []string{"ignore app.go", "ignore zz.go"}; !slices.Equal(stale, want) || result.InEffect != 2 {
+		t.Errorf("the pass reports %v stale and %d in effect, want %v and 2: the directives are in effect", stale, result.InEffect, want)
 	}
 }
 
@@ -713,26 +714,27 @@ func TestOneFindingIsWithheldByTheFirstRecordThatNamesItAndTheSecondIsStale(t *t
 	// finding is the one it names, which the pass withholds rather than the sweep.
 	directive := recordNaming(t, in.Marks, vocab.UnnecessaryExport, "go://example.com/app/internal/store#Narrowed")
 	entry := directive
-	entry.Mechanism = suppress.MechanismIgnore
-	entry.Site = position(core.IgnoreFileName, 4, 5)
+	entry.Mechanism = core.Ignore
+	entry.Site = siteOf(position(core.IgnoreFileName, 4, 5))
 	entry.Reason = "the same adjudication, written a second time"
 	in.Marks = append(in.Marks, entry)
 
-	found := computed(t, in, packageEmitters()).Findings
+	result := computed(t, in, packageEmitters())
+	found := result.Findings
 	for i := range found {
 		if found[i].Code == vocab.UnnecessaryExport {
 			t.Errorf("the pass reports %s about %s, want it withheld: two records name it",
 				found[i].Code, found[i].Symbol.Name)
 		}
 	}
-	if got := recordAt(t, found, core.IgnoreFileName, 4); got.Details.Mechanism != "ignore" {
-		t.Errorf("the second record is reported as a %s record, want ignore", got.Details.Mechanism)
+	if got := staleAtSite(t, result.Stale, core.IgnoreFileName, 4); got.Mechanism != "ignore" {
+		t.Errorf("the second record is reported as a %s record, want ignore", got.Mechanism)
 	}
 }
 
 // recordNaming is the record of one code over one reference, which is how a test
 // names a record the target's own documents produced.
-func recordNaming(t *testing.T, marks []suppress.Record, code vocab.Code, ref string) suppress.Record {
+func recordNaming(t *testing.T, marks []core.Record, code vocab.Code, ref string) core.Record {
 	t.Helper()
 
 	for i := range marks {
@@ -741,7 +743,7 @@ func recordNaming(t *testing.T, marks []suppress.Record, code vocab.Code, ref st
 		}
 	}
 	t.Fatalf("the run read no %s record naming %s: it read %+v", code, ref, marks)
-	return suppress.Record{}
+	return core.Record{}
 }
 
 func TestUnmatchedRootsIsPositionedInTheDocumentThatDeclaredTheRoot(t *testing.T) {
@@ -773,8 +775,8 @@ func TestUnmatchedRootsIsPositionedInTheDocumentThatDeclaredTheRoot(t *testing.T
 
 func TestStaleSuppressionsReadsDormancyFromTheFindingsARecordMatches(t *testing.T) {
 	bothStale := []string{
-		"inline directive for DS1001 matches no current finding",
-		"inline directive for DS1401 matches no current finding",
+		"inline directive for DS1001 matches no current finding, and its declaration reports DS1002",
+		"inline directive for DS1401 matches no current finding, and its declaration reports DS1002",
 	}
 	cases := map[string]struct {
 		severity map[string]vocab.Severity
@@ -804,16 +806,15 @@ func TestStaleSuppressionsReadsDormancyFromTheFindingsARecordMatches(t *testing.
 			in := suppressed(t, "selfcheck-match.txtar", resolved)
 			emitters := intraFuncEmitters()
 			maps.Copy(emitters, declarationEmitters())
-			emitters[vocab.StaleSuppression] = staleSuppressions
 
 			result := computed(t, in, emitters)
 
 			var stale []string
+			for i := range result.Stale {
+				stale = append(stale, result.Stale[i].Message)
+			}
 			for i := range result.Findings {
-				switch found := &result.Findings[i]; found.Code {
-				case vocab.StaleSuppression:
-					stale = append(stale, found.Message)
-				case vocab.UnusedParameter:
+				if found := &result.Findings[i]; found.Code == vocab.UnusedParameter {
 					t.Errorf("the pass reports %s %s, which a record in effect withholds", found.Code, found.Symbol.Name)
 				}
 			}
@@ -840,10 +841,7 @@ func TestStaleSuppressionsLeavesARecordDormantWhoseFindingANameLiteralLowers(t *
 
 func TestAnIgnoreEntryNamingAParameterHoldsThatParameterAlone(t *testing.T) {
 	in := suppressed(t, "selfcheck-parameter-entries.txtar", applicationConfig())
-	emitters := intraFuncEmitters()
-	emitters[vocab.StaleSuppression] = staleSuppressions
-
-	result := computed(t, in, emitters)
+	result := computed(t, in, intraFuncEmitters())
 
 	want := []string{"main.go:3:22 parameter second of go://example.com/app#pair(second)"}
 	if got := subjectsOf(result.Findings, vocab.UnusedParameter); !slices.Equal(got, want) {
@@ -852,10 +850,8 @@ func TestAnIgnoreEntryNamingAParameterHoldsThatParameterAlone(t *testing.T) {
 			got, vocab.UnusedParameter, want)
 	}
 	var stale []string
-	for i := range result.Findings {
-		if found := &result.Findings[i]; found.Code == vocab.StaleSuppression {
-			stale = append(stale, found.Symbol.Ref)
-		}
+	for i := range result.Stale {
+		stale = append(stale, result.Stale[i].Symbol)
 	}
 	if wantStale := []string{"go://example.com/app#reads(v)"}; !slices.Equal(stale, wantStale) {
 		t.Errorf("StaleSuppressions() names %v, want %v: an entry naming a read parameter matches nothing", stale, wantStale)

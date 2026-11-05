@@ -359,10 +359,10 @@ func TestAnUnanalysedConsumerIsReadFromTheInnermostUnitWhateverTheMapOrder(t *te
 		{Dir: "/r/x"},
 	}}}}}
 	for range 64 {
-		if newPass(in).unanalysedConsumer(&inventory.Symbol{Pos: token.Position{Filename: "x/a.go"}}) {
+		if newPass(in).unanalysedConsumer(&inventory.Symbol{File: "x/a.go"}) {
 			t.Fatal("unanalysedConsumer(x/a.go) = true with the root unit flagged and unit x not, want false")
 		}
-		if !newPass(in).unanalysedConsumer(&inventory.Symbol{Pos: token.Position{Filename: "a.go"}}) {
+		if !newPass(in).unanalysedConsumer(&inventory.Symbol{File: "a.go"}) {
 			t.Fatal("unanalysedConsumer(a.go) = false with the root unit flagged, want true")
 		}
 	}

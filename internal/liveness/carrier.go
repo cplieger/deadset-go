@@ -1,6 +1,8 @@
 package liveness
 
 import (
+	"slices"
+
 	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
@@ -64,14 +66,16 @@ func (r Reach) Holds(id inventory.SymbolID) bool {
 func (g *Graph) Carry(c *Carrier) *Carriage {
 	servers := make(map[int]bool)
 	for method := range c.Implementers {
-		if at := g.at(method); at != outside && g.parent[at] != outside {
-			servers[g.parent[at]] = true
+		if at := g.at(method); at != outside {
+			for _, p := range g.parents[at] {
+				servers[p] = true
+			}
 		}
 	}
 	probe := &Carriage{g: g, servers: servers}
 	var kept []exempt.Exemption
 	for ix := range c.Exempt {
-		if e := &c.Exempt[ix]; (e.Consumer != "" || !c.Generated[e.Site.Filename]) && !probe.Answers(e) {
+		if e := &c.Exempt[ix]; (e.Consumer != "" || !c.Generated[e.File]) && !probe.Answers(e) {
 			kept = append(kept, *e)
 		}
 	}
@@ -90,7 +94,7 @@ func (k *Carriage) follow(c *Carrier) {
 		if c.Registrations[k.g.symbols[i].ID] {
 			continue
 		}
-		generated := c.Generated[k.g.symbols[i].Pos.Filename]
+		generated := c.Generated[k.g.symbols[i].File]
 		for _, e := range k.g.out[i] {
 			if !k.cut(i, e, generated, c) {
 				k.out[i] = append(k.out[i], e)
@@ -139,7 +143,7 @@ func (k *Carriage) seeds(c *Carrier, held []bool) (reached []bool, queue []int) 
 		}
 	}
 	for _, r := range k.g.rooted {
-		if r.root.Kind != roots.RootTest && !r.yielded && !c.Generated[k.g.symbols[r.at].Pos.Filename] {
+		if r.root.Kind != roots.RootTest && !r.yielded && !c.Generated[k.g.symbols[r.at].File] {
 			seed(r.at)
 		}
 	}
@@ -164,7 +168,7 @@ func (k *Carriage) Answers(e *exempt.Exemption) bool {
 		return false
 	}
 	at := k.g.at(e.Via)
-	return at != outside && k.servers[k.g.parent[at]]
+	return at != outside && slices.ContainsFunc(k.g.parents[at], func(p int) bool { return k.servers[p] })
 }
 
 // cut reports whether the carrier sweep leaves one edge of the declaration at i
@@ -199,14 +203,16 @@ func (k *Carriage) closed(reached []bool, queue []int) Reach {
 // Hand is what hand-written code reaches.
 func (k *Carriage) Hand() Reach { return k.hand }
 
-// Search is what the carrier sweep reaches from one declaration alone, the
+// Search is what the carrier sweep reaches from the declarations alone, the
 // search of an implementer's method bindings.16 and bindings.17 read.
-func (k *Carriage) Search(from inventory.SymbolID) Reach {
+func (k *Carriage) Search(from ...inventory.SymbolID) Reach {
 	reached := make([]bool, len(k.g.symbols))
-	at := k.g.at(from)
-	if at == outside {
-		return Reach{g: k.g, reached: reached}
+	var queue []int
+	for _, id := range from {
+		if at := k.g.at(id); at != outside && !reached[at] {
+			reached[at] = true
+			queue = append(queue, at)
+		}
 	}
-	reached[at] = true
-	return k.closed(reached, []int{at})
+	return k.closed(reached, queue)
 }

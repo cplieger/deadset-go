@@ -1,0 +1,30 @@
+A command whose unreferenced functions each carry a record naming a code whose
+subject is no declaration: a record of a document, a file or an import binding.
+No such record matches a finding about a function, so each is stale, and none
+marks its function live, so each function's own finding is reported beside it.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() {}
+
+//deadset:ignore DS9003 -- a record
+func record() {}
+
+//deadset:ignore DS9004 -- a configured root
+func root() {}
+
+//deadset:ignore DS1601 -- a file
+func built() {}
+
+//deadset:ignore DS1602 -- a file
+func imported() {}
+
+//deadset:ignore DS1004 -- an import binding
+func binding() {}

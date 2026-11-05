@@ -1,0 +1,38 @@
+A command whose dead struct, dead interface and dead type each hold a member
+carrying a record. With every mark withdrawn the member is judged on its own, not
+through its dead container, and its record is decided against the member's own
+finding: the field's DS1003, the interface method's DS1202 and the method's DS1002
+are each in effect, and the DS1002 record on a field is stale, since a field's
+finding carries DS1003.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() {}
+
+type dead struct {
+	//deadset:ignore DS1003 -- wanted
+	f int
+	g int
+}
+
+type alsoDead struct {
+	//deadset:ignore DS1002 -- a field's finding carries DS1003
+	h int
+}
+
+type deadIface interface {
+	//deadset:ignore DS1202 -- wanted
+	M()
+}
+
+type withMethod struct{}
+
+//deadset:ignore DS1002 -- wanted
+func (withMethod) m() {}

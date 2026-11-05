@@ -17,13 +17,14 @@ import (
 )
 
 // Swept is the sweep stage: every suppression record the run read, bound or not,
-// what the grammar refused with a finding of its own, and one sweep of the matrix
-// seeded by the bound records.
+// what the grammar refused with a finding of its own, the sweep of the matrix
+// seeded by the records that mark, and the sweep with no mark where one marks.
 type Swept struct {
 	*Prepared
 
-	Marks    []suppress.Record
-	refusals []suppress.Refusal
+	unmarked *liveness.Result
+	Marks    []core.Record
+	refusals []core.Refusal
 	Liveness liveness.Result
 }
 
@@ -46,37 +47,32 @@ func (p *Prepared) sweep(r *round) (*Swept, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Swept{
-		Prepared: p,
-		Marks:    marks,
-		refusals: refusals,
-		Liveness: p.Graph.Sweep(&liveness.SweepPolicy{
-			Marked:       suppress.Bound(marks),
-			Exempt:       p.Exemptions,
-			TestEvidence: p.testEvidence,
-			Unseen:       p.unseen,
-			Mode:         p.Mode,
-		}),
-	}, nil
+	swept, unmarked := p.Graph.Sweeps(&liveness.SweepPolicy{
+		Marked:       suppress.Marked(marks),
+		Exempt:       p.Exemptions,
+		TestEvidence: p.testEvidence,
+		Unseen:       p.unseen,
+		Mode:         p.Mode,
+	})
+	return &Swept{Prepared: p, Marks: marks, refusals: refusals, Liveness: swept, unmarked: unmarked}, nil
 }
 
-// suppressions is the records and refusals of the inline directives, the ignore
-// file and the baseline, in that order, which is the order a stale suppression is
-// reported in. The directives are read from the first configuration alone; the
-// ignore file and the baseline bind against the matrix inventory.
-func (p *Prepared) suppressions(r *round) ([]suppress.Record, []suppress.Refusal, error) {
-	var records []suppress.Record
-	var refusals []suppress.Refusal
-	if len(p.per) > 0 {
-		inline, refused, err := suppress.Inline(p.per[0].Result, p.per[0].Resolve, p.per[0].Symbols)
-		if err != nil {
-			return nil, nil, err
-		}
-		records, refusals = inline, refused
+// suppressions is the records and refusals of the inline directives of every
+// configuration, the ignore file and the baseline, in that order, which is the
+// order a stale suppression is reported in. The ignore file and the baseline bind
+// against the matrix inventory.
+func (p *Prepared) suppressions(r *round) ([]core.Record, []core.Refusal, error) {
+	configurations := make([]suppress.Configuration, len(p.per))
+	for i := range p.per {
+		configurations[i] = suppress.Configuration{Result: p.per[i].Result, Resolve: p.per[i].Resolve, Symbols: p.per[i].Symbols}
+	}
+	records, refusals, err := suppress.Inline(configurations)
+	if err != nil {
+		return nil, nil, err
 	}
 	baseline := suppress.Baseline
 	if r != nil {
-		baseline = func(_ string, symbols []inventory.Symbol) ([]suppress.Record, []suppress.Refusal, error) {
+		baseline = func(_ string, symbols []inventory.Symbol) ([]core.Record, []core.Refusal, error) {
 			var body bytes.Buffer
 			if err := core.WriteBaseline(&body, r.rows, r.provenance, nil); err != nil {
 				return nil, nil, err
@@ -85,7 +81,7 @@ func (p *Prepared) suppressions(r *round) ([]suppress.Record, []suppress.Refusal
 		}
 	}
 	for _, read := range []struct {
-		of   func(path string, symbols []inventory.Symbol) ([]suppress.Record, []suppress.Refusal, error)
+		of   func(path string, symbols []inventory.Symbol) ([]core.Record, []core.Refusal, error)
 		name string
 	}{
 		{suppress.IgnoreFile, core.IgnoreFileName},

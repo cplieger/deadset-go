@@ -67,21 +67,3 @@ func cohere(findings []Finding) {
 		}
 	}
 }
-
-// wouldBe is the own confidence of the finding a liveness record's mark kept the
-// sweep from producing: the bound declaration's, classified as its kind classifies
-// a finding, where a test that references it lowers it as the sweep's test use
-// would with the mark withdrawn ([pass.testReachedUse]).
-func (in *pass) wouldBe(at int, row *vocab.Kind) vocab.Class {
-	mark := &in.Marks[at]
-	d, held := in.finding(mark.Bound, mark.Code, "")
-	if !held {
-		return vocab.Certain
-	}
-	found := Finding{Code: d.Code, Symbol: in.subjectOf(&d), id: d.id}
-	in.classify(&found, &d, row)
-	if in.testReachedUse(mark.Bound, mark.Code) {
-		return lower(found.Confidence, vocab.Possible)
-	}
-	return found.Confidence
-}

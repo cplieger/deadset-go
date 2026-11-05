@@ -1,0 +1,47 @@
+A dependency declares two functions that one line directive each renders at the
+same line: Load only decodes into its argument, Show prints it. A value handed to
+Load is only written, so the String method of its type is unused.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+
+require example.com/plugin v0.0.0
+
+replace example.com/plugin => ./plugin
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- app.go --
+package main
+
+import "example.com/plugin"
+
+type settings struct {
+	Name string `json:"name"`
+}
+
+func (settings) String() string { return "settings" }
+
+func main() {
+	var s settings
+	_ = plugin.Load(&s)
+	println(s.Name)
+}
+-- plugin/go.mod --
+module example.com/plugin
+
+go 1.27.1
+-- plugin/plugin.go --
+package plugin
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+//line plugin.go:20
+func Load(v any) error { return json.Unmarshal(nil, v) }
+
+//line plugin.go:20
+func Show(v any) error { fmt.Println(v); return nil }

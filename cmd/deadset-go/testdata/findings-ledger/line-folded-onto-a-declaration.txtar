@@ -1,0 +1,23 @@
+A command whose init function holds a dead store that a line directive renders at
+the identifier of an unreferenced function. The function and the store are each
+reported.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() {}
+
+func unused() {}
+
+func init() {
+//line main.go:5:5
+	v := 1
+	v = 2
+	_ = v
+}

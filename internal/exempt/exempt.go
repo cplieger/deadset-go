@@ -128,6 +128,11 @@ type Exemption struct {
 	// an encoder emits the field though nothing writes it.
 	Confidence vocab.Class
 
+	// File is the path of the file that writes the evidence, relative to the root
+	// Site renders against, which a line directive does not move: what classifies
+	// the evidence as a test's or a generated file's.
+	File string
+
 	Site token.Position // last, so the counted fields of a position end the value
 }
 
@@ -237,11 +242,11 @@ func NewProgram(l *Loaded) (*Program, error) {
 		return nil, fmt.Errorf("%w: no file set", inventory.ErrIncompleteLoad)
 	}
 	p := &Program{Loaded: *l}
-	p.allConversions = facts.Conversions(p.Result.Fset, p.Result.Packages)
+	p.allConversions = facts.Conversions(p.Resolve.Positions(), p.Result.Packages)
 	p.conversions = concrete(p.allConversions)
 	p.programConversions = slices.Clone(p.conversions)
 	for i := range p.Result.Consumers {
-		p.programConversions = append(p.programConversions, concrete(facts.Conversions(p.Result.Fset, p.Result.Consumers[i].Packages))...)
+		p.programConversions = append(p.programConversions, concrete(facts.Conversions(p.Resolve.Positions(), p.Result.Consumers[i].Packages))...)
 	}
 	p.published = publishedConversions(p)
 	p.functions = programFunctions(p)

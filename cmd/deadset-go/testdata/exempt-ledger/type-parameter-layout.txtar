@@ -1,0 +1,34 @@
+Two generic functions each instantiate view with their own type parameter T,
+one taking alpha and the other bravo. The unsafe conversion lays out both, so
+alpha.X and bravo.Y are read.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+import (
+	"fmt"
+	"unsafe"
+)
+
+type alpha struct{ X int }
+
+type bravo struct{ Y int }
+
+func view[T any](b []byte) *T { return (*T)(unsafe.Pointer(&b[0])) }
+
+var buf = make([]byte, 64)
+
+func one[T any]() { fmt.Println(view[T](buf) != nil) }
+
+func two[T any]() { fmt.Println(view[T](buf) != nil) }
+
+func main() {
+	one[alpha]()
+	two[bravo]()
+}

@@ -1,0 +1,23 @@
+A command with two functions that call only each other, so with the marks
+withdrawn they are one dead component with both as roots. A string literal
+spells bravo's name, which makes its finding possible, and the component carries
+its lowest root confidence, so alpha's finding would be possible too. The default
+minimum withholds it, so the directive on alpha is dormant rather than in effect.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() { println(len(names)) }
+
+var names = []string{"bravo"}
+
+//deadset:ignore DS1002 -- kept for the loader
+func alpha() { bravo() }
+
+func bravo() { alpha() }

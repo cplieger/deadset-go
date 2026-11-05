@@ -1,0 +1,80 @@
+A line directive renders the linux declaration of an interface declared once
+per platform and its assertion under gen.proto. An entry at gen.proto names
+the assertion's one finding.
+
+-- deadset-ignore.json --
+{"ignore": [{"code": "DS1203", "symbol": "go://example.com/app#writer", "path": "gen.proto", "reason": "wanted"}]}
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}, "analysis": {"configurations": [
+  {"id": "linux-amd64", "os": "linux", "arch": "amd64"},
+  {"id": "windows-amd64", "os": "windows", "arch": "amd64"}]}}
+-- main.go --
+package main
+
+func main() { _ = impl{}.write() }
+
+type impl struct{}
+
+func (impl) write() int { return 2 }
+-- iface_linux.go --
+package main
+
+//line gen.proto:1:1
+type writer interface {
+	write() int
+}
+-- iface_windows.go --
+package main
+
+type writer interface {
+	write() int
+}
+-- a.go --
+package main
+
+//line gen.proto:20:1
+var _ writer = impl{}
+-- gen.proto --
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39

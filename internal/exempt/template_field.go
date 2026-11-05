@@ -72,6 +72,7 @@ func TemplateFieldDetector(in *Program) ([]Exemption, error) {
 			out = append(out, Exemption{
 				ID:     m.id,
 				Class:  string(vocab.TemplateField),
+				File:   r.site.Filename,
 				Site:   r.site,
 				Detail: "named by " + r.action,
 			})

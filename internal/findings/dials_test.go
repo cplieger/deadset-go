@@ -1,26 +1,39 @@
 package findings
 
 import (
-	"go/token"
 	"slices"
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
-	"github.com/cplieger/deadset-go/v2/internal/suppress"
+	core "github.com/cplieger/deadset-spec/v8/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // The hand-built component's root is the exported function and the unexported
 // helper falls with it, so these emitters report the root under one code, the
 // member under another, and one declaration of no dead component under the second.
+// An unexported declaration a mark holds back is reported only by the pass whose
+// sweep judges it dead.
 func rootMemberAndBystander(in *Input) map[vocab.Code]Emitter {
 	return map[vocab.Code]Emitter{
-		vocab.UnusedExported:   emitterOf(oneFinding(in, vocab.UnusedExported, exportedID)),
-		vocab.UnusedUnexported: emitterOf(oneFinding(in, vocab.UnusedUnexported, helperID), oneFinding(in, vocab.UnusedUnexported, internalID)),
+		vocab.UnusedExported: emitterOf(oneFinding(in, vocab.UnusedExported, exportedID)),
+		vocab.UnusedUnexported: func(p *pass) ([]draft, error) {
+			found := []draft{oneFinding(in, vocab.UnusedUnexported, internalID)}
+			for _, id := range []inventory.SymbolID{helperID, markedID} {
+				if p.candidateOf(id) != nil {
+					found = append(found, oneFinding(in, vocab.UnusedUnexported, id))
+				}
+			}
+			return found, nil
+		},
 	}
 }
+
+// markedID is a declaration a test adds to the hand-built inventory.
+const markedID inventory.SymbolID = "catalog.go:40:6"
 
 // reportedIDs names the subject of every finding a pass reported, in its order.
 func reportedIDs(result Result) []inventory.SymbolID {
@@ -107,18 +120,31 @@ func TestComputeWithholdsTheComponentOfARootBelowTheMinimumConfidence(t *testing
 	}
 }
 
-// heldBackMark is a record naming the member's code, bound to one declaration a
-// sweep without it judged dead.
+// heldBackMark is a record naming the member's code, bound to one declaration the
+// sweep without it judges dead and a member of the hand-built component, which the
+// sweep with it judges live.
 func heldBackMark(in *Input, id inventory.SymbolID) {
-	in.Marks = []suppress.Record{{
+	in.Marks = []core.Record{{
 		Code:      vocab.UnusedUnexported,
 		Symbol:    in.Refs[id],
 		Reason:    "kept for the plugin loader",
-		Bound:     id,
-		Site:      token.Position{Filename: "catalog.go", Line: 30, Column: 1},
-		Mechanism: suppress.MechanismInline,
+		Bound:     string(id),
+		Site:      core.Site{Path: "catalog.go", File: "catalog.go", Line: 30, Column: 1},
+		Mechanism: core.Inline,
 	}}
-	in.Sweep.Suppressed = []inventory.SymbolID{id}
+	unmarked := *in.Sweep
+	unmarked.Candidates = slices.Clone(unmarked.Candidates)
+	unmarked.Components = []liveness.Component{in.Sweep.Components[0]}
+	if !slices.ContainsFunc(unmarked.Candidates, func(c liveness.Candidate) bool { return c.ID == id }) {
+		unmarked.Candidates = append(unmarked.Candidates, liveness.Candidate{ID: id, Relation: liveness.Reachability, ProductionRefs: 1, Configs: inventory.ConfigSet(0b11)})
+		unmarked.Components[0].Members = append(slices.Clone(unmarked.Components[0].Members), id)
+	}
+	in.Unmarked = &unmarked
+	marked := *in.Sweep
+	marked.Candidates = slices.DeleteFunc(slices.Clone(marked.Candidates), func(c liveness.Candidate) bool { return c.ID == id })
+	marked.Components = []liveness.Component{in.Sweep.Components[0]}
+	marked.Components[0].Members = slices.DeleteFunc(slices.Clone(marked.Components[0].Members), func(m inventory.SymbolID) bool { return m == id })
+	in.Sweep = &marked
 }
 
 func TestARecordOnAMemberOfAWithheldComponentIsDormant(t *testing.T) {
@@ -132,10 +158,8 @@ func TestARecordOnAMemberOfAWithheldComponentIsDormant(t *testing.T) {
 	if inEffect, _ := result.InEffect, result.Reasons; inEffect != 0 {
 		t.Errorf("Totals() = %d in effect, want 0: the record's finding falls with a root the severity withholds", inEffect)
 	}
-	for i := range result.Findings {
-		if result.Findings[i].Code == vocab.StaleSuppression {
-			t.Errorf("Compute() reported %v, want no stale suppression for a dormant record", summary(result.Findings))
-		}
+	if len(result.Stale) != 0 {
+		t.Errorf("Compute() reported %+v, want no stale suppression for a dormant record", result.Stale)
 	}
 }
 
@@ -143,7 +167,6 @@ func TestARecordOnASymbolThatWouldJoinAWithheldComponentIsDormant(t *testing.T) 
 	resolved := applicationConfig()
 	resolved.Severity = map[string]vocab.Severity{string(vocab.UnusedExported): vocab.Allow}
 	in := handInput(resolved)
-	const markedID inventory.SymbolID = "catalog.go:40:6"
 	in.Merged.Symbols = append(in.Merged.Symbols,
 		handSymbol(markedID, "go://example.com/app#marked", "marked", "example.com/app", "catalog.go", 40, 42, false))
 	in.Merged.References = append(in.Merged.References, facts.Reference{From: exportedID, To: markedID, Kind: facts.RefCall})
@@ -163,7 +186,6 @@ func TestARecordOnASymbolThatReferencesAMemberOfAWithheldComponentIsDormant(t *t
 	resolved := applicationConfig()
 	resolved.Severity = map[string]vocab.Severity{string(vocab.UnusedExported): vocab.Allow}
 	in := handInput(resolved)
-	const markedID inventory.SymbolID = "catalog.go:40:6"
 	in.Merged.Symbols = append(in.Merged.Symbols,
 		handSymbol(markedID, "go://example.com/app#marked", "marked", "example.com/app", "catalog.go", 40, 42, false))
 	in.Merged.References = append(in.Merged.References, facts.Reference{From: markedID, To: helperID, Kind: facts.RefCall})
@@ -185,9 +207,8 @@ func TestARecordOnAMethodWhoseTypeIsAMemberOfAWithheldComponentIsDormant(t *test
 	resolved.Severity = map[string]vocab.Severity{string(vocab.UnusedExported): vocab.Allow}
 	in := handInput(resolved)
 	in.Merged.Symbols[1].Kind = inventory.KindType
-	const markedID inventory.SymbolID = "catalog.go:40:6"
 	method := handSymbol(markedID, "go://example.com/app#resolve.marked", "marked", "example.com/app", "catalog.go", 40, 42, false)
-	method.Kind, method.Parent = inventory.KindMethod, helperID
+	method.Kind, method.Parents = inventory.KindMethod, []inventory.SymbolID{helperID}
 	in.Merged.Symbols = append(in.Merged.Symbols, method)
 	in.Refs[markedID] = method.Ref
 	heldBackMark(in, markedID)
@@ -205,11 +226,10 @@ func TestARecordOnATypeWhoseMethodIsAMemberOfAWithheldComponentIsDormant(t *test
 	resolved := applicationConfig()
 	resolved.Severity = map[string]vocab.Severity{string(vocab.UnusedExported): vocab.Allow}
 	in := handInput(resolved)
-	const markedID inventory.SymbolID = "catalog.go:40:6"
 	container := handSymbol(markedID, "go://example.com/app#marked", "marked", "example.com/app", "catalog.go", 40, 42, false)
 	container.Kind = inventory.KindType
 	in.Merged.Symbols = append(in.Merged.Symbols, container)
-	in.Merged.Symbols[1].Kind, in.Merged.Symbols[1].Parent = inventory.KindMethod, markedID
+	in.Merged.Symbols[1].Kind, in.Merged.Symbols[1].Parents = inventory.KindMethod, []inventory.SymbolID{markedID}
 	in.Refs[markedID] = container.Ref
 	heldBackMark(in, markedID)
 

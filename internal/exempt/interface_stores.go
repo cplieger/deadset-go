@@ -7,6 +7,8 @@ import (
 	"go/types"
 	"maps"
 	"slices"
+
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
 )
 
 // storeNode is one place the analysed program stores interface values in, keyed by
@@ -276,7 +278,7 @@ func (s *storedTypes) reaching(n storeNode) []types.Type {
 		one := queue[0]
 		queue = queue[1:]
 		for _, t := range s.direct[one] {
-			if key := types.TypeString(t, nil); !keys[key] {
+			if key := resolve.Spell(t, nil); !keys[key] {
 				keys[key] = true
 				found = append(found, t)
 			}

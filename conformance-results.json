@@ -8,10 +8,10 @@
   "result": "pass",
   "totals": {
     "fixtures": 224,
-    "pass": 214,
+    "pass": 216,
     "gap": 0,
     "fail": 0,
-    "pending": 10
+    "pending": 8
   },
   "fixtures": [
     {
@@ -1230,16 +1230,14 @@
     },
     {
       "fixture": "directive-in-one-configuration",
-      "result": "pending",
+      "result": "pass",
       "expectations": [
         {
           "symbol": "probeArm64",
-          "result": "fail",
+          "result": "pass",
           "actual": {
-            "report": "DS1002",
-            "confidence": "certain"
-          },
-          "message": "want no finding at target/boot_arm64.go:6, got DS1002"
+            "report": "none"
+          }
         },
         {
           "symbol": "unusedEverywhere",
@@ -1260,18 +1258,11 @@
           }
         }
       ],
-      "unexpected": [
-        {
-          "file": "target/boot_arm64.go",
-          "line": 6,
-          "report": "DS1002"
-        }
-      ],
-      "message": "suppressions_in_effect want 1 got 0"
+      "unexpected": []
     },
     {
       "fixture": "directive-naming-the-base-of-a-derived-code",
-      "result": "pending",
+      "result": "pass",
       "expectations": [
         {
           "symbol": "Helper",
@@ -1282,15 +1273,18 @@
         },
         {
           "symbol": "WrongCode",
-          "result": "fail",
+          "result": "pass",
           "actual": {
-            "report": "none"
-          },
-          "message": "want exactly one DS9003 record at target/internal/util/util.go:4, got 0"
+            "report": "DS9003",
+            "symbol_kind": "suppression",
+            "confidence": "certain",
+            "details": {
+              "mechanism": "inline"
+            }
+          }
         }
       ],
-      "unexpected": [],
-      "message": "suppressions_in_effect want 0 got 1"
+      "unexpected": []
     },
     {
       "fixture": "dormant-directive-over-a-name-literal",

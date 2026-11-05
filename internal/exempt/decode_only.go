@@ -209,11 +209,11 @@ func (d *decoders) body(fn *types.Func) (*ast.FuncDecl, *types.Info) {
 	if fn.Pkg() == nil {
 		return nil, nil
 	}
-	at := d.flow.kept.in.Result.Fset.Position(fn.Pos())
+	at := d.flow.kept.in.Result.Fset.PositionFor(fn.Pos(), false)
 	if !at.IsValid() || at.Filename == "" {
 		return nil, nil
 	}
-	one, held := d.source(fn.Pkg())[declKey(filepath.Base(at.Filename), at.Line)]
+	one, held := d.source(fn.Pkg())[declKey(filepath.Base(at.Filename), at.Offset)]
 	if !held {
 		return nil, nil
 	}
@@ -221,7 +221,7 @@ func (d *decoders) body(fn *types.Func) (*ast.FuncDecl, *types.Info) {
 }
 
 // source is every function declaration of one package's source, indexed on first
-// use by its file and the line of its name.
+// use by [declKey].
 func (d *decoders) source(pkg *types.Package) map[string]programFunction {
 	if held, known := d.sources[pkg]; known {
 		return held
@@ -244,15 +244,16 @@ func (d *decoders) source(pkg *types.Package) map[string]programFunction {
 			}
 			one := programFunction{info: source.Info, decl: fd, fn: fn}
 			d.declared[fn] = one
-			at := source.Fset.Position(fd.Name.Pos())
-			held[declKey(filepath.Base(at.Filename), at.Line)] = one
+			at := source.Fset.PositionFor(fd.Name.Pos(), false)
+			held[declKey(filepath.Base(at.Filename), at.Offset)] = one
 		}
 	}
 	return held
 }
 
-// declKey names a declaration by its file and the line of its name, which is what
-// an object the load checked for its declarations alone carries.
-func declKey(file string, line int) string {
-	return file + ":" + strconv.Itoa(line)
+// declKey names a declaration by the file and byte its name is written at, before
+// any line directive: an object the load checked for its declarations alone is of
+// another parse, and two declarations a line directive renders at one line are two.
+func declKey(file string, offset int) string {
+	return file + ":" + strconv.Itoa(offset)
 }

@@ -1,0 +1,17 @@
+A command with an unreferenced function under a line directive naming a file the
+tree does not hold. The function is reported where the directive renders it, its
+column counted on the line that writes it.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+func main() {}
+
+//line grammar.y:10:1
+func unused() {}

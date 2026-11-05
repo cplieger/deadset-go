@@ -1,0 +1,40 @@
+A command whose main converts a wrapping error to error under a line directive
+naming a test file. The conversion is written in a production file, so it is
+production evidence: the error's methods and the field Unwrap reads are live, and
+only Error's unused receiver is reported.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+import "errors"
+
+type wrapped struct{ inner error }
+
+func (w wrapped) Error() string { return "wrapped" }
+
+func (w wrapped) Unwrap() error { return w.inner }
+
+func main() {
+//line convert_test.go:3:1
+	var err error = wrapped{}
+	println(errors.Unwrap(err) == nil)
+}
+-- convert_test.go --
+package main
+
+// a listing line long enough for every column main.go's directive renders here 0
+// a listing line long enough for every column main.go's directive renders here 1
+// a listing line long enough for every column main.go's directive renders here 2
+// a listing line long enough for every column main.go's directive renders here 3
+// a listing line long enough for every column main.go's directive renders here 4
+// a listing line long enough for every column main.go's directive renders here 5
+// a listing line long enough for every column main.go's directive renders here 6
+// a listing line long enough for every column main.go's directive renders here 7
+// a listing line long enough for every column main.go's directive renders here 8
+// a listing line long enough for every column main.go's directive renders here 9

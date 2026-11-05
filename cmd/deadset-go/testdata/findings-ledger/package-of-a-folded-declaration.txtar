@@ -1,0 +1,29 @@
+A target of two modules that declare one import path: a's is a library package
+and b's is a command. An exported function of b's command, which nothing can
+import, is written under a line directive naming a file of a. It is declared in
+b's package, so it is an unreachable export.
+
+-- target/deadset.json --
+{"target": {"kind": "application"}}
+-- target/a/go.mod --
+module example.com/app
+
+go 1.27
+-- target/a/lib.go --
+// Package app is a library.
+package app
+
+// Used is the library's export.
+func Used() {}
+// a listing long enough to hold the line b's directive remaps here
+-- target/b/go.mod --
+module example.com/app
+
+go 1.27
+-- target/b/main.go --
+package main
+
+func main() {}
+
+//line ../a/lib.go:6:1
+func Exported() {}

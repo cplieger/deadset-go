@@ -295,7 +295,7 @@ func TestAMemberWhoseContainerIsDeadIsNotReportedIndependently(t *testing.T) {
 		inventory.Symbol{
 			ID: fieldID, Ref: "go://example.com/app#Counter.stale", Name: "stale",
 			PkgPath: "example.com/app", Pos: token.Position{Filename: "catalog.go", Line: 41, Column: 2},
-			EndLine: 41, Kind: inventory.KindField, Parent: typeID, Configs: inventory.ConfigSet(0b11),
+			EndLine: 41, Kind: inventory.KindField, Parents: []inventory.SymbolID{typeID}, Configs: inventory.ConfigSet(0b11),
 		},
 	)
 	in.Sweep.Candidates = []liveness.Candidate{

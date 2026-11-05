@@ -56,11 +56,6 @@ type drawnFinding struct {
 	line   int
 }
 
-// live reports whether the analysis holds this finding's subject live, which decides
-// where the record naming its code is held: the sweep's mark for a dead subject, the
-// pass's own withholding for a live one.
-func (d drawnFinding) live() bool { return slices.Contains(liveSubjectCodes, d.code) }
-
 // part reports whether this finding is about a part of its declaration rather than
 // about the declaration, which is the subject a record reaches through the
 // declaration its own reference names.
@@ -74,7 +69,9 @@ func (d drawnFinding) finding() draft {
 	if d.part() {
 		at.Column = drawnPartColumn
 		subject.Kind = parameterSubject
-		return findingAt(d.code, subject, at, "drawn part of a declaration the analysis keeps")
+		one := findingAt(d.code, subject, at, "drawn part of a declaration the analysis keeps")
+		one.decl = d.id
+		return one
 	}
 	return draft{
 		Code:     d.code,
@@ -88,9 +85,8 @@ func (d drawnFinding) finding() draft {
 // drawnFindings draws a set of findings about distinct declarations, one per
 // declaration, which is what a suppression document is written from.
 //
-// Both classes are drawn every iteration, so no iteration measures the mark alone:
-// a document holding only dead subjects is one the sweep's Suppressed answer already
-// accounts for, and the class the pass has to withhold would go unexercised.
+// Both classes are drawn every iteration, so every iteration measures a record on a
+// finding the marks change and one on a finding they do not.
 func drawnFindings(t *rapid.T) []drawnFinding {
 	codes := slices.Concat(
 		rapid.SliceOfN(rapid.SampledFrom(deadSubjectCodes), 1, 4).Draw(t, "dead subjects"),
@@ -122,7 +118,7 @@ func drawnEmitters(found []drawnFinding) map[vocab.Code]Emitter {
 	for _, one := range found {
 		byCode[one.code] = append(byCode[one.code], one.finding())
 	}
-	table := map[vocab.Code]Emitter{vocab.StaleSuppression: staleSuppressions}
+	table := map[vocab.Code]Emitter{}
 	for code, produced := range byCode {
 		table[code] = func(*pass) ([]draft, error) { return slices.Clone(produced), nil }
 	}
@@ -139,6 +135,7 @@ func inventoryOf(found []drawnFinding) []inventory.Symbol {
 			Ref:      found[i].symbol,
 			Kind:     inventory.KindFunc,
 			Pos:      token.Position{Filename: drawnFilePath, Line: found[i].line, Column: 1},
+			File:     drawnFilePath,
 			Exported: true,
 		})
 	}
@@ -146,16 +143,15 @@ func inventoryOf(found []drawnFinding) []inventory.Symbol {
 }
 
 // inputOfRecords is the input a findings pass reads over hand-built records: the
-// inventory the records bind against, the records themselves, and the sweep answer
-// naming the declarations a mark held back, which is the dead-subject half of the
-// drawn set and nothing else.
-func inputOfRecords(records []suppress.Record, symbols []inventory.Symbol, suppressed []inventory.SymbolID) *Input {
+// inventory the records bind against and the records themselves. The stubbed kinds
+// read no sweep, so the sweep with the marks withdrawn is the one sweep.
+func inputOfRecords(records []core.Record, symbols []inventory.Symbol) *Input {
 	resolved := defaultConfig()
 	resolved.Target.Kind = report.TargetKindApplication
 	return &Input{
 		Config: &resolved,
 		Merged: &liveness.Merged{Symbols: symbols},
-		Sweep:  &liveness.Result{Suppressed: suppressed},
+		Sweep:  &liveness.Result{},
 		Marks:  records,
 	}
 }
@@ -185,15 +181,9 @@ func TestASuppressionDocumentRoundTrips(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
 		found := drawnFindings(t)
 		symbols := inventoryOf(found)
-		suppressed := make([]inventory.SymbolID, 0, len(found))
-		for i := range found {
-			if !found[i].live() {
-				suppressed = append(suppressed, found[i].id)
-			}
-		}
 
-		for _, mechanism := range []suppress.Mechanism{
-			suppress.MechanismInline, suppress.MechanismIgnore, suppress.MechanismBaseline,
+		for _, mechanism := range []core.Mechanism{
+			core.Inline, core.Ignore, core.Baseline,
 		} {
 			records, refusals := recordsOf(t, dir, mechanism, found, symbols)
 			if len(refusals) != 0 {
@@ -204,7 +194,7 @@ func TestASuppressionDocumentRoundTrips(t *testing.T) {
 					mechanism, len(found), len(records))
 			}
 
-			in := inputOfRecords(records, symbols, suppressed)
+			in := inputOfRecords(records, symbols)
 			result, err := Compute(in, drawnEmitters(found))
 			if err != nil {
 				t.Fatalf("Compute() over the %s document = _, %v, want the findings the document leaves",
@@ -226,11 +216,11 @@ func TestASuppressionDocumentRoundTrips(t *testing.T) {
 // recordsOf is the records one mechanism's document holds for a drawn finding set.
 // The ignore file and the baseline are written and read back; the inline records are
 // built directly, one per finding, at the line above the declaration.
-func recordsOf(t *rapid.T, dir string, mechanism suppress.Mechanism, found []drawnFinding,
+func recordsOf(t *rapid.T, dir string, mechanism core.Mechanism, found []drawnFinding,
 	symbols []inventory.Symbol,
-) ([]suppress.Record, []suppress.Refusal) {
+) ([]core.Record, []core.Refusal) {
 	switch mechanism {
-	case suppress.MechanismBaseline:
+	case core.Baseline:
 		recorded := make([]core.Recorded, 0, len(found))
 		for i := range found {
 			recorded = append(recorded, core.Recorded{
@@ -248,7 +238,7 @@ func recordsOf(t *rapid.T, dir string, mechanism suppress.Mechanism, found []dra
 		}
 		return records, refusals
 
-	case suppress.MechanismIgnore:
+	case core.Ignore:
 		document := "{\n  \"ignore\": [\n"
 		for i := range found {
 			if i > 0 {
@@ -267,16 +257,16 @@ func recordsOf(t *rapid.T, dir string, mechanism suppress.Mechanism, found []dra
 		return records, refusals
 
 	default:
-		records := make([]suppress.Record, 0, len(found))
+		records := make([]core.Record, 0, len(found))
 		for i := range found {
-			records = append(records, suppress.Record{
+			records = append(records, core.Record{
 				Code:      found[i].code,
 				Symbol:    found[i].symbol,
 				Path:      drawnFilePath,
 				Reason:    "adjudicated by the maintainer",
-				Bound:     found[i].id,
-				Site:      token.Position{Filename: drawnFilePath, Line: i + 1, Column: 1},
-				Mechanism: suppress.MechanismInline,
+				Bound:     string(found[i].id),
+				Site:      core.Site{Path: drawnFilePath, File: drawnFilePath, Line: i + 1, Column: 1},
+				Mechanism: core.Inline,
 			})
 		}
 		return records, nil
@@ -312,16 +302,16 @@ func TestAnythingTheConfigurationNamesThatMatchesNothingIsReported(t *testing.T)
 			"go://" + drawnModulePath + "/internal/queue#List.Push",
 		}), 0, 4).Draw(t, "roots")
 
-		records := make([]suppress.Record, 0, len(found))
+		records := make([]core.Record, 0, len(found))
 		declared := &edges.Document{}
 		for i := range found {
-			records = append(records, suppress.Record{
+			records = append(records, core.Record{
 				Code:      found[i].code,
 				Symbol:    found[i].symbol,
 				Path:      drawnFilePath,
 				Reason:    "adjudicated by the maintainer",
-				Site:      token.Position{Filename: core.IgnoreFileName, Line: i + 2, Column: 5},
-				Mechanism: suppress.MechanismIgnore,
+				Site:      core.Site{Path: core.IgnoreFileName, Line: i + 2, Column: 5},
+				Mechanism: core.Ignore,
 			})
 			declared.Edges = append(declared.Edges, edges.Edge{
 				ID:       "wire/drawn" + strconv.Itoa(i),
@@ -331,24 +321,20 @@ func TestAnythingTheConfigurationNamesThatMatchesNothingIsReported(t *testing.T)
 		}
 
 		// Nothing bound, so nothing was suppressed and nothing is enumerated.
-		in := inputOfRecords(records, nil, nil)
+		in := inputOfRecords(records, nil)
 		in.Unmatched = make([]roots.Unmatched, 0, len(configured))
 		for _, root := range configured {
 			in.Unmatched = append(in.Unmatched, roots.Unmatched{Source: root})
 		}
 		in.Edges = declared
 
-		stale, err := staleSuppressions(newPass(in))
-		if err != nil {
-			t.Fatalf("StaleSuppressions() = _, %v, want every record reported", err)
-		}
-		if len(stale) != len(records) {
-			t.Errorf("StaleSuppressions() over %d records that bound nothing reported %d, want one each: %v",
-				len(records), len(stale), draftSummary(stale))
-		}
 		result, err := Compute(in, nil)
 		if err != nil {
 			t.Fatalf("Compute() = error %v, want the findings of the pass", err)
+		}
+		if len(result.Stale) != len(records) {
+			t.Errorf("Compute() over %d records that bound nothing reported %d stale, want one each: %+v",
+				len(records), len(result.Stale), result.Stale)
 		}
 		if inEffect, reasons := result.InEffect, result.Reasons; inEffect != 0 || reasons != len(records) {
 			t.Errorf("Totals() over %d records that bound nothing = %d in effect and %d reasons, want 0 and %d",

@@ -26,7 +26,7 @@ func (f *Findings) Facts(ctx context.Context, name, version string) (*specfacts.
 	files := make(map[string]inventory.SymbolID)
 	for i := range f.Merged.Symbols {
 		if s := &f.Merged.Symbols[i]; s.Kind == inventory.KindFile {
-			files[s.Pos.Filename] = s.ID
+			files[s.File] = s.ID
 		}
 	}
 	generated := make(map[string]bool)
@@ -170,7 +170,7 @@ func (p *Prepared) implementers(served map[inventory.SymbolID][]facts.Binding, g
 		e := &p.Exemptions[i]
 		method := symbols[e.ID]
 		if _, ok := served[e.Via]; !ok || e.Class != string(vocab.InterfaceSatisfaction) || method == nil ||
-			method.Kind != inventory.KindMethod || method.InTestFile || method.TestSupport || generated[method.Pos.Filename] ||
+			method.Kind != inventory.KindMethod || method.InTestFile || method.TestSupport || generated[method.File] ||
 			slices.Contains(answering[e.Via], e.ID) {
 			continue
 		}
@@ -205,8 +205,8 @@ func (p *Prepared) implementerRecords(held []specfacts.Binding, implementers map
 // reaches, and the search of each implementer it does not reach.
 type searches struct {
 	k         *liveness.Carriage
-	ids       map[string]inventory.SymbolID // every reported symbol, by its reference
-	from      map[string]liveness.Reach     // per unreached implementer's reference, its search
+	ids       map[string][]inventory.SymbolID // per reference, the declarations a record of it names
+	from      map[string]liveness.Reach       // per unreached implementer's reference, its search
 	generated map[string]bool
 	hand      liveness.Reach
 	order     []string // the unreached implementers, in record order
@@ -238,34 +238,40 @@ func (f *Findings) states(ctx context.Context, records []specfacts.Binding, k *l
 // hand-written code does not reach.
 func (f *Findings) searches(records []specfacts.Binding, k *liveness.Carriage, generated map[string]bool) *searches {
 	s := &searches{
-		k: k, hand: k.Hand(), ids: make(map[string]inventory.SymbolID, len(f.Merged.Symbols)),
+		k: k, hand: k.Hand(), ids: make(map[string][]inventory.SymbolID, len(f.Merged.Symbols)),
 		from: make(map[string]liveness.Reach), generated: generated,
 	}
+	// A record names a reference, which each configuration's alternative of one
+	// declaration shares and a blank member shares with its container.
 	for i := range f.Merged.Symbols {
-		if ref := f.Refs[f.Merged.Symbols[i].ID]; ref != "" {
-			s.ids[ref] = f.Merged.Symbols[i].ID
+		if one := &f.Merged.Symbols[i]; !one.Blank && f.Refs[one.ID] != "" {
+			s.ids[f.Refs[one.ID]] = append(s.ids[f.Refs[one.ID]], one.ID)
 		}
 	}
 	for i := range records {
 		r := &records[i]
-		if _, searched := s.from[r.Symbol]; r.Role == specfacts.RoleImplementer && !searched && !s.hand.Holds(s.ids[r.Symbol]) {
-			s.from[r.Symbol] = k.Search(s.ids[r.Symbol])
+		if _, searched := s.from[r.Symbol]; r.Role == specfacts.RoleImplementer && !searched && !s.holds(s.hand, r.Symbol) {
+			s.from[r.Symbol] = k.Search(s.ids[r.Symbol]...)
 			s.order = append(s.order, r.Symbol)
 		}
 	}
 	return s
 }
 
+// holds reports whether the reach holds a declaration the reference names.
+func (s *searches) holds(r liveness.Reach, ref string) bool {
+	return slices.ContainsFunc(s.ids[ref], r.Holds)
+}
+
 // decide gives one consumer or implementer record its state, its via and, for a
 // dead implementer, the pending finding found.
 func (s *searches) decide(r *specfacts.Binding, found *implementerFinding) {
-	id := s.ids[r.Symbol]
-	if s.hand.Holds(id) {
+	if s.holds(s.hand, r.Symbol) {
 		r.State = specfacts.StateLive
 		return
 	}
 	for _, other := range s.order {
-		if other != r.Symbol && s.from[other].Holds(id) {
+		if other != r.Symbol && s.holds(s.from[other], r.Symbol) {
 			r.Via = append(r.Via, other)
 		}
 	}
@@ -320,22 +326,30 @@ func (f *Findings) pending(ctx context.Context, s *searches) (map[string]*implem
 		}
 		next++
 		component := findings.ComponentID(next)
-		one := &implementerFinding{finding: found.Result.Findings[at].Document()}
+		one := &implementerFinding{finding: found.Result.Findings[at].Document(), carried: s.carried(found.Result.Findings, ref, reported)}
 		one.finding.Component.ID = component
-		for i := range found.Result.Findings {
-			c := &found.Result.Findings[i]
-			id := s.ids[c.Symbol.Ref]
-			if _, implementer := s.from[c.Symbol.Ref]; implementer || reported[c.Symbol.Ref] || c.Live || c.Generated ||
-				c.TestOnly || !s.from[ref].Holds(id) || s.hand.Holds(id) {
-				continue
-			}
-			carried := c.Document()
-			carried.Component.ID = component
-			one.carried = append(one.carried, carried)
+		for i := range one.carried {
+			one.carried[i].Component.ID = component
 		}
 		held[ref] = one
 	}
 	return held, nil
+}
+
+// carried is the findings of all that one unreached implementer's search alone
+// reaches ([Findings.pending]).
+func (s *searches) carried(all []findings.Finding, ref string, reported map[string]bool) []report.Finding {
+	var found []report.Finding
+	for i := range all {
+		c := &all[i]
+		id := c.Declaration()
+		if _, implementer := s.from[c.Symbol.Ref]; implementer || id == "" || reported[c.Symbol.Ref] || c.Live || c.Generated ||
+			c.TestOnly || !s.from[ref].Holds(id) || s.hand.Holds(id) {
+			continue
+		}
+		found = append(found, c.Document())
+	}
+	return found
 }
 
 // withoutGenerated is the findings pass over the production sweep with the
@@ -345,11 +359,13 @@ func (f *Findings) pending(ctx context.Context, s *searches) (map[string]*implem
 func (f *Findings) withoutGenerated(ctx context.Context, s *searches) (*Findings, error) {
 	unreached := make(map[inventory.SymbolID]bool, len(s.order))
 	for _, ref := range s.order {
-		unreached[s.ids[ref]] = true
+		for _, id := range s.ids[ref] {
+			unreached[id] = true
+		}
 	}
 	generated := make(map[inventory.SymbolID]bool)
 	for i := range f.Merged.Symbols {
-		if one := &f.Merged.Symbols[i]; s.generated[one.Pos.Filename] {
+		if one := &f.Merged.Symbols[i]; s.generated[one.File] {
 			generated[one.ID] = true
 		}
 	}

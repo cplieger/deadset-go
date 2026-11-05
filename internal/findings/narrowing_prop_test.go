@@ -121,6 +121,7 @@ func (d *narrowedInventory) declare(file, pkgPath, name string, exported bool) i
 		PkgPath:  pkgPath,
 		Pos:      token.Position{Filename: file, Line: line, Column: 1},
 		EndLine:  line,
+		File:     file,
 		Kind:     inventory.KindFunc,
 		Exported: exported,
 	})

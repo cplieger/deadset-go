@@ -1,0 +1,28 @@
+wrap embeds selfish, so wrap's method set holds selfish's MarshalJSON, and
+encoding/json marshals a wrap by calling it: the method is read, and selfish's
+field Z, which the method never reads and the encoder never walks, is not.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type selfish struct{ Z int }
+
+func (selfish) MarshalJSON() ([]byte, error) { return []byte("1"), nil }
+
+type wrap struct{ selfish }
+
+func main() {
+	out, _ := json.Marshal(wrap{})
+	fmt.Println(string(out))
+}

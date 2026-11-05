@@ -78,6 +78,7 @@ type linkname struct {
 type linknameFact struct {
 	id     inventory.SymbolID
 	detail string
+	file   string // [Exemption.File]
 	site   token.Position
 }
 
@@ -108,11 +109,12 @@ func (d *linkname) mechanisms(p *packages.Package) error {
 func (d *linkname) exemptions() []Exemption {
 	found := make([]Exemption, 0, len(d.found))
 	for f := range d.found {
-		found = append(found, Exemption{ID: f.id, Class: string(vocab.LinknameCgoAsmPlugin), Site: f.site, Detail: f.detail})
+		found = append(found, Exemption{ID: f.id, Class: string(vocab.LinknameCgoAsmPlugin), File: f.file, Site: f.site, Detail: f.detail})
 	}
 	slices.SortFunc(found, func(a, b Exemption) int {
 		return cmp.Or(
 			inventory.ByPosition(a.Site, b.Site),
+			strings.Compare(a.File, b.File),
 			cmp.Compare(a.ID, b.ID),
 			strings.Compare(a.Detail, b.Detail),
 		)
@@ -131,7 +133,7 @@ func (d *linkname) keep(obj types.Object, site token.Pos, detail string) error {
 	if err != nil {
 		return err
 	}
-	d.at(id, rendered, detail)
+	d.found[linknameFact{id: id, site: rendered, file: d.in.Resolve.File(site), detail: detail}] = struct{}{}
 	return nil
 }
 
@@ -154,7 +156,7 @@ func (d *linkname) linkable(obj types.Object) (inventory.SymbolID, bool) {
 // assembly file names one: the file is not parsed, so its directives have no
 // position in the file set.
 func (d *linkname) at(id inventory.SymbolID, site token.Position, detail string) {
-	d.found[linknameFact{id: id, site: site, detail: detail}] = struct{}{}
+	d.found[linknameFact{id: id, site: site, file: site.Filename, detail: detail}] = struct{}{}
 }
 
 // assembly retains every declaration a TEXT directive of one of the package's own
@@ -204,7 +206,7 @@ func (d *linkname) plugin(p *packages.Package) error {
 		if f == nil {
 			continue
 		}
-		if _, test := inventory.IsTestFile(d.in.Result.Fset.Position(f.FileStart).Filename); test {
+		if d.in.Resolve.Positions().InTestFile(f.FileStart) {
 			continue
 		}
 		if err := d.keep(obj, f.Package, detailPluginMain); err != nil {

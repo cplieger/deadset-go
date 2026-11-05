@@ -40,10 +40,16 @@ var (
 	docsSpecLink        = regexp.MustCompile(`github\.com/cplieger/deadset-spec/(?:blob|tree)/([^/)\s]+)/`)
 )
 
+// reports reports whether this analyzer reports one code: an emitter's, or the stale
+// suppression the findings pass's ledger reports as a record of its own.
+func reports(code vocab.Code) bool {
+	return findings.Emitters[code] != nil || code == vocab.StaleSuppression
+}
+
 // TestEveryReportedKindHasADocumentationEntry reads the kinds page and refuses a
 // code this command answers that the page says nothing about.
 //
-// The population is findings.Emitters plus the live Go kinds it holds no rule for,
+// The population is the codes [reports] answers plus the other live Go kinds,
 // which another product reports, which is every code a reader of this analyzer's
 // documentation can meet: one in a report it wrote, and one in a merged report the
 // edge evaluations it published produced.
@@ -56,16 +62,16 @@ func TestEveryReportedKindHasADocumentationEntry(t *testing.T) {
 
 	page := docPage(t, "kinds.md")
 	sections := matched(docsKindHeading, page)
-	for _, code := range slices.Sorted(maps.Keys(findings.Emitters)) {
-		if !slices.Contains(sections, string(code)) {
-			t.Errorf("docs/kinds.md carries %d kind sections and none for %s, which findings.Emitters reports",
+	for _, row := range vocab.Kinds() {
+		if code := row.Code; reports(code) && !slices.Contains(sections, string(code)) {
+			t.Errorf("docs/kinds.md carries %d kind sections and none for %s, which this analyzer reports",
 				len(sections), code)
 		}
 	}
 	entries := docsKindEntries(page)
 	for _, row := range vocab.Kinds() {
 		code := row.Code
-		if !row.AppliesTo(vocab.Go) || findings.Emitters[code] != nil {
+		if !row.AppliesTo(vocab.Go) || reports(code) {
 			continue
 		}
 		if !slices.Contains(entries, string(code)) {
@@ -77,7 +83,7 @@ func TestEveryReportedKindHasADocumentationEntry(t *testing.T) {
 
 // TestEveryDocumentedKindSectionIsOneThisAnalyzerReports is the other direction: a
 // section of the kinds page states what a run does under one code, so a section for
-// a code no emitter answers documents a kind this analyzer does not report.
+// a code [reports] does not answer documents a kind this analyzer does not report.
 //
 // A code this analyzer does not report is a table row instead, which carries which
 // product reports it or why it is absent, so the two forms are what separates the
@@ -87,9 +93,8 @@ func TestEveryDocumentedKindSectionIsOneThisAnalyzerReports(t *testing.T) {
 
 	sections := matched(docsKindHeading, docPage(t, "kinds.md"))
 	for _, code := range sections {
-		if findings.Emitters[vocab.Code(code)] == nil {
-			t.Errorf("docs/kinds.md carries a section for %s, want a section only for a code findings.Emitters reports: %v",
-				code, slices.Sorted(maps.Keys(findings.Emitters)))
+		if !reports(vocab.Code(code)) {
+			t.Errorf("docs/kinds.md carries a section for %s, want a section only for a code this analyzer reports", code)
 		}
 	}
 }

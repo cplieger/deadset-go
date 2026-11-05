@@ -1,6 +1,6 @@
 One command whose function body holds a line directive naming a file of the target
 too short to hold the positions it maps. The local the directive covers is no
-declaration the inventory holds, and its position still does not render.
+declaration the inventory holds, and its position renders all the same.
 
 -- go.mod --
 module example.com/unrendered

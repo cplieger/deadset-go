@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"go/types"
 	"slices"
+
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
 )
 
 // selfEncoder is one method an encoder calls instead of walking fields, with the
@@ -45,14 +47,14 @@ func (f *encodingFlow) selfEncodedReach(t types.Type, directions methodReach) se
 	found := f.encodedTypes(t)
 	seen := make(map[string]bool, len(found))
 	for _, named := range found {
-		seen[types.TypeString(named, nil)] = true
+		seen[resolve.Spell(named, nil)] = true
 	}
 	for at := 0; at < len(found); at++ {
-		if encoded[types.TypeString(found[at], nil)] {
+		if encoded[resolve.Spell(found[at], nil)] {
 			continue
 		}
 		for _, next := range f.membersReached(found[at]) {
-			if key := types.TypeString(next, nil); !seen[key] {
+			if key := resolve.Spell(next, nil); !seen[key] {
 				seen[key] = true
 				found = append(found, next)
 			}
@@ -80,13 +82,13 @@ func (f *encodingFlow) addressing(t types.Type) map[string]*meeting {
 	for len(stack) > 0 {
 		cur := stack[len(stack)-1]
 		stack = stack[:len(stack)-1]
-		key := fmt.Sprint(cur.addressable, types.TypeString(cur.t, nil))
+		key := fmt.Sprint(cur.addressable, resolve.Spell(cur.t, nil))
 		if cur.t == nil || seen[key] {
 			continue
 		}
 		seen[key] = true
 		if named, isNamed := types.Unalias(cur.t).(*types.Named); isNamed {
-			spelled := types.TypeString(named, nil)
+			spelled := resolve.Spell(named, nil)
 			if met[spelled] == nil {
 				met[spelled] = &meeting{named: named}
 			}
@@ -134,10 +136,11 @@ func (f *encodingFlow) beneath(cur walkStep) []walkStep {
 	return nil
 }
 
-// keepPromoting keeps each embedded field through which a type that encodes itself
-// has the encoding method an encoder calls, the first of its direction's [selfEncoders]
-// the type has, because calling the method reads that field. A method only some
-// encoders call ([selfEncoder.some]) leaves the others to go on to the next.
+// keepPromoting keeps the encoding method an encoder calls on a type that encodes
+// itself, the first of its direction's [selfEncoders] the type has, and each embedded
+// field through which the type has it, because calling the method reads that field.
+// A method only some encoders call ([selfEncoder.some]) leaves the others to go on to
+// the next.
 func (f *encodingFlow) keepPromoting(named *types.Named, site evidence, d *destination) {
 	set := types.NewMethodSet(types.NewPointer(named))
 	for direction, methods := range selfEncoders {
@@ -149,9 +152,7 @@ func (f *encodingFlow) keepPromoting(named *types.Named, site evidence, d *desti
 			if sel == nil {
 				continue
 			}
-			if len(sel.Index()) > 1 {
-				f.keepEmbedded(named, sel.Index()[:len(sel.Index())-1], site, d)
-			}
+			f.kept.promoted(named, sel, site, d.detail)
 			if !m.some {
 				break
 			}
@@ -159,9 +160,15 @@ func (f *encodingFlow) keepPromoting(named *types.Named, site evidence, d *desti
 	}
 }
 
-// keepEmbedded keeps each embedded field a path of field indices crosses from t.
-func (f *encodingFlow) keepEmbedded(t types.Type, path []int, site evidence, d *destination) {
-	for _, i := range path {
+// promoted keeps, for a method t has by promotion, the method and each embedded
+// field its selection crosses from t, because calling it on t reads those fields.
+// A method t declares itself keeps nothing here.
+func (r *retention) promoted(t types.Type, sel *types.Selection, site evidence, detail string) {
+	path := sel.Index()
+	if len(path) < 2 {
+		return
+	}
+	for _, i := range path[:len(path)-1] {
 		if pointer, isPointer := t.Underlying().(*types.Pointer); isPointer {
 			t = pointer.Elem()
 		}
@@ -169,9 +176,10 @@ func (f *encodingFlow) keepEmbedded(t types.Type, path []int, site evidence, d *
 		if !isStruct {
 			return
 		}
-		f.kept.record(st.Field(i), site, d.detail)
+		r.record(st.Field(i), site, detail)
 		t = st.Field(i).Type()
 	}
+	r.record(sel.Obj(), site, detail)
 }
 
 // encodesItself reports whether a type met by a walk encodes itself in every one of

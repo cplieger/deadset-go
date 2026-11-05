@@ -1,0 +1,68 @@
+A line directive renders the interface in z.go and the assertion in a.go at
+gen.proto. The directive above the interface names the assertion written in
+z.go and not the one written in a.go, whatever path both render under.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- z.go --
+package main
+
+func main() { _ = impl{}.write() + other{}.write() }
+
+//line gen.proto:20:1
+//deadset:ignore DS1203 -- wanted
+type writer interface {
+	write() int
+}
+
+type impl struct{}
+
+func (impl) write() int { return 2 }
+
+var _ writer = impl{}
+-- a.go --
+package main
+
+type other struct{}
+
+func (other) write() int { return 3 }
+
+//line gen.proto:2:1
+var _ writer = other{}
+-- gen.proto --
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32

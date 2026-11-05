@@ -1,0 +1,33 @@
+A local type e holds a field of the outer local type e that a block shadows.
+Encoding the inner e reads both, so alpha.X and bravo.Y are read.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type alpha struct{ X int }
+
+type bravo struct{ Y int }
+
+func main() {
+	type e struct{ A alpha }
+	type outer = e
+	{
+		type e struct {
+			B bravo
+			O outer
+		}
+		out, _ := json.Marshal(e{B: bravo{Y: 2}, O: outer{A: alpha{X: 1}}})
+		fmt.Println(string(out))
+	}
+}

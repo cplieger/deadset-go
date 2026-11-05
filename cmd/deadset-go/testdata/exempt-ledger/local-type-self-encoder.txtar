@@ -1,0 +1,36 @@
+A local type e holds a field of the outer local type e that a block shadows;
+the outer e holds a self-encoding selfish. Encoding the inner e calls
+selfish.MarshalJSON and reads plain.Y.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type selfish struct{ Z int }
+
+func (selfish) MarshalJSON() ([]byte, error) { return []byte("1"), nil }
+
+type plain struct{ Y int }
+
+func main() {
+	type e struct{ S selfish }
+	type outer = e
+	{
+		type e struct {
+			P plain
+			O outer
+		}
+		out, _ := json.Marshal(e{P: plain{Y: 2}, O: outer{S: selfish{Z: 1}}})
+		fmt.Println(string(out))
+	}
+}

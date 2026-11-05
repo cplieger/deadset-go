@@ -1,0 +1,43 @@
+The windows configuration names its declaration of the interface as a type
+outside the assertion, so the assertion is used there and is not reported:
+a declaration is reported only when it is dead in every configuration.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}, "analysis": {"configurations": [
+  {"id": "linux-amd64", "os": "linux", "arch": "amd64"},
+  {"id": "windows-amd64", "os": "windows", "arch": "amd64"}]}}
+-- main.go --
+package main
+
+func main() { _ = impl{}.write() }
+
+type impl struct{}
+
+func (impl) write() int { return 2 }
+-- iface_linux.go --
+package main
+
+type writer interface {
+	write() int
+}
+-- iface_windows.go --
+package main
+
+type writer interface {
+	write() int
+}
+-- a.go --
+package main
+
+var _ writer = impl{}
+-- use_windows.go --
+package main
+
+func init() {
+	var w writer = impl{}
+	_ = w
+}

@@ -1,0 +1,107 @@
+Line directives render the interface at gen.y and its assertion, written in
+the same file, at other.y. The directive above the interface names the
+assertion written in its own file, so nothing is reported and nothing is stale.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- z.go --
+package main
+
+func main() { _ = impl{}.write() }
+
+//line gen.y:20:1
+//deadset:ignore DS1203 -- wanted
+type writer interface {
+	write() int
+}
+
+type impl struct{}
+
+func (impl) write() int { return 2 }
+
+//line other.y:5:1
+var _ writer = impl{}
+-- gen.y --
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39
+-- other.y --
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
+27
+28
+29
+30
+31
+32
+33
+34
+35
+36
+37
+38
+39

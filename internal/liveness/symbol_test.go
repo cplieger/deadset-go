@@ -10,6 +10,7 @@ import (
 	"go/types"
 	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -122,7 +123,7 @@ func render(symbols []inventory.Symbol) string {
 	for _, s := range symbols {
 		fmt.Fprintf(&b, "%s:%d:%d-%d\t%s\t%s\t%s\tparent=%s\texported=%t\tblank=%t\n",
 			s.Pos.Filename, s.Pos.Line, s.Pos.Column, s.EndLine,
-			s.Kind, s.Ref, s.Name, s.Parent, s.Exported, s.Blank)
+			s.Kind, s.Ref, s.Name, onlyParent(s), s.Exported, s.Blank)
 	}
 	return b.String()
 }
@@ -287,10 +288,19 @@ func TestSymbolsNamesEveryMemberWithItsContainer(t *testing.T) {
 	}
 }
 
+// onlyParent is the one container a configuration's inventory gives a symbol, or
+// the empty identifier for a package.
+func onlyParent(s inventory.Symbol) inventory.SymbolID {
+	if len(s.Parents) == 0 {
+		return ""
+	}
+	return s.Parents[0]
+}
+
 // parentRef resolves one symbol's container to that container's reference.
 func parentRef(byRef map[string]inventory.Symbol, s inventory.Symbol) string {
 	for _, candidate := range byRef {
-		if candidate.ID == s.Parent {
+		if candidate.ID == onlyParent(s) {
 			return candidate.Ref
 		}
 	}
@@ -420,9 +430,12 @@ func TestSymbolsOrderIsTheSameOnEveryCall(t *testing.T) {
 	}
 }
 
-func TestSymbolsIDIsTheRenderedPosition(t *testing.T) {
+func TestSymbolsIDIsTheWrittenPositionOrForAPackageItsPathAndDirectory(t *testing.T) {
 	for _, s := range symbolsOf(t, "every-kind.txtar") {
 		want := inventory.SymbolID(fmt.Sprintf("%s:%d:%d", s.Pos.Filename, s.Pos.Line, s.Pos.Column))
+		if s.Kind == inventory.KindPackage {
+			want = inventory.SymbolID(s.PkgPath + " " + path.Dir(s.File) + "/")
+		}
 		if s.ID != want {
 			t.Errorf("Symbols(every-kind.txtar)[%s].ID = %q, want %q", s.Ref, s.ID, want)
 		}
@@ -550,7 +563,7 @@ func TestSymbolsGivesABlankDeclarationItsContainersReference(t *testing.T) {
 			if got.Ref != tc.ref {
 				t.Errorf("Symbols(every-kind.txtar) blank %q has Ref %q, want %q", tc.name, got.Ref, tc.ref)
 			}
-			if parent := byID[got.Parent]; parent.Ref != tc.ref {
+			if parent := byID[onlyParent(got)]; parent.Ref != tc.ref {
 				t.Errorf("Symbols(every-kind.txtar) blank %q has parent %q, want the symbol whose Ref is %q",
 					tc.name, parent.Ref, tc.ref)
 			}
@@ -579,8 +592,8 @@ func TestSymbolsGivesAMethodTypeParameterItsOwnBracketedReference(t *testing.T) 
 	if parameter.Ref != parameterRef {
 		t.Errorf("Symbols(every-kind.txtar) type parameter of %s has Ref %q, want %q", methodRef, parameter.Ref, parameterRef)
 	}
-	if parameter.Parent != method.ID {
-		t.Errorf("Symbols(every-kind.txtar) type parameter of %s has Parent %q, want %q", methodRef, parameter.Parent, method.ID)
+	if !slices.Equal(parameter.Parents, []inventory.SymbolID{method.ID}) {
+		t.Errorf("Symbols(every-kind.txtar) type parameter of %s has Parents %q, want %q", methodRef, parameter.Parents, method.ID)
 	}
 	if parameter.Pos.Line != method.Pos.Line || parameter.Pos.Column == method.Pos.Column {
 		t.Errorf("Symbols(every-kind.txtar) type parameter is at %s:%d:%d and the method at %s:%d:%d, want one line and two columns",

@@ -1,0 +1,26 @@
+A command whose dead functions da in a.go and db in b.go each call helper, at
+one byte of each file that a line directive renders at main.go:20:13. The kind
+that would report helper is allowed, so explain lists both references.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}, "severity": {"DS1002": "allow"}}
+-- a.go --
+package main
+
+//line main.go:20:1
+func da() { helper() }
+-- b.go --
+package main
+
+//line main.go:20:1
+func db() { helper() }
+-- main.go --
+package main
+
+func main() {}
+
+func helper() {}

@@ -143,15 +143,16 @@ func (s *satisfactionScan) retain(in *Program, c *facts.Conversion, retained []E
 	if err != nil {
 		return nil, err
 	}
+	file := in.Resolve.File(c.Site)
 	holder, coHolders, asserted := in.holderOf(c)
 	if asserted != "" && holder != "" {
 		retained = append(retained, Exemption{
-			ID: asserted, Class: string(vocab.InterfaceSatisfaction), Consumer: consumer, Site: site,
+			ID: asserted, Class: string(vocab.InterfaceSatisfaction), Consumer: consumer, File: file, Site: site,
 			Detail: "asserts " + c.Name, Holder: holder,
 		})
 	}
 	held := Exemption{
-		Class: string(vocab.InterfaceSatisfaction), Consumer: consumer, Site: site,
+		Class: string(vocab.InterfaceSatisfaction), Consumer: consumer, File: file, Site: site,
 		Detail: "satisfies " + c.Name, Holder: holder, CoHolders: coHolders,
 	}
 	for _, m := range methods {
@@ -260,7 +261,7 @@ type outsideAssertions struct {
 	program   map[string]bool
 	assert    *assertable
 	methodsOf map[outsideKey][]types.Object    // the methods retained, by type and package
-	names     map[*types.Named]map[string]bool // the names a type or a pointer to it declares
+	ids       map[*types.Named]map[string]bool // [declaredMethodIDs], by type
 	errorsOf  map[string][]errorAnswer         // [outsideAssertions.ofError], by exact type
 	holding   *[]*types.Named                  // [outsideAssertions.errorHolders], on first use
 }
@@ -285,7 +286,7 @@ func newOutsideAssertions(in *Program) *outsideAssertions {
 		program:   programPaths(in),
 		assert:    in.assert,
 		methodsOf: make(map[outsideKey][]types.Object),
-		names:     make(map[*types.Named]map[string]bool),
+		ids:       make(map[*types.Named]map[string]bool),
 		errorsOf:  make(map[string][]errorAnswer),
 	}
 }
@@ -305,15 +306,15 @@ func (o *outsideAssertions) ofError(t types.Type) []errorAnswer {
 	if held, known := o.errorsOf[key]; known {
 		return held
 	}
-	names, known := o.names[named]
+	ids, known := o.ids[named]
 	if !known {
-		names = declaredMethodNames(named)
-		o.names[named] = names
+		ids = declaredMethodIDs(named)
+		o.ids[named] = ids
 	}
 	var held []errorAnswer
 	for _, holder := range o.errorHolders() {
 		iface, _ := holder.Underlying().(*types.Interface)
-		if iface.NumMethods() <= 1 || !namesEvery(names, iface) || !types.Implements(t, iface) || !o.assert.assertsOwn(holder) {
+		if iface.NumMethods() <= 1 || !declaresEvery(ids, iface) || !types.Implements(t, iface) || !o.assert.assertsOwn(holder) {
 			continue
 		}
 		for _, one := range satisfying(t, iface) {
@@ -364,15 +365,15 @@ func (o *outsideAssertions) methods(t types.Type, pkg *types.Package) []types.Ob
 	if held, known := o.methodsOf[key]; known {
 		return held
 	}
-	names, known := o.names[named]
+	ids, known := o.ids[named]
 	if !known {
-		names = declaredMethodNames(named)
-		o.names[named] = names
+		ids = declaredMethodIDs(named)
+		o.ids[named] = ids
 	}
-	satisfied := satisfiedMethods(named, names, o.assert.asserted(pkg))
+	satisfied := satisfiedMethods(named, ids, o.assert.asserted(pkg))
 	var held []types.Object
 	for selection := range types.NewMethodSet(types.NewPointer(named)).Methods() {
-		if satisfied[selection.Obj().Name()] {
+		if satisfied[selection.Obj().Id()] {
 			held = append(held, selection.Obj())
 		}
 	}

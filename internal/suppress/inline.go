@@ -1,246 +1,219 @@
 package suppress
 
 import (
+	"cmp"
 	"go/ast"
 	"go/token"
-	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
+	core "github.com/cplieger/deadset-spec/v8/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
-// The three expressions the grammar fixes, applied to the text of each line
-// comment in this order: the first recognizes a comment in the namespace, the
-// second a well-formed directive, the third a directive that lacks only its
-// reason. A comment matching none of the three is not a directive and nothing
-// happens; one in the namespace that matches neither of the last two is
-// malformed. They are transcribed from the published grammar and a test asserts
-// each is byte-identical to the line that grammar carries.
-var (
-	directiveCandidate = regexp.MustCompile(`^//[ \t]*deadset:`)
-
-	directiveWellFormed = regexp.MustCompile(`^//[ \t]*deadset:ignore[ \t]+(?<codes>DS[0-9]{4}(?:,DS[0-9]{4})*)[ \t]+--[ \t]+(?<reason>[^ \t\r\n][^\r\n]*?)[ \t]*$`)
-
-	directiveNoReason = regexp.MustCompile(`^//[ \t]*deadset:ignore[ \t]+(?<codes>DS[0-9]{4}(?:,DS[0-9]{4})*)(?:[ \t]+--)?[ \t]*$`)
-)
-
-// directiveForm is the form a malformed directive is told to take.
-const directiveForm = "//deadset:ignore DS0000[,DS0000...] -- <reason>"
-
-// codeSeparator joins the codes of one directive, with no whitespace inside the
-// list.
-const codeSeparator = ","
-
-// verdict is what the grammar's decision procedure says one comment is.
-type verdict uint8
-
-const (
-	verdictNone      verdict = iota // not a directive: nothing happens, whatever else it says
-	verdictDirective                // a directive: one record per code, each carrying the reason
-	verdictNoReason                 // a directive with no reason: refused, and it binds nothing
-	verdictMalformed                // in the namespace and malformed: the run ends
-)
-
-// classify applies the three expressions to the text of one comment, in the
-// grammar's order, and returns what the comment is with the codes and the reason
-// it names.
-func classify(text string) (is verdict, codes []vocab.Code, reason string) {
-	if !directiveCandidate.MatchString(text) {
-		return verdictNone, nil, ""
-	}
-	if match := directiveWellFormed.FindStringSubmatch(text); match != nil {
-		return verdictDirective,
-			codesOf(directiveWellFormed, match),
-			match[directiveWellFormed.SubexpIndex("reason")]
-	}
-	if match := directiveNoReason.FindStringSubmatch(text); match != nil {
-		return verdictNoReason, codesOf(directiveNoReason, match), ""
-	}
-	return verdictMalformed, nil, ""
+// Configuration is one build configuration's load, with the declarations
+// enumerated from it and the resolver over them.
+type Configuration struct {
+	Result  *load.Result
+	Resolve *resolve.Resolver
+	Symbols []inventory.Symbol
 }
 
-// codesOf splits the code list one expression captured.
-func codesOf(expression *regexp.Regexp, match []string) []vocab.Code {
-	spelled := strings.Split(match[expression.SubexpIndex("codes")], codeSeparator)
-	codes := make([]vocab.Code, len(spelled))
-	for i, code := range spelled {
-		codes[i] = vocab.Code(code)
+// Inline reads every inline directive the configurations compile. A directive is
+// one record per code and per declaration any configuration placed it on, or one
+// per code bound to nothing where none did; one lacking only its reason is one
+// [core.Refusal] per code, and any other comment in the namespace ends the read
+// with a [core.MalformedError], the first in reading order: by rendered
+// position, then by written byte.
+func Inline(configurations []Configuration) ([]core.Record, []core.Refusal, error) {
+	read := map[writtenAt]*directive{}
+	for i := range configurations {
+		if err := placeAll(&configurations[i], read); err != nil {
+			return nil, nil, err
+		}
 	}
-	return codes
-}
-
-// directive is one comment in the namespace: what the decision procedure made of
-// it, what it named, and where it is written.
-type directive struct {
-	text     string
-	reason   string
-	codes    []vocab.Code
-	at       token.Position
-	is       verdict
-	trailing bool // a token precedes it on its line
-}
-
-// Inline reads every inline directive of one loaded configuration and binds each to
-// the declarations it sits beside: alone on its line, to every declaration beginning
-// on the next line and the function whose wrapped signature declares a part there;
-// after a token on its line, the same on that line and never the next. A directive
-// anywhere else is a record bound to nothing, one lacking only its reason is a
-// [Refusal], and any other comment in the namespace is a [malformedError]. A file the
-// target root does not hold ends the read.
-func Inline(r *load.Result, rs *resolve.Resolver, symbols []inventory.Symbol) ([]Record, []Refusal, error) {
-	directives, err := namespaced(r, rs)
-	if err != nil {
-		return nil, nil, err
+	directives := make([]*directive, 0, len(read))
+	for _, d := range read {
+		directives = append(directives, d)
 	}
-
-	below := declarationLines(symbols)
-	if err := signatureLines(r, rs, symbols, below); err != nil {
-		return nil, nil, err
-	}
-	var records []Record
-	var refusals []Refusal
-	for i := range directives {
-		d := &directives[i]
-		switch d.is {
-		case verdictDirective:
-			line := d.at.Line + 1
-			if d.trailing {
-				line = d.at.Line
-			}
-			records = append(records, d.bind(below[site{file: d.at.Filename, line: line}])...)
-		case verdictNoReason:
-			refusals = append(refusals, d.refuse()...)
-		case verdictNone, verdictMalformed:
-			return nil, nil, &malformedError{
-				Text:      d.text,
-				Want:      directiveForm,
-				Site:      d.at,
-				Mechanism: MechanismInline,
-			}
+	slices.SortFunc(directives, func(a, b *directive) int {
+		return cmp.Or(inventory.ByPosition(a.at, b.at), strings.Compare(a.written.file, b.written.file), cmp.Compare(a.written.offset, b.written.offset))
+	})
+	var records []core.Record
+	var refusals []core.Refusal
+	for _, d := range directives {
+		switch d.read.Verdict {
+		case core.WellFormed:
+			records = append(records, d.records()...)
+		case core.Reasonless:
+			refusals = append(refusals, d.refusals()...)
+		case core.Malformed:
+			return nil, nil, core.MalformedDirective(d.text, d.site())
 		}
 	}
 	return records, refusals, nil
 }
 
-// bind returns one record per code the directive names and per declaration it
-// bound, and one record per code bound to nothing where it bound none, which is
-// the record a stale-suppression finding reports.
-func (d *directive) bind(bound []inventory.Symbol) []Record {
-	records := make([]Record, 0, len(d.codes)*max(len(bound), 1))
-	for _, code := range d.codes {
-		record := Record{
-			Code:      code,
-			Path:      d.at.Filename,
-			Reason:    d.reason,
-			Site:      d.at,
-			Mechanism: MechanismInline,
+// writtenAt is where a comment is written, which every configuration compiling
+// its file agrees on whatever line directive renders it.
+type writtenAt struct {
+	file   string
+	offset int
+}
+
+// directive is one comment in the namespace: what the grammar made of it, where
+// it renders, the written line it binds, and every declaration a configuration
+// placed it on.
+type directive struct {
+	read    core.Directive
+	bound   []inventory.Symbol
+	text    string
+	written writtenAt
+	target  line
+	at      token.Position
+}
+
+// site is where the directive renders and where it is written, as a record
+// carries it.
+func (d *directive) site() core.Site {
+	return core.Site{
+		Path: d.at.Filename, Line: d.at.Line, Column: d.at.Column,
+		Written: d.written.file + "@" + strconv.Itoa(d.written.offset),
+		File:    d.target.file,
+	}
+}
+
+// place adds the declarations one configuration holds on the line the directive
+// targets, each once.
+func (d *directive) place(below map[line][]inventory.Symbol) {
+	held := below[d.target]
+	for i := range held {
+		if !slices.ContainsFunc(d.bound, func(placed inventory.Symbol) bool { return placed.ID == held[i].ID }) {
+			d.bound = append(d.bound, held[i])
 		}
-		if len(bound) == 0 {
+	}
+}
+
+// records is one record per code and per declaration the directive bound.
+func (d *directive) records() []core.Record {
+	records := make([]core.Record, 0, len(d.read.Codes)*max(len(d.bound), 1))
+	for _, code := range d.read.Codes {
+		record := core.Record{Code: code, Path: d.at.Filename, Reason: d.read.Reason, Site: d.site(), Mechanism: core.Inline}
+		if len(d.bound) == 0 {
 			records = append(records, record)
 			continue
 		}
-		for i := range bound {
-			record.Symbol, record.Bound = bound[i].Ref, bound[i].ID
+		for i := range d.bound {
+			record.Symbol, record.Bound = d.bound[i].Ref, string(d.bound[i].ID)
 			records = append(records, record)
 		}
 	}
 	return records
 }
 
-// refuse returns one refusal per code a directive carrying no reason names,
-// because the finding each becomes reports one code.
-func (d *directive) refuse() []Refusal {
-	refusals := make([]Refusal, 0, len(d.codes))
-	for _, code := range d.codes {
-		refusals = append(refusals, Refusal{
-			Reported:  vocab.SuppressionWithoutReason,
-			Code:      code,
-			Path:      d.at.Filename,
-			Site:      d.at,
-			Mechanism: MechanismInline,
+// refusals is one refusal per code a directive carrying no reason names.
+func (d *directive) refusals() []core.Refusal {
+	refusals := make([]core.Refusal, 0, len(d.read.Codes))
+	for _, code := range d.read.Codes {
+		refusals = append(refusals, core.Refusal{
+			Reported: vocab.SuppressionWithoutReason, Code: code, Path: d.at.Filename, Site: d.site(), Mechanism: core.Inline,
 		})
 	}
 	return refusals
 }
 
-// namespaced returns every line comment of the configuration that is in the
-// namespace, in file order.
-//
-// One comment is read once whatever the number of package variants that
-// type-check the file holding it, because the load parses a file once and every
-// variant carries the same syntax tree. The order the load reported the packages
-// in does not reach the result: the comments are ordered by rendered position, so
-// the first malformed directive a read refuses is the first one written.
-func namespaced(r *load.Result, rs *resolve.Resolver) ([]directive, error) {
-	read := &comments{resolve: rs, fset: r.Fset, seen: make(map[token.Pos]bool)}
-	for _, p := range r.Packages {
+// placeAll reads the namespaced comments of one configuration into read and
+// places each well-formed one on that configuration's declarations. One comment
+// is read once whatever the number of package variants that type-check its file,
+// because every variant carries the same syntax tree.
+func placeAll(c *Configuration, read map[writtenAt]*directive) error {
+	below := declarationLines(c.Symbols)
+	signatureLines(c, below)
+	fset := c.Result.Fset
+	seen := map[token.Pos]bool{}
+	for _, p := range c.Result.Packages {
 		for _, f := range p.Syntax {
-			if err := read.file(f); err != nil {
-				return nil, err
-			}
-		}
-	}
-	found := read.found
-	slices.SortFunc(found, func(a, b directive) int { return inventory.ByPosition(a.at, b.at) })
-	return found, nil
-}
-
-// comments accumulates the line comments of one configuration that are in the
-// namespace, one per source site.
-type comments struct {
-	resolve *resolve.Resolver
-	fset    *token.FileSet
-	seen    map[token.Pos]bool
-	found   []directive
-}
-
-// file keeps every comment of one syntax tree that is in the namespace. A
-// position that does not render ends the read, because a comment the analysis
-// cannot place is a directive it cannot bind.
-func (c *comments) file(f *ast.File) error {
-	var first map[int]token.Pos
-	for _, group := range f.Comments {
-		for _, comment := range group.List {
-			text := lineText(comment)
-			is, codes, reason := classify(text)
-			if is == verdictNone || c.seen[comment.Slash] {
+			if seen[f.FileStart] {
 				continue
 			}
-			c.seen[comment.Slash] = true
-			at, err := c.resolve.Render(comment.Slash)
-			if err != nil {
+			seen[f.FileStart] = true
+			if err := placeFile(f, fset, c.Resolve, read, below); err != nil {
 				return err
 			}
-			if first == nil {
-				first = c.firstTokens(f)
-			}
-			line := c.fset.Position(comment.Slash).Line
-			leading, held := first[line]
-			c.found = append(c.found, directive{
-				text: text, reason: reason, codes: codes, at: at, is: is,
-				trailing: held && leading < comment.Slash,
-			})
 		}
 	}
 	return nil
 }
 
-// firstTokens is, per line of one file, the earliest position at which a syntax node
-// begins or ends on it, comments left out, which is what tells a comment written
-// after code on its line from one alone on it.
-func (c *comments) firstTokens(f *ast.File) map[int]token.Pos {
+// placeFile reads every comment of one syntax tree in the namespace into read
+// and places each well-formed one.
+func placeFile(f *ast.File, fset *token.FileSet, rs *resolve.Resolver, read map[writtenAt]*directive, below map[line][]inventory.Symbol) error {
+	var first map[int]token.Pos
+	for _, group := range f.Comments {
+		for _, comment := range group.List {
+			d, err := readComment(comment, fset, rs, read, func() map[int]token.Pos {
+				if first == nil {
+					first = firstTokens(f, fset)
+				}
+				return first
+			})
+			if err != nil {
+				return err
+			}
+			if d != nil && d.read.Verdict == core.WellFormed {
+				d.place(below)
+			}
+		}
+	}
+	return nil
+}
+
+// readComment is the directive one comment is, read once into read, and nil for
+// a comment outside the namespace. A position that does not render ends the
+// read, because a comment the analysis cannot place is a directive it cannot
+// bind.
+func readComment(comment *ast.Comment, fset *token.FileSet, rs *resolve.Resolver, read map[writtenAt]*directive,
+	first func() map[int]token.Pos,
+) (*directive, error) {
+	text := strings.TrimSuffix(comment.Text, "\r")
+	verdict := core.ReadDirective(text)
+	if verdict.Verdict == core.NotADirective {
+		return nil, nil
+	}
+	physical := fset.PositionFor(comment.Slash, false)
+	key := writtenAt{file: physical.Filename, offset: physical.Offset}
+	if d := read[key]; d != nil {
+		return d, nil
+	}
+	at, err := rs.Render(comment.Slash)
+	if err != nil {
+		return nil, err
+	}
+	target := line{file: rs.Positions().File(comment.Slash), line: physical.Line + 1}
+	if leading, held := first()[physical.Line]; held && leading < comment.Slash {
+		target.line = physical.Line
+	}
+	d := &directive{text: text, read: verdict, at: at, written: key, target: target}
+	read[key] = d
+	return d, nil
+}
+
+// firstTokens is, per written line of one file, the earliest position at which a
+// syntax node begins or ends on it, comments left out, which is what tells a
+// comment written after code on its line from one alone on it.
+func firstTokens(f *ast.File, fset *token.FileSet) map[int]token.Pos {
 	first := make(map[int]token.Pos)
 	keep := func(pos token.Pos) {
 		if !pos.IsValid() {
 			return
 		}
-		line := c.fset.Position(pos).Line
-		if held, seen := first[line]; !seen || pos < held {
-			first[line] = pos
+		written := fset.PositionFor(pos, false).Line
+		if held, seen := first[written]; !seen || pos < held {
+			first[written] = pos
 		}
 	}
 	ast.Inspect(f, func(n ast.Node) bool {
@@ -255,78 +228,57 @@ func (c *comments) firstTokens(f *ast.File) map[int]token.Pos {
 	return first
 }
 
-// lineText is the text of one comment from its first solidus to the end of its
-// line. A file whose lines end in a carriage return and a line feed carries the
-// carriage return in neither, because it terminates the line rather than
-// belonging to it.
-func lineText(c *ast.Comment) string {
-	return strings.TrimSuffix(c.Text, "\r")
-}
-
-// declarationLines indexes the inventory by the line each declaration begins on,
-// which is the line of the keyword of a declaration, of the name of a
-// specification inside a grouped declaration, of a field name inside a struct, or
-// of a method name inside an interface. A line that declares several symbols
-// holds each of them, and a line that opens a group declares none.
-//
-// A file and a package are left out. Neither is a declaration of the language, so
-// neither has a first token for a directive to sit above, and a directive
-// covering a whole file is not admitted: a suppression names one site so that its
-// staleness can be decided at that site.
-func declarationLines(symbols []inventory.Symbol) map[site][]inventory.Symbol {
-	below := make(map[site][]inventory.Symbol, len(symbols))
+// declarationLines indexes the inventory by the line each declaration begins on:
+// that of its keyword, or of its name inside a group, a struct or an interface. A
+// line declaring several symbols holds each, and a line opening a group none. A
+// file and a package have no first token for a directive to sit above, so they
+// are left out.
+func declarationLines(symbols []inventory.Symbol) map[line][]inventory.Symbol {
+	below := make(map[line][]inventory.Symbol, len(symbols))
 	for i := range symbols {
 		s := &symbols[i]
 		if s.Kind == inventory.KindFile || s.Kind == inventory.KindPackage {
 			continue
 		}
-		at := site{file: s.Pos.Filename, line: s.Pos.Line}
+		at := line{file: s.File, line: s.Line}
 		below[at] = append(below[at], *s)
 	}
 	return below
 }
 
-// site names one line of one file, which is what binds a directive to the
-// declarations written on the line below it.
-type site struct {
+// line names one line of one file as the file writes it, which a line directive
+// does not move: what binds a directive to the declarations written below it.
+type line struct {
 	file string
 	line int
 }
 
-// signatureLines adds to the index every line a wrapped function signature declares
-// a receiver, a parameter or a result on, below the line the function begins on, and
-// binds each to the function: a part of a signature is suppressed through the
-// declaration that holds it, and the directive for one on a later line of the
-// signature sits above it, inside the list.
-//
-// A file several package variants compile is read once, for the reason namespaced
-// gives.
-func signatureLines(r *load.Result, rs *resolve.Resolver, symbols []inventory.Symbol,
-	below map[site][]inventory.Symbol,
-) error {
-	byID := make(map[inventory.SymbolID]*inventory.Symbol, len(symbols))
-	for i := range symbols {
-		byID[symbols[i].ID] = &symbols[i]
+// signatureLines adds to the index every line a wrapped function signature
+// declares a receiver, a parameter or a result on, below the line the function
+// begins on, and binds each to the function: a part of a signature is suppressed
+// through the declaration that holds it, and the directive for one on a later
+// line of the signature sits above it, inside the list.
+func signatureLines(c *Configuration, below map[line][]inventory.Symbol) {
+	byID := make(map[inventory.SymbolID]*inventory.Symbol, len(c.Symbols))
+	for i := range c.Symbols {
+		byID[c.Symbols[i].ID] = &c.Symbols[i]
 	}
 	seen := make(map[token.Pos]bool)
-	for _, p := range r.Packages {
+	for _, p := range c.Result.Packages {
 		for _, f := range p.Syntax {
 			if seen[f.FileStart] {
 				continue
 			}
 			seen[f.FileStart] = true
-			if err := signatureLinesOf(f, rs, byID, below); err != nil {
-				return err
-			}
+			signatureLinesOf(f, c.Resolve, byID, below)
 		}
 	}
-	return nil
 }
 
 // signatureLinesOf adds the wrapped signature lines of one file's functions.
 func signatureLinesOf(f *ast.File, rs *resolve.Resolver, byID map[inventory.SymbolID]*inventory.Symbol,
-	below map[site][]inventory.Symbol,
-) error {
+	below map[line][]inventory.Symbol,
+) {
 	for _, decl := range f.Decls {
 		fn, isFunc := decl.(*ast.FuncDecl)
 		if !isFunc {
@@ -337,37 +289,28 @@ func signatureLinesOf(f *ast.File, rs *resolve.Resolver, byID map[inventory.Symb
 		if !inventoried || function == nil {
 			continue
 		}
-		lines, err := fieldLines(fn, rs)
-		if err != nil {
-			return err
-		}
-		for _, line := range lines {
-			if line.line == function.Pos.Line || slices.ContainsFunc(below[line], func(s inventory.Symbol) bool {
+		for _, at := range fieldLines(fn, rs.Positions()) {
+			if at.line == function.Line || slices.ContainsFunc(below[at], func(s inventory.Symbol) bool {
 				return s.ID == function.ID
 			}) {
 				continue
 			}
-			below[line] = append(below[line], *function)
+			below[at] = append(below[at], *function)
 		}
 	}
-	return nil
 }
 
 // fieldLines is the line every receiver, parameter and result of one function's
 // signature begins on, in signature order.
-func fieldLines(fn *ast.FuncDecl, rs *resolve.Resolver) ([]site, error) {
-	var lines []site
+func fieldLines(fn *ast.FuncDecl, positions *inventory.Positions) []line {
+	var lines []line
 	for _, list := range []*ast.FieldList{fn.Recv, fn.Type.Params, fn.Type.Results} {
 		if list == nil {
 			continue
 		}
 		for _, field := range list.List {
-			at, err := rs.Render(field.Pos())
-			if err != nil {
-				return nil, err
-			}
-			lines = append(lines, site{file: at.Filename, line: at.Line})
+			lines = append(lines, line{file: positions.File(field.Pos()), line: positions.Line(field.Pos())})
 		}
 	}
-	return lines, nil
+	return lines
 }

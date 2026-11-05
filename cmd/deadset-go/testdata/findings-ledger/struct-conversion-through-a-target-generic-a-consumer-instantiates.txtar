@@ -1,0 +1,47 @@
+A library generic that converts its type parameter to a struct type, which only a
+declared consumer instantiates, with the target's own S. The conversion keeps the
+fields of S and of wire identical, so each reads the other's, once the consumer's
+instantiation reaches the target's own type parameter.
+
+-- target/go.mod --
+module example.com/app
+
+go 1.27.1
+-- target/deadset.json --
+{"target": {"kind": "library"}, "consumers": {"complete": true}}
+-- target/lib.go --
+// Package app exports a type a consumer lays out.
+package app
+
+import "fmt"
+
+// S is converted by Wire.
+type S struct{ x int }
+
+type wire struct{ x int }
+
+// Wire converts v to its wire form.
+func Wire[T ~struct{ x int }](v T) string { return fmt.Sprint(wire(v)) }
+-- consumer/go.mod --
+module example.com/consumer
+
+go 1.27.1
+
+require example.com/app v0.0.0
+
+replace example.com/app => ../target
+-- consumer/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/app"
+)
+
+func main() { fmt.Println(app.Wire(app.S{})) }
+-- scope.json --
+{
+  "target": {"id": "example.com/app", "role": "target", "path": "target"},
+  "consumers": [{"id": "example.com/consumer", "role": "consumer", "path": "consumer"}]
+}

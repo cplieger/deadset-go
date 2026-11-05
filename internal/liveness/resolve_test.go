@@ -1,7 +1,6 @@
 package liveness
 
 import (
-	"errors"
 	"go/token"
 	"go/types"
 	"os"
@@ -228,7 +227,7 @@ func TestResolverResolvesWithoutReadingASource(t *testing.T) {
 	}
 }
 
-func TestResolverRefusesATargetFileWhosePositionsDoNotRender(t *testing.T) {
+func TestResolverRendersALocalUnderADirectiveNamingAShortFile(t *testing.T) {
 	dir := extract(t, "unrendered-local.txtar")
 	result, root := loadDir(t, dir, "linux", "amd64")
 	inv, err := inventory.Of(result, root, os.ReadFile)
@@ -236,7 +235,7 @@ func TestResolverRefusesATargetFileWhosePositionsDoNotRender(t *testing.T) {
 		t.Fatalf("Setup: inventory.Of(unrendered-local.txtar): %v", err)
 	}
 
-	if _, err := resolve.New(result, inv); !errors.Is(err, inventory.ErrSource) {
-		t.Errorf("resolve.New(unrendered-local.txtar) returned %v, want %v: the local x renders outside short.txt", err, inventory.ErrSource)
+	if _, err := resolve.New(result, inv); err != nil {
+		t.Errorf("resolve.New(unrendered-local.txtar) = %v, want nil: app.go writes the local x, so its column renders", err)
 	}
 }

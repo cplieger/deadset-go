@@ -1,0 +1,29 @@
+The two inits of equal-offset, with a type error in a.go's. The type error
+skips that init alone, so b.go's store is still reported.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- a.go --
+package main
+
+//line a.go:4:1
+func init() {
+	v := 1
+	v = 2
+	_ = v + missing
+}
+
+func main() {}
+-- b.go --
+package main
+
+//line a.go:4:1
+func init() {
+	w := 1
+	w = 2
+	_ = w
+}
