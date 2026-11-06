@@ -1,5 +1,5 @@
 module example.com/uncached
 
-go 1.27.2
+go 1.27.3
 
 require example.com/absent v1.0.0
