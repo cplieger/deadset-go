@@ -1,6 +1,6 @@
 module example.com/sigdeps
 
-go 1.27.2
+go 1.27.3
 
 require example.com/sigdep v0.0.0
 
