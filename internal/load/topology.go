@@ -64,7 +64,7 @@ func (t ModuleTree) Skips(path string) bool {
 // a package of t's module that is none of unit's packages ([program.4]): a
 // directory between them, dir included, is one t skips, and none roots a module.
 func (t ModuleTree) outside(unit, dir string) bool {
-	if !below(unit, dir) {
+	if !scope.Below(unit, dir) {
 		return false
 	}
 	skipped := false
@@ -80,10 +80,13 @@ func (t ModuleTree) outside(unit, dir string) bool {
 // OutsideDir is the directory the import path names in t's module, whose module
 // path is module, where it holds a package outside unit's packages that the
 // module's build compiles all the same when a package of unit imports it
-// ([program.4]), and false for any other path.
+// ([program.4]), and false for any other path. A path through a vendor directory,
+// other than as its last element, is none: the go command refuses it, as a
+// vendored package is imported by its own module's path (cmd/go FindVendor).
 func (t ModuleTree) OutsideDir(module, unit, importPath string) (string, bool) {
 	rest, found := strings.CutPrefix(importPath, module)
-	if module == "" || !found || (rest != "" && rest[0] != '/') {
+	vendored := strings.Contains(importPath, "/vendor/") || strings.HasPrefix(importPath, "vendor/")
+	if module == "" || !found || (rest != "" && rest[0] != '/') || vendored {
 		return "", false
 	}
 	dir := filepath.Join(t.root, filepath.FromSlash(rest))
@@ -94,7 +97,7 @@ func (t ModuleTree) OutsideDir(module, unit, importPath string) (string, bool) {
 // path, as the go command matches it: a ./ path is a prefix of path's elements below
 // the module root, any other path a run of them.
 func (t ModuleTree) ignores(path string) bool {
-	if t.root == "" || !below(t.root, path) {
+	if t.root == "" || !scope.Below(t.root, path) {
 		return false
 	}
 	dir := enclosed(unitPrefix(t.root, path))
@@ -115,11 +118,19 @@ func enclosed(p string) string {
 	return p
 }
 
-// treeAt is the tree of the module the toolchain run in dir reads, which ignores
-// nothing where that module file cannot be read: the load reports that file.
+// treeAt is the tree of the module the toolchain run in dir reads, the one whose
+// module file is in dir or the nearest directory above it, which ignores nothing
+// where that module file cannot be read: the load reports that file.
 func treeAt(dir string) ModuleTree {
-	f, _ := readModuleFile(dir)
-	return TreeOf(f)
+	for at := dir; ; at = filepath.Dir(at) {
+		if IsModuleRoot(at) {
+			f, _ := readModuleFile(at)
+			return TreeOf(f)
+		}
+		if filepath.Dir(at) == at {
+			return ModuleTree{}
+		}
+	}
 }
 
 // leftOutBelow reports whether path lies strictly below dir inside a directory
@@ -279,7 +290,7 @@ func unitDirs(ctx context.Context, target string) ([]string, error) {
 		return []string{target}, nil
 	}
 	var dirs []string
-	err := filepath.WalkDir(target, func(path string, entry fs.DirEntry, err error) error {
+	err := WalkTree(target, func(path string, entry fs.DirEntry, err error) error {
 		switch {
 		case err != nil:
 			return err
@@ -325,10 +336,14 @@ func holdsProgram(ctx context.Context, target string, dirs []string) error {
 }
 
 // holdsGoFile reports whether the module tree at dir holds a Go source file of the
-// Go row, in a directory the underscored-package search enters.
+// Go row, in a directory the underscored-package search enters. A directory its
+// module ignores holds none ([program.4]).
 func holdsGoFile(ctx context.Context, dir string, tree ModuleTree) (bool, error) {
+	if tree.ignores(dir) {
+		return false, nil
+	}
 	found := false
-	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+	err := WalkTree(dir, func(path string, entry fs.DirEntry, err error) error {
 		switch {
 		case err != nil:
 			return err
@@ -363,7 +378,7 @@ func withMembers(ctx context.Context, target string) ([]string, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if below(target, member) {
+		if scope.Below(target, member) {
 			dirs = append(dirs, member)
 		}
 	}
@@ -403,7 +418,7 @@ func discoverModule(ctx context.Context, dir string) (discoveredModule, error) {
 // declared consumer and that builds against a unit's directory, in directory order.
 func (top *Topology) nestedModules(ctx context.Context, declared []scope.Module) ([]discoveredModule, error) {
 	var nested []discoveredModule
-	err := filepath.WalkDir(top.Root, func(path string, entry fs.DirEntry, err error) error {
+	err := WalkTree(top.Root, func(path string, entry fs.DirEntry, err error) error {
 		switch {
 		case err != nil:
 			return err
@@ -449,7 +464,7 @@ func (top *Topology) readers(ctx context.Context, declared []scope.Module) ([]di
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("load: %w", err)
 		}
-		if sameDir(member, top.Root) || below(top.Root, member) || declares(declared, member) {
+		if sameDir(member, top.Root) || scope.Below(top.Root, member) || declares(declared, member) {
 			continue
 		}
 		m := discoveredModule{Dir: member, Workspace: workspace.File}
@@ -561,6 +576,23 @@ func governedFromAbove(dir string) bool {
 	}
 }
 
+// WalkTree walks the tree rooted at root as the go command walks a module's tree,
+// following root itself where it is a symbolic link to a directory
+// (go.dev/issue/50807). fn sees root as written and every path below it joined
+// onto that spelling, the spelling the toolchain reports.
+func WalkTree(root string, fn fs.WalkDirFunc) error {
+	followed := root
+	if !strings.HasSuffix(root, string(filepath.Separator)) {
+		followed += string(filepath.Separator)
+	}
+	return filepath.WalkDir(followed, func(path string, entry fs.DirEntry, err error) error {
+		if path == followed {
+			path = root
+		}
+		return fn(path, entry, err)
+	})
+}
+
 // IsModuleRoot reports whether dir holds a module file, which makes it the root of
 // a module of its own.
 func IsModuleRoot(dir string) bool {
@@ -568,16 +600,10 @@ func IsModuleRoot(dir string) bool {
 	return err == nil && !info.IsDir()
 }
 
-// below reports whether path is a directory strictly under dir.
-func below(dir, path string) bool {
-	rel, err := filepath.Rel(dir, path)
-	return err == nil && rel != "." && filepath.IsLocal(rel)
-}
-
 // unitPrefix is dir relative to target with forward slashes, empty for the target
 // itself.
 func unitPrefix(target, dir string) string {
-	if !below(target, dir) {
+	if !scope.Below(target, dir) {
 		return ""
 	}
 	rel, _ := filepath.Rel(target, dir)
@@ -591,7 +617,7 @@ func unitPrefix(target, dir string) string {
 // directory as its root, so each is named by its own path.
 func underscoredPackages(ctx context.Context, dir string, tree ModuleTree) ([]string, error) {
 	var patterns []string
-	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+	err := WalkTree(dir, func(path string, entry fs.DirEntry, err error) error {
 		switch {
 		case err != nil || path == dir:
 			return err

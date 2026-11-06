@@ -26,6 +26,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/cplieger/deadset-go/v2/internal/buildconstraint"
 	"github.com/cplieger/deadset-go/v2/internal/load"
@@ -83,15 +84,11 @@ type collector struct {
 
 // collect hands visit the path and build constraint, nil where none decides it, of
 // every Go file of the tree of module file f below the directory unit of module, in
-// the order the walk meets them, then of every file other than a test file of each
-// package outside the unit's packages ([load.ModuleTree.OutsideDir]) that a file
-// it read other than a test file imports, under any constraint but the ignore tag
-// alone. A refusal names the file relative to root.
-//
-// The walk is the toolchain's own reading of a directory rather than a loaded
-// package set, which is what lets it see a directory whose every file one
-// configuration excludes: such a directory holds no package for that
-// configuration and a load reports nothing at all for it.
+// walk order, then of every non-test file of each package outside the unit's
+// packages ([load.ModuleTree.OutsideDir]) that a non-test file it read imports,
+// under any constraint but the ignore tag alone. A refusal names the file relative
+// to root. Reading the tree rather than a loaded package set sees a directory whose
+// every file one configuration excludes, for which a load reports nothing.
 func collect(root, unit, module string, f *load.ModuleFile, visit func(path string, expression constraint.Expr)) error {
 	tree := load.TreeOf(f)
 	c := &collector{root: root, unit: unit, module: module, tree: tree, visit: visit, queued: make(map[string]bool)}
@@ -106,7 +103,7 @@ func collect(root, unit, module string, f *load.ModuleFile, visit func(path stri
 		}
 		return c.read(path)
 	}
-	if err := filepath.WalkDir(unit, walk); err != nil {
+	if err := load.WalkTree(unit, walk); err != nil {
 		return fmt.Errorf("read the build constraints under %s: %w", unit, err)
 	}
 	for len(c.queue) > 0 {
@@ -120,12 +117,16 @@ func collect(root, unit, module string, f *load.ModuleFile, visit func(path stri
 }
 
 // readPackage reads every Go file of the directory dir other than a test file. A
-// directory that does not exist holds none: the load reports the import.
+// path that holds no directory holds none: the load reports the import.
 func (c *collector) readPackage(dir string) error {
-	entries, err := os.ReadDir(dir)
-	if errors.Is(err, fs.ErrNotExist) {
+	info, err := os.Stat(dir)
+	switch {
+	case errors.Is(err, fs.ErrNotExist), errors.Is(err, syscall.ENOTDIR), err == nil && !info.IsDir():
 		return nil
+	case err != nil:
+		return err
 	}
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return err
 	}

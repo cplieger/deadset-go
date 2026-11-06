@@ -7,6 +7,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/liveness"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -39,9 +40,9 @@ type narrowing struct {
 	fromTest     map[inventory.SymbolID]int
 	unnarrowable map[inventory.SymbolID]bool
 
-	// signatures keys every type an exported function or method of the type's own
-	// package names in a parameter or a result, with those functions and methods.
-	signatures map[inventory.SymbolID][]inventory.SymbolID
+	// exposed is how far code reaches each type's values through its own package's
+	// exported declarations ([exposureOf]).
+	exposed map[inventory.SymbolID]narrowScope
 }
 
 // newNarrowing folds every reference into the spread of the declaration it names,
@@ -58,7 +59,6 @@ func newNarrowing(in *pass) *narrowing {
 		named:        make(map[inventory.SymbolID]int),
 		fromTest:     make(map[inventory.SymbolID]int),
 		unnarrowable: make(map[inventory.SymbolID]bool, len(in.exempted)+len(in.writeOnly)+len(in.fixed)),
-		signatures:   signatureTypes(in),
 	}
 	if in.Merged == nil {
 		return n
@@ -74,6 +74,7 @@ func newNarrowing(in *pass) *narrowing {
 	for i := range in.Merged.References {
 		n.widen(&in.Merged.References[i])
 	}
+	n.exposed = exposureOf(carriersOf(in), n.reach)
 	n.holdInterfaceSatisfying()
 	return n
 }
@@ -127,12 +128,14 @@ func (n *narrowing) holdImplementors(iface *facts.Interface) {
 }
 
 // scopeOf answers how far one reference to a declaration reaches, which the
-// referencing declaration decides: one the inventory does not hold, a loaded
-// consumer's among them, is outside the module, and an external test package is a
-// package of its own.
+// referencing declaration decides: one the inventory does not hold is a loaded
+// consumer's, outside the module, or a [load.TestBuild] package's, another
+// package of the module, and an external test package is a package of its own.
 func (n *narrowing) scopeOf(to *inventory.Symbol, r *facts.Reference) narrowScope {
 	from := n.in.symbol(r.From)
 	switch {
+	case from == nil && r.Build == load.TestBuild:
+		return scopeModule
 	case from == nil:
 		return scopeOutside
 	case from.PkgPath != to.PkgPath:
@@ -222,7 +225,7 @@ func unnecessaryExport(in *pass) ([]draft, error) {
 		case scopeModule, scopeOutside:
 			continue
 		}
-		if n.namedBySignatureReachedFrom(symbol, scopeModule) {
+		if n.exposed[symbol.ID] >= scopeModule {
 			continue
 		}
 		message := "exported " + in.word(symbol.ID) +
@@ -247,8 +250,7 @@ func unnecessaryExposure(in *pass) ([]draft, error) {
 	subjects := n.subjects()
 	found := make([]draft, 0, len(subjects))
 	for _, symbol := range subjects {
-		if !in.importable(symbol) || n.reach[symbol.ID] != scopeModule ||
-			n.namedBySignatureReachedFrom(symbol, scopeOutside) {
+		if !in.importable(symbol) || n.reach[symbol.ID] != scopeModule || n.exposed[symbol.ID] >= scopeOutside {
 			continue
 		}
 		message := "exported " + in.word(symbol.ID) + " is referenced only inside this module"
@@ -259,133 +261,205 @@ func unnecessaryExposure(in *pass) ([]draft, error) {
 	return found, nil
 }
 
-// namedBySignatureReachedFrom reports whether an exported function or method that
-// names one type in a parameter or a result is referenced from at least as far as
-// scope. Its callers then hold values of the type, so narrowing the type would leave
-// an exported signature naming a type those callers cannot name.
-func (n *narrowing) namedBySignatureReachedFrom(symbol *inventory.Symbol, scope narrowScope) bool {
-	for _, fn := range n.signatures[symbol.ID] {
-		if n.reach[fn] >= scope {
-			return true
-		}
-	}
-	return false
+// carrier is one declaration through which code reaches a type's values without
+// naming the type. A type carrier passes on how far its own values reach.
+type carrier struct {
+	id     inventory.SymbolID
+	isType bool
 }
 
-// signatureTypes keys every type of the target that an exported function or method
-// of the type's own package names in a parameter or a result, with the functions
-// and methods that name it, over every configuration of the run.
-func signatureTypes(in *pass) map[inventory.SymbolID][]inventory.SymbolID {
-	named := make(map[inventory.SymbolID][]inventory.SymbolID)
+// carriersOf keys every type of the target by its carriers in its own package, over
+// every configuration of the run: an exported function, method, variable or
+// constant whose type names it, an exported field whose type names it, an exported
+// member of the type itself, and a type whose definition names it ([typeNamesIn]).
+func carriersOf(in *pass) map[inventory.SymbolID][]carrier {
+	held := make(map[inventory.SymbolID][]carrier)
 	for one, p := range in.typedPackages() {
-		for _, fn := range exportedFuncs(p.Types) {
-			holdSignature(named, one, fn, p.Types.Path())
-		}
-	}
-	return named
-}
-
-// holdSignature keys every type of the package at path that one function's
-// signature names to that function.
-func holdSignature(named map[inventory.SymbolID][]inventory.SymbolID, one *Configured, fn *types.Func, path string) {
-	fnID, held := one.Resolve.Object(fn)
-	if !held {
-		return
-	}
-	for name := range typesNamedBy(fn.Signature(), path) {
-		id, inventoried := one.Resolve.Object(name)
-		if inventoried && !slices.Contains(named[id], fnID) {
-			named[id] = append(named[id], fnID)
-		}
-	}
-}
-
-// exportedFuncs is every exported function of one package and every exported method
-// of a type it defines.
-func exportedFuncs(pkg *types.Package) []*types.Func {
-	var funcs []*types.Func
-	scope := pkg.Scope()
-	for _, name := range scope.Names() {
-		switch object := scope.Lookup(name).(type) {
-		case *types.Func:
-			if object.Exported() {
-				funcs = append(funcs, object)
+		k := carrierKeys{held: held, one: one, path: p.Types.Path()}
+		scope := p.Types.Scope()
+		for _, name := range scope.Names() {
+			switch object := scope.Lookup(name).(type) {
+			case *types.TypeName:
+				k.typeName(object)
+			case *types.Func, *types.Var, *types.Const:
+				if object.Exported() {
+					k.names(object, false, object.Type())
+				}
 			}
-		case *types.TypeName:
-			funcs = append(funcs, exportedMethods(object)...)
 		}
 	}
-	return funcs
-}
-
-// exportedMethods is every exported method one defined type declares.
-func exportedMethods(object *types.TypeName) []*types.Func {
-	defined, isNamed := object.Type().(*types.Named)
-	if !isNamed || object.IsAlias() {
-		return nil
-	}
-	var methods []*types.Func
-	for method := range defined.Methods() {
-		if method.Exported() {
-			methods = append(methods, method)
-		}
-	}
-	return methods
-}
-
-// typesNamedBy is every type of the package at path that one signature's parameters
-// and results name, through any composite type that spells it.
-func typesNamedBy(signature *types.Signature, path string) map[*types.TypeName]bool {
-	held := make(map[*types.TypeName]bool)
-	typeNamesIn(held, path, signature)
 	return held
 }
 
-// typeNamesIn adds to held every type of the package at path that t spells,
-// through any composite type, a signature's parameters and results included.
+// carrierKeys adds the carriers one package of one configuration declares.
+type carrierKeys struct {
+	held map[inventory.SymbolID][]carrier
+	one  *Configured
+	path string
+}
+
+// names keys every type of the package t spells to the carrier object.
+func (k *carrierKeys) names(object types.Object, isType bool, t types.Type) {
+	spelled := make(map[*types.TypeName]bool)
+	typeNamesIn(spelled, k.path, t)
+	for name := range spelled {
+		if name != object {
+			k.add(name, object, isType)
+		}
+	}
+}
+
+// add keys the type name to the carrier object, both where the inventory holds them.
+func (k *carrierKeys) add(name *types.TypeName, object types.Object, isType bool) {
+	id, inventoried := k.one.Resolve.Object(name)
+	by, held := k.one.Resolve.Object(object)
+	if inventoried && held && !slices.Contains(k.held[id], carrier{id: by, isType: isType}) {
+		k.held[id] = append(k.held[id], carrier{id: by, isType: isType})
+	}
+}
+
+// typeName keys the carriers one type declares: its definition, for every type it
+// names, and its exported members, for itself and for the types they name.
+func (k *carrierKeys) typeName(object *types.TypeName) {
+	if object.IsAlias() {
+		k.names(object, true, types.Unalias(object.Type()))
+		return
+	}
+	defined, isNamed := object.Type().(*types.Named)
+	if !isNamed {
+		return
+	}
+	k.names(object, true, defined.Underlying())
+	for method := range defined.Methods() {
+		if method.Exported() {
+			k.add(object, method, false)
+			k.names(method, false, method.Signature())
+		}
+	}
+	switch underlying := defined.Underlying().(type) {
+	case *types.Struct:
+		k.fields(object, underlying)
+	case *types.Interface:
+		for method := range underlying.ExplicitMethods() {
+			if method.Exported() {
+				k.add(object, method, false)
+				k.names(method, false, method.Signature())
+			}
+		}
+	}
+}
+
+// fields keys owner to each exported field of st, and of each struct with no name
+// such a field holds, and each type a field names to that field.
+func (k *carrierKeys) fields(owner *types.TypeName, st *types.Struct) {
+	for field := range st.Fields() {
+		if !field.Exported() {
+			continue
+		}
+		k.add(owner, field, false)
+		k.names(field, false, field.Type())
+		if inner, unnamed := types.Unalias(field.Type()).(*types.Struct); unnamed {
+			k.fields(owner, inner)
+		}
+	}
+}
+
+// exposureOf is how far code reaches each type's values through its carriers: the
+// widest reach of a carrier, a type carrier's own exposure included, solved to a
+// fixpoint because a type's definition passes its exposure on.
+func exposureOf(carriers map[inventory.SymbolID][]carrier, reach map[inventory.SymbolID]narrowScope) map[inventory.SymbolID]narrowScope {
+	exposed := make(map[inventory.SymbolID]narrowScope, len(carriers))
+	for changed := true; changed; {
+		changed = false
+		for id, held := range carriers {
+			for _, c := range held {
+				widest := reach[c.id]
+				if c.isType {
+					widest = max(widest, exposed[c.id])
+				}
+				if widest > exposed[id] {
+					exposed[id], changed = widest, true
+				}
+			}
+		}
+	}
+	return exposed
+}
+
+// typeNamesIn adds to held every type of the package at path that t spells, through
+// any composite type, a signature's parameters and results, a type argument and the
+// exported members of a struct or an interface with no name: an unexported member is
+// out of reach of code outside the package.
 func typeNamesIn(held map[*types.TypeName]bool, path string, t types.Type) {
-	var walk func(t types.Type)
-	keep := func(name *types.TypeName) {
-		if name.Pkg() != nil && name.Pkg().Path() == path {
-			held[name] = true
+	(&typeNameWalk{held: held, path: path}).walk(t)
+}
+
+// typeNameWalk is one [typeNamesIn] walk.
+type typeNameWalk struct {
+	held map[*types.TypeName]bool
+	path string
+}
+
+func (w *typeNameWalk) keep(name *types.TypeName) {
+	if name.Pkg() != nil && name.Pkg().Path() == w.path {
+		w.held[name] = true
+	}
+}
+
+func (w *typeNameWalk) walk(t types.Type) {
+	switch t := t.(type) {
+	case *types.Alias:
+		w.keep(t.Obj())
+		w.walk(t.Rhs())
+	case *types.Named:
+		w.keep(t.Obj())
+		for arg := range t.TypeArgs().Types() {
+			w.walk(arg)
+		}
+	case *types.Pointer:
+		w.walk(t.Elem())
+	case *types.Slice:
+		w.walk(t.Elem())
+	case *types.Array:
+		w.walk(t.Elem())
+	case *types.Chan:
+		w.walk(t.Elem())
+	case *types.Map:
+		w.walk(t.Key())
+		w.walk(t.Elem())
+	case *types.Signature:
+		w.tuple(t.Params())
+		w.tuple(t.Results())
+	case *types.Struct:
+		w.structFields(t)
+	case *types.Interface:
+		w.interfaceMembers(t)
+	}
+}
+
+func (w *typeNameWalk) tuple(tuple *types.Tuple) {
+	for v := range tuple.Variables() {
+		w.walk(v.Type())
+	}
+}
+
+func (w *typeNameWalk) structFields(st *types.Struct) {
+	for field := range st.Fields() {
+		if field.Exported() {
+			w.walk(field.Type())
 		}
 	}
-	walkTuple := func(tuple *types.Tuple) {
-		for v := range tuple.Variables() {
-			walk(v.Type())
+}
+
+func (w *typeNameWalk) interfaceMembers(iface *types.Interface) {
+	for method := range iface.ExplicitMethods() {
+		if method.Exported() {
+			w.walk(method.Type())
 		}
 	}
-	walk = func(t types.Type) {
-		switch t := t.(type) {
-		case *types.Alias:
-			keep(t.Obj())
-			walk(t.Rhs())
-		case *types.Named:
-			keep(t.Obj())
-			for arg := range t.TypeArgs().Types() {
-				walk(arg)
-			}
-		case *types.Pointer:
-			walk(t.Elem())
-		case *types.Slice:
-			walk(t.Elem())
-		case *types.Array:
-			walk(t.Elem())
-		case *types.Chan:
-			walk(t.Elem())
-		case *types.Map:
-			walk(t.Key())
-			walk(t.Elem())
-		case *types.Signature:
-			walkTuple(t.Params())
-			walkTuple(t.Results())
-		case *types.Struct:
-			for field := range t.Fields() {
-				walk(field.Type())
-			}
-		}
+	for embedded := range iface.EmbeddedTypes() {
+		w.walk(embedded)
 	}
-	walk(t)
 }
 
 // finding renders one finding of a narrowing kind.

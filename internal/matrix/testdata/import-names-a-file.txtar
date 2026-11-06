@@ -1,0 +1,16 @@
+A module whose production code imports a path below node_modules that names a
+regular file rather than a directory. The path holds no package, so it derives
+no configuration, and the load reports the import.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- main.go --
+package main
+
+import "example.com/app/node_modules/helper"
+
+func main() { helper.Run() }
+-- node_modules/helper --
+not a directory

@@ -1,0 +1,40 @@
+A declared consumer imports the target's package side for its effects alone. The
+import reaches side.go as an import the target writes would, so side.go is no
+file that no import reaches, though nothing calls side.Unused.
+
+-- target/go.mod --
+module example.com/app
+
+go 1.27.1
+-- target/deadset.json --
+{"target": {"kind": "application"}}
+-- target/main.go --
+// Command app runs nothing.
+package main
+
+func main() {}
+-- target/side/side.go --
+// Package side is imported for its effects.
+package side
+
+// Unused is called by nothing.
+func Unused() {}
+-- consumer/go.mod --
+module example.com/consumer
+
+go 1.27.1
+
+require example.com/app v0.0.0
+
+replace example.com/app => ../target
+-- consumer/main.go --
+package main
+
+import _ "example.com/app/side"
+
+func main() {}
+-- scope.json --
+{
+  "target": {"id": "example.com/app", "role": "target", "path": "target"},
+  "consumers": [{"id": "example.com/consumer", "role": "consumer", "path": "consumer"}]
+}

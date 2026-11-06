@@ -522,14 +522,14 @@ func (f *formatFlow) retain(t types.Type, at token.Pos, detail string) error {
 		return err
 	}
 	for _, named := range formattedTypes(t) {
-		f.keepPrinting(named, site, detail)
+		f.keepPrinting(named, &site, detail)
 	}
 	return nil
 }
 
 // keepPrinting records the string and error methods of one type, a method it has
 // by promotion with the embedded fields the call reads.
-func (f *formatFlow) keepPrinting(named *types.Named, site evidence, detail string) {
+func (f *formatFlow) keepPrinting(named *types.Named, site *evidence, detail string) {
 	for m := range named.Origin().Methods() {
 		if rendersAString(m) {
 			f.kept.record(m, site, detail)

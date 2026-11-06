@@ -1,0 +1,36 @@
+A module whose production code imports a package below its vendor directory by
+the module's own path, and a package below testdata whose last element is
+vendor. The go command refuses the first, telling the module to import the
+vendored path as the vendored module's own, so no build compiles that package
+and the platform its file names derives no configuration. A vendor element that
+ends the path is a package of its own to the go command, so the build compiles
+the second and its file's platform derives a configuration.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- main.go --
+package main
+
+import (
+	"example.com/app/testdata/vendor"
+	"example.com/app/vendor/helper"
+)
+
+func main() {
+	helper.Run()
+	vendor.Run()
+}
+-- vendor/helper/helper_windows.go --
+package helper
+
+// Run runs nothing.
+func Run() {}
+-- testdata/vendor/vendor.go --
+package vendor
+
+// Run runs nothing.
+func Run() {}
+-- testdata/vendor/vendor_plan9.go --
+package vendor

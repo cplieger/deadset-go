@@ -12,6 +12,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -125,9 +126,9 @@ func TestFormatVerbContractRetainsWhatAConsumersPrintWrapperFormats(t *testing.T
 	}
 }
 
-// The detail names the consumer's wrapper the value was handed to, which is the
-// immediate callee, so a maintainer reading the retained set is shown the function
-// the target itself called rather than the encoder behind it.
+// The evidence at the target's call names the consumer's wrapper the value was
+// handed to, which is the immediate callee, so a maintainer reading the retained set
+// is shown the function the target itself called beside the encoder behind it.
 func TestEncodingReflectionNamesTheConsumersWrapper(t *testing.T) {
 	shared := analysisOf(t, consumerArchive, Options{})
 	symbols := shared.inventory(t)
@@ -136,10 +137,10 @@ func TestEncodingReflectionNamesTheConsumersWrapper(t *testing.T) {
 		refs[symbols[i].ID] = symbols[i].Ref
 	}
 
-	got := make(map[string]string)
+	got := make(map[string][]string)
 	for _, e := range retained(t, shared, vocab.EncodingReflection) {
 		if ref, held := refs[e.ID]; held {
-			got[ref] = e.Detail
+			got[ref] = append(got[ref], e.Detail)
 		}
 	}
 	for ref, want := range map[string]string{
@@ -147,8 +148,8 @@ func TestEncodingReflectionNamesTheConsumersWrapper(t *testing.T) {
 		"go://example.com/target#Marshalled.Name": "passed to example.com/httpwire.MarshalWire",
 		"go://example.com/target#Chained.Name":    "passed to example.com/httpwire.Emit",
 	} {
-		if got[ref] != want {
-			t.Errorf("EncodingReflectionDetector(%s) records %s with detail %q, want %q",
+		if !slices.Contains(got[ref], want) {
+			t.Errorf("EncodingReflectionDetector(%s) records %s with the details %q, want one %q",
 				consumerArchive, ref, got[ref], want)
 		}
 	}
@@ -192,16 +193,20 @@ func TestEncodingReflectionRendersAConsumersEvidenceAgainstTheConsumersRoot(t *t
 	for i := range symbols {
 		refs[symbols[i].ID] = symbols[i].Ref
 	}
-	sites := make(map[string]string)
+	sites := make(map[string][]string)
 	for _, e := range found {
-		sites[refs[e.ID]] = e.Consumer + " " + e.Site.Filename
+		sites[refs[e.ID]] = append(sites[refs[e.ID]], e.Consumer+" "+e.Site.Filename)
 	}
-	for ref, want := range map[string]string{
-		"go://example.com/target#Record.Name":  "example.com/httpwire wire.go",
-		"go://example.com/target#Record.Count": "example.com/httpwire wire.go",
-		"go://example.com/target#Probe.Label":  "example.com/httpwire wire_test.go",
+	// The consumer's production queue holds and returns Records, and its test
+	// pushes one onto a heap: each file holds evidence of its own.
+	for ref, want := range map[string][]string{
+		"go://example.com/target#Record.Name":  {"example.com/httpwire wire.go", "example.com/httpwire wire_test.go"},
+		"go://example.com/target#Record.Count": {"example.com/httpwire wire.go", "example.com/httpwire wire_test.go"},
+		"go://example.com/target#Probe.Label":  {"example.com/httpwire wire_test.go"},
 	} {
-		if got := sites[ref]; got != want {
+		got := sites[ref]
+		slices.Sort(got)
+		if got = slices.Compact(got); !slices.Equal(got, want) {
 			t.Errorf("EncodingReflectionDetector(%s) records %s at %q, want %q", consumerSiteArchive, ref, got, want)
 		}
 	}
@@ -210,11 +215,18 @@ func TestEncodingReflectionRendersAConsumersEvidenceAgainstTheConsumersRoot(t *t
 	if err != nil {
 		t.Fatalf("Compute(%s) under a production run = %v", consumerSiteArchive, err)
 	}
+	recordHeld := false
 	for _, e := range held {
-		if refs[e.ID] == "go://example.com/target#Probe.Label" {
+		switch refs[e.ID] {
+		case "go://example.com/target#Probe.Label":
 			t.Errorf("Compute(%s) under a production run holds %s by the consumer's test file %s, want nothing",
 				consumerSiteArchive, refs[e.ID], e.Site)
+		case "go://example.com/target#Record.Name":
+			recordHeld = recordHeld || e.Site.Filename == "wire.go"
 		}
+	}
+	if !recordHeld {
+		t.Errorf("Compute(%s) under a production run does not hold Record.Name by wire.go, the consumer's production file", consumerSiteArchive)
 	}
 }
 
@@ -241,16 +253,21 @@ func TestEvidenceOfATestFileHoldsAsTheModeClassifiesThatFile(t *testing.T) {
 			if got := holdsInMode(&Exemption{File: site.Filename, Site: site}, test.mode); got != test.targetTest {
 				t.Errorf("holdsInMode(the target's %s, %+v) = %t, want %t", site, test.mode, got, test.targetTest)
 			}
-			consumed := &Exemption{Consumer: "example.com/consumer", File: site.Filename, Site: site}
+			consumed := &Exemption{Consumer: "example.com/consumer", Build: load.ConsumerBuild, File: site.Filename, Site: site}
 			if got := holdsInMode(consumed, test.mode); got != test.consumerTest {
 				t.Errorf("holdsInMode(the consumer's %s, %+v) = %t, want %t", site, test.mode, got, test.consumerTest)
 			}
-			for _, consumer := range []string{"", "example.com/consumer"} {
-				source := &Exemption{Consumer: consumer, File: "app.go", Site: token.Position{Filename: "app.go", Line: 9, Column: 2}}
+			for _, build := range []load.Build{load.TargetBuild, load.ConsumerBuild} {
+				source := &Exemption{Build: build, File: "app.go", Site: token.Position{Filename: "app.go", Line: 9, Column: 2}}
 				if got := holdsInMode(source, test.mode); !got {
-					t.Errorf("holdsInMode(%q app.go, %+v) = false, want true: a source file's evidence holds under every mode",
-						consumer, test.mode)
+					t.Errorf("holdsInMode(build %d app.go, %+v) = false, want true: a source file's evidence holds under every mode",
+						build, test.mode)
 				}
+			}
+			testBuild := &Exemption{Build: load.TestBuild, File: "testdata/fix/fix.go", Site: token.Position{Filename: "testdata/fix/fix.go", Line: 9, Column: 2}}
+			if got := holdsInMode(testBuild, test.mode); got != test.targetTest {
+				t.Errorf("holdsInMode(a test-build package's fix.go, %+v) = %t, want %t: all of it is the target's test code",
+					test.mode, got, test.targetTest)
 			}
 		})
 	}

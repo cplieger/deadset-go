@@ -1,0 +1,99 @@
+In control the test encodes lib's S with encoding/json itself; in leftout it
+calls a package below testdata that only the test imports and that encodes it.
+That package is test code of the module, so its encoder call is a test's
+evidence as the test's own is, and both runs find the same in every mode.
+
+-- control/go.mod --
+module example.com/m
+
+go 1.27.1
+-- control/deadset.json --
+{"target":{"kind":"application"}}
+-- control/main.go --
+// Command m calls lib.Live.
+package main
+
+import "example.com/m/internal/lib"
+
+func main() { lib.Live() }
+-- control/main_test.go --
+package main
+
+import (
+	"encoding/json"
+	"testing"
+
+	"example.com/m/internal/lib"
+)
+
+func TestEncode(t *testing.T) {
+	lib.Live()
+	if _, err := json.Marshal(lib.New()); err != nil {
+		t.Fatal(err)
+	}
+}
+-- control/internal/lib/lib.go --
+// Package lib makes values.
+package lib
+
+// S is encoded by test code.
+type S struct{ X, Y int }
+
+// New returns an S.
+func New() S { return S{X: 1, Y: 2} }
+
+// Live is called by main and by the test.
+func Live() {}
+-- leftout/go.mod --
+module example.com/m
+
+go 1.27.1
+-- leftout/deadset.json --
+{"target":{"kind":"application"}}
+-- leftout/main.go --
+// Command m calls lib.Live.
+package main
+
+import "example.com/m/internal/lib"
+
+func main() { lib.Live() }
+-- leftout/main_test.go --
+package main
+
+import (
+	"testing"
+
+	"example.com/m/internal/lib"
+	"example.com/m/testdata/enc"
+)
+
+func TestEncode(t *testing.T) {
+	lib.Live()
+	if enc.Encode() == "" {
+		t.Fatal("empty")
+	}
+}
+-- leftout/internal/lib/lib.go --
+// Package lib makes values.
+package lib
+
+// S is encoded by test code.
+type S struct{ X, Y int }
+
+// New returns an S.
+func New() S { return S{X: 1, Y: 2} }
+
+// Live is called by main and by the test.
+func Live() {}
+-- leftout/testdata/enc/enc.go --
+// Package enc encodes lib values for the tests.
+package enc
+
+import (
+	"encoding/json"
+
+	"example.com/m/internal/lib"
+)
+
+// Encode encodes a new S.
+func Encode() string { b, _ := json.Marshal(lib.New()); return string(b) }

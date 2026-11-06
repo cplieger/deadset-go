@@ -1,0 +1,27 @@
+outer's field W is a wrap, whose method set holds the MarshalJSON it embeds
+from selfish: encoding/json walks outer to W and calls that method, so it is
+read, and selfish's field Z is not.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+type selfish struct{ Z int }
+
+func (selfish) MarshalJSON() ([]byte, error) { return []byte("1"), nil }
+
+type wrap struct{ selfish }
+
+type outer struct{ W wrap }
+
+func main() { out, _ := json.Marshal(outer{}); fmt.Println(string(out)) }

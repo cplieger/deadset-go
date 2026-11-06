@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/atomicfile/v4"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/vocab"
+	"github.com/cplieger/go/filesafe"
 )
 
 // The document every test of a well-formed read is measured over: two edges, one
@@ -191,7 +191,7 @@ func TestReadHoldsThePublishedExamples(t *testing.T) {
 
 func TestReadRefusesADocumentOverTheBound(t *testing.T) {
 	_, err := Read(t.Context(), target(t, `{"edges": {}}`+strings.Repeat(" ", vocab.DocumentMaxBytes)))
-	if !errors.Is(err, ErrMalformed) || !errors.Is(err, atomicfile.ErrFileTooLarge) {
+	if !errors.Is(err, ErrMalformed) || !errors.Is(err, filesafe.ErrFileTooLarge) {
 		t.Errorf("Read(a document over the bound) = %v, want it refused as malformed and too large", err)
 	}
 }
@@ -222,8 +222,8 @@ func TestReadRefusesADocumentNameThatLeavesTheTargetOrIsNoFile(t *testing.T) {
 		if err == nil || errors.Is(err, ErrMalformed) {
 			t.Errorf("Read(%s) = %+v, %v, want a refusal that is not a malformed document", tc.name, held, err)
 		}
-		if tc.notRegular && !errors.Is(err, atomicfile.ErrNotRegular) {
-			t.Errorf("Read(%s) = %v, want an error matching atomicfile.ErrNotRegular", tc.name, err)
+		if tc.notRegular && !errors.Is(err, filesafe.ErrNotRegular) {
+			t.Errorf("Read(%s) = %v, want an error matching filesafe.ErrNotRegular", tc.name, err)
 		}
 	}
 }

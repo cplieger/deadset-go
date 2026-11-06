@@ -143,16 +143,16 @@ func (s *satisfactionScan) retain(in *Program, c *facts.Conversion, retained []E
 	if err != nil {
 		return nil, err
 	}
-	file := in.Resolve.File(c.Site)
+	file, build := in.Resolve.File(c.Site), in.Resolve.Build(c.Site)
 	holder, coHolders, asserted := in.holderOf(c)
 	if asserted != "" && holder != "" {
 		retained = append(retained, Exemption{
-			ID: asserted, Class: string(vocab.InterfaceSatisfaction), Consumer: consumer, File: file, Site: site,
+			ID: asserted, Class: string(vocab.InterfaceSatisfaction), Consumer: consumer, Build: build, File: file, Site: site,
 			Detail: "asserts " + c.Name, Holder: holder,
 		})
 	}
 	held := Exemption{
-		Class: string(vocab.InterfaceSatisfaction), Consumer: consumer, File: file, Site: site,
+		Class: string(vocab.InterfaceSatisfaction), Consumer: consumer, Build: build, File: file, Site: site,
 		Detail: "satisfies " + c.Name, Holder: holder, CoHolders: coHolders,
 	}
 	for _, m := range methods {

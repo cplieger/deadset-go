@@ -20,12 +20,12 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/cplieger/atomicfile/v4"
 	"github.com/cplieger/deadset-go/v2/internal/failure"
 	"github.com/cplieger/deadset-go/v2/internal/jsondoc"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/document"
 	"github.com/cplieger/deadset-spec/v8/vocab"
+	"github.com/cplieger/go/filesafe"
 )
 
 // ErrMalformed reports an edges document the Contract refuses, which ends the
@@ -90,11 +90,11 @@ func Read(ctx context.Context, dir string) (*Document, error) {
 		return nil, fmt.Errorf("edges: open the target root %s: %w", dir, err)
 	}
 	defer func() { _ = root.Close() }()
-	body, err := atomicfile.ReadBoundedInRoot(ctx, root, vocab.EdgesFileName, vocab.DocumentMaxBytes)
+	body, err := filesafe.ReadBoundedInRoot(ctx, root, vocab.EdgesFileName, vocab.DocumentMaxBytes)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return &Document{}, nil
-	case errors.Is(err, atomicfile.ErrFileTooLarge):
+	case errors.Is(err, filesafe.ErrFileTooLarge):
 		return nil, fmt.Errorf("%w: %s: %w", ErrMalformed, vocab.EdgesFileName, err)
 	case err != nil:
 		return nil, failure.Wrap(vocab.SetupUnreadableDocument, fmt.Errorf("%s cannot be read: %w", vocab.EdgesFileName, err))

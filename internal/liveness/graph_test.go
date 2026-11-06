@@ -210,6 +210,7 @@ func (b *graphBuilder) refFromConsumer(consumer, to string, test bool) {
 		Consumer: consumer,
 		Pos:      token.Position{Filename: file, Line: b.outside, Column: 1},
 		Kind:     facts.RefCall,
+		Build:    load.ConsumerBuild,
 		Test:     test,
 	})
 }

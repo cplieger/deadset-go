@@ -98,7 +98,23 @@ func baseNames(files []string) []string {
 	return names
 }
 
+func TestHostConfigurationIsTheEnvironmentsPlatformWhereItNamesOne(t *testing.T) {
+	t.Setenv("GOOS", "plan9")
+	t.Setenv("GOARCH", "")
+	want := Configuration{ID: "plan9-" + runtime.GOARCH, OS: "plan9", Arch: runtime.GOARCH, Origin: host}
+	if got := HostConfiguration(); !reflect.DeepEqual(got, want) {
+		t.Errorf("HostConfiguration() under GOOS=plan9 = %+v, want %+v", got, want)
+	}
+	t.Setenv("GOARCH", "arm64")
+	want = Configuration{ID: "plan9-arm64", OS: "plan9", Arch: "arm64", Origin: host}
+	if got := HostConfiguration(); !reflect.DeepEqual(got, want) {
+		t.Errorf("HostConfiguration() under GOOS=plan9 GOARCH=arm64 = %+v, want %+v", got, want)
+	}
+}
+
 func TestHostConfiguration(t *testing.T) {
+	t.Setenv("GOOS", "")
+	t.Setenv("GOARCH", "")
 	got := HostConfiguration()
 	want := Configuration{ID: runtime.GOOS + "-" + runtime.GOARCH, OS: runtime.GOOS, Arch: runtime.GOARCH, Origin: host}
 	if !reflect.DeepEqual(got, want) {
@@ -727,7 +743,7 @@ func TestLoadReadsEveryModuleUnderATargetThatIsNoModuleRoot(t *testing.T) {
 // A package below a node_modules directory, which ./... matches, is no package of
 // the module, one with a type error included, and one the module's production code
 // imports is read as a dependency whose references count as a consumer's; one only
-// a test imports is not.
+// a test imports is read as one whose references are a test file's.
 func TestLoadLeavesOutThePackagesBelowNodeModules(t *testing.T) {
 	stableToolchain(t)
 	root := writeTree(t, map[string]string{
@@ -757,13 +773,50 @@ func TestLoadLeavesOutThePackagesBelowNodeModules(t *testing.T) {
 	if !reached["example.com/m/node_modules/helper"] || !reached["example.com/m/node_modules/testonly"] {
 		t.Error("Load() reaches no example.com/m/node_modules/helper or testonly, want both read as the dependencies main and its test import")
 	}
-	counted := func(path string) bool {
+	counted := func(path string, build Build) bool {
 		return slices.ContainsFunc(got.Nested, func(c Consumer) bool {
-			return slices.ContainsFunc(c.Packages, func(p *packages.Package) bool { return p.PkgPath == path })
+			return c.Build == build && slices.ContainsFunc(c.Packages, func(p *packages.Package) bool { return p.PkgPath == path })
 		})
 	}
-	if !counted("example.com/m/node_modules/helper") || counted("example.com/m/node_modules/testonly") {
-		t.Errorf("Load() read the nested consumers %v, want example.com/m/node_modules/helper among them and no testonly", got.Nested)
+	if !counted("example.com/m/node_modules/helper", ConsumerBuild) || !counted("example.com/m/node_modules/testonly", TestBuild) ||
+		counted("example.com/m/node_modules/helper", TestBuild) || counted("example.com/m/node_modules/testonly", ConsumerBuild) {
+		t.Errorf("Load() read the nested consumers %+v, want helper among the production ones and testonly among the test ones", got.Nested)
+	}
+}
+
+// A package below node_modules that main imports, and that an external test
+// also compiles against the tested package, is production code in both variants.
+func TestLoadReadsATestBinarysVariantOfAProductionLeftOutPackageAsProduction(t *testing.T) {
+	stableToolchain(t)
+	root := writeTree(t, map[string]string{
+		"go.mod":                   "module example.com/m\n\ngo 1.27.1\n",
+		"main.go":                  "package main\n\nimport \"example.com/m/node_modules/helper\"\n\nfunc main() { helper.Used() }\n",
+		"node_modules/helper/h.go": "package helper\n\nimport \"example.com/m/p\"\n\n// Used is what main calls.\nfunc Used() { p.New() }\n",
+		"p/p.go":                   "package p\n\n// New is what helper calls.\nfunc New() {}\n",
+		"p/p_internal_test.go":     "package p\n\nimport \"testing\"\n\nfunc TestNew(t *testing.T) { New() }\n",
+		"p/p_test.go":              "package p_test\n\nimport (\n\t\"testing\"\n\n\t\"example.com/m/node_modules/helper\"\n)\n\nfunc TestUsed(t *testing.T) { helper.Used() }\n",
+	})
+	doc, err := scope.ForDir(root)
+	if err != nil {
+		t.Fatalf("Setup: scope.ForDir = _, %v", err)
+	}
+
+	got, err := loadScope(t.Context(), doc, HostConfiguration())
+	if err != nil {
+		t.Fatalf("Load() = _, %v, want no error", err)
+	}
+	builds := map[string]Build{}
+	for _, c := range got.Nested {
+		for _, p := range c.Packages {
+			if p.PkgPath == "example.com/m/node_modules/helper" {
+				builds[p.ID] = c.Build
+			}
+		}
+	}
+	variant := "example.com/m/node_modules/helper [example.com/m/p.test]"
+	if len(builds) != 2 || builds["example.com/m/node_modules/helper"] != ConsumerBuild || builds[variant] != ConsumerBuild {
+		t.Errorf("Load() read helper's variants with the builds %v, want %s and %q both %d (ConsumerBuild)",
+			builds, "example.com/m/node_modules/helper", variant, ConsumerBuild)
 	}
 }
 

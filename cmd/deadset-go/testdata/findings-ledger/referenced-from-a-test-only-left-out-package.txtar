@@ -1,0 +1,104 @@
+A package below node_modules, and one below testdata, that only a test file of
+the module imports are compiled by the module's test build, so their calls of
+lib.Tested and lib.Fixture are a test file's references. In control the test
+calls all three itself; leftout finds what control finds. Lib.Unused is called
+by nothing.
+
+-- control/go.mod --
+module example.com/m
+
+go 1.27.1
+-- control/deadset.json --
+{"target":{"kind":"application"}}
+-- control/main.go --
+// Command m runs nothing.
+package main
+
+func main() {}
+-- control/main_test.go --
+package main
+
+import (
+	"testing"
+
+	"example.com/m/internal/lib"
+)
+
+func TestRun(t *testing.T) {
+	lib.Tested()
+	lib.Fixture()
+	lib.Direct()
+}
+-- control/internal/lib/lib.go --
+// Package lib is what the tests call.
+package lib
+
+// Tested is called by the test-only package below node_modules.
+func Tested() {}
+
+// Direct is called by the test itself.
+func Direct() {}
+
+// Fixture is called by the test-only package below testdata.
+func Fixture() {}
+
+// Unused is called by nothing.
+func Unused() {}
+-- leftout/go.mod --
+module example.com/m
+
+go 1.27.1
+-- leftout/deadset.json --
+{"target":{"kind":"application"}}
+-- leftout/main.go --
+// Command m runs nothing.
+package main
+
+func main() {}
+-- leftout/main_test.go --
+package main
+
+import (
+	"testing"
+
+	"example.com/m/internal/lib"
+	"example.com/m/node_modules/testonly"
+	"example.com/m/testdata/fixture"
+)
+
+func TestRun(t *testing.T) {
+	testonly.Run()
+	fixture.Run()
+	lib.Direct()
+}
+-- leftout/internal/lib/lib.go --
+// Package lib is what the tests call.
+package lib
+
+// Tested is called by the test-only package below node_modules.
+func Tested() {}
+
+// Direct is called by the test itself.
+func Direct() {}
+
+// Fixture is called by the test-only package below testdata.
+func Fixture() {}
+
+// Unused is called by nothing.
+func Unused() {}
+-- leftout/node_modules/testonly/testonly.go --
+// Package testonly is imported by a test alone.
+package testonly
+
+import "example.com/m/internal/lib"
+
+// Run calls lib.Tested.
+func Run() { lib.Tested() }
+-- leftout/testdata/fixture/fixture.go --
+// Package fixture is imported by a test alone.
+package fixture
+
+import "example.com/m/internal/lib"
+
+// Run calls lib.Fixture.
+func Run() { lib.Fixture() }

@@ -1,0 +1,48 @@
+Sibling and Helper are exported and called from another package of the module.
+Helper is also called from a package below testdata that only a test imports,
+which is test code of the module and reaches no farther than the module, so
+Helper's export is as unneeded as Sibling's.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- deadset.json --
+{"target":{"kind":"library"},"consumers":{"complete":true}}
+-- main.go --
+// Command app calls pkg.
+package main
+
+import "example.com/app/pkg"
+
+func main() {
+	pkg.Sibling()
+	pkg.Helper()
+}
+-- pkg/pkg.go --
+// Package pkg is called by main.
+package pkg
+
+// Sibling is called by main.
+func Sibling() {}
+
+// Helper is called by main and by the test-only package.
+func Helper() {}
+-- pkg/pkg_test.go --
+package pkg_test
+
+import (
+	"testing"
+
+	"example.com/app/testdata/fix"
+)
+
+func TestRun(t *testing.T) { fix.Run() }
+-- testdata/fix/fix.go --
+// Package fix is imported by a test alone.
+package fix
+
+import "example.com/app/pkg"
+
+// Run calls pkg.Helper.
+func Run() { pkg.Helper() }

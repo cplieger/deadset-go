@@ -1,0 +1,110 @@
+Package cli reaches each type of package client through an exported declaration
+of client without naming the type: a field of what Fetch returns, a slice element
+and a map value of such fields, a field promoted from an embedded type, the type
+of an exported variable, the element of an exported result type, an exported
+field of the unexported type Summary returns. Each such type
+is part of client's API, so none is reported as a candidate for unexporting.
+Inner is the type of an unexported field only and Local is named in its file
+alone: both are still reported.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- deadset.json --
+{"target":{"kind":"application"}}
+-- main.go --
+// Command app runs the client's command line.
+package main
+
+import "example.com/app/internal/cli"
+
+func main() { cli.Run() }
+-- internal/client/wire.go --
+// Package client holds the wire types.
+package client
+
+// Hint is the type of the exported field Me.Hint.
+type Hint struct{ Line string }
+
+// Card is the element of the exported field Me.Cards.
+type Card struct{ Title string }
+
+// Note is the map value, through a pointer, of the exported field Me.Notes.
+type Note struct{ Body string }
+
+// Badge is embedded in Me, and package cli reads its promoted field.
+type Badge struct{ Label string }
+
+// Inner is the type of an unexported field of Me only.
+type Inner struct{ n int }
+
+// Me is what Fetch returns.
+type Me struct {
+	Badge
+	Hint  Hint
+	Cards []Card
+	Notes map[string]*Note
+	inner Inner
+}
+
+// Request is the parameter of Send.
+type Request struct{ Path string }
+
+// Config is the type of the exported variable Default.
+type Config struct{ Port int }
+
+// Default is read by package cli.
+var Default = Config{Port: 1}
+
+// Job is the element of the exported type Queue.
+type Job struct{ ID int }
+
+// Queue is what Jobs returns.
+type Queue []Job
+
+// Local is referenced only inside this file.
+type Local struct{ v int }
+
+// Fetch is called by package cli.
+func Fetch() Me {
+	return Me{Hint: Hint{Line: "x"}, Cards: []Card{{Title: "t"}}, Notes: map[string]*Note{"a": {Body: "b"}},
+		Badge: Badge{Label: "l"}, inner: Inner{n: Local{v: 1}.v}}
+}
+
+// Count reads the unexported field.
+func Count(m Me) int { return m.inner.n }
+
+// Send is called by package cli.
+func Send(r Request) string { return r.Path }
+
+// Jobs is called by package cli.
+func Jobs() Queue { return Queue{{ID: 1}} }
+
+// Tag is the type of an exported field of summary, which Summary returns.
+type Tag struct{ Name string }
+
+type summary struct{ Tag Tag }
+
+// String is what package cli prints.
+func (s summary) String() string { return s.Tag.Name }
+
+// Summary is called by package cli.
+func Summary() summary { return summary{Tag: Tag{Name: "n"}} }
+-- internal/cli/cli.go --
+// Package cli prints what the client fetched.
+package cli
+
+import (
+	"fmt"
+
+	"example.com/app/internal/client"
+)
+
+// Run prints the fetched values.
+func Run() {
+	me := client.Fetch()
+	fmt.Println(me.Hint.Line, me.Cards[0].Title, me.Notes["a"].Body, me.Label, client.Count(me))
+	fmt.Println(client.Send(client.Request{Path: "/"}), client.Default.Port, client.Jobs()[0].ID)
+	fmt.Println(client.Summary())
+}

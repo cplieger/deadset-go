@@ -1,0 +1,91 @@
+In control a test imports lib and calls lib.Helper; in leftout a package below
+testdata that only the test imports does. Its import is a test file's import,
+which reaches lib's file as the test's own does, so leftout finds what control
+finds, and neither reports lib.go as never imported.
+
+-- control/go.mod --
+module example.com/m
+
+go 1.27.1
+-- control/deadset.json --
+{"target":{"kind":"application"}}
+-- control/main.go --
+// Command m calls live.Run.
+package main
+
+import "example.com/m/internal/live"
+
+func main() { live.Run() }
+-- control/main_test.go --
+package main
+
+import (
+	"testing"
+
+	"example.com/m/internal/lib"
+	"example.com/m/internal/live"
+)
+
+func TestRun(t *testing.T) {
+	live.Run()
+	lib.Helper()
+}
+-- control/internal/lib/lib.go --
+// Package lib is what test code calls.
+package lib
+
+// Helper is called by test code alone.
+func Helper() {}
+-- control/internal/live/live.go --
+// Package live is what main calls.
+package live
+
+// Run is called by main and by the test.
+func Run() {}
+-- leftout/go.mod --
+module example.com/m
+
+go 1.27.1
+-- leftout/deadset.json --
+{"target":{"kind":"application"}}
+-- leftout/main.go --
+// Command m calls live.Run.
+package main
+
+import "example.com/m/internal/live"
+
+func main() { live.Run() }
+-- leftout/main_test.go --
+package main
+
+import (
+	"testing"
+
+	"example.com/m/internal/live"
+	"example.com/m/testdata/fix"
+)
+
+func TestRun(t *testing.T) {
+	live.Run()
+	fix.Run()
+}
+-- leftout/internal/lib/lib.go --
+// Package lib is what test code calls.
+package lib
+
+// Helper is called by test code alone.
+func Helper() {}
+-- leftout/testdata/fix/fix.go --
+// Package fix is imported by a test alone.
+package fix
+
+import "example.com/m/internal/lib"
+
+// Run calls lib.Helper.
+func Run() { lib.Helper() }
+-- leftout/internal/live/live.go --
+// Package live is what main calls.
+package live
+
+// Run is called by main and by the test.
+func Run() {}

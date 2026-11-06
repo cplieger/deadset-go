@@ -66,6 +66,8 @@ func limit() (uint64, bool) {
 }
 
 // extendedLimitInformation is JOBOBJECT_EXTENDED_LIMIT_INFORMATION.
+//
+//nolint:govet // fieldalignment: the field order is the Windows structure's, which QueryInformationJobObject writes
 type extendedLimitInformation struct {
 	perProcessUserTimeLimit int64
 	perJobUserTimeLimit     int64

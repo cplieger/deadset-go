@@ -10,7 +10,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
@@ -253,13 +252,10 @@ func relativeToRunDirectory(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve the directory the run was invoked from: %w", err)
 	}
-	relative, err := filepath.Rel(invoked, path)
-	if err != nil {
-		return "", fmt.Errorf("resolve %s against the directory the run was invoked from: %w", path, err)
-	}
-	if relative != "." && !filepath.IsLocal(relative) {
+	relative, inside := scope.Within(invoked, path)
+	if !inside {
 		return "", failure.Wrap(vocab.RunUnreportablePath, fmt.Errorf("a report names %s relative to the directory the run was invoked from, and %s does not contain it",
 			path, invoked))
 	}
-	return filepath.ToSlash(relative), nil
+	return relative, nil
 }

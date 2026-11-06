@@ -44,7 +44,7 @@ func Resolve(ctx context.Context, dir, document string) (Document, error) {
 	// listed module is a consumer.
 	doc := Document{Workspace: workspace.File, Target: Module{Path: target}}
 	for _, path := range workspace.Modules {
-		if path != target && !below(target, path) {
+		if path != target && !Below(target, path) {
 			doc.Consumers = append(doc.Consumers, Module{Path: path})
 		}
 	}
@@ -125,8 +125,9 @@ func readWorkspace(file string) ([]string, error) {
 	return used, nil
 }
 
-// below reports whether path is a directory strictly under dir.
-func below(dir, path string) bool {
-	rel, err := filepath.Rel(dir, path)
-	return err == nil && rel != "." && filepath.IsLocal(rel)
+// Below reports whether path is strictly under dir by its names, the way the
+// toolchain places a workspace member or a package directory under a module.
+func Below(dir, path string) bool {
+	relative, inside := lexicallyWithin(dir, path)
+	return inside && relative != "."
 }

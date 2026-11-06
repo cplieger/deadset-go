@@ -305,6 +305,9 @@ func TestAMethodATypeHasByPromotionIsCalledThroughTheEmbeddedField(t *testing.T)
 		{"promoted-text-marshaler-map-key", "selfish.MarshalText", "json.Marshal spells a wrap key by its promoted MarshalText"},
 		{"promoted-xml-marshaler", "selfish.MarshalXML", "xml.Marshal calls wrap's promoted MarshalXML"},
 		{"promoted-string-method", "wrap.selfish", "fmt.Println calls wrap's promoted String, which reads the field"},
+		{"promoted-through-an-embedded-pointer", "selfish.MarshalJSON", "json.Marshal calls the MarshalJSON wrap's *selfish promotes"},
+		{"promoted-through-two-embeddings", "selfish.MarshalJSON", "json.Marshal calls the MarshalJSON mid promotes to wrap"},
+		{"promoted-on-a-field-type", "selfish.MarshalJSON", "json.Marshal walks outer.W and calls wrap's promoted MarshalJSON"},
 	} {
 		t.Run(c.archive, func(t *testing.T) {
 			about := findingsAbout(t, archiveModule(t, "exempt-ledger/"+c.archive+".txtar"))

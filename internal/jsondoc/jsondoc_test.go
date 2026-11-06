@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/atomicfile/v4"
 	"github.com/cplieger/deadset-spec/v8/document"
+	"github.com/cplieger/go/filesafe"
 )
 
 func TestEncodeWritesTheCharactersAPageEscapesAsThemselves(t *testing.T) {
@@ -54,7 +54,7 @@ func TestReadHoldsADocumentToItsBound(t *testing.T) {
 		limit int64
 	}{
 		{name: "at_the_bound", ctx: t.Context(), limit: 8},
-		{name: "over_the_bound", ctx: t.Context(), limit: 7, want: atomicfile.ErrFileTooLarge},
+		{name: "over_the_bound", ctx: t.Context(), limit: 7, want: filesafe.ErrFileTooLarge},
 		{name: "a_cancelled_read", ctx: cancelled, limit: 8, want: context.Canceled},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

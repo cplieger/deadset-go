@@ -1,0 +1,95 @@
+Package testutil carries test evidence and only test code uses it; Unused is
+called by nothing. In control the test calls testutil.Via itself; in leftout it
+calls it through a package below testdata that only the test imports, which is
+test code of the module as the test is, so both runs find the same: testutil
+stays test support, and Helper and TestRun get no finding.
+
+-- control/go.mod --
+module example.com/m
+
+go 1.27.1
+-- control/deadset.json --
+{"target":{"kind":"application"}}
+-- control/main.go --
+// Command m runs nothing.
+package main
+
+func main() {}
+-- control/main_test.go --
+package main
+
+import (
+	"testing"
+
+	"example.com/m/internal/testutil"
+)
+
+func TestRun(t *testing.T) {
+	testutil.Helper(t)
+	if testutil.Via() != 1 {
+		t.Fatal("Via")
+	}
+}
+-- control/internal/testutil/testutil.go --
+// Package testutil helps the tests.
+package testutil
+
+import "testing"
+
+// Helper is called by the test itself.
+func Helper(t *testing.T) { t.Helper() }
+
+// Via is called through the fixture.
+func Via() int { return 1 }
+
+// Unused is called by nothing.
+func Unused() {}
+-- leftout/go.mod --
+module example.com/m
+
+go 1.27.1
+-- leftout/deadset.json --
+{"target":{"kind":"application"}}
+-- leftout/main.go --
+// Command m runs nothing.
+package main
+
+func main() {}
+-- leftout/main_test.go --
+package main
+
+import (
+	"testing"
+
+	"example.com/m/internal/testutil"
+	"example.com/m/testdata/fixture"
+)
+
+func TestRun(t *testing.T) {
+	testutil.Helper(t)
+	if fixture.Run() != 1 {
+		t.Fatal("Run")
+	}
+}
+-- leftout/internal/testutil/testutil.go --
+// Package testutil helps the tests.
+package testutil
+
+import "testing"
+
+// Helper is called by the test itself.
+func Helper(t *testing.T) { t.Helper() }
+
+// Via is called through the fixture.
+func Via() int { return 1 }
+
+// Unused is called by nothing.
+func Unused() {}
+-- leftout/testdata/fixture/fixture.go --
+// Package fixture is imported by a test alone.
+package fixture
+
+import "example.com/m/internal/testutil"
+
+// Run calls testutil.Via.
+func Run() int { return testutil.Via() }

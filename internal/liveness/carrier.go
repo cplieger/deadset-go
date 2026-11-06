@@ -6,6 +6,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -75,7 +76,7 @@ func (g *Graph) Carry(c *Carrier) *Carriage {
 	probe := &Carriage{g: g, servers: servers}
 	var kept []exempt.Exemption
 	for ix := range c.Exempt {
-		if e := &c.Exempt[ix]; (e.Consumer != "" || !c.Generated[e.File]) && !probe.Answers(e) {
+		if e := &c.Exempt[ix]; (e.Build != load.TargetBuild || !c.Generated[e.File]) && !probe.Answers(e) {
 			kept = append(kept, *e)
 		}
 	}

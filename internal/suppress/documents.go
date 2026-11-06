@@ -8,10 +8,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/cplieger/atomicfile/v4"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
+	"github.com/cplieger/go/filesafe"
 )
 
 // IgnoreFile reads the ignore file at path and binds each of its entries to the
@@ -57,7 +57,7 @@ func documentEntries(path string, read func([]byte) ([]core.Entry, error)) ([]co
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return nil, nil
-	case errors.Is(err, atomicfile.ErrFileTooLarge):
+	case errors.Is(err, filesafe.ErrFileTooLarge):
 		return nil, fmt.Errorf("%w: %s: %w", core.ErrMalformed, filepath.Base(path), err)
 	case err != nil:
 		return nil, fmt.Errorf("%s %w: %w", filepath.Base(path), ErrUnreadable, err)
@@ -73,7 +73,7 @@ func readInDir(path string) ([]byte, error) {
 		return nil, err
 	}
 	defer func() { _ = root.Close() }()
-	return atomicfile.ReadBoundedInRoot(context.Background(), root, filepath.Base(path), vocab.DocumentMaxBytes)
+	return filesafe.ReadBoundedInRoot(context.Background(), root, filepath.Base(path), vocab.DocumentMaxBytes)
 }
 
 // bind resolves the entries of this analyzer's scheme against the inventory, by

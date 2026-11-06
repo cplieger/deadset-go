@@ -64,8 +64,8 @@ type errorsDuckForm struct {
 // errorsDuckRetained is one retained method and the rendered position of its own
 // declaration, which is what orders the answer.
 type errorsDuckRetained struct {
-	exemption Exemption
 	at        token.Position
+	exemption Exemption
 }
 
 // errorsDuckSite is one conversion to error, with its site rendered, and the

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"golang.org/x/tools/go/packages"
 )
@@ -85,20 +86,21 @@ func schemaReadsOf(x *Index, rs *resolve.Resolver, generated map[string]generate
 		rs: rs, fset: x.fset, generatedFiles: generated,
 		oneofs: make(map[*types.TypeName][]oneof), told: make(map[ast.Expr]bool),
 	}
-	s.scan(x.Sources())
+	s.scan(x.Sources(), load.TargetBuild)
 	s.consumer = true
 	for _, c := range x.order {
-		s.scan(inventory.Sources(x.consumers[c], x.fset))
+		s.scan(inventory.Sources(x.consumers[c], x.fset), c.Build)
 	}
 	return s.held, s.capsOf(x.bindings, x.Program())
 }
 
-// scan visits every hand-written file of sources; a loaded consumer's test files
-// are none of its production code.
-func (s *schemaScan) scan(sources iter.Seq2[*packages.Package, *ast.File]) {
+// scan visits every hand-written file of sources, of one build. A loaded
+// consumer's test code is skipped: no declaration holds a read it makes, and an
+// unheld read seeds the carrier sweep, which counts production code alone.
+func (s *schemaScan) scan(sources iter.Seq2[*packages.Package, *ast.File], build load.Build) {
 	for p, f := range sources {
 		_, test := inventory.IsTestFile(s.fset.File(f.Package).Name())
-		if ast.IsGenerated(f) || p.TypesInfo == nil || (s.consumer && test) {
+		if ast.IsGenerated(f) || p.TypesInfo == nil || (s.consumer && build.TestCode(test)) {
 			continue
 		}
 		s.info, s.pkg, s.test = p.TypesInfo, p, test

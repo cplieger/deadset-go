@@ -420,6 +420,26 @@ func TestAConsumersInstantiationReachesTheTypeParameterItInstantiates(t *testing
 	}
 }
 
+func TestATypeAnotherPackageReachesThroughAnExportedDeclarationIsNoUnnecessaryExport(t *testing.T) {
+	var got []string
+	for _, found := range findingsOfDir(t, archiveModule(t, "findings-ledger/types-reached-through-an-exported-declaration.txtar")).Result.Findings {
+		if found.Code == vocab.UnnecessaryExport {
+			got = append(got, found.Symbol.Ref)
+		}
+	}
+	slices.Sort(got)
+	want := []string{"go://example.com/app/internal/client#Inner", "go://example.com/app/internal/client#Local"}
+	if !slices.Equal(got, want) {
+		t.Errorf("%s findings = %q, want %q: package cli reaches every other type through client's exported declarations", vocab.UnnecessaryExport, got, want)
+	}
+}
+
+func TestAConsumersEncoderReadsTheFieldsOfTheTargetsTypeItEncodes(t *testing.T) {
+	if got := scopedReport(t, "findings-ledger/encoded-by-a-consumer.txtar"); len(got) != 0 {
+		t.Errorf("findings = %q, want none: the consumer's json.Marshal reads S.X", got)
+	}
+}
+
 func TestAConsumersReadOfAStructLiteralsFieldReadsEachIdenticalLiteralsField(t *testing.T) {
 	got := scopedReport(t, "findings-ledger/struct-literal-twin-read-from-a-consumer.txtar")
 	want := []string{"DS1003 go://example.com/app#P.In.Y", "DS1003 go://example.com/app#Q.In.Y"}
@@ -473,5 +493,122 @@ func TestAMethodOfATypeDeclaredPerPlatformIsJudgedUnderTheTypeOfEachPlatform(t *
 				}
 			})
 		}
+	}
+}
+
+// consumerTestsProduction is the repository document of an application whose
+// loaded consumers' test files count as production code.
+const consumerTestsProduction = `{"target": {"kind": "application"}, "analysis": {"consumer_tests": "production"}}`
+
+// everyFinding is every finding of the run over dir, reported or withheld by the
+// minimum confidence, as its code, confidence and subject.
+func everyFinding(t *testing.T, dir string) []string {
+	t.Helper()
+
+	set := findingsOfDir(t, dir)
+	var got []string
+	for _, found := range slices.Concat(set.Result.Findings, set.Result.Withheld) {
+		got = append(got, string(found.Code)+" "+string(found.Confidence)+" "+found.Symbol.Ref)
+	}
+	slices.Sort(got)
+	return got
+}
+
+// sameAsControl checks that the leftout variant of an archive finds what its
+// control variant finds, in the plain consumer-test mode and in the production
+// one, and returns the leftout findings of each mode.
+func sameAsControl(t *testing.T, archive, why string) map[string][]string {
+	t.Helper()
+
+	found := make(map[string][]string)
+	for mode, document := range map[string]string{"consumer_tests_test": "", "consumer_tests_production": consumerTestsProduction} {
+		files := archiveFiles(t, archive)
+		if document != "" {
+			files["control/"+repositoryDocument] = document
+			files["leftout/"+repositoryDocument] = document
+		}
+		dir := writeModule(t, files)
+		control, leftout := everyFinding(t, filepath.Join(dir, "control")), everyFinding(t, filepath.Join(dir, "leftout"))
+		if !slices.Equal(leftout, control) || len(control) == 0 {
+			t.Errorf("%s: findings = %q, want those of control, %q: %s", mode, leftout, control, why)
+		}
+		found[mode] = leftout
+	}
+	return found
+}
+
+func TestAPackageOnlyATestImportsFromALeftOutDirectoryReferencesAsTheTestDoes(t *testing.T) {
+	sameAsControl(t, "findings-ledger/referenced-from-a-test-only-left-out-package.txtar",
+		"the packages below node_modules and testdata are test code, so their calls are a test's as the test's own are")
+}
+
+func TestATestOnlyLeftOutPackageKeepsTheTestSupportItUsesTestSupport(t *testing.T) {
+	for mode, found := range sameAsControl(t, "findings-ledger/test-support-reached-through-a-test-only-left-out-package.txtar",
+		"the package below testdata is test code, so testutil stays test support") {
+		for _, f := range found {
+			if strings.HasSuffix(f, "#Helper") || strings.HasSuffix(f, "#TestRun") {
+				t.Errorf("%s: findings hold %q, want none about Helper or TestRun: only test code uses testutil", mode, f)
+			}
+		}
+	}
+}
+
+func TestATestOnlyLeftOutPackagesEncoderCallIsATestsEvidence(t *testing.T) {
+	sameAsControl(t, "findings-ledger/encoded-by-a-test-only-left-out-package.txtar",
+		"the package below testdata is test code, so its json.Marshal is a test's evidence")
+}
+
+func TestALeftOutPackageATestAlsoCompilesKeepsItsEncoderCallProductionEvidence(t *testing.T) {
+	for mode, found := range sameAsControl(t, "findings-ledger/encoded-by-a-left-out-package-a-test-also-imports.txtar",
+		"main imports the package below testdata, so its json.Marshal is production evidence however many test binaries compile it") {
+		for _, f := range found {
+			if strings.HasSuffix(f, " go://example.com/m/internal/p#S.X") {
+				t.Errorf("%s: findings hold %q, want none about S.X: the production encoder reads it", mode, f)
+			}
+		}
+	}
+}
+
+func TestATestOnlyLeftOutPackagesCallReachesNoFartherThanTheModule(t *testing.T) {
+	findings := map[string][]string{}
+	for _, found := range everyFinding(t, archiveModule(t, "findings-ledger/exported-for-a-test-only-left-out-package.txtar")) {
+		code, ref, _ := strings.Cut(found, " go://example.com/app/pkg#")
+		findings[ref] = append(findings[ref], code)
+	}
+	if got, want := findings["Helper"], findings["Sibling"]; !slices.Equal(got, want) || !slices.ContainsFunc(want, func(f string) bool {
+		return strings.HasPrefix(f, string(vocab.UnnecessaryExposure)+" ")
+	}) {
+		t.Errorf("findings of Helper = %q, want those of Sibling, %q, among them %s", got, want, vocab.UnnecessaryExposure)
+	}
+}
+
+func TestALeftOutOrNestedConsumersEncoderReadsTheFieldsOfTheTypeItEncodes(t *testing.T) {
+	for fixture, ref := range map[string]string{
+		"encoded-by-a-left-out-package": "go://example.com/m/internal/lib#S.X",
+		"encoded-by-a-nested-module":    "go://example.com/app/internal/lib#S.X",
+	} {
+		t.Run(fixture, func(t *testing.T) {
+			wantNoFinding(t, findingsAbout(t, archiveModule(t, "findings-ledger/"+fixture+".txtar")),
+				"the consumer's json.Marshal reads it", ref)
+		})
+	}
+}
+
+func TestATestOnlyLeftOutPackagesImportReachesTheFileItImports(t *testing.T) {
+	for mode, found := range sameAsControl(t, "findings-ledger/imported-by-a-test-only-left-out-package.txtar",
+		"the package below testdata is test code, so its import is a test's") {
+		for _, f := range found {
+			if strings.HasPrefix(f, string(vocab.FileNeverImported)+" ") {
+				t.Errorf("%s: findings hold %q, want no %s: the test-only package imports lib", mode, f, vocab.FileNeverImported)
+			}
+		}
+	}
+}
+
+func TestAConsumersImportReachesTheFileItImports(t *testing.T) {
+	got := scopedReport(t, "findings-ledger/imported-by-a-consumer.txtar")
+	if slices.Contains(got, string(vocab.FileNeverImported)+" go://example.com/app/side#side.go:file") ||
+		!slices.ContainsFunc(got, func(f string) bool { return strings.HasSuffix(f, " go://example.com/app/side#Unused") }) {
+		t.Errorf("findings = %q, want one about side.Unused and no %s about side.go: the consumer imports side", got, vocab.FileNeverImported)
 	}
 }

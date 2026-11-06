@@ -410,14 +410,9 @@ func (pr *provenance) exemptionOf(id inventory.SymbolID) *exempt.Exemption {
 }
 
 // consumerHop is the reference of a loaded consumer that made the symbol at at a
-// seed: its first from a production file, else its first from a test file, which
-// a seed has only where the mode counts it.
+// seed: its first in the order [calls] holds them, which is the one a mode that
+// counts any of them counts.
 func (pr *provenance) consumerHop(at int) Hop {
-	c := pr.g.consumed[at]
-	first := c.production
-	if first == 0 {
-		first = c.test
-	}
-	r := &pr.g.refs[first-1]
+	r := &pr.g.refs[pr.g.consumedFirst(at, facts.Mode{})-1]
 	return Hop{Reference: r, From: r.From, To: r.To}
 }

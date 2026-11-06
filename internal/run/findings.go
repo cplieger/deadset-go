@@ -9,6 +9,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/edges"
 	"github.com/cplieger/deadset-go/v2/internal/findings"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 )
 
 // Findings is the findings stage: every kind of [findings.Emitters] over the production
@@ -111,23 +112,17 @@ func (l *Loaded) moduleFiles() ([]findings.ModuleFile, error) {
 //
 // It is the label of the setting's origin, not the conventional path, so a run
 // reading a document the invocation named reports an unmatched root in that
-// document. Both paths are made absolute first, because a relative target beside an
-// absolute document is the ordinary invocation.
+// document.
 func (l *Loaded) rootsDocument() string {
 	label := l.req.Provenance[rootsPatternsSetting].Label
 	if label == "" {
 		return ""
 	}
-	root, rootErr := filepath.Abs(l.req.Target)
-	document, documentErr := filepath.Abs(label)
-	if rootErr != nil || documentErr != nil {
+	relative, inside := scope.Within(l.Root, label)
+	if !inside {
 		return ""
 	}
-	relative, err := filepath.Rel(root, document)
-	if err != nil || !filepath.IsLocal(relative) {
-		return ""
-	}
-	return filepath.ToSlash(relative)
+	return relative
 }
 
 // rootsPatternsSetting is the setting the configured roots are resolved under.

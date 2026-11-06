@@ -153,7 +153,7 @@ func distinct(refs []facts.Reference) []facts.Reference {
 		site := referenceSite{from: r.From, to: r.To, site: r.Site}
 		like := slices.IndexFunc(held[site], func(at int) bool {
 			k := &kept[at]
-			return k.Configs&r.Configs == 0 && k.Kind == r.Kind && k.Via == r.Via && k.Test == r.Test
+			return k.Configs&r.Configs == 0 && k.Kind == r.Kind && k.Via == r.Via && k.Build == r.Build && k.Test == r.Test
 		})
 		if like >= 0 {
 			kept[held[site][like]].Configs |= r.Configs

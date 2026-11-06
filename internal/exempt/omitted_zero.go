@@ -116,7 +116,7 @@ func zeroOmitted(t types.Type) bool {
 // kind and call no method. An opaque destination ([reach.opaque]) may hand the
 // value to a JSON encoder or to a YAML one calling it under omitempty
 // (https://pkg.go.dev/gopkg.in/yaml.v3#Marshal), so it keeps the method too.
-func (f *encodingFlow) keepZeroMethod(t types.Type, tag string, site evidence, d *destination) {
+func (f *encodingFlow) keepZeroMethod(t types.Type, tag string, site *evidence, d *destination) {
 	if !d.reach.emits {
 		return
 	}

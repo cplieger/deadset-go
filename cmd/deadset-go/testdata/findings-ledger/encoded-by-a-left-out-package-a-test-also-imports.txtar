@@ -1,0 +1,110 @@
+main imports a package below testdata that encodes p's S with encoding/json.
+In leftout an external test of p imports that package too, so the go command
+also compiles it into p's test binary. The package is still production code
+the module's build compiles, so its json.Marshal reads X in every mode, and
+both runs find the same.
+
+-- control/go.mod --
+module example.com/m
+
+go 1.27.1
+-- control/deadset.json --
+{"target":{"kind":"application"}}
+-- control/main.go --
+// Command m prints what l encodes.
+package main
+
+import (
+	"fmt"
+
+	"example.com/m/testdata/l"
+)
+
+func main() { fmt.Println(l.Encode()) }
+-- control/internal/p/p.go --
+// Package p holds S.
+package p
+
+// S is encoded by l.
+type S struct{ X int }
+
+// New returns an S.
+func New() S { return S{X: 1} }
+-- control/internal/p/p_internal_test.go --
+package p
+
+import "testing"
+
+func TestNew(t *testing.T) { _ = New() }
+-- control/testdata/l/l.go --
+// Package l encodes p's value.
+package l
+
+import (
+	"encoding/json"
+
+	"example.com/m/internal/p"
+)
+
+// Encode encodes p.New().
+func Encode() string {
+	b, _ := json.Marshal(p.New())
+	return string(b)
+}
+-- leftout/go.mod --
+module example.com/m
+
+go 1.27.1
+-- leftout/deadset.json --
+{"target":{"kind":"application"}}
+-- leftout/main.go --
+// Command m prints what l encodes.
+package main
+
+import (
+	"fmt"
+
+	"example.com/m/testdata/l"
+)
+
+func main() { fmt.Println(l.Encode()) }
+-- leftout/internal/p/p.go --
+// Package p holds S.
+package p
+
+// S is encoded by l.
+type S struct{ X int }
+
+// New returns an S.
+func New() S { return S{X: 1} }
+-- leftout/internal/p/p_internal_test.go --
+package p
+
+import "testing"
+
+func TestNew(t *testing.T) { _ = New() }
+-- leftout/internal/p/p_test.go --
+package p_test
+
+import (
+	"testing"
+
+	"example.com/m/testdata/l"
+)
+
+func TestEncode(t *testing.T) { _ = l.Encode() }
+-- leftout/testdata/l/l.go --
+// Package l encodes p's value.
+package l
+
+import (
+	"encoding/json"
+
+	"example.com/m/internal/p"
+)
+
+// Encode encodes p.New().
+func Encode() string {
+	b, _ := json.Marshal(p.New())
+	return string(b)
+}

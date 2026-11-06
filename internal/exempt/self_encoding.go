@@ -141,7 +141,7 @@ func (f *encodingFlow) beneath(cur walkStep) []walkStep {
 // field through which the type has it, because calling the method reads that field.
 // A method only some encoders call ([selfEncoder.some]) leaves the others to go on to
 // the next.
-func (f *encodingFlow) keepPromoting(named *types.Named, site evidence, d *destination) {
+func (f *encodingFlow) keepPromoting(named *types.Named, site *evidence, d *destination) {
 	set := types.NewMethodSet(types.NewPointer(named))
 	for direction, methods := range selfEncoders {
 		if d.reach.encoders&direction == 0 {
@@ -163,7 +163,7 @@ func (f *encodingFlow) keepPromoting(named *types.Named, site evidence, d *desti
 // promoted keeps, for a method t has by promotion, the method and each embedded
 // field its selection crosses from t, because calling it on t reads those fields.
 // A method t declares itself keeps nothing here.
-func (r *retention) promoted(t types.Type, sel *types.Selection, site evidence, detail string) {
+func (r *retention) promoted(t types.Type, sel *types.Selection, site *evidence, detail string) {
 	path := sel.Index()
 	if len(path) < 2 {
 		return

@@ -133,7 +133,11 @@ type Exemption struct {
 	// the evidence as a test's or a generated file's.
 	File string
 
-	Site token.Position // last, so the counted fields of a position end the value
+	Site token.Position // after every pointer field, so the counted fields of a position end the pointer data
+
+	// Build is the build that compiles the file holding the evidence
+	// ([resolve.Resolver.Build]).
+	Build load.Build
 }
 
 // Fact is what one exemption states, with the site left out: this class holds this
@@ -245,8 +249,8 @@ func NewProgram(l *Loaded) (*Program, error) {
 	p.allConversions = facts.Conversions(p.Resolve.Positions(), p.Result.Packages)
 	p.conversions = concrete(p.allConversions)
 	p.programConversions = slices.Clone(p.conversions)
-	for i := range p.Result.Consumers {
-		p.programConversions = append(p.programConversions, concrete(facts.Conversions(p.Resolve.Positions(), p.Result.Consumers[i].Packages))...)
+	for _, consumer := range p.Result.Referencing() {
+		p.programConversions = append(p.programConversions, concrete(facts.Conversions(p.Resolve.Positions(), consumer.Packages))...)
 	}
 	p.published = publishedConversions(p)
 	p.functions = programFunctions(p)
