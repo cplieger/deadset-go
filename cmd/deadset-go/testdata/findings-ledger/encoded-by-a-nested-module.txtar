@@ -1,0 +1,47 @@
+A module below the target root requires the target and replaces it with the
+target's directory, so it is a consumer of the target's tree. It encodes the
+target's S with encoding/json, which reads the field X by reflection, so X is
+not write-only.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- deadset.json --
+{"target":{"kind":"application"}}
+-- main.go --
+// Command app makes an S.
+package main
+
+import "example.com/app/internal/lib"
+
+func main() { _ = lib.New() }
+-- internal/lib/lib.go --
+// Package lib makes values a nested module encodes.
+package lib
+
+// S is encoded by the nested module.
+type S struct{ X int }
+
+// New returns an S.
+func New() S { return S{X: 1} }
+-- tools/encode/go.mod --
+module example.com/app/tools/encode
+
+go 1.27.1
+
+require example.com/app v0.0.0
+
+replace example.com/app => ../..
+-- tools/encode/main.go --
+// Command encode prints an encoded S.
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+
+	"example.com/app/internal/lib"
+)
+
+func main() { fmt.Println(json.Marshal(lib.New())) }

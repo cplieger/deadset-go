@@ -1,0 +1,43 @@
+A declared consumer encodes the target's S with encoding/json, which reads the
+field X by reflection: the consumer's call reads X as much as one the target
+writes would, so X is not write-only.
+
+-- target/go.mod --
+module example.com/app
+
+go 1.27.1
+-- target/deadset.json --
+{"target": {"kind": "library"}, "consumers": {"complete": true}}
+-- target/lib.go --
+// Package app makes values its consumers encode.
+package app
+
+// S is encoded by the consumer.
+type S struct{ X int }
+
+// New returns an S.
+func New() S { return S{X: 1} }
+-- consumer/go.mod --
+module example.com/consumer
+
+go 1.27.1
+
+require example.com/app v0.0.0
+
+replace example.com/app => ../target
+-- consumer/main.go --
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+
+	"example.com/app"
+)
+
+func main() { fmt.Println(json.Marshal(app.New())) }
+-- scope.json --
+{
+  "target": {"id": "example.com/app", "role": "target", "path": "target"},
+  "consumers": [{"id": "example.com/consumer", "role": "consumer", "path": "consumer"}]
+}

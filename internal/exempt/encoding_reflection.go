@@ -11,6 +11,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -625,7 +626,7 @@ func pathTo(root, target ast.Node) []ast.Node {
 	return found
 }
 
-// readCall reads the arguments one call of the target hands to something that
+// readCall reads the arguments one call of the program hands to something that
 // reads them: a destination, and otherwise a parameter that only decodes or one a
 // value leaves the analysis through.
 func (f *encodingFlow) readCall(info *types.Info, decl ast.Decl, enclosing *types.Func, dir string, call *ast.CallExpr) {
@@ -937,14 +938,14 @@ func (f *encodingFlow) retain(a *arrival) error {
 		} else {
 			_, unnamed := typesReached(one)
 			for _, st := range unnamed {
-				f.fields(st, site, d)
+				f.fields(st, &site, d)
 			}
 		}
 		if d.reach.results {
 			reached = f.calledResults(slices.Clone(reached), d)
 		}
 		for _, named := range reached {
-			f.members(named, site, d, encoded[resolve.Spell(named, nil)])
+			f.members(named, &site, d, encoded[resolve.Spell(named, nil)])
 		}
 	}
 	return nil
@@ -954,7 +955,7 @@ func (f *encodingFlow) retain(a *arrival) error {
 // resolves by name, the methods an outside package can name, and, where it reads
 // fields and the type does not encode itself, the exported fields and every field
 // carrying a tag, because a tagged field is named by its tag and not by its visibility.
-func (f *encodingFlow) members(named *types.Named, site evidence, d *destination, encodesItself bool) {
+func (f *encodingFlow) members(named *types.Named, site *evidence, d *destination, encodesItself bool) {
 	origin := named.Origin()
 	every, satisfying := f.outsideMethods(named, d.reach)
 	for m := range origin.Methods() {
@@ -978,14 +979,14 @@ func (f *encodingFlow) members(named *types.Named, site evidence, d *destination
 // type that holds the struct. An exported, a tagged and an embedded struct field are
 // visited (https://pkg.go.dev/encoding/json#Marshal), and every field where the
 // destination reads the struct's layout.
-func (f *encodingFlow) fields(st *types.Struct, site evidence, d *destination) {
+func (f *encodingFlow) fields(st *types.Struct, site *evidence, d *destination) {
 	for i := range st.NumFields() {
 		field := st.Field(i)
 		visited := d.reach.layout ||
 			(field.Exported() || st.Tag(i) != "" || embedsStruct(field)) && !d.reach.keys.skips(st.Tag(i))
 		f.noteDecoded(field, visited, site, d)
 		emits := d.reach.emits && !d.reach.keys.omitsZero(field.Type(), st.Tag(i))
-		unwritten := unwrittenRead{field: field, site: site, detail: d.detail, emits: emits}
+		unwritten := unwrittenRead{field: field, site: *site, detail: d.detail, emits: emits}
 		switch {
 		case f.reads(field, st.Tag(i), visited, site, d):
 			f.kept.record(field, site, d.detail)
@@ -1017,7 +1018,7 @@ func (f *encodingFlow) fields(st *types.Struct, site evidence, d *destination) {
 // write of a promoted field writes through, or the destination reads the set of fields
 // itself ([reach.strict], [reach.layout]): any other reader of an unwritten field
 // reads a value no code of the program gave it.
-func (f *encodingFlow) reads(field *types.Var, tag string, visited bool, site evidence, d *destination) bool {
+func (f *encodingFlow) reads(field *types.Var, tag string, visited bool, site *evidence, d *destination) bool {
 	switch {
 	case f.readsAny(field, visited, d) && (field.Embedded() || d.reach.strict || d.reach.layout ||
 		f.graph.writes.forSite(site, f.kept.in.Mode.Production)[f.edge.sites.of(field)]):
@@ -1052,13 +1053,13 @@ type unwrittenRead struct {
 
 // noteDecoded records the site of a decoding destination that fills a field: a
 // decoder, a function that only decodes into its argument, or a filling callee.
-func (f *encodingFlow) noteDecoded(field *types.Var, visited bool, site evidence, d *destination) {
+func (f *encodingFlow) noteDecoded(field *types.Var, visited bool, site *evidence, d *destination) {
 	if !visited || !d.reach.holders && !d.reach.fills {
 		return
 	}
 	at := f.edge.sites.of(field)
-	if !slices.Contains(f.decoded[at], site) {
-		f.decoded[at] = append(f.decoded[at], site)
+	if !slices.Contains(f.decoded[at], *site) {
+		f.decoded[at] = append(f.decoded[at], *site)
 	}
 }
 
@@ -1070,10 +1071,10 @@ func (f *encodingFlow) noteDecoded(field *types.Var, visited bool, site evidence
 func (f *encodingFlow) keepDecoded() {
 	for i := range f.unwritten {
 		switch u := &f.unwritten[i]; {
-		case slices.ContainsFunc(f.decoded[f.edge.sites.of(u.field)], u.filledBy):
-			f.kept.record(u.field, u.site, u.detail)
+		case u.filled(f.decoded[f.edge.sites.of(u.field)]):
+			f.kept.record(u.field, &u.site, u.detail)
 		case u.emits:
-			f.filled.record(u.field, u.site, u.detail)
+			f.filled.record(u.field, &u.site, u.detail)
 		}
 	}
 }
@@ -1081,15 +1082,22 @@ func (f *encodingFlow) keepDecoded() {
 // filledBy reports whether the decoder at one site fills the field for this read: a
 // decoder of production code fills it for any reader and one of a test file for a
 // reader in a test file, and a reader that may fill the field needs another decoder.
-func (u *unwrittenRead) filledBy(decoder evidence) bool {
-	if u.fills && decoder == u.site {
+func (u *unwrittenRead) filledBy(decoder *evidence) bool {
+	if u.fills && *decoder == u.site {
 		return false
 	}
-	if _, test := inventory.IsTestFile(decoder.file); !test {
-		return true
+	return !decoder.testCode() || u.site.testCode()
+}
+
+// filled reports whether one of the decoders at the given sites fills the field for
+// this read ([unwrittenRead.filledBy]).
+func (u *unwrittenRead) filled(decoders []evidence) bool {
+	for i := range decoders {
+		if u.filledBy(&decoders[i]) {
+			return true
+		}
 	}
-	_, test := inventory.IsTestFile(u.site.file)
-	return test
+	return false
 }
 
 // embedsStruct reports whether one field is an embedded struct or pointer to one,
@@ -1384,12 +1392,12 @@ func newRetention(in *Program, class vocab.Exemption) *retention {
 
 // record keeps one exemption, unless the symbol is not one the run reasons about
 // or this class already recorded the symbol at this site.
-func (r *retention) record(obj types.Object, site evidence, detail string) {
+func (r *retention) record(obj types.Object, site *evidence, detail string) {
 	id, held := r.in.Resolve.Object(obj)
 	if !held {
 		return
 	}
-	key := exemptionKey{id: id, site: site}
+	key := exemptionKey{id: id, site: *site}
 	if r.seen[key] {
 		return
 	}
@@ -1398,6 +1406,7 @@ func (r *retention) record(obj types.Object, site evidence, detail string) {
 		ID:       id,
 		Class:    string(r.class),
 		Consumer: site.consumer,
+		Build:    site.build,
 		File:     site.file,
 		Site:     site.at,
 		Detail:   detail,
@@ -1410,6 +1419,13 @@ type evidence struct {
 	consumer string
 	file     string // [Exemption.File]
 	at       token.Position
+	build    load.Build
+}
+
+// testCode reports whether the evidence is in test code ([load.Build.TestCode]).
+func (e *evidence) testCode() bool {
+	_, testFile := inventory.IsTestFile(e.file)
+	return e.build.TestCode(testFile)
 }
 
 // site renders one position. Every position the load compiled is a file of the
@@ -1417,7 +1433,7 @@ type evidence struct {
 // the run rather than a site to pass over.
 func (r *retention) site(pos token.Pos) (evidence, error) {
 	consumer, at, err := r.in.Resolve.Site(pos)
-	return evidence{consumer: consumer, file: r.in.Resolve.File(pos), at: at}, err
+	return evidence{consumer: consumer, file: r.in.Resolve.File(pos), at: at, build: r.in.Resolve.Build(pos)}, err
 }
 
 // exemptions returns what the class recorded, ordered by site and then by symbol.

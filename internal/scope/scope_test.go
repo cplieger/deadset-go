@@ -11,10 +11,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cplieger/atomicfile/v4"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/document"
 	"github.com/cplieger/deadset-spec/v8/vocab"
+	"github.com/cplieger/go/filesafe"
 )
 
 // writeDocument writes body as a scope document in a fresh directory and returns
@@ -210,8 +210,8 @@ func TestReadRefusesADocumentAboveTheSizeBound(t *testing.T) {
 
 	_, err := read(t.Context(), path)
 
-	if !errors.Is(err, atomicfile.ErrFileTooLarge) {
-		t.Errorf("read(oversize document) = _, %v, want an error matching atomicfile.ErrFileTooLarge", err)
+	if !errors.Is(err, filesafe.ErrFileTooLarge) {
+		t.Errorf("read(oversize document) = _, %v, want an error matching filesafe.ErrFileTooLarge", err)
 	}
 }
 
@@ -364,5 +364,41 @@ func TestReadRefusesEveryPublishedScopeNegative(t *testing.T) {
 	}
 	if refused == 0 {
 		t.Fatal("examples/negatives/index.json names no refused scope document, so this test pins nothing")
+	}
+}
+
+func TestWithinPlacesAPathByItsNamesThenWhereBothResolve(t *testing.T) {
+	base := t.TempDir()
+	real := filepath.Join(base, "real")
+	if err := os.MkdirAll(filepath.Join(real, "app", "sub"), 0o750); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	alias := filepath.Join(base, "alias")
+	if err := os.Symlink(real, alias); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	outside := filepath.Join(base, "outside")
+	if err := os.Symlink(filepath.Join(real, "app"), filepath.Join(real, "inner")); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	for _, tc := range []struct {
+		name, dir, path, want string
+		inside                bool
+	}{
+		{"the directory itself", real, real, ".", true},
+		{"a path below by its names", real, filepath.Join(real, "app", "sub"), "app/sub", true},
+		{"a link inside the directory keeps its name", base, filepath.Join(real, "inner"), "real/inner", true},
+		{"the directory spelled through a link", alias, filepath.Join(real, "app"), "app", true},
+		{"the path spelled through a link", real, filepath.Join(alias, "app", "sub"), "app/sub", true},
+		{"a link below a path spelled through a link keeps its name", real, filepath.Join(alias, "inner", "sub"), "inner/sub", true},
+		{"a sibling", filepath.Join(real, "app"), base, "", false},
+		{"a path that resolves nowhere", real, outside, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, inside := Within(tc.dir, tc.path)
+			if got != tc.want || inside != tc.inside {
+				t.Errorf("Within(%s, %s) = %q, %v, want %q, %v", tc.dir, tc.path, got, inside, tc.want, tc.inside)
+			}
+		})
 	}
 }

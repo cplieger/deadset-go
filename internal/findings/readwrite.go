@@ -11,6 +11,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/liveness"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
@@ -231,7 +232,7 @@ func (u *uses) count(in *pass, r *facts.Reference) {
 	case r.Kind != facts.RefWrite && in.deadReader(r):
 		u.deadReads++
 		return
-	case r.Kind != facts.RefWrite || r.Consumer != "":
+	case r.Kind != facts.RefWrite || r.Build != load.TargetBuild:
 		u.reads++
 		return
 	}
@@ -252,7 +253,7 @@ func (u *uses) count(in *pass, r *facts.Reference) {
 // relation is reference counting, under which that declaration is dead, so its
 // read is no read. A reader dead at a weaker class may be live, so its read counts.
 func (in *pass) deadReader(r *facts.Reference) bool {
-	if r.Consumer != "" || r.From == "" || r.From == r.To {
+	if r.Build != load.TargetBuild || r.From == "" || r.From == r.To {
 		return false
 	}
 	reader := in.candidateOf(r.From)

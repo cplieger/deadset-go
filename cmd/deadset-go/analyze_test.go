@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -915,5 +916,25 @@ func TestAnalyzeRefusesAnEdgesDocumentTheContractRefuses(t *testing.T) {
 				t.Errorf("analyze over %s left a report at %s (%v), want none", name, got.reportPath, err)
 			}
 		})
+	}
+}
+
+func TestARunWritesNothingOnceCancelledAndEverythingOnceItStartsWriting(t *testing.T) {
+	t.Parallel()
+
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := committed(cancelled); !errors.Is(err, context.Canceled) {
+		t.Errorf("committed(a cancelled run) = %v, want the cancellation, so nothing is written", err)
+	}
+
+	live, stop := context.WithCancel(t.Context())
+	writing, err := committed(live)
+	if err != nil {
+		t.Fatalf("committed(a live run) = %v, want the context to write under", err)
+	}
+	stop()
+	if err := writing.Err(); err != nil {
+		t.Errorf("committed(a run cancelled after it started writing).Err() = %v, want none: every document is written", err)
 	}
 }

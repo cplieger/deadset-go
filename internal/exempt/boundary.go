@@ -500,14 +500,9 @@ func parameterNamed(info *types.Info, arg ast.Expr) *types.Var {
 
 // holdsInMode reports whether the evidence one exemption found holds under the run's
 // mode: every exemption in the plain mode, and in a production one an exemption whose
-// evidence no test file carries, or a loaded consumer's test file the mode classifies
-// as production, as it classifies that file's references.
+// evidence the mode classifies as no test code, as it classifies that file's
+// references ([facts.Mode.TestCode]).
 func holdsInMode(e *Exemption, m facts.Mode) bool {
-	if !m.Production {
-		return true
-	}
-	if _, test := inventory.IsTestFile(e.File); !test {
-		return true
-	}
-	return e.Consumer != "" && m.ConsumerTestsProduction
+	_, testFile := inventory.IsTestFile(e.File)
+	return !m.Production || !m.TestCode(e.Build, e.Build.TestCode(testFile))
 }

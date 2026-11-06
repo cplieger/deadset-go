@@ -491,6 +491,7 @@ func TestNarrowingLeavesADeclarationReferencedFromOutsideTheModuleAlone(t *testi
 		name     string
 		from     inventory.SymbolID
 		consumer string
+		build    load.Build
 		want     map[string]string
 	}{
 		{
@@ -504,8 +505,10 @@ func TestNarrowingLeavesADeclarationReferencedFromOutsideTheModuleAlone(t *testi
 			// alone, and it names the module that made it.
 			name:     "a_reference_a_loaded_consumer_made",
 			consumer: theConsumer,
+			build:    load.ConsumerBuild,
 			want:     map[string]string{},
 		},
+
 		{
 			name: "a_reference_of_the_declaring_file",
 			from: subject.ID,
@@ -520,6 +523,7 @@ func TestNarrowingLeavesADeclarationReferencedFromOutsideTheModuleAlone(t *testi
 					From:     tc.from,
 					To:       subject.ID,
 					Consumer: tc.consumer,
+					Build:    tc.build,
 					Pos:      token.Position{Filename: file, Line: 4, Column: 9},
 					Kind:     facts.RefCall,
 				}},

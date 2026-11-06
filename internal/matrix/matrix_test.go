@@ -69,6 +69,19 @@ func TestDeriveEmitsOneConfigurationPerAtomAndNeverTheirProduct(t *testing.T) {
 			wantAtoms:   atomSet{OS: []string{"plan9", "windows"}, Arch: []string{"arm64"}},
 		},
 		{
+			name:      "an_imported_path_naming_a_file_holds_no_package",
+			archive:   "import-names-a-file.txtar",
+			wantIDs:   []string{"linux-amd64"},
+			wantAtoms: atomSet{},
+		},
+		{
+			name:        "an_import_through_a_vendor_directory_is_none_the_build_compiles_and_one_ending_in_vendor_is",
+			archive:     "import-of-a-vendor-path.txtar",
+			wantIDs:     []string{"linux-amd64", "plan9-amd64"},
+			wantDerived: []string{"plan9-amd64"},
+			wantAtoms:   atomSet{OS: []string{"plan9"}},
+		},
+		{
 			name:      "no_path_the_toolchain_builds_nothing_from_is_read",
 			archive:   "walk-skips.txtar",
 			wantIDs:   []string{"linux-amd64"},

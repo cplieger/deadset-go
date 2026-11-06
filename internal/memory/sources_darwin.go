@@ -38,7 +38,7 @@ func freePages() (uint64, bool) {
 // the bytes are padded back to eight before they are decoded.
 func memsize() (uint64, bool) {
 	raw, err := syscall.Sysctl("hw.memsize")
-	if err != nil || len(raw) == 0 || len(raw) > 8 {
+	if err != nil || raw == "" || len(raw) > 8 {
 		return 0, false
 	}
 	var buf [8]byte

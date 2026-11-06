@@ -110,6 +110,7 @@ func TestReferencesRecordsWhatALoadedConsumerReferences(t *testing.T) {
 		from     string
 		to       string
 		file     string
+		build    load.Build
 		test     bool
 	}
 	var fromConsumer []made
@@ -122,6 +123,7 @@ func TestReferencesRecordsWhatALoadedConsumerReferences(t *testing.T) {
 			from:     names[r.From],
 			to:       names[r.To],
 			file:     r.Pos.Filename,
+			build:    r.Build,
 			test:     r.Test,
 		})
 	}
@@ -129,10 +131,13 @@ func TestReferencesRecordsWhatALoadedConsumerReferences(t *testing.T) {
 	// A consumer's reference carries the consumer's module path, no referencing
 	// declaration, because the consumer's declarations are not the inventory's, and
 	// a position relative to the consumer's own module root. Its Test flag is the
-	// language's own rule applied to the consumer's file, as it is for the target.
+	// language's own rule applied to the consumer's file, as it is for the target,
+	// and its imports of the target's package are references too.
 	want := []made{
-		{consumer: "example.com/consumer", to: "UsedByConsumer", file: "main.go"},
-		{consumer: "example.com/consumer", to: "UsedByConsumerTest", file: "main_test.go", test: true},
+		{consumer: "example.com/consumer", to: "example.com/target", file: "main.go", build: load.ConsumerBuild},
+		{consumer: "example.com/consumer", to: "UsedByConsumer", file: "main.go", build: load.ConsumerBuild},
+		{consumer: "example.com/consumer", to: "example.com/target", file: "main_test.go", build: load.ConsumerBuild, test: true},
+		{consumer: "example.com/consumer", to: "UsedByConsumerTest", file: "main_test.go", build: load.ConsumerBuild, test: true},
 	}
 	if !slices.Equal(fromConsumer, want) {
 		t.Errorf("References() recorded %+v from the consumer, want %+v", fromConsumer, want)
@@ -165,15 +170,21 @@ func TestReferencesRendersAUnitsOwnConsumerAgainstItsModuleRoot(t *testing.T) {
 	}{
 		"module at the target root": {
 			target: "rooted", module: "example.com/app",
-			want: []string{"Back node_modules/helper/helper.go", "Shown _examples/demo/main.go"},
+			want: []string{
+				"Back node_modules/helper/helper.go", "Shown _examples/demo/main.go",
+				"example.com/app/lib _examples/demo/main.go", "example.com/app/lib node_modules/helper/helper.go",
+			},
 		},
 		"module below a walked target": {
 			target: "walked", module: "example.com/app",
-			want: []string{"Back node_modules/helper/helper.go", "Shown _examples/demo/main.go"},
+			want: []string{
+				"Back node_modules/helper/helper.go", "Shown _examples/demo/main.go",
+				"example.com/app/lib _examples/demo/main.go", "example.com/app/lib node_modules/helper/helper.go",
+			},
 		},
 		"module above the target": {
 			target: "governed/pkg", module: "example.com/m",
-			want: []string{"Shown pkg/_examples/demo/main.go"},
+			want: []string{"Shown pkg/_examples/demo/main.go", "example.com/m/pkg/lib pkg/_examples/demo/main.go"},
 		},
 	}
 	for name, tc := range cases {

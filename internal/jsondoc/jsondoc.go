@@ -17,12 +17,12 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/cplieger/atomicfile/v4"
 	"github.com/cplieger/deadset-spec/v8/document"
+	"github.com/cplieger/go/filesafe"
 )
 
 // Read returns the bytes of the document at path, refusing one larger than limit
-// bytes, wrapping [atomicfile.ErrFileTooLarge], without reading it whole. An
+// bytes, wrapping [filesafe.ErrFileTooLarge], without reading it whole. An
 // absent document is an error satisfying errors.Is(err, fs.ErrNotExist).
 func Read(ctx context.Context, path string, limit int64) ([]byte, error) {
 	file, err := os.Open(path)
@@ -30,9 +30,9 @@ func Read(ctx context.Context, path string, limit int64) ([]byte, error) {
 		return nil, err
 	}
 	defer func() { _ = file.Close() }()
-	body, err := atomicfile.ReadBoundedFile(ctx, file, limit)
-	if errors.Is(err, atomicfile.ErrFileTooLarge) {
-		return nil, fmt.Errorf("%w: %s is larger than %d bytes", atomicfile.ErrFileTooLarge, path, limit)
+	body, err := filesafe.ReadBoundedFile(ctx, file, limit)
+	if errors.Is(err, filesafe.ErrFileTooLarge) {
+		return nil, fmt.Errorf("%w: %s is larger than %d bytes", filesafe.ErrFileTooLarge, path, limit)
 	}
 	return body, err
 }

@@ -187,6 +187,42 @@ func TestATargetOutsideTheRunDirectoryEndsTheRunWithItsRunClass(t *testing.T) {
 	wantOneClassLine(t, "analyze of a target outside the run directory", stderr.String(), vocab.RunFailurePrefix+vocab.RunUnreportablePath+": ")
 }
 
+// An import below node_modules naming a regular file holds no package, which is a
+// missing module of the project's setup rather than a fault of the analyzer.
+func TestAnImportNamingAFileBelowNodeModulesIsAMissingModule(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"go.mod":              "module example.com/app\n\ngo 1.27.1\n",
+		"main.go":             "package main\n\nimport \"example.com/app/node_modules/helper\"\n\nfunc main() { helper.Run() }\n",
+		"node_modules/helper": "not a directory\n",
+		repositoryDocument:    `{"target": {"kind": "application"}}`,
+	})
+	t.Chdir(dir)
+	var stdout, stderr bytes.Buffer
+	code := invoke(t.Context(), []string{"analyze", "--target=.", "--report=" + filepath.Join(t.TempDir(), "report.json")}, &stdout, &stderr)
+	if code != vocab.ExitFailure {
+		t.Fatalf("analyze of an import naming a file = %d, want %d\nstderr:\n%s", code, vocab.ExitFailure, stderr.String())
+	}
+	wantOneClassLine(t, "analyze of an import naming a file", stderr.String(), vocab.SetupFailurePrefix+vocab.SetupMissingModule+": ")
+}
+
+// A target in a directory the module above it ignores holds no source file of the
+// target, which is no program to analyze rather than a clean report.
+func TestATargetItsModuleIgnoresHoldsNoProgram(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"go.mod":                      "module example.com/app\n\ngo 1.27.1\n\nignore ./tools\n",
+		"app.go":                      "package app\n\n// A is the module's own package.\nfunc A() {}\n",
+		"tools/main.go":               "package main\n\nfunc main() {}\n\nfunc dead() {}\n",
+		"tools/" + repositoryDocument: `{"target": {"kind": "application"}}`,
+	})
+	t.Chdir(filepath.Join(dir, "tools"))
+	var stdout, stderr bytes.Buffer
+	code := invoke(t.Context(), []string{"analyze", "--target=.", "--report=" + filepath.Join(t.TempDir(), "report.json")}, &stdout, &stderr)
+	if code != vocab.ExitFailure {
+		t.Fatalf("analyze of an ignored directory = %d, want %d\nstderr:\n%s", code, vocab.ExitFailure, stderr.String())
+	}
+	wantOneClassLine(t, "analyze of an ignored directory", stderr.String(), vocab.SetupFailurePrefix+vocab.SetupNoProgram+": ")
+}
+
 func TestAnErrorNoClassNamesIsAProductFault(t *testing.T) {
 	var stderr bytes.Buffer
 	code := failed(t.Context(), &stderr, errors.New("the loader returned no package for a listed file"))

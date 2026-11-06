@@ -3,8 +3,8 @@ module github.com/cplieger/deadset-go/v2
 go 1.27.3
 
 require (
-	github.com/cplieger/atomicfile/v4 v4.2.0
-	github.com/cplieger/deadset-spec/v8 v8.0.0-dev.37
+	github.com/cplieger/deadset-spec/v8 v8.0.0-dev.38
+	github.com/cplieger/go/filesafe v1.0.0-dev.2
 	golang.org/x/mod v0.42.0
 	golang.org/x/tools v0.52.0
 	pgregory.net/rapid v1.3.0

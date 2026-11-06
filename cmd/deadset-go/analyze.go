@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cplieger/atomicfile/v4"
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/failure"
 	"github.com/cplieger/deadset-go/v2/internal/jsondoc"
@@ -24,6 +23,7 @@ import (
 	"github.com/cplieger/deadset-spec/v8/report"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
+	"github.com/cplieger/go/filesafe"
 )
 
 // analyzeUsage names every flag the verb takes: the invocation's own, which name
@@ -149,19 +149,47 @@ func analyze(ctx context.Context, args []string, stderr io.Writer) int {
 		}
 	}
 
-	if err := asked.write(ctx, built, reporters, recorded, run.Provenance(self)); err != nil {
-		return failed(ctx, stderr, err)
-	}
+	var facts *specfacts.Document
 	if asked.facts != "" {
-		doc, err := found.Facts(ctx, self.Analyzer.Name, self.Analyzer.Version)
-		if err == nil {
-			err = publish(ctx, asked.facts, func(w io.Writer) error { return specfacts.Encode(w, doc) })
-		}
-		if err != nil {
+		if facts, err = found.Facts(ctx, self.Analyzer.Name, self.Analyzer.Version); err != nil {
 			return failed(ctx, stderr, fmt.Errorf("write the facts document: %w", err))
 		}
 	}
+	writing, err := committed(ctx)
+	if err != nil {
+		return failed(ctx, stderr, err)
+	}
+	if err := asked.writeAll(writing, built, facts, recorded, run.Provenance(self), reporters); err != nil {
+		return failed(writing, stderr, err)
+	}
 	return asked.verdict(built, reporters.FailOn, stderr)
+}
+
+// writeAll writes the report, its renderings and baseline ([invocation.write]), then
+// the facts document where the invocation asked for one.
+func (a *invocation) writeAll(ctx context.Context, r *report.Report, facts *specfacts.Document, recorded []core.Recorded, p core.Provenance, reporters *config.Reporters) error {
+	if err := a.write(ctx, r, reporters, recorded, p); err != nil {
+		return err
+	}
+	if facts == nil {
+		return nil
+	}
+	if err := publish(ctx, a.facts, func(w io.Writer) error { return specfacts.Encode(w, facts) }); err != nil {
+		return fmt.Errorf("write the facts document: %w", err)
+	}
+	return nil
+}
+
+// committed is the context a run writes its documents under: an error where the
+// run is cancelled before it starts writing, so it writes nothing, and otherwise
+// ctx with its cancellation dropped, so once it starts writing it writes every
+// document whatever the memory governor or a signal does, and keeps its verdict
+// rather than exiting 3 beside a report of its own.
+func committed(ctx context.Context) (context.Context, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return context.WithoutCancel(ctx), nil
 }
 
 // analyzeFlags parses the invocation and resolves the configuration documents it
@@ -347,7 +375,7 @@ func publish(ctx context.Context, path string, write func(w io.Writer) error) er
 	}
 	absolute, err := filepath.Abs(path)
 	if err == nil {
-		_, err = atomicfile.WriteFile(ctx, absolute, rendered.Bytes(), atomicfile.WithMode(documentMode))
+		_, err = filesafe.WriteFile(ctx, absolute, rendered.Bytes(), filesafe.WithMode(documentMode))
 	}
 	if err != nil {
 		return failure.Wrap(vocab.RunUnwrittenOutput, fmt.Errorf("write %s: %w", path, err))

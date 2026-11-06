@@ -30,8 +30,9 @@ type Resolver struct {
 	paths     map[string]bool           // the import paths of the target's packages, the only ones declaring a symbol
 	dirs      map[*types.Package]string // TypeKey's directory of each package, on first use
 	consumers []consumerPositions
-	decls     []ast.Decl // every top-level declaration, by position
-	holders   []extent   // every range declaring a symbol of the inventory, by position
+	builds    map[*token.File]load.Build // the build of every loaded consumer's file ([Resolver.Build])
+	decls     []ast.Decl                 // every top-level declaration, by position
+	holders   []extent                   // every range declaring a symbol of the inventory, by position
 }
 
 // extent is one declaration's source range, with the symbol it declares.
@@ -61,6 +62,7 @@ func New(r *load.Result, inv *inventory.Inventory) (*Resolver, error) {
 		pos:     inv.Positions(),
 		written: make(map[inventory.Offset]inventory.SymbolID, len(inv.Symbols)),
 		paths:   make(map[string]bool),
+		builds:  make(map[*token.File]load.Build),
 	}
 	units := make(map[string]bool, len(r.Units))
 	for i := range r.Units {
@@ -75,6 +77,7 @@ func New(r *load.Result, inv *inventory.Inventory) (*Resolver, error) {
 			held = consumerPositions{id: consumer.ID, pos: rs.pos.Under(module.Dir), rooted: true}
 		}
 		rs.consumers = append(rs.consumers, held)
+		rs.holdBuild(r.Fset, &consumer)
 	}
 	for pos, id := range inv.Sites() {
 		rs.written[rs.pos.Offset(pos)] = id
@@ -87,6 +90,16 @@ func New(r *load.Result, inv *inventory.Inventory) (*Resolver, error) {
 		return nil, err
 	}
 	return rs, nil
+}
+
+// holdBuild records the build of every file of one loaded consumer. The load
+// compiles no file under packages of both sides, so each file gets one build.
+func (rs *Resolver) holdBuild(fset *token.FileSet, consumer *load.Consumer) {
+	for _, p := range consumer.Packages {
+		for _, f := range p.Syntax {
+			rs.builds[fset.File(f.FileStart)] = consumer.Build
+		}
+	}
 }
 
 // renders returns the failure written first among the declarations the packages'
@@ -410,6 +423,15 @@ func (rs *Resolver) Site(pos token.Pos) (consumer string, at token.Position, err
 	consumer, held := rs.owner(pos)
 	at, err = held.Render(pos)
 	return consumer, at, err
+}
+
+// Build is the build that compiles the file writing pos: [load.TargetBuild] for a
+// file of the target, and for a loaded consumer's file [load.ConsumerBuild] where
+// any production package of a consumer compiles it, [load.TestBuild] where only
+// test code does. The load decides each package's build and compiles no file
+// under packages of both sides.
+func (rs *Resolver) Build(pos token.Pos) load.Build {
+	return rs.builds[rs.pos.Fset.File(pos)]
 }
 
 // File is the path of the file that writes pos, relative to the root [Resolver.Site]

@@ -8,8 +8,6 @@ import (
 	"maps"
 	"path/filepath"
 	"slices"
-
-	"github.com/cplieger/deadset-go/v2/internal/inventory"
 )
 
 // flowGraph is the value flow of one program the encoding class solves, read by one
@@ -83,9 +81,10 @@ type fieldWrites struct {
 	every, production map[token.Position]bool
 }
 
-// readFlow reads the flow graph: the target's calls and the program's returns,
-// instantiations, assertions, stores and writes, each package of the program in
-// order and each declaration in source order.
+// readFlow reads the flow graph: the program's calls, returns, instantiations,
+// assertions, stores and writes, each package of the program in order and each
+// declaration in source order. A loaded consumer's calls are read as the
+// target's are, because a consumer that encodes a target type reads its fields.
 func (f *encodingFlow) readFlow() {
 	in := f.kept.in
 	f.graph = flowGraph{
@@ -97,13 +96,12 @@ func (f *encodingFlow) readFlow() {
 		},
 	}
 	imports := sourceImports(in.Facts.Program())
-	target := len(in.Facts.Packages())
-	for i, p := range in.Facts.Program() {
+	for _, p := range in.Facts.Program() {
 		if p.TypesInfo != nil {
 			f.readInstances(p.TypesInfo, imports)
 		}
 		for _, file := range in.Facts.Files(p) {
-			f.readFile(p.TypesInfo, file, i < target)
+			f.readFile(p.TypesInfo, file)
 		}
 	}
 	f.graph.stored.link(in)
@@ -120,17 +118,16 @@ func (f *encodingFlow) readInstances(info *types.Info, imports map[string][]stri
 	}
 }
 
-// readFile reads every declaration of one source file, the calls only where the
-// file is the target's. A file several package variants type-check is read once
-// per variant, and every variant resolves the same positions, so the repeated
-// records collapse on the site.
-func (f *encodingFlow) readFile(info *types.Info, file *ast.File, target bool) {
+// readFile reads every declaration of one source file. A file several package
+// variants type-check is read once per variant, and every variant resolves the
+// same positions, so the repeated records collapse on the site.
+func (f *encodingFlow) readFile(info *types.Info, file *ast.File) {
 	name := f.kept.in.Result.Fset.Position(file.FileStart).Filename
-	test := f.kept.in.Resolve.Positions().InTestFile(file.FileStart)
+	test := f.kept.in.Resolve.Build(file.FileStart).TestCode(f.kept.in.Resolve.Positions().InTestFile(file.FileStart))
 	for _, decl := range file.Decls {
 		enclosing := enclosingFunc(info, decl)
 		r := &declarationReader{
-			flow: f, info: info, decl: decl, enclosing: enclosing, dir: filepath.Dir(name), target: target, test: test,
+			flow: f, info: info, decl: decl, enclosing: enclosing, dir: filepath.Dir(name), test: test,
 			store: &storeWalk{storedTypes: f.graph.stored, info: info, fn: enclosing},
 		}
 		r.returns, r.answered = f.returnDestination(decl, enclosing)
@@ -149,7 +146,6 @@ type declarationReader struct {
 	dir       string
 	returns   destination // what reads the values the method returns, where answered
 	answered  bool
-	target    bool
 	test      bool
 }
 
@@ -161,9 +157,7 @@ func (r *declarationReader) visit(n ast.Node, stack []ast.Node) bool {
 	f.graph.writes.read(f.edge.sites, r.info, n, r.test)
 	switch n := n.(type) {
 	case *ast.CallExpr:
-		if r.target {
-			f.readCall(r.info, r.decl, r.enclosing, r.dir, n)
-		}
+		f.readCall(r.info, r.decl, r.enclosing, r.dir, n)
 	case *ast.ReturnStmt:
 		if r.answered && !inLiteral {
 			f.returnedValues(r.info, r.enclosing, n, &r.returns)
@@ -236,8 +230,8 @@ func (w *fieldWrites) read(sites *declarationSites, info *types.Info, n ast.Node
 // forSite is every field the code one destination's site stands for writes: the
 // program's production code, and its test files too where the site is in a test
 // file or the run counts test references.
-func (w *fieldWrites) forSite(site evidence, production bool) map[token.Position]bool {
-	if _, test := inventory.IsTestFile(site.file); test || !production {
+func (w *fieldWrites) forSite(site *evidence, production bool) map[token.Position]bool {
+	if site.testCode() || !production {
 		return w.every
 	}
 	return w.production

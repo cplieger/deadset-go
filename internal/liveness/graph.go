@@ -8,6 +8,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
 )
 
@@ -29,21 +30,22 @@ type edge struct {
 type counts struct {
 	production int
 
-	// test counts every reference a test file made, a loaded consumer's test
+	// test counts every reference test code made, a loaded consumer's test
 	// files included.
 	test int
 
-	// consumerTest counts the references a loaded consumer's test files made,
+	// consumerTest counts the references a consumer build's test files made,
 	// which is the part of test a mode may classify as production.
 	consumerTest int
 }
 
-// calls is how the modules outside the target reference one symbol: one past the
-// place in [Graph.refs] of the first reference a consumer's production files make
-// to it, and of the first its test files make, 0 for none.
+// calls is how the code outside the inventory's declarations references one
+// symbol: per kind of file, one past the place in [Graph.refs] of the first
+// reference such a file makes to it, 0 for none.
 type calls struct {
-	production int
-	test       int
+	production   int // a consumer build's file other than a test file
+	consumerTest int // a consumer build's test file
+	testBuild    int // a file of a [load.TestBuild] package
 }
 
 // rooted is one root the inventory holds, at the position of the symbol it names.
@@ -166,7 +168,7 @@ func (g *Graph) add(hop Hop, test bool) bool {
 	} else {
 		g.made[to].production++
 	}
-	if r := hop.Reference; r != nil && r.Consumer != "" && r.Test {
+	if r := hop.Reference; r != nil && r.Build == load.ConsumerBuild && r.Test {
 		g.made[to].consumerTest++
 	}
 	from := g.at(hop.From)
@@ -182,12 +184,15 @@ func (g *Graph) add(hop Hop, test bool) bool {
 // it, as the first such call of its target if it is.
 func (g *Graph) consume(i int) {
 	r, to := &g.refs[i], g.at(g.refs[i].To)
-	if r.Consumer == "" || to == outside {
+	if r.Build == load.TargetBuild || to == outside {
 		return
 	}
 	first := &g.consumed[to].production
-	if r.Test {
-		first = &g.consumed[to].test
+	switch {
+	case r.Build == load.TestBuild:
+		first = &g.consumed[to].testBuild
+	case r.Test:
+		first = &g.consumed[to].consumerTest
 	}
 	if *first == 0 {
 		*first = i + 1
@@ -239,9 +244,21 @@ func (g *Graph) testReferenced(at int) bool {
 }
 
 // consumedIn reports whether a loaded consumer's reference to the symbol at at is
-// one the given mode counts, which is what makes the symbol called from outside the
-// target.
+// one the given mode counts, which is what makes the symbol called from code the
+// inventory does not declare.
 func (g *Graph) consumedIn(at int, m facts.Mode) bool {
+	return g.consumedFirst(at, m) > 0
+}
+
+// consumedFirst is one past the place in [Graph.refs] of the first reference of
+// the kinds [calls] holds, in its order, that the mode counts to the symbol at at,
+// 0 for none.
+func (g *Graph) consumedFirst(at int, m facts.Mode) int {
 	c := g.consumed[at]
-	return c.production > 0 || (c.test > 0 && m.CountsConsumerTests())
+	for _, first := range [...]int{c.production, c.consumerTest, c.testBuild} {
+		if first > 0 && !m.Uncounted(&g.refs[first-1]) {
+			return first
+		}
+	}
+	return 0
 }

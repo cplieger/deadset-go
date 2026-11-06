@@ -7,8 +7,8 @@
   },
   "result": "pass",
   "totals": {
-    "fixtures": 224,
-    "pass": 216,
+    "fixtures": 226,
+    "pass": 218,
     "gap": 0,
     "fail": 0,
     "pending": 8
@@ -4453,6 +4453,12 @@
       "unexpected": []
     },
     {
+      "fixture": "go-only-in-left-out-directories",
+      "result": "pass",
+      "expectations": [],
+      "unexpected": []
+    },
+    {
       "fixture": "ignore-entry-of-another-language",
       "result": "pass",
       "expectations": [
@@ -6530,6 +6536,117 @@
           "suppression": {
             "suppressed": true,
             "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "narrowing-through-an-exported-declaration",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Badge",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Card",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Config",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Hint",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Inner",
+          "result": "pass",
+          "actual": {
+            "report": "DS1501",
+            "symbol_kind": "type",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "details": {
+              "narrower_visibility": "file"
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Job",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Local",
+          "result": "pass",
+          "actual": {
+            "report": "DS1501",
+            "symbol_kind": "type",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "details": {
+              "narrower_visibility": "file"
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Me",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Note",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Queue",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Request",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Tag",
+          "result": "pass",
+          "actual": {
+            "report": "none"
           }
         }
       ],

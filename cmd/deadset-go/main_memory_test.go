@@ -65,17 +65,21 @@ func TestARunThatCannotFitExitsWithTheMemoryLine(t *testing.T) {
 	t.Chdir(dir)
 	reportPath := filepath.Join(t.TempDir(), "report.json")
 
-	// A machine with no memory left beyond what the process holds, and a live heap
-	// of half a gigabyte, is a run the governor cannot fit.
+	// A machine whose limit is a live heap of half a gigabyte, with no memory left
+	// beyond what the process holds, is a run the governor cannot fit. The limit
+	// bounds the ceiling, so the governor's first reading ends the run whatever
+	// memory earlier tests left the process holding.
 	held = make([]byte, 512<<20)
 	for i := range held {
 		held[i] = 1
 	}
 	t.Cleanup(func() { held = nil; runtime.GC() })
 	noHeadroom := func() (uint64, bool) { return 0, true }
+	limit := func() (uint64, bool) { return uint64(len(held)), true }
 
 	var stdout, stderr bytes.Buffer
-	code := governed([]string{"analyze", "--target=.", "--report=" + reportPath}, &stdout, &stderr, memory.Machine{Sources: []memory.Source{noHeadroom}})
+	code := governed([]string{"analyze", "--target=.", "--report=" + reportPath}, &stdout, &stderr,
+		memory.Machine{Limit: limit, Sources: []memory.Source{noHeadroom}})
 
 	if want := contractExitCodes(t)["failure"]; code != want {
 		t.Errorf("analyze with no memory to spare = %d, want %d\nstderr: %s", code, want, stderr.String())

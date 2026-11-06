@@ -147,7 +147,7 @@ func rootedPackages(symbols []inventory.Symbol, roots []Root) map[load.PackageID
 
 // usersOf is, per candidate, every user that imports it or references one of its
 // declarations from outside it: the package key of a target file that is not a
-// test file, testUser for a test file of the target or of a consumer, and
+// test file, testUser for test code of the target or of a consumer, and
 // outsideUser for any other file of a consumer.
 func usersOf(r *load.Result, candidates map[load.PackageID]bool) map[load.PackageID]map[load.PackageID]bool {
 	keys := r.TypesIDs()
@@ -163,21 +163,22 @@ func usersOf(r *load.Result, candidates map[load.PackageID]bool) map[load.Packag
 	}
 	for _, p := range r.Packages {
 		if p.Module != nil && p.Module.Main {
-			addUses(r.Fset, p, keys, r.ID(p), add)
+			addUses(r.Fset, p, keys, load.TargetBuild, r.ID(p), add)
 		}
 	}
 	for _, consumer := range r.Referencing() {
 		for _, p := range consumer.Packages {
-			addUses(r.Fset, p, keys, outsideUser, add)
+			addUses(r.Fset, p, keys, consumer.Build, outsideUser, add)
 		}
 	}
 	return users
 }
 
-// addUses records every import and every resolved name of one package against the
-// user its file is: testUser for a test file and production for any other.
-func addUses(fset *token.FileSet, p *packages.Package, keys map[*types.Package]load.PackageID, production load.PackageID, add func(to, from load.PackageID)) {
-	files := fileUsers{fset: fset, production: production, of: make(map[*token.File]load.PackageID)}
+// addUses records every import and every resolved name of one package of build
+// against the user its file is: testUser for test code and production for any
+// other.
+func addUses(fset *token.FileSet, p *packages.Package, keys map[*types.Package]load.PackageID, build load.Build, production load.PackageID, add func(to, from load.PackageID)) {
+	files := fileUsers{fset: fset, build: build, production: production, of: make(map[*token.File]load.PackageID)}
 	for _, f := range p.Syntax {
 		user := files.at(f.FileStart)
 		for _, spec := range f.Imports {
@@ -209,6 +210,7 @@ type fileUsers struct {
 	fset       *token.FileSet
 	of         map[*token.File]load.PackageID
 	production load.PackageID
+	build      load.Build
 }
 
 // at is the user of the file holding one position.
@@ -218,10 +220,12 @@ func (u *fileUsers) at(pos token.Pos) load.PackageID {
 		return user
 	}
 	user := u.production
+	testFile := false
 	if file != nil {
-		if _, test := inventory.IsTestFile(file.Name()); test {
-			user = testUser
-		}
+		_, testFile = inventory.IsTestFile(file.Name())
+	}
+	if u.build.TestCode(testFile) {
+		user = testUser
 	}
 	u.of[file] = user
 	return user

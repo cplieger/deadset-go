@@ -1,0 +1,42 @@
+A package below node_modules that main imports encodes lib's S with
+encoding/json, which reads the field X by reflection: the package is compiled
+by the module's build and counts as a consumer, so X is not write-only.
+
+-- go.mod --
+module example.com/m
+
+go 1.27.1
+-- deadset.json --
+{"target":{"kind":"application"}}
+-- main.go --
+// Command m prints an encoded S.
+package main
+
+import (
+	"fmt"
+
+	"example.com/m/node_modules/enc"
+)
+
+func main() { fmt.Println(enc.Encode()) }
+-- internal/lib/lib.go --
+// Package lib makes values.
+package lib
+
+// S is encoded by the left-out package.
+type S struct{ X int }
+
+// New returns an S.
+func New() S { return S{X: 1} }
+-- node_modules/enc/enc.go --
+// Package enc encodes lib values.
+package enc
+
+import (
+	"encoding/json"
+
+	"example.com/m/internal/lib"
+)
+
+// Encode encodes a new S.
+func Encode() string { b, _ := json.Marshal(lib.New()); return string(b) }

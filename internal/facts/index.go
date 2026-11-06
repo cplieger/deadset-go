@@ -55,14 +55,15 @@ const (
 // NewIndex indexes r. A generated file's package clause that does not render is
 // [inventory.ErrSource], and one its generator row cannot decode an error naming the row.
 func NewIndex(r *load.Result, rs *resolve.Resolver) (*Index, error) {
+	referencing := r.Referencing()
 	x := &Index{
 		fset:      r.Fset,
 		packages:  inventory.Packages(r.Packages, r.Fset),
-		consumers: make(map[*load.Consumer][]*packages.Package, len(r.Consumers)),
+		consumers: make(map[*load.Consumer][]*packages.Package, len(referencing)),
 	}
-	for i := range r.Consumers {
-		x.consumers[&r.Consumers[i]] = inventory.Packages(r.Consumers[i].Packages, r.Fset)
-		x.order = append(x.order, &r.Consumers[i])
+	for i := range referencing {
+		x.consumers[&referencing[i]] = inventory.Packages(referencing[i].Packages, r.Fset)
+		x.order = append(x.order, &referencing[i])
 	}
 	generatedFiles := make(map[string]generatedFile)
 	for p, f := range x.Sources() {
@@ -137,7 +138,7 @@ func (x *Index) Sources() iter.Seq2[*packages.Package, *ast.File] {
 }
 
 // Program is every package variant of the analysed program: the target's, then
-// every loaded consumer's in the order the scope declares them.
+// every loaded consumer's in [load.Result.Referencing] order.
 func (x *Index) Program() []*packages.Package {
 	found := slices.Clone(x.packages)
 	for i := range x.order {

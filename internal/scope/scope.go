@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 
 	"github.com/cplieger/deadset-go/v2/internal/jsondoc"
@@ -152,6 +153,56 @@ func resolveModule(w wireModule, base string) (Module, error) {
 		return Module{}, fmt.Errorf("scope: resolve %s: %w", w.Path, err)
 	}
 	return Module{ID: w.ID, Path: abs}, nil
+}
+
+// Within is path relative to dir with forward slashes, and whether path is dir
+// or below it. The names decide first, so a link inside dir keeps its name in
+// dir. Where they place path outside dir, the shortest leading part of path that
+// resolves to dir or below it places it and the rest keeps its names, so one
+// directory spelled two ways, as macOS spells /private/var through its /var
+// link, sits where it resolves, and a link below that part keeps its name.
+func Within(dir, path string) (string, bool) {
+	dir, dirErr := filepath.Abs(dir)
+	path, pathErr := filepath.Abs(path)
+	if dirErr != nil || pathErr != nil {
+		return "", false
+	}
+	if relative, inside := lexicallyWithin(dir, path); inside {
+		return relative, true
+	}
+	resolvedDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return "", false
+	}
+	for _, lead := range slices.Backward(ancestors(path)) {
+		resolved, err := filepath.EvalSymlinks(lead)
+		if err != nil {
+			return "", false
+		}
+		if _, inside := lexicallyWithin(resolvedDir, resolved); inside {
+			rest, _ := filepath.Rel(lead, path)
+			return lexicallyWithin(resolvedDir, filepath.Join(resolved, rest))
+		}
+	}
+	return "", false
+}
+
+// ancestors is path and each directory above it, path first.
+func ancestors(path string) []string {
+	held := []string{path}
+	for parent := filepath.Dir(path); parent != path; path, parent = parent, filepath.Dir(parent) {
+		held = append(held, parent)
+	}
+	return held
+}
+
+// lexicallyWithin is [Within] by the names alone.
+func lexicallyWithin(dir, path string) (string, bool) {
+	relative, err := filepath.Rel(dir, path)
+	if err != nil || (relative != "." && !filepath.IsLocal(relative)) {
+		return "", false
+	}
+	return filepath.ToSlash(relative), true
 }
 
 // absolute is path, resolved against base where it is relative.

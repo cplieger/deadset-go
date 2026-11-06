@@ -60,7 +60,7 @@ func scriptPaths(dir string, tree ModuleTree, c *Configuration) []string {
 	with := cgoEnabledContext(c)
 	with.BuildTags = append(with.BuildTags, buildconstraint.IgnoreTag)
 	byDir := make(map[string][]string)
-	_ = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+	_ = WalkTree(dir, func(path string, entry fs.DirEntry, err error) error {
 		switch {
 		case err != nil:
 			return nil

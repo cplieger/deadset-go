@@ -60,7 +60,7 @@ func (f *encodingFlow) fieldAssertion(a *fieldAssertion) error {
 		}
 		for m := range a.iface.Methods() {
 			if impl, isFunc := lookupMethod(field.Type(), m); isFunc {
-				f.kept.record(impl, site, "converted to "+a.name+" from a field read by reflection")
+				f.kept.record(impl, &site, "converted to "+a.name+" from a field read by reflection")
 			}
 		}
 	}

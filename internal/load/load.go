@@ -5,6 +5,7 @@
 package load
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -85,16 +86,13 @@ type Configuration struct {
 	Origin origin
 }
 
-// HostConfiguration is the configuration of the host the binary runs on, with no
-// build tags. It reads the running binary's own target rather than asking the
-// toolchain, so it spawns nothing and cannot disagree with the code it belongs to.
+// HostConfiguration is the host platform with no build tags: the GOOS and GOARCH
+// environment variables where they are set and not empty, else the running
+// binary's own target; a value only the go env file sets does not count
+// ([matrix.1]). It spawns nothing.
 func HostConfiguration() Configuration {
-	return Configuration{
-		ID:     runtime.GOOS + "-" + runtime.GOARCH,
-		OS:     runtime.GOOS,
-		Arch:   runtime.GOARCH,
-		Origin: host,
-	}
+	goos, goarch := cmp.Or(os.Getenv("GOOS"), runtime.GOOS), cmp.Or(os.Getenv("GOARCH"), runtime.GOARCH)
+	return Configuration{ID: goos + "-" + goarch, OS: goos, Arch: goarch, Origin: host}
 }
 
 // Load resolves configuration c of every module top holds; cancelling ctx stops
@@ -161,8 +159,12 @@ func (l *loader) readers(r *Result) error {
 		}
 	}
 	for i := range r.Units {
-		if imported := importedOutside(&r.Units[i]); len(imported) > 0 {
-			r.Nested = append(r.Nested, Consumer{ID: r.Units[i].Path, Packages: imported})
+		production, test := importedOutside(&r.Units[i])
+		if len(production) > 0 {
+			r.Nested = append(r.Nested, Consumer{ID: r.Units[i].Path, Packages: production, Build: ConsumerBuild})
+		}
+		if len(test) > 0 {
+			r.Nested = append(r.Nested, Consumer{ID: r.Units[i].Path, Packages: test, Build: TestBuild})
 		}
 	}
 	for _, dropped := range r.Dropped {
@@ -270,7 +272,7 @@ func (l *loader) nested(r *Result, m *discoveredModule, prefix string) error {
 		return fmt.Errorf("load %s: %s: %w", l.c.ID, m.Dir, err)
 	}
 	if module := mainModule(pkgs); module != nil {
-		r.Nested = append(r.Nested, Consumer{ID: module.Path, Packages: pkgs})
+		r.Nested = append(r.Nested, Consumer{ID: module.Path, Packages: pkgs, Build: ConsumerBuild})
 	}
 	return nil
 }
@@ -290,27 +292,44 @@ func (l *loader) reader(r *Result, m *discoveredModule) error {
 }
 
 // importedOutside is every package of unit's module outside its packages
-// ([ModuleTree.OutsideDir]) that the production code of one of them imports, which
-// the module's build compiles all the same, so its references count and nothing of
-// it is reported.
-func importedOutside(unit *Unit) []*packages.Package {
+// ([ModuleTree.OutsideDir]) that the module's build compiles all the same, so its
+// references count and nothing of it is reported: those the production code of
+// unit's packages imports, then those only their test variants import. A test
+// binary recompiles a production-imported package against a tested one ("l
+// [p.test]"), and that variant is production code too, so no file is compiled by
+// packages of both sides.
+func importedOutside(unit *Unit) (production, test []*packages.Package) {
 	if unit.Path == "" {
-		return nil
+		return nil, nil
 	}
 	tree := treeAt(unit.Dir)
-	production := make([]*packages.Package, 0, len(unit.Packages))
+	var built, tested []*packages.Package
 	for _, p := range unit.Packages {
 		if p.ForTest == "" {
+			built = append(built, p)
+		} else {
+			tested = append(tested, p)
+		}
+	}
+	held := make(map[string]bool)
+	produced := make(map[string]bool) // the import paths production holds
+	outside := func(testing bool) func(*packages.Package) {
+		return func(p *packages.Package) {
+			if held[p.ID] || p.Module == nil || p.Module.Path != unit.Path || !tree.outside(unit.Dir, p.Dir) {
+				return
+			}
+			held[p.ID] = true
+			if testing && !produced[p.PkgPath] {
+				test = append(test, p)
+				return
+			}
+			produced[p.PkgPath] = true
 			production = append(production, p)
 		}
 	}
-	var imported []*packages.Package
-	packages.Visit(production, nil, func(p *packages.Package) {
-		if p.Module != nil && p.Module.Path == unit.Path && tree.outside(unit.Dir, p.Dir) {
-			imported = append(imported, p)
-		}
-	})
-	return imported
+	packages.Visit(built, nil, outside(false))
+	packages.Visit(tested, nil, outside(true))
+	return production, test
 }
 
 // underscored loads the packages of unit's own module below an underscore directory
@@ -327,7 +346,7 @@ func (l *loader) underscored(r *Result, unit *discoveredModule) error {
 		pkgs, err := l.module(spec, "")
 		switch {
 		case err == nil:
-			r.Nested = append(r.Nested, Consumer{ID: unit.Path, Packages: pkgs})
+			r.Nested = append(r.Nested, Consumer{ID: unit.Path, Packages: pkgs, Build: ConsumerBuild})
 			return true, nil
 		case droppable(err) && l.ctx.Err() == nil:
 			return false, nil

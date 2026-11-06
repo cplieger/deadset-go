@@ -150,7 +150,8 @@ type Reference struct {
 	Configs inventory.ConfigSet
 	Kind    RefKind
 	Via     via
-	Test    bool // the referencing file is a test file
+	Build   load.Build // the build that compiles the referencing file
+	Test    bool       // the referencing file is test code: a test file, test support, or all of a [load.TestBuild] package
 }
 
 // Layout reports whether the reference is a field a memory-layout use lays out.
@@ -179,23 +180,20 @@ type Mode struct {
 	ConsumerTestsProduction bool
 }
 
-// TestReference reports whether the mode classifies one reference as a test file's,
-// which a loaded consumer's test reference is not where the mode counts it as
-// production.
-func (m Mode) TestReference(r *Reference) bool {
-	return r.Test && (r.Consumer == "" || !m.ConsumerTestsProduction)
+// TestCode reports whether the mode classifies code of one build as test code,
+// test telling whether it is ([load.Build.TestCode]): a consumer build's test file
+// is not where the mode counts it as production.
+func (m Mode) TestCode(build load.Build, test bool) bool {
+	return test && (build != load.ConsumerBuild || !m.ConsumerTestsProduction)
 }
+
+// TestReference reports whether the mode classifies one reference as a test file's.
+func (m Mode) TestReference(r *Reference) bool { return m.TestCode(r.Build, r.Test) }
 
 // Uncounted reports whether the mode counts one reference as no use at all, which a
 // production mode does for every test reference.
 func (m Mode) Uncounted(r *Reference) bool {
 	return m.Production && m.TestReference(r)
-}
-
-// CountsConsumerTests reports whether the mode counts a loaded consumer's test-file
-// reference as a call from outside the target.
-func (m Mode) CountsConsumerTests() bool {
-	return !m.Production || m.ConsumerTestsProduction
 }
 
 // References walks each source file of one configuration once ([inventory.Sources]),
@@ -271,8 +269,9 @@ type referencePass struct {
 	err         error
 	refs        []Reference
 	testFiles   int
-	supportFile int  // the files of the target's test-support packages
-	test        bool // the file being walked is test code
+	supportFile int        // the files of the target's test-support packages
+	build       load.Build // the build of the module being walked
+	test        bool       // the file being walked is test code
 }
 
 // newReferencePass prepares one configuration's walk.
@@ -312,10 +311,10 @@ func walked(r *load.Result) []*packages.Package {
 // through the resolver's renderer, so a consumer's file renders one way in every
 // pass wherever it is.
 func (p *referencePass) walkConsumer(at int, consumer *load.Consumer) error {
-	p.consumer = consumer.ID
+	p.consumer, p.build = consumer.ID, consumer.Build
 	p.at = p.resolve.Consumer(at)
 	defer func() {
-		p.consumer = ""
+		p.consumer, p.build = "", load.TargetBuild
 		p.at = p.resolve.Positions()
 	}()
 	return p.walk(consumer.Packages)
@@ -348,9 +347,10 @@ func (p *referencePass) walkFile(pkg *packages.Package, f *ast.File) error {
 	if p.consumer == "" {
 		p.file, _ = p.resolve.At(f.FileStart)
 	}
-	p.test = p.at.InTestFile(f.FileStart)
+	testFile := p.at.InTestFile(f.FileStart)
+	p.test = p.build.TestCode(testFile)
 	switch {
-	case p.test:
+	case testFile:
 		p.testFiles++
 	case p.consumer == "" && p.tests.Support[p.idOf(pkg)]:
 		p.test = true
@@ -545,12 +545,13 @@ func (p *referencePass) repeatedUse(ident *ast.Ident, ids []inventory.SymbolID, 
 
 // walkImport records the reference one import declaration makes: a read of the
 // imported package's own symbol, at the import spec, from the file (an import
-// serves every declaration of it). The identifier walk records nothing here, the
-// import resolving to a package name no inventory symbol is written at. Nothing is
-// recorded for a package the inventory holds no symbol for, every dependency, nor
-// for a consumer's import.
+// serves every declaration of it), and from nothing in a loaded consumer, whose
+// import reaches the package as the target's does. The identifier walk records
+// nothing here, the import resolving to a package name no inventory symbol is
+// written at. Nothing is recorded for a package the inventory holds no symbol for,
+// every dependency.
 func (p *referencePass) walkImport(spec *ast.ImportSpec) {
-	if p.file == "" {
+	if p.file == "" && p.consumer == "" {
 		return
 	}
 	name := p.info.PkgNameOf(spec)
@@ -1437,7 +1438,7 @@ func (p *referencePass) add(from, to inventory.SymbolID, pos token.Pos, kind Ref
 	}
 	r := Reference{
 		From: from, To: to, Consumer: p.consumer, Pos: position, Site: p.at.Offset(pos),
-		Kind: kind, Via: rule, Test: p.test,
+		Kind: kind, Via: rule, Build: p.build, Test: p.test,
 	}
 	if node := p.spans[pos]; node != nil && kind == RefWrite && p.consumer == "" {
 		r.Span = p.at.Range(node)

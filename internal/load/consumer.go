@@ -15,6 +15,24 @@ import (
 // the ambient one included.
 const workspaceOff = "off"
 
+// Build is which build of the program compiles a loaded package's code, decided
+// once where the load finds the package. Every pass that tells the target's code
+// from a consumer's, or test code from production code, reads it; within the
+// target's and a consumer's builds a file's name still tells a test file apart.
+type Build uint8
+
+// The builds a loaded package is compiled by.
+const (
+	TargetBuild   Build = iota // a package of the target
+	ConsumerBuild              // a consumer's package: its references count as a consumer's do
+	TestBuild                  // outside the target's packages and imported by its test files alone: all of it is the target's test code ([program.4])
+)
+
+// TestCode reports whether a file of this build is test code, testFile telling
+// whether its name makes it a test file. The target's test-support packages are
+// test code too, which the test classes decide after the load.
+func (b Build) TestCode(testFile bool) bool { return testFile || b == TestBuild }
+
 // Consumer is one loaded consumer module's contribution to a configuration: a
 // declared consumer, or a [Result.Nested] one.
 type Consumer struct {
@@ -27,6 +45,9 @@ type Consumer struct {
 	// declaration of a consumer is ever reported; what these packages carry is
 	// the references the consumer makes to the target.
 	Packages []*packages.Package
+
+	// Build is [ConsumerBuild] or [TestBuild], never [TargetBuild].
+	Build Build
 }
 
 // consumers resolves every consumer the topology declares, in the order the scope
@@ -95,7 +116,7 @@ func (l *loader) consumer(declared *discoveredModule, mains []*packages.Module) 
 	if err != nil {
 		return Consumer{}, err
 	}
-	return Consumer{ID: module, Packages: pkgs}, nil
+	return Consumer{ID: module, Packages: pkgs, Build: ConsumerBuild}, nil
 }
 
 // consumerModuleOf returns the module path of one loaded consumer, and refuses a
