@@ -123,7 +123,7 @@ func TestWriteOnlySymbolReportsNoDeclarationAnExemptionHoldsLive(t *testing.T) {
 
 	staged := false
 	for _, exemption := range in.Exempt {
-		if symbol := newPass(in).symbol(exemption.ID); symbol != nil && symbol.Name == "answer.Status" {
+		if symbol := mustPass(t, in).symbol(exemption.ID); symbol != nil && symbol.Name == "answer.Status" {
 			staged = true
 		}
 	}
@@ -170,7 +170,7 @@ func TestUnusedEnumMemberReportsNoMemberTheEnumGroupClassRetains(t *testing.T) {
 		if exemption.Class != string(vocab.EnumGroup) {
 			continue
 		}
-		if symbol := newPass(in).symbol(exemption.ID); symbol != nil {
+		if symbol := mustPass(t, in).symbol(exemption.ID); symbol != nil {
 			retained[symbol.Name] = true
 		}
 	}
@@ -188,8 +188,8 @@ func TestEnumGroupMembersReadsAnIotaGroupTheWayTheExemptionDoes(t *testing.T) {
 	in := inputOf(t, "readwrite-enum.txtar", libraryConfig(), Consumers{})
 
 	var named []string
-	for id, owner := range enumGroupMembers(newPass(in)) {
-		symbol := newPass(in).symbol(id)
+	for id, owner := range mustPass(t, in).enumerated {
+		symbol := mustPass(t, in).symbol(id)
 		if symbol == nil {
 			t.Fatalf("enumGroupMembers names %s, which the inventory does not hold", id)
 		}
@@ -252,7 +252,7 @@ func TestUnusedTypeParameterTakesNoSubjectFromATypeDeclaration(t *testing.T) {
 		if symbol.Kind != inventory.KindTypeParam {
 			continue
 		}
-		if !declaresTypeParameters(newPass(in).container(symbol)) {
+		if !declaresTypeParameters(mustPass(t, in).container(symbol)) {
 			t.Errorf("the inventory holds %s, a type parameter of a container whose parameters nothing reports",
 				symbol.Name)
 		}
@@ -383,8 +383,12 @@ func TestWriteOnlyRetainedNamesTheExemptionThatHoldsAWriteOnlyFindingBack(t *tes
 	in.Mode = facts.Mode{Production: true}
 
 	var got []string
-	for _, exemption := range WriteOnlyRetained(in) {
-		got = append(got, newPass(in).symbol(exemption.ID).Name+" "+exemption.Class)
+	retained, err := WriteOnlyRetained(in)
+	if err != nil {
+		t.Fatalf("WriteOnlyRetained: %v", err)
+	}
+	for _, exemption := range retained {
+		got = append(got, mustPass(t, in).symbol(exemption.ID).Name+" "+exemption.Class)
 	}
 	if want := []string{"answer.Status encoding-reflection"}; !slices.Equal(got, want) {
 		t.Errorf("WriteOnlyRetained(readwrite-encoded.txtar) = %v, want %v", got, want)

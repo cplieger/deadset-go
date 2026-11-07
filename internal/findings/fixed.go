@@ -6,27 +6,23 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 )
 
-// fixedByOutsideInterface is every method of the target whose name and signature are
-// those of a method [facts.Index.OutsideMethods] holds, a loaded consumer's among
-// them. That interface fixes the method's signature and its exportedness whether or
-// not the program converts the method's type to it, so the method is neither
-// narrowed nor judged for its parameters and results.
-func fixedByOutsideInterface(a *pass) map[inventory.SymbolID]bool {
-	fixed := make(map[inventory.SymbolID]bool)
-	for i := range a.Per {
-		one := &a.Per[i]
-		if one.Result == nil || one.Resolve == nil || one.Facts == nil {
-			continue
-		}
-		for _, p := range one.Facts.Packages() {
-			for _, object := range p.TypesInfo.Defs {
-				if id, isFixed := fixedMethod(one, object); isFixed {
-					fixed[id] = true
-				}
+// readFixed adds to fixed every method of the target one configuration defines
+// whose name and signature are those of a method [facts.Index.OutsideMethods]
+// holds, a loaded consumer's among them. That interface fixes the method's
+// signature and its exportedness whether or not the program converts the method's
+// type to it, so the method is neither narrowed nor judged for its parameters and
+// results.
+func readFixed(one *Configured, fixed map[inventory.SymbolID]bool) {
+	if one.Result == nil || one.Resolve == nil || one.Facts == nil {
+		return
+	}
+	for _, p := range one.Facts.Packages() {
+		for _, object := range p.TypesInfo.Defs {
+			if id, isFixed := fixedMethod(one, object); isFixed {
+				fixed[id] = true
 			}
 		}
 	}
-	return fixed
 }
 
 // fixedMethod reports whether one definition is a method of the inventory that an

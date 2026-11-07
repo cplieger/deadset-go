@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"sync"
+
+	"github.com/cplieger/deadset-go/v2/internal/memory"
 )
 
 // decoders answers which parameters of a function only decode into the value they
@@ -13,13 +16,20 @@ import (
 // argument, unchanged or converted to an interface type, of a decoding entry point
 // or of a parameter that only decodes, applied until no further function joins. A
 // function the program does not declare is read from the source its package was
-// compiled from, for this question alone.
+// compiled from, for this question alone. Answers are keyed by the loaded
+// program's functions only, so they name nothing of a reading.
 type decoders struct {
 	flow     *encodingFlow
 	answered map[*types.Func]map[int]reach
 	pending  map[*types.Func]bool
-	declared map[*types.Func]programFunction               // the program's and every read source's
-	sources  map[*types.Package]map[string]programFunction // per source read, its functions by [declKey]
+	declared map[*types.Func]programFunction // the program's own
+
+	// sources is, per package read, its functions by [declKey]: every package
+	// outside memory pressure, the last one read under it, none once pressure
+	// begins ([memory.OnPressureOf]).
+	sources map[*types.Package]map[string]programFunction
+	pressed func() bool
+	mu      sync.Mutex
 }
 
 // newDecoders starts the answer over one configuration.
@@ -30,11 +40,20 @@ func newDecoders(f *encodingFlow) *decoders {
 		pending:  make(map[*types.Func]bool),
 		declared: make(map[*types.Func]programFunction),
 		sources:  make(map[*types.Package]map[string]programFunction),
+		pressed:  memory.Pressed,
 	}
 	for _, one := range f.kept.in.functions {
 		d.declared[one.fn.Origin()] = one
 	}
+	memory.OnPressureOf(d, (*decoders).drop)
 	return d
+}
+
+// drop forgets every source d read.
+func (d *decoders) drop() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	clear(d.sources)
 }
 
 // at reports whether the parameter at one position of fn only decodes, and what the
@@ -72,16 +91,17 @@ func (d *decoders) compute(fn *types.Func) map[int]reach {
 	}
 	held := make(map[int]reach)
 	for i := range sig.Params().Len() {
-		if r, decodes := d.decodesInto(info, decl.Body, sig.Params().At(i)); decodes {
+		if r, decodes := d.decodesInto(fn.Pkg(), info, decl.Body, sig.Params().At(i)); decodes {
 			held[i] = r
 		}
 	}
 	return held
 }
 
-// decodesInto reports whether every use of one parameter in a body is an argument a
-// decoding entry point or a decoding parameter receives, and there is at least one.
-func (d *decoders) decodesInto(info *types.Info, body *ast.BlockStmt, param *types.Var) (reach, bool) {
+// decodesInto reports whether every use of one parameter in a body of home is an
+// argument a decoding entry point or a decoding parameter receives, and there is at
+// least one.
+func (d *decoders) decodesInto(home *types.Package, info *types.Info, body *ast.BlockStmt, param *types.Var) (reach, bool) {
 	uses := 0
 	for _, obj := range info.Uses {
 		if obj == param {
@@ -95,7 +115,7 @@ func (d *decoders) decodesInto(info *types.Info, body *ast.BlockStmt, param *typ
 	var held reach
 	ast.Inspect(body, func(n ast.Node) bool {
 		if call, isCall := n.(*ast.CallExpr); isCall {
-			count, r := d.decodedArguments(info, body, call, param)
+			count, r := d.decodedArguments(home, info, body, call, param)
 			decoded += count
 			held = held.union(r)
 		}
@@ -106,8 +126,12 @@ func (d *decoders) decodesInto(info *types.Info, body *ast.BlockStmt, param *typ
 
 // decodedArguments counts the arguments of one call that pass the parameter to a
 // callee parameter that decodes into it, and what those callee parameters retain.
-func (d *decoders) decodedArguments(info *types.Info, body ast.Node, call *ast.CallExpr, param *types.Var) (int, reach) {
+func (d *decoders) decodedArguments(home *types.Package, info *types.Info, body ast.Node, call *ast.CallExpr, param *types.Var) (int, reach) {
 	callee, isFunc := resolveObject(info, call.Fun).(*types.Func)
+	if !isFunc {
+		return 0, reach{}
+	}
+	callee, isFunc = loadedFunc(home, callee)
 	if !isFunc {
 		return 0, reach{}
 	}
@@ -182,6 +206,41 @@ func (d *decoders) readsFields(fn *types.Func, at int) bool {
 	return reads
 }
 
+// loadedFunc is fn as the loaded home declares it, where fn is a function of home
+// that a reading of home's source checked anew, and fn itself where fn is no such
+// function. False where the loaded home declares no counterpart: an answer keyed by
+// a reading's function would keep the reading alive.
+func loadedFunc(home *types.Package, fn *types.Func) (*types.Func, bool) {
+	pkg := fn.Pkg()
+	if home == nil || pkg == nil || pkg == home || pkg.Path() != home.Path() {
+		return fn, true
+	}
+	fn = fn.Origin()
+	recv := fn.Signature().Recv()
+	if recv == nil {
+		loaded, declared := home.Scope().Lookup(fn.Name()).(*types.Func)
+		return loaded, declared
+	}
+	base := recv.Type()
+	if ptr, isPtr := base.(*types.Pointer); isPtr {
+		base = ptr.Elem()
+	}
+	named, isNamed := types.Unalias(base).(*types.Named)
+	if !isNamed {
+		return nil, false
+	}
+	loaded, declared := home.Scope().Lookup(named.Obj().Name()).(*types.TypeName)
+	if !declared {
+		return nil, false
+	}
+	method, _, _ := types.LookupFieldOrMethod(loaded.Type(), true, home, fn.Name())
+	m, isFunc := method.(*types.Func)
+	if !isFunc {
+		return nil, false
+	}
+	return m.Origin(), true
+}
+
 // usedParameter is the variable an argument names, unchanged or converted to an
 // interface type, and nil for any other argument.
 func usedParameter(info *types.Info, arg ast.Expr) *types.Var {
@@ -201,7 +260,7 @@ func usedParameter(info *types.Info, arg ast.Expr) *types.Var {
 
 // body is the declaration and type information of one function: the program's own
 // where it declares the function, and otherwise the source its package was compiled
-// from ([load.Result.Source]).
+// from ([load.Sources.Read]).
 func (d *decoders) body(fn *types.Func) (*ast.FuncDecl, *types.Info) {
 	if one, held := d.declared[fn.Origin()]; held {
 		return one.decl, one.info
@@ -220,15 +279,24 @@ func (d *decoders) body(fn *types.Func) (*ast.FuncDecl, *types.Info) {
 	return one.decl, one.info
 }
 
-// source is every function declaration of one package's source, indexed on first
-// use by [declKey].
+// source is every function declaration of one package's source by [declKey].
 func (d *decoders) source(pkg *types.Package) map[string]programFunction {
-	if held, known := d.sources[pkg]; known {
+	d.mu.Lock()
+	held, known := d.sources[pkg]
+	d.mu.Unlock()
+	if known {
 		return held
 	}
-	held := make(map[string]programFunction)
-	d.sources[pkg] = held
-	source, ok := d.flow.kept.in.Result.Source(pkg)
+	held = make(map[string]programFunction)
+	defer func() {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		if d.pressed() {
+			clear(d.sources)
+		}
+		d.sources[pkg] = held
+	}()
+	source, ok := d.flow.kept.in.sources.Read(pkg)
 	if !ok {
 		return held
 	}
@@ -243,7 +311,6 @@ func (d *decoders) source(pkg *types.Package) map[string]programFunction {
 				continue
 			}
 			one := programFunction{info: source.Info, decl: fd, fn: fn}
-			d.declared[fn] = one
 			at := source.Fset.PositionFor(fd.Name.Pos(), false)
 			held[declKey(filepath.Base(at.Filename), at.Offset)] = one
 		}

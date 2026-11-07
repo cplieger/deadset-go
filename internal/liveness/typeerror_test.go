@@ -19,12 +19,16 @@ func TestATypeErrorAnotherConfigurationDoesNotReportRootsAndSkipsNothing(t *test
 		result, _ := loadDirUnder(t.Context(), t, dir, c)
 		results = append(results, *result)
 	}
-	elsewhere := roots.CheckedElsewhere(results)
+	var gathered roots.Elsewhere
+	for i := range results {
+		gathered.Add(&results[i])
+	}
+	elsewhere := gathered.Of()
 	if got := elsewhere[0]; len(got) != 0 {
-		t.Errorf("CheckedElsewhere()[linux] = %v, want none", got)
+		t.Errorf("Elsewhere.Of()[linux] = %v, want none", got)
 	}
 	if got, want := paths(elsewhere[1]), []string{"example.com/platform/sig"}; !slices.Equal(got, want) {
-		t.Errorf("CheckedElsewhere()[windows] = %v, want %v", got, want)
+		t.Errorf("Elsewhere.Of()[windows] = %v, want %v", got, want)
 	}
 
 	windows := &results[1]

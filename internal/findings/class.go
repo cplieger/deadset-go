@@ -1,13 +1,11 @@
 package findings
 
 import (
-	"path/filepath"
 	"slices"
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
-	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -82,8 +80,11 @@ func (in *pass) classOf(id inventory.SymbolID) vocab.Class {
 // Unseen is every production declaration of the inventory whose reachability class
 // is possible, which programs outside the analysis may call: the sweep counts each
 // as a live target of a test that references it. It reads no sweep.
-func Unseen(in *Input) map[inventory.SymbolID]bool {
-	a := classesOf(in)
+func Unseen(in *Input) (map[inventory.SymbolID]bool, error) {
+	a, err := classesOf(in)
+	if err != nil {
+		return nil, err
+	}
 	unseen := make(map[inventory.SymbolID]bool)
 	for i := range in.Merged.Symbols {
 		symbol := &in.Merged.Symbols[i]
@@ -91,7 +92,7 @@ func Unseen(in *Input) map[inventory.SymbolID]bool {
 			unseen[symbol.ID] = true
 		}
 	}
-	return unseen
+	return unseen, nil
 }
 
 // unlinkedApplicationPackage reports whether an importable package of an
@@ -103,34 +104,6 @@ func (in *pass) unlinkedApplicationPackage(symbol *inventory.Symbol) bool {
 		return false
 	}
 	return in.unlinked[in.packageOf(symbol)]
-}
-
-// unlinkedPackages is every package no build links in any configuration that loads
-// it, by [pass.packageKey].
-func unlinkedPackages(per []Configured, root string, x *pass) map[string]bool {
-	unlinked := make(map[string]bool)
-	linked := make(map[string]bool)
-	for _, one := range per {
-		if one.Result == nil {
-			continue
-		}
-		none := roots.UnlinkedPackages(one.Result)
-		for _, p := range one.Result.Packages {
-			if p.ForTest != "" {
-				continue
-			}
-			key := x.packageKey(p.PkgPath, packageDir(p, root))
-			if none[one.Result.ID(p)] {
-				unlinked[key] = true
-			} else {
-				linked[key] = true
-			}
-		}
-	}
-	for key := range linked {
-		delete(unlinked, key)
-	}
-	return unlinked
 }
 
 // unanalysedConsumer reports whether the unit declaring one symbol has, under some
@@ -149,25 +122,6 @@ func (in *pass) unanalysedConsumer(symbol *inventory.Symbol) bool {
 		}
 	}
 	return flagged
-}
-
-// unanalysedUnits is every unit of every configuration by its directory relative to
-// root, flagged where some configuration gave it an unanalysed consumer.
-func unanalysedUnits(per []Configured, root string) map[string]bool {
-	units := make(map[string]bool)
-	for _, one := range per {
-		if one.Result == nil {
-			continue
-		}
-		for _, unit := range one.Result.Units {
-			rel, err := filepath.Rel(root, unit.Dir)
-			if err == nil {
-				dir := filepath.ToSlash(rel)
-				units[dir] = units[dir] || unit.UnanalysedConsumer
-			}
-		}
-	}
-	return units
 }
 
 // publishedAPI reports whether one declaration is published API of a library: an
@@ -240,22 +194,4 @@ func (in *pass) hiddenMember(symbol *inventory.Symbol) bool {
 		return false
 	}
 	return !in.exposed[owner.ID]
-}
-
-// exposedTypes is every type of the target the published API of some
-// configuration reaches ([facts.Published]).
-func exposedTypes(in *pass) map[inventory.SymbolID]bool {
-	exposed := make(map[inventory.SymbolID]bool)
-	for i := range in.Per {
-		one := &in.Per[i]
-		if one.Facts == nil {
-			continue
-		}
-		for _, name := range one.Facts.Published().Names() {
-			if id, held := one.Resolve.Object(name); held {
-				exposed[id] = true
-			}
-		}
-	}
-	return exposed
 }

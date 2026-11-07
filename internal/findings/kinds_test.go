@@ -97,7 +97,7 @@ func emitterOf(findings ...draft) Emitter {
 
 // oneFinding is the finding an emitter of code reports about one declaration.
 func oneFinding(in *Input, code vocab.Code, id inventory.SymbolID) draft {
-	found, held := newPass(in).finding(id, code, "the declaration has no reference in the target")
+	found, held := passOf(in).finding(id, code, "the declaration has no reference in the target")
 	if !held {
 		panic("the hand-built inventory holds no " + string(id))
 	}

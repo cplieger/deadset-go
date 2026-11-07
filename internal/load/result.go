@@ -10,14 +10,14 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/cplieger/deadset-go/v2/internal/memory"
 	"golang.org/x/tools/go/packages"
 )
 
 // Result is one configuration's loaded program. Nothing changes it once [Load]
 // returns it.
 type Result struct {
-	Fset    *token.FileSet // one FileSet for the whole configuration, shared by every configuration [All] loads
-	sources *sourceCache
+	Fset *token.FileSet // one FileSet for the whole configuration, shared by every configuration one [Matrix] loads
 
 	// Packages holds the target's packages and the test variants that
 	// type-check their files again, and never a synthesized test binary, so
@@ -206,21 +206,31 @@ type Source struct {
 	Files []*ast.File
 }
 
-// sourceCache holds every [Source] one configuration read, by package.
-type sourceCache struct {
-	fset    *token.FileSet
+// Sources reads the [Source] of packages of one load, each once outside memory
+// pressure. Its reads are the largest allocation of a run, so it lives with its
+// caller, never with the [Result]: dropping it frees every tree and type record it
+// read, and pressure drops the reads it holds ([memory.OnPressureOf]).
+type Sources struct {
 	byTypes map[*types.Package]*packages.Package
-	read    map[*types.Package]*Source
+	read    map[*types.Package]*sourceRead
+	pressed func() bool
 	mu      sync.Mutex
 }
 
-// newSourceCache indexes every package r holds, a consumer's and a dependency's
-// included, by its types, so every narrowing of r ([Result.Unit]) reads one cache.
-func newSourceCache(r *Result) *sourceCache {
-	c := &sourceCache{
-		fset:    token.NewFileSet(),
+// sourceRead is one package's read, which concurrent readers of the package wait
+// for rather than read again.
+type sourceRead struct {
+	source *Source
+	ready  chan struct{}
+}
+
+// Sources starts a reader over every package r holds, a consumer's and a
+// dependency's included, by its types.
+func (r *Result) Sources() *Sources {
+	c := &Sources{
 		byTypes: make(map[*types.Package]*packages.Package),
-		read:    make(map[*types.Package]*Source),
+		read:    make(map[*types.Package]*sourceRead),
+		pressed: memory.Pressed,
 	}
 	roots := slices.Clone(r.Packages)
 	for _, consumer := range r.Referencing() {
@@ -231,40 +241,52 @@ func newSourceCache(r *Result) *sourceCache {
 			c.byTypes[p.Types] = p
 		}
 	})
+	memory.OnPressureOf(c, (*Sources).drop)
 	return c
 }
 
-// Source returns the source of the loaded package pkg, read once per
-// configuration, and false where the load holds no package of it or none of its
-// files parses.
-func (r *Result) Source(pkg *types.Package) (*Source, bool) {
-	c := r.sources
-	if c == nil {
-		return nil, false
-	}
+// Read returns the source of the loaded package pkg, and false where the load
+// holds no package of it or none of its files parses. Two reads of one package
+// may return two readings, each checked against the same loaded packages.
+func (c *Sources) Read(pkg *types.Package) (*Source, bool) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if held, known := c.read[pkg]; known {
-		return held, held != nil
+		c.mu.Unlock()
+		<-held.ready
+		return held.source, held.source != nil
 	}
-	var held *Source
-	if p := c.byTypes[pkg]; p != nil {
-		held = c.check(p)
+	held := &sourceRead{ready: make(chan struct{})}
+	if !c.pressed() {
+		c.read[pkg] = held
 	}
-	c.read[pkg] = held
-	return held, held != nil
+	p := c.byTypes[pkg]
+	c.mu.Unlock()
+	if p != nil {
+		held.source = readSource(p)
+	}
+	close(held.ready)
+	return held.source, held.source != nil
 }
 
-// check parses and type-checks one package's compiled files, its imports resolved
-// to the packages the load holds.
-func (c *sourceCache) check(p *packages.Package) *Source {
+// drop forgets every source c read, without waiting for a read in progress.
+func (c *Sources) drop() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	clear(c.read)
+}
+
+// readSource parses and type-checks one package's compiled files into a file set of
+// its own, so the line tables go with the Source; its imports resolve to the
+// packages the load holds.
+func readSource(p *packages.Package) *Source {
+	fset := token.NewFileSet()
 	var files []*ast.File
 	for _, name := range p.CompiledGoFiles {
 		src, err := os.ReadFile(name)
 		if err != nil {
 			continue
 		}
-		if f, err := parser.ParseFile(c.fset, name, src, parser.SkipObjectResolution); err == nil && f.Name.Name == p.Name {
+		if f, err := parser.ParseFile(fset, name, src, parser.SkipObjectResolution); err == nil && f.Name.Name == p.Name {
 			files = append(files, f)
 		}
 	}
@@ -280,8 +302,8 @@ func (c *sourceCache) check(p *packages.Package) *Source {
 	conf := types.Config{Importer: importer{pkg: p}, Error: func(error) {}}
 	// The Error function above drops every error: a package the configuration
 	// cannot fully check still answers what it resolved.
-	_, _ = conf.Check(p.PkgPath, c.fset, files, info)
-	return &Source{Fset: c.fset, Files: files, Info: info}
+	_, _ = conf.Check(p.PkgPath, fset, files, info)
+	return &Source{Fset: fset, Files: files, Info: info}
 }
 
 // TypesIDs is the [PackageID] of every package the load reads, the target's

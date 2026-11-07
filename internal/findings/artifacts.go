@@ -96,11 +96,11 @@ type ignoredFile struct {
 // package, so the load, and this population, never reach it; the report records
 // that limit.
 func neverBuilt(in *pass) ([]ignoredFile, error) {
-	ignored := ignoredEverywhere(in.Per)
+	ignored := in.artifacts.ignored
 	if len(ignored) == 0 {
 		return nil, nil
 	}
-	cgo := excludedByCgo(in.Per)
+	cgo := in.artifacts.cgo
 	files := make([]ignoredFile, 0, len(ignored))
 	for _, path := range slices.Sorted(maps.Keys(ignored)) {
 		relative := load.RelativeSlash(in.Root, path)
@@ -119,26 +119,98 @@ func neverBuilt(in *pass) ([]ignoredFile, error) {
 	return files, nil
 }
 
-// ignoredEverywhere is every Go file every configuration of the run ignored, keyed
-// by its absolute path, with the import path of the package that listed it.
-//
-// A package and its test variants list the same ignored files, so the import path
-// kept is the tested package's: a variant carries the path of the package it tests
-// in ForTest, and a file belongs to the directory rather than to a variant of it.
-func ignoredEverywhere(per []Configured) map[string]string {
-	if len(per) == 0 {
-		return nil
+// artifactFacts is what the module-artifact kinds read of the configurations'
+// loads, gathered in one visit per configuration ([artifactFacts.read]).
+type artifactFacts struct {
+	in *pass
+
+	// ignored is every Go file each configuration read ignored, by absolute path,
+	// with the import path of the tested package: a test variant lists its
+	// package's ignored files and names that package in ForTest.
+	ignored map[string]string
+	// cgo is every target-relative path one configuration excluded by cgo alone,
+	// since a file importing "C" imports it under every configuration.
+	cgo map[string]bool
+
+	// last is the union over the configurations of the modules each deletion
+	// candidate holds the last use of ([joinLastUses]).
+	last map[inventory.SymbolID][]string
+
+	// requires and replaces are what every configuration read so far answers about
+	// the unit of each module file of [Input.Modules], by its index ([agreement]).
+	requires []agreement[deps.Requirement]
+	replaces []agreement[deps.Replacement]
+
+	configurations int // the configurations read
+}
+
+func newArtifactFacts(in *pass) *artifactFacts {
+	return &artifactFacts{
+		in:       in,
+		cgo:      make(map[string]bool),
+		requires: make([]agreement[deps.Requirement], len(in.Modules)),
+		replaces: make([]agreement[deps.Replacement], len(in.Modules)),
+		last:     make(map[inventory.SymbolID][]string),
 	}
-	everywhere := ignoredUnder(per[0].Result)
-	for _, one := range per[1:] {
-		under := ignoredUnder(one.Result)
-		for path := range everywhere {
-			if _, also := under[path]; !also {
-				delete(everywhere, path)
-			}
+}
+
+// read adds one configuration's answers.
+func (f *artifactFacts) read(one *Configured) {
+	under := ignoredUnder(one.Result)
+	if f.configurations == 0 {
+		f.ignored = under
+	}
+	for path := range f.ignored {
+		if _, also := under[path]; !also {
+			delete(f.ignored, path)
 		}
 	}
-	return everywhere
+	if one.Result != nil {
+		for _, path := range one.Result.ExcludedByCgo {
+			f.cgo[path] = true
+		}
+	}
+	for i := range f.in.Modules {
+		m := &f.in.Modules[i]
+		unit := unitOf(one.Result, m.Dir)
+		f.requires[i].add(f.configurations == 0, unit, func() []deps.Requirement { return deps.UnusedRequirements(m.File, unit) })
+		f.replaces[i].add(f.configurations == 0, unit, func() []deps.Replacement { return deps.NoopReplacements(m.File, unit) })
+	}
+	if f.in.Sweep != nil && one.Result != nil {
+		// A last use is a module's last use inside one unit, whose own module
+		// file is what the deletion leaves requiring it.
+		for i := range one.Result.Units {
+			unit := one.Result.Unit(one.Result.Units[i].Dir)
+			joinLastUses(f.last, deps.LastUses(unit, one.Resolve, f.in.Sweep.Candidates))
+		}
+	}
+	f.configurations++
+}
+
+// agreement is what every configuration read so far answers about the unit of one
+// module file, in the order the first answers it, and nothing once a configuration
+// loaded no such unit.
+type agreement[T comparable] struct {
+	kept   []T
+	absent bool
+}
+
+// add folds one configuration's answer in, answer reading the unit, nil where the
+// configuration loaded none.
+func (a *agreement[T]) add(first bool, unit *load.Result, answer func() []T) {
+	if a.absent {
+		return
+	}
+	if unit == nil {
+		a.absent, a.kept = true, nil
+		return
+	}
+	also := answer()
+	if first {
+		a.kept = also
+		return
+	}
+	a.kept = slices.DeleteFunc(a.kept, func(v T) bool { return !slices.Contains(also, v) })
 }
 
 // ignoredUnder is every Go file one configuration ignored, keyed by absolute path,
@@ -165,22 +237,6 @@ func ignoredUnder(r *load.Result) map[string]string {
 		}
 	}
 	return ignored
-}
-
-// excludedByCgo is every target-relative path any configuration recorded as
-// excluded by cgo alone. One configuration is enough: a file importing "C" imports
-// it whichever configuration reads it.
-func excludedByCgo(per []Configured) map[string]bool {
-	excluded := make(map[string]bool)
-	for _, one := range per {
-		if one.Result == nil {
-			continue
-		}
-		for _, path := range one.Result.ExcludedByCgo {
-			excluded[path] = true
-		}
-	}
-	return excluded
 }
 
 // readIgnored reads one ignored file, the constraint that excluded it and the
@@ -321,7 +377,7 @@ func unusedDependency(in *pass) ([]draft, error) {
 	var found []draft
 	for i := range in.Modules {
 		m := &in.Modules[i]
-		for _, require := range agreed(in, m, deps.UnusedRequirements) {
+		for _, require := range in.artifacts.requires[i].kept {
 			one := findingAt(vocab.UnusedDependency, Subject{
 				Ref:       moduleFragment(m.Path, require.Path+":"+requireSection),
 				Kind:      dependencySubject,
@@ -336,26 +392,6 @@ func unusedDependency(in *pass) ([]draft, error) {
 	return found, nil
 }
 
-// agreed is what every configuration of the run answers about the unit of one
-// module file, in the order the first answers it, and nothing where a configuration
-// loaded no such unit.
-func agreed[T comparable](in *pass, m *ModuleFile, answer func(deps.File, *load.Result) []T) []T {
-	var kept []T
-	for i, one := range in.Per {
-		unit := unitOf(one.Result, m.Dir)
-		if unit == nil {
-			return nil
-		}
-		also := answer(m.File, unit)
-		if i == 0 {
-			kept = also
-			continue
-		}
-		kept = slices.DeleteFunc(kept, func(v T) bool { return !slices.Contains(also, v) })
-	}
-	return kept
-}
-
 // unusedReplace reports a replace directive whose replaced module is absent from
 // its module's build list, which is the one case in which the directive redirects
 // nothing.
@@ -366,7 +402,7 @@ func unusedReplace(in *pass) ([]draft, error) {
 	var found []draft
 	for i := range in.Modules {
 		m := &in.Modules[i]
-		for _, replace := range agreed(in, m, deps.NoopReplacements) {
+		for _, replace := range in.artifacts.replaces[i].kept {
 			named := referenceSpelling(replace.Old)
 			one := findingAt(vocab.UnusedModuleDirective, Subject{
 				Ref:       moduleFragment(m.Path, named+replaceSelector),
@@ -443,7 +479,7 @@ func (in *pass) annotate(findings []Finding) {
 	if len(findings) == 0 {
 		return
 	}
-	last := lastUses(in)
+	last := in.artifacts.last
 	if len(last) == 0 {
 		return
 	}
@@ -458,41 +494,16 @@ func (in *pass) annotate(findings []Finding) {
 	}
 }
 
-// lastUses is the union over the configurations of the modules each deletion
-// candidate holds the last use of, each list sorted.
-//
-// The union is the right fold for this join and the intersection is not: a module
-// whose last use one configuration writes inside the candidate loses that use when
-// the candidate goes, whatever another configuration does, and the finding names
-// what the deletion would remove.
-func lastUses(in *pass) map[inventory.SymbolID][]string {
-	if in.Sweep == nil {
-		return nil
-	}
-	union := make(map[inventory.SymbolID][]string)
-	for _, one := range in.Per {
-		if one.Result == nil {
-			continue
-		}
-		// A last use is a module's last use inside one unit, whose own module
-		// file is what the deletion leaves requiring it.
-		for i := range one.Result.Units {
-			unit := one.Result.Unit(one.Result.Units[i].Dir)
-			joinLastUses(union, deps.LastUses(unit, one.Resolve, in.Sweep.Candidates))
-		}
-	}
-	for id := range union {
-		slices.Sort(union[id])
-	}
-	return union
-}
-
-// joinLastUses adds each module of found to its candidate's entry of union, once.
+// joinLastUses adds each module of found to its candidate's entry of union, once,
+// in sorted order. The union is the right fold for this join and the intersection
+// is not: a module whose last use one configuration writes inside the candidate
+// loses that use when the candidate goes, whatever another configuration does, and
+// the finding names what the deletion would remove.
 func joinLastUses(union, found map[inventory.SymbolID][]string) {
 	for id, modules := range found {
 		for _, module := range modules {
-			if !slices.Contains(union[id], module) {
-				union[id] = append(union[id], module)
+			if at, held := slices.BinarySearch(union[id], module); !held {
+				union[id] = slices.Insert(union[id], at, module)
 			}
 		}
 	}

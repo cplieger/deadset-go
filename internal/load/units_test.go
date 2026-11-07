@@ -549,9 +549,9 @@ func TestDiscoveryStopsWhenCancelledAfterItBegins(t *testing.T) {
 	}
 }
 
-// A narrowing of a result reads the one source cache of the whole result, so the
-// source of a unit's package reads the same whichever narrowing asks first.
-func TestSourceReadsEveryPackageWhicheverNarrowingAsksFirst(t *testing.T) {
+// A reader started from the whole result reads the source of any unit's package,
+// whichever unit declares it.
+func TestSourcesReadEveryUnitsPackage(t *testing.T) {
 	stableToolchain(t)
 	root := writeTree(t, map[string]string{
 		"a/go.mod":  "module example.com/a\n\ngo 1.27.1\n\nrequire example.com/b v0.0.0\n\nreplace example.com/b => ../b\n",
@@ -568,8 +568,12 @@ func TestSourceReadsEveryPackageWhicheverNarrowingAsksFirst(t *testing.T) {
 		t.Fatalf("Load() read the units %+v, want b among them", got.Units)
 	}
 	own := b.Packages[slices.IndexFunc(b.Packages, func(p *packages.Package) bool { return p.PkgPath == "example.com/b" && p.ForTest == "" })]
-	got.Unit(filepath.Join(root, "a")).Source(own.Types)
-	if _, read := got.Source(own.Types); !read {
-		t.Errorf("Source(b's own package) after a narrowing to a asked for it = _, false, want its source")
+	sources := got.Sources()
+	first, read := sources.Read(own.Types)
+	if !read {
+		t.Fatalf("Sources().Read(b's own package) = _, false, want its source")
+	}
+	if again, _ := sources.Read(own.Types); again != first {
+		t.Errorf("Sources().Read(b's own package) twice read two sources, want the one read first")
 	}
 }

@@ -372,7 +372,7 @@ func TestASuppressionBoundToADeclarationSilencesTheFindingAboutItsPart(t *testin
 	t.Parallel()
 
 	in := inputOf(t, "intrafunc-suppressed.txtar", applicationConfig(), Consumers{})
-	marks, refusals, err := suppress.Inline([]suppress.Configuration{{Result: in.Per[0].Result, Resolve: in.Per[0].Resolve, Symbols: in.Per[0].Symbols}})
+	marks, refusals, err := suppress.Inline(1, inlineOf(t, in, 0))
 	if err != nil {
 		t.Fatalf("Setup: suppress.Inline(intrafunc-suppressed.txtar): %v", err)
 	}

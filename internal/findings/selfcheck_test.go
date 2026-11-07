@@ -27,9 +27,11 @@ func suppressed(t *testing.T, archive string, resolved config.Config) *Input {
 
 	dir := extract(t, archive)
 	in := inputOfDir(t, dir, resolved, Consumers{})
-	one := in.Per[0]
+	one := in.Per.(configs)[0]
 
-	inline, inlineRefused, err := suppress.Inline([]suppress.Configuration{{Result: one.Result, Resolve: one.Resolve, Symbols: one.Symbols}})
+	inline, inlineRefused, err := suppress.Inline(1, func(int) (*suppress.Configuration, error) {
+		return &suppress.Configuration{Result: one.Result, Resolve: one.Resolve, Symbols: one.Symbols}, nil
+	})
 	if err != nil {
 		t.Fatalf("Setup: suppress.Inline(%s): %v", archive, err)
 	}
@@ -322,7 +324,7 @@ func TestTheRefusalKindsReportEachRefusalAsTheSuppressionWasWritten(t *testing.T
 func oneRefusal(t *testing.T, emit Emitter, in *Input, code vocab.Code) draft {
 	t.Helper()
 
-	found, err := emit(newPass(in))
+	found, err := emit(mustPass(t, in))
 	if err != nil {
 		t.Fatalf("the %s emitter = _, %v, want one finding per refusal of its code", code, err)
 	}
@@ -424,7 +426,7 @@ func TestTheRefusalKindsRefuseARefusalUnderACodeTheGrammarDoesNotReport(t *testi
 		Mechanism: core.Inline,
 	}}
 
-	if _, err := suppressionsWithoutReason(newPass(in)); !errors.Is(err, errEmitter) {
+	if _, err := suppressionsWithoutReason(mustPass(t, in)); !errors.Is(err, errEmitter) {
 		t.Errorf("SuppressionsWithoutReason() over a refusal reported under %s = %v, want an error satisfying errors.Is(err, errEmitter)",
 			vocab.StaleSuppression, err)
 	}

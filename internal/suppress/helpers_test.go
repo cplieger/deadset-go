@@ -162,7 +162,8 @@ func writeDocument(t *testing.T, name, document string) string {
 }
 
 // configured is one loaded fixture as the one configuration [Inline] reads.
-func configured(t *testing.T, result *load.Result, root string, symbols []inventory.Symbol) []Configuration {
+func configured(t *testing.T, result *load.Result, root string, symbols []inventory.Symbol) (int, func(int) (*Configuration, error)) {
 	t.Helper()
-	return []Configuration{{Result: result, Resolve: resolverOf(t, result, root, symbols), Symbols: symbols}}
+	one := &Configuration{Result: result, Resolve: resolverOf(t, result, root, symbols), Symbols: symbols}
+	return 1, func(int) (*Configuration, error) { return one, nil }
 }

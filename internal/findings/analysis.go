@@ -7,6 +7,8 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/liveness"
+	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
@@ -38,33 +40,42 @@ type pass struct {
 	enumerated map[inventory.SymbolID]string
 	literals   map[string][]literalSite
 	constTypes map[inventory.SymbolID]inventory.SymbolID
-	interfaces *interfaceFacts
-	fixed      map[inventory.SymbolID]bool          // [pass.fixedByOutsideInterface]
-	exempted   map[inventory.SymbolID]bool          // every declaration of Exempt
-	unused     map[vocab.Code][]*liveness.Candidate // [unusedByCode]
-	referenced map[inventory.SymbolID]bool          // every declaration any reference of any file names
-	counted    map[inventory.SymbolID]*uses
-	writeOnly  map[inventory.SymbolID]*uses // the write-only kind's subjects
-	falling    *annotationFalls
-	narrowed   *narrowing
-	intra      *intrafunc
-	listed     map[int][]positioned        // each dead component's member listing, where the run lists them in full
-	skipped    map[inventory.SymbolID]bool // every declaration a type error skipped
+	twins      *twins
+	carriers   map[inventory.SymbolID][]carrier // [readCarriers]
+	satisfying map[inventory.SymbolID]bool      // [pass.readSatisfying]
+	cascades   *cascades
+	artifacts  *artifactFacts
+
+	// seenLiterals is every literal site [readLiterals] kept, so a file two
+	// configurations compile counts its literals once.
+	seenLiterals map[inventory.Offset]bool
+	interfaces   *interfaceFacts
+	fixed        map[inventory.SymbolID]bool          // [readFixed]
+	exempted     map[inventory.SymbolID]bool          // every declaration of Exempt
+	unused       map[vocab.Code][]*liveness.Candidate // [unusedByCode]
+	referenced   map[inventory.SymbolID]bool          // every declaration any reference of any file names
+	counted      map[inventory.SymbolID]*uses
+	writeOnly    map[inventory.SymbolID]*uses // the write-only kind's subjects
+	falling      *annotationFalls
+	narrowed     *narrowing
+	intra        *intrafunc
+	listed       map[int][]positioned        // each dead component's member listing, where the run lists them in full
+	skipped      map[inventory.SymbolID]bool // every declaration a type error skipped
 
 	// dialed is the dials' answer over the pass's findings, empty until [pass.dial]
 	// gives it.
 	dialed *dialed
 
-	swept   []liveness.Component
-	sources []typedFile // [sourcesOf]
+	swept []liveness.Component
 
 	// withdrawnMarks marks the pass over the sweep with every mark withdrawn
 	// ([pass.withdrawn]), which reports a member of a dead container on its own.
 	withdrawnMarks bool
 }
 
-// classesOf is the facts the reachability class reads, which need no sweep.
-func classesOf(in *Input) *pass {
+// classesOf is the facts the reachability class reads, which need no sweep, read
+// in one visit per configuration.
+func classesOf(in *Input) (*pass, error) {
 	a := &pass{
 		Input:      in,
 		symbols:    make(map[inventory.SymbolID]*inventory.Symbol),
@@ -75,25 +86,48 @@ func classesOf(in *Input) *pass {
 		mains:      make(map[string]bool),
 		dirs:       make(map[string][]string),
 		children:   make(map[inventory.SymbolID][]inventory.SymbolID),
+		unlinked:   make(map[string]bool),
+		unanalysed: make(map[string]bool),
+		exposed:    make(map[inventory.SymbolID]bool),
 	}
-	a.sources = sourcesOf(in)
 	a.holdInventory(in.Merged)
 	a.holdSweep(in.Sweep)
-	a.holdPackages(in.Per, in.Root)
-	a.unlinked = unlinkedPackages(in.Per, in.Root, a)
-	a.unanalysed = unanalysedUnits(in.Per, in.Root)
-	a.exposed = exposedTypes(a)
-	return a
+	var held packageFacts
+	if err := each(in.Per, func(_ int, one *Configured) error {
+		a.readPackages(one, &held)
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	a.keyPackages(&held)
+	return a, nil
 }
 
-// newPass computes every fact of one pass, each from the ones before it.
-func newPass(in *Input) *pass {
-	a := classesOf(in)
-	a.deprecated = deprecations(a)
-	a.enumerated = enumGroupMembers(a)
-	a.literals, a.constTypes = nameLiterals(a)
-	a.interfaces = interfacesOf(a)
-	a.fixed = fixedByOutsideInterface(a)
+// newPass computes every fact of one pass, each from the ones before it. The facts
+// read from syntax and types are read in three visits per configuration, the
+// packages ([classesOf]), the declarations ([pass.readDeclarations]) and the bodies
+// ([pass.readBodies]), so a run whose loads memory pressure drops loads each
+// configuration again three times rather than once per fact.
+func newPass(in *Input) (*pass, error) {
+	a, err := classesOf(in)
+	if err != nil {
+		return nil, err
+	}
+	a.deprecated = make(map[inventory.SymbolID]bool)
+	a.enumerated = make(map[inventory.SymbolID]string)
+	a.literals = make(map[string][]literalSite)
+	a.seenLiterals = make(map[inventory.Offset]bool)
+	a.constTypes = make(map[inventory.SymbolID]inventory.SymbolID)
+	a.fixed = make(map[inventory.SymbolID]bool)
+	a.twins = newTwins()
+	a.carriers = make(map[inventory.SymbolID][]carrier)
+	a.satisfying = make(map[inventory.SymbolID]bool)
+	a.interfaces = newInterfaceFacts(a)
+	if err := each(in.Per, a.readDeclarations); err != nil {
+		return nil, err
+	}
+	sortLiterals(a.literals)
+	a.interfaces.settle()
 	a.exempted = make(map[inventory.SymbolID]bool, len(in.Exempt))
 	for i := range in.Exempt {
 		a.exempted[in.Exempt[i].ID] = true
@@ -114,13 +148,50 @@ func newPass(in *Input) *pass {
 	a.unused = unusedByCode(a)
 	a.narrowed = newNarrowing(a)
 	a.intra = newIntrafunc(a)
+	a.cascades = newCascades(a)
+	a.artifacts = newArtifactFacts(a)
+	if err := each(in.Per, a.readBodies); err != nil {
+		return nil, err
+	}
+	a.intra.settle()
 	if in.Config != nil && in.Config.Reporters.CascadeFull {
 		a.listed = make(map[int][]positioned, len(a.swept))
 		for at := range a.swept {
 			a.listed[at] = a.listing(a.swept[at].Members)
 		}
 	}
-	return a
+	return a, nil
+}
+
+// readDeclarations reads what one configuration's declarations say: deprecation
+// markers, enumerated types, name literals and constant types, interfaces and
+// satisfaction assertions, methods an outside interface fixes, platform twins, and
+// each type's carriers and implementors for the narrowing kinds.
+func (in *pass) readDeclarations(_ int, one *Configured) error {
+	files := sourcesOf(one)
+	for _, typed := range files {
+		markDeprecated(typed.file, typed.one.Resolve, in.deprecated)
+	}
+	readEnumGroups(one, files, in.enumerated)
+	readLiterals(files, in.literals, in.constTypes, in.seenLiterals)
+	in.interfaces.configuration(in, one, files)
+	readFixed(one, in.fixed)
+	in.twins.read(one, files)
+	readCarriers(one, in.carriers)
+	in.readSatisfying(one)
+	return nil
+}
+
+// readBodies reads what one configuration's function bodies say, for the kinds that
+// read them ([intrafunc]), the write cascades and the module artifacts.
+func (in *pass) readBodies(config int, one *Configured) error {
+	files := sourcesOf(one)
+	if err := in.intra.read(config, one, files); err != nil {
+		return err
+	}
+	in.cascades.read(one, files)
+	in.artifacts.read(one)
+	return nil
 }
 
 // component is the dead component one declaration is a member of with its place in
@@ -174,29 +245,76 @@ func (in *pass) holdSweep(swept *liveness.Result) {
 	}
 }
 
-// holdPackages records the directories of each import path, and which packages
-// are main packages, which nothing outside the module can import.
-func (in *pass) holdPackages(per []Configured, root string) {
-	eachPackage(per, func(p *packages.Package) {
-		if dir := packageDir(p, root); dir != "" && !slices.Contains(in.dirs[p.PkgPath], dir) {
-			in.dirs[p.PkgPath] = append(in.dirs[p.PkgPath], dir)
-		}
-	})
-	eachPackage(per, func(p *packages.Package) {
-		if p.Name == mainPackageName {
-			in.mains[in.packageKey(p.PkgPath, packageDir(p, root))] = true
-		}
-	})
+// packageAt is one package of one configuration by its import path and its
+// target-relative directory, which [pass.packageKey] keys once every
+// configuration's directories are known.
+type packageAt struct {
+	path, dir string
 }
 
-// eachPackage calls visit for every target package of every configuration.
-func eachPackage(per []Configured, visit func(*packages.Package)) {
-	for _, one := range per {
-		if one.Result != nil {
-			for _, p := range one.Result.Packages {
-				visit(p)
+// packageFacts is what [pass.readPackages] reads of the configurations' packages
+// before their keys exist: the main packages, the packages some build links, and
+// the packages a configuration loads and links in no build.
+type packageFacts struct {
+	mains, linked, unlinked []packageAt
+}
+
+// readPackages reads one configuration's packages: the directories of each import
+// path, its main packages, which nothing outside the module can import, which of
+// its packages no build links, its units, flagged where it gives one an
+// unanalysed consumer, and the types its published API reaches ([facts.Published]).
+func (in *pass) readPackages(one *Configured, held *packageFacts) {
+	if one.Result != nil {
+		in.readPackageDirs(one.Result, held)
+		for _, unit := range one.Result.Units {
+			if rel, err := filepath.Rel(in.Root, unit.Dir); err == nil {
+				dir := filepath.ToSlash(rel)
+				in.unanalysed[dir] = in.unanalysed[dir] || unit.UnanalysedConsumer
 			}
 		}
+	}
+	if one.Facts != nil {
+		for _, name := range one.Facts.Published().Names() {
+			if id, inInventory := one.Resolve.Object(name); inInventory {
+				in.exposed[id] = true
+			}
+		}
+	}
+}
+
+// readPackageDirs reads where each package of one configuration's load is
+// declared, whether it is a main package, and whether some build links it.
+func (in *pass) readPackageDirs(r *load.Result, held *packageFacts) {
+	none := roots.UnlinkedPackages(r)
+	for _, p := range r.Packages {
+		at := packageAt{path: p.PkgPath, dir: packageDir(p, in.Root)}
+		if at.dir != "" && !slices.Contains(in.dirs[at.path], at.dir) {
+			in.dirs[at.path] = append(in.dirs[at.path], at.dir)
+		}
+		if p.Name == mainPackageName {
+			held.mains = append(held.mains, at)
+		}
+		switch {
+		case p.ForTest != "":
+		case none[r.ID(p)]:
+			held.unlinked = append(held.unlinked, at)
+		default:
+			held.linked = append(held.linked, at)
+		}
+	}
+}
+
+// keyPackages keys what [pass.readPackages] read once every directory is known: a
+// package is unlinked where no configuration that loads it links it in a build.
+func (in *pass) keyPackages(held *packageFacts) {
+	for _, at := range held.mains {
+		in.mains[in.packageKey(at.path, at.dir)] = true
+	}
+	for _, at := range held.unlinked {
+		in.unlinked[in.packageKey(at.path, at.dir)] = true
+	}
+	for _, at := range held.linked {
+		delete(in.unlinked, in.packageKey(at.path, at.dir))
 	}
 }
 

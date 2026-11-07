@@ -105,7 +105,7 @@ func Load(ctx context.Context, top *Topology, c *Configuration) (Result, error) 
 	return load(ctx, top, c, newSyntaxCache())
 }
 
-// load is [Load] over trees, which [All] shares across the configurations of a matrix.
+// load is [Load] over trees, which a [Matrix] shares across its configurations.
 func load(ctx context.Context, top *Topology, c *Configuration, trees *syntaxCache) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, fmt.Errorf("load %s: %w", c.ID, err)
@@ -131,7 +131,6 @@ func load(ctx context.Context, top *Topology, c *Configuration, trees *syntaxCac
 	if r.Consumers, err = l.consumers(r.Units); err != nil {
 		return Result{}, err
 	}
-	r.sources = newSourceCache(&r)
 	return r, nil
 }
 
@@ -393,7 +392,7 @@ func loadPackages(ctx context.Context, trees *syntaxCache, c *Configuration, spe
 		Env:        loadEnv(c, spec.workspace),
 		BuildFlags: buildFlags(c.Tags),
 	}
-	pkgs, err := packages.Load(cfg, patterns...)
+	pkgs, err := trees.list(cfg, patterns)
 	if err != nil {
 		return nil, nil, &listError{err: err}
 	}
@@ -419,6 +418,67 @@ func loadPackages(ctx context.Context, trees *syntaxCache, c *Configuration, spe
 		return nil, diagnostics, nil
 	}
 	return pkgs, nil, nil
+}
+
+// listing is one module listing's packages, as the toolchain reported them, or its
+// error.
+type listing struct {
+	err  error
+	pkgs []*packages.Package
+}
+
+// list is the toolchain's listing of patterns under cfg, listed once per matrix: a
+// configuration loaded again reads a copy of its first listing, so it loads the
+// packages and files its first load did whatever changed on disk or in the module
+// cache since, and every answer the run kept from the first load still holds.
+func (t *syntaxCache) list(cfg *packages.Config, patterns []string) ([]*packages.Package, error) {
+	key := strings.Join(slices.Concat([]string{cfg.Dir}, patterns, []string{""}, cfg.BuildFlags, []string{""}, cfg.Env), "\x00")
+	t.mu.Lock()
+	held, known := t.lists[key]
+	t.mu.Unlock()
+	if known {
+		return copyGraph(held.pkgs), held.err
+	}
+	pkgs, err := packages.Load(cfg, patterns...)
+	if cfg.Context.Err() != nil {
+		return pkgs, err
+	}
+	t.mu.Lock()
+	t.lists[key] = &listing{pkgs: copyGraph(pkgs), err: err}
+	t.mu.Unlock()
+	return pkgs, err
+}
+
+// copyGraph copies every package reachable from roots, each import naming the
+// copy, so the load's checks and edits of one copy leave every other untouched.
+func copyGraph(roots []*packages.Package) []*packages.Package {
+	copies := make(map[*packages.Package]*packages.Package)
+	packages.Visit(roots, nil, func(p *packages.Package) {
+		c := *p
+		c.Errors = slices.Clone(p.Errors)
+		c.GoFiles = slices.Clone(p.GoFiles)
+		c.CompiledGoFiles = slices.Clone(p.CompiledGoFiles)
+		c.OtherFiles = slices.Clone(p.OtherFiles)
+		c.EmbedPatterns = slices.Clone(p.EmbedPatterns)
+		c.EmbedFiles = slices.Clone(p.EmbedFiles)
+		c.IgnoredFiles = slices.Clone(p.IgnoredFiles)
+		if p.Module != nil {
+			module := *p.Module
+			c.Module = &module
+		}
+		if p.Imports != nil {
+			c.Imports = make(map[string]*packages.Package, len(p.Imports))
+			for path, imported := range p.Imports {
+				c.Imports[path] = copies[imported]
+			}
+		}
+		copies[p] = &c
+	})
+	copied := make([]*packages.Package, len(roots))
+	for i, p := range roots {
+		copied[i] = copies[p]
+	}
+	return copied
 }
 
 // expectedModules is every module the project expects to exist: the main modules

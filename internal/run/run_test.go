@@ -32,7 +32,7 @@ func TestNameableKeepsTheWorkspaceMembersTheReportCanName(t *testing.T) {
 // read, which makes every export of the target possible.
 func TestDroppedNotesNameAReaderWhoseModuleFileCannotBeReadAtTheRoot(t *testing.T) {
 	base := t.TempDir()
-	l := &Loaded{Root: filepath.Join(base, "app"), Loads: []enumerated{{Result: load.Result{Dropped: []load.Dropped{
+	l := &Loaded{Root: filepath.Join(base, "app"), loads: &loads{outlines: []outline{{dropped: []load.Dropped{
 		{Dir: filepath.Join(base, "app", "tool"), Err: errors.New("tool does not load")},
 		{Dir: filepath.Join(base, "reader"), Err: fmt.Errorf("load: %w", load.ErrModuleFile)},
 		{Dir: filepath.Join(base, "broken"), Err: errors.New("broken does not load")},

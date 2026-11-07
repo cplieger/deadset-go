@@ -1,0 +1,31 @@
+A library whose recorder answers the deadline setters net/http's
+ResponseController asserts on the writer it is given. A site an assertion derives
+can name net/http as another module of the target type-checks it, so the methods
+the recorder satisfies there are asked of that other reading.
+
+-- go.mod --
+module example.com/recording
+
+go 1.27.0
+-- recorder.go --
+// Package recording records responses.
+package recording
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"time"
+)
+
+// Recorder refuses every write deadline.
+type Recorder struct {
+	*httptest.ResponseRecorder
+}
+
+// SetWriteDeadline always refuses.
+func (r *Recorder) SetWriteDeadline(time.Time) error { return http.ErrNotSupported }
+
+// Clear clears the write deadline of a fresh recorder.
+func Clear() error {
+	return http.NewResponseController(&Recorder{ResponseRecorder: httptest.NewRecorder()}).SetWriteDeadline(time.Time{})
+}

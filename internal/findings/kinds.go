@@ -334,10 +334,10 @@ type Input struct {
 	// target carries no edges document.
 	Edges *edges.Document
 
-	// Matrix is the configuration identifiers in matrix order, and Per is one
-	// entry per configuration in the same order.
+	// Matrix is the configuration identifiers in matrix order, and Per reads each
+	// configuration's load in the same order.
 	Matrix []string
-	Per    []Configured
+	Per    Loads
 
 	// Consumers is what the run knows about the target's consumers.
 	Consumers Consumers
@@ -451,7 +451,11 @@ func Compute(in *Input, emitters map[vocab.Code]Emitter) (Result, error) {
 	if err := checkTable(emitters); err != nil {
 		return Result{}, err
 	}
-	return newPass(in).compute(emitters)
+	a, err := newPass(in)
+	if err != nil {
+		return Result{}, err
+	}
+	return a.compute(emitters)
 }
 
 // compute is [Compute] over the facts of p.

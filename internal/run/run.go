@@ -15,11 +15,11 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/failure"
+	"github.com/cplieger/deadset-go/v2/internal/findings"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/matrix"
-	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/report"
@@ -35,15 +35,6 @@ type Request struct {
 	Target string
 	Scope  string
 	Config config.Config
-}
-
-// enumerated is one configuration's load, the declarations enumerated from it and
-// the resolver over them.
-type enumerated struct {
-	Resolve *resolve.Resolver
-	Facts   *facts.Index
-	Symbols []inventory.Symbol
-	Result  load.Result
 }
 
 // Loaded is the load stage: the scope, the matrix the target builds, one load and
@@ -66,9 +57,9 @@ type Loaded struct {
 	Identity string
 
 	// Configurations is the matrix the run analyzed, in the order every
-	// configuration index names.
+	// configuration index names, and loads each one's load.
 	Configurations []load.Configuration
-	Loads          []enumerated
+	loads          *loads
 
 	// Declared is the consumers the scope declared.
 	Declared       []scope.Module
@@ -101,20 +92,33 @@ func Load(ctx context.Context, req *Request) (*Loaded, error) {
 	if err != nil {
 		return nil, err
 	}
-	results, unbuilt, err := load.All(ctx, top, configurations)
-	if err != nil {
-		return nil, err
-	}
-
 	l := &Loaded{
 		req:      req,
 		Topology: top,
 		Root:     top.Root,
 		Identity: document.Target.ID,
 		Declared: document.Consumers,
-		Unbuilt:  unbuilt,
 	}
-	passes, tests, err := l.enumerate(results, derived)
+	loader := load.NewMatrix(top)
+	l.loads = newLoads(ctx, loader, top.Root)
+	var elsewhere roots.Elsewhere
+	l.Configurations, l.Unbuilt, err = loader.All(ctx, configurations, func(r *load.Result) error {
+		one, enumerated := configuredOf(r, top.Root)
+		if enumerated != nil {
+			return enumerated
+		}
+		elsewhere.Add(r)
+		l.loads.add(one)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	var checked []map[load.PackageID]bool
+	if derived {
+		checked = elsewhere.Of()
+	}
+	passes, tests, err := l.enumerate(checked)
 	if err != nil {
 		return nil, err
 	}
@@ -144,34 +148,34 @@ func (l *Loaded) Identifiers() []string {
 
 // enumerate runs the passes over every loaded configuration, and returns them with
 // the matrix's test classes the reference pass read. A derived matrix checks a file
-// against the configurations that compile it elsewhere.
-func (l *Loaded) enumerate(results []load.Result, derived bool) ([]liveness.Configured, roots.TestClasses, error) {
+// against the configurations that compile it elsewhere, which elsewhere holds per
+// configuration and a declared matrix leaves nil.
+func (l *Loaded) enumerate(elsewhere []map[load.PackageID]bool) ([]liveness.Configured, roots.TestClasses, error) {
 	options := roots.RootOptions{
 		Patterns:     l.req.Config.Roots.Patterns,
 		PublishedAPI: l.req.Config.Target.Kind == report.TargetKindLibrary,
 	}
-	var elsewhere []map[load.PackageID]bool
-	if derived {
-		elsewhere = roots.CheckedElsewhere(results)
-	}
-	l.Loads = make([]enumerated, len(results))
-	passes := make([]liveness.Configured, len(results))
-	classes := make([]roots.TestClasses, len(results))
-	for i := range results {
-		one := options
-		if elsewhere != nil {
-			one.CheckedElsewhere = elsewhere[i]
-		}
-		var err error
-		if l.Loads[i], passes[i], classes[i], err = rootsOf(&results[i], l.Root, one); err != nil {
+	passes := make([]liveness.Configured, l.loads.Len())
+	classes := make([]roots.TestClasses, l.loads.Len())
+	for i := range passes {
+		one, err := l.loads.At(i)
+		if err != nil {
 			return nil, roots.TestClasses{}, err
 		}
-		l.TypeErrorSkips = append(l.TypeErrorSkips, roots.TypeErrorSkips(&results[i], l.Loads[i].Resolve, l.Root, one.CheckedElsewhere)...)
-		l.Configurations = append(l.Configurations, results[i].Configuration)
+		options := options
+		if elsewhere != nil {
+			options.CheckedElsewhere = elsewhere[i]
+		}
+		passes[i], classes[i] = rootsOf(one, options)
+		l.TypeErrorSkips = append(l.TypeErrorSkips, roots.TypeErrorSkips(one.Result, one.Resolve, l.Root, options.CheckedElsewhere)...)
 	}
 	tests := roots.MatrixTests(classes)
-	for i := range results {
-		references, rules, err := facts.References(&results[i], l.Loads[i].Resolve, l.Loads[i].Symbols, tests)
+	for i := range passes {
+		one, err := l.loads.At(i)
+		if err != nil {
+			return nil, roots.TestClasses{}, err
+		}
+		references, rules, err := facts.References(one.Result, one.Resolve, one.Symbols, tests)
 		if err != nil {
 			return nil, roots.TestClasses{}, err
 		}
@@ -182,25 +186,12 @@ func (l *Loaded) enumerate(results []load.Result, derived bool) ([]liveness.Conf
 }
 
 // rootsOf runs the passes over one loaded configuration that come before the
-// matrix's test classes: the enumeration, the resolver, the roots, and the
-// configuration's own test classes, which read the roots.
-func rootsOf(result *load.Result, root string, options roots.RootOptions) (enumerated, liveness.Configured, roots.TestClasses, error) {
-	inv, err := inventory.Of(result, root, os.ReadFile)
-	if err != nil {
-		return enumerated{}, liveness.Configured{}, roots.TestClasses{}, err
-	}
-	resolver, err := resolve.New(result, inv)
-	if err != nil {
-		return enumerated{}, liveness.Configured{}, roots.TestClasses{}, err
-	}
-	index, err := facts.NewIndex(result, resolver)
-	if err != nil {
-		return enumerated{}, liveness.Configured{}, roots.TestClasses{}, err
-	}
-	found, unmatched := roots.Roots(result, resolver, inv.Symbols, options)
-	return enumerated{Symbols: inv.Symbols, Result: *result, Resolve: resolver, Facts: index},
-		liveness.Configured{Symbols: inv.Symbols, Roots: found, Unmatched: unmatched, Interfaces: index.Interfaces()},
-		roots.ClassifyTestSupport(result, inv.Symbols, found, options.PublishedAPI), nil
+// matrix's test classes: the roots, and the configuration's own test classes, which
+// read the roots.
+func rootsOf(one *findings.Configured, options roots.RootOptions) (liveness.Configured, roots.TestClasses) {
+	found, unmatched := roots.Roots(one.Result, one.Resolve, one.Symbols, options)
+	return liveness.Configured{Symbols: one.Symbols, Roots: found, Unmatched: unmatched, Interfaces: one.Facts.Interfaces()},
+		roots.ClassifyTestSupport(one.Result, one.Symbols, found, options.PublishedAPI)
 }
 
 // greatestPerRule folds one configuration's test-file rules into the run's. Every

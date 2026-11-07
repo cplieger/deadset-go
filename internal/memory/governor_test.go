@@ -52,11 +52,12 @@ func TestPercentOfDoesNotOverflow(t *testing.T) {
 func keepGCSettings(t *testing.T) (limit int64, gogc int) {
 	t.Helper()
 	limit = debug.SetMemoryLimit(-1)
-	gogc = debug.SetGCPercent(defaultGOGC)
+	gogc = debug.SetGCPercent(100)
 	debug.SetGCPercent(gogc)
 	t.Cleanup(func() {
 		debug.SetMemoryLimit(limit)
 		debug.SetGCPercent(gogc)
+		pressed.Store(false)
 	})
 	return limit, gogc
 }
@@ -83,17 +84,20 @@ func TestStartSetsNothingWhereNoSourceAnswers(t *testing.T) {
 	}
 }
 
-func TestTickRaisesGOGCAndSetsTheLimitUnderHeadroom(t *testing.T) {
+// The governor bounds the heap through the soft limit alone: a collection target
+// raised while memory is free would hold garbage the run does not need.
+func TestTickSetsTheLimitAndLeavesGOGC(t *testing.T) {
 	keepGCSettings(t)
-	debug.SetGCPercent(defaultGOGC)
+	const gogc = 150
+	debug.SetGCPercent(gogc)
 	const room = 1 << 40
-	g := &governor{sources: []Source{func() (uint64, bool) { return room, true }}, cancel: func(error) {}, samples: newSamples(), gogc: defaultGOGC}
+	g := &governor{sources: []Source{func() (uint64, bool) { return room, true }}, cancel: func(error) {}, samples: newSamples()}
 
 	if g.tick() {
 		t.Fatal("tick() with a terabyte of headroom ended the run")
 	}
-	if got := debug.SetGCPercent(defaultGOGC); got != raisedGOGC {
-		t.Errorf("tick() with a terabyte of headroom: GOGC %d, want %d", got, raisedGOGC)
+	if got := debug.SetGCPercent(gogc); got != gogc {
+		t.Errorf("tick() with a terabyte of headroom: GOGC %d, want %d, as the process set it", got, gogc)
 	}
 	if got := debug.SetMemoryLimit(-1); got < room*8/10 || got > room {
 		t.Errorf("tick() with %d bytes of headroom: limit %d, want 85 %% of the ceiling", uint64(room), got)
@@ -132,13 +136,6 @@ func TestStartHoldsARunWithoutGOMEMLIMITToSeventyPercentOfTheMachine(t *testing.
 	got := startedLimit(t, Machine{Sources: []Source{roomy}, Limit: func() (uint64, bool) { return machineLimit, true }})
 	if want := int64(percentOf(machineLimit, defaultPercent)); got != want {
 		t.Errorf("start without GOMEMLIMIT on a 10 GiB machine with a terabyte of headroom set the limit to %d, want %d, 70 %% of the machine", got, want)
-	}
-
-	debug.SetGCPercent(defaultGOGC)
-	g := &governor{sources: []Source{roomy}, cancel: func(error) {}, samples: newSamples(), gogc: defaultGOGC, machineLimit: machineLimit}
-	g.tick()
-	if got := debug.SetGCPercent(defaultGOGC); got != raisedGOGC {
-		t.Errorf("tick() under the machine's bound with a small live heap: GOGC %d, want %d", got, raisedGOGC)
 	}
 }
 
@@ -214,7 +211,7 @@ func TestStartKeepsTheLimitTheProcessStartedWith(t *testing.T) {
 
 func TestTickKeepsCollectionOffWhereTheProcessTurnedItOff(t *testing.T) {
 	keepGCSettings(t)
-	g := &governor{sources: []Source{func() (uint64, bool) { return 1 << 40, true }}, cancel: func(error) {}, samples: newSamples(), previousGOGC: -1, gogc: -1}
+	g := &governor{sources: []Source{func() (uint64, bool) { return 1 << 40, true }}, cancel: func(error) {}, samples: newSamples()}
 	debug.SetGCPercent(-1)
 	g.tick()
 	if got := debug.SetGCPercent(-1); got != -1 {
@@ -222,35 +219,57 @@ func TestTickKeepsCollectionOffWhereTheProcessTurnedItOff(t *testing.T) {
 	}
 }
 
-// sink holds the allocation the low-budget test keeps live.
-var sink []byte
+// sink holds the allocation the low-budget tests keep live, and lateSink one made
+// after the last collection.
+var sink, lateSink []byte
 
-func TestTickEndsARunThatDoesNotFitWithTheContractLine(t *testing.T) {
-	keepGCSettings(t)
-	const held = 256 << 20
-	sink = make([]byte, held)
+// heldTight allocates sink and returns a caller limit 80 % of the live heap with
+// it: the ceiling the governor reads is then that limit, whatever the runtime
+// holds from earlier tests, so pressure begins on the first reading and the live
+// heap sits past the abort line while sink is held.
+func heldTight(t *testing.T) uint64 {
+	t.Helper()
+	sink = make([]byte, 256<<20)
 	for i := range sink {
 		sink[i] = byte(i)
 	}
 	t.Cleanup(func() { sink = nil; runtime.GC() })
+	runtime.GC()
+	live, _ := (&governor{samples: newSamples()}).read()
+	return live / 10 * 8
+}
+
+func TestTickEndsARunThatDoesNotFitWithTheContractLine(t *testing.T) {
+	keepGCSettings(t)
+	const held = 256 << 20
+	limit := heldTight(t)
+	dropped := 0
+	unregister := onPressure(func() { dropped++ })
+	defer unregister()
 
 	var cause error
 	g := &governor{
-		sources: []Source{func() (uint64, bool) { return 0, true }},
-		cancel:  func(err error) { cause = err },
-		samples: newSamples(),
-		gogc:    defaultGOGC,
+		sources:     []Source{func() (uint64, bool) { return 0, true }},
+		cancel:      func(err error) { cause = err },
+		samples:     newSamples(),
+		callerLimit: limit,
+	}
+	if g.tick() || cause != nil {
+		t.Fatalf("tick() ended the run on the reading that put it under pressure (%v), want it judged once it ran under pressure", cause)
+	}
+	if dropped != 1 || !Pressed() {
+		t.Fatalf("tick() with no headroom: dropped %d times, Pressed() = %v; want 1 and true", dropped, Pressed())
 	}
 	if !g.tick() {
-		t.Fatal("tick() with no headroom and a 256 MB live heap did not end the run")
+		t.Fatal("tick() under pressure with no headroom and a 256 MB live heap the drop kept did not end the run")
 	}
 	exhausted, ok := errors.AsType[*ExhaustedError](cause)
 	if !ok {
 		t.Fatalf("tick() cancelled with %v, want an *ExhaustedError", cause)
 	}
-	if exhausted.Needed < 2*held || exhausted.Needed <= exhausted.Available {
-		t.Errorf("tick() = needed %d, available %d; want needed at least %d, twice the live heap, and above available",
-			exhausted.Needed, exhausted.Available, 2*held)
+	if exhausted.Needed < held*100/abortPercent || exhausted.Needed <= exhausted.Available {
+		t.Errorf("tick() = needed %d, available %d; want needed at least %d, the least ceiling the live heap fits under, and above available",
+			exhausted.Needed, exhausted.Available, held*100/abortPercent)
 	}
 	line := regexp.MustCompile(`^at least (\d+(?:\.\d)?) GB were needed, (\d+(?:\.\d)?) GB are available$`)
 	match := line.FindStringSubmatch(exhausted.Error())
@@ -314,5 +333,145 @@ func TestCeilingIsTheCallerLimitOnceTheRuntimeHoldsMore(t *testing.T) {
 	}
 	if ceiling, read := g.ceiling(); !read || ceiling != g.callerLimit {
 		t.Errorf("ceiling() under a 1 MiB limit = %d, %t, want %d, true", ceiling, read, g.callerLimit)
+	}
+}
+
+// A run whose live heap nears the limit is put under pressure: what it registered
+// to drop is dropped and collected before the run is judged, so a heap that fits
+// once its caches go ends nothing, and the run stays under pressure.
+func TestTickUnderPressureDropsCachesBeforeJudgingTheRun(t *testing.T) {
+	keepGCSettings(t)
+	limit := heldTight(t)
+	dropped := 0
+	unregister := onPressure(func() { dropped++; sink = nil })
+	defer unregister()
+
+	ended := false
+	var room uint64
+	g := &governor{
+		sources:     []Source{func() (uint64, bool) { return room, true }},
+		cancel:      func(error) { ended = true },
+		samples:     newSamples(),
+		callerLimit: limit,
+	}
+	if g.tick() || ended {
+		t.Fatal("tick() ended a run whose heap fits once its cache is dropped")
+	}
+	if dropped != 1 || !Pressed() {
+		t.Errorf("tick() with a 256 MB cache and no headroom: dropped %d times, Pressed() = %v; want 1 and true", dropped, Pressed())
+	}
+	if g.tick() || ended {
+		t.Error("a second tick under pressure ended a run whose heap fits without its cache")
+	}
+	if dropped != 1 {
+		t.Errorf("a second tick under pressure dropped again (%d drops), want the drop once per pressure", dropped)
+	}
+	if !Pressed() {
+		t.Error("the heap the drop emptied ended pressure, want the run kept under pressure while its cache would not fit again")
+	}
+	room, g.callerLimit = 1<<40, 0
+	if g.tick(); Pressed() {
+		t.Error("tick() with a terabyte of headroom kept the run under pressure, want pressure ended once the cache fits again")
+	}
+}
+
+// What pressure keeps off counts what the drops freed of memory allocated since the
+// last collection, which that collection's live heap does not hold.
+func TestTickCountsWhatTheDropFreedSinceTheLastCollection(t *testing.T) {
+	keepGCSettings(t)
+	limit := heldTight(t)
+	const late = 128 << 20
+	lateSink = make([]byte, late)
+	for i := range lateSink {
+		lateSink[i] = byte(i)
+	}
+	unregister := onPressure(func() { sink, lateSink = nil, nil })
+	defer unregister()
+
+	g := &governor{
+		sources:     []Source{func() (uint64, bool) { return 0, true }},
+		cancel:      func(error) {},
+		samples:     newSamples(),
+		callerLimit: limit,
+	}
+	g.tick()
+	if !Pressed() || g.regain < 256<<20+late*9/10 {
+		t.Errorf("tick() dropping a 256 MB cache and a %d MB one allocated since the last collection: Pressed() = %t, regain %d MB; want true and at least %d MB",
+			late>>20, Pressed(), g.regain>>20, (256<<20+late*9/10)>>20)
+	}
+}
+
+// A collector bound by its CPU limiter ends only a run already under pressure: a
+// run that never shed its caches has not been tried in its minimal shape.
+func TestTickJudgesACollectionBoundRunOnlyUnderPressure(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		pressed bool
+	}{{"relieved", false}, {"pressed", true}} {
+		t.Run(tt.name, func(t *testing.T) {
+			keepGCSettings(t)
+			pressed.Store(tt.pressed)
+			var cause error
+			g := &governor{
+				sources: []Source{func() (uint64, bool) { return 0, true }},
+				cancel:  func(err error) { cause = err },
+				samples: newSamples(),
+				// A window opened a billion CPU-seconds ago, all of them collection's.
+				window: cpuWindow{gc: -1e9, total: -1e9, open: true},
+				regain: math.MaxUint64 / 2,
+			}
+			ended := g.tick()
+			if tt.pressed {
+				if _, ok := errors.AsType[*ExhaustedError](cause); !ended || !ok {
+					t.Errorf("tick() under pressure in a collection-bound window holding the whole ceiling = %t, %v; want the run ended with an *ExhaustedError", ended, cause)
+				}
+				return
+			}
+			if ended || cause != nil {
+				t.Errorf("tick() outside pressure in a collection-bound window holding the whole ceiling ended the run (%v), want it put under pressure first", cause)
+			}
+		})
+	}
+}
+
+// Pressure ends once the live heap falls well under the soft limit.
+func TestTickEndsPressureOnceTheHeapFalls(t *testing.T) {
+	keepGCSettings(t)
+	pressed.Store(true)
+	g := &governor{sources: []Source{func() (uint64, bool) { return 1 << 40, true }}, cancel: func(error) {}, samples: newSamples()}
+	if g.tick() || Pressed() {
+		t.Errorf("tick() with a terabyte of headroom: Pressed() = %v, want false", Pressed())
+	}
+}
+
+// An unregistered drop function is never called.
+func TestOnPressureUnregisterRemovesTheDrop(t *testing.T) {
+	called := false
+	onPressure(func() { called = true })()
+	shed()
+	if called {
+		t.Error("shed() called a drop function after its unregister")
+	}
+}
+
+// Needed is the least ceiling under which the memory that passed the abort line
+// sits at it, rounded up, so it always exceeds what was available.
+func TestExhaustedNeedsTheLeastCeilingTheReadingFits(t *testing.T) {
+	for _, used := range []uint64{900, 901, 1_000_000_007, math.MaxUint64 / 2} {
+		ceiling := percentOf(used, abortPercent)
+		got := exhausted(used, ceiling)
+		if got.Needed < used || percentOf(got.Needed, abortPercent) < ceiling {
+			t.Errorf("exhausted(%d).Needed = %d, want the least ceiling %d sits at %d %% of", used, got.Needed, used, abortPercent)
+		}
+		if got.Needed <= ceiling {
+			t.Errorf("exhausted(%d, %d).Needed = %d, want above the ceiling", used, ceiling, got.Needed)
+		}
+	}
+	// A reading just past the abort line of a ceiling, which is what every caller
+	// passes, needs more than that ceiling.
+	for _, tt := range []struct{ used, ceiling uint64 }{{910, 1000}, {901, 1000}, {9_000_000_001, 10_000_000_000}} {
+		if got := exhausted(tt.used, tt.ceiling); got.Needed <= tt.ceiling {
+			t.Errorf("exhausted(%d, %d).Needed = %d, want above the ceiling", tt.used, tt.ceiling, got.Needed)
+		}
 	}
 }

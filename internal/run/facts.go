@@ -36,8 +36,12 @@ func (f *Findings) Facts(ctx context.Context, name, version string) (*specfacts.
 	oneof := make(map[inventory.SymbolID]facts.OneofPart)
 	caps := make(map[string]facts.Cap)
 	var reads []facts.SchemaRead
-	for i := range f.Loads {
-		x := f.Loads[i].Facts
+	for i := range f.loads.Len() {
+		one, err := f.loads.At(i)
+		if err != nil {
+			return nil, err
+		}
+		x := one.Facts
 		doc.Generated = generatedEntries(doc.Generated, x.Generated(), generated)
 		doc.Bindings = f.bindingRecords(doc.Bindings, x.Bindings(), files, tuples)
 		reads = append(reads, x.SchemaReads()...)

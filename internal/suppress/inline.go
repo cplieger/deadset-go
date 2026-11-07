@@ -28,11 +28,16 @@ type Configuration struct {
 // per code bound to nothing where none did; one lacking only its reason is one
 // [core.Refusal] per code, and any other comment in the namespace ends the read
 // with a [core.MalformedError], the first in reading order: by rendered
-// position, then by written byte.
-func Inline(configurations []Configuration) ([]core.Record, []core.Refusal, error) {
+// position, then by written byte. It reads count configurations, each through at
+// once it is done with the one before.
+func Inline(count int, at func(config int) (*Configuration, error)) ([]core.Record, []core.Refusal, error) {
 	read := map[writtenAt]*directive{}
-	for i := range configurations {
-		if err := placeAll(&configurations[i], read); err != nil {
+	for i := range count {
+		one, err := at(i)
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := placeAll(one, read); err != nil {
 			return nil, nil, err
 		}
 	}

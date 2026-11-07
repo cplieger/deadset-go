@@ -178,7 +178,7 @@ func TestFileNeverBuiltReportsNoFileTheIgnoreTagConstrains(t *testing.T) {
 		twoConfigurations()...)
 
 	ignored := false
-	for _, one := range in.Per {
+	for _, one := range in.Per.(configs) {
 		for _, p := range one.Result.Packages {
 			ignored = ignored || slices.ContainsFunc(p.IgnoredFiles, func(path string) bool {
 				return filepath.Base(path) == "generate.go"
@@ -203,7 +203,7 @@ func TestFileNeverBuiltReportsNoFileTheToolchainIgnoredForReachingC(t *testing.T
 
 	// The opaque-C check read the file, so no package of any configuration ignores
 	// it any more, which is the premise the kind is being held to here.
-	for _, one := range in.Per {
+	for _, one := range in.Per.(configs) {
 		for _, p := range one.Result.Packages {
 			if slices.ContainsFunc(p.IgnoredFiles, func(path string) bool {
 				return filepath.Base(path) == "bridge.go"
@@ -334,7 +334,7 @@ func retainOneDeclaration(t *testing.T, in *Input, pkgPath string) {
 	t.Helper()
 
 	for i := range in.Sweep.Candidates {
-		symbol := newPass(in).symbol(in.Sweep.Candidates[i].ID)
+		symbol := mustPass(t, in).symbol(in.Sweep.Candidates[i].ID)
 		if symbol == nil || symbol.PkgPath != pkgPath {
 			continue
 		}
@@ -526,7 +526,7 @@ func TestAnnotateNamesTheModuleADeletionRemovesTheLastUseOf(t *testing.T) {
 	in := withModuleFile(t, "artifacts-dependency.txtar", applicationConfig(), twoConfigurations()...)
 
 	result := computed(t, in, declarationEmitters())
-	newPass(in).annotate(result.Findings)
+	mustPass(t, in).annotate(result.Findings)
 
 	paired := findingOf(t, result.Findings, vocab.UnusedUnexported, "paired").Details.RemovesLastUseOf
 	if want := []string{"example.com/platform"}; !slices.Equal(paired, want) {
@@ -563,7 +563,7 @@ func TestAnnotateNamesNoModuleOnAFindingNoDeletionFixes(t *testing.T) {
 		result.Findings[i].Fixability = "narrowable"
 		result.Findings[i].Details.RemovesLastUseOf = nil
 	}
-	newPass(in).annotate(result.Findings)
+	mustPass(t, in).annotate(result.Findings)
 
 	for i := range result.Findings {
 		if named := result.Findings[i].Details.RemovesLastUseOf; len(named) > 0 {

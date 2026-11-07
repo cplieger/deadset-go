@@ -62,11 +62,13 @@ func (p *Prepared) sweep(r *round) (*Swept, error) {
 // order a stale suppression is reported in. The ignore file and the baseline bind
 // against the matrix inventory.
 func (p *Prepared) suppressions(r *round) ([]core.Record, []core.Refusal, error) {
-	configurations := make([]suppress.Configuration, len(p.per))
-	for i := range p.per {
-		configurations[i] = suppress.Configuration{Result: p.per[i].Result, Resolve: p.per[i].Resolve, Symbols: p.per[i].Symbols}
-	}
-	records, refusals, err := suppress.Inline(configurations)
+	records, refusals, err := suppress.Inline(p.loads.Len(), func(config int) (*suppress.Configuration, error) {
+		one, err := p.loads.At(config)
+		if err != nil {
+			return nil, err
+		}
+		return &suppress.Configuration{Result: one.Result, Resolve: one.Resolve, Symbols: one.Symbols}, nil
+	})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -103,17 +105,20 @@ func (p *Prepared) suppressions(r *round) ([]core.Record, []core.Refusal, error)
 // Retained is every exemption the retained-symbol listing names: those that held a
 // dead symbol back, then those that held a write-only finding back, grouped by
 // symbol in inventory order.
-func (s *Swept) Retained() []exempt.Exemption {
-	writeOnly := findings.WriteOnlyRetained(&findings.Input{
+func (s *Swept) Retained() ([]exempt.Exemption, error) {
+	writeOnly, err := findings.WriteOnlyRetained(&findings.Input{
 		Config: &s.req.Config,
 		Merged: s.Merged,
 		Sweep:  &s.Liveness,
 		Exempt: s.Exemptions,
-		Per:    s.per,
+		Per:    s.loads,
 		Mode:   s.Mode,
 	})
+	if err != nil {
+		return nil, err
+	}
 	if len(writeOnly) == 0 {
-		return s.Liveness.Retained
+		return s.Liveness.Retained, nil
 	}
 	held := make(map[inventory.SymbolID][]exempt.Exemption)
 	all := slices.Concat(s.Liveness.Retained, writeOnly)
@@ -124,5 +129,5 @@ func (s *Swept) Retained() []exempt.Exemption {
 	for i := range s.Merged.Symbols {
 		ordered = append(ordered, held[s.Merged.Symbols[i].ID]...)
 	}
-	return ordered
+	return ordered, nil
 }

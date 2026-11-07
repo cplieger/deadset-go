@@ -66,7 +66,7 @@ func narrowingInput(
 		Sweep:     &swept,
 		Refs:      refs,
 		Matrix:    []string{fixtureConfiguration().ID},
-		Per:       []Configured{{Result: &load.Result{Packages: loaded}}},
+		Per:       configs{{Result: &load.Result{Packages: loaded}}},
 		Consumers: consumers,
 		Mode:      mode,
 	}
@@ -103,7 +103,7 @@ func narrowedRefs(found []draft) []string {
 func narrowedIDOf(t *testing.T, in *Input, ref string) inventory.SymbolID {
 	t.Helper()
 
-	if id := newPass(in).byRef[ref]; id != "" {
+	if id := mustPass(t, in).byRef[ref]; id != "" {
 		return id
 	}
 	t.Fatalf("Setup: the inventory holds no declaration whose reference is %q", ref)
@@ -176,7 +176,7 @@ func TestUnnecessaryExportReportsAPublishedPackageOnlyUnderAClosedWorld(t *testi
 
 func TestUnnecessaryExportNamesTheDeclaringFileWhereEveryReferenceIsInIt(t *testing.T) {
 	in := inputOf(t, "narrowing-file.txtar", libraryConfig(), Consumers{})
-	found, err := unnecessaryExport(newPass(in))
+	found, err := unnecessaryExport(mustPass(t, in))
 	if err != nil {
 		t.Fatalf("UnnecessaryExport(narrowing-file) = error %v, want the findings", err)
 	}
@@ -388,7 +388,7 @@ func TestNarrowingLeavesADeclarationAnExemptionHoldsLiveAlone(t *testing.T) {
 	exemptions := []exempt.Exemption{{ID: exempted, Class: "interface-satisfaction"}}
 	in.Exempt = exemptions
 
-	found, err := unnecessaryExport(newPass(in))
+	found, err := unnecessaryExport(mustPass(t, in))
 	if err != nil {
 		t.Fatalf("UnnecessaryExport(an exempt declaration) = error %v, want the findings", err)
 	}
@@ -454,7 +454,7 @@ func TestNarrowingYieldsADeclarationNothingReadsToTheWriteOnlyKind(t *testing.T)
 		Roots: []roots.Root{{ID: fill.ID, Kind: roots.RootMain}},
 	}, map[string]string{pkgPath: mainPackageName}, Consumers{})
 
-	narrowed, err := unnecessaryExport(newPass(in))
+	narrowed, err := unnecessaryExport(mustPass(t, in))
 	if err != nil {
 		t.Fatalf("UnnecessaryExport(a written declaration nothing reads) = error %v, want the findings", err)
 	}
@@ -462,7 +462,7 @@ func TestNarrowingYieldsADeclarationNothingReadsToTheWriteOnlyKind(t *testing.T)
 		t.Errorf("UnnecessaryExport reported %s, want no finding on a declaration the write-only "+
 			"kind reports", fieldOf)
 	}
-	written, err := writeOnlySymbol(newPass(in))
+	written, err := writeOnlySymbol(mustPass(t, in))
 	if err != nil {
 		t.Fatalf("WriteOnlySymbol(a written declaration nothing reads) = error %v, want the findings", err)
 	}
@@ -530,11 +530,11 @@ func TestNarrowingLeavesADeclarationReferencedFromOutsideTheModuleAlone(t *testi
 				Roots: []roots.Root{{ID: subject.ID, Kind: roots.RootPublishedAPI}},
 			}, map[string]string{pkgPath: "catalog"}, Consumers{Complete: true})
 
-			exported, err := unnecessaryExport(newPass(in))
+			exported, err := unnecessaryExport(mustPass(t, in))
 			if err != nil {
 				t.Fatalf("UnnecessaryExport(%s) = error %v, want the findings", tc.name, err)
 			}
-			exposed, err := unnecessaryExposure(newPass(in))
+			exposed, err := unnecessaryExposure(mustPass(t, in))
 			if err != nil {
 				t.Fatalf("UnnecessaryExposure(%s) = error %v, want the findings", tc.name, err)
 			}
@@ -667,11 +667,11 @@ const (
 // report, so an empty population cannot pass for an exclusion.
 func TestNarrowingReportsNoInterfaceMethodNoFieldAndNoInterfaceSatisfyingMethod(t *testing.T) {
 	in := inputOf(t, "narrowing-members.txtar", applicationConfig(), Consumers{Complete: true})
-	found, err := unnecessaryExport(newPass(in))
+	found, err := unnecessaryExport(mustPass(t, in))
 	if err != nil {
 		t.Fatalf("UnnecessaryExport(narrowing-members) = error %v, want the findings", err)
 	}
-	exposed, err := unnecessaryExposure(newPass(in))
+	exposed, err := unnecessaryExposure(mustPass(t, in))
 	if err != nil {
 		t.Fatalf("UnnecessaryExposure(narrowing-members) = error %v, want the findings", err)
 	}
@@ -713,7 +713,7 @@ func TestNarrowingExcludesASatisfyingMethodTheExemptionClassDoesNotHold(t *testi
 			storeBufferWrite)
 	}
 
-	found, err := unnecessaryExport(newPass(in))
+	found, err := unnecessaryExport(mustPass(t, in))
 	if err != nil {
 		t.Fatalf("UnnecessaryExport(narrowing-members) = error %v, want the findings", err)
 	}
