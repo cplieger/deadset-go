@@ -21,22 +21,41 @@ type Unbuilt struct {
 	Configuration Configuration
 }
 
-// All resolves every configuration of one matrix over top, in matrix order, which
-// keys a configuration from here on, and returns one result per configuration it
-// built and every one it dropped. A [Derived] configuration that does not load is
-// dropped as an [Unbuilt]; any other ends the run with its load's error, and a
-// matrix whose every configuration dropped ends with the first dropped setup
-// failure, else the first drop's error. A cancelled ctx ends it with the cause.
-func All(ctx context.Context, top *Topology, configurations []Configuration) ([]Result, []Unbuilt, error) {
+// Matrix loads the configurations of one topology over one syntax cache: a
+// configuration loaded again reads the same trees and shares the same dependency
+// checks, so its positions and its dependencies' types are those of its first load,
+// and a caller may drop a configuration's [Result] and load it again.
+type Matrix struct {
+	top   *Topology
+	trees *syntaxCache
+}
+
+// NewMatrix starts the loads of top.
+func NewMatrix(top *Topology) *Matrix {
+	return &Matrix{top: top, trees: newSyntaxCache()}
+}
+
+// Load loads one configuration of the matrix, as [Load] does.
+func (m *Matrix) Load(ctx context.Context, c *Configuration) (Result, error) {
+	return load(ctx, m.top, c, m.trees)
+}
+
+// All loads every configuration in matrix order, which keys a configuration from
+// here on, hands each one it built to built before it loads the next, and returns
+// the configurations it built and every one it dropped. A [Derived] configuration
+// that does not load is dropped as an [Unbuilt]; any other ends the run with its
+// load's error, and a matrix whose every configuration dropped ends with the first
+// dropped setup failure, else the first drop's error. A cancelled ctx ends it with
+// the cause, and an error from built ends it with that error.
+func (m *Matrix) All(ctx context.Context, configurations []Configuration, built func(*Result) error) ([]Configuration, []Unbuilt, error) {
 	if len(configurations) == 0 {
-		return nil, nil, fmt.Errorf("%w: %s", ErrNoConfiguration, top.Root)
+		return nil, nil, fmt.Errorf("%w: %s", ErrNoConfiguration, m.top.Root)
 	}
-	results := make([]Result, 0, len(configurations))
+	kept := make([]Configuration, 0, len(configurations))
 	var dropped []Unbuilt
-	trees := newSyntaxCache()
 	for i := range configurations {
 		c := &configurations[i]
-		r, err := load(ctx, top, c, trees)
+		r, err := m.Load(ctx, c)
 		switch {
 		case err != nil && ctx.Err() != nil:
 			return nil, nil, fmt.Errorf("load %s: %w", c.ID, context.Cause(ctx))
@@ -45,13 +64,16 @@ func All(ctx context.Context, top *Topology, configurations []Configuration) ([]
 		case err != nil:
 			dropped = append(dropped, Unbuilt{Err: err, Configuration: *c})
 		default:
-			results = append(results, r)
+			if err := built(&r); err != nil {
+				return nil, nil, err
+			}
+			kept = append(kept, *c)
 		}
 	}
-	if len(results) == 0 {
+	if len(kept) == 0 {
 		return nil, nil, droppedError(dropped)
 	}
-	return results, dropped, nil
+	return kept, dropped, nil
 }
 
 // droppedError is the error a matrix whose every configuration was dropped ends

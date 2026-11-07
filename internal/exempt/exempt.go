@@ -237,6 +237,10 @@ type Program struct {
 	// source per package on a class's first ask, because most are never asked.
 	assert *assertable
 
+	// sources reads the packages outside the program from their source. The
+	// program owns it, so the trees it read go when the program does.
+	sources *load.Sources
+
 	Loaded
 }
 
@@ -245,7 +249,7 @@ func NewProgram(l *Loaded) (*Program, error) {
 	if l.Result == nil || l.Result.Fset == nil {
 		return nil, fmt.Errorf("%w: no file set", inventory.ErrIncompleteLoad)
 	}
-	p := &Program{Loaded: *l}
+	p := &Program{Loaded: *l, sources: l.Result.Sources()}
 	p.allConversions = facts.Conversions(p.Resolve.Positions(), p.Result.Packages)
 	p.conversions = concrete(p.allConversions)
 	p.programConversions = slices.Clone(p.conversions)

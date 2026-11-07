@@ -240,7 +240,11 @@ func writeExplanation(w io.Writer, set *run.Findings, full bool, subject *invent
 	fmt.Fprintf(&held, "configurations: %s\n", configurationNames(set.Identifiers(), subject.Configs))
 
 	found := findingAbout(set.Result.Findings, subject)
-	retained := retentionsOf(set.Retained(), subject.ID)
+	all, err := set.Retained()
+	if err != nil {
+		return err
+	}
+	retained := retentionsOf(all, subject.ID)
 	switch {
 	case found != nil:
 		fmt.Fprintf(&held, "answer: %s\n", stateReported)
@@ -252,7 +256,7 @@ func writeExplanation(w io.Writer, set *run.Findings, full bool, subject *invent
 		writeLiveness(&held, set, full, subject)
 	}
 	writeNamedElsewhere(&held, set.Result.Findings, subject)
-	_, err := io.WriteString(w, held.String())
+	_, err = io.WriteString(w, held.String())
 	return err
 }
 

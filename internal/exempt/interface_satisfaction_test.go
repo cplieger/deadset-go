@@ -668,3 +668,29 @@ func TestUncalledMethodsWithdrawOnlyTheRetentionsThroughAProductionMethodNothing
 		t.Errorf("Withdrawn() = %v, want %v: an interface-satisfaction retention through the uncalled method alone goes", got, retained[1:])
 	}
 }
+
+// A site naming net/http as another module's load reads it still retains the
+// methods by which the converted type satisfies what net/http asserts, as the
+// type's own reading of net/http states it.
+func TestOutsideMethodsReadTheConvertedTypesOwnReading(t *testing.T) {
+	const archive = "interface-satisfaction-outside-reading.txtar"
+	in := inputOf(t, archive, Options{})
+	other := inputOf(t, archive, Options{})
+	var recorder *types.Named
+	for _, p := range in.Result.Packages {
+		if obj, ok := p.Types.Scope().Lookup("Recorder").(*types.TypeName); ok && p.PkgPath == "example.com/recording" {
+			recorder, _ = obj.Type().(*types.Named)
+		}
+	}
+	foreign := other.outside[slices.IndexFunc(other.outside, func(p *types.Package) bool { return p.Path() == "net/http" })]
+	if recorder == nil {
+		t.Fatalf("Setup: no Recorder in %s", archive)
+	}
+	var names []string
+	for _, method := range newOutsideAssertions(in).methods(types.NewPointer(recorder), foreign) {
+		names = append(names, method.Name())
+	}
+	if !slices.Contains(names, "SetWriteDeadline") {
+		t.Errorf("methods(*Recorder, another load's net/http) = %v, want SetWriteDeadline among them", names)
+	}
+}

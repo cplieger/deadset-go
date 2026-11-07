@@ -19,6 +19,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
+	"github.com/cplieger/deadset-go/v2/internal/suppress"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/report"
@@ -248,7 +249,10 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 	}
 	g := liveness.Of(&merged)
 	exemptions, testEvidence = merged.Uncalled.Withdrawn(exemptions), merged.Uncalled.Withdrawn(testEvidence)
-	unseen := Unseen(&Input{Config: &resolved, Root: root, Merged: &merged, Per: per, Consumers: consumers})
+	unseen, err := Unseen(&Input{Config: &resolved, Root: root, Merged: &merged, Per: configs(per), Consumers: consumers})
+	if err != nil {
+		t.Fatalf("Setup: Unseen(%s): %v", doc.Target.Path, err)
+	}
 	swept := g.Sweep(&liveness.SweepPolicy{Exempt: exemptions, Mode: mode, TestEvidence: testEvidence, Unseen: unseen})
 
 	refs := make(map[inventory.SymbolID]string, len(merged.Symbols))
@@ -266,7 +270,7 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 		TestEvidence: testEvidence,
 		Generated:    func(path string) bool { return generated[path] },
 		Matrix:       identifiers(configurations),
-		Per:          per,
+		Per:          configs(per),
 		Consumers:    consumers,
 		Mode:         mode,
 	}
@@ -461,7 +465,7 @@ func analyzeShared(t *testing.T, in *Input) *sharedAnalysis {
 	fresh := func(production bool) {
 		in.Mode.Production = production
 	}
-	emitting := newPass(in)
+	emitting := mustPass(t, in)
 	for code, emit := range packageEmitters() {
 		held.emitted[code], held.failed[code] = emit(emitting)
 	}
@@ -680,4 +684,46 @@ func defaultConfig() config.Config {
 		panic(err)
 	}
 	return resolved.Config
+}
+
+// configs is a run's configurations held in memory, as [Loads] reads them.
+type configs []Configured
+
+func (c configs) Len() int { return len(c) }
+
+func (c configs) At(config int) (*Configured, error) { return &c[config], nil }
+
+// fataler is what a helper needs of the test that calls it to stop it.
+type fataler interface {
+	Helper()
+	Fatalf(format string, args ...any)
+}
+
+// mustPass is [newPass] over in, stopping the test where it fails.
+func mustPass(t fataler, in *Input) *pass {
+	t.Helper()
+	a, err := newPass(in)
+	if err != nil {
+		t.Fatalf("newPass: %v", err)
+	}
+	return a
+}
+
+// inlineOf reads the configuration at config of in as [suppress.Inline] does.
+func inlineOf(t fataler, in *Input, config int) func(int) (*suppress.Configuration, error) {
+	t.Helper()
+	one := in.Per.(configs)[config]
+	return func(int) (*suppress.Configuration, error) {
+		return &suppress.Configuration{Result: one.Result, Resolve: one.Resolve, Symbols: one.Symbols}, nil
+	}
+}
+
+// passOf is [newPass] over in for a helper with no test to stop: a pass over
+// in-memory configurations reads no load that can fail.
+func passOf(in *Input) *pass {
+	a, err := newPass(in)
+	if err != nil {
+		panic(err)
+	}
+	return a
 }

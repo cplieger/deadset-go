@@ -191,7 +191,7 @@ func retainedUnder(in *Input, class string) []string {
 		if exemption.Class != class {
 			continue
 		}
-		if symbol := newPass(in).symbol(exemption.ID); symbol != nil {
+		if symbol := passOf(in).symbol(exemption.ID); symbol != nil {
 			names = append(names, symbol.Name)
 		}
 	}
@@ -315,7 +315,7 @@ func TestTheImplementationOfAMethodATestCallsStaysRetained(t *testing.T) {
 	// satisfaction exemption keeps holding it rather than a use by the
 	// interface method that leaves it dead.
 	for _, e := range in.Sweep.Retained {
-		if symbol := newPass(in).symbol(e.ID); symbol != nil && strings.HasSuffix(symbol.Ref, "#memory.Count") {
+		if symbol := mustPass(t, in).symbol(e.ID); symbol != nil && strings.HasSuffix(symbol.Ref, "#memory.Count") {
 			return
 		}
 	}

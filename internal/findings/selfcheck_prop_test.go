@@ -341,7 +341,7 @@ func TestAnythingTheConfigurationNamesThatMatchesNothingIsReported(t *testing.T)
 				len(records), inEffect, reasons, len(records))
 		}
 
-		unmatched, err := unmatchedRoots(newPass(in))
+		unmatched, err := unmatchedRoots(mustPass(t, in))
 		if err != nil {
 			t.Fatalf("UnmatchedRoots() = _, %v, want every configured string reported", err)
 		}
@@ -356,7 +356,7 @@ func TestAnythingTheConfigurationNamesThatMatchesNothingIsReported(t *testing.T)
 			}
 		}
 
-		kept, evaluations := newPass(in).evaluate(nil)
+		kept, evaluations := mustPass(t, in).evaluate(nil)
 		if len(kept) != 0 {
 			t.Errorf("Evaluate() over no finding kept %v, want none", summary(kept))
 		}

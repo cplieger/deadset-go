@@ -17,15 +17,19 @@ import (
 // package of the target, program or [load.Result.Nested] consumer imports under any
 // configuration. A library's packages are its published API already, and a run
 // that declares consumers has named the outside programs.
-func (l *Loaded) notes() []report.Note {
+func (l *Loaded) notes() ([]report.Note, error) {
 	notes := l.droppedNotes()
 	if l.req.Config.Target.Kind != report.TargetKindApplication || len(l.Declared) > 0 {
-		return notes
+		return notes, nil
 	}
 	imported := imports{ids: make(map[load.PackageID]bool), paths: make(map[string]bool)}
 	directories := make(map[load.PackageID]string)
-	for i := range l.Loads {
-		result := &l.Loads[i].Result
+	for i := range l.loads.Len() {
+		one, err := l.loads.At(i)
+		if err != nil {
+			return nil, err
+		}
+		result := one.Result
 		imported.idOf = result.ID
 		for _, p := range result.Packages {
 			if p.Module != nil && p.Module.Main {
@@ -47,7 +51,7 @@ func (l *Loaded) notes() []report.Note {
 				rootsPatternsSetting + " roots its published declarations if they do",
 		})
 	}
-	return notes
+	return notes, nil
 }
 
 // droppedNotes is one note per module directory some configuration dropped,
@@ -58,8 +62,8 @@ func (l *Loaded) notes() []report.Note {
 func (l *Loaded) droppedNotes() []report.Note {
 	var notes []report.Note
 	seen := make(map[string]bool)
-	for i := range l.Loads {
-		for _, dropped := range l.Loads[i].Result.Dropped {
+	for i := range l.loads.outlines {
+		for _, dropped := range l.loads.outlines[i].dropped {
 			directory := load.RelativeSlash(l.Root, dropped.Dir)
 			below := filepath.IsLocal(filepath.FromSlash(directory))
 			if seen[directory] || !below && !errors.Is(dropped.Err, load.ErrModuleFile) {

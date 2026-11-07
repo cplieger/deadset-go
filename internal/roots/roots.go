@@ -91,7 +91,7 @@ type Root struct {
 // the symbol whose reference it spells.
 type RootOptions struct {
 	// CheckedElsewhere holds every package whose type errors root nothing, because
-	// another configuration of a derived matrix type-checks it ([CheckedElsewhere]).
+	// another configuration of a derived matrix type-checks it ([Elsewhere]).
 	CheckedElsewhere map[load.PackageID]bool
 
 	Patterns     []string // roots.patterns from the resolved configuration

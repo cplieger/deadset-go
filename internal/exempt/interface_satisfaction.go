@@ -370,7 +370,7 @@ func (o *outsideAssertions) methods(t types.Type, pkg *types.Package) []types.Ob
 		ids = declaredMethodIDs(named)
 		o.ids[named] = ids
 	}
-	satisfied := satisfiedMethods(named, ids, o.assert.asserted(pkg))
+	satisfied := satisfiedMethods(named, ids, o.assert.asserted(readingOf(named.Obj().Pkg(), pkg)))
 	var held []types.Object
 	for selection := range types.NewMethodSet(types.NewPointer(named)).Methods() {
 		if satisfied[selection.Obj().Id()] {
@@ -379,6 +379,32 @@ func (o *outsideAssertions) methods(t types.Type, pkg *types.Package) []types.Ob
 	}
 	o.methodsOf[key] = held
 	return held
+}
+
+// readingOf is the package of pkg's path that from imports at any depth, and pkg
+// where from imports none. A site an assertion derives can name an interface of
+// another module's reading than its type's ([facts.Conversions] walks each file
+// once), and a type implements only interfaces stated in its own reading's types.
+func readingOf(from, pkg *types.Package) *types.Package {
+	if from == nil {
+		return pkg
+	}
+	seen := map[*types.Package]bool{from: true}
+	queue := []*types.Package{from}
+	for len(queue) > 0 {
+		one := queue[0]
+		queue = queue[1:]
+		if one.Path() == pkg.Path() {
+			return one
+		}
+		for _, imported := range one.Imports() {
+			if !seen[imported] {
+				seen[imported] = true
+				queue = append(queue, imported)
+			}
+		}
+	}
+	return pkg
 }
 
 // definedType is the defined type a value of t is, or a pointer to it points to.

@@ -203,10 +203,10 @@ type interfaceFacts struct {
 	assertions      []assertedVar
 }
 
-// interfacesOf computes the facts the three kinds read: the reference set's answers
-// first, then the type information of every configuration, and last the facts that
-// need both.
-func interfacesOf(in *pass) *interfaceFacts {
+// newInterfaceFacts starts the facts the three kinds read with the reference set's
+// answers; [interfaceFacts.configuration] then reads the type information of each
+// configuration, and [interfaceFacts.settle] the facts that need both.
+func newInterfaceFacts(in *pass) *interfaceFacts {
 	f := &interfaceFacts{
 		implementations: make(map[inventory.SymbolID]map[inventory.SymbolID]positioned),
 		ordered:         make(map[inventory.SymbolID][]positioned),
@@ -222,10 +222,6 @@ func interfacesOf(in *pass) *interfaceFacts {
 		f.methods = in.Merged.InterfaceMethods
 		f.references(in, in.Merged.References)
 	}
-	for c := range in.Per {
-		f.configuration(in, c)
-	}
-	f.settle()
 	return f
 }
 
@@ -268,8 +264,7 @@ func namesAsType(kind facts.RefKind) bool {
 // configuration reads one configuration's interfaces: which types of the target
 // implement which of its interfaces, and the satisfaction assertions the
 // configuration compiles.
-func (f *interfaceFacts) configuration(in *pass, config int) {
-	one := &in.Per[config]
+func (f *interfaceFacts) configuration(in *pass, one *Configured, files []typedFile) {
 	if one.Result == nil || one.Resolve == nil {
 		return
 	}
@@ -278,7 +273,7 @@ func (f *interfaceFacts) configuration(in *pass, config int) {
 			f.addImplementation(in, iface.ID, impl.Concrete)
 		}
 	}
-	f.assertionsIn(in, one, blanksIn(in, config))
+	f.assertionsIn(in, one, blanksIn(files))
 }
 
 // addImplementation records one concrete type of the target as an implementation of
@@ -448,14 +443,11 @@ type blankDeclaration struct {
 	value ast.Expr
 }
 
-// blanksIn is every package-level blank declaration of the configuration at config
-// that may be a satisfaction assertion, read from its [sourcesOf] files.
-func blanksIn(in *pass, config int) []blankDeclaration {
+// blanksIn is every package-level blank declaration of one configuration's
+// [sourcesOf] files that may be a satisfaction assertion.
+func blanksIn(files []typedFile) []blankDeclaration {
 	var blanks []blankDeclaration
-	for _, typed := range in.sources {
-		if typed.config != config {
-			continue
-		}
+	for _, typed := range files {
 		for _, decl := range typed.file.Decls {
 			if decl, isGen := decl.(*ast.GenDecl); isGen && decl.Tok == token.VAR {
 				blanks = append(blanks, blanksOf(typed.pkg.TypesInfo, decl)...)

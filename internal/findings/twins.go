@@ -8,34 +8,44 @@ import (
 	"strings"
 )
 
-// platformTwins keys every function and method of the target by its package,
-// receiver type and name, to the files that declare it. A key two files declare is
-// one declaration written once per build configuration, which every
-// configuration's callers call with one signature.
+// twins keys every function and method of the target by its package, receiver
+// type and name, to the files that declare it. A key two files declare is one
+// declaration written once per build configuration, which every configuration's
+// callers call with one signature.
 //
 // Ignored files count too: a twin for a platform the matrix does not build still
 // fixes the signature its callers there use. A blank function is no key: nothing
 // calls it, so no caller fixes its signature.
-func platformTwins(in *pass) map[string]map[string]bool {
-	twins := make(map[string]map[string]bool)
-	fset := token.NewFileSet()
-	parsed := make(map[string]bool)
-	for _, typed := range in.sources {
-		holdFuncs(twins, typed.pkg.PkgPath, typed.one.Result.Fset.Position(typed.file.FileStart).Filename, typed.file)
+type twins struct {
+	keys   map[string]map[string]bool
+	parsed map[string]bool // every ignored file read, by path
+}
+
+func newTwins() *twins {
+	return &twins{keys: make(map[string]map[string]bool), parsed: make(map[string]bool)}
+}
+
+// read adds the functions one configuration's files declare and those of the
+// files its packages ignore.
+func (t *twins) read(one *Configured, files []typedFile) {
+	for _, typed := range files {
+		holdFuncs(t.keys, typed.pkg.PkgPath, typed.one.Result.Fset.Position(typed.file.FileStart).Filename, typed.file)
 	}
-	for _, p := range in.typedPackages() {
+	if one.Facts == nil {
+		return
+	}
+	for p := range one.Facts.Typed() {
 		for _, path := range p.IgnoredFiles {
-			if parsed[path] || filepath.Ext(path) != goSuffix {
+			if t.parsed[path] || filepath.Ext(path) != goSuffix {
 				continue
 			}
-			parsed[path] = true
-			f, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+			t.parsed[path] = true
+			f, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
 			if err == nil && f.Name.Name == p.Name {
-				holdFuncs(twins, p.PkgPath, path, f)
+				holdFuncs(t.keys, p.PkgPath, path, f)
 			}
 		}
 	}
-	return twins
 }
 
 // holdFuncs adds the file to the entry of every function and method it declares.

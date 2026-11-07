@@ -104,7 +104,7 @@ func unreachableCase(in *pass) ([]draft, error) {
 }
 
 // intrafunc is what the kinds of this group read: the free-signature answer, and
-// what the one walk read of each configuration.
+// each kind's parts, read in one walk per configuration ([intrafunc.read]).
 type intrafunc struct {
 	in *pass
 
@@ -134,11 +134,11 @@ type intrafunc struct {
 	// interface type the value reaches.
 	valued map[inventory.SymbolID]bool
 
-	// twins is every function and method by package, receiver type and name, to
-	// the files that declare it.
-	twins map[string]map[string]bool
-
-	walks []walk // each configuration's, in matrix order
+	// held is each kind's parts by its code, the unused-unexported kind's being the
+	// local declarations ([pass.localsOf]), and called every declaration some
+	// configuration calls.
+	held   map[vocab.Code]*parts
+	called map[inventory.SymbolID]bool
 }
 
 // newIntrafunc prepares what these kinds read.
@@ -149,12 +149,15 @@ func newIntrafunc(in *pass) *intrafunc {
 		foreign:    make(map[inventory.SymbolID]bool),
 		programmed: make(map[inventory.SymbolID]bool),
 		valued:     make(map[inventory.SymbolID]bool),
-		twins:      platformTwins(in),
 		compiled:   make(map[string]inventory.ConfigSet),
+		held:       make(map[vocab.Code]*parts),
+		called:     make(map[inventory.SymbolID]bool),
 	}
-	g.walks = make([]walk, len(in.Per))
-	for c := range in.Per {
-		g.walks[c] = g.walk(c)
+	for _, code := range []vocab.Code{
+		vocab.UnusedParameter, vocab.UnusedReceiver, vocab.UnusedResult, vocab.UnreachableStatement,
+		vocab.UnreachableCase, vocab.DeadStore, vocab.UnusedUnexported,
+	} {
+		g.held[code] = newParts()
 	}
 	maps.Copy(g.exempted, in.exempted)
 	for ix := range in.TestEvidence {
@@ -184,7 +187,7 @@ func newIntrafunc(in *pass) *intrafunc {
 // freeSignature reports whether one declaration's signature answers only to its
 // body, the precondition of the parameter and result kinds: it is not free when the
 // declaration is [intrafunc.exempted], [intrafunc.valued] or [intrafunc.foreign],
-// when an outside interface fixes it ([pass.fixedByOutsideInterface]), or when its
+// when an outside interface fixes it ([readFixed]), or when its
 // body is a stub, which exists for its callers. A library's published declaration is
 // free whatever the run knows of its consumers, since no caller can make a body read a
 // parameter; [intrafunc.callersUnknown] answers for the one kind a caller outside the
@@ -207,7 +210,7 @@ func (g *intrafunc) freeSignature(id inventory.SymbolID, decl *ast.FuncDecl) boo
 // those calls.
 func (g *intrafunc) twinned(id inventory.SymbolID, decl *ast.FuncDecl) bool {
 	symbol := g.in.symbol(id)
-	return symbol != nil && decl != nil && len(g.twins[twinKey(symbol.PkgPath, decl)]) > 1
+	return symbol != nil && decl != nil && len(g.in.twins.keys[twinKey(symbol.PkgPath, decl)]) > 1
 }
 
 // callersUnknown reports whether a program names one declaration, or it is part of a
@@ -400,23 +403,95 @@ type walk struct {
 	initializers []walked
 }
 
-// walk reads the configuration at config, recording the path of every file it
-// compiled.
-func (g *intrafunc) walk(config int) walk {
-	one := &g.in.Per[config]
+// read walks one configuration, recording the path of every file it compiled and
+// every declaration it calls, and adds what each kind finds there to its parts.
+func (g *intrafunc) read(config int, one *Configured, files []typedFile) error {
 	w := walk{one: one, calls: make(map[inventory.SymbolID][]*callSite)}
 	if one.Resolve == nil {
-		return w
+		return nil
 	}
-	for _, typed := range g.in.sources {
-		if typed.config != config {
-			continue
-		}
+	for _, typed := range files {
 		file := one.Resolve.Positions().Offset(typed.file.Package).File
 		g.compiled[file] = g.compiled[file].With(config)
 		w.read(typed.pkg.TypesInfo, typed.file)
 	}
-	return w
+	for id := range w.calls {
+		g.called[id] = true
+	}
+	return g.answer(config, &w)
+}
+
+// answer adds what each kind finds in one configuration's walk to its parts. A
+// result is held whoever calls its function, and [intrafunc.settle] keeps the
+// results of a function some configuration calls.
+func (g *intrafunc) answer(c int, w *walk) error {
+	for _, fn := range w.functions {
+		if err := g.answerDeclared(c, w, &fn); err != nil {
+			return err
+		}
+	}
+	for _, fn := range w.initializers {
+		if err := g.calledLiterals(c, w, &fn, g.held[vocab.UnusedParameter]); err != nil {
+			return err
+		}
+	}
+	if w.one.Facts != nil {
+		for _, p := range w.one.Facts.Packages() {
+			if err := g.reportUnreachable(c, w.one, p, g.held[vocab.UnreachableStatement]); err != nil {
+				return err
+			}
+		}
+	}
+	for _, fn := range w.everyFunction() {
+		if err := g.answerBodies(c, w, &fn); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// answerBodies adds what the dead-store kind and the local declarations find in one
+// walked function's bodies.
+func (g *intrafunc) answerBodies(c int, w *walk, fn *walked) error {
+	for _, body := range bodies(fn) {
+		if err := g.storesOf(c, w, fn, &body, g.held[vocab.DeadStore]); err != nil {
+			return err
+		}
+	}
+	return g.in.localsOf(c, w, fn, g.held[vocab.UnusedUnexported])
+}
+
+// answerDeclared adds what the parameter, receiver, result and case kinds find in
+// one declared function.
+func (g *intrafunc) answerDeclared(c int, w *walk, fn *walked) error {
+	if err := g.parametersOf(c, w, fn, g.held[vocab.UnusedParameter]); err != nil {
+		return err
+	}
+	err := g.unread(c, w, fn, fn.decl.Recv, fn.decl.Body, g.held[vocab.UnusedReceiver], vocab.UnusedReceiver, receiverSubject,
+		func(ref, _ string) string { return ref })
+	if err != nil {
+		return err
+	}
+	if g.freeSignature(fn.id, fn.decl) && !g.callersUnknown(fn.id) {
+		if err := g.resultsOf(c, w, fn, g.held[vocab.UnusedResult]); err != nil {
+			return err
+		}
+	}
+	return g.casesOf(c, w, fn, g.held[vocab.UnreachableCase])
+}
+
+// settle drops the results of every function no configuration calls, once every
+// configuration is read: a function with no call site is an unused declaration's
+// subject.
+func (g *intrafunc) settle() {
+	results := g.held[vocab.UnusedResult]
+	results.order = slices.DeleteFunc(results.order, func(key partKey) bool {
+		if g.called[key.decl] {
+			return false
+		}
+		delete(results.keyed, key)
+		return true
+	})
 }
 
 // read adds what one file holds to the walk.
@@ -481,37 +556,12 @@ func declaredFunctions(one *Configured, info *types.Info, f *ast.File) []walked 
 
 // parameters is the answer of the unused-parameter kind.
 func (g *intrafunc) parameters() ([]draft, error) {
-	held := newParts()
-	for c := range g.walks {
-		w := &g.walks[c]
-		for _, fn := range w.functions {
-			if err := g.parametersOf(c, w, &fn, held); err != nil {
-				return nil, err
-			}
-		}
-		for _, fn := range w.initializers {
-			if err := g.calledLiterals(c, w, &fn, held); err != nil {
-				return nil, err
-			}
-		}
-	}
-	return g.findings(held), nil
+	return g.findings(g.held[vocab.UnusedParameter]), nil
 }
 
 // receivers is the answer of the unused-receiver kind.
 func (g *intrafunc) receivers() ([]draft, error) {
-	held := newParts()
-	for c := range g.walks {
-		w := &g.walks[c]
-		for _, fn := range w.functions {
-			err := g.unread(c, w, &fn, fn.decl.Recv, fn.decl.Body, held, vocab.UnusedReceiver, receiverSubject,
-				func(ref, _ string) string { return ref })
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-	return g.findings(held), nil
+	return g.findings(g.held[vocab.UnusedReceiver]), nil
 }
 
 // literalVariables is every local variable one body declares with a function
@@ -680,25 +730,7 @@ func readObjects(info *types.Info, body *ast.BlockStmt) map[types.Object]bool {
 // call site in the loaded graph discards. A configuration that compiles no call of a
 // function some configuration calls discards each of its results at every site.
 func (g *intrafunc) results() ([]draft, error) {
-	called := make(map[inventory.SymbolID]bool)
-	for c := range g.walks {
-		for id := range g.walks[c].calls {
-			called[id] = true
-		}
-	}
-	held := newParts()
-	for c := range g.walks {
-		w := &g.walks[c]
-		for _, fn := range w.functions {
-			if !called[fn.id] || !g.freeSignature(fn.id, fn.decl) || g.callersUnknown(fn.id) {
-				continue
-			}
-			if err := g.resultsOf(c, w, &fn, held); err != nil {
-				return nil, err
-			}
-		}
-	}
-	return g.findings(held), nil
+	return g.findings(g.held[vocab.UnusedResult]), nil
 }
 
 // resultsOf records every result of one function no call site of the walk uses.
@@ -840,19 +872,7 @@ func calledFunction(one *Configured, info *types.Info, call *ast.CallExpr) (inve
 // unreachableStatements is the answer of the unreachable-statement kind: the
 // toolchain's own pass, run over each package the configuration compiled.
 func (g *intrafunc) unreachableStatements() ([]draft, error) {
-	held := newParts()
-	for c := range g.walks {
-		one := g.walks[c].one
-		if one.Facts == nil || one.Resolve == nil {
-			continue
-		}
-		for _, p := range one.Facts.Packages() {
-			if err := g.reportUnreachable(c, one, p, held); err != nil {
-				return nil, err
-			}
-		}
-	}
-	return g.findings(held), nil
+	return g.findings(g.held[vocab.UnreachableStatement]), nil
 }
 
 // reportUnreachable runs the unreachable pass over one package and records one
@@ -895,16 +915,7 @@ func (g *intrafunc) reportUnreachable(c int, one *Configured, p *packages.Packag
 
 // unreachableCases is the answer of the unreachable-case kind.
 func (g *intrafunc) unreachableCases() ([]draft, error) {
-	held := newParts()
-	for c := range g.walks {
-		w := &g.walks[c]
-		for _, fn := range w.functions {
-			if err := g.casesOf(c, w, &fn, held); err != nil {
-				return nil, err
-			}
-		}
-	}
-	return g.findings(held), nil
+	return g.findings(g.held[vocab.UnreachableCase]), nil
 }
 
 // casesOf records every unreachable case clause of every type switch of one body.
@@ -996,18 +1007,7 @@ func subsumes(first, second types.Type) bool {
 
 // deadStores is the answer of the dead-store kind.
 func (g *intrafunc) deadStores() ([]draft, error) {
-	held := newParts()
-	for c := range g.walks {
-		w := &g.walks[c]
-		for _, fn := range w.everyFunction() {
-			for _, body := range bodies(&fn) {
-				if err := g.storesOf(c, w, &fn, &body, held); err != nil {
-					return nil, err
-				}
-			}
-		}
-	}
-	return g.findings(held), nil
+	return g.findings(g.held[vocab.DeadStore]), nil
 }
 
 // functionBody is one body and the signature that declares the variables it

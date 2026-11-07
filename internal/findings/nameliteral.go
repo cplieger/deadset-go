@@ -73,16 +73,16 @@ func (in *pass) packageLevel(symbol *inventory.Symbol) bool {
 	return parent != nil && (parent.Kind == inventory.KindPackage || parent.Kind == inventory.KindFile)
 }
 
-// nameLiterals is every string literal of the production files of the target the
-// run builds, by its value, each value's sites in position order, built on first use.
+// readLiterals adds every string literal of one configuration's production files
+// to literals, by its value, and each constant's defined type to constTypes. A site
+// seen holds is not added again, so a file two configurations compile counts once.
 // An import path and a struct tag are no such literal: no tool finds a declaration by
 // either, and counting them would let an import of a package lower a declaration of
-// the same name. It returns each constant's defined type beside them.
-func nameLiterals(a *pass) (literals map[string][]literalSite, constTypes map[inventory.SymbolID]inventory.SymbolID) {
-	literals = make(map[string][]literalSite)
-	constTypes = make(map[inventory.SymbolID]inventory.SymbolID)
-	seen := make(map[inventory.Offset]bool)
-	for _, typed := range a.sources {
+// the same name.
+func readLiterals(files []typedFile, literals map[string][]literalSite, constTypes map[inventory.SymbolID]inventory.SymbolID,
+	seen map[inventory.Offset]bool,
+) {
+	for _, typed := range files {
 		rs := typed.one.Resolve
 		for _, decl := range typed.file.Decls {
 			keepConstTypes(decl, typed.pkg.TypesInfo, rs, constTypes)
@@ -91,10 +91,14 @@ func nameLiterals(a *pass) (literals map[string][]literalSite, constTypes map[in
 			}
 		}
 	}
+}
+
+// sortLiterals puts each value's sites in position order once every configuration
+// is read.
+func sortLiterals(literals map[string][]literalSite) {
 	for value := range literals {
 		slices.SortFunc(literals[value], func(a, b literalSite) int { return inventory.ByPosition(a.at, b.at) })
 	}
-	return literals, constTypes
 }
 
 // keepLiteralsOf records every string literal one declaration node holds, as written

@@ -30,11 +30,7 @@ func UnusedExported(in *pass) ([]draft, error) {
 // type and that nothing references, and a constant or a type a function body
 // declares that nothing in the body references.
 func unusedUnexported(in *pass) ([]draft, error) {
-	locals, err := in.unusedLocals()
-	if err != nil {
-		return nil, err
-	}
-	return append(in.unusedDeclarations(vocab.UnusedUnexported), locals...), nil
+	return append(in.unusedDeclarations(vocab.UnusedUnexported), in.unusedLocals()...), nil
 }
 
 // unusedMember reports a struct field that nothing references and whose container
@@ -273,16 +269,6 @@ func (in *pass) testReached(symbol *inventory.Symbol) bool {
 	return in.Merged.Tests.Reached[symbol.Package]
 }
 
-// deprecations is every declaration of the inventory carrying a deprecation
-// marker, read from the syntax of every configuration.
-func deprecations(a *pass) map[inventory.SymbolID]bool {
-	marked := make(map[inventory.SymbolID]bool)
-	for _, typed := range a.sources {
-		markDeprecated(typed.file, typed.one.Resolve, marked)
-	}
-	return marked
-}
-
 // markDeprecated records every declaration of one file whose doc comment carries
 // the deprecation paragraph.
 //
@@ -390,21 +376,12 @@ type localDeclaration struct {
 // initializer included: one finding per such declaration nothing in its body
 // references outside its own specification, under the enclosing declaration's
 // reference.
-func (in *pass) unusedLocals() ([]draft, error) {
-	held := newParts()
-	for c := range in.intra.walks {
-		w := &in.intra.walks[c]
-		for _, fn := range w.everyFunction() {
-			if err := in.localsOf(c, w, &fn, held); err != nil {
-				return nil, err
-			}
-		}
-	}
-	found := in.intra.findings(held)
+func (in *pass) unusedLocals() []draft {
+	found := in.intra.findings(in.intra.held[vocab.UnusedUnexported])
 	for i := range found {
 		found[i].local = true
 	}
-	return found, nil
+	return found
 }
 
 // localsOf records every local declaration of one walked function its body does not

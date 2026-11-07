@@ -30,6 +30,61 @@ func derivedMatrix() []Configuration {
 	return held
 }
 
+// all is [Matrix.All] over top with every result it built, in matrix order, and no
+// result where it failed.
+func all(ctx context.Context, top *Topology, configurations []Configuration) ([]Result, []Unbuilt, error) {
+	var results []Result
+	_, unbuilt, err := NewMatrix(top).All(ctx, configurations, func(r *Result) error {
+		results = append(results, *r)
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return results, unbuilt, nil
+}
+
+// A configuration loaded again reads the trees and the dependency checks of its
+// first load, so what a caller derived from positions or from a dependency's types
+// still holds, and only the program's own type records are new.
+func TestMatrixLoadsAConfigurationAgainOverItsFirstTreesAndDependencies(t *testing.T) {
+	m := NewMatrix(discovered(t, fixtureScope(t, "platform")))
+	c := matrix()[0]
+	first, err := m.Load(t.Context(), &c)
+	if err != nil {
+		t.Fatalf("Load(linux-amd64) = %v, want no error", err)
+	}
+	again, err := m.Load(t.Context(), &c)
+	if err != nil {
+		t.Fatalf("Load(linux-amd64) again = %v, want no error", err)
+	}
+	if len(first.Packages) == 0 || len(first.Packages) != len(again.Packages) {
+		t.Fatalf("the loads hold %d and %d packages, want one equal, non-zero count", len(first.Packages), len(again.Packages))
+	}
+	for i, p := range first.Packages {
+		q := again.Packages[i]
+		if p.ID != q.ID || len(p.Syntax) != len(q.Syntax) {
+			t.Fatalf("package %d is %s with %d files, then %s with %d", i, p.ID, len(p.Syntax), q.ID, len(q.Syntax))
+		}
+		for j := range p.Syntax {
+			if p.Syntax[j] != q.Syntax[j] {
+				t.Errorf("%s file %d was parsed into %p, then %p: want the first tree", p.ID, j, p.Syntax[j], q.Syntax[j])
+			}
+		}
+		if p.TypesInfo == q.TypesInfo {
+			t.Errorf("%s shares its type records with its first load, want its own", p.ID)
+		}
+		for path, imported := range p.Imports {
+			if imported.Module != nil && imported.Module.Main {
+				continue
+			}
+			if q.Imports[path].Types != imported.Types {
+				t.Errorf("%s imports %s checked afresh, want the first load's check", p.ID, path)
+			}
+		}
+	}
+}
+
 // everyDerived is the matrix with every configuration one the analyzer derived.
 func everyDerived() []Configuration {
 	held := matrix()
@@ -60,7 +115,7 @@ func configurationIDs(results []Result) []string {
 func TestAllResolvesEveryConfigurationInTheOrderTheMatrixLists(t *testing.T) {
 	stableToolchain(t)
 
-	results, unbuilt, err := All(t.Context(), discovered(t, fixtureScope(t, "platform")), matrix())
+	results, unbuilt, err := all(t.Context(), discovered(t, fixtureScope(t, "platform")), matrix())
 	if err != nil {
 		t.Fatalf("All(testdata/platform) = _, _, %v, want no error", err)
 	}
@@ -87,7 +142,7 @@ func TestAllResolvesEveryConfigurationInTheOrderTheMatrixLists(t *testing.T) {
 func TestAllParsesAFileEveryConfigurationCompilesOnce(t *testing.T) {
 	stableToolchain(t)
 
-	results, _, err := All(t.Context(), discovered(t, fixtureScope(t, "platform")), matrix())
+	results, _, err := all(t.Context(), discovered(t, fixtureScope(t, "platform")), matrix())
 	if err != nil {
 		t.Fatalf("All(testdata/platform) = _, _, %v, want no error", err)
 	}
@@ -122,7 +177,7 @@ func TestAllStopsAtTheConfigurationThatDoesNotLoadAndReturnsNoResult(t *testing.
 		t.Fatalf("Load(testdata/platformerror, linux-amd64) = _, %v, want no error", err)
 	}
 
-	results, unbuilt, err := All(t.Context(), discovered(t, doc), matrix())
+	results, unbuilt, err := all(t.Context(), discovered(t, doc), matrix())
 	if len(results) != 0 {
 		t.Errorf("All(testdata/platformerror) returned %d results, want none: an answer computed from the configurations that did load is more permissive than the truth",
 			len(results))
@@ -147,7 +202,7 @@ func TestAllStopsAtTheConfigurationThatDoesNotLoadAndReturnsNoResult(t *testing.
 func TestAllRefusesAMatrixHoldingNoConfiguration(t *testing.T) {
 	stableToolchain(t)
 
-	results, unbuilt, err := All(t.Context(), discovered(t, fixtureScope(t, "platform")), nil)
+	results, unbuilt, err := all(t.Context(), discovered(t, fixtureScope(t, "platform")), nil)
 	if !errors.Is(err, ErrNoConfiguration) {
 		t.Errorf("All(testdata/platform, no configuration) = _, _, %v, want %v", err, ErrNoConfiguration)
 	}
@@ -163,7 +218,7 @@ func TestAllRefusesAMatrixHoldingNoConfiguration(t *testing.T) {
 func TestAllDropsADerivedConfigurationTheTargetDoesNotBuild(t *testing.T) {
 	stableToolchain(t)
 
-	results, unbuilt, err := All(t.Context(), discovered(t, unparsedScope(t, "platformerror")), derivedMatrix())
+	results, unbuilt, err := all(t.Context(), discovered(t, unparsedScope(t, "platformerror")), derivedMatrix())
 	if err != nil {
 		t.Fatalf("All(testdata/platformerror, windows-amd64 derived) = _, _, %v, want no error", err)
 	}
@@ -192,7 +247,7 @@ func TestAllRefusesAMatrixWhoseEveryConfigurationIsDropped(t *testing.T) {
 	stableToolchain(t)
 	only := []Configuration{derivedMatrix()[1]}
 
-	results, unbuilt, err := All(t.Context(), discovered(t, unparsedScope(t, "platformerror")), only)
+	results, unbuilt, err := all(t.Context(), discovered(t, unparsedScope(t, "platformerror")), only)
 	var failure *Error
 	if !errors.As(err, &failure) {
 		t.Fatalf("All(testdata/platformerror, windows-amd64 derived alone) = _, _, %v, want a *load.Error", err)
@@ -212,7 +267,7 @@ func TestAllRefusesAMatrixWhoseEveryConfigurationIsDropped(t *testing.T) {
 func TestAllDropsADerivedConfigurationThatMeetsASetupFailure(t *testing.T) {
 	stableToolchain(t)
 
-	results, unbuilt, err := All(t.Context(), discovered(t, unparsedScope(t, "setupfailure")), derivedMatrix())
+	results, unbuilt, err := all(t.Context(), discovered(t, unparsedScope(t, "setupfailure")), derivedMatrix())
 	if err != nil {
 		t.Fatalf("All(testdata/setupfailure, windows-amd64 derived) = _, _, %v, want no error", err)
 	}
@@ -234,7 +289,7 @@ func TestAllDropsADerivedConfigurationThatMeetsASetupFailure(t *testing.T) {
 // does, even where a load error was dropped first.
 func TestAllEndsAMatrixWhoseEveryConfigurationIsDroppedOnItsSetupFailure(t *testing.T) {
 	stableToolchain(t)
-	results, unbuilt, err := All(t.Context(), discovered(t, unparsedScope(t, "everyderiveddropped")), everyDerived())
+	results, unbuilt, err := all(t.Context(), discovered(t, unparsedScope(t, "everyderiveddropped")), everyDerived())
 	setup, ok := errors.AsType[*failure.Error](err)
 	if !ok || len(setup.Failures) == 0 || setup.Failures[0].Class != vocab.SetupMissingModule {
 		t.Errorf("All(testdata/everyderiveddropped, both derived) = _, _, %v, want the windows-amd64 missing-module setup failure", err)
@@ -250,7 +305,7 @@ func TestAllEndsAMatrixWhoseEveryConfigurationIsDroppedOnItsSetupFailure(t *test
 func TestAllEndsTheRunOnADeclaredConfigurationsSetupFailure(t *testing.T) {
 	stableToolchain(t)
 
-	results, unbuilt, err := All(t.Context(), discovered(t, unparsedScope(t, "setupfailure")), matrix())
+	results, unbuilt, err := all(t.Context(), discovered(t, unparsedScope(t, "setupfailure")), matrix())
 	setup, ok := errors.AsType[*failure.Error](err)
 	if !ok || len(setup.Failures) == 0 || setup.Failures[0].Class != vocab.SetupMissingModule {
 		t.Errorf("All(testdata/setupfailure) = _, _, %v, want a missing-module setup failure", err)
@@ -268,7 +323,7 @@ func TestAllEndsTheRunWithTheCauseWhenTheLoadOfADerivedConfigurationIsCancelled(
 	cause := errors.New("the run was stopped")
 	ctx, cancel := context.WithCancelCause(t.Context())
 	cancel(cause)
-	results, unbuilt, err := All(ctx, discovered(t, fixtureScope(t, "platform")), everyDerived())
+	results, unbuilt, err := all(ctx, discovered(t, fixtureScope(t, "platform")), everyDerived())
 	if !errors.Is(err, cause) {
 		t.Errorf("All(cancelled, every configuration derived) = _, _, %v, want an error wrapping the cause %q", err, cause)
 	}

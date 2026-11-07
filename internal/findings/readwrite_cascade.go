@@ -12,33 +12,85 @@ import (
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
-// writeCascade names the declarations that deleting one write-only subject and its
+// cascades is, per write-only subject, the declarations that deleting it and its
 // writes also deletes: a type parameter of the subject's declaring type that only
 // the subject's type names, and an import whose every use in its file is inside the
-// spans the writes' deletion deletes.
-func writeCascade(in *pass, symbol *inventory.Symbol, spans []inventory.SourceRange) []string {
-	return append(cascadingTypeParams(in, symbol), cascadingImports(in, spans)...)
+// spans the writes' deletion deletes. Each is read in one visit per configuration
+// ([cascades.read]), from the first configuration whose files answer it.
+type cascades struct {
+	of map[inventory.SymbolID]*cascade
 }
 
-// cascadingTypeParams names every type parameter of a field's declaring type that
-// the field's own type expression holds every use of in that declaration, where
-// the field is the one name its line declares.
-func cascadingTypeParams(in *pass, symbol *inventory.Symbol) []string {
-	container := in.container(symbol)
-	if symbol.Kind != inventory.KindField || container == nil {
+// cascade is what the configurations read so far answer for one subject.
+type cascade struct {
+	container *inventory.Symbol
+	symbol    *inventory.Symbol
+	spans     map[string][]inventory.SourceRange // by file
+	done      map[string]bool                    // every file of spans read
+	params    []string
+	imports   []string
+	decided   bool // a file declares the container
+}
+
+func newCascades(in *pass) *cascades {
+	c := &cascades{of: make(map[inventory.SymbolID]*cascade, len(in.writeOnly))}
+	for id, u := range in.writeOnly {
+		symbol := in.symbol(id)
+		if symbol == nil {
+			continue
+		}
+		held := &cascade{symbol: symbol, spans: make(map[string][]inventory.SourceRange), done: make(map[string]bool)}
+		if container := in.container(symbol); symbol.Kind == inventory.KindField && container != nil {
+			held.container = container
+		} else {
+			held.decided = true
+		}
+		for _, span := range u.spans {
+			held.spans[span.File] = append(held.spans[span.File], span)
+		}
+		c.of[id] = held
+	}
+	return c
+}
+
+// writeCascade names what [cascades] answers for one write-only subject.
+func writeCascade(in *pass, symbol *inventory.Symbol) []string {
+	held := in.cascades.of[symbol.ID]
+	if held == nil {
 		return nil
 	}
-	for _, typed := range in.sources {
-		spec := typeSpecAt(typed.file, typed.one, container.Pos)
+	return slices.Concat(held.params, held.imports)
+}
+
+// read adds what one configuration's files answer for every subject.
+func (c *cascades) read(one *Configured, files []typedFile) {
+	if one.Resolve == nil {
+		return
+	}
+	for _, held := range c.of {
+		held.readParams(files)
+		held.readImports(files)
+	}
+}
+
+// readParams names every type parameter of a field's declaring type that the
+// field's own type expression holds every use of in that declaration, where the
+// field is the one name its line declares, read from the first file declaring the
+// type.
+func (held *cascade) readParams(files []typedFile) {
+	for _, typed := range files {
+		if held.decided {
+			return
+		}
+		spec := typeSpecAt(typed.file, typed.one, held.container.Pos)
 		if spec == nil {
 			continue
 		}
-		if field := fieldAt(spec, typed.one, symbol.Pos); field != nil {
-			return paramsUsedOnlyIn(spec, field.Type, typed.pkg.TypesInfo)
+		held.decided = true
+		if field := fieldAt(spec, typed.one, held.symbol.Pos); field != nil {
+			held.params = paramsUsedOnlyIn(spec, field.Type, typed.pkg.TypesInfo)
 		}
-		return nil
 	}
-	return nil
 }
 
 // typeSpecAt is the generic type declaration one file writes at a rendered position.
@@ -110,25 +162,18 @@ func usesOf(node ast.Node, object types.Object, info *types.Info) int {
 	return count
 }
 
-// cascadingImports names every import whose uses in its file all sit inside the
-// spans, read from the first variant that compiles each file. A use inside two
-// spans counts twice, so an import used in nested spans is not named.
-func cascadingImports(in *pass, spans []inventory.SourceRange) []string {
-	at := make(map[string][]inventory.SourceRange)
-	for _, s := range spans {
-		at[s.File] = append(at[s.File], s)
-	}
-	var names []string
-	done := make(map[string]bool)
-	for _, typed := range in.sources {
+// readImports names every import whose uses in its file all sit inside the spans,
+// read from the first variant that compiles each file. A use inside two spans counts
+// twice, so an import used in nested spans is not named.
+func (held *cascade) readImports(files []typedFile) {
+	for _, typed := range files {
 		file := typed.one.Resolve.Positions().Offset(typed.file.FileStart).File
-		if done[file] || at[file] == nil {
+		if held.done[file] || held.spans[file] == nil {
 			continue
 		}
-		done[file] = true
-		names = append(names, importsOnlyIn(typed, at[file])...)
+		held.done[file] = true
+		held.imports = append(held.imports, importsOnlyIn(typed, held.spans[file])...)
 	}
-	return names
 }
 
 // importsOnlyIn names every import of one file whose uses all sit inside spans.

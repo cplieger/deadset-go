@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -90,8 +91,12 @@ func TestARunThatCannotFitExitsWithTheMemoryLine(t *testing.T) {
 	}
 	needed, _ := strconv.ParseFloat(match[1], 64)
 	available, _ := strconv.ParseFloat(match[2], 64)
-	if needed < 1 || needed <= available {
-		t.Errorf("analyze with a 0.5 GB live heap and no headroom: needed %v GB, available %v GB; want needed at least 1, twice the live heap, and above available", needed, available)
+	// N is the least ceiling the run's reading fits under at 90%, rounded up to a
+	// tenth of a gigabyte, and the run held at least the live heap.
+	least := math.Ceil(float64(len(held))/0.9/1e8) / 10
+	if needed < least || needed <= available {
+		t.Errorf("analyze with a 0.5 GB live heap and no headroom: needed %v GB, available %v GB; want needed at least %v, the live heap at 90%% of it, and above available",
+			needed, available, least)
 	}
 	if _, err := os.Stat(reportPath); !os.IsNotExist(err) {
 		t.Errorf("analyze that ran out of memory left a report at %s (stat: %v), want none", reportPath, err)

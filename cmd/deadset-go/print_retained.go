@@ -58,7 +58,11 @@ func printRetained(ctx context.Context, args []string, stdout, stderr io.Writer)
 	for i := range swept.Merged.Symbols {
 		positions[swept.Merged.Symbols[i].ID] = swept.Merged.Symbols[i].Pos.String()
 	}
-	return printLines(stdout, stderr, "print-retained", retainedLines(swept.Refs, positions, swept.Retained()), swept.Unmatched)
+	retained, err := swept.Retained()
+	if err != nil {
+		return failed(ctx, stderr, err)
+	}
+	return printLines(stdout, stderr, "print-retained", retainedLines(swept.Refs, positions, retained), swept.Unmatched)
 }
 
 // sweptOf runs a request through the sweep stage under the production or the plain

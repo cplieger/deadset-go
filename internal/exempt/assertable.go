@@ -77,11 +77,11 @@ func (a *assertable) importedBy(pkg *types.Package) importedSet {
 }
 
 // literals is every interface type literal one package's source writes that holds
-// methods alone and that the loaded program can state ([load.Result.Source]). A
+// methods alone and that the loaded program can state ([load.Sources.Read]). A
 // package-level type declaration is the scope's ([declaredInterfaces]), so its
 // literal is not read twice.
 func (a *assertable) literals(pkg *types.Package) []*types.Interface {
-	source, ok := a.in.Result.Source(pkg)
+	source, ok := a.in.sources.Read(pkg)
 	if !ok {
 		return nil
 	}
@@ -110,14 +110,14 @@ func (a *assertable) literals(pkg *types.Package) []*types.Interface {
 // asserted is every interface one package outside the program asserts: the interface
 // type of each type assertion and each type switch case its source writes, and the
 // interface of each errors.As and errors.AsType call there, wherever it stands and
-// whatever value it asserts on, read from its source ([load.Result.Source]). A case
+// whatever value it asserts on, read from its source ([load.Sources.Read]). A case
 // naming a type that is no interface asserts nothing.
 func (a *assertable) asserted(pkg *types.Package) []*types.Interface {
 	if held, known := a.assertions[pkg]; known {
 		return held
 	}
 	a.assertions[pkg] = nil
-	source, ok := a.in.Result.Source(pkg)
+	source, ok := a.in.sources.Read(pkg)
 	if !ok {
 		return nil
 	}
@@ -152,7 +152,7 @@ func (a *assertable) assertsOwn(iface *types.Named) bool {
 // program that the package's own source asserts.
 func (a *assertable) ownAsserted(pkg *types.Package) map[string]bool {
 	names := make(map[string]bool)
-	source, ok := a.in.Result.Source(pkg)
+	source, ok := a.in.sources.Read(pkg)
 	if !ok {
 		return names
 	}
@@ -300,6 +300,15 @@ func (l localizer) named(n *types.Named) (types.Type, bool) {
 	return instance, err == nil
 }
 
+// packageOf is the loaded package where pkg is the reading of it, so a stated type
+// keeps no reading reachable, and pkg otherwise.
+func (l localizer) packageOf(pkg *types.Package) *types.Package {
+	if pkg != nil && pkg.Path() == l.pkg.Path() {
+		return l.pkg
+	}
+	return pkg
+}
+
 // signature is one function type in the loaded program's types.
 func (l localizer) signature(sig *types.Signature) (*types.Signature, bool) {
 	if sig.TypeParams().Len() > 0 {
@@ -319,7 +328,7 @@ func (l localizer) tuple(t *types.Tuple) (*types.Tuple, bool) {
 		if !ok {
 			return nil, false
 		}
-		vars[i] = types.NewParam(v.Pos(), v.Pkg(), v.Name(), stated)
+		vars[i] = types.NewParam(v.Pos(), l.packageOf(v.Pkg()), v.Name(), stated)
 	}
 	return types.NewTuple(vars...), true
 }
@@ -334,7 +343,7 @@ func (l localizer) structure(st *types.Struct) (types.Type, bool) {
 		if !ok {
 			return nil, false
 		}
-		fields[i] = types.NewField(field.Pos(), field.Pkg(), field.Name(), stated, field.Embedded())
+		fields[i] = types.NewField(field.Pos(), l.packageOf(field.Pkg()), field.Name(), stated, field.Embedded())
 		tags[i] = st.Tag(i)
 	}
 	return types.NewStruct(fields, tags), true

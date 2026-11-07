@@ -60,7 +60,7 @@ func TestEvaluatePublishesOneRecordPerOwnSideWithItsState(t *testing.T) {
 	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnreachableExport: unreachableExport})
 
 	all := unevaluated(result)
-	kept, evaluations := newPass(in).evaluate(all)
+	kept, evaluations := mustPass(t, in).evaluate(all)
 	const declaring = "go://example.com/selfcheckedges#"
 	want := []evaluated{
 		{edge: "wire/Event", side: "provides", symbol: declaring + "Event", state: "dead", finding: vocab.UnreachableExport},
@@ -122,7 +122,7 @@ func TestEvaluatePublishesTheFindingAboutTheDeclarationAnEdgeNamesAndNeverAPartO
 	}, Position{Path: "main.go", Line: 4, Column: 20, EndLine: 4},
 		"parameter label is never read in the body")
 
-	p := newPass(in)
+	p := mustPass(t, in)
 	row, _ := vocab.KindOf(vocab.UnusedParameter)
 	kept, evaluations := p.evaluate(append(unevaluated(result), p.complete(&part, &row)))
 

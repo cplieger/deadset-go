@@ -25,8 +25,6 @@ type Prepared struct {
 	// retains ([exempt.Computed.Filled]).
 	filled map[inventory.SymbolID]bool
 
-	per []findings.Configured
-
 	Exemptions []exempt.Exemption
 
 	// testEvidence is the exemption evidence a test file carries, which the mode
@@ -48,14 +46,16 @@ func (l *Loaded) Prepare(production bool) (*Prepared, error) {
 			Production:              production,
 			ConsumerTestsProduction: l.req.Config.Analysis.ConsumerTestsProduction,
 		},
-		per:    make([]findings.Configured, len(l.Loads)),
 		filled: make(map[inventory.SymbolID]bool),
 	}
 	options := exemptOptions(&l.req.Config)
-	for i := range l.Loads {
-		one := &l.Loads[i]
+	for i := range l.loads.Len() {
+		one, err := l.loads.At(i)
+		if err != nil {
+			return nil, err
+		}
 		program, err := exempt.NewProgram(&exempt.Loaded{
-			Result:  &one.Result,
+			Result:  one.Result,
 			Resolve: one.Resolve,
 			Facts:   one.Facts,
 			Symbols: one.Symbols,
@@ -76,11 +76,14 @@ func (l *Loaded) Prepare(production bool) (*Prepared, error) {
 		for j := range computed.Filled {
 			p.filled[computed.Filled[j].ID] = true
 		}
-		p.per[i] = findings.Configured{Result: &one.Result, Resolve: one.Resolve, Facts: one.Facts, Symbols: one.Symbols}
 	}
 	p.Exemptions = l.Merged.Uncalled.Withdrawn(p.Exemptions)
 	p.testEvidence = l.Merged.Uncalled.Withdrawn(p.testEvidence)
-	p.unseen = findings.Unseen(&findings.Input{Config: &l.req.Config, Merged: l.Merged, Per: p.per, Root: l.Root, Consumers: l.consumers()})
+	var err error
+	p.unseen, err = findings.Unseen(&findings.Input{Config: &l.req.Config, Merged: l.Merged, Per: l.loads, Root: l.Root, Consumers: l.consumers()})
+	if err != nil {
+		return nil, err
+	}
 	return p, nil
 }
 

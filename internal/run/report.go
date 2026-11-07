@@ -30,6 +30,10 @@ func (f *Findings) Report(self *Self) (*report.Report, error) {
 	if err != nil {
 		return nil, err
 	}
+	notes, err := f.notes()
+	if err != nil {
+		return nil, err
+	}
 	reported := make([]report.Finding, len(f.Result.Findings))
 	for i := range f.Result.Findings {
 		reported[i] = f.Result.Findings[i].Document()
@@ -39,8 +43,8 @@ func (f *Findings) Report(self *Self) (*report.Report, error) {
 		evaluations[i] = f.Result.Evaluations[i].Document()
 	}
 	var excluded []string
-	for i := range f.Loads {
-		excluded = append(excluded, f.Loads[i].Result.ExcludedByCgo...)
+	for i := range f.loads.outlines {
+		excluded = append(excluded, f.loads.outlines[i].excludedByCgo...)
 	}
 	rules := make([]report.TestFileRule, len(f.TestFileRules))
 	for i, rule := range f.TestFileRules {
@@ -64,7 +68,7 @@ func (f *Findings) Report(self *Self) (*report.Report, error) {
 		ExcludedByCgo:          excluded,
 		TestFileRules:          rules,
 		TypeErrorSkips:         skips,
-		Notes:                  f.notes(),
+		Notes:                  notes,
 		SuppressionsInEffect:   f.Result.InEffect,
 		ReasonsRecorded:        f.Result.Reasons,
 		Withheld:               findings.WithheldOf(f.Result.Withheld),
@@ -89,8 +93,8 @@ func (l *Loaded) target() (report.Target, error) {
 // scope gives the target, else the path of the first unit in directory order.
 func (l *Loaded) identity() (string, error) {
 	var units []load.Unit
-	if len(l.Loads) > 0 {
-		units = l.Loads[0].Result.Units
+	if l.loads.Len() > 0 {
+		units = l.loads.outlines[0].units
 	}
 	for i := range units {
 		if filepath.Clean(units[i].Dir) == filepath.Clean(l.Root) && units[i].Path != "" {
@@ -112,9 +116,9 @@ func (l *Loaded) identity() (string, error) {
 // named it. A declared consumer that fails to load ends the run, so none is
 // unavailable.
 func (l *Loaded) consumersReported() ([]report.LoadedConsumer, error) {
-	var held []load.Consumer
-	if len(l.Loads) > 0 {
-		held = l.Loads[0].Result.Consumers
+	var held []string
+	if l.loads.Len() > 0 {
+		held = l.loads.outlines[0].consumers
 	}
 	named := make([]report.LoadedConsumer, len(held))
 	for i := range held {
@@ -125,7 +129,7 @@ func (l *Loaded) consumersReported() ([]report.LoadedConsumer, error) {
 		if err != nil {
 			return nil, err
 		}
-		named[i] = report.LoadedConsumer{ID: held[i].ID, Path: path}
+		named[i] = report.LoadedConsumer{ID: held[i], Path: path}
 	}
 	return named, nil
 }

@@ -71,24 +71,36 @@ func TypeErrorSkips(r *load.Result, rs *resolve.Resolver, targetRoot string, che
 	return held
 }
 
-// CheckedElsewhere is, per result in the order given, every package of the target
-// with a type error there that another result type-checks without one. Such a
-// package is judged by the configurations that build it.
-func CheckedElsewhere(results []load.Result) []map[load.PackageID]bool {
-	failed := make([]map[load.PackageID]bool, len(results))
-	clean := make(map[load.PackageID]bool)
-	for i := range results {
-		failed[i] = typeFailed(&results[i])
-		for _, p := range results[i].Packages {
-			if key := results[i].ID(p); p.Module != nil && p.Module.Main && !failed[i][key] {
-				clean[key] = true
-			}
+// Elsewhere gathers, one configuration's load at a time in matrix order, every
+// package of the target with a type error in one configuration that another
+// type-checks without one. Such a package is judged by the configurations that
+// build it.
+type Elsewhere struct {
+	clean  map[load.PackageID]bool
+	failed []map[load.PackageID]bool
+}
+
+// Add reads the next configuration's load.
+func (e *Elsewhere) Add(r *load.Result) {
+	if e.clean == nil {
+		e.clean = make(map[load.PackageID]bool)
+	}
+	failed := typeFailed(r)
+	for _, p := range r.Packages {
+		if key := r.ID(p); p.Module != nil && p.Module.Main && !failed[key] {
+			e.clean[key] = true
 		}
 	}
-	for i := range failed {
-		maps.DeleteFunc(failed[i], func(key load.PackageID, _ bool) bool { return !clean[key] })
+	e.failed = append(e.failed, failed)
+}
+
+// Of is, per configuration in the order added, its packages another configuration
+// checks clean.
+func (e *Elsewhere) Of() []map[load.PackageID]bool {
+	for i := range e.failed {
+		maps.DeleteFunc(e.failed[i], func(key load.PackageID, _ bool) bool { return !e.clean[key] })
 	}
-	return failed
+	return e.failed
 }
 
 // typeFailed is every package of the target with a type error in r, in any of its
@@ -109,7 +121,7 @@ func typeFailed(r *load.Result) map[load.PackageID]bool {
 // an operand whose type it knows could have named any member of that type, and a
 // value reaching a position whose type it could not resolve could reach an
 // interface, so every method and field of the type is rooted too. A package another
-// configuration type-checks holds no such root ([CheckedElsewhere]).
+// configuration type-checks holds no such root ([Elsewhere]).
 func (d *rootDetection) typeErrors(r *load.Result, checkedElsewhere map[load.PackageID]bool) {
 	for _, one := range skippedDecls(r, d.resolve, checkedElsewhere) {
 		if !d.rootDeclared(one.decl) {

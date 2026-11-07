@@ -110,7 +110,7 @@ func TestTheClassOfADeclarationNoConsumerCanReachIsCertainWithoutAnyConsumerInfo
 		t.Run(name, func(t *testing.T) {
 			in := handInput(libraryConfig())
 
-			if got := newPass(in).classOf(one.id); got != one.want {
+			if got := mustPass(t, in).classOf(one.id); got != one.want {
 				t.Errorf("classOf(%s) = %q for %s of a library with no consumer information, want %q",
 					one.id, got, name, one.want)
 			}
@@ -134,7 +134,7 @@ func TestTheClassOfATypeParameterOfAFunctionIsCertainWithNoConsumerInformation(t
 	}
 
 	container := narrowedIDOf(t, in, "go://example.com/app/api#Convert")
-	if got := newPass(in).classOf(container); got != vocab.Possible {
+	if got := mustPass(t, in).classOf(container); got != vocab.Possible {
 		t.Errorf("classOf(the function that declares the type parameter) = %q, want %q: the type parameter's class is the parameter's own rule and not its container's",
 			got, vocab.Possible)
 	}
@@ -157,7 +157,7 @@ func TestTheCorpusConversionFixtureIsCertainWithItsConsumerLoaded(t *testing.T) 
 	}
 
 	dead := narrowedIDOf(t, in, "go://example.com/target#DeadExport")
-	if got := newPass(in).classOf(dead); got != vocab.Certain {
+	if got := mustPass(t, in).classOf(dead); got != vocab.Certain {
 		t.Errorf("classOf(%s) = %q with the fixture's consumer loaded and the set not declared complete, want %q",
 			"go://example.com/target#DeadExport", got, vocab.Certain)
 	}
@@ -216,7 +216,7 @@ func TestTheClosedWorldFactNeedsTheCompletenessDeclaration(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			in := &Input{Consumers: one.consumers}
 
-			if got := newPass(in).consumersLoaded(); got != one.closedWorld {
+			if got := mustPass(t, in).consumersLoaded(); got != one.closedWorld {
 				t.Errorf("consumersLoaded() = %t for %s, want %t: the narrowing kinds need the completeness declaration",
 					got, name, one.closedWorld)
 			}
@@ -299,7 +299,7 @@ func TestTheClassOfADeclarationOfAMainPackageIsCertain(t *testing.T) {
 			continue
 		}
 		found = true
-		if got := newPass(in).classOf(id); got != vocab.Certain {
+		if got := mustPass(t, in).classOf(id); got != vocab.Certain {
 			t.Errorf("classOf(%s) = %q for a declaration of a main package, want %q", ref, got, vocab.Certain)
 		}
 	}
@@ -315,7 +315,7 @@ func TestTheClassOfADeclarationOfATestFileIsCertain(t *testing.T) {
 	in := inputOf(t, "declarations-test-of-dead-code.txtar", libraryConfig(), Consumers{})
 
 	test := narrowedIDOf(t, in, "go://example.com/app/catalog#TestDeadOnly")
-	if got := newPass(in).classOf(test); got != vocab.Certain {
+	if got := mustPass(t, in).classOf(test); got != vocab.Certain {
 		t.Errorf("classOf(TestDeadOnly) = %q for a test function of a published package's own test file, want %q",
 			got, vocab.Certain)
 	}
@@ -346,7 +346,7 @@ func TestTheClassOfAFieldOfAnUnexposedUnexportedTypeIsCertain(t *testing.T) {
 	} {
 		t.Run(member, func(t *testing.T) {
 			ref := "go://example.com/app/shape#" + member
-			if got := newPass(in).classOf(narrowedIDOf(t, in, ref)); got != want {
+			if got := mustPass(t, in).classOf(narrowedIDOf(t, in, ref)); got != want {
 				t.Errorf("classOf(%s) = %q in a library with no consumer information, want %q", ref, got, want)
 			}
 		})
@@ -354,15 +354,15 @@ func TestTheClassOfAFieldOfAnUnexposedUnexportedTypeIsCertain(t *testing.T) {
 }
 
 func TestAnUnanalysedConsumerIsReadFromTheInnermostUnitWhateverTheMapOrder(t *testing.T) {
-	in := &Input{Root: "/r", Per: []Configured{{Result: &load.Result{Units: []load.Unit{
+	in := &Input{Root: "/r", Per: configs{{Result: &load.Result{Units: []load.Unit{
 		{Dir: "/r", UnanalysedConsumer: true},
 		{Dir: "/r/x"},
 	}}}}}
 	for range 64 {
-		if newPass(in).unanalysedConsumer(&inventory.Symbol{File: "x/a.go"}) {
+		if mustPass(t, in).unanalysedConsumer(&inventory.Symbol{File: "x/a.go"}) {
 			t.Fatal("unanalysedConsumer(x/a.go) = true with the root unit flagged and unit x not, want false")
 		}
-		if !newPass(in).unanalysedConsumer(&inventory.Symbol{File: "a.go"}) {
+		if !mustPass(t, in).unanalysedConsumer(&inventory.Symbol{File: "a.go"}) {
 			t.Fatal("unanalysedConsumer(a.go) = false with the root unit flagged, want true")
 		}
 	}

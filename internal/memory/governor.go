@@ -1,7 +1,8 @@
 // Package memory adapts a run to the memory the machine makes available: it holds
-// the runtime's soft memory limit below the ceiling the machine allows, collects
-// less often while the heap is far below it, and ends the run through its context
-// when the analysis needs more than the machine has.
+// the runtime's soft memory limit below the ceiling the machine allows, puts the run
+// under pressure near the limit ([Pressed], [OnPressureOf]), and ends the run
+// through its context when even the run under pressure needs more than the machine
+// has.
 package memory
 
 import (
@@ -34,22 +35,19 @@ const (
 	interval = 50 * time.Millisecond
 
 	softLimitPercent = 85 // the runtime's memory limit
-	defaultPercent   = 70 // of the machine's limit, the soft limit a run without GOMEMLIMIT holds to
-	abortPercent     = 90 // the live heap past which the run cannot fit
-	pressurePercent  = 80 // the live heap, of the soft limit, past which a GC-bound window ends the run
-	raisedGOGC       = 400
-	headroomPercent  = 70 // the projected heap, of the soft limit, under which GOGC stays raised
+	defaultPercent   = 70 // of the machine's limit, the soft limit a run without GOMEMLIMIT holds to outside pressure
+	abortPercent     = 90 // the live heap, or under a GC-bound window the memory held, past which the run cannot fit
+	pressurePercent  = 80 // the live heap, of the soft limit, past which the run is under pressure
+	relievedPercent  = 50 // the live heap with what pressure dropped, of the soft limit outside pressure, under which pressure ends
 	limiterShare     = 0.5
 	bytesPerTenthGB  = 100_000_000
-	defaultGOGC      = 100
 	cpuWindowFactor  = 2 // the GC CPU limiter's window, in CPU-seconds per GOMAXPROCS
 )
 
 // ExhaustedError ends a run that needs more memory than the machine makes
-// available: Needed is the heap the analysis was about to need, the goal of the
-// next collection cycle at the default collection target, and Available the
-// ceiling the machine allowed it. The governor only builds one where Needed
-// exceeds Available.
+// available: Needed is the least memory under which what the run used under
+// pressure would fit, and Available the ceiling the machine allowed it. The
+// governor only builds one where Needed exceeds Available ([exhausted]).
 type ExhaustedError struct {
 	Needed    uint64
 	Available uint64
@@ -70,19 +68,18 @@ func gigabytes(tenths uint64) string {
 }
 
 // Start governs this process's memory for the life of ctx with machine's readers,
-// and ends the run by calling cancel with an *[ExhaustedError] when it cannot fit,
-// before Start returns where the first reading already says so. GOMEMLIMIT bounds
-// the ceiling as a source does; without it the soft limit stays at most 70 % of the
-// machine's limit, so a raised collection target never runs unbounded. Where
-// nothing reads it sets nothing. The returned function stops the governor and
-// restores the limit and collection target it found; call it before exiting.
+// and ends the run by calling cancel with an *[ExhaustedError] when it cannot fit.
+// GOMEMLIMIT bounds the ceiling as a source does; without it the soft limit stays
+// at most 70 % of the machine's limit outside pressure. It leaves the collection
+// target (GOGC) as the process set it. Where nothing reads it sets nothing. The
+// returned function stops the governor and restores the limit it found; call it
+// before exiting.
 func Start(ctx context.Context, cancel context.CancelCauseFunc, machine Machine) (stop func()) {
 	return start(ctx, cancel, machine, interval)
 }
 
 func start(ctx context.Context, cancel context.CancelCauseFunc, machine Machine, every time.Duration) (stop func()) {
-	// A negative limit reads the current one without changing it; the collection
-	// target has no such read, so it is set to the default and put back.
+	// A negative limit reads the current one without changing it.
 	g := &governor{sources: machine.Sources, cancel: cancel, samples: newSamples(), previousLimit: debug.SetMemoryLimit(-1)}
 	if g.previousLimit > 0 && g.previousLimit < math.MaxInt64 {
 		g.callerLimit = uint64(g.previousLimit)
@@ -93,12 +90,9 @@ func start(ctx context.Context, cancel context.CancelCauseFunc, machine Machine,
 	if _, read := g.ceiling(); !read {
 		return func() {}
 	}
-	g.previousGOGC = debug.SetGCPercent(defaultGOGC)
-	debug.SetGCPercent(g.previousGOGC)
-	g.gogc = g.previousGOGC
 	restore := func() {
 		debug.SetMemoryLimit(g.previousLimit)
-		debug.SetGCPercent(g.previousGOGC)
+		pressed.Store(false)
 	}
 	if g.tick() {
 		return restore
@@ -152,9 +146,12 @@ type governor struct {
 	previousLimit int64
 	callerLimit   uint64 // the memory limit the process started with, 0 where none was set
 	machineLimit  uint64 // the machine's limit where the process started with none, else 0
-	previousGOGC  int
-	gogc          int
-	window        cpuWindow
+	// regain is what the drops freed when the current pressure began, which the
+	// dropped caches take again once pressure ends: pressure ends only where the
+	// live heap and regain together sit under the relief line, so a run that fits
+	// only without its caches stays under pressure rather than refilling them.
+	regain uint64
+	window cpuWindow
 }
 
 // cpuWindow is the GC and total CPU time read at the start of the current window.
@@ -212,19 +209,49 @@ func (g *governor) ceiling() (uint64, bool) {
 	return ceiling, answered
 }
 
-// tick applies one reading and reports whether the run was ended.
+// tick applies one reading and reports whether the run was ended. A run is judged
+// not to fit only on a reading taken under a pressure that began on an earlier
+// tick, so every [onPressure] function dropped what it holds, a collection ran, and
+// the run has since gone on in its minimal shape.
 func (g *governor) tick() bool {
 	ceiling, read := g.ceiling()
 	if !read {
 		return false
 	}
-	soft := percentOf(ceiling, softLimitPercent)
+	capped := percentOf(ceiling, softLimitPercent)
 	if g.machineLimit > 0 {
-		soft = min(soft, percentOf(g.machineLimit, defaultPercent))
+		capped = min(capped, percentOf(g.machineLimit, defaultPercent))
+	}
+	live, held := g.read()
+	judged := pressed.Load()
+	switch {
+	case !judged && live > percentOf(capped, pressurePercent):
+		pressed.Store(true)
+		// The live heap read is of the last collection, so one runs first: regain
+		// then counts what the drops freed of what was allocated since.
+		runtime.GC()
+		before, _ := g.read()
+		shed()
+		runtime.GC()
+		live, held = g.read()
+		g.regain = before - min(live, before)
+	case judged && live+g.regain < percentOf(capped, relievedPercent):
+		pressed.Store(false)
+		judged = false
+	}
+	// Under pressure the collector may use the whole share of the ceiling before the
+	// run is judged not to fit, so the 70 % cap no longer applies.
+	soft := capped
+	if pressed.Load() {
+		soft = percentOf(ceiling, softLimitPercent)
 	}
 	debug.SetMemoryLimit(int64(min(soft, math.MaxInt64)))
 
-	live, _ := g.read()
+	gc, total := g.samples[metricGCCPU].Value.Float64(), g.samples[metricAllCPU].Value.Float64()
+	bound := g.window.boundByCollection(gc, total, runtime.GOMAXPROCS(0))
+	if !judged {
+		return false
+	}
 	if live > percentOf(ceiling, abortPercent) {
 		runtime.GC()
 		if live, _ = g.read(); live > percentOf(ceiling, abortPercent) {
@@ -232,31 +259,22 @@ func (g *governor) tick() bool {
 			return true
 		}
 	}
-	gc, total := g.samples[metricGCCPU].Value.Float64(), g.samples[metricAllCPU].Value.Float64()
-	if g.window.boundByCollection(gc, total, runtime.GOMAXPROCS(0)) && live > percentOf(soft, pressurePercent) {
-		g.cancel(exhausted(live, ceiling))
+	// A collector bound by its CPU limiter lets the heap outgrow the soft limit, so
+	// such a run is judged by what it holds: slow while that stays under the
+	// ceiling, unable to fit once it nears it.
+	if bound && held > percentOf(ceiling, abortPercent) {
+		g.cancel(exhausted(held, ceiling))
 		return true
-	}
-
-	want := defaultGOGC
-	if live/100*(100+raisedGOGC) < percentOf(soft, headroomPercent) {
-		want = raisedGOGC
-	}
-	if g.previousGOGC < 0 {
-		want = g.previousGOGC
-	}
-	if want != g.gogc {
-		debug.SetGCPercent(want)
-		g.gogc = want
 	}
 	return false
 }
 
-// exhausted is the error ending a run whose live heap does not fit under ceiling.
-// Needed is the heap goal the default target sets on that live heap. Both abort
-// rules fire with live above half the ceiling, so Needed is above the ceiling.
-func exhausted(live, ceiling uint64) *ExhaustedError {
-	return &ExhaustedError{Needed: live + percentOf(live, defaultGOGC), Available: ceiling}
+// exhausted is the error ending a run that needs more than ceiling, used being the
+// memory whose reading passed ceiling's abort line, as the caller ensures. Needed is
+// the least ceiling under which that reading would sit at the abort line, so it is
+// above ceiling.
+func exhausted(used, ceiling uint64) *ExhaustedError {
+	return &ExhaustedError{Needed: used/abortPercent*100 + (used%abortPercent*100+abortPercent-1)/abortPercent, Available: ceiling}
 }
 
 // boundByCollection reports, once the CPU time spent since the window opened fills

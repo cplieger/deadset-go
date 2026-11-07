@@ -53,7 +53,7 @@ func writeOnly(in *pass, symbol *inventory.Symbol, u *uses) (draft, bool) {
 	case u.testReads > 0:
 		read = " and read only from test files"
 	}
-	cascade := append(writeCascade(in, symbol, u.spans), in.falling.named[symbol.ID]...)
+	cascade := append(writeCascade(in, symbol), in.falling.named[symbol.ID]...)
 	finding, names := in.finding(symbol.ID, vocab.WriteOnlySymbol, in.word(symbol.ID)+" "+symbol.Name+
 		" is written "+writeCount(len(u.writes))+read+cascadeClause(cascade))
 	if !names {
@@ -69,12 +69,15 @@ func writeOnly(in *pass, symbol *inventory.Symbol, u *uses) (draft, bool) {
 // into and never read: the exemption is a read, so it holds back the write-only
 // finding about a declaration the sweep judges live and lists nowhere else. One
 // symbol, class and detail is one record.
-func WriteOnlyRetained(in *Input) []exempt.Exemption {
+func WriteOnlyRetained(in *Input) ([]exempt.Exemption, error) {
 	type fact struct {
 		id            inventory.SymbolID
 		class, detail string
 	}
-	a := classesOf(in)
+	a, err := classesOf(in)
+	if err != nil {
+		return nil, err
+	}
 	counted := writesAndReads(a)
 	seen := make(map[fact]bool)
 	var held []exempt.Exemption
@@ -88,7 +91,7 @@ func WriteOnlyRetained(in *Input) []exempt.Exemption {
 		seen[one] = true
 		held = append(held, *exemption)
 	}
-	return held
+	return held, nil
 }
 
 // writeOnlySubject reports whether the counted references store into one
@@ -302,41 +305,33 @@ func referencedSymbols(in *pass) map[inventory.SymbolID]bool {
 	return named
 }
 
-// enumGroupMembers is every constant of an enumerated type, with the name of the
-// type: a defined type with constants in an iota group (a constant block one of
-// whose value expressions, repeated ones included, mentions iota). Every constant of
-// such a type is a member, one a later block declares included, a blank one none;
-// one configuration declaring it in such a group is enough. It is the enum-group
-// exemption's recognition, so the kinds and the class agree on it.
-func enumGroupMembers(in *pass) map[inventory.SymbolID]string {
-	members := make(map[inventory.SymbolID]string)
-	for c := range in.Per {
-		scan := &enumScan{in: in, config: c, per: &in.Per[c], owners: make(map[string]string), members: members}
-		for _, iotaGroups := range []bool{true, false} {
-			scan.blocks(iotaGroups)
-		}
+// readEnumGroups adds to members every constant of an enumerated type one
+// configuration declares, with the name of the type: a defined type with constants
+// in an iota group (a constant block one of whose value expressions, repeated ones
+// included, mentions iota). Every constant of such a type is a member, one a later
+// block declares included, a blank one none; one configuration declaring it in such
+// a group is enough. It is the enum-group exemption's recognition, so the kinds and
+// the class agree on it.
+func readEnumGroups(one *Configured, files []typedFile, members map[inventory.SymbolID]string) {
+	scan := &enumScan{per: one, owners: make(map[string]string), members: members}
+	for _, iotaGroups := range []bool{true, false} {
+		scan.blocks(files, iotaGroups)
 	}
-	return members
 }
 
 // enumScan accumulates the enumerated types of one build configuration and their
 // members.
 type enumScan struct {
-	in      *pass
 	per     *Configured
 	owners  map[string]string // the type's key to the name a message carries
 	members map[inventory.SymbolID]string
-	config  int
 }
 
-// blocks walks every constant block of one configuration, registering the types
-// an iota group declares on the pass over those groups and keeping the constants
-// of an already registered type on the pass over every other block.
-func (s *enumScan) blocks(iotaGroups bool) {
-	for _, typed := range s.in.sources {
-		if typed.config != s.config {
-			continue
-		}
+// blocks walks every constant block of one configuration's files, registering the
+// types an iota group declares on the pass over those groups and keeping the
+// constants of an already registered type on the pass over every other block.
+func (s *enumScan) blocks(files []typedFile, iotaGroups bool) {
+	for _, typed := range files {
 		for _, decl := range typed.file.Decls {
 			block, isBlock := decl.(*ast.GenDecl)
 			if !isBlock || block.Tok != token.CONST || mentionsIota(block) != iotaGroups {

@@ -8,13 +8,16 @@ import (
 	"go/scanner"
 	"go/token"
 	"go/types"
+	"maps"
 	"os"
 	"runtime"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 
 	"github.com/cplieger/deadset-go/v2/internal/buildconstraint"
+	"github.com/cplieger/deadset-go/v2/internal/memory"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -27,15 +30,29 @@ const (
 	signatureParse = parser.AllErrors | parser.SkipObjectResolution
 )
 
-// syntaxCache is the file set and the parsed trees of the files checked whole that
-// every configuration of one matrix shares. A parse does not depend on the
-// configuration, so a file every configuration compiles is one tree and one
-// position however many configurations check it; each configuration still records
-// its own type information over that tree.
+// syntaxCache is what every configuration of one matrix shares: the file set, the
+// trees of the files checked whole, one tree and one position per file however many
+// configurations check it (each records its own type information over it), and
+// each package checked for its declarations alone, so a dependency compiling
+// identically in several units and configurations is checked once
+// ([declarationKey]); nil decls checks each afresh. lists is each module listing
+// the matrix ran ([syntaxCache.list]).
 type syntaxCache struct {
 	fset  *token.FileSet
 	files map[syntaxKey]*parsedFile
+	decls map[string]*declared
+	ids   map[*types.Package]uint64
+	lists map[string]*listing
 	mu    sync.Mutex
+}
+
+// declared is one package checked for its declarations alone, shared by every load
+// whose package compiles the same files over the same imports.
+type declared struct {
+	types *types.Package
+	ready chan struct{}
+	errs  []packages.Error
+	terrs []types.Error
 }
 
 // syntaxKey is one file of one reading: the directory a load ran in and the further
@@ -47,7 +64,13 @@ type syntaxKey struct {
 }
 
 func newSyntaxCache() *syntaxCache {
-	return &syntaxCache{fset: token.NewFileSet(), files: make(map[syntaxKey]*parsedFile)}
+	return &syntaxCache{
+		fset:  token.NewFileSet(),
+		files: make(map[syntaxKey]*parsedFile),
+		decls: make(map[string]*declared),
+		ids:   map[*types.Package]uint64{types.Unsafe: 0},
+		lists: make(map[string]*listing),
+	}
 }
 
 // typeCheck type-checks every package reachable from roots, each after its imports,
@@ -87,6 +110,7 @@ func check(ctx context.Context, trees *syntaxCache, reading string, roots []*pac
 		trees:   trees,
 		reading: reading,
 		cpu:     make(chan struct{}, runtime.GOMAXPROCS(0)),
+		pressed: memory.Pressed,
 	}
 	c.run(schedule(roots, own, mainWhole))
 	return ctx.Err()
@@ -132,12 +156,17 @@ func schedule(roots []*packages.Package, own func(*packages.Package) bool, mainW
 // keyed under, and the bound on how many parses and checks run at once.
 type checker struct {
 	ctx     context.Context
-	fset    *token.FileSet
 	sizes   types.Sizes
+	fset    *token.FileSet
 	trees   *syntaxCache
 	cpu     chan struct{}
+	pressed func() bool
 	reading string
 }
+
+// pressedSlot is the one slot every parse and check of the process shares under
+// memory pressure, whichever checker runs it.
+var pressedSlot sync.Mutex
 
 // parsedFile is one file's parse, shared by every package that compiles it.
 type parsedFile struct {
@@ -185,6 +214,81 @@ func (c *checker) check(p *packages.Package, whole, program bool) {
 		p.TypesInfo = newTypesInfo()
 		return
 	}
+	if !whole {
+		c.checkShared(p)
+		return
+	}
+	c.checkOne(p, whole, program)
+}
+
+// checkShared checks p for its declarations alone, or takes the check of a package
+// compiling the same files over the same imports that an earlier load ran.
+func (c *checker) checkShared(p *packages.Package) {
+	key, shareable := c.trees.declarationKey(p, c.sizes)
+	if !shareable {
+		c.checkOne(p, false, false)
+		return
+	}
+	c.trees.mu.Lock()
+	d, held := c.trees.decls[key]
+	if !held {
+		d = &declared{ready: make(chan struct{})}
+		c.trees.decls[key] = d
+	}
+	c.trees.mu.Unlock()
+	if held {
+		<-d.ready
+		p.Types = d.types
+		p.Errors = append(p.Errors, d.errs...)
+		p.TypeErrors = append(p.TypeErrors, d.terrs...)
+		p.IllTyped = len(p.Errors) > 0
+		for _, imported := range p.Imports {
+			p.IllTyped = p.IllTyped || imported.IllTyped
+		}
+		return
+	}
+	c.checkOne(p, false, false)
+	d.types, d.errs, d.terrs = p.Types, slices.Clone(p.Errors), slices.Clone(p.TypeErrors)
+	c.trees.mu.Lock()
+	c.trees.ids[p.Types] = uint64(len(c.trees.ids))
+	c.trees.mu.Unlock()
+	close(d.ready)
+}
+
+// declarationKey names what decides a declarations-only check of p: its path and
+// name, the type sizes and language version it is checked under, its compiled files
+// and, per import path, the shared check that import resolved to. It is false where
+// p carries an error of its own or an import was not itself shared, as the check
+// would then not be the same.
+func (t *syntaxCache) declarationKey(p *packages.Package, sizes types.Sizes) (string, bool) {
+	if t.decls == nil || len(p.Errors) > 0 {
+		return "", false
+	}
+	var b strings.Builder
+	version := ""
+	if p.Module != nil {
+		version = p.Module.GoVersion
+	}
+	fmt.Fprintf(&b, "%s\x00%s\x00%d,%d\x00%s", p.PkgPath, p.Name, sizes.Sizeof(types.Typ[types.Uintptr]), sizes.Alignof(types.Typ[types.Int64]), version)
+	for _, name := range p.CompiledGoFiles {
+		b.WriteString("\x00f")
+		b.WriteString(name)
+	}
+	paths := slices.Sorted(maps.Keys(p.Imports))
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, path := range paths {
+		id, shared := t.ids[p.Imports[path].Types]
+		if !shared {
+			return "", false
+		}
+		fmt.Fprintf(&b, "\x00i%s=%d", path, id)
+	}
+	return b.String(), true
+}
+
+// checkOne parses and type-checks one package itself.
+func (c *checker) checkOne(p *packages.Package, whole, program bool) {
 	p.Types = types.NewPackage(p.PkgPath, p.Name)
 	if c.ctx.Err() != nil {
 		return
@@ -210,9 +314,9 @@ func (c *checker) check(p *packages.Package, whole, program bool) {
 		conf.GoVersion = "go" + p.Module.GoVersion
 	}
 
-	c.cpu <- struct{}{}
+	release := c.acquire()
 	err := types.NewChecker(conf, c.fset, p.Types, info).Files(files)
-	<-c.cpu
+	release()
 	if _, typed := err.(types.Error); err != nil && len(p.Errors) == 0 && !typed {
 		appendError(p, err)
 	}
@@ -290,15 +394,29 @@ func (c *checker) parse(name string, whole bool) (*ast.File, error) {
 	return v.file, v.err
 }
 
-// parseOnce reads and parses one file under mode.
+// parseOnce reads and parses one file under mode. The read is inside the slot, so a
+// file waiting for one holds none of its bytes.
 func (c *checker) parseOnce(name string, mode parser.Mode) (*ast.File, error) {
+	defer c.acquire()()
 	src, err := os.ReadFile(name)
 	if err != nil {
 		return nil, err
 	}
-	c.cpu <- struct{}{}
-	defer func() { <-c.cpu }()
 	return parser.ParseFile(c.fset, name, src, mode)
+}
+
+// acquire takes one of the checker's slots, and under memory pressure also the
+// single slot of the process ([pressedSlot], [memory.Pressed]).
+func (c *checker) acquire() (release func()) {
+	c.cpu <- struct{}{}
+	if !c.pressed() {
+		return func() { <-c.cpu }
+	}
+	pressedSlot.Lock()
+	return func() {
+		pressedSlot.Unlock()
+		<-c.cpu
+	}
 }
 
 // importer resolves the imports of one package from the packages its own import

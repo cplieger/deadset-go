@@ -43,7 +43,11 @@ func (s *Swept) Findings(ctx context.Context) (*Findings, error) {
 // input is everything a kind reads.
 func (s *Swept) input(ctx context.Context) (*findings.Input, error) {
 	generated := make(map[string]bool)
-	for _, one := range s.per {
+	for i := range s.loads.Len() {
+		one, err := s.loads.At(i)
+		if err != nil {
+			return nil, err
+		}
 		all := one.Facts.Generated()
 		for i := range all {
 			generated[all[i].Path] = true
@@ -76,7 +80,7 @@ func (s *Swept) input(ctx context.Context) (*findings.Input, error) {
 		RootsDocument:  s.rootsDocument(),
 		Edges:          declared,
 		Matrix:         s.Identifiers(),
-		Per:            s.per,
+		Per:            s.loads,
 		Consumers:      s.consumers(),
 		Mode:           s.Mode,
 	}, nil
@@ -86,13 +90,13 @@ func (s *Swept) input(ctx context.Context) (*findings.Input, error) {
 // whose file sits at its root, in unit order. Every configuration loads the same
 // units, and a file above the target root has no directive a report can position.
 func (l *Loaded) moduleFiles() ([]findings.ModuleFile, error) {
-	if len(l.Loads) == 0 {
+	if l.loads.Len() == 0 {
 		return nil, nil
 	}
 	var files []findings.ModuleFile
 	for i := range l.Topology.Units {
 		unit := &l.Topology.Units[i]
-		if !slices.ContainsFunc(l.Loads[0].Result.Units, func(u load.Unit) bool { return u.Dir == unit.Dir }) {
+		if !slices.ContainsFunc(l.loads.outlines[0].units, func(u load.Unit) bool { return u.Dir == unit.Dir }) {
 			continue
 		}
 		if unit.FileErr != nil {
@@ -134,11 +138,8 @@ const rootsPatternsSetting = "roots.patterns"
 // asks a different question of each.
 func (l *Loaded) consumers() findings.Consumers {
 	var loaded []string
-	if len(l.Loads) > 0 {
-		loaded = make([]string, len(l.Loads[0].Result.Consumers))
-		for i, consumer := range l.Loads[0].Result.Consumers {
-			loaded[i] = consumer.ID
-		}
+	if l.loads.Len() > 0 {
+		loaded = l.loads.outlines[0].consumers
 	}
 	return findings.Consumers{Declared: loaded, Loaded: loaded, Complete: l.req.Config.Consumers.Complete}
 }

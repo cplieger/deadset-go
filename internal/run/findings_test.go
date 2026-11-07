@@ -15,7 +15,7 @@ func TestConsumersNamesWhatTheRunLoaded(t *testing.T) {
 	tests := []struct {
 		name     string
 		complete bool
-		loads    []enumerated
+		loads    []outline
 		want     findings.Consumers
 	}{
 		{
@@ -25,9 +25,7 @@ func TestConsumersNamesWhatTheRunLoaded(t *testing.T) {
 		{
 			name:     "a_run_whose_configuration_declares_the_set_complete",
 			complete: true,
-			loads: []enumerated{{Result: load.Result{Consumers: []load.Consumer{
-				{ID: "example.com/one"}, {ID: "example.com/two"},
-			}}}},
+			loads:    []outline{{consumers: []string{"example.com/one", "example.com/two"}}},
 			want: findings.Consumers{
 				Declared: []string{"example.com/one", "example.com/two"},
 				Loaded:   []string{"example.com/one", "example.com/two"},
@@ -42,7 +40,7 @@ func TestConsumersNamesWhatTheRunLoaded(t *testing.T) {
 
 			cfg := defaultConfig()
 			cfg.Consumers.Complete = tc.complete
-			got := (&Loaded{req: &Request{Config: cfg}, Loads: tc.loads}).consumers()
+			got := (&Loaded{req: &Request{Config: cfg}, loads: &loads{outlines: tc.loads, configurations: make([]load.Configuration, len(tc.loads))}}).consumers()
 			if !slices.Equal(got.Declared, tc.want.Declared) || !slices.Equal(got.Loaded, tc.want.Loaded) ||
 				got.Complete != tc.want.Complete {
 				t.Errorf("consumers() = %+v, want %+v", got, tc.want)

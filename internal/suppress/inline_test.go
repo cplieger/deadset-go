@@ -208,8 +208,14 @@ func TestInlineReadsADirectiveEveryConfigurationCompilesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Inline(directives.txtar) error: %v", err)
 	}
-	both := slices.Concat(configured(t, result, root, symbols), configured(t, result, root, symbols))
-	twice, refusedTwice, err := Inline(both)
+	_, first := configured(t, result, root, symbols)
+	_, second := configured(t, result, root, symbols)
+	twice, refusedTwice, err := Inline(2, func(config int) (*Configuration, error) {
+		if config == 0 {
+			return first(config)
+		}
+		return second(config)
+	})
 	if err != nil {
 		t.Fatalf("Inline(directives.txtar, twice) error: %v", err)
 	}

@@ -50,7 +50,7 @@ type narrowing struct {
 // story: one an exemption retains (the sweep's own set, which holds exemptions on
 // live declarations too), one the write-only kind reports, a method satisfying an
 // interface the target uses as a type, and a method an outside interface fixes
-// ([pass.fixedByOutsideInterface]). A declared cross-language edge is a reference
+// ([readFixed]). A declared cross-language edge is a reference
 // from outside, and its narrowing finding becomes the edge's pending evaluation.
 func newNarrowing(in *pass) *narrowing {
 	n := &narrowing{
@@ -74,8 +74,10 @@ func newNarrowing(in *pass) *narrowing {
 	for i := range in.Merged.References {
 		n.widen(&in.Merged.References[i])
 	}
-	n.exposed = exposureOf(carriersOf(in), n.reach)
-	n.holdInterfaceSatisfying()
+	n.exposed = exposureOf(in.carriers, n.reach)
+	for id := range in.satisfying {
+		n.unnarrowable[id] = true
+	}
 	return n
 }
 
@@ -95,33 +97,24 @@ func (n *narrowing) widen(r *facts.Reference) {
 	n.reach[r.To] = max(n.reach[r.To], n.scopeOf(to, r))
 }
 
-// holdInterfaceSatisfying keys every method of the target that satisfies an
-// interface the target declares and something names as a type, an assertion of
-// satisfaction included: unexporting it takes the type out of the interface's
-// implementors, so the conversion stops compiling. Another module's interface is the
-// interface satisfaction class's.
-func (n *narrowing) holdInterfaceSatisfying() {
-	known := n.in.interfaces
-	for i := range n.in.Per {
-		one := &n.in.Per[i]
-		if one.Result == nil || one.Resolve == nil {
+// readSatisfying keys every method of the target one configuration compiles that
+// satisfies an interface the target declares and something names as a type, an
+// assertion of satisfaction included: unexporting it takes the type out of the
+// interface's implementors, so the conversion stops compiling. Another module's
+// interface is the interface satisfaction class's.
+func (in *pass) readSatisfying(one *Configured) {
+	if one.Result == nil || one.Resolve == nil {
+		return
+	}
+	for _, iface := range one.Facts.Interfaces() {
+		if len(in.interfaces.typeUsedBy[iface.ID]) == 0 {
 			continue
 		}
-		for _, iface := range one.Facts.Interfaces() {
-			if len(known.typeUsedBy[iface.ID]) > 0 {
-				n.holdImplementors(&iface)
-			}
-		}
-	}
-}
-
-// holdImplementors keys every declaration of the target implementing one of the
-// interface's methods.
-func (n *narrowing) holdImplementors(iface *facts.Interface) {
-	for _, impl := range iface.Implementations {
-		for _, id := range impl.Implementors {
-			if id != "" {
-				n.unnarrowable[id] = true
+		for _, impl := range iface.Implementations {
+			for _, id := range impl.Implementors {
+				if id != "" {
+					in.satisfying[id] = true
+				}
 			}
 		}
 	}
@@ -268,13 +261,15 @@ type carrier struct {
 	isType bool
 }
 
-// carriersOf keys every type of the target by its carriers in its own package, over
-// every configuration of the run: an exported function, method, variable or
+// readCarriers keys every type of the target by its carriers in its own package
+// in one configuration, adding to held: an exported function, method, variable or
 // constant whose type names it, an exported field whose type names it, an exported
 // member of the type itself, and a type whose definition names it ([typeNamesIn]).
-func carriersOf(in *pass) map[inventory.SymbolID][]carrier {
-	held := make(map[inventory.SymbolID][]carrier)
-	for one, p := range in.typedPackages() {
+func readCarriers(one *Configured, held map[inventory.SymbolID][]carrier) {
+	if one.Facts == nil {
+		return
+	}
+	for p := range one.Facts.Typed() {
 		k := carrierKeys{held: held, one: one, path: p.Types.Path()}
 		scope := p.Types.Scope()
 		for _, name := range scope.Names() {
@@ -288,7 +283,6 @@ func carriersOf(in *pass) map[inventory.SymbolID][]carrier {
 			}
 		}
 	}
-	return held
 }
 
 // carrierKeys adds the carriers one package of one configuration declares.

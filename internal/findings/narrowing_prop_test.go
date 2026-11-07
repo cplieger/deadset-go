@@ -286,11 +286,11 @@ func TestNarrowingNamesTheNarrowestScopeContainingEveryReference(t *testing.T) {
 			Roots:      inventory.roots,
 		}, m.names(), consumers)
 
-		exported, err := unnecessaryExport(newPass(in))
+		exported, err := unnecessaryExport(mustPass(t, in))
 		if err != nil {
 			t.Fatalf("UnnecessaryExport = error %v, want the findings", err)
 		}
-		exposed, err := unnecessaryExposure(newPass(in))
+		exposed, err := unnecessaryExposure(mustPass(t, in))
 		if err != nil {
 			t.Fatalf("UnnecessaryExposure = error %v, want the findings", err)
 		}
