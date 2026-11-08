@@ -42,6 +42,9 @@ type matrixWorld struct {
 // matrixWorlds varies which file anchors the package (the first-sorting one), where
 // a name literal's subjects are written, where a method's receiver type is, and
 // whether an imported package has shared files, per-platform files only or both.
+// The first three vary package main and are crossed; the imported package's files
+// share no declaration with main's, so its variants are each run beside one main
+// layout rather than crossed with every one.
 func matrixWorlds() []matrixWorld {
 	anchors := map[string]map[string]string{
 		"anchor-per-platform": {
@@ -73,19 +76,25 @@ func matrixWorlds() []matrixWorld {
 			"var names = []string{\"helper\", \"mode\", \"work\"}\n\nfunc main() { lib.Use(); println(names[0], osName) }\n",
 	}
 
+	world := func(a, s, ty, l string) matrixWorld {
+		files := maps.Clone(common)
+		for _, part := range []map[string]string{anchors[a], spelled[s], types[ty], libs[l]} {
+			maps.Copy(files, part)
+		}
+		return matrixWorld{name: a + "/" + s + "/" + ty + "/" + l, files: files}
+	}
+	const crossedLib = "lib-mixed"
 	var worlds []matrixWorld
 	for _, a := range slices.Sorted(maps.Keys(anchors)) {
 		for _, s := range slices.Sorted(maps.Keys(spelled)) {
 			for _, ty := range slices.Sorted(maps.Keys(types)) {
-				for _, l := range slices.Sorted(maps.Keys(libs)) {
-					files := maps.Clone(common)
-					maps.Copy(files, anchors[a])
-					maps.Copy(files, spelled[s])
-					maps.Copy(files, types[ty])
-					maps.Copy(files, libs[l])
-					worlds = append(worlds, matrixWorld{name: a + "/" + s + "/" + ty + "/" + l, files: files})
-				}
+				worlds = append(worlds, world(a, s, ty, crossedLib))
 			}
+		}
+	}
+	for _, l := range slices.Sorted(maps.Keys(libs)) {
+		if l != crossedLib {
+			worlds = append(worlds, world("anchor-per-platform", "spelled-per-platform", "type-per-platform", l))
 		}
 	}
 	return worlds
@@ -152,6 +161,7 @@ func TestAMatrixGivesEachDeclarationTheContainersAndCapOfEveryConfigurationThatC
 	windows := `{"id": "windows-amd64", "os": "windows", "arch": "amd64"}`
 	for _, world := range matrixWorlds() {
 		t.Run(world.name, func(t *testing.T) {
+			t.Parallel()
 			alone := []configured{runWorld(t, world.files, linux), runWorld(t, world.files, windows)}
 			for _, order := range [][]string{{linux, windows}, {windows, linux}} {
 				matrix := runWorld(t, world.files, order...)

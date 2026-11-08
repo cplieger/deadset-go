@@ -123,6 +123,7 @@ func verdictLines(b *graphBuilder, candidates []Candidate) []string {
 // This runs at rapid's default of 100 checks; -rapid.checks raises it for a
 // deeper local run.
 func TestProperty11MatrixIntersectionReportsOnlyWhatIsDeadEverywhere(t *testing.T) {
+	t.Parallel()
 	rapid.Check(t, func(t *rapid.T) {
 		d := drawnMatrices().Draw(t, "the matrix")
 		b := d.build(t)

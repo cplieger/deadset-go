@@ -54,6 +54,7 @@ var fixes = map[string]string{
 	vocab.SetupUnreadableConfiguration: "correct the module or workspace file the toolchain names",
 	vocab.RunUnwrittenOutput:           "name a path the run can write, or correct the template that renders it",
 	vocab.RunUnreportablePath:          "run from a directory that holds the target, or analyze a target that holds the configuration",
+	vocab.RunMissingToolchain:          "install Go, or put the directory that holds its go command on PATH",
 	vocab.RunInterruptedRun:            "run it again without interrupting it",
 	vocab.RunProductFault:              "reinstall " + product + ", and report the fault to its maintainers if a reinstalled " + product + " fails the same way",
 }

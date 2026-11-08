@@ -41,6 +41,7 @@ func archiveRoots(t *testing.T, archive string, c load.Configuration, kind roots
 }
 
 func TestRootsRootsTheInputsAGenerateDirectiveNames(t *testing.T) {
+	t.Parallel()
 	named, held := generatorRoots(t, load.Configuration{ID: "linux-amd64", OS: "linux", Arch: "amd64"}, roots.RootGenerate)
 
 	for ref, want := range map[string]bool{
@@ -74,6 +75,7 @@ func TestRootsRootsTheInputsAGenerateDirectiveNames(t *testing.T) {
 }
 
 func TestRootsRootsAGoFuzzEntryOfAFileTheGofuzzTagSelects(t *testing.T) {
+	t.Parallel()
 	tagged := load.Configuration{ID: "linux-amd64-gofuzz", OS: "linux", Arch: "amd64", Tags: []string{"gofuzz"}}
 	named, held := generatorRoots(t, tagged, roots.RootFuzz)
 	got := slices.Sorted(maps.Keys(named))
@@ -94,6 +96,7 @@ func TestRootsRootsAGoFuzzEntryOfAFileTheGofuzzTagSelects(t *testing.T) {
 }
 
 func TestRootsRootsADeclarationASwaggerDirectiveNamesWithItsFields(t *testing.T) {
+	t.Parallel()
 	named, held := generatorRoots(t, load.Configuration{ID: "linux-amd64", OS: "linux", Arch: "amd64"}, roots.RootSwagger)
 
 	const pkg = "go://example.com/gen/api#"
@@ -120,6 +123,7 @@ func TestRootsRootsADeclarationASwaggerDirectiveNamesWithItsFields(t *testing.T)
 }
 
 func TestUnlinkedPackagesIsWhatNoBuildLinksOfAModuleLoadedWhole(t *testing.T) {
+	t.Parallel()
 	dir := extract(t, "unlinked.txtar")
 	host := load.Configuration{ID: "linux-amd64", OS: "linux", Arch: "amd64"}
 	result, _ := loadDirUnder(t.Context(), t, dir, host)
@@ -140,6 +144,7 @@ func TestUnlinkedPackagesIsWhatNoBuildLinksOfAModuleLoadedWhole(t *testing.T) {
 }
 
 func TestRootsLeavesTheInitAndBlankDeclarationsOfAnUnlinkedApplicationPackageUnrooted(t *testing.T) {
+	t.Parallel()
 	for _, published := range []bool{false, true} {
 		d := detect(t, "unlinked.txtar", roots.RootOptions{PublishedAPI: published})
 		var inits []string

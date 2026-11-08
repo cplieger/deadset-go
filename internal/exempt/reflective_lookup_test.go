@@ -8,6 +8,7 @@ import (
 )
 
 func TestReflectiveLookupDetector(t *testing.T) {
+	t.Parallel()
 	shared := analysisOf(t, "reflective-lookup.txtar", Options{})
 	symbols := shared.inventory(t)
 
@@ -29,6 +30,7 @@ func TestReflectiveLookupDetector(t *testing.T) {
 }
 
 func TestReflectiveLookupDetectorWithoutALookup(t *testing.T) {
+	t.Parallel()
 	shared := analysisOf(t, "reflective-lookup-none.txtar", Options{})
 	symbols := shared.inventory(t)
 
@@ -46,6 +48,7 @@ func TestReflectiveLookupDetectorWithoutALookup(t *testing.T) {
 // names that type's exported methods, item by item after the verbs a route gives
 // them; a call of the program's own function names nothing.
 func TestReflectiveLookupRetainsTheMethodsARegistrationNames(t *testing.T) {
+	t.Parallel()
 	shared := analysisOf(t, "reflective-lookup-registration.txtar", Options{})
 	symbols := shared.inventory(t)
 

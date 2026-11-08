@@ -18,6 +18,7 @@ func reportedNames(findings []Finding) []string {
 // interface requires and no other, and a conversion inside a dead method retains
 // nothing.
 func TestAnInterfaceConversionRetainsOnlyTheInterfacesMethodsFromLiveCode(t *testing.T) {
+	t.Parallel()
 	result := computed(t, inputOf(t, "retention-interface-conversion.txtar", applicationConfig(), Consumers{}), packageEmitters())
 	reported := reportedNames(result.Findings)
 

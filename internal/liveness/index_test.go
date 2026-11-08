@@ -10,6 +10,7 @@ import (
 )
 
 func TestIndexNamesEveryGeneratedFileByItsHeaderLine(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	for name, body := range map[string]string{
 		"go.mod":           "module example.com/app\n\ngo 1.27.1\n",

@@ -56,6 +56,7 @@ func asNamed(evaluations []evaluation) []evaluated {
 }
 
 func TestEvaluatePublishesOneRecordPerOwnSideWithItsState(t *testing.T) {
+	t.Parallel()
 	in := edged(t, "selfcheck-edges.txtar", applicationConfig())
 	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnreachableExport: unreachableExport})
 
@@ -86,6 +87,7 @@ func TestEvaluatePublishesOneRecordPerOwnSideWithItsState(t *testing.T) {
 }
 
 func TestEvaluateCarriesTheFindingTheAnalyzerWouldHaveReported(t *testing.T) {
+	t.Parallel()
 	in := edged(t, "selfcheck-edges.txtar", applicationConfig())
 	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnreachableExport: unreachableExport})
 	reported := findingOf(t, unevaluated(result), vocab.UnreachableExport, "Event")
@@ -106,6 +108,7 @@ func TestEvaluateCarriesTheFindingTheAnalyzerWouldHaveReported(t *testing.T) {
 }
 
 func TestEvaluatePublishesTheFindingAboutTheDeclarationAnEdgeNamesAndNeverAPartOfIt(t *testing.T) {
+	t.Parallel()
 	in := edged(t, "selfcheck-edges.txtar", applicationConfig())
 	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnreachableExport: unreachableExport})
 	const declaring = "go://example.com/selfcheckedges#"
@@ -137,6 +140,7 @@ func TestEvaluatePublishesTheFindingAboutTheDeclarationAnEdgeNamesAndNeverAPartO
 }
 
 func TestEvaluatePublishesANarrowingCandidateWhoseOnlyOutsideReferenceIsAnEdge(t *testing.T) {
+	t.Parallel()
 	in := edged(t, "selfcheck-edges.txtar", applicationConfig())
 	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnnecessaryExport: unnecessaryExport})
 	if !slices.Contains(namesUnder(unevaluated(result), vocab.UnnecessaryExport), "Local") {
@@ -166,6 +170,7 @@ func TestEvaluatePublishesANarrowingCandidateWhoseOnlyOutsideReferenceIsAnEdge(t
 }
 
 func TestEvaluateReadsOnlyItsOwnSideOfEveryEdge(t *testing.T) {
+	t.Parallel()
 	in := edged(t, "selfcheck-edges.txtar", applicationConfig())
 	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnreachableExport: unreachableExport})
 
@@ -182,6 +187,7 @@ func TestEvaluateReadsOnlyItsOwnSideOfEveryEdge(t *testing.T) {
 }
 
 func TestEvaluateWithNoDeclaredEdgeChangesNothing(t *testing.T) {
+	t.Parallel()
 	in := edged(t, "selfcheck-edges.txtar", applicationConfig())
 	in.Edges = nil
 	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnreachableExport: unreachableExport})

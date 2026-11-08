@@ -8,6 +8,7 @@ import (
 )
 
 func TestDeletableLinesCountALineSeveralSpansCoverOnce(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		spans []liveness.Span
 		want  int
@@ -56,6 +57,7 @@ func TestDeletableLinesCountALineSeveralSpansCoverOnce(t *testing.T) {
 }
 
 func TestComponentNumberReadsWhatComponentIDMints(t *testing.T) {
+	t.Parallel()
 	for _, n := range []int{1, 7, 120} {
 		if got, minted := ComponentNumber(ComponentID(n)); !minted || got != n {
 			t.Errorf("ComponentNumber(ComponentID(%d)) = %d, %v, want %d, true", n, got, minted, n)
@@ -69,6 +71,7 @@ func TestComponentNumberReadsWhatComponentIDMints(t *testing.T) {
 }
 
 func TestWithholdsRanksTheClassBelowTheMinimum(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		minimum, class vocab.Class
 		want           bool

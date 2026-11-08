@@ -26,6 +26,12 @@ const (
 	product        = "deadset-go"
 )
 
+// corpusJobs is how many fixtures the corpus run answers at once. A fixture's
+// analyses are processes that mostly wait on the go command they start, whose
+// start-up and reads of the toolchain's files cost several times more on Windows
+// than elsewhere, so twice the processors keeps them busy.
+var corpusJobs = 2 * runtime.GOMAXPROCS(0)
+
 // binary is the command, built once by TestMain with no version control state
 // stamped, so the version it states is the development version at every commit.
 var binary string
@@ -65,7 +71,7 @@ func TestConformanceCorpus(t *testing.T) {
 	}
 	results, err := corpus.Run(t.Context(), spec.Corpus,
 		corpus.Analyzer{Command: []string{binary}, Language: string(vocab.Go)},
-		corpus.Options{Gaps: gaps.Gaps, Jobs: runtime.GOMAXPROCS(0), Scratch: t.TempDir()})
+		corpus.Options{Gaps: gaps.Gaps, Jobs: corpusJobs, Scratch: t.TempDir()})
 	if err != nil {
 		t.Fatalf("corpus.Run = %v, want the results document", err)
 	}

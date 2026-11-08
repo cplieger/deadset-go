@@ -29,7 +29,30 @@ var (
 
 	// errNotDirectory reports a target path that exists and is not a directory.
 	errNotDirectory = errors.New("not a directory")
+
+	// ErrNamed reports a target or a scope document the invocation names that cannot
+	// be read: absent, not a directory or a file as its role needs, or refused by the
+	// scope schema. The fix is to the invocation, whatever the platform's wording.
+	ErrNamed = errors.New("scope: an input the invocation names cannot be read")
 )
+
+// namedError is one [ErrNamed] failure, which keeps the message and the cause it
+// wraps.
+type namedError struct{ err error }
+
+func (e namedError) Error() string { return e.err.Error() }
+
+func (e namedError) Unwrap() error { return e.err }
+
+func (namedError) Is(target error) bool { return target == ErrNamed }
+
+// named marks err as [ErrNamed] unless ctx ended the read.
+func named(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return err
+	}
+	return namedError{err}
+}
 
 // Module is one module the run loads: the target or a declared consumer.
 //
@@ -80,12 +103,12 @@ var scopeSchema = sync.OnceValues(func() (*document.Schema, error) {
 // read decodes the scope document at path as one strict instance of the
 // Contract's scope schema, refused as [errRefused] naming the first place at
 // fault, and resolves a relative path inside it against the document's own
-// directory. An absent document is an error satisfying
-// errors.Is(err, fs.ErrNotExist).
+// directory. A document it cannot read or refuses is an [ErrNamed] error, an absent
+// one also satisfying errors.Is(err, fs.ErrNotExist).
 func read(ctx context.Context, path string) (Document, error) {
 	body, err := jsondoc.Read(ctx, path, vocab.DocumentMaxBytes)
 	if err != nil {
-		return Document{}, fmt.Errorf("scope: read %s: %w", path, err)
+		return Document{}, named(ctx, fmt.Errorf("scope: read %s: %w", path, err))
 	}
 	schema, err := scopeSchema()
 	if err != nil {
@@ -93,14 +116,14 @@ func read(ctx context.Context, path string) (Document, error) {
 	}
 	var wire wireDocument
 	if err := jsondoc.Unmarshal(schema, path, body, &wire); err != nil {
-		return Document{}, fmt.Errorf("%w: %w", errRefused, err)
+		return Document{}, named(ctx, fmt.Errorf("%w: %w", errRefused, err))
 	}
 	return resolve(&wire, filepath.Dir(path))
 }
 
 // ForDir is the scope of a run given no scope document and no workspace: dir is
-// the target and nothing else is loaded. It returns an error naming dir when dir
-// is not an existing directory.
+// the target and nothing else is loaded. It returns an [ErrNamed] error naming dir
+// when dir is not an existing directory.
 func ForDir(dir string) (Document, error) {
 	abs, err := existingDir(dir)
 	if err != nil {
@@ -118,10 +141,10 @@ func existingDir(dir string) (string, error) {
 	}
 	info, err := os.Stat(abs)
 	if err != nil {
-		return "", fmt.Errorf("scope: target %s: %w", abs, err)
+		return "", namedError{fmt.Errorf("scope: target %s: %w", abs, err)}
 	}
 	if !info.IsDir() {
-		return "", fmt.Errorf("scope: target %s: %w", abs, errNotDirectory)
+		return "", namedError{fmt.Errorf("scope: target %s: %w", abs, errNotDirectory)}
 	}
 	return abs, nil
 }

@@ -127,6 +127,7 @@ func orPackage(emitters map[vocab.Code]Emitter) map[vocab.Code]Emitter {
 }
 
 func TestStaleSuppressionsReportsEveryRecordAtEveryMechanismTheMarkHeldNothingBackFor(t *testing.T) {
+	t.Parallel()
 	in := suppressed(t, "selfcheck-stale.txtar", applicationConfig())
 
 	want := []staleAt{
@@ -142,6 +143,7 @@ func TestStaleSuppressionsReportsEveryRecordAtEveryMechanismTheMarkHeldNothingBa
 }
 
 func TestStaleSuppressionsCarriesTheRecordAsWritten(t *testing.T) {
+	t.Parallel()
 	in := suppressed(t, "selfcheck-stale.txtar", applicationConfig())
 
 	stale := computed(t, in, packageEmitters()).Stale
@@ -177,6 +179,7 @@ func TestStaleSuppressionsCarriesTheRecordAsWritten(t *testing.T) {
 }
 
 func TestTotalsCountsBoundRecordsInEffectAndEveryReasonOnce(t *testing.T) {
+	t.Parallel()
 	in := suppressed(t, "selfcheck-stale.txtar", applicationConfig())
 
 	// In effect: the directive above quiet, the entry naming Dropped and the row
@@ -190,6 +193,7 @@ func TestTotalsCountsBoundRecordsInEffectAndEveryReasonOnce(t *testing.T) {
 }
 
 func TestStaleSuppressionsLeavesARecordDormantWhoseCodeTheConfigurationSilences(t *testing.T) {
+	t.Parallel()
 	resolved := applicationConfig()
 	resolved.Severity = map[string]vocab.Severity{"DS1002": vocab.Allow}
 	in := suppressed(t, "selfcheck-stale.txtar", resolved)
@@ -214,6 +218,7 @@ func TestStaleSuppressionsLeavesARecordDormantWhoseCodeTheConfigurationSilences(
 }
 
 func TestStaleSuppressionsLeavesARecordDormantBelowTheConfiguredMinimumConfidence(t *testing.T) {
+	t.Parallel()
 	for name, held := range map[string]struct {
 		minimum  vocab.Class
 		inEffect int
@@ -240,6 +245,7 @@ func TestStaleSuppressionsLeavesARecordDormantBelowTheConfiguredMinimumConfidenc
 }
 
 func TestStaleSuppressionsKeepsARecordNamingARetiredCodeStale(t *testing.T) {
+	t.Parallel()
 	resolved := applicationConfig()
 	// DS1499 is a code no live kind carries, so nothing reports under it and no
 	// severity key can name it: a record naming one is silenced by nothing and can
@@ -254,6 +260,7 @@ func TestStaleSuppressionsKeepsARecordNamingARetiredCodeStale(t *testing.T) {
 }
 
 func TestStaleSuppressionsCollapsesTheRecordsAtOneSiteIntoOneFindingNamingEveryCode(t *testing.T) {
+	t.Parallel()
 	in := suppressed(t, "selfcheck-collapse.txtar", applicationConfig())
 	const collapsedCodes = "inline directive for DS1001 and DS1501 matches no current finding"
 
@@ -272,6 +279,7 @@ func TestStaleSuppressionsCollapsesTheRecordsAtOneSiteIntoOneFindingNamingEveryC
 }
 
 func TestTheRefusalKindsReportEachRefusalAsTheSuppressionWasWritten(t *testing.T) {
+	t.Parallel()
 	in := suppressed(t, "selfcheck-stale.txtar", applicationConfig())
 	in.Refusals = []core.Refusal{
 		{
@@ -338,6 +346,7 @@ func oneRefusal(t *testing.T, emit Emitter, in *Input, code vocab.Code) draft {
 }
 
 func TestAnEntryLackingBothItsReasonAndItsPathIsTwoFindingsAtOnePosition(t *testing.T) {
+	t.Parallel()
 	in := suppressed(t, "selfcheck-stale.txtar", applicationConfig())
 	site := position(core.IgnoreFileName, 4, 5)
 	refusal := core.Refusal{
@@ -370,6 +379,7 @@ func TestAnEntryLackingBothItsReasonAndItsPathIsTwoFindingsAtOnePosition(t *test
 }
 
 func TestADirectiveNamingTwoCodesAndNoReasonIsOneFindingPerCodeAtOnePosition(t *testing.T) {
+	t.Parallel()
 	in := suppressed(t, "selfcheck-stale.txtar", applicationConfig())
 	site := position("main.go", 21, 1)
 	refusal := core.Refusal{
@@ -417,6 +427,7 @@ func TestADirectiveNamingTwoCodesAndNoReasonIsOneFindingPerCodeAtOnePosition(t *
 }
 
 func TestTheRefusalKindsRefuseARefusalUnderACodeTheGrammarDoesNotReport(t *testing.T) {
+	t.Parallel()
 	in := suppressed(t, "selfcheck-stale.txtar", applicationConfig())
 	in.Refusals = []core.Refusal{{
 		Reported:  vocab.StaleSuppression,
@@ -433,6 +444,7 @@ func TestTheRefusalKindsRefuseARefusalUnderACodeTheGrammarDoesNotReport(t *testi
 }
 
 func TestUnmatchedRootsReportsEveryConfiguredStringAsTheConfigurationSpellsIt(t *testing.T) {
+	t.Parallel()
 	in := suppressed(t, "selfcheck-stale.txtar", applicationConfig())
 	in.Unmatched = []roots.Unmatched{
 		{Source: "go://example.com/selfcheck#Vanished"},
@@ -476,6 +488,7 @@ func TestUnmatchedRootsReportsEveryConfiguredStringAsTheConfigurationSpellsIt(t 
 }
 
 func TestAMarkOnADeadComponentsRootLeavesTheSymbolsOnlyThatRootReferencesUnreported(t *testing.T) {
+	t.Parallel()
 	in := suppressed(t, "selfcheck-seed.txtar", applicationConfig())
 	result := computed(t, in, declarationEmitters())
 
@@ -493,6 +506,7 @@ func TestAMarkOnADeadComponentsRootLeavesTheSymbolsOnlyThatRootReferencesUnrepor
 }
 
 func TestWithoutTheMarkTheDeadComponentsRootIsReportedAndTheComponentFalls(t *testing.T) {
+	t.Parallel()
 	in := suppressed(t, "selfcheck-seed.txtar", applicationConfig())
 	// The same input with the mark withdrawn, which is the run a maintainer makes
 	// after deleting the directive.
@@ -531,6 +545,7 @@ func position(path string, line, column int) token.Position {
 }
 
 func TestASuppressionWithholdsTheFindingItsCodeWouldHaveProducedWhateverTheKind(t *testing.T) {
+	t.Parallel()
 	in := suppressed(t, "selfcheck-withheld.txtar", applicationConfig())
 	if len(in.Marks) != 4 {
 		t.Fatalf("Setup: the fixture's directives read as %d records, want 4: %+v", len(in.Marks), in.Marks)
@@ -581,6 +596,7 @@ func TestASuppressionWithholdsTheFindingItsCodeWouldHaveProducedWhateverTheKind(
 }
 
 func TestTheStaleSuppressionKindReadsWhatTheSamePassWithheldWhateverTheVocabularysOrder(t *testing.T) {
+	t.Parallel()
 	in := suppressed(t, "selfcheck-withheld.txtar", applicationConfig())
 
 	// The unused-parameter kind runs after the stale-suppression kind in the
@@ -607,6 +623,7 @@ func TestTheStaleSuppressionKindReadsWhatTheSamePassWithheldWhateverTheVocabular
 }
 
 func TestARecordIsDormantRatherThanInEffectWhereTheMinimumConfidenceWithholdsItsFindingToo(t *testing.T) {
+	t.Parallel()
 	for name, held := range map[string]struct {
 		minimum  vocab.Class
 		inEffect int
@@ -645,6 +662,7 @@ func TestARecordIsDormantRatherThanInEffectWhereTheMinimumConfidenceWithholdsIts
 }
 
 func TestTheFirstRecordOfTheReadingOrderIsInEffectAndALaterOneIsStale(t *testing.T) {
+	t.Parallel()
 	in := suppressed(t, "selfcheck-two-mechanisms.txtar", applicationConfig())
 	if len(in.Marks) != 4 {
 		t.Fatalf("Setup: the fixture's documents read as %d records, want 4: two directives and two entries", len(in.Marks))
@@ -691,6 +709,7 @@ func TestTheFirstRecordOfTheReadingOrderIsInEffectAndALaterOneIsStale(t *testing
 }
 
 func TestTheRecordInEffectIsTheFirstOfTheReadingOrderAndNotOfAnyFileOrder(t *testing.T) {
+	t.Parallel()
 	in := suppressed(t, "selfcheck-two-mechanisms.txtar", applicationConfig())
 
 	// The declaration in zz.go is the one no file order reads first: its directive is
@@ -708,6 +727,7 @@ func TestTheRecordInEffectIsTheFirstOfTheReadingOrderAndNotOfAnyFileOrder(t *tes
 }
 
 func TestOneFindingIsWithheldByTheFirstRecordThatNamesItAndTheSecondIsStale(t *testing.T) {
+	t.Parallel()
 	in := suppressed(t, "selfcheck-withheld.txtar", applicationConfig())
 
 	// The adjudication a maintainer copied out of the report into the ignore file,
@@ -749,6 +769,7 @@ func recordNaming(t *testing.T, marks []core.Record, code vocab.Code, ref string
 }
 
 func TestUnmatchedRootsIsPositionedInTheDocumentThatDeclaredTheRoot(t *testing.T) {
+	t.Parallel()
 	for name, held := range map[string]struct {
 		document string
 		want     string
@@ -776,6 +797,7 @@ func TestUnmatchedRootsIsPositionedInTheDocumentThatDeclaredTheRoot(t *testing.T
 }
 
 func TestStaleSuppressionsReadsDormancyFromTheFindingsARecordMatches(t *testing.T) {
+	t.Parallel()
 	bothStale := []string{
 		"inline directive for DS1001 matches no current finding, and its declaration reports DS1002",
 		"inline directive for DS1401 matches no current finding, and its declaration reports DS1002",
@@ -831,6 +853,7 @@ func TestStaleSuppressionsReadsDormancyFromTheFindingsARecordMatches(t *testing.
 }
 
 func TestStaleSuppressionsLeavesARecordDormantWhoseFindingANameLiteralLowers(t *testing.T) {
+	t.Parallel()
 	in := suppressed(t, "selfcheck-name-literal.txtar", applicationConfig())
 
 	if got := staleFindings(t, in, nil); len(got) != 0 {
@@ -842,6 +865,7 @@ func TestStaleSuppressionsLeavesARecordDormantWhoseFindingANameLiteralLowers(t *
 }
 
 func TestAnIgnoreEntryNamingAParameterHoldsThatParameterAlone(t *testing.T) {
+	t.Parallel()
 	in := suppressed(t, "selfcheck-parameter-entries.txtar", applicationConfig())
 	result := computed(t, in, intraFuncEmitters())
 
@@ -864,6 +888,7 @@ func TestAnIgnoreEntryNamingAParameterHoldsThatParameterAlone(t *testing.T) {
 }
 
 func TestAnIgnoreEntryNamingAParameterIsDormantUnderAllow(t *testing.T) {
+	t.Parallel()
 	resolved := applicationConfig()
 	resolved.Severity = map[string]vocab.Severity{"DS1401": vocab.Allow}
 	in := suppressed(t, "selfcheck-parameter-entries.txtar", resolved)
@@ -877,6 +902,7 @@ func TestAnIgnoreEntryNamingAParameterIsDormantUnderAllow(t *testing.T) {
 // A record holding a test-only use of production code only tests reach holds a
 // finding the default minimum withholds, so it is dormant: neither stale nor in effect.
 func TestARecordOnProductionCodeOnlyTestsReachIsDormantByDefault(t *testing.T) {
+	t.Parallel()
 	in := suppressed(t, "selfcheck-test-reached.txtar", applicationConfig())
 
 	if got := staleFindings(t, in, nil); len(got) != 0 {
@@ -890,6 +916,7 @@ func TestARecordOnProductionCodeOnlyTestsReachIsDormantByDefault(t *testing.T) {
 // A record holding a declaration only production code only tests reach calls holds a
 // finding the default minimum withholds, so it is dormant: neither stale nor in effect.
 func TestARecordOnACalleeOfProductionCodeOnlyTestsReachIsDormantByDefault(t *testing.T) {
+	t.Parallel()
 	in := suppressed(t, "selfcheck-test-reached-callee.txtar", applicationConfig())
 	computed(t, in, declarationEmitters())
 

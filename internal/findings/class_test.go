@@ -19,6 +19,7 @@ import (
 const theConsumer = "example.com/consumer"
 
 func TestTheReachabilityClassIsWhatTheRunKnowsAboutTheConsumers(t *testing.T) {
+	t.Parallel()
 	for name, one := range map[string]struct {
 		resolved  config.Config
 		consumers Consumers
@@ -79,6 +80,7 @@ func TestTheReachabilityClassIsWhatTheRunKnowsAboutTheConsumers(t *testing.T) {
 }
 
 func TestEveryFindingNamesTheConsumersTheRunLoaded(t *testing.T) {
+	t.Parallel()
 	consumers := Consumers{Declared: []string{theConsumer}, Loaded: []string{theConsumer}, Complete: true}
 	resolved := libraryConfig()
 	resolved.Consumers.Complete = true
@@ -99,6 +101,7 @@ func TestEveryFindingNamesTheConsumersTheRunLoaded(t *testing.T) {
 }
 
 func TestTheClassOfADeclarationNoConsumerCanReachIsCertainWithoutAnyConsumerInformation(t *testing.T) {
+	t.Parallel()
 	for name, one := range map[string]struct {
 		id   inventory.SymbolID
 		want vocab.Class
@@ -124,6 +127,7 @@ func TestTheClassOfADeclarationNoConsumerCanReachIsCertainWithoutAnyConsumerInfo
 // declaration that introduces it. The function that declares it is possible under
 // the same run, which is what tells the two apart.
 func TestTheClassOfATypeParameterOfAFunctionIsCertainWithNoConsumerInformation(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "precedence-importable.txtar", libraryConfig(), Consumers{})
 
 	result := computed(t, in, packageEmitters())
@@ -146,6 +150,7 @@ func TestTheClassOfATypeParameterOfAFunctionIsCertainWithNoConsumerInformation(t
 // fixture this rule was got backwards against, so it is pinned here against the
 // published expectation rather than against a local one.
 func TestTheCorpusConversionFixtureIsCertainWithItsConsumerLoaded(t *testing.T) {
+	t.Parallel()
 	const fixture = "interface-satisfaction-conversion"
 	in := corpusInput(t, fixture, libraryConfig())
 	if in.Consumers.Complete {
@@ -179,6 +184,7 @@ func TestTheCorpusConversionFixtureIsCertainWithItsConsumerLoaded(t *testing.T) 
 }
 
 func TestTheClosedWorldFactNeedsTheCompletenessDeclaration(t *testing.T) {
+	t.Parallel()
 	const otherConsumer = "example.com/other"
 
 	for name, one := range map[string]struct {
@@ -231,6 +237,7 @@ func TestTheClosedWorldFactNeedsTheCompletenessDeclaration(t *testing.T) {
 // does not govern once already: what a body never reads is decided by the body, and
 // no caller can change it.
 func TestTheCompletenessDeclarationHasTwoReaders(t *testing.T) {
+	t.Parallel()
 	want := []string{"intrafunc.go:callersUnknown", "narrowing.go:closed"}
 
 	if got := callersOf(t, "consumersLoaded"); !slices.Equal(got, want) {
@@ -291,6 +298,7 @@ func calls(body *ast.BlockStmt, method string) bool {
 }
 
 func TestTheClassOfADeclarationOfAMainPackageIsCertain(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "declarations-unused.txtar", libraryConfig(), Consumers{})
 
 	found := false
@@ -312,6 +320,7 @@ func TestTheClassOfADeclarationOfAMainPackageIsCertain(t *testing.T) {
 // test function in a published package's own test file is certain with no consumer
 // information, where the package's exported declarations are possible.
 func TestTheClassOfADeclarationOfATestFileIsCertain(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "declarations-test-of-dead-code.txtar", libraryConfig(), Consumers{})
 
 	test := narrowedIDOf(t, in, "go://example.com/app/catalog#TestDeadOnly")
@@ -329,6 +338,7 @@ func TestTheClassOfADeclarationOfATestFileIsCertain(t *testing.T) {
 // method stays possible, because a value converted to an interface carries it out
 // of the module.
 func TestTheClassOfAFieldOfAnUnexposedUnexportedTypeIsCertain(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "class-hidden-member.txtar", libraryConfig(), Consumers{})
 
 	for member, want := range map[string]vocab.Class{
@@ -354,6 +364,7 @@ func TestTheClassOfAFieldOfAnUnexposedUnexportedTypeIsCertain(t *testing.T) {
 }
 
 func TestAnUnanalysedConsumerIsReadFromTheInnermostUnitWhateverTheMapOrder(t *testing.T) {
+	t.Parallel()
 	in := &Input{Root: "/r", Per: configs{{Result: &load.Result{Units: []load.Unit{
 		{Dir: "/r", UnanalysedConsumer: true},
 		{Dir: "/r/x"},

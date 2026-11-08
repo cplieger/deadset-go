@@ -549,6 +549,7 @@ func handOffModule(t *testing.T) string {
 }
 
 func TestFindingsOfKeepsAMethodReachedThroughAnInterfaceHandedOnByAFunctionValue(t *testing.T) {
+	t.Parallel()
 	envelope := reportOfDir(t, handOffModule(t))
 	uncalled := false
 	for i := range envelope.Findings {
@@ -584,6 +585,7 @@ func causeModule(t *testing.T) string {
 }
 
 func TestFindingsOfKeepsTheErrorMethodOfATestFilesCancelCause(t *testing.T) {
+	t.Parallel()
 	envelope := reportOfDir(t, causeModule(t))
 	for i := range envelope.Findings {
 		found := &envelope.Findings[i]

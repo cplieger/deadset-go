@@ -10,6 +10,7 @@ import (
 )
 
 func TestATypeErrorAnotherConfigurationDoesNotReportRootsAndSkipsNothing(t *testing.T) {
+	t.Parallel()
 	dir := extract(t, "type-error-platform.txtar")
 	var results []load.Result
 	for _, c := range []load.Configuration{

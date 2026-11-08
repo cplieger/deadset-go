@@ -219,6 +219,7 @@ func (r methodReach) reads(m *types.Func) bool {
 func EncodingReflectionDetector(in *Program) ([]Exemption, error) {
 	f := &encodingFlow{
 		conversions:  in.programConversions,
+		readings:     facts.NewReadings(in.Result.Fset),
 		kept:         newRetention(in, vocab.EncodingReflection),
 		filled:       newRetention(in, vocab.EncodingReflection),
 		own:          programPaths(in),
@@ -258,6 +259,7 @@ type encodingFlow struct {
 	decode      *decoders
 	templates   *templateOrigins   // which templates an execution's receiver holds
 	conversions []facts.Conversion // the program's, consumers' included
+	readings    *facts.Readings
 
 	// The tables [encodingFlow.index] fills from every arrival before any is
 	// retained: the import closure of each outside package an arrival reaches, by
@@ -735,11 +737,12 @@ func (f *encodingFlow) ownTypes(info *types.Info, arg ast.Expr) []types.Type {
 }
 
 // convertedTo is every concrete type the program converts to one defined interface
-// type, at the sites the program and its loaded consumers convert ([Program]).
+// type, at the sites the program and its loaded consumers convert ([Program]), the
+// interface of another module's reading of its package included.
 func (f *encodingFlow) convertedTo(iface *types.Named) []types.Type {
 	var found []types.Type
 	for i := range f.conversions {
-		if c := &f.conversions[i]; types.Identical(c.Interface, iface) {
+		if c := &f.conversions[i]; f.readings.Same(c.Interface, iface) {
 			found = append(found, c.From)
 		}
 	}

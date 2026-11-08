@@ -118,6 +118,13 @@ func TestAValueAssertedAcrossTheTwoReadingsAndEncodedHoldsTheFieldsTheEncoderRea
 	}
 }
 
+func TestAValueAssertedAcrossTheTwoReadingsAndEncodedInTheTypesReadingHoldsTheFieldsTheEncoderReads(t *testing.T) {
+	t.Parallel()
+	if got := reportedAt(t, "findings-ledger/derived-conversion-encoded-in-the-types-reading.txtar"); len(got) != 0 {
+		t.Errorf("findings = %q, want none: m's json.Marshal reads Square.Secret through the Namer b asserts", got)
+	}
+}
+
 func TestAnAssertedMethodVariadicInATypeParameterKeepsTheInterfaceItWrites(t *testing.T) {
 	t.Parallel()
 	if got := reportedAt(t, "findings-ledger/assertion-of-a-variadic-type-parameter-method.txtar"); len(got) != 0 {

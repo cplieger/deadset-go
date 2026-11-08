@@ -105,6 +105,7 @@ func oneFinding(in *Input, code vocab.Code, id inventory.SymbolID) draft {
 }
 
 func TestComputeFillsEveryFieldTheContractRequiresOfAFinding(t *testing.T) {
+	t.Parallel()
 	in := handInput(applicationConfig())
 	reported := oneFinding(in, vocab.UnusedExported, exportedID)
 
@@ -206,6 +207,7 @@ func render(value any) string {
 }
 
 func TestComputeReportsNoFindingOfAnAllowedKindAndNoneOfACodeWithNoEmitter(t *testing.T) {
+	t.Parallel()
 	resolved := applicationConfig()
 	resolved.Severity = map[string]vocab.Severity{string(vocab.UnusedExported): vocab.Allow}
 	in := handInput(resolved)
@@ -221,6 +223,7 @@ func TestComputeReportsNoFindingOfAnAllowedKindAndNoneOfACodeWithNoEmitter(t *te
 }
 
 func TestComputeRefusesAMessageAReporterCannotCarry(t *testing.T) {
+	t.Parallel()
 	for name, message := range map[string]string{
 		"ending in a full stop": "the declaration has no reference.",
 		"holding a line feed":   "the declaration has no reference\nanywhere",
@@ -240,6 +243,7 @@ func TestComputeRefusesAMessageAReporterCannotCarry(t *testing.T) {
 }
 
 func TestComputeRefusesACodeThatIsNotTheEmittersOwn(t *testing.T) {
+	t.Parallel()
 	in := handInput(applicationConfig())
 	reported := oneFinding(in, vocab.UnusedUnexported, exportedID)
 
@@ -251,6 +255,7 @@ func TestComputeRefusesACodeThatIsNotTheEmittersOwn(t *testing.T) {
 }
 
 func TestComputeRefusesAnEmitterRegisteredUnderACodeTheVocabularyDoesNotHold(t *testing.T) {
+	t.Parallel()
 	const retired = "DS1299"
 
 	in := handInput(applicationConfig())
@@ -262,6 +267,7 @@ func TestComputeRefusesAnEmitterRegisteredUnderACodeTheVocabularyDoesNotHold(t *
 }
 
 func TestComputeRefusesTwoFindingsAboutOneDeclaration(t *testing.T) {
+	t.Parallel()
 	in := handInput(applicationConfig())
 
 	_, err := Compute(in, map[vocab.Code]Emitter{
@@ -275,6 +281,7 @@ func TestComputeRefusesTwoFindingsAboutOneDeclaration(t *testing.T) {
 }
 
 func TestComputeRefusesAFindingAboutASymbolAnExemptionRetained(t *testing.T) {
+	t.Parallel()
 	in := handInput(applicationConfig())
 	in.Sweep.Retained = []exempt.Exemption{{
 		ID:     exportedID,
@@ -291,6 +298,7 @@ func TestComputeRefusesAFindingAboutASymbolAnExemptionRetained(t *testing.T) {
 }
 
 func TestComputeRefusesAFindingAboutNoDeclarationOfTheInventory(t *testing.T) {
+	t.Parallel()
 	in := handInput(applicationConfig())
 	reported := draft{
 		Code:    vocab.UnusedExported,
@@ -305,6 +313,7 @@ func TestComputeRefusesAFindingAboutNoDeclarationOfTheInventory(t *testing.T) {
 }
 
 func TestComputeRefusesAFindingAboutADeclarationAnEmitterNamesByItsReferenceAlone(t *testing.T) {
+	t.Parallel()
 	in := handInput(applicationConfig())
 	reported := draft{
 		Code:     vocab.UnusedExported,
@@ -384,6 +393,7 @@ func TestComputeReportsTheCeilingAsTheConfidenceOfACertainClass(t *testing.T) {
 }
 
 func TestComputeReturnsTheFindingsInTheCanonicalOrder(t *testing.T) {
+	t.Parallel()
 	in := handInput(applicationConfig())
 
 	result := computed(t, in, map[vocab.Code]Emitter{
@@ -405,6 +415,7 @@ func TestComputeReturnsTheFindingsInTheCanonicalOrder(t *testing.T) {
 }
 
 func TestComputeMintsAComponentForASubjectNoDeadComponentHolds(t *testing.T) {
+	t.Parallel()
 	in := handInput(applicationConfig())
 
 	result := computed(t, in, map[vocab.Code]Emitter{
@@ -421,6 +432,7 @@ func TestComputeMintsAComponentForASubjectNoDeadComponentHolds(t *testing.T) {
 }
 
 func TestComputeMarksAFindingInAGeneratedFileAsOneNoMechanicalEditActsOn(t *testing.T) {
+	t.Parallel()
 	in := handInput(applicationConfig())
 
 	result := computed(t, in, map[vocab.Code]Emitter{
@@ -438,6 +450,7 @@ func TestComputeMarksAFindingInAGeneratedFileAsOneNoMechanicalEditActsOn(t *test
 }
 
 func TestComputeRefusesAPassWithNoResolvedConfiguration(t *testing.T) {
+	t.Parallel()
 	if _, err := Compute(&Input{}, nil); !errors.Is(err, errInput) {
 		t.Errorf("Compute() with no configuration = %v, want an errInput refusal", err)
 	}
@@ -594,6 +607,7 @@ func TestLivenessAbsentAnswersForEveryFindingTheContractForbidsTheRelationOn(t *
 }
 
 func TestEveryKindOfDeclarationMapsOntoTheContractsSubjectVocabulary(t *testing.T) {
+	t.Parallel()
 	const schemaPath = "contract/finding.schema.json"
 
 	body, err := spec.Contract.ReadFile(schemaPath)
@@ -662,6 +676,7 @@ func requirementFinding() draft {
 }
 
 func TestComputeCompletesAFindingWhoseSubjectIsNoDeclarationOfTheInventory(t *testing.T) {
+	t.Parallel()
 	in := handInput(applicationConfig())
 
 	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnusedDependency: emitterOf(requirementFinding())})
@@ -695,6 +710,7 @@ func TestComputeCompletesAFindingWhoseSubjectIsNoDeclarationOfTheInventory(t *te
 }
 
 func TestComputeRefusesTwoFindingsAboutOneSubjectThatIsNoDeclaration(t *testing.T) {
+	t.Parallel()
 	in := handInput(applicationConfig())
 	twice := requirementFinding()
 
@@ -706,6 +722,7 @@ func TestComputeRefusesTwoFindingsAboutOneSubjectThatIsNoDeclaration(t *testing.
 }
 
 func TestComputeRefusesAFindingAboutADeclarationKindTheInventoryDoesNotHold(t *testing.T) {
+	t.Parallel()
 	for kind, subject := range map[string]string{
 		"a function": symbolKinds[inventory.KindFunc],
 		"a field":    symbolKinds[inventory.KindField],
@@ -729,6 +746,7 @@ func TestComputeRefusesAFindingAboutADeclarationKindTheInventoryDoesNotHold(t *t
 }
 
 func TestComputeRefusesARowThatNamesNoRecord(t *testing.T) {
+	t.Parallel()
 	in := handInput(applicationConfig())
 	unnamed := requirementFinding()
 	unnamed.Symbol.Ref = ""
@@ -741,6 +759,7 @@ func TestComputeRefusesARowThatNamesNoRecord(t *testing.T) {
 }
 
 func TestComputeRefusesAPartOfADeclarationTheInventoryDoesNotHold(t *testing.T) {
+	t.Parallel()
 	in := handInput(applicationConfig())
 	orphan := findingAt(vocab.UnusedParameter, Subject{
 		Ref:       "go://example.com/app#Absent",
@@ -758,6 +777,7 @@ func TestComputeRefusesAPartOfADeclarationTheInventoryDoesNotHold(t *testing.T) 
 }
 
 func TestASuppressionWithholdsAFindingReportedInAnotherFileThanTheDeclarationItNames(t *testing.T) {
+	t.Parallel()
 	in := suppressed(t, "interfaces-assertion-elsewhere.txtar", applicationConfig())
 	emitters := map[vocab.Code]Emitter{
 		vocab.UnusedSatisfactionAssertion: unusedSatisfactionAssertion,
@@ -799,6 +819,7 @@ func TestASuppressionWithholdsAFindingReportedInAnotherFileThanTheDeclarationItN
 }
 
 func TestASuppressionWithholdsNoFindingReportedInAFileTheRecordDoesNotName(t *testing.T) {
+	t.Parallel()
 	in := suppressed(t, "interfaces-assertion-elsewhere.txtar", applicationConfig())
 	if len(in.Marks) != 1 {
 		t.Fatalf("Setup: the fixture's ignore document read as %d records, want 1: %+v", len(in.Marks), in.Marks)

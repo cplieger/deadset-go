@@ -1,0 +1,89 @@
+A target of two modules: m hands out a Square as a Shaper and holds an encoder of
+lib's Namer, and b, which requires m, asserts m's Namer on the Square and hands the
+asserted value to m's encoder. Each module reads lib on its own, so the site the
+assertion derives names the Namer of b's reading, and the encoder, in m, asks for
+the types converted to the Namer of m's reading. The encoder reads Secret.
+
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- m/go.mod --
+module example.com/m
+
+go 1.27
+-- m/lib/lib.go --
+// Package lib declares a shape and the interfaces it reaches.
+package lib
+
+// Shaper is what the source hands out.
+type Shaper interface{ Area() int }
+
+// Namer is what b asserts.
+type Namer interface{ Name() string }
+
+// Square is the shape the source returns.
+type Square struct {
+	Secret string
+}
+
+// Area makes Square a Shaper.
+func (*Square) Area() int { return 4 }
+
+// Name is reached only through b's assertion of Namer.
+func (*Square) Name() string { return "square" }
+-- m/src/src.go --
+// Package src hands out a shape.
+package src
+
+import "example.com/m/lib"
+
+// Get returns a Square as a Shaper.
+func Get() lib.Shaper { return &lib.Square{Secret: "s"} }
+-- m/enc/enc.go --
+// Package enc encodes a Namer.
+package enc
+
+import (
+	"encoding/json"
+
+	"example.com/m/lib"
+)
+
+// Encode encodes n.
+func Encode(n lib.Namer) string {
+	out, _ := json.Marshal(n)
+	return string(out)
+}
+-- m/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/m/src"
+)
+
+func main() { fmt.Println(src.Get().Area()) }
+-- b/go.mod --
+module example.com/b
+
+go 1.27
+
+require example.com/m v0.0.0
+
+replace example.com/m => ../m
+-- b/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/m/enc"
+	"example.com/m/lib"
+	"example.com/m/src"
+)
+
+func main() {
+	if n, ok := src.Get().(lib.Namer); ok {
+		fmt.Println(n.Name(), enc.Encode(n))
+	}
+}

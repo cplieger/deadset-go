@@ -22,7 +22,7 @@ func TestNameableKeepsTheWorkspaceMembersTheReportCanName(t *testing.T) {
 	inside := scope.Module{Path: filepath.Join(invoked, "member")}
 	outside := scope.Module{Path: t.TempDir()}
 
-	if named := nameable([]scope.Module{inside, outside}); !slices.Equal(named, []scope.Module{inside}) {
+	if named := nameable(invoked, []scope.Module{inside, outside}); !slices.Equal(named, []scope.Module{inside}) {
 		t.Errorf("nameable() = %v, want [%v]", named, inside)
 	}
 }

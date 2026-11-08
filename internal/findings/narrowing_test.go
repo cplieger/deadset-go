@@ -111,6 +111,7 @@ func narrowedIDOf(t *testing.T, in *Input, ref string) inventory.SymbolID {
 }
 
 func TestUnnecessaryExportReportsAPublishedPackageOnlyUnderAClosedWorld(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		consumers Consumers
@@ -175,6 +176,7 @@ func TestUnnecessaryExportReportsAPublishedPackageOnlyUnderAClosedWorld(t *testi
 }
 
 func TestUnnecessaryExportNamesTheDeclaringFileWhereEveryReferenceIsInIt(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "narrowing-file.txtar", libraryConfig(), Consumers{})
 	found, err := unnecessaryExport(mustPass(t, in))
 	if err != nil {
@@ -190,6 +192,7 @@ func TestUnnecessaryExportNamesTheDeclaringFileWhereEveryReferenceIsInIt(t *test
 }
 
 func TestUnnecessaryExposureReportsAModuleWideReferenceSetUnderAClosedWorld(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		consumers Consumers
@@ -220,6 +223,7 @@ func TestUnnecessaryExposureReportsAModuleWideReferenceSetUnderAClosedWorld(t *t
 }
 
 func TestUnreachableExportReachesCertainWithNoConsumerInformation(t *testing.T) {
+	t.Parallel()
 	shared := analysisOf(t, "narrowing-published.txtar", asLibrary, Consumers{})
 	found, err := shared.emit(t, vocab.UnreachableExport)
 	if err != nil {
@@ -249,6 +253,7 @@ func TestUnreachableExportReachesCertainWithNoConsumerInformation(t *testing.T) 
 }
 
 func TestUnreachableExportSaysWhatTheAnalysisFoundAboutTheReferences(t *testing.T) {
+	t.Parallel()
 	found, err := analysisOf(t, "narrowing-published.txtar", asLibrary, Consumers{}).emit(t, vocab.UnreachableExport)
 	if err != nil {
 		t.Fatalf("UnreachableExport(narrowing-published) = error %v, want the findings", err)
@@ -268,6 +273,7 @@ func TestUnreachableExportSaysWhatTheAnalysisFoundAboutTheReferences(t *testing.
 }
 
 func TestUnreachableExportLeavesADeclarationOutsideItsPopulationAlone(t *testing.T) {
+	t.Parallel()
 	found, err := analysisOf(t, "narrowing-published.txtar", asLibrary, Consumers{}).emit(t, vocab.UnreachableExport)
 	if err != nil {
 		t.Fatalf("UnreachableExport(narrowing-published) = error %v, want the findings", err)
@@ -286,6 +292,7 @@ func TestUnreachableExportLeavesADeclarationOutsideItsPopulationAlone(t *testing
 }
 
 func TestUnreachableExportLeavesACandidateATestFileReferencesToTheTestOnlyKind(t *testing.T) {
+	t.Parallel()
 	result, err := analysisOf(t, "narrowing-published.txtar", asLibrary, Consumers{}).
 		compute(t, testOnlyAndUnreachableExport)
 	if err != nil {
@@ -316,6 +323,7 @@ func TestUnreachableExportLeavesACandidateATestFileReferencesToTheTestOnlyKind(t
 // unused-exported kind is allowed for a library whose published API may have
 // references the analysis cannot see, and an allowed kind cannot disagree.
 func TestNarrowingAndTheUnusedDeclarationKindsReportEachDeclarationOnce(t *testing.T) {
+	t.Parallel()
 	resolved := libraryConfig()
 	resolved.Consumers.Complete = true
 	in := inputOf(t, "narrowing-published.txtar", resolved, Consumers{Complete: true})
@@ -359,6 +367,7 @@ func TestNarrowingAndTheUnusedDeclarationKindsReportEachDeclarationOnce(t *testi
 // because an internal tree is closed world: they are not the subject of this test and
 // they are here because the table is the whole package's.
 func TestUnreachableExportYieldsEverySubjectAMoreSpecificKindReports(t *testing.T) {
+	t.Parallel()
 	want := map[string]vocab.Code{
 		"go://example.com/app/internal/api#Reader":      vocab.UnusedInterface,
 		"go://example.com/app/internal/api#Store.Flush": vocab.UncalledInterfaceMethod,
@@ -383,6 +392,7 @@ func TestUnreachableExportYieldsEverySubjectAMoreSpecificKindReports(t *testing.
 }
 
 func TestNarrowingLeavesADeclarationAnExemptionHoldsLiveAlone(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "narrowing-published.txtar", libraryConfig(), Consumers{})
 	exempted := narrowedIDOf(t, in, internalHelper)
 	exemptions := []exempt.Exemption{{ID: exempted, Class: "interface-satisfaction"}}
@@ -403,6 +413,7 @@ func TestNarrowingLeavesADeclarationAnExemptionHoldsLiveAlone(t *testing.T) {
 // it than a narrower visibility, so a narrowing yields it whatever its reference
 // spread says.
 func TestNarrowingYieldsADeclarationNothingReadsToTheWriteOnlyKind(t *testing.T) {
+	t.Parallel()
 	const (
 		file    = "answer.go"
 		pkgPath = "example.com/app"
@@ -472,6 +483,7 @@ func TestNarrowingYieldsADeclarationNothingReadsToTheWriteOnlyKind(t *testing.T)
 }
 
 func TestNarrowingLeavesADeclarationReferencedFromOutsideTheModuleAlone(t *testing.T) {
+	t.Parallel()
 	const (
 		ref     = "go://example.com/app/catalog#Shared"
 		file    = "catalog/api.go"
@@ -553,6 +565,7 @@ func TestNarrowingLeavesADeclarationReferencedFromOutsideTheModuleAlone(t *testi
 // the two narrowing kinds on the published package, and it is not consumer
 // information, so those findings are possible.
 func TestNarrowingReportsEveryFindingTheFrameworkAccepts(t *testing.T) {
+	t.Parallel()
 	loaded := Consumers{Declared: []string{theConsumer}, Loaded: []string{theConsumer}, Complete: true}
 	tests := []struct {
 		name      string
@@ -595,6 +608,7 @@ func TestNarrowingReportsEveryFindingTheFrameworkAccepts(t *testing.T) {
 // candidate, so it carries the relation that found it. The framework decides both
 // from the sweep, which is why one pass over one fixture measures the two.
 func TestANarrowingFindingCarriesNoLivenessRelationAndAnUnreachableExportCarriesTheCandidates(t *testing.T) {
+	t.Parallel()
 	result, err := analysisOf(t, "narrowing-published.txtar", asLibrary, Consumers{Complete: true}).
 		compute(t, narrowingKinds)
 	if err != nil {
@@ -627,6 +641,7 @@ func TestANarrowingFindingCarriesNoLivenessRelationAndAnUnreachableExportCarries
 // Every finding of a kind of this file names the language and the vocabulary's own
 // name for the kind, which the framework fills rather than the emitter.
 func TestNarrowingCarriesTheVocabularyNameAndTheLanguage(t *testing.T) {
+	t.Parallel()
 	result, err := analysisOf(t, "narrowing-published.txtar", asLibrary, Consumers{Complete: true}).
 		compute(t, narrowingKinds)
 	if err != nil {
@@ -666,6 +681,7 @@ const (
 // exclusion is measured beside the declarations of the same fixture the kinds do
 // report, so an empty population cannot pass for an exclusion.
 func TestNarrowingReportsNoInterfaceMethodNoFieldAndNoInterfaceSatisfyingMethod(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "narrowing-members.txtar", applicationConfig(), Consumers{Complete: true})
 	found, err := unnecessaryExport(mustPass(t, in))
 	if err != nil {
@@ -696,6 +712,7 @@ func TestNarrowingReportsNoInterfaceMethodNoFieldAndNoInterfaceSatisfyingMethod(
 // fixture's two satisfying methods, so a later change cannot delete one rule and
 // keep both methods excluded by accident.
 func TestNarrowingExcludesASatisfyingMethodTheExemptionClassDoesNotHold(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "narrowing-members.txtar", applicationConfig(), Consumers{Complete: true})
 
 	exempted := make(map[string]bool, len(in.Exempt))

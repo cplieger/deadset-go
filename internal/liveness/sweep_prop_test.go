@@ -190,6 +190,7 @@ func (d drawnGraph) liveness(added []drawnRoot) (referenced, counted, reached ma
 // This runs at rapid's default of 100 checks; -rapid.checks raises it for a
 // deeper local run.
 func TestProperty07TheRelationRecordedIsTheOneThatFoundTheCandidate(t *testing.T) {
+	t.Parallel()
 	rapid.Check(t, func(t *rapid.T) {
 		d := drawnGraphs().Draw(t, "the graph")
 		b := d.build(t, nil)
@@ -389,6 +390,7 @@ func plant(b *graphBuilder, at int, shape drawnShape) string {
 // This runs at rapid's default of 100 checks; -rapid.checks raises it for a
 // deeper local run.
 func TestProperty06EveryDeadSymbolLandsInOneComponentReportedAtItsRoots(t *testing.T) {
+	t.Parallel()
 	rapid.Check(t, func(t *rapid.T) {
 		shapes := drawnShapes().Draw(t, "the shapes")
 		b := newGraphBuilder(t)
@@ -748,6 +750,7 @@ func describeLoad(d drawnLoad) string {
 // This runs at rapid's default of 100 checks; -rapid.checks raises it for a
 // deeper local run.
 func TestProperty03AReferenceFromAnyLoadedModulePreventsTheFinding(t *testing.T) {
+	t.Parallel()
 	rapid.Check(t, func(t *rapid.T) {
 		d := drawnLoads().Draw(t, "the run")
 		b := d.build(t)

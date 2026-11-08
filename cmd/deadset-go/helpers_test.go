@@ -118,13 +118,8 @@ func (f *fixture) findings(ctx context.Context) (*run.Findings, error) {
 	return f.set, f.analyzeErr
 }
 
-// report assembles the archive's report on the first request and answers the same
-// envelope to every later one.
-//
-// A report names the target relative to the directory the run was invoked from, so the
-// caller has already made the archive's own directory the working directory; every
-// caller of one archive therefore names the same directory and reads an envelope built
-// under it.
+// report assembles the archive's report on the first request, run from the archive's
+// own directory, and answers the same envelope to every later one.
 func (f *fixture) report(ctx context.Context) (*report.Report, error) {
 	dir, err := f.directory()
 	if err != nil {
@@ -137,6 +132,7 @@ func (f *fixture) report(ctx context.Context) (*report.Report, error) {
 			f.reportErr = fmt.Errorf("resolve the configuration of %s = %d: %s", dir, code, refused.String())
 			return
 		}
+		req.RunDir = dir
 		f.envelope, f.reportErr = reportOf(ctx, req, corpusAnswered())
 	})
 	return f.envelope, f.reportErr
@@ -149,23 +145,6 @@ func reportOf(ctx context.Context, req *run.Request, self *run.Self) (*report.Re
 		return nil, err
 	}
 	return found.Report(self)
-}
-
-// sharedModule writes one archive and returns its directory, which is the same
-// directory for every test declaring the same files.
-//
-// The directory belongs to the cache and not to the caller: a test that needs a
-// document inside its target declares that document as part of the archive, and a test
-// that writes into its target at all uses writeModule instead, which gives it a
-// directory of its own.
-func sharedModule(sink failureSink, files map[string]string) string {
-	sink.Helper()
-
-	dir, err := fixtureFor(files).directory()
-	if err != nil {
-		sink.Fatalf("Setup: write the fixture module: %v", err)
-	}
-	return dir
 }
 
 // cachedFindings is the findings of one run over the archive's module, computed once
@@ -236,6 +215,7 @@ func commandBinary(t *testing.T) string {
 		built.path = filepath.Join(fixtureBase, "bin", name)
 		build := exec.Command("go", "build", "-buildvcs=false", "-trimpath", "-o", built.path, ".")
 		build.Dir = packageDir
+		build.Env = append(os.Environ(), "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH)
 		built.out, built.err = build.CombinedOutput()
 	})
 	if built.err != nil {

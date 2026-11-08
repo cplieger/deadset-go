@@ -8,6 +8,7 @@ import (
 )
 
 func TestErrorsDuckTypingRetainsTheHelperFormsOnATypeReachableAsAnError(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		archive string
@@ -50,6 +51,7 @@ func TestErrorsDuckTypingRetainsTheHelperFormsOnATypeReachableAsAnError(t *testi
 // file converts the same type at a site that sorts first, because a test file's
 // site retains nothing in that run.
 func TestErrorsDuckTypingHoldsTheSourceFilesSiteUnderAProductionRun(t *testing.T) {
+	t.Parallel()
 	shared := analysisOf(t, "errors-duck-test-site.txtar", Options{})
 	held, err := shared.compute(t, true)
 	if err != nil {

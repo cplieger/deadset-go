@@ -12,6 +12,7 @@ import (
 // A declaration dead in every configuration it exists in stays while a configuration
 // compiles a reference to it from a declaration another configuration keeps live.
 func TestMatrixSweepKeepsADeclarationAKeptCallerCompilesAReferenceTo(t *testing.T) {
+	t.Parallel()
 	x := matrixOf(t, "matrix-compiled-caller.txtar", roots.RootOptions{}, linuxAmd64(), windowsAmd64())
 	r := x.graph.Sweep(&SweepPolicy{Mode: facts.Mode{Production: true}})
 

@@ -8,6 +8,7 @@ import (
 )
 
 func TestCapFilled_lowersAFindingAboutAFilledFieldToPossible(t *testing.T) {
+	t.Parallel()
 	resolved := applicationConfig()
 	resolved.Analysis.MinConfidence = vocab.Possible
 	in := inputOf(t, "filled-field.txtar", resolved, Consumers{})

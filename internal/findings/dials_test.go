@@ -50,6 +50,7 @@ func idsOf(findings []Finding) []inventory.SymbolID {
 }
 
 func TestComputeWithholdsTheComponentOfARootTheSeverityAllows(t *testing.T) {
+	t.Parallel()
 	resolved := applicationConfig()
 	resolved.Severity = map[string]vocab.Severity{string(vocab.UnusedExported): vocab.Allow}
 	in := handInput(resolved)
@@ -71,6 +72,7 @@ func TestComputeWithholdsTheComponentOfARootTheSeverityAllows(t *testing.T) {
 // A finding a type error skips is removed before the dials read it (confidence.31), so
 // the root's finding at a severity of allow withholds nothing of its component.
 func TestATypeErrorSkipsARootsFindingBeforeTheSeverityReadsIt(t *testing.T) {
+	t.Parallel()
 	resolved := applicationConfig()
 	resolved.Severity = map[string]vocab.Severity{string(vocab.UnusedExported): vocab.Allow}
 	in := handInput(resolved)
@@ -84,6 +86,7 @@ func TestATypeErrorSkipsARootsFindingBeforeTheSeverityReadsIt(t *testing.T) {
 }
 
 func TestComputeReportsTheWholeComponentWhenNoDialWithholdsItsRoot(t *testing.T) {
+	t.Parallel()
 	in := handInput(applicationConfig())
 
 	result := computed(t, in, rootMemberAndBystander(in))
@@ -148,6 +151,7 @@ func heldBackMark(in *Input, id inventory.SymbolID) {
 }
 
 func TestARecordOnAMemberOfAWithheldComponentIsDormant(t *testing.T) {
+	t.Parallel()
 	resolved := applicationConfig()
 	resolved.Severity = map[string]vocab.Severity{string(vocab.UnusedExported): vocab.Allow}
 	in := handInput(resolved)
@@ -164,6 +168,7 @@ func TestARecordOnAMemberOfAWithheldComponentIsDormant(t *testing.T) {
 }
 
 func TestARecordOnASymbolThatWouldJoinAWithheldComponentIsDormant(t *testing.T) {
+	t.Parallel()
 	resolved := applicationConfig()
 	resolved.Severity = map[string]vocab.Severity{string(vocab.UnusedExported): vocab.Allow}
 	in := handInput(resolved)
@@ -183,6 +188,7 @@ func TestARecordOnASymbolThatWouldJoinAWithheldComponentIsDormant(t *testing.T) 
 }
 
 func TestARecordOnASymbolThatReferencesAMemberOfAWithheldComponentIsDormant(t *testing.T) {
+	t.Parallel()
 	resolved := applicationConfig()
 	resolved.Severity = map[string]vocab.Severity{string(vocab.UnusedExported): vocab.Allow}
 	in := handInput(resolved)
@@ -203,6 +209,7 @@ func TestARecordOnASymbolThatReferencesAMemberOfAWithheldComponentIsDormant(t *t
 }
 
 func TestARecordOnAMethodWhoseTypeIsAMemberOfAWithheldComponentIsDormant(t *testing.T) {
+	t.Parallel()
 	resolved := applicationConfig()
 	resolved.Severity = map[string]vocab.Severity{string(vocab.UnusedExported): vocab.Allow}
 	in := handInput(resolved)
@@ -223,6 +230,7 @@ func TestARecordOnAMethodWhoseTypeIsAMemberOfAWithheldComponentIsDormant(t *test
 }
 
 func TestARecordOnATypeWhoseMethodIsAMemberOfAWithheldComponentIsDormant(t *testing.T) {
+	t.Parallel()
 	resolved := applicationConfig()
 	resolved.Severity = map[string]vocab.Severity{string(vocab.UnusedExported): vocab.Allow}
 	in := handInput(resolved)
@@ -243,6 +251,7 @@ func TestARecordOnATypeWhoseMethodIsAMemberOfAWithheldComponentIsDormant(t *test
 }
 
 func TestARecordOnAMemberIsInEffectWhileItsRootIsReported(t *testing.T) {
+	t.Parallel()
 	in := handInput(applicationConfig())
 	heldBackMark(in, helperID)
 

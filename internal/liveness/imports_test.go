@@ -11,6 +11,7 @@ import (
 // records, and no stage after it, so no report policy or configuration can decide
 // liveness. The import graph is read from the toolchain, not from directory names.
 func TestLivenessImportsNoStageAfterItAndNoReportOrConfigurationPackage(t *testing.T) {
+	t.Parallel()
 	const module = "github.com/cplieger/deadset-go/v2/"
 	list := func(format string) []string {
 		out, err := exec.CommandContext(t.Context(), "go", "list", "-f", format, ".").Output()

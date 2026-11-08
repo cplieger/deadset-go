@@ -13,6 +13,7 @@ import (
 // passed as an interface value, a method the runner skips and one a look-alike runner
 // receives are no root.
 func TestRootsRootsTheMethodsASuiteRunnerCalls(t *testing.T) {
+	t.Parallel()
 	d := detect(t, "suite-run.txtar", roots.RootOptions{})
 	kinds := kindsByRef(d)
 

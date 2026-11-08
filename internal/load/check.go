@@ -1,6 +1,7 @@
 package load
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"go/ast"
@@ -15,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"unicode/utf8"
 
 	"github.com/cplieger/deadset-go/v2/internal/buildconstraint"
 	"github.com/cplieger/deadset-go/v2/internal/memory"
@@ -30,29 +32,48 @@ const (
 	signatureParse = parser.AllErrors | parser.SkipObjectResolution
 )
 
-// syntaxCache is what every configuration of one matrix shares: the file set, the
-// trees of the files checked whole, one tree and one position per file however many
+// syntaxCache is what every configuration of one matrix shares: the trees of the
+// files checked whole, one tree and one position per file however many
 // configurations check it (each records its own type information over it), and
-// each package checked for its declarations alone, so a dependency compiling
-// identically in several units and configurations is checked once
-// ([declarationKey]); nil decls checks each afresh. lists is each module listing
-// the matrix ran ([syntaxCache.list]).
+// lists, each module listing the matrix ran ([syntaxCache.list]). decls is the store
+// of the packages checked for their declarations alone, nil where each is checked
+// afresh, and fset its file set.
 type syntaxCache struct {
 	fset  *token.FileSet
+	decls *declarationStore
 	files map[syntaxKey]*parsedFile
-	decls map[string]*declared
-	ids   map[*types.Package]uint64
 	lists map[string]*listing
 	mu    sync.Mutex
 }
 
-// declared is one package checked for its declarations alone, shared by every load
-// whose package compiles the same files over the same imports.
+// declarationStore holds each package checked for its declarations alone, shared by
+// every load whose package compiles the same files over the same imports
+// ([syntaxCache.declarationKey]); ids numbers each held check for its importers' keys.
+type declarationStore struct {
+	fset  *token.FileSet
+	decls map[string]*declared
+	ids   map[*types.Package]uint64
+	mu    sync.Mutex
+}
+
+// processDeclarations is the store every matrix of the process shares, as such a
+// check depends on its files and imports alone: a dependency several analyses of one
+// process read is checked once. Its file set is every load's, so a position a shared
+// check holds renders through any result.
+var processDeclarations = &declarationStore{
+	fset:  token.NewFileSet(),
+	decls: make(map[string]*declared),
+	ids:   map[*types.Package]uint64{types.Unsafe: 0},
+}
+
+// declared is one package checked for its declarations alone. failed is set where
+// the check was cancelled before it ended, so whoever waited on it checks again.
 type declared struct {
-	types *types.Package
-	ready chan struct{}
-	errs  []packages.Error
-	terrs []types.Error
+	types  *types.Package
+	ready  chan struct{}
+	errs   []packages.Error
+	terrs  []types.Error
+	failed bool
 }
 
 // syntaxKey is one file of one reading: the directory a load ran in and the further
@@ -65,10 +86,9 @@ type syntaxKey struct {
 
 func newSyntaxCache() *syntaxCache {
 	return &syntaxCache{
-		fset:  token.NewFileSet(),
+		fset:  processDeclarations.fset,
+		decls: processDeclarations,
 		files: make(map[syntaxKey]*parsedFile),
-		decls: make(map[string]*declared),
-		ids:   map[*types.Package]uint64{types.Unsafe: 0},
 		lists: make(map[string]*listing),
 	}
 }
@@ -229,15 +249,20 @@ func (c *checker) checkShared(p *packages.Package) {
 		c.checkOne(p, false, false)
 		return
 	}
-	c.trees.mu.Lock()
-	d, held := c.trees.decls[key]
+	store := c.trees.decls
+	store.mu.Lock()
+	d, held := store.decls[key]
 	if !held {
 		d = &declared{ready: make(chan struct{})}
-		c.trees.decls[key] = d
+		store.decls[key] = d
 	}
-	c.trees.mu.Unlock()
+	store.mu.Unlock()
 	if held {
 		<-d.ready
+		if d.failed {
+			c.checkOne(p, false, false)
+			return
+		}
 		p.Types = d.types
 		p.Errors = append(p.Errors, d.errs...)
 		p.TypeErrors = append(p.TypeErrors, d.terrs...)
@@ -249,17 +274,23 @@ func (c *checker) checkShared(p *packages.Package) {
 	}
 	c.checkOne(p, false, false)
 	d.types, d.errs, d.terrs = p.Types, slices.Clone(p.Errors), slices.Clone(p.TypeErrors)
-	c.trees.mu.Lock()
-	c.trees.ids[p.Types] = uint64(len(c.trees.ids))
-	c.trees.mu.Unlock()
+	store.mu.Lock()
+	if c.ctx.Err() != nil || !p.Types.Complete() {
+		d.failed = true
+		delete(store.decls, key)
+	} else {
+		store.ids[p.Types] = uint64(len(store.ids))
+	}
+	store.mu.Unlock()
 	close(d.ready)
 }
 
 // declarationKey names what decides a declarations-only check of p: its path and
 // name, the type sizes and language version it is checked under, its compiled files
-// and, per import path, the shared check that import resolved to. It is false where
-// p carries an error of its own or an import was not itself shared, as the check
-// would then not be the same.
+// with the size and modification time each holds, and, per import path, the shared
+// check that import resolved to. It is false where p carries an error of its own, a
+// file cannot be read, or an import was not itself shared, as the check would then
+// not be the same.
 func (t *syntaxCache) declarationKey(p *packages.Package, sizes types.Sizes) (string, bool) {
 	if t.decls == nil || len(p.Errors) > 0 {
 		return "", false
@@ -271,14 +302,17 @@ func (t *syntaxCache) declarationKey(p *packages.Package, sizes types.Sizes) (st
 	}
 	fmt.Fprintf(&b, "%s\x00%s\x00%d,%d\x00%s", p.PkgPath, p.Name, sizes.Sizeof(types.Typ[types.Uintptr]), sizes.Alignof(types.Typ[types.Int64]), version)
 	for _, name := range p.CompiledGoFiles {
-		b.WriteString("\x00f")
-		b.WriteString(name)
+		info, err := os.Stat(name)
+		if err != nil {
+			return "", false
+		}
+		fmt.Fprintf(&b, "\x00f%s\x00%d\x00%d", name, info.Size(), info.ModTime().UnixNano())
 	}
 	paths := slices.Sorted(maps.Keys(p.Imports))
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.decls.mu.Lock()
+	defer t.decls.mu.Unlock()
 	for _, path := range paths {
-		id, shared := t.ids[p.Imports[path].Types]
+		id, shared := t.decls.ids[p.Imports[path].Types]
 		if !shared {
 			return "", false
 		}
@@ -402,7 +436,210 @@ func (c *checker) parseOnce(name string, mode parser.Mode) (*ast.File, error) {
 	if err != nil {
 		return nil, err
 	}
+	if mode == signatureParse {
+		src = withoutBodies(src)
+	}
 	return parser.ParseFile(c.fset, name, src, mode)
+}
+
+// withoutBodies is src with the inside of every function declaration's body blanked,
+// each byte but a line break turned to a space so every position stays where it was.
+// A check of the declarations alone ignores the bodies, and parsing them is most of
+// what it costs. A declaration is found by its func keyword opening a line outside
+// every bracket. A file holding a line directive, which a body could hold and which
+// moves every position after it, or one whose literals or brackets do not close, is
+// returned whole.
+func withoutBodies(src []byte) []byte {
+	if bytes.Contains(src, []byte("//line ")) || bytes.Contains(src, []byte("/*line ")) {
+		return src
+	}
+	f := fileScan{src: src}
+	if !scanCode(src, 0, f.step) || f.unclosed || f.depth != 0 || len(f.bodies) == 0 {
+		return src
+	}
+	blanked := slices.Clone(src)
+	for _, body := range f.bodies {
+		for i := body[0]; i < body[1]; i++ {
+			if blanked[i] != '\n' && blanked[i] != '\r' {
+				blanked[i] = ' '
+			}
+		}
+	}
+	return blanked
+}
+
+// scanCode calls step at each byte of src from i on that lies outside every comment
+// and string or rune literal; step returns the offset to go on from, or -1 to stop.
+// It is false where a literal does not close.
+func scanCode(src []byte, i int, step func(i int) int) bool {
+	for i >= 0 && i < len(src) {
+		if c := src[i]; c == '/' || c == '"' || c == '`' || c == '\'' {
+			next, closed := pastLiteral(src, i)
+			if !closed {
+				return false
+			}
+			if next != i+1 || c != '/' {
+				i = next
+				continue
+			}
+		}
+		i = step(i)
+	}
+	return true
+}
+
+// fileScan is [withoutBodies]' walk of one file: the bracket depth, the body offsets
+// found, and whether a declaration's body did not close.
+type fileScan struct {
+	src      []byte
+	bodies   [][2]int
+	depth    int
+	unclosed bool
+}
+
+func (f *fileScan) step(i int) int {
+	switch c := f.src[i]; {
+	case c == '(' || c == '[' || c == '{':
+		f.depth++
+	case c == ')' || c == ']' || c == '}':
+		f.depth--
+	case f.depth == 0 && (i == 0 || f.src[i-1] == '\n') && opensWord(f.src, i, "func"):
+		open, end, found := bodyOf(f.src, i+len("func"))
+		if !found {
+			f.unclosed = true
+			return -1
+		}
+		if end > open {
+			f.bodies = append(f.bodies, [2]int{open + 1, end})
+		}
+		return end + 1
+	}
+	return i + 1
+}
+
+// bodyOf reads one function declaration from just past its func keyword and returns
+// the offsets of its body's braces, or of the line break ending a declaration with
+// no body as both, or false where the file ends first.
+func bodyOf(src []byte, i int) (open, end int, found bool) {
+	s := signatureScan{src: src, word: -1}
+	if !scanCode(src, i, s.step) || !s.found {
+		return 0, 0, false
+	}
+	return s.open, s.end, true
+}
+
+// signatureScan is [bodyOf]'s walk of one signature: the parenthesis and bracket
+// depth, and where the identifier just read starts, or -1. A brace inside the
+// signature opens a struct or interface type, whose braces it passes over.
+type signatureScan struct {
+	src         []byte
+	depth, word int
+	open, end   int
+	found       bool
+}
+
+func (s *signatureScan) step(i int) int {
+	c := s.src[i]
+	switch {
+	case identifierByte(c):
+		if s.word < 0 || !identifierByte(s.src[i-1]) {
+			s.word = i
+		}
+		return i + 1
+	case c == '\n' && s.depth == 0:
+		s.open, s.end, s.found = i, i, true
+		return -1
+	case c == '(' || c == '[':
+		s.depth++
+	case c == ')' || c == ']':
+		s.depth--
+	case c == '{':
+		return s.brace(i)
+	}
+	if c != ' ' && c != '\t' && c != '\r' {
+		s.word = -1
+	}
+	return i + 1
+}
+
+// brace passes over the braces of a type the signature writes, or ends the scan at
+// the body's.
+func (s *signatureScan) brace(i int) int {
+	closing, closed := matchingBrace(s.src, i)
+	if !closed {
+		return -1
+	}
+	typed := s.word >= 0 && (opensWord(s.src, s.word, "struct") || opensWord(s.src, s.word, "interface"))
+	if s.depth == 0 && !typed {
+		s.open, s.end, s.found = i, closing, true
+		return -1
+	}
+	s.word = -1
+	return closing + 1
+}
+
+// matchingBrace is the offset of the brace closing the one at src[i].
+func matchingBrace(src []byte, i int) (int, bool) {
+	depth, at := 0, -1
+	readable := scanCode(src, i, func(j int) int {
+		switch src[j] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				at = j
+				return -1
+			}
+		}
+		return j + 1
+	})
+	return at, readable && at >= 0
+}
+
+// pastLiteral is the offset just past the comment, string or rune literal opening at
+// src[i], or past the division sign src[i] is, and false where the literal does not
+// close. A line comment ends before its line break, which stays the line's.
+func pastLiteral(src []byte, i int) (int, bool) {
+	switch c := src[i]; {
+	case c == '/' && i+1 < len(src) && src[i+1] == '/':
+		if n := bytes.IndexByte(src[i:], '\n'); n >= 0 {
+			return i + n, true
+		}
+		return len(src), true
+	case c == '/' && i+1 < len(src) && src[i+1] == '*':
+		n := bytes.Index(src[i+2:], []byte("*/"))
+		return i + 2 + n + 2, n >= 0
+	case c == '/':
+		return i + 1, true
+	case c == '`':
+		n := bytes.IndexByte(src[i+1:], '`')
+		return i + 1 + n + 1, n >= 0
+	}
+	quote := src[i]
+	for j := i + 1; j < len(src); j++ {
+		switch src[j] {
+		case '\\':
+			j++
+		case quote:
+			return j + 1, true
+		case '\n':
+			return 0, false
+		}
+	}
+	return 0, false
+}
+
+// opensWord reports whether src holds the identifier word at i, ending there.
+func opensWord(src []byte, i int, word string) bool {
+	end := i + len(word)
+	return bytes.HasPrefix(src[i:], []byte(word)) && (end == len(src) || !identifierByte(src[end]))
+}
+
+// identifierByte reports whether c can be a byte of an identifier: an ASCII letter,
+// digit or underscore, or any byte of a multi-byte character.
+func identifierByte(c byte) bool {
+	return c == '_' || c >= utf8.RuneSelf || '0' <= c && c <= '9' || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'
 }
 
 // acquire takes one of the checker's slots, and under memory pressure also the

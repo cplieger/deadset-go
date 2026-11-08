@@ -47,6 +47,7 @@ func classifiedSupport(t *testing.T, library bool) (support, marked []string) {
 // configured root, a production import, a production blank import and a package no
 // test reaches each keep a package out.
 func TestClassifyTestSupportIsTheLargestSetOnlyTestsReach(t *testing.T) {
+	t.Parallel()
 	support, marked := classifiedSupport(t, false)
 
 	want := []string{
@@ -66,6 +67,7 @@ func TestClassifyTestSupportIsTheLargestSetOnlyTestsReach(t *testing.T) {
 // An import of a package of a test library is test evidence as the testing
 // package's is, and one of a module whose path only starts with a library's is not.
 func TestClassifyTestSupportCountsTestLibraryImportsAsEvidence(t *testing.T) {
+	t.Parallel()
 	result, root := loadDir(t, extract(t, "test-support-libraries.txtar"), "linux", "amd64")
 	symbols, rs, err := inventoryOf(result, root, os.ReadFile)
 	if err != nil {
@@ -87,6 +89,7 @@ func TestClassifyTestSupportCountsTestLibraryImportsAsEvidence(t *testing.T) {
 // A library's package outside an internal tree is importable by outside programs,
 // so only the internal one stays test-support code.
 func TestClassifyTestSupportKeepsALibrarysImportablePackagesOut(t *testing.T) {
+	t.Parallel()
 	support, _ := classifiedSupport(t, true)
 
 	if want := []string{"example.com/support/internal/own"}; !slices.Equal(support, want) {
@@ -98,6 +101,7 @@ func TestClassifyTestSupportKeepsALibrarysImportablePackagesOut(t *testing.T) {
 // a declaration of the package whose file holds it, so it is test-support code with
 // that package.
 func TestClassifyTestSupportKeepsADeclarationALineDirectiveMovesInItsPackage(t *testing.T) {
+	t.Parallel()
 	result, root := loadDir(t, extract(t, "test-support-line-directive.txtar"), "linux", "amd64")
 	symbols, rs, err := inventoryOf(result, root, os.ReadFile)
 	if err != nil {
@@ -131,6 +135,7 @@ func paths(set map[load.PackageID]bool) []string {
 // A configuration that loads a package and classifies it otherwise vetoes the class,
 // whatever the order of the matrix, and one that does not load it decides nothing.
 func TestMatrixTestsKeepsAClassEveryConfigurationLoadingThePackageGives(t *testing.T) {
+	t.Parallel()
 	support, reached, production, absent := load.PackageID{Path: "s"}, load.PackageID{Path: "r"}, load.PackageID{Path: "p"}, load.PackageID{Path: "a"}
 	set := func(keys ...load.PackageID) map[load.PackageID]bool {
 		held := make(map[load.PackageID]bool, len(keys))

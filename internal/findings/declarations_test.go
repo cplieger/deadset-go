@@ -14,6 +14,7 @@ import (
 )
 
 func TestTheUnusedKindsReportEveryDeadDeclarationOfTheFixtureAndNothingLive(t *testing.T) {
+	t.Parallel()
 	result := analysisOf(t, "declarations-unused.txtar", asApplication, Consumers{}).findings(t, declarationKinds)
 
 	for code, want := range map[vocab.Code][]string{
@@ -36,6 +37,7 @@ func TestTheUnusedKindsReportEveryDeadDeclarationOfTheFixtureAndNothingLive(t *t
 }
 
 func TestASelfReferencingDeclarationIsReportedOnceUnderTheCodeItsVisibilitySelects(t *testing.T) {
+	t.Parallel()
 	result := analysisOf(t, "declarations-unused.txtar", asApplication, Consumers{}).findings(t, declarationKinds)
 
 	var reported []vocab.Code
@@ -60,6 +62,7 @@ func TestASelfReferencingDeclarationIsReportedOnceUnderTheCodeItsVisibilitySelec
 }
 
 func TestTheUnusedMessagesSayWhatTheAnalysisFound(t *testing.T) {
+	t.Parallel()
 	result := analysisOf(t, "declarations-unused.txtar", asApplication, Consumers{}).findings(t, declarationKinds)
 
 	for _, want := range []struct {
@@ -78,6 +81,7 @@ func TestTheUnusedMessagesSayWhatTheAnalysisFound(t *testing.T) {
 }
 
 func TestATestOnlyReferenceIsItsOwnKindAndAProductionReferenceRemovesTheFinding(t *testing.T) {
+	t.Parallel()
 	before := analysisOf(t, "declarations-test-only.txtar", asApplication, Consumers{}).findings(t, declarationKinds)
 	after := analysisOf(t, "declarations-test-only-moved.txtar", asApplication, Consumers{}).findings(t, declarationKinds)
 
@@ -98,6 +102,7 @@ func TestATestOnlyReferenceIsItsOwnKindAndAProductionReferenceRemovesTheFinding(
 }
 
 func TestATestWhoseEveryTargetIsDeadIsReportedInTheirComponent(t *testing.T) {
+	t.Parallel()
 	result := analysisOf(t, "declarations-test-of-dead-code.txtar", asApplication, Consumers{}).findings(t, declarationKinds)
 
 	if got := namesUnder(result.Findings, vocab.TestOfDeadCode); !slices.Equal(got, []string{"TestDeadOnly"}) {
@@ -129,6 +134,7 @@ func TestATestWhoseEveryTargetIsDeadIsReportedInTheirComponent(t *testing.T) {
 }
 
 func TestTheMembersOfATestFileDeclarationATestReachesAreJudgedOnTheirOwn(t *testing.T) {
+	t.Parallel()
 	result := analysisOf(t, "declarations-test-file-members.txtar", asApplication, Consumers{}).findings(t, everyKind)
 
 	for code, want := range map[vocab.Code][]string{
@@ -159,6 +165,7 @@ func TestTheMembersOfATestFileDeclarationATestReachesAreJudgedOnTheirOwn(t *test
 }
 
 func TestAMethodOnlyADeadDeclarationConvertsFallsWithItAndNoExemptionRetainsIt(t *testing.T) {
+	t.Parallel()
 	result := analysisOf(t, "declarations-dead-holder.txtar", asApplication, Consumers{}).findings(t, everyKind)
 
 	spare := findingOf(t, result.Findings, vocab.UnusedUnexported, "spare")
@@ -174,6 +181,7 @@ func TestAMethodOnlyADeadDeclarationConvertsFallsWithItAndNoExemptionRetainsIt(t
 }
 
 func TestAConversionInLiveCodeRetainsAMethodADeadDeclarationConvertsFirst(t *testing.T) {
+	t.Parallel()
 	result := analysisOf(t, "declarations-held-twice.txtar", asApplication, Consumers{}).findings(t, everyKind)
 
 	findingOf(t, result.Findings, vocab.UnusedUnexported, "spare")
@@ -189,6 +197,7 @@ func TestAConversionInLiveCodeRetainsAMethodADeadDeclarationConvertsFirst(t *tes
 // value, so a method whose only caller is an assertion it writes itself is dead
 // under reachability, and the method main calls through the conversion is not.
 func TestAnAssertionInsideTheMethodItRetainsHoldsNothing(t *testing.T) {
+	t.Parallel()
 	result := analysisOf(t, "declarations-asserted-inside.txtar", asApplication, Consumers{}).findings(t, everyKind)
 
 	closed := findingOf(t, result.Findings, vocab.UnreachableExport, "(*wrapper).Close")
@@ -205,6 +214,7 @@ func TestAnAssertionInsideTheMethodItRetainsHoldsNothing(t *testing.T) {
 }
 
 func TestAMethodAnErrorsAsTargetRequiresIsRetainedOnATypeUsedAsAnError(t *testing.T) {
+	t.Parallel()
 	result := analysisOf(t, "interfaces-errors-as.txtar", asApplication, Consumers{}).findings(t, everyKind)
 
 	var reported []string
@@ -218,6 +228,7 @@ func TestAMethodAnErrorsAsTargetRequiresIsRetainedOnATypeUsedAsAnError(t *testin
 }
 
 func TestADeprecatedDeclarationNothingReferencesIsReportedUnderTheDeprecatedKindAlone(t *testing.T) {
+	t.Parallel()
 	result := analysisOf(t, "declarations-deprecated.txtar", asApplication, Consumers{}).findings(t, declarationKinds)
 
 	want := []string{"Old", "Stale", "StaleToo", "Counter.Old"}
@@ -241,6 +252,7 @@ func TestADeprecatedDeclarationNothingReferencesIsReportedUnderTheDeprecatedKind
 }
 
 func TestAnExportedDeclarationOfAnUnimportablePackageIsLeftToTheUnreachableExportKind(t *testing.T) {
+	t.Parallel()
 	result := analysisOf(t, "class-visibility.txtar", asApplication, Consumers{}).findings(t, declarationKinds)
 
 	for i := range result.Findings {
@@ -252,6 +264,7 @@ func TestAnExportedDeclarationOfAnUnimportablePackageIsLeftToTheUnreachableExpor
 }
 
 func TestAConsumersTestReferenceDecidesTheKindByHowTheReferencePassCountedIt(t *testing.T) {
+	t.Parallel()
 	for name, counts := range map[string]struct {
 		production, test int
 		want             vocab.Code
@@ -280,6 +293,7 @@ func TestAConsumersTestReferenceDecidesTheKindByHowTheReferencePassCountedIt(t *
 }
 
 func TestAMemberWhoseContainerIsDeadIsNotReportedIndependently(t *testing.T) {
+	t.Parallel()
 	const (
 		typeID  inventory.SymbolID = "catalog.go:40:6"
 		fieldID inventory.SymbolID = "catalog.go:41:2"
@@ -312,6 +326,7 @@ func TestAMemberWhoseContainerIsDeadIsNotReportedIndependently(t *testing.T) {
 }
 
 func TestAKindReportsNothingWhereTheSeverityMapAllowsIt(t *testing.T) {
+	t.Parallel()
 	resolved := applicationConfig()
 	resolved.Severity = map[string]vocab.Severity{
 		string(vocab.UnusedExported):   vocab.Allow,
@@ -331,6 +346,7 @@ func TestAKindReportsNothingWhereTheSeverityMapAllowsIt(t *testing.T) {
 // are candidates: the field the test writes reports as test-only use, and the field
 // nothing writes, which the encoder reads no value of, as an unused member.
 func TestTheMembersOfAStructOnlyATestFileMarshalsReportUnderAProductionSweep(t *testing.T) {
+	t.Parallel()
 	result := analysisOf(t, "declarations-test-evidence.txtar", asApplication, Consumers{}).findings(t, everyKind)
 	got := make(map[string]vocab.Code, len(result.Findings))
 	for i := range result.Findings {
@@ -353,6 +369,7 @@ func TestTheMembersOfAStructOnlyATestFileMarshalsReportUnderAProductionSweep(t *
 // whatever another configuration that compiles none of its production importers
 // says, so a function of it only a test references is reported as test-only.
 func TestAPackageAProductionFileImportsUnderOneConfigurationIsNotTestSupport(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "declarations-test-support-platform.txtar", applicationConfig(), Consumers{},
 		load.Configuration{ID: "linux-amd64", OS: "linux", Arch: "amd64"},
 		load.Configuration{ID: "windows-amd64", OS: "windows", Arch: "amd64"})
@@ -370,6 +387,7 @@ func TestAPackageAProductionFileImportsUnderOneConfigurationIsNotTestSupport(t *
 // a test references is reported as test-only, and the test as a test of dead code,
 // whichever configuration comes first.
 func TestATestSupportClassOneConfigurationVetoesHoldsUnderEveryMatrixOrder(t *testing.T) {
+	t.Parallel()
 	linux := load.Configuration{ID: "linux-amd64", OS: "linux", Arch: "amd64"}
 	windows := load.Configuration{ID: "windows-amd64", OS: "windows", Arch: "amd64"}
 	for name, order := range map[string][]load.Configuration{
@@ -393,6 +411,7 @@ func TestATestSupportClassOneConfigurationVetoesHoldsUnderEveryMatrixOrder(t *te
 // and a method of it nothing references is reported under the unused code its
 // visibility selects, at certain.
 func TestTestSupportCodeATestReferencesIsTestCode(t *testing.T) {
+	t.Parallel()
 	resolved := applicationConfig()
 	resolved.Analysis.MinConfidence = vocab.Possible
 	in := inputOf(t, "declarations-test-support-possible.txtar", resolved, Consumers{})
@@ -411,6 +430,7 @@ func TestTestSupportCodeATestReferencesIsTestCode(t *testing.T) {
 }
 
 func TestCapNameLiteral_lowersADeclarationAStringLiteralSpellsToPossible(t *testing.T) {
+	t.Parallel()
 	resolved := applicationConfig()
 	resolved.Analysis.MinConfidence = vocab.Possible
 	result := computed(t, inputOf(t, "name-literal.txtar", resolved, Consumers{}), packageEmitters())
@@ -448,6 +468,7 @@ func TestCapNameLiteral_lowersADeclarationAStringLiteralSpellsToPossible(t *test
 // init function included, at the possible class, because outside programs may import
 // it, and an internal one at certain. A linked package's export keeps certain.
 func TestUnlinkedApplicationPackageIsReportedAtPossible(t *testing.T) {
+	t.Parallel()
 	resolved := applicationConfig()
 	resolved.Analysis.MinConfidence = vocab.Possible
 	result := computed(t, inputOf(t, "declarations-unlinked-package.txtar", resolved, Consumers{}), declarationEmitters())
@@ -478,6 +499,7 @@ func TestUnlinkedApplicationPackageIsReportedAtPossible(t *testing.T) {
 // the helper it keeps and the test of dead code that calls it, while a declaration of
 // it nothing references keeps certain.
 func TestProductionCodeOnlyTestsReachIsReportedAtPossible(t *testing.T) {
+	t.Parallel()
 	resolved := applicationConfig()
 	resolved.Analysis.MinConfidence = vocab.Possible
 	result := computed(t, inputOf(t, "declarations-test-reached.txtar", resolved, Consumers{}), declarationEmitters())
@@ -510,6 +532,7 @@ func TestProductionCodeOnlyTestsReachIsReportedAtPossible(t *testing.T) {
 // The helpers of a test file that only a test of production code only tests reach
 // needs are at possible with that test, so the default level reports none of them.
 func TestTestFileHelpersOfATestOfProductionCodeOnlyTestsReachAreAtPossible(t *testing.T) {
+	t.Parallel()
 	resolved := applicationConfig()
 	resolved.Analysis.MinConfidence = vocab.Possible
 	result := computed(t, inputOf(t, "declarations-test-reached-test-helpers.txtar", resolved, Consumers{}), declarationEmitters())
@@ -535,6 +558,7 @@ func TestTestFileHelpersOfATestOfProductionCodeOnlyTestsReachAreAtPossible(t *te
 // test of live code references it, and keeps its unreferenced kind where only a test
 // of dead code does.
 func TestADeclarationATestOfLiveCodeKeepsIsATestOnlyUse(t *testing.T) {
+	t.Parallel()
 	result := computed(t, inputOf(t, "declarations-test-kept.txtar", applicationConfig(), Consumers{}), declarationEmitters())
 
 	kept := findingOf(t, result.Findings, vocab.TestOnlyUse, "FixedNow")
@@ -548,6 +572,7 @@ func TestADeclarationATestOfLiveCodeKeepsIsATestOnlyUse(t *testing.T) {
 // Under an internal tree a declaration a test of live code keeps is the test-only
 // use alone, and one only a test of dead code reads is the unreachable export.
 func TestADeclarationATestOfLiveCodeKeepsIsNoUnreachableExport(t *testing.T) {
+	t.Parallel()
 	emitters := declarationEmitters()
 	emitters[vocab.UnreachableExport] = unreachableExport
 	result := computed(t, inputOf(t, "declarations-test-kept-internal.txtar", applicationConfig(), Consumers{}), emitters)
@@ -559,6 +584,7 @@ func TestADeclarationATestOfLiveCodeKeepsIsNoUnreachableExport(t *testing.T) {
 // Every kind a test's use of production code only tests reach decides reports that
 // declaration at possible, and a declaration nothing references at certain.
 func TestEveryKindOfProductionCodeOnlyTestsReachIsAtPossible(t *testing.T) {
+	t.Parallel()
 	resolved := applicationConfig()
 	resolved.Analysis.MinConfidence = vocab.Possible
 	emitters := declarationEmitters()
@@ -589,6 +615,7 @@ func TestEveryKindOfProductionCodeOnlyTestsReachIsAtPossible(t *testing.T) {
 // A field of production code only tests reach that only a test reads is under the
 // same tier, while a field of the command a test alone reads keeps its class.
 func TestAFieldOfProductionCodeOnlyTestsReachThatOnlyTestsReadIsPossible(t *testing.T) {
+	t.Parallel()
 	resolved := applicationConfig()
 	resolved.Analysis.MinConfidence = vocab.Possible
 	emitters := declarationEmitters()
@@ -616,6 +643,7 @@ func TestAFieldOfProductionCodeOnlyTestsReachThatOnlyTestsReadIsPossible(t *test
 // A dead root beside production code only tests reach keeps its own class, and so
 // does what only it reaches, though it shares a dead declaration with that code.
 func TestADeadRootBesideProductionCodeOnlyTestsReachKeepsItsClass(t *testing.T) {
+	t.Parallel()
 	resolved := applicationConfig()
 	resolved.Analysis.MinConfidence = vocab.Possible
 	result := computed(t, inputOf(t, "declarations-test-reached-beside-a-dead-root.txtar", resolved, Consumers{}), declarationEmitters())
@@ -647,6 +675,7 @@ func TestADeadRootBesideProductionCodeOnlyTestsReachKeepsItsClass(t *testing.T) 
 // only tests reach keeps its own confidence, so it is never withheld while that
 // declaration, which it references, is reported.
 func TestATestOfDeadCodeBesideADeadRootKeepsItsConfidence(t *testing.T) {
+	t.Parallel()
 	result := computed(t, inputOf(t, "declarations-test-reached-and-dead-root-tested.txtar", applicationConfig(), Consumers{}), declarationEmitters())
 
 	if found := findingOf(t, result.Findings, vocab.TestOfDeadCode, "TestBoth"); found.Confidence != vocab.Certain {
@@ -657,6 +686,7 @@ func TestATestOfDeadCodeBesideADeadRootKeepsItsConfidence(t *testing.T) {
 // Under the default minimum a dead root beside production code only tests reach is
 // reported with what only it reaches, and the rest of its component is withheld.
 func TestADeadRootBesideProductionCodeOnlyTestsReachIsReportedByDefault(t *testing.T) {
+	t.Parallel()
 	result := computed(t, inputOf(t, "declarations-test-reached-beside-a-dead-root.txtar", applicationConfig(), Consumers{}), declarationEmitters())
 
 	if got, want := summary(result.Findings), []string{string(vocab.UnusedExported) + " Legacy", string(vocab.UnusedUnexported) + " only"}; !slices.Equal(got, want) {
@@ -667,6 +697,7 @@ func TestADeadRootBesideProductionCodeOnlyTestsReachIsReportedByDefault(t *testi
 // Under the default minimum the findings of production code only tests reach are
 // withheld, and the one about a declaration nothing references is reported.
 func TestProductionCodeOnlyTestsReachIsWithheldByDefault(t *testing.T) {
+	t.Parallel()
 	result := computed(t, inputOf(t, "declarations-test-reached.txtar", applicationConfig(), Consumers{}), declarationEmitters())
 
 	if got, want := summary(result.Findings), []string{string(vocab.UnusedExported) + " Spare"}; !slices.Equal(got, want) {

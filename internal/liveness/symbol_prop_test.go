@@ -275,6 +275,7 @@ func loadedGeneratedModules(t *testing.T) []*loadedModule {
 // under one configuration, named for the declaration shapes and the variant
 // arrangement it carries, and every row of the pool is asserted.
 func TestProperty01OneDeclarationPerSourceSite(t *testing.T) {
+	t.Parallel()
 	for _, one := range loadedGeneratedModules(t) {
 		t.Run(one.name, func(t *testing.T) {
 			checkOneDeclarationPerSourceSite(t, one)

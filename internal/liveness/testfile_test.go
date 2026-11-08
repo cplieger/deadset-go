@@ -8,6 +8,7 @@ import (
 )
 
 func TestIsTestFileAppliesTheLanguageRule(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		path string
@@ -53,6 +54,7 @@ func TestIsTestFileAppliesTheLanguageRule(t *testing.T) {
 }
 
 func TestReferencesReportsTheRuleThatClassifiedEachTestFile(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		archive string
 		want    []inventory.TestFileRule
@@ -73,6 +75,7 @@ func TestReferencesReportsTheRuleThatClassifiedEachTestFile(t *testing.T) {
 }
 
 func TestReferencesFlagsEveryReferenceATestFileMakes(t *testing.T) {
+	t.Parallel()
 	a := analyze(t, "variants.txtar")
 
 	for _, r := range a.refs {
@@ -85,6 +88,7 @@ func TestReferencesFlagsEveryReferenceATestFileMakes(t *testing.T) {
 }
 
 func TestReferencesLeavesProductionModeOneReferenceSet(t *testing.T) {
+	t.Parallel()
 	a := analyze(t, "variants.txtar")
 
 	// Production mode is the reference set with every test reference dropped,

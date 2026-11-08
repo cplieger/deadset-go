@@ -90,6 +90,7 @@ func (g *cgoGraph) candidates() []string {
 // The four cases below share one load, because the load is what the fixture costs
 // and the four read one graph of it.
 func TestTheOpaqueCPassGivesThePassesTheGoOfAFileImportingC(t *testing.T) {
+	t.Parallel()
 	g := sweepCgo(t)
 
 	t.Run("the declarations the check read", func(t *testing.T) { checkCgoSymbols(t, g) })

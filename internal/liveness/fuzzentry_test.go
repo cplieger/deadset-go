@@ -13,6 +13,7 @@ import (
 // constraint holds with the gofuzz tag set for some setting of its other tags, and not
 // in a file whose constraint holds only without the tag.
 func TestRootsRootsAGoFuzzEntryOfEveryFileAFuzzBuildMayCompile(t *testing.T) {
+	t.Parallel()
 	d := detect(t, "fuzz-entries.txtar", roots.RootOptions{})
 	held := make(map[string]bool, len(d.symbols))
 	for _, s := range d.symbols {

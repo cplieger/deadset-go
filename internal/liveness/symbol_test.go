@@ -129,6 +129,7 @@ func render(symbols []inventory.Symbol) string {
 }
 
 func TestSymbolsNamesTheDependentsOfEveryConstantOfAGroup(t *testing.T) {
+	t.Parallel()
 	symbols := symbolsOf(t, "constant-groups.txtar")
 	names := make(map[inventory.SymbolID]string, len(symbols))
 	for _, s := range symbols {
@@ -167,6 +168,7 @@ func TestSymbolsNamesTheDependentsOfEveryConstantOfAGroup(t *testing.T) {
 }
 
 func TestSymbolsGoldenTableOverEveryKind(t *testing.T) {
+	t.Parallel()
 	got := render(symbolsOf(t, "every-kind.txtar"))
 	golden := filepath.Join("testdata", "every-kind.golden")
 
@@ -185,6 +187,7 @@ func TestSymbolsGoldenTableOverEveryKind(t *testing.T) {
 }
 
 func TestSymbolsReachesEveryKind(t *testing.T) {
+	t.Parallel()
 	symbols := symbolsOf(t, "every-kind.txtar")
 	found := make(map[inventory.SymbolKind][]string)
 	for _, s := range symbols {
@@ -229,6 +232,7 @@ func namedByRef(symbols []inventory.Symbol) map[string]inventory.Symbol {
 }
 
 func TestSymbolsNamesEveryMemberWithItsContainer(t *testing.T) {
+	t.Parallel()
 	byRef := namedByRef(symbolsOf(t, "every-kind.txtar"))
 
 	cases := []struct {
@@ -308,6 +312,7 @@ func parentRef(byRef map[string]inventory.Symbol, s inventory.Symbol) string {
 }
 
 func TestSymbolsGivesEveryDeclarationOfAPackageWithATestVariantItsOwnContainer(t *testing.T) {
+	t.Parallel()
 	byRef := namedByRef(symbolsOf(t, "receivers.txtar"))
 
 	// The method is enumerated once and resolved again by the test variant, which
@@ -332,6 +337,7 @@ func TestSymbolsGivesEveryDeclarationOfAPackageWithATestVariantItsOwnContainer(t
 }
 
 func TestSymbolsCountsTheBlankDeclarations(t *testing.T) {
+	t.Parallel()
 	var blanks []string
 	for _, s := range symbolsOf(t, "every-kind.txtar") {
 		if s.Blank {
@@ -344,6 +350,7 @@ func TestSymbolsCountsTheBlankDeclarations(t *testing.T) {
 }
 
 func TestSymbolsRecordsExportedness(t *testing.T) {
+	t.Parallel()
 	byName := make(map[string]inventory.Symbol)
 	for _, s := range symbolsOf(t, "every-kind.txtar") {
 		byName[s.Name] = s
@@ -381,6 +388,7 @@ func TestSymbolsRecordsExportedness(t *testing.T) {
 }
 
 func TestSymbolsRecordsSizeInSourceLines(t *testing.T) {
+	t.Parallel()
 	byRef := namedByRef(symbolsOf(t, "every-kind.txtar"))
 
 	cases := []struct {
@@ -407,6 +415,7 @@ func TestSymbolsRecordsSizeInSourceLines(t *testing.T) {
 }
 
 func TestSymbolsOrderIsTheSameOnEveryCall(t *testing.T) {
+	t.Parallel()
 	dir := extract(t, "every-kind.txtar")
 	result, root := loadDir(t, dir, "linux", "amd64")
 
@@ -431,6 +440,7 @@ func TestSymbolsOrderIsTheSameOnEveryCall(t *testing.T) {
 }
 
 func TestSymbolsIDIsTheWrittenPositionOrForAPackageItsPathAndDirectory(t *testing.T) {
+	t.Parallel()
 	for _, s := range symbolsOf(t, "every-kind.txtar") {
 		want := inventory.SymbolID(fmt.Sprintf("%s:%d:%d", s.Pos.Filename, s.Pos.Line, s.Pos.Column))
 		if s.Kind == inventory.KindPackage {
@@ -443,6 +453,7 @@ func TestSymbolsIDIsTheWrittenPositionOrForAPackageItsPathAndDirectory(t *testin
 }
 
 func TestSymbolsRefusesAnIncompleteRequest(t *testing.T) {
+	t.Parallel()
 	dir := extract(t, "every-kind.txtar")
 	result, root := loadDir(t, dir, "linux", "amd64")
 
@@ -480,6 +491,7 @@ func TestSymbolsRefusesAnIncompleteRequest(t *testing.T) {
 }
 
 func TestSymbolsReportsAFileTheTargetRootDoesNotHold(t *testing.T) {
+	t.Parallel()
 	result, root, file := outsideRoot(t)
 
 	got, _, err := inventoryOf(result, root, readOutsideRootSource)
@@ -495,6 +507,7 @@ func TestSymbolsReportsAFileTheTargetRootDoesNotHold(t *testing.T) {
 }
 
 func TestSymbolsReportsAnUnreadableSource(t *testing.T) {
+	t.Parallel()
 	dir := extract(t, "every-kind.txtar")
 	result, root := loadDir(t, dir, "linux", "amd64")
 
@@ -509,6 +522,7 @@ func TestSymbolsReportsAnUnreadableSource(t *testing.T) {
 }
 
 func TestSymbolKindStringNamesEveryKind(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		kind inventory.SymbolKind
 		want string
@@ -536,6 +550,7 @@ func TestSymbolKindStringNamesEveryKind(t *testing.T) {
 }
 
 func TestSymbolsGivesABlankDeclarationItsContainersReference(t *testing.T) {
+	t.Parallel()
 	symbols := symbolsOf(t, "every-kind.txtar")
 	byID := make(map[inventory.SymbolID]inventory.Symbol, len(symbols))
 	for _, s := range symbols {
@@ -572,6 +587,7 @@ func TestSymbolsGivesABlankDeclarationItsContainersReference(t *testing.T) {
 }
 
 func TestSymbolsGivesAMethodTypeParameterItsOwnBracketedReference(t *testing.T) {
+	t.Parallel()
 	const (
 		methodRef    = "go://example.com/app/internal/queue#List.Contains"
 		parameterRef = "go://example.com/app/internal/queue#List.Contains[U]"

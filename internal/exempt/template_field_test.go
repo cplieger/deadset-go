@@ -28,6 +28,7 @@ func retainedRows(t *testing.T, symbols []inventory.Symbol, got []Exemption) []s
 }
 
 func TestTemplateFieldDetector(t *testing.T) {
+	t.Parallel()
 	base := inputOf(t, "template-field.txtar", Options{})
 
 	t.Run("a configured directory retains what its templates name", func(t *testing.T) {
@@ -111,6 +112,7 @@ func TestTemplateFieldDetector(t *testing.T) {
 }
 
 func TestTemplateFieldDetectorSkipsAnUnparsableFile(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "template-field-unparsed.txtar", Options{TemplateDirs: []string{"templates"}})
 
 	got, err := TemplateFieldDetector(in)
@@ -125,6 +127,7 @@ func TestTemplateFieldDetectorSkipsAnUnparsableFile(t *testing.T) {
 }
 
 func TestTemplatePosition(t *testing.T) {
+	t.Parallel()
 	// The second line holds a rune outside the basic multilingual plane, which
 	// is two UTF-16 code units and one rune, so a column counting runes reads
 	// one less than the column a report carries.

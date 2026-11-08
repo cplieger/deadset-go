@@ -99,6 +99,7 @@ func (r *resolved) objectsNamed(name string) []types.Object {
 }
 
 func TestResolverOverALoadedConfiguration(t *testing.T) {
+	t.Parallel()
 	r := resolverOf(t, "receivers.txtar")
 	named, none := r.resolvedDefs()
 
@@ -159,6 +160,7 @@ func TestResolverOverALoadedConfiguration(t *testing.T) {
 }
 
 func TestResolverNamesNothingForAnObjectWithNoPosition(t *testing.T) {
+	t.Parallel()
 	empty := &load.Result{Fset: token.NewFileSet()}
 	inv, err := inventory.Of(empty, "/target", os.ReadFile)
 	if err != nil {
@@ -198,6 +200,7 @@ func (c *countingReader) read(name string) ([]byte, error) {
 }
 
 func TestResolverResolvesWithoutReadingASource(t *testing.T) {
+	t.Parallel()
 	dir := extract(t, "receivers.txtar")
 	result, root := loadDir(t, dir, "linux", "amd64")
 	reader := &countingReader{}
@@ -228,6 +231,7 @@ func TestResolverResolvesWithoutReadingASource(t *testing.T) {
 }
 
 func TestResolverRendersALocalUnderADirectiveNamingAShortFile(t *testing.T) {
+	t.Parallel()
 	dir := extract(t, "unrendered-local.txtar")
 	result, root := loadDir(t, dir, "linux", "amd64")
 	inv, err := inventory.Of(result, root, os.ReadFile)

@@ -34,6 +34,7 @@ func exemptionRows(t *testing.T, symbols []inventory.Symbol, class vocab.Exempti
 }
 
 func TestEnumGroupRetainsEveryMemberOfAGroupWhoseValuesCanArriveByConversion(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		archive string

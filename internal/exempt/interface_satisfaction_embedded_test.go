@@ -12,6 +12,7 @@ import (
 // promoted through, beside the method; an embedded field supplying no method the
 // interface requires is not retained.
 func TestInterfaceSatisfactionRetainsTheEmbeddedFieldsThatSupplyAMethod(t *testing.T) {
+	t.Parallel()
 	refs := retainedRefs(t, analysisOf(t, "interface-satisfaction-embedded.txtar", Options{}), vocab.InterfaceSatisfaction)
 
 	var got []string
@@ -34,6 +35,7 @@ func TestInterfaceSatisfactionRetainsTheEmbeddedFieldsThatSupplyAMethod(t *testi
 // In a library, an embedded field supplying a method of a published parameter's
 // interface is retained for the conversion an outside program writes.
 func TestInterfaceSatisfactionRetainsAnEmbeddedFieldForAPublishedParameter(t *testing.T) {
+	t.Parallel()
 	refs := retainedRefs(t, analysisOf(t, "interface-satisfaction-embedded-published.txtar", Options{PublishedAPI: true}), vocab.InterfaceSatisfaction)
 
 	if !slices.Contains(refs, "go://example.com/lib/addon#Decoder.Base") {

@@ -43,6 +43,7 @@ func encodesSecret(t *testing.T, files []templateFile) bool {
 }
 
 func TestEncodesWholeAnswersAsHTMLTemplateEscapes(t *testing.T) {
+	t.Parallel()
 	one := func(src string) []templateFile { return []templateFile{{"p.html", src}} }
 	cases := []struct {
 		name    string

@@ -12,15 +12,19 @@ import (
 	"weak"
 
 	"github.com/cplieger/deadset-go/v2/internal/findings"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/go/packages"
 )
 
-// platformTree is a module whose matrix holds two configurations, one for its
-// windows file, with declarations every kind of the findings pass reads.
+// platformTree is a module whose matrix holds two configurations, the host pinned
+// to linux-amd64 and one for its windows file, with declarations every kind of the
+// findings pass reads.
 func platformTree(t *testing.T) string {
 	t.Helper()
 	t.Setenv("GOFLAGS", "")
 	t.Setenv("GOWORK", "off")
+	t.Setenv("GOOS", "linux")
+	t.Setenv("GOARCH", "amd64")
 	root := t.TempDir()
 	for name, body := range map[string]string{
 		"go.mod": "module example.com/p\n\ngo 1.27.1\n",
@@ -70,7 +74,7 @@ func main() { println(describe(0, &Store{}), Fast, platform()) }
 // loadedTree runs the load stage over the platform tree.
 func loadedTree(t *testing.T, root string) *Loaded {
 	t.Helper()
-	loaded, err := Load(t.Context(), &Request{Target: root, Config: defaultConfig()})
+	loaded, err := Load(t.Context(), &Request{Scope: scope.Document{Target: scope.Module{Path: root}}, Config: defaultConfig()})
 	if err != nil {
 		t.Fatalf("Setup: Load(%s) = %v", root, err)
 	}

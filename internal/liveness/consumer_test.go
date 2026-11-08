@@ -100,6 +100,7 @@ func candidateNames(names map[inventory.SymbolID]string, r Result) []string {
 }
 
 func TestReferencesRecordsWhatALoadedConsumerReferences(t *testing.T) {
+	t.Parallel()
 	dir := extractArchive(t, "consumer.txtar", mustReadTestdata(t, "consumer.txtar"))
 	result, root := loadTwoModules(t, dir, fixtureConsume)
 	symbols, refs, _ := passes(t, result, root)
@@ -159,6 +160,7 @@ func TestReferencesRecordsWhatALoadedConsumerReferences(t *testing.T) {
 }
 
 func TestReferencesRendersAUnitsOwnConsumerAgainstItsModuleRoot(t *testing.T) {
+	t.Parallel()
 	dir := extractArchive(t, "unit-own-consumers.txtar", mustReadTestdata(t, "unit-own-consumers.txtar"))
 
 	// A reference from the module's own packages outside its loaded ones names its
@@ -211,6 +213,7 @@ func TestReferencesRendersAUnitsOwnConsumerAgainstItsModuleRoot(t *testing.T) {
 }
 
 func TestSweepHoldsWhatAConsumerReferencesLiveAndReportsTheRest(t *testing.T) {
+	t.Parallel()
 	dir := extractArchive(t, "consumer.txtar", mustReadTestdata(t, "consumer.txtar"))
 
 	cases := map[string]struct {
@@ -247,6 +250,7 @@ func TestSweepHoldsWhatAConsumerReferencesLiveAndReportsTheRest(t *testing.T) {
 }
 
 func TestSweepHoldsAConsumersCallLiveUnderBothRelations(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("called", "helper", "dead")
 	b.ref("called", "helper")
 	b.refFromConsumer(handConsumer, "called", false)
@@ -267,6 +271,7 @@ func TestSweepHoldsAConsumersCallLiveUnderBothRelations(t *testing.T) {
 }
 
 func TestSweepSeedsNothingFromAnOutsideReferenceNoConsumerMade(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("referenced", "helper")
 	b.ref("referenced", "helper")
 	b.refFromOutside("referenced")
@@ -290,6 +295,7 @@ func TestSweepSeedsNothingFromAnOutsideReferenceNoConsumerMade(t *testing.T) {
 }
 
 func TestSweepClassifiesAConsumersTestReferenceByTheMode(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		mode facts.Mode
 		// want is the candidate set, and the counts the candidate carries where it
@@ -335,6 +341,7 @@ func TestSweepClassifiesAConsumersTestReferenceByTheMode(t *testing.T) {
 }
 
 func TestSweepCountsEachConsumersReferenceOfOneSymbol(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("called")
 	b.refFromConsumer(handConsumer, "called", false)
 	b.refFromConsumer(handOtherConsumer, "called", false)
@@ -351,6 +358,7 @@ func TestSweepCountsEachConsumersReferenceOfOneSymbol(t *testing.T) {
 }
 
 func TestReferencesAndSweepOverTheCorpusConsumerFixture(t *testing.T) {
+	t.Parallel()
 	body, err := spec.Corpus.ReadFile(corpusArchive)
 	if err != nil {
 		t.Fatalf("Setup: read %s from the corpus: %v", corpusArchive, err)
@@ -391,6 +399,7 @@ func TestReferencesAndSweepOverTheCorpusConsumerFixture(t *testing.T) {
 }
 
 func TestReferencesAndSweepOverATargetOnlyDocumentAreUnchanged(t *testing.T) {
+	t.Parallel()
 	dir := extract(t, "tested-module.txtar")
 	result, root := loadDir(t, dir, "linux", "amd64")
 	symbols, refs, _ := passes(t, result, root)

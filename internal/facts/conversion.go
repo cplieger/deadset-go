@@ -709,6 +709,34 @@ func (r *readings) identity(t types.Type) string {
 	return resolve.Spell(t, r.of)
 }
 
+// Readings answers whether two types are one type where a type of two readings of
+// one package is one type ([readings]), for a caller comparing a type its own code
+// states with one another module's code states.
+type Readings struct {
+	names *readings
+	spelt map[types.Type]string
+}
+
+// NewReadings answers for the packages whose files fset places.
+func NewReadings(fset *token.FileSet) *Readings {
+	return &Readings{names: newReadings(fset), spelt: make(map[types.Type]string)}
+}
+
+// Same reports whether a and b are one type, two readings of one package's types
+// alike.
+func (r *Readings) Same(a, b types.Type) bool {
+	return types.Identical(a, b) || r.spelling(a) == r.spelling(b)
+}
+
+func (r *Readings) spelling(t types.Type) string {
+	held, known := r.spelt[t]
+	if !known {
+		held = r.names.identity(t)
+		r.spelt[t] = held
+	}
+	return held
+}
+
 func newReadings(fset *token.FileSet) *readings {
 	return &readings{fset: fset, names: make(map[*types.Package]string)}
 }
