@@ -58,7 +58,6 @@ func unanswered() *run.Self {
 func reportOfArchive(t *testing.T, files map[string]string) *report.Report {
 	t.Helper()
 
-	sharedModule(t, files)
 	return cachedEnvelope(t.Context(), t, files)
 }
 

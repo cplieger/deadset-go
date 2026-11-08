@@ -147,23 +147,6 @@ func reportOf(ctx context.Context, req *run.Request, self *run.Self) (*report.Re
 	return found.Report(self)
 }
 
-// sharedModule writes one archive and returns its directory, which is the same
-// directory for every test declaring the same files.
-//
-// The directory belongs to the cache and not to the caller: a test that needs a
-// document inside its target declares that document as part of the archive, and a test
-// that writes into its target at all uses writeModule instead, which gives it a
-// directory of its own.
-func sharedModule(sink failureSink, files map[string]string) string {
-	sink.Helper()
-
-	dir, err := fixtureFor(files).directory()
-	if err != nil {
-		sink.Fatalf("Setup: write the fixture module: %v", err)
-	}
-	return dir
-}
-
 // cachedFindings is the findings of one run over the archive's module, computed once
 // per archive however many tests ask for it. Each caller gets its own copy of the
 // findings and evaluations; the stages before them are shared and read only.
