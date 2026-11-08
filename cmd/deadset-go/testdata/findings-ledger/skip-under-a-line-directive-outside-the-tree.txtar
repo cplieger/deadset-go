@@ -13,5 +13,5 @@ package main
 
 func main() {}
 
-//line /nowhere/gen.go:10
+//line ../nowhere/gen.go:10
 func broken() int { return "x" }

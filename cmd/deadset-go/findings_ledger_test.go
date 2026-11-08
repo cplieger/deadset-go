@@ -25,6 +25,7 @@ func partsAt(t *testing.T, dir string, code vocab.Code) []string {
 }
 
 func TestAPartOneConfigurationOfTwoFindsIsNotReported(t *testing.T) {
+	t.Parallel()
 	dir := archiveModule(t, "findings-ledger/parts-per-configuration.txtar")
 
 	if got, want := partsAt(t, dir, vocab.UnreachableCase), []string{"main.go:25 go://example.com/app#always"}; !slices.Equal(got, want) {
@@ -36,6 +37,7 @@ func TestAPartOneConfigurationOfTwoFindsIsNotReported(t *testing.T) {
 }
 
 func TestATypeErrorSkipsOnlyTheDeclarationWhoseSourceHoldsIt(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, archiveModule(t, "findings-ledger/skip-by-declaration.txtar"))
 
 	wantNoFinding(t, about, "the type error skips Broken", "go://example.com/app#Broken")
@@ -43,6 +45,7 @@ func TestATypeErrorSkipsOnlyTheDeclarationWhoseSourceHoldsIt(t *testing.T) {
 }
 
 func TestMintedComponentsAreNumberedInTheReportsOrder(t *testing.T) {
+	t.Parallel()
 	set := findingsOfDir(t, archiveModule(t, "findings-ledger/minted-in-report-order.txtar"))
 
 	var got []string
@@ -75,13 +78,62 @@ func reportedAt(t *testing.T, fixture string) []string {
 	return got
 }
 
+func TestATestEntryPointAnotherTestCallsIsNoUnnecessaryExport(t *testing.T) {
+	t.Parallel()
+	want := []string{"DS1501 internal/p/p.go:7"}
+	if got := reportedAt(t, "findings-ledger/test-entry-points-another-test-calls.txtar"); !slices.Equal(got, want) {
+		t.Errorf("findings = %q, want %q: the go test driver runs each entry point by its exported name", got, want)
+	}
+}
+
+// A package below an underscore directory and one below testdata are both skipped
+// by the go tool's wildcard, and a test that imports one compiles it as test code
+// alike.
+func TestAPackageOnlyATestImportsIsTestCodeBelowAnUnderscoreAsBelowTestdata(t *testing.T) {
+	t.Parallel()
+	want := []string{"DS1102 p/p.go:8"}
+	for _, fixture := range []string{"underscored-package-only-a-test-imports", "testdata-package-only-a-test-imports"} {
+		if got := reportedAt(t, "findings-ledger/"+fixture+".txtar"); !slices.Equal(got, want) {
+			t.Errorf("%s: findings = %q, want %q: only the test's build compiles x", fixture, got, want)
+		}
+	}
+}
+
+// An assertion in one module of a type another module hands out holds the methods it
+// reaches, whichever module's reading of their package each type and interface is.
+func TestAnAssertionOfAnotherModulesTypeHoldsWhatItReachesAcrossTheTwoReadings(t *testing.T) {
+	t.Parallel()
+	if got := reportedAt(t, "findings-ledger/derived-conversion-across-two-readings.txtar"); len(got) != 0 {
+		t.Errorf("findings = %q, want none: b's assertions reach every method they name", got)
+	}
+}
+
+// The site an assertion derives names the interface the assertion writes, so an
+// encoder its module calls finds the asserted value's type among the types converted
+// to it.
+func TestAValueAssertedAcrossTheTwoReadingsAndEncodedHoldsTheFieldsTheEncoderReads(t *testing.T) {
+	t.Parallel()
+	if got := reportedAt(t, "findings-ledger/derived-conversion-encoded-across-two-readings.txtar"); len(got) != 0 {
+		t.Errorf("findings = %q, want none: json.Marshal reads Square.Secret through b's Namer", got)
+	}
+}
+
+func TestAnAssertedMethodVariadicInATypeParameterKeepsTheInterfaceItWrites(t *testing.T) {
+	t.Parallel()
+	if got := reportedAt(t, "findings-ledger/assertion-of-a-variadic-type-parameter-method.txtar"); len(got) != 0 {
+		t.Errorf("findings = %q, want none: every declaration is used", got)
+	}
+}
+
 func TestARecordOnADeclarationATypeErrorSkipsIsStaleWhenNoFindingNamesIt(t *testing.T) {
+	t.Parallel()
 	if got, want := reportedAt(t, "findings-ledger/skip-record.txtar"), []string{"DS9003 main.go:5"}; !slices.Equal(got, want) {
 		t.Errorf("findings = %q, want %q: the type error roots broken, so no kind finds it unused", got, want)
 	}
 }
 
 func TestARecordNamingOnlyASkippedFindingIsNeitherInEffectNorStale(t *testing.T) {
+	t.Parallel()
 	const fixture = "findings-ledger/skip-record-held.txtar"
 	if got := reportedAt(t, fixture); len(got) != 0 {
 		t.Errorf("findings = %q, want none: each record names a finding the type error skips", got)
@@ -92,12 +144,14 @@ func TestARecordNamingOnlyASkippedFindingIsNeitherInEffectNorStale(t *testing.T)
 }
 
 func TestARecordNamingNoKindsCodeIsStaleOnADeclarationATypeErrorSkips(t *testing.T) {
+	t.Parallel()
 	if got, want := reportedAt(t, "findings-ledger/skip-record-unknown-code.txtar"), []string{"DS9003 main.go:5"}; !slices.Equal(got, want) {
 		t.Errorf("findings = %q, want %q: a record naming DS1999 matches nothing whatever the type error hides", got, want)
 	}
 }
 
 func TestARecordNoKindReportsAboutASkippedDeclarationIsStale(t *testing.T) {
+	t.Parallel()
 	want := []string{
 		"DS9003 lib/lib.go:5", "DS9003 lib/lib.go:8", "DS9003 main.go:7", "DS9003 main.go:12", "DS9003 main.go:15",
 		"DS9003 main.go:18", "DS9003 main.go:21", "DS9003 main.go:24", "DS9003 main.go:27", "DS9003 main.go:30",
@@ -108,6 +162,7 @@ func TestARecordNoKindReportsAboutASkippedDeclarationIsStale(t *testing.T) {
 }
 
 func TestARecordNamingAnotherShapeIsStaleOnADeclarationATypeErrorSkips(t *testing.T) {
+	t.Parallel()
 	if got, want := reportedAt(t, "findings-ledger/skip-record-shape-code.txtar"), []string{"DS9003 main.go:5"}; !slices.Equal(got, want) {
 		t.Errorf("findings = %q, want %q: no finding about unexported broken carries DS1001", got, want)
 	}
@@ -117,12 +172,14 @@ func TestARecordNamingAnotherShapeIsStaleOnADeclarationATypeErrorSkips(t *testin
 }
 
 func TestARecordOnAUsedDeclarationIsStaleWhenATypeErrorSkipsIt(t *testing.T) {
+	t.Parallel()
 	if got, want := reportedAt(t, "findings-ledger/skip-record-used.txtar"), []string{"DS9003 lib/lib.go:3"}; !slices.Equal(got, want) {
 		t.Errorf("findings = %q, want %q: main calls Broken outside its body", got, want)
 	}
 }
 
 func TestARecordNoFindingAboutAFunctionCanCarryIsStaleWhenATypeErrorSkipsIt(t *testing.T) {
+	t.Parallel()
 	want := []string{
 		"DS9003 main.go:5", "DS9003 main.go:8", "DS9003 main.go:11", "DS9003 main.go:14",
 		"DS9003 main.go:17", "DS9003 main.go:20", "DS9003 main.go:23",
@@ -133,12 +190,14 @@ func TestARecordNoFindingAboutAFunctionCanCarryIsStaleWhenATypeErrorSkipsIt(t *t
 }
 
 func TestARecordForADependencyKindKeepsNothingLive(t *testing.T) {
+	t.Parallel()
 	if got, want := reportedAt(t, "findings-ledger/dependency-record-marks-nothing.txtar"), []string{"DS1002 main.go:6", "DS9003 main.go:5"}; !slices.Equal(got, want) {
 		t.Errorf("findings = %q, want %q: a DS1701 record marks nothing live, so helper is reported beside the stale record", got, want)
 	}
 }
 
 func TestARecordWhoseFindingTheMinimumWithholdsIsDormant(t *testing.T) {
+	t.Parallel()
 	set := findingsOfDir(t, archiveModule(t, "findings-ledger/dormant-filled.txtar"))
 
 	if got := set.Result.InEffect; got != 0 {
@@ -147,6 +206,7 @@ func TestARecordWhoseFindingTheMinimumWithholdsIsDormant(t *testing.T) {
 }
 
 func TestAPartUnderALineDirectiveIsReportedWhereTheDirectivePutsIt(t *testing.T) {
+	t.Parallel()
 	dir := archiveModule(t, "findings-ledger/part-under-a-line-directive.txtar")
 
 	want := []string{"main.go:5 go://example.com/app#plain(unused)", "shadow.txt:3 go://example.com/app#shifted(also)"}
@@ -156,6 +216,7 @@ func TestAPartUnderALineDirectiveIsReportedWhereTheDirectivePutsIt(t *testing.T)
 }
 
 func TestATypeErrorSkipsNoRefusalOfAnEntryNamingTheDeclaration(t *testing.T) {
+	t.Parallel()
 	want := []string{"DS9001 deadset-ignore.json:2", "DS9002 deadset-ignore.json:3", "DS9003 deadset-ignore.json:4"}
 	if got := reportedAt(t, "findings-ledger/skipped-declaration-entries.txtar"); !slices.Equal(got, want) {
 		t.Errorf("findings = %q, want %q: a refused entry is a row of the ignore file, and the complete entry matches no finding", got, want)
@@ -163,12 +224,14 @@ func TestATypeErrorSkipsNoRefusalOfAnEntryNamingTheDeclaration(t *testing.T) {
 }
 
 func TestANameLiteralUnderALineDirectiveNamingATestFileStillLowers(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, archiveModule(t, "findings-ledger/name-literal-under-a-line-directive.txtar"))
 
 	wantFinding(t, about, "go://example.com/app#helper", vocab.UnusedUnexported, vocab.Possible)
 }
 
 func TestEachOfTwoLiteralsALineDirectiveRendersAtOnePositionLowers(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, archiveModule(t, "findings-ledger/literal-fold.txtar"))
 
 	wantFinding(t, about, "go://example.com/app#alpha", vocab.UnusedUnexported, vocab.Possible)
@@ -176,6 +239,7 @@ func TestEachOfTwoLiteralsALineDirectiveRendersAtOnePositionLowers(t *testing.T)
 }
 
 func TestEachOfTwoWritesALineDirectiveRendersAtOnePositionCounts(t *testing.T) {
+	t.Parallel()
 	found := findingsAbout(t, archiveModule(t, "findings-ledger/write-fold.txtar"))["go://example.com/app#settings.level"]
 	if found == nil {
 		t.Fatal("no finding about settings.level")
@@ -186,6 +250,7 @@ func TestEachOfTwoWritesALineDirectiveRendersAtOnePositionCounts(t *testing.T) {
 }
 
 func TestAColumnAfterAnInlineLineDirectiveCountsOnlyTheBytesAfterIt(t *testing.T) {
+	t.Parallel()
 	found := findingsAbout(t, archiveModule(t, "findings-ledger/column-after-an-inline-line-directive.txtar"))["go://example.com/app#t"]
 	if found == nil {
 		t.Fatal("no finding about t")
@@ -196,6 +261,7 @@ func TestAColumnAfterAnInlineLineDirectiveCountsOnlyTheBytesAfterIt(t *testing.T
 }
 
 func TestATypeErrorInOneInitSkipsThatInitsPartsAlone(t *testing.T) {
+	t.Parallel()
 	if got := reportedAt(t, "findings-ledger/skip-init-later.txtar"); len(got) != 0 {
 		t.Errorf("findings = %q, want none: the dead store is in the init the type error skips", got)
 	}
@@ -208,6 +274,7 @@ func TestATypeErrorInOneInitSkipsThatInitsPartsAlone(t *testing.T) {
 }
 
 func TestARecordOnAPartOfTheHealthyInitIsInEffect(t *testing.T) {
+	t.Parallel()
 	const fixture = "findings-ledger/skip-init-record.txtar"
 	if got := reportedAt(t, fixture); len(got) != 0 {
 		t.Errorf("findings = %q, want none: the record withholds the healthy init's dead store", got)
@@ -218,6 +285,7 @@ func TestARecordOnAPartOfTheHealthyInitIsInEffect(t *testing.T) {
 }
 
 func TestARecordWhoseMarkWithholdsASkippedMembersFindingIsNeitherInEffectNorStale(t *testing.T) {
+	t.Parallel()
 	const fixture = "findings-ledger/skip-record-member.txtar"
 	if got := reportedAt(t, fixture); len(got) != 0 {
 		t.Errorf("findings = %q, want none: the type error skips broken and its field y", got)
@@ -228,6 +296,7 @@ func TestARecordWhoseMarkWithholdsASkippedMembersFindingIsNeitherInEffectNorStal
 }
 
 func TestARecordOnOneInitWithholdsThatInitsPartsAlone(t *testing.T) {
+	t.Parallel()
 	const fixture = "findings-ledger/record-on-one-init.txtar"
 	if got, want := reportedAt(t, fixture), []string{"DS1404 main.go:6"}; !slices.Equal(got, want) {
 		t.Errorf("findings = %q, want %q: the directive binds the second init, not the first", got, want)
@@ -238,6 +307,7 @@ func TestARecordOnOneInitWithholdsThatInitsPartsAlone(t *testing.T) {
 }
 
 func TestAnEntryNamingTwoInitsIsARecordInEffectPerInit(t *testing.T) {
+	t.Parallel()
 	const fixture = "findings-ledger/entry-on-two-inits.txtar"
 	if got := reportedAt(t, fixture); len(got) != 0 {
 		t.Errorf("findings = %q, want none: each init's record withholds its store", got)
@@ -248,6 +318,7 @@ func TestAnEntryNamingTwoInitsIsARecordInEffectPerInit(t *testing.T) {
 }
 
 func TestAPartHoldsUnderTheConfigurationsOfItsOwnDeclaration(t *testing.T) {
+	t.Parallel()
 	set := findingsOfDir(t, archiveModule(t, "findings-ledger/init-per-configuration.txtar"))
 
 	var got []string
@@ -260,6 +331,7 @@ func TestAPartHoldsUnderTheConfigurationsOfItsOwnDeclaration(t *testing.T) {
 }
 
 func TestBlankFunctionsAreNoPlatformTwins(t *testing.T) {
+	t.Parallel()
 	dir := archiveModule(t, "findings-ledger/blank-functions-are-no-twins.txtar")
 
 	want := []string{"main.go:5 go://example.com/app#(unused)", "other.go:3 go://example.com/app#(spare)"}
@@ -282,6 +354,7 @@ func storesAt(t *testing.T, fixture string) []string {
 }
 
 func TestPartsALineDirectiveRendersAtOnePositionAreEachReported(t *testing.T) {
+	t.Parallel()
 	if got, want := storesAt(t, "findings-ledger/line-folded-inits.txtar"), []string{"main.go:4 v", "main.go:4 w"}; !slices.Equal(got, want) {
 		t.Errorf("dead stores = %q, want %q: each init writes its own store", got, want)
 	}
@@ -318,6 +391,7 @@ func subjectsAt(t *testing.T, fixture string) []string {
 }
 
 func TestDeclarationsALineDirectiveRendersAtOnePositionAreEachReported(t *testing.T) {
+	t.Parallel()
 	want := []string{"DS1002 main.go:20 go://example.com/app#alpha", "DS1002 main.go:20 go://example.com/app#bravo"}
 	if got := subjectsAt(t, "findings-ledger/decl-fold.txtar"); !slices.Equal(got, want) {
 		t.Errorf("findings = %q, want %q", got, want)
@@ -329,6 +403,7 @@ func TestDeclarationsALineDirectiveRendersAtOnePositionAreEachReported(t *testin
 }
 
 func TestADependencysFunctionALineDirectiveRendersOntoAnothersLineKeepsItsOwnBody(t *testing.T) {
+	t.Parallel()
 	want := []string{"DS1101 app.go:9 go://example.com/app#settings.String"}
 	if got := subjectsAt(t, "findings-ledger/decoder-fold.txtar"); !slices.Equal(got, want) {
 		t.Errorf("findings = %q, want %q: Load only decodes, whatever Show's body does", got, want)
@@ -336,6 +411,7 @@ func TestADependencysFunctionALineDirectiveRendersOntoAnothersLineKeepsItsOwnBod
 }
 
 func TestATypeErrorALineDirectiveRendersOutsideTheTreeIsSkippedWhereItIsWritten(t *testing.T) {
+	t.Parallel()
 	set := findingsOfDir(t, archiveModule(t, "findings-ledger/skip-under-a-line-directive-outside-the-tree.txtar"))
 	var got []string
 	for _, skip := range set.TypeErrorSkips {
@@ -347,12 +423,14 @@ func TestATypeErrorALineDirectiveRendersOutsideTheTreeIsSkippedWhereItIsWritten(
 }
 
 func TestADeclarationIsOfThePackageThatWritesIt(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, filepath.Join(archiveModule(t, "findings-ledger/package-of-a-folded-declaration.txtar"), "target"))
 
 	wantFinding(t, about, "go://example.com/app#Exported", vocab.UnreachableExport, vocab.Certain)
 }
 
 func TestALineDirectiveNamingATestFileMakesNoProductionCodeATest(t *testing.T) {
+	t.Parallel()
 	want := []string{"DS1102 helper_test.go:3", "DS1103 main_test.go:5"}
 	if got := reportedAt(t, "findings-ledger/test-file-under-a-line-directive.txtar"); !slices.Equal(got, want) {
 		t.Errorf("findings = %q, want %q: helper is written in main.go", got, want)
@@ -374,6 +452,7 @@ func renderedAt(t *testing.T, fixture string) []string {
 }
 
 func TestALineDirectiveRendersAPositionAndMovesNothingElse(t *testing.T) {
+	t.Parallel()
 	if got := renderedAt(t, "findings-ledger/generated-file-under-a-line-directive.txtar"); len(got) != 0 {
 		t.Errorf("findings = %q, want none: yyUnused is written in a generated file", got)
 	}
@@ -390,14 +469,11 @@ func TestALineDirectiveRendersAPositionAndMovesNothingElse(t *testing.T) {
 func scopedReport(t *testing.T, fixture string) []string {
 	t.Helper()
 
-	t.Chdir(archiveModule(t, fixture))
 	reportPath := filepath.Join(t.TempDir(), "report.json")
-	var stdout, stderr strings.Builder
-	code := invoke(t.Context(), []string{
-		"analyze", "--scope=scope.json", "--config=target/" + repositoryDocument, "--report=" + reportPath,
-	}, &stdout, &stderr)
-	if code != vocab.ExitClean && code != vocab.ExitFindings {
-		t.Fatalf("analyze --scope=scope.json = %d, want a verdict\nstderr:\n%s", code, stderr.String())
+	ran := invokedIn(t, archiveModule(t, fixture),
+		"analyze", "--scope=scope.json", "--config=target/"+repositoryDocument, "--report="+reportPath)
+	if ran.code != vocab.ExitClean && ran.code != vocab.ExitFindings {
+		t.Fatalf("analyze --scope=scope.json = %d, want a verdict\nstderr:\n%s", ran.code, ran.stderr)
 	}
 	var got []string
 	for _, found := range envelopeAt(t, reportPath).Findings {
@@ -407,6 +483,7 @@ func scopedReport(t *testing.T, fixture string) []string {
 }
 
 func TestAConsumersInstantiationReachesTheTypeParameterItInstantiates(t *testing.T) {
+	t.Parallel()
 	for fixture, why := range map[string]string{
 		"layout-through-a-consumers-generic":                                 "the consumer's conversion lays S out",
 		"layout-through-a-target-generic-a-consumer-instantiates":            "View lays out the S the consumer gives it",
@@ -421,6 +498,7 @@ func TestAConsumersInstantiationReachesTheTypeParameterItInstantiates(t *testing
 }
 
 func TestATypeAnotherPackageReachesThroughAnExportedDeclarationIsNoUnnecessaryExport(t *testing.T) {
+	t.Parallel()
 	var got []string
 	for _, found := range findingsOfDir(t, archiveModule(t, "findings-ledger/types-reached-through-an-exported-declaration.txtar")).Result.Findings {
 		if found.Code == vocab.UnnecessaryExport {
@@ -435,12 +513,14 @@ func TestATypeAnotherPackageReachesThroughAnExportedDeclarationIsNoUnnecessaryEx
 }
 
 func TestAConsumersEncoderReadsTheFieldsOfTheTargetsTypeItEncodes(t *testing.T) {
+	t.Parallel()
 	if got := scopedReport(t, "findings-ledger/encoded-by-a-consumer.txtar"); len(got) != 0 {
 		t.Errorf("findings = %q, want none: the consumer's json.Marshal reads S.X", got)
 	}
 }
 
 func TestAConsumersReadOfAStructLiteralsFieldReadsEachIdenticalLiteralsField(t *testing.T) {
+	t.Parallel()
 	got := scopedReport(t, "findings-ledger/struct-literal-twin-read-from-a-consumer.txtar")
 	want := []string{"DS1003 go://example.com/app#P.In.Y", "DS1003 go://example.com/app#Q.In.Y"}
 	if !slices.Equal(got, want) {
@@ -449,6 +529,7 @@ func TestAConsumersReadOfAStructLiteralsFieldReadsEachIdenticalLiteralsField(t *
 }
 
 func TestAMethodOfATypeDeclaredPerPlatformIsJudgedUnderTheTypeOfEachPlatform(t *testing.T) {
+	t.Parallel()
 	linux := `{"id": "linux-amd64", "os": "linux", "arch": "amd64"}`
 	windows := `{"id": "windows-amd64", "os": "windows", "arch": "amd64"}`
 	for _, tc := range []struct {
@@ -538,11 +619,13 @@ func sameAsControl(t *testing.T, archive, why string) map[string][]string {
 }
 
 func TestAPackageOnlyATestImportsFromALeftOutDirectoryReferencesAsTheTestDoes(t *testing.T) {
+	t.Parallel()
 	sameAsControl(t, "findings-ledger/referenced-from-a-test-only-left-out-package.txtar",
 		"the packages below node_modules and testdata are test code, so their calls are a test's as the test's own are")
 }
 
 func TestATestOnlyLeftOutPackageKeepsTheTestSupportItUsesTestSupport(t *testing.T) {
+	t.Parallel()
 	for mode, found := range sameAsControl(t, "findings-ledger/test-support-reached-through-a-test-only-left-out-package.txtar",
 		"the package below testdata is test code, so testutil stays test support") {
 		for _, f := range found {
@@ -554,11 +637,13 @@ func TestATestOnlyLeftOutPackageKeepsTheTestSupportItUsesTestSupport(t *testing.
 }
 
 func TestATestOnlyLeftOutPackagesEncoderCallIsATestsEvidence(t *testing.T) {
+	t.Parallel()
 	sameAsControl(t, "findings-ledger/encoded-by-a-test-only-left-out-package.txtar",
 		"the package below testdata is test code, so its json.Marshal is a test's evidence")
 }
 
 func TestALeftOutPackageATestAlsoCompilesKeepsItsEncoderCallProductionEvidence(t *testing.T) {
+	t.Parallel()
 	for mode, found := range sameAsControl(t, "findings-ledger/encoded-by-a-left-out-package-a-test-also-imports.txtar",
 		"main imports the package below testdata, so its json.Marshal is production evidence however many test binaries compile it") {
 		for _, f := range found {
@@ -570,6 +655,7 @@ func TestALeftOutPackageATestAlsoCompilesKeepsItsEncoderCallProductionEvidence(t
 }
 
 func TestATestOnlyLeftOutPackagesCallReachesNoFartherThanTheModule(t *testing.T) {
+	t.Parallel()
 	findings := map[string][]string{}
 	for _, found := range everyFinding(t, archiveModule(t, "findings-ledger/exported-for-a-test-only-left-out-package.txtar")) {
 		code, ref, _ := strings.Cut(found, " go://example.com/app/pkg#")
@@ -583,6 +669,7 @@ func TestATestOnlyLeftOutPackagesCallReachesNoFartherThanTheModule(t *testing.T)
 }
 
 func TestALeftOutOrNestedConsumersEncoderReadsTheFieldsOfTheTypeItEncodes(t *testing.T) {
+	t.Parallel()
 	for fixture, ref := range map[string]string{
 		"encoded-by-a-left-out-package": "go://example.com/m/internal/lib#S.X",
 		"encoded-by-a-nested-module":    "go://example.com/app/internal/lib#S.X",
@@ -595,6 +682,7 @@ func TestALeftOutOrNestedConsumersEncoderReadsTheFieldsOfTheTypeItEncodes(t *tes
 }
 
 func TestATestOnlyLeftOutPackagesImportReachesTheFileItImports(t *testing.T) {
+	t.Parallel()
 	for mode, found := range sameAsControl(t, "findings-ledger/imported-by-a-test-only-left-out-package.txtar",
 		"the package below testdata is test code, so its import is a test's") {
 		for _, f := range found {
@@ -606,6 +694,7 @@ func TestATestOnlyLeftOutPackagesImportReachesTheFileItImports(t *testing.T) {
 }
 
 func TestAConsumersImportReachesTheFileItImports(t *testing.T) {
+	t.Parallel()
 	got := scopedReport(t, "findings-ledger/imported-by-a-consumer.txtar")
 	if slices.Contains(got, string(vocab.FileNeverImported)+" go://example.com/app/side#side.go:file") ||
 		!slices.ContainsFunc(got, func(f string) bool { return strings.HasSuffix(f, " go://example.com/app/side#Unused") }) {

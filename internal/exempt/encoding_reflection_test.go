@@ -959,6 +959,35 @@ func TestEncodingReflectionFollowsContainersAndInterfaceMethodResults(t *testing
 	}
 }
 
+// A value stored in an interface-typed field of a struct the program encodes reaches
+// the encoder whatever expression stores it, and one stored in a struct nothing
+// encodes reaches none.
+func TestEncodingReflectionFollowsAValueIntoAnInterfaceTypedField(t *testing.T) {
+	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-interface-field-flow.txtar", Options{}), vocab.EncodingReflection)
+
+	for _, test := range []struct {
+		how      string
+		typeName string
+		want     []string
+	}{
+		{how: "a conversion to any", typeName: "Converted", want: anyFlowRefs("Converted", "A")},
+		{how: "a call of two results", typeName: "Paired", want: anyFlowRefs("Paired", "B")},
+		{how: "a map index a call of two results assigns", typeName: "Indexed", want: anyFlowRefs("Indexed", "C")},
+		{how: "a slice a call returns", typeName: "Listed", want: anyFlowRefs("Listed", "D")},
+		{how: "a variable", typeName: "Held", want: anyFlowRefs("Held", "E")},
+		{how: "a struct nothing encodes", typeName: "Unsent"},
+		{how: "a conversion to a type parameter, as itself", typeName: "Raw"},
+		{how: "a conversion to a type parameter, as its argument", typeName: "Retyped", want: anyFlowRefs("Retyped", "G")},
+	} {
+		t.Run(strings.ReplaceAll(test.how, " ", "_"), func(t *testing.T) {
+			if got := membersOf(refs, test.typeName); !slices.Equal(got, test.want) {
+				t.Errorf("EncodingReflectionDetector(encoding-reflection-interface-field-flow.txtar) retained, for %s stored through %s,\ngot  %v\nwant %v",
+					test.typeName, test.how, got, test.want)
+			}
+		})
+	}
+}
+
 // A function outside the program whose name says it fills its argument, and whose own
 // body hands it to no reader of fields, retains no field of the value: the fields it
 // fills are the class's filled fields, reported at possible. One that also prints its

@@ -1,0 +1,44 @@
+The twin of underscored-package-only-a-test-imports with the package below a
+testdata directory, which the go tool's wildcard skips too: Helper is production
+code only a test uses.
+
+-- go.mod --
+module example.com/m
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+// Command m.
+package main
+
+import "example.com/m/p"
+
+func main() { p.Used() }
+-- p/p.go --
+// Package p.
+package p
+
+// Used is what main calls.
+func Used() {}
+
+// Helper is what x calls.
+func Helper() {}
+-- p/p_test.go --
+package p_test
+
+import (
+	"testing"
+
+	"example.com/m/testdata/x"
+)
+
+func TestX(t *testing.T) { x.Call() }
+-- testdata/x/x.go --
+// Package x.
+package x
+
+import "example.com/m/p"
+
+// Call calls Helper.
+func Call() { p.Helper() }

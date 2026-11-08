@@ -15,6 +15,7 @@ const otherLanguageRoots = `{"target": {"kind": "application"}, "roots": {"patte
 	`"ts://@example/app/src/a.ts#main", "js://@example/app/b.js#x", "py://app#run", "go://example.com/app#Absent"]}}`
 
 func TestAnalyzeReadsOnlyTheConfiguredRootsOfItsOwnLanguage(t *testing.T) {
+	t.Parallel()
 	dir := applicationModule(t, otherLanguageRoots)
 
 	got := runAnalyze(t, dir)
@@ -33,6 +34,7 @@ func TestAnalyzeReadsOnlyTheConfiguredRootsOfItsOwnLanguage(t *testing.T) {
 }
 
 func TestPrintRootsReadsOnlyTheConfiguredRootsOfItsOwnLanguage(t *testing.T) {
+	t.Parallel()
 	dir := applicationModule(t, otherLanguageRoots)
 
 	var stdout, stderr bytes.Buffer
@@ -46,6 +48,7 @@ func TestPrintRootsReadsOnlyTheConfiguredRootsOfItsOwnLanguage(t *testing.T) {
 }
 
 func TestPrintRootsNamesEveryReasonOfAGoFuzzEntryExportedToC(t *testing.T) {
+	t.Parallel()
 	dir := writeModule(t, map[string]string{
 		"go.mod":           "module example.com/app\n\ngo 1.27.1\n",
 		"main.go":          "package main\n\nfunc main() {}\n",

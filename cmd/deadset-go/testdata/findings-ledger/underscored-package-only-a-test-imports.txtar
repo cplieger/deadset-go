@@ -1,0 +1,44 @@
+A command whose package p a test reaches only through a package below an underscore
+directory, which the go tool's wildcard skips. Only the test's build compiles that
+package, so Helper, which only it calls, is production code only a test uses.
+
+-- go.mod --
+module example.com/m
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+// Command m.
+package main
+
+import "example.com/m/p"
+
+func main() { p.Used() }
+-- p/p.go --
+// Package p.
+package p
+
+// Used is what main calls.
+func Used() {}
+
+// Helper is what x calls.
+func Helper() {}
+-- p/p_test.go --
+package p_test
+
+import (
+	"testing"
+
+	"example.com/m/_x/x"
+)
+
+func TestX(t *testing.T) { x.Call() }
+-- _x/x/x.go --
+// Package x.
+package x
+
+import "example.com/m/p"
+
+// Call calls Helper.
+func Call() { p.Helper() }

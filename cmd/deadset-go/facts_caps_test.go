@@ -88,6 +88,7 @@ func TestDecode(t *testing.T) { _ = protojson.Unmarshal(nil, &v1.Cloned{}) }
 // form or in a test only carries none, and neither does an enum value
 // (references-go.17).
 func TestFactsCapAConsumerOfAMessageDecodedFromProtoJSONKeepingUnknownFields(t *testing.T) {
+	t.Parallel()
 	wantCaps(t, capsOf(t, decodes), map[string]string{
 		"Envelope": "persistence", "Envelope.Label": "persistence", "Envelope.GetLabel": "persistence",
 		"Envelope.Items": "persistence", "Envelope_Word.Word": "persistence", "Envelope_Boxed": "persistence",
@@ -98,6 +99,7 @@ func TestFactsCapAConsumerOfAMessageDecodedFromProtoJSONKeepingUnknownFields(t *
 }
 
 func TestFactsCapReadsAnUnkeyedOptionsLiteralByFieldPosition(t *testing.T) {
+	t.Parallel()
 	wantCaps(t, capsOf(t, map[string]string{
 		"main.go": `package main
 
@@ -118,6 +120,7 @@ func main() {
 // Below a minimum confidence of possible no record carries a cap, because the
 // merge must not lower a finding under it (bindings.16).
 func TestFactsCapNothingWherePossibleIsBelowTheMinimum(t *testing.T) {
+	t.Parallel()
 	replaced := maps.Clone(decodes)
 	replaced[repositoryDocument] = `{"target": {"kind": "application"}, "analysis": {"min_confidence": "probable"}}`
 	for fragment, capped := range capsOf(t, replaced) {
@@ -131,6 +134,7 @@ func TestFactsCapNothingWherePossibleIsBelowTheMinimum(t *testing.T) {
 // generated file it links, and none it does not link, its tests' imports
 // included; a test's call serves no program (references-go.17).
 func TestFactsCapEveryConsumerOfAFileAProgramServingReflectionLinks(t *testing.T) {
+	t.Parallel()
 	wantCaps(t, capsOf(t, map[string]string{
 		"main.go": `package main
 
@@ -168,6 +172,7 @@ func TestServe(t *testing.T) { reflection.Register(grpc.NewServer()) }
 // A package no program of the target links exposes, serving connect's reflection,
 // the generated files it links itself (references-go.17).
 func TestFactsCapTheFilesAPackageServingConnectReflectionLinks(t *testing.T) {
+	t.Parallel()
 	wantCaps(t, capsOf(t, map[string]string{
 		"serve/serve.go": `// Package serve serves reflection over connect.
 package serve
@@ -188,6 +193,7 @@ func Handler() (string, any) {
 // A package serving reflection exposes what each program linking it links, not
 // only what it imports itself (references-go.17).
 func TestFactsCapTheFilesTheProgramLinkingAServingPackageLinks(t *testing.T) {
+	t.Parallel()
 	wantCaps(t, capsOf(t, map[string]string{
 		"main.go": `package main
 
@@ -215,6 +221,7 @@ func Serve() { reflection.Register(grpc.NewServer()) }
 // Converting one generated file's descriptor to a descriptor message exposes that
 // file's consumers only, whatever else the program links (references-go.17).
 func TestFactsCapTheConsumersOfTheFileWhoseDescriptorHandCodeConverts(t *testing.T) {
+	t.Parallel()
 	wantCaps(t, capsOf(t, map[string]string{
 		"main.go": `package main
 
@@ -234,6 +241,7 @@ func main() { fmt.Println(protodesc.ToFileDescriptorProto(v2.File_v2_aside_proto
 // A loaded consumer's program serving reflection exposes the target's generated
 // files it links (references-go.17).
 func TestFactsCapTheFilesALoadedConsumersProgramServingReflectionLinks(t *testing.T) {
+	t.Parallel()
 	files := make(map[string]string)
 	for name, data := range archiveFiles(t, "schema-reads/caps.txtar") {
 		if name != "main.go" {
@@ -260,6 +268,7 @@ func TestFactsCapTheFilesALoadedConsumersProgramServingReflectionLinks(t *testin
 // A loaded consumer converting one of the target's generated descriptors exposes
 // that file's consumers, though the consumer type-checks the file in its own parse.
 func TestFactsCapTheConsumersOfTheFileWhoseDescriptorALoadedConsumerConverts(t *testing.T) {
+	t.Parallel()
 	files := make(map[string]string)
 	for name, data := range archiveFiles(t, "schema-reads/caps.txtar") {
 		if name != "main.go" {

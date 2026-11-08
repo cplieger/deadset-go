@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"errors"
 	"path/filepath"
 	"runtime"
@@ -15,13 +14,22 @@ import (
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
-// unbuildableWindows is the identifier of the configuration the fixture below
-// derives and the target does not build. Derivation pairs a platform atom with the
-// host's other axis, so the architecture is the host's.
-var unbuildableWindows = "windows-" + runtime.GOARCH
+// otherOS is a platform the fixtures below name in a file and the host is not, so
+// derivation answers it beside the host's configuration.
+var otherOS = func() string {
+	if runtime.GOOS == "windows" {
+		return "darwin"
+	}
+	return "windows"
+}()
+
+// unbuildableOther is the identifier of the configuration the fixture below derives
+// and the target does not build. Derivation pairs a platform atom with the host's
+// other axis, so the architecture is the host's.
+var unbuildableOther = otherOS + "-" + runtime.GOARCH
 
 // unbuildableDerivedModule writes the fixture both matrix tests are driven against: a
-// target whose file names make derivation answer a Windows configuration, and a
+// target whose file names make derivation answer a configuration of otherOS, and a
 // dependency, reached through a replace so nothing is fetched, whose only file a
 // constraint excludes there.
 //
@@ -35,10 +43,10 @@ func unbuildableDerivedModule(t *testing.T, document string) string {
 			"require example.com/dep v0.0.0\n\nreplace example.com/dep => ./dep\n",
 		"app.go": "package main\n\nimport \"example.com/dep\"\n\n" +
 			"func main() { dep.Used() }\n",
-		"app_windows.go":   "package main\n\n// windowsOnly is declared where the guessed configuration would build.\nfunc windowsOnly() {}\n",
-		"dep/go.mod":       "module example.com/dep\n\ngo 1.27.1\n",
-		"dep/dep.go":       "//go:build !windows\n\npackage dep\n\n// Used is what the entry point calls.\nfunc Used() {}\n",
-		repositoryDocument: document,
+		"app_" + otherOS + ".go": "package main\n\n// otherOnly is declared where the guessed configuration would build.\nfunc otherOnly() {}\n",
+		"dep/go.mod":             "module example.com/dep\n\ngo 1.27.1\n",
+		"dep/dep.go":             "//go:build !" + otherOS + "\n\npackage dep\n\n// Used is what the entry point calls.\nfunc Used() {}\n",
+		repositoryDocument:       document,
 	})
 }
 
@@ -46,6 +54,7 @@ func unbuildableDerivedModule(t *testing.T, document string) string {
 // from the matrix and returned for the verb to name, so the run answers over the
 // configurations the target does build instead of having no answer at all.
 func TestLoadDropsADerivedConfigurationTheTargetDoesNotBuild(t *testing.T) {
+	t.Parallel()
 	dir := unbuildableDerivedModule(t, `{"target": {"kind": "application"}}`)
 	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
 	if code != vocab.ExitClean {
@@ -54,7 +63,7 @@ func TestLoadDropsADerivedConfigurationTheTargetDoesNotBuild(t *testing.T) {
 
 	loaded, err := run.Load(t.Context(), resolved)
 	if err != nil {
-		t.Fatalf("run.Load(a target whose derived Windows configuration does not build) = %v, want the load of the run", err)
+		t.Fatalf("run.Load(a target whose derived configuration of another platform does not build) = %v, want the load of the run", err)
 	}
 	if want := []string{load.HostConfiguration().ID}; !slices.Equal(loaded.Identifiers(), want) {
 		t.Errorf("run.Load() analyzed the matrix %v, want %v: the matrix of the run is what the target builds",
@@ -65,8 +74,8 @@ func TestLoadDropsADerivedConfigurationTheTargetDoesNotBuild(t *testing.T) {
 		t.Fatalf("run.Load() dropped %d configurations, want 1", len(loaded.Unbuilt))
 	}
 	dropped := &loaded.Unbuilt[0]
-	if dropped.Configuration.ID != unbuildableWindows {
-		t.Errorf("run.Load() dropped %q, want %q", dropped.Configuration.ID, unbuildableWindows)
+	if dropped.Configuration.ID != unbuildableOther {
+		t.Errorf("run.Load() dropped %q, want %q", dropped.Configuration.ID, unbuildableOther)
 	}
 	var failure *load.Error
 	if !errors.As(dropped.Err, &failure) {
@@ -81,9 +90,10 @@ func TestLoadDropsADerivedConfigurationTheTargetDoesNotBuild(t *testing.T) {
 // run: the declaration asserts that the target builds it, and an answer computed
 // without it would report what it uses.
 func TestLoadFailsTheRunOnADeclaredConfigurationTheTargetDoesNotBuild(t *testing.T) {
+	t.Parallel()
 	dir := unbuildableDerivedModule(t, `{"target": {"kind": "application"}, "analysis": {"configurations": [`+
 		`{"id": "`+load.HostConfiguration().ID+`", "os": "`+runtime.GOOS+`", "arch": "`+runtime.GOARCH+`"},`+
-		`{"id": "`+unbuildableWindows+`", "os": "windows", "arch": "`+runtime.GOARCH+`"}]}}`)
+		`{"id": "`+unbuildableOther+`", "os": "`+otherOS+`", "arch": "`+runtime.GOARCH+`"}]}}`)
 	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
@@ -92,10 +102,10 @@ func TestLoadFailsTheRunOnADeclaredConfigurationTheTargetDoesNotBuild(t *testing
 	loaded, err := run.Load(t.Context(), resolved)
 	var failure *load.Error
 	if !errors.As(err, &failure) {
-		t.Fatalf("run.Load(a target declaring the Windows configuration) = %v, want a *load.Error", err)
+		t.Fatalf("run.Load(a target declaring the configuration of another platform) = %v, want a *load.Error", err)
 	}
-	if failure.Configuration != unbuildableWindows {
-		t.Errorf("run.Load() named the configuration %q, want %q", failure.Configuration, unbuildableWindows)
+	if failure.Configuration != unbuildableOther {
+		t.Errorf("run.Load() named the configuration %q, want %q", failure.Configuration, unbuildableOther)
 	}
 	if got := exitCodeFor(err); got != vocab.ExitFailure {
 		t.Errorf("exitCodeFor(run.Load()) = %d, want %d", got, vocab.ExitFailure)
@@ -109,14 +119,15 @@ func TestLoadFailsTheRunOnADeclaredConfigurationTheTargetDoesNotBuild(t *testing
 // reading the run has, and the report names it in the array the Contract declares
 // beside the matrix the analysis ran.
 func TestAnalyzeNamesTheDerivedConfigurationItDropped(t *testing.T) {
+	t.Parallel()
 	dir := unbuildableDerivedModule(t, `{"target": {"kind": "application"}}`)
 
 	run := runAnalyze(t, dir)
 	if run.code == vocab.ExitFailure {
-		t.Fatalf("analyze(a target whose derived Windows configuration does not build) = %d, want a verdict rather than a load failure: %s",
+		t.Fatalf("analyze(a target whose derived configuration of another platform does not build) = %d, want a verdict rather than a load failure: %s",
 			run.code, run.stderr)
 	}
-	for _, want := range []string{unbuildableWindows, "derived from the target tree", "dropped from the matrix"} {
+	for _, want := range []string{unbuildableOther, "derived from the target tree", "dropped from the matrix"} {
 		if !strings.Contains(run.stderr, want) {
 			t.Errorf("analyze() wrote to stderr\n%s\nwant a line naming %q", run.stderr, want)
 		}
@@ -124,7 +135,7 @@ func TestAnalyzeNamesTheDerivedConfigurationItDropped(t *testing.T) {
 
 	envelope := envelopeAt(t, run.reportPath)
 	for _, one := range envelope.Configurations {
-		if one.ID == unbuildableWindows {
+		if one.ID == unbuildableOther {
 			t.Errorf("the report names the configuration %q in its matrix, want it absent: the matrix a report carries is the one the analysis ran over",
 				one.ID)
 		}
@@ -135,15 +146,15 @@ func TestAnalyzeNamesTheDerivedConfigurationItDropped(t *testing.T) {
 			len(envelope.ConfigurationsNotBuilt))
 	}
 	dropped := &envelope.ConfigurationsNotBuilt[0]
-	if dropped.ID != unbuildableWindows || dropped.Platform == nil || dropped.Platform.OS != "windows" || dropped.Platform.Arch != runtime.GOARCH {
-		t.Errorf("the report names the dropped configuration %q on %+v, want %q on windows/%s",
-			dropped.ID, dropped.Platform, unbuildableWindows, runtime.GOARCH)
+	if dropped.ID != unbuildableOther || dropped.Platform == nil || dropped.Platform.OS != otherOS || dropped.Platform.Arch != runtime.GOARCH {
+		t.Errorf("the report names the dropped configuration %q on %+v, want %q on %s/%s",
+			dropped.ID, dropped.Platform, unbuildableOther, otherOS, runtime.GOARCH)
 	}
 	if dropped.Platform != nil && len(dropped.Platform.Tags) != 0 {
 		t.Errorf("the report names the dropped configuration %q with the tags %v, want none",
 			dropped.ID, dropped.Platform.Tags)
 	}
-	if want := "load " + unbuildableWindows + ": "; !strings.HasPrefix(dropped.Error, want) {
+	if want := "load " + unbuildableOther + ": "; !strings.HasPrefix(dropped.Error, want) {
 		t.Errorf("the report names the error of %q as %q, want one opening %q",
 			dropped.ID, dropped.Error, want)
 	}
@@ -165,6 +176,7 @@ const projectEntries = `{"target": {"kind": "application"}, "analysis": {` +
 // matrix at all, and drops a derived configuration the target does not build rather
 // than failing on it.
 func TestLoadDerivesTheMatrixWhereTheConfigurationListsProjectsAlone(t *testing.T) {
+	t.Parallel()
 	dir := unbuildableDerivedModule(t, projectEntries)
 	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
 	if code != vocab.ExitClean {
@@ -179,15 +191,16 @@ func TestLoadDerivesTheMatrixWhereTheConfigurationListsProjectsAlone(t *testing.
 		t.Errorf("run.Load() analyzed the matrix %v, want the derived matrix the target builds %v",
 			loaded.Identifiers(), want)
 	}
-	if len(loaded.Unbuilt) != 1 || loaded.Unbuilt[0].Configuration.ID != unbuildableWindows {
+	if len(loaded.Unbuilt) != 1 || loaded.Unbuilt[0].Configuration.ID != unbuildableOther {
 		t.Errorf("run.Load() dropped %d configurations, want the one derived configuration %q: only a derived configuration is dropped",
-			len(loaded.Unbuilt), unbuildableWindows)
+			len(loaded.Unbuilt), unbuildableOther)
 	}
 }
 
 // The report's matrix is the one the analysis ran, so a configuration listing both
 // shapes writes its platform entries and no project entry.
 func TestAnalyzeReportsThePlatformEntriesOfAMatrixListingBothShapes(t *testing.T) {
+	t.Parallel()
 	host := load.HostConfiguration()
 	dir := unbuildableDerivedModule(t, `{"target": {"kind": "application"}, "analysis": {"configurations": [`+
 		`{"id": "tsconfig.json", "project": "tsconfig.json"},`+
@@ -212,18 +225,18 @@ func TestAnalyzeReportsThePlatformEntriesOfAMatrixListingBothShapes(t *testing.T
 	}
 }
 
-// setupFailingWindowsModule writes a target whose file names make derivation answer
-// a Windows configuration, and whose only Windows file imports a package of the
+// setupFailingOtherModule writes a target whose file names make derivation answer
+// a configuration of otherOS, and whose only file of it imports a package of the
 // target's own module that nothing provides: a setup failure of that configuration
 // alone.
-func setupFailingWindowsModule(t *testing.T, document string) string {
+func setupFailingOtherModule(t *testing.T, document string) string {
 	t.Helper()
 
 	return writeModule(t, map[string]string{
 		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
 		"app.go": "package main\n\nfunc main() {}\n",
-		"app_windows.go": "package main\n\nimport \"example.com/app/gen\"\n\n" +
-			"// generated is what the Windows build reads from the generator's output.\nvar generated = gen.Value\n",
+		"app_" + otherOS + ".go": "package main\n\nimport \"example.com/app/gen\"\n\n" +
+			"// generated is what that build reads from the generator's output.\nvar generated = gen.Value\n",
 		repositoryDocument: document,
 	})
 }
@@ -231,11 +244,12 @@ func setupFailingWindowsModule(t *testing.T, document string) string {
 // A derived configuration's setup failure drops that configuration, which the report
 // names with the setup failure's line, and the run answers over the rest.
 func TestAnalyzeReportsADerivedConfigurationsSetupFailureAsNotBuilt(t *testing.T) {
-	dir := setupFailingWindowsModule(t, `{"target": {"kind": "application"}}`)
+	t.Parallel()
+	dir := setupFailingOtherModule(t, `{"target": {"kind": "application"}}`)
 
 	run := runAnalyze(t, dir)
 	if run.code == vocab.ExitFailure || run.code == vocab.ExitUsage {
-		t.Fatalf("analyze(a target whose derived Windows configuration meets a setup failure) = %d, want a verdict: %s",
+		t.Fatalf("analyze(a target whose derived configuration of another platform meets a setup failure) = %d, want a verdict: %s",
 			run.code, run.stderr)
 	}
 	envelope := envelopeAt(t, run.reportPath)
@@ -243,22 +257,23 @@ func TestAnalyzeReportsADerivedConfigurationsSetupFailureAsNotBuilt(t *testing.T
 		t.Fatalf("the report names %d configurations the run did not build, want 1", len(envelope.ConfigurationsNotBuilt))
 	}
 	dropped := &envelope.ConfigurationsNotBuilt[0]
-	if want := "setup failure: missing-module: "; dropped.ID != unbuildableWindows || !strings.HasPrefix(dropped.Error, want) {
+	if want := "setup failure: missing-module: "; dropped.ID != unbuildableOther || !strings.HasPrefix(dropped.Error, want) {
 		t.Errorf("the report names %q as not built with %q, want %q with an error opening %q",
-			dropped.ID, dropped.Error, unbuildableWindows, want)
+			dropped.ID, dropped.Error, unbuildableOther, want)
 	}
 }
 
 // The same configuration, declared by the maintainer, ends the run with exit code 3
 // and the setup failure's line.
 func TestAnalyzeEndsTheRunOnADeclaredConfigurationsSetupFailure(t *testing.T) {
-	dir := setupFailingWindowsModule(t, `{"target": {"kind": "application"}, "analysis": {"configurations": [`+
+	t.Parallel()
+	dir := setupFailingOtherModule(t, `{"target": {"kind": "application"}, "analysis": {"configurations": [`+
 		`{"id": "`+load.HostConfiguration().ID+`", "os": "`+runtime.GOOS+`", "arch": "`+runtime.GOARCH+`"},`+
-		`{"id": "`+unbuildableWindows+`", "os": "windows", "arch": "`+runtime.GOARCH+`"}]}}`)
+		`{"id": "`+unbuildableOther+`", "os": "`+otherOS+`", "arch": "`+runtime.GOARCH+`"}]}}`)
 
 	run := runAnalyze(t, dir)
 	if run.code != vocab.ExitFailure {
-		t.Errorf("analyze(a target declaring a Windows configuration that meets a setup failure) = %d, want %d\nstderr: %s",
+		t.Errorf("analyze(a target declaring a configuration of another platform that meets a setup failure) = %d, want %d\nstderr: %s",
 			run.code, vocab.ExitFailure, run.stderr)
 	}
 	if !strings.HasPrefix(run.stderr, "setup failure: missing-module: ") {
@@ -271,6 +286,7 @@ func TestAnalyzeEndsTheRunOnADeclaredConfigurationsSetupFailure(t *testing.T) {
 // fact about a symbol its graph does not hold. That sweep answers over its own
 // graph rather than gating an edge the graph shares with the base sweep.
 func TestAnalyzeAnswersWhereAnAssertionHoldsAMethodOneConfigurationLacks(t *testing.T) {
+	t.Parallel()
 	assertion := "\tif c, ok := w.(io.Closer); ok {\n\t\t_ = c.Close()\n\t}\n"
 	dir := writeModule(t, map[string]string{
 		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
@@ -278,12 +294,12 @@ func TestAnalyzeAnswersWhereAnAssertionHoldsAMethodOneConfigurationLacks(t *test
 			"func closeOne(w io.Writer) {\n" + assertion + "}\n\n" +
 			"func closeOther(w io.Writer) {\n" + assertion + "}\n\n" +
 			"func main() {\n\tcloseOne(os.Stdout)\n\tcloseOther(os.Stdout)\n}\n",
-		"sys.go": "//go:build !windows\n\npackage main\n\ntype sysWriter struct{}\n\n" +
+		"sys.go": "//go:build !" + otherOS + "\n\npackage main\n\ntype sysWriter struct{}\n\n" +
 			"func (sysWriter) Write(p []byte) (int, error) { return len(p), nil }\n\n" +
 			"func (sysWriter) Close() error { return nil }\n\n" +
 			"func init() { closeOne(sysWriter{}) }\n",
-		"app_windows.go":   "package main\n\nfunc windowsOnly() {}\n",
-		repositoryDocument: `{"target": {"kind": "application"}}`,
+		"app_" + otherOS + ".go": "package main\n\nfunc otherOnly() {}\n",
+		repositoryDocument:       `{"target": {"kind": "application"}}`,
 	})
 
 	run := runAnalyze(t, dir)
@@ -294,7 +310,7 @@ func TestAnalyzeAnswersWhereAnAssertionHoldsAMethodOneConfigurationLacks(t *test
 	for _, f := range envelopeAt(t, run.reportPath).Findings {
 		found = append(found, f.Symbol.Ref)
 	}
-	if want := []string{"go://example.com/app#windowsOnly"}; !slices.Equal(found, want) {
+	if want := []string{"go://example.com/app#otherOnly"}; !slices.Equal(found, want) {
 		t.Errorf("analyze() reported %v, want %v: the assertion holds sysWriter's methods", found, want)
 	}
 }
@@ -303,6 +319,7 @@ func TestAnalyzeAnswersWhereAnAssertionHoldsAMethodOneConfigurationLacks(t *test
 // windows is production code in the matrix, so the references its windows-only file
 // makes are production references under either order of the configurations.
 func TestAnalyzeReadsTheReferencesOfAPackageOneConfigurationImportsFromProductionAsProduction(t *testing.T) {
+	t.Parallel()
 	files := map[string]string{
 		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
 		"internal/sys/sys.go": "package sys\n\nimport \"testing\"\n\nfunc Live() int { return 1 }\n\n" +
@@ -385,6 +402,7 @@ func twoModuleTree(t *testing.T) string {
 // it names live, and each module file's directives are read against that module's
 // own build list.
 func TestAnalyzeReportsEveryModuleUnderATargetThatIsNoModuleRoot(t *testing.T) {
+	t.Parallel()
 	dir := twoModuleTree(t)
 
 	run := runAnalyze(t, dir)
@@ -420,6 +438,7 @@ func TestAnalyzeReportsEveryModuleUnderATargetThatIsNoModuleRoot(t *testing.T) {
 // module also declares, a package nothing imports and a package only a test imports
 // keep the findings they would have alone, every class reported.
 func TestAnalyzeJudgesTwoModulesOfOnePathEachAsItIsAlone(t *testing.T) {
+	t.Parallel()
 	dir := writeModule(t, map[string]string{
 		"x/go.mod": "module example\n\ngo 1.27.1\n",
 		"x/main.go": "package main\n\nimport (\n\t\"fmt\"\n\n\t\"example/extra\"\n\t\"example/util\"\n)\n\n" +
@@ -482,6 +501,7 @@ func TestAnalyzeJudgesTwoModulesOfOnePathEachAsItIsAlone(t *testing.T) {
 // A library module and a main module of one module path: the library's exported
 // declarations are its published API, whatever the main package of that path is.
 func TestAnalyzePublishesALibraryBesideAMainPackageOfItsPath(t *testing.T) {
+	t.Parallel()
 	dir := writeModule(t, map[string]string{
 		"x/go.mod":         "module example\n\ngo 1.27.1\n",
 		"x/main.go":        "package main\n\nfunc helper() {}\n\nfunc main() { helper() }\n",
@@ -503,12 +523,12 @@ func TestAnalyzePublishesALibraryBesideAMainPackageOfItsPath(t *testing.T) {
 		t.Errorf("analyze() reported %v, want %v", found, want)
 	}
 
-	var stdout, stderr bytes.Buffer
-	if code := invoke(t.Context(), []string{"print-roots", "--target=."}, &stdout, &stderr); code != vocab.ExitClean {
-		t.Fatalf("print-roots = %d, want %d: %s", code, vocab.ExitClean, stderr.String())
+	roots := invokedIn(t, dir, "print-roots", "--target=.")
+	if roots.code != vocab.ExitClean {
+		t.Fatalf("print-roots = %d, want %d: %s", roots.code, vocab.ExitClean, roots.stderr)
 	}
 	want := []string{"go://example#main\tmain", "go://example#Exported\tpublished-api", "go://example#TestExported\ttest"}
-	if got := strings.Split(strings.TrimSpace(stdout.String()), "\n"); !slices.Equal(got, want) {
+	if got := strings.Split(strings.TrimSpace(roots.stdout), "\n"); !slices.Equal(got, want) {
 		t.Errorf("print-roots printed %q, want %q", got, want)
 	}
 }
@@ -517,6 +537,7 @@ func TestAnalyzePublishesALibraryBesideAMainPackageOfItsPath(t *testing.T) {
 // module sees is a reading of its own: an interface of it fixes the second module's
 // method and an assertion in it retains the second module's method, as for the first.
 func TestAnalyzeJudgesEachModuleAgainstItsOwnReadingOfItsImports(t *testing.T) {
+	t.Parallel()
 	source := "package main\n\nimport (\n\t\"io\"\n\t\"os\"\n)\n\ntype T struct{}\n\n" +
 		"func (T) WriteTo(w io.Writer) (int64, error) { return 0, nil }\n\ntype R struct{}\n\n" +
 		"func (R) Read([]byte) (int, error) { return 0, io.EOF }\n\n" +
@@ -570,6 +591,7 @@ func workspaceTree(t *testing.T) string {
 // the target: its declarations are judged with the target's, rather than its
 // references counted as a consumer's.
 func TestAnalyzeReportsAWorkspaceMemberBelowTheTarget(t *testing.T) {
+	t.Parallel()
 	dir := workspaceTree(t)
 
 	run := runAnalyze(t, dir)
@@ -594,6 +616,7 @@ func TestAnalyzeReportsAWorkspaceMemberBelowTheTarget(t *testing.T) {
 // workspace above it and names no path outside the run directory: the other member
 // there is no consumer the report could name.
 func TestAnalyzeAWorkspaceMemberFromItsOwnDirectory(t *testing.T) {
+	t.Parallel()
 	dir := filepath.Join(workspaceTree(t), "sub")
 
 	run := runAnalyze(t, dir)
@@ -618,17 +641,17 @@ func TestAnalyzeAWorkspaceMemberFromItsOwnDirectory(t *testing.T) {
 func retainedIn(t *testing.T, dir string) []string {
 	t.Helper()
 
-	t.Chdir(dir)
-	var stdout, stderr bytes.Buffer
-	if code := invoke(t.Context(), []string{"print-retained", "--target=."}, &stdout, &stderr); code != vocab.ExitClean {
-		t.Fatalf("print-retained = %d, want %d: %s", code, vocab.ExitClean, stderr.String())
+	got := invokedIn(t, dir, "print-retained", "--target=.")
+	if got.code != vocab.ExitClean {
+		t.Fatalf("print-retained = %d, want %d: %s", got.code, vocab.ExitClean, got.stderr)
 	}
-	return strings.Split(strings.TrimSpace(stdout.String()), "\n")
+	return strings.Split(strings.TrimSpace(got.stdout), "\n")
 }
 
 // A type each of two modules of one module path declares, spelled alike by both,
 // keeps the methods each module's own conversions retain.
 func TestRetainsForTwoModulesOfOnePathEachTypeItsOwnMethods(t *testing.T) {
+	t.Parallel()
 	failing := "package main\n\nimport (\n\t\"fmt\"\n\t\"io\"\n\t\"net/http\"\n\t\"os\"\n)\n\ntype E struct{}\n\n" +
 		"func (E) Error() string { return \"\" }\n\nfunc (E) Timeout() bool { return true }\n\n" +
 		"func (E) Temporary() bool { return true }\n\ntype R struct{}\n\n" +
@@ -664,6 +687,7 @@ func TestRetainsForTwoModulesOfOnePathEachTypeItsOwnMethods(t *testing.T) {
 // outside program, each type spelled alike. An outside program may import several
 // modules of the target, so a published parameter of one holds the other's type too.
 func TestRetainsAPublishedTypeBesideAnotherModuleOfItsPath(t *testing.T) {
+	t.Parallel()
 	published := "package example\n\nimport \"fmt\"\n\n// T is published.\ntype T struct{}\n\n" +
 		"func (T) String() string { return \"\" }\n\n// NewT is published.\nfunc NewT() T { return T{} }\n\n" +
 		"// Print is published.\nfunc Print(s fmt.Stringer) { fmt.Println(s) }\n"
@@ -689,6 +713,7 @@ func TestRetainsAPublishedTypeBesideAnotherModuleOfItsPath(t *testing.T) {
 // Under a complete matrix a file of the second module that no configuration builds
 // is reported at its path under the target root.
 func TestAnalyzeReportsANeverBuiltFileOfTheSecondModule(t *testing.T) {
+	t.Parallel()
 	dir := twoModuleTree(t)
 	host := load.HostConfiguration()
 	writeDocument(t, dir, repositoryDocument, `{"target": {"kind": "application"}, "analysis": {"configurations": [`+
@@ -713,6 +738,7 @@ func TestAnalyzeReportsANeverBuiltFileOfTheSecondModule(t *testing.T) {
 // report carries, so a report of another language over the same target names it
 // alike.
 func TestAnalyzeNamesATargetNoModuleIsRootedAtAsTheScopeDoes(t *testing.T) {
+	t.Parallel()
 	dir := twoModuleTree(t)
 	writeDocument(t, dir, "scope.json", `{"target": {"id": "whole", "path": "."}}`)
 
@@ -730,6 +756,7 @@ func TestAnalyzeNamesATargetNoModuleIsRootedAtAsTheScopeDoes(t *testing.T) {
 // package paths and declares nothing of the target, so the run answers and a
 // declaration only the copy's callers name is reported.
 func TestAnalyzeReadsAModuleTheTargetAlsoBuildsFromACopyOutsideIt(t *testing.T) {
+	t.Parallel()
 	root := writeModule(t, map[string]string{
 		"target/a/go.mod":              "module example.com/a\n\ngo 1.27.1\n\nrequire example.com/b v0.0.0\n\nreplace example.com/b => ../../copy/b\n",
 		"target/a/main.go":             "package main\n\nimport \"example.com/b\"\n\nfunc main() { b.Used() }\n",

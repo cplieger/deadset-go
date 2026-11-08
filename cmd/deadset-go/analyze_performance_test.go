@@ -210,6 +210,7 @@ func writeSynthesized(t *testing.T, recorded *benchmarkRun) moduleSize {
 // beside it, which a release runs: a wall time asserted in the unit suite would
 // measure a shared runner's load rather than the analysis.
 func TestTheBenchmarkRecordNamesWhatTheGeneratorProduces(t *testing.T) {
+	t.Parallel()
 	record := readBenchmarkRecord(t)
 
 	if len(record.Runs) == 0 {
@@ -235,6 +236,7 @@ const recordCommand = "go test -run='^$' -bench=BenchmarkAnalyzeTheRecordedModul
 // against the figures the analysis is required to meet, so a record edited to make a
 // measurement look inside the budget fails here.
 func TestTheBenchmarkRecordStatesTheBudgetTheDesignSets(t *testing.T) {
+	t.Parallel()
 	record := readBenchmarkRecord(t)
 
 	// The required budget: a module of about 250,000 lines analyzed within 60

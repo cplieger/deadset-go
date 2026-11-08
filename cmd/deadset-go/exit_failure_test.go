@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -44,6 +45,7 @@ func wantOneClassLine(t *testing.T, what, stderr, prefix string) {
 }
 
 func TestTwoMissingModulesPrintOneClassLine(t *testing.T) {
+	t.Parallel()
 	dir := writeModule(t, map[string]string{
 		"go.mod":           "module example.com/app\n\ngo 1.27.1\n",
 		"main.go":          "package main\n\nimport (\n\t\"example.com/app/gen1\"\n\t\"example.com/app/gen2\"\n)\n\nfunc main() { gen1.F(); gen2.G() }\n",
@@ -61,6 +63,7 @@ func TestTwoMissingModulesPrintOneClassLine(t *testing.T) {
 }
 
 func TestAnUnreadableTargetDocumentEndsTheRunWithItsSetupClass(t *testing.T) {
+	t.Parallel()
 	outside := t.TempDir()
 	if err := os.WriteFile(filepath.Join(outside, "ignore.json"), []byte(`{"ignore": []}`), 0o600); err != nil {
 		t.Fatalf("Setup: %v", err)
@@ -224,6 +227,7 @@ func TestATargetItsModuleIgnoresHoldsNoProgram(t *testing.T) {
 }
 
 func TestAnErrorNoClassNamesIsAProductFault(t *testing.T) {
+	t.Parallel()
 	var stderr bytes.Buffer
 	code := failed(t.Context(), &stderr, errors.New("the loader returned no package for a listed file"))
 	if code != vocab.ExitFailure {
@@ -242,13 +246,17 @@ func reexecuted(t *testing.T, dir string, env []string, args ...string) *exec.Cm
 	if err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
-	cmd := exec.Command(os.Args[0])
+	cmd := exec.CommandContext(t.Context(), os.Args[0])
 	cmd.Dir = dir
 	cmd.Env = append(append(os.Environ(), env...), execArgsVariable+"="+string(encoded))
 	return cmd
 }
 
 func TestASignalledRunEndsWithTheInterruptedRunClass(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Process.Signal sends no interrupt or termination on Windows, and the toolchain stub is a shell script")
+	}
 	for _, tc := range []struct {
 		signal syscall.Signal
 		named  string
@@ -302,6 +310,7 @@ func TestASignalledRunEndsWithTheInterruptedRunClass(t *testing.T) {
 }
 
 func TestAConfigurationRefusedByNoUsageErrorEndsWithOneClassLine(t *testing.T) {
+	t.Parallel()
 	var stderr bytes.Buffer
 	set := flag.NewFlagSet(name, flag.ContinueOnError)
 	set.Usage = func() { fmt.Fprintln(&stderr, "usage") }

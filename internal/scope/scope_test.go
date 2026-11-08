@@ -78,9 +78,9 @@ func TestReadResolvesTheWorkspaceTheDocumentNames(t *testing.T) {
 			declared: "../go.work",
 			want:     func(dir string) string { return filepath.Join(filepath.Dir(dir), "go.work") },
 		},
-		"an absolute path, as written": {
+		"a rooted path, on the volume of the document": {
 			declared: "/src/go.work",
-			want:     func(string) string { return filepath.FromSlash("/src/go.work") },
+			want:     func(dir string) string { return filepath.VolumeName(dir) + filepath.FromSlash("/src/go.work") },
 		},
 		"no workspace at all": {
 			declared: "",
@@ -326,7 +326,7 @@ func TestReadResolvesThePublishedDocumentNamingEveryMember(t *testing.T) {
 		Target:    Module{ID: "example.com/app", Path: filepath.Join(dir, "app")},
 		Consumers: []Module{
 			{ID: "example.com/consumer", Path: filepath.Join(dir, "consumer")},
-			{Path: filepath.FromSlash("/src/example.com/tool")},
+			{Path: filepath.VolumeName(dir) + filepath.FromSlash("/src/example.com/tool")},
 		},
 	}
 	if !reflect.DeepEqual(got, want) {

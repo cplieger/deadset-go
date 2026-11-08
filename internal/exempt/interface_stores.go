@@ -8,6 +8,7 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
 )
 
@@ -34,10 +35,11 @@ const (
 // also holds what every place it is filled from holds, which [storedTypes.reaching]
 // resolves on first use.
 type storedTypes struct {
-	sites  *declarationSites
-	direct map[storeNode][]types.Type
-	from   map[storeNode][]storeNode
-	memo   map[storeNode][]types.Type
+	sites    *declarationSites
+	typeArgs *facts.Instantiations
+	direct   map[storeNode][]types.Type
+	from     map[storeNode][]storeNode
+	memo     map[storeNode][]types.Type
 
 	// called is every identifier a call names as its callee, and valued every
 	// function or method of the program some other identifier uses as a value.
@@ -74,9 +76,10 @@ type storeWalk struct {
 // index of it, and an argument a call passes for a parameter. A stored
 // interface-typed parameter stands for every argument the program's calls pass for
 // it, and a parameter no call passes adds nothing.
-func newStoredTypes(sites *declarationSites) *storedTypes {
+func newStoredTypes(sites *declarationSites, typeArgs *facts.Instantiations) *storedTypes {
 	return &storedTypes{
 		sites:    sites,
+		typeArgs: typeArgs,
 		direct:   make(map[storeNode][]types.Type),
 		from:     make(map[storeNode][]storeNode),
 		memo:     make(map[storeNode][]types.Type),
@@ -128,7 +131,7 @@ func returnsInterface(method *types.Func) (*types.Interface, bool) {
 		return nil, false
 	}
 	return iface, slices.ContainsFunc(slices.Collect(method.Signature().Results().Variables()),
-		func(v *types.Var) bool { return types.IsInterface(v.Type()) })
+		func(v *types.Var) bool { return holdsInterface(v.Type()) })
 }
 
 // linkResults fills each interface-typed result of one interface method from the same
@@ -136,7 +139,7 @@ func returnsInterface(method *types.Func) (*types.Interface, bool) {
 func (w *storeWalk) linkResults(method, impl *types.Func) {
 	results := method.Signature().Results()
 	for i := range results.Len() {
-		if types.IsInterface(results.At(i).Type()) {
+		if holdsInterface(results.At(i).Type()) {
 			w.link(w.result(method, i), w.result(impl, i))
 		}
 	}
@@ -192,7 +195,7 @@ func (s *storedTypes) linkIndirect() {
 	for fn := range s.valued {
 		results := fn.Signature().Results()
 		for i := range results.Len() {
-			if types.IsInterface(results.At(i).Type()) {
+			if holdsInterface(results.At(i).Type()) {
 				w := &storeWalk{storedTypes: s}
 				w.link(indirectResult(i, results.Len()), w.result(fn, i))
 			}
@@ -265,7 +268,8 @@ func (s *storedTypes) held(info *types.Info, fn *types.Func, arg ast.Expr) []typ
 }
 
 // reaching is every concrete type stored in one node or in a node it is filled from,
-// each once.
+// each once, a type built from type parameters followed by the type arguments the
+// program instantiates them with.
 func (s *storedTypes) reaching(n storeNode) []types.Type {
 	if held, known := s.memo[n]; known {
 		return held
@@ -278,10 +282,7 @@ func (s *storedTypes) reaching(n storeNode) []types.Type {
 		one := queue[0]
 		queue = queue[1:]
 		for _, t := range s.direct[one] {
-			if key := resolve.Spell(t, nil); !keys[key] {
-				keys[key] = true
-				found = append(found, t)
-			}
+			found = s.withBindings(found, keys, t)
 		}
 		for _, source := range s.from[one] {
 			if !seen[source] {
@@ -291,6 +292,18 @@ func (s *storedTypes) reaching(n storeNode) []types.Type {
 		}
 	}
 	s.memo[n] = found
+	return found
+}
+
+// withBindings appends t and the type arguments its type parameters are
+// instantiated with to found, each type keys does not yet hold.
+func (s *storedTypes) withBindings(found []types.Type, keys map[string]bool, t types.Type) []types.Type {
+	for _, bound := range append([]types.Type{t}, bindings(s.typeArgs, t)...) {
+		if key := resolve.Spell(bound, nil); !keys[key] {
+			keys[key] = true
+			found = append(found, bound)
+		}
+	}
 	return found
 }
 
@@ -359,34 +372,55 @@ func (w *storeWalk) returned(ret *ast.ReturnStmt) {
 		return
 	}
 	for i, value := range ret.Results {
-		if types.IsInterface(results.At(i).Type()) {
-			w.store(w.result(w.fn, i), w.valueOf(value))
+		if t := results.At(i).Type(); holdsInterface(t) {
+			w.storeInto(w.result(w.fn, i), t, value)
 		}
 	}
 }
 
 // returnedCall reads the values a return statement whose one operand is a call of
-// several results stores in the declared function's interface-typed results: each
-// result of the call at the same position.
+// several results stores in the declared function's results that hold interface
+// values: each result of the call at the same position.
 func (w *storeWalk) returnedCall(results *types.Tuple, value ast.Expr) {
-	call, isCall := ast.Unparen(value).(*ast.CallExpr)
-	if !isCall {
-		return
-	}
-	held, isTuple := w.info.TypeOf(call).(*types.Tuple)
-	nodes, resolved := w.resultsOf(call)
-	if !isTuple || !resolved || held.Len() != results.Len() || len(nodes) != results.Len() {
+	held, nodes, resolved := w.tupleOf(value, results.Len())
+	if !resolved {
 		return
 	}
 	for i := range results.Len() {
-		if !types.IsInterface(results.At(i).Type()) {
-			continue
+		if t := results.At(i).Type(); holdsInterface(t) {
+			w.storeResult(w.result(w.fn, i), t, held.At(i).Type(), nodes[i])
 		}
-		if t := held.At(i).Type(); !types.IsInterface(t) {
-			w.store(w.result(w.fn, i), storedValue{concrete: t})
-		} else {
-			w.link(w.result(w.fn, i), nodes[i])
-		}
+	}
+}
+
+// tupleOf is the result types and the result nodes of a call of n results that
+// expr is.
+func (w *storeWalk) tupleOf(expr ast.Expr, n int) (*types.Tuple, []storeNode, bool) {
+	call, isCall := ast.Unparen(expr).(*ast.CallExpr)
+	if !isCall {
+		return nil, nil, false
+	}
+	held, isTuple := w.info.TypeOf(call).(*types.Tuple)
+	nodes, resolved := w.resultsOf(call)
+	if !isTuple || !resolved || held.Len() != n || len(nodes) != n {
+		return nil, nil, false
+	}
+	return held, nodes, true
+}
+
+// storeResult reads what one result of a call, of type result at node, stores in a
+// node of type t: a node holding interface elements holds the result's elements, and
+// an interface the result's concrete type, with the elements of a container.
+func (w *storeWalk) storeResult(node storeNode, t, result types.Type, from storeNode) {
+	switch {
+	case holdsInterfaceElements(t):
+		w.link(node, from)
+	case types.IsInterface(result):
+		w.link(node, from)
+	case holdsInterfaceElements(result):
+		w.store(node, storedValue{concrete: result, from: &from})
+	default:
+		w.store(node, storedValue{concrete: result})
 	}
 }
 
@@ -412,22 +446,34 @@ func (w *storeWalk) local(expr ast.Expr) (storeNode, bool) {
 	return storeNode{at: w.sites.of(v), param: placeNode}, true
 }
 
-// fromCall links the interface-typed variables one assignment from a single call
-// declares or assigns to the results of the program function it calls.
+// fromCall reads the stores one assignment of a single call of several results
+// makes: each result, into the interface-typed variable, the place or the index of a
+// container at the same position.
 func (w *storeWalk) fromCall(lhs []ast.Expr, rhs ast.Expr) {
-	call, isCall := ast.Unparen(rhs).(*ast.CallExpr)
-	if !isCall {
-		return
-	}
-	results, held := w.resultsOf(call)
-	if !held || len(results) != len(lhs) {
+	held, results, resolved := w.tupleOf(rhs, len(lhs))
+	if !resolved {
 		return
 	}
 	for i, target := range lhs {
-		if node, isLocal := w.local(target); isLocal {
-			w.link(node, results[i])
+		if node, t, holds := w.target(target); holds {
+			w.storeResult(node, t, held.At(i).Type(), results[i])
 		}
 	}
+}
+
+// target is the node one assignment's left side stores into, with its type, where it
+// holds interface values: an interface-typed variable, a place, or an index of a
+// container of interface values, whose element the type is.
+func (w *storeWalk) target(lhs ast.Expr) (storeNode, types.Type, bool) {
+	if node, isLocal := w.local(lhs); isLocal {
+		return node, w.info.TypeOf(lhs), true
+	}
+	if index, indexed := ast.Unparen(lhs).(*ast.IndexExpr); indexed {
+		node, holds := w.container(index.X)
+		return node, w.info.TypeOf(lhs), holds
+	}
+	node, t, isPlace := w.place(lhs)
+	return node, t, isPlace && holdsInterface(t)
 }
 
 // resultsOf is the result nodes of one call: of the function it names, or of the
@@ -503,7 +549,7 @@ func (w *storeWalk) assign(s *ast.AssignStmt) {
 	if s.Tok != token.ASSIGN && s.Tok != token.DEFINE {
 		return
 	}
-	if len(s.Rhs) == 1 {
+	if len(s.Rhs) == 1 && len(s.Lhs) > 1 {
 		w.fromCall(s.Lhs, s.Rhs[0])
 	}
 	if len(s.Lhs) != len(s.Rhs) {
@@ -511,13 +557,7 @@ func (w *storeWalk) assign(s *ast.AssignStmt) {
 	}
 	for i, lhs := range s.Lhs {
 		w.bindLiteral(lhs, s.Rhs[i])
-		if target, indexed := ast.Unparen(lhs).(*ast.IndexExpr); indexed {
-			if node, holds := w.container(target.X); holds {
-				w.store(node, w.valueOf(s.Rhs[i]))
-			}
-			continue
-		}
-		if node, t, isPlace := w.place(lhs); isPlace {
+		if node, t, holds := w.target(lhs); holds {
 			w.storeInto(node, t, s.Rhs[i])
 		}
 	}
@@ -526,7 +566,7 @@ func (w *storeWalk) assign(s *ast.AssignStmt) {
 // valueSpec reads the stores one variable declaration makes, and the function
 // literals it gives variables.
 func (w *storeWalk) valueSpec(spec *ast.ValueSpec) {
-	if len(spec.Values) == 1 {
+	if len(spec.Values) == 1 && len(spec.Names) > 1 {
 		names := make([]ast.Expr, 0, len(spec.Names))
 		for _, name := range spec.Names {
 			names = append(names, name)
@@ -538,7 +578,7 @@ func (w *storeWalk) valueSpec(spec *ast.ValueSpec) {
 	}
 	for i, name := range spec.Names {
 		w.bindLiteral(name, spec.Values[i])
-		if node, t, isPlace := w.place(name); isPlace {
+		if node, t, holds := w.target(name); holds {
 			w.storeInto(node, t, spec.Values[i])
 		}
 	}
@@ -580,11 +620,22 @@ func (w *storeWalk) fill(node storeNode, value ast.Expr) {
 }
 
 // carrier is the node whose values one expression of a type holding interface
-// elements carries: a composite literal, a field or a variable.
+// elements carries: a composite literal, a field, a variable, or the one result of a
+// call other than append, which [storeWalk.fill] reads operand by operand.
 func (w *storeWalk) carrier(expr ast.Expr) (storeNode, bool) {
-	if lit, isLit := ast.Unparen(expr).(*ast.CompositeLit); isLit {
-		if t := w.info.TypeOf(lit); t != nil && holdsInterfaceElements(t) {
-			return w.literal(lit), true
+	switch e := ast.Unparen(expr).(type) {
+	case *ast.CompositeLit:
+		if t := w.info.TypeOf(e); t != nil && holdsInterfaceElements(t) {
+			return w.literal(e), true
+		}
+		return storeNode{}, false
+	case *ast.CallExpr:
+		t := w.info.TypeOf(e)
+		if t == nil || !holdsInterfaceElements(t) || isAppend(w.info, e) {
+			return storeNode{}, false
+		}
+		if results, held := w.resultsOf(e); held && len(results) == 1 {
+			return results[0], true
 		}
 		return storeNode{}, false
 	}
@@ -700,13 +751,16 @@ func isAppend(info *types.Info, call *ast.CallExpr) bool {
 // valueOf is what one expression carries into an interface-typed place: its concrete
 // type, with what it holds where it is a container of interface values
 // ([storeWalk.carrier]), the interface-typed parameter of the enclosing function or the
-// interface-typed variable it names, or the one result of the call it is.
+// interface-typed variable it names, or the one result of the call it is. A value of a
+// type parameter's type is stored as that type, which stands for its type arguments
+// ([storedTypes.reaching]).
 func (w *storeWalk) valueOf(expr ast.Expr) storedValue {
+	expr = w.unconverted(expr)
 	t := w.info.TypeOf(expr)
 	if t == nil {
 		return storedValue{}
 	}
-	if !types.IsInterface(t) {
+	if _, isParam := types.Unalias(t).(*types.TypeParam); isParam || !types.IsInterface(t) {
 		if node, carries := w.carrier(expr); carries {
 			return storedValue{concrete: t, from: &node}
 		}
@@ -727,6 +781,23 @@ func (w *storeWalk) valueOf(expr ast.Expr) storedValue {
 		return storedValue{from: &node}
 	}
 	return storedValue{}
+}
+
+// unconverted is expr without the conversions to an interface type around it, which
+// store the value they convert as it is. A conversion to a type parameter stores a
+// value of the type argument, so it stays.
+func (w *storeWalk) unconverted(expr ast.Expr) ast.Expr {
+	for {
+		call, isCall := ast.Unparen(expr).(*ast.CallExpr)
+		if !isCall || len(call.Args) != 1 {
+			return expr
+		}
+		fun, known := w.info.Types[call.Fun]
+		if _, isParam := types.Unalias(fun.Type).(*types.TypeParam); !known || !fun.IsType() || isParam || !types.IsInterface(fun.Type) {
+			return expr
+		}
+		expr = call.Args[0]
+	}
 }
 
 // fieldRead is the node of the field one selector expression reads.

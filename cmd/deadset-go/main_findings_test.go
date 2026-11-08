@@ -409,6 +409,7 @@ func testEvidenceModule(t *testing.T) string {
 }
 
 func TestAnalysisOfComputesItsExemptionsUnderTheModeItSweepsIn(t *testing.T) {
+	t.Parallel()
 	dir := testEvidenceModule(t)
 	const subject = "go://example.com/app#Record.Tally"
 

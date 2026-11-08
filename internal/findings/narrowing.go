@@ -8,6 +8,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -49,9 +50,10 @@ type narrowing struct {
 // and keys as unnarrowable the declarations whose references are not the whole
 // story: one an exemption retains (the sweep's own set, which holds exemptions on
 // live declarations too), one the write-only kind reports, a method satisfying an
-// interface the target uses as a type, and a method an outside interface fixes
-// ([readFixed]). A declared cross-language edge is a reference
-// from outside, and its narrowing finding becomes the edge's pending evaluation.
+// interface the target uses as a type, a method an outside interface fixes
+// ([readFixed]), and a root a driver finds by its exported name ([driverNamed]). A
+// declared cross-language edge is a reference from outside, and its narrowing
+// finding becomes the edge's pending evaluation.
 func newNarrowing(in *pass) *narrowing {
 	n := &narrowing{
 		in:           in,
@@ -71,6 +73,11 @@ func newNarrowing(in *pass) *narrowing {
 	for id := range in.writeOnly {
 		n.unnarrowable[id] = true
 	}
+	for i := range in.Merged.Roots {
+		if root := &in.Merged.Roots[i]; driverNamed(root.Kind) {
+			n.unnarrowable[root.ID] = true
+		}
+	}
 	for i := range in.Merged.References {
 		n.widen(&in.Merged.References[i])
 	}
@@ -79,6 +86,14 @@ func newNarrowing(in *pass) *narrowing {
 		n.unnarrowable[id] = true
 	}
 	return n
+}
+
+// driverNamed reports whether a root of kind is one a driver finds by its exported
+// name, so unexporting it stops the driver from running it whatever else refers to
+// it: the go test driver's tests, benchmarks, fuzz tests, examples and suite
+// methods, and go-fuzz's entry points.
+func driverNamed(kind roots.RootKind) bool {
+	return kind == roots.RootTest || kind == roots.RootFuzz
 }
 
 // widen folds one reference into the spread of the declaration it names.

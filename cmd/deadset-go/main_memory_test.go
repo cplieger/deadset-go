@@ -104,6 +104,7 @@ func TestARunThatCannotFitExitsWithTheMemoryLine(t *testing.T) {
 }
 
 func TestAStageTheGovernorCancelledEndsWithTheMemoryLine(t *testing.T) {
+	t.Parallel()
 	line := memoryExhaustionLine(t)
 	// The governor cancels the run's context with the memory error as its cause, and
 	// the stage running at that moment returns its own wrapping of the cancellation.

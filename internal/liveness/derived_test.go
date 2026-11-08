@@ -30,7 +30,7 @@ func TestChainsAnswersEveryChainBetweenTwoInterfaces(t *testing.T) {
 		{From: wide, To: narrow, Site: 4},
 	}
 	byHolder := func(i int) string { return strconv.Itoa(i) }
-	chains := facts.NewChains(sites, byHolder)
+	chains := facts.NewChains(token.NewFileSet(), sites, byHolder)
 
 	if got := chains.Routes(wide, narrow); len(got) != 3 {
 		t.Errorf("Routes(wide, narrow) = %v, want three chains: through middle, and each direct site", got)
@@ -45,7 +45,7 @@ func TestChainsAnswersEveryChainBetweenTwoInterfaces(t *testing.T) {
 		t.Errorf("Routes(other, narrow) = %v, want none", got)
 	}
 
-	oneHolder := facts.NewChains(sites, func(int) string { return "one" })
+	oneHolder := facts.NewChains(token.NewFileSet(), sites, func(int) string { return "one" })
 	if got := oneHolder.Routes(wide, narrow); len(got) != 2 {
 		t.Errorf("Routes(wide, narrow) with one holder = %v, want two: the two direct sites one declaration holds are one hop", got)
 	}

@@ -1,0 +1,47 @@
+A command whose internal package's test runs the package's other test entry
+points as its own steps. The go test driver finds each by its exported name, so
+none of them is an unnecessary export; Local, a production function only its own
+file calls, is.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+import "example.com/app/internal/p"
+
+func main() { p.Run() }
+-- internal/p/p.go --
+package p
+
+// Run is what main calls.
+func Run() { Local() }
+
+// Local is called from its own file alone.
+func Local() {}
+-- internal/p/p_test.go --
+package p
+
+import "testing"
+
+func TestA(t *testing.T) {
+	TestB(t)
+	BenchmarkC(nil)
+	FuzzD(nil)
+	ExampleRun()
+}
+
+func TestB(t *testing.T) { Run() }
+
+func BenchmarkC(b *testing.B) {}
+
+func FuzzD(f *testing.F) {}
+
+func ExampleRun() {
+	Run()
+	// Output:
+}

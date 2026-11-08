@@ -125,12 +125,28 @@ func TestUnusedResultReportsEveryResultEveryCallDiscards(t *testing.T) {
 	result := analysisOf(t, "intrafunc-result.txtar", asApplication, Consumers{}).findings(t, intraFunctionKinds)
 
 	want := []string{
-		"main.go:4:14 result result 1 of go://example.com/app#tally",
-		"main.go:9:15 result result 1 of go://example.com/app#split",
+		"main.go:4:14 result 1 of 1 (int) of go://example.com/app#tally",
+		"main.go:9:15 result 1 of 2 (int) of go://example.com/app#split",
+		"main.go:24:15 result count of go://example.com/app#named",
 	}
 	if got := subjectsOf(result.Findings, vocab.UnusedResult); !slices.Equal(got, want) {
 		t.Errorf("the pass over intrafunc-result.txtar reports %v under %s, want %v",
 			got, vocab.UnusedResult, want)
+	}
+	var messages []string
+	for i := range result.Findings {
+		if result.Findings[i].Code == vocab.UnusedResult {
+			messages = append(messages, result.Findings[i].Message)
+		}
+	}
+	wantMessages := []string{
+		"result 1 of 1 (int) is discarded at every call site",
+		"result 1 of 2 (int) is discarded at every call site",
+		"result count, 1 of 2 (int), is discarded at every call site",
+	}
+	if !slices.Equal(messages, wantMessages) {
+		t.Errorf("the pass over intrafunc-result.txtar says %q under %s, want %q: each names the result once, by position, count and type",
+			messages, vocab.UnusedResult, wantMessages)
 	}
 }
 
@@ -141,7 +157,7 @@ func TestUnusedResultSparesAFunctionAProgramNames(t *testing.T) {
 
 	result := analysisOf(t, "intrafunc-result-program.txtar", asApplication, Consumers{}).findings(t, intraFunctionKinds)
 
-	want := []string{"tally/tally.go:5:14 result result 1 of go://example.com/app/tally#Spare"}
+	want := []string{"tally/tally.go:5:14 result 1 of 1 (int) of go://example.com/app/tally#Spare"}
 	if got := subjectsOf(result.Findings, vocab.UnusedResult); !slices.Equal(got, want) {
 		t.Errorf("the pass over intrafunc-result-program.txtar reports %v under %s, want %v",
 			got, vocab.UnusedResult, want)
@@ -343,14 +359,14 @@ func TestTheUnusedResultKindReportsOnlyWhereEveryCallSiteIsLoaded(t *testing.T) 
 		{
 			name:  "a library whose consumer set is not declared complete",
 			setup: asLibrary,
-			want:  []string{"api/api.go:9:14 result result 1 of go://example.com/app/api#tally"},
+			want:  []string{"api/api.go:9:14 result 1 of 1 (int) of go://example.com/app/api#tally"},
 		},
 		{
 			name:  "an application, whose every caller is in the graph",
 			setup: asApplication,
 			want: []string{
-				"api/api.go:4:14 result result 1 of go://example.com/app/api#Tally",
-				"api/api.go:9:14 result result 1 of go://example.com/app/api#tally",
+				"api/api.go:4:14 result 1 of 1 (int) of go://example.com/app/api#Tally",
+				"api/api.go:9:14 result 1 of 1 (int) of go://example.com/app/api#tally",
 			},
 		},
 	}

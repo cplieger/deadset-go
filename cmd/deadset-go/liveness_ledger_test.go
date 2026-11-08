@@ -25,6 +25,7 @@ func reportedOrWithheld(t *testing.T, dir, ref string) *findings.Finding {
 }
 
 func TestATestOfAPossibleDeclarationIsNoTestOfDeadCodeAndLeavesItsComponent(t *testing.T) {
+	t.Parallel()
 	dir := writeModule(t, map[string]string{
 		"go.mod": "module example.com/lib\n\ngo 1.27.1\n",
 		"lib.go": "package lib\n\n// Helper is published API only a test calls.\nfunc Helper() int { return 1 }\n",
@@ -44,6 +45,7 @@ func TestATestOfAPossibleDeclarationIsNoTestOfDeadCodeAndLeavesItsComponent(t *t
 }
 
 func TestATypeAnAnnotationSharesWithALiveDeclarationDoesNotFallWithTheWriteOnlyOne(t *testing.T) {
+	t.Parallel()
 	dir := writeModule(t, map[string]string{
 		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
 		"app.go": "package main\n\ntype box struct{ n int }\n\nvar x, y box\n\n" +
@@ -58,6 +60,7 @@ func TestATypeAnAnnotationSharesWithALiveDeclarationDoesNotFallWithTheWriteOnlyO
 }
 
 func TestADeclarationOnlyAWriteInsideAWriteOnlySubjectsWriteNamesFallsWithTheSubject(t *testing.T) {
+	t.Parallel()
 	dir := writeModule(t, map[string]string{
 		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
 		"app.go": "package main\n\ntype T struct{ F func() }\n\nfunc helper() {}\n\nvar x T\n\n" +
@@ -72,6 +75,7 @@ func TestADeclarationOnlyAWriteInsideAWriteOnlySubjectsWriteNamesFallsWithTheSub
 }
 
 func TestADeclarationNestedWriteOnlySubjectsWritesCarryFallsWithTheInnermostSubject(t *testing.T) {
+	t.Parallel()
 	dir := writeModule(t, map[string]string{
 		"go.mod":           "module example.com/app\n\ngo 1.27.1\n",
 		"app.go":           "package main\n\ntype T struct{ F func() }\n\nfunc helper() {}\n\nvar x T\n\nfunc main() { x = T{F: helper} }\n",
@@ -89,6 +93,7 @@ func TestADeclarationNestedWriteOnlySubjectsWritesCarryFallsWithTheInnermostSubj
 }
 
 func TestAnExemptionOnASymbolAMarksReferencesAlsoHoldIsNotRetained(t *testing.T) {
+	t.Parallel()
 	dir := writeModule(t, map[string]string{
 		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
 		"app.go": "package main\n\nfunc main() {}\n\n//deadset:ignore DS1002 -- kept for a later release.\n" +
@@ -109,6 +114,7 @@ const linuxAndWindows = `{"target": {"kind": "application"}, "analysis": {"confi
 	`{"id": "windows-amd64", "os": "windows", "arch": "amd64", "tags": []}]}}`
 
 func TestATestOneConfigurationCompilesOfADeclarationAnotherKeepsLiveIsNoTestOfDeadCode(t *testing.T) {
+	t.Parallel()
 	dir := writeModule(t, map[string]string{
 		"go.mod":          "module example.com/app\n\ngo 1.27.1\n",
 		"app.go":          "package main\n\nfunc main() {}\n\nfunc helper() int { return 1 }\n",
@@ -127,6 +133,7 @@ func TestATestOneConfigurationCompilesOfADeclarationAnotherKeepsLiveIsNoTestOfDe
 }
 
 func TestADeclarationOneConfigurationReadsThroughALiveSubjectDoesNotFallWithAnotherConfigurationsWriteOnlyOne(t *testing.T) {
+	t.Parallel()
 	dir := writeModule(t, map[string]string{
 		"go.mod":           "module example.com/app\n\ngo 1.27.1\n",
 		"app.go":           "package main\n\ntype T struct{ F func() }\n\nfunc helper() {}\n\nfunc main() { x = T{F: helper} }\n",
@@ -142,6 +149,7 @@ func TestADeclarationOneConfigurationReadsThroughALiveSubjectDoesNotFallWithAnot
 }
 
 func TestExplainFollowsAPathThroughTheConfigurationsThatMakeEachHop(t *testing.T) {
+	t.Parallel()
 	dir := writeModule(t, map[string]string{
 		"go.mod":           "module example.com/app\n\ngo 1.27.1\n",
 		"app.go":           "package main\n\nfunc main() {}\n\nfunc d() { work() }\n\nfunc s() {}\n",
@@ -165,6 +173,7 @@ func TestExplainFollowsAPathThroughTheConfigurationsThatMakeEachHop(t *testing.T
 }
 
 func TestExplainNamesNoConfigurationForAHopEveryConfigurationMakesThroughItsOwnWrite(t *testing.T) {
+	t.Parallel()
 	// The write in main stores into a different x in each configuration, and the
 	// Windows build alone calls w.
 	dir := writeModule(t, map[string]string{
@@ -186,6 +195,7 @@ func TestExplainNamesNoConfigurationForAHopEveryConfigurationMakesThroughItsOwnW
 }
 
 func TestExplainNamesTheMarkOrExemptionWhereAHeldSymbolsPathBegins(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, app, gen, symbol string
 		library                bool

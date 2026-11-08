@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -36,6 +35,7 @@ func consumerStates(facts map[string]any) map[string]string {
 // of the enum (references-go.16, bindings.15). The runtime's own reflection in a
 // generated message method reaches no field (bindings.12).
 func TestFactsReadWhatAHandWrittenSerializerCallEncodes(t *testing.T) {
+	t.Parallel()
 	facts, _ := analyzeWithFacts(t, archiveModule(t, "schema-reads/serializers.txtar"))
 	got := consumerStates(facts)
 	want := map[string]string{
@@ -58,6 +58,7 @@ func TestFactsReadWhatAHandWrittenSerializerCallEncodes(t *testing.T) {
 // A loaded consumer's production call of a serializer reads what it encodes, an
 // actual caller of the target; its test file's call reads nothing for production.
 func TestFactsReadWhatALoadedConsumerSerializes(t *testing.T) {
+	t.Parallel()
 	files := make(map[string]string)
 	for name, data := range archiveFiles(t, "schema-reads/serializers.txtar") {
 		if name != "main.go" {
@@ -91,15 +92,12 @@ func TestFactsReadWhatALoadedConsumerSerializes(t *testing.T) {
 // facts document decoded as plain JSON values.
 func analyzeScopeWithFacts(t *testing.T, files map[string]string) map[string]any {
 	t.Helper()
-	t.Chdir(writeModule(t, files))
 	factsPath := filepath.Join(t.TempDir(), "facts.json")
-	var stdout, stderr bytes.Buffer
-	code := invoke(t.Context(), []string{
-		"analyze", "--scope=scope.json", "--config=target/" + repositoryDocument,
-		"--report=" + filepath.Join(t.TempDir(), "report.json"), "--facts=" + factsPath,
-	}, &stdout, &stderr)
-	if code == vocab.ExitUsage || code == vocab.ExitFailure {
-		t.Fatalf("analyze --scope=scope.json --facts = %d, want a verdict\nstderr:\n%s", code, stderr.String())
+	ran := invokedIn(t, writeModule(t, files),
+		"analyze", "--scope=scope.json", "--config=target/"+repositoryDocument,
+		"--report="+filepath.Join(t.TempDir(), "report.json"), "--facts="+factsPath)
+	if ran.code == vocab.ExitUsage || ran.code == vocab.ExitFailure {
+		t.Fatalf("analyze --scope=scope.json --facts = %d, want a verdict\nstderr:\n%s", ran.code, ran.stderr)
 	}
 	body, err := os.ReadFile(factsPath)
 	if err != nil {
@@ -117,6 +115,7 @@ func analyzeScopeWithFacts(t *testing.T, files map[string]string) map[string]any
 // wrapper literal only writes, and a nested message's oneof binds to the nested
 // message (references-go.15, bindings.14).
 func TestFactsReadAOneofMemberWhereHandCodeTellsItApart(t *testing.T) {
+	t.Parallel()
 	facts, _ := analyzeWithFacts(t, archiveModule(t, "schema-reads/oneofs.txtar"))
 	got := consumerStates(facts)
 	want := map[string]string{

@@ -29,9 +29,15 @@ func kept() int {
 	return 2
 }
 
+// named returns a named count every call drops and a flag every call reads.
+func named() (count int, ok bool) {
+	return 1, true
+}
+
 func main() {
 	tally()
 	_, ok := split()
 	doubled(3)
-	println(ok, doubled(4), kept())
+	_, done := named()
+	println(ok, done, doubled(4), kept())
 }

@@ -691,11 +691,49 @@ func (s *conversionScan) typeSwitch(ts *ast.TypeSwitchStmt) {
 	}
 }
 
+// readings names each package of one run by its path and the files it compiles,
+// which fset places: a unit's own reading of a package and another unit's reading
+// of it share a name, while a test variant, which compiles more files, and a module
+// of the same path elsewhere do not. A package fset places no file of is named by
+// its own reading.
+type readings struct {
+	fset  *token.FileSet
+	names map[*types.Package]string
+}
+
 // identity spells one type so that two types share a spelling only when they are
-// identical: the package of each name is spelled by its own identity, because two
-// variants of one package declare two distinct types under one path.
-func identity(t types.Type) string {
-	return resolve.Spell(t, func(p *types.Package) string { return fmt.Sprintf("%p", p) })
+// identical, a type of two readings of one package being one type: the package of
+// each name is spelled by its reading's name ([readings.of]), because two variants of
+// one package declare two distinct types under one path.
+func (r *readings) identity(t types.Type) string {
+	return resolve.Spell(t, r.of)
+}
+
+func newReadings(fset *token.FileSet) *readings {
+	return &readings{fset: fset, names: make(map[*types.Package]string)}
+}
+
+// of is the name of one package.
+func (r *readings) of(p *types.Package) string {
+	if held, known := r.names[p]; known {
+		return held
+	}
+	var files []string
+	for child := range p.Scope().Children() {
+		if r.fset == nil {
+			break
+		}
+		if f := r.fset.File(child.Pos()); f != nil {
+			files = append(files, f.Name())
+		}
+	}
+	name := fmt.Sprintf("%p", p)
+	if len(files) > 0 {
+		slices.Sort(files)
+		name = p.Path() + "\x00" + strings.Join(files, "\x00")
+	}
+	r.names[p] = name
+	return name
 }
 
 // typeOf returns the type one expression has, and nil when the type checker

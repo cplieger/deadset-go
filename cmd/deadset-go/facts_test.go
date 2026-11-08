@@ -50,6 +50,7 @@ func analyzeWithFacts(t *testing.T, dir string) (map[string]any, []byte) {
 }
 
 func TestAnalyzeWritesAFactsDocumentAndTheSameReport(t *testing.T) {
+	t.Parallel()
 	dir := generatedModule(t)
 	facts, withFacts := analyzeWithFacts(t, dir)
 	without := runAnalyze(t, dir)
@@ -76,6 +77,7 @@ func TestAnalyzeWritesAFactsDocumentAndTheSameReport(t *testing.T) {
 }
 
 func TestFactsNameEveryGeneratedFileByItsHeaderLine(t *testing.T) {
+	t.Parallel()
 	facts, _ := analyzeWithFacts(t, generatedModule(t))
 	want := []any{
 		map[string]any{

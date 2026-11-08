@@ -1,0 +1,35 @@
+A generic function asserts an interface literal whose one method is variadic in the
+function's type parameter, in a package that converts a defined type to an
+interface. No reading of the package states a type parameter, so the assertion keeps
+the interface it writes, and every declaration here is live.
+
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- go.mod --
+module example.com/m
+
+go 1.27
+-- main.go --
+package main
+
+import "fmt"
+
+// shaper is what square is used as.
+type shaper interface{ Area() int }
+
+// square is the shape main converts.
+type square struct{}
+
+// Area makes square a shaper.
+func (square) Area() int { return 4 }
+
+// mixes asserts a method variadic in T.
+func mixes[T any](x any) bool {
+	_, ok := x.(interface{ M(v ...T) })
+	return ok
+}
+
+func main() {
+	var s shaper = square{}
+	fmt.Println(s.Area(), mixes[int](s))
+}

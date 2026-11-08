@@ -22,19 +22,24 @@ const (
 // Chains answers by which chains of the sites of one set a value of one interface
 // type reaches another: each site of a chain converts a value of the interface type
 // the previous site converts to, the first a value of the type the search starts
-// from. Interfaces are compared by method set.
+// from. Interfaces are compared by method set, two readings of one package's types
+// alike ([readings]).
 type Chains struct {
-	hops   map[string][]int // by the method set of the interface a site's value has
-	routes map[string][][]int
-	keys   map[*types.Interface]string // methodSetKey's answers, which spell every signature
-	sites  []Conversion
+	hops     map[string][]int // by the method set of the interface a site's value has
+	routes   map[string][][]int
+	keys     map[*types.Interface]string // methodSetKey's answers, which spell every signature
+	readings *readings
+	sites    []Conversion
 }
 
-// NewChains indexes the sites of one set that convert an interface value. holder
-// names the declaration holding the site at an index: two sites one declaration
-// holds between the same two interfaces are one hop.
-func NewChains(sites []Conversion, holder func(i int) string) *Chains {
-	c := &Chains{sites: sites, hops: make(map[string][]int), routes: make(map[string][][]int), keys: make(map[*types.Interface]string)}
+// NewChains indexes the sites of one set that convert an interface value, whose
+// positions fset holds. holder names the declaration holding the site at an index:
+// two sites one declaration holds between the same two interfaces are one hop.
+func NewChains(fset *token.FileSet, sites []Conversion, holder func(i int) string) *Chains {
+	c := &Chains{
+		sites: sites, hops: make(map[string][]int), routes: make(map[string][][]int),
+		keys: make(map[*types.Interface]string), readings: newReadings(fset),
+	}
 	seen := make(map[string]bool)
 	for i := range sites {
 		from := interfaceOf(sites[i].From)
@@ -126,21 +131,21 @@ func (c *Chains) key(iface *types.Interface) string {
 	if held, known := c.keys[iface]; known {
 		return held
 	}
-	spelled := methodSetKey(iface)
+	spelled := c.readings.methodSetKey(iface)
 	c.keys[iface] = spelled
 	return spelled
 }
 
 // methodSetKey spells an interface's method set, so two interfaces share a key
 // exactly when their method sets are identical, however each is written.
-func methodSetKey(iface *types.Interface) string {
+func (r *readings) methodSetKey(iface *types.Interface) string {
 	methods := make([]string, 0, iface.NumMethods())
 	for m := range iface.Methods() {
 		name := m.Name()
 		if !m.Exported() && m.Pkg() != nil {
 			name = m.Pkg().Path() + "." + name
 		}
-		methods = append(methods, name+" "+identity(m.Signature()))
+		methods = append(methods, name+" "+r.identity(m.Signature()))
 	}
 	slices.Sort(methods)
 	return strings.Join(methods, ";")
@@ -157,13 +162,14 @@ type derivable struct {
 	decls []token.Pos
 }
 
-// joined is e reached at assertion a through one chain of hops: every declaration
-// holding e, a or a hop holds the derived site.
-func (s *conversionScan) joined(e *derivable, a *assertion, hops []int) derivable {
+// joined is e reached at assertion a, whose interface's method set is to in e's
+// reading, through one chain of hops: every declaration holding e, a or a hop holds
+// the derived site.
+func (s *conversionScan) joined(e *derivable, a *assertion, to *types.Interface, hops []int) derivable {
 	d := derivable{
 		from:  e.from,
 		key:   e.key,
-		to:    interfaceOf(a.to),
+		to:    to,
 		held:  slices.Clone(e.held),
 		decls: slices.Clone(e.decls),
 	}
@@ -200,7 +206,7 @@ func (d *derivable) declsKey() string {
 // every declaration holding a site it derives from. A derived site is a site of the
 // set, so the derivation runs until no site joins.
 func (s *conversionScan) asserted() []Conversion {
-	chains := NewChains(s.sites, func(i int) string { return strconv.Itoa(int(s.holders[i])) })
+	chains := NewChains(s.at.Fset, s.sites, func(i int) string { return strconv.Itoa(int(s.holders[i])) })
 	var queue []derivable
 	for i := range s.sites {
 		c := &s.sites[i]
@@ -210,32 +216,69 @@ func (s *conversionScan) asserted() []Conversion {
 		queue = append(queue, derivable{
 			from:  c.From,
 			to:    c.To,
-			key:   identity(c.From),
+			key:   chains.readings.identity(c.From),
 			held:  []token.Pos{c.Site},
 			decls: []token.Pos{s.holders[i]},
 		})
 	}
-	targets := make([]*types.Interface, len(s.assertions))
 	names := make([]string, len(s.assertions))
 	for i := range s.assertions {
-		targets[i] = interfaceOf(s.assertions[i].to)
-		names[i] = identity(s.assertions[i].to)
+		names[i] = chains.readings.identity(s.assertions[i].to)
 	}
 	run := derivation{
 		scan: s, chains: chains, names: names,
 		implements: make(map[implementsPair]bool), seen: make(map[string]bool), counts: make(map[string]int),
+		stated: make(map[statedPair]*types.Interface),
 	}
 	for len(queue) > 0 {
 		e := queue[0]
 		queue = queue[1:]
 		for i := range s.assertions {
-			if targets[i].NumMethods() == 0 || !implementsOnce(run.implements, e.key, i, e.from, targets[i]) {
+			to := run.inReadingOf(e.from, i)
+			if to.NumMethods() == 0 || !implementsOnce(run.implements, e.key, i, e.from, to) {
 				continue
 			}
-			queue = append(queue, run.derive(&e, i)...)
+			queue = append(queue, run.derive(&e, i, to)...)
 		}
 	}
 	return run.derived
+}
+
+// definedPackage is the package declaring the defined type a value of t is, or a
+// pointer to it points to, and nil for any other type.
+func definedPackage(t types.Type) *types.Package {
+	if pointer, isPointer := types.Unalias(t).(*types.Pointer); isPointer {
+		t = pointer.Elem()
+	}
+	if named, isNamed := types.Unalias(t).(*types.Named); isNamed {
+		return named.Obj().Pkg()
+	}
+	return nil
+}
+
+// ReadingOf is the package of pkg's path that from imports at any depth, from
+// itself included, and pkg where from reaches none: the reading of pkg the code of
+// from's package sees.
+func ReadingOf(from, pkg *types.Package) *types.Package {
+	if from == nil {
+		return pkg
+	}
+	seen := map[*types.Package]bool{from: true}
+	queue := []*types.Package{from}
+	for len(queue) > 0 {
+		one := queue[0]
+		queue = queue[1:]
+		if one.Path() == pkg.Path() {
+			return one
+		}
+		for _, imported := range one.Imports() {
+			if !seen[imported] {
+				seen[imported] = true
+				queue = append(queue, imported)
+			}
+		}
+	}
+	return pkg
 }
 
 // derivation is the state of one fixed point of [conversionScan.asserted].
@@ -243,20 +286,52 @@ type derivation struct {
 	scan       *conversionScan
 	chains     *Chains
 	implements map[implementsPair]bool
+	stated     map[statedPair]*types.Interface
 	seen       map[string]bool // the derived sites kept, by type, interface and holders
 	counts     map[string]int  // the derived sites kept, by type and interface
 	names      []string
 	derived    []Conversion
 }
 
-// derive adds the sites one site of the set derives at one assertion, one per chain
-// from its interface to the operand's, and returns them.
-func (r *derivation) derive(e *derivable, assertion int) []derivable {
+// inReadingOf is the method set of one assertion's interface stated in the readings
+// of the packages it names that the package declaring from's defined type reaches
+// ([ReadingOf], [Restated]), each pair of package and assertion once. A type
+// implements only interfaces stated in its own reading's types, and a site an
+// assertion derives can pair a type and an interface of two readings of one
+// package, because [Conversions] walks each file once. A method set that cannot be
+// stated there stays as the assertion writes it.
+func (r *derivation) inReadingOf(from types.Type, assertion int) *types.Interface {
+	methods := interfaceOf(r.scan.assertions[assertion].to)
+	declared := definedPackage(from)
+	if declared == nil {
+		return methods
+	}
+	pair := statedPair{pkg: declared, assertion: assertion}
+	if held, known := r.stated[pair]; known {
+		return held
+	}
+	if restated, ok := Restated(methods, func(p *types.Package) *types.Package { return ReadingOf(declared, p) }); ok {
+		methods, _ = restated.(*types.Interface)
+	}
+	r.stated[pair] = methods
+	return methods
+}
+
+// statedPair is one package declaring a type and one assertion, by its index.
+type statedPair struct {
+	pkg       *types.Package
+	assertion int
+}
+
+// derive adds the sites one site of the set derives at one assertion, whose
+// interface's method set is to in e's reading, one per chain from its interface to
+// the operand's, and returns them.
+func (r *derivation) derive(e *derivable, assertion int, to *types.Interface) []derivable {
 	a := &r.scan.assertions[assertion]
 	pair := e.key + "\x00" + r.names[assertion]
 	var added []derivable
 	for _, route := range r.chains.indexRoutes(e.to, a.operand) {
-		d := r.scan.joined(e, a, route)
+		d := r.scan.joined(e, a, to, route)
 		if r.counts[pair] >= maxDerived {
 			d.held, d.decls = []token.Pos{a.site}, []token.Pos{a.holder}
 		}
@@ -290,9 +365,11 @@ func implementsOnce(held map[implementsPair]bool, key string, assertion int, fro
 	return answer
 }
 
-// derivedSite is the site one derivation adds. Its position is the first site it
-// derives from that a test file holds, because the derived site is then a test's
-// evidence, and the assertion's otherwise.
+// derivedSite is the site one derivation adds. It names the interface as the
+// assertion writes it, which is the type its own package's code spells, and holds
+// d's method set, stated in the reading of d's type, as To. Its position is the
+// first site it derives from that a test file holds, because the derived site is then
+// a test's evidence, and the assertion's otherwise.
 func (s *conversionScan) derivedSite(d *derivable, a *assertion) Conversion {
 	site := a.site
 	for _, at := range d.held {

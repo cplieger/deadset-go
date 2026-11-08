@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -26,7 +27,10 @@ func writeWorkspace(t *testing.T, dir string, entries ...string) string {
 	body := "go 1.27.1\n\nuse (\n"
 	for _, entry := range entries {
 		body += "\t" + entry + "\n"
-		if filepath.IsAbs(entry) {
+		if unquoted, err := strconv.Unquote(entry); err == nil {
+			entry = unquoted
+		}
+		if entry == "" || filepath.IsAbs(entry) {
 			continue
 		}
 		if err := os.MkdirAll(filepath.Join(dir, entry), 0o750); err != nil {

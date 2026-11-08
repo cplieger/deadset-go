@@ -36,6 +36,7 @@ func findingOf(t *testing.T, set *run.Findings, ref string) *findings.Finding {
 }
 
 func TestACascadeListedInFullNamesEveryMemberOfTheComponent(t *testing.T) {
+	t.Parallel()
 	dir := cascadeModule(t, `{"target": {"kind": "application"}, "reporters": {"cascade": "full"}}`)
 	set := findingsOfDir(t, dir)
 	found := findingOf(t, set, "go://example.com/app#outer")
@@ -57,6 +58,7 @@ func TestACascadeListedInFullNamesEveryMemberOfTheComponent(t *testing.T) {
 }
 
 func TestACascadeListedByItsRootsNamesNoMember(t *testing.T) {
+	t.Parallel()
 	dir := cascadeModule(t, `{"target": {"kind": "application"}}`)
 	set := findingsOfDir(t, dir)
 

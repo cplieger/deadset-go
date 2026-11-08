@@ -48,6 +48,7 @@ func ruledIn(t *testing.T, dir string, args ...string) ruled {
 }
 
 func TestARecordNamingACodeAboutNoDeclarationMarksNothing(t *testing.T) {
+	t.Parallel()
 	got := ruledOf(t, "record-subject-code-marks-nothing.txtar")
 
 	want := []string{"DS1002 main.go:6", "DS1002 main.go:9", "DS1002 main.go:12", "DS1002 main.go:15", "DS1002 main.go:18"}
@@ -73,6 +74,7 @@ func TestARecordNamingACodeAboutNoDeclarationMarksNothing(t *testing.T) {
 }
 
 func TestALivenessRecordIsInEffectOnlyUnderTheCodeItsDeclarationWouldCarry(t *testing.T) {
+	t.Parallel()
 	got := ruledOf(t, "wrong-liveness-code.txtar")
 
 	if len(got.findings) != 0 {
@@ -97,6 +99,7 @@ func TestALivenessRecordIsInEffectOnlyUnderTheCodeItsDeclarationWouldCarry(t *te
 }
 
 func TestADirectiveInAFileOneConfigurationCompilesIsRead(t *testing.T) {
+	t.Parallel()
 	got := ruledOf(t, "directive-in-a-second-configuration.txtar")
 
 	if len(got.findings) != 0 || len(got.stale) != 0 {
@@ -108,6 +111,7 @@ func TestADirectiveInAFileOneConfigurationCompilesIsRead(t *testing.T) {
 }
 
 func TestADirectiveBindsTheDeclarationWrittenBelowItWhateverALineDirectiveFoldsOntoItsLine(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range []string{"directive-fold-one-file.txtar", "directive-fold-two-files.txtar"} {
 		t.Run(fixture, func(t *testing.T) {
 			got := ruledOf(t, fixture)
@@ -123,6 +127,7 @@ func TestADirectiveBindsTheDeclarationWrittenBelowItWhateverALineDirectiveFoldsO
 }
 
 func TestEachOfTwoDirectivesALineDirectiveRendersAtOneSiteIsItsOwnSuppression(t *testing.T) {
+	t.Parallel()
 	got := ruledOf(t, "directive-fold-stale.txtar")
 
 	if len(got.findings) != 0 {
@@ -137,6 +142,7 @@ func TestEachOfTwoDirectivesALineDirectiveRendersAtOneSiteIsItsOwnSuppression(t 
 }
 
 func TestEachOfTwoReasonlessDirectivesALineDirectiveRendersAtOneSiteIsAFinding(t *testing.T) {
+	t.Parallel()
 	reasonless := ruledOf(t, "reasonless-fold.txtar")
 	want := []string{"DS9001 main.go:19", "DS9001 main.go:19", "DS1002 main.go:20", "DS1002 main.go:20"}
 	if !slices.Equal(reasonless.findings, want) {
@@ -145,6 +151,7 @@ func TestEachOfTwoReasonlessDirectivesALineDirectiveRendersAtOneSiteIsAFinding(t
 }
 
 func TestARecordWhoseFindingTheComponentCapWithholdsIsDormant(t *testing.T) {
+	t.Parallel()
 	dir := archiveModule(t, "suppression-ledger/dormant-through-the-component.txtar")
 	got := ruledIn(t, dir)
 	if len(got.findings) != 0 || len(got.stale) != 0 || got.totals.SuppressionsInEffect != 0 {
@@ -157,6 +164,7 @@ func TestARecordWhoseFindingTheComponentCapWithholdsIsDormant(t *testing.T) {
 }
 
 func TestAnEntryOfAnotherSchemeIsAcceptedUnread(t *testing.T) {
+	t.Parallel()
 	got := ruledOf(t, "other-scheme-unread.txtar")
 
 	if len(got.findings) != 0 || len(got.stale) != 0 {
@@ -169,6 +177,7 @@ func TestAnEntryOfAnotherSchemeIsAcceptedUnread(t *testing.T) {
 }
 
 func TestAMalformedDirectiveIsAUsageError(t *testing.T) {
+	t.Parallel()
 	got := runAnalyze(t, archiveModule(t, "suppression-ledger/malformed-directive.txtar"))
 
 	if got.code != vocab.ExitUsage || !strings.Contains(got.stderr, "main.go:5") {
@@ -177,6 +186,7 @@ func TestAMalformedDirectiveIsAUsageError(t *testing.T) {
 }
 
 func TestARecordOnAMemberOfADeadContainerIsDecidedAgainstTheMembersOwnFinding(t *testing.T) {
+	t.Parallel()
 	got := ruledOf(t, "record-on-a-member-of-a-dead-container.txtar")
 
 	if want := []string{"DS1002 main.go:5", "DS1002 main.go:11", "DS1201 main.go:16"}; !slices.Equal(got.findings, want) {
@@ -191,6 +201,7 @@ func TestARecordOnAMemberOfADeadContainerIsDecidedAgainstTheMembersOwnFinding(t 
 }
 
 func TestARecordOnASatisfactionAssertionNamesItsFindingByTheInterfacesReference(t *testing.T) {
+	t.Parallel()
 	got := ruledOf(t, "record-on-a-satisfaction-assertion.txtar")
 
 	for _, found := range got.findings {
@@ -204,6 +215,7 @@ func TestARecordOnASatisfactionAssertionNamesItsFindingByTheInterfacesReference(
 }
 
 func TestARecordOnAnInterfaceNamesTheAssertionAtItsOwnPath(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range []string{
 		"entry-on-an-interface-asserted-in-two-files.txtar",
 		"directive-on-an-interface-asserted-in-two-files.txtar",
@@ -239,6 +251,7 @@ func assertionsOf(r ruled) []string {
 }
 
 func TestARecordOnAnInterfaceNamesEveryAssertionOfItInItsFile(t *testing.T) {
+	t.Parallel()
 	for _, fixture := range []string{
 		"entry-on-an-interface-asserted-twice-in-one-file.txtar",
 		"directive-on-an-interface-asserted-twice-in-one-file.txtar",
@@ -257,6 +270,7 @@ func TestARecordOnAnInterfaceNamesEveryAssertionOfItInItsFile(t *testing.T) {
 }
 
 func TestADirectiveOnAnInterfaceNamesTheAssertionsWrittenInItsFile(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		fixture string
 		want    []string
@@ -278,6 +292,7 @@ func TestADirectiveOnAnInterfaceNamesTheAssertionsWrittenInItsFile(t *testing.T)
 }
 
 func TestADirectiveOnOneFoldedAssertionWithholdsThatAssertionAlone(t *testing.T) {
+	t.Parallel()
 	got := runAnalyze(t, archiveModule(t, "suppression-ledger/directive-on-one-folded-assertion.txtar"))
 	envelope := envelopeAt(t, got.reportPath)
 
@@ -297,6 +312,7 @@ func TestADirectiveOnOneFoldedAssertionWithholdsThatAssertionAlone(t *testing.T)
 }
 
 func TestADirectiveOnOneFoldedPartHolderWithholdsThatAlternativesPartAlone(t *testing.T) {
+	t.Parallel()
 	got := runAnalyze(t, archiveModule(t, "suppression-ledger/directive-on-one-folded-part-holder.txtar"))
 	envelope := envelopeAt(t, got.reportPath)
 
@@ -315,6 +331,7 @@ func TestADirectiveOnOneFoldedPartHolderWithholdsThatAlternativesPartAlone(t *te
 }
 
 func TestADirectiveOnOnePlatformAlternativeWithholdsThatDeclarationAlone(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ fixture, reported string }{
 		{"directive-on-one-platform-alternative-linux.txtar", "windows"},
 		{"directive-on-one-platform-alternative-windows.txtar", "linux"},
@@ -344,6 +361,7 @@ func TestADirectiveOnOnePlatformAlternativeWithholdsThatDeclarationAlone(t *test
 }
 
 func TestAnAssertionOfAnInterfaceDeclaredPerPlatformIsOneFinding(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		fixture    string
 		assertions []string
@@ -382,6 +400,7 @@ func TestAnAssertionOfAnInterfaceDeclaredPerPlatformIsOneFinding(t *testing.T) {
 }
 
 func TestAnEntryNamesAPartByThePathThePartReports(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		fixture         string
 		findings, stale []string
