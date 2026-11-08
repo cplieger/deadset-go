@@ -177,6 +177,7 @@ func inputOfRecords(records []core.Record, symbols []inventory.Symbol) *Input {
 // the sweep's answer rather than this pass's, and the fixture tests of this file's
 // unit pin it over a loaded module.
 func TestASuppressionDocumentRoundTrips(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	rapid.Check(t, func(t *rapid.T) {
 		found := drawnFindings(t)
@@ -293,6 +294,7 @@ func writeTemp(t *rapid.T, dir, name, document string) string {
 // and the merge is what does. Every drawn suppression sits at a site of its own, so
 // the collapse by site does not fold two of them together and the count is exact.
 func TestAnythingTheConfigurationNamesThatMatchesNothingIsReported(t *testing.T) {
+	t.Parallel()
 	rapid.Check(t, func(t *rapid.T) {
 		found := drawnFindings(t)
 		configured := rapid.SliceOfN(rapid.SampledFrom([]string{

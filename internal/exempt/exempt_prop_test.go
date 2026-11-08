@@ -257,6 +257,7 @@ func sweptWith(t *rapid.T, g *liveness.Graph, table map[vocab.Exemption]exempt.D
 // This runs at rapid's default of 100 checks; -rapid.checks raises it for a deeper
 // local run.
 func TestProperty04TheReportedSetAndTheRetainedSetAreDisjoint(t *testing.T) {
+	t.Parallel()
 	rapid.Check(t, func(t *rapid.T) {
 		d := drawnSets().Draw(t, "the symbol set")
 		g, ids := d.graphOf()

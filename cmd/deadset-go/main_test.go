@@ -56,8 +56,23 @@ func runTests(m *testing.M) int {
 		fmt.Fprintf(os.Stderr, "read the package directory: %v\n", err)
 		return 1
 	}
+	for name, value := range map[string]string{"GOOS": hostOS, "GOARCH": hostArch} {
+		if err := os.Setenv(name, value); err != nil {
+			fmt.Fprintf(os.Stderr, "pin the host: %v\n", err)
+			return 1
+		}
+	}
 	return m.Run()
 }
+
+// hostOS and hostArch are the host every run of this package's tests derives for,
+// in process and in the command it starts, whatever the runner: [runTests] sets them
+// as GOOS and GOARCH, which [load.HostConfiguration] reads, so a derived matrix and
+// the expectations naming it are the same on every runner.
+const (
+	hostOS   = "linux"
+	hostArch = "amd64"
+)
 
 // exitCode is one row of contract/exit-codes.json.
 type exitCode struct {

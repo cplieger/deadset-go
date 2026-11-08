@@ -13,6 +13,7 @@ import (
 // directive's own directory, a directory a type generator receives and a word with no
 // relative path root nothing.
 func TestRootsRootsTheExportsOfAPackageAGeneratorReceives(t *testing.T) {
+	t.Parallel()
 	d := detect(t, "generator-packages.txtar", roots.RootOptions{})
 	held := make(map[string]bool, len(d.symbols))
 	for _, s := range d.symbols {

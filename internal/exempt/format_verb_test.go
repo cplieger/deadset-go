@@ -15,6 +15,7 @@ func verbRefs(typeName string, members ...string) []string {
 }
 
 func TestFormatVerbContractRetainsTheMethodEveryVerbFamilyCalls(t *testing.T) {
+	t.Parallel()
 	shared := analysisOf(t, "format-verb-firing.txtar", Options{})
 	refs := retainedRefs(t, shared, vocab.FormatVerbContract)
 
@@ -56,6 +57,7 @@ func facilityRefs(typeName string, members ...string) []string {
 }
 
 func TestFormatVerbContractRetainsTheMethodEveryFacilityCalls(t *testing.T) {
+	t.Parallel()
 	shared := analysisOf(t, "format-verb-facilities.txtar", Options{})
 	refs := retainedRefs(t, shared, vocab.FormatVerbContract)
 
@@ -87,6 +89,7 @@ func TestFormatVerbContractRetainsTheMethodEveryFacilityCalls(t *testing.T) {
 }
 
 func TestFormatVerbContractNamesTheFacilityThatFormatted(t *testing.T) {
+	t.Parallel()
 	shared := analysisOf(t, "format-verb-facilities.txtar", Options{})
 	symbols := shared.inventory(t)
 	refs := make(map[inventory.SymbolID]string, len(symbols))
@@ -123,6 +126,7 @@ func TestFormatVerbContractNamesTheFacilityThatFormatted(t *testing.T) {
 }
 
 func TestFormatVerbContractRetainsNothingWhereNoVerbAsksForAString(t *testing.T) {
+	t.Parallel()
 	shared := analysisOf(t, "format-verb-quiet.txtar", Options{})
 	if got := retainedRefs(t, shared, vocab.FormatVerbContract); len(got) > 0 {
 		t.Errorf("FormatVerbContractDetector(format-verb-quiet.txtar) retained %v, want nothing", got)
@@ -130,6 +134,7 @@ func TestFormatVerbContractRetainsNothingWhereNoVerbAsksForAString(t *testing.T)
 }
 
 func TestFormatVerbContractNamesTheClassTheVerbAndTheSite(t *testing.T) {
+	t.Parallel()
 	shared := analysisOf(t, "format-verb-firing.txtar", Options{})
 	symbols := shared.inventory(t)
 	refs := make(map[inventory.SymbolID]string, len(symbols))
@@ -170,6 +175,7 @@ func TestFormatVerbContractNamesTheClassTheVerbAndTheSite(t *testing.T) {
 // string: each want below is the set of operand positions the package asks for a
 // string, over operands whose string method records the call.
 func TestStringOperandsBindsTheOperandsTheFormattingPackageAsksForAString(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		format string
 		verbs  string
@@ -228,6 +234,7 @@ func TestStringOperandsBindsTheOperandsTheFormattingPackageAsksForAString(t *tes
 // operand past the last one a verb consumed, and stops doing so once the format
 // has selected an operand by an explicit index.
 func TestStringOperandsReportsHowFarTheVerbsReachedAndWhetherAnIndexAppeared(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		format        string
 		wantReached   int
@@ -263,6 +270,7 @@ func TestStringOperandsReportsHowFarTheVerbsReachedAndWhetherAnIndexAppeared(t *
 // without a method call, and an interface-typed field holds a type the walk does
 // not see.
 func TestFormatVerbContractRetainsTheMethodsOfTheFieldsItFormats(t *testing.T) {
+	t.Parallel()
 	refs := retainedRefs(t, analysisOf(t, "format-verb-fields.txtar", Options{}), vocab.FormatVerbContract)
 
 	for _, test := range []struct {

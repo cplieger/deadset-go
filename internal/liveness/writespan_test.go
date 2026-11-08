@@ -14,6 +14,7 @@ import (
 // A write carries the statement or element its deletion deletes where the write is
 // that statement's one target, and nothing where deleting it deletes no statement.
 func TestReferencesGiveAWriteTheSpanItsDeletionDeletes(t *testing.T) {
+	t.Parallel()
 	result, root := loadDir(t, extract(t, "write-spans.txtar"), "linux", "amd64")
 	symbols, rs, err := inventoryOf(result, root, os.ReadFile)
 	if err != nil {

@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -15,18 +14,12 @@ import (
 )
 
 // otherOS is a platform the fixtures below name in a file and the host is not, so
-// derivation answers it beside the host's configuration.
-var otherOS = func() string {
-	if runtime.GOOS == "windows" {
-		return "darwin"
-	}
-	return "windows"
-}()
-
-// unbuildableOther is the identifier of the configuration the fixture below derives
-// and the target does not build. Derivation pairs a platform atom with the host's
-// other axis, so the architecture is the host's.
-var unbuildableOther = otherOS + "-" + runtime.GOARCH
+// derivation answers it beside the host's configuration, paired with the host's
+// architecture as unbuildableOther.
+const (
+	otherOS          = "windows"
+	unbuildableOther = otherOS + "-" + hostArch
+)
 
 // unbuildableDerivedModule writes the fixture both matrix tests are driven against: a
 // target whose file names make derivation answer a configuration of otherOS, and a
@@ -92,8 +85,8 @@ func TestLoadDropsADerivedConfigurationTheTargetDoesNotBuild(t *testing.T) {
 func TestLoadFailsTheRunOnADeclaredConfigurationTheTargetDoesNotBuild(t *testing.T) {
 	t.Parallel()
 	dir := unbuildableDerivedModule(t, `{"target": {"kind": "application"}, "analysis": {"configurations": [`+
-		`{"id": "`+load.HostConfiguration().ID+`", "os": "`+runtime.GOOS+`", "arch": "`+runtime.GOARCH+`"},`+
-		`{"id": "`+unbuildableOther+`", "os": "`+otherOS+`", "arch": "`+runtime.GOARCH+`"}]}}`)
+		`{"id": "`+load.HostConfiguration().ID+`", "os": "`+hostOS+`", "arch": "`+hostArch+`"},`+
+		`{"id": "`+unbuildableOther+`", "os": "`+otherOS+`", "arch": "`+hostArch+`"}]}}`)
 	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
@@ -146,9 +139,9 @@ func TestAnalyzeNamesTheDerivedConfigurationItDropped(t *testing.T) {
 			len(envelope.ConfigurationsNotBuilt))
 	}
 	dropped := &envelope.ConfigurationsNotBuilt[0]
-	if dropped.ID != unbuildableOther || dropped.Platform == nil || dropped.Platform.OS != otherOS || dropped.Platform.Arch != runtime.GOARCH {
+	if dropped.ID != unbuildableOther || dropped.Platform == nil || dropped.Platform.OS != otherOS || dropped.Platform.Arch != hostArch {
 		t.Errorf("the report names the dropped configuration %q on %+v, want %q on %s/%s",
-			dropped.ID, dropped.Platform, unbuildableOther, otherOS, runtime.GOARCH)
+			dropped.ID, dropped.Platform, unbuildableOther, otherOS, hostArch)
 	}
 	if dropped.Platform != nil && len(dropped.Platform.Tags) != 0 {
 		t.Errorf("the report names the dropped configuration %q with the tags %v, want none",
@@ -204,7 +197,7 @@ func TestAnalyzeReportsThePlatformEntriesOfAMatrixListingBothShapes(t *testing.T
 	host := load.HostConfiguration()
 	dir := unbuildableDerivedModule(t, `{"target": {"kind": "application"}, "analysis": {"configurations": [`+
 		`{"id": "tsconfig.json", "project": "tsconfig.json"},`+
-		`{"id": "`+host.ID+`", "os": "`+runtime.GOOS+`", "arch": "`+runtime.GOARCH+`"}]}}`)
+		`{"id": "`+host.ID+`", "os": "`+hostOS+`", "arch": "`+hostArch+`"}]}}`)
 
 	run := runAnalyze(t, dir)
 	if run.code == vocab.ExitFailure || run.code == vocab.ExitUsage {
@@ -268,8 +261,8 @@ func TestAnalyzeReportsADerivedConfigurationsSetupFailureAsNotBuilt(t *testing.T
 func TestAnalyzeEndsTheRunOnADeclaredConfigurationsSetupFailure(t *testing.T) {
 	t.Parallel()
 	dir := setupFailingOtherModule(t, `{"target": {"kind": "application"}, "analysis": {"configurations": [`+
-		`{"id": "`+load.HostConfiguration().ID+`", "os": "`+runtime.GOOS+`", "arch": "`+runtime.GOARCH+`"},`+
-		`{"id": "`+unbuildableOther+`", "os": "`+otherOS+`", "arch": "`+runtime.GOARCH+`"}]}}`)
+		`{"id": "`+load.HostConfiguration().ID+`", "os": "`+hostOS+`", "arch": "`+hostArch+`"},`+
+		`{"id": "`+unbuildableOther+`", "os": "`+otherOS+`", "arch": "`+hostArch+`"}]}}`)
 
 	run := runAnalyze(t, dir)
 	if run.code != vocab.ExitFailure {
@@ -717,7 +710,7 @@ func TestAnalyzeReportsANeverBuiltFileOfTheSecondModule(t *testing.T) {
 	dir := twoModuleTree(t)
 	host := load.HostConfiguration()
 	writeDocument(t, dir, repositoryDocument, `{"target": {"kind": "application"}, "analysis": {"configurations": [`+
-		`{"id": "`+host.ID+`", "os": "`+runtime.GOOS+`", "arch": "`+runtime.GOARCH+`"}], "matrix": {"complete": true}}}`)
+		`{"id": "`+host.ID+`", "os": "`+hostOS+`", "arch": "`+hostArch+`"}], "matrix": {"complete": true}}}`)
 
 	run := runAnalyze(t, dir)
 	if run.code != vocab.ExitFindings {

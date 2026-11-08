@@ -10,12 +10,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/failure"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -32,6 +34,10 @@ const metadataMode = packages.NeedName | packages.NeedFiles | packages.NeedCompi
 // loadPattern matches every package of the target directory's module tree, and
 // every package below a node_modules directory too, which [loadPackages] drops.
 const loadPattern = "./..."
+
+// goCommand is the toolchain command a listing runs, which go/packages looks up
+// on this process's PATH.
+const goCommand = "go"
 
 // goFileExt is the extension of a Go source file, which IgnoredFiles lists among
 // assembly and C sources.
@@ -96,7 +102,8 @@ func HostConfiguration() Configuration {
 }
 
 // Load resolves configuration c of every module top holds; cancelling ctx stops
-// it. A file or component the project lacks returns a setup *[failure.Error], any other
+// it. A file or component the project lacks returns a setup *[failure.Error], a go
+// command absent from PATH a run *[failure.Error] of missing-toolchain, any other
 // metadata or [typeCheck] error a *[Error], an unusable consumer [errConsumer],
 // each with a zero Result; a walked unit, a nested module or a reader that does not
 // load is dropped into [Result.Dropped] instead while a unit is left. Load makes no
@@ -112,6 +119,9 @@ func load(ctx context.Context, top *Topology, c *Configuration, trees *syntaxCac
 	}
 	if c.ID == "" || c.OS == "" || c.Arch == "" {
 		return Result{}, fmt.Errorf("%w: id=%q os=%q arch=%q", errConfiguration, c.ID, c.OS, c.Arch)
+	}
+	if _, err := exec.LookPath(goCommand); err != nil {
+		return Result{}, failure.Wrap(vocab.RunMissingToolchain, fmt.Errorf("the %s command that lists the target's packages is not on PATH %q: %w", goCommand, os.Getenv("PATH"), err))
 	}
 	l := &loader{ctx: ctx, top: top, c: c, trees: trees}
 	r := Result{Configuration: *c, Fset: trees.fset}

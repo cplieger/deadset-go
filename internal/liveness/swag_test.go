@@ -11,6 +11,7 @@ import (
 // annotation is a root, and one whose comment holds only another annotation, a longer
 // word or the annotation inside a line is not.
 func TestRootsRootsWhatASwagRouteAnnotationDocuments(t *testing.T) {
+	t.Parallel()
 	d := detect(t, "swag.txtar", roots.RootOptions{})
 	held := make(map[string]bool, len(d.symbols))
 	for _, s := range d.symbols {

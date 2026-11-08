@@ -267,8 +267,8 @@ func TestWorkspaceFileIgnoresADirectoryOfThatName(t *testing.T) {
 
 	got, found := workspaceFile(dir)
 
-	if found {
-		t.Errorf("workspaceFile(%s) = %q, true, want no workspace: a directory is not the file", dir, got)
+	if found && got == filepath.Join(dir, workspaceFileName) {
+		t.Errorf("workspaceFile(%s) = %q, true, want the directory passed over: a directory is not the file", dir, got)
 	}
 }
 

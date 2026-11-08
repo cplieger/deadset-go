@@ -196,6 +196,7 @@ func (x *sweptMatrix) existsIn(t *testing.T, ref string) string {
 }
 
 func TestMergeNamesTheConfigurationsEachDeclarationExistsIn(t *testing.T) {
+	t.Parallel()
 	x := matrixOf(t, "matrix.txtar", roots.RootOptions{PublishedAPI: true}, linuxAmd64(), windowsAmd64())
 
 	cases := map[string]string{
@@ -218,6 +219,7 @@ func TestMergeNamesTheConfigurationsEachDeclarationExistsIn(t *testing.T) {
 }
 
 func TestMatrixSweepReportsOnlyWhatIsDeadUnderEveryConfigurationItExistsIn(t *testing.T) {
+	t.Parallel()
 	x := matrixOf(t, "matrix.txtar", roots.RootOptions{PublishedAPI: true}, linuxAmd64(), windowsAmd64())
 	r := x.graph.Sweep(&SweepPolicy{})
 
@@ -245,6 +247,7 @@ func TestMatrixSweepReportsOnlyWhatIsDeadUnderEveryConfigurationItExistsIn(t *te
 }
 
 func TestMatrixSweepGroupsOneComponentOverEveryConfigurationsEdges(t *testing.T) {
+	t.Parallel()
 	x := matrixOf(t, "matrix.txtar", roots.RootOptions{PublishedAPI: true}, linuxAmd64(), windowsAmd64())
 	r := x.graph.Sweep(&SweepPolicy{})
 
@@ -266,6 +269,7 @@ func TestMatrixSweepGroupsOneComponentOverEveryConfigurationsEdges(t *testing.T)
 }
 
 func TestMatrixSweepHoldsASymbolLiveUnderTheRelationsOfEveryConfiguration(t *testing.T) {
+	t.Parallel()
 	x := matrixOf(t, "matrix.txtar", roots.RootOptions{PublishedAPI: true}, linuxAmd64(), windowsAmd64())
 	r := x.graph.Sweep(&SweepPolicy{})
 
@@ -281,6 +285,7 @@ func TestMatrixSweepHoldsASymbolLiveUnderTheRelationsOfEveryConfiguration(t *tes
 }
 
 func TestMatrixOverOneConfigurationAnswersWhatTheGraphOfThatConfigurationAnswers(t *testing.T) {
+	t.Parallel()
 	one := analysisOf(t, "sweep.txtar", nil).configured(t, true)
 	direct := New(one.Symbols, one.References, one.Roots).Sweep(&SweepPolicy{})
 
@@ -322,6 +327,7 @@ func sameApartFromConfigs(a, b Candidate) bool {
 }
 
 func TestMatrixSweepUnionsTheExemptionsEveryConfigurationRetained(t *testing.T) {
+	t.Parallel()
 	// Two configurations, each holding one declaration of its own and one they
 	// share, with an exemption on each of the three and a duplicate of the shared
 	// one, which is what the union of two configurations' classes produces.
@@ -361,6 +367,7 @@ func TestMatrixSweepUnionsTheExemptionsEveryConfigurationRetained(t *testing.T) 
 }
 
 func TestAPathsHopHoldsTheConfigurationsThatMakeItsReference(t *testing.T) {
+	t.Parallel()
 	// Of three configurations, the first and the third hold the caller, so its
 	// one reference is one edge of the union made by those two.
 	b := newGraphBuilder(t).add("entry", "caller", "callee")
@@ -386,6 +393,7 @@ func TestAPathsHopHoldsTheConfigurationsThatMakeItsReference(t *testing.T) {
 }
 
 func TestAReferenceEveryConfigurationMakesThroughItsOwnCarriersIsOneEdgeCarryingEachChain(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("entry", "target", "firstCarrier", "secondCarrier")
 	b.root("entry", roots.RootMain)
 	b.ref("entry", "target")
@@ -412,6 +420,7 @@ func TestAReferenceEveryConfigurationMakesThroughItsOwnCarriersIsOneEdgeCarrying
 }
 
 func TestAMarkOnADeclarationOneConfigurationCallsIsStale(t *testing.T) {
+	t.Parallel()
 	// Two configurations, each holding a caller the other does not, so each of
 	// the two declarations those callers reference is dead under one
 	// configuration and live under the other. A third declaration an entry point
@@ -456,6 +465,7 @@ func TestAMarkOnADeclarationOneConfigurationCallsIsStale(t *testing.T) {
 }
 
 func TestMergeRefusesAMatrixItCannotKeyAConfigurationOf(t *testing.T) {
+	t.Parallel()
 	cases := map[string]int{
 		"no configuration":                 0,
 		"one configuration past the bound": inventory.MaxConfigurations + 1,
@@ -471,6 +481,7 @@ func TestMergeRefusesAMatrixItCannotKeyAConfigurationOf(t *testing.T) {
 }
 
 func TestMergeKeepsOneSymbolPerPositionWithTheFirstConfigurationsFields(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("first", "second")
 	per := b.configured(2, func(int, string) bool { return true })
 
@@ -497,6 +508,7 @@ func TestMergeKeepsOneSymbolPerPositionWithTheFirstConfigurationsFields(t *testi
 }
 
 func TestMergeCarriesEveryConfigurationsReferencesAndRoots(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("caller", "target")
 	b.ref("caller", "target")
 	b.root("caller", roots.RootMain)
@@ -536,6 +548,7 @@ func configsOfRoots(roots []roots.Root) []int {
 }
 
 func TestMatrixUnmatchedEverywhereIntersectsWhatEachConfigurationMatchedNothingWith(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		per  [][]string
 		want []string
@@ -592,6 +605,7 @@ func TestMatrixUnmatchedEverywhereIntersectsWhatEachConfigurationMatchedNothingW
 }
 
 func TestMergeCarriesEveryConfigurationsUnmatchedStrings(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("only")
 	per := b.configured(2, func(int, string) bool { return true })
 	per[0].Unmatched = []roots.Unmatched{{Source: "first"}}
@@ -609,6 +623,7 @@ func TestMergeCarriesEveryConfigurationsUnmatchedStrings(t *testing.T) {
 }
 
 func TestDistinctCountsOneReferenceOncePerMatrixAndTwiceInOneConfiguration(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("caller", "target")
 	b.ref("caller", "target")
 	b.ref("caller", "target")
@@ -627,6 +642,7 @@ func TestDistinctCountsOneReferenceOncePerMatrixAndTwiceInOneConfiguration(t *te
 }
 
 func TestDistinctKeepsTheReferencesALaterConfigurationMakesBeyondAnEarlierOnesCount(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("caller", "target")
 	b.ref("caller", "target")
 	b.ref("caller", "target")
@@ -648,6 +664,7 @@ func TestDistinctKeepsTheReferencesALaterConfigurationMakesBeyondAnEarlierOnesCo
 }
 
 func TestDistinctTellsTwoConsumersReferencesAtOnePositionApart(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("called")
 	b.refFromConsumer(handConsumer, "called", false)
 	b.refFromConsumer(handOtherConsumer, "called", false)
@@ -666,6 +683,7 @@ func TestDistinctTellsTwoConsumersReferencesAtOnePositionApart(t *testing.T) {
 }
 
 func TestOfAnalyzesNoDeclarationOfNoConfigurationOfTheMatrix(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("outside")
 	per := b.configured(1, func(int, string) bool { return true })
 	merged, err := Merge(per, handTests)
@@ -684,6 +702,7 @@ func TestOfAnalyzesNoDeclarationOfNoConfigurationOfTheMatrix(t *testing.T) {
 }
 
 func TestConfigSetHoldsEveryConfigurationInTheMatrixAndNoneOutsideIt(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		set  inventory.ConfigSet
 		want []int

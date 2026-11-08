@@ -77,6 +77,7 @@ func compareGolden(t *testing.T, name, subject, got string) {
 }
 
 func TestConversionsGoldenTableOverEverySyntacticShape(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "conversion-shapes.txtar", Options{})
 	sites := in.conversions
 	compareGolden(t, "conversion-shapes.golden",
@@ -84,6 +85,7 @@ func TestConversionsGoldenTableOverEverySyntacticShape(t *testing.T) {
 }
 
 func TestConversionsRecordsNeitherAnAssertionNorATypeSwitchNorADeclaration(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "conversion-shapes.txtar", Options{})
 	sites := in.conversions
 
@@ -101,6 +103,7 @@ func TestConversionsRecordsNeitherAnAssertionNorATypeSwitchNorADeclaration(t *te
 }
 
 func TestNewProgramRefusesALoadCarryingNoFileSet(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		in   *Loaded
 		name string

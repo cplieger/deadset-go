@@ -70,9 +70,12 @@ func TestARunThatCannotFitExitsWithTheMemoryLine(t *testing.T) {
 	// beyond what the process holds, is a run the governor cannot fit. The limit
 	// bounds the ceiling, so the governor's first reading ends the run whatever
 	// memory earlier tests left the process holding.
+	// Each copy doubles the written prefix: the race detector checks a copy as one
+	// range, where it checks a loop's every byte.
 	held = make([]byte, 512<<20)
-	for i := range held {
-		held[i] = 1
+	held[0] = 1
+	for n := 1; n < len(held); n *= 2 {
+		copy(held[n:], held[:n])
 	}
 	t.Cleanup(func() { held = nil; runtime.GC() })
 	noHeadroom := func() (uint64, bool) { return 0, true }

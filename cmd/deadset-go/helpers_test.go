@@ -236,6 +236,7 @@ func commandBinary(t *testing.T) string {
 		built.path = filepath.Join(fixtureBase, "bin", name)
 		build := exec.Command("go", "build", "-buildvcs=false", "-trimpath", "-o", built.path, ".")
 		build.Dir = packageDir
+		build.Env = append(os.Environ(), "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH)
 		built.out, built.err = build.CombinedOutput()
 	})
 	if built.err != nil {

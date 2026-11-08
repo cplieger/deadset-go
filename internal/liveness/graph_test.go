@@ -334,6 +334,7 @@ func (b *graphBuilder) groups(r Result) []grouped {
 }
 
 func TestNewCountsAReferenceWhoseSourceIsOutsideTheInventory(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("consumed", "internal")
 	b.refFromOutside("consumed")
 	b.ref("consumed", "internal")
@@ -352,6 +353,7 @@ func TestNewCountsAReferenceWhoseSourceIsOutsideTheInventory(t *testing.T) {
 }
 
 func TestNewSplitsTheReferenceCountsByTheFileThatMadeThem(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("subject", "caller", "entry").addTest("exercise")
 	b.ref("caller", "subject")
 	b.ref("exercise", "subject")
@@ -373,6 +375,7 @@ func TestNewSplitsTheReferenceCountsByTheFileThatMadeThem(t *testing.T) {
 }
 
 func TestNewKeepsNoRootAndNoReferenceNamingNoSymbol(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("alone")
 	b.rootOutside(roots.RootMain)
 	b.refToOutside("alone")
@@ -387,6 +390,7 @@ func TestNewKeepsNoRootAndNoReferenceNamingNoSymbol(t *testing.T) {
 }
 
 func TestSpanOfCoversTheLinesOneDeclarationOccupies(t *testing.T) {
+	t.Parallel()
 	at := func(line, end int) inventory.Symbol {
 		return inventory.Symbol{Pos: token.Position{Filename: "a.go", Line: line}, EndLine: end}
 	}

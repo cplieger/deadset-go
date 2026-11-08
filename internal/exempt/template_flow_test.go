@@ -26,6 +26,7 @@ func membersNamed(refs []string, typeNames ...string) []string {
 }
 
 func TestEncodingReflectionReadsTemplatesLoadedThroughAFileSystem(t *testing.T) {
+	t.Parallel()
 	refs := retainedRefs(t, analysisOf(t, "template-fs-flow.txtar", Options{}), vocab.EncodingReflection)
 	got := membersNamed(refs, "Page", "Mail")
 	want := []string{
@@ -40,6 +41,7 @@ func TestEncodingReflectionReadsTemplatesLoadedThroughAFileSystem(t *testing.T) 
 }
 
 func TestEncodingReflectionReadsTemplatesEmbeddedByQuotedPatterns(t *testing.T) {
+	t.Parallel()
 	refs := retainedRefs(t, analysisOf(t, "template-fs-flow-quoted.txtar", Options{}), vocab.EncodingReflection)
 	got := membersNamed(refs, "Page")
 	want := []string{"go://example.com/quoted#Page.Note", "go://example.com/quoted#Page.Title"}
@@ -49,6 +51,7 @@ func TestEncodingReflectionReadsTemplatesEmbeddedByQuotedPatterns(t *testing.T) 
 }
 
 func TestEncodingReflectionReadsEveryMemberWhereAFileSystemTemplateIsUnread(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		archive string
@@ -76,6 +79,7 @@ func TestEncodingReflectionReadsEveryMemberWhereAFileSystemTemplateIsUnread(t *t
 }
 
 func TestEmbeddedFilesRefusesASetOverTheFileBound(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	for _, sub := range []string{"one", "two"} {
 		if err := os.Mkdir(filepath.Join(root, sub), 0o750); err != nil {
@@ -100,6 +104,7 @@ func TestEmbeddedFilesRefusesASetOverTheFileBound(t *testing.T) {
 }
 
 func TestFileSystemRootsMatchFilesInTheOrderFSGlobDoes(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	for _, file := range []string{"a/x.html", "a.b/y.html", "b/z.html"} {
 		if err := os.MkdirAll(filepath.Join(dir, filepath.Dir(file)), 0o750); err != nil {

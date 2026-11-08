@@ -229,9 +229,14 @@ var sink, lateSink []byte
 // heap sits past the abort line while sink is held.
 func heldTight(t *testing.T) uint64 {
 	t.Helper()
+	// Each copy doubles the written prefix: the race detector checks a copy as one
+	// range, where it checks a loop's every byte.
 	sink = make([]byte, 256<<20)
-	for i := range sink {
+	for i := range 256 {
 		sink[i] = byte(i)
+	}
+	for n := 256; n < len(sink); n *= 2 {
+		copy(sink[n:], sink[:n])
 	}
 	t.Cleanup(func() { sink = nil; runtime.GC() })
 	runtime.GC()

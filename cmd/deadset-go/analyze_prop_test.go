@@ -10,63 +10,66 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/cplieger/deadset-spec/v8/vocab"
-	"pgregory.net/rapid"
 )
 
-// drawTree draws one target tree: a main package whose entry point references some
-// of its declarations and not others, an optional second package in a directory of
-// its own, an optional file that is not Go source at all, and the repository
-// configuration. Every path of the draw is a file of the tree the property hashes,
-// and the declarations nothing references are what give the run findings to render.
-//
-// No file of the draw imports anything and no file of it is a _test.go file, which
-// is what makes the draw cheap to analyze: measured under the race detector, one
-// analysis of a module with neither costs 0.06 s, one of a module importing io and
-// strings costs 0.69 s, and one of a module carrying any test file at all costs
-// 1.07 s, because the toolchain's synthesized test main pulls in the testing
-// package's whole dependency graph whatever the test file itself imports. What this
-// property is about is the documents a run writes and where, so the type-level shape
-// of the target is not its subject and the cheap draw is what lets an iteration draw
-// a tree of its own.
-func drawTree(t *rapid.T) map[string]string {
-	files := map[string]string{
-		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
-	}
+// treeShape is one target tree of the byte-identity property: a main package whose
+// entry point references some of its declarations and not others, and the files a
+// run reads beside it or must pass over.
+type treeShape struct {
+	declared, referenced int
+	lib, docs, ignore    bool
+	kind                 string
+}
 
-	count := rapid.IntRange(1, 4).Draw(t, "the number of declarations")
+// treeShapes is every combination of the optional parts of a tree, a second package,
+// a file that is not Go source, an ignore document and either target kind, with a
+// count of declarations and of referenced ones that varies between them.
+func treeShapes() []treeShape {
+	var shapes []treeShape
+	for i := range 16 {
+		declared := 1 + i%4
+		shapes = append(shapes, treeShape{
+			declared: declared, referenced: i % (declared + 1),
+			lib: i&1 != 0, docs: i&2 != 0, ignore: i&4 != 0,
+			kind: []string{"application", "library"}[i>>3],
+		})
+	}
+	return shapes
+}
+
+// files writes the shape's tree, every path a file the property hashes; the
+// declarations nothing references give the run findings to render. No file imports
+// anything and none is a _test.go file, whose synthesized test main would pull in the
+// testing package's whole dependency graph: the property is about the documents a run
+// writes, not the target's type-level shape.
+func (s treeShape) files() map[string]string {
+	files := map[string]string{"go.mod": "module example.com/app\n\ngo 1.27.1\n"}
 	var body strings.Builder
 	body.WriteString("// Command app is a generated target.\npackage main\n\nfunc main() {\n")
-	var declared []string
-	for i := range count {
-		name := "d" + strconv.Itoa(i)
-		declared = append(declared, name)
-		if rapid.Bool().Draw(t, name+" is referenced by the entry point") {
-			fmt.Fprintf(&body, "\t%s()\n", name)
-		}
+	for i := range s.referenced {
+		fmt.Fprintf(&body, "\td%d()\n", i)
 	}
 	body.WriteString("}\n")
-	for _, name := range declared {
-		fmt.Fprintf(&body, "\n// %s is a generated declaration.\nfunc %s() {}\n", name, name)
+	for i := range s.declared {
+		fmt.Fprintf(&body, "\n// d%d is a generated declaration.\nfunc d%d() {}\n", i, i)
 	}
 	files["app.go"] = body.String()
-
-	if rapid.Bool().Draw(t, "a second package in a directory of its own") {
+	if s.lib {
 		files[filepath.Join("lib", "lib.go")] = "// Package lib is a generated package.\npackage lib\n\n" +
 			"// Exported is what nothing references.\nfunc Exported() {}\n"
 	}
-	if rapid.Bool().Draw(t, "a file that is not Go source") {
+	if s.docs {
 		files[filepath.Join("docs", "notes.md")] = "# Notes\n\nA file of the tree that is no input of the analysis.\n"
 	}
 	// An ignore document is a file of the tree the run READS, which is the file a
-	// write would be likeliest to land on. The entry binds where the draw left the
-	// first declaration unreferenced and is stale where it did not, and the run
-	// leaves the document alone either way.
-	if rapid.Bool().Draw(t, "an ignore document the run reads") {
+	// write would be likeliest to land on. The entry binds where the first declaration
+	// is unreferenced and is stale where it is referenced, and the run leaves the
+	// document alone either way.
+	if s.ignore {
 		files["deadset-ignore.json"] = `{
   "description": "One entry about the first generated declaration.",
   "ignore": [
@@ -80,52 +83,35 @@ func drawTree(t *rapid.T) map[string]string {
 }
 `
 	}
-
-	kind := rapid.SampledFrom([]string{"application", "library"}).Draw(t, "the declared target kind")
-	files[repositoryDocument] = `{"target": {"kind": "` + kind + `"}}`
+	files[repositoryDocument] = `{"target": {"kind": "` + s.kind + `"}}`
 	return files
 }
 
-// drawInvocation draws the parts of an analyze invocation that decide which
-// documents the run writes and where: the renderings asked for, whether a baseline
-// is written, whether the exit code carries the verdict, and the severity that fails
-// the run. --report and --baseline-write name paths under documents, which is a
-// sibling of the target and inside the run directory, so no document the run writes
-// is a file of the tree being hashed.
-func drawInvocation(t *rapid.T, documents, name string) []string {
-	formats := rapid.SliceOfNDistinct(
-		rapid.SampledFrom([]string{"text", "json", "github", "sarif"}),
-		1, 4, func(s string) string { return s },
-	).Draw(t, "the renderings the invocation asks for")
-
+// everyDocument is the analyze invocation of row i over the tree named name: every
+// rendering and the baseline, so every document the verb writes is written, with
+// --report and --baseline-write under documents, a sibling of the target inside the
+// run directory, so no document the run writes is a file of the tree being hashed.
+// Whether the exit code carries the verdict and the severity that fails the run vary
+// between rows.
+func everyDocument(i int, documents, name string) []string {
 	reportPath := filepath.Join(documents, name+".json")
-	args := []string{"analyze", "--target=./" + name, "--report=" + reportPath}
-	for _, one := range formats {
+	args := []string{"analyze", "--target=./" + name, "--report=" + reportPath, "--baseline-write=" + reportPath + ".baseline"}
+	for _, one := range []string{"text", "json", "github", "sarif"} {
 		args = append(args, "--format="+one)
 	}
-	if rapid.Bool().Draw(t, "a baseline is written") {
-		args = append(args, "--baseline-write="+reportPath+".baseline")
-	}
-	if rapid.Bool().Draw(t, "the exit code carries the verdict") {
+	if i%2 == 1 {
 		args = append(args, "--exit-code="+exitCodeOff)
 	}
-	args = append(args, "--fail-on="+rapid.SampledFrom([]string{"allow", "warn", "deny"}).
-		Draw(t, "the severity that fails the run"))
-	return args
+	return append(args, "--fail-on="+[]string{"allow", "warn", "deny"}[i%3])
 }
 
 // TestAnalysisLeavesTheTreeByteIdentical is property dead-code-suite/P23: a run of
-// the analysis changes no file of the target.
-//
-// Every file of the tree is hashed before the run and after it, and the file set is
-// compared as well as the contents, so a file added, removed or rewritten fails the
-// property. The documents the run writes go outside the target, so what the run
-// produces is not the change being measured, and the invocation is drawn over every
-// document the verb can write, because a write is the only thing that could touch the
-// tree.
-//
-// No deletion candidate is deleted and no visibility is changed by construction: each
-// would be a byte the hash reads.
+// the analysis changes no file of the target. The tree's file set and contents are
+// hashed before and after the run, so a file added, removed or rewritten fails it.
+// The documents the run writes go outside the target, and each run writes every
+// document the verb can write, over every combination of the parts a tree can hold,
+// because a write is the only thing that could touch the tree; a deleted candidate or
+// a changed visibility would be a byte the hash reads.
 func TestAnalysisLeavesTheTreeByteIdentical(t *testing.T) {
 	// A report names the target relative to the directory the run was invoked from
 	// and can name no path outside it, so the run is invoked from the directory the
@@ -138,34 +124,34 @@ func TestAnalysisLeavesTheTreeByteIdentical(t *testing.T) {
 	}
 	t.Chdir(base)
 
-	rapid.Check(t, func(t *rapid.T) {
-		files := drawTree(t)
-		dir, err := os.MkdirTemp(base, "module")
-		if err != nil {
-			t.Fatalf("create a directory for the generated module: %v", err)
-		}
-		if err := writeFiles(dir, files); err != nil {
-			t.Fatalf("write the generated module: %v", err)
-		}
+	for i, shape := range treeShapes() {
+		t.Run(fmt.Sprintf("%+v", shape), func(t *testing.T) {
+			dir, err := os.MkdirTemp(base, "module")
+			if err != nil {
+				t.Fatalf("create a directory for the module: %v", err)
+			}
+			if err := writeFiles(dir, shape.files()); err != nil {
+				t.Fatalf("write the module: %v", err)
+			}
 
-		before := hashTree(t, dir)
-		var stdout, stderr bytes.Buffer
-		code := invoke(t.Context(), drawInvocation(t, documents, filepath.Base(dir)), &stdout, &stderr)
-		if code != vocab.ExitClean && code != vocab.ExitFindings {
-			t.Fatalf("analyze over the generated module = %d, want a verdict about its findings\nstderr: %s",
-				code, stderr.String())
-		}
+			before := hashTree(t, dir)
+			var stdout, stderr bytes.Buffer
+			code := invoke(t.Context(), everyDocument(i, documents, filepath.Base(dir)), &stdout, &stderr)
+			if code != vocab.ExitClean && code != vocab.ExitFindings {
+				t.Fatalf("analyze over the module = %d, want a verdict about its findings\nstderr: %s", code, stderr.String())
+			}
 
-		after := hashTree(t, dir)
-		if !maps.Equal(before, after) {
-			t.Fatalf("the analysis changed the target tree:\n%s", treeDifference(before, after))
-		}
-	})
+			after := hashTree(t, dir)
+			if !maps.Equal(before, after) {
+				t.Fatalf("the analysis changed the target tree:\n%s", treeDifference(before, after))
+			}
+		})
+	}
 }
 
 // hashTree is the SHA-256 of every file under dir, keyed by the path relative to it,
 // which is both the file set and the contents in one value.
-func hashTree(t *rapid.T, dir string) map[string]string {
+func hashTree(t *testing.T, dir string) map[string]string {
 	hashes := make(map[string]string)
 	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {

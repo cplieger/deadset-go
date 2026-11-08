@@ -11,6 +11,7 @@ import (
 // that a linkname directive is no evidence of this class: the names it joins are
 // roots of the analysis, which the graph's root detection keeps.
 func TestLinknameCgoAsmPluginDetectorRetainsNeitherSideOfALinknameDirective(t *testing.T) {
+	t.Parallel()
 	shared := analysisOf(t, "linkname.txtar", Options{})
 	symbols := shared.inventory(t)
 
@@ -24,6 +25,7 @@ func TestLinknameCgoAsmPluginDetectorRetainsNeitherSideOfALinknameDirective(t *t
 }
 
 func TestLinknameCgoAsmPluginDetectorRetainsTheDeclarationATextDirectiveNames(t *testing.T) {
+	t.Parallel()
 	shared := analysisOf(t, "assembly.txtar", Options{})
 	symbols := shared.inventory(t)
 
@@ -42,6 +44,7 @@ func TestLinknameCgoAsmPluginDetectorRetainsTheDeclarationATextDirectiveNames(t 
 }
 
 func TestLinknameCgoAsmPluginDetectorRetainsTheExportedSymbolsOfAPluginMainPackage(t *testing.T) {
+	t.Parallel()
 	shared := analysisOf(t, "plugin.txtar", Options{})
 	symbols := shared.inventory(t)
 
@@ -65,6 +68,7 @@ func TestLinknameCgoAsmPluginDetectorRetainsTheExportedSymbolsOfAPluginMainPacka
 // walks, and the function C calls is a root of the analysis rather than an
 // exemption.
 func TestLinknameCgoAsmPluginDetectorRetainsNoCgoExport(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "cgo-export.txtar", Options{})
 
 	if len(in.Result.ExcludedByCgo) != 0 {
@@ -82,6 +86,7 @@ func TestLinknameCgoAsmPluginDetectorRetainsNoCgoExport(t *testing.T) {
 }
 
 func TestTextSymbol(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name          string
 		line          string

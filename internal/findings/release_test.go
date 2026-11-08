@@ -63,6 +63,7 @@ func (r *reloads) At(config int) (*Configured, error) {
 // only identifiers, positions and strings across them, so a configuration it read
 // is collectable once it reads the next.
 func TestThePassKeepsNoConfigurationItReadBefore(t *testing.T) {
+	t.Parallel()
 	linux := load.Configuration{ID: "linux-amd64", OS: "linux", Arch: "amd64"}
 	windows := load.Configuration{ID: "windows-amd64", OS: "windows", Arch: "amd64"}
 	dir := extract(t, "declarations-test-support-platform.txtar")

@@ -20,6 +20,7 @@ import (
 // of a run. Once the classes ran, neither what they computed nor the configuration's
 // load keeps any of it reachable, so it goes with the program.
 func TestComputeLeavesNoSourceTheProgramReadReachable(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "encoding-reflection-relayed-outside.txtar", Options{})
 	var read []weak.Pointer[load.Source]
 	for _, pkg := range in.outside {
@@ -126,14 +127,16 @@ func TestDecodersKeepNoReadingUnderPressure(t *testing.T) {
 }
 
 // The decoder flow answers for functions of the loaded program only, so asking
-// about every parameter of every function outside the program keys no answer by a
-// reading's function, and pressure leaves no reading reachable through the answers.
+// about every parameter of every function of a package the program imports keys no
+// answer by a reading's function, and pressure leaves no reading reachable through
+// the answers.
 func TestDecoderAnswersNameNoReading(t *testing.T) {
 	in := inputOf(t, "encoding-reflection-relayed-outside.txtar", Options{})
 	d := newDecoders(&encodingFlow{kept: newRetention(in, vocab.EncodingReflection)})
 	loaded := in.Result.TypesIDs()
+	imported := importedOutside(in)
 	var readings []weak.Pointer[types.Package]
-	for _, pkg := range in.outside {
+	for _, pkg := range imported {
 		source, ok := in.sources.Read(pkg)
 		if !ok {
 			continue
@@ -146,7 +149,7 @@ func TestDecoderAnswersNameNoReading(t *testing.T) {
 		}
 	}
 	asked := 0
-	for _, pkg := range in.outside {
+	for _, pkg := range imported {
 		for _, fn := range scopeFuncs(pkg) {
 			for i := range fn.Signature().Params().Len() {
 				d.at(fn, i)
@@ -181,6 +184,18 @@ func TestDecoderAnswersNameNoReading(t *testing.T) {
 	runtime.KeepAlive(in)
 }
 
+// importedOutside is every package outside the program that a package of the program
+// imports itself.
+func importedOutside(in *Program) []*types.Package {
+	direct := make(map[string]bool)
+	for _, p := range in.Result.Packages {
+		for path := range p.Imports {
+			direct[path] = true
+		}
+	}
+	return slices.DeleteFunc(slices.Clone(in.outside), func(pkg *types.Package) bool { return !direct[pkg.Path()] })
+}
+
 // scopeFuncs is every function and method a package's scope declares.
 func scopeFuncs(pkg *types.Package) []*types.Func {
 	var held []*types.Func
@@ -204,7 +219,7 @@ func TestAssertableKeepsNoReading(t *testing.T) {
 	in := inputOf(t, "encoding-reflection-relayed-outside.txtar", Options{})
 	var sources []weak.Pointer[load.Source]
 	var readings []weak.Pointer[types.Package]
-	for _, pkg := range in.outside {
+	for _, pkg := range importedOutside(in) {
 		in.assert.asserted(pkg)
 		in.assert.ownInterfaces(pkg)
 		source, ok := in.sources.Read(pkg)

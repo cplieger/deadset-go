@@ -38,6 +38,7 @@ func wireRefs(typeName string, members ...string) []string {
 // nothing, and one whose parameter is concrete, are no wrappers, so a value reaching
 // only those crosses nothing.
 func TestEncodingReflectionRetainsWhatAConsumersWrapperReaches(t *testing.T) {
+	t.Parallel()
 	shared := analysisOf(t, consumerArchive, Options{})
 	refs := retainedRefs(t, shared, vocab.EncodingReflection)
 
@@ -97,6 +98,7 @@ func TestEncodingReflectionRetainsWhatAConsumersWrapperReaches(t *testing.T) {
 // formats through it keeps the method the verb calls, and a value handed to a
 // consumer's function that formats nothing keeps nothing.
 func TestFormatVerbContractRetainsWhatAConsumersPrintWrapperFormats(t *testing.T) {
+	t.Parallel()
 	shared := analysisOf(t, consumerArchive, Options{})
 	refs := retainedRefs(t, shared, vocab.FormatVerbContract)
 
@@ -130,6 +132,7 @@ func TestFormatVerbContractRetainsWhatAConsumersPrintWrapperFormats(t *testing.T
 // handed to, which is the immediate callee, so a maintainer reading the retained set
 // is shown the function the target itself called beside the encoder behind it.
 func TestEncodingReflectionNamesTheConsumersWrapper(t *testing.T) {
+	t.Parallel()
 	shared := analysisOf(t, consumerArchive, Options{})
 	symbols := shared.inventory(t)
 	refs := make(map[inventory.SymbolID]string, len(symbols))
@@ -158,6 +161,7 @@ func TestEncodingReflectionNamesTheConsumersWrapper(t *testing.T) {
 // Every site a class publishes is relative to the root of the module whose file holds
 // it, the target's or the loaded consumer's the exemption names.
 func TestEveryExemptionOfATwoModuleProgramNamesASiteInsideItsModule(t *testing.T) {
+	t.Parallel()
 	shared := analysisOf(t, consumerArchive, Options{})
 
 	found, err := shared.compute(t, false)
@@ -183,6 +187,7 @@ const consumerSiteArchive = "encoding-reflection-consumer-site.txtar"
 // against the consumer's root and names the consumer, rather than ending the run on a
 // file outside the target root.
 func TestEncodingReflectionRendersAConsumersEvidenceAgainstTheConsumersRoot(t *testing.T) {
+	t.Parallel()
 	shared := analysisOf(t, consumerSiteArchive, Options{})
 	found, err := shared.detect(t, vocab.EncodingReflection)
 	if err != nil {
@@ -234,6 +239,7 @@ func TestEncodingReflectionRendersAConsumersEvidenceAgainstTheConsumersRoot(t *t
 // nothing, whatever the mode says of a consumer's tests. A loaded consumer's test file
 // is classified as the mode classifies that file's references.
 func TestEvidenceOfATestFileHoldsAsTheModeClassifiesThatFile(t *testing.T) {
+	t.Parallel()
 	for _, test := range []struct {
 		name         string
 		mode         facts.Mode
@@ -279,6 +285,7 @@ func TestEvidenceOfATestFileHoldsAsTheModeClassifiesThatFile(t *testing.T) {
 // agreement. The test reads the package's own sources, so a copy lands red wherever
 // it is written.
 func TestOneCrossingTestExistsInThePackage(t *testing.T) {
+	t.Parallel()
 	const owner = "boundary.go"
 
 	found := make(map[string][]string)

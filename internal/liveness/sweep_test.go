@@ -27,6 +27,7 @@ func unreachableChain(t *testing.T) *graphBuilder {
 }
 
 func TestSweepNamesTheRelationThatFoundEachCandidate(t *testing.T) {
+	t.Parallel()
 	b := unreachableChain(t)
 	got := b.verdicts(b.graph().Sweep(&SweepPolicy{}))
 
@@ -43,6 +44,7 @@ func TestSweepNamesTheRelationThatFoundEachCandidate(t *testing.T) {
 }
 
 func TestSweepNamesTheRelationsHoldingEachSymbolLive(t *testing.T) {
+	t.Parallel()
 	b := unreachableChain(t)
 	live := b.graph().Sweep(&SweepPolicy{}).LiveUnder
 
@@ -68,6 +70,7 @@ func TestSweepNamesTheRelationsHoldingEachSymbolLive(t *testing.T) {
 }
 
 func TestSweepHoldsAMarkedSymbolLiveUnderBothRelationsWithWhatItReferences(t *testing.T) {
+	t.Parallel()
 	b := unreachableChain(t)
 	r := b.graph().Sweep(&SweepPolicy{Marked: []inventory.SymbolID{b.id("unreferenced")}})
 
@@ -85,6 +88,7 @@ func TestSweepHoldsAMarkedSymbolLiveUnderBothRelationsWithWhatItReferences(t *te
 }
 
 func TestSweepReportsAPublishedRootUnderReferenceCountingAndHoldsItsClosureLive(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("Exported", "helper")
 	b.root("Exported", roots.RootPublishedAPI)
 	b.ref("Exported", "helper")
@@ -103,6 +107,7 @@ func TestSweepReportsAPublishedRootUnderReferenceCountingAndHoldsItsClosureLive(
 }
 
 func TestSweepHoldsEveryRootThatNamesACallerLiveUnderBothRelations(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		kind roots.RootKind
 		want []string
@@ -143,6 +148,7 @@ func testOnlyUse(t *testing.T) *graphBuilder {
 }
 
 func TestSweepCountsEveryReferenceAndSeedsEveryRoot(t *testing.T) {
+	t.Parallel()
 	b := testOnlyUse(t)
 	if got := b.candidates(b.graph().Sweep(&SweepPolicy{})); len(got) != 0 {
 		t.Errorf("Sweep counting every reference returned %v, want no candidate", got)
@@ -150,6 +156,7 @@ func TestSweepCountsEveryReferenceAndSeedsEveryRoot(t *testing.T) {
 }
 
 func TestSweepUnderProductionModeCountsNoTestReferenceAndSeedsNoTestRoot(t *testing.T) {
+	t.Parallel()
 	b := testOnlyUse(t)
 	got := b.verdicts(b.graph().Sweep(&SweepPolicy{Mode: facts.Mode{Production: true}}))
 
@@ -162,6 +169,7 @@ func TestSweepUnderProductionModeCountsNoTestReferenceAndSeedsNoTestRoot(t *test
 }
 
 func TestTestEvidenceCountsOneReferencePerClassAndDetail(t *testing.T) {
+	t.Parallel()
 	b := unreachableChain(t)
 	one, other := b.id("unreferenced"), b.id("reached")
 	got := testReferencesOf([]exempt.Exemption{
@@ -179,6 +187,7 @@ func TestTestEvidenceCountsOneReferencePerClassAndDetail(t *testing.T) {
 }
 
 func TestSweepAdmitsATestOfDeadCodeAndDeclinesATestOfLiveCode(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("entry", "live", "deadOne", "deadTwo").addTest("TestDead", "TestLive")
 	b.root("entry", roots.RootMain)
 	b.root("TestDead", roots.RootTest)
@@ -210,6 +219,7 @@ func TestSweepAdmitsATestOfDeadCodeAndDeclinesATestOfLiveCode(t *testing.T) {
 }
 
 func TestSweepJudgesNoPackageAndNoFile(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t)
 	b.declare(handSymbol{name: "package", kind: inventory.KindPackage})
 	b.declare(handSymbol{name: "file", kind: inventory.KindFile, parent: "package"})
@@ -261,6 +271,7 @@ func (b *graphBuilder) exemption(name, class string) exempt.Exemption {
 }
 
 func TestSweepReportsNoExemptSymbolAndHoldsWhatItReferencesLive(t *testing.T) {
+	t.Parallel()
 	b := retainedMethod(t)
 	r := b.graph().Sweep(&SweepPolicy{Exempt: []exempt.Exemption{b.exemption("String", "format-verb-contract")}})
 
@@ -284,6 +295,7 @@ func TestSweepReportsNoExemptSymbolAndHoldsWhatItReferencesLive(t *testing.T) {
 }
 
 func TestSweepRecordsEveryExemptionThatHeldASymbolBackAndNoOther(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("entry", "unreferenced", "alsoUnreferenced")
 	b.root("entry", roots.RootMain)
 	r := b.graph().Sweep(&SweepPolicy{Exempt: []exempt.Exemption{
@@ -313,6 +325,7 @@ func TestSweepRecordsEveryExemptionThatHeldASymbolBackAndNoOther(t *testing.T) {
 }
 
 func TestSweepRecordsNoExemptionNamingASymbolTheInventoryDoesNotHold(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("unreferenced")
 	r := b.graph().Sweep(&SweepPolicy{Exempt: []exempt.Exemption{
 		{ID: inventory.SymbolID("absent.go:1:1"), Class: "reflective-lookup"},
@@ -340,6 +353,7 @@ func (b *graphBuilder) suppressedBy(r Result) []string {
 }
 
 func TestSweepRecordsEveryMarkThatHeldASymbolBackAndNoOther(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("entry", "heldBack", "alsoHeldBack", "exemptAndMarked")
 	b.root("entry", roots.RootMain)
 	r := b.graph().Sweep(&SweepPolicy{
@@ -370,6 +384,7 @@ func TestSweepRecordsEveryMarkThatHeldASymbolBackAndNoOther(t *testing.T) {
 }
 
 func TestSweepRecordsNoMarkWhenTheModeCarriesNone(t *testing.T) {
+	t.Parallel()
 	b := unreachableChain(t)
 	r := b.graph().Sweep(&SweepPolicy{})
 
@@ -384,6 +399,7 @@ func TestSweepRecordsNoMarkWhenTheModeCarriesNone(t *testing.T) {
 }
 
 func TestSweepRecordsAMarkThatHeldBackATestOfDeadCode(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("deadOne").addTest("TestDead")
 	b.root("TestDead", roots.RootTest)
 	b.ref("TestDead", "deadOne")
@@ -416,6 +432,7 @@ func retainedTestDeclaration(t *testing.T) *graphBuilder {
 }
 
 func TestSweepUnderProductionModeSeedsAnExemptTestDeclaration(t *testing.T) {
+	t.Parallel()
 	b := retainedTestDeclaration(t)
 	r := b.graph().Sweep(&SweepPolicy{
 		Exempt: []exempt.Exemption{b.exemption("Hook", "linkname-cgo-asm-plugin")},
@@ -440,6 +457,7 @@ func TestSweepUnderProductionModeSeedsAnExemptTestDeclaration(t *testing.T) {
 }
 
 func TestSweepUnderProductionModeKeepsNothingATestFileRootReferences(t *testing.T) {
+	t.Parallel()
 	b := retainedTestDeclaration(t)
 	b.root("Hook", roots.RootBlank)
 	r := b.graph().Sweep(&SweepPolicy{Mode: facts.Mode{Production: true}})
@@ -462,6 +480,7 @@ func TestSweepUnderProductionModeKeepsNothingATestFileRootReferences(t *testing.
 }
 
 func TestSweepUnderProductionModeWithoutTheExemptionReachesNothingTheTestReferences(t *testing.T) {
+	t.Parallel()
 	b := retainedTestDeclaration(t)
 	r := b.graph().Sweep(&SweepPolicy{Mode: facts.Mode{Production: true}})
 
@@ -479,6 +498,7 @@ func TestSweepUnderProductionModeWithoutTheExemptionReachesNothingTheTestReferen
 }
 
 func TestSweepWithoutTheExemptionReportsWhatTheRetainedMethodReferences(t *testing.T) {
+	t.Parallel()
 	b := retainedMethod(t)
 
 	// The same graph without the exemption: nothing seeds the closure, so the
@@ -490,6 +510,7 @@ func TestSweepWithoutTheExemptionReportsWhatTheRetainedMethodReferences(t *testi
 }
 
 func TestSweepUnderProductionModeReadsTheReferencingFileAndNotTheTargets(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("entry").addTest("reachedFromProduction")
 	b.root("entry", roots.RootMain)
 	b.ref("entry", "reachedFromProduction")
@@ -505,6 +526,7 @@ func TestSweepUnderProductionModeReadsTheReferencingFileAndNotTheTargets(t *test
 }
 
 func TestThePassesOverAModuleThatHasTestFiles(t *testing.T) {
+	t.Parallel()
 	const pkg = "go://example.com/tested#"
 	s := sweepOf(t, "tested-module.txtar", roots.RootOptions{PublishedAPI: true})
 
@@ -567,6 +589,7 @@ func TestThePassesOverAModuleThatHasTestFiles(t *testing.T) {
 }
 
 func TestRelationStringNamesEveryRelation(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		relation Relation
 		want     string
@@ -684,6 +707,7 @@ func (s *swept) groupsUnder(prefix string, r Result) []grouped {
 }
 
 func TestSweepOverTheLoadedGraphNamesTheRelationThatFoundEachCandidate(t *testing.T) {
+	t.Parallel()
 	const pkg = "go://example.com/sweep#"
 	s := sweepOf(t, "sweep.txtar", roots.RootOptions{PublishedAPI: true})
 	r := s.graph.Sweep(&SweepPolicy{})
@@ -710,6 +734,7 @@ func TestSweepOverTheLoadedGraphNamesTheRelationThatFoundEachCandidate(t *testin
 }
 
 func TestSweepOverTheLoadedGraphReportsNothingUnderAMarkedDeclaration(t *testing.T) {
+	t.Parallel()
 	const pkg = "go://example.com/sweep#"
 	s := sweepOf(t, "sweep.txtar", roots.RootOptions{PublishedAPI: true})
 	r := s.graph.Sweep(&SweepPolicy{Marked: []inventory.SymbolID{s.id(t, pkg+"unreferenced")}})
@@ -724,6 +749,7 @@ func TestSweepOverTheLoadedGraphReportsNothingUnderAMarkedDeclaration(t *testing
 }
 
 func TestSweepOverTheLoadedGraphGroupsACycleAndACascade(t *testing.T) {
+	t.Parallel()
 	s := sweepOf(t, "sweep.txtar", roots.RootOptions{PublishedAPI: true})
 	r := s.graph.Sweep(&SweepPolicy{})
 
@@ -779,6 +805,7 @@ func TestSweepOverTheLoadedGraphGroupsACycleAndACascade(t *testing.T) {
 }
 
 func TestSweepOverTheLoadedGraphAdmitsATestOfDeadCode(t *testing.T) {
+	t.Parallel()
 	const pkg = "go://example.com/sweep/subject#"
 	s := sweepOf(t, "sweep.txtar", roots.RootOptions{PublishedAPI: true})
 	r := s.graph.Sweep(&SweepPolicy{Mode: facts.Mode{Production: true}})
@@ -818,6 +845,7 @@ func (s *swept) verdictOf(t *testing.T, r Result, ref string) (reachable bool, c
 }
 
 func TestSweepOverEveryRootClassHoldsTheRootLiveAndReportsItsLookAlike(t *testing.T) {
+	t.Parallel()
 	const pkg = "go://example.com/roots#"
 	s := sweepOf(t, "roots.txtar", roots.RootOptions{PublishedAPI: true})
 	r := s.graph.Sweep(&SweepPolicy{})
@@ -889,6 +917,7 @@ func TestSweepOverEveryRootClassHoldsTheRootLiveAndReportsItsLookAlike(t *testin
 }
 
 func TestSweepWithoutThePublishedSeedReportsEveryExportedSymbolNothingReferences(t *testing.T) {
+	t.Parallel()
 	const pkg = "go://example.com/roots#"
 	s := sweepOf(t, "roots.txtar", roots.RootOptions{})
 	r := s.graph.Sweep(&SweepPolicy{})
@@ -925,6 +954,7 @@ func TestSweepWithoutThePublishedSeedReportsEveryExportedSymbolNothingReferences
 }
 
 func TestSweepOverAConfiguredRootHoldsItLiveAndReportsTheDeclarationsNothingNames(t *testing.T) {
+	t.Parallel()
 	const pkg = "go://example.com/patterns#"
 	s := sweepOf(t, "root-patterns.txtar", roots.RootOptions{Patterns: []string{pkg + "Alpha"}})
 	r := s.graph.Sweep(&SweepPolicy{})
@@ -949,6 +979,7 @@ func TestSweepOverAConfiguredRootHoldsItLiveAndReportsTheDeclarationsNothingName
 }
 
 func TestSweepOverAPackageWithATestVariantLeavesAFunctionOutOfTheTypesComponent(t *testing.T) {
+	t.Parallel()
 	const pkg = "go://example.com/receivers#"
 	s := sweepOf(t, "receivers.txtar", roots.RootOptions{})
 	r := s.graph.Sweep(&SweepPolicy{Mode: facts.Mode{Production: true}})
@@ -983,6 +1014,7 @@ func (b *graphBuilder) unreferencedFlags(r Result) map[string]Relation {
 }
 
 func TestSweepAdmitsEveryTestFileDeclarationNoRootReaches(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("entry", "live", "spare").
 		addTest("TestLive", "calledHelper", "unusedHelper", "checkedHelper")
 	b.root("entry", roots.RootMain)
@@ -1013,6 +1045,7 @@ func TestSweepAdmitsEveryTestFileDeclarationNoRootReaches(t *testing.T) {
 }
 
 func TestSweepHoldsTestSupportCodeAReferenceNamesLive(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("entry", "live", "onlyTested").addTest("TestLive").
 		addSupport("calledHelper", "deepHelper", "unusedHelper", "strandedHelper")
 	b.root("entry", roots.RootMain)
@@ -1036,6 +1069,7 @@ func TestSweepHoldsTestSupportCodeAReferenceNamesLive(t *testing.T) {
 }
 
 func TestMatrixSweepHoldsATestFileDeclarationTestEvidenceNamesLiveWithWhatItReaches(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("entry").addTest("TestLive", "write", "writeHelper", "unusedHelper")
 	b.root("entry", roots.RootMain)
 	b.root("TestLive", roots.RootTest)
@@ -1057,6 +1091,7 @@ func TestMatrixSweepHoldsATestFileDeclarationTestEvidenceNamesLiveWithWhatItReac
 }
 
 func TestMatrixSweepHoldsTestSupportCodeTestEvidenceNamesLive(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("entry").addTest("TestLive").addSupport("Get", "Spare")
 	b.root("entry", roots.RootMain)
 	b.root("TestLive", roots.RootTest)
@@ -1074,6 +1109,7 @@ func TestMatrixSweepHoldsTestSupportCodeTestEvidenceNamesLive(t *testing.T) {
 }
 
 func TestSweepCountsAHeldExemptionAsAUseByItsHolder(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("entry", "deadHolder", "keptByLive", "keptByDead")
 	b.root("entry", roots.RootMain)
 	exemptions := []exempt.Exemption{
@@ -1092,6 +1128,7 @@ func TestSweepCountsAHeldExemptionAsAUseByItsHolder(t *testing.T) {
 }
 
 func TestSweepRecordsAHeldExemptionAsRetainingOnlyWhileItsHolderIsLive(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("entry", "deadHolder", "keptByLive", "keptByDead")
 	b.root("entry", roots.RootMain)
 	exemptions := []exempt.Exemption{
@@ -1111,6 +1148,7 @@ func TestSweepRecordsAHeldExemptionAsRetainingOnlyWhileItsHolderIsLive(t *testin
 }
 
 func TestSweepRetainsAnExemptionWithCoHoldersOnlyWhileEveryHolderIsLive(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("entry", "second", "deadHolder", "keptByBoth", "keptWithADead")
 	b.root("entry", roots.RootMain)
 	b.root("second", roots.RootMain)
@@ -1133,6 +1171,7 @@ func TestSweepRetainsAnExemptionWithCoHoldersOnlyWhileEveryHolderIsLive(t *testi
 }
 
 func TestSweepCreditsAnExemptionWithASymbolAMarkItMadeStaleNamesToo(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("entry", "kept")
 	b.root("entry", roots.RootMain)
 	r := b.graph().Sweep(&SweepPolicy{
@@ -1149,6 +1188,7 @@ func TestSweepCreditsAnExemptionWithASymbolAMarkItMadeStaleNamesToo(t *testing.T
 }
 
 func TestSweepCountsAHolderReachabilityHoldsLiveAsHoldingItsExemption(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("Published", "kept")
 	b.root("Published", roots.RootPublishedAPI)
 	r := b.graph().Sweep(&SweepPolicy{
@@ -1164,6 +1204,7 @@ func TestSweepCountsAHolderReachabilityHoldsLiveAsHoldingItsExemption(t *testing
 }
 
 func TestMatrixSweepRecordsTheHolderOfAFactThatRetained(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("entry", "deadHolder", "method")
 	b.root("entry", roots.RootMain)
 	merged, err := Merge(b.configured(1, func(int, string) bool { return true }), handTests)
@@ -1183,6 +1224,7 @@ func TestMatrixSweepRecordsTheHolderOfAFactThatRetained(t *testing.T) {
 }
 
 func TestSweepLeavesABlankRootAHeldExemptionNamesToItsHolder(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("entry", "asserted", "assertion")
 	b.root("entry", roots.RootMain)
 	b.root("assertion", roots.RootBlank)
@@ -1199,6 +1241,7 @@ func TestSweepLeavesABlankRootAHeldExemptionNamesToItsHolder(t *testing.T) {
 }
 
 func TestSweepCountsTheImplementationOfAnUncalledInterfaceMethodAsItsUse(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("entry", "uncalled", "implementation")
 	b.root("entry", roots.RootMain)
 	per := b.configured(1, func(int, string) bool { return true })
@@ -1229,6 +1272,7 @@ func TestSweepCountsTheImplementationOfAnUncalledInterfaceMethodAsItsUse(t *test
 }
 
 func TestSweepLeavesTheGraphUngatedByACoHeldExemptionOnASymbolItDoesNotHold(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("entry", "second", "callee")
 	b.root("entry", roots.RootMain)
 	b.ref("entry", "callee")

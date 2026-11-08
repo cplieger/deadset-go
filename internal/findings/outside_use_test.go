@@ -11,6 +11,7 @@ import (
 // code, though that API stays reported at possible; a test of an unexported dead
 // declaration alone still is.
 func TestATestOfPublishedAPIAtPossibleIsNoTestOfDeadCode(t *testing.T) {
+	t.Parallel()
 	result := computed(t, inputOf(t, "declarations-test-published.txtar", libraryConfig(), Consumers{}), declarationEmitters())
 
 	if got := namesUnder(result.Findings, vocab.TestOfDeadCode); !slices.Equal(got, []string{"TestSpare"}) {

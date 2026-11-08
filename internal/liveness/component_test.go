@@ -8,6 +8,7 @@ import (
 )
 
 func TestComponentsGroupACycleAndReportEveryMemberAsARoot(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("alpha", "beta")
 	b.ref("alpha", "beta")
 	b.ref("beta", "alpha")
@@ -42,6 +43,7 @@ func cascadeChain(t *testing.T) *graphBuilder {
 }
 
 func TestComponentsHoldEverySymbolThatFallsWithTheRoot(t *testing.T) {
+	t.Parallel()
 	b := cascadeChain(t)
 	got := b.groups(b.graph().Sweep(&SweepPolicy{}))
 
@@ -57,6 +59,7 @@ func TestComponentsHoldEverySymbolThatFallsWithTheRoot(t *testing.T) {
 }
 
 func TestComponentsJoinTwoRootsThatReachOneDeclaration(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("leftRoot", "rightRoot", "shared")
 	b.ref("leftRoot", "shared")
 	b.ref("rightRoot", "shared")
@@ -74,6 +77,7 @@ func TestComponentsJoinTwoRootsThatReachOneDeclaration(t *testing.T) {
 }
 
 func TestComponentsPlaceADeadMemberInsideItsDeadContainer(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t)
 	b.declare(handSymbol{name: "box", kind: inventory.KindType, lines: 4})
 	b.declare(handSymbol{name: "lid", kind: inventory.KindField, parent: "box"})
@@ -99,6 +103,7 @@ func TestComponentsPlaceADeadMemberInsideItsDeadContainer(t *testing.T) {
 }
 
 func TestComponentsOrderPlacesEachComponentAtItsFirstRoot(t *testing.T) {
+	t.Parallel()
 	// Each component's reached declaration is written first, so the order the
 	// sweep returns is the one the roots decide rather than the one the sites do.
 	b := newGraphBuilder(t).add("lateTail", "earlyTail", "lateHead", "earlyHead")
@@ -121,6 +126,7 @@ func TestComponentsOrderPlacesEachComponentAtItsFirstRoot(t *testing.T) {
 }
 
 func TestComponentsOrderIsTheSameOnEveryCall(t *testing.T) {
+	t.Parallel()
 	b := cascadeChain(t)
 	b.ref("third", "head")
 	g := b.graph()
@@ -138,6 +144,7 @@ func TestComponentsOrderIsTheSameOnEveryCall(t *testing.T) {
 }
 
 func TestComponentsMarkNoMemberOfAReachedCycleAsARoot(t *testing.T) {
+	t.Parallel()
 	b := newGraphBuilder(t).add("caller", "ping", "pong")
 	b.ref("caller", "ping")
 	b.ref("ping", "pong")

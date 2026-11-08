@@ -14,6 +14,7 @@ import (
 )
 
 func TestWriteOnlySymbolNamesEveryWritePositionOfAVariableNothingReads(t *testing.T) {
+	t.Parallel()
 	found := analysisOf(t, "readwrite-writeonly.txtar", asApplication, Consumers{}).
 		findingsUnder(t, writeOnlyKind, false).Findings
 	if names := namesUnder(found, vocab.WriteOnlySymbol); !slices.Equal(names, []string{"tally"}) {
@@ -41,6 +42,7 @@ func TestWriteOnlySymbolNamesEveryWritePositionOfAVariableNothingReads(t *testin
 }
 
 func TestWriteOnlySymbolCountsNoReadFromADeclarationNothingReferences(t *testing.T) {
+	t.Parallel()
 	found := analysisOf(t, "readwrite-dead-reader.txtar", asApplication, Consumers{}).
 		findingsUnder(t, writeOnlyKind, true).Findings
 	if names := namesUnder(found, vocab.WriteOnlySymbol); !slices.Equal(names, []string{"pattern"}) {
@@ -53,6 +55,7 @@ func TestWriteOnlySymbolCountsNoReadFromADeclarationNothingReferences(t *testing
 }
 
 func TestWriteOnlySymbolReportsNothingThatOnlyADeclarationNothingReferencesWrites(t *testing.T) {
+	t.Parallel()
 	found := analysisOf(t, "readwrite-dead-reader-library.txtar", asLibrary, Consumers{}).
 		findingsUnder(t, writeOnlyKind, true).Findings
 	if names := namesUnder(found, vocab.WriteOnlySymbol); len(names) != 0 {
@@ -61,6 +64,7 @@ func TestWriteOnlySymbolReportsNothingThatOnlyADeclarationNothingReferencesWrite
 }
 
 func TestWriteOnlySymbolCountsATestReadAsNoReadUnderProductionModeAlone(t *testing.T) {
+	t.Parallel()
 	for _, production := range []bool{false, true} {
 		t.Run("production="+strconv.FormatBool(production), func(t *testing.T) {
 			found := analysisOf(t, "readwrite-writeonly.txtar", asApplication, Consumers{}).
@@ -91,6 +95,7 @@ func TestWriteOnlySymbolCountsATestReadAsNoReadUnderProductionModeAlone(t *testi
 }
 
 func TestWriteOnlySymbolCountsNoTestWriteAsATestRead(t *testing.T) {
+	t.Parallel()
 	found := analysisOf(t, "readwrite-testwrite.txtar", asApplication, Consumers{}).
 		findingsUnder(t, writeOnlyKind, true).Findings
 
@@ -102,6 +107,7 @@ func TestWriteOnlySymbolCountsNoTestWriteAsATestRead(t *testing.T) {
 }
 
 func TestWriteOnlySymbolNamesWhatDeletingItsWritesAlsoDeletes(t *testing.T) {
+	t.Parallel()
 	found := analysisOf(t, "readwrite-cascade.txtar", asApplication, Consumers{}).
 		findingsUnder(t, writeOnlyKind, true).Findings
 
@@ -119,6 +125,7 @@ func TestWriteOnlySymbolNamesWhatDeletingItsWritesAlsoDeletes(t *testing.T) {
 }
 
 func TestWriteOnlySymbolReportsNoDeclarationAnExemptionHoldsLive(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "readwrite-retained.txtar", applicationConfig(), Consumers{})
 
 	staged := false
@@ -138,6 +145,7 @@ func TestWriteOnlySymbolReportsNoDeclarationAnExemptionHoldsLive(t *testing.T) {
 }
 
 func TestUnusedEnumMemberReportsTheGroupNoConversionRetainsAtTheDerivedClass(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "readwrite-enum.txtar", libraryConfig(), Consumers{})
 
 	found := computed(t, in, map[vocab.Code]Emitter{vocab.UnusedEnumMember: unusedEnumMember}).Findings
@@ -163,6 +171,7 @@ func TestUnusedEnumMemberReportsTheGroupNoConversionRetainsAtTheDerivedClass(t *
 }
 
 func TestUnusedEnumMemberReportsNoMemberTheEnumGroupClassRetains(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "readwrite-enum.txtar", libraryConfig(), Consumers{})
 
 	retained := make(map[string]bool)
@@ -185,6 +194,7 @@ func TestUnusedEnumMemberReportsNoMemberTheEnumGroupClassRetains(t *testing.T) {
 }
 
 func TestEnumGroupMembersReadsAnIotaGroupTheWayTheExemptionDoes(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "readwrite-enum.txtar", libraryConfig(), Consumers{})
 
 	var named []string
@@ -207,6 +217,7 @@ func TestEnumGroupMembersReadsAnIotaGroupTheWayTheExemptionDoes(t *testing.T) {
 }
 
 func TestUnusedTypeParameterReportsAFunctionAndAMethodAtCertain(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "readwrite-typeparam.txtar", applicationConfig(), Consumers{})
 
 	found := computed(t, in, map[vocab.Code]Emitter{vocab.UnusedTypeParameter: unusedTypeParameter}).Findings
@@ -231,6 +242,7 @@ func TestUnusedTypeParameterReportsAFunctionAndAMethodAtCertain(t *testing.T) {
 }
 
 func TestUnusedTypeParameterTakesNoSubjectFromATypeDeclaration(t *testing.T) {
+	t.Parallel()
 	for name, owner := range map[string]*inventory.Symbol{
 		"none":     nil,
 		"function": {Kind: inventory.KindFunc},
@@ -260,6 +272,7 @@ func TestUnusedTypeParameterTakesNoSubjectFromATypeDeclaration(t *testing.T) {
 }
 
 func TestConfidenceEqualsTheDerivedClassForBothCertainReadAndWriteKinds(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "readwrite-confidence.txtar", applicationConfig(), Consumers{})
 
 	found := computed(t, in, map[vocab.Code]Emitter{
@@ -292,6 +305,7 @@ func writePositions(found Finding) []string {
 // the generic code as an operand of == is, so every field of it is read; one whose
 // constraint is any is not.
 func TestWriteOnlySymbolReadsTheFieldsOfAComparableTypeArgument(t *testing.T) {
+	t.Parallel()
 	found := analysisOf(t, "readwrite-comparable.txtar", asApplication, Consumers{}).
 		findingsUnder(t, writeOnlyKind, true).Findings
 
@@ -304,6 +318,7 @@ func TestWriteOnlySymbolReadsTheFieldsOfAComparableTypeArgument(t *testing.T) {
 // findings whose annotations hold it: each finding names it and no finding is
 // reported about it. A type its own method's receiver names is used elsewhere.
 func TestWriteOnlySymbolNamesTheDeclarationsOnlyItsAnnotationUses(t *testing.T) {
+	t.Parallel()
 	resolved := applicationConfig()
 	in := inputOf(t, "readwrite-cascade-declarations.txtar", resolved, Consumers{})
 	in.Mode = facts.Mode{Production: true}
@@ -330,6 +345,7 @@ func TestWriteOnlySymbolNamesTheDeclarationsOnlyItsAnnotationUses(t *testing.T) 
 // A line directive inside a write or an annotation maps part of it to another file,
 // and the cascade still names what the write or the annotation holds in source order.
 func TestWriteOnlySymbolNamesWhatAWriteHoldsInSourceOrderUnderALineDirective(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "readwrite-line-directive.txtar", applicationConfig(), Consumers{})
 	in.Mode = facts.Mode{Production: true}
 	result := computed(t, in, packageEmitters())
@@ -351,6 +367,7 @@ func TestWriteOnlySymbolNamesWhatAWriteHoldsInSourceOrderUnderALineDirective(t *
 // that counts test references, and in a production one only where the configuration
 // counts consumer tests as production.
 func TestWriteOnlySymbolCountsAConsumersWriteAsARead(t *testing.T) {
+	t.Parallel()
 	data, err := os.ReadFile(filepath.Join("testdata", "sections", "readwrite-consumer-write.txtar"))
 	if err != nil {
 		t.Fatalf("Setup: read readwrite-consumer-write.txtar: %v", err)
@@ -379,6 +396,7 @@ func TestWriteOnlySymbolCountsAConsumersWriteAsARead(t *testing.T) {
 // An exemption on a live declaration that is written and never read holds back the
 // write-only finding, so it is what the retained listing names for it.
 func TestWriteOnlyRetainedNamesTheExemptionThatHoldsAWriteOnlyFindingBack(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "readwrite-encoded.txtar", applicationConfig(), Consumers{})
 	in.Mode = facts.Mode{Production: true}
 

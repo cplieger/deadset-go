@@ -15,6 +15,7 @@ import (
 )
 
 func TestClassesHandsOutNoSliceACallerCanChange(t *testing.T) {
+	t.Parallel()
 	first := goClasses()
 	first[0] = "changed"
 
@@ -48,6 +49,7 @@ func held(found []Exemption) []string {
 }
 
 func TestComputeRunsEveryClassTheTableHoldsInVocabularyOrder(t *testing.T) {
+	t.Parallel()
 	var ran []vocab.Exemption
 	detectors := make(map[vocab.Exemption]Detector, len(goClasses()))
 	for _, class := range goClasses() {
@@ -70,6 +72,7 @@ func TestComputeRunsEveryClassTheTableHoldsInVocabularyOrder(t *testing.T) {
 }
 
 func TestComputeRunsNoDisabledClass(t *testing.T) {
+	t.Parallel()
 	retained := Exemption{ID: "a.go:1:1", Class: string(vocab.GeneratedFile)}
 	detectors := map[vocab.Exemption]Detector{
 		vocab.GeneratedFile:         detector(retained),
@@ -92,6 +95,7 @@ func TestComputeRunsNoDisabledClass(t *testing.T) {
 }
 
 func TestComputeOrdersTheUnionBySiteThenClassThenSymbol(t *testing.T) {
+	t.Parallel()
 	detectors := map[vocab.Exemption]Detector{
 		vocab.GeneratedFile: detector(
 			Exemption{ID: "b.go:9:1", Class: string(vocab.GeneratedFile), Site: at("b.go", 9, 1)},
@@ -127,6 +131,7 @@ func TestComputeOrdersTheUnionBySiteThenClassThenSymbol(t *testing.T) {
 }
 
 func TestComputeKeepsOneEntryPerSymbolClassDetailAndHolder(t *testing.T) {
+	t.Parallel()
 	const converted = "satisfies io.Writer"
 	detectors := map[vocab.Exemption]Detector{
 		vocab.GeneratedFile: detector(
@@ -199,6 +204,7 @@ func retainedClauses(symbols []inventory.Symbol, found []Exemption) []string {
 }
 
 func TestComputeKeepsOneRecordPerHolderForAMethodConvertedAtSeveralSites(t *testing.T) {
+	t.Parallel()
 	shared := analysisOf(t, "several-sites.txtar", Options{})
 	symbols := shared.inventory(t)
 
@@ -256,6 +262,7 @@ func writerSites(found []Exemption) int {
 }
 
 func TestEveryClassRunsCleanOverAModuleThatHasATestFile(t *testing.T) {
+	t.Parallel()
 	shared := analysisOf(t, "with-tests.txtar", Options{})
 	symbols := shared.inventory(t)
 
@@ -282,6 +289,7 @@ func TestEveryClassRunsCleanOverAModuleThatHasATestFile(t *testing.T) {
 // source file holds under both modes, which is what tells the rule from a run that
 // retained less for another reason.
 func TestComputeDropsAnExemptionATestFileIsTheEvidenceFor(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		want []string
@@ -323,6 +331,7 @@ func TestComputeDropsAnExemptionATestFileIsTheEvidenceFor(t *testing.T) {
 // framework keeps the first site by rendered order, and a test file sorts before the
 // source file here.
 func TestComputeKeepsTheSourceSiteOfAFactATestFileAlsoCarries(t *testing.T) {
+	t.Parallel()
 	shared := analysisOf(t, "with-tests.txtar", Options{})
 
 	found, err := shared.compute(t, true)
@@ -381,6 +390,7 @@ func fixtureOptions(t *testing.T, archive string) Options {
 const templateFixtureDir = "templates"
 
 func TestEveryClauseIsOneRelationThenTheThingItRelatesTo(t *testing.T) {
+	t.Parallel()
 	seen := make(map[vocab.Exemption]bool, len(goClasses()))
 	for _, archive := range fixtureArchives(t) {
 		t.Run(archive, func(t *testing.T) {
@@ -432,6 +442,7 @@ func checkClause(t *testing.T, archive string, e Exemption) {
 var errEvidence = errors.New("the template directory cannot be read")
 
 func TestComputeNamesTheClassThatFailed(t *testing.T) {
+	t.Parallel()
 	detectors := map[vocab.Exemption]Detector{
 		vocab.GeneratedFile: detector(Exemption{ID: "a.go:1:1", Class: string(vocab.GeneratedFile)}),
 		vocab.TemplateField: func(*Program) ([]Exemption, error) { return nil, errEvidence },
@@ -455,6 +466,7 @@ func TestComputeNamesTheClassThatFailed(t *testing.T) {
 }
 
 func TestComputeHandsEveryClassTheLoadedConfigurationItReads(t *testing.T) {
+	t.Parallel()
 	const method = "(*Catalog).Resolve"
 
 	opts := Options{TemplateDirs: []string{"views"}, IncludeGenerated: true}

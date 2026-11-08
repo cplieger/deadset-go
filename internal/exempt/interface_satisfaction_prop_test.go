@@ -223,6 +223,7 @@ func retainedMethods(in *Program, held []Exemption) map[string]bool {
 // This runs at rapid's default of 100 checks; -rapid.checks raises it for a deeper
 // local run.
 func TestProperty05InterfaceSatisfactionRetainsExactlyTheSatisfyingMethods(t *testing.T) {
+	t.Parallel()
 	rapid.Check(t, func(t *rapid.T) {
 		p := drawnPrograms().Draw(t, "the program")
 		source := p.render()

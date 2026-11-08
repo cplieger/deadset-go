@@ -630,3 +630,14 @@ func TestSourcesReadEveryUnitsPackage(t *testing.T) {
 		t.Errorf("Sources().Read(b's own package) twice read two sources, want the one read first")
 	}
 }
+
+func TestALoadWithNoGoCommandOnPathEndsTheRunAsMissingToolchain(t *testing.T) {
+	stableToolchain(t)
+	top := discovered(t, fixtureScope(t, "clean"))
+	t.Setenv("PATH", t.TempDir())
+	_, err := Load(t.Context(), top, new(HostConfiguration()))
+	held, ok := errors.AsType[*failure.Error](err)
+	if !ok || held.Failures[0].Class != vocab.RunMissingToolchain || !strings.Contains(held.Failures[0].Detail, `"go"`) {
+		t.Fatalf("Load with no go command on PATH = %v, want the run failure %s naming the go command", err, vocab.RunMissingToolchain)
+	}
+}

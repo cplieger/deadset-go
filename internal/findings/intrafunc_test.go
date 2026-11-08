@@ -628,6 +628,7 @@ func TestUnusedParameterReportsNothingAboutAFunctionDeclaredOncePerPlatform(t *t
 }
 
 func TestAMethodATypeErrorRootsHasNoSignatureFreeToChange(t *testing.T) {
+	t.Parallel()
 	result := analysisOf(t, "intrafunc-type-error.txtar", asApplication, Consumers{}).findings(t, everyKind)
 
 	var reported []string

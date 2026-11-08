@@ -7,6 +7,7 @@ import (
 )
 
 func TestReferencesReadTheFieldsATypeParameterIsLaidOutAs(t *testing.T) {
+	t.Parallel()
 	a := analyze(t, "layout.txtar")
 
 	cases := []struct {

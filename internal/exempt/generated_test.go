@@ -32,6 +32,7 @@ func rendered(symbols []inventory.Symbol, exemptions []Exemption) []string {
 }
 
 func TestGeneratedFileDetectorRetainsEveryDeclarationOfAGeneratedFile(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "generated.txtar", Options{})
 
 	got, err := GeneratedFileDetector(in)
@@ -49,6 +50,7 @@ func TestGeneratedFileDetectorRetainsEveryDeclarationOfAGeneratedFile(t *testing
 }
 
 func TestGeneratedFileDetectorRetainsNothingWhenGeneratedFilesAreIncluded(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "generated.txtar", Options{IncludeGenerated: true})
 
 	got, err := GeneratedFileDetector(in)

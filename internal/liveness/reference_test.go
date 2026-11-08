@@ -97,6 +97,7 @@ func goldenTable(name, got string) (string, error) {
 }
 
 func TestReferencesGoldenTableOverEveryKind(t *testing.T) {
+	t.Parallel()
 	const run = "TestReferencesGoldenTableOverEveryKind"
 
 	got := analyze(t, "reference-kinds.txtar").render()
@@ -111,6 +112,7 @@ func TestReferencesGoldenTableOverEveryKind(t *testing.T) {
 }
 
 func TestReferencesRecordsTheEnclosingDeclaration(t *testing.T) {
+	t.Parallel()
 	a := analyze(t, "reference-kinds.txtar")
 
 	cases := []struct {
@@ -170,6 +172,7 @@ func TestReferencesRecordsTheEnclosingDeclaration(t *testing.T) {
 }
 
 func TestReferencesRecordWhatARepeatedListNamesFromEachConstantRepeatingIt(t *testing.T) {
+	t.Parallel()
 	a := analyze(t, "constant-groups.txtar")
 
 	if got := a.count("running", "phase", facts.RefTypeUse); got != 1 {
@@ -181,6 +184,7 @@ func TestReferencesRecordWhatARepeatedListNamesFromEachConstantRepeatingIt(t *te
 }
 
 func TestReferencesResolvesEveryEndToASymbol(t *testing.T) {
+	t.Parallel()
 	a := analyze(t, "reference-kinds.txtar")
 	if len(a.refs) == 0 {
 		t.Fatal("References(reference-kinds.txtar) returned no reference, want the fixture's own")
@@ -199,6 +203,7 @@ func TestReferencesResolvesEveryEndToASymbol(t *testing.T) {
 }
 
 func TestReferencesLeavesADeclarationSiteUnreferenced(t *testing.T) {
+	t.Parallel()
 	a := analyze(t, "reference-kinds.txtar")
 
 	// Every declaration answers for itself: the identifier that declares a
@@ -220,6 +225,7 @@ func TestReferencesLeavesADeclarationSiteUnreferenced(t *testing.T) {
 }
 
 func TestReferencesGoldenTableOverTheWriteShapes(t *testing.T) {
+	t.Parallel()
 	const run = "TestReferencesGoldenTableOverTheWriteShapes"
 
 	got := analyze(t, "reference-writes.txtar").render()
@@ -234,6 +240,7 @@ func TestReferencesGoldenTableOverTheWriteShapes(t *testing.T) {
 }
 
 func TestReferencesSplitsReadsFromWrites(t *testing.T) {
+	t.Parallel()
 	a := analyze(t, "reference-writes.txtar")
 
 	cases := []struct {
@@ -319,6 +326,7 @@ func TestReferencesSplitsReadsFromWrites(t *testing.T) {
 }
 
 func TestReferencesKeepsEveryWritePositionOfOneSymbol(t *testing.T) {
+	t.Parallel()
 	a := analyze(t, "reference-writes.txtar")
 
 	want := []string{
@@ -334,6 +342,7 @@ func TestReferencesKeepsEveryWritePositionOfOneSymbol(t *testing.T) {
 }
 
 func TestReferencesGoldenTableOverThePackageVariants(t *testing.T) {
+	t.Parallel()
 	const run = "TestReferencesGoldenTableOverThePackageVariants"
 
 	got := analyze(t, "variants.txtar").render()
@@ -348,6 +357,7 @@ func TestReferencesGoldenTableOverThePackageVariants(t *testing.T) {
 }
 
 func TestReferencesRecordsAProductionReferenceOncePerVariantSet(t *testing.T) {
+	t.Parallel()
 	a := analyze(t, "variants.txtar")
 
 	// The package and its in-package test variant type-check catalog.go
@@ -371,6 +381,7 @@ func TestReferencesRecordsAProductionReferenceOncePerVariantSet(t *testing.T) {
 }
 
 func TestReferencesInspectsEachSourceFileOnce(t *testing.T) {
+	t.Parallel()
 	dir := extract(t, "variants.txtar")
 	result, root := loadDir(t, dir, "linux", "amd64")
 	symbols, rs, err := inventoryOf(result, root, os.ReadFile)
@@ -406,6 +417,7 @@ func TestReferencesInspectsEachSourceFileOnce(t *testing.T) {
 }
 
 func TestReferencesOrderIsTheSameOnEveryCall(t *testing.T) {
+	t.Parallel()
 	dir := extract(t, "reference-kinds.txtar")
 	result, root := loadDir(t, dir, "linux", "amd64")
 	symbols, rs, err := inventoryOf(result, root, os.ReadFile)
@@ -427,6 +439,7 @@ func TestReferencesOrderIsTheSameOnEveryCall(t *testing.T) {
 }
 
 func TestRefKindStringNamesEveryKind(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		kind facts.RefKind
 		want string
@@ -460,6 +473,7 @@ func (a analysis) kinds() map[inventory.SymbolID]inventory.SymbolKind {
 }
 
 func TestReferencesRecordsEveryImportOfATargetPackageFromTheImportingFile(t *testing.T) {
+	t.Parallel()
 	a := analyze(t, "imports.txtar")
 	kinds := a.kinds()
 
@@ -490,6 +504,7 @@ func TestReferencesRecordsEveryImportOfATargetPackageFromTheImportingFile(t *tes
 }
 
 func TestReferencesLeavesTheCandidateSetToTheDeclarations(t *testing.T) {
+	t.Parallel()
 	a := analyze(t, "imports.txtar")
 	kinds := a.kinds()
 
@@ -545,6 +560,7 @@ func (a analysis) fieldReadsIn(prefix string) map[string][]string {
 }
 
 func TestReferencesRecordsAReadOfEveryFieldAComparisonReads(t *testing.T) {
+	t.Parallel()
 	reads := analyze(t, "comparisons.txtar").fieldReads()
 
 	cases := map[string][]string{
@@ -594,6 +610,7 @@ func TestReferencesRecordsAReadOfEveryFieldAComparisonReads(t *testing.T) {
 }
 
 func TestReferencesRecordsAComparisonsReadsAtTheComparisonSite(t *testing.T) {
+	t.Parallel()
 	a := analyze(t, "comparisons.txtar")
 	names := a.refNames(comparisonsPackage)
 	kinds := a.kinds()
@@ -629,6 +646,7 @@ func TestReferencesRecordsAComparisonsReadsAtTheComparisonSite(t *testing.T) {
 }
 
 func TestReferencesRecordsAReadOfEveryFieldAStructConversionReads(t *testing.T) {
+	t.Parallel()
 	reads := analyze(t, "struct-conversions.txtar").fieldReadsIn("go://example.com/conversions#")
 
 	cases := map[string][]string{
@@ -657,6 +675,7 @@ func TestReferencesRecordsAReadOfEveryFieldAStructConversionReads(t *testing.T) 
 }
 
 func TestReferencesReadAFieldThroughEveryIdenticalStructLiteral(t *testing.T) {
+	t.Parallel()
 	reads := analyze(t, "struct-identity.txtar").fieldReadsIn("go://example.com/identity#")
 
 	if got, want := reads["use"], []string{"holder.X.C"}; !slices.Equal(got, want) {
@@ -670,6 +689,7 @@ func TestReferencesReadAFieldThroughEveryIdenticalStructLiteral(t *testing.T) {
 }
 
 func TestReferencesReadAnIdenticalLiteralsFieldOnceWhateverTheVariants(t *testing.T) {
+	t.Parallel()
 	a := analyze(t, "struct-identity-variants.txtar")
 
 	var vias []string
@@ -684,6 +704,7 @@ func TestReferencesReadAnIdenticalLiteralsFieldOnceWhateverTheVariants(t *testin
 }
 
 func TestReferencesReadWhatAConversionRequiresOfTheValueItConverts(t *testing.T) {
+	t.Parallel()
 	a := analyze(t, "conversion-reads.txtar")
 
 	cases := []struct {
@@ -709,6 +730,7 @@ func TestReferencesReadWhatAConversionRequiresOfTheValueItConverts(t *testing.T)
 }
 
 func TestReferencesResolveTheMembersSelectedOnAGoConversionOfACValue(t *testing.T) {
+	t.Parallel()
 	a := analyze(t, "cgo-conversion.txtar")
 
 	cases := []struct {

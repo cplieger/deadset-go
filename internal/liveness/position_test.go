@@ -11,6 +11,7 @@ import (
 )
 
 func TestSymbolsColumnsOnANonASCIILine(t *testing.T) {
+	t.Parallel()
 	byName := make(map[string]inventory.Symbol)
 	for _, s := range symbolsOf(t, "columns.txtar") {
 		byName[s.Name] = s
@@ -52,6 +53,7 @@ func TestSymbolsColumnsOnANonASCIILine(t *testing.T) {
 }
 
 func TestSymbolsPathIsTargetRelativeWithForwardSlashes(t *testing.T) {
+	t.Parallel()
 	for _, s := range symbolsOf(t, "every-kind.txtar") {
 		path := s.Pos.Filename
 		switch {
@@ -70,6 +72,7 @@ func TestSymbolsPathIsTargetRelativeWithForwardSlashes(t *testing.T) {
 }
 
 func TestSymbolsKeepsOneDeclarationPerSourceSiteAcrossVariants(t *testing.T) {
+	t.Parallel()
 	dir := extract(t, "variants.txtar")
 	result, root := loadDir(t, dir, "linux", "amd64")
 

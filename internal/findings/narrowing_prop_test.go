@@ -269,6 +269,7 @@ func owedFor(reach drawnReach, complete bool, sites []drawnSite) (string, bool) 
 // The oracle is the placements a draw produced, which decide the answer without
 // the spread the rules fold.
 func TestNarrowingNamesTheNarrowestScopeContainingEveryReference(t *testing.T) {
+	t.Parallel()
 	rapid.Check(t, func(t *rapid.T) {
 		m := drawnModules().Draw(t, "the module")
 		inventory := m.render()

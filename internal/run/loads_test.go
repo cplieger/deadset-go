@@ -15,12 +15,15 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
-// platformTree is a module whose matrix holds two configurations, one for its
-// windows file, with declarations every kind of the findings pass reads.
+// platformTree is a module whose matrix holds two configurations, the host pinned
+// to linux-amd64 and one for its windows file, with declarations every kind of the
+// findings pass reads.
 func platformTree(t *testing.T) string {
 	t.Helper()
 	t.Setenv("GOFLAGS", "")
 	t.Setenv("GOWORK", "off")
+	t.Setenv("GOOS", "linux")
+	t.Setenv("GOARCH", "amd64")
 	root := t.TempDir()
 	for name, body := range map[string]string{
 		"go.mod": "module example.com/p\n\ngo 1.27.1\n",

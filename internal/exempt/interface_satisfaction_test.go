@@ -98,6 +98,7 @@ func candidateOf(swept []SweptCandidate, id inventory.SymbolID) (SweptCandidate,
 }
 
 func TestInterfaceSatisfactionRetainsTheMethodAConversionReaches(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "unconverted-implementation.txtar", Options{})
 	found := retainedBy(t, in, "unconverted-implementation.txtar")
 
@@ -116,6 +117,7 @@ func TestInterfaceSatisfactionRetainsTheMethodAConversionReaches(t *testing.T) {
 }
 
 func TestInterfaceSatisfactionNamesTheInterfaceAndTheSiteItWasFoundAt(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "unconverted-implementation.txtar", Options{})
 	found := retainedBy(t, in, "unconverted-implementation.txtar")
 
@@ -167,6 +169,7 @@ func TestInterfaceSatisfactionRetainsNothingWhereNoConversionReachesTheType(t *t
 }
 
 func TestInterfaceSatisfactionRetainsEveryMethodOfAMultiMethodInterfaceAtEverySite(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "conversion-shapes.txtar", Options{})
 	found := retainedBy(t, in, "conversion-shapes.txtar")
 
@@ -194,6 +197,7 @@ func TestInterfaceSatisfactionRetainsEveryMethodOfAMultiMethodInterfaceAtEverySi
 }
 
 func TestInterfaceSatisfactionRetainsStrictlyLessThanTheConservativeRule(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "unconverted-implementation.txtar", Options{})
 	narrow := retainedSet(retainedBy(t, in, "unconverted-implementation.txtar"))
 	conservative := conservativeRetained(t, in)
@@ -472,6 +476,7 @@ func corpusManifestOf(t *testing.T, archive *txtar.Archive) corpusManifest {
 // names, so the methods each requires are retained although no expression converts
 // the type to it. A type that reaches no interface keeps nothing retained.
 func TestInterfaceSatisfactionRetainsWhatAConstraintAndAnAssertionReach(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "structural-satisfaction.txtar", Options{})
 	set := retainedSet(retainedBy(t, in, "structural-satisfaction.txtar"))
 
@@ -500,6 +505,7 @@ func TestInterfaceSatisfactionRetainsWhatAConstraintAndAnAssertionReach(t *testi
 // tests run, so a production run holds nothing for it and the plain run holds it.
 // A type a source file converts too is held by both, whichever file sorts first.
 func TestInterfaceSatisfactionHoldsWhatAnAssertionReachesFromATestFileOutsideAProductionRun(t *testing.T) {
+	t.Parallel()
 	shared := analysisOf(t, "structural-satisfaction.txtar", Options{})
 	in := inputOf(t, "structural-satisfaction.txtar", Options{})
 
@@ -525,6 +531,7 @@ func TestInterfaceSatisfactionHoldsWhatAnAssertionReachesFromATestFileOutsideAPr
 // expression switch asserts nothing. A value converted to the program's own
 // interface keeps what that interface requires and nothing more.
 func TestInterfaceSatisfactionRetainsWhatAnOutsideHolderCanAssert(t *testing.T) {
+	t.Parallel()
 	refs := retainedRefs(t, analysisOf(t, "interface-satisfaction-outside.txtar", Options{}), vocab.InterfaceSatisfaction)
 
 	for _, test := range []struct {
@@ -550,6 +557,7 @@ func TestInterfaceSatisfactionRetainsWhatAnOutsideHolderCanAssert(t *testing.T) 
 // evidence of that consumer: the record names the consumer and renders the site
 // against the consumer's root, never against the target's.
 func TestInterfaceSatisfactionRendersAConsumersSiteAgainstTheConsumersRoot(t *testing.T) {
+	t.Parallel()
 	const archive = "interface-satisfaction-consumer-site.txtar"
 	shared := analysisOf(t, archive, Options{})
 	found, err := shared.detect(t, vocab.InterfaceSatisfaction)
@@ -581,6 +589,7 @@ func TestInterfaceSatisfactionRendersAConsumersSiteAgainstTheConsumersRoot(t *te
 // outside interface keeps what that package asserts through errors.AsType on
 // another value.
 func TestInterfaceSatisfactionRetainsWhatAnOutsidePackageAssertsOnAnError(t *testing.T) {
+	t.Parallel()
 	refs := retainedRefs(t, analysisOf(t, "interface-satisfaction-error-assertions.txtar", Options{}), vocab.InterfaceSatisfaction)
 
 	for _, test := range []struct {
@@ -602,6 +611,7 @@ func TestInterfaceSatisfactionRetainsWhatAnOutsidePackageAssertsOnAnError(t *tes
 }
 
 func TestAPublishedParameterOutsideTheTargetIsHeldByTheTypeItConverts(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "published-outside-parameter.txtar", Options{PublishedAPI: true})
 	found := retainedBy(t, in, "published-outside-parameter.txtar")
 
@@ -620,6 +630,7 @@ func TestAPublishedParameterOutsideTheTargetIsHeldByTheTypeItConverts(t *testing
 // callee's package asserts, the interface's package standing for a call through an
 // interface value. A package the callee hands the value on to is not read.
 func TestInterfaceSatisfactionRetainsWhatAnOutsideCalleesPackageAsserts(t *testing.T) {
+	t.Parallel()
 	refs := retainedRefs(t, analysisOf(t, "interface-satisfaction-callee.txtar", Options{}), vocab.InterfaceSatisfaction)
 
 	for _, test := range []struct {
@@ -641,6 +652,7 @@ func TestInterfaceSatisfactionRetainsWhatAnOutsideCalleesPackageAsserts(t *testi
 }
 
 func TestUncalledMethodsWithdrawOnlyTheRetentionsThroughAProductionMethodNothingSelects(t *testing.T) {
+	t.Parallel()
 	const (
 		called, uncalled, inTest, marker = "go://m#I.Called", "go://m#I.Uncalled", "go://m#I.InTest", "go://m#I.Marker"
 		impl, empty                      = "go://m#T.Uncalled", "go://m#T.Marker"
@@ -674,6 +686,7 @@ func TestUncalledMethodsWithdrawOnlyTheRetentionsThroughAProductionMethodNothing
 // methods by which the converted type satisfies what net/http asserts, as the
 // type's own reading of net/http states it.
 func TestOutsideMethodsReadTheConvertedTypesOwnReading(t *testing.T) {
+	t.Parallel()
 	const archive = "interface-satisfaction-outside-reading.txtar"
 	in := inputOf(t, archive, Options{})
 	other := inputOf(t, archive, Options{})

@@ -74,6 +74,7 @@ func refsOfKind(d detection, kind roots.RootKind) []string {
 }
 
 func TestRootsDetectsEachClassAndDeclinesItsLookAlike(t *testing.T) {
+	t.Parallel()
 	d := detect(t, "roots.txtar", roots.RootOptions{PublishedAPI: true})
 	kinds := kindsByRef(d)
 
@@ -148,6 +149,7 @@ func TestRootsDetectsEachClassAndDeclinesItsLookAlike(t *testing.T) {
 }
 
 func TestRootsRootsABlankDeclarationAndNotTheNamedOneBesideIt(t *testing.T) {
+	t.Parallel()
 	d := detect(t, "roots.txtar", roots.RootOptions{PublishedAPI: true})
 
 	var blank inventory.Symbol
@@ -175,6 +177,7 @@ func TestRootsRootsABlankDeclarationAndNotTheNamedOneBesideIt(t *testing.T) {
 }
 
 func TestRootsRootsTheMembersOfAValueAPositionOfNoResolvedTypeReceives(t *testing.T) {
+	t.Parallel()
 	d := detect(t, "type-error-destinations.txtar", roots.RootOptions{})
 
 	const pkg = "go://example.com/app#"
@@ -194,6 +197,7 @@ func TestRootsRootsTheMembersOfAValueAPositionOfNoResolvedTypeReceives(t *testin
 }
 
 func TestRootsReachesTheCgoExportTheOpaqueCheckRead(t *testing.T) {
+	t.Parallel()
 	d := detect(t, "roots.txtar", roots.RootOptions{PublishedAPI: true})
 
 	// The file importing "C" is read by the opaque-C check, so nothing about it is
@@ -221,6 +225,7 @@ func TestRootsReachesTheCgoExportTheOpaqueCheckRead(t *testing.T) {
 }
 
 func TestRootsPublishedAPIIsTheOnlyDifferenceTheTargetKindMakes(t *testing.T) {
+	t.Parallel()
 	library := detect(t, "roots.txtar", roots.RootOptions{PublishedAPI: true})
 	application := detect(t, "roots.txtar", roots.RootOptions{})
 
@@ -243,6 +248,7 @@ func TestRootsPublishedAPIIsTheOnlyDifferenceTheTargetKindMakes(t *testing.T) {
 }
 
 func TestRootsNamesOneSymbolOncePerReason(t *testing.T) {
+	t.Parallel()
 	const published = "go://example.com/roots#Published"
 	d := detect(t, "roots.txtar", roots.RootOptions{PublishedAPI: true, Patterns: []string{published, "go://example.com/roots#Publish*"}})
 
@@ -270,6 +276,7 @@ func TestRootsNamesOneSymbolOncePerReason(t *testing.T) {
 }
 
 func TestRootsMatchesAConfiguredStringAgainstASymbolReference(t *testing.T) {
+	t.Parallel()
 	const pkg = "go://example.com/patterns#"
 
 	cases := map[string]struct {
@@ -353,6 +360,7 @@ func TestRootsMatchesAConfiguredStringAgainstASymbolReference(t *testing.T) {
 }
 
 func TestRootsReportsEveryUnmatchedStringOnceInTheConfigurationsOrder(t *testing.T) {
+	t.Parallel()
 	patterns := []string{
 		"go://example.com/patterns#Zeta",
 		"go://example.com/patterns#Alpha",
@@ -371,6 +379,7 @@ func TestRootsReportsEveryUnmatchedStringOnceInTheConfigurationsOrder(t *testing
 }
 
 func TestRootsOrderIsTheSameOnEveryCall(t *testing.T) {
+	t.Parallel()
 	dir := extract(t, "roots.txtar")
 	result, target := loadDir(t, dir, "linux", "amd64")
 	symbols, rs, err := inventoryOf(result, target, os.ReadFile)
@@ -390,6 +399,7 @@ func TestRootsOrderIsTheSameOnEveryCall(t *testing.T) {
 }
 
 func TestRootsOrdersBySiteRatherThanBySymbolIdentifier(t *testing.T) {
+	t.Parallel()
 	d := detect(t, "roots.txtar", roots.RootOptions{PublishedAPI: true})
 
 	sites := make(map[inventory.SymbolID]inventory.Symbol, len(d.symbols))
@@ -421,6 +431,7 @@ func TestRootsOrdersBySiteRatherThanBySymbolIdentifier(t *testing.T) {
 }
 
 func TestRootKindStringNamesEveryKind(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		kind roots.RootKind
 		want string
@@ -448,6 +459,7 @@ func TestRootKindStringNamesEveryKind(t *testing.T) {
 }
 
 func TestRootsRootsWhatAProgramUnderTheIgnoreTagNames(t *testing.T) {
+	t.Parallel()
 	d := analysisOf(t, "programs.txtar", nil)
 	rooted, _ := d.rootsUnder(t, false)
 	names := make(map[inventory.SymbolID]string)

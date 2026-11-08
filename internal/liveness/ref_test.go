@@ -2,6 +2,7 @@ package liveness
 
 import (
 	"encoding/json"
+	"go/token"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -10,8 +11,21 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/load"
 	spec "github.com/cplieger/deadset-spec/v8"
 )
+
+// treeOf is where the tree of the file named base starts in r, or NoPos.
+func treeOf(r *load.Result, base string) token.Pos {
+	for _, p := range r.Packages {
+		for _, f := range p.Syntax {
+			if filepath.Base(r.Fset.Position(f.FileStart).Filename) == base {
+				return f.FileStart
+			}
+		}
+	}
+	return token.NoPos
+}
 
 // corpusCase is one case of the published symbol-reference corpus.
 type corpusCase struct {
@@ -128,6 +142,7 @@ var emittedParameters = map[string][2]string{
 var notEmitted = []string{"require", "replace"}
 
 func TestPublishedGrammarCarriesEveryExpression(t *testing.T) {
+	t.Parallel()
 	const path = "contract/grammar/symbol-ref.md"
 	body, err := spec.Contract.ReadFile(path)
 	if err != nil {
@@ -145,6 +160,7 @@ func TestPublishedGrammarCarriesEveryExpression(t *testing.T) {
 }
 
 func TestRefEmitsEveryAcceptedCorpusCase(t *testing.T) {
+	t.Parallel()
 	for _, c := range readCorpus(t) {
 		if !c.Accepted {
 			continue
@@ -177,6 +193,7 @@ func TestRefEmitsEveryAcceptedCorpusCase(t *testing.T) {
 }
 
 func TestRefTableCoversNothingTheCorpusRefuses(t *testing.T) {
+	t.Parallel()
 	accepted := make(map[string]bool)
 	for _, c := range readCorpus(t) {
 		if c.Accepted {
@@ -196,6 +213,7 @@ func TestRefTableCoversNothingTheCorpusRefuses(t *testing.T) {
 }
 
 func TestPublishedGrammarClassifiesEveryCorpusCase(t *testing.T) {
+	t.Parallel()
 	compiled := make(map[string]*regexp.Regexp, len(goForms))
 	for form, expression := range goForms {
 		re, err := regexp.Compile(expression)
@@ -226,6 +244,7 @@ func TestPublishedGrammarClassifiesEveryCorpusCase(t *testing.T) {
 }
 
 func TestSymbolsEmitsOnlyReferencesThePublishedGrammarAccepts(t *testing.T) {
+	t.Parallel()
 	compiled := make([]*regexp.Regexp, 0, len(goForms))
 	for form, expression := range goForms {
 		re, err := regexp.Compile(expression)
@@ -245,12 +264,13 @@ func TestSymbolsEmitsOnlyReferencesThePublishedGrammarAccepts(t *testing.T) {
 }
 
 func TestRefIsTheSameUnderAnotherBuildConfiguration(t *testing.T) {
+	t.Parallel()
 	dir := extract(t, "configurations.txtar")
 
 	linux, root := loadDir(t, dir, "linux", "amd64")
 	windows, _ := loadDir(t, dir, "windows", "arm64")
-	if linux.Fset == windows.Fset {
-		t.Fatal("Setup: the two configurations share one file set, so positions were not computed independently")
+	if start := treeOf(linux, "catalog.go"); start == token.NoPos || start == treeOf(windows, "catalog.go") {
+		t.Fatal("Setup: the two configurations share one tree of catalog.go, so positions were not computed independently")
 	}
 
 	first, _, err := inventoryOf(linux, root, os.ReadFile)
@@ -293,6 +313,7 @@ func TestRefIsTheSameUnderAnotherBuildConfiguration(t *testing.T) {
 }
 
 func TestRefSurvivesAnEditAboveTheDeclarationAndAFileRename(t *testing.T) {
+	t.Parallel()
 	dir := extract(t, "every-kind.txtar")
 	before, root := loadDir(t, dir, "linux", "amd64")
 	original, _, err := inventoryOf(before, root, os.ReadFile)

@@ -22,6 +22,7 @@ func interfaceEmitters() map[vocab.Code]Emitter {
 }
 
 func TestInterfaceKinds_reportEachShapeOnceUnderItsOwnCode(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		archive string
 		want    []string
@@ -75,6 +76,7 @@ func TestInterfaceKinds_reportEachShapeOnceUnderItsOwnCode(t *testing.T) {
 }
 
 func TestUnusedInterface_namesEveryImplementationAndWhereItIsWritten(t *testing.T) {
+	t.Parallel()
 	result := analysisOf(t, "interfaces-unused.txtar", asApplication, Consumers{}).findings(t, interfaceKinds)
 
 	found := findingOf(t, result.Findings, vocab.UnusedInterface, "Reader")
@@ -110,6 +112,7 @@ func TestUnusedInterface_namesEveryImplementationAndWhereItIsWritten(t *testing.
 }
 
 func TestUncalledInterfaceMethod_reportsTheInterfaceMethodAndNamesTheImplementation(t *testing.T) {
+	t.Parallel()
 	result := analysisOf(t, "interfaces-uncalled.txtar", asApplication, Consumers{}).findings(t, interfaceKinds)
 
 	found := findingOf(t, result.Findings, vocab.UncalledInterfaceMethod, "Store.Put")
@@ -135,6 +138,7 @@ func TestUncalledInterfaceMethod_reportsTheInterfaceMethodAndNamesTheImplementat
 }
 
 func TestUnusedSatisfactionAssertion_reportsTheAssertionWhileTheConcreteMethodFallsWithItsInterfaceMethod(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "interfaces-assertion.txtar", applicationConfig(), Consumers{})
 
 	result := computed(t, in, interfaceEmitters())
@@ -199,6 +203,7 @@ func retainedUnder(in *Input, class string) []string {
 }
 
 func TestUnusedSatisfactionAssertion_aPublishedInterfaceOfALibraryIsPossibleWhateverTheConsumers(t *testing.T) {
+	t.Parallel()
 	everyLoaded := Consumers{Declared: []string{"example.com/consumer"}, Loaded: []string{"example.com/consumer"}, Complete: true}
 	// The three assertions are roots of the one component of the type they assert, so
 	// every finding of it carries the confidence of the published one.
@@ -263,6 +268,7 @@ func TestTestOnlyUse_reportsAnInterfaceMethodOnlyATestCallsThroughTheInterface(t
 }
 
 func TestUnusedSatisfactionAssertion_anAssertionBetweenPublishedTypesOfALibraryIsNotReported(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		resolved config.Config
 		want     []int
@@ -297,6 +303,7 @@ func TestUnusedSatisfactionAssertion_anAssertionBetweenPublishedTypesOfALibraryI
 // An assertion an exemption retains is live, so no satisfaction-assertion finding
 // names it, and the run reports rather than refusing an emitter defect.
 func TestUnusedSatisfactionAssertion_anAssertionAnExemptionRetainedIsNotReported(t *testing.T) {
+	t.Parallel()
 	in := inputOf(t, "interfaces-assertion-retained.txtar", applicationConfig(), Consumers{})
 
 	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnusedSatisfactionAssertion: unusedSatisfactionAssertion})

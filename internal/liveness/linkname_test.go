@@ -10,6 +10,7 @@ import (
 )
 
 func TestEmbeddedNameIsTheUnqualifiedNameOfTheEmbeddedType(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		source string
 		want   string

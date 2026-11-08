@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -10,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -119,13 +121,14 @@ func TestAnUnwrittenOutputEndsTheRunWithItsRunClass(t *testing.T) {
 	t.Run("the-report", func(t *testing.T) {
 		t.Chdir(dir)
 		var stdout, stderr bytes.Buffer
-		code := invoke(t.Context(), []string{"analyze", "--target=.", "--report=" + filepath.Join(absent, "report.json")}, &stdout, &stderr)
+		report := filepath.Join(absent, "report.json")
+		code := invoke(t.Context(), []string{"analyze", "--target=.", "--report=" + report}, &stdout, &stderr)
 		if code != vocab.ExitFailure {
 			t.Fatalf("analyze to a missing directory = %d, want %d\nstderr:\n%s", code, vocab.ExitFailure, stderr.String())
 		}
 		wantOneClassLine(t, "analyze to a missing directory", stderr.String(), prefix)
-		if !strings.Contains(stderr.String(), "absent/report.json") {
-			t.Errorf("analyze to a missing directory wrote %q, want the report path named", stderr.String())
+		if !strings.Contains(stderr.String(), report) {
+			t.Errorf("analyze to a missing directory wrote %q, want the report path %s named", stderr.String(), report)
 		}
 	})
 	t.Run("the-baseline", func(t *testing.T) {
@@ -306,6 +309,71 @@ func TestASignalledRunEndsWithTheInterruptedRunClass(t *testing.T) {
 				t.Errorf("a run sent %s wrote a report (stat: %v), want none", tc.named, err)
 			}
 		})
+	}
+}
+
+// toolchainStub builds a program to stand for the go command on every operating
+// system: it creates started and then waits to be killed.
+func toolchainStub(t *testing.T, started string) (dir string) {
+	t.Helper()
+	src := t.TempDir()
+	for name, body := range map[string]string{
+		"go.mod":  "module example.com/stub\n\ngo 1.27.1\n",
+		"main.go": "package main\n\nimport (\n\t\"os\"\n\t\"time\"\n)\n\nfunc main() {\n\t_ = os.WriteFile(" + strconv.Quote(started) + ", nil, 0o600)\n\ttime.Sleep(time.Minute)\n}\n",
+	} {
+		if err := os.WriteFile(filepath.Join(src, name), []byte(body), 0o600); err != nil {
+			t.Fatalf("Setup: %v", err)
+		}
+	}
+	dir = t.TempDir()
+	stub := filepath.Join(dir, "go")
+	if runtime.GOOS == "windows" {
+		stub += ".exe"
+	}
+	build := exec.Command("go", "build", "-o", stub, ".")
+	build.Dir = src
+	build.Env = append(os.Environ(), "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH, "GOWORK=off", "GOFLAGS=")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("Setup: build the toolchain stub: %v\n%s", err, out)
+	}
+	return dir
+}
+
+// An interrupt cancels the run's context, which is how every operating system's
+// interrupt reaches the analysis (signal.NotifyContext in governed), so this covers on
+// Windows what the signalled run above covers where a process can be signalled.
+func TestARunCancelledWhileTheToolchainRunsEndsWithTheInterruptedRunClass(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"go.mod":           "module example.com/app\n\ngo 1.27.1\n",
+		"main.go":          "package main\n\nfunc main() {}\n",
+		repositoryDocument: `{"target": {"kind": "application"}}`,
+	})
+	started := filepath.Join(t.TempDir(), "started")
+	t.Setenv("PATH", toolchainStub(t, started))
+	t.Chdir(dir)
+	reportPath := filepath.Join(t.TempDir(), "report.json")
+
+	ctx, cancel := context.WithCancelCause(t.Context())
+	go func() {
+		for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+			if _, err := os.Stat(started); err == nil {
+				break
+			}
+		}
+		cancel(errors.New("interrupt"))
+	}()
+	var stdout, stderr bytes.Buffer
+	code := invoke(ctx, []string{"analyze", "--target=.", "--report=" + reportPath}, &stdout, &stderr)
+
+	if _, err := os.Stat(started); err != nil {
+		t.Fatalf("the analysis never ran the toolchain (stat: %v)\nstderr:\n%s", err, stderr.String())
+	}
+	if code != vocab.ExitFailure {
+		t.Fatalf("a run cancelled while the toolchain runs = %d, want %d\nstderr:\n%s", code, vocab.ExitFailure, stderr.String())
+	}
+	wantOneClassLine(t, "a run cancelled while the toolchain runs", stderr.String(), vocab.RunFailurePrefix+vocab.RunInterruptedRun+": interrupt")
+	if _, err := os.Stat(reportPath); !os.IsNotExist(err) {
+		t.Errorf("a run cancelled while the toolchain runs wrote a report (stat: %v), want none", err)
 	}
 }
 
