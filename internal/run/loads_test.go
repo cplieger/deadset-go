@@ -12,6 +12,7 @@ import (
 	"weak"
 
 	"github.com/cplieger/deadset-go/v2/internal/findings"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -73,7 +74,7 @@ func main() { println(describe(0, &Store{}), Fast, platform()) }
 // loadedTree runs the load stage over the platform tree.
 func loadedTree(t *testing.T, root string) *Loaded {
 	t.Helper()
-	loaded, err := Load(t.Context(), &Request{Target: root, Config: defaultConfig()})
+	loaded, err := Load(t.Context(), &Request{Scope: scope.Document{Target: scope.Module{Path: root}}, Config: defaultConfig()})
 	if err != nil {
 		t.Fatalf("Setup: Load(%s) = %v", root, err)
 	}

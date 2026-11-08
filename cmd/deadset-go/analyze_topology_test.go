@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
@@ -37,7 +38,11 @@ func TestAnalyzeCountsAWorkspaceReaderWhateverNamesTheScope(t *testing.T) {
 	base := readerWorkspace(t)
 	app := filepath.Join(base, "app")
 	scopeDocument := filepath.Join(base, "scope.json")
-	writeDocument(t, base, "scope.json", `{"target": {"path": "`+app+`"}}`)
+	encoded, err := json.Marshal(map[string]map[string]string{"target": {"path": app}})
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	writeDocument(t, base, "scope.json", string(encoded))
 
 	for _, invocation := range []struct {
 		name string

@@ -8,12 +8,14 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strconv"
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/jsondoc"
 	"github.com/cplieger/deadset-go/v2/internal/run"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -102,16 +104,30 @@ func (f *configuredFlags) unread(ctx context.Context, stderr io.Writer, err erro
 
 // request is [configuredFlags.resolution] as the request a verb asks one analysis
 // for.
+//
+// The scope resolves first, so a target or scope document the invocation names that
+// cannot be read is refused as such before a configuration is looked for in it.
 func (f *configuredFlags) request(ctx context.Context, stderr io.Writer) (req *run.Request, code int) {
+	document := ""
+	if f.scope != nil {
+		document = *f.scope
+	}
+	resolvedScope, err := scope.Resolve(ctx, *f.target, document)
+	if errors.Is(err, scope.ErrNamed) {
+		return nil, f.unread(ctx, stderr, err)
+	}
+	if err != nil {
+		return nil, failed(ctx, stderr, err)
+	}
 	resolved, code := f.resolution(ctx, stderr)
 	if code != vocab.ExitClean {
 		return nil, code
 	}
-	req = &run.Request{Config: resolved.Config, Provenance: resolved.Provenance, Target: *f.target}
-	if f.scope != nil {
-		req.Scope = *f.scope
+	invoked, err := os.Getwd()
+	if err != nil {
+		return nil, failed(ctx, stderr, fmt.Errorf("resolve the directory the run was invoked from: %w", err))
 	}
-	return req, vocab.ExitClean
+	return &run.Request{Config: resolved.Config, Provenance: resolved.Provenance, Scope: resolvedScope, ScopeNamed: document != "", RunDir: invoked}, vocab.ExitClean
 }
 
 // parsed parses the flags of a verb that reads a configuration and takes no

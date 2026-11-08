@@ -58,10 +58,7 @@ func unanswered() *run.Self {
 func reportOfArchive(t *testing.T, files map[string]string) *report.Report {
 	t.Helper()
 
-	// A report names the target relative to the directory the run was invoked from
-	// and can name no path outside it, so a run over a fixture is invoked from the
-	// fixture. Every test that calls this is therefore sequential.
-	t.Chdir(sharedModule(t, files))
+	sharedModule(t, files)
 	return cachedEnvelope(t.Context(), t, files)
 }
 
@@ -71,14 +68,11 @@ func reportOfArchive(t *testing.T, files map[string]string) *report.Report {
 func reportOfDir(t *testing.T, dir string) *report.Report {
 	t.Helper()
 
-	// A report names the target relative to the directory the run was invoked from
-	// and can name no path outside it, so a run over a fixture is invoked from the
-	// fixture. Every test that calls this is therefore sequential.
-	t.Chdir(dir)
 	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
+	resolved.RunDir = dir
 	envelope, err := reportOf(t.Context(), resolved, corpusAnswered())
 	if err != nil {
 		t.Fatalf("reportOf(%s) = error %v, want the report of the run", dir, err)
@@ -118,6 +112,7 @@ func suppressedArchive(document string) map[string]string {
 }
 
 func TestReportOfSuppressesTheFindingAnIgnoreEntryBindsAndCountsIt(t *testing.T) {
+	t.Parallel()
 	envelope := reportOfArchive(t, suppressedArchive(`{"target": {"kind": "application"}}`))
 
 	// The entry bound a declaration the sweep would otherwise have reported, so
@@ -140,6 +135,7 @@ func TestReportOfSuppressesTheFindingAnIgnoreEntryBindsAndCountsIt(t *testing.T)
 }
 
 func TestReportOfCarriesTheStaleEntryAsItsOwnRecord(t *testing.T) {
+	t.Parallel()
 	envelope := reportOfArchive(t, suppressedArchive(`{"target": {"kind": "application"}}`))
 
 	if len(envelope.StaleSuppressions) != 1 {
@@ -221,6 +217,7 @@ func TestReportOfPublishesTheFindingADeclaredEdgeNamesInsideItsEvaluation(t *tes
 }
 
 func TestReportOfNamesTheDependencyADeletionOrphans(t *testing.T) {
+	t.Parallel()
 	dir := writeModule(t, map[string]string{
 		"go.mod": "module example.com/app\n\ngo 1.27.1\n\n" +
 			"require example.com/dep v1.0.0\n\nreplace example.com/dep => ./dep\n",
@@ -242,6 +239,7 @@ func TestReportOfNamesTheDependencyADeletionOrphans(t *testing.T) {
 }
 
 func TestReportOfReportsAConfiguredRootThatNamesNothing(t *testing.T) {
+	t.Parallel()
 	dir := findingsFixture(t, `{"target": {"kind": "application"}, "roots": {"patterns": ["go://example.com/app#Absent"]}}`)
 	envelope := reportOfDir(t, dir)
 
@@ -300,6 +298,7 @@ func TestReportOfSitesAConfiguredRootInTheDocumentThatDeclaredIt(t *testing.T) {
 }
 
 func TestReportOfSitesAConfiguredRootAtTheConventionalDocumentWhereNoDocumentOfTheTargetDeclaredIt(t *testing.T) {
+	t.Parallel()
 	// The central configuration is kept outside the repository, so no path relative
 	// to the target names it and the finding has no document of the run to carry. It
 	// carries the repository configuration's conventional path instead, which is the
@@ -315,12 +314,12 @@ func TestReportOfSitesAConfiguredRootAtTheConventionalDocumentWhereNoDocumentOfT
 		t.Fatalf("Setup: write %s: %v", central, err)
 	}
 
-	t.Chdir(dir)
 	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage,
 		[]string{"--target=" + dir, "--central=" + central}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
+	resolved.RunDir = dir
 	envelope, err := reportOf(t.Context(), resolved, corpusAnswered())
 	if err != nil {
 		t.Fatalf("reportOf(%s) = error %v, want the report of the run", dir, err)
@@ -334,6 +333,7 @@ func TestReportOfSitesAConfiguredRootAtTheConventionalDocumentWhereNoDocumentOfT
 }
 
 func TestReportOfNamesEveryMemberTheContractRequiresOfTheRun(t *testing.T) {
+	t.Parallel()
 	envelope := reportOfArchive(t, findingsArchive(`{"target": {"kind": "application"}}`))
 
 	contractVersion, schemaVersions := contractVersions(t)
@@ -405,6 +405,7 @@ func mixedModule(t *testing.T) string {
 }
 
 func TestReportOfRoundTripsThroughTheJSONDocumentItWrites(t *testing.T) {
+	t.Parallel()
 	envelope := reportOfDir(t, mixedModule(t))
 
 	// Both halves of the presence rule are in the document, or the round trip
@@ -445,6 +446,7 @@ func TestReportOfRoundTripsThroughTheJSONDocumentItWrites(t *testing.T) {
 }
 
 func TestReportOfWritesEveryTextLineThePublishedExpressionDefines(t *testing.T) {
+	t.Parallel()
 	envelope := reportOfArchive(t, suppressedArchive(`{"target": {"kind": "application"}}`))
 
 	var written bytes.Buffer
@@ -495,12 +497,13 @@ func publishedFindingLine(t *testing.T) *regexp.Regexp {
 }
 
 func TestReportOfRefusesAnEnvelopeNamingNoConformanceResult(t *testing.T) {
+	t.Parallel()
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
-	t.Chdir(dir)
 	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
+	resolved.RunDir = dir
 
 	built, err := reportOf(t.Context(), resolved, unanswered())
 	if err == nil {
@@ -518,16 +521,16 @@ func TestReportOfRefusesAnEnvelopeNamingNoConformanceResult(t *testing.T) {
 }
 
 func TestReportOfRefusesATargetTheRunDirectoryDoesNotContain(t *testing.T) {
+	t.Parallel()
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
-	// The run is invoked from a directory of its own, which does not contain the
-	// target: the report format admits no path that climbs out of the run
-	// directory, so the run fails rather than writing a document no reader admits.
-	t.Chdir(t.TempDir())
-
 	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
+	// The run is invoked from a directory of its own, which does not contain the
+	// target: the report format admits no path that climbs out of the run
+	// directory, so the run fails rather than writing a document no reader admits.
+	resolved.RunDir = t.TempDir()
 
 	_, err := reportOf(t.Context(), resolved, corpusAnswered())
 	if failures := failure.Of(err); failures[0].Class != vocab.RunUnreportablePath {
@@ -719,6 +722,7 @@ func livenessWritten(t *testing.T, envelope *report.Report) map[string]bool {
 }
 
 func TestReportOfOmitsTheLivenessRelationWhereTheContractForbidsIt(t *testing.T) {
+	t.Parallel()
 	envelope := reportOfDir(t, livenessModule(t))
 
 	rule := livenessAbsentRule(t)
@@ -828,6 +832,7 @@ func implementationsWritten(t *testing.T, document []byte) map[string]json.RawMe
 }
 
 func TestReportOfWritesAnEmptyImplementationListForAnInterfaceNothingImplements(t *testing.T) {
+	t.Parallel()
 	envelope := reportOfDir(t, writeModule(t, map[string]string{
 		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
 		"app.go": "package main\n\n" +

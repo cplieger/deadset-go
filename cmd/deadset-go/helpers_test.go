@@ -118,13 +118,8 @@ func (f *fixture) findings(ctx context.Context) (*run.Findings, error) {
 	return f.set, f.analyzeErr
 }
 
-// report assembles the archive's report on the first request and answers the same
-// envelope to every later one.
-//
-// A report names the target relative to the directory the run was invoked from, so the
-// caller has already made the archive's own directory the working directory; every
-// caller of one archive therefore names the same directory and reads an envelope built
-// under it.
+// report assembles the archive's report on the first request, run from the archive's
+// own directory, and answers the same envelope to every later one.
 func (f *fixture) report(ctx context.Context) (*report.Report, error) {
 	dir, err := f.directory()
 	if err != nil {
@@ -137,6 +132,7 @@ func (f *fixture) report(ctx context.Context) (*report.Report, error) {
 			f.reportErr = fmt.Errorf("resolve the configuration of %s = %d: %s", dir, code, refused.String())
 			return
 		}
+		req.RunDir = dir
 		f.envelope, f.reportErr = reportOf(ctx, req, corpusAnswered())
 	})
 	return f.envelope, f.reportErr

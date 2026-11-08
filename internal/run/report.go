@@ -78,7 +78,7 @@ func (f *Findings) Report(self *Self) (*report.Report, error) {
 // target is what a report says was analyzed: the declared kind, the target's
 // directory as a reader resolves it, and the name the target publishes itself under.
 func (l *Loaded) target() (report.Target, error) {
-	root, err := relativeToRunDirectory(l.Root)
+	root, err := relativeTo(l.req.RunDir, l.Root)
 	if err != nil {
 		return report.Target{}, err
 	}
@@ -125,7 +125,7 @@ func (l *Loaded) consumersReported() ([]report.LoadedConsumer, error) {
 		if i >= len(l.Declared) {
 			return nil, fmt.Errorf("the load answered %d consumers and the scope declared %d", len(held), len(l.Declared))
 		}
-		path, err := relativeToRunDirectory(l.Declared[i].Path)
+		path, err := relativeTo(l.req.RunDir, l.Declared[i].Path)
 		if err != nil {
 			return nil, err
 		}

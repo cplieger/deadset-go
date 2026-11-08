@@ -9,7 +9,6 @@ package run
 import (
 	"context"
 	"fmt"
-	"os"
 	"slices"
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
@@ -30,11 +29,15 @@ import (
 type Request struct {
 	Provenance config.Provenance
 
-	// Target is the target root as the invocation spelled it, and Scope the scope
-	// document it named, empty where it named none.
-	Target string
-	Scope  string
-	Config config.Config
+	// RunDir is the absolute directory the run was invoked from, which every path
+	// a report names is relative to.
+	RunDir string
+
+	// Scope is the resolved scope ([scope.Resolve]), and ScopeNamed whether a scope
+	// document the invocation named gave it.
+	Scope      scope.Document
+	Config     config.Config
+	ScopeNamed bool
 }
 
 // Loaded is the load stage: the scope, the matrix the target builds, one load and
@@ -77,12 +80,9 @@ type Loaded struct {
 // reports dead what only that configuration uses. A configured string is
 // unmatched only where no configuration matched it.
 func Load(ctx context.Context, req *Request) (*Loaded, error) {
-	document, err := scope.Resolve(ctx, req.Target, req.Scope)
-	if err != nil {
-		return nil, err
-	}
-	if req.Scope == "" {
-		document.Consumers = nameable(document.Consumers)
+	document := req.Scope
+	if !req.ScopeNamed {
+		document.Consumers = nameable(req.RunDir, document.Consumers)
 	}
 	top, err := load.Discover(ctx, document)
 	if err != nil {
@@ -226,27 +226,23 @@ func matrixOf(cfg *config.Config, top *load.Topology) ([]load.Configuration, boo
 }
 
 // nameable is the consumers a workspace lists that a report can name, the ones
-// under the run directory. The others are workspace readers, which the topology
-// counts whatever named the scope.
-func nameable(consumers []scope.Module) []scope.Module {
+// under the run directory runDir. The others are workspace readers, which the
+// topology counts whatever named the scope.
+func nameable(runDir string, consumers []scope.Module) []scope.Module {
 	return slices.DeleteFunc(slices.Clone(consumers), func(consumer scope.Module) bool {
-		_, err := relativeToRunDirectory(consumer.Path)
+		_, err := relativeTo(runDir, consumer.Path)
 		return err != nil
 	})
 }
 
-// relativeToRunDirectory is one path relative to the directory the run was invoked
-// from, with forward slashes, so two runs over one tree on two machines write the
+// relativeTo is one path relative to the directory the run was invoked from,
+// runDir, with forward slashes, so two runs over one tree on two machines write the
 // same bytes; a path outside that directory has no spelling a report carries.
-func relativeToRunDirectory(path string) (string, error) {
-	invoked, err := os.Getwd()
-	if err != nil {
-		return "", fmt.Errorf("resolve the directory the run was invoked from: %w", err)
-	}
-	relative, inside := scope.Within(invoked, path)
+func relativeTo(runDir, path string) (string, error) {
+	relative, inside := scope.Within(runDir, path)
 	if !inside {
 		return "", failure.Wrap(vocab.RunUnreportablePath, fmt.Errorf("a report names %s relative to the directory the run was invoked from, and %s does not contain it",
-			path, invoked))
+			path, runDir))
 	}
 	return relative, nil
 }

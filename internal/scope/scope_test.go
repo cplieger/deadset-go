@@ -1,6 +1,7 @@
 package scope
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -400,5 +401,30 @@ func TestWithinPlacesAPathByItsNamesThenWhereBothResolve(t *testing.T) {
 				t.Errorf("Within(%s, %s) = %q, %v, want %q, %v", tc.dir, tc.path, got, inside, tc.want, tc.inside)
 			}
 		})
+	}
+}
+
+func TestAnInputTheInvocationNamesThatCannotBeReadIsErrNamed(t *testing.T) {
+	_, refused := writeDocument(t, `{"target": {"path": "."}, "unknown": true}`)
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0o600); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	for _, tc := range []struct {
+		name, dir, document string
+	}{
+		{"an absent target", filepath.Join(t.TempDir(), "absent"), ""},
+		{"a target that is a file", file, ""},
+		{"an absent scope document", ".", filepath.Join(t.TempDir(), "missing.json")},
+		{"a scope document the schema refuses", ".", refused},
+	} {
+		if _, err := Resolve(t.Context(), tc.dir, tc.document); !errors.Is(err, ErrNamed) {
+			t.Errorf("Resolve(%s) = _, %v, want an error matching ErrNamed", tc.name, err)
+		}
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := Resolve(ctx, ".", refused); errors.Is(err, ErrNamed) {
+		t.Errorf("Resolve(a cancelled read) = _, %v, want no ErrNamed: the invocation is not at fault", err)
 	}
 }

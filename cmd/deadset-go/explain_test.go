@@ -254,6 +254,7 @@ func TestExplainAnswersTheThreeSpellingsTheContractsTableGivesTheRequest(t *test
 }
 
 func TestExplainAnswersFromTheAnalysisTheReportIsBuiltFrom(t *testing.T) {
+	t.Parallel()
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
 
 	// Every reported symbol of the run gets the reported answer, and the code the

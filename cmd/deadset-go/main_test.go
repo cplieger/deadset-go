@@ -913,6 +913,7 @@ func TestPrintRootsFailures(t *testing.T) {
 		name       string
 		files      map[string]string
 		target     string
+		code       string
 		wantStderr []string
 	}{
 		{
@@ -922,13 +923,15 @@ func TestPrintRootsFailures(t *testing.T) {
 				"app.go":           "package main\n\nfunc main() {\n\tvar n int =\n\t_ = n\n}\n",
 				repositoryDocument: `{"target": {"kind": "application"}}`,
 			},
+			code:       "failure",
 			wantStderr: []string{"1 error", "app.go:5:", "expected"},
 		},
 		{
 			name:       "a_target_the_filesystem_does_not_hold",
 			files:      map[string]string{repositoryDocument: `{"target": {"kind": "application"}}`},
 			target:     "absent",
-			wantStderr: []string{"scope: target", "absent", "no such file or directory"},
+			code:       "usage",
+			wantStderr: []string{"scope: target", "absent", "usage: "},
 		},
 	}
 
@@ -944,8 +947,8 @@ func TestPrintRootsFailures(t *testing.T) {
 
 			var stdout, stderr bytes.Buffer
 			args := []string{"print-roots", "--target=" + target, "--config=" + filepath.Join(dir, repositoryDocument)}
-			if got := invoke(t.Context(), args, &stdout, &stderr); got != codes["failure"] {
-				t.Errorf("invoke(%q) = %d, want %d\nstderr: %q", args, got, codes["failure"], stderr.String())
+			if got := invoke(t.Context(), args, &stdout, &stderr); got != codes[tc.code] {
+				t.Errorf("invoke(%q) = %d, want %d\nstderr: %q", args, got, codes[tc.code], stderr.String())
 			}
 			if stdout.Len() != 0 {
 				t.Errorf("invoke(%q) stdout = %q, want empty: a run that produced no root set prints none", args, stdout.String())

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -113,19 +112,20 @@ func everyDocument(i int, documents, name string) []string {
 // because a write is the only thing that could touch the tree; a deleted candidate or
 // a changed visibility would be a byte the hash reads.
 func TestAnalysisLeavesTheTreeByteIdentical(t *testing.T) {
+	t.Parallel()
 	// A report names the target relative to the directory the run was invoked from
-	// and can name no path outside it, so the run is invoked from the directory the
-	// generated trees are written under. The documents go in a sibling of those
-	// trees, which is inside the run directory and outside every target.
+	// and can name no path outside it, so each run is invoked from the directory the
+	// trees are written under. The documents go in a sibling of those trees, which is
+	// inside the run directory and outside every target.
 	base := t.TempDir()
 	documents := filepath.Join(base, "documents")
 	if err := os.MkdirAll(documents, 0o750); err != nil {
 		t.Fatalf("Setup: create %s: %v", documents, err)
 	}
-	t.Chdir(base)
 
 	for i, shape := range treeShapes() {
 		t.Run(fmt.Sprintf("%+v", shape), func(t *testing.T) {
+			t.Parallel()
 			dir, err := os.MkdirTemp(base, "module")
 			if err != nil {
 				t.Fatalf("create a directory for the module: %v", err)
@@ -135,10 +135,9 @@ func TestAnalysisLeavesTheTreeByteIdentical(t *testing.T) {
 			}
 
 			before := hashTree(t, dir)
-			var stdout, stderr bytes.Buffer
-			code := invoke(t.Context(), everyDocument(i, documents, filepath.Base(dir)), &stdout, &stderr)
-			if code != vocab.ExitClean && code != vocab.ExitFindings {
-				t.Fatalf("analyze over the module = %d, want a verdict about its findings\nstderr: %s", code, stderr.String())
+			run := invokedIn(t, base, everyDocument(i, documents, filepath.Base(dir))...)
+			if run.code != vocab.ExitClean && run.code != vocab.ExitFindings {
+				t.Fatalf("analyze over the module = %d, want a verdict about its findings\nstderr: %s", run.code, run.stderr)
 			}
 
 			after := hashTree(t, dir)
