@@ -739,16 +739,15 @@ func (g *intrafunc) resultsOf(c int, w *walk, fn *walked, held *parts) error {
 	if results == nil || symbol == nil {
 		return nil
 	}
-	at := 0
+	at, count := 0, results.NumFields()
 	for _, field := range results.List {
 		names := max(len(field.Names), 1)
 		for offset := range names {
 			index := at + offset
-			if usedAtAnySite(w.calls[fn.id], index, results) {
+			if usedAtAnySite(w.calls[fn.id], index, count) {
 				continue
 			}
 			position := field.Type.Pos()
-			name := resultName(field, offset, index)
 			if offset < len(field.Names) {
 				position = field.Names[offset].Pos()
 			}
@@ -756,29 +755,29 @@ func (g *intrafunc) resultsOf(c int, w *walk, fn *walked, held *parts) error {
 			if err != nil {
 				return err
 			}
+			name, described := resultName(field, offset, index, count)
 			held.hold(c, w.one, position, fn.id, newPart(vocab.UnusedResult, symbol.Ref, resultSubject, name, site,
-				resultSubject+" "+name+" is discarded at every call site"))
+				resultSubject+" "+described+" is discarded at every call site"))
 		}
 		at += names
 	}
 	return nil
 }
 
-// resultName is what a message calls one result: the name the signature gives it,
-// and its one-based ordinal where the signature leaves it unnamed.
-func resultName(field *ast.Field, offset, index int) string {
+// resultName is the name a finding gives one result of count, and how its message
+// describes it: the position, the count and the type as the signature spells them,
+// after the result's own name where the signature gives one. A text line renders
+// the kind before the name, so an unnamed one reads "result 1 of 2 (Info)".
+func resultName(field *ast.Field, offset, index, count int) (name, described string) {
+	place := strconv.Itoa(index+1) + " of " + strconv.Itoa(count) + " (" + types.ExprString(field.Type) + ")"
 	if offset < len(field.Names) && field.Names[offset].Name != blankName {
-		return field.Names[offset].Name
+		return field.Names[offset].Name, field.Names[offset].Name + ", " + place + ","
 	}
-	return resultSubject + " " + strconv.Itoa(index+1)
+	return place, place
 }
 
 // usedAtAnySite reports whether any call site uses the result at one index.
-func usedAtAnySite(sites []*callSite, index int, results *ast.FieldList) bool {
-	count := 0
-	for _, field := range results.List {
-		count += max(len(field.Names), 1)
-	}
+func usedAtAnySite(sites []*callSite, index, count int) bool {
 	for _, site := range sites {
 		if site.uses(index, count) {
 			return true

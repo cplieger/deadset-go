@@ -66,7 +66,7 @@ func TestLoadReadsTheFilesCgoAloneExcludesAndLeavesTheRestIgnored(t *testing.T) 
 	// Each of these is ignored for a reason cgo does not decide alone, so each
 	// stays in the population the build configurations reason about.
 	ignored := baseNames(pkg.IgnoredFiles)
-	for _, name := range []string{"unselected.go", "bridge_windows.go", "only_cgo_tag.go", "helper_plan9.c"} {
+	for _, name := range []string{"unselected.go", "bridge_plan9.go", "only_cgo_tag.go", "helper_plan9.c"} {
 		if !slices.Contains(ignored, name) {
 			t.Errorf("IgnoredFiles = %v, want it to contain %s", ignored, name)
 		}
@@ -179,12 +179,12 @@ func TestLoadResolvesAnImportOnlyAFileImportingCWrites(t *testing.T) {
 func TestCgoOnlyDecidesWhichIgnoredFilesTheCheckReads(t *testing.T) {
 	ctxt := cgoEnabledContext(new(HostConfiguration()))
 	cases := map[string]bool{
-		"bridge.go":         true,
-		"bridge_tagged.go":  true,
-		"bridge_windows.go": false,
-		"only_cgo_tag.go":   false,
-		"unselected.go":     false,
-		"helper_plan9.c":    false,
+		"bridge.go":        true,
+		"bridge_tagged.go": true,
+		"bridge_plan9.go":  false,
+		"only_cgo_tag.go":  false,
+		"unselected.go":    false,
+		"helper_plan9.c":   false,
 	}
 	for name, want := range cases {
 		t.Run(name, func(t *testing.T) {

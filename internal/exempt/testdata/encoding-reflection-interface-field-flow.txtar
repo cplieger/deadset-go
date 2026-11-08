@@ -1,0 +1,96 @@
+A package whose values reach an encoder through an interface-typed field of a
+struct the program encodes: through a conversion, a call of two results, a map
+index a call of two results assigns, a slice a call returns, a variable, and the
+struct handed on in another interface-typed field. A value stored the same way in a
+struct nothing encodes reaches no encoder, and a value a generic function converts
+to its type parameter is stored as the type argument, not as itself.
+
+-- go.mod --
+module example.com/flow
+
+go 1.27.0
+-- flow.go --
+package flow
+
+import (
+	"encoding/json"
+	"io"
+)
+
+// Body is what Send encodes, through the request that carries it.
+type Body struct {
+	To    any
+	Items []any
+	Named map[string]any
+	Inner Inner
+}
+
+// Inner carries one more value.
+type Inner struct {
+	Held any
+}
+
+// Request carries a body in an interface-typed field.
+type Request struct {
+	Body any
+}
+
+// Kept is like Body, and nothing encodes it.
+type Kept struct {
+	To any
+}
+
+// Converted reaches To through a conversion to any.
+type Converted struct{ A string }
+
+// Paired reaches To through a call of two results.
+type Paired struct{ B string }
+
+// Indexed reaches Named through a call of two results assigned to a map index.
+type Indexed struct{ C string }
+
+// Listed reaches Items through a slice a call returns.
+type Listed struct{ D string }
+
+// Held reaches Inner.Held through a variable.
+type Held struct{ E string }
+
+// Unsent is stored in Kept, which nothing encodes.
+type Unsent struct{ F string }
+
+// Raw is converted to the type parameter of retype before it is stored.
+type Raw struct{ G string }
+
+// Retyped is the type argument retype's conversion stores.
+type Retyped struct{ G string }
+
+func retype[T ~struct{ G string }](b *Body, r Raw) { b.To = T(r) }
+
+func paired(s string) (*Paired, error) { return &Paired{B: s}, nil }
+
+func indexed(s string) (any, error) { return &Indexed{C: s}, nil }
+
+func listed() []any { return []any{&Listed{D: "d"}} }
+
+func send(w io.Writer, r *Request) error { return json.NewEncoder(w).Encode(r.Body) }
+
+// Send fills a body and encodes it.
+func Send(w io.Writer, s string) (*Kept, error) {
+	var b Body
+	var err error
+	b.To = any(&Converted{A: s})
+	if b.To, err = paired(s); err != nil {
+		return nil, err
+	}
+	b.Named = map[string]any{}
+	if b.Named["c"], err = indexed(s); err != nil {
+		return nil, err
+	}
+	b.Items = listed()
+	var v any = &Held{E: s}
+	b.Inner.Held = v
+	retype[Retyped](&b, Raw{G: s})
+	k := &Kept{}
+	k.To = &Unsent{F: s}
+	return k, send(w, &Request{Body: b})
+}

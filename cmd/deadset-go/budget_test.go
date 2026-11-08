@@ -37,7 +37,8 @@ func firstParty(module string) bool {
 // arrives because x/tools started requiring it is therefore admitted without an edit
 // here, and a third-party one that arrives any other way is reported.
 func TestTheBuiltBinaryLinksNothingOutsideTheBudget(t *testing.T) {
-	binary := analyzerBinary(t)
+	t.Parallel()
+	binary := commandBinary(t)
 
 	linked := linkedModules(t, binary)
 	if !slices.Contains(linked, toolsModule) {
@@ -62,6 +63,7 @@ func TestTheBuiltBinaryLinksNothingOutsideTheBudget(t *testing.T) {
 // whether the module file declares another one. A new direct requirement is a
 // decision about the budget, and this is where that decision is refused.
 func TestTheModuleFileDeclaresNoDirectRequirementOutsideTheBudget(t *testing.T) {
+	t.Parallel()
 	for _, module := range directRequirements(t, moduleFilePath(t)) {
 		if firstParty(module) || slices.Contains(testOnlyModules, module) {
 			continue

@@ -213,7 +213,13 @@ func TestLoadKeysOnePositionAcrossVariantsAndReportsEveryDiagnostic(t *testing.T
 	}
 	files := make([]string, 0, len(loadErr.Diagnostics))
 	for _, d := range loadErr.Diagnostics {
-		file, _, ok := strings.Cut(d.Position, ":")
+		// The position ends ":line:col", and its file may hold a volume's colon.
+		file, ok := d.Position, true
+		for range 2 {
+			i := strings.LastIndexByte(file, ':')
+			ok = ok && i >= 0
+			file = file[:max(i, 0)]
+		}
 		if !ok {
 			t.Errorf("diagnostic %+v carries no file:line:col position", d)
 			continue

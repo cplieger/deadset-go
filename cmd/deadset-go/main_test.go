@@ -52,6 +52,10 @@ func runTests(m *testing.M) int {
 	defer func() { _ = os.RemoveAll(base) }()
 
 	fixtureBase = base
+	if packageDir, err = os.Getwd(); err != nil {
+		fmt.Fprintf(os.Stderr, "read the package directory: %v\n", err)
+		return 1
+	}
 	return m.Run()
 }
 

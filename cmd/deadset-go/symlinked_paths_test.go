@@ -3,7 +3,6 @@ package main
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -24,12 +23,10 @@ func symlink(t *testing.T, target, link string) {
 func analyzedFrom(t *testing.T, run string, args ...string) string {
 	t.Helper()
 
-	t.Chdir(run)
 	reportPath := filepath.Join(t.TempDir(), "report.json")
-	var stdout, stderr strings.Builder
-	code := invoke(t.Context(), append([]string{"analyze", "--report=" + reportPath}, args...), &stdout, &stderr)
-	if code != vocab.ExitClean && code != vocab.ExitFindings {
-		t.Fatalf("analyze %q from %s = %d, want a verdict\nstderr:\n%s", args, run, code, stderr.String())
+	ran := invokedIn(t, run, append([]string{"analyze", "--report=" + reportPath}, args...)...)
+	if ran.code != vocab.ExitClean && ran.code != vocab.ExitFindings {
+		t.Fatalf("analyze %q from %s = %d, want a verdict\nstderr:\n%s", args, run, ran.code, ran.stderr)
 	}
 	return reportPath
 }
@@ -40,6 +37,7 @@ func analyzedFrom(t *testing.T, run string, args ...string) string {
 // case spells the run directory and the target two different ways, so only
 // resolving both decides that one holds the other.
 func TestAReportNamesATargetSpelledThroughASymbolicLinkWhereItResolves(t *testing.T) {
+	t.Parallel()
 	base := t.TempDir()
 	parent, name := filepath.Join(base, "real"), "app"
 	dir := filepath.Join(parent, name)
@@ -79,6 +77,7 @@ func TestAReportNamesATargetSpelledThroughASymbolicLinkWhereItResolves(t *testin
 // directory holding both are reported where they resolve, below the run directory
 // the link's target is, and the consumer's references count.
 func TestAReportNamesAConsumerSpelledThroughASymbolicLinkWhereItResolves(t *testing.T) {
+	t.Parallel()
 	dir := archiveModule(t, "findings-ledger/layout-through-a-consumers-generic.txtar")
 	alias := filepath.ToSlash(filepath.Join(t.TempDir(), "alias"))
 	symlink(t, dir, alias)
@@ -100,6 +99,7 @@ func TestAReportNamesAConsumerSpelledThroughASymbolicLinkWhereItResolves(t *test
 // A configured root's document spelled through a link is sited in the target where
 // the document resolves.
 func TestAConfiguredRootsDocumentSpelledThroughASymbolicLinkIsSitedWhereItResolves(t *testing.T) {
+	t.Parallel()
 	document := filepath.Join("sub", "other.json")
 	dir := writeModule(t, map[string]string{
 		"go.mod": "module example.com/app\n\ngo 1.27.1\n",

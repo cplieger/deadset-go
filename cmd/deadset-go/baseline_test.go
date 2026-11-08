@@ -198,8 +198,9 @@ func baselineFixpointModule(t *testing.T) string {
 }
 
 func TestAnalyzeWritesTheBaselineFixpointAndNoDocumentRow(t *testing.T) {
+	t.Parallel()
 	dir := baselineFixpointModule(t)
-	baseline := path.Join(dir, core.BaselineFileName)
+	baseline := filepath.Join(dir, core.BaselineFileName)
 	runAnalyze(t, dir, "--baseline-write="+baseline)
 
 	body, err := os.ReadFile(baseline)
@@ -225,8 +226,9 @@ func TestAnalyzeWritesTheBaselineFixpointAndNoDocumentRow(t *testing.T) {
 }
 
 func TestAnalyzeReadsBackTheBaselineItWroteWithNoStaleRow(t *testing.T) {
+	t.Parallel()
 	dir := baselineFixpointModule(t)
-	baseline := path.Join(dir, core.BaselineFileName)
+	baseline := filepath.Join(dir, core.BaselineFileName)
 	runAnalyze(t, dir, "--baseline-write="+baseline)
 
 	got := runAnalyze(t, dir)
@@ -249,8 +251,9 @@ func TestAnalyzeReadsBackTheBaselineItWroteWithNoStaleRow(t *testing.T) {
 }
 
 func TestAnalyzeWritesItsOwnRowsAndKeepsTheOtherSchemesRows(t *testing.T) {
+	t.Parallel()
 	dir := baselineFixpointModule(t)
-	baseline := path.Join(dir, core.BaselineFileName)
+	baseline := filepath.Join(dir, core.BaselineFileName)
 	const other = `{"code": "DS1301", "symbol": "ts://@example/app/src/a.ts#A.b", "path": "src/a.ts", "reason": "recorded by deadset-ts 7.0.0"}`
 	if err := os.WriteFile(baseline, []byte(`{"baseline": [`+other+`]}`), 0o600); err != nil {
 		t.Fatalf("Setup: write %s: %v", baseline, err)
@@ -279,8 +282,9 @@ func TestAnalyzeWritesItsOwnRowsAndKeepsTheOtherSchemesRows(t *testing.T) {
 // A row of a scheme no analyzer of the run implements is kept unread, and the
 // document orders its rows by their schemes compared bytewise.
 func TestAnalyzeKeepsAThirdSchemesRowInBytewiseSchemeOrder(t *testing.T) {
+	t.Parallel()
 	dir := baselineFixpointModule(t)
-	baseline := path.Join(dir, core.BaselineFileName)
+	baseline := filepath.Join(dir, core.BaselineFileName)
 	const rows = `{"code": "DS1301", "symbol": "ts://@example/app/src/a.ts#A.b", "path": "src/a.ts", "reason": "recorded by deadset-ts 7.0.0"},
   {"code": "DS1001", "symbol": "js://example/app/a.js#A", "path": "a.js", "reason": "recorded by a third analyzer"}`
 	if err := os.WriteFile(baseline, []byte(`{"baseline": [`+rows+`]}`), 0o600); err != nil {
@@ -310,9 +314,10 @@ func TestAnalyzeKeepsAThirdSchemesRowInBytewiseSchemeOrder(t *testing.T) {
 // while a write over a document it cannot read is refused with the failure code
 // and leaves it as it was.
 func TestAMalformedBaselineIsAUsageErrorAndAWriteOverOneAFailure(t *testing.T) {
+	t.Parallel()
 	const malformed = `{"baseline": [{"symbol": "go://example.com/app#spare"}]}`
 	dir := baselineFixpointModule(t)
-	if err := os.WriteFile(path.Join(dir, core.BaselineFileName), []byte(malformed), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, core.BaselineFileName), []byte(malformed), 0o600); err != nil {
 		t.Fatalf("Setup: write the target's baseline: %v", err)
 	}
 	if got := runAnalyze(t, dir); got.code != vocab.ExitUsage {

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"slices"
 
+	"github.com/cplieger/deadset-go/v2/internal/failure"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/mod/modfile"
 )
 
@@ -103,15 +105,16 @@ func workspaceFile(dir string) (string, bool) {
 // readWorkspace returns the absolute path of every module the workspace file
 // lists, in its order, parsed from one reading of its bytes by the toolchain's
 // own parser. A relative entry resolves against the file's own directory, as
-// the toolchain resolves it.
+// the toolchain resolves it. A file it cannot read or parse is the project's
+// unreadable configuration.
 func readWorkspace(file string) ([]string, error) {
 	content, err := os.ReadFile(file)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s: %w", errWorkspace, file, err)
+		return nil, failure.Wrap(vocab.SetupUnreadableConfiguration, fmt.Errorf("%w: %s: %w", errWorkspace, file, err))
 	}
 	work, err := modfile.ParseWork(file, content, nil)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %s: %w", errWorkspace, file, err)
+		return nil, failure.Wrap(vocab.SetupUnreadableConfiguration, fmt.Errorf("%w: %s: %w", errWorkspace, file, err))
 	}
 	base := filepath.Dir(file)
 	used := make([]string, 0, len(work.Use))
@@ -120,7 +123,13 @@ func readWorkspace(file string) ([]string, error) {
 		if use.Path == "" {
 			continue
 		}
-		used = append(used, filepath.Clean(absolute(use.Path, base)))
+		// The toolchain joins every entry filepath.IsAbs refuses to the file's
+		// directory, a rooted entry on Windows included, so [absolute] is not its rule.
+		dir := use.Path
+		if !filepath.IsAbs(dir) {
+			dir = filepath.Join(base, dir)
+		}
+		used = append(used, filepath.Clean(dir))
 	}
 	return used, nil
 }

@@ -1,5 +1,5 @@
-github.com/cplieger/deadset-spec/v8 v8.0.0-dev.42 h1:kNnMrONpeUy8pNL0b/GyKIfGcOME+lTXnfjeegBBpsQ=
-github.com/cplieger/deadset-spec/v8 v8.0.0-dev.42/go.mod h1:QslhekMoqUrAWTNM0rG/qi1YMV9qi4ZVcC6dt75Qu+U=
+github.com/cplieger/deadset-spec/v8 v8.0.0-dev.44 h1:8cB8W3E3t7i4uGryTD1U99KMRr4c3I45PjumxQm3hg0=
+github.com/cplieger/deadset-spec/v8 v8.0.0-dev.44/go.mod h1:QslhekMoqUrAWTNM0rG/qi1YMV9qi4ZVcC6dt75Qu+U=
 github.com/cplieger/go/filesafe v1.0.0-dev.4 h1:05SeUM+hKRzdu4qROsLC3edb06CK44VEm+9L2Gs34xM=
 github.com/cplieger/go/filesafe v1.0.0-dev.4/go.mod h1:Pu9t7x6mRQwXm09EdWaQvVK++fpjgGP7+58XiMxGYks=
 github.com/dlclark/regexp2 v1.11.0 h1:G/nrcoOa7ZXlpoa/91N3X7mM3r8eIlMBBJZvsz/mxKI=

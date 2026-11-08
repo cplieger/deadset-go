@@ -1,14 +1,12 @@
 package main
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -17,13 +15,6 @@ import (
 	"github.com/cplieger/deadset-spec/v8/corpus"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
-)
-
-// goldenVariable is the gate that rewrites the committed results document, and
-// goldenCommand the invocation a failure names.
-const (
-	goldenVariable = "UPDATE_GOLDEN"
-	goldenCommand  = "UPDATE_GOLDEN=1 go test ./cmd/deadset-go/ -run TestConformanceCorpus"
 )
 
 // committedGaps decodes the declared gaps committed beside this source.
@@ -43,90 +34,6 @@ func readCommitted(t *testing.T, name string) []byte {
 		t.Fatalf("Setup: read %s: %v", name, err)
 	}
 	return body
-}
-
-// TestConformanceCorpus answers the pinned corpus through the built command as
-// a process, and holds the run to the committed results document.
-func TestConformanceCorpus(t *testing.T) {
-	binary := unstampedBinary(t)
-	gaps := committedGaps(t)
-	results, err := corpus.Run(t.Context(), spec.Corpus,
-		corpus.Analyzer{Command: []string{binary}, Language: string(vocab.Go)},
-		corpus.Options{Gaps: gaps.Gaps, Jobs: runtime.GOMAXPROCS(0), Scratch: t.TempDir()})
-	if err != nil {
-		t.Fatalf("corpus.Run = %v, want the results document", err)
-	}
-	got, err := corpus.Encode(results)
-	if err != nil {
-		t.Fatalf("corpus.Encode: %v", err)
-	}
-	if os.Getenv(goldenVariable) == "1" {
-		if err := os.WriteFile(filepath.Join("..", "..", conformanceResultsFile), got, 0o600); err != nil {
-			t.Fatalf("write %s: %v", conformanceResultsFile, err)
-		}
-	}
-
-	for _, row := range results.Fixtures {
-		if row.Result == corpus.Pending {
-			continue
-		}
-		if row.Result == corpus.Fail && row.Message != "" {
-			t.Errorf("%s: %s", row.Fixture, row.Message)
-		}
-		for _, held := range row.Expectations {
-			if held.Result == corpus.Fail || held.Message == corpus.StaleGap {
-				t.Errorf("%s %s %s: %s", row.Fixture, held.Symbol, held.Result, held.Message)
-			}
-		}
-		for _, one := range row.Unexpected {
-			t.Errorf("%s: %s at %s:%d, which no expectation names", row.Fixture, one.Report, one.File, one.Line)
-		}
-	}
-	if results.Result != corpus.Pass {
-		t.Errorf("the corpus result is %s, want pass", results.Result)
-	}
-	if err := corpus.Validate(corpus.ResultsSchemaPath, got); err != nil {
-		t.Errorf("the results document does not meet %s: %v", corpus.ResultsSchemaPath, err)
-	}
-	fixtures, err := corpus.Load(spec.Corpus)
-	if err != nil {
-		t.Fatalf("Setup: corpus.Load: %v", err)
-	}
-	for _, err := range corpus.Unanswered(fixtures, results, gaps.Gaps) {
-		t.Error(err)
-	}
-	if committed := readCommitted(t, conformanceResultsFile); !bytes.Equal(committed, got) {
-		t.Errorf("%s differs from this run (regenerate with %s)", conformanceResultsFile, goldenCommand)
-	}
-}
-
-// unstampedBinary builds the command with no version control state stamped, so
-// the version it states is the development version at every commit.
-func unstampedBinary(t *testing.T) string {
-	t.Helper()
-	binary := filepath.Join(t.TempDir(), "deadset-go")
-	build := exec.CommandContext(t.Context(), "go", "build", "-buildvcs=false", "-trimpath", "-o", binary, ".")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("Setup: build the command: %v\n%s", err, out)
-	}
-	return binary
-}
-
-// TestCommandLineVectors runs every command-line vector naming this analyzer
-// through the built command; a pending case reports what it awaits.
-func TestCommandLineVectors(t *testing.T) {
-	results, err := corpus.RunCases(t.Context(), spec.Vectors, name, corpus.Analyzer{Command: []string{unstampedBinary(t)}})
-	if err != nil {
-		t.Fatalf("corpus.RunCases = %v", err)
-	}
-	if len(results) == 0 {
-		t.Fatal("no command-line vector names this analyzer")
-	}
-	for _, result := range results {
-		if result.Result == corpus.Fail {
-			t.Errorf("%s: %s", result.Case, result.Message)
-		}
-	}
 }
 
 // TestCorpusAnswerReadsTheCommittedConformanceDocuments pins the record every
@@ -204,6 +111,7 @@ func TestTheDeclaredGapsNameTheProductAndTheCorpusTheyAnswer(t *testing.T) {
 // command writes to the committed record: the corpus version, the result and the
 // digest of the committed results document.
 func TestTheBinaryReportsTheConformanceRecordItCommitted(t *testing.T) {
+	t.Parallel()
 	results := readCommitted(t, conformanceResultsFile)
 	digest := sha256.Sum256(results)
 	var committed corpus.Results
@@ -223,7 +131,7 @@ func TestTheBinaryReportsTheConformanceRecordItCommitted(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Setup: write the target module: %v", err)
 	}
-	binary := analyzerBinary(t)
+	binary := commandBinary(t)
 	command := exec.CommandContext(t.Context(), binary, "analyze", "--target=./app", "--report=report.json")
 	command.Dir = base
 	var stderr strings.Builder

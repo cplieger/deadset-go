@@ -157,7 +157,7 @@ func (s *errorsDuckScan) sites(conversions []facts.Conversion) ([]errorsDuckSite
 // sites leads to error, once per chain, held by the declarations holding the sites.
 // A method a site to error retains unheld is not retained again.
 func (s *errorsDuckScan) chains(all []facts.Conversion) error {
-	chains := facts.NewChains(all, func(i int) string {
+	chains := facts.NewChains(s.in.Result.Fset, all, func(i int) string {
 		holder, _ := s.in.declarationAt(&all[i], all[i].Site)
 		return string(holder)
 	})

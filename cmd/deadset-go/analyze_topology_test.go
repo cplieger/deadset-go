@@ -33,6 +33,7 @@ func readerWorkspace(t *testing.T) string {
 // whatever names the scope: a scope document the invocation names, the one deadset
 // always passes, included.
 func TestAnalyzeCountsAWorkspaceReaderWhateverNamesTheScope(t *testing.T) {
+	t.Parallel()
 	base := readerWorkspace(t)
 	app := filepath.Join(base, "app")
 	scopeDocument := filepath.Join(base, "scope.json")
@@ -57,15 +58,18 @@ func TestAnalyzeCountsAWorkspaceReaderWhateverNamesTheScope(t *testing.T) {
 
 // A module the workspace lists whose go.mod the toolchain cannot read fails every
 // load through that workspace, the target's own included, so the run ends with the
-// toolchain's refusal naming that file and writes no report.
+// setup failure naming that file and writes no report.
 func TestAnalyzeEndsOnAWorkspaceMemberWhoseModuleFileTheToolchainCannotRead(t *testing.T) {
+	t.Parallel()
 	base := readerWorkspace(t)
 	writeDocument(t, base, "reader/go.mod", "module example.com/reader\n\ngo 1.27.1\n\nrequire example.com/app v0.0.0\n\nunknowndirective x\n")
 
 	got := runAnalyze(t, filepath.Join(base, "app"))
-	if got.code != vocab.ExitFailure || !strings.Contains(got.stderr, "reader/go.mod") {
-		t.Errorf("analyze with an unreadable workspace member = %d, stderr %q, want %d naming reader/go.mod", got.code, got.stderr, vocab.ExitFailure)
+	named := filepath.FromSlash("reader/go.mod")
+	if got.code != vocab.ExitFailure || !strings.Contains(got.stderr, named) {
+		t.Errorf("analyze with an unreadable workspace member = %d, stderr %q, want %d naming %s", got.code, got.stderr, vocab.ExitFailure, named)
 	}
+	wantOneClassLine(t, "analyze with an unreadable workspace member", got.stderr, vocab.SetupFailurePrefix+vocab.SetupUnreadableConfiguration+": ")
 	if _, err := os.Stat(got.reportPath); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("analyze with an unreadable workspace member left the report %s (%v), want none", got.reportPath, err)
 	}
@@ -74,6 +78,7 @@ func TestAnalyzeEndsOnAWorkspaceMemberWhoseModuleFileTheToolchainCannotRead(t *t
 // A target a go.mod above it governs is a directory of that module: the run
 // analyzes it and judges no directive of a module file outside the target.
 func TestAnalyzeReadsATargetAModuleFileAboveGoverns(t *testing.T) {
+	t.Parallel()
 	base := writeModule(t, map[string]string{
 		"go.mod":                    "module example.com/app\n\ngo 1.27.1\n",
 		"lib/lib.go":                "package lib\n\n// Unused is what nothing calls.\nfunc Unused() {}\n",
@@ -97,6 +102,7 @@ func TestAnalyzeReadsATargetAModuleFileAboveGoverns(t *testing.T) {
 // target root that holds no go.mod is a consumer of that module, as one of a
 // module rooted at the target is, so a declaration only it references is live.
 func TestAnalyzeCountsTheUnderscoredPackagesOfAWalkedModule(t *testing.T) {
+	t.Parallel()
 	base := writeModule(t, map[string]string{
 		repositoryDocument:             `{"target": {"kind": "application"}}`,
 		"app/go.mod":                   "module example.com/app\n\ngo 1.27.1\n",
@@ -122,6 +128,7 @@ func TestAnalyzeCountsTheUnderscoredPackagesOfAWalkedModule(t *testing.T) {
 // finds below a target root holding no go.mod is a consumer of that module, as one
 // below a target root holding a go.mod is, so a declaration only it calls is live.
 func TestAnalyzeCountsAnUnderscoreConsumerModuleOfAWalkedTarget(t *testing.T) {
+	t.Parallel()
 	base := writeModule(t, map[string]string{
 		repositoryDocument: `{"target": {"kind": "application"}}`,
 		"app/go.mod":       "module example.com/app\n\ngo 1.27.1\n",

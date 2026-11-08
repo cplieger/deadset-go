@@ -223,147 +223,32 @@ func packageLevelTypes(file *ast.File) map[ast.Expr]bool {
 	return held
 }
 
-// localizer rewrites a type a source reading checked into the loaded program's
-// types. The reading checks the package anew, so a type the package declares is a
-// second object there, which no type of the program is identical to; it is replaced
-// by the loaded declaration of the same name. A type with no loaded counterpart, one
-// declared in a function body or a type parameter, cannot be stated.
+// localizer states a type a source reading checked in the loaded program's types.
+// The reading checks the package anew, so a type the package declares is a second
+// object there, which no type of the program is identical to.
 type localizer struct {
 	pkg *types.Package
 }
 
-// of is t in the loaded program's types, and false where it has no counterpart.
+// of is t in the loaded program's types ([facts.Restated]), and false where it has
+// no counterpart.
 func (l localizer) of(t types.Type) (types.Type, bool) {
-	switch u := t.(type) {
-	case *types.Basic:
-		return u, true
-	case *types.Alias:
-		return l.of(types.Unalias(u))
-	case *types.Named:
-		return l.named(u)
-	case *types.Pointer:
-		elem, ok := l.of(u.Elem())
-		return types.NewPointer(elem), ok
-	case *types.Slice:
-		elem, ok := l.of(u.Elem())
-		return types.NewSlice(elem), ok
-	case *types.Array:
-		elem, ok := l.of(u.Elem())
-		return types.NewArray(elem, u.Len()), ok
-	case *types.Chan:
-		elem, ok := l.of(u.Elem())
-		return types.NewChan(u.Dir(), elem), ok
-	case *types.Map:
-		key, keyOK := l.of(u.Key())
-		elem, elemOK := l.of(u.Elem())
-		return types.NewMap(key, elem), keyOK && elemOK
-	case *types.Signature:
-		if sig, ok := l.signature(u); ok {
-			return sig, true
+	return facts.Restated(t, func(p *types.Package) *types.Package {
+		if p.Path() == l.pkg.Path() {
+			return l.pkg
 		}
-	case *types.Struct:
-		return l.structure(u)
-	case *types.Interface:
-		if iface, ok := l.iface(u); ok {
-			return iface, true
-		}
-	}
-	return nil, false
+		return p
+	})
 }
 
-// named is one defined type in the loaded program's types.
-func (l localizer) named(n *types.Named) (types.Type, bool) {
-	obj := n.Obj()
-	if obj.Pkg() == nil || obj.Pkg() == l.pkg || obj.Pkg().Path() != l.pkg.Path() {
-		return n, true
-	}
-	if obj.Parent() != obj.Pkg().Scope() {
-		return nil, false
-	}
-	loaded, declared := l.pkg.Scope().Lookup(obj.Name()).(*types.TypeName)
-	if !declared {
-		return nil, false
-	}
-	args := n.TypeArgs()
-	if args.Len() == 0 {
-		return loaded.Type(), true
-	}
-	stated := make([]types.Type, args.Len())
-	for i := range args.Len() {
-		arg, ok := l.of(args.At(i))
-		if !ok {
-			return nil, false
-		}
-		stated[i] = arg
-	}
-	instance, err := types.Instantiate(nil, loaded.Type(), stated, false)
-	return instance, err == nil
-}
-
-// packageOf is the loaded package where pkg is the reading of it, so a stated type
-// keeps no reading reachable, and pkg otherwise.
-func (l localizer) packageOf(pkg *types.Package) *types.Package {
-	if pkg != nil && pkg.Path() == l.pkg.Path() {
-		return l.pkg
-	}
-	return pkg
-}
-
-// signature is one function type in the loaded program's types.
-func (l localizer) signature(sig *types.Signature) (*types.Signature, bool) {
-	if sig.TypeParams().Len() > 0 {
-		return nil, false
-	}
-	params, paramsOK := l.tuple(sig.Params())
-	results, resultsOK := l.tuple(sig.Results())
-	return types.NewSignatureType(nil, nil, nil, params, results, sig.Variadic()), paramsOK && resultsOK
-}
-
-// tuple is one parameter or result list in the loaded program's types.
-func (l localizer) tuple(t *types.Tuple) (*types.Tuple, bool) {
-	vars := make([]*types.Var, t.Len())
-	for i := range t.Len() {
-		v := t.At(i)
-		stated, ok := l.of(v.Type())
-		if !ok {
-			return nil, false
-		}
-		vars[i] = types.NewParam(v.Pos(), l.packageOf(v.Pkg()), v.Name(), stated)
-	}
-	return types.NewTuple(vars...), true
-}
-
-// structure is one struct type with no name in the loaded program's types.
-func (l localizer) structure(st *types.Struct) (types.Type, bool) {
-	fields := make([]*types.Var, st.NumFields())
-	tags := make([]string, st.NumFields())
-	for i := range st.NumFields() {
-		field := st.Field(i)
-		stated, ok := l.of(field.Type())
-		if !ok {
-			return nil, false
-		}
-		fields[i] = types.NewField(field.Pos(), l.packageOf(field.Pkg()), field.Name(), stated, field.Embedded())
-		tags[i] = st.Tag(i)
-	}
-	return types.NewStruct(fields, tags), true
-}
-
-// iface is one interface type in the loaded program's types, its methods those of
-// its method set, embedded ones included.
+// iface is one interface type in the loaded program's types.
 func (l localizer) iface(iface *types.Interface) (*types.Interface, bool) {
-	if !iface.IsMethodSet() {
+	stated, ok := l.of(iface)
+	if !ok {
 		return nil, false
 	}
-	methods := make([]*types.Func, 0, iface.NumMethods())
-	for m := range iface.Methods() {
-		sig, ok := l.signature(m.Signature())
-		if !ok {
-			return nil, false
-		}
-		methods = append(methods, types.NewFunc(m.Pos(), l.pkg, m.Name(), sig))
-	}
-	return types.NewInterfaceType(methods, nil).Complete(), true
+	loaded, _ := stated.(*types.Interface)
+	return loaded, true
 }
 
 // assertedInterface is the interface an asserted type is in the loaded program's

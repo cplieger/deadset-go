@@ -96,6 +96,7 @@ func analyzedModules(t *testing.T) []*run.Findings {
 // which is the same assertion set the property has always made over one module and
 // costs nothing beyond rendering an explanation per symbol.
 func TestAnExplanationAgreesWithTheReport(t *testing.T) {
+	t.Parallel()
 	analyzed := analyzedModules(t)
 
 	rapid.Check(t, func(t *rapid.T) {

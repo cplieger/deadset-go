@@ -154,6 +154,43 @@ func TestLoadReadsTheUnderscoredPackagesOfTheModuleAsANestedConsumer(t *testing.
 	}
 }
 
+// An underscored package that only a test of the module imports is held once, on
+// the test side the build compiles it on, and an underscored package production
+// imports once, on the production side: a second, production copy would keep live
+// what only a test reaches.
+func TestLoadHoldsAnUnderscoredPackageTheBuildImportsOnlyOnItsSide(t *testing.T) {
+	stableToolchain(t)
+	root := writeTree(t, map[string]string{
+		"go.mod":         "module example.com/m\n\ngo 1.27.1\n",
+		"main.go":        "package main\n\nimport \"example.com/m/_x/built\"\n\nfunc main() { built.Run() }\n",
+		"p/p.go":         "package p\n\n// Helper is what the tested package calls.\nfunc Helper() {}\n",
+		"p/p_test.go":    "package p_test\n\nimport (\n\t\"testing\"\n\n\t\"example.com/m/_x/tested\"\n)\n\nfunc TestX(t *testing.T) { tested.Call() }\n",
+		"_x/tested/x.go": "package tested\n\nimport \"example.com/m/p\"\n\n// Call calls Helper.\nfunc Call() { p.Helper() }\n",
+		"_x/built/b.go":  "package built\n\n// Run is what main calls.\nfunc Run() {}\n",
+		"_x/alone/a.go":  "package alone\n\n// Alone is what nothing imports.\nfunc Alone() {}\n",
+	})
+	got, err := loadTree(t, root, ".")
+	if err != nil {
+		t.Fatalf("Load(a module with imported underscored packages) = _, %v, want no error", err)
+	}
+	side := map[Build]string{ConsumerBuild: "production", TestBuild: "test"}
+	var loaded []string
+	for _, consumer := range got.Nested {
+		for _, p := range consumer.Packages {
+			loaded = append(loaded, side[consumer.Build]+" "+p.PkgPath)
+		}
+	}
+	slices.Sort(loaded)
+	want := []string{
+		"production example.com/m/_x/alone",
+		"production example.com/m/_x/built",
+		"test example.com/m/_x/tested",
+	}
+	if !slices.Equal(loaded, want) {
+		t.Errorf("Load() held the nested packages %v, want %v", loaded, want)
+	}
+}
+
 // A module below a module-root target that replaces the target with its directory,
 // relative or absolute and below an underscore directory too, loads as a nested
 // consumer; one requiring a published version, or replacing it with another module,
@@ -300,11 +337,27 @@ func TestListErrorRendersTheFailureWithoutProgressLines(t *testing.T) {
 	}
 }
 
+func TestUnreadableConfigurationClassesOnlyAFileTheToolchainCannotParse(t *testing.T) {
+	parse := &listError{err: errors.New("err: exit status 1: stderr: go: errors parsing go.mod:\ngo.mod:5: unknown directive: bogus\n")}
+	refused := unreadableConfiguration(parse, "tool")
+	if refused == nil || refused.Failures[0].Class != vocab.SetupUnreadableConfiguration {
+		t.Fatalf("unreadableConfiguration(a parse refusal) = %v, want the setup failure %s", refused, vocab.SetupUnreadableConfiguration)
+	}
+	if want := "tool: go: errors parsing go.mod:\ngo.mod:5: unknown directive: bogus; "; !strings.HasPrefix(refused.Failures[0].Detail, want) {
+		t.Errorf("unreadableConfiguration(a parse refusal) detail = %q, want one opening %q", refused.Failures[0].Detail, want)
+	}
+	other := &listError{err: errors.New("err: exit status 1: stderr: go: go.mod requires go >= 1.99 (running go 1.27.3; GOTOOLCHAIN=local)\n")}
+	if refused := unreadableConfiguration(other, ""); refused != nil {
+		t.Errorf("unreadableConfiguration(a toolchain version refusal) = %v, want nil", refused)
+	}
+}
+
 func TestRebasedJoinsARelativePositionToThePrefix(t *testing.T) {
+	abs := filepath.Join(t.TempDir(), "main.go") + ":4:2"
 	for _, test := range []struct{ position, prefix, want string }{
 		{position: "main.go:4:2", prefix: "tool", want: "tool/main.go:4:2"},
 		{position: "main.go:4:2", prefix: "", want: "main.go:4:2"},
-		{position: "/abs/main.go:4:2", prefix: "tool", want: "/abs/main.go:4:2"},
+		{position: abs, prefix: "tool", want: abs},
 		{position: "", prefix: "tool", want: ""},
 	} {
 		if got := rebased(test.position, test.prefix); got != test.want {

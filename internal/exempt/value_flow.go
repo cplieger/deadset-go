@@ -88,7 +88,7 @@ type fieldWrites struct {
 func (f *encodingFlow) readFlow() {
 	in := f.kept.in
 	f.graph = flowGraph{
-		stored: newStoredTypes(f.edge.sites),
+		stored: newStoredTypes(f.edge.sites, f.typeArgs),
 		writes: fieldWrites{
 			assigned:   make(map[token.Position]bool),
 			every:      make(map[token.Position]bool),

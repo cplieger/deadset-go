@@ -205,10 +205,15 @@ func lexicallyWithin(dir, path string) (string, bool) {
 	return filepath.ToSlash(relative), true
 }
 
-// absolute is path, resolved against base where it is relative.
+// absolute is path, resolved against base where it is relative. A path rooted
+// with no volume, which only Windows has, takes the volume of base: it names no
+// directory below base, and the current drive is not the document's.
 func absolute(path, base string) string {
-	if filepath.IsAbs(path) {
+	switch {
+	case filepath.IsAbs(path):
 		return path
+	case path != "" && os.IsPathSeparator(path[0]):
+		return filepath.Join(filepath.VolumeName(base), path)
 	}
 	return filepath.Join(base, path)
 }

@@ -6,6 +6,8 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"path/filepath"
+	"strconv"
 	"testing"
 )
 
@@ -115,13 +117,20 @@ func TestPositionsColumnRefusesAPositionOutsideTheFile(t *testing.T) {
 }
 
 func TestRenderCountsUTF16UnitsFromWhereTheColumnsDirectiveTakesEffect(t *testing.T) {
+	// A path rooted with no volume is relative on Windows, so the absolute file
+	// takes the volume of the working directory there.
+	elsewhere, err := filepath.Abs("/elsewhere/x.go")
+	if err != nil {
+		t.Fatal(err)
+	}
 	for name, test := range map[string]struct{ line, want string }{
 		"a two-byte rune before an inline directive":  {line: `var s = "é"; /*line main.go:30:40*/ var t = 1`, want: "main.go:30:45"},
 		"a two-byte rune after an inline directive":   {line: `var s = 1; /*line main.go:30:40*/ var u = "é"; var t = 1`, want: "main.go:30:58"},
 		"a two-byte rune in an inline directive":      {line: `/*line é.go:30:40*/ var t = 1`, want: "é.go:30:45"},
 		"a directive's text in a string literal":      {line: `var s = "é /*line x.go:1:1*/"; var t = 1`, want: "main.go:3:36"},
 		"a directive on the line above":               {line: "//line main.go:30:40\nvar s = \"é\"; var t = 1", want: "main.go:30:57"},
-		"a directive naming a file outside the root":  {line: `var s = "é"; /*line /elsewhere/x.go:30:40*/ var t = 1`, want: "main.go:3:49"},
+		"a directive naming a file outside the root":  {line: `var s = "é"; /*line ../elsewhere/x.go:30:40*/ var t = 1`, want: "main.go:3:51"},
+		"a directive naming an absolute file outside": {line: `var s = "é"; /*line ` + elsewhere + `:30:40*/ var t = 1`, want: "main.go:3:" + strconv.Itoa(34+len(elsewhere))},
 		"an inline directive with no column":          {line: `var s = "é"; /*line main.go:30*/ var t = 1`, want: "main.go:30:1"},
 		"a line after an inline directive's own line": {line: "var s = \"é\"; /*line main.go:30:40*/\nvar t = 1", want: "main.go:31:5"},
 	} {

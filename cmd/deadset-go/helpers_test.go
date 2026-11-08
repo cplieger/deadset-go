@@ -1,15 +1,21 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
+	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/run"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
@@ -199,4 +205,66 @@ func mustDecode(t failureSink, what string, data []byte) *report.Report {
 		t.Fatalf("decode %s: %v", what, err)
 	}
 	return read
+}
+
+// built is the command built once for every test of the package that runs it as a
+// process, under the fixture directory, which outlives each of them.
+var built struct {
+	once sync.Once
+	path string
+	out  []byte
+	err  error
+}
+
+// packageDir is the directory of this package, read before any test runs: a test that
+// changes the working directory may be the first to ask for the command.
+var packageDir string
+
+// commandBinary builds the command on first use and answers the path of the binary.
+// It stamps no version control state, so the version it states is the development
+// version at every commit.
+func commandBinary(t *testing.T) string {
+	t.Helper()
+	if packageDir == "" {
+		t.Fatal("Setup: packageDir is unset, so the build would compile the working directory's package")
+	}
+	built.once.Do(func() {
+		name := "deadset-go"
+		if runtime.GOOS == "windows" {
+			name += ".exe"
+		}
+		built.path = filepath.Join(fixtureBase, "bin", name)
+		build := exec.Command("go", "build", "-buildvcs=false", "-trimpath", "-o", built.path, ".")
+		build.Dir = packageDir
+		built.out, built.err = build.CombinedOutput()
+	})
+	if built.err != nil {
+		t.Fatalf("Setup: build the command: %v\n%s", built.err, built.out)
+	}
+	return built.path
+}
+
+// invoked is what one invocation of the command wrote and the code it exited with.
+type invoked struct {
+	stdout, stderr string
+	code           int
+}
+
+// invokedIn runs one invocation of the built command as a process from dir, so the
+// directory the run is invoked from is that process's and the calling test can run
+// in parallel with others. The command is built without the race detector, which
+// multiplies an analysis's CPU time several times over: the in-process tests run the
+// same analysis under it, and the signal test re-executes this binary ([reexecuted]).
+func invokedIn(t *testing.T, dir string, args ...string) invoked {
+	t.Helper()
+	cmd := exec.CommandContext(t.Context(), commandBinary(t), args...)
+	cmd.Dir = dir
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		if _, exited := errors.AsType[*exec.ExitError](err); !exited {
+			t.Fatalf("Setup: run %q from %s: %v", args, dir, err)
+		}
+	}
+	return invoked{stdout: stdout.String(), stderr: stderr.String(), code: cmd.ProcessState.ExitCode()}
 }

@@ -123,6 +123,7 @@ func bindingLines(facts map[string]any) []string {
 // its number, not by the message name its tag carries; the gRPC and Connect files
 // bind their service and RPC and publish no fallback; the gogo file is a fallback.
 func TestFactsBindEveryGeneratedDeclarationToItsSchemaDeclaration(t *testing.T) {
+	t.Parallel()
 	desc := pingDescriptor()
 	shapes := map[string]string{
 		"a-byte-slice":        "var file_v1_ping_proto_rawDesc = " + byteLiteral(desc),
@@ -209,6 +210,7 @@ func platformProtobufModule(t *testing.T, configurations string) string {
 }
 
 func TestFactsBindAPlatformAlternativeOnceThroughItsLowestGeneratedFile(t *testing.T) {
+	t.Parallel()
 	linux, windows := linuxConfiguration, windowsConfiguration
 	written := make(map[string][]byte)
 	for order, configurations := range map[string]string{"linux-first": linux + "," + windows, "windows-first": windows + "," + linux} {
@@ -239,6 +241,7 @@ func TestFactsBindAPlatformAlternativeOnceThroughItsLowestGeneratedFile(t *testi
 // where the hand-written code of one configuration reaches the alternative that
 // configuration compiles, whichever alternative's file sorts last.
 func TestFactsGiveAPlatformAlternativesRecordTheStateOfEveryAlternative(t *testing.T) {
+	t.Parallel()
 	const request = "go://example.com/app/gen/v1#PingRequest"
 	for _, reaching := range []string{"linux", "windows"} {
 		t.Run("reached-on-"+reaching, func(t *testing.T) {
@@ -270,6 +273,7 @@ func TestFactsGiveAPlatformAlternativesRecordTheStateOfEveryAlternative(t *testi
 // A dead implementer carries the platform alternative of a declaration that only
 // its search reaches, though hand-written code reaches the other alternative.
 func TestADeadImplementerCarriesThePlatformAlternativeOnlyItsSearchReaches(t *testing.T) {
+	t.Parallel()
 	dir := platformProtobufModule(t, linuxConfiguration+","+windowsConfiguration)
 	grpcFile := filepath.Join(dir, "gen/v1/ping_grpc.pb.go")
 	body, err := os.ReadFile(grpcFile)
@@ -308,6 +312,7 @@ func TestADeadImplementerCarriesThePlatformAlternativeOnlyItsSearchReaches(t *te
 // RPC's implementer, whichever site converts its type; a method of a test file and
 // one the generated Unimplemented type supplies are none (bindings.8).
 func TestFactsPublishEachHandWrittenMethodAnsweringAServerMethodAsAnImplementer(t *testing.T) {
+	t.Parallel()
 	dir := protobufModule(t, "var file_v1_ping_proto_rawDesc = "+byteLiteral(pingDescriptor()))
 	grpcFile := filepath.Join(dir, "gen/v1/ping_grpc.pb.go")
 	body, err := os.ReadFile(grpcFile)

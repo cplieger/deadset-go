@@ -13,6 +13,7 @@ import (
 )
 
 func TestAPackageIsOneContainerWhateverFileAConfigurationAnchorsItAt(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		fixture string
 		ref     string
@@ -146,6 +147,7 @@ func runWorld(t *testing.T, files map[string]string, configurations ...string) c
 // reported (matrix.4) with its single-configuration code and confidence exactly
 // when every configuration compiling it reports it.
 func TestAMatrixGivesEachDeclarationTheContainersAndCapOfEveryConfigurationThatCompilesIt(t *testing.T) {
+	t.Parallel()
 	linux := `{"id": "linux-amd64", "os": "linux", "arch": "amd64"}`
 	windows := `{"id": "windows-amd64", "os": "windows", "arch": "amd64"}`
 	for _, world := range matrixWorlds() {

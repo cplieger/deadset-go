@@ -116,6 +116,21 @@ func (e *listError) Error() string {
 
 func (e *listError) Unwrap() error { return e.err }
 
+// parseRefusal opens the toolchain's message for a module or workspace file it
+// cannot parse, which it reports as no typed error.
+const parseRefusal = "errors parsing "
+
+// unreadableConfiguration is the setup failure of a listing the toolchain refused
+// because a module or workspace file does not parse, named from the directory the
+// listing ran in, rebased below prefix; it is nil for any other refusal.
+func unreadableConfiguration(listed *listError, prefix string) *failure.Error {
+	_, stderr, found := strings.Cut(listed.Error(), "stderr: ")
+	if !found || !strings.Contains(stderr, parseRefusal) {
+		return nil
+	}
+	return failure.Wrap(vocab.SetupUnreadableConfiguration, fmt.Errorf("%s: %s", rebased(".", prefix), strings.TrimSpace(stderr)))
+}
+
 // The toolchain's messages that name a package nothing provides and a module sum
 // file missing a checksum. The toolchain reports neither as a typed error, so its
 // message is the only record of which one a listing met.

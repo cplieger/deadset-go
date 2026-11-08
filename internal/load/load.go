@@ -143,17 +143,16 @@ type loader struct {
 }
 
 // readers loads into r every module whose references count as a declared
-// consumer's without being one: the nested modules, then the units' underscored
-// packages, then the packages each unit imports from outside its packages, then the
+// consumer's without being one: the nested modules, then the packages each unit
+// imports from outside its packages, then the units' underscored packages, then the
 // scripts of every module dropped so far, then the workspace readers.
+//
+// The imported packages come before the underscored ones: an underscored package a
+// unit's build compiles is held on the side that build compiles it, and a second,
+// production copy would keep live what only a test reaches.
 func (l *loader) readers(r *Result) error {
 	for i := range l.top.Nested {
 		if err := l.nested(r, &l.top.Nested[i], unitPrefix(l.top.Root, l.top.Nested[i].Dir)); err != nil {
-			return err
-		}
-	}
-	for i := range l.top.Units {
-		if err := l.underscored(r, &l.top.Units[i]); err != nil {
 			return err
 		}
 	}
@@ -164,6 +163,11 @@ func (l *loader) readers(r *Result) error {
 		}
 		if len(test) > 0 {
 			r.Nested = append(r.Nested, Consumer{ID: r.Units[i].Path, Packages: test, Build: TestBuild})
+		}
+	}
+	for i := range l.top.Units {
+		if err := l.underscored(r, &l.top.Units[i]); err != nil {
+			return err
 		}
 	}
 	for _, dropped := range r.Dropped {
@@ -333,10 +337,22 @@ func importedOutside(unit *Unit) (production, test []*packages.Package) {
 
 // underscored loads the packages of unit's own module below an underscore directory
 // ([underscoredPackages]), an example tree among them, as a nested consumer of the
-// unit. No build of the module compiles them, so where they do not load together
-// each loads alone, and one that does not load counts nothing.
+// unit, but for one [importedOutside] already holds for it. No build of the module
+// compiles the rest, so where they do not load together each loads alone, and one
+// that does not load counts nothing.
 func (l *loader) underscored(r *Result, unit *discoveredModule) error {
-	if len(unit.Underscored) == 0 {
+	held := make(map[string]bool)
+	for i := range r.Nested {
+		if r.Nested[i].ID == unit.Path {
+			for _, p := range r.Nested[i].Packages {
+				held[p.Dir] = true
+			}
+		}
+	}
+	patterns := slices.DeleteFunc(slices.Clone(unit.Underscored), func(pattern string) bool {
+		return held[filepath.Join(unit.Dir, filepath.FromSlash(pattern))]
+	})
+	if len(patterns) == 0 {
 		return nil
 	}
 	try := func(patterns []string) (bool, error) {
@@ -353,10 +369,10 @@ func (l *loader) underscored(r *Result, unit *discoveredModule) error {
 			return false, fmt.Errorf("load %s: %s: %w", l.c.ID, unit.Dir, err)
 		}
 	}
-	if loaded, err := try(unit.Underscored); loaded || err != nil || len(unit.Underscored) == 1 {
+	if loaded, err := try(patterns); loaded || err != nil || len(patterns) == 1 {
 		return err
 	}
-	for _, pattern := range unit.Underscored {
+	for _, pattern := range patterns {
 		if _, err := try([]string{pattern}); err != nil {
 			return err
 		}
@@ -394,7 +410,11 @@ func loadPackages(ctx context.Context, trees *syntaxCache, c *Configuration, spe
 	}
 	pkgs, err := trees.list(cfg, patterns)
 	if err != nil {
-		return nil, nil, &listError{err: err}
+		listed := &listError{err: err}
+		if refused := unreadableConfiguration(listed, spec.prefix); refused != nil {
+			return nil, nil, refused
+		}
+		return nil, nil, listed
 	}
 	if len(spec.patterns) == 0 {
 		pkgs = slices.DeleteFunc(pkgs, func(p *packages.Package) bool { return leftOutBelow(spec.dir, p.Dir) })

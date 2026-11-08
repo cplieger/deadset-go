@@ -41,9 +41,6 @@ const (
 	exitCodeOff = "off"
 )
 
-// documentMode is the mode every document this verb writes carries.
-const documentMode = 0o644
-
 // renderings is the suffix each format's file takes, and a format absent from it is
 // refused. The suffix is appended to the report path rather than replacing its
 // extension: the path may carry any extension or none, and appending is the one rule
@@ -367,7 +364,9 @@ func (a *invocation) verdict(r *report.Report, failOn vocab.Severity, stderr io.
 
 // publish renders one document whole and publishes it at path atomically: a
 // reader of the path sees the document of the previous run or this one, never a
-// truncated one, which a consumer could not tell from a malformed document.
+// truncated one, which a consumer could not tell from a malformed document. The
+// document takes the mode a new file takes in its directory: its readers need no
+// restriction, and filesafe refuses any mode option on Windows.
 func publish(ctx context.Context, path string, write func(w io.Writer) error) error {
 	var rendered bytes.Buffer
 	if err := write(&rendered); err != nil {
@@ -375,7 +374,7 @@ func publish(ctx context.Context, path string, write func(w io.Writer) error) er
 	}
 	absolute, err := filepath.Abs(path)
 	if err == nil {
-		_, err = filesafe.WriteFile(ctx, absolute, rendered.Bytes(), filesafe.WithMode(documentMode))
+		_, err = filesafe.WriteFile(ctx, absolute, rendered.Bytes())
 	}
 	if err != nil {
 		return failure.Wrap(vocab.RunUnwrittenOutput, fmt.Errorf("write %s: %w", path, err))

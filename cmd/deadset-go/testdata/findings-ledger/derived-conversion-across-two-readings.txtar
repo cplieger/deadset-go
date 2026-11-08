@@ -1,0 +1,166 @@
+A target of two modules: m declares the shapes and hands them out as interfaces,
+and b, which requires m, asserts interfaces whose methods name m's own Label. Each
+module reads lib on its own, so a site an assertion in b derives pairs a shape of
+m's reading with an interface of b's. Square reaches Namer from a Shaper whose
+method names no type of lib, Circle reaches Titler from a Sizer whose method names
+Label too. b also asserts an interface it declares itself, an interface literal,
+an instance of m's generic Getter at Label and an instance of its own generic
+pairer at *Label, each naming Label inside a composite type. Every method the
+assertions reach is live.
+
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- m/go.mod --
+module example.com/m
+
+go 1.27
+-- m/lib/lib.go --
+// Package lib declares the shapes, the interfaces they reach and the label they name.
+package lib
+
+// Label is what a namer answers.
+type Label struct{ Text string }
+
+// Shaper is what Square is handed out as.
+type Shaper interface{ Area() int }
+
+// Sizer is what Circle is handed out as, and its method names Label.
+type Sizer interface{ Size() Label }
+
+// Namer is what b asserts on a Shaper, and its method names Label.
+type Namer interface{ Name() Label }
+
+// Titler is what b asserts on a Sizer, and its method names Label.
+type Titler interface{ Title() Label }
+
+// Getter is what b asserts at Label on a Shaper.
+type Getter[T any] interface{ Get() T }
+
+// Square is handed out as a Shaper.
+type Square struct{}
+
+// Area makes Square a Shaper.
+func (Square) Area() int { return 4 }
+
+// Name is reached only through b's assertion of Namer.
+func (Square) Name() Label { return Label{Text: "square"} }
+
+// Triangle is handed out as a Shaper.
+type Triangle struct{}
+
+// Area makes Triangle a Shaper.
+func (Triangle) Area() int { return 3 }
+
+// Caption is reached only through the interface b declares.
+func (Triangle) Caption() []*Label { return nil }
+
+// Hexagon is handed out as a Shaper.
+type Hexagon struct{}
+
+// Area makes Hexagon a Shaper.
+func (Hexagon) Area() int { return 6 }
+
+// Tag is reached only through b's interface literal.
+func (Hexagon) Tag(map[string]Label) func() Label { return nil }
+
+// Pentagon is handed out as a Shaper.
+type Pentagon struct{}
+
+// Area makes Pentagon a Shaper.
+func (Pentagon) Area() int { return 5 }
+
+// Get is reached only through b's assertion of Getter[Label].
+func (Pentagon) Get() Label { return Label{} }
+
+// Octagon is handed out as a Shaper.
+type Octagon struct{}
+
+// Area makes Octagon a Shaper.
+func (Octagon) Area() int { return 8 }
+
+// Pair is reached only through b's assertion of its pairer[*Label].
+func (Octagon) Pair() (*Label, error) { return nil, nil }
+
+// Circle is handed out as a Sizer.
+type Circle struct{}
+
+// Size makes Circle a Sizer.
+func (Circle) Size() Label { return Label{Text: "1"} }
+
+// Title is reached only through b's assertion of Titler.
+func (Circle) Title() Label { return Label{Text: "circle"} }
+-- m/src/src.go --
+// Package src hands out the shapes.
+package src
+
+import "example.com/m/lib"
+
+// Square returns a Square as a Shaper.
+func Square() lib.Shaper { return lib.Square{} }
+
+// Shapes returns the shapes b asserts its own interfaces on, as Shapers.
+func Shapes() []lib.Shaper {
+	return []lib.Shaper{lib.Triangle{}, lib.Hexagon{}, lib.Pentagon{}, lib.Octagon{}}
+}
+
+// Circle returns a Circle as a Sizer.
+func Circle() lib.Sizer { return lib.Circle{} }
+-- m/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/m/src"
+)
+
+func main() {
+	fmt.Println(src.Square().Area(), src.Circle().Size().Text)
+	for _, s := range src.Shapes() {
+		fmt.Println(s.Area())
+	}
+}
+-- b/go.mod --
+module example.com/b
+
+go 1.27
+
+require example.com/m v0.0.0
+
+replace example.com/m => ../m
+-- b/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/m/lib"
+	"example.com/m/src"
+)
+
+type captioner interface{ Caption() []*lib.Label }
+
+type pairer[T any] interface{ Pair() (T, error) }
+
+func main() {
+	for _, s := range src.Shapes() {
+		if c, ok := s.(captioner); ok {
+			fmt.Println(c.Caption())
+		}
+		if t, ok := s.(interface{ Tag(map[string]lib.Label) func() lib.Label }); ok {
+			fmt.Println(t.Tag(nil))
+		}
+		if g, ok := s.(lib.Getter[lib.Label]); ok {
+			fmt.Println(g.Get().Text)
+		}
+		if p, ok := s.(pairer[*lib.Label]); ok {
+			fmt.Println(p.Pair())
+		}
+	}
+	if n, ok := src.Square().(lib.Namer); ok {
+		fmt.Println(n.Name().Text)
+	}
+	if t, ok := src.Circle().(lib.Titler); ok {
+		fmt.Println(t.Title().Text)
+	}
+}

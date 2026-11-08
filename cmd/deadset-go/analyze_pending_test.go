@@ -52,23 +52,6 @@ func pendingBase(t *testing.T) string {
 	return base
 }
 
-// analyzerBinary builds the command and answers the path of the binary, so an
-// assertion about an exit code reads the status of the real process rather than the
-// return value of a function inside the test binary.
-//
-// The build carries the flags a published build carries, so what the binary reports
-// about itself is what a published one reports.
-func analyzerBinary(t *testing.T) string {
-	t.Helper()
-
-	binary := filepath.Join(t.TempDir(), "deadset-go")
-	build := exec.CommandContext(t.Context(), "go", "build", "-trimpath", "-ldflags=-s -w", "-o", binary, ".")
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("Setup: build the command: %v\n%s", err, out)
-	}
-	return binary
-}
-
 // TestAnalyzeAloneOverADeclaredEdgeExitsPending is the single-analyzer pending
 // assertion: the analyzer running by itself over a target holding a declared
 // cross-language edge exits with the pending code rather than with the clean one, and
@@ -80,8 +63,9 @@ func analyzerBinary(t *testing.T) string {
 // the merge has not resolved is not a clean tree, and reading one as clean is the
 // failure this exit code exists to prevent.
 func TestAnalyzeAloneOverADeclaredEdgeExitsPending(t *testing.T) {
+	t.Parallel()
 	base := pendingBase(t)
-	binary := analyzerBinary(t)
+	binary := commandBinary(t)
 
 	command := exec.CommandContext(t.Context(), binary,
 		"analyze", "--target=./app", "--report=report.json")

@@ -19,20 +19,14 @@ type explained struct {
 
 // runExplain invokes the verb over dir with the arguments given, from the target, so
 // a position the answer prints is the target-relative one every other verb prints.
-//
-// A test that calls this is sequential, because the working directory is the
-// process's.
 func runExplain(t *testing.T, dir string, args ...string) explained {
 	t.Helper()
 
-	t.Chdir(dir)
-	var stdout, stderr bytes.Buffer
-	invoked := append([]string{"explain", "--target=."}, args...)
-	code := invoke(t.Context(), invoked, &stdout, &stderr)
-	return explained{stdout: stdout.String(), stderr: stderr.String(), code: code}
+	return explained(invokedIn(t, dir, append([]string{"explain", "--target=."}, args...)...))
 }
 
 func TestExplainAnswersAboutAReportedSymbolWithWhatTheFindingCarries(t *testing.T) {
+	t.Parallel()
 	got := runExplain(t, findingsFixture(t, `{"target": {"kind": "application"}}`), "go://example.com/app#forgotten")
 
 	if want := contractExitCodes(t)["clean"]; got.code != want {
@@ -61,6 +55,7 @@ func TestExplainAnswersAboutAReportedSymbolWithWhatTheFindingCarries(t *testing.
 }
 
 func TestExplainAnswersAboutALiveSymbolWithAPathFromARoot(t *testing.T) {
+	t.Parallel()
 	got := runExplain(t, findingsFixture(t, `{"target": {"kind": "application"}}`), "go://example.com/app#used")
 
 	if want := contractExitCodes(t)["clean"]; got.code != want {
@@ -86,6 +81,7 @@ func TestExplainAnswersAboutALiveSymbolWithAPathFromARoot(t *testing.T) {
 }
 
 func TestExplainAnswersAboutARootWithTheRootKind(t *testing.T) {
+	t.Parallel()
 	got := runExplain(t, findingsFixture(t, `{"target": {"kind": "application"}}`), "go://example.com/app#main")
 
 	if want := contractExitCodes(t)["clean"]; got.code != want {
@@ -104,6 +100,7 @@ func TestExplainAnswersAboutARootWithTheRootKind(t *testing.T) {
 }
 
 func TestExplainAnswersAboutARetainedSymbolWithEveryClassThatHeldIt(t *testing.T) {
+	t.Parallel()
 	got := runExplain(t, retainedModule(t), "go://example.com/app#sink.Write")
 
 	if want := contractExitCodes(t)["clean"]; got.code != want {
@@ -151,6 +148,7 @@ func retainedModule(t *testing.T) string {
 // A field written and never read that an exemption holds back is a symbol the run
 // would otherwise have reported, so it is retained as a dead symbol held back is.
 func TestExplainAnswersAboutAWriteOnlyFieldAnExemptionHoldsBackAsRetained(t *testing.T) {
+	t.Parallel()
 	dir := writeModule(t, map[string]string{
 		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
 		"app.go": "package main\n\nimport \"encoding/json\"\n\n" +
@@ -168,6 +166,7 @@ func TestExplainAnswersAboutAWriteOnlyFieldAnExemptionHoldsBackAsRetained(t *tes
 }
 
 func TestExplainAnswersAboutADeadSymbolNoFindingNamesWithTheKindItsConfigurationSilences(t *testing.T) {
+	t.Parallel()
 	got := runExplain(t, findingsFixture(t,
 		`{"target": {"kind": "application"}, "severity": {"DS1002": "allow"}}`),
 		"go://example.com/app#forgotten")
@@ -186,6 +185,7 @@ func TestExplainAnswersAboutADeadSymbolNoFindingNamesWithTheKindItsConfiguration
 }
 
 func TestExplainResolvesASymbolByItsFragmentAndByItsDisplayName(t *testing.T) {
+	t.Parallel()
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
 	for _, named := range []string{"go://example.com/app#forgotten", "forgotten"} {
 		got := runExplain(t, dir, named)
@@ -199,6 +199,7 @@ func TestExplainResolvesASymbolByItsFragmentAndByItsDisplayName(t *testing.T) {
 }
 
 func TestExplainRefusesASymbolTheTargetDoesNotHoldAndPrintsThePartialMatches(t *testing.T) {
+	t.Parallel()
 	got := runExplain(t, findingsFixture(t, `{"target": {"kind": "application"}}`), "forgot")
 
 	if want := contractExitCodes(t)["usage"]; got.code != want {
@@ -215,6 +216,7 @@ func TestExplainRefusesASymbolTheTargetDoesNotHoldAndPrintsThePartialMatches(t *
 }
 
 func TestExplainRefusesASymbolSeveralDeclarationsAnswerAndNamesThem(t *testing.T) {
+	t.Parallel()
 	dir := writeModule(t, map[string]string{
 		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
 		"app.go": "package main\n\nimport \"example.com/app/one\"\n\nfunc main() { one.Shared() }\n\n" +
@@ -236,6 +238,7 @@ func TestExplainRefusesASymbolSeveralDeclarationsAnswerAndNamesThem(t *testing.T
 }
 
 func TestExplainAnswersTheThreeSpellingsTheContractsTableGivesTheRequest(t *testing.T) {
+	t.Parallel()
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
 	for _, spelling := range whyFlags {
 		got := runExplain(t, dir, "--"+spelling+"=go://example.com/app#forgotten")
@@ -272,6 +275,7 @@ func TestExplainAnswersFromTheAnalysisTheReportIsBuiltFrom(t *testing.T) {
 }
 
 func TestExplainIsTheSameAnswerOnEveryRunOverOneTree(t *testing.T) {
+	t.Parallel()
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
 	first := runExplain(t, dir, "go://example.com/app#used")
 	second := runExplain(t, dir, "go://example.com/app#used")
@@ -282,6 +286,7 @@ func TestExplainIsTheSameAnswerOnEveryRunOverOneTree(t *testing.T) {
 }
 
 func TestExplainListsTheDeadComponentAtTheConfiguredCascade(t *testing.T) {
+	t.Parallel()
 	// The orphan is the component's root and the declaration it references falls
 	// with it, so the component holds two members and the cascade decides whether
 	// the answer names the one that is not the root.
@@ -320,6 +325,7 @@ func TestExplainListsTheDeadComponentAtTheConfiguredCascade(t *testing.T) {
 }
 
 func TestExplainPrefersTheProductionPathOverAShorterTestPath(t *testing.T) {
+	t.Parallel()
 	// The test reaches the declaration in one hop from the test root; production
 	// reaches it in three from the entry point. The production path is the one the
 	// sweep the report was built from counts, so it is the path the answer prints.
@@ -351,6 +357,7 @@ func TestExplainPrefersTheProductionPathOverAShorterTestPath(t *testing.T) {
 }
 
 func TestExplainListsTheFindingsThatNameTheSymbolAndReportSomewhereElse(t *testing.T) {
+	t.Parallel()
 	// The interface is live, because the assertion names it as a type, and the run
 	// reports the assertion under the interface's reference at the assertion's own
 	// position. A maintainer who read that finding asks about that reference, so the
@@ -382,6 +389,7 @@ func TestExplainListsTheFindingsThatNameTheSymbolAndReportSomewhereElse(t *testi
 }
 
 func TestExplainListsTheUnusedParametersOfTheSymbol(t *testing.T) {
+	t.Parallel()
 	// A parameter's finding carries its own reference under the function's, so the
 	// answer about the function names it.
 	dir := writeModule(t, map[string]string{
@@ -446,6 +454,7 @@ func TestExplainNamesTheConsumerTestThatHoldsASymbolLiveUnderConsumerTestsProduc
 // A reference no identifier at its site names is printed with the rule that made
 // it: a comparison reads every field of the struct it compares.
 func TestExplainNamesTheRuleBehindAReadNoIdentifierNames(t *testing.T) {
+	t.Parallel()
 	dir := writeModule(t, map[string]string{
 		"go.mod":           "module example.com/app\n\ngo 1.27.1\n",
 		"app.go":           "package main\n\ntype key struct{ id int }\n\nfunc main() { println(key{} == key{}) }\n",
@@ -462,6 +471,7 @@ func TestExplainNamesTheRuleBehindAReadNoIdentifierNames(t *testing.T) {
 }
 
 func TestExplainNamesTheConstantRepetitionBehindARead(t *testing.T) {
+	t.Parallel()
 	dir := writeModule(t, map[string]string{
 		"go.mod":           "module example.com/app\n\ngo 1.27.1\n",
 		"app.go":           "package main\n\nconst helper = 1\n\nconst (\n\ta = helper\n\tb\n)\n\nfunc main() { println(b) }\n",
@@ -478,6 +488,7 @@ func TestExplainNamesTheConstantRepetitionBehindARead(t *testing.T) {
 }
 
 func TestExplainListsEachOfTwoReferencesALineDirectiveRendersAtOnePosition(t *testing.T) {
+	t.Parallel()
 	got := runExplain(t, archiveModule(t, "findings-ledger/reference-fold.txtar"), "go://example.com/app#helper")
 
 	if want := contractExitCodes(t)["clean"]; got.code != want {

@@ -73,6 +73,7 @@ func wantFinding(t *testing.T, about map[string]*findings.Finding, ref string, c
 }
 
 func TestAGenericImplementationFallsWithTheUncalledMethodItImplements(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/generic-implementor.txtar"))
 
 	plain, generic := about["go://example.com/app#Plain.Get"], about["go://example.com/app#Box.Get"]
@@ -96,6 +97,7 @@ func TestAGenericImplementationFallsWithTheUncalledMethodItImplements(t *testing
 }
 
 func TestAnEventHandlerEncodesTheValueWholeOnlyInAnActionItHolds(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/valueless-on-attribute.txtar"))
 
 	wantFinding(t, about, "go://example.com/app#Widget.Spare", vocab.WriteOnlySymbol, vocab.Certain)
@@ -104,6 +106,7 @@ func TestAnEventHandlerEncodesTheValueWholeOnlyInAnActionItHolds(t *testing.T) {
 }
 
 func TestATemplateCallPlacingTheValueInAnEventHandlerReadsEveryField(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/handler-written-by-a-called-template.txtar"))
 
 	wantNoFinding(t, about, "a called template places the value in an event handler, so the set encodes it whole",
@@ -111,6 +114,7 @@ func TestATemplateCallPlacingTheValueInAnEventHandlerReadsEveryField(t *testing.
 }
 
 func TestATemplateCalledInAnAttributeValueReadsWhatItNamesUnlessItWritesAHandler(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/template-called-in-an-attribute-value.txtar"))
 
 	wantFinding(t, about, "go://example.com/app#Profile.Secret", vocab.WriteOnlySymbol, vocab.Certain)
@@ -120,6 +124,7 @@ func TestATemplateCalledInAnAttributeValueReadsWhatItNamesUnlessItWritesAHandler
 }
 
 func TestATemplateEndingInAnotherContextThanItStartsInReadsEveryField(t *testing.T) {
+	t.Parallel()
 	for range 5 {
 		about := findingsAbout(t, archiveModule(t, "exempt-ledger/template-called-twice-ending-elsewhere.txtar"))
 
@@ -128,6 +133,7 @@ func TestATemplateEndingInAnotherContextThanItStartsInReadsEveryField(t *testing
 }
 
 func TestABlockOverriddenInOneParseFilesCallReadsWhatTheOverrideNames(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/block-overridden.txtar"))
 
 	wantFinding(t, about, "go://example.com/app#Home.Unused", vocab.WriteOnlySymbol, vocab.Certain)
@@ -135,6 +141,7 @@ func TestABlockOverriddenInOneParseFilesCallReadsWhatTheOverrideNames(t *testing
 }
 
 func TestANewNamedParseChainReadsWhatItsTemplatesName(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/new-named-parse-chain.txtar"))
 
 	wantFinding(t, about, "go://example.com/app#Nav.Unused", vocab.WriteOnlySymbol, vocab.Certain)
@@ -142,12 +149,14 @@ func TestANewNamedParseChainReadsWhatItsTemplatesName(t *testing.T) {
 }
 
 func TestATemplateFileChosenAtRunTimeReadsEveryField(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/template-file-chosen-at-run-time.txtar"))
 
 	wantNoFinding(t, about, "the file the program parses may write its value as JSON whole", "go://example.com/app#Page.Secret")
 }
 
 func TestEmbeddedTemplatesAreParsedInSortedOrder(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/embedded-templates-in-sorted-order.txtar"))
 
 	wantNoFinding(t, about, "the file sorting last writes its value as JSON whole",
@@ -155,6 +164,7 @@ func TestEmbeddedTemplatesAreParsedInSortedOrder(t *testing.T) {
 }
 
 func TestATemplateSetParsingOneOfTwoAlternativesReadsEveryField(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/template-alternatives.txtar"))
 
 	for _, set := range []string{"Text", "File", "Glob", "Pattern", "Root"} {
@@ -164,12 +174,14 @@ func TestATemplateSetParsingOneOfTwoAlternativesReadsEveryField(t *testing.T) {
 }
 
 func TestTemplatesOfOneNameFromTwoSetsReadEveryField(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/templates-of-one-name-from-two-sets.txtar"))
 
 	wantNoFinding(t, about, "the set the function executes may write its value as JSON whole", "go://example.com/app#Page.Secret")
 }
 
 func TestADecodedValueRelayedWholeToOutsideCodeKeepsItsFields(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/decoded-relay.txtar"))
 
 	wantNoFinding(t, about, "outside code receives the decoded value whole and reads what was decoded",
@@ -177,6 +189,7 @@ func TestADecodedValueRelayedWholeToOutsideCodeKeepsItsFields(t *testing.T) {
 }
 
 func TestAFieldOnlyAnOutsideFillerReachedThroughAnInProgramGenericFillsIsPossible(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/generic-client.txtar"))
 
 	wantFinding(t, about, "go://example.com/app#Untyped.Spare", vocab.UnusedMember, vocab.Possible)
@@ -184,12 +197,14 @@ func TestAFieldOnlyAnOutsideFillerReachedThroughAnInProgramGenericFillsIsPossibl
 }
 
 func TestTheXMLEncoderReadsXMLName(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/xml-name-encoder.txtar"))
 
 	wantNoFinding(t, about, "encoding/xml names the element from XMLName's tag", "go://example.com/app#Feed.XMLName")
 }
 
 func TestAnEnumFilledByAnyDecodingEntryPointKeepsEveryMember(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/enum-decoded-by-every-decoder.txtar"))
 
 	wantNoFinding(t, about, "a decoder fills the enum from a document, so any member can arrive",
@@ -197,6 +212,7 @@ func TestAnEnumFilledByAnyDecodingEntryPointKeepsEveryMember(t *testing.T) {
 }
 
 func TestAnEnumALineDirectiveRendersOutsideTheTreeIsTheTargetsOwn(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/enum-under-a-line-directive-outside-the-tree.txtar"))
 
 	wantNoFinding(t, about, "the target writes the enum, so a decoder can fill any member",
@@ -204,6 +220,7 @@ func TestAnEnumALineDirectiveRendersOutsideTheTreeIsTheTargetsOwn(t *testing.T) 
 }
 
 func TestAGoFlagsCommandFieldIsRead(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/go-flags-command.txtar"))
 
 	wantNoFinding(t, about, "the parser runs the subcommand a command field holds",
@@ -212,6 +229,7 @@ func TestAGoFlagsCommandFieldIsRead(t *testing.T) {
 }
 
 func TestTemplatesReadFromAFileSystemReadTheFieldsTheyName(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/templates-read-from-a-file-system.txtar"))
 
 	wantNoFinding(t, about, "projects.tpl.html names them",
@@ -220,6 +238,7 @@ func TestTemplatesReadFromAFileSystemReadTheFieldsTheyName(t *testing.T) {
 }
 
 func TestTemplatesParsedFromAFileSystemParameterReadWhatAClosureExecutes(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/templates-parsed-from-a-file-system-parameter.txtar"))
 
 	wantNoFinding(t, about, "the closure executes the value with a template set the analysis cannot list",
@@ -227,6 +246,7 @@ func TestTemplatesParsedFromAFileSystemParameterReadWhatAClosureExecutes(t *test
 }
 
 func TestAFieldOfAStructWithNoNameADecoderFillsIsReadByAnEncoder(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/decoded-into-an-unnamed-struct.txtar"))
 
 	wantNoFinding(t, about, "the decoder fills Note through a pointer to Meta and the encoder reads it",
@@ -235,6 +255,7 @@ func TestAFieldOfAStructWithNoNameADecoderFillsIsReadByAnEncoder(t *testing.T) {
 }
 
 func TestATestThatEncodesADecodedValueAgainReadsItsFields(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/test-re-encodes-a-decoded-value.txtar"))
 
 	wantNoFinding(t, about, "the benchmark encodes what it decoded",
@@ -242,6 +263,7 @@ func TestATestThatEncodesADecodedValueAgainReadsItsFields(t *testing.T) {
 }
 
 func TestKeyEnumeratingReflectionReadsEveryField(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/key-enumerating-reflection.txtar"))
 
 	wantNoFinding(t, about, "a walk over the fields reads every field, written or not",
@@ -249,6 +271,7 @@ func TestKeyEnumeratingReflectionReadsEveryField(t *testing.T) {
 }
 
 func TestAValueReturnedThroughAnOutsideInterfaceIsSentFromEveryModulesReading(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, filepath.Join(archiveModule(t, "exempt-ledger/returned-through-in-two-modules.txtar"), "target"))
 
 	wantNoFinding(t, about, "the value Resource returns reaches the dependency, whichever module's reading of it the method implements",
@@ -256,6 +279,7 @@ func TestAValueReturnedThroughAnOutsideInterfaceIsSentFromEveryModulesReading(t 
 }
 
 func TestTwoTypesOneNameSpellsInTwoFunctionsAreTwoTypes(t *testing.T) {
+	t.Parallel()
 	kept := []struct {
 		archive string
 		why     string
@@ -286,12 +310,14 @@ func TestTwoTypesOneNameSpellsInTwoFunctionsAreTwoTypes(t *testing.T) {
 }
 
 func TestAValueReturnedThroughAnOutsideConstraintIsNotSent(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, filepath.Join(archiveModule(t, "exempt-ledger/returned-through-a-constraint.txtar"), "target"))
 
 	wantFinding(t, about, "go://example.com/app#deployment.Replicas", vocab.WriteOnlySymbol, vocab.Certain)
 }
 
 func TestAnOutsideAssertionRetainsTheUnexportedMethodOfItsOwnPackageAlone(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, filepath.Join(archiveModule(t, "exempt-ledger/unexported-method-of-one-name-in-two-packages.txtar"), "target"))
 
 	wantFinding(t, about, "go://example.com/app#T.mark", vocab.UnusedUnexported, vocab.Certain)
@@ -299,6 +325,7 @@ func TestAnOutsideAssertionRetainsTheUnexportedMethodOfItsOwnPackageAlone(t *tes
 }
 
 func TestAMethodATypeHasByPromotionIsCalledThroughTheEmbeddedField(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct{ archive, method, why string }{
 		{"promoted-self-encoder", "selfish.MarshalJSON", "json.Marshal calls wrap's promoted MarshalJSON"},
 		{"promoted-pointer-self-encoder", "selfish.MarshalJSON", "json.Marshal calls *wrap's promoted MarshalJSON"},
@@ -320,6 +347,7 @@ func TestAMethodATypeHasByPromotionIsCalledThroughTheEmbeddedField(t *testing.T)
 }
 
 func TestAnEnumMemberIsRetainedByTheEvidenceTheRunsModeHolds(t *testing.T) {
+	t.Parallel()
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/enum-converted-in-a-test-file-and-in-production.txtar"))
 	wantNoFinding(t, about, "main converts to mode", "go://example.com/app#slow")
 

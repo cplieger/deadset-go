@@ -22,9 +22,6 @@ import (
 // target, because a report names every path relative to the directory the run was
 // invoked from and can name none outside it, and the report is written outside the
 // target so the run leaves the tree alone.
-//
-// A test that calls this is sequential, because the working directory is the
-// process's.
 type analyzed struct {
 	reportPath string
 	stderr     string
@@ -36,17 +33,14 @@ type analyzed struct {
 func runAnalyze(t *testing.T, dir string, args ...string) analyzed {
 	t.Helper()
 
-	t.Chdir(dir)
 	reportPath := filepath.Join(t.TempDir(), "report.json")
-	var stdout, stderr bytes.Buffer
-	invoked := append([]string{"analyze", "--target=.", "--report=" + reportPath}, args...)
-	code := invoke(t.Context(), invoked, &stdout, &stderr)
+	got := invokedIn(t, dir, append([]string{"analyze", "--target=.", "--report=" + reportPath}, args...)...)
 	// The verb writes nothing to stdout: the report is a file and the verdict is
 	// the code, so a stream carries neither.
-	if stdout.Len() != 0 {
-		t.Errorf("analyze wrote %q to stdout, want nothing: the report is the file --report names", stdout.String())
+	if got.stdout != "" {
+		t.Errorf("analyze wrote %q to stdout, want nothing: the report is the file --report names", got.stdout)
 	}
-	return analyzed{reportPath: reportPath, stderr: stderr.String(), code: code}
+	return analyzed{reportPath: reportPath, stderr: got.stderr, code: got.code}
 }
 
 // envelopeAt reads the report one run wrote, refusing a member the report package
@@ -110,6 +104,7 @@ func edgedModule(t *testing.T) string {
 }
 
 func TestAnalyzeExitsWithTheCodeTheContractsTableGivesTheRun(t *testing.T) {
+	t.Parallel()
 	codes := contractExitCodes(t)
 	tests := []struct {
 		name       string
@@ -257,6 +252,7 @@ func brokenModule(t *testing.T) string {
 }
 
 func TestAnalyzeExitCodeConfiguredOffWritesTheReportAndNamesTheVerdict(t *testing.T) {
+	t.Parallel()
 	codes := contractExitCodes(t)
 	got := runAnalyze(t, edgedModule(t), "--exit-code=off")
 
@@ -275,9 +271,11 @@ func TestAnalyzeExitCodeConfiguredOffWritesTheReportAndNamesTheVerdict(t *testin
 }
 
 func TestAnalyzeWritesEveryRenderingBesideTheReportItNames(t *testing.T) {
+	t.Parallel()
 	got := runAnalyze(t, findingsFixture(t, `{"target": {"kind": "application"}}`),
 		"--format=text", "--format=json", "--format=github", "--format=sarif")
 
+	created := createdMode(t, filepath.Dir(got.reportPath))
 	for _, suffix := range []string{".txt", ".json", ".annotations", ".sarif"} {
 		path := got.reportPath + suffix
 		body, err := os.ReadFile(path)
@@ -287,8 +285,8 @@ func TestAnalyzeWritesEveryRenderingBesideTheReportItNames(t *testing.T) {
 		if len(body) == 0 {
 			t.Errorf("the rendering %s is empty, want the rendering of the run's findings", path)
 		}
-		if info, statErr := os.Stat(path); statErr == nil && info.Mode().Perm() != documentMode {
-			t.Errorf("the rendering %s carries mode %v, want %v", path, info.Mode().Perm(), fs.FileMode(documentMode))
+		if info, statErr := os.Stat(path); statErr == nil && info.Mode().Perm() != created {
+			t.Errorf("the rendering %s carries mode %v, want %v, the mode a new file takes in its directory", path, info.Mode().Perm(), created)
 		}
 	}
 
@@ -313,6 +311,7 @@ func TestAnalyzeWritesEveryRenderingBesideTheReportItNames(t *testing.T) {
 }
 
 func TestAnalyzeRenderingsAreTheConfiguredFormatsWhereTheInvocationNamesNone(t *testing.T) {
+	t.Parallel()
 	got := runAnalyze(t, findingsFixture(t,
 		`{"target": {"kind": "application"}, "reporters": {"formats": ["sarif"]}}`))
 
@@ -325,6 +324,7 @@ func TestAnalyzeRenderingsAreTheConfiguredFormatsWhereTheInvocationNamesNone(t *
 }
 
 func TestAnalyzeRenderingsAreTheInvocationsWhereItNamesAny(t *testing.T) {
+	t.Parallel()
 	got := runAnalyze(t, findingsFixture(t,
 		`{"target": {"kind": "application"}, "reporters": {"formats": ["sarif"]}}`), "--format=text")
 
@@ -337,6 +337,7 @@ func TestAnalyzeRenderingsAreTheInvocationsWhereItNamesAny(t *testing.T) {
 }
 
 func TestAnalyzeTemplateRenderingReadsTheTemplateTheInvocationNames(t *testing.T) {
+	t.Parallel()
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
 	templatePath := writeDocument(t, dir, "one-line.tmpl",
 		"{{range .findings}}{{.code}} {{.symbol.ref}}\n{{end}}")
@@ -352,6 +353,7 @@ func TestAnalyzeTemplateRenderingReadsTheTemplateTheInvocationNames(t *testing.T
 }
 
 func TestAnalyzeRefusesTheTemplateRenderingWithNoTemplate(t *testing.T) {
+	t.Parallel()
 	got := runAnalyze(t, findingsFixture(t, `{"target": {"kind": "application"}}`), "--format=template")
 
 	if want := contractExitCodes(t)["usage"]; got.code != want {
@@ -366,6 +368,7 @@ func TestAnalyzeRefusesTheTemplateRenderingWithNoTemplate(t *testing.T) {
 }
 
 func TestAnalyzeRefusesAnUnparseableTemplateBeforeAnyAnalysis(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		formats []string
@@ -393,6 +396,7 @@ func TestAnalyzeRefusesAnUnparseableTemplateBeforeAnyAnalysis(t *testing.T) {
 }
 
 func TestAnalyzeExitsWithFailureWhenTheTemplateFailsToRender(t *testing.T) {
+	t.Parallel()
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
 	templatePath := writeDocument(t, dir, "absent-field.tmpl", "{{ .totals.findings }} {{ .invented }}\n")
 	got := runAnalyze(t, dir, "--format=template", "--template="+templatePath)
@@ -414,6 +418,7 @@ func TestAnalyzeExitsWithFailureWhenTheTemplateFailsToRender(t *testing.T) {
 }
 
 func TestAnalyzeWritesTheBaselineOfEveryFindingOfTheRun(t *testing.T) {
+	t.Parallel()
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
 	baseline := filepath.Join(t.TempDir(), "deadset-baseline.json")
 	got := runAnalyze(t, dir, "--baseline-write="+baseline, "--max-findings=1")
@@ -627,6 +632,7 @@ func TestFormatListNamesEveryFormatTheContractDeclares(t *testing.T) {
 }
 
 func TestAnalyzeNamesATemplateItCannotRead(t *testing.T) {
+	t.Parallel()
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
 	got := runAnalyze(t, dir, "--format=template", "--template=absent.tmpl")
 	if got.code != vocab.ExitUsage || !strings.Contains(got.stderr, "read the template absent.tmpl") {
@@ -684,6 +690,7 @@ func TestSettingValueRendersEachSettingAsItsDeclaredType(t *testing.T) {
 }
 
 func TestAnalyzeAppliesTheSettingsTheCommandLineSupplies(t *testing.T) {
+	t.Parallel()
 	dir := findingsFixture(t, `{"target": {"kind": "application"}, "reporters": {"max_findings": 0}}`)
 	got := runAnalyze(t, dir, "--max-findings=2", "--sort=size", "--fail-on=allow")
 
@@ -707,6 +714,7 @@ func TestAnalyzeAppliesTheSettingsTheCommandLineSupplies(t *testing.T) {
 }
 
 func TestAnalyzeRefusesANumericSettingThatIsNotANumber(t *testing.T) {
+	t.Parallel()
 	got := runAnalyze(t, liveModule(t), "--max-findings=all")
 
 	if want := contractExitCodes(t)["usage"]; got.code != want {
@@ -819,6 +827,7 @@ func testSupportAssertionModule(t *testing.T) string {
 }
 
 func TestAnalyzeWritesASchemaValidDS1203InTestSupportCode(t *testing.T) {
+	t.Parallel()
 	ran := runAnalyze(t, testSupportAssertionModule(t))
 	if ran.code != vocab.ExitFindings {
 		t.Fatalf("analyze(a test-support assertion) = %d, want %d; stderr:\n%s", ran.code, vocab.ExitFindings, ran.stderr)
@@ -875,6 +884,7 @@ func TestCountedRendersThePluralOfTheNoun(t *testing.T) {
 // its note as the root itself, a single dot, and the report carrying that note
 // passes the run's own schema check.
 func TestAnalyzeNamesAPublishablePackageAtTheRootAsADot(t *testing.T) {
+	t.Parallel()
 	dir := writeModule(t, map[string]string{
 		"go.mod":           "module example.com/lib\n\ngo 1.27.1\n",
 		"lib.go":           "// Package lib is imported by nothing in its module.\npackage lib\n\n// Answer is what an outside program calls.\nfunc Answer() int { return 42 }\n",
@@ -900,6 +910,7 @@ func TestAnalyzeNamesAPublishablePackageAtTheRootAsADot(t *testing.T) {
 // naming the document, and writes no report: an identifier written twice, and
 // the edges written as a list.
 func TestAnalyzeRefusesAnEdgesDocumentTheContractRefuses(t *testing.T) {
+	t.Parallel()
 	const edge = `{"provides": "go://example.com/app#forgotten", "used_by": "ts://@example/app/src/wire.ts#forgotten"}`
 	for name, document := range map[string]string{
 		"an identifier written twice": `{"edges": {"wire/forgotten": ` + edge + `, "wire/forgotten": ` + edge + `}}`,

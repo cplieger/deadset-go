@@ -76,6 +76,7 @@ func drawLibrary(t *rapid.T, document string) map[string]string {
 // nothing, so each analysis is the cheap one. An archive a later iteration draws again
 // is analyzed once.
 func TestTheDeclaredTargetKindIsTheOnlyThingThatChangesTheTargetsTreatment(t *testing.T) {
+	t.Parallel()
 	rapid.Check(t, func(t *rapid.T) {
 		const library = `{"target": {"kind": "library"}}`
 		files := drawLibrary(t, library)

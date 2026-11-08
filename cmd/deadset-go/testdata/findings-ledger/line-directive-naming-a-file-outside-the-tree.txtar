@@ -13,5 +13,5 @@ package main
 
 func main() {}
 
-//line /nowhere/grammar.y:10:1
+//line ../nowhere/grammar.y:10:1
 func unused() {}

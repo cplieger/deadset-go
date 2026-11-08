@@ -3,6 +3,7 @@ package exempt
 import (
 	"encoding/json"
 	"go/ast"
+	"go/parser"
 	"go/token"
 	"go/types"
 	"reflect"
@@ -692,5 +693,48 @@ func TestOutsideMethodsReadTheConvertedTypesOwnReading(t *testing.T) {
 	}
 	if !slices.Contains(names, "SetWriteDeadline") {
 		t.Errorf("methods(*Recorder, another load's net/http) = %v, want SetWriteDeadline among them", names)
+	}
+}
+
+// An interface a source reading asserts or writes, whose method is variadic in a type
+// parameter or in a type its function body declares, has no counterpart in the loaded
+// program, so the localizer answers false for it rather than building a signature
+// without its parameter.
+func TestTheLocalizerStatesNoInterfaceVariadicInWhatTheLoadedProgramLacks(t *testing.T) {
+	t.Parallel()
+	const src = "package lib\n\nfunc F[T any](x any) bool {\n\ttype L struct{}\n" +
+		"\t_, a := x.(interface{ M(v ...T) })\n\t_, b := x.(interface{ M(v ...L) })\n\treturn a && b\n}\n"
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "/m/lib/lib.go", src, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatalf("Setup: parse: %v", err)
+	}
+	info := &types.Info{Types: make(map[ast.Expr]types.TypeAndValue)}
+	if _, err := new(types.Config).Check("example.com/lib", fset, []*ast.File{file}, info); err != nil {
+		t.Fatalf("Setup: check the source reading: %v", err)
+	}
+	loaded, err := new(types.Config).Check("example.com/lib", fset, []*ast.File{file}, nil)
+	if err != nil {
+		t.Fatalf("Setup: check the loaded reading: %v", err)
+	}
+	asserted := assertedTypes(file, info)
+	if len(asserted) != 2 {
+		t.Fatalf("Setup: assertedTypes = %v, want the two literals", asserted)
+	}
+	local := localizer{pkg: loaded}
+	for _, typ := range asserted {
+		t.Run(typ.String(), func(t *testing.T) {
+			defer func() {
+				if p := recover(); p != nil {
+					t.Errorf("localizer panicked on %v: %v", typ, p)
+				}
+			}()
+			if iface, ok := local.assertedInterface(typ); ok {
+				t.Errorf("assertedInterface(%v) = %v, true, want false", typ, iface)
+			}
+			if iface, ok := local.iface(typ.(*types.Interface)); ok {
+				t.Errorf("iface(%v) = %v, true, want false", typ, iface)
+			}
+		})
 	}
 }
