@@ -7,11 +7,11 @@
   },
   "result": "pass",
   "totals": {
-    "fixtures": 231,
+    "fixtures": 232,
     "pass": 223,
     "gap": 0,
     "fail": 0,
-    "pending": 8
+    "pending": 9
   },
   "fixtures": [
     {
@@ -1864,6 +1864,71 @@
         }
       ],
       "unexpected": []
+    },
+    {
+      "fixture": "encoding-reflection-field-walk-through-a-method-value",
+      "result": "pending",
+      "expectations": [
+        {
+          "symbol": "chat.Mute",
+          "result": "pass",
+          "actual": {
+            "report": "DS1101",
+            "symbol_kind": "method",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "chat.Validate",
+          "result": "fail",
+          "actual": {
+            "report": "DS1101",
+            "confidence": "certain"
+          },
+          "message": "want no finding at target/main.go:24, got DS1101"
+        },
+        {
+          "symbol": "email.Validate",
+          "result": "fail",
+          "actual": {
+            "report": "DS1101",
+            "confidence": "certain"
+          },
+          "message": "want no finding at target/main.go:18, got DS1101"
+        },
+        {
+          "symbol": "pager.Validate",
+          "result": "fail",
+          "actual": {
+            "report": "DS1101",
+            "confidence": "certain"
+          },
+          "message": "want no finding at target/main.go:33, got DS1101"
+        }
+      ],
+      "unexpected": [
+        {
+          "file": "target/main.go",
+          "line": 18,
+          "report": "DS1101"
+        },
+        {
+          "file": "target/main.go",
+          "line": 24,
+          "report": "DS1101"
+        },
+        {
+          "file": "target/main.go",
+          "line": 33,
+          "report": "DS1101"
+        }
+      ]
     },
     {
       "fixture": "encoding-reflection-filling-callee",
