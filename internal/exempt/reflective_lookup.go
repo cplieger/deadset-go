@@ -22,18 +22,12 @@ type lookup struct {
 }
 
 // lookups is the closed set of callees this class recognises, keyed by the
-// receiver's type and the method's name.
-//
-// A method is reached only when it is exported, because the method set reflection
-// exposes on a concrete type holds the exported methods alone; a field is reached
-// whatever its visibility, because a field is found by name in the struct type
-// either way; and a plugin symbol is an exported package-level function or
-// variable, which is the only thing a plugin lookup can resolve.
-//
-// A method named Lookup on any other type is not in the set. The rule is a name
-// resolved at run time, and a lookup into a value the program itself holds
-// resolves nothing the reference graph cannot already see, so a map or a registry
-// helper spelled Lookup does not fire the class.
+// receiver's type and the method's name. A method is reached only when exported,
+// since reflection's method set of a concrete type holds the exported methods
+// alone; a field whatever its visibility, since it is found by name in the struct
+// type; a plugin symbol is an exported package-level function or variable. A method
+// named Lookup on any other type is not in the set: a lookup into a value the
+// program holds resolves nothing the reference graph cannot already see.
 var lookups = map[string]lookup{
 	"reflect.Value.MethodByName": {
 		callee:   "reflect.Value.MethodByName",
@@ -63,12 +57,10 @@ var lookups = map[string]lookup{
 // ReflectiveLookupDetector retains the declarations a constant string names at a
 // reflective lookup call, on any type, and records the call site.
 //
-// The evidence is a string equal to an identifier beside a call rather than a
-// type relation, so the class is the weakest of the Contract's Go classes and
-// every exemption it records names a site a maintainer can go and read. A call
-// whose name argument is not a constant retains nothing: a computed name is the
-// case no exact rule can serve, and the class declines to guess rather than
-// retaining every declaration a lookup might reach.
+// The evidence is a string equal to an identifier beside a call, not a type
+// relation, so every exemption the class records names a site a maintainer can
+// read. A call whose name argument is not a constant retains nothing: the class
+// declines to guess rather than retaining every declaration a lookup might reach.
 func ReflectiveLookupDetector(in *Program) ([]Exemption, error) {
 	calls, err := allLookupCalls(in)
 	if err != nil {
@@ -121,8 +113,8 @@ func registeredMethods(in *Program) ([]Exemption, error) {
 
 // registrationOf is what one call retains under [registeredMethods].
 func registrationOf(in *Program, info *types.Info, call *ast.CallExpr, own map[string]bool) ([]Exemption, error) {
-	callee, isFunc := resolveObject(info, call.Fun).(*types.Func)
-	if !isFunc || callee.Pkg() == nil || own[callee.Pkg().Path()] {
+	callee := outsideCallee(in, info, call, own)
+	if callee == "" {
 		return nil, nil
 	}
 	names, receivers := registrationArguments(info, call, own)
@@ -144,12 +136,28 @@ func registrationOf(in *Program, info *types.Info, call *ast.CallExpr, own map[s
 			if id, held := in.Resolve.Object(selection.Obj()); held {
 				out = append(out, Exemption{
 					ID: id, Class: string(vocab.ReflectiveLookup), File: in.Resolve.File(call.Pos()), Site: site,
-					Detail: "named by a string passed with " + named.Obj().Name() + " to " + callee.FullName(),
+					Detail: "named by a string passed with " + named.Obj().Name() + " to " + callee,
 				})
 			}
 		}
 	}
 	return out, nil
+}
+
+// outsideCallee names a function outside the analysed program one call reaches, a
+// function the analysis does not know among them, and is empty where it reaches
+// none.
+func outsideCallee(in *Program, info *types.Info, call *ast.CallExpr, own map[string]bool) string {
+	callees, dynamic := in.callees(info, call)
+	for _, callee := range callees {
+		if pkg := callee.Fn.Pkg(); pkg != nil && !own[pkg.Path()] {
+			return callee.Fn.FullName()
+		}
+	}
+	if dynamic {
+		return types.ExprString(call.Fun)
+	}
+	return ""
 }
 
 // registrationArguments is the method names the constant string arguments of one call
@@ -262,34 +270,49 @@ func lookupCalls(in *Program, info *types.Info, f *ast.File) ([]lookupCall, erro
 		if !ok {
 			return true
 		}
-		l, ok := lookups[calleeKey(info, call)]
-		if !ok {
-			return true
+		for _, l := range lookupsOf(in, info, call) {
+			name, ok := constantName(info, call, l.shift)
+			if !ok {
+				continue
+			}
+			site, err := in.Resolve.Render(call.Pos())
+			if err != nil {
+				failure = err
+				return false
+			}
+			calls = append(calls, lookupCall{lookup: l.lookup, name: name, site: site, file: in.Resolve.File(call.Pos())})
 		}
-		name, ok := constantName(info, call)
-		if !ok {
-			return true
-		}
-		site, err := in.Resolve.Render(call.Pos())
-		if err != nil {
-			failure = err
-			return false
-		}
-		calls = append(calls, lookupCall{lookup: l, name: name, site: site, file: in.Resolve.File(call.Pos())})
 		return true
 	})
 	return calls, failure
 }
 
-// calleeKey names the method a call selects as its receiver's type and the
-// method's own name, and is empty for a call that selects no method. The method
-// is resolved from the type information, so a local name for the reflect package
-// or a value whose type is an alias of one names the same method, and the
-// receiver is the one the method declares rather than the type written at the
-// call.
-func calleeKey(info *types.Info, call *ast.CallExpr) string {
-	fn, isFunc := resolveObject(info, call.Fun).(*types.Func)
-	if !isFunc || fn.Pkg() == nil {
+// shiftedLookup is one recognised lookup a call reaches, and the argument its name
+// parameter takes ([facts.Callee.Shift]).
+type shiftedLookup struct {
+	lookup lookup
+	shift  int
+}
+
+// lookupsOf is every recognised lookup one call makes through a method, a method
+// value or a method expression it reaches: a function value holding two lookups
+// makes both.
+func lookupsOf(in *Program, info *types.Info, call *ast.CallExpr) []shiftedLookup {
+	callees, _ := in.callees(info, call)
+	var found []shiftedLookup
+	for _, callee := range callees {
+		if l, ok := lookups[calleeKey(callee.Fn)]; ok {
+			found = append(found, shiftedLookup{lookup: l, shift: callee.Shift})
+		}
+	}
+	return found
+}
+
+// calleeKey names a method as its receiver's type and its own name, and is empty
+// for a function that is no method. The receiver is the one the method declares
+// rather than the type written at the call.
+func calleeKey(fn *types.Func) string {
+	if fn.Pkg() == nil {
 		return ""
 	}
 	declared := fn.Signature().Recv()
@@ -316,15 +339,15 @@ func receiverName(t types.Type) string {
 	return named.Obj().Name()
 }
 
-// constantName returns the string a call's first argument is, when the type
-// checker resolved that argument to a string constant. A literal, a named
+// constantName returns the string a call's argument at is, when the type checker
+// resolved that argument to a string constant. A literal, a named
 // constant and a constant expression all qualify; anything computed at run time
 // does not.
-func constantName(info *types.Info, call *ast.CallExpr) (string, bool) {
-	if len(call.Args) == 0 {
+func constantName(info *types.Info, call *ast.CallExpr, at int) (string, bool) {
+	if len(call.Args) <= at {
 		return "", false
 	}
-	value := info.Types[ast.Unparen(call.Args[0])].Value
+	value := info.Types[ast.Unparen(call.Args[at])].Value
 	if value == nil || value.Kind() != constant.String {
 		return "", false
 	}

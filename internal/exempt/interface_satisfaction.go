@@ -314,7 +314,7 @@ func (o *outsideAssertions) ofError(t types.Type) []errorAnswer {
 	var held []errorAnswer
 	for _, holder := range o.errorHolders() {
 		iface, _ := holder.Underlying().(*types.Interface)
-		if iface.NumMethods() <= 1 || !declaresEvery(ids, iface) || !types.Implements(t, iface) || !o.assert.assertsOwn(holder) {
+		if iface.NumMethods() <= 1 || !declaresEvery(ids, iface) || !o.assert.in.Facts.Readings().Implements(t, iface) || !o.assert.assertsOwn(holder) {
 			continue
 		}
 		for _, one := range satisfying(t, iface) {
@@ -370,7 +370,8 @@ func (o *outsideAssertions) methods(t types.Type, pkg *types.Package) []types.Ob
 		ids = declaredMethodIDs(named)
 		o.ids[named] = ids
 	}
-	satisfied := satisfiedMethods(named, ids, o.assert.asserted(facts.ReadingOf(named.Obj().Pkg(), pkg)))
+	readings := o.assert.in.Facts.Readings()
+	satisfied := satisfiedMethods(readings, named, ids, o.assert.asserted(readings.Of(named.Obj().Pkg(), pkg)))
 	var held []types.Object
 	for selection := range types.NewMethodSet(types.NewPointer(named)).Methods() {
 		if satisfied[selection.Obj().Id()] {

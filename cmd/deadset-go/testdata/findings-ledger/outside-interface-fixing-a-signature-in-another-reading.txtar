@@ -1,0 +1,52 @@
+A declared consumer declares Getter, whose method takes the target's Key, and Doc's
+Get has that name and signature. The consumer's load reads the target's package on
+its own, so Getter names the Key of the consumer's reading while Get names the
+target's: the interface still fixes Get's signature, so its unread parameter is no
+finding.
+
+-- target/go.mod --
+module example.com/app
+
+go 1.27.1
+-- target/deadset.json --
+{"target": {"kind": "library"}, "consumers": {"complete": true}}
+-- target/lib.go --
+// Package app declares a document.
+package app
+
+// Key names a document.
+type Key struct{ ID int }
+
+// Doc is a document.
+type Doc struct{}
+
+// Get matches the consumer's Getter.
+func (Doc) Get(k Key) int { return 1 }
+-- consumer/go.mod --
+module example.com/consumer
+
+go 1.27.1
+
+require example.com/app v0.0.0
+
+replace example.com/app => ../target
+-- consumer/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/app"
+)
+
+// Getter is what the consumer calls.
+type Getter interface{ Get(app.Key) int }
+
+func use(g Getter) int { return g.Get(app.Key{}) }
+
+func main() { fmt.Println(app.Doc{}.Get(app.Key{ID: 1}), use) }
+-- scope.json --
+{
+  "target": {"id": "example.com/app", "role": "target", "path": "target"},
+  "consumers": [{"id": "example.com/consumer", "role": "consumer", "path": "consumer"}]
+}

@@ -1,0 +1,100 @@
+A target of two modules that build against two versions of dep: m against dep1, z
+against dep2, whose store declares Coder and asserts it. z hands m's error to
+store.CodeOf, so Err's Code, which has Coder's signature in m's reading of store, is
+reached.
+
+-- target/deadset.json --
+{"target": {"kind": "application"}}
+-- target/m/go.mod --
+module example.com/m
+
+go 1.27
+
+require example.com/dep v0.0.0
+
+replace example.com/dep => ../../dep1
+-- target/m/lib/lib.go --
+// Package lib fails with a coded error.
+package lib
+
+import "example.com/dep/store"
+
+// Err is the error Fail returns.
+type Err struct{}
+
+func (Err) Error() string { return "failed" }
+
+// Code makes Err a store.Coder.
+func (Err) Code(*store.Ctx) int { return 7 }
+
+// Fail fails.
+func Fail() error { return Err{} }
+-- target/m/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/m/lib"
+)
+
+func main() { fmt.Println(lib.Fail()) }
+-- target/z/go.mod --
+module example.com/z
+
+go 1.27
+
+require (
+	example.com/dep v0.0.0
+	example.com/m v0.0.0
+)
+
+replace (
+	example.com/dep => ../../dep2
+	example.com/m => ../m
+)
+-- target/z/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/dep/store"
+	"example.com/m/lib"
+)
+
+func main() { fmt.Println(store.CodeOf(lib.Fail())) }
+-- dep1/go.mod --
+module example.com/dep
+
+go 1.27
+-- dep1/store/store.go --
+// Package store declares a context.
+package store
+
+// Ctx is what a code is read under.
+type Ctx struct{}
+-- dep2/go.mod --
+module example.com/dep
+
+go 1.27
+-- dep2/store/store.go --
+// Package store declares a context and coded errors.
+package store
+
+// Ctx is what a code is read under.
+type Ctx struct{}
+
+// Coder is an error with a code.
+type Coder interface {
+	error
+	Code(*Ctx) int
+}
+
+// CodeOf is err's code.
+func CodeOf(err error) int {
+	if c, ok := err.(Coder); ok {
+		return c.Code(&Ctx{})
+	}
+	return 0
+}

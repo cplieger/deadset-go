@@ -37,6 +37,7 @@ const (
 type storedTypes struct {
 	sites    *declarationSites
 	typeArgs *facts.Instantiations
+	callees  *facts.Callees
 	direct   map[storeNode][]types.Type
 	from     map[storeNode][]storeNode
 	memo     map[storeNode][]types.Type
@@ -76,10 +77,11 @@ type storeWalk struct {
 // index of it, and an argument a call passes for a parameter. A stored
 // interface-typed parameter stands for every argument the program's calls pass for
 // it, and a parameter no call passes adds nothing.
-func newStoredTypes(sites *declarationSites, typeArgs *facts.Instantiations) *storedTypes {
+func newStoredTypes(sites *declarationSites, typeArgs *facts.Instantiations, callees *facts.Callees) *storedTypes {
 	return &storedTypes{
 		sites:    sites,
 		typeArgs: typeArgs,
+		callees:  callees,
 		direct:   make(map[storeNode][]types.Type),
 		from:     make(map[storeNode][]storeNode),
 		memo:     make(map[storeNode][]types.Type),
@@ -96,7 +98,7 @@ func newStoredTypes(sites *declarationSites, typeArgs *facts.Instantiations) *st
 // result of.
 func (s *storedTypes) link(in *Program) {
 	s.linkIndirect()
-	s.linkImplementations(programNamedTypes(in))
+	s.linkImplementations(in.Facts.Readings(), programNamedTypes(in))
 }
 
 func isAbstract(fn *types.Func) bool {
@@ -107,7 +109,7 @@ func isAbstract(fn *types.Func) bool {
 // linkImplementations fills each interface-typed result of an interface method a call
 // takes a result of from the same result of every method of the program's defined
 // types implementing it, because the call stands for each of them.
-func (s *storedTypes) linkImplementations(named []*types.Named) {
+func (s *storedTypes) linkImplementations(readings *facts.Readings, named []*types.Named) {
 	methods := slices.SortedFunc(maps.Keys(s.abstract), func(a, b *types.Func) int { return cmp.Compare(a.Pos(), b.Pos()) })
 	w := &storeWalk{storedTypes: s}
 	for _, method := range methods {
@@ -116,7 +118,7 @@ func (s *storedTypes) linkImplementations(named []*types.Named) {
 			continue
 		}
 		for _, t := range named {
-			if impl, implements := implementation(t, iface, method); implements {
+			if impl, implements := implementation(readings, t, iface, method); implements {
 				w.linkResults(method, impl)
 			}
 		}
@@ -147,9 +149,9 @@ func (w *storeWalk) linkResults(method, impl *types.Func) {
 
 // implementation is the method of t, or of a pointer to it, that implements one
 // method of iface, where either implements iface.
-func implementation(t *types.Named, iface *types.Interface, method *types.Func) (*types.Func, bool) {
+func implementation(readings *facts.Readings, t *types.Named, iface *types.Interface, method *types.Func) (*types.Func, bool) {
 	for _, held := range []types.Type{t, types.NewPointer(t)} {
-		if !types.Implements(held, iface) {
+		if !readings.Implements(held, iface) {
 			continue
 		}
 		obj, _, _ := types.LookupFieldOrMethod(held, false, method.Pkg(), method.Name())
@@ -838,26 +840,31 @@ func (w *storeWalk) link(node, source storeNode) {
 }
 
 // call records what one call passes for every parameter of its callee that is an
-// interface or holds interface elements, other than a variadic one. The callee is a
-// function, or a variable holding one.
+// interface or holds interface elements, other than a variadic one: of each function
+// the call reaches ([facts.Callees.Of]), and of a variable it calls through, whose
+// nodes hold the parameters of a function literal the variable is given
+// ([storeWalk.bindLiteral]).
 func (w *storeWalk) call(call *ast.CallExpr) {
-	var sig *types.Signature
-	var callee types.Object
-	switch obj := resolveObject(w.info, call.Fun).(type) {
-	case *types.Func:
-		sig, callee = obj.Signature(), obj
-	case *types.Var:
-		held, isFunc := types.Unalias(obj.Type()).Underlying().(*types.Signature)
-		if !isFunc || obj.IsField() {
-			return
-		}
-		sig, callee = held, obj
-	default:
-		return
+	callees, _ := w.callees.Of(w.info, call)
+	for _, callee := range callees {
+		w.arguments(call, callee.Fn.Signature(), callee.Fn, callee.Shift)
 	}
+	if v, isVar := resolveObject(w.info, call.Fun).(*types.Var); isVar && !v.IsField() {
+		if sig, isFunc := types.Unalias(v.Type()).Underlying().(*types.Signature); isFunc {
+			w.arguments(call, sig, v, 0)
+		}
+	}
+}
+
+// arguments records what one call passes for the parameters of callee's signature
+// sig, its first shift arguments supplying none.
+func (w *storeWalk) arguments(call *ast.CallExpr, sig *types.Signature, callee types.Object, shift int) {
 	last := sig.Params().Len() - 1
 	for i, arg := range call.Args {
-		at, supplies := parameterAt(sig, i)
+		if i < shift {
+			continue
+		}
+		at, supplies := parameterAt(sig, i-shift)
 		if !supplies || (sig.Variadic() && at == last) {
 			continue
 		}

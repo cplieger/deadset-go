@@ -3,6 +3,7 @@ package load
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"math"
 	"os"
@@ -634,10 +635,16 @@ func TestSourcesReadEveryUnitsPackage(t *testing.T) {
 func TestALoadWithNoGoCommandOnPathEndsTheRunAsMissingToolchain(t *testing.T) {
 	stableToolchain(t)
 	top := discovered(t, fixtureScope(t, "clean"))
-	t.Setenv("PATH", t.TempDir())
+	searched := t.TempDir()
+	t.Setenv("PATH", searched)
 	_, err := Load(t.Context(), top, new(HostConfiguration()))
 	held, ok := errors.AsType[*failure.Error](err)
-	if !ok || held.Failures[0].Class != vocab.RunMissingToolchain || !strings.Contains(held.Failures[0].Detail, `"go"`) {
-		t.Fatalf("Load with no go command on PATH = %v, want the run failure %s naming the go command", err, vocab.RunMissingToolchain)
+	if !ok || held.Failures[0].Class != vocab.RunMissingToolchain {
+		t.Fatalf("Load with no go command on PATH = %v, want the run failure %s", err, vocab.RunMissingToolchain)
+	}
+	for _, want := range []string{"the go command", fmt.Sprintf("%q", searched)} {
+		if !strings.Contains(held.Failures[0].Detail, want) {
+			t.Errorf("the run failure reads %q, want it to name %s", held.Failures[0].Detail, want)
+		}
 	}
 }

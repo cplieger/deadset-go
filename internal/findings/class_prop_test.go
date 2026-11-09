@@ -111,7 +111,7 @@ func everyCandidate(in *pass) ([]draft, error) {
 	var found []draft
 	for i := range in.Sweep.Candidates {
 		one, held := in.finding(in.Sweep.Candidates[i].ID, vocab.UnusedMember,
-			"the field has no reference in the target")
+			in.named(in.Sweep.Candidates[i].ID)+" has no reference in the target")
 		if !held {
 			continue
 		}
@@ -138,16 +138,10 @@ func dials(t *rapid.T, in *Input) (map[string]vocab.Class, map[string]vocab.Seve
 // TestTheClassAndTheSeverityAreIndependentDials is property dead-code-suite/P13:
 // changing the severity map or the assertion that the consumer set is complete
 // changes no finding's reachability class, and changing the consumer set or the
-// target kind changes no finding's severity.
-//
-// Completeness is on the severity side of the property because it is what opens the
-// narrowing kinds on a published API: what the class reads is which declared
-// consumers the run loaded, and an assertion about the consumers it did not load
-// moves neither.
-//
-// The severity map the property draws names the observed kind explicitly, which is
-// what the second half is about: the severity comes from the configuration. The
-// minimum confidence is possible, so no finding is withheld by the class it carries.
+// target kind changes no finding's severity. Completeness sits on the severity side
+// because it opens the narrowing kinds on a published API, while the class reads
+// only which consumers the run loaded. The drawn severity map names the observed
+// kind explicitly, and the minimum confidence is possible, so nothing is withheld.
 func TestTheClassAndTheSeverityAreIndependentDials(t *testing.T) {
 	t.Parallel()
 

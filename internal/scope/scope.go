@@ -46,14 +46,6 @@ func (e namedError) Unwrap() error { return e.err }
 
 func (namedError) Is(target error) bool { return target == ErrNamed }
 
-// named marks err as [ErrNamed] unless ctx ended the read.
-func named(ctx context.Context, err error) error {
-	if ctx.Err() != nil {
-		return err
-	}
-	return namedError{err}
-}
-
 // Module is one module the run loads: the target or a declared consumer.
 //
 // The role a document declares for a module is not carried here, because the
@@ -108,7 +100,7 @@ var scopeSchema = sync.OnceValues(func() (*document.Schema, error) {
 func read(ctx context.Context, path string) (Document, error) {
 	body, err := jsondoc.Read(ctx, path, vocab.DocumentMaxBytes)
 	if err != nil {
-		return Document{}, named(ctx, fmt.Errorf("scope: read %s: %w", path, err))
+		return Document{}, namedError{fmt.Errorf("scope: read %s: %w", path, err)}
 	}
 	schema, err := scopeSchema()
 	if err != nil {
@@ -116,7 +108,7 @@ func read(ctx context.Context, path string) (Document, error) {
 	}
 	var wire wireDocument
 	if err := jsondoc.Unmarshal(schema, path, body, &wire); err != nil {
-		return Document{}, named(ctx, fmt.Errorf("%w: %w", errRefused, err))
+		return Document{}, namedError{fmt.Errorf("%w: %w", errRefused, err)}
 	}
 	return resolve(&wire, filepath.Dir(path))
 }

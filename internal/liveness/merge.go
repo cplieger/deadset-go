@@ -51,13 +51,12 @@ type Merged struct {
 
 // Merge combines what the passes returned for each configuration of a matrix into
 // one inventory, per's order being the configuration index, under the matrix's test
-// classes ([MatrixTests]). A declaration is keyed across configurations by its
-// identifier ([inventory.SymbolID]): the first configuration that declares it gives
-// its fields, tests its test support, and every configuration that declares it adds
-// its bit and its containers. A package's Pos, EndLine, File and Line are the
-// exception: they come from the first-sorting of its configurations' anchors
-// ([anchoredFirst]). A declaration one configuration alone holds is analyzed under
-// that configuration rather than skipped.
+// classes ([roots.MatrixTests]). A declaration is keyed by its identifier
+// ([inventory.SymbolID]): the first configuration that declares it gives its fields,
+// tests its test support, and each one that declares it adds its bit and containers,
+// but a package's Pos, EndLine, File and Line come from the first-sorting of its
+// configurations' anchors ([anchoredFirst]). A declaration one configuration alone
+// holds is analyzed under that configuration rather than skipped.
 func Merge(per []Configured, tests roots.TestClasses) (Merged, error) {
 	if len(per) == 0 {
 		return Merged{}, fmt.Errorf("%w: no configuration", ErrMatrix)

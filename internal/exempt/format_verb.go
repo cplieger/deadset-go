@@ -45,6 +45,16 @@ type printSignature struct {
 	wraps    bool
 }
 
+// shifted is the signature read at the arguments of a call whose first by
+// arguments supply no parameter ([facts.Callee.Shift]).
+func (s printSignature) shifted(by int) printSignature {
+	if s.format != verbless {
+		s.format += by
+	}
+	s.operands += by
+	return s
+}
+
 // declaredPrintFunction returns where fn carries its format string and its
 // operands, and reports whether fn is one of the functions the standard library
 // declares to format its operands. A method's receiver is no argument of the call,
@@ -118,12 +128,11 @@ func (f *formatFlow) walkFile(info *types.Info, file *ast.File) error {
 		if !ok || failed != nil {
 			return failed == nil
 		}
-		fn, isFunc := resolveObject(info, call.Fun).(*types.Func)
-		if !isFunc {
-			return true
-		}
-		if sig, formats := f.printFunction(fn); formats {
-			failed = f.call(info, call, fn, sig)
+		callees, _ := f.kept.in.callees(info, call)
+		for _, callee := range callees {
+			if sig, formats := f.printFunction(callee.Fn); formats && failed == nil {
+				failed = f.call(info, call, callee.Fn, sig.shifted(callee.Shift))
+			}
 		}
 		return failed == nil
 	})
@@ -188,6 +197,7 @@ type variadicWrapper struct {
 type forwardedCall struct {
 	to        *types.Func
 	fromParam []int
+	shift     int // [facts.Callee.Shift]
 }
 
 // signature returns where the wrapper carries its format string and its operands,
@@ -203,8 +213,8 @@ func (w *variadicWrapper) signature(sites *declarationSites, found printWrappers
 			continue
 		}
 		format := verbless
-		if inner.format >= 0 && inner.format < len(call.fromParam) {
-			format = call.fromParam[inner.format]
+		if at := inner.shifted(call.shift).format; at >= 0 && at < len(call.fromParam) {
+			format = call.fromParam[at]
 		}
 		return printSignature{format: format, operands: w.operands, wraps: inner.wraps}, true
 	}
@@ -221,7 +231,7 @@ func variadicWrappers(in *Program, sites *declarationSites) []variadicWrapper {
 		if declared.decl.Body == nil {
 			continue
 		}
-		if w, forwards := variadicOperands(sites, declared); forwards {
+		if w, forwards := variadicOperands(in, sites, declared); forwards {
 			found = append(found, w)
 		}
 	}
@@ -233,7 +243,7 @@ func variadicWrappers(in *Program, sites *declarationSites) []variadicWrapper {
 // calls that do. A list passed element by element, or a list of its own, is not one.
 // The final parameter's element type is read through the boundary's own test of the
 // empty interface.
-func variadicOperands(sites *declarationSites, declared programFunction) (variadicWrapper, bool) {
+func variadicOperands(in *Program, sites *declarationSites, declared programFunction) (variadicWrapper, bool) {
 	sig := declared.fn.Signature()
 	params := sig.Params()
 	if !sig.Variadic() || params.Len() == 0 {
@@ -253,8 +263,9 @@ func variadicOperands(sites *declarationSites, declared programFunction) (variad
 		if !isCall || !forwardsOperands(info, call, operands) {
 			return true
 		}
-		if to, isFunc := resolveObject(info, call.Fun).(*types.Func); isFunc {
-			w.forwards = append(w.forwards, forwardedCall{to: to, fromParam: parametersNamed(info, call.Args, strung)})
+		callees, _ := in.callees(info, call)
+		for _, to := range callees {
+			w.forwards = append(w.forwards, forwardedCall{to: to.Fn, shift: to.Shift, fromParam: parametersNamed(info, call.Args, strung)})
 		}
 		return true
 	})

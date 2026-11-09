@@ -69,7 +69,7 @@ func (d drawnFinding) finding() draft {
 	if d.part() {
 		at.Column = drawnPartColumn
 		subject.Kind = parameterSubject
-		one := findingAt(d.code, subject, at, "drawn part of a declaration the analysis keeps")
+		one := findingAt(d.code, subject, at, "drawn part "+subject.Name+" of a declaration the analysis keeps")
 		one.decl = d.id
 		return one
 	}
@@ -77,7 +77,7 @@ func (d drawnFinding) finding() draft {
 		Code:     d.code,
 		Position: at,
 		Symbol:   subject,
-		Message:  "drawn subject of a document written by the property",
+		Message:  "drawn subject " + subject.Name + " of a document written by the property",
 		id:       d.id,
 	}
 }
@@ -158,24 +158,12 @@ func inputOfRecords(records []core.Record, symbols []inventory.Symbol) *Input {
 
 // TestASuppressionDocumentRoundTrips is property dead-code-suite/P15: writing the
 // reported findings into a mechanism's document suppresses exactly those findings on
-// the next run and reports no stale entry.
-//
-// Each mechanism is drawn over the same finding set. The ignore file and the
-// baseline are written and read back through their own readers, so the property runs
-// over the documents rather than over records built beside them; the inline
-// mechanism has no document of its own, its records being the source's directives,
-// so its records are built directly.
-//
-// The findings go through the whole pass rather than through the self-check kind
-// alone, because a record for a kind whose subject the analysis holds live is in
-// effect only where the pass withheld the finding, and the drawn set holds such a
-// finding every iteration. What the sweep answers about a mark is the other half and
-// is drawn beside it.
-//
-// The half of the property about what a mark seeds, that a symbol reachable only
-// through a suppressed one is unreported and every other finding stays reported, is
-// the sweep's answer rather than this pass's, and the fixture tests of this file's
-// unit pin it over a loaded module.
+// the next run and reports no stale entry. The ignore file and the baseline go
+// through their own readers; inline records are built from directives directly. The
+// findings go through the whole pass, since a record for a kind whose subject is
+// live is in effect only where the pass withheld the finding. What a mark seeds (a
+// symbol reachable only through a suppressed one stays unreported) is the sweep's
+// answer, pinned by this unit's fixture tests.
 func TestASuppressionDocumentRoundTrips(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

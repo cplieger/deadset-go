@@ -127,7 +127,7 @@ func (f *encodingFlow) strictAt(fn *types.Func, info *types.Info, scope ast.Node
 		return true
 	}
 	enabled, followed := optionsEnable(info, fn.Signature(), call, path)
-	if sel, isSelector := ast.Unparen(call.Fun).(*ast.SelectorExpr); isSelector && fn.Signature().Recv() != nil {
+	if sel, isSelector := ast.Unparen(call.Fun).(*ast.SelectorExpr); isSelector && fn.Signature().Recv() != nil && info.Uses[sel.Sel] == fn {
 		took, seen := decoderEnables(info, scope, sel.X, path)
 		enabled, followed = enabled || took, followed && seen
 	}

@@ -1,0 +1,62 @@
+A target of two modules: a hands out a Source whose Get takes a's Key, and z, which
+requires a, encodes what Get returns. z reads a's package on its own, so the call
+names the Source of z's reading while impl implements a's: the call still stands
+for impl's Get, so json.Marshal reads the Payload it returns.
+
+-- target/deadset.json --
+{"target": {"kind": "application"}}
+-- target/a/go.mod --
+module example.com/a
+
+go 1.27
+-- target/a/lib/lib.go --
+// Package lib hands out a source.
+package lib
+
+// Key selects a payload.
+type Key struct{}
+
+// Source gets a payload by key.
+type Source interface{ Get(Key) any }
+
+// Payload is what z encodes.
+type Payload struct{ Secret string }
+
+type impl struct{}
+
+func (impl) Get(Key) any { return &Payload{Secret: "s"} }
+
+// New returns a Source.
+func New() Source { return impl{} }
+-- target/a/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/a/lib"
+)
+
+func main() { fmt.Println(lib.New() != nil) }
+-- target/z/go.mod --
+module example.com/z
+
+go 1.27
+
+require example.com/a v0.0.0
+
+replace example.com/a => ../a
+-- target/z/main.go --
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+
+	"example.com/a/lib"
+)
+
+func main() {
+	out, _ := json.Marshal(lib.New().Get(lib.Key{}))
+	fmt.Println(string(out))
+}

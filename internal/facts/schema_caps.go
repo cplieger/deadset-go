@@ -197,7 +197,7 @@ func linkedBy(serving, program []*packages.Package) map[string]bool {
 			continue
 		}
 		production[p.PkgPath] = p
-		if p.Name == "main" {
+		if p.Name == mainPackage {
 			mains = append(mains, importClosure(p))
 		}
 	}

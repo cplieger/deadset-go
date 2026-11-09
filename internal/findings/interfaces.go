@@ -2,6 +2,7 @@ package findings
 
 import (
 	"cmp"
+	"fmt"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -21,16 +22,16 @@ import (
 // about one names the subject a maintainer deletes rather than the spelling it took.
 const satisfactionAssertionSubject = "satisfaction-assertion"
 
-// What each interface kind says, in the reader's words. The unused-interface kind
-// says two things, because the relation that found the subject decides which is
-// true: a candidate found by reference counting is named as a type by nothing at
-// all, and one found by reachability is named only from declarations that are
-// themselves dead.
+// What each interface kind says after or around its subject's name, in the reader's
+// words. The unused-interface kind says two things, because the relation that found
+// the subject decides which is true: a candidate found by reference counting is
+// named as a type by nothing at all, and one found by reachability is named only
+// from declarations that are themselves dead.
 const (
-	unusedInterfaceMessage             = "nothing in the target names the interface as a type"
-	unusedInterfaceDeadMessage         = "the interface is named as a type only from declarations that are themselves dead"
-	uncalledInterfaceMethodMessage     = "no call site invokes or selects the method through the interface"
-	unusedSatisfactionAssertionMessage = "the assertion is the only thing that names the interface as a type"
+	unusedInterfaceMessage             = "nothing in the target names %s as a type"
+	unusedInterfaceDeadMessage         = "%s is named as a type only from declarations that are themselves dead"
+	uncalledInterfaceMethodMessage     = "no call site invokes or selects %s through the interface"
+	unusedSatisfactionAssertionMessage = "the assertion is the only thing that names interface %s as a type"
 )
 
 // unusedInterface reports an interface declaration no symbol names as a type,
@@ -53,12 +54,12 @@ func unusedInterface(in *pass) ([]draft, error) {
 		if symbol == nil || !interfaceSubject(symbol, inventory.KindInterface) {
 			continue
 		}
-		one, held := in.finding(candidate.ID, vocab.UnusedInterface, unusedInterfaceMessage)
+		one, held := in.finding(candidate.ID, vocab.UnusedInterface, fmt.Sprintf(unusedInterfaceMessage, in.named(candidate.ID)))
 		if !held {
 			continue
 		}
 		if candidate.Relation == liveness.Reachability {
-			one.Message = unusedInterfaceDeadMessage
+			one.Message = fmt.Sprintf(unusedInterfaceDeadMessage, in.named(candidate.ID))
 		}
 		one.TestOnly = testOnly(candidate)
 		one.Details.Implementations = known.implementationsOf(candidate.ID)
@@ -90,7 +91,7 @@ func uncalledInterfaceMethod(in *pass) ([]draft, error) {
 		if in.fallsWithInterface(symbol) || known.exempt(candidate.ID) || testOnly(candidate) {
 			continue
 		}
-		one, held := in.finding(candidate.ID, vocab.UncalledInterfaceMethod, uncalledInterfaceMethodMessage)
+		one, held := in.finding(candidate.ID, vocab.UncalledInterfaceMethod, fmt.Sprintf(uncalledInterfaceMethodMessage, in.named(candidate.ID)))
 		if !held {
 			continue
 		}
@@ -125,7 +126,7 @@ func unusedSatisfactionAssertion(in *pass) ([]draft, error) {
 			continue
 		}
 		one, held := in.finding(asserted.Var, vocab.UnusedSatisfactionAssertion,
-			unusedSatisfactionAssertionMessage)
+			fmt.Sprintf(unusedSatisfactionAssertionMessage, ifaces[0].Name))
 		if !held {
 			continue
 		}

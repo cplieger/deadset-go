@@ -442,13 +442,12 @@ func (c *checker) parseOnce(name string, mode parser.Mode) (*ast.File, error) {
 	return parser.ParseFile(c.fset, name, src, mode)
 }
 
-// withoutBodies is src with the inside of every function declaration's body blanked,
-// each byte but a line break turned to a space so every position stays where it was.
-// A check of the declarations alone ignores the bodies, and parsing them is most of
-// what it costs. A declaration is found by its func keyword opening a line outside
-// every bracket. A file holding a line directive, which a body could hold and which
-// moves every position after it, or one whose literals or brackets do not close, is
-// returned whole.
+// withoutBodies is src with the inside of each body blanked whose declaration's func
+// keyword opens a line outside every bracket, each byte but a line break turned to a
+// space so every position stays where it was. A check of the declarations alone
+// ignores the bodies, and parsing them is most of what it costs. A file holding a
+// line directive, which a body could hold and which moves every position after it,
+// or one whose literals or brackets do not close, is returned whole.
 func withoutBodies(src []byte) []byte {
 	if bytes.Contains(src, []byte("//line ")) || bytes.Contains(src, []byte("/*line ")) {
 		return src

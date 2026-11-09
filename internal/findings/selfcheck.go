@@ -60,15 +60,15 @@ func (in *pass) refused(code vocab.Code) ([]draft, error) {
 	found := make([]draft, 0, len(in.Refusals))
 	for i := range in.Refusals {
 		refused := &in.Refusals[i]
-		message, err := refusalMessage(refused)
+		ref := in.suppressionRef(refused.Symbol, refused.Path)
+		message, err := refusalMessage(refused, ref)
 		if err != nil {
 			return nil, err
 		}
 		if refused.Reported != code {
 			continue
 		}
-		one := selfCheck(refused.Reported, suppressionSubject,
-			in.suppressionRef(refused.Symbol, refused.Path), sitePosition(refused.Site), message)
+		one := selfCheck(refused.Reported, suppressionSubject, ref, sitePosition(refused.Site), message)
 		one.record = refused.Site.Written
 		one.Details.Mechanism = string(refused.Mechanism)
 		one.Details.Entry = &suppressionEntry{
@@ -83,13 +83,15 @@ func (in *pass) refused(code vocab.Code) ([]draft, error) {
 }
 
 // refusalMessage is the sentence one refusal reports, which names the mechanism,
-// the code the suppression named and the rule it broke.
-func refusalMessage(refused *core.Refusal) (string, error) {
+// the code the suppression named, the subject it suppresses, which is ref, and the
+// rule it broke.
+func refusalMessage(refused *core.Refusal, ref string) (string, error) {
+	named := written(refused.Mechanism) + " for " + string(refused.Code) + " on " + ref
 	switch refused.Reported {
 	case vocab.SuppressionWithoutReason:
-		return written(refused.Mechanism) + " for " + string(refused.Code) + " carries no reason", nil
+		return named + " carries no reason", nil
 	case vocab.UnscopedIgnoreEntry:
-		return written(refused.Mechanism) + " for " + string(refused.Code) + " names a symbol and no path", nil
+		return named + " names a symbol and no path", nil
 	default:
 		return "", fmt.Errorf("%w: a suppression is refused under %s, which is no refusal of the grammar",
 			errEmitter, refused.Reported)
@@ -119,9 +121,9 @@ func unmatchedRoots(in *pass) ([]draft, error) {
 	at := token.Position{Filename: in.rootsDocument(), Line: documentPosition, Column: documentPosition}
 	found := make([]draft, 0, len(in.Unmatched))
 	for _, unmatched := range in.Unmatched {
-		message := "configured root matches no symbol of the inventory"
+		message := "configured root " + unmatched.Source + " matches no symbol of the inventory"
 		if strings.ContainsAny(unmatched.Source, "*?") {
-			message = "configured root pattern matches no symbol of the inventory"
+			message = "configured root pattern " + unmatched.Source + " matches no symbol of the inventory"
 		}
 		found = append(found, selfCheck(vocab.UnmatchedRoot, rootSubject, unmatched.Source, at, message))
 	}

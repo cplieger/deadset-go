@@ -1,0 +1,91 @@
+A target of two modules that build against two versions of dep: a against dep1,
+z against dep2, whose source package declares Source. Doc's Value has Source's
+name and signature in a's reading of store, so code outside may call it through
+Source and read the Payload it returns.
+
+-- target/deadset.json --
+{"target": {"kind": "application"}}
+-- target/a/go.mod --
+module example.com/a
+
+go 1.27
+
+require example.com/dep v0.0.0
+
+replace example.com/dep => ../../dep1
+-- target/a/lib/lib.go --
+// Package lib declares a document.
+package lib
+
+import "example.com/dep/store"
+
+// Payload is what Value hands out.
+type Payload struct{ Secret string }
+
+// Doc answers dep's Source.
+type Doc struct{}
+
+// Value makes Doc a source.Source.
+func (*Doc) Value(*store.Ctx) any { return &Payload{Secret: "s"} }
+-- target/a/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/a/lib"
+)
+
+func main() { fmt.Println(new(lib.Doc).Value(nil) != nil) }
+-- target/z/go.mod --
+module example.com/z
+
+go 1.27
+
+require example.com/dep v0.0.0
+
+replace example.com/dep => ../../dep2
+-- target/z/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/dep/source"
+)
+
+func main() { fmt.Println(source.Name) }
+-- dep1/go.mod --
+module example.com/dep
+
+go 1.27
+-- dep1/store/store.go --
+// Package store declares a context.
+package store
+
+// Ctx is what a value is read under.
+type Ctx struct{}
+-- dep2/go.mod --
+module example.com/dep
+
+go 1.27
+-- dep2/store/store.go --
+// Package store declares a context.
+package store
+
+// Ctx is what a value is read under.
+type Ctx struct{}
+
+// Version is the second release's.
+const Version = 2
+-- dep2/source/source.go --
+// Package source reads values.
+package source
+
+import "example.com/dep/store"
+
+// Source hands out a value.
+type Source interface{ Value(*store.Ctx) any }
+
+// Name names the package.
+const Name = "source"

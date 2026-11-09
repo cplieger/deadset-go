@@ -1,0 +1,48 @@
+A declared consumer copies P.In into a struct literal of its own and reads X. The
+field K names the target's Key, which the consumer's load reads on its own, and the
+two literals are still one type, so the read of the consumer's X reads P.In.X.
+
+-- target/go.mod --
+module example.com/app
+
+go 1.27.1
+-- target/deadset.json --
+{"target": {"kind": "library"}, "consumers": {"complete": true}}
+-- target/lib.go --
+// Package app exports a type holding a struct literal type.
+package app
+
+// Key names a value.
+type Key int
+
+// P is read by the consumer.
+type P struct{ In struct{ X int; K Key } }
+
+// Get hands one out.
+func Get() P { return P{} }
+-- consumer/go.mod --
+module example.com/consumer
+
+go 1.27.1
+
+require example.com/app v0.0.0
+
+replace example.com/app => ../target
+-- consumer/main.go --
+package main
+
+import (
+	"fmt"
+
+	"example.com/app"
+)
+
+func main() {
+	var local struct{ X int; K app.Key } = app.Get().In
+	fmt.Println(local.X, local.K)
+}
+-- scope.json --
+{
+  "target": {"id": "example.com/app", "role": "target", "path": "target"},
+  "consumers": [{"id": "example.com/consumer", "role": "consumer", "path": "consumer"}]
+}

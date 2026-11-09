@@ -27,6 +27,14 @@ import (
 	"golang.org/x/tools/txtar"
 )
 
+func TestMain(m *testing.M) {
+	if err := testsupport.WaitOnTheToolchain(); err != nil {
+		fmt.Fprintf(os.Stderr, "set the test parallelism: %v\n", err)
+		os.Exit(1)
+	}
+	os.Exit(m.Run())
+}
+
 // The build configuration every fixture of this package is loaded for, stated
 // rather than read, so a fixture's expected configuration identifiers are the same
 // on every machine.

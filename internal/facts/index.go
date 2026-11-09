@@ -21,6 +21,8 @@ type Index struct {
 	fset       *token.FileSet
 	published  *Published
 	instances  *Instantiations
+	callees    *Callees
+	readings   *Readings
 	consumers  map[*load.Consumer][]*packages.Package
 	caps       map[inventory.SymbolID]Cap
 	packages   []*packages.Package
@@ -58,6 +60,7 @@ func NewIndex(r *load.Result, rs *resolve.Resolver) (*Index, error) {
 	referencing := r.Referencing()
 	x := &Index{
 		fset:      r.Fset,
+		readings:  readingsOver(r.Fset),
 		packages:  inventory.Packages(r.Packages, r.Fset),
 		consumers: make(map[*load.Consumer][]*packages.Package, len(referencing)),
 	}
@@ -91,6 +94,7 @@ func NewIndex(r *load.Result, rs *resolve.Resolver) (*Index, error) {
 	x.interfaces = interfacesOf(x, rs)
 	x.outside = outsideOf(x)
 	x.instances = instantiationsOf(x.Program(), rs.Positions())
+	x.callees = calleesOf(x.Program(), rs.Positions())
 	x.published = publishedOf(x, rs)
 	x.reads, x.caps = schemaReadsOf(x, rs, generatedFiles)
 	return x, nil
@@ -150,6 +154,12 @@ func (x *Index) Program() []*packages.Package {
 // Instantiations is every type argument each type parameter takes in an
 // instantiation the program holds.
 func (x *Index) Instantiations() *Instantiations { return x.instances }
+
+// Callees is which functions each call of the program reaches.
+func (x *Index) Callees() *Callees { return x.callees }
+
+// Readings compares the types of the configuration's readings of one package.
+func (x *Index) Readings() *Readings { return x.readings }
 
 // Bindings is every binding identity the target's generated files publish.
 func (x *Index) Bindings() []Binding { return x.bindings }

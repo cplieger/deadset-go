@@ -146,7 +146,8 @@ func (in *pass) stale(ledger *core.Ledger, would []core.Finding) []report.StaleS
 	for _, at := range order {
 		first := by[at][0]
 		named := codesAt(by[at])
-		message := written(first.Mechanism) + " for " + spellCodes(named) + " matches no current finding"
+		ref := in.suppressionRef(first.Symbol, first.Path)
+		message := written(first.Mechanism) + " for " + spellCodes(named) + " on " + ref + " matches no current finding"
 		if reports := reportedBeside(by[at], named, would); len(reports) > 0 {
 			message += ", and its declaration reports " + spellCodes(reports)
 		}
@@ -155,7 +156,7 @@ func (in *pass) stale(ledger *core.Ledger, would []core.Finding) []report.StaleS
 			Mechanism: string(first.Mechanism),
 			Entry:     report.SuppressionEntry{Code: first.Code, Symbol: first.Symbol, Path: first.Path, Reason: first.Reason},
 			Position:  report.SuppressionPosition{Path: first.Site.Path, Line: first.Site.Line, Column: first.Site.Column},
-			Symbol:    in.suppressionRef(first.Symbol, first.Path),
+			Symbol:    ref,
 			Message:   message,
 		})
 	}

@@ -1,0 +1,91 @@
+A target of two modules that build against two versions of dep: m against dep1, a
+against dep2. Each hands store.Save a value, and m's Doc implements the Encoder of
+the dep1 store that m's call reaches, which asserts it.
+
+-- target/deadset.json --
+{"target": {"kind": "application"}}
+-- target/m/go.mod --
+module example.com/m
+
+go 1.27
+
+require example.com/dep v0.0.0
+
+replace example.com/dep => ../../dep1
+-- target/m/lib/lib.go --
+// Package lib declares a document.
+package lib
+
+import "example.com/dep/store"
+
+// Doc encodes itself into a store.Buf.
+type Doc struct{}
+
+// EncodeTo makes Doc a store.Encoder.
+func (*Doc) EncodeTo(*store.Buf) error { return nil }
+-- target/m/main.go --
+package main
+
+import (
+	"example.com/dep/store"
+	"example.com/m/lib"
+)
+
+func main() { store.Save(&lib.Doc{}) }
+-- target/a/go.mod --
+module example.com/a
+
+go 1.27
+
+require example.com/dep v0.0.0
+
+replace example.com/dep => ../../dep2
+-- target/a/main.go --
+package main
+
+import "example.com/dep/store"
+
+func main() { store.Save(1) }
+-- dep1/go.mod --
+module example.com/dep
+
+go 1.27
+-- dep1/store/store.go --
+// Package store saves values.
+package store
+
+// Buf is what a value encodes into.
+type Buf struct{}
+
+// Encoder is a value that encodes itself.
+type Encoder interface{ EncodeTo(*Buf) error }
+
+// Save keeps v.
+func Save(v any) {
+	if e, ok := v.(Encoder); ok {
+		_ = e.EncodeTo(&Buf{})
+	}
+}
+-- dep2/go.mod --
+module example.com/dep
+
+go 1.27
+-- dep2/store/store.go --
+// Package store saves values.
+package store
+
+// Buf is what a value encodes into.
+type Buf struct{}
+
+// Encoder is a value that encodes itself.
+type Encoder interface{ EncodeTo(*Buf) error }
+
+// Save keeps v.
+func Save(v any) {
+	if e, ok := v.(Encoder); ok {
+		_ = e.EncodeTo(&Buf{})
+	}
+}
+
+// Version is the second release's.
+const Version = 2

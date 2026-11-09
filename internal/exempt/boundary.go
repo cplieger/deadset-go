@@ -25,6 +25,7 @@ type boundary struct {
 	held     map[token.Position]bool
 	forwards destinationParameters
 	opaque   func(*types.Func) []sinkParameter
+	dynamic  reach // what a function the analysis does not know reads ([encodingFlow.dynamicReach])
 }
 
 // destinationParameters are the parameters of the analysed program's own functions
@@ -99,33 +100,24 @@ func (d *declarationSites) position(pos token.Pos) token.Position {
 // destination is the base case of the forwarding fixpoint: a function of the program
 // that hands one of its own empty-interface parameters to a destination the calling
 // class names, or to a parameter a value already crosses out through, carries the
-// crossing at that parameter of its own, retaining what the parameter it forwards to
-// retains, and is then itself something a further function can forward to. The set
-// grows until no function joins it and no retained set widens.
-func newBoundary(in *Program, destination destinationTest, opaque func(*types.Func) []sinkParameter) *boundary {
+// crossing at that parameter, retaining what the parameter it forwards to retains,
+// until no function joins and no retained set widens. A parameter handed to a
+// function the analysis does not know is a crossing of its own from the start.
+func newBoundary(in *Program, destination destinationTest, opaque func(*types.Func) []sinkParameter, dynamic reach) *boundary {
 	declared := in.functions
 	b := &boundary{
 		sites:    newDeclarationSites(in.Result.Fset),
 		held:     make(map[token.Position]bool, len(declared)),
 		forwards: make(destinationParameters),
 		opaque:   opaque,
+		dynamic:  dynamic,
 	}
 	for _, one := range declared {
 		b.held[b.sites.of(one.fn)] = true
 	}
 
-	candidates := b.forwardingParameters(declared)
-	for joined := true; joined; {
-		joined = false
-		for i := range candidates {
-			for _, forwarded := range candidates[i].forwards {
-				reads, reaches := b.reaches(forwarded.to, forwarded.at, forwarded.site, destination)
-				if !reaches {
-					continue
-				}
-				joined = b.hold(candidates[i].at, sinkParameter{at: forwarded.own, reach: reads}) || joined
-			}
-		}
+	candidates := b.forwardingParameters(in, declared)
+	for b.forwardOnce(candidates, destination) {
 	}
 	for pos := range b.forwards {
 		slices.SortFunc(b.forwards[pos], func(a, b sinkParameter) int {
@@ -135,24 +127,18 @@ func newBoundary(in *Program, destination destinationTest, opaque func(*types.Fu
 	return b
 }
 
-// sinkOf reports whether the argument at position arg of one call is passed for a
-// parameter at which a value leaves the analysed program, and names the callee it
-// leaves through: the callee does not belong to the program or forwards the
-// parameter on, and the parameter erases the type of what it is given
+// sinkOf reports whether the argument at position arg of a call reaching callee is
+// passed for a parameter at which a value leaves the analysed program, and names the
+// callee it leaves through: the callee does not belong to the program or forwards
+// the parameter on, and the parameter erases the type of what it is given
 // ([erasedParameters]). A struct value carried there crosses out ([carriesStruct]).
-func (b *boundary) sinkOf(info *types.Info, call *ast.CallExpr, arg int) (crossingOut, bool) {
-	if arg >= len(call.Args) {
-		return crossingOut{}, false
-	}
-	fn, isFunc := resolveObject(info, call.Fun).(*types.Func)
-	if !isFunc {
-		return crossingOut{}, false
-	}
+func (b *boundary) sinkOf(callee facts.Callee, arg int) (crossingOut, bool) {
+	fn := callee.Fn
 	sinks, reaches := b.sinks(fn)
 	if !reaches {
 		return crossingOut{}, false
 	}
-	at, supplies := parameterAt(fn.Signature(), arg)
+	at, supplies := argumentParameter(callee, arg)
 	if !supplies {
 		return crossingOut{}, false
 	}
@@ -246,8 +232,8 @@ type forwardingFunc struct {
 }
 
 // forwardedParameter is one parameter a function hands on: the function it goes to,
-// the forwarding function's own parameter position, the position it arrives at, and
-// the call that hands it on.
+// nil for a function the analysis does not know, the forwarding function's own
+// parameter position, the position it arrives at, and the call that hands it on.
 type forwardedParameter struct {
 	to   *types.Func
 	site callSite
@@ -255,15 +241,33 @@ type forwardedParameter struct {
 	at   int
 }
 
+// forwardOnce holds each candidate's parameter that reaches a destination or a held
+// crossing, and reports whether any crossing joined or widened.
+func (b *boundary) forwardOnce(candidates []forwardingFunc, destination destinationTest) bool {
+	joined := false
+	for i := range candidates {
+		for _, forwarded := range candidates[i].forwards {
+			reads, reaches := b.dynamic, true
+			if forwarded.to != nil {
+				reads, reaches = b.reaches(forwarded.to, forwarded.at, forwarded.site, destination)
+			}
+			if reaches {
+				joined = b.hold(candidates[i].at, sinkParameter{at: forwarded.own, reach: reads}) || joined
+			}
+		}
+	}
+	return joined
+}
+
 // forwardingParameters returns every function of the program that hands a parameter
 // of its own typed as the empty interface to another function.
-func (b *boundary) forwardingParameters(declared []programFunction) []forwardingFunc {
+func (b *boundary) forwardingParameters(in *Program, declared []programFunction) []forwardingFunc {
 	var found []forwardingFunc
 	for _, one := range declared {
 		if one.decl.Body == nil {
 			continue
 		}
-		if w, forwards := forwardedParametersOf(b.sites, one); forwards {
+		if w, forwards := forwardedParametersOf(in, b.sites, one); forwards {
 			found = append(found, w)
 		}
 	}
@@ -273,8 +277,10 @@ func (b *boundary) forwardingParameters(declared []programFunction) []forwarding
 // forwardedParametersOf reports whether one declaration hands a parameter of its own
 // typed as the empty interface to another function, and returns the calls that do. A
 // parameter passed as itself and a variadic list spread whole are both hands-on:
-// what the callee receives is the value the declaration's own caller wrote.
-func forwardedParametersOf(sites *declarationSites, declared programFunction) (forwardingFunc, bool) {
+// what the callee receives is the value the declaration's own caller wrote. A call
+// reaching a function the analysis does not know hands the parameter on to it at
+// any empty-interface parameter.
+func forwardedParametersOf(in *Program, sites *declarationSites, declared programFunction) (forwardingFunc, bool) {
 	sig := declared.fn.Signature()
 	own := make(map[*types.Var]int)
 	for _, at := range erasedParameters(sig) {
@@ -291,25 +297,32 @@ func forwardedParametersOf(sites *declarationSites, declared programFunction) (f
 		if !isCall {
 			return true
 		}
-		to, isFunc := resolveObject(info, call.Fun).(*types.Func)
-		if !isFunc {
-			return true
-		}
-		for i, arg := range call.Args {
-			held, names := own[parameterNamed(info, arg)]
-			if !names {
-				continue
-			}
-			at, supplies := parameterAt(to.Signature(), i)
-			if !supplies {
-				continue
-			}
-			site := callSite{info: info, decl: declared.decl, call: call}
-			w.forwards = append(w.forwards, forwardedParameter{to: to, site: site, own: held, at: at})
-		}
+		w.forwards = append(w.forwards, forwardedAt(in, own, callSite{info: info, decl: declared.decl, call: call})...)
 		return true
 	})
 	return w, len(w.forwards) > 0
+}
+
+// forwardedAt is every parameter of own one call hands on, at each function the call
+// reaches.
+func forwardedAt(in *Program, own map[*types.Var]int, site callSite) []forwardedParameter {
+	callees, dynamic := in.callees(site.info, site.call)
+	var found []forwardedParameter
+	for i, arg := range site.call.Args {
+		held, names := own[parameterNamed(site.info, arg)]
+		if !names {
+			continue
+		}
+		for _, to := range callees {
+			if at, supplies := argumentParameter(to, i); supplies {
+				found = append(found, forwardedParameter{to: to.Fn, site: site, own: held, at: at})
+			}
+		}
+		if dynamic && dynamicallyErased(site.info, site.call, i) {
+			found = append(found, forwardedParameter{site: site, own: held})
+		}
+	}
+	return found
 }
 
 // programFunction is one function the analysed program declares: the declaration,
@@ -465,6 +478,31 @@ func isStructValue(t types.Type) bool {
 	}
 	_, isStruct := u.Underlying().(*types.Struct)
 	return isStruct
+}
+
+// argumentParameter is the parameter of callee's signature the argument at position
+// arg of a call reaching it supplies, and false for a method expression's receiver.
+func argumentParameter(callee facts.Callee, arg int) (int, bool) {
+	if arg < callee.Shift {
+		return 0, false
+	}
+	return parameterAt(callee.Fn.Signature(), arg-callee.Shift)
+}
+
+// dynamicallyErased reports whether the argument at position arg of one call is
+// passed for an empty-interface parameter of the signature the call's callee
+// expression has.
+func dynamicallyErased(info *types.Info, call *ast.CallExpr, arg int) bool {
+	callee := info.TypeOf(call.Fun)
+	if callee == nil {
+		return false
+	}
+	sig, isSignature := callee.Underlying().(*types.Signature)
+	if !isSignature {
+		return false
+	}
+	at, supplies := parameterAt(sig, arg)
+	return supplies && slices.Contains(erasedParameters(sig), at)
 }
 
 // parameterAt is the parameter of one signature the argument at position arg

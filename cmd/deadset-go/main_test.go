@@ -19,13 +19,14 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/memory"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // TestMain creates the directory the shared fixture modules are written under, runs
-// the package's tests, and removes it.
+// the package's tests, [testsupport.WaitOnTheToolchain] many at once, and removes it.
 //
 // The directory cannot belong to a test: a fixture module is declared by several of
 // them and written once, so it outlives whichever one declared it first.
@@ -61,6 +62,10 @@ func runTests(m *testing.M) int {
 			fmt.Fprintf(os.Stderr, "pin the host: %v\n", err)
 			return 1
 		}
+	}
+	if err := testsupport.WaitOnTheToolchain(); err != nil {
+		fmt.Fprintf(os.Stderr, "set the test parallelism: %v\n", err)
+		return 1
 	}
 	return m.Run()
 }

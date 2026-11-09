@@ -705,7 +705,7 @@ func (g *intrafunc) unread(c int, w *walk, fn *walked, fields *ast.FieldList, bo
 				return err
 			}
 			held.hold(c, w.one, name.Pos(), fn.id, newPart(code, ref(symbol.Ref, name.Name), word, name.Name, at,
-				word+" "+name.Name+" is never read in the body"))
+				word+" "+name.Name+" of "+namedSymbol(symbol)+" is never read in the body"))
 		}
 	}
 	return nil
@@ -757,7 +757,7 @@ func (g *intrafunc) resultsOf(c int, w *walk, fn *walked, held *parts) error {
 			}
 			name, described := resultName(field, offset, index, count)
 			held.hold(c, w.one, position, fn.id, newPart(vocab.UnusedResult, symbol.Ref, resultSubject, name, site,
-				resultSubject+" "+described+" is discarded at every call site"))
+				resultSubject+" "+described+" of "+namedSymbol(symbol)+" is discarded at every call site"))
 		}
 		at += names
 	}
@@ -906,7 +906,7 @@ func (g *intrafunc) reportUnreachable(c int, one *Configured, p *packages.Packag
 		}
 		if symbol := g.in.symbol(id); symbol != nil {
 			held.hold(c, one, diagnostic.Pos, id, newPart(vocab.UnreachableStatement, symbol.Ref, statementSubject, symbol.Name, at,
-				"statement of "+symbol.Name+" is unreachable"))
+				"statement of "+namedSymbol(symbol)+" is unreachable"))
 		}
 	}
 	return nil
@@ -940,7 +940,7 @@ func (g *intrafunc) casesOf(c int, w *walk, fn *walked, held *parts) error {
 				return false
 			}
 			held.hold(c, w.one, later.clause.Case, fn.id, newPart(vocab.UnreachableCase, symbol.Ref, caseSubject, symbol.Name, site,
-				"case of the type switch in "+symbol.Name+" can never match, because an earlier case always matches first"))
+				"case of the type switch in "+namedSymbol(symbol)+" can never match, because an earlier case always matches first"))
 		}
 		return true
 	})
@@ -1051,7 +1051,7 @@ func (g *intrafunc) storesOf(c int, w *walk, fn *walked, body *functionBody, hel
 		if err != nil {
 			return err
 		}
-		store := newPart(vocab.DeadStore, symbol.Ref, storeSubject, name.Name, at, "store to "+name.Name+" is never read")
+		store := newPart(vocab.DeadStore, symbol.Ref, storeSubject, name.Name, at, "store to "+name.Name+" in "+namedSymbol(symbol)+" is never read")
 		store.Details.WritePositions = []Position{store.Position}
 		held.hold(c, w.one, name.Pos(), fn.id, store)
 	}

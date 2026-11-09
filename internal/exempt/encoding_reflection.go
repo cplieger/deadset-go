@@ -219,7 +219,7 @@ func (r methodReach) reads(m *types.Func) bool {
 func EncodingReflectionDetector(in *Program) ([]Exemption, error) {
 	f := &encodingFlow{
 		conversions:  in.programConversions,
-		readings:     facts.NewReadings(in.Result.Fset),
+		readings:     in.Facts.Readings(),
 		kept:         newRetention(in, vocab.EncodingReflection),
 		filled:       newRetention(in, vocab.EncodingReflection),
 		own:          programPaths(in),
@@ -234,7 +234,7 @@ func EncodingReflectionDetector(in *Program) ([]Exemption, error) {
 	}
 	f.templates = newTemplateOrigins(in)
 	f.decode = newDecoders(f)
-	f.edge = newBoundary(in, f.namedDestinationParameter, f.opaqueParameters)
+	f.edge = newBoundary(in, f.namedDestinationParameter, f.opaqueParameters, f.dynamicReach())
 	f.readFlow()
 	if err := f.solve(); err != nil {
 		return nil, err
@@ -264,7 +264,7 @@ type encodingFlow struct {
 	// The tables [encodingFlow.index] fills from every arrival before any is
 	// retained: the import closure of each outside package an arrival reaches, by
 	// path, and what a walk of each type an arrival carries reads.
-	closures    map[string]*importClosure
+	closures    map[*types.Package]*importClosure
 	walked      map[types.Type][]*types.Named
 	selfEncoded map[selfEncodingKey]selfEncodedTypes
 
@@ -328,14 +328,12 @@ func (f *encodingFlow) bound(carried []types.Type) []types.Type {
 // for an arrival read by standard encoders, the types that walk reads and enters,
 // which is read from the first.
 func (f *encodingFlow) index(arrivals []arrival) {
-	f.closures = make(map[string]*importClosure)
+	f.closures = make(map[*types.Package]*importClosure)
 	f.walked = make(map[types.Type][]*types.Named)
 	f.selfEncoded = make(map[selfEncodingKey]selfEncodedTypes)
 	for i := range arrivals {
 		for _, pkg := range arrivals[i].d.reach.outside {
-			if _, known := f.closures[pkg.Path()]; !known {
-				f.closures[pkg.Path()] = f.closureOf(pkg)
-			}
+			f.closure(pkg)
 		}
 		for _, t := range arrivals[i].types {
 			if _, known := f.walked[t]; !known {
@@ -629,13 +627,23 @@ func pathTo(root, target ast.Node) []ast.Node {
 }
 
 // readCall reads the arguments one call of the program hands to something that
-// reads them: a destination, and otherwise a parameter that only decodes or one a
-// value leaves the analysis through.
+// reads them, for each function the call reaches ([facts.Callees.Of]): a
+// destination, and otherwise a parameter that only decodes or one a value leaves
+// the analysis through, which every argument of a call that may reach a function
+// the analysis does not know is.
 func (f *encodingFlow) readCall(info *types.Info, decl ast.Decl, enclosing *types.Func, dir string, call *ast.CallExpr) {
-	fn, isFunc := resolveObject(info, call.Fun).(*types.Func)
-	if !isFunc {
-		return
+	callees, dynamic := f.kept.in.callees(info, call)
+	for _, callee := range callees {
+		f.readCallee(info, decl, enclosing, dir, call, callee)
 	}
+	if dynamic {
+		f.readDynamic(info, enclosing, call)
+	}
+}
+
+// readCallee is [encodingFlow.readCall] for one function the call reaches.
+func (f *encodingFlow) readCallee(info *types.Info, decl ast.Decl, enclosing *types.Func, dir string, call *ast.CallExpr, callee facts.Callee) {
+	fn := callee.Fn
 	if d, reaches := f.encodingDestination(fn); reaches {
 		narrowReflection(fn, callSite{info: info, decl: decl, call: call}, &d)
 		f.narrowStrict(fn, info, decl, call, &d.reach)
@@ -644,14 +652,28 @@ func (f *encodingFlow) readCall(info *types.Info, decl ast.Decl, enclosing *type
 		return
 	}
 	for i, arg := range call.Args {
-		if at, supplies := parameterAt(fn.Signature(), i); supplies && !f.edge.declares(fn) {
+		if at, supplies := argumentParameter(callee, i); supplies && !f.edge.declares(fn) {
 			if decoded, decodes := f.decode.at(fn, at); decodes {
 				d := destination{detail: "decoded by " + fn.FullName(), reach: decoded}
 				f.readArgument(info, enclosing, arg, &d, decodedArgument)
 				continue
 			}
 		}
-		f.readCrossing(info, decl, enclosing, call, i)
+		f.readCrossing(info, decl, enclosing, call, callee, i)
+	}
+}
+
+// readDynamic reads each argument a call hands to an empty-interface parameter of
+// a function the analysis does not know, where the value leaves the analysis as at
+// a callee outside the program, read by every package outside it.
+func (f *encodingFlow) readDynamic(info *types.Info, enclosing *types.Func, call *ast.CallExpr) {
+	for i, arg := range call.Args {
+		if !dynamicallyErased(info, call, i) {
+			continue
+		}
+		d := destination{detail: "passed to " + types.ExprString(call.Fun), reach: f.edge.dynamic}
+		d.reach.fills = isPointer(info.TypeOf(arg))
+		f.readArgument(info, enclosing, arg, &d, crossingArgument)
 	}
 }
 
@@ -664,15 +686,15 @@ func (f *encodingFlow) readArgument(info *types.Info, enclosing *types.Func, arg
 // value out of the analysed program, which the boundary's crossing test decides.
 // What is retained is what the boundary carries for the callee, and the detail names
 // the immediate callee, so a wrapper's caller reads the wrapper's name.
-func (f *encodingFlow) readCrossing(info *types.Info, decl ast.Decl, enclosing *types.Func, call *ast.CallExpr, i int) {
-	out, sinks := f.edge.sinkOf(info, call, i)
+func (f *encodingFlow) readCrossing(info *types.Info, decl ast.Decl, enclosing *types.Func, call *ast.CallExpr, callee facts.Callee, i int) {
+	out, sinks := f.edge.sinkOf(callee, i)
 	if !sinks {
 		return
 	}
 	f.narrowStrict(out.callee, info, decl, call, &out.reach)
 	arg := call.Args[i]
 	d := destination{detail: "passed to " + out.callee.FullName(), reach: out.reach}
-	if at, supplies := parameterAt(out.callee.Signature(), i); supplies && !f.edge.declares(out.callee) {
+	if at, supplies := argumentParameter(callee, i); supplies && !f.edge.declares(out.callee) {
 		switch {
 		case f.fills(out.callee, at):
 			d = destination{detail: "decoded by " + out.callee.FullName(), reach: out.reach.filling()}
@@ -896,7 +918,7 @@ func (f *encodingFlow) outsideMethod(fn *types.Func) (*types.Func, bool) {
 	}
 	recv := sig.Recv().Type()
 	for _, candidate := range f.kept.in.Facts.OutsideMethods(fn.Name()) {
-		if !candidate.Consumer && facts.HoldsValues(candidate.Interface) && types.Implements(recv, candidate.Interface) {
+		if !candidate.Consumer && facts.HoldsValues(candidate.Interface) && f.readings.Implements(recv, candidate.Interface) {
 			return candidate.Method, true
 		}
 	}
@@ -1125,6 +1147,17 @@ type importClosure struct {
 	templates  bool
 }
 
+// closure is the import closure of one reading of a package, read once: two
+// readings of one path can import two versions of a package.
+func (f *encodingFlow) closure(pkg *types.Package) *importClosure {
+	held, known := f.closures[pkg]
+	if !known {
+		held = f.closureOf(pkg)
+		f.closures[pkg] = held
+	}
+	return held
+}
+
 // closureOf reads one package's import closure.
 func (f *encodingFlow) closureOf(pkg *types.Package) *importClosure {
 	imported := f.assert.importedBy(pkg)
@@ -1136,6 +1169,21 @@ func (f *encodingFlow) closureOf(pkg *types.Package) *importClosure {
 		}
 	}
 	return closure
+}
+
+// dynamicReach is what a function the analysis does not know reads of a value its
+// empty-interface parameter is given: what a callee outside the program reads, for
+// every package outside it, so a positional codec among them reads every field.
+func (f *encodingFlow) dynamicReach() reach {
+	outside := joinPackages(nil, f.outsidePackages())
+	return reach{
+		methods: reachEncoding | reachDecoding,
+		fields:  true,
+		outside: outside,
+		layout:  slices.ContainsFunc(outside, func(pkg *types.Package) bool { return positionalCodecs[pkg.Path()] }),
+		emits:   true,
+		opaque:  true,
+	}
 }
 
 // outsidePackages is the packages outside the flow's program ([Program]).
@@ -1168,14 +1216,14 @@ func (f *encodingFlow) outsideMethods(named *types.Named, r reach) (every bool, 
 	}
 	ids = make(map[string]bool)
 	for _, pkg := range r.outside {
-		closure := f.closures[pkg.Path()]
+		closure := f.closure(pkg)
 		if closure.templates {
 			return true, nil
 		}
-		maps.Copy(ids, f.satisfied(satisfactionKey{named: named, pkg: pkg.Path()}, closure.interfaces))
+		maps.Copy(ids, f.satisfied(satisfactionKey{named: named, pkg: pkg}, closure.interfaces))
 	}
 	for _, pkg := range r.contained {
-		key := satisfactionKey{named: named, pkg: pkg.Path(), contained: true}
+		key := satisfactionKey{named: named, pkg: pkg, contained: true}
 		maps.Copy(ids, f.satisfied(key, f.assert.ownInterfaces(pkg)))
 	}
 	return false, ids
@@ -1186,7 +1234,7 @@ func (f *encodingFlow) outsideMethods(named *types.Named, r reach) (every bool, 
 func (f *encodingFlow) satisfied(key satisfactionKey, interfaces []*types.Interface) map[string]bool {
 	held, known := f.satisfying[key]
 	if !known {
-		held = satisfiedMethods(key.named, f.declaredIDs(key.named), interfaces)
+		held = satisfiedMethods(f.readings, key.named, f.declaredIDs(key.named), interfaces)
 		f.satisfying[key] = held
 	}
 	return held
@@ -1196,7 +1244,7 @@ func (f *encodingFlow) satisfied(key satisfactionKey, interfaces []*types.Interf
 // a callee or as a container that stores it.
 type satisfactionKey struct {
 	named     *types.Named
-	pkg       string
+	pkg       *types.Package
 	contained bool
 }
 
@@ -1224,15 +1272,16 @@ func declaredMethodIDs(named *types.Named) map[string]bool {
 
 // satisfiedMethods is the [types.Object.Id] of each method of every interface the
 // type, or a pointer to it, implements. An interface with a method the type's set
-// lacks is one neither implements, so [types.Implements] is asked only of the rest.
-func satisfiedMethods(named *types.Named, declared map[string]bool, interfaces []*types.Interface) map[string]bool {
+// lacks is one neither implements, so [facts.Readings.Implements] is asked only of
+// the rest.
+func satisfiedMethods(readings *facts.Readings, named *types.Named, declared map[string]bool, interfaces []*types.Interface) map[string]bool {
 	ids := make(map[string]bool)
 	pointer := types.NewPointer(named)
 	for _, iface := range interfaces {
 		if !declaresEvery(declared, iface) {
 			continue
 		}
-		if !types.Implements(named, iface) && !types.Implements(pointer, iface) {
+		if !readings.Implements(named, iface) && !readings.Implements(pointer, iface) {
 			continue
 		}
 		for method := range iface.Methods() {

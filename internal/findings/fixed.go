@@ -26,15 +26,16 @@ func readFixed(one *Configured, fixed map[inventory.SymbolID]bool) {
 }
 
 // fixedMethod reports whether one definition is a method of the inventory that an
-// outside interface method of its name matches in signature. Receivers are not
-// compared, because [types.Identical] ignores a signature's receiver.
+// outside interface method of its name matches in signature, stated as the
+// method's package sees it ([facts.Readings.In]). Receivers are not compared,
+// because [types.Identical] ignores a signature's receiver.
 func fixedMethod(one *Configured, object types.Object) (inventory.SymbolID, bool) {
 	fn, isFunc := object.(*types.Func)
 	if !isFunc || fn.Signature().Recv() == nil {
 		return "", false
 	}
 	for _, method := range one.Facts.OutsideMethods(fn.Name()) {
-		if types.Identical(fn.Signature(), method.Method.Signature()) {
+		if want, stated := one.Facts.Readings().In(method.Method.Signature(), fn.Pkg()); stated && types.Identical(fn.Signature(), want) {
 			return one.Resolve.Object(fn)
 		}
 	}

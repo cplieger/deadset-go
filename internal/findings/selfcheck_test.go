@@ -6,6 +6,7 @@ import (
 	"maps"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
@@ -56,12 +57,13 @@ func suppressed(t *testing.T, archive string, resolved config.Config) *Input {
 }
 
 // The sentences a stale record of these fixtures reports, one per mechanism, and
-// for a record whose declaration reports another code, one naming that code.
+// for a record whose declaration reports another code, one naming that code, each
+// with the record's own subject at <symbol> ([staleMessage]).
 const (
-	staleInline          = "inline directive for DS1002 matches no current finding"
-	staleIgnore          = "ignore entry for DS1001 matches no current finding"
+	staleInline          = "inline directive for DS1002 on <symbol> matches no current finding"
+	staleIgnore          = "ignore entry for DS1001 on <symbol> matches no current finding"
 	staleIgnoreReports   = staleIgnore + ", and its declaration reports DS1501"
-	staleBaseline        = "baseline row for DS1001 matches no current finding"
+	staleBaseline        = "baseline row for DS1001 on <symbol> matches no current finding"
 	staleBaselineReports = staleBaseline + ", and its declaration reports DS1501"
 )
 
@@ -90,10 +92,16 @@ func staleOf(stale []report.StaleSuppression) []staleAt {
 			path:      stale[i].Position.Path,
 			line:      stale[i].Position.Line,
 			mechanism: stale[i].Mechanism,
-			message:   stale[i].Message,
+			message:   staleMessage(&stale[i]),
 		})
 	}
 	return named
+}
+
+// staleMessage is the message of one stale suppression with the subject it names,
+// which must be its own, written <symbol>.
+func staleMessage(stale *report.StaleSuppression) string {
+	return strings.Replace(stale.Message, " on "+stale.Symbol+" ", " on <symbol> ", 1)
 }
 
 // staleAtSite is the stale suppression reported at one site.
@@ -262,7 +270,7 @@ func TestStaleSuppressionsKeepsARecordNamingARetiredCodeStale(t *testing.T) {
 func TestStaleSuppressionsCollapsesTheRecordsAtOneSiteIntoOneFindingNamingEveryCode(t *testing.T) {
 	t.Parallel()
 	in := suppressed(t, "selfcheck-collapse.txtar", applicationConfig())
-	const collapsedCodes = "inline directive for DS1001 and DS1501 matches no current finding"
+	const collapsedCodes = "inline directive for DS1001 and DS1501 on <symbol> matches no current finding"
 
 	want := []staleAt{
 		{path: "main.go", line: 5, mechanism: "inline", message: collapsedCodes},
@@ -303,8 +311,8 @@ func TestTheRefusalKindsReportEachRefusalAsTheSuppressionWasWritten(t *testing.T
 	// lets both stand in the emitters table.
 	reasonless := oneRefusal(t, suppressionsWithoutReason, in, vocab.SuppressionWithoutReason)
 	switch {
-	case reasonless.Message != "inline directive for DS1001 carries no reason":
-		t.Errorf("SuppressionsWithoutReason() reports %q, want the sentence naming the mechanism and the code",
+	case reasonless.Message != "inline directive for DS1001 on go://example.com/selfcheck#main.go:file carries no reason":
+		t.Errorf("SuppressionsWithoutReason() reports %q, want the sentence naming the mechanism, the code and the subject",
 			reasonless.Message)
 	case reasonless.Details.Mechanism != "inline":
 		t.Errorf("SuppressionsWithoutReason() names mechanism %q, want inline", reasonless.Details.Mechanism)
@@ -317,8 +325,8 @@ func TestTheRefusalKindsReportEachRefusalAsTheSuppressionWasWritten(t *testing.T
 
 	unscoped := oneRefusal(t, unscopedEntries, in, vocab.UnscopedIgnoreEntry)
 	switch {
-	case unscoped.Message != "ignore entry for DS1002 names a symbol and no path":
-		t.Errorf("UnscopedEntries() reports %q, want the sentence naming the mechanism and the code",
+	case unscoped.Message != "ignore entry for DS1002 on go://example.com/selfcheck#Dropped names a symbol and no path":
+		t.Errorf("UnscopedEntries() reports %q, want the sentence naming the mechanism, the code and the subject",
 			unscoped.Message)
 	case unscoped.Details.Entry == nil || unscoped.Details.Entry.Path != "":
 		t.Errorf("UnscopedEntries() carries %+v, want the record with its path empty", unscoped.Details.Entry)
@@ -415,8 +423,8 @@ func TestADirectiveNamingTwoCodesAndNoReasonIsOneFindingPerCodeAtOnePosition(t *
 			t.Errorf("the record of %s is sited at %s:%d:%d, want %s:%d:%d, the position the directive is written on",
 				one.Details.Entry.Code, one.Position.Path, one.Position.Line, one.Position.Column,
 				site.Filename, site.Line, site.Column)
-		case one.Message != written(core.Inline)+" for "+string(one.Details.Entry.Code)+" carries no reason":
-			t.Errorf("the record of %s reports %q, want the sentence naming the mechanism and that code",
+		case one.Message != written(core.Inline)+" for "+string(one.Details.Entry.Code)+" on "+one.Symbol.Ref+" carries no reason":
+			t.Errorf("the record of %s reports %q, want the sentence naming the mechanism, that code and the subject",
 				one.Details.Entry.Code, one.Message)
 		}
 	}
@@ -464,8 +472,8 @@ func TestUnmatchedRootsReportsEveryConfiguredStringAsTheConfigurationSpellsIt(t 
 	}{
 		// The canonical key orders two findings at one position by the reference each
 		// names, which is what tells the rows of one document apart.
-		{ref: "go://example.com/selfcheck#Vanish*", message: "configured root pattern matches no symbol of the inventory"},
-		{ref: "go://example.com/selfcheck#Vanished", message: "configured root matches no symbol of the inventory"},
+		{ref: "go://example.com/selfcheck#Vanish*", message: "configured root pattern go://example.com/selfcheck#Vanish* matches no symbol of the inventory"},
+		{ref: "go://example.com/selfcheck#Vanished", message: "configured root go://example.com/selfcheck#Vanished matches no symbol of the inventory"},
 	} {
 		one := found[i]
 		switch {
@@ -675,8 +683,8 @@ func TestTheFirstRecordOfTheReadingOrderIsInEffectAndALaterOneIsStale(t *testing
 	result := computed(t, in, packageEmitters())
 	found := result.Findings
 	want := []staleAt{
-		{path: core.IgnoreFileName, line: 4, mechanism: "ignore", message: "ignore entry for DS1002 matches no current finding"},
-		{path: core.IgnoreFileName, line: 10, mechanism: "ignore", message: "ignore entry for DS1002 matches no current finding"},
+		{path: core.IgnoreFileName, line: 4, mechanism: "ignore", message: "ignore entry for DS1002 on <symbol> matches no current finding"},
+		{path: core.IgnoreFileName, line: 10, mechanism: "ignore", message: "ignore entry for DS1002 on <symbol> matches no current finding"},
 	}
 	if got := staleFindings(t, in, packageEmitters()); !slices.Equal(got, want) {
 		t.Errorf("StaleSuppressions() = %+v, want %+v: the entry naming a code a directive already named is the later record",
@@ -799,8 +807,8 @@ func TestUnmatchedRootsIsPositionedInTheDocumentThatDeclaredTheRoot(t *testing.T
 func TestStaleSuppressionsReadsDormancyFromTheFindingsARecordMatches(t *testing.T) {
 	t.Parallel()
 	bothStale := []string{
-		"inline directive for DS1001 matches no current finding, and its declaration reports DS1002",
-		"inline directive for DS1401 matches no current finding, and its declaration reports DS1002",
+		"inline directive for DS1001 on <symbol> matches no current finding, and its declaration reports DS1002",
+		"inline directive for DS1401 on <symbol> matches no current finding, and its declaration reports DS1002",
 	}
 	cases := map[string]struct {
 		severity map[string]vocab.Severity
@@ -835,7 +843,7 @@ func TestStaleSuppressionsReadsDormancyFromTheFindingsARecordMatches(t *testing.
 
 			var stale []string
 			for i := range result.Stale {
-				stale = append(stale, result.Stale[i].Message)
+				stale = append(stale, staleMessage(&result.Stale[i]))
 			}
 			for i := range result.Findings {
 				if found := &result.Findings[i]; found.Code == vocab.UnusedParameter {
