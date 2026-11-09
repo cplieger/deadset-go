@@ -65,7 +65,7 @@ The text rendering lists two findings:
 
 ```text
 main.go:7:2: field counter.label: field counter.label is written once and never read [certain] (DS1301)
-main.go:14:6: function farewell: unexported function has no reference in the target [certain] (DS1002)
+main.go:14:6: function farewell: unexported function farewell has no reference in the target [certain] (DS1002)
 summary: 2 findings (0 allow, 0 warn, 2 deny), 1 deletable line, 0 suppressions in effect, 0 reasons recorded, 0 stale suppressions, 0 pending, 0 omitted
 ```
 
@@ -113,7 +113,7 @@ The report follows the [deadset contract](https://github.com/cplieger/deadset-sp
 
 ## Related projects
 
-deadset-go implements the [deadset contract](https://github.com/cplieger/deadset-spec), which fixes the issue codes, the report schema and the exit codes. It answers all 228 of the contract's conformance fixtures that carry a Go rendering: 220 pass and 8 are pending a rule the contract has adopted and this release does not meet yet. Every report names that result.
+deadset-go implements the [deadset contract](https://github.com/cplieger/deadset-spec), which fixes the issue codes, the report schema and the exit codes. It answers all 231 of the contract's conformance fixtures that carry a Go rendering: 223 pass and 8 are pending a rule the contract has adopted and this release does not meet yet. Every report names that result.
 
 - [deadset-ts](https://github.com/cplieger/deadset-ts) is the same analysis for TypeScript and JavaScript.
 - [deadset](https://github.com/cplieger/deadset) runs both analyzers as one command and merges their reports, resolving the references between Go and TypeScript code.

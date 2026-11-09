@@ -1,0 +1,33 @@
+An application whose enumerated type only a test produces from an integer, so
+the enum-group exemption retains every member from that test file alone. One
+member a test also names, and one no file names.
+
+-- go.mod --
+module example.com/evidence
+
+go 1.27.1
+-- main.go --
+package main
+
+type level int
+
+const (
+	levelLow level = iota
+	levelMid
+	levelTop
+)
+
+func main() {
+	l := levelLow
+	println(l == levelLow)
+}
+-- main_test.go --
+package main
+
+import "testing"
+
+func TestLevels(t *testing.T) {
+	if level(len(t.Name())) == levelTop {
+		t.Fatal("the name is as long as the top level")
+	}
+}

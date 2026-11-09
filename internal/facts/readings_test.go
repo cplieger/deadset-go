@@ -171,3 +171,63 @@ func TestRestatedIsFalseForATypeNamingWhatNoOtherReadingDeclares(t *testing.T) {
 		})
 	}
 }
+
+// importing resolves each import path to the one package of that path.
+type importing map[string]*types.Package
+
+func (m importing) Import(path string) (*types.Package, error) {
+	if p, held := m[path]; held {
+		return p, nil
+	}
+	return nil, fmt.Errorf("no package %s", path)
+}
+
+// A type of m, built against one version of lib, meets an interface and a type of
+// another version as a build holding both meets them: stated in m's reading of lib.
+func TestReadingsStateTheOtherVersionsTypesInTheReadingTheTypeSees(t *testing.T) {
+	t.Parallel()
+	fset := token.NewFileSet()
+	parse := func(name, src string) *ast.File {
+		f, err := parser.ParseFile(fset, name, src, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("Setup: parse %s: %v", name, err)
+		}
+		return f
+	}
+	first := checked(t, fset, "example.com/lib", parse("/v1/lib/lib.go", "package lib\n\ntype Key struct{}\n"))
+	second := checked(t, fset, "example.com/lib", parse("/v2/lib/lib.go",
+		"package lib\n\ntype Key struct{}\n\ntype Getter interface{ Get(Key) int }\n"))
+	m, err := (&types.Config{Importer: importing{"example.com/lib": first}}).Check("example.com/m", fset,
+		[]*ast.File{parse("/m/m.go", "package m\n\nimport \"example.com/lib\"\n\ntype T struct{}\n\nfunc (T) Get(lib.Key) int { return 0 }\n")}, nil)
+	if err != nil {
+		t.Fatalf("Setup: check m: %v", err)
+	}
+	getter := second.Scope().Lookup("Getter").Type().Underlying().(*types.Interface)
+	tType := m.Scope().Lookup("T").Type()
+	if types.Implements(tType, getter) {
+		t.Fatalf("Setup: T implements the second version's Getter before stating it in m's reading")
+	}
+	r := readingsOver(fset)
+
+	if !r.Implements(tType, getter) {
+		t.Errorf("Implements(T, Getter) = false, want true: Getter stated in m's reading of lib is T's")
+	}
+	if r.Implements(types.Typ[types.Int], getter) {
+		t.Errorf("Implements(int, Getter) = true, want false")
+	}
+	if got := r.Of(m, second); got != first {
+		t.Errorf("Of(m, the second lib) = %p, want m's reading %p", got, first)
+	}
+	firstKey, secondKey := first.Scope().Lookup("Key").Type(), second.Scope().Lookup("Key").Type()
+	if !r.Same(firstKey, secondKey) || !r.Same(secondKey, firstKey) {
+		t.Errorf("Same(Key, Key) of two versions = false, want true in either order")
+	}
+	if r.Same(firstKey, tType) {
+		t.Errorf("Same(lib.Key, m.T) = true, want false")
+	}
+	sig := getter.Method(0).Signature()
+	stated, ok := r.In(sig, m)
+	if !ok || !types.Identical(stated, tType.(*types.Named).Method(0).Signature()) {
+		t.Errorf("In(Getter.Get, m) = %v, %v, want T.Get's signature", stated, ok)
+	}
+}

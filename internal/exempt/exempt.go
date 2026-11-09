@@ -430,3 +430,9 @@ func resolveObject(info *types.Info, expr ast.Expr) types.Object {
 	}
 	return nil
 }
+
+// callees is every function one call of the program reaches, and whether it may
+// reach one the analysis does not know ([facts.Callees.Of]).
+func (in *Program) callees(info *types.Info, call *ast.CallExpr) ([]facts.Callee, bool) {
+	return in.Facts.Callees().Of(info, call)
+}

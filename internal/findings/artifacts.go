@@ -65,7 +65,7 @@ func fileNeverBuilt(in *pass) ([]draft, error) {
 			Name:      file.name,
 			SizeLines: file.lines,
 		}, Position{Path: file.path, Line: 1, Column: 1, EndLine: file.lines},
-			"no configuration of the build matrix compiles this file")
+			"no configuration of the build matrix compiles file "+file.name)
 		one.Details.ExcludedBy = file.constraint
 		found = append(found, one)
 	}
@@ -288,7 +288,7 @@ func fileNeverImported(in *pass) ([]draft, error) {
 			continue
 		}
 		one, held := in.finding(symbol.ID, vocab.FileNeverImported,
-			"no import reaches the package this file declares and no root names a declaration in it")
+			"no import reaches the package file "+symbol.Name+" declares and no root names a declaration in it")
 		if !held {
 			continue
 		}
@@ -384,7 +384,7 @@ func unusedDependency(in *pass) ([]draft, error) {
 				Name:      require.Path,
 				SizeLines: 1,
 			}, in.directivePosition(m, require.Site),
-				"no package of the target imports a package this required module provides")
+				"no package of the target imports a package required module "+require.Path+" provides")
 			one.Details.DependencyClass = requireSection
 			found = append(found, one)
 		}
@@ -410,7 +410,7 @@ func unusedReplace(in *pass) ([]draft, error) {
 				Name:      named,
 				SizeLines: 1,
 			}, in.directivePosition(m, replace.Site),
-				"the module this directive replaces is absent from the build list")
+				"module "+named+", which this directive replaces, is absent from the build list")
 			one.Details.Replacement = moduleFileSpelling(replace.New)
 			found = append(found, one)
 		}

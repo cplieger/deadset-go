@@ -236,7 +236,7 @@ func unnecessaryExport(in *pass) ([]draft, error) {
 		if n.exposed[symbol.ID] >= scopeModule {
 			continue
 		}
-		message := "exported " + in.word(symbol.ID) +
+		message := "exported " + in.named(symbol.ID) +
 			" is referenced only inside the " + visibility + " that declares it"
 		if one, held := n.finding(symbol, vocab.UnnecessaryExport, visibility, message); held {
 			found = append(found, one)
@@ -261,7 +261,7 @@ func unnecessaryExposure(in *pass) ([]draft, error) {
 		if !in.importable(symbol) || n.reach[symbol.ID] != scopeModule || n.exposed[symbol.ID] >= scopeOutside {
 			continue
 		}
-		message := "exported " + in.word(symbol.ID) + " is referenced only inside this module"
+		message := "exported " + in.named(symbol.ID) + " is referenced only inside this module"
 		if one, held := n.finding(symbol, vocab.UnnecessaryExposure, visibilityModule, message); held {
 			found = append(found, one)
 		}
@@ -554,6 +554,6 @@ func unreachableMessage(in *pass, candidate *liveness.Candidate) string {
 	if candidate.Relation == liveness.Reachability {
 		found = "is referenced only from declarations that are themselves dead"
 	}
-	return "exported " + in.word(candidate.ID) + " " + found +
+	return "exported " + in.named(candidate.ID) + " " + found +
 		", and nothing outside can import the package that declares it"
 }

@@ -8,6 +8,9 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
+// mainPackage is the name of a package that builds a command.
+const mainPackage = "main"
+
 // Published is what one configuration's published API reaches, which
 // grammar/analysis/confidence.md states (confidence.3): the type of each exported
 // declaration of a package of the published API, and in turn the type of each
@@ -57,7 +60,7 @@ func publishedOf(x *Index, rs *resolve.Resolver) *Published {
 			continue
 		}
 		p.target[rs.PackageKey(pkg.Types)] = true
-		if load.Published(pkg.PkgPath, pkg.Name == "main") {
+		if load.Published(pkg.PkgPath, pkg.Name == mainPackage) {
 			p.packages = append(p.packages, pkg)
 		}
 	}

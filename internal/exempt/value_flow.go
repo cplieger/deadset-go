@@ -88,7 +88,7 @@ type fieldWrites struct {
 func (f *encodingFlow) readFlow() {
 	in := f.kept.in
 	f.graph = flowGraph{
-		stored: newStoredTypes(f.edge.sites, f.typeArgs),
+		stored: newStoredTypes(f.edge.sites, f.typeArgs, in.Facts.Callees()),
 		writes: fieldWrites{
 			assigned:   make(map[token.Position]bool),
 			every:      make(map[token.Position]bool),
@@ -175,7 +175,7 @@ func (r *declarationReader) assertion(n *ast.TypeAssertExpr) {
 		return
 	}
 	if r.walk == nil {
-		r.walk = &reflectWalk{info: r.info, assigned: reflectValueAssignments(r.info, fd.Body)}
+		r.walk = &reflectWalk{info: r.info, assigned: reflectValueAssignments(r.info, fd.Body), callees: r.flow.kept.in.callees}
 	}
 	if a, converts := assertedField(r.walk, n); converts {
 		r.flow.graph.assertions = append(r.flow.graph.assertions, a)

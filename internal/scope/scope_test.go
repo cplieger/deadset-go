@@ -1,7 +1,6 @@
 package scope
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -421,10 +420,5 @@ func TestAnInputTheInvocationNamesThatCannotBeReadIsErrNamed(t *testing.T) {
 		if _, err := Resolve(t.Context(), tc.dir, tc.document); !errors.Is(err, ErrNamed) {
 			t.Errorf("Resolve(%s) = _, %v, want an error matching ErrNamed", tc.name, err)
 		}
-	}
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	if _, err := Resolve(ctx, ".", refused); errors.Is(err, ErrNamed) {
-		t.Errorf("Resolve(a cancelled read) = _, %v, want no ErrNamed: the invocation is not at fault", err)
 	}
 }

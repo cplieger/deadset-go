@@ -18,6 +18,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/deps"
@@ -736,14 +738,19 @@ func (in *pass) admit(found *Finding) error {
 	return nil
 }
 
-// checkMessage refuses a message a text line and a SARIF result cannot carry: an
-// empty one, one holding a line break, and one ending in a full stop, which is
-// what lets a consumer append a clause to the same sentence.
+// checkMessage refuses a message a text line, a SARIF result and an annotation
+// cannot carry: an empty one, one that does not name its subject, which an
+// annotation or a SARIF result shows with no other name, one holding a line break,
+// and one ending in a full stop, which is what lets a consumer append a clause to
+// the same sentence.
 func checkMessage(found *Finding) error {
 	switch {
 	case found.Message == "":
 		return fmt.Errorf("%w: %s reports %s with no message",
 			errEmitter, found.Code, found.Symbol.Ref)
+	case !namesSubject(found.Message, found.Symbol.Name):
+		return fmt.Errorf("%w: %s does not name %q in its message: %q",
+			errEmitter, found.Code, found.Symbol.Name, found.Message)
 	case strings.ContainsAny(found.Message, "\r\n"):
 		return fmt.Errorf("%w: %s holds a line break in its message: %q",
 			errEmitter, found.Code, found.Message)
@@ -752,6 +759,43 @@ func checkMessage(found *Finding) error {
 			errEmitter, found.Code, found.Message)
 	}
 	return nil
+}
+
+// namesSubject reports whether message holds name as a subject phrase does: a whole
+// token, inside no longer identifier and selected from nothing, after no article,
+// since a name the sentence's own nouns spell, as "the target", names nothing. A
+// message opens with a word for its subject's kind, never its name, so an article
+// opening it is the article whatever the subject is called.
+func namesSubject(message, name string) bool {
+	for from := 0; from <= len(message); from++ {
+		at := strings.Index(message[from:], name)
+		if at < 0 {
+			return false
+		}
+		at += from
+		before, _ := utf8.DecodeLastRuneInString(message[:at])
+		after, _ := utf8.DecodeRuneInString(message[at+len(name):])
+		opening := at == 0 && after == ' ' && slices.Contains([]string{"a", "an", "the"}, name)
+		if !identifierRune(before) && before != '.' && !identifierRune(after) && !afterArticle(message[:at]) && !opening {
+			return true
+		}
+		from = at
+	}
+	return false
+}
+
+func identifierRune(r rune) bool { return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r) }
+
+// afterArticle reports whether text ends in an article and the space after it.
+func afterArticle(text string) bool {
+	for _, article := range [...]string{"a ", "an ", "the "} {
+		if rest, ends := strings.CutSuffix(text, article); ends {
+			if last, _ := utf8.DecodeLastRuneInString(rest); !identifierRune(last) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // subjectOf copies the draft's subject and, where the emitter left the kind empty,
@@ -942,6 +986,24 @@ func findingAt(code vocab.Code, subject Subject, at Position, message string) dr
 		Symbol:   subject,
 		Message:  message,
 	}
+}
+
+// named is how a message names one declaration ([namedSymbol]).
+func (in *pass) named(id inventory.SymbolID) string {
+	if symbol := in.symbol(id); symbol != nil {
+		return namedSymbol(symbol)
+	}
+	return in.word(id)
+}
+
+// namedSymbol is how a message names one declaration, its subject or the one a part
+// belongs to: the reader's word for its kind and its name.
+func namedSymbol(symbol *inventory.Symbol) string {
+	word, held := words[symbol.Kind]
+	if !held {
+		word = symbol.Kind.String()
+	}
+	return word + " " + symbol.Name
 }
 
 // word is the reader's word for the kind of one declaration, and the vocabulary's

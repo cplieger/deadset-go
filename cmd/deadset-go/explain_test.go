@@ -41,7 +41,7 @@ func TestExplainAnswersAboutAReportedSymbolWithWhatTheFindingCarries(t *testing.
 		"position: app.go:9:6",
 		"answer: reported",
 		"code: DS1002 unused-unexported",
-		"message: unexported function has no reference in the target",
+		"message: unexported function forgotten has no reference in the target",
 		"class: certain",
 		"confidence: certain",
 		"liveness relation: reference-counting",

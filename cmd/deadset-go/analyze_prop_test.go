@@ -26,13 +26,20 @@ type treeShape struct {
 
 // treeShapes is every combination of the optional parts of a tree, a second package,
 // a file that is not Go source, an ignore document and either target kind, with a
-// count of declarations and of referenced ones that varies between them.
+// count of declarations and of referenced ones that varies between them. Every
+// eighth references all of its declarations and holds no second package and no
+// ignore document, so a run over it writes every document with no finding and no
+// stale suppression in it.
 func treeShapes() []treeShape {
 	var shapes []treeShape
 	for i := range 16 {
 		declared := 1 + i%4
+		referenced := i % (declared + 1)
+		if i%8 == 0 {
+			referenced = declared
+		}
 		shapes = append(shapes, treeShape{
-			declared: declared, referenced: i % (declared + 1),
+			declared: declared, referenced: referenced,
 			lib: i&1 != 0, docs: i&2 != 0, ignore: i&4 != 0,
 			kind: []string{"application", "library"}[i>>3],
 		})
@@ -138,6 +145,9 @@ func TestAnalysisLeavesTheTreeByteIdentical(t *testing.T) {
 			run := invokedIn(t, base, everyDocument(i, documents, filepath.Base(dir))...)
 			if run.code != vocab.ExitClean && run.code != vocab.ExitFindings {
 				t.Fatalf("analyze over the module = %d, want a verdict about its findings\nstderr: %s", run.code, run.stderr)
+			}
+			if i%8 == 0 && run.code != vocab.ExitClean {
+				t.Errorf("analyze over a module with nothing to report = %d, want %d\nstderr: %s", run.code, vocab.ExitClean, run.stderr)
 			}
 
 			after := hashTree(t, dir)

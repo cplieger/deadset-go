@@ -7,8 +7,8 @@
   },
   "result": "pass",
   "totals": {
-    "fixtures": 228,
-    "pass": 220,
+    "fixtures": 231,
+    "pass": 223,
     "gap": 0,
     "fail": 0,
     "pending": 8
@@ -1494,6 +1494,106 @@
       "unexpected": []
     },
     {
+      "fixture": "encoding-reflection-call-through-a-function-value",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "viaEitherFunction.F",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "viaField.C",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "viaLiteralVar.H",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "viaLocalVar.B",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "viaMapEntry.D",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "viaMethodValue.E",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "viaPackageVar.A",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "viaParameter.G",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "viaStoringVar.I",
+          "result": "pass",
+          "actual": {
+            "report": "DS1301",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
       "fixture": "encoding-reflection-decode-only",
       "result": "pass",
       "expectations": [
@@ -2558,6 +2658,69 @@
           "result": "pass",
           "actual": {
             "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "encoding-reflection-test-export-of-a-function-value",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Read",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "symbol_kind": "function",
+            "confidence": "possible",
+            "reachability_class": "possible"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "directProbe.Name",
+          "result": "pass",
+          "actual": {
+            "report": "DS1003",
+            "symbol_kind": "field",
+            "confidence": "possible",
+            "reachability_class": "possible"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "probeConfig.Name",
+          "result": "pass",
+          "actual": {
+            "report": "DS1003",
+            "symbol_kind": "field",
+            "confidence": "possible",
+            "reachability_class": "possible"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "probeConfig.Nested",
+          "result": "pass",
+          "actual": {
+            "report": "DS1003",
+            "symbol_kind": "field",
+            "confidence": "possible",
+            "reachability_class": "possible"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         }
       ],
@@ -9155,6 +9318,98 @@
             "report": "none",
             "retained_by": [
               "interface-satisfaction"
+            ]
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "reach-rules-through-a-function-value",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "badge.String",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "format-verb-contract"
+            ]
+          }
+        },
+        {
+          "symbol": "controller.Archive",
+          "result": "pass",
+          "actual": {
+            "report": "DS1101",
+            "symbol_kind": "method",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "controller.Login",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "reflective-lookup"
+            ]
+          }
+        },
+        {
+          "symbol": "controller.Logout",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "reflective-lookup"
+            ]
+          }
+        },
+        {
+          "symbol": "label.String",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "format-verb-contract"
+            ]
+          }
+        },
+        {
+          "symbol": "rec.alias",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "reflective-lookup"
+            ]
+          }
+        },
+        {
+          "symbol": "row.title",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "reflective-lookup"
+            ]
+          }
+        },
+        {
+          "symbol": "stamp.String",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "format-verb-contract"
             ]
           }
         }

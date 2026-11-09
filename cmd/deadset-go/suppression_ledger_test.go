@@ -59,11 +59,11 @@ func TestARecordNamingACodeAboutNoDeclarationMarksNothing(t *testing.T) {
 		t.Errorf("stale suppressions = %q, want %q: no finding about a function carries a record, file or import code", got.stale, want)
 	}
 	want = []string{
-		"inline directive for DS9003 matches no current finding, and its declaration reports DS1002",
-		"inline directive for DS9004 matches no current finding, and its declaration reports DS1002",
-		"inline directive for DS1601 matches no current finding, and its declaration reports DS1002",
-		"inline directive for DS1602 matches no current finding, and its declaration reports DS1002",
-		"inline directive for DS1004 matches no current finding, and its declaration reports DS1002",
+		"inline directive for DS9003 on go://example.com/app#record matches no current finding, and its declaration reports DS1002",
+		"inline directive for DS9004 on go://example.com/app#root matches no current finding, and its declaration reports DS1002",
+		"inline directive for DS1601 on go://example.com/app#built matches no current finding, and its declaration reports DS1002",
+		"inline directive for DS1602 on go://example.com/app#imported matches no current finding, and its declaration reports DS1002",
+		"inline directive for DS1004 on go://example.com/app#binding matches no current finding, and its declaration reports DS1002",
 	}
 	if !slices.Equal(got.messages, want) {
 		t.Errorf("stale messages = %q, want %q: each names the code its function reports", got.messages, want)

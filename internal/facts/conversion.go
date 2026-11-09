@@ -1,7 +1,6 @@
 package facts
 
 import (
-	"fmt"
 	"go/ast"
 	"go/token"
 	"go/types"
@@ -10,18 +9,17 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/gotypes"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
-	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"golang.org/x/tools/go/packages"
 )
 
-// Conversion is one site where a value reaches a position typed as an interface:
-// an assertion, a conversion, an argument, a result, an assignment, a stored
-// element, a send, a range assignment, or a type argument whose constraint
-// declares methods.
+// Conversion is one site where a value reaches a position typed as an interface: an
+// assertion, conversion, argument, result, assignment, stored element, send, range
+// assignment, or a type argument whose constraint declares methods.
 //
 // From is the value's type, possibly an interface, never a type parameter. To is
-// the structural interface reached; Interface is the type the site names, and Name
-// spells it as the site does, because a defined interface is not derivable from To.
+// the structural interface reached, stated in From's reading so [Satisfies] decides
+// one against the other; Interface is the type the site names, and Name spells it as
+// the site does, because a defined interface is not derivable from To.
 type Conversion struct {
 	From      types.Type
 	Interface types.Type
@@ -689,79 +687,6 @@ func (s *conversionScan) typeSwitch(ts *ast.TypeSwitchStmt) {
 			}
 		}
 	}
-}
-
-// readings names each package of one run by its path and the files it compiles,
-// which fset places: a unit's own reading of a package and another unit's reading
-// of it share a name, while a test variant, which compiles more files, and a module
-// of the same path elsewhere do not. A package fset places no file of is named by
-// its own reading.
-type readings struct {
-	fset  *token.FileSet
-	names map[*types.Package]string
-}
-
-// identity spells one type so that two types share a spelling only when they are
-// identical, a type of two readings of one package being one type: the package of
-// each name is spelled by its reading's name ([readings.of]), because two variants of
-// one package declare two distinct types under one path.
-func (r *readings) identity(t types.Type) string {
-	return resolve.Spell(t, r.of)
-}
-
-// Readings answers whether two types are one type where a type of two readings of
-// one package is one type ([readings]), for a caller comparing a type its own code
-// states with one another module's code states.
-type Readings struct {
-	names *readings
-	spelt map[types.Type]string
-}
-
-// NewReadings answers for the packages whose files fset places.
-func NewReadings(fset *token.FileSet) *Readings {
-	return &Readings{names: newReadings(fset), spelt: make(map[types.Type]string)}
-}
-
-// Same reports whether a and b are one type, two readings of one package's types
-// alike.
-func (r *Readings) Same(a, b types.Type) bool {
-	return types.Identical(a, b) || r.spelling(a) == r.spelling(b)
-}
-
-func (r *Readings) spelling(t types.Type) string {
-	held, known := r.spelt[t]
-	if !known {
-		held = r.names.identity(t)
-		r.spelt[t] = held
-	}
-	return held
-}
-
-func newReadings(fset *token.FileSet) *readings {
-	return &readings{fset: fset, names: make(map[*types.Package]string)}
-}
-
-// of is the name of one package.
-func (r *readings) of(p *types.Package) string {
-	if held, known := r.names[p]; known {
-		return held
-	}
-	var files []string
-	for child := range p.Scope().Children() {
-		if r.fset == nil {
-			break
-		}
-		if f := r.fset.File(child.Pos()); f != nil {
-			files = append(files, f.Name())
-		}
-	}
-	name := fmt.Sprintf("%p", p)
-	if len(files) > 0 {
-		slices.Sort(files)
-		name = p.Path() + "\x00" + strings.Join(files, "\x00")
-	}
-	r.names[p] = name
-	return name
 }
 
 // typeOf returns the type one expression has, and nil when the type checker

@@ -259,9 +259,9 @@ func TestUnreachableExportSaysWhatTheAnalysisFoundAboutTheReferences(t *testing.
 		t.Fatalf("UnreachableExport(narrowing-published) = error %v, want the findings", err)
 	}
 	want := map[string]string{
-		commandUnused: "exported function has no reference in the target, and nothing outside " +
+		commandUnused: "exported function Unused has no reference in the target, and nothing outside " +
 			"can import the package that declares it",
-		internalForgotten: "exported function is referenced only from declarations that are " +
+		internalForgotten: "exported function Forgotten is referenced only from declarations that are " +
 			"themselves dead, and nothing outside can import the package that declares it",
 	}
 	for _, f := range found {
@@ -359,13 +359,10 @@ func TestNarrowingAndTheUnusedDeclarationKindsReportEachDeclarationOnce(t *testi
 
 // The unreachable-export kind is the unused-exported answer for a package nothing
 // outside can import, so it reports what that kind reports and yields every subject a
-// more specific kind claims. Over a package under an internal tree, that is the four
-// subjects of the interface and the read-and-write kinds.
-//
-// The two narrowing findings beside them are the same package's live exported
-// declarations nothing outside it names, which the export-narrowing kind reports
-// because an internal tree is closed world: they are not the subject of this test and
-// they are here because the table is the whole package's.
+// more specific kind claims: over a package under an internal tree, the four subjects
+// of the interface and the read-and-write kinds. The two narrowing findings beside
+// them are live exported declarations nothing outside names, which export-narrowing
+// reports because an internal tree is closed world; the table is the whole package's.
 func TestUnreachableExportYieldsEverySubjectAMoreSpecificKindReports(t *testing.T) {
 	t.Parallel()
 	want := map[string]vocab.Code{

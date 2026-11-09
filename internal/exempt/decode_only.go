@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/memory"
 )
 
@@ -126,13 +127,12 @@ func (d *decoders) decodesInto(home *types.Package, info *types.Info, body *ast.
 
 // decodedArguments counts the arguments of one call that pass the parameter to a
 // callee parameter that decodes into it, and what those callee parameters retain.
+// An argument a call that may reach a function the analysis does not know passes
+// decodes into nothing, and one passed to several functions decodes only where each
+// of them decodes into it.
 func (d *decoders) decodedArguments(home *types.Package, info *types.Info, body ast.Node, call *ast.CallExpr, param *types.Var) (int, reach) {
-	callee, isFunc := resolveObject(info, call.Fun).(*types.Func)
-	if !isFunc {
-		return 0, reach{}
-	}
-	callee, isFunc = loadedFunc(home, callee)
-	if !isFunc {
+	callees, dynamic := d.flow.kept.in.callees(info, call)
+	if dynamic {
 		return 0, reach{}
 	}
 	decoded := 0
@@ -141,16 +141,37 @@ func (d *decoders) decodedArguments(home *types.Package, info *types.Info, body 
 		if usedParameter(info, arg) != param {
 			continue
 		}
-		at, supplies := parameterAt(callee.Signature(), i)
-		if !supplies {
-			continue
-		}
-		if r, decodes := d.receives(callSite{info: info, decl: body, call: call}, callee, at); decodes {
+		if r, decodes := d.receivedByEach(callSite{info: info, decl: body, call: call}, home, callees, i); decodes {
 			decoded++
 			held = held.union(r)
 		}
 	}
 	return decoded, held
+}
+
+// receivedByEach reports whether the argument at position arg of a call decodes
+// into it at each function the call reaches, and what they retain.
+func (d *decoders) receivedByEach(site callSite, home *types.Package, callees []facts.Callee, arg int) (reach, bool) {
+	if len(callees) == 0 {
+		return reach{}, false
+	}
+	var held reach
+	for _, callee := range callees {
+		fn, isFunc := loadedFunc(home, callee.Fn)
+		if !isFunc {
+			return reach{}, false
+		}
+		at, supplies := argumentParameter(facts.Callee{Fn: fn, Shift: callee.Shift}, arg)
+		if !supplies {
+			return reach{}, false
+		}
+		r, decodes := d.receives(site, fn, at)
+		if !decodes {
+			return reach{}, false
+		}
+		held = held.union(r)
+	}
+	return held, true
 }
 
 // receives reports whether one parameter of a callee, called at site, decodes into
@@ -174,8 +195,9 @@ func decodingOnly(r reach) bool {
 
 // readsFields reports whether the body of fn hands the parameter at one position, unchanged
 // or converted to an interface type, to a destination that reads fields: a destination
-// of this class that does, or a function of a package the format-verb class reads. A
-// body the analysis cannot read hands it to none.
+// of this class that does, a function of a package the format-verb class reads, or a
+// function the analysis does not know. A body the analysis cannot read hands it to
+// none.
 func (d *decoders) readsFields(fn *types.Func, at int) bool {
 	decl, info := d.body(fn)
 	if decl == nil || decl.Body == nil || info == nil {
@@ -192,17 +214,27 @@ func (d *decoders) readsFields(fn *types.Func, at int) bool {
 		if reads || !isCall {
 			return !reads
 		}
-		callee, isFunc := resolveObject(info, call.Fun).(*types.Func)
-		if !isFunc || callee.Pkg() == nil || !slices.ContainsFunc(call.Args, func(arg ast.Expr) bool {
-			return usedParameter(info, arg) == param
-		}) {
+		if !slices.ContainsFunc(call.Args, func(arg ast.Expr) bool { return usedParameter(info, arg) == param }) {
 			return true
 		}
-		dest, named := d.flow.encodingDestination(callee)
-		d.flow.narrowStrict(callee, info, decl, call, &dest.reach)
-		reads = (named && dest.reach.fields) || destinations[callee.Pkg().Path()].prints != nil
+		reads = d.callReadsFields(info, decl, call)
 		return !reads
 	})
+	return reads
+}
+
+// callReadsFields reports whether a call hands its arguments to a destination that
+// reads fields, or to a function the analysis does not know.
+func (d *decoders) callReadsFields(info *types.Info, decl *ast.FuncDecl, call *ast.CallExpr) bool {
+	callees, dynamic := d.flow.kept.in.callees(info, call)
+	reads := dynamic
+	for _, callee := range callees {
+		if fn := callee.Fn; fn.Pkg() != nil {
+			dest, named := d.flow.encodingDestination(fn)
+			d.flow.narrowStrict(fn, info, decl, call, &dest.reach)
+			reads = reads || (named && dest.reach.fields) || destinations[fn.Pkg().Path()].prints != nil
+		}
+	}
 	return reads
 }
 

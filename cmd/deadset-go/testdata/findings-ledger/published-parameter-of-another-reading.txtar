@@ -1,0 +1,42 @@
+A library of two modules: z publishes Use, which takes a's Source, and a declares
+Impl, which implements it. z reads a's package on its own, so Use's Source names the
+Key of z's reading: an outside program can still hand Use an Impl, so Impl's Get is
+retained.
+
+-- target/deadset.json --
+{"target": {"kind": "library"}}
+-- target/a/go.mod --
+module example.com/a
+
+go 1.27
+-- target/a/lib/lib.go --
+// Package lib declares a source and a value an outside program can hold.
+package lib
+
+// Key selects a value.
+type Key struct{}
+
+// Source gets a value by key.
+type Source interface{ Get(Key) int }
+
+// Impl is a Source an outside program can hand to z.
+type Impl struct{}
+
+// Get makes Impl a Source.
+func (Impl) Get(Key) int { return 1 }
+-- target/z/go.mod --
+module example.com/z
+
+go 1.27
+
+require example.com/a v0.0.0
+
+replace example.com/a => ../a
+-- target/z/use/use.go --
+// Package use reads a source.
+package use
+
+import "example.com/a/lib"
+
+// Use reads s.
+func Use(s lib.Source) int { return s.Get(lib.Key{}) }

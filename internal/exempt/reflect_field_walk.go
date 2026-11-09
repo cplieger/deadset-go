@@ -3,6 +3,8 @@ package exempt
 import (
 	"go/ast"
 	"go/types"
+
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 )
 
 // reflectFieldReads are the methods of reflect.Value that return a field of the struct
@@ -79,6 +81,19 @@ func lookupMethod(t types.Type, m *types.Func) (*types.Func, bool) {
 type reflectWalk struct {
 	info     *types.Info
 	assigned map[*types.Var][]ast.Expr
+	callees  func(*types.Info, *ast.CallExpr) ([]facts.Callee, bool) // [Program.callees]
+}
+
+// reflectFunction is the function of the reflect package, no method, among the
+// functions a call reaches.
+func reflectFunction(callees []facts.Callee) (*types.Func, bool) {
+	for _, callee := range callees {
+		fn := callee.Fn
+		if fn.Pkg() != nil && fn.Pkg().Path() == reflectPackage && fn.Signature().Recv() == nil {
+			return fn, true
+		}
+	}
+	return nil, false
 }
 
 // maxReflectSteps bounds how many locals one reading passes through, which a cycle of
@@ -128,8 +143,9 @@ func (w *reflectWalk) valueOf(expr ast.Expr, steps int) (types.Type, bool) {
 	if recv, elem := w.method(call, map[string]bool{reflectElem: true}); elem {
 		return w.pointedTo(recv, steps)
 	}
-	fn, isFunc := resolveObject(w.info, call.Fun).(*types.Func)
-	if !isFunc || fn.Pkg() == nil || fn.Pkg().Path() != reflectPackage || fn.Signature().Recv() != nil || len(call.Args) != 1 {
+	callees, _ := w.callees(w.info, call)
+	fn, isFunc := reflectFunction(callees)
+	if !isFunc || len(call.Args) != 1 {
 		return nil, false
 	}
 	switch fn.Name() {

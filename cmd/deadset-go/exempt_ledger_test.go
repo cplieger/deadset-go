@@ -3,6 +3,7 @@ package main
 import (
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/findings"
@@ -80,8 +81,8 @@ func TestAGenericImplementationFallsWithTheUncalledMethodItImplements(t *testing
 	if plain == nil || generic == nil {
 		t.Fatalf("Plain.Get = %v, Box.Get = %v, want a finding about each", plain, generic)
 	}
-	if generic.Message != plain.Message {
-		t.Errorf("Box.Get's message is %q, want Plain.Get's %q: Box[int] implements Getter as Plain does", generic.Message, plain.Message)
+	if strings.Replace(generic.Message, generic.Symbol.Name, plain.Symbol.Name, 1) != plain.Message {
+		t.Errorf("Box.Get's message is %q, want Plain.Get's %q under its own name: Box[int] implements Getter as Plain does", generic.Message, plain.Message)
 	}
 	method := about["go://example.com/app#Getter.Get"]
 	if method == nil {

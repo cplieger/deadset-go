@@ -89,6 +89,10 @@ type Candidate struct {
 	ProductionRefs int
 	TestRefs       int
 
+	// TestEvidence is how many of TestRefs are the facts exemption evidence a test
+	// file carries states rather than references.
+	TestEvidence int
+
 	// Configs is the set of build configurations the candidate exists in, every
 	// one of which it is dead in, and empty over one configuration's graph.
 	Configs inventory.ConfigSet
@@ -558,6 +562,7 @@ func (s *sweep) result(v *view) Result {
 			ID:               s.g.symbols[i].ID,
 			ProductionRefs:   production,
 			TestRefs:         test + s.tested[s.g.symbols[i].ID],
+			TestEvidence:     s.tested[s.g.symbols[i].ID],
 			Configs:          s.g.symbols[i].Configs,
 			Relation:         relation,
 			TestOfDeadCode:   v.testOfDeadCode[i],

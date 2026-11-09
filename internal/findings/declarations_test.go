@@ -55,7 +55,7 @@ func TestASelfReferencingDeclarationIsReportedOnceUnderTheCodeItsVisibilitySelec
 		t.Errorf("the pass reports Recurse under the %s relation, want %s: its own call is a reference",
 			found.Relation, liveness.Reachability)
 	}
-	if found.Message != "exported function is referenced only from declarations that are themselves dead" {
+	if found.Message != "exported function Recurse is referenced only from declarations that are themselves dead" {
 		t.Errorf("the pass reports Recurse with the message %q, want the one the reachability relation gives",
 			found.Message)
 	}
@@ -69,9 +69,9 @@ func TestTheUnusedMessagesSayWhatTheAnalysisFound(t *testing.T) {
 		code          vocab.Code
 		name, message string
 	}{
-		{vocab.UnusedExported, "Resolve", "exported function has no reference in the target and none from any loaded consumer"},
-		{vocab.UnusedUnexported, "helper", "unexported function has no reference in the target"},
-		{vocab.UnusedMember, "Counter.stale", "unexported field has no reference in the target"},
+		{vocab.UnusedExported, "Resolve", "exported function Resolve has no reference in the target and none from any loaded consumer"},
+		{vocab.UnusedUnexported, "helper", "unexported function helper has no reference in the target"},
+		{vocab.UnusedMember, "Counter.stale", "unexported field Counter.stale has no reference in the target"},
 	} {
 		if got := findingOf(t, result.Findings, want.code, want.name).Message; got != want.message {
 			t.Errorf("the pass reports %s about %s with the message %q, want %q",
@@ -92,7 +92,7 @@ func TestATestOnlyReferenceIsItsOwnKindAndAProductionReferenceRemovesTheFinding(
 	if !found.TestOnly {
 		t.Error("the pass reports OnlyTested with test_only false, want true: every reference to it is from a test file")
 	}
-	if found.Message != "function is referenced only from test files and never from production code" {
+	if found.Message != "function OnlyTested is referenced only from test files and never from production code" {
 		t.Errorf("the pass reports OnlyTested with the message %q, want the test-only one", found.Message)
 	}
 	if got := namesUnder(after.Findings, vocab.TestOnlyUse); len(got) != 0 {
@@ -110,9 +110,9 @@ func TestATestWhoseEveryTargetIsDeadIsReportedInTheirComponent(t *testing.T) {
 			vocab.TestOfDeadCode, got)
 	}
 	test := findingOf(t, result.Findings, vocab.TestOfDeadCode, "TestDeadOnly")
-	if test.Message != testOfDeadCodeMessage {
+	if want := "function TestDeadOnly" + testOfDeadCodeMessage; test.Message != want {
 		t.Errorf("the pass reports TestDeadOnly with the message %q, want the rule stated: %q",
-			test.Message, testOfDeadCodeMessage)
+			test.Message, want)
 	}
 	for _, target := range []string{"DeadOne", "DeadTwo"} {
 		found := findingOf(t, result.Findings, vocab.TestOnlyUse, target)
@@ -246,7 +246,7 @@ func TestADeprecatedDeclarationNothingReferencesIsReportedUnderTheDeprecatedKind
 				result.Findings[i].Code, vocab.DeprecatedUnused)
 		}
 	}
-	if got := findingOf(t, result.Findings, vocab.DeprecatedUnused, "Stale").Message; got != "deprecated variable has no production reference" {
+	if got := findingOf(t, result.Findings, vocab.DeprecatedUnused, "Stale").Message; got != "deprecated variable Stale has no production reference" {
 		t.Errorf("the pass reports Stale with the message %q, want the deprecated one", got)
 	}
 }
@@ -554,6 +554,23 @@ func TestTestFileHelpersOfATestOfProductionCodeOnlyTestsReachAreAtPossible(t *te
 	}
 }
 
+// A member only the evidence a test file carries keeps is a test-only use whose
+// message says no file references it, while one a test also names keeps the
+// test-only message.
+func TestATestOnlyUseKeptByTestEvidenceAloneSaysNoFileReferencesIt(t *testing.T) {
+	t.Parallel()
+	result := analysisOf(t, "declarations-enum-test-evidence.txtar", asApplication, Consumers{}).findings(t, declarationKinds)
+
+	for name, want := range map[string]string{
+		"levelMid": "constant levelMid is referenced from no file and kept only by evidence in test files",
+		"levelTop": "constant levelTop is referenced only from test files and never from production code",
+	} {
+		if got := findingOf(t, result.Findings, vocab.TestOnlyUse, name).Message; got != want {
+			t.Errorf("DS1102 %s says %q, want %q", name, got, want)
+		}
+	}
+}
+
 // A declaration only dead code references in production is a test-only use where a
 // test of live code references it, and keeps its unreferenced kind where only a test
 // of dead code does.
@@ -562,7 +579,7 @@ func TestADeclarationATestOfLiveCodeKeepsIsATestOnlyUse(t *testing.T) {
 	result := computed(t, inputOf(t, "declarations-test-kept.txtar", applicationConfig(), Consumers{}), declarationEmitters())
 
 	kept := findingOf(t, result.Findings, vocab.TestOnlyUse, "FixedNow")
-	if want := "variable is referenced only from test files and from declarations that are themselves dead"; kept.Message != want {
+	if want := "variable FixedNow is referenced only from test files and from declarations that are themselves dead"; kept.Message != want {
 		t.Errorf("DS1102 FixedNow says %q, want %q", kept.Message, want)
 	}
 	findingOf(t, result.Findings, vocab.UnusedExported, "Frozen")

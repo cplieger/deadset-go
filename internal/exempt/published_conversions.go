@@ -20,7 +20,7 @@ func publishedConversions(in *Program) []facts.Conversion {
 	if !in.Options.PublishedAPI || len(in.Result.Consumers) > 0 {
 		return nil
 	}
-	return newPublishedScan(in.Facts.Published(), in.Resolve).sites()
+	return newPublishedScan(in.Facts.Published(), in.Facts.Readings(), in.Resolve).sites()
 }
 
 // publishedScan reads what an outside program can hold of one configuration's
@@ -28,6 +28,7 @@ func publishedConversions(in *Program) []facts.Conversion {
 type publishedScan struct {
 	resolve    *resolve.Resolver
 	published  *facts.Published
+	readings   *facts.Readings
 	holdable   map[string]types.Type // by [resolve.Resolver.TypeKey]
 	functions  map[*types.Func]bool  // the published functions read
 	typeParams map[*types.TypeParam]bool
@@ -47,10 +48,11 @@ type publishedParameter struct {
 }
 
 // newPublishedScan starts the scan over one configuration's published API.
-func newPublishedScan(published *facts.Published, rs *resolve.Resolver) *publishedScan {
+func newPublishedScan(published *facts.Published, readings *facts.Readings, rs *resolve.Resolver) *publishedScan {
 	return &publishedScan{
 		resolve:    rs,
 		published:  published,
+		readings:   readings,
 		holdable:   make(map[string]types.Type),
 		functions:  make(map[*types.Func]bool),
 		typeParams: make(map[*types.TypeParam]bool),
@@ -78,7 +80,8 @@ func (s *publishedScan) sites() []facts.Conversion {
 			continue
 		}
 		for _, t := range candidates {
-			from, implements := facts.Implementing(t, iface)
+			stated := s.readings.For(t, iface)
+			from, implements := facts.Implementing(t, stated)
 			if !implements {
 				continue
 			}
@@ -90,7 +93,7 @@ func (s *publishedScan) sites() []facts.Conversion {
 				at = t.Obj().Pos()
 			}
 			sites = append(sites, facts.Conversion{
-				From: from, Interface: param.t, To: iface, Name: spelled(param.t), Site: at,
+				From: from, Interface: param.t, To: stated, Name: spelled(param.t), Site: at,
 			})
 		}
 	}

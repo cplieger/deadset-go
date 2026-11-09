@@ -16,9 +16,10 @@ import (
 // deprecated, which is the convention the standard Go tools recognise.
 const deprecatedPrefix = "Deprecated:"
 
-// testOfDeadCodeMessage states the rule the test-of-dead-code kind applies, which
-// the Contract requires the message to say rather than leave to a reader.
-const testOfDeadCodeMessage = "every target symbol this test references is reported dead"
+// testOfDeadCodeMessage states, after the test's name, the rule the test-of-dead-code
+// kind applies, which the Contract requires the message to say rather than leave to
+// a reader.
+const testOfDeadCodeMessage = " references only target symbols that are reported dead"
 
 // UnusedExported reports an exported declaration that is not a member of a type
 // and that nothing references.
@@ -70,7 +71,7 @@ func testOfDeadCode(in *pass) ([]draft, error) {
 		if !candidate.TestOfDeadCode {
 			continue
 		}
-		one, held := in.finding(candidate.ID, vocab.TestOfDeadCode, testOfDeadCodeMessage)
+		one, held := in.finding(candidate.ID, vocab.TestOfDeadCode, in.named(candidate.ID)+testOfDeadCodeMessage)
 		if !held {
 			continue
 		}
@@ -201,11 +202,17 @@ func (in *pass) deadParent(symbol *inventory.Symbol) bool {
 // reachability has references, every one of them from a declaration that is itself
 // dead, and saying "no reference" about it would be false.
 func (in *pass) unusedMessage(candidate *liveness.Candidate, code vocab.Code) string {
-	word := in.word(candidate.ID)
+	word := in.named(candidate.ID)
 	switch code {
 	case vocab.TestOnlyUse:
-		if candidate.ProductionRefs > 0 {
+		evidenceOnly := candidate.TestRefs == candidate.TestEvidence
+		switch {
+		case candidate.ProductionRefs > 0 && evidenceOnly:
+			return word + " is referenced only from declarations that are themselves dead and kept only by evidence in test files"
+		case candidate.ProductionRefs > 0:
 			return word + " is referenced only from test files and from declarations that are themselves dead"
+		case evidenceOnly:
+			return word + " is referenced from no file and kept only by evidence in test files"
 		}
 		return word + " is referenced only from test files and never from production code"
 	case vocab.DeprecatedUnused:
@@ -400,7 +407,7 @@ func (in *pass) localsOf(c int, w *walk, fn *walked, held *parts) error {
 			return err
 		}
 		held.hold(c, w.one, local.name.Pos(), fn.id, newPart(vocab.UnusedUnexported, symbol.Ref, local.kind, local.name.Name, at,
-			local.kind+" "+local.name.Name+" is never referenced in the body that declares it"))
+			local.kind+" "+local.name.Name+" of "+namedSymbol(symbol)+" is never referenced in the body that declares it"))
 	}
 	return nil
 }

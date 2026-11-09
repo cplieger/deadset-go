@@ -140,9 +140,9 @@ func TestUnusedResultReportsEveryResultEveryCallDiscards(t *testing.T) {
 		}
 	}
 	wantMessages := []string{
-		"result 1 of 1 (int) is discarded at every call site",
-		"result 1 of 2 (int) is discarded at every call site",
-		"result count, 1 of 2 (int), is discarded at every call site",
+		"result 1 of 1 (int) of function tally is discarded at every call site",
+		"result 1 of 2 (int) of function split is discarded at every call site",
+		"result count, 1 of 2 (int), of function named is discarded at every call site",
 	}
 	if !slices.Equal(messages, wantMessages) {
 		t.Errorf("the pass over intrafunc-result.txtar says %q under %s, want %q: each names the result once, by position, count and type",

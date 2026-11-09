@@ -84,9 +84,9 @@ func TestUnusedInterface_namesEveryImplementationAndWhereItIsWritten(t *testing.
 		t.Errorf("UnusedInterface(interfaces-unused.txtar) kind, subject kind = %q, %q, want %q, %q",
 			found.Kind, found.Symbol.Kind, "unused-interface", "interface")
 	}
-	if found.Message != unusedInterfaceMessage {
+	if want := "nothing in the target names interface Reader as a type"; found.Message != want {
 		t.Errorf("UnusedInterface(interfaces-unused.txtar) message = %q, want %q",
-			found.Message, unusedInterfaceMessage)
+			found.Message, want)
 	}
 	if found.Relation != liveness.ReferenceCounting {
 		t.Errorf("UnusedInterface(interfaces-unused.txtar) relation = %s, want %s",
@@ -120,9 +120,9 @@ func TestUncalledInterfaceMethod_reportsTheInterfaceMethodAndNamesTheImplementat
 		t.Errorf("UncalledInterfaceMethod(interfaces-uncalled.txtar) kind, subject kind = %q, %q, want %q, %q",
 			found.Kind, found.Symbol.Kind, "uncalled-interface-method", "interface-method")
 	}
-	if found.Message != uncalledInterfaceMethodMessage {
+	if want := "no call site invokes or selects interface method Store.Put through the interface"; found.Message != want {
 		t.Errorf("UncalledInterfaceMethod(interfaces-uncalled.txtar) message = %q, want %q",
-			found.Message, uncalledInterfaceMethodMessage)
+			found.Message, want)
 	}
 	if found.Relation != liveness.ReferenceCounting {
 		t.Errorf("UncalledInterfaceMethod(interfaces-uncalled.txtar) relation = %s, want %s",
@@ -159,9 +159,9 @@ func TestUnusedSatisfactionAssertion_reportsTheAssertionWhileTheConcreteMethodFa
 		t.Errorf("UnusedSatisfactionAssertion(interfaces-assertion.txtar) reports at %+v, want %+v: the position is the assertion's",
 			got, want)
 	}
-	if found.Message != unusedSatisfactionAssertionMessage {
+	if want := "the assertion is the only thing that names interface Encoder as a type"; found.Message != want {
 		t.Errorf("UnusedSatisfactionAssertion(interfaces-assertion.txtar) message = %q, want %q",
-			found.Message, unusedSatisfactionAssertionMessage)
+			found.Message, want)
 	}
 	if found.Fixability != "deletable" || found.Severity != vocab.Deny {
 		t.Errorf("UnusedSatisfactionAssertion(interfaces-assertion.txtar) fixability, severity = %q, %q, want deletable, deny",

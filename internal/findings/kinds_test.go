@@ -97,7 +97,8 @@ func emitterOf(findings ...draft) Emitter {
 
 // oneFinding is the finding an emitter of code reports about one declaration.
 func oneFinding(in *Input, code vocab.Code, id inventory.SymbolID) draft {
-	found, held := passOf(in).finding(id, code, "the declaration has no reference in the target")
+	p := passOf(in)
+	found, held := p.finding(id, code, p.named(id)+" has no reference in the target")
 	if !held {
 		panic("the hand-built inventory holds no " + string(id))
 	}
@@ -225,9 +226,11 @@ func TestComputeReportsNoFindingOfAnAllowedKindAndNoneOfACodeWithNoEmitter(t *te
 func TestComputeRefusesAMessageAReporterCannotCarry(t *testing.T) {
 	t.Parallel()
 	for name, message := range map[string]string{
-		"ending in a full stop": "the declaration has no reference.",
-		"holding a line feed":   "the declaration has no reference\nanywhere",
-		"holding no text":       "",
+		"ending in a full stop":           "function Resolve has no reference.",
+		"holding a line feed":             "function Resolve has no reference\nanywhere",
+		"holding no text":                 "",
+		"not naming the subject":          "the declaration has no reference in the target",
+		"naming another declaration only": "function Open has no reference in the target",
 	} {
 		t.Run(name, func(t *testing.T) {
 			in := handInput(applicationConfig())
@@ -239,6 +242,42 @@ func TestComputeRefusesAMessageAReporterCannotCarry(t *testing.T) {
 				t.Errorf("Compute() with a message %s = %v, want an errEmitter refusal", name, err)
 			}
 		})
+	}
+}
+
+// A message names its subject only where the name stands as a whole token after
+// no article: a short name found inside another word, a member's own name found
+// after its owner's dot, a name the sentence spells as one of its own nouns, or the
+// article opening the sentence names nothing.
+func TestCheckMessageFindsTheSubjectAsAWholeToken(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, message string
+		names         bool
+	}{
+		{"e", "parameter e of method Doc.Get is never read in the body", true},
+		{"e", "parameter of method Doc.Get is never read in the body", false},
+		{"Get", "parameter e of method Doc.Get is never read in the body", false},
+		{"target", "exported field has no reference in the target and none from any loaded consumer", false},
+		{"target", "exported field target has no reference in the target", true},
+		{"payload.Hidden", "exported field payload.Hidden has no reference in the target", true},
+		{"kindEnd", "inline directive for DS1102 on go://example.com/app#kindEnd matches no current finding", true},
+		{"x", "store to x in function f is never read", true},
+		{"x_test.go", "no configuration of the build matrix compiles file x_test.go", true},
+		{"a", "a parameter of method Doc.Get is never read in the body", false},
+		{"an", "an exported field has no reference in the target", false},
+		{"a", "parameter a of method Doc.Get is never read in the body", true},
+		{"the", "exported field the has no reference in the target", true},
+		// A subject named like an article is told from the article only where the
+		// message opens: mid-sentence, "the target" and a store to a variable named
+		// the read alike, so checkMessage accepts both.
+		{"the", "exported field has no reference in the target", true},
+		{"the", "store to the in function f is never read", true},
+	} {
+		found := &Finding{Code: vocab.UnusedExported, Symbol: Subject{Name: tc.name}, Message: tc.message}
+		if err := checkMessage(found); (err == nil) != tc.names {
+			t.Errorf("checkMessage(%q naming %q) = %v, want it to name the subject: %t", tc.message, tc.name, err, tc.names)
+		}
 	}
 }
 
@@ -303,7 +342,7 @@ func TestComputeRefusesAFindingAboutNoDeclarationOfTheInventory(t *testing.T) {
 	reported := draft{
 		Code:    vocab.UnusedExported,
 		Symbol:  Subject{Ref: "go://example.com/app#Absent", Name: "Absent", SizeLines: 1},
-		Message: "the declaration has no reference in the target",
+		Message: "function Absent has no reference in the target",
 	}
 
 	_, err := Compute(in, map[vocab.Code]Emitter{vocab.UnusedExported: emitterOf(reported)})
@@ -319,7 +358,7 @@ func TestComputeRefusesAFindingAboutADeclarationAnEmitterNamesByItsReferenceAlon
 		Code:     vocab.UnusedExported,
 		Position: Position{Path: "catalog.go", Line: 14, Column: 6, EndLine: 31},
 		Symbol:   Subject{Ref: exportedRef, Name: "Resolve", SizeLines: 18},
-		Message:  "the declaration has no reference in the target",
+		Message:  "function Resolve has no reference in the target",
 	}
 
 	_, err := Compute(in, map[vocab.Code]Emitter{vocab.UnusedExported: emitterOf(reported)})
@@ -670,7 +709,7 @@ func requirementFinding() draft {
 			Name:      requirementName,
 			SizeLines: 1,
 		},
-		Message: "no package of the target imports a package this required module provides",
+		Message: "no package of the target imports a package required module golang.org/x/text provides",
 		Details: Details{DependencyClass: requireSection},
 	}
 }
@@ -733,7 +772,7 @@ func TestComputeRefusesAFindingAboutADeclarationKindTheInventoryDoesNotHold(t *t
 			reported := draft{
 				Code:    vocab.UnusedExported,
 				Symbol:  Subject{Ref: "go://example.com/app#Absent", Kind: subject, Name: "Absent", SizeLines: 1},
-				Message: "the declaration has no reference in the target",
+				Message: "declaration Absent has no reference in the target",
 			}
 
 			_, err := Compute(in, map[vocab.Code]Emitter{vocab.UnusedExported: emitterOf(reported)})

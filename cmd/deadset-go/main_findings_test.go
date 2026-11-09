@@ -149,7 +149,7 @@ func TestFindingsOfCompletesAFindingWithEveryFieldTheContractRequires(t *testing
 	if len(found.ConsumersLoaded) != 0 {
 		t.Errorf("the finding names %v as loaded consumers, want none: the scope declares no consumer", found.ConsumersLoaded)
 	}
-	if got, want := found.Message, "unexported function has no reference in the target"; got != want {
+	if got, want := found.Message, "unexported function forgotten has no reference in the target"; got != want {
 		t.Errorf("the finding says %q, want %q", got, want)
 	}
 	if got := found.Details; !reflect.DeepEqual(got, findings.Details{}) {

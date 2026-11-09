@@ -1,0 +1,43 @@
+Save, of a module outside the target, appends its parameter to a slice, and the
+target hands it a doc. append reaches no function, so Save decodes nothing into the
+value: the value crosses into dep, whose Encoder doc implements.
+
+-- target/deadset.json --
+{"target": {"kind": "application"}}
+-- target/go.mod --
+module example.com/a
+
+go 1.27
+
+require example.com/dep v0.0.0
+
+replace example.com/dep => ../dep
+-- target/main.go --
+package main
+
+import "example.com/dep/store"
+
+type doc struct{}
+
+// EncodeTo makes doc a store.Encoder.
+func (*doc) EncodeTo(*store.Buf) error { return nil }
+
+func main() { store.Save(&doc{}) }
+-- dep/go.mod --
+module example.com/dep
+
+go 1.27
+-- dep/store/store.go --
+// Package store saves values.
+package store
+
+// Buf is what a value encodes into.
+type Buf struct{}
+
+// Encoder is a value that encodes itself.
+type Encoder interface{ EncodeTo(*Buf) error }
+
+// Save keeps v.
+func Save(v any) { saved = append(saved, v) }
+
+var saved []any

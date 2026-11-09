@@ -1,0 +1,45 @@
+main calls hook, which production code sets to nop, and a test sets it to a
+function that encodes its argument as JSON. The test's write reaches the calls of
+test files alone, so main's call reaches nop and the payload's Hidden field is
+unused, with the test file or without it.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- main.go --
+package main
+
+type payload struct {
+	Shown  int
+	Hidden int
+}
+
+func nop(any) error { return nil }
+
+var hook = nop
+
+func main() {
+	p := &payload{Shown: 1}
+	_ = hook(p)
+	println(p.Shown)
+}
+-- hook_test.go --
+package main
+
+import (
+	"encoding/json"
+	"testing"
+)
+
+func testOnly(v any) error {
+	_, err := json.Marshal(v)
+	return err
+}
+
+func TestReassign(t *testing.T) {
+	hook = testOnly
+	main()
+}

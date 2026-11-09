@@ -14,9 +14,10 @@ import (
 // (https://go.dev/ref/spec#Type_identity), and the checker gives each spelling its
 // own field objects.
 type literalStructs struct {
-	byKey  map[string][]literalStruct
-	fields map[inventory.Offset]fieldAt // by where a field is written, which every reading of its file shares
-	at     *inventory.Positions
+	byKey    map[string][]literalStruct
+	fields   map[inventory.Offset]fieldAt // by where a field is written, which every reading of its file shares
+	at       *inventory.Positions
+	readings *Readings
 }
 
 // literalStruct is one struct type literal and the type the variant that indexed it
@@ -39,6 +40,7 @@ func (l *literalStructs) add(pkgs []*packages.Package, at *inventory.Positions) 
 		l.byKey = make(map[string][]literalStruct)
 		l.fields = make(map[inventory.Offset]fieldAt)
 		l.at = at
+		l.readings = readingsOver(at.Fset)
 	}
 	for pkg, f := range inventory.Sources(pkgs, at.Fset) {
 		l.addFile(pkg.TypesInfo, f)
@@ -71,7 +73,8 @@ func (l *literalStructs) addFile(info *types.Info, f *ast.File) {
 
 // twins is every field at the same index of each other struct literal identical to
 // the one that declares field, each literal typed as info's variant types it where
-// that variant compiles it: a variant's types are identical only to its own.
+// that variant compiles it, and otherwise stated as field's package sees it
+// ([Readings.In]): a variant's types are identical only to its own.
 func (l *literalStructs) twins(info *types.Info, field *types.Var) []*types.Var {
 	at, held := l.fields[l.at.Offset(field.Pos())]
 	if !held {
@@ -83,7 +86,8 @@ func (l *literalStructs) twins(info *types.Info, field *types.Var) []*types.Var 
 		if other.node == at.lit.node {
 			continue
 		}
-		if twin := typedIn(info, other); types.Identical(twin, st) {
+		twin := typedIn(info, other)
+		if stated, ok := l.readings.In(twin, field.Pkg()); ok && types.Identical(stated, st) {
 			found = append(found, twin.Field(at.index))
 		}
 	}

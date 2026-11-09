@@ -708,3 +708,79 @@ func TestAConsumersImportReachesTheFileItImports(t *testing.T) {
 		t.Errorf("findings = %q, want one about side.Unused and no %s about side.go: the consumer imports side", got, vocab.FileNeverImported)
 	}
 }
+
+// reportedBelow is [reportedAt] of the target at dir of the fixture, whose other
+// directories hold modules outside the target.
+func reportedBelow(t *testing.T, fixture, dir string) []string {
+	t.Helper()
+
+	set := findingsOfDir(t, filepath.Join(archiveModule(t, fixture), dir))
+	var got []string
+	for _, found := range slices.Concat(set.Result.Findings, set.Result.Withheld) {
+		got = append(got, string(found.Code)+" "+found.Position.Path+":"+strconv.Itoa(found.Position.Line))
+	}
+	return got
+}
+
+// Two loads read one package as two sets of types, and a module built against
+// another version of a dependency reads that dependency apart: a type of one and an
+// interface or a type of the other still meet as the build that holds both meets
+// them.
+func TestATypeAndAnInterfaceOfTwoReadingsMeetAsOneBuildMeetsThem(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		fixture string
+		want    []string
+		why     string
+	}{
+		{"interface-result-of-another-reading", nil, "z's call of Source.Get stands for impl's Get, whose Payload json.Marshal reads"},
+		{"returned-through-an-outside-interface-of-another-version", nil, "code outside may call Doc's Value through dep2's Source and read the Payload"},
+		{"published-parameter-of-another-reading", []string{"DS1001 z/use/use.go:7"}, "an outside program can hand Use an Impl, so Impl's Get is retained"},
+		{"outside-closure-of-another-version", nil, "the dep1 store m's call reaches asserts Doc's Encoder"},
+		{"error-holder-of-another-version", nil, "store.CodeOf asserts Coder on m's error"},
+		{"outside-function-appending-its-parameter", nil, "append decodes nothing, so doc crosses into dep, whose Encoder it implements"},
+	} {
+		t.Run(tc.fixture, func(t *testing.T) {
+			t.Parallel()
+			if got := reportedBelow(t, "findings-ledger/"+tc.fixture+".txtar", "target"); !slices.Equal(got, tc.want) {
+				t.Errorf("findings = %q, want %q: %s", got, tc.want, tc.why)
+			}
+		})
+	}
+}
+
+func TestAConsumersReadingOfTheTargetMeetsTheTargetsOwnTypes(t *testing.T) {
+	t.Parallel()
+	for fixture, why := range map[string]string{
+		"outside-interface-fixing-a-signature-in-another-reading": "the consumer's Getter fixes Get's signature",
+		"struct-literal-twin-in-another-reading":                  "the consumer's literal is P.In's type, so its read of X reads P.In.X",
+	} {
+		t.Run(fixture, func(t *testing.T) {
+			t.Parallel()
+			if got := scopedReport(t, "findings-ledger/"+fixture+".txtar"); len(got) != 0 {
+				t.Errorf("findings = %q, want none: %s", got, why)
+			}
+		})
+	}
+}
+
+// A call through a function variable reaches only what production code writes into
+// it: nothing, where no file writes it, and never a function only a test file
+// assigns, so the field the payload never names stays certainly unused.
+func TestACallThroughAHookReachesOnlyWhatProductionCodeWrites(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, fixture, drop string
+	}{
+		{"no write", "hook-nothing-writes", ""},
+		{"a test's write", "hook-only-a-test-reassigns", ""},
+		{"no test", "hook-only-a-test-reassigns", "hook_test.go"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			files := archiveFiles(t, "findings-ledger/"+tc.fixture+".txtar")
+			delete(files, tc.drop)
+			wantFinding(t, findingsAbout(t, writeModule(t, files)), "go://example.com/app#payload.Hidden", vocab.UnusedMember, vocab.Certain)
+		})
+	}
+}
