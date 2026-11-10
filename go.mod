@@ -1,6 +1,6 @@
 module github.com/cplieger/deadset-go/v2
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/cplieger/deadset-spec/v8 v8.0.0-dev.50
