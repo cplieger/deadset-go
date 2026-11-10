@@ -462,6 +462,8 @@ func TestAnalyzeJudgesTwoModulesOfOnePathEachAsItIsAlone(t *testing.T) {
 	}
 	want := []string{
 		"DS1501 go://example#Color x/main.go",
+		"DS1501 go://example#Red x/main.go",
+		"DS1005 go://example#Blue x/main.go",
 		"DS1402 go://example#Color.String x/main.go",
 		"DS1501 go://example#Mode x/main.go",
 		"DS1501 go://example#Slow x/main.go",

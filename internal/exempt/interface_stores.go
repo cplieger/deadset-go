@@ -747,7 +747,7 @@ func isAppend(info *types.Info, call *ast.CallExpr) bool {
 		return false
 	}
 	builtin, isBuiltin := info.Uses[id].(*types.Builtin)
-	return isBuiltin && builtin.Name() == "append" && len(call.Args) > 0
+	return isBuiltin && builtin.Name() == builtinAppend && len(call.Args) > 0
 }
 
 // valueOf is what one expression carries into an interface-typed place: its concrete

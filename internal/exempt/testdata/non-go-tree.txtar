@@ -1,0 +1,49 @@
+Package a holds no non-Go source. Package b's assembly file only includes an
+underscore file, which go list lists nowhere, and that file loads a·probe; another
+assembly file of b reaches a·Probe. A directory holding its own module writes
+a·Spare, which is not read. Package b itself holds a non-Go source, so its own
+declaration is retained under that rule.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- a/a.go --
+package a
+
+var probe int
+
+// Probe is what the assembly calls.
+func Probe() {}
+
+// Spare is named only by a file of another module.
+func Spare() {}
+
+func unnamed() {}
+-- b/b.go --
+package b
+
+func run()
+-- b/call_s390x.s --
+#include "_hidden.s"
+-- b/_hidden.s --
+TEXT ·run(SB), $0
+	MOVD example·com∕app∕a·probe(SB), R1
+	RET
+-- b/ref_s390x.s --
+	BL example·com∕app∕a·Probe(SB)
+-- other/go.mod --
+module example.com/other
+
+go 1.27.0
+-- other/x.s --
+	BL example·com∕app∕a·Spare(SB)
+-- main.go --
+package main
+
+import (
+	_ "example.com/app/a"
+	_ "example.com/app/b"
+)
+
+func main() {}

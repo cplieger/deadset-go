@@ -14,7 +14,7 @@ import (
 // sealedTemplateMethods are the methods a variable holding a template may be the
 // receiver of while every template it holds stays the set its initializer parsed.
 var sealedTemplateMethods = map[string]bool{
-	"Execute": true, "ExecuteTemplate": true, "Lookup": true, "Name": true, "DefinedTemplates": true, "Templates": true,
+	"Execute": true, executeTemplate: true, "Lookup": true, "Name": true, "DefinedTemplates": true, "Templates": true,
 }
 
 // templateOrigins answers, for the receiver of a template execution, every
@@ -74,6 +74,7 @@ func (o *templateOrigins) index(info *types.Info, dir string, f *ast.File) {
 			}
 		case *ast.AssignStmt:
 			o.defined(info, dir, n)
+			o.discarded(info, n)
 		case *ast.SelectorExpr:
 			o.sealedUse(info, n)
 		}
@@ -89,6 +90,24 @@ func (o *templateOrigins) defined(info *types.Info, dir string, stmt *ast.Assign
 	for i, lhs := range stmt.Lhs {
 		if name, isName := lhs.(*ast.Ident); isName {
 			o.initialize(info, dir, name, stmt.Rhs[i])
+		}
+	}
+}
+
+// discarded counts a variable an assignment hands to the blank identifier, which
+// reads the variable and leaves its templates as they are.
+func (o *templateOrigins) discarded(info *types.Info, stmt *ast.AssignStmt) {
+	if stmt.Tok != token.ASSIGN || len(stmt.Lhs) != len(stmt.Rhs) {
+		return
+	}
+	for i, lhs := range stmt.Lhs {
+		blank, isName := lhs.(*ast.Ident)
+		id, reads := ast.Unparen(stmt.Rhs[i]).(*ast.Ident)
+		if !isName || blank.Name != "_" || !reads {
+			continue
+		}
+		if v, isVar := info.Uses[id].(*types.Var); isVar {
+			o.allowed[v]++
 		}
 	}
 }
@@ -118,17 +137,30 @@ func (o *templateOrigins) initialize(info *types.Info, dir string, name *ast.Ide
 // the receiver's engine ([templateOrigins.everyParse]). It is nil otherwise, and
 // for a library, whose callers may execute any template.
 func (o *templateOrigins) executed(info *types.Info, dir string, call *ast.CallExpr) map[string]bool {
-	sel, isSelector := ast.Unparen(call.Fun).(*ast.SelectorExpr)
 	fn, _ := resolveObject(info, call.Fun).(*types.Func)
-	if o == nil || !isSelector || fn == nil || fn.Pkg() == nil {
+	if o == nil || fn == nil || fn.Pkg() == nil {
+		return nil
+	}
+	if inv := o.receiverSet(info, dir, call); inv != nil {
+		return inv.names
+	}
+	return o.everyParse(fn.Pkg().Path())
+}
+
+// receiverSet is what the chain that writes the receiver of one execution parses,
+// where it is the first of [templateOrigins.executed]'s two answers, and nil
+// otherwise.
+func (o *templateOrigins) receiverSet(info *types.Info, dir string, call *ast.CallExpr) *templateSet {
+	sel, isSelector := ast.Unparen(call.Fun).(*ast.SelectorExpr)
+	if o == nil || !isSelector {
 		return nil
 	}
 	inv := o.inventory()
 	o.origin(info, dir, sel.X, inv, 0)
 	if inv.complete && inv.parsed > 0 && !encodesWhole(inv.trees, inv.guessed) {
-		return inv.names
+		return inv
 	}
-	return o.everyParse(fn.Pkg().Path())
+	return nil
 }
 
 // inventory is an empty inventory reading through the program's value flow.
@@ -177,7 +209,13 @@ func (o *templateOrigins) call(info *types.Info, dir string, call *ast.CallExpr,
 	case name == "New":
 		inv.named(info, dir, call)
 	case templateParses[name]:
+		// The function form returns a template named after the first file it
+		// parses (parseFiles in go1.27.3 src/text/template/helper.go).
+		inv.receiver, inv.first = "", ""
 		inv.parse(info, dir, fn.Pkg().Path(), name, call)
+		if !inv.unordered {
+			inv.receiver = inv.first
+		}
 	default:
 		inv.complete = false
 	}
@@ -193,7 +231,7 @@ func (o *templateOrigins) method(info *types.Info, dir string, fn *types.Func, c
 	case name == "New":
 		after = func() { inv.named(info, dir, call) }
 	case name == "Lookup":
-		after = func() { inv.receiver = "" }
+		after = func() { inv.named(info, dir, call) }
 	case name == "Funcs", name == "Option":
 		after = func() {}
 	default:
@@ -217,27 +255,26 @@ func (o *templateOrigins) receiver(info *types.Info, dir string, call *ast.CallE
 // templates to a set from a constant string, a file name or a pattern.
 var templateParses = map[string]bool{"Parse": true, "ParseFiles": true, "ParseGlob": true, "ParseFS": true}
 
-// templateSet accumulates the identifiers the templates of one set name, and whether
-// every template of the set is one the analysis read: a constant string, a constant
-// file name or pattern resolved against the target root or its file's directory, or
-// a constant pattern of an embedded file system, each of which parses. trees holds
-// an html/template set's trees by the name the engine gives each ([encodesWhole]);
-// receiver is the name the next Parse call gives its text, empty where unknown;
-// unordered says the reads are no one sequence of the engine's parses: the parses
-// of several sets, or alternatives of which the program parses one.
+// templateSet accumulates the identifiers the templates of one set name, and
+// whether every template of the set is one the analysis read: a constant string,
+// file name or pattern resolved against the target root or its file's directory,
+// or a constant pattern of an embedded file system, each of which parses.
 type templateSet struct {
 	names     map[string]bool
-	trees     map[string]*parse.Tree
+	trees     map[string]*parse.Tree // an html/template set's trees by engine name ([encodesWhole])
+	typed     map[string]*parse.Tree // every engine's trees, for the typed walk ([templateWalk])
 	flow      *valueFlow
 	root      string
-	receiver  string
+	receiver  string // the template the chain returns, which the next Parse fills; "" if unknown
+	first     string // the first file the last parse read
 	parsed    int
 	complete  bool
 	guessed   bool
-	unordered bool
+	unordered bool // the reads are no one sequence of parses: several sets, or alternatives
+	split     bool // two parses gave one name different trees in no one order
 }
 
-// named records the name one New call gives the template it returns.
+// named records the name one New or Lookup call gives the template it returns.
 func (inv *templateSet) named(info *types.Info, dir string, call *ast.CallExpr) {
 	inv.receiver = ""
 	if len(call.Args) == 1 {
@@ -352,21 +389,29 @@ func (inv *templateSet) matching(dir, name string, pattern bool) []string {
 
 // files reads every template file one parse names, each named name or, where name is
 // empty, by its base name as ParseFiles names it, and makes the inventory incomplete
-// where it names none.
+// where it names none or one that is no regular file, which it never opens: a pipe
+// would block the read, and a device never end it.
 func (inv *templateSet) files(engine string, paths []string, name string, guessed bool) {
 	if len(paths) == 0 {
 		inv.complete = false
 		return
 	}
 	for _, path := range paths {
-		src, err := os.ReadFile(path)
-		if err != nil {
+		var src []byte
+		info, err := os.Stat(path)
+		if err == nil && info.Mode().IsRegular() {
+			src, err = os.ReadFile(path)
+		}
+		if err != nil || !info.Mode().IsRegular() {
 			inv.complete = false
 			return
 		}
 		tree := name
 		if tree == "" {
 			tree = filepath.Base(path)
+		}
+		if inv.first == "" {
+			inv.first = tree
 		}
 		inv.read(engine, path, tree, src, guessed)
 	}
@@ -386,6 +431,7 @@ func (inv *templateSet) read(engine, path, name string, src []byte, guessed bool
 	if engine == htmlTemplate {
 		inv.add(set, guessed)
 	}
+	inv.addTyped(set)
 	for _, ref := range templateFileRefs(path, src, Delimiters{}) {
 		inv.names[ref.name] = true
 	}
@@ -411,6 +457,27 @@ func (inv *templateSet) add(trees map[string]*parse.Tree, guessed bool) {
 			inv.complete = false
 		default:
 			inv.trees[name] = tree
+		}
+	}
+}
+
+// addTyped adds one parse's trees to the set's typed trees, as [templateSet.add]
+// adds an html/template set's, a split set marking where two parses in no one order
+// give one name different trees.
+func (inv *templateSet) addTyped(trees map[string]*parse.Tree) {
+	if inv.typed == nil {
+		inv.typed = make(map[string]*parse.Tree, len(trees))
+	}
+	for name, tree := range trees {
+		held, found := inv.typed[name]
+		switch {
+		case !found || parse.IsEmptyTree(held.Root):
+			inv.typed[name] = tree
+		case parse.IsEmptyTree(tree.Root) || held.Root.String() == tree.Root.String():
+		case inv.unordered:
+			inv.split = true
+		default:
+			inv.typed[name] = tree
 		}
 	}
 }

@@ -1,0 +1,96 @@
+One command executing templates parsed from constant strings, each action typed
+as the engine binds dot and variables: a map with string keys selected by name, a
+range over a map binding its key and value, a with whose else keeps the outer dot,
+a defined template invoking itself on a child, a field reached through an
+embedded struct, a value printed by html, a variable assigned after its
+declaration, a method's result, a template the receiver chain looks up by name,
+and a template the function form of ParseFiles names after its file.
+
+-- go.mod --
+module example.com/typed
+
+go 1.27.1
+-- main.go --
+package main
+
+import (
+	"os"
+	"text/template"
+)
+
+type entry struct {
+	Label string
+	Spare string
+}
+
+type tally struct{ Total string }
+
+type catalog struct {
+	ByName map[string]entry
+	Counts map[string]tally
+}
+
+type node struct {
+	Name  string
+	Child *node
+}
+
+type base struct{ ID string }
+
+type wrapped struct {
+	base
+	Note string
+}
+
+type escaped struct {
+	Body string
+}
+
+type reassigned struct {
+	First  entry
+	Second entry
+}
+
+type computed struct{ Title string }
+
+// Detail returns a value the walk does not type.
+func (computed) Detail() entry { return entry{} }
+
+type looked struct{ Body string }
+
+type filed struct{ Body string }
+
+func must(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
+func main() {
+	out := os.Stdout
+	t1 := template.Must(template.New("m").Parse("{{.ByName.one.Label}}{{range $k, $v := .Counts}}{{$k}}{{$v.Total}}{{end}}"))
+	must(t1.Execute(out, catalog{}))
+
+	t2 := template.Must(template.New("w").Parse(`{{define "tree"}}{{.Name}}{{with .Child}}{{template "tree" .}}{{else}}{{.Name}}{{end}}{{end}}{{template "tree" .}}`))
+	must(t2.Execute(out, node{}))
+
+	t3 := template.Must(template.New("e").Parse("{{.ID}} {{.Note}}"))
+	must(t3.Execute(out, wrapped{}))
+
+	t4 := template.Must(template.New("h").Parse("{{html .}}"))
+	must(t4.Execute(out, escaped{}))
+
+	t5 := template.Must(template.New("a").Parse("{{$x := .First}}{{$x = .Second}}{{$x.Spare}}"))
+	must(t5.Execute(out, reassigned{}))
+
+	t6 := template.Must(template.New("c").Parse("{{.Title}} {{.Detail.Spare}}"))
+	must(t6.Execute(out, computed{}))
+
+	t7 := template.Must(template.New("l").Parse(`{{define "row"}}{{.Body}}{{end}}`)).Lookup("row")
+	must(t7.Execute(out, looked{}))
+
+	t8 := template.Must(template.ParseFiles("page.tmpl"))
+	must(t8.Execute(out, filed{}))
+}
+-- page.tmpl --
+{{.Body}}

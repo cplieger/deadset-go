@@ -1,0 +1,89 @@
+One command asserting an interface on what Interface returns for values a field
+walk reads: a field a constant index selects beside one it never reaches, a type
+switch, a field read through an unexported embedded field, a field read through an
+unexported field that is not embedded, on which Interface panics, an element a
+variable index selects, a method expression, and Elem on an interface value, which
+the walk does not enumerate.
+
+-- go.mod --
+module example.com/rwalk
+
+go 1.27.1
+-- main.go --
+package main
+
+import (
+	"os"
+	"reflect"
+)
+
+type I interface{ M() }
+
+type t1 struct{}
+
+func (t1) M() {}
+
+type t1b struct{}
+
+func (t1b) M() {}
+
+type s1 struct {
+	X t1
+	Y t1b
+}
+
+type t2 struct{}
+
+func (t2) M() {}
+
+type s2 struct{ X t2 }
+
+type t3 struct{}
+
+func (t3) M() {}
+
+type inner3 struct{ X t3 }
+
+type s3 struct{ inner3 }
+
+type t4 struct{}
+
+func (t4) M() {}
+
+type inner4 struct{ X t4 }
+
+type s4 struct{ in inner4 }
+
+type t5 struct{}
+
+func (t5) M() {}
+
+func (t5) extra() {}
+
+type t6 struct{}
+
+func (t6) M() {}
+
+type t7 struct{}
+
+func (t7) M() {}
+
+func (t7) hint7() {}
+
+type s7 struct{ V any }
+
+func main() {
+	n := len(os.Args)
+	reflect.ValueOf(s1{}).Field(0).Interface().(I).M()
+	switch x := reflect.ValueOf(s2{}).Field(0).Interface().(type) {
+	case I:
+		x.M()
+	}
+	reflect.ValueOf(s3{}).Field(0).Field(0).Interface().(I).M()
+	if n > 5 {
+		reflect.ValueOf(s4{}).Field(0).Field(0).Interface().(I).M()
+	}
+	reflect.ValueOf([]t5{{}}).Index(n - 1).Interface().(I).M()
+	reflect.Value.Interface(reflect.ValueOf(t6{})).(I).M()
+	reflect.ValueOf(s7{V: t7{}}).Field(0).Elem().Interface().(I).M()
+}

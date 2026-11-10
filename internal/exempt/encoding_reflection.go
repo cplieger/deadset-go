@@ -231,6 +231,7 @@ func EncodingReflectionDetector(in *Program) ([]Exemption, error) {
 		methodIDs:    make(map[*types.Named]map[string]bool),
 		decoded:      make(map[token.Position][]evidence),
 		typeArgs:     in.Facts.Instantiations(),
+		reflectWalks: make(map[*ast.FuncDecl]*reflectWalk),
 	}
 	f.templates = newTemplateOrigins(in)
 	f.decode = newDecoders(f)
@@ -249,17 +250,15 @@ func EncodingReflectionDetector(in *Program) ([]Exemption, error) {
 // encodingFlow is the class over one loaded configuration: the facts it reads, the
 // flow graph its one walk reads ([flowGraph]), and what solving the graph records.
 type encodingFlow struct {
-	graph       flowGraph
-	typeArgs    *facts.Instantiations
-	kept        *retention
-	filled      *retention      // the fields kept only at the class possible ([unwrittenRead])
-	own         map[string]bool // the program's package paths
-	edge        *boundary
-	assert      *assertable
-	decode      *decoders
-	templates   *templateOrigins   // which templates an execution's receiver holds
-	conversions []facts.Conversion // the program's, consumers' included
-	readings    *facts.Readings
+	typeArgs  *facts.Instantiations
+	kept      *retention
+	filled    *retention      // the fields kept only at the class possible ([unwrittenRead])
+	own       map[string]bool // the program's package paths
+	edge      *boundary
+	assert    *assertable
+	decode    *decoders
+	templates *templateOrigins // which templates an execution's receiver holds
+	readings  *facts.Readings
 
 	// The tables [encodingFlow.index] fills from every arrival before any is
 	// retained: the import closure of each outside package an arrival reaches, by
@@ -275,8 +274,16 @@ type encodingFlow struct {
 	// ([enabledSwitches]).
 	strict map[string]bool
 
-	decoded   map[token.Position][]evidence // the sites of the decoders that fill each field
-	unwritten []unwrittenRead               // the fields a destination reads that no code writes
+	decoded map[token.Position][]evidence // the sites of the decoders that fill each field
+
+	reflectWalks map[*ast.FuncDecl]*reflectWalk // each body's reflect.Value reading, built once
+	flow         *valueFlow                     // the program's value flow, built on first use
+
+	conversions []facts.Conversion // the program's, consumers' included
+	unwritten   []unwrittenRead    // the fields a destination reads that no code writes
+	executions  []typedExecution   // the executions the typed walk reads
+
+	graph flowGraph
 
 	// findsMethods is whether the program names a reflection method finder, and
 	// walksFields whether it names a reflective field walker.
@@ -305,6 +312,9 @@ func (f *encodingFlow) solve() error {
 		if err := f.fieldAssertion(&f.graph.assertions[i]); err != nil {
 			return err
 		}
+	}
+	if err := f.typeExecutions(); err != nil {
+		return err
 	}
 	f.keepDecoded()
 	return nil
@@ -648,6 +658,7 @@ func (f *encodingFlow) readCallee(info *types.Info, decl ast.Decl, enclosing *ty
 		narrowReflection(fn, callSite{info: info, decl: decl, call: call}, &d)
 		f.narrowStrict(fn, info, decl, call, &d.reach)
 		d.named = f.templateNames(info, dir, fn, call)
+		f.noteExecution(info, dir, fn, call, callee)
 		f.readArguments(info, enclosing, calledSignature(info, fn, call), call.Args, &d)
 		return
 	}

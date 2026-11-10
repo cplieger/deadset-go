@@ -49,13 +49,16 @@ const (
 	htmlTemplate   = "html/template"
 )
 
-const disallowUnknownFields = "DisallowUnknownFields"
+const (
+	disallowUnknownFields = "DisallowUnknownFields"
+	executeTemplate       = "ExecuteTemplate"
+)
 
 var (
 	jsonSwitches       = map[string]bool{disallowUnknownFields: true, "RejectUnknownMembers": true}
 	yamlV2Strict       = strictDecoder{key: yamlKey, switches: map[string]bool{"SetStrict": true, "UnmarshalStrict": true}}
 	yamlV3Strict       = strictDecoder{key: yamlKey, switches: map[string]bool{"KnownFields": true}}
-	templateExecutions = map[string]bool{"Execute": true, "ExecuteTemplate": true}
+	templateExecutions = map[string]bool{"Execute": true, executeTemplate: true}
 )
 
 // strictDecoder is one decoder package that can refuse a document naming a member
@@ -222,17 +225,6 @@ func entryPoint(row *destinationRow, name string, strict bool) reach {
 
 func decodingEntryPoint(row *destinationRow, name string) bool {
 	return row.methods&reachDecoding != 0 && hasAnyPrefix(name, decodingEntryPoints[:])
-}
-
-// decodesWireValue reports whether a call to fn fills its argument from a document
-// the program reads: a decoding entry point of an encoder, or the Scan of a
-// database row.
-func decodesWireValue(fn *types.Func) bool {
-	if fn.Pkg() == nil {
-		return false
-	}
-	row := destinations[fn.Pkg().Path()]
-	return decodingEntryPoint(&row, fn.Name()) || scansARow(fn, row.scanners)
 }
 
 // hasAnyPrefix reports whether name begins with one of the prefixes.

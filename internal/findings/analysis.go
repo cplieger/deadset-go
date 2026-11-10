@@ -1,10 +1,12 @@
 package findings
 
 import (
+	"maps"
 	"path"
 	"path/filepath"
 	"slices"
 
+	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/load"
@@ -172,7 +174,7 @@ func (in *pass) readDeclarations(_ int, one *Configured) error {
 	for _, typed := range files {
 		markDeprecated(typed.file, typed.one.Resolve, in.deprecated)
 	}
-	readEnumGroups(one, files, in.enumerated)
+	maps.Copy(in.enumerated, exempt.EnumeratedMembers(one.Resolve, one.Facts))
 	readLiterals(files, in.literals, in.constTypes, in.seenLiterals)
 	in.interfaces.configuration(in, one, files)
 	readFixed(one, in.fixed)

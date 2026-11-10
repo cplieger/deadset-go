@@ -1,0 +1,35 @@
+An application that parses its templates through os.DirFS from a directory
+holding a regular template and a symbolic link to another, which os.DirFS
+follows. Execute runs the first file the pattern matches, the linked body.html,
+which alone names Body. The analysis does not follow the link, so it reads the
+directory as unread and every member of what the page renders is read.
+
+-- go.mod --
+module example.com/linked
+
+go 1.27.1
+-- shared/body.html --
+<p>{{.Body}}</p>
+-- views/page.html --
+<h1>{{.Title}}</h1>
+-- views/body.html.symlink --
+../shared/body.html
+-- main.go --
+package main
+
+import (
+	"html/template"
+	"os"
+)
+
+// Page is rendered from the linked template.
+type Page struct {
+	Title string
+	Body  string
+	Note  string
+}
+
+func main() {
+	page := template.Must(template.ParseFS(os.DirFS("views"), "*.html"))
+	_ = page.Execute(os.Stdout, Page{Title: "t", Body: "b", Note: "n"})
+}

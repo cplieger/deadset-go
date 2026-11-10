@@ -1,0 +1,60 @@
+Constant blocks whose later constants no deletion can lower one step: a boolean
+group, a complex group, a division by a value that reaches zero, a constant of a
+type the target does not declare, and a member declared from a value that differs
+by target. The class evaluates none of them.
+
+-- go.mod --
+module example.com/enumtotal
+
+go 1.27.1
+-- main.go --
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func main() {
+	fmt.Println(off, mid, c0, cZ, dA, tick0, tickLast, wide)
+}
+
+type flag bool
+
+const (
+	off flag = iota == 0
+	on
+	mid
+)
+
+type cplx complex128
+
+const (
+	c0 cplx = iota
+	cMid
+	cZ
+)
+
+type div int
+
+const (
+	dA div = iota
+	dMid
+	dHidden div = 1 / (iota - 1)
+)
+
+const (
+	tick0 time.Duration = iota * time.Second
+	tickMid
+	tickLast
+)
+
+type lanes int
+
+const (
+	lanesNone lanes = iota
+	lanesMid
+	lanesTwo
+)
+
+const wide = lanes(^uint(0)>>63) + lanesTwo

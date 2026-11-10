@@ -1,5 +1,6 @@
 A package that reads a field of a struct by reflection and asserts the field's value
-to an interface, and a second assertion of a value reflection holds that is no field.
+to an interface, and a second assertion of a value reflection holds that is no field,
+which converts that value as the first converts each exported field.
 
 -- go.mod --
 module example.com/walk

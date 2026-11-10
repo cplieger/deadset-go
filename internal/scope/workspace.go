@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -19,6 +20,23 @@ const workspaceFileName = "go.work"
 
 // errWorkspace reports a workspace file that cannot be read or parsed.
 var errWorkspace = errors.New("scope: unreadable workspace")
+
+// ErrIrregular reports a module or workspace file that is no regular file.
+var ErrIrregular = errors.New("no regular file")
+
+// ReadRegularFile reads the file at path where Stat, following links, says it is
+// a regular file, opening nothing else: a pipe would block the read, and a device
+// never end it.
+func ReadRegularFile(path string) ([]byte, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, &fs.PathError{Op: "read", Path: path, Err: ErrIrregular}
+	}
+	return os.ReadFile(path)
+}
 
 // Resolve is the scope of one run, from the first source that names one: the
 // scope document at document, when the invocation names one; otherwise the
@@ -108,7 +126,7 @@ func workspaceFile(dir string) (string, bool) {
 // the toolchain resolves it. A file it cannot read or parse is the project's
 // unreadable configuration.
 func readWorkspace(file string) ([]string, error) {
-	content, err := os.ReadFile(file)
+	content, err := ReadRegularFile(file)
 	if err != nil {
 		return nil, failure.Wrap(vocab.SetupUnreadableConfiguration, fmt.Errorf("%w: %s: %w", errWorkspace, file, err))
 	}

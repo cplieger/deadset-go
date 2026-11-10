@@ -1,6 +1,7 @@
 Three iota groups of one package: one whose type declares no conversion method
 and which no conversion produces, with one member named by nothing; one whose
-type declares a String method; and one a conversion from an integer produces.
+type declares a String method, which retains no member; and one a conversion
+from an integer produces, whose middle member's deletion renumbers a named one.
 
 -- go.mod --
 module example.com/enums
@@ -50,7 +51,11 @@ type state int
 const (
 	stateIdle state = iota
 	stateBusy
+	stateDone
 )
 
 // StateOf produces a state from a number, which is a value no member names.
 func StateOf(n int) state { return state(n) }
+
+// Done reports whether a state is the last one.
+func Done(s state) bool { return s == stateDone }

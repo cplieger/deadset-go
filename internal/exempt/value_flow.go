@@ -26,6 +26,11 @@ type flowGraph struct {
 	returns    []arrival
 	typeArgs   []arrival
 	assertions []fieldAssertion
+
+	// reflected is every operand the program hands to reflect.ValueOf, and
+	// interfaceValued whether it takes reflect.Value's Interface as a value.
+	reflected       []reflectOrigin
+	interfaceValued bool
 }
 
 // arrival is one value that reaches a destination: where, what reads it there, and
@@ -61,15 +66,6 @@ const (
 	// struct values it carries.
 	crossingArgument
 )
-
-// fieldAssertion is one assertion to an interface type of what Interface returns
-// for a reflect.Value holding a field of a struct ([assertedField]).
-type fieldAssertion struct {
-	st    *types.Struct
-	iface *types.Interface
-	name  string
-	at    token.Pos
-}
 
 // fieldWrites is every field the program writes, keyed by where it is declared.
 type fieldWrites struct {
@@ -142,7 +138,6 @@ type declarationReader struct {
 	decl      ast.Decl
 	enclosing *types.Func // the function decl declares, nil for any other declaration
 	store     *storeWalk
-	walk      *reflectWalk // the body's reflect.Value locals, read at its first assertion
 	dir       string
 	returns   destination // what reads the values the method returns, where answered
 	answered  bool
@@ -158,28 +153,103 @@ func (r *declarationReader) visit(n ast.Node, stack []ast.Node) bool {
 	switch n := n.(type) {
 	case *ast.CallExpr:
 		f.readCall(r.info, r.decl, r.enclosing, r.dir, n)
+		r.reflectedOperand(n)
 	case *ast.ReturnStmt:
 		if r.answered && !inLiteral {
 			f.returnedValues(r.info, r.enclosing, n, &r.returns)
 		}
 	case *ast.TypeAssertExpr:
-		r.assertion(n)
+		if n.Type != nil {
+			r.assertion(n.X, []ast.Expr{n.Type}, n)
+		}
+	case *ast.TypeSwitchStmt:
+		if x := switchedValue(n); x != nil {
+			r.assertion(x, switchCases(n), n)
+		}
+	case *ast.SelectorExpr:
+		r.interfaceValue(n, stack)
 	}
 	return true
 }
 
-// assertion reads one type assertion of a function's body ([assertedField]).
-func (r *declarationReader) assertion(n *ast.TypeAssertExpr) {
+// assertion reads one assertion of a function's body on x to each type of named
+// that is an interface ([assertedValue]), and every operand the body hands to
+// reflect.ValueOf.
+func (r *declarationReader) assertion(x ast.Expr, named []ast.Expr, at ast.Node) {
 	fd, declares := r.decl.(*ast.FuncDecl)
-	if r.enclosing == nil || !declares {
+	if r.enclosing == nil || !declares || fd.Body == nil {
 		return
 	}
-	if r.walk == nil {
-		r.walk = &reflectWalk{info: r.info, assigned: reflectValueAssignments(r.info, fd.Body), callees: r.flow.kept.in.callees}
+	var asserted []assertedInterface
+	for _, e := range named {
+		t := r.info.TypeOf(e)
+		if t == nil {
+			continue
+		}
+		if iface, isInterface := types.Unalias(t).Underlying().(*types.Interface); isInterface {
+			asserted = append(asserted, assertedInterface{iface: iface, name: types.TypeString(t, nil)})
+		}
 	}
-	if a, converts := assertedField(r.walk, n); converts {
+	if a, reads := assertedValue(r.flow.reflectWalkOf(r.info, fd), x, asserted, at); reads {
 		r.flow.graph.assertions = append(r.flow.graph.assertions, a)
 	}
+}
+
+// reflectedOperand records the operand one call hands to reflect.ValueOf.
+func (r *declarationReader) reflectedOperand(call *ast.CallExpr) {
+	callees, _ := r.flow.kept.in.callees(r.info, call)
+	for _, callee := range callees {
+		if isReflectFunction(callee.Fn, reflectValueOf) && len(call.Args) == 1 {
+			if t := r.info.TypeOf(call.Args[0]); t != nil {
+				r.flow.graph.reflected = append(r.flow.graph.reflected, reflectOrigin{t: t, expr: call.Args[0], info: r.info, fn: r.enclosing})
+			}
+			return
+		}
+	}
+}
+
+// switchedValue is the operand a type switch asserts on.
+func switchedValue(n *ast.TypeSwitchStmt) ast.Expr {
+	var assert ast.Expr
+	switch s := n.Assign.(type) {
+	case *ast.ExprStmt:
+		assert = s.X
+	case *ast.AssignStmt:
+		if len(s.Rhs) == 1 {
+			assert = s.Rhs[0]
+		}
+	}
+	if ta, isAssert := ast.Unparen(assert).(*ast.TypeAssertExpr); isAssert {
+		return ta.X
+	}
+	return nil
+}
+
+// switchCases is every type a type switch's cases name.
+func switchCases(n *ast.TypeSwitchStmt) []ast.Expr {
+	var named []ast.Expr
+	for _, stmt := range n.Body.List {
+		if clause, isClause := stmt.(*ast.CaseClause); isClause {
+			named = append(named, clause.List...)
+		}
+	}
+	return named
+}
+
+// interfaceValue notes a selector taking reflect.Value's Interface as a value, a
+// method value or a method expression any call through a function value the
+// analysis does not follow may then be.
+func (r *declarationReader) interfaceValue(n *ast.SelectorExpr, stack []ast.Node) {
+	fn, isFunc := r.info.Uses[n.Sel].(*types.Func)
+	if !isFunc || !isReflectValueMethod(fn, reflectInterface) {
+		return
+	}
+	if len(stack) > 0 {
+		if call, isCall := stack[len(stack)-1].(*ast.CallExpr); isCall && ast.Unparen(call.Fun) == n {
+			return
+		}
+	}
+	r.flow.graph.interfaceValued = true
 }
 
 // isFuncLit reports whether one node is a function literal.

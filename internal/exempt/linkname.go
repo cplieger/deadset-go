@@ -9,53 +9,34 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"unicode"
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
 
-// The spellings the two mechanisms are written with.
+// The spellings the plugin mechanism is written with.
 const (
-	mainPackage      = "main"
-	mainFunction     = "main"
-	asmExtension     = ".s"
-	asmTextDirective = "TEXT"
-	asmTextSuffix    = "(SB)"
-	asmFileLocal     = "<>"
-
-	// asmSymbolPrefix is the middle dot, U+00B7, the assembler writes between a
-	// package and a symbol name.
-	asmSymbolPrefix = "·"
+	mainPackage  = "main"
+	mainFunction = "main"
 )
 
-// The clause each mechanism records. One class covers both, so the class name
+// The clause each mechanism records. One class covers them, so the class name
 // alone does not say which one retained a symbol.
 const (
-	detailAssembly   = "named by an assembly TEXT directive"
-	detailPluginMain = "exported from a plugin's main package"
+	detailNonGoPackage = "declared in a package that holds a source in another language than Go"
+	detailNonGoName    = "named by a source in another language than Go"
+	detailNonGoUnread  = "named by an entry of the tree the analysis cannot read, which counts as a source in another language than Go naming every function and variable"
+	detailPluginMain   = "exported from a plugin's main package"
 )
 
 // LinknameCgoAsmPluginDetector retains a symbol another compilation unit reaches
-// by a name the type checker never records, which is two mechanisms:
-//
-//   - The declaration a TEXT directive of an assembly file of the same package
-//     names. The directive is a line whose first word is TEXT, followed by ·name
-//     or ·name<> and then (SB), the middle dot first: a qualified form, pkg·name,
-//     names a symbol of another package and retains nothing here.
-//   - Every exported function and variable of a main package declaring no main
-//     function. A plugin is built from a main package by a build flag the load
-//     cannot see, and a main package with no main function is the honest signal of
-//     one, because such a package cannot be linked as a program. A plugin resolves
-//     a function or a variable by name, so no other kind is retained, and a
-//     declaration of a test file is not part of the plugin.
-//
-// A name a //go:linkname directive joins and a function an //export directive
-// gives C are roots of the analysis, so neither is retained here. The string a
-// plugin lookup call names is the other side of the plugin mechanism and belongs
-// to the reflective-lookup class, whose rule is a string literal beside a call;
-// nothing here reads a string literal.
+// by a name the type checker never records: every declaration of a package holding
+// a non-Go source and every function or variable such a source of the tree names
+// (rule N, [nonGoSources]), and every exported function and variable of a main
+// package declaring no main function, which is how a plugin is built. A
+// //go:linkname or //export name is a root, not an exemption, and a plugin lookup
+// string belongs to reflective-lookup.
 func LinknameCgoAsmPluginDetector(in *Program) ([]Exemption, error) {
 	d := newLinkname(in)
 	for _, p := range d.loaded {
@@ -94,9 +75,9 @@ func newLinkname(in *Program) *linkname {
 	return d
 }
 
-// mechanisms runs the two mechanisms of the class over one package.
+// mechanisms runs the mechanisms of the class over one package.
 func (d *linkname) mechanisms(p *packages.Package) error {
-	for _, mechanism := range []func(*packages.Package) error{d.assembly, d.plugin} {
+	for _, mechanism := range []func(*packages.Package) error{d.nonGo, d.plugin} {
 		if err := mechanism(p); err != nil {
 			return err
 		}
@@ -104,7 +85,7 @@ func (d *linkname) mechanisms(p *packages.Package) error {
 	return nil
 }
 
-// exemptions returns what the two mechanisms found, ordered by site and then by
+// exemptions returns what the mechanisms found, ordered by site and then by
 // the symbol and the clause, and once per symbol, site and clause.
 func (d *linkname) exemptions() []Exemption {
 	found := make([]Exemption, 0, len(d.found))
@@ -140,9 +121,10 @@ func (d *linkname) keep(obj types.Object, site token.Pos, detail string) error {
 // linkable returns the identifier of the declaration obj is written at, when the
 // inventory holds it and it is a kind this class can retain.
 //
-// A function and a variable are those two kinds: they are what an assembly
-// definition and a plugin lookup name, so a name denoting any other kind
-// of declaration is not evidence of a caller outside the type checker's view.
+// A function and a variable are those two kinds: they are what a plugin lookup
+// and a symbol of another compilation unit name, so a name denoting any other
+// kind of declaration is not evidence of a caller outside the type checker's
+// view.
 func (d *linkname) linkable(obj types.Object) (inventory.SymbolID, bool) {
 	switch obj.(type) {
 	case *types.Func, *types.Var:
@@ -152,42 +134,93 @@ func (d *linkname) linkable(obj types.Object) (inventory.SymbolID, bool) {
 	}
 }
 
-// at retains one symbol against a site that is already rendered, which is how an
-// assembly file names one: the file is not parsed, so its directives have no
-// position in the file set.
+// at retains one symbol against a site that is already rendered, which is how a
+// non-Go source is named: the file is not parsed, so it has no position in the
+// file set.
 func (d *linkname) at(id inventory.SymbolID, site token.Position, detail string) {
 	d.found[linknameFact{id: id, site: site, file: site.Filename, detail: detail}] = struct{}{}
 }
 
-// assembly retains every declaration a TEXT directive of one of the package's own
-// assembly files names, at the file and line of the directive.
-func (d *linkname) assembly(p *packages.Package) error {
-	for _, path := range p.OtherFiles {
-		if filepath.Ext(path) != asmExtension {
-			continue
-		}
-		rel, err := targetRelative(d.in.Root, path)
-		if err != nil {
+// nonGo applies rule N to one package of the target: every declaration of a
+// package holding a non-Go source, at that source's first line, and otherwise
+// every function and variable of it whose name a non-Go source of the tree
+// writes, at that file's first line.
+func (d *linkname) nonGo(p *packages.Package) error {
+	if p.TypesInfo == nil || !d.in.Resolve.Inside(packageStart(p)) {
+		return nil
+	}
+	rules := d.in.nonGo()
+	if file := rules.evidence(p); file != "" {
+		return d.nonGoPackage(p, file)
+	}
+	scope := p.Types.Scope()
+	for _, name := range scope.Names() {
+		if err := d.nonGoName(rules, scope.Lookup(name)); err != nil {
 			return err
-		}
-		src, err := d.in.Read(path)
-		if err != nil {
-			return fmt.Errorf("exempt: read %s: %w", rel, err)
-		}
-		for _, t := range textDirectives(src) {
-			id, linkable := d.linkable(p.Types.Scope().Lookup(t.name))
-			if !linkable {
-				continue
-			}
-			d.at(id, token.Position{
-				Filename: rel,
-				Offset:   t.offset,
-				Line:     t.line,
-				Column:   t.column,
-			}, detailAssembly)
 		}
 	}
 	return nil
+}
+
+// nonGoPackage retains every declaration of a package holding a non-Go source, at
+// the first line of that source.
+func (d *linkname) nonGoPackage(p *packages.Package, file string) error {
+	site, err := d.firstLine(file)
+	if err != nil {
+		return err
+	}
+	for _, obj := range p.TypesInfo.Defs {
+		if id, held := declared(d.in, obj); held {
+			d.at(id, site, detailNonGoPackage)
+		}
+	}
+	return nil
+}
+
+// nonGoName retains one package-level function or variable a non-Go source of the
+// tree writes the name of, at the first line of the first such file, or that an
+// entry the search could not read may write, at that entry.
+func (d *linkname) nonGoName(rules *nonGoSources, obj types.Object) error {
+	id, linkable := d.linkable(obj)
+	if !linkable {
+		return nil
+	}
+	file := rules.namer(obj.Name())
+	if file == "" {
+		return nil
+	}
+	site, err := d.firstLine(file)
+	if err != nil {
+		return err
+	}
+	detail := detailNonGoName
+	if rules.tokens[obj.Name()] == "" {
+		detail = detailNonGoUnread
+	}
+	d.at(id, site, detail)
+	return nil
+}
+
+// firstLine is the site rule N records against one entry of the tree, a file it
+// read or an entry it could not read: its first line, rendered against the target
+// root.
+func (d *linkname) firstLine(path string) (token.Position, error) {
+	rel, err := targetRelative(d.in.Root, path)
+	if err != nil {
+		return token.Position{}, err
+	}
+	return token.Position{Filename: rel, Line: 1, Column: 1}, nil
+}
+
+// declared is the inventory symbol one definition of a package makes, when it is a
+// constant, a type, a variable or struct field, or a function or method.
+func declared(in *Program, obj types.Object) (inventory.SymbolID, bool) {
+	switch obj.(type) {
+	case *types.Const, *types.TypeName, *types.Var, *types.Func:
+		return in.Resolve.Object(obj)
+	default:
+		return "", false
+	}
 }
 
 // plugin retains every exported function and variable of a main package that
@@ -240,80 +273,4 @@ func declaringFile(p *packages.Package, pos token.Pos) *ast.File {
 		}
 	}
 	return nil
-}
-
-// textDirective is one TEXT directive of an assembly file: the name it defines in
-// the package the file belongs to, and where the directive is written.
-type textDirective struct {
-	name   string
-	offset int
-	line   int
-	column int
-}
-
-// textDirectives returns every TEXT directive one assembly file writes for its own
-// package, in the order the file writes them.
-func textDirectives(src []byte) []textDirective {
-	var found []textDirective
-	offset, line := 0, 1
-	for raw := range strings.Lines(string(src)) {
-		if name, at, ok := textSymbol(strings.TrimRight(raw, "\r\n")); ok {
-			found = append(found, textDirective{
-				name:   name,
-				offset: offset + at,
-				line:   line,
-				column: at + 1,
-			})
-		}
-		offset += len(raw)
-		line++
-	}
-	return found
-}
-
-// textSymbol returns the name one line defines with a TEXT directive and the byte
-// the directive starts at, or reports that the line defines none.
-//
-// Everything before the directive is white space, so the byte the directive starts
-// at is also its column in UTF-16 code units, which is the unit a position counts
-// in.
-func textSymbol(line string) (name string, at int, ok bool) {
-	rest := strings.TrimLeft(line, " \t")
-	at = len(line) - len(rest)
-	rest, ok = strings.CutPrefix(rest, asmTextDirective)
-	if !ok {
-		return "", 0, false
-	}
-	operands := strings.TrimLeft(rest, " \t")
-	if len(operands) == len(rest) {
-		// TEXT begins a longer word, so the line writes no directive.
-		return "", 0, false
-	}
-	// A name carrying anything at all before the middle dot belongs to another
-	// package, and a line reaching no middle dot defines nothing.
-	rest, ok = strings.CutPrefix(operands, asmSymbolPrefix)
-	if !ok {
-		return "", 0, false
-	}
-	name = leadingIdentifier(rest)
-	if name == "" {
-		return "", 0, false
-	}
-	rest = strings.TrimPrefix(rest[len(name):], asmFileLocal)
-	if !strings.HasPrefix(rest, asmTextSuffix) {
-		return "", 0, false
-	}
-	return name, at, true
-}
-
-// leadingIdentifier returns the longest prefix of s that a Go declaration can be
-// named, which is what a directive naming a Go declaration writes.
-func leadingIdentifier(s string) string {
-	for i, r := range s {
-		if r == '_' || unicode.IsLetter(r) || (i > 0 && unicode.IsDigit(r)) {
-			continue
-		}
-		return s[:i]
-	}
-	return s
 }

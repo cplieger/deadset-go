@@ -1,9 +1,6 @@
 package findings
 
 import (
-	"go/ast"
-	"go/token"
-	"go/types"
 	"slices"
 	"strconv"
 
@@ -13,7 +10,6 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-spec/v8/vocab"
-	"golang.org/x/tools/go/packages"
 )
 
 // enumMemberSubject is the Contract's word for a constant of an enumerated type,
@@ -108,11 +104,10 @@ func writeOnlySubject(in *pass, symbol *inventory.Symbol, u *uses, exempted map[
 }
 
 // unusedEnumMember reports a constant of an enumerated type (the enum-group
-// exemption's: a defined type an iota group declares constants of) that nothing
-// names, from any file. A member of a type whose values can arrive by conversion is
-// retained by that exemption and never reaches this kind, and one only a test's
-// evidence retains is the unused-declaration kinds' ([pass.readOrWriteSubject]),
-// which report no other member of an iota group.
+// exemption's recognition) that nothing names, from any file. A member whose
+// deletion the exemption does not prove safe is retained by it and never reaches
+// this kind, and one only a test's evidence retains is the unused-declaration
+// kinds' ([pass.readOrWriteSubject]), which report no other member of an iota group.
 func unusedEnumMember(in *pass) ([]draft, error) {
 	referenced := in.referenced
 
@@ -123,8 +118,11 @@ func unusedEnumMember(in *pass) ([]draft, error) {
 		if symbol == nil || !in.enumMember(symbol) || !in.readOrWriteSubject(candidate, symbol) || referenced[candidate.ID] {
 			continue
 		}
-		finding, names := in.finding(candidate.ID, vocab.UnusedEnumMember,
-			"enumerated member "+symbol.Name+" of "+in.enumerated[candidate.ID]+" is named nowhere")
+		message := "enumerated member " + symbol.Name + " of " + in.enumerated[candidate.ID] + " is named nowhere"
+		if in.Arriving[candidate.ID] {
+			message += "; its value may still arrive from a decoder or outside code, and deleting the name changes no behaviour"
+		}
+		finding, names := in.finding(candidate.ID, vocab.UnusedEnumMember, message)
 		if !names {
 			continue
 		}
@@ -303,102 +301,4 @@ func referencedSymbols(in *pass) map[inventory.SymbolID]bool {
 		named[in.Merged.References[i].To] = true
 	}
 	return named
-}
-
-// readEnumGroups adds to members every constant of an enumerated type one
-// configuration declares, with the name of the type: a defined type with constants
-// in an iota group (a constant block one of whose value expressions, repeated ones
-// included, mentions iota). Every constant of such a type is a member, one a later
-// block declares included, a blank one none; one configuration declaring it in such
-// a group is enough. It is the enum-group exemption's recognition, so the kinds and
-// the class agree on it.
-func readEnumGroups(one *Configured, files []typedFile, members map[inventory.SymbolID]string) {
-	scan := &enumScan{per: one, owners: make(map[string]string), members: members}
-	for _, iotaGroups := range []bool{true, false} {
-		scan.blocks(files, iotaGroups)
-	}
-}
-
-// enumScan accumulates the enumerated types of one build configuration and their
-// members.
-type enumScan struct {
-	per     *Configured
-	owners  map[string]string // the type's key to the name a message carries
-	members map[inventory.SymbolID]string
-}
-
-// blocks walks every constant block of one configuration's files, registering the
-// types an iota group declares on the pass over those groups and keeping the
-// constants of an already registered type on the pass over every other block.
-func (s *enumScan) blocks(files []typedFile, iotaGroups bool) {
-	for _, typed := range files {
-		for _, decl := range typed.file.Decls {
-			block, isBlock := decl.(*ast.GenDecl)
-			if !isBlock || block.Tok != token.CONST || mentionsIota(block) != iotaGroups {
-				continue
-			}
-			s.constants(typed.pkg, block, iotaGroups)
-		}
-	}
-}
-
-// constants keeps every constant of one block whose defined type this scan holds,
-// and registers the type a block under an iota group declares.
-func (s *enumScan) constants(p *packages.Package, block *ast.GenDecl, register bool) {
-	for _, spec := range block.Specs {
-		value, isValue := spec.(*ast.ValueSpec)
-		if !isValue {
-			continue
-		}
-		for _, name := range value.Names {
-			s.constant(p, name, register)
-		}
-	}
-}
-
-// constant keeps one declared constant under the defined type it carries.
-func (s *enumScan) constant(p *packages.Package, name *ast.Ident, register bool) {
-	constant, isConst := p.TypesInfo.Defs[name].(*types.Const)
-	if !isConst || name.Name == "_" {
-		return
-	}
-	named, isNamed := constant.Type().(*types.Named)
-	if !isNamed {
-		return
-	}
-	key := s.per.Resolve.TypeKey(named)
-	owner, held := s.owners[key]
-	if !held {
-		if !register {
-			return
-		}
-		owner = named.Obj().Name()
-		s.owners[key] = owner
-	}
-	if id, inInventory := s.per.Resolve.Object(constant); inInventory {
-		s.members[id] = owner
-	}
-}
-
-// mentionsIota reports whether one constant block is an iota group, which is one
-// specification naming iota anywhere in a value expression. A specification
-// carrying no expression repeats the previous one, so a block with one such
-// specification is a group throughout.
-func mentionsIota(block *ast.GenDecl) bool {
-	found := false
-	for _, spec := range block.Specs {
-		value, isValue := spec.(*ast.ValueSpec)
-		if !isValue {
-			continue
-		}
-		for _, expr := range value.Values {
-			ast.Inspect(expr, func(n ast.Node) bool {
-				if id, isIdent := n.(*ast.Ident); isIdent && id.Name == "iota" {
-					found = true
-				}
-				return !found
-			})
-		}
-	}
-	return found
 }

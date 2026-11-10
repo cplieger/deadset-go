@@ -213,25 +213,6 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 		}
 		rooted, _ := roots.Roots(result, resolver, symbols, rootOptions)
 		classes[i] = roots.ClassifyTestSupport(result, symbols, rooted, rootOptions.PublishedAPI)
-		program, err := exempt.NewProgram(&exempt.Loaded{
-			Result:  result,
-			Resolve: resolver,
-			Facts:   index,
-			Symbols: symbols,
-			Root:    root,
-			Read:    os.ReadFile,
-			Options: options,
-			Mode:    mode,
-		})
-		if err != nil {
-			t.Fatalf("Setup: exempt.NewProgram(%s): %v", c.ID, err)
-		}
-		computed, err := exempt.Compute(program, detectors)
-		if err != nil {
-			t.Fatalf("Setup: exempt.Compute(%s): %v", c.ID, err)
-		}
-		exemptions = append(exemptions, computed.Held...)
-		testEvidence = append(testEvidence, computed.TestEvidence...)
 		per[i] = Configured{Result: result, Resolve: resolver, Facts: index, Symbols: symbols}
 		passes[i] = liveness.Configured{Symbols: symbols, Roots: rooted, Interfaces: index.Interfaces()}
 	}
@@ -247,6 +228,38 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 	merged, err := liveness.Merge(passes, tests)
 	if err != nil {
 		t.Fatalf("Setup: liveness.Merge(%s): %v", doc.Target.Path, err)
+	}
+	arriving := make(map[inventory.SymbolID]bool)
+	locals := make(map[inventory.Offset]bool)
+	for i := range per {
+		program, err := exempt.NewProgram(&exempt.Loaded{
+			Result:     per[i].Result,
+			Resolve:    per[i].Resolve,
+			Facts:      per[i].Facts,
+			Symbols:    per[i].Symbols,
+			Root:       root,
+			Read:       os.ReadFile,
+			ReadDir:    os.ReadDir,
+			Stat:       os.Stat,
+			References: merged.References,
+			Options:    options,
+			Mode:       mode,
+		})
+		if err != nil {
+			t.Fatalf("Setup: exempt.NewProgram(%s): %v", configurations[i].ID, err)
+		}
+		computed, err := exempt.Compute(program, detectors)
+		if err != nil {
+			t.Fatalf("Setup: exempt.Compute(%s): %v", configurations[i].ID, err)
+		}
+		exemptions = append(exemptions, computed.Held...)
+		testEvidence = append(testEvidence, computed.TestEvidence...)
+		for _, id := range computed.Arriving {
+			arriving[id] = true
+		}
+		for j := range computed.Locals {
+			locals[computed.Locals[j].Declared] = true
+		}
 	}
 	if len(loadedConsumers) > 0 {
 		consumers = Consumers{
@@ -281,6 +294,9 @@ func inputOfScope(t *testing.T, doc scope.Document, resolved config.Config, cons
 		Per:          configs(per),
 		Consumers:    consumers,
 		Mode:         mode,
+
+		Arriving:       arriving,
+		RetainedLocals: locals,
 	}
 }
 

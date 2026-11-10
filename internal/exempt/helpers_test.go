@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
+	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -25,7 +27,9 @@ const (
 )
 
 // extract writes one txtar archive of testdata into a directory of its own and
-// returns the directory, which is the target root the load resolves.
+// returns the directory, which is the target root the load resolves. A file whose
+// name ends in linkSuffix is written as a symbolic link, named without the suffix,
+// to the path its text holds; a host that cannot make one skips the test.
 func extract(t *testing.T, archive string) string {
 	t.Helper()
 	parsed, err := txtar.ParseFile(filepath.Join("testdata", archive))
@@ -38,12 +42,21 @@ func extract(t *testing.T, archive string) string {
 		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			t.Fatalf("Setup: create %s: %v", filepath.Dir(path), err)
 		}
+		if link, isLink := strings.CutSuffix(path, linkSuffix); isLink {
+			if err := os.Symlink(filepath.FromSlash(strings.TrimSpace(string(f.Data))), link); err != nil {
+				t.Skipf("Setup: this host makes no symbolic link %s: %v", link, err)
+			}
+			continue
+		}
 		if err := os.WriteFile(path, f.Data, 0o600); err != nil {
 			t.Fatalf("Setup: write %s: %v", path, err)
 		}
 	}
 	return dir
 }
+
+// linkSuffix marks an archive file [extract] writes as a symbolic link.
+const linkSuffix = ".symlink"
 
 // The directories a two-module archive writes its target and its declared consumer
 // into. An archive holding the first is loaded as a program of two modules, which is
@@ -134,14 +147,21 @@ func inputOf(t *testing.T, archive string, opts Options, tags ...string) *Progra
 	if err != nil {
 		t.Fatalf("Setup: facts.NewIndex(%s): %v", archive, err)
 	}
+	references, _, err := facts.References(result, resolver, symbols, roots.TestClasses{})
+	if err != nil {
+		t.Fatalf("Setup: facts.References(%s): %v", archive, err)
+	}
 	return programOf(t, &Loaded{
-		Result:  result,
-		Resolve: resolver,
-		Facts:   index,
-		Symbols: symbols,
-		Root:    root,
-		Read:    os.ReadFile,
-		Options: opts,
+		Result:     result,
+		Resolve:    resolver,
+		Facts:      index,
+		Symbols:    symbols,
+		Root:       root,
+		Read:       os.ReadFile,
+		ReadDir:    os.ReadDir,
+		Stat:       os.Stat,
+		References: references,
+		Options:    opts,
 	})
 }
 

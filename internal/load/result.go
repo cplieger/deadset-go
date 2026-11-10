@@ -78,7 +78,8 @@ type Unit struct {
 	Packages []*packages.Package
 
 	// UnanalysedConsumer reports a unit whose module a [Dropped] module's module
-	// file requires, so code the run did not analyze may import its exports.
+	// file requires, or any unit of a tree with a path the run cannot read
+	// ([Topology.Unread]), so code the run did not analyze may import its exports.
 	UnanalysedConsumer bool
 }
 
@@ -103,8 +104,12 @@ func droppedOf(m *discoveredModule, err error) Dropped {
 
 // markUnanalysedConsumers flags every unit whose module the module file of a
 // dropped module requires, and every unit where that file cannot be read, because
-// then it may require any of them.
-func (r *Result) markUnanalysedConsumers() {
+// then it may require any of them, or where unread holds, because code the tree
+// holds where the run cannot read it may import any of them.
+func (r *Result) markUnanalysedConsumers(unread bool) {
+	for i := range r.Units {
+		r.Units[i].UnanalysedConsumer = unread
+	}
 	for _, dropped := range r.Dropped {
 		for i := range r.Units {
 			if !dropped.readable || slices.Contains(dropped.requires, r.Units[i].Path) {

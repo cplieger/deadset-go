@@ -18,6 +18,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"io/fs"
 	"slices"
 	"strings"
 
@@ -140,6 +141,15 @@ type Exemption struct {
 	Build load.Build
 }
 
+// RetainedLocal is one constant a function body declares that a class retains:
+// the exemption names the declaration enclosing it as its ID, and Declared and At
+// are where the constant itself is declared, as a byte of its file and rendered.
+type RetainedLocal struct {
+	Declared inventory.Offset
+	At       token.Position
+	Exemption
+}
+
 // Fact is what one exemption states, with the site left out: this class holds this
 // symbol for this reason while these holders are live. A class that finds the same
 // fact at several sites found it once, and the sweep records it once.
@@ -188,9 +198,17 @@ type Loaded struct {
 	// recorded site is rendered relative to.
 	Root string
 
-	// Read is how a class that reads a file reads it. A class reaches the
-	// filesystem through this and nowhere else.
-	Read inventory.ReadFile
+	// Read is how a class that reads a file reads it, ReadDir how one that lists a
+	// directory lists it, and Stat how one that asks what a path names, through
+	// a symbolic link, asks it.
+	Read    inventory.ReadFile
+	ReadDir func(name string) ([]fs.DirEntry, error)
+	Stat    func(name string) (fs.FileInfo, error)
+
+	// References is every reference of every configuration of the matrix, a
+	// loaded consumer's included, which is what a class that asks whether code
+	// names a declaration in any build configuration reads.
+	References []facts.Reference
 
 	Options Options
 
@@ -241,6 +259,23 @@ type Program struct {
 	// program owns it, so the trees it read go when the program does.
 	sources *load.Sources
 
+	// nonGoSources is rule N's reading of the target's directories, made on a
+	// class's first ask ([Program.nonGo]).
+	nonGoSources *nonGoSources
+
+	// bodies is the position of every function the program declares with a body
+	// ([Program.declaresBody]), made on a class's first ask.
+	bodies map[inventory.Offset]bool
+
+	// locals is every constant a function body declares that the enum-group
+	// class retains under the run's mode ([Computed.Locals]).
+	locals []RetainedLocal
+
+	// arriving is every member the enum-group class reports no retention for
+	// whose type's values may arrive other than by a member's name
+	// ([Computed.Arriving]).
+	arriving []inventory.SymbolID
+
 	Loaded
 }
 
@@ -277,10 +312,24 @@ type Computed struct {
 	// which retain nothing and count as test references.
 	TestEvidence []Exemption
 
+	// Locals is every constant a function body declares that a class retains
+	// under the run's mode. Such a constant is no symbol of the inventory, so it
+	// is named by the declaration enclosing it.
+	Locals []RetainedLocal
+
+	// Arriving is every member of an enumerated type whose values may arise other
+	// than by a member's name, which a finding about the member says.
+	Arriving []inventory.SymbolID
+
 	// Filled is the records of the class possible whose symbol no held exemption
 	// holds, each found in a file the mode counts or naming a symbol a test file
 	// declares, whose finding a test file's evidence may lower under any mode.
 	Filled []Exemption
+
+	// Unread is every directory and non-Go source under the target root that rule
+	// N's tree search could not read, where a class asked it to search, each of
+	// which counts as naming every function and variable of the target.
+	Unread []string
 }
 
 // Compute runs every class the detector table holds and the options do not disable,
@@ -328,7 +377,7 @@ func Compute(in *Program, detectors map[vocab.Exemption]Detector) (Computed, err
 	for _, set := range [][]Exemption{found, evidence, filled} {
 		slices.SortStableFunc(set, byEvidence)
 	}
-	return Computed{Held: firstPerFact(found), TestEvidence: firstPerFact(evidence), Filled: firstPerFact(filled)}, nil
+	return Computed{Held: firstPerFact(found), TestEvidence: firstPerFact(evidence), Filled: firstPerFact(filled), Locals: in.locals, Arriving: in.arriving, Unread: in.unreadEntries()}, nil
 }
 
 // recordSet is which part of [Computed] one record of a class goes to, if any.
@@ -429,6 +478,21 @@ func resolveObject(info *types.Info, expr ast.Expr) types.Object {
 		return resolveObject(info, e.X)
 	}
 	return nil
+}
+
+// declaresBody reports whether the analyzed program declares fn with a body: a
+// function declared without one is written in another language or linked by
+// name, and one declared outside the program is outside code.
+func (in *Program) declaresBody(fn *types.Func) bool {
+	if in.bodies == nil {
+		in.bodies = make(map[inventory.Offset]bool, len(in.functions))
+		for i := range in.functions {
+			if f := &in.functions[i]; f.decl.Body != nil {
+				in.bodies[in.offsetOf(f.fn.Pos())] = true
+			}
+		}
+	}
+	return in.bodies[in.offsetOf(fn.Origin().Pos())]
 }
 
 // callees is every function one call of the program reaches, and whether it may

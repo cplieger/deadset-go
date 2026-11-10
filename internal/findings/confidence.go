@@ -7,7 +7,7 @@ import (
 // classify gives one finding its reachability class and its own confidence: the
 // class capped by the kind's max_class, then lowered to possible where production
 // code only tests use is its subject ([pass.capTestUsed]). The component cap is
-// [cohere]'s, once every finding of the pass is classified.
+// [pass.cohere]'s, once every finding of the pass is classified.
 func (in *pass) classify(found *Finding, d *draft, row *vocab.Kind) {
 	found.Class = vocab.Certain
 	if !found.local && shapeOf(found.Symbol.Kind) == shapeDeclaration {
@@ -47,9 +47,24 @@ func (in *pass) capTestUsed(found *Finding, row *vocab.Kind, testRead bool) {
 // cohere caps every finding of a dead component at the lowest shared confidence
 // among the findings about the component's root members, whatever their severity
 // and whether or not a record withholds them, so every finding of one component
-// carries one confidence but those [pass.capTestUsed] lowers on their own. A
-// component minted for one subject holds that finding alone.
-func cohere(findings []Finding) {
+// carries one confidence but those [pass.capTestUsed] lowers on their own. A held
+// component is capped by the components beneath it as well, whose declarations
+// reference its members: it is dead only as surely as they are. A component
+// minted for one subject holds that finding alone.
+func (in *pass) cohere(findings []Finding) {
+	least := rootFloors(findings)
+	in.capHeld(least)
+	for i := range findings {
+		if floor, seen := least[findings[i].Component.ID]; seen {
+			findings[i].Confidence = lower(findings[i].Confidence, floor)
+			findings[i].shared = lower(findings[i].shared, floor)
+		}
+	}
+}
+
+// rootFloors is, for every component, the lowest shared confidence among the
+// findings about its root members.
+func rootFloors(findings []Finding) map[string]vocab.Class {
 	least := make(map[string]vocab.Class)
 	for i := range findings {
 		found := &findings[i]
@@ -60,10 +75,23 @@ func cohere(findings []Finding) {
 			least[found.Component.ID] = found.shared
 		}
 	}
-	for i := range findings {
-		if floor, seen := least[findings[i].Component.ID]; seen {
-			findings[i].Confidence = lower(findings[i].Confidence, floor)
-			findings[i].shared = lower(findings[i].shared, floor)
+	return least
+}
+
+// capHeld lowers the floor of every held component to the floor of each
+// component beneath it, until no floor moves.
+func (in *pass) capHeld(least map[string]vocab.Class) {
+	for changed := true; changed; {
+		changed = false
+		for at := range in.swept {
+			id := ComponentID(at + 1)
+			for _, under := range in.swept[at].Beneath {
+				floor, seen := least[ComponentID(under+1)]
+				if held, capped := least[id]; seen && capped && rank(floor) < rank(held) {
+					least[id] = floor
+					changed = true
+				}
+			}
 		}
 	}
 }

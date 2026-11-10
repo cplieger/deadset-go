@@ -149,8 +149,8 @@ func TestUnusedEnumMemberReportsTheGroupNoConversionRetainsAtTheDerivedClass(t *
 	in := inputOf(t, "readwrite-enum.txtar", libraryConfig(), Consumers{})
 
 	found := computed(t, in, map[vocab.Code]Emitter{vocab.UnusedEnumMember: unusedEnumMember}).Findings
-	if names := namesUnder(found, vocab.UnusedEnumMember); !slices.Equal(names, []string{"modeWrite"}) {
-		t.Fatalf("UnusedEnumMember over readwrite-enum.txtar reports %v, want [modeWrite]", names)
+	if names := namesUnder(found, vocab.UnusedEnumMember); !slices.Equal(names, []string{"levelHigh", "modeWrite"}) {
+		t.Fatalf("UnusedEnumMember over readwrite-enum.txtar reports %v, want [levelHigh modeWrite]: a String method retains no member", names)
 	}
 
 	member := findingOf(t, found, vocab.UnusedEnumMember, "modeWrite")
@@ -183,13 +183,15 @@ func TestUnusedEnumMemberReportsNoMemberTheEnumGroupClassRetains(t *testing.T) {
 			retained[symbol.Name] = true
 		}
 	}
-	for _, name := range []string{"levelHigh", "stateIdle", "stateBusy"} {
+	for _, name := range []string{"stateIdle", "stateBusy"} {
 		if !retained[name] {
 			t.Errorf("the sweep over readwrite-enum.txtar does not retain %s under enum-group, want it held back", name)
 		}
 	}
-	if retained["modeWrite"] {
-		t.Error("the sweep over readwrite-enum.txtar retains modeWrite under enum-group, want it reported instead")
+	for _, name := range []string{"modeWrite", "levelHigh"} {
+		if retained[name] {
+			t.Errorf("the sweep over readwrite-enum.txtar retains %s under enum-group, want it reported instead", name)
+		}
 	}
 }
 
@@ -209,7 +211,7 @@ func TestEnumGroupMembersReadsAnIotaGroupTheWayTheExemptionDoes(t *testing.T) {
 	want := []string{
 		"levelHigh of level", "levelLow of level",
 		"modeRead of mode", "modeWrite of mode",
-		"stateBusy of state", "stateIdle of state",
+		"stateBusy of state", "stateDone of state", "stateIdle of state",
 	}
 	if !slices.Equal(named, want) {
 		t.Errorf("enumGroupMembers over readwrite-enum.txtar = %v, want %v", named, want)

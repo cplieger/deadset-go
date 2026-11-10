@@ -67,6 +67,11 @@ func TestEncodingReflectionReadsEveryMemberWhereAFileSystemTemplateIsUnread(t *t
 			"go://example.com/themed#Article.Body",
 			"go://example.com/themed#Article.Title",
 		}},
+		{"directory_holding_a_symbolic_link", "template-fs-link.txtar", []string{
+			"go://example.com/linked#Page.Body",
+			"go://example.com/linked#Page.Note",
+			"go://example.com/linked#Page.Title",
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

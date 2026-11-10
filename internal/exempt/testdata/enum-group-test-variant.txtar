@@ -1,0 +1,45 @@
+A package and its in-package test read one enumerated type: the load
+type-checks the package alone and again with its test file, and the class keys
+both readings of the type as one. Production code names the first and last
+members, and the test converts an int to the type, which only the view of every
+file counts, so the middle member is retained against the test file.
+
+-- go.mod --
+module example.com/variants
+
+go 1.27.0
+-- main.go --
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+type mode int
+
+const (
+	modeA mode = iota
+	modeMid
+	modeZ
+)
+
+func pick(n int) mode {
+	if n > 3 {
+		return modeA
+	}
+	return modeZ
+}
+
+func main() { fmt.Println(pick(len(os.Args)) == modeZ) }
+-- main_test.go --
+package main
+
+import "testing"
+
+func TestPick(t *testing.T) {
+	n := 1
+	if pick(5) == mode(n) {
+		t.Fatal("pick(5) is the member at 1")
+	}
+}

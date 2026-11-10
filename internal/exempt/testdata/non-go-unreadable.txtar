@@ -1,0 +1,27 @@
+A C header and a directory below testdata that the test makes the run unable to
+read. Either may name any function or variable of the tree, so every one is
+retained against the first, docs/secret.h; a constant is no symbol another
+compilation unit reaches by name, so it is not.
+
+-- go.mod --
+module example.com/unreadable
+
+go 1.27.0
+-- docs/secret.h --
+int unread;
+-- testdata/pg/PG_VERSION --
+17
+-- p/p.go --
+package p
+
+const Limit = 3
+
+var spare int
+
+func Run() {}
+-- main.go --
+package main
+
+import "example.com/unreadable/p"
+
+func main() { p.Run() }

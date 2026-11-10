@@ -5,6 +5,7 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -13,11 +14,14 @@ import (
 )
 
 // The packages whose functions format a value with the formatting machinery, and
-// the two methods that machinery reaches through an interface when a verb asks for
-// a string.
+// the methods that machinery reaches through an interface: the two a verb asking for
+// a string calls, the one it calls under every verb, and the one the default verb
+// with the sharp flag calls (handleMethods in go1.27.3 src/fmt/print.go).
 const (
-	stringMethod = "String"
-	errorMethod  = "Error"
+	stringMethod   = "String"
+	errorMethod    = "Error"
+	formatMethod   = "Format"
+	goStringMethod = "GoString"
 )
 
 // stringVerbs are the verbs a string operand is valid under, and so the verbs
@@ -69,20 +73,30 @@ func declaredPrintFunction(fn *types.Func) (printSignature, bool) {
 }
 
 // formatScan is what one format string says about the operands of its call: the
-// operands a verb asks for a string, how far into the operand list the verbs
-// reached, and whether the format selected an operand by an explicit index.
+// operands a verb asks for a string, the operands a verb prints, how far into the
+// operand list the verbs reached, and whether the format selected an operand by an
+// explicit index.
 type formatScan struct {
 	bound     []operand
+	printed   []operand
 	reached   int
 	reordered bool
 }
 
-// operand is one argument a formatting call asks for a string, with the clause the
-// exemption records about the verb that asked.
+// operand is one argument a formatting call asks for a string, or prints, with the
+// clause the exemption records about the verb that asked. A printed operand carries
+// the verb that prints it, anyVerb where the call may print it under any, and
+// whether that verb can be the default verb carrying the sharp flag, the one verb
+// that calls GoString.
 type operand struct {
-	under string
-	at    int
+	under  string
+	at     int
+	verb   rune
+	sharpV bool
 }
+
+// anyVerb is the verb of an operand a call may print under any verb.
+const anyVerb rune = 0
 
 // FormatVerbContractDetector records the format-verb-contract class: a type whose
 // values reach a facility that formats its operands keeps its String and Error
@@ -342,7 +356,69 @@ func (f *formatFlow) call(info *types.Info, call *ast.CallExpr, fn *types.Func, 
 			return err
 		}
 	}
+	for _, op := range printedOperandsOf(info, call, sig, len(operands)) {
+		at := info.TypeOf(operands[op.at])
+		if at == nil {
+			continue
+		}
+		site, err := f.kept.site(operands[op.at].Pos())
+		if err != nil {
+			return err
+		}
+		recordPrinted(f.kept, at, &site, "formatted by "+fn.FullName()+op.under, false, op)
+	}
 	return nil
+}
+
+// printedOperandsOf returns the operands one call prints, each with whether a verb
+// that binds it can be the default verb carrying the sharp flag. A form carrying no
+// format string prints every operand under the default verb with no flag
+// (doPrint in go1.27.3 src/fmt/print.go); a format string that is not a constant, or
+// operands that arrive as a spread slice, may bind any operand to any verb.
+func printedOperandsOf(info *types.Info, call *ast.CallExpr, sig printSignature, count int) []operand {
+	if sig.format < 0 {
+		return defaultOperands(everyOperand(count, ""))
+	}
+	if call.Ellipsis.IsValid() || sig.format >= len(call.Args) {
+		return sharpOperands(everyOperand(count, " under every verb it may carry"))
+	}
+	format, written := constantString(info, call.Args[sig.format])
+	if !written {
+		return sharpOperands(everyOperand(count, " under every verb it may carry"))
+	}
+	return printedOperands(format, count)
+}
+
+// printedOperands is the operands a constant format string prints: each operand a
+// verb other than %T binds, and every operand past the last one a verb consumed,
+// which the formatting package prints under the default verb with no flag unless the
+// format selected an operand by an explicit index.
+func printedOperands(format string, count int) []operand {
+	scan := stringOperands(format, count, stringVerbs)
+	if scan.reordered {
+		return scan.printed
+	}
+	for at := scan.reached; at < count; at++ {
+		scan.printed = append(scan.printed, operand{at: at, under: " past the format's last verb", verb: 'v'})
+	}
+	return scan.printed
+}
+
+// defaultOperands marks every operand as one the default verb with no flag prints.
+func defaultOperands(all []operand) []operand {
+	for i := range all {
+		all[i].verb = 'v'
+	}
+	return all
+}
+
+// sharpOperands marks every operand as one any verb may print, the default verb
+// with the sharp flag among them.
+func sharpOperands(all []operand) []operand {
+	for i := range all {
+		all[i].verb, all[i].sharpV = anyVerb, true
+	}
+	return all
 }
 
 // stringOperandsOf returns the operands one call binds to a verb valid for a
@@ -414,13 +490,33 @@ func stringOperands(format string, count int, verbs string) formatScan {
 		if !held {
 			break
 		}
-		if bindsAString(d.verb, d.sharp, verbs) && d.arg < count {
-			scan.bound = append(scan.bound, operand{at: d.arg, under: " under %" + string(d.verb)})
+		if d.arg < count {
+			scan.add(&d, verbs)
 		}
 		arg = d.arg + 1
 		scan.reached = arg
 	}
 	return scan
+}
+
+// add records what one directive binding an operand of the call says of it:
+// whether the verb asks it for a string, and how it prints, which every verb but
+// %T does.
+func (scan *formatScan) add(d *directive, verbs string) {
+	if bindsAString(d.verb, d.sharp, verbs) {
+		scan.bound = append(scan.bound, operand{at: d.arg, under: " under %" + string(d.verb)})
+	}
+	if d.verb == 'T' {
+		return
+	}
+	op := operand{at: d.arg, under: " under %" + string(d.verb), verb: d.verb, sharpV: d.verb == 'v' && d.sharp}
+	if d.verb == 'w' {
+		op.verb = 'v' // the wrapping verb prints as the default one (handleMethods)
+	}
+	if op.sharpV {
+		op.under = " under %#v"
+	}
+	scan.printed = append(scan.printed, op)
 }
 
 // directive is one verb of a format string: the operand it binds, where the
@@ -541,32 +637,189 @@ func (f *formatFlow) retain(t types.Type, at token.Pos, detail string) error {
 // keepPrinting records the string and error methods of one type, a method it has
 // by promotion with the embedded fields the call reads.
 func (f *formatFlow) keepPrinting(named *types.Named, site *evidence, detail string) {
+	keepPrintingMethods(f.kept, named, site, detail, stringMethod, errorMethod)
+}
+
+// keepPrintingMethods records each of the named methods of one type the formatting
+// machinery calls, in the form it calls it, a method the type has by promotion with
+// the embedded fields the call reads.
+func keepPrintingMethods(kept *retention, named *types.Named, site *evidence, detail string, names ...string) {
 	for m := range named.Origin().Methods() {
-		if rendersAString(m) {
-			f.kept.record(m, site, detail)
+		if slices.Contains(names, m.Name()) && printsAs(m) {
+			kept.record(m, site, detail)
 		}
 	}
 	set := types.NewMethodSet(types.NewPointer(named))
-	for _, name := range [...]string{stringMethod, errorMethod} {
+	for _, name := range names {
 		if sel := set.Lookup(nil, name); sel != nil {
-			if m, isFunc := sel.Obj().(*types.Func); isFunc && rendersAString(m) {
-				f.kept.promoted(named, sel, site, detail)
+			if m, isFunc := sel.Obj().(*types.Func); isFunc && printsAs(m) {
+				kept.promoted(named, sel, site, detail)
 			}
 		}
 	}
 }
 
-// rendersAString reports whether m is one of the two methods a verb calls, in the
-// form it calls: named String or Error, taking nothing and returning one string.
-func rendersAString(m *types.Func) bool {
-	if m.Name() != stringMethod && m.Name() != errorMethod {
-		return false
-	}
+// printsAs reports whether m has the signature the formatting machinery calls a
+// method of its name with: String, Error and GoString taking nothing and returning
+// one string, Format taking a fmt.State and a rune and returning nothing.
+func printsAs(m *types.Func) bool {
 	sig := m.Signature()
-	if sig.Params().Len() != 0 || sig.Results().Len() != 1 {
+	switch m.Name() {
+	case stringMethod, errorMethod, goStringMethod:
+		return sig.Params().Len() == 0 && sig.Results().Len() == 1 &&
+			types.Identical(sig.Results().At(0).Type(), types.Typ[types.String])
+	case formatMethod:
+		if sig.Params().Len() != 2 || sig.Results().Len() != 0 {
+			return false
+		}
+		state, isNamed := types.Unalias(sig.Params().At(0).Type()).(*types.Named)
+		return isNamed && state.Obj().Pkg() != nil && state.Obj().Pkg().Path() == "fmt" && state.Obj().Name() == "State" &&
+			types.Identical(sig.Params().At(1).Type(), types.Typ[types.Rune])
+	default:
 		return false
 	}
-	return types.Identical(sig.Results().At(0).Type(), types.Typ[types.String])
+}
+
+// recordPrinted records what the formatting machinery reads of one operand of
+// static type t it prints under one verb, where the walk enumerates it
+// ([printedFields]): every field it prints, written or not, and on every type it can
+// call a method on ([formattedTypes]) the Format method, which it calls under every
+// verb but %T and %p, GoString where the default verb with the sharp flag may print
+// the operand, and String and Error where str says the caller does not record them
+// itself. An operand the walk does not enumerate records nothing here.
+func recordPrinted(kept *retention, t types.Type, site *evidence, detail string, str bool, op operand) {
+	fields, enumerated := printedFields(t, op.verb, op.sharpV)
+	if !enumerated {
+		return
+	}
+	for _, field := range fields {
+		kept.record(field, site, detail)
+	}
+	var names []string
+	if op.verb != 'p' {
+		names = append(names, formatMethod)
+	}
+	if op.sharpV {
+		names = append(names, goStringMethod)
+	}
+	if str {
+		names = append(names, stringMethod, errorMethod)
+	}
+	for _, named := range formattedTypes(t) {
+		keepPrintingMethods(kept, named, site, detail, names...)
+	}
+}
+
+// printedFields returns every field fmt prints of a value of static type t under
+// one verb, following printArg, handleMethods and printValue (go1.27.3
+// src/fmt/print.go): a value whose method set holds a method the verb calls
+// (Format, GoString under %#v, Error or String under %v %s %q %x %X) prints none
+// of its fields, no method is called below an unexported field, and only the
+// operand itself is dereferenced. It reports false where a printed value has an
+// interface, type-parameter or reflect.Value type, whose dynamic value t does not
+// give.
+func printedFields(t types.Type, verb rune, sharpV bool) ([]*types.Var, bool) {
+	w := printedWalk{verb: verb, sharpV: sharpV, seen: make(map[string]bool)}
+	t = types.Unalias(t)
+	if w.callsMethod(t) {
+		return nil, true
+	}
+	if pointer, isPointer := t.Underlying().(*types.Pointer); isPointer {
+		t = pointer.Elem()
+	}
+	queue := []printedValue{{t: t, methods: true}}
+	for len(queue) > 0 {
+		next, known := w.step(queue[0])
+		if !known {
+			return nil, false
+		}
+		queue = append(queue[1:], next...)
+	}
+	return w.fields, true
+}
+
+// printedValue is one value the formatting machinery prints, by its static type,
+// and whether it may call a method on it.
+type printedValue struct {
+	t       types.Type
+	methods bool
+}
+
+// printedWalk is the state of one [printedFields] walk.
+type printedWalk struct {
+	seen   map[string]bool
+	fields []*types.Var
+	verb   rune
+	sharpV bool
+}
+
+// step records the fields one printed value prints and returns the values beneath
+// it the machinery prints, reporting false where the value's type is one whose
+// dynamic value the static type does not give.
+func (w *printedWalk) step(v printedValue) ([]printedValue, bool) {
+	t := types.Unalias(v.t)
+	key := resolve.Spell(t, nil)
+	if v.methods {
+		key += "\x00methods"
+	}
+	if w.seen[key] {
+		return nil, true
+	}
+	w.seen[key] = true
+	if isReflectHandle(t) {
+		return nil, false
+	}
+	if _, isInterface := t.Underlying().(*types.Interface); isInterface {
+		return nil, false
+	}
+	if v.methods && w.callsMethod(t) {
+		return nil, true
+	}
+	var next []printedValue
+	switch u := t.Underlying().(type) {
+	case *types.Struct:
+		for field := range u.Fields() {
+			w.fields = append(w.fields, field)
+			next = append(next, printedValue{t: field.Type(), methods: v.methods && field.Exported()})
+		}
+	case *types.Array:
+		next = append(next, printedValue{t: u.Elem(), methods: v.methods})
+	case *types.Slice:
+		next = append(next, printedValue{t: u.Elem(), methods: v.methods})
+	case *types.Map:
+		next = append(next, printedValue{t: u.Key(), methods: v.methods}, printedValue{t: u.Elem(), methods: v.methods})
+	}
+	return next, true
+}
+
+// callsMethod reports whether the machinery prints a value of type t through a
+// method of its method set under the walk's verb rather than by its fields. Under
+// any verb only Format is sure to be called.
+func (w *printedWalk) callsMethod(t types.Type) bool {
+	if _, isInterface := t.Underlying().(*types.Interface); isInterface || w.verb == 'p' {
+		return false
+	}
+	set := types.NewMethodSet(t)
+	has := func(name string) bool {
+		sel := set.Lookup(nil, name)
+		if sel == nil {
+			return false
+		}
+		m, isFunc := sel.Obj().(*types.Func)
+		return isFunc && printsAs(m)
+	}
+	switch {
+	case has(formatMethod):
+		return true
+	case w.verb == anyVerb:
+		return false
+	case w.verb == 'v' && w.sharpV:
+		return has(goStringMethod)
+	case strings.ContainsRune(stringVerbs, w.verb):
+		return has(errorMethod) || has(stringMethod)
+	default:
+		return false
+	}
 }
 
 // formattedTypes returns every defined type the machinery formats a value of t

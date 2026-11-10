@@ -29,7 +29,7 @@ func (in *pass) decide(found, skipped []Finding, emitters map[vocab.Code]Emitter
 		if would, wouldSkipped, err = from.phase(livenessKinds(), emitters); err != nil {
 			return nil, nil, err
 		}
-		cohere(would)
+		from.cohere(would)
 		from.dialed = from.dial(would)
 	}
 

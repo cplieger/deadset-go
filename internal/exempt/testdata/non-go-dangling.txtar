@@ -1,0 +1,28 @@
+A symbolic link to nothing named like a C header, in a directory that holds no
+package, an editor's lock file, a link to nothing named like a C source, in a
+package directory, and a link named like a C header through a file there. None
+has content the build or a compiler can read, so the tree holds no non-Go source
+and nothing is retained.
+
+-- go.mod --
+module example.com/dangling
+
+go 1.27.0
+-- docs/broken.h.symlink --
+/nonexistent/target.h
+-- p/p.go --
+package p
+
+var spare int
+
+func Run() {}
+-- p/.#p.c.symlink --
+user@host.1234
+-- p/a.h.symlink --
+p.go/nothing.h
+-- main.go --
+package main
+
+import "example.com/dangling/p"
+
+func main() { p.Run() }

@@ -1,6 +1,7 @@
 main converts an integer to mode, and so does a test file whose name sorts before
-main.go. The production conversion is the evidence a production run holds, so slow
-is retained whatever file renders first.
+main.go. Deleting slow renumbers turbo, which main names, and the production
+conversion is the evidence a production run holds that a value no name gives can
+arise, so slow is retained whatever file renders first.
 
 -- go.mod --
 module example.com/app
@@ -21,9 +22,10 @@ type mode int
 const (
 	fast mode = iota
 	slow
+	turbo
 )
 
-func main() { fmt.Println(fast, mode(len(os.Args))) }
+func main() { fmt.Println(fast, turbo, mode(len(os.Args))) }
 -- a_test.go --
 package main
 
