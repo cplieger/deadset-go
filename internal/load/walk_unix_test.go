@@ -115,6 +115,24 @@ func TestDiscoverSortsEveryEntryKindBeforeOpeningIt(t *testing.T) {
 				mode0(t, path, func(string) error { return nil })
 			},
 		},
+		{name: "a_link_to_a_name_too_long_to_stat", entry: "data/long", make: linkTo(strings.Repeat("n", 300)), want: Unread},
+		{name: "a_go_file_link_to_a_name_too_long_to_stat", entry: "p/long.go", make: linkTo(strings.Repeat("n", 300)), want: Unread},
+		{
+			name: "a_module_holding_no_go_file_beside_a_directory_the_user_cannot_list", entry: "b", want: Unread,
+			tree: map[string]string{
+				"a/go.mod": "module example.com/a\n\ngo 1.27.1\n",
+				"b/go.mod": "module example.com/b\n\ngo 1.27.1\n", "b/x.go": "package b\n",
+			},
+			make: func(t *testing.T, path string) {
+				t.Helper()
+				mode0(t, path, func(string) error { return nil })
+			},
+		},
+		{
+			name: "a_module_holding_no_go_file_beside_a_link_too_long_to_stat", entry: "long", want: Unread,
+			tree: map[string]string{"a/go.mod": "module example.com/a\n\ngo 1.27.1\n"},
+			make: linkTo(strings.Repeat("n", 300)),
+		},
 		{
 			name: "a_module_file_that_is_a_pipe", entry: "go.mod", make: fifo,
 			tree:    map[string]string{"main.go": "package main\n\nfunc main() {}\n"},

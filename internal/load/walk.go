@@ -11,9 +11,9 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 )
 
-// Kind is what one entry of a tree is to every walk of it, decided by Stat before
-// anything there is opened: opening a pipe blocks, and reading a device never
-// ends.
+// Kind is what one entry of a tree is to every walk of it, decided before anything
+// there is opened, by the listing's type for an entry that is no symbolic link and
+// by Stat for one that is: opening a pipe blocks, and reading a device never ends.
 type Kind uint8
 
 const (
@@ -73,10 +73,11 @@ func kindOfType(mode fs.FileMode) Kind {
 }
 
 // Walk walks the tree at root as the go command walks a module's tree, handing
-// visit every entry once with its [Kind], a directory before what it holds, and
-// entering each directory below root that enters accepts. It follows root where
-// root is a symbolic link to a directory (go.dev/issue/50807); visit sees root as
-// written and every path below joined onto it, the spelling the toolchain reports.
+// visit each entry once with its [Kind], a directory before what it holds. A
+// directory below root that enters rejects is neither visited nor entered. It
+// follows root where root is a symbolic link to a directory (go.dev/issue/50807);
+// visit sees root as written and every path below joined onto it, the spelling the
+// toolchain reports.
 // An Unread or leftOut entry at or below top's root is recorded in
 // [Topology.Unread] or [Topology.LeftOut]. visit's fs.SkipAll ends the walk, and
 // any other error ends it with that error.
