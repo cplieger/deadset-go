@@ -575,6 +575,9 @@ var enumInputs = []string{"0", "1", "2", "3"}
 // four cores; DEADSET_ENUM_PROPERTY_ROUNDS repeats the run under fresh seeds.
 func TestEnumGroupReportsOnlyAMemberWhoseDeletionNoProgramObserves(t *testing.T) {
 	t.Parallel()
+	if runtime.GOOS != hostOS || runtime.GOARCH != hostArch {
+		t.Skipf("every host analyzes as %s/%s, so the oracles answer as they do on that host, which runs every draw; here only the host's go build would differ", hostOS, hostArch)
+	}
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("the differential oracle builds each program with the go command, which is not on PATH")
 	}
