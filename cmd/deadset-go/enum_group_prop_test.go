@@ -715,7 +715,9 @@ func checkDifferential(ctx context.Context, t *rapid.T, p *enumProgram, variants
 	bin := filepath.Join(dir, "bin")
 	build := exec.CommandContext(ctx, "go", "build", "-o", bin+string(filepath.Separator), "./...")
 	build.Dir = dir
-	build.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod", "CGO_ENABLED=0")
+	// runTests pins GOOS and GOARCH to linux/amd64 for the analysis; the variants
+	// run here, so they build for the host.
+	build.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod", "CGO_ENABLED=0", "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH)
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("deleting the reported members leaves a program that does not build: %v\n%s\noriginal:\n%s", err, out, program)
 	}
