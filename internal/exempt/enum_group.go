@@ -6,437 +6,594 @@ import (
 	"go/token"
 	"go/types"
 	"slices"
+	"strings"
 
+	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
 
-// The conversion methods whose presence on an enumerated type means a value of it
-// can arrive spelled as text or as a number rather than as a member's name, in the
-// Contract's order. The first one a type declares is the evidence recorded.
-var enumGroupConversionMethods = [...]string{
-	"String", "MarshalText", "UnmarshalText", "MarshalJSON", "UnmarshalJSON",
-}
-
-// The three rules of the class, ranked: the evidence of the lowest rank wins, and
-// the earliest rendered position wins inside one rank, so one type records one
-// reason whatever order the load parsed its files in.
-const (
-	enumGroupByMethod = iota
-	enumGroupByInteger
-	enumGroupByDecode
-)
-
-// EnumGroupDetector retains every constant of an enumerated type whose values can
-// arrive by conversion rather than by name: a defined type the target declares,
-// with constants in an iota group, that declares a String, MarshalText,
-// UnmarshalText, MarshalJSON or UnmarshalJSON method, is produced by converting a
-// non-constant integer, or is a decoder's target (the Contract's enum-group class).
-// A conversion method matches by name alone, a decoder's target carries every type
-// reachable through pointers, elements, map keys and values and fields, and a
-// blank constant is retained by nothing.
+// EnumGroupDetector retains every constant of the target whose deletion, alone or
+// with other constants the class does not retain, the analysis does not prove
+// leaves a program that builds and does the same (the Contract's enum-group
+// class). It decides over the production files and again over every file.
 func EnumGroupDetector(in *Program) ([]Exemption, error) {
-	scan := &enumGroupScan{in: in, byKey: make(map[string]*enumGroupType)}
-	if err := scan.groups(); err != nil {
-		return nil, err
+	in.locals, in.arriving = nil, nil
+	s := newEnumGroupScan(in)
+	if len(s.consts) == 0 {
+		return nil, nil
 	}
-	if err := scan.evidence(); err != nil {
-		return nil, err
+	s.walkUses()
+	production := s.view(false)
+	full := s.view(true)
+	in.arriving = s.arrivingMembers()
+	return s.exemptions(production, full)
+}
+
+// EnumeratedMembers is every member of an enumerated type one configuration
+// declares, mapped to the name of its type: the class's recognition, which the
+// kinds read rather than recompute.
+func EnumeratedMembers(rs *resolve.Resolver, x *facts.Index) map[inventory.SymbolID]string {
+	found := make(map[inventory.SymbolID]string)
+	if x == nil {
+		return found // a configuration with no index declares no type
 	}
-	return scan.exemptions(), nil
-}
-
-// enumGroupScan accumulates the enumerated types of one configuration and the
-// evidence that a value of each can arrive by conversion.
-type enumGroupScan struct {
-	in    *Program
-	byKey map[string]*enumGroupType
-	keys  []string
-}
-
-// enumGroupType is one defined type whose constants an iota group declares.
-type enumGroupType struct {
-	best    *enumGroupEvidence
-	held    map[inventory.SymbolID]struct{}
-	spelled string // the type as types.TypeString spells it, the order of the exemptions
-	members []enumGroupMember
-	named   []*types.Named // the type as each package variant type-checked it
-}
-
-// enumGroupMember is one constant of an enumerated type, at the rendered position
-// of its own declaration.
-type enumGroupMember struct {
-	id inventory.SymbolID
-	at token.Position
-}
-
-// enumGroupEvidence is why one enumerated type fires: the rule, the rendered
-// position a maintainer reads, and the clause an exemption records.
-type enumGroupEvidence struct {
-	detail string
-	file   string // [Exemption.File]
-	at     token.Position
-	rank   int
-	held   bool // [holdsInMode]
-}
-
-// groups collects every defined type whose constants an iota group declares, and
-// then every constant of each such type whichever block declares it.
-func (s *enumGroupScan) groups() error {
-	for _, iotaGroups := range []bool{true, false} {
-		if err := s.each(func(p *packages.Package, f *ast.File) error {
-			for _, decl := range f.Decls {
-				group, ok := decl.(*ast.GenDecl)
-				if !ok || group.Tok != token.CONST || s.mentionsIota(group) != iotaGroups {
-					continue
-				}
-				if err := s.constants(p, group); err != nil {
-					return err
-				}
-			}
-			return nil
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// mentionsIota reports whether one const block is an iota group, which is one
-// specification naming iota anywhere in a value expression. A specification that
-// carries no expression repeats the previous one, so a block with one such
-// specification is a group throughout.
-func (*enumGroupScan) mentionsIota(group *ast.GenDecl) bool {
-	found := false
-	for _, spec := range group.Specs {
-		value, ok := spec.(*ast.ValueSpec)
-		if !ok {
-			continue
-		}
-		for _, expr := range value.Values {
-			ast.Inspect(expr, func(n ast.Node) bool {
-				if id, isIdent := n.(*ast.Ident); isIdent && id.Name == "iota" {
-					found = true
-				}
-				return !found
-			})
+	for _, enum := range recognizeEnums(rs, x).byKey {
+		for _, id := range enum.members {
+			found[id] = enum.name
 		}
 	}
 	return found
 }
 
-// constants keeps every constant of one block whose type is a defined type the
-// scan already holds, and registers a type the block declares under an iota group.
-func (s *enumGroupScan) constants(p *packages.Package, group *ast.GenDecl) error {
-	register := s.mentionsIota(group)
-	for _, spec := range group.Specs {
+// enumRecognition is the enumerated types of one configuration: each defined
+// package-level type the target declares with constants in an iota group, and
+// every non-blank constant of it any top-level block of the target declares.
+type enumRecognition struct {
+	byKey map[string]*egEnum
+	keys  []string // in the order the walk registered them
+}
+
+// recognizeEnums reads the enumerated types of one configuration: the iota groups
+// first, which register the types, then every other block, which only adds
+// members to them.
+func recognizeEnums(rs *resolve.Resolver, x *facts.Index) *enumRecognition {
+	r := &enumRecognition{byKey: make(map[string]*egEnum)}
+	for _, iotaGroups := range []bool{true, false} {
+		for _, p := range x.Packages() {
+			if p.TypesInfo == nil {
+				continue
+			}
+			for _, f := range x.Files(p) {
+				r.file(rs, p.TypesInfo, f, iotaGroups)
+			}
+		}
+	}
+	return r
+}
+
+// file reads every constant block of one file that is an iota group exactly
+// where iotaGroups is set.
+func (r *enumRecognition) file(rs *resolve.Resolver, info *types.Info, f *ast.File, iotaGroups bool) {
+	for _, decl := range f.Decls {
+		block, ok := decl.(*ast.GenDecl)
+		if !ok || block.Tok != token.CONST || namesIota(info, block) != iotaGroups {
+			continue
+		}
+		r.block(rs, info, block, iotaGroups)
+	}
+}
+
+// block keeps every constant of one block whose type is an enumerated type, and
+// registers the types an iota group declares constants of.
+func (r *enumRecognition) block(rs *resolve.Resolver, info *types.Info, block *ast.GenDecl, register bool) {
+	for _, spec := range block.Specs {
 		value, ok := spec.(*ast.ValueSpec)
 		if !ok {
 			continue
 		}
 		for _, name := range value.Names {
-			if err := s.constant(p, name, register); err != nil {
-				return err
+			if c, isConst := info.Defs[name].(*types.Const); isConst && name.Name != "_" {
+				r.member(rs, c, register)
 			}
 		}
 	}
-	return nil
 }
 
-// constant keeps one declared constant under the defined type it carries, and
-// registers that type when the block declaring it is an iota group. A constant
-// declared with the blank identifier names no member.
-func (s *enumGroupScan) constant(p *packages.Package, name *ast.Ident, register bool) error {
-	constant, ok := p.TypesInfo.Defs[name].(*types.Const)
-	if !ok || name.Name == "_" {
-		return nil
-	}
-	named, ok := constant.Type().(*types.Named)
-	if !ok {
-		return nil
-	}
-	key := s.in.Resolve.TypeKey(named)
-	enum := s.byKey[key]
+// member keeps one constant as a member of its type where that is an enumerated
+// type.
+func (r *enumRecognition) member(rs *resolve.Resolver, c *types.Const, register bool) {
+	enum := r.enumOf(rs, c, register)
 	if enum == nil {
-		// A type declared outside the target is not an enumeration the target
-		// declares: its methods and its other constants are outside facts.
-		if !register || !s.in.Resolve.Inside(named.Obj().Pos()) {
-			return nil
-		}
-		enum = &enumGroupType{held: make(map[inventory.SymbolID]struct{}), spelled: types.TypeString(named, nil)}
-		s.byKey[key] = enum
-		s.keys = append(s.keys, key)
+		return
 	}
-	if !slices.Contains(enum.named, named) {
-		enum.named = append(enum.named, named)
+	if id, held := rs.Object(c); held && !slices.Contains(enum.members, id) {
+		enum.members = append(enum.members, id)
 	}
-	return s.member(enum, constant)
 }
 
-// member keeps one constant of an enumerated type, once per declaration site.
-func (s *enumGroupScan) member(enum *enumGroupType, constant *types.Const) error {
-	id, held := s.in.Resolve.Object(constant)
-	if !held {
+// enumOf is the enumerated type a constant's type is, registering it where
+// register is set: nil for a type that is no package-level defined type of the
+// target, or one no iota group registered.
+func (r *enumRecognition) enumOf(rs *resolve.Resolver, c *types.Const, register bool) *egEnum {
+	named, isNamed := types.Unalias(c.Type()).(*types.Named)
+	if !isNamed || !packageLevel(named.Obj()) || !rs.Inside(named.Obj().Pos()) {
 		return nil
 	}
-	if _, already := enum.held[id]; already {
-		return nil
+	key := rs.TypeKey(named)
+	if enum := r.byKey[key]; enum != nil || !register {
+		return enum
 	}
-	at, err := s.site(constant.Pos())
-	if err != nil {
-		return err
+	basic, _ := named.Underlying().(*types.Basic)
+	enum := &egEnum{
+		name: named.Obj().Name(), index: len(r.keys),
+		integer: basic != nil && basic.Info()&types.IsInteger != 0,
 	}
-	enum.held[id] = struct{}{}
-	enum.members = append(enum.members, enumGroupMember{id: id, at: at})
-	return nil
+	r.byKey[key] = enum
+	r.keys = append(r.keys, key)
+	return enum
 }
 
-// evidence records, for every enumerated type, why a value of it can arrive by
-// conversion: a conversion method it declares, a conversion from an integer, or a
-// decoder that writes one.
-func (s *enumGroupScan) evidence() error {
-	for _, key := range s.keys {
-		if err := s.method(s.byKey[key]); err != nil {
-			return err
-		}
-	}
-	return s.each(func(p *packages.Package, f *ast.File) error {
-		var failed error
-		ast.Inspect(f, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok || failed != nil {
-				return failed == nil
-			}
-			if err := s.integerConversion(p, call); err != nil {
-				failed = err
-				return false
-			}
-			if err := s.decoded(p, call); err != nil {
-				failed = err
-				return false
-			}
-			return true
-		})
-		return failed
-	})
+// packageLevel reports whether a type is declared at the level of its package.
+func packageLevel(obj types.Object) bool {
+	return obj.Pkg() != nil && obj.Parent() == obj.Pkg().Scope()
 }
 
-// method records the first conversion method one enumerated type declares, in the
-// Contract's order of the five names and then at the earliest position, whichever
-// package variant declares it.
-func (s *enumGroupScan) method(enum *enumGroupType) error {
-	for _, name := range enumGroupConversionMethods {
-		for _, named := range enum.named {
-			for declared := range named.Methods() {
-				if declared.Name() != name {
-					continue
-				}
-				if err := s.record(enum, enumGroupByMethod, declared.Pos(),
-					"declares a "+name+" method"); err != nil {
-					return err
-				}
-			}
-		}
-	}
-	return nil
-}
-
-// integerConversion records a conversion of an integer to an enumerated type. The
-// operand must not be a constant of the type itself: T(a member of T) and T(3)
-// name a value in the source, while T(n) produces one nothing named.
-func (s *enumGroupScan) integerConversion(p *packages.Package, call *ast.CallExpr) error {
-	if len(call.Args) != 1 {
-		return nil
-	}
-	target, held := p.TypesInfo.Types[call.Fun]
-	if !held || !target.IsType() {
-		return nil
-	}
-	named, ok := target.Type.(*types.Named)
-	if !ok {
-		return nil
-	}
-	enum := s.byKey[s.in.Resolve.TypeKey(named)]
-	if enum == nil {
-		return nil
-	}
-	operand := p.TypesInfo.Types[call.Args[0]]
-	if operand.Type == nil {
-		return nil
-	}
-	basic, ok := operand.Type.Underlying().(*types.Basic)
-	if !ok || basic.Info()&types.IsInteger == 0 {
-		return nil
-	}
-	if operand.Value != nil && types.Identical(operand.Type, named) {
-		return nil
-	}
-	return s.record(enum, enumGroupByInteger, call.Pos(),
-		"converted from "+types.TypeString(operand.Type, nil))
-}
-
-// decoded records a decoder whose target carries an enumerated type, which is a
-// value of that type arriving from outside the program.
-func (s *enumGroupScan) decoded(p *packages.Package, call *ast.CallExpr) error {
-	decoder := s.decoder(p, call)
-	if decoder == "" {
-		return nil
-	}
-	for _, arg := range call.Args {
-		argument := p.TypesInfo.Types[arg]
-		if argument.Type == nil {
+// namesIota reports whether one constant block is an iota group: one of its value
+// expressions names the predeclared iota.
+func namesIota(info *types.Info, block *ast.GenDecl) bool {
+	for _, spec := range block.Specs {
+		value, ok := spec.(*ast.ValueSpec)
+		if !ok {
 			continue
 		}
-		for _, key := range s.reach(argument.Type) {
-			enum := s.byKey[key]
-			if enum == nil {
+		for _, expr := range value.Values {
+			if exprNamesIota(info, expr) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// exprNamesIota reports whether an expression names the predeclared iota.
+func exprNamesIota(info *types.Info, expr ast.Expr) bool {
+	found := false
+	ast.Inspect(expr, func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok && isIota(info, id) {
+			found = true
+		}
+		return !found
+	})
+	return found
+}
+
+// isIota reports whether an identifier denotes the predeclared iota.
+func isIota(info *types.Info, id *ast.Ident) bool {
+	c, ok := info.Uses[id].(*types.Const)
+	return ok && c.Pkg() == nil && c.Name() == "iota"
+}
+
+// egEnum is one enumerated type and what the class learns about its values.
+type egEnum struct {
+	// The first use the list of uses does not name, in a production file and in
+	// a test file, and the first exported declaration of an importable package
+	// whose type holds it in a library.
+	useProduction, useTest, exported *egSite
+
+	name    string
+	members []inventory.SymbolID
+	items   []egItem // the constant expressions of the type the walk met
+	index   int
+	integer bool
+}
+
+// arrives reports whether, in one view, a value of the type may arise other than
+// from a member's name, a constant or the zero value, or be held by code outside
+// the program.
+func (e *egEnum) arrives(full bool) bool {
+	return e.exported != nil || e.useProduction != nil || full && e.useTest != nil
+}
+
+// egSite is one piece of evidence: where it is written, whether a test file writes
+// it, and the clause it records. A site the walk found is rendered when an
+// exemption records it; a reference's is already rendered.
+type egSite struct {
+	rendered *Exemption
+	detail   string
+	at       inventory.Offset
+	pos      token.Pos
+	test     bool
+}
+
+// before orders two sites by the file and byte they are written at.
+func (a *egSite) before(b *egSite) bool {
+	return cmp.Or(strings.Compare(a.at.File, b.at.File), cmp.Compare(a.at.At, b.at.At)) < 0
+}
+
+// earliest is the earliest of the sites given, preferring a test file's where
+// test is set and a production file's otherwise, and any where none of that kind
+// is given.
+func earliest(sites []*egSite, test bool) *egSite {
+	var best, first *egSite
+	for _, s := range sites {
+		if s == nil {
+			continue
+		}
+		if first == nil || s.before(first) {
+			first = s
+		}
+		if s.test == test && (best == nil || s.before(best)) {
+			best = s
+		}
+	}
+	if best != nil {
+		return best
+	}
+	return first
+}
+
+// egRetained is why one view retains one constant.
+type egRetained struct {
+	detail string
+	sites  []*egSite
+}
+
+// enumGroupScan is the class over one configuration.
+type enumGroupScan struct {
+	in         *Program
+	enums      *enumRecognition
+	byID       map[inventory.SymbolID]*egConst
+	locals     map[inventory.Offset]*egConst // the constants function bodies declare
+	holds      *enumHolds
+	named      map[inventory.SymbolID]*egNaming
+	localNamed map[*egConst]*egNaming
+
+	constrained map[string]bool // a file to whether a build constraint selects it
+	fixed       map[*egConst]int8
+
+	consts []*egConst // in position order
+	specs  []*egSpec
+}
+
+// egNaming is the references that name one constant, by view.
+type egNaming struct {
+	production, test []*egSite
+}
+
+// newEnumGroupScan reads the constants of the target and the references that name
+// them.
+func newEnumGroupScan(in *Program) *enumGroupScan {
+	s := &enumGroupScan{
+		in:          in,
+		enums:       recognizeEnums(in.Resolve, in.Facts),
+		byID:        make(map[inventory.SymbolID]*egConst),
+		locals:      make(map[inventory.Offset]*egConst),
+		named:       make(map[inventory.SymbolID]*egNaming),
+		localNamed:  make(map[*egConst]*egNaming),
+		constrained: make(map[string]bool),
+		fixed:       make(map[*egConst]int8),
+	}
+	s.holds = newEnumHolds(in.Resolve, s.enums)
+	s.readBlocks()
+	s.readReferences()
+	s.readLocalUses()
+	return s
+}
+
+// readLocalUses reads which identifiers name each constant a function body
+// declares: such a constant is no symbol of the inventory, so no reference of the
+// matrix names it, and every use is in the file declaring it.
+func (s *enumGroupScan) readLocalUses() {
+	if len(s.locals) == 0 {
+		return
+	}
+	seen := make(map[inventory.Offset]bool)
+	for _, p := range s.in.Facts.Packages() {
+		if p.TypesInfo == nil {
+			continue
+		}
+		for id, obj := range p.TypesInfo.Uses {
+			c := s.locals[s.in.offsetOf(obj.Pos())]
+			at := s.in.offsetOf(id.Pos())
+			if c == nil || seen[at] {
 				continue
 			}
-			if err := s.record(enum, enumGroupByDecode, call.Pos(), "decoded by "+decoder); err != nil {
-				return err
-			}
+			seen[at] = true
+			naming(s.localNamed, c).add(s.siteAt(id.Pos(), ""))
 		}
 	}
-	return nil
 }
 
-// decoder names the decoder one call calls ([decodesWireValue]), and an empty
-// string for every other call. A method is named by its receiver's defined type
-// and its own name.
-func (*enumGroupScan) decoder(p *packages.Package, call *ast.CallExpr) string {
-	called, ok := resolveObject(p.TypesInfo, call.Fun).(*types.Func)
-	if !ok || !decodesWireValue(called) {
-		return ""
-	}
-	name := called.Pkg().Path() + "."
-	if recv := called.Signature().Recv(); recv != nil {
-		t := recv.Type()
-		if pointer, isPointer := t.(*types.Pointer); isPointer {
-			t = pointer.Elem()
-		}
-		named, isNamed := t.(*types.Named)
-		if !isNamed {
-			return ""
-		}
-		name += named.Obj().Name() + "."
-	}
-	return name + called.Name()
-}
-
-// reach names every defined type a value of t carries: t itself when it is
-// defined, and every type reachable through a pointer, an element, a map key or
-// value, or a struct field.
-func (s *enumGroupScan) reach(t types.Type) []string {
-	var keys []string
-	seen := make(map[types.Type]struct{})
-	var walk func(types.Type)
-	walk = func(t types.Type) {
-		if t == nil {
-			return
-		}
-		if _, already := seen[t]; already {
-			return
-		}
-		seen[t] = struct{}{}
-		if named, ok := t.(*types.Named); ok {
-			keys = append(keys, s.in.Resolve.TypeKey(named))
-			walk(named.Underlying())
-			return
-		}
-		switch shape := t.(type) {
-		case *types.Pointer:
-			walk(shape.Elem())
-		case *types.Slice:
-			walk(shape.Elem())
-		case *types.Array:
-			walk(shape.Elem())
-		case *types.Chan:
-			walk(shape.Elem())
-		case *types.Map:
-			walk(shape.Key())
-			walk(shape.Elem())
-		case *types.Struct:
-			for field := range shape.Fields() {
-				walk(field.Type())
-			}
-		}
-	}
-	walk(t)
-	return keys
-}
-
-// record keeps one piece of evidence when it outranks what the type already holds:
-// evidence that holds in the run's mode first, since every member's exemption cites
-// the one kept, then the lower rank, then the site written earlier.
-func (s *enumGroupScan) record(enum *enumGroupType, rank int, pos token.Pos, detail string) error {
-	at, err := s.site(pos)
-	if err != nil {
-		return err
-	}
-	file := s.in.Resolve.File(pos)
-	held := holdsInMode(&Exemption{File: file}, s.in.Mode)
-	best := enum.best
-	if best == nil || cmp.Or(compareHeld(held, best.held), cmp.Compare(rank, best.rank), inventory.ByPosition(at, best.at)) < 0 {
-		enum.best = &enumGroupEvidence{rank: rank, at: at, file: file, detail: detail, held: held}
-	}
-	return nil
-}
-
-// compareHeld orders evidence that holds in the run's mode before evidence that does not.
-func compareHeld(a, b bool) int {
-	switch {
-	case a == b:
-		return 0
-	case a:
-		return -1
-	}
-	return 1
-}
-
-// exemptions renders one exemption per member of every enumerated type that
-// fired, ordered by the defined type and then by the member's own declaration.
-func (s *enumGroupScan) exemptions() []Exemption {
-	var found []Exemption
-	keys := slices.Clone(s.keys)
-	slices.SortFunc(keys, func(a, b string) int {
-		return cmp.Or(cmp.Compare(s.byKey[a].spelled, s.byKey[b].spelled), cmp.Compare(a, b))
-	})
-	for _, key := range keys {
-		enum := s.byKey[key]
-		if enum.best == nil {
+// readReferences reads which references of the matrix name each constant, and
+// where, under the run's mode.
+func (s *enumGroupScan) readReferences() {
+	for i := range s.in.References {
+		r := &s.in.References[i]
+		if _, held := s.byID[r.To]; !held {
 			continue
 		}
-		members := slices.Clone(enum.members)
-		slices.SortFunc(members, func(a, b enumGroupMember) int { return inventory.ByPosition(a.at, b.at) })
-		for _, m := range members {
-			found = append(found, Exemption{
-				ID:     m.id,
-				Class:  string(vocab.EnumGroup),
-				File:   enum.best.file,
-				Site:   enum.best.at,
-				Detail: enum.best.detail,
-			})
+		naming(s.named, r.To).add(s.referenceSite(r))
+	}
+}
+
+// naming is the naming of one key of a table, added on first ask.
+func naming[K comparable](table map[K]*egNaming, key K) *egNaming {
+	n := table[key]
+	if n == nil {
+		n = &egNaming{}
+		table[key] = n
+	}
+	return n
+}
+
+// add records one site in the view its file belongs to.
+func (n *egNaming) add(site *egSite) {
+	if site.test {
+		n.test = append(n.test, site)
+	} else {
+		n.production = append(n.production, site)
+	}
+}
+
+// referenceSite is the evidence one reference is.
+func (s *enumGroupScan) referenceSite(r *facts.Reference) *egSite {
+	file := s.in.Resolve.Positions().Relative(r.Site.File)
+	if file == "" {
+		file = r.Pos.Filename
+	}
+	return &egSite{
+		at:     r.Site,
+		test:   s.in.Mode.TestReference(r),
+		detail: "",
+		rendered: &Exemption{
+			Consumer: r.Consumer,
+			Site:     r.Pos,
+			File:     file,
+			Build:    r.Build,
+		},
+	}
+}
+
+// isNamed reports whether a reference one view counts names a constant, or the
+// constant is an exported constant of an importable package of a library, and
+// returns the sites that name it in that view.
+func (s *enumGroupScan) isNamed(c *egConst, full bool) (bool, []*egSite) {
+	if c.exported {
+		return true, []*egSite{s.declSite(c, "exported from an importable package")}
+	}
+	n := s.named[c.id]
+	if c.local {
+		n = s.localNamed[c]
+	}
+	if n == nil {
+		return false, nil
+	}
+	if full {
+		return len(n.production)+len(n.test) > 0, append(slices.Clone(n.production), n.test...)
+	}
+	return len(n.production) > 0, n.production
+}
+
+// namedByReference reports whether a reference one view counts names a constant.
+func (s *enumGroupScan) namedByReference(c *egConst, full bool) bool {
+	n := s.named[c.id]
+	if c.local {
+		n = s.localNamed[c]
+	}
+	return n != nil && (len(n.production) > 0 || full && len(n.test) > 0)
+}
+
+// declSite is the site of one constant's declaration.
+func (s *enumGroupScan) declSite(c *egConst, detail string) *egSite {
+	return s.siteAt(c.pos(), detail)
+}
+
+// siteAt is the site of one position of this configuration's syntax.
+func (s *enumGroupScan) siteAt(pos token.Pos, detail string) *egSite {
+	return &egSite{
+		at:     s.in.offsetOf(pos),
+		pos:    pos,
+		test:   s.testCode(pos),
+		detail: detail,
+	}
+}
+
+// testCode reports whether the run's mode counts the file writing pos as test code.
+func (s *enumGroupScan) testCode(pos token.Pos) bool {
+	build := s.in.Resolve.Build(pos)
+	return s.in.Mode.TestCode(build, build.TestCode(s.in.Resolve.Positions().InTestFile(pos)))
+}
+
+// view runs the fixed point over one view: the production files, or every file.
+func (s *enumGroupScan) view(full bool) map[*egConst]*egRetained {
+	retained, candidate := s.candidates(full)
+	for {
+		round := s.round(candidate, full)
+		if len(round) == 0 {
+			return retained
+		}
+		for _, c := range s.consts {
+			if r, held := round[c]; held {
+				retained[c] = r
+				delete(candidate, c)
+			}
+		}
+	}
+}
+
+// candidates is the start of one view's fixed point: the constants rule D
+// retains, and the constants left to judge, which are every other one of the
+// program that no reference of the view names, is not blank and is not declared
+// beside a non-Go source.
+func (s *enumGroupScan) candidates(full bool) (retained map[*egConst]*egRetained, candidate map[*egConst]bool) {
+	retained = make(map[*egConst]*egRetained)
+	candidate = make(map[*egConst]bool)
+	for _, c := range s.consts {
+		if c.blank || c.id == "" && !c.local || c.nonGo {
+			continue
+		}
+		// An exported constant of a library counts as named only as a constant
+		// another deletion moves: its own deletion is judged, since the values it
+		// renumbers may be held by an importer.
+		if s.namedByReference(c, full) {
+			continue
+		}
+		if c.spec.unsplittable {
+			retained[c] = &egRetained{
+				detail: "deleting it alone leaves its block unable to compile",
+				sites:  []*egSite{s.declSite(c, "")},
+			}
+			continue
+		}
+		candidate[c] = true
+	}
+	return retained, candidate
+}
+
+// egRound is one round of the fixed point: the candidates left, rule Moved over
+// them, what the round retains, and the enumerated types left to rule M2.
+type egRound struct {
+	candidate map[*egConst]bool
+	m         *egMovers
+	found     map[*egConst]*egRetained
+	compared  []*egEnum
+	full      bool
+}
+
+// retain retains every candidate of every specification of movers not yet
+// retained this round, for one reason.
+func (r *egRound) retain(movers egBits, detail string, sites ...*egSite) {
+	for _, spec := range r.m.removable.members(movers) {
+		for _, c := range spec.consts {
+			if r.candidate[c] && r.found[c] == nil {
+				r.found[c] = &egRetained{detail: detail, sites: sites}
+			}
+		}
+	}
+}
+
+// round applies rules W, M0 and M2 once over the candidates left, and returns the
+// candidates they retain.
+func (s *enumGroupScan) round(candidate map[*egConst]bool, full bool) map[*egConst]*egRetained {
+	r := &egRound{candidate: candidate, m: s.movers(candidate), found: make(map[*egConst]*egRetained), full: full}
+	for _, c := range s.consts {
+		s.judgeMoved(r, c)
+	}
+	for _, enum := range r.compared {
+		s.compare(enum, r)
+	}
+	return r.found
+}
+
+// judgeMoved applies rules W and M0 to one constant the round's removals may
+// move, and leaves its type to rule M2 where neither decides.
+func (s *enumGroupScan) judgeMoved(r *egRound, c *egConst) {
+	movers := r.m.of(c)
+	if movers.empty() {
+		return
+	}
+	if !s.stillBuilds(c, r.m) {
+		r.retain(movers, "deleting it moves "+c.name+", which may then not compile", s.declSite(c, ""))
+		return
+	}
+	named, sites := s.isNamed(c, r.full)
+	switch {
+	case !named:
+	case c.enum == nil || !c.enum.integer:
+		r.retain(movers, "deleting it renumbers "+c.name+", which code names", sites...)
+	case c.enum.arrives(r.full):
+		use := []*egSite{c.enum.exported, c.enum.useProduction}
+		if r.full {
+			use = append(use, c.enum.useTest)
+		}
+		detail := "deleting it renumbers " + c.name + ", and a value of " + c.enum.name + " " + earliest(use, false).detail
+		r.retain(movers, detail, append(use, sites...)...)
+	case !slices.Contains(r.compared, c.enum):
+		r.compared = append(r.compared, c.enum)
+	}
+}
+
+// arrivingMembers is every member of a type whose values may arise other than
+// by a member's name in the run's mode, which a finding about a member says.
+func (s *enumGroupScan) arrivingMembers() []inventory.SymbolID {
+	var found []inventory.SymbolID
+	for _, key := range s.enums.keys {
+		enum := s.enums.byKey[key]
+		if enum.arrives(!s.in.Mode.Production) {
+			found = append(found, enum.members...)
 		}
 	}
 	return found
 }
 
-// each calls visit for every file of every package variant the load holds.
-func (s *enumGroupScan) each(visit func(p *packages.Package, f *ast.File) error) error {
-	for _, p := range s.in.Facts.Packages() {
-		for _, f := range s.in.Facts.Files(p) {
-			if err := visit(p, f); err != nil {
-				return err
-			}
+// exemptions renders what the two views retain: a constant the production view
+// retains at the earliest production site of its evidence, and one only the full
+// view retains at the earliest test file's.
+func (s *enumGroupScan) exemptions(production, full map[*egConst]*egRetained) ([]Exemption, error) {
+	var found []Exemption
+	for _, c := range s.consts {
+		r, test := production[c], false
+		if r == nil {
+			r, test = full[c], true
 		}
+		if r == nil {
+			continue
+		}
+		site := earliest(r.sites, test)
+		e, err := s.render(site)
+		if err != nil {
+			return nil, err
+		}
+		e.Class, e.Detail = string(vocab.EnumGroup), r.detail
+		if c.local {
+			if err := s.local(c, &e); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		e.ID = c.id
+		found = append(found, e)
 	}
+	return found, nil
+}
+
+// local keeps the retention of one constant a function body declares, where the
+// run's mode holds its evidence.
+func (s *enumGroupScan) local(c *egConst, e *Exemption) error {
+	if !holdsInMode(e, s.in.Mode) {
+		return nil
+	}
+	holder, held := s.in.Resolve.Holder(c.at)
+	if !held {
+		return nil
+	}
+	at, err := s.in.Resolve.Render(c.at)
+	if err != nil {
+		return err
+	}
+	e.ID = holder
+	s.in.locals = append(s.in.locals, RetainedLocal{Exemption: *e, Declared: s.in.offsetOf(c.at), At: at})
 	return nil
 }
 
-// site renders one position. Every position the load compiled is a position of
-// the target, so one the resolver cannot render is a failure of the run rather
-// than evidence to pass over.
-func (s *enumGroupScan) site(pos token.Pos) (token.Position, error) {
-	return s.in.Resolve.Render(pos)
+// render is the exemption one site records, without its symbol.
+func (s *enumGroupScan) render(site *egSite) (Exemption, error) {
+	if site.rendered != nil {
+		return *site.rendered, nil
+	}
+	consumer, at, err := s.in.Resolve.Site(site.pos)
+	if err != nil {
+		return Exemption{}, err
+	}
+	return Exemption{Consumer: consumer, Site: at, File: s.in.Resolve.File(site.pos), Build: s.in.Resolve.Build(site.pos)}, nil
+}
+
+// published reports whether one package variant of the target is an importable
+// package of a library, whose exported declarations code outside the program can use.
+func (s *enumGroupScan) published(p *packages.Package) bool {
+	return s.in.Options.PublishedAPI && load.Published(p.PkgPath, p.Name == mainPackage)
 }

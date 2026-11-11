@@ -237,7 +237,13 @@ type invoked struct {
 // same analysis under it, and the signal test re-executes this binary ([reexecuted]).
 func invokedIn(t *testing.T, dir string, args ...string) invoked {
 	t.Helper()
-	cmd := exec.CommandContext(t.Context(), commandBinary(t), args...)
+	return invokedUnder(t.Context(), t, dir, args...)
+}
+
+// invokedUnder is [invokedIn] under ctx, which kills the command when it ends.
+func invokedUnder(ctx context.Context, t *testing.T, dir string, args ...string) invoked {
+	t.Helper()
+	cmd := exec.CommandContext(ctx, commandBinary(t), args...)
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

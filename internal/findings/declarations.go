@@ -399,7 +399,7 @@ func (in *pass) localsOf(c int, w *walk, fn *walked, held *parts) error {
 		return nil
 	}
 	for _, local := range localDeclarations(fn.info, fn.root()) {
-		if local.used {
+		if local.used || in.RetainedLocals[w.one.Resolve.Positions().Offset(local.name.Pos())] {
 			continue
 		}
 		at, err := w.one.Resolve.Render(local.name.Pos())

@@ -1,6 +1,7 @@
-An iota enum that only a decoder's target carries keeps every member, whichever
-decoding entry point fills it: encoding/xml's DecodeElement and encoding/gob's
-Decode fill a value from a document as json.Unmarshal does.
+An iota enum that only a decoder's target carries keeps each member whose
+deletion renumbers a member code names, whichever decoding entry point fills
+it: encoding/xml's DecodeElement and encoding/gob's Decode fill a value from a
+document as json.Unmarshal does, so a value no name gives can arrive.
 
 -- go.mod --
 module example.com/app
@@ -31,6 +32,7 @@ type Mode int
 const (
 	Off Mode = iota
 	On
+	Auto
 )
 
 type Config struct {
@@ -50,5 +52,5 @@ func main() {
 	if err := gob.NewDecoder(os.Stdin).Decode(&s); err != nil {
 		os.Exit(1)
 	}
-	fmt.Println(c.Level == Low, s.Mode == Off)
+	fmt.Println(c.Level == High, s.Mode == Auto)
 }

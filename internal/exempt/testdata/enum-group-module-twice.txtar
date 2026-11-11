@@ -1,0 +1,58 @@
+A target whose build list holds the module the scope also declares as its
+consumer, so the load reads that module twice. The target instantiates the
+consumer's generic with an enumerated type, and a type argument retains wherever
+the generic is declared, so the middle member is retained.
+
+-- target/go.mod --
+module example.com/target
+
+go 1.27.0
+
+require example.com/httpwire v0.0.0
+
+replace example.com/httpwire => ../httpwire
+-- target/main.go --
+package main
+
+import (
+	"fmt"
+	"os"
+
+	"example.com/httpwire"
+)
+
+type level int
+
+const (
+	levelA level = iota
+	levelMid
+	levelZ
+)
+
+func pick(n int) level {
+	if n > 3 {
+		return levelA
+	}
+	return levelZ
+}
+
+func main() {
+	box := httpwire.Wrap(pick(len(os.Args)))
+	fmt.Println(box.Value() == levelZ)
+}
+-- httpwire/go.mod --
+module example.com/httpwire
+
+go 1.27.0
+-- httpwire/box.go --
+// Package httpwire boxes a value of any type.
+package httpwire
+
+// Box holds one value.
+type Box[T any] struct{ v T }
+
+// Wrap boxes v.
+func Wrap[T any](v T) Box[T] { return Box[T]{v: v} }
+
+// Value is the value b holds.
+func (b Box[T]) Value() T { return b.v }

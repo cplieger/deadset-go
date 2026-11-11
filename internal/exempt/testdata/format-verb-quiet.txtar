@@ -4,7 +4,8 @@ asks for a Go-syntax representation instead, a scanning function of the same
 package, the function of the package that formats a verb rather than an operand, an
 operand an explicit index steps over, a function of the package that takes a
 variadic list of any and never passes it on, and a pair that pass such a list to
-each other and to nothing that formats. The class records nothing here.
+each other and to nothing that formats. The class retains no method here; the
+numeric verb and the sharp flag still print the fields of the struct they format.
 
 -- go.mod --
 module example.com/verbs

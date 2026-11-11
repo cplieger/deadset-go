@@ -15,7 +15,11 @@ import (
 // argument i supplies parameter i-Shift of Fn's signature, so a method expression's
 // first argument, its receiver, supplies none.
 type Callee struct {
-	Fn    *types.Func
+	Fn *types.Func
+	// Recv is the receiver a method value binds, the operand of its selector, which
+	// lies in the body the selector is written in; nil for a function and a method
+	// expression, whose receiver is the call's first argument.
+	Recv  ast.Expr
 	Shift int
 }
 
@@ -156,11 +160,12 @@ func (c *Callees) solve(root scoped) solvedPlace {
 	return held
 }
 
-// appendCallee adds one callee once, whichever reading of its declaration it is.
+// appendCallee adds one callee once, whichever reading of its declaration it is;
+// two method values of one method binding different receivers are two callees.
 func (c *Callees) appendCallee(found []Callee, callee Callee) []Callee {
 	at := c.pos.Offset(callee.Fn.Pos())
 	for _, held := range found {
-		if held.Shift == callee.Shift && held.Fn.FullName() == callee.Fn.FullName() && c.pos.Offset(held.Fn.Pos()) == at {
+		if held.Shift == callee.Shift && held.Recv == callee.Recv && held.Fn.FullName() == callee.Fn.FullName() && c.pos.Offset(held.Fn.Pos()) == at {
 			return found
 		}
 	}
@@ -632,11 +637,16 @@ func (w *calleeWalk) selected(e *ast.SelectorExpr) []written {
 	if !isFunc {
 		return w.named(e, w.info.Uses[e.Sel])
 	}
-	shift := 0
-	if sel, selected := w.info.Selections[e]; selected && sel.Kind() == types.MethodExpr {
-		shift = 1
+	callee := Callee{Fn: fn}
+	if sel, selected := w.info.Selections[e]; selected {
+		switch sel.Kind() {
+		case types.MethodExpr:
+			callee.Shift = 1
+		case types.MethodVal:
+			callee.Recv = e.X
+		}
 	}
-	return []written{{callee: Callee{Fn: fn, Shift: shift}}}
+	return []written{{callee: callee}}
 }
 
 // named is what an identifier or a selector naming object holds.

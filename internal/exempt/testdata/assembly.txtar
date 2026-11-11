@@ -1,7 +1,7 @@
-One assembly file naming a function of its own package, once at the start of a
-line and once as a file-local symbol under an indent, beside four near misses: a
-commented directive, a name qualified by another package, a name no declaration of
-the package carries, and a definition that is not a TEXT directive.
+One assembly file beside a package's Go files. Rule N reads no assembly form, so
+every constant, type, struct field, variable, function and method of the package
+is retained, the ones the file names in a TEXT directive, a GLOBL, a comment or
+not at all alike, against the assembly file's first line.
 
 -- go.mod --
 module example.com/app
@@ -24,6 +24,10 @@ func commented() {}
 func other() {}
 
 var data int
+
+const width = 8
+
+type pair struct{ left int }
 -- add_amd64.s --
 #include "textflag.h"
 

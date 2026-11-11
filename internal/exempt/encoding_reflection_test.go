@@ -846,7 +846,7 @@ func TestFormatVerbContractAloneRecordsAnOperandOfTheFormattingPackage(t *testin
 // The mechanism text of the class, as the Contract states it for this language. The
 // class implements this text; a pin bump that moves it must be read against the
 // destination table before this literal moves with it.
-const encodingReflectionMechanismSHA256 = "6f44043f50eb6ea8f254f953bc33d28545c45997f32021d55bc5685e45bbb5fc"
+const encodingReflectionMechanismSHA256 = "d7a2775109b17d357e27e1a55a716d6405090f1b7164e2365c5a5d4650f667ac"
 
 func TestEncodingReflectionImplementsTheContractsMechanismText(t *testing.T) {
 	t.Parallel()
@@ -1100,7 +1100,7 @@ func TestEncodingReflectionRetainsWhatAFieldWalkAssertsEachFieldTo(t *testing.T)
 	t.Parallel()
 	refs := retainedRefs(t, analysisOf(t, "encoding-reflection-field-walk.txtar", Options{}), vocab.EncodingReflection)
 
-	want := []string{"go://example.com/walk#discord.Validate", "go://example.com/walk#slack.Validate"}
+	want := []string{"go://example.com/walk#discord.Validate", "go://example.com/walk#plain.Validate", "go://example.com/walk#slack.Validate"}
 	var got []string
 	for _, ref := range refs {
 		if strings.Contains(ref, ".Validate") || strings.Contains(ref, ".Unused") {

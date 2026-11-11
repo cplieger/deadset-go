@@ -16,7 +16,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/cplieger/deadset-go/v2/internal/buildconstraint"
 	"github.com/cplieger/deadset-go/v2/internal/failure"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
@@ -135,7 +137,7 @@ func load(ctx context.Context, top *Topology, c *Configuration, trees *syntaxCac
 	if err := l.readers(&r); err != nil {
 		return Result{}, err
 	}
-	r.markUnanalysedConsumers()
+	r.markUnanalysedConsumers(len(l.top.Unread) > 0)
 
 	var err error
 	if r.Consumers, err = l.consumers(r.Units); err != nil {
@@ -181,7 +183,7 @@ func (l *loader) readers(r *Result) error {
 		}
 	}
 	for _, dropped := range r.Dropped {
-		r.Programs = append(r.Programs, checkScripts(l.ctx, r.Fset, dropped.Dir, r.Packages, l.c)...)
+		r.Programs = append(r.Programs, checkScripts(l.ctx, l.top, r.Fset, dropped.Dir, r.Packages, l.c)...)
 	}
 	for i := range l.top.Readers {
 		if err := l.reader(r, &l.top.Readers[i]); err != nil {
@@ -194,10 +196,12 @@ func (l *loader) readers(r *Result) error {
 // loadSpec is what one load of a module directory runs: the directory, its GOWORK
 // setting and the module file its toolchain reads, the further modules [typeCheck]
 // checks whole, the prefix a position the toolchain wrote relative to the
-// directory is rewritten below, and the patterns it names there.
+// directory is rewritten below, the patterns it names there, and the topology
+// whose unread and left-out entries it lists around.
 type loadSpec struct {
-	dir, workspace, prefix string
 	file                   *ModuleFile
+	top                    *Topology
+	dir, workspace, prefix string
 	modules                []string
 	patterns               []string
 }
@@ -211,6 +215,7 @@ func specOf(m *discoveredModule, prefix string) *loadSpec {
 // dropped. A load that reports diagnostics returns them as an *[Error] naming
 // name, empty for a unit of the target, and any other failure as the load met it.
 func (l *loader) module(spec *loadSpec, name string) ([]*packages.Package, error) {
+	spec.top = l.top
 	pkgs, diagnostics, err := loadPackages(l.ctx, l.trees, l.c, spec)
 	if err != nil {
 		return nil, err
@@ -406,9 +411,9 @@ func droppable(err error) bool {
 // A load that reports errors returns them as diagnostics and no packages, each
 // position the toolchain wrote relative to the directory rewritten below the prefix.
 func loadPackages(ctx context.Context, trees *syntaxCache, c *Configuration, spec *loadSpec) ([]*packages.Package, []Diagnostic, error) {
-	patterns := spec.patterns
-	if len(patterns) == 0 {
-		patterns = []string{loadPattern}
+	patterns, byDir, err := listPatterns(ctx, spec)
+	if err != nil || len(patterns) == 0 {
+		return nil, nil, err
 	}
 	cfg := &packages.Config{
 		Mode:       metadataMode,
@@ -429,12 +434,16 @@ func loadPackages(ctx context.Context, trees *syntaxCache, c *Configuration, spe
 	if len(spec.patterns) == 0 {
 		pkgs = slices.DeleteFunc(pkgs, func(p *packages.Package) bool { return leftOutBelow(spec.dir, p.Dir) })
 	}
+	if byDir {
+		pkgs = slices.DeleteFunc(pkgs, unbuilt)
+	}
 	if spec.workspace != workspaceOff && len(spec.modules) == 0 {
 		demoteOtherMembers(pkgs, spec.dir)
 	}
 	if err := dropUnbuiltErrors(pkgs, c); err != nil {
 		return nil, nil, err
 	}
+	pkgs = dropUnreadErrors(pkgs, spec)
 	if diagnostics := collect(pkgs, spec.prefix); len(diagnostics) > 0 {
 		if refused := setupFailures(diagnostics, expectedModules(spec.file, pkgs)); refused != nil {
 			return nil, nil, refused
@@ -559,6 +568,104 @@ func demoteOtherMembers(pkgs []*packages.Package, dir string) {
 func positionlessOnly(p *packages.Package) bool {
 	return len(p.GoFiles) == 0 && len(p.CompiledGoFiles) == 0 && len(p.Errors) > 0 &&
 		!slices.ContainsFunc(p.Errors, func(e packages.Error) bool { return e.Kind != packages.ListError || e.Pos != "" })
+}
+
+// listPatterns is the patterns the load of spec lists, and whether they name each
+// directory of the tree by its own path ([treePatterns]).
+func listPatterns(ctx context.Context, spec *loadSpec) (patterns []string, byDir bool, err error) {
+	switch {
+	case len(spec.patterns) > 0:
+		return spec.patterns, false, nil
+	case !spec.top.unreadBelow(spec.dir):
+		return []string{loadPattern}, false, nil
+	}
+	patterns, err = treePatterns(ctx, spec)
+	return patterns, true, err
+}
+
+// unreadBelow reports whether an entry strictly below dir is [Unread].
+func (top *Topology) unreadBelow(dir string) bool {
+	return top != nil && slices.ContainsFunc(top.Unread, func(path string) bool { return scope.Below(dir, path) })
+}
+
+// treePatterns names by its own path each directory holding a Go file of the
+// module tree at spec's directory, and under a workspace of each member module
+// below it: where an entry below it is [Unread], a directory the toolchain cannot
+// list ends its walk of [loadPattern] there, leaving out every package after it.
+// The toolchain answers a directory named so whose every Go file the
+// configuration's constraints exclude with a package, where the wildcard leaves it
+// out, so [loadPackages] drops it, and loads no package for no pattern.
+func treePatterns(ctx context.Context, spec *loadSpec) ([]string, error) {
+	members := scope.Workspace{}
+	if spec.workspace != workspaceOff {
+		var err error
+		if members, err = scope.WorkspaceOf(ctx, spec.dir); err != nil {
+			return nil, fmt.Errorf("load: %s: %w", spec.dir, err)
+		}
+	}
+	return dirPatterns(ctx, spec, &members)
+}
+
+// dirPatterns is the pattern of each directory of the tree at spec's directory
+// that holds a Go file, entering a member module of the workspace and no other.
+func dirPatterns(ctx context.Context, spec *loadSpec, members *scope.Workspace) ([]string, error) {
+	tree := TreeOf(spec.file)
+	var patterns []string
+	enters := func(dir string) bool { return !tree.Skips(dir) && (!IsModuleRoot(dir) || members.Lists(dir)) }
+	err := spec.top.Walk(spec.dir, enters, func(path string, kind Kind) error {
+		switch {
+		case ctx.Err() != nil:
+			return ctx.Err()
+		case kind != File || !buildconstraint.IsGoFile(filepath.Base(path)):
+			return nil
+		}
+		pattern := "./" + unitPrefix(spec.dir, filepath.Dir(path))
+		if pattern == "./" {
+			pattern = "."
+		}
+		if !slices.Contains(patterns, pattern) {
+			patterns = append(patterns, pattern)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("load: find the packages under %s: %w", spec.dir, err)
+	}
+	return patterns, nil
+}
+
+// dropUnreadErrors clears every list error reporting that opening an entry the
+// walks met as [Unread] or [leftOut] failed, and drops a root left with no file and
+// no error: the toolchain's answer for a pattern whose walk met such a directory.
+// The toolchain lists every other package and file all the same, and leaves such
+// a Go file out of the package's compiled files.
+func dropUnreadErrors(pkgs []*packages.Package, spec *loadSpec) []*packages.Package {
+	if spec.top == nil || len(spec.top.Unread) == 0 && len(spec.top.LeftOut) == 0 {
+		return pkgs
+	}
+	opened := func(e packages.Error) bool {
+		names := func(path string) bool { return opens(e.Msg, spec.dir, path) }
+		return e.Kind == packages.ListError && (slices.ContainsFunc(spec.top.Unread, names) || slices.ContainsFunc(spec.top.LeftOut, names))
+	}
+	cleared := make(map[*packages.Package]bool)
+	packages.Visit(pkgs, nil, func(p *packages.Package) {
+		kept := slices.DeleteFunc(p.Errors, opened)
+		cleared[p] = len(kept) == 0 && len(p.Errors) > 0
+		p.Errors = kept
+	})
+	return slices.DeleteFunc(pkgs, func(p *packages.Package) bool {
+		return cleared[p] && len(p.GoFiles) == 0 && len(p.CompiledGoFiles) == 0
+	})
+}
+
+// opens reports whether a toolchain message reports that opening path failed, the
+// toolchain naming it relative to the directory it ran in or in full.
+func opens(msg, from, path string) bool {
+	if strings.Contains(msg, "open "+path+": ") {
+		return true
+	}
+	rel, err := filepath.Rel(from, path)
+	return err == nil && filepath.IsLocal(rel) && strings.Contains(msg, "open "+rel+": ")
 }
 
 // unbuilt reports whether one package of the main module is a directory whose

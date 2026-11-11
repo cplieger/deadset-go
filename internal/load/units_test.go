@@ -127,7 +127,7 @@ func TestLoadReadsTheUnderscoredPackagesOfTheModuleAsANestedConsumer(t *testing.
 		"_examples/own/main.go":        "package main\n\nfunc main() {}\n",
 		"testdata/_input/in.go":        "package in\n",
 	})
-	patterns, err := underscoredPackages(t.Context(), root, treeAt(root))
+	patterns, err := (&Topology{Root: root}).underscoredPackages(t.Context(), root, treeAt(root))
 	if want := []string{"./_examples/_nested/x", "./_examples/absent", "./_examples/limits", "./_examples/stale"}; err != nil || !slices.Equal(patterns, want) {
 		t.Errorf("underscoredPackages() = %v, %v, want %v, nil", patterns, err, want)
 	}
@@ -445,7 +445,7 @@ func TestDiscoveryLeavesEveryDirectoryTheGoRowSkipsUnsearched(t *testing.T) {
 		files[name+"/m/go.mod"] = "module example.com/" + strings.Trim(name, "._") + "\n\ngo 1.27.1\n"
 	}
 	root := writeTree(t, files)
-	got, err := unitDirs(t.Context(), root)
+	got, err := (&Topology{Root: root}).unitDirs(t.Context())
 	if want := []string{filepath.Join(root, "kept")}; err != nil || !slices.Equal(got, want) {
 		t.Errorf("unitDirs(a tree with a module below each skipped directory of %v) = %v, %v, want %v", goRow.SkippedDirectories, got, err, want)
 	}
@@ -567,7 +567,7 @@ func TestDiscoveryStopsWhenCancelledAfterItBegins(t *testing.T) {
 	consumers := []scope.Module{{Path: filepath.Join(module, "other")}, {Path: walked}}
 	checks := map[string]int{}
 	for name, search := range map[string]func(context.Context) error{
-		"unitDirs":    func(ctx context.Context) error { _, err := unitDirs(ctx, walked); return err },
+		"unitDirs":    func(ctx context.Context) error { _, err := (&Topology{Root: walked}).unitDirs(ctx); return err },
 		"withMembers": func(ctx context.Context) error { _, err := withMembers(ctx, module); return err },
 		"withMembers under a workspace that does not list it": func(ctx context.Context) error {
 			_, err := withMembers(ctx, filepath.Join(unlisted, "target"))
@@ -578,7 +578,7 @@ func TestDiscoveryStopsWhenCancelledAfterItBegins(t *testing.T) {
 			return err
 		},
 		"underscoredPackages": func(ctx context.Context) error {
-			_, err := underscoredPackages(ctx, module, treeAt(module))
+			_, err := (&Topology{Root: module}).underscoredPackages(ctx, module, treeAt(module))
 			return err
 		},
 		"readers":           func(ctx context.Context) error { _, err := top.readers(ctx, nil); return err },

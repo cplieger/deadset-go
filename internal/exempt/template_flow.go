@@ -1,6 +1,7 @@
 package exempt
 
 import (
+	"errors"
 	"go/ast"
 	"go/constant"
 	"go/token"
@@ -655,8 +656,9 @@ func (r fsRoot) sub(dir string) fsRoot {
 // directory is the file system os.DirFS opens on one constant directory, read
 // against the target root first and the calling file's directory second, as a
 // program run from either opens it. It holds every regular file below the
-// directory, and false where the directory is no directory of the target or holds
-// more files than are read.
+// directory, and false where the directory is no directory of the target, holds
+// more files than are read, or is or holds a symbolic link, which os.DirFS
+// follows and the walk does not.
 func (f *valueFlow) directory(callerDir, dir string) (fsRoot, bool) {
 	for _, base := range []string{f.root, callerDir} {
 		joined := filepath.Join(base, filepath.FromSlash(dir))
@@ -666,7 +668,10 @@ func (f *valueFlow) directory(callerDir, dir string) (fsRoot, bool) {
 		if !within(f.root, joined) && joined != f.root {
 			continue
 		}
-		files, err := regularFiles(joined, true)
+		files, err := regularFiles(joined, true, true)
+		if errors.Is(err, errLinked) {
+			return fsRoot{}, false
+		}
 		if err == nil {
 			return fsRoot{dir: joined, files: files}, len(files) <= maxRootFiles
 		}
@@ -715,7 +720,7 @@ func patternFiles(root, dir, pattern string) ([]string, bool) {
 		if !within(root, one) {
 			return nil, false
 		}
-		files, err := regularFiles(one, all)
+		files, err := regularFiles(one, all, false)
 		if err != nil {
 			return nil, false
 		}
@@ -726,20 +731,25 @@ func patternFiles(root, dir, pattern string) ([]string, bool) {
 	return held, true
 }
 
+// errLinked is the walk of [regularFiles] meeting a symbolic link it was asked to
+// fail on.
+var errLinked = errors.New("a symbolic link")
+
 // regularFiles is name itself where it is a regular file, else every regular file
 // below it, skipping each file and directory below it whose name starts with . or
-// _ unless hidden keeps them.
-func regularFiles(name string, hidden bool) ([]string, error) {
+// _ unless hidden keeps them. A symbolic link, name itself included, is skipped, as
+// //go:embed skips one, or fails the walk with errLinked where linked is set.
+func regularFiles(name string, hidden, linked bool) ([]string, error) {
 	var held []string
 	err := filepath.WalkDir(name, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if p != name && !hidden && (strings.HasPrefix(d.Name(), ".") || strings.HasPrefix(d.Name(), "_")) {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
+			return skipEntry(d)
+		}
+		if linked && d.Type()&fs.ModeSymlink != 0 {
+			return errLinked
 		}
 		if d.Type().IsRegular() {
 			held = append(held, p)
@@ -750,6 +760,15 @@ func regularFiles(name string, hidden bool) ([]string, error) {
 		return nil
 	})
 	return held, err
+}
+
+// skipEntry is how a walk leaves out one entry: a directory with everything below
+// it.
+func skipEntry(d fs.DirEntry) error {
+	if d.IsDir() {
+		return filepath.SkipDir
+	}
+	return nil
 }
 
 // textSource is one text a template parse may read: a constant, or any one of a

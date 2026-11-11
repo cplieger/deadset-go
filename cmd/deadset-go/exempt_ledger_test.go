@@ -204,20 +204,20 @@ func TestTheXMLEncoderReadsXMLName(t *testing.T) {
 	wantNoFinding(t, about, "encoding/xml names the element from XMLName's tag", "go://example.com/app#Feed.XMLName")
 }
 
-func TestAnEnumFilledByAnyDecodingEntryPointKeepsEveryMember(t *testing.T) {
+func TestAnEnumFilledByAnyDecodingEntryPointKeepsAMemberThatRenumbersANamedOne(t *testing.T) {
 	t.Parallel()
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/enum-decoded-by-every-decoder.txtar"))
 
-	wantNoFinding(t, about, "a decoder fills the enum from a document, so any member can arrive",
-		"go://example.com/app#Mid", "go://example.com/app#High", "go://example.com/app#On")
+	wantNoFinding(t, about, "a decoder fills the enum from a document, so a value no name gives can arrive and deleting the member renumbers a named one",
+		"go://example.com/app#Low", "go://example.com/app#Mid", "go://example.com/app#Off", "go://example.com/app#On")
 }
 
 func TestAnEnumALineDirectiveRendersOutsideTheTreeIsTheTargetsOwn(t *testing.T) {
 	t.Parallel()
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/enum-under-a-line-directive-outside-the-tree.txtar"))
 
-	wantNoFinding(t, about, "the target writes the enum, so a decoder can fill any member",
-		"go://example.com/app#Mid", "go://example.com/app#High")
+	wantNoFinding(t, about, "the target writes the enum, so a decoder can fill a value deleting the member renumbers",
+		"go://example.com/app#Low", "go://example.com/app#Mid")
 }
 
 func TestAGoFlagsCommandFieldIsRead(t *testing.T) {

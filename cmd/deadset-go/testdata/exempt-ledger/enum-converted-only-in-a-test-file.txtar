@@ -1,5 +1,7 @@
 Only a test file converts an integer to mode, so a production run holds no evidence
-for slow, and the test's conversion keeps it for tests alone.
+that a value no name gives can arise, and deleting slow there only renumbers
+turbo consistently. Over every file the test's conversion keeps slow, so it is
+kept for tests alone.
 
 -- go.mod --
 module example.com/app
@@ -20,9 +22,16 @@ type mode int
 const (
 	fast mode = iota
 	slow
+	turbo
 )
 
-func main() { fmt.Println(fast, len(os.Args)) }
+func main() {
+	m := fast
+	if len(os.Args) > 1 {
+		m = turbo
+	}
+	fmt.Println(m == turbo)
+}
 -- a_test.go --
 package main
 

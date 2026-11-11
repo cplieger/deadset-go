@@ -1,0 +1,205 @@
+An application whose constant blocks exercise each rule of the enum-group class:
+a group only compared and copied, a range over a member, a conversion from an
+integer, two moved constants that are not one step, a lowered value below the
+least int8, a constant expression whose relation to a member a deletion changes,
+a type cycle met before and after a decoder, a recursive generic instantiated
+with the type, an untyped iota block, and a joint deletion.
+
+-- go.mod --
+module example.com/enumrules
+
+go 1.27.1
+-- main.go --
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+func main() {
+	n := len(os.Args)
+	fmt.Println(compared(n), ranged0(), converted(n), shifted0(), divided0(), small0(), label(n))
+	fmt.Println(cycleFirst(nil), cycleLast(nil), generic(), a, c, joint0(n))
+}
+
+type plain int
+
+const (
+	plainA plain = iota
+	plainMid
+	plainZ
+	plainTail
+)
+
+func compared(n int) bool {
+	v := plainA
+	if n > 1 {
+		v = plainZ
+	}
+	return v == plainZ
+}
+
+type ranged int
+
+const (
+	rangedA ranged = iota
+	rangedMid
+	rangedZ
+)
+
+func ranged0() int {
+	count := 0
+	for v := range rangedZ {
+		if v == rangedA {
+			count++
+		}
+	}
+	return count
+}
+
+type conv int
+
+const (
+	convA conv = iota
+	convMid
+	convZ
+)
+
+func converted(n int) bool { return conv(n) == convZ || conv(n) == convA }
+
+type shifted int
+
+const (
+	shiftedA shifted = 2.0 << iota
+	shiftedMid
+	shiftedZ
+)
+
+func shifted0() bool { return shiftedA == shiftedZ }
+
+type divided int
+
+const (
+	dividedA divided = 6.0 / (iota + 1)
+	dividedMid
+	dividedZ
+)
+
+func divided0() bool { return dividedA == dividedZ }
+
+type small int8
+
+const (
+	smallA small = iota
+	smallMid
+	smallZ small = iota - 130
+)
+
+func small0() bool { return smallA == smallZ }
+
+type kind int
+
+const (
+	kindA kind = iota
+	kindB
+	kindMid
+	kindP
+	kindQ kind = kindB + 1
+)
+
+func label(n int) string {
+	k := kindA
+	if n > 1 {
+		k = kindP
+	}
+	if k == kindQ {
+		return "q"
+	}
+	return "p"
+}
+
+type cycOne int
+
+const (
+	cycOneA cycOne = iota
+	cycOneMid
+	cycOneZ
+)
+
+type nodeOne struct {
+	next *nodeOne
+	m    cycOne
+}
+
+func cycleFirst(data []byte) bool {
+	n := &nodeOne{next: &nodeOne{}}
+	if n.m == cycOneZ || n.m == cycOneA {
+		return true
+	}
+	return json.Unmarshal(data, n.next) == nil
+}
+
+type cycTwo int
+
+const (
+	cycTwoA cycTwo = iota
+	cycTwoMid
+	cycTwoZ
+)
+
+type nodeTwo struct {
+	next *nodeTwo
+	m    cycTwo
+}
+
+func cycleLast(data []byte) bool {
+	n := &nodeTwo{next: &nodeTwo{}}
+	if json.Unmarshal(data, n.next) != nil {
+		return false
+	}
+	return n.m == cycTwoZ || n.m == cycTwoA
+}
+
+type gen int
+
+const (
+	genA gen = iota
+	genMid
+	genZ
+)
+
+type list[T any] struct {
+	next *list[T]
+	v    T
+}
+
+func generic() bool {
+	var l list[gen]
+	l.v = genA
+	return l.v == genZ
+}
+
+const (
+	a = iota
+	b
+	c
+)
+
+type joint int
+
+const (
+	jointA joint = iota
+	jointM1
+	jointM2
+	jointZ
+)
+
+func joint0(n int) bool {
+	v := joint(1)
+	if n > 1 {
+		v = jointA
+	}
+	return v == jointZ
+}

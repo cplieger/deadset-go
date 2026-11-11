@@ -1,0 +1,79 @@
+One command printing values whose fields and formatting methods only fmt reads:
+a struct printed by its fields at any depth, an unexported one included; a type
+printed through its String method rather than its fields; a pointer field below
+the operand, printed as an address; a pointer operand, printed as the value it
+points to; a Format method every verb calls; a GoString method only the default
+verb with the sharp flag calls, and one a print form never calls; a struct
+holding an interface, a struct holding a reflect.Value and a type parameter's
+value, whose dynamic values the walk does not see.
+
+-- go.mod --
+module example.com/printed
+
+go 1.27.1
+-- main.go --
+package main
+
+import (
+	"fmt"
+	"os"
+	"reflect"
+)
+
+type nested struct{ c int }
+
+type plain struct {
+	A int
+	b nested
+}
+
+type stringy struct{ X int }
+
+func (s stringy) String() string { return "s" }
+
+type deep struct{ d int }
+
+type holder struct{ P *deep }
+
+type topPtr struct{ e int }
+
+type formatted int
+
+func (f formatted) Format(s fmt.State, verb rune) { fmt.Fprint(s, "f") }
+
+type goSyntax int
+
+func (g goSyntax) GoString() string { return "g" }
+
+type goPrinted int
+
+func (g goPrinted) GoString() string { return "p" }
+
+type boxed struct {
+	V any
+	w int
+}
+
+type reflected struct {
+	R reflect.Value
+	r int
+}
+
+type hidden struct{ h int }
+
+func (h hidden) String() string { return "h" }
+
+type outer struct{ in hidden }
+
+type generic struct{ t int }
+
+func show[T any](v T) { fmt.Println(v) }
+
+func main() {
+	n := len(os.Args)
+	fmt.Println(plain{A: n}, stringy{X: n}, holder{P: &deep{d: n}}, &topPtr{e: n})
+	fmt.Printf("%d %#v\n", formatted(n), goSyntax(n))
+	fmt.Println(goPrinted(n))
+	fmt.Println(boxed{V: n, w: n}, reflected{R: reflect.ValueOf(n), r: n}, outer{in: hidden{h: n}})
+	show(generic{t: n})
+}

@@ -301,6 +301,15 @@ type Input struct {
 	// possible and nothing retains ([pass.capFilled]).
 	Filled map[inventory.SymbolID]bool
 
+	// Arriving is every enumerated member whose type's values may arise other
+	// than by a member's name, a decoder's or outside code's among them, which the
+	// finding about an unused member says.
+	Arriving map[inventory.SymbolID]bool
+
+	// RetainedLocals is where each constant a function body declares that an
+	// exemption class retains is declared ([pass.localsOf]).
+	RetainedLocals map[inventory.Offset]bool
+
 	// Generated reports whether one target-relative path is a generated file.
 	Generated func(path string) bool
 
@@ -443,7 +452,7 @@ var vocabularyKinds = vocab.Kinds
 // the finished findings of the run, the edge evaluations and the suppression
 // ledger's answer. A draft the Contract cannot carry fails the pass: it is an
 // emitter's defect. The order is fixed: complete, skip, the component cap
-// ([cohere]), the dials ([pass.dial]), the ledger ([pass.decide]), then the edge
+// ([pass.cohere]), the dials ([pass.dial]), the ledger ([pass.decide]), then the edge
 // evaluations.
 func Compute(in *Input, emitters map[vocab.Code]Emitter) (Result, error) {
 	if in == nil || in.Config == nil {
@@ -466,7 +475,7 @@ func (in *pass) compute(emitters map[vocab.Code]Emitter) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
-	cohere(findings)
+	in.cohere(findings)
 	in.dialed = in.dial(findings)
 	ledger, would, err := in.decide(findings, skipped, emitters)
 	if err != nil {

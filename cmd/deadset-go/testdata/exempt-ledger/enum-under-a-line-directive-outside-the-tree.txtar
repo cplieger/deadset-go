@@ -1,6 +1,6 @@
-An iota enum a decoder fills keeps every member when a line directive renders
-its type in a file outside the tree: the file that writes the type is the
-target's.
+An iota enum a decoder fills keeps a member whose deletion renumbers a member
+code names when a line directive renders its type in a file outside the tree:
+the file that writes the type is the target's.
 
 -- go.mod --
 module example.com/app
@@ -37,5 +37,5 @@ func main() {
 	if err := json.NewDecoder(os.Stdin).Decode(&c); err != nil {
 		os.Exit(1)
 	}
-	fmt.Println(c.Level == Low)
+	fmt.Println(c.Level == High)
 }

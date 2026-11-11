@@ -34,6 +34,7 @@ func (f *Findings) Report(self *Self) (*report.Report, error) {
 	if err != nil {
 		return nil, err
 	}
+	notes = append(notes, f.unreadNotes()...)
 	reported := make([]report.Finding, len(f.Result.Findings))
 	for i := range f.Result.Findings {
 		reported[i] = f.Result.Findings[i].Document()

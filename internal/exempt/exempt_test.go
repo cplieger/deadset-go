@@ -346,10 +346,12 @@ func TestComputeKeepsTheSourceSiteOfAFactATestFileAlsoCarries(t *testing.T) {
 
 // relationWords is the closed set of relations a clause may open with: every
 // class states one clause of the form relation-then-thing, and the words are what
-// a maintainer reads the nine classes by.
+// a maintainer reads the nine classes by. enum-group's relation is what deleting
+// the constant does to the program.
 var relationWords = []string{
 	"satisfies", "passed", "scanned", "converted", "decoded", "formatted",
 	"implements", "declares", "declared", "named", "exported", "looked", "asserts", "returned",
+	"deleting",
 }
 
 // fixtureArchives names every txtar archive of the package's testdata, which is

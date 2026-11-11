@@ -149,9 +149,10 @@ type pathed struct {
 func pathedFiles(t *testing.T, root string) []pathed {
 	t.Helper()
 
-	unit := topOf(t, root).Units[0]
+	top := topOf(t, root)
+	unit := top.Units[0]
 	var found []pathed
-	err := collect(root, unit.Dir, unit.Path, unit.File, func(path string, expression constraint.Expr) {
+	err := collect(top, unit.Dir, unit.Path, unit.File, func(path string, expression constraint.Expr) {
 		found = append(found, pathed{path: load.RelativeSlash(root, path), file: expression})
 	})
 	if err != nil {

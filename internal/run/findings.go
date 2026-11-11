@@ -7,7 +7,9 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/deps"
 	"github.com/cplieger/deadset-go/v2/internal/edges"
+	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/findings"
+	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 )
@@ -70,6 +72,8 @@ func (s *Swept) input(ctx context.Context) (*findings.Input, error) {
 		Exempt:         s.Exemptions,
 		TestEvidence:   s.testEvidence,
 		Filled:         s.filled,
+		Arriving:       s.arriving,
+		RetainedLocals: retainedLocals(s.Locals),
 		Generated:      func(path string) bool { return generated[path] },
 		TypeErrorSkips: s.TypeErrorSkips,
 		Marks:          s.Marks,
@@ -142,4 +146,14 @@ func (l *Loaded) consumers() findings.Consumers {
 		loaded = l.loads.outlines[0].consumers
 	}
 	return findings.Consumers{Declared: loaded, Loaded: loaded, Complete: l.req.Config.Consumers.Complete}
+}
+
+// retainedLocals is where each constant a class retains in a function body is
+// declared.
+func retainedLocals(locals []exempt.RetainedLocal) map[inventory.Offset]bool {
+	held := make(map[inventory.Offset]bool, len(locals))
+	for i := range locals {
+		held[locals[i].Declared] = true
+	}
+	return held
 }

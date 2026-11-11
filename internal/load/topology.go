@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/cplieger/deadset-go/v2/internal/buildconstraint"
 	"github.com/cplieger/deadset-go/v2/internal/failure"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -165,6 +166,17 @@ type Topology struct {
 	// Consumers holds the declared consumers, in the order the scope declares them.
 	Consumers []discoveredModule
 
+	// Unread holds each entry at or below the root a walk of the tree met as
+	// [Unread], and each Go file there the search or the derivation of the matrix
+	// cannot open, in the order they were met. The run analyzes the tree without
+	// them, so code there may use any export of any unit.
+	Unread []string
+
+	// LeftOut holds each entry at or below the root a walk met as [leftOut], whose
+	// listing error the toolchain reports where its name is a Go file's and the
+	// load clears: no build reads such an entry.
+	LeftOut []string
+
 	// Walked reports units the search found below a root that holds no module
 	// file, of which a unit that does not load is dropped.
 	Walked bool
@@ -218,16 +230,20 @@ func Discover(ctx context.Context, doc scope.Document) (*Topology, error) {
 	if _, err := os.Stat(target); err != nil {
 		return nil, fmt.Errorf("load: target %s: %w", target, err)
 	}
-	dirs, err := unitDirs(ctx, target)
+	top := &Topology{Root: target, ConsumerWorkspace: workspaceOff}
+	dirs, err := top.unitDirs(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load: find the modules under %s: %w", target, err)
 	}
-	if empty := holdsProgram(ctx, target, dirs); empty != nil {
+	if empty := top.holdsProgram(ctx, dirs); empty != nil {
 		return nil, empty
 	}
-	top := &Topology{Root: target, Walked: walkedUnits(target, dirs), ConsumerWorkspace: workspaceOff}
-	if top.Units, err = discoverUnits(ctx, dirs); err != nil {
+	top.Walked = walkedUnits(target, dirs)
+	if top.Units, err = top.discoverUnits(ctx, dirs); err != nil {
 		return nil, err
+	}
+	if err = top.survey(ctx); err != nil {
+		return nil, fmt.Errorf("load: find the directories under %s: %w", target, err)
 	}
 	if top.Nested, err = top.nestedModules(ctx, doc.Consumers); err != nil {
 		return nil, err
@@ -252,6 +268,9 @@ func declaredConsumers(ctx context.Context, declared []scope.Module) ([]discover
 		}
 		consumer := discoveredModule{Dir: d.Path, ID: d.ID}
 		consumer.File, consumer.FileErr = readModuleFile(d.Path)
+		if irregular(consumer.FileErr) {
+			return nil, consumer.FileErr
+		}
 		consumers = append(consumers, consumer)
 	}
 	return consumers, nil
@@ -259,7 +278,7 @@ func declaredConsumers(ctx context.Context, declared []scope.Module) ([]discover
 
 // discoverUnits is the unit at each of dirs, with the underscored packages of its
 // module.
-func discoverUnits(ctx context.Context, dirs []string) ([]discoveredModule, error) {
+func (top *Topology) discoverUnits(ctx context.Context, dirs []string) ([]discoveredModule, error) {
 	units := make([]discoveredModule, 0, len(dirs))
 	for _, dir := range dirs {
 		unit, err := discoverModule(ctx, dir)
@@ -267,7 +286,7 @@ func discoverUnits(ctx context.Context, dirs []string) ([]discoveredModule, erro
 			return nil, err
 		}
 		if unit.Path != "" {
-			if unit.Underscored, err = underscoredPackages(ctx, dir, TreeOf(unit.File)); err != nil {
+			if unit.Underscored, err = top.underscoredPackages(ctx, dir, TreeOf(unit.File)); err != nil {
 				return nil, fmt.Errorf("load: find the packages under %s: %w", dir, err)
 			}
 		}
@@ -282,7 +301,8 @@ func discoverUnits(ctx context.Context, dirs []string) ([]discoveredModule, erro
 // nothing. A directory a module file above it governs is its own one unit. Any
 // other target is every module rooted below it, in directory order, searching no
 // directory [leavesOut] names, and holds no unit where it holds none.
-func unitDirs(ctx context.Context, target string) ([]string, error) {
+func (top *Topology) unitDirs(ctx context.Context) ([]string, error) {
+	target := top.Root
 	if IsModuleRoot(target) {
 		return withMembers(ctx, target)
 	}
@@ -290,17 +310,12 @@ func unitDirs(ctx context.Context, target string) ([]string, error) {
 		return []string{target}, nil
 	}
 	var dirs []string
-	err := WalkTree(target, func(path string, entry fs.DirEntry, err error) error {
+	enters := func(dir string) bool { return !leavesOut(filepath.Base(dir)) }
+	err := top.Walk(target, enters, func(path string, kind Kind) error {
 		switch {
-		case err != nil:
-			return err
 		case ctx.Err() != nil:
 			return ctx.Err()
-		case !entry.IsDir():
-			return nil
-		case path != target && leavesOut(entry.Name()):
-			return fs.SkipDir
-		case IsModuleRoot(path):
+		case kind == directory && IsModuleRoot(path):
 			dirs = append(dirs, path)
 		}
 		return nil
@@ -311,17 +326,13 @@ func unitDirs(ctx context.Context, target string) ([]string, error) {
 	return dirs, nil
 }
 
-// holdsProgram is the setup failure no-program where target holds no unit, or no
-// unit holds a Go file [holdsGoFile] finds, and nil otherwise.
-func holdsProgram(ctx context.Context, target string, dirs []string) error {
-	if len(dirs) == 0 {
-		return failure.New(vocab.SetupNoProgram, fmt.Sprintf(
-			"%s holds no go.mod file and none above it governs it; run from the directory that holds a module's go.mod file, or name the languages to analyze",
-			target,
-		))
-	}
+// holdsProgram is the setup failure no-program where the target holds no unit, or
+// no unit holds a Go file [Topology.holdsGoFile] finds, and nil otherwise. A tree
+// holding an entry the run cannot read may hold such a file, so where a unit holds
+// none it is no failure, and where none is found the failure names the entry.
+func (top *Topology) holdsProgram(ctx context.Context, dirs []string) error {
 	for _, dir := range dirs {
-		found, err := holdsGoFile(ctx, dir, treeAt(dir))
+		found, err := top.holdsGoFile(ctx, dir, treeAt(dir))
 		if err != nil {
 			return fmt.Errorf("load: find the Go files under %s: %w", dir, err)
 		}
@@ -329,29 +340,46 @@ func holdsProgram(ctx context.Context, target string, dirs []string) error {
 			return nil
 		}
 	}
-	return failure.New(vocab.SetupNoProgram, fmt.Sprintf(
-		"the modules of %s hold no .go file; run from the directory that holds the module's Go source files, or name the languages to analyze",
-		target,
-	))
+	switch {
+	case len(dirs) == 0 && len(top.Unread) > 0:
+		unread := make([]string, len(top.Unread))
+		for i, path := range top.Unread {
+			unread[i] = RelativeSlash(top.Root, path)
+		}
+		return failure.New(vocab.SetupNoProgram, fmt.Sprintf(
+			"%s holds no go.mod file the run can read and none above it governs it, and the run cannot read %s; give the run read access to it, run from the directory that holds a module's go.mod file, or name the languages to analyze",
+			top.Root, strings.Join(unread, ", "),
+		))
+	case len(dirs) == 0:
+		return failure.New(vocab.SetupNoProgram, fmt.Sprintf(
+			"%s holds no go.mod file and none above it governs it; run from the directory that holds a module's go.mod file, or name the languages to analyze",
+			top.Root,
+		))
+	case len(top.Unread) > 0:
+		return nil
+	default:
+		return failure.New(vocab.SetupNoProgram, fmt.Sprintf(
+			"the modules of %s hold no .go file; run from the directory that holds the module's Go source files, or name the languages to analyze",
+			top.Root,
+		))
+	}
 }
 
 // holdsGoFile reports whether the module tree at dir holds a Go source file of the
-// Go row, in a directory the underscored-package search enters. A directory its
-// module ignores holds none ([program.4]).
-func holdsGoFile(ctx context.Context, dir string, tree ModuleTree) (bool, error) {
+// Go row, or an entry it cannot read, which may be or hold one, in a directory the
+// underscored-package search enters. A directory its module ignores holds none
+// ([program.4]).
+func (top *Topology) holdsGoFile(ctx context.Context, dir string, tree ModuleTree) (bool, error) {
 	if tree.ignores(dir) {
 		return false, nil
 	}
 	found := false
-	err := WalkTree(dir, func(path string, entry fs.DirEntry, err error) error {
+	enters := func(dir string) bool { return !underscoredSkips(tree, dir) }
+	err := top.Walk(dir, enters, func(path string, kind Kind) error {
 		switch {
-		case err != nil:
-			return err
 		case ctx.Err() != nil:
 			return ctx.Err()
-		case entry.IsDir() && path != dir && underscoredSkips(tree, path):
-			return fs.SkipDir
-		case !entry.IsDir() && goRow.Sources(entry.Name()):
+		case kind == Unread, kind == File && goRow.Sources(filepath.Base(path)):
 			found = true
 			return fs.SkipAll
 		}
@@ -407,6 +435,9 @@ func discoverModule(ctx context.Context, dir string) (discoveredModule, error) {
 		m.Workspace = workspace.File
 	}
 	m.File, m.FileErr = readModuleFile(dir)
+	if irregular(m.FileErr) {
+		return discoveredModule{}, m.FileErr
+	}
 	if m.File != nil && m.File.Syntax.Module != nil {
 		m.Path = m.File.Syntax.Module.Mod.Path
 	}
@@ -418,21 +449,18 @@ func discoverModule(ctx context.Context, dir string) (discoveredModule, error) {
 // declared consumer and that builds against a unit's directory, in directory order.
 func (top *Topology) nestedModules(ctx context.Context, declared []scope.Module) ([]discoveredModule, error) {
 	var nested []discoveredModule
-	err := WalkTree(top.Root, func(path string, entry fs.DirEntry, err error) error {
+	err := top.Walk(top.Root, searchedDir, func(path string, kind Kind) error {
 		switch {
-		case err != nil:
-			return err
 		case ctx.Err() != nil:
 			return ctx.Err()
-		case !entry.IsDir():
-			return nil
-		case path != top.Root && !searchedBelowUnderscore(entry.Name()):
-			return fs.SkipDir
-		case path == top.Root || !IsModuleRoot(path) || top.isUnit(path) || declares(declared, path):
+		case kind != directory || path == top.Root || !IsModuleRoot(path) || top.isUnit(path) || declares(declared, path):
 			return nil
 		}
 		m := discoveredModule{Dir: path, Workspace: workspaceOff}
 		m.File, m.FileErr = readModuleFile(path)
+		if irregular(m.FileErr) {
+			return m.FileErr
+		}
 		if m.Consumes = top.replacedUnits(&m); len(m.Consumes) > 0 {
 			nested = append(nested, m)
 		}
@@ -471,6 +499,9 @@ func (top *Topology) readers(ctx context.Context, declared []scope.Module) ([]di
 		// A workspace member is a module root of its own: the toolchain reads the module
 		// file in its directory and none above it.
 		m.File, m.FileErr = parseModuleFile(filepath.Join(member, moduleFileName))
+		if irregular(m.FileErr) {
+			return nil, m.FileErr
+		}
 		if m.File != nil {
 			required := m.File.required()
 			m.Consumes = slices.DeleteFunc(top.unitPaths(), func(path string) bool { return !slices.Contains(required, path) })
@@ -541,9 +572,14 @@ func readModuleFile(dir string) (*ModuleFile, error) {
 	return parseModuleFile(filepath.Join(at, moduleFileName))
 }
 
-// parseModuleFile reads and parses the module file at path.
+// parseModuleFile reads and parses the module file at path. One that is no
+// regular file is never opened, and its error is the setup failure
+// unreadable-configuration: the toolchain would block on it as well.
 func parseModuleFile(path string) (*ModuleFile, error) {
-	text, err := os.ReadFile(path)
+	text, err := scope.ReadRegularFile(path)
+	if errors.Is(err, scope.ErrIrregular) {
+		return nil, failure.Wrap(vocab.SetupUnreadableConfiguration, fmt.Errorf("%w: %w", ErrModuleFile, err))
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrModuleFile, err)
 	}
@@ -553,6 +589,10 @@ func parseModuleFile(path string) (*ModuleFile, error) {
 	}
 	return &ModuleFile{Path: path, Text: text, Syntax: syntax}, nil
 }
+
+// irregular reports whether err is a module file that is no regular file, which
+// ends the run before the toolchain, which would block on it, runs.
+func irregular(err error) bool { return errors.Is(err, scope.ErrIrregular) }
 
 // required is the path of every module the file requires.
 func (f *ModuleFile) required() []string {
@@ -576,21 +616,28 @@ func governedFromAbove(dir string) bool {
 	}
 }
 
-// WalkTree walks the tree rooted at root as the go command walks a module's tree,
-// following root itself where it is a symbolic link to a directory
-// (go.dev/issue/50807). fn sees root as written and every path below it joined
-// onto that spelling, the spelling the toolchain reports.
-func WalkTree(root string, fn fs.WalkDirFunc) error {
-	followed := root
-	if !strings.HasSuffix(root, string(filepath.Separator)) {
-		followed += string(filepath.Separator)
-	}
-	return filepath.WalkDir(followed, func(path string, entry fs.DirEntry, err error) error {
-		if path == followed {
-			path = root
+// survey walks the directories the module search enters, recording each entry
+// there the run cannot read and each regular Go file it cannot open.
+func (top *Topology) survey(ctx context.Context) error {
+	return top.Walk(top.Root, searchedDir, func(path string, kind Kind) error {
+		switch {
+		case ctx.Err() != nil:
+			return ctx.Err()
+		case kind == File && buildconstraint.IsGoFile(filepath.Base(path)) && !openable(path):
+			top.AddUnread(path)
 		}
-		return fn(path, entry, err)
+		return nil
 	})
+}
+
+// openable reports whether the run can open the regular file at path.
+func openable(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	_ = f.Close()
+	return true
 }
 
 // IsModuleRoot reports whether dir holds a module file, which makes it the root of
@@ -615,19 +662,14 @@ func unitPrefix(target, dir string) string {
 // every module below dir and every directory the module tree ignores, in directory
 // order. The go tool's wildcard matches none of them, even with the underscore
 // directory as its root, so each is named by its own path.
-func underscoredPackages(ctx context.Context, dir string, tree ModuleTree) ([]string, error) {
+func (top *Topology) underscoredPackages(ctx context.Context, dir string, tree ModuleTree) ([]string, error) {
 	var patterns []string
-	err := WalkTree(dir, func(path string, entry fs.DirEntry, err error) error {
+	enters := func(dir string) bool { return !underscoredSkips(tree, dir) }
+	err := top.Walk(dir, enters, func(path string, kind Kind) error {
 		switch {
-		case err != nil || path == dir:
-			return err
 		case ctx.Err() != nil:
 			return ctx.Err()
-		}
-		if entry.IsDir() {
-			if underscoredSkips(tree, path) {
-				return fs.SkipDir
-			}
+		case kind != File:
 			return nil
 		}
 		rel, err := filepath.Rel(dir, path)
@@ -650,6 +692,10 @@ func underscoredPackages(ctx context.Context, dir string, tree ModuleTree) ([]st
 func searchedBelowUnderscore(name string) bool {
 	return strings.HasPrefix(name, "_") || !leavesOut(name)
 }
+
+// searchedDir reports whether the nested-module search enters the directory at
+// path ([searchedBelowUnderscore]).
+func searchedDir(path string) bool { return searchedBelowUnderscore(filepath.Base(path)) }
 
 // underscoredSkips reports whether the walk of one module's underscored packages
 // skips the directory at path: one it does not search below an underscore, one the

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"go/token"
 	"io"
+	"slices"
 
 	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
@@ -62,7 +63,26 @@ func printRetained(ctx context.Context, args []string, stdout, stderr io.Writer)
 	if err != nil {
 		return failed(ctx, stderr, err)
 	}
-	return printLines(stdout, stderr, "print-retained", retainedLines(swept.Refs, positions, retained), swept.Unmatched)
+	lines := append(retainedLines(swept.Refs, positions, retained), localLines(swept.Refs, swept.Locals)...)
+	return printLines(stdout, stderr, "print-retained", lines, swept.Unmatched)
+}
+
+// localLines renders one line per constant a class retains in a function body: the
+// reference of the declaration enclosing it, which is how a finding about a local
+// declaration names its subject, then the constant's own position. One constant
+// several configurations retain is listed once, in position order.
+func localLines(refs map[inventory.SymbolID]string, locals []exempt.RetainedLocal) []string {
+	held := slices.Clone(locals)
+	slices.SortStableFunc(held, func(a, b exempt.RetainedLocal) int { return inventory.ByPosition(a.At, b.At) })
+	var lines []string
+	for i := range held {
+		if i > 0 && held[i].Declared == held[i-1].Declared {
+			continue
+		}
+		e := &held[i].Exemption
+		lines = append(lines, refs[e.ID]+"\t"+held[i].At.String()+"\t"+e.Class+"\t"+evidenceSite(e)+"\t"+e.Detail)
+	}
+	return lines
 }
 
 // sweptOf runs a request through the sweep stage under the production or the plain

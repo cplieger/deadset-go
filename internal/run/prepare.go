@@ -2,6 +2,7 @@ package run
 
 import (
 	"os"
+	"slices"
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/exempt"
@@ -25,11 +26,23 @@ type Prepared struct {
 	// retains ([exempt.Computed.Filled]).
 	filled map[inventory.SymbolID]bool
 
+	// arriving is every enumerated member whose type's values may arise other
+	// than by a member's name ([exempt.Computed.Arriving]).
+	arriving map[inventory.SymbolID]bool
+
+	// Locals is every constant a function body declares that a class retains
+	// ([exempt.Computed.Locals]).
+	Locals []exempt.RetainedLocal
+
 	Exemptions []exempt.Exemption
 
 	// testEvidence is the exemption evidence a test file carries, which the mode
 	// does not hold and the sweep counts as test references.
 	testEvidence []exempt.Exemption
+
+	// unread is every entry of the tree some configuration's rule N could not
+	// read ([exempt.Computed.Unread]), each once.
+	unread []string
 
 	// Mode is the reference mode every later stage of the run reads.
 	Mode facts.Mode
@@ -46,7 +59,8 @@ func (l *Loaded) Prepare(production bool) (*Prepared, error) {
 			Production:              production,
 			ConsumerTestsProduction: l.req.Config.Analysis.ConsumerTestsProduction,
 		},
-		filled: make(map[inventory.SymbolID]bool),
+		filled:   make(map[inventory.SymbolID]bool),
+		arriving: make(map[inventory.SymbolID]bool),
 	}
 	options := exemptOptions(&l.req.Config)
 	for i := range l.loads.Len() {
@@ -55,14 +69,17 @@ func (l *Loaded) Prepare(production bool) (*Prepared, error) {
 			return nil, err
 		}
 		program, err := exempt.NewProgram(&exempt.Loaded{
-			Result:  one.Result,
-			Resolve: one.Resolve,
-			Facts:   one.Facts,
-			Symbols: one.Symbols,
-			Root:    l.Root,
-			Read:    os.ReadFile,
-			Options: options,
-			Mode:    p.Mode,
+			Result:     one.Result,
+			Resolve:    one.Resolve,
+			Facts:      one.Facts,
+			Symbols:    one.Symbols,
+			Root:       l.Root,
+			Read:       os.ReadFile,
+			ReadDir:    os.ReadDir,
+			Stat:       os.Stat,
+			References: l.Merged.References,
+			Options:    options,
+			Mode:       p.Mode,
 		})
 		if err != nil {
 			return nil, err
@@ -71,11 +88,7 @@ func (l *Loaded) Prepare(production bool) (*Prepared, error) {
 		if err != nil {
 			return nil, err
 		}
-		p.Exemptions = append(p.Exemptions, computed.Held...)
-		p.testEvidence = append(p.testEvidence, computed.TestEvidence...)
-		for j := range computed.Filled {
-			p.filled[computed.Filled[j].ID] = true
-		}
+		p.add(&computed)
 	}
 	p.Exemptions = l.Merged.Uncalled.Withdrawn(p.Exemptions)
 	p.testEvidence = l.Merged.Uncalled.Withdrawn(p.testEvidence)
@@ -85,6 +98,24 @@ func (l *Loaded) Prepare(production bool) (*Prepared, error) {
 		return nil, err
 	}
 	return p, nil
+}
+
+// add records what the classes computed over one configuration.
+func (p *Prepared) add(computed *exempt.Computed) {
+	p.Exemptions = append(p.Exemptions, computed.Held...)
+	p.testEvidence = append(p.testEvidence, computed.TestEvidence...)
+	for i := range computed.Filled {
+		p.filled[computed.Filled[i].ID] = true
+	}
+	p.Locals = append(p.Locals, computed.Locals...)
+	for _, id := range computed.Arriving {
+		p.arriving[id] = true
+	}
+	for _, path := range computed.Unread {
+		if !slices.Contains(p.unread, path) {
+			p.unread = append(p.unread, path)
+		}
+	}
 }
 
 // exemptOptions is the whole of the configuration that reaches an exemption class.

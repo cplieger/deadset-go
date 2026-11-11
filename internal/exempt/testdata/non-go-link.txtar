@@ -1,0 +1,37 @@
+Package c's only assembly file is a symbolic link to a file outside every package,
+which go/build lists among c's files as it lists a regular one, so c holds a non-Go
+source and every declaration of it is retained. Package e holds a symbolic link
+named like an assembly file that points at a directory, which go/build skips, so
+e holds none and its variable is not retained. The linked file names nothing but
+c's own function.
+
+-- go.mod --
+module example.com/linked
+
+go 1.27.0
+-- shared/impl.s --
+TEXT ·run(SB), $0
+	RET
+-- c/c.go --
+package c
+
+var size int
+
+func run()
+-- c/run_amd64.s.symlink --
+../shared/impl.s
+-- e/e.go --
+package e
+
+var spare int
+-- e/dir.s.symlink --
+../shared
+-- main.go --
+package main
+
+import (
+	_ "example.com/linked/c"
+	_ "example.com/linked/e"
+)
+
+func main() {}

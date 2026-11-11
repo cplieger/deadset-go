@@ -33,12 +33,12 @@ func TestFormatVerbContractRetainsTheMethodEveryVerbFamilyCalls(t *testing.T) {
 		{family: "the other form carrying none", typeName: "BarePrintln", want: verbRefs("BarePrintln", "String")},
 		{family: "the operand an explicit index selects", typeName: "IndexChosen", want: verbRefs("IndexChosen", "String")},
 		{family: "the operand an explicit index steps over", typeName: "IndexSkipped", want: nil},
-		{family: "a format string the call computes", typeName: "Computed", want: verbRefs("Computed", "String")},
+		{family: "a format string the call computes", typeName: "Computed", want: verbRefs("Computed", "Name", "String")},
 		{family: "operands spread from a slice", typeName: "Spread", want: verbRefs("Spread", "String")},
 		{family: "an operand past the format's last verb", typeName: "Surplus", want: verbRefs("Surplus", "String")},
 		{family: "the wrapping verb of the error-construction function", typeName: "Wrapped", want: verbRefs("Wrapped", "Error")},
 		{family: "an element of a container", typeName: "Element", want: verbRefs("Element", "String")},
-		{family: "a method of the retained name in another shape", typeName: "Shaped", want: nil},
+		{family: "a method of the retained name in another shape", typeName: "Shaped", want: verbRefs("Shaped", "Name")},
 	} {
 		t.Run(strings.ReplaceAll(test.family, " ", "_"), func(t *testing.T) {
 			got := membersOf(refs, test.typeName)
@@ -125,11 +125,15 @@ func TestFormatVerbContractNamesTheFacilityThatFormatted(t *testing.T) {
 	}
 }
 
-func TestFormatVerbContractRetainsNothingWhereNoVerbAsksForAString(t *testing.T) {
+// No verb of the quiet fixture calls a method, so the class retains none; a struct
+// a numeric verb or the sharp flag prints still has its fields printed, which reads
+// them.
+func TestFormatVerbContractRetainsNoMethodWhereNoVerbAsksForAString(t *testing.T) {
 	t.Parallel()
 	shared := analysisOf(t, "format-verb-quiet.txtar", Options{})
-	if got := retainedRefs(t, shared, vocab.FormatVerbContract); len(got) > 0 {
-		t.Errorf("FormatVerbContractDetector(format-verb-quiet.txtar) retained %v, want nothing", got)
+	want := []string{"go://example.com/verbs#Numeric.Count", "go://example.com/verbs#Sharp.Name"}
+	if got := retainedRefs(t, shared, vocab.FormatVerbContract); !slices.Equal(got, want) {
+		t.Errorf("FormatVerbContractDetector(format-verb-quiet.txtar) retained %v, want only the printed fields %v", got, want)
 	}
 }
 
@@ -151,6 +155,7 @@ func TestFormatVerbContractNamesTheClassTheVerbAndTheSite(t *testing.T) {
 	want := []record{
 		{"go://example.com/verbs#BarePrint.String", "format-verb-contract", "bare_forms.go:31:57", "formatted by fmt.Sprint"},
 		{"go://example.com/verbs#BarePrintln.String", "format-verb-contract", "bare_forms.go:34:87", "formatted by fmt.Fprintln"},
+		{"go://example.com/verbs#Computed.Name", "format-verb-contract", "computed.go:17:84", "formatted by fmt.Sprintf under every verb it may carry"},
 		{"go://example.com/verbs#Computed.String", "format-verb-contract", "computed.go:17:84", "formatted by fmt.Sprintf under every verb it may carry"},
 		{"go://example.com/verbs#VerbV.String", "format-verb-contract", "default_verb.go:17:57", "formatted by fmt.Sprintf under %v"},
 		{"go://example.com/verbs#Element.String", "format-verb-contract", "elements.go:17:73", "formatted by fmt.Sprintf under %v"},
@@ -162,6 +167,7 @@ func TestFormatVerbContractNamesTheClassTheVerbAndTheSite(t *testing.T) {
 		{"go://example.com/verbs#VerbS.String", "format-verb-contract", "string_verb.go:17:58", "formatted by fmt.Sprintf under %s"},
 		{"go://example.com/verbs#Surplus.String", "format-verb-contract", "surplus.go:15:75", "formatted by fmt.Sprintf past the format's last verb"},
 		{"go://example.com/verbs#Wrapped.Error", "format-verb-contract", "wrapped.go:17:68", "formatted by fmt.Errorf under %w"},
+		{"go://example.com/verbs#Shaped.Name", "format-verb-contract", "shaped.go:12:63", "formatted by fmt.Sprintf under %v"},
 	}
 	slices.SortFunc(got, func(a, b record) int { return strings.Compare(a.site, b.site) })
 	slices.SortFunc(want, func(a, b record) int { return strings.Compare(a.site, b.site) })

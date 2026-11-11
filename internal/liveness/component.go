@@ -30,6 +30,12 @@ type Component struct {
 	// Spans are the lines each member occupies, in the order of Members.
 	Spans []Span
 
+	// Beneath are the places, in the order of the components, of every component
+	// one of whose declarations references a member of this held one. A held
+	// declaration shares no component with the unheld ones that reference it, so
+	// this is what keeps it dead only as surely as they are.
+	Beneath []int
+
 	// Held reports a component of declarations no mechanical edit deletes, as
 	// grammar/analysis/fixability.md "Positional members" states ([Graph.heldSet]).
 	Held bool
@@ -60,6 +66,7 @@ func (g *Graph) componentsOf(dead, testOfDeadCode, unreferencedTest, reachable [
 		return nil
 	}
 	held := g.heldSet(dead, reachable, place)
+	full := adj
 	adj = withinHeld(adj, at, held)
 	joints := g.joints(at, place, held)
 	cycleOf, cycles := connected(adj)
@@ -82,7 +89,25 @@ func (g *Graph) componentsOf(dead, testOfDeadCode, unreferencedTest, reachable [
 		}
 		component.Held = component.Held || held[i]
 	}
+	beneath(components, full, at, held, func(position int) int { return clusterOf[cycleOf[position]] })
 	return components
+}
+
+// beneath records, for every held component, the components of the unheld
+// declarations of the dead subgraph that reference one of its members, clusterOf
+// giving the component of a position of the subgraph.
+func beneath(components []Component, full [][]int, at []int, held []bool, clusterOf func(int) int) {
+	for from, targets := range full {
+		for _, to := range targets {
+			if !held[at[to]] || held[at[from]] {
+				continue
+			}
+			under, over := clusterOf(to), clusterOf(from)
+			if !slices.Contains(components[under].Beneath, over) {
+				components[under].Beneath = append(components[under].Beneath, over)
+			}
+		}
+	}
 }
 
 // dependentsOf is, per symbol, the positions of the dependents

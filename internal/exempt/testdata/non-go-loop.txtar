@@ -1,0 +1,24 @@
+A symbolic link named like a C header that points at itself, in a directory that
+holds no package. No compiler can read a link that loops, so it is no source and
+names nothing: nothing is retained.
+
+-- go.mod --
+module example.com/loop
+
+go 1.27.0
+-- docs/loop.h.symlink --
+loop.h
+-- p/p.go --
+package p
+
+const Limit = 3
+
+var spare int
+
+func Run() {}
+-- main.go --
+package main
+
+import "example.com/loop/p"
+
+func main() { p.Run() }

@@ -1,7 +1,7 @@
 A function exported to C in a file importing "C". The load compiles with cgo
 disabled and then type-checks the file from its original sources with the C
-pseudo-package opaque, so the file is among the syntax the class walks. The
-exported function is a root, so the class retains nothing.
+pseudo-package opaque, so the file is among the syntax the class walks. The import
+makes the package hold a non-Go source, so every declaration of it is retained.
 
 -- go.mod --
 module example.com/app

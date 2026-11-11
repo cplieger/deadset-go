@@ -7,7 +7,6 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
-	"io/fs"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -47,26 +46,23 @@ func checkPrograms(ctx context.Context, fset *token.FileSet, from unitDir, pkgs 
 // of its package compiles because a sibling file declares main as well. A package a
 // script imports that pkgs do not hold is loaded from dir, so the script's own module
 // file decides it.
-func checkScripts(ctx context.Context, fset *token.FileSet, dir string, pkgs []*packages.Package, c *Configuration) []programFile {
-	return checkProgramFiles(ctx, fset, unitDir{dir: dir, workspace: workspaceOff}, pkgs, c, scriptPaths(dir, treeAt(dir), c))
+func checkScripts(ctx context.Context, top *Topology, fset *token.FileSet, dir string, pkgs []*packages.Package, c *Configuration) []programFile {
+	return checkProgramFiles(ctx, fset, unitDir{dir: dir, workspace: workspaceOff}, pkgs, c, top.scriptPaths(dir, treeAt(dir), c))
 }
 
 // scriptPaths lists, sorted, every Go file below the module root dir, in no nested
 // module and no directory tree skips, other than a test file, that configuration c
 // builds with or without the ignore tag and that declares a function main with no
 // receiver in package main, where another such file shares its directory.
-func scriptPaths(dir string, tree ModuleTree, c *Configuration) []string {
+func (top *Topology) scriptPaths(dir string, tree ModuleTree, c *Configuration) []string {
 	without := cgoEnabledContext(c)
 	with := cgoEnabledContext(c)
 	with.BuildTags = append(with.BuildTags, buildconstraint.IgnoreTag)
 	byDir := make(map[string][]string)
-	_ = WalkTree(dir, func(path string, entry fs.DirEntry, err error) error {
-		switch {
-		case err != nil:
-			return nil
-		case entry.IsDir() && path != dir && (tree.Skips(path) || IsModuleRoot(path)):
-			return filepath.SkipDir
-		case !entry.IsDir() && isScript(&without, &with, path):
+	enters := func(dir string) bool { return !tree.Skips(dir) && !IsModuleRoot(dir) }
+	// The visit returns no error, so neither does the walk.
+	_ = top.Walk(dir, enters, func(path string, kind Kind) error {
+		if kind == File && isScript(&without, &with, path) {
 			parent := filepath.Dir(path)
 			byDir[parent] = append(byDir[parent], path)
 		}

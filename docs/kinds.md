@@ -46,7 +46,7 @@ The kind reports nothing for a library whose published API is open world, becaus
 
 ### DS1002 unused-unexported
 
-An unexported declaration that is not a member of a type and that no reference names.
+An unexported declaration that is not a member of a type and that no reference names. A constant the `enum-group` exemption retains, one whose deletion moves a constant that code names or leaves one that no longer compiles, is never a candidate.
 
 A constant or a type a function body declares, a function literal's body included, is reported here when nothing in that body names it outside its own declaration. Such a declaration has no reference of its own, so the finding carries the enclosing declaration's reference and the local declaration's own position.
 
@@ -56,7 +56,7 @@ A struct field no reference names, whose container the analysis did not also fin
 
 ### DS1005 unused-enum-member
 
-A constant of an enumerated type that no reference names. The enumerated type is the one the `enum-group` exemption recognises, so a type whose values can arrive by conversion retains every member and no member of it reaches this kind. A member a reference names is not reported whichever file holds the reference, so a member only a test names is the test-only kind's subject. This kind takes precedence over the unused-exported and unused-unexported kinds for a constant of an enumerated type.
+A constant of an enumerated type that no reference names. The enumerated type is the one the `enum-group` exemption recognises. A member that exemption retains, one whose deletion the analysis does not prove leaves a program that builds and does the same, never reaches this kind. Where values of the member's type may still arrive from a decoder or from outside code, the message says so and that deleting the name changes no behaviour. A member a reference names is not reported whichever file holds the reference, so a member only a test names is the test-only kind's subject. This kind takes precedence over the unused-exported and unused-unexported kinds for a constant of an enumerated type.
 
 ### DS1006 unused-type-parameter
 
@@ -123,7 +123,7 @@ A compile-time satisfaction assertion is a package-level declaration of the blan
 
 A package-level variable or a struct field the references store into and never read, which means at least one write and no reference of any other kind. The finding names every write position. Its message says when only test files read the subject, and names any type parameter, import or declaration the deletion also removes. Such a declaration is one whose every use is in a reported subject's type or writes, and no finding is reported about it. A constant cannot be written and is no subject. A variable a function declares is the dead-store kind's subject instead.
 
-The subject is a live declaration, because a write is a reference and holds the symbol live. The kind asks whether anything reads the declaration, which is the question the liveness relations do not ask. A loaded consumer's write counts as a read. A read from a declaration nothing references, found dead at `certain`, is no read, so a variable live code writes and only such a declaration reads is reported. A type argument of a type parameter constrained by `comparable` has every field read, as a comparison of it does.
+The subject is a live declaration, because a write is a reference and holds the symbol live. The kind asks whether anything reads the declaration, which is the question the liveness relations do not ask. A loaded consumer's write counts as a read. A read from a declaration nothing references, found dead at `certain`, is no read, so a variable live code writes and only such a declaration reads is reported. A type argument of a type parameter constrained by `comparable` has every field read, as a comparison of it does. A field a formatting call prints, as the format-verb-contract walk reaches it, is read at the call.
 
 ## DS1400 to DS1499: inside functions
 

@@ -1,0 +1,21 @@
+Symbolic links named like C headers below testdata, one to a named pipe the test
+makes and one to a device, beside a header that names a function. Reading either
+link would block or never end, and neither is a file a compiler reads, so the run
+reads neither and retains only what the header names.
+
+-- go.mod --
+module example.com/pipe
+
+go 1.27.0
+-- docs/names.h --
+void named(void);
+-- testdata/p.h.symlink --
+pipe
+-- testdata/z.h.symlink --
+/dev/zero
+-- main.go --
+package main
+
+var named, spare int
+
+func main() {}

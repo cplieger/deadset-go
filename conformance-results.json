@@ -1,5 +1,5 @@
 {
-  "corpus_version": "6.1.0",
+  "corpus_version": "6.2.0",
   "product": {
     "name": "deadset-go",
     "version": "0.0.0-devel",
@@ -7,11 +7,11 @@
   },
   "result": "pass",
   "totals": {
-    "fixtures": 232,
-    "pass": 223,
+    "fixtures": 255,
+    "pass": 248,
     "gap": 0,
     "fail": 0,
-    "pending": 9
+    "pending": 7
   },
   "fixtures": [
     {
@@ -1866,9 +1866,287 @@
       "unexpected": []
     },
     {
-      "fixture": "encoding-reflection-field-walk-through-a-method-value",
-      "result": "pending",
+      "fixture": "encoding-reflection-field-walk-from-an-origin-it-cannot-follow",
+      "result": "pass",
       "expectations": [
+        {
+          "symbol": "R10.r10T.String",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "R10.r10bT.String",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "R10.spare.hint",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "R11.r11T.String",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "encoding-reflection-field-walk-through-a-method-value",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "R12.r12T.String",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "R12.r12T.hint",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "symbol_kind": "method",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "R13.r13T.String",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "R14.r14T.String",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "R15.r15T.String",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "R15.r15U.String",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "R15.r15U.hint",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "symbol_kind": "method",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "R16.r16T.String",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "R16.r16U.String",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "R16.r16U.hint",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "symbol_kind": "method",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "R17.r17T.String",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection",
+              "interface-satisfaction"
+            ]
+          }
+        },
+        {
+          "symbol": "R18.r18T.String",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "R18.r18U.String",
+          "result": "pass",
+          "actual": {
+            "report": "DS1101",
+            "symbol_kind": "method",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "R19.r19T.String",
+          "result": "pass",
+          "actual": {
+            "report": "DS1101",
+            "symbol_kind": "method",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "R4.r4T.String",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "R5.r5T.String",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "R6.r6T.String",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "R6.r6U.String",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "R7.r7T.String",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "R7.r7U.String",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "R8.r8T.String",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
         {
           "symbol": "chat.Mute",
           "result": "pass",
@@ -1876,8 +2154,7 @@
             "report": "DS1101",
             "symbol_kind": "method",
             "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reference-counting"
+            "reachability_class": "certain"
           },
           "suppression": {
             "suppressed": true,
@@ -1886,49 +2163,36 @@
         },
         {
           "symbol": "chat.Validate",
-          "result": "fail",
+          "result": "pass",
           "actual": {
-            "report": "DS1101",
-            "confidence": "certain"
-          },
-          "message": "want no finding at target/main.go:24, got DS1101"
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
         },
         {
           "symbol": "email.Validate",
-          "result": "fail",
+          "result": "pass",
           "actual": {
-            "report": "DS1101",
-            "confidence": "certain"
-          },
-          "message": "want no finding at target/main.go:18, got DS1101"
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
         },
         {
           "symbol": "pager.Validate",
-          "result": "fail",
+          "result": "pass",
           "actual": {
-            "report": "DS1101",
-            "confidence": "certain"
-          },
-          "message": "want no finding at target/main.go:33, got DS1101"
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
         }
       ],
-      "unexpected": [
-        {
-          "file": "target/main.go",
-          "line": 18,
-          "report": "DS1101"
-        },
-        {
-          "file": "target/main.go",
-          "line": 24,
-          "report": "DS1101"
-        },
-        {
-          "file": "target/main.go",
-          "line": 33,
-          "report": "DS1101"
-        }
-      ]
+      "unexpected": []
     },
     {
       "fixture": "encoding-reflection-filling-callee",
@@ -2660,6 +2924,385 @@
       "unexpected": []
     },
     {
+      "fixture": "encoding-reflection-template-in-a-library",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "T8.page.Body",
+          "result": "pass",
+          "actual": {
+            "report": "DS1003",
+            "symbol_kind": "field",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "T8.page.tag",
+          "result": "pass",
+          "actual": {
+            "report": "DS1003",
+            "symbol_kind": "field",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "encoding-reflection-template-names-an-unwritten-field",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "T1.page.Body",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "T10.inner10",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "T10.inner10.Body",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "T10.outer10.Inner",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "T11.priv11.Name",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "T11.priv11.secret",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "T12.item12.Name",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "T12.item12.Note",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "T13.inner13",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "T13.inner13.Body",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "T13.outer13.Inner",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "T14.item14.Note",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "T15.inner15",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "T15.inner15.Body",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "T15.item15.Note",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "T15.page15.Inner",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "T16.item16.Name",
+          "result": "pass",
+          "actual": {
+            "report": "DS1301",
+            "symbol_kind": "field",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "T16.item16.Note",
+          "result": "pass",
+          "actual": {
+            "report": "DS1003",
+            "symbol_kind": "field",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "T16.stored16.Name",
+          "result": "pass",
+          "actual": {
+            "report": "DS1301",
+            "symbol_kind": "field",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "T16.stored16.Note",
+          "result": "pass",
+          "actual": {
+            "report": "DS1003",
+            "symbol_kind": "field",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "T18.detail18.Body",
+          "result": "pass",
+          "actual": {
+            "report": "DS1003",
+            "symbol_kind": "field",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "T19.detail19.Body",
+          "result": "pass",
+          "actual": {
+            "report": "DS1003",
+            "symbol_kind": "field",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "T2.note.Body",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "T2.post.Body",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "T20.row20.Body",
+          "result": "pass",
+          "actual": {
+            "report": "DS1003",
+            "symbol_kind": "field",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "T3.card.Body",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "T4.page.Extra",
+          "result": "pass",
+          "actual": {
+            "report": "DS1003",
+            "symbol_kind": "field",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "T5.page.Draft",
+          "result": "pass",
+          "actual": {
+            "report": "DS1301",
+            "symbol_kind": "field",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "T6.story.Body",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "T9.whole.Body",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "T9.whole.Title",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
       "fixture": "encoding-reflection-template-read-through-a-file-system",
       "result": "pass",
       "expectations": [
@@ -2723,6 +3366,55 @@
           "result": "pass",
           "actual": {
             "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "encoding-reflection-template-the-analysis-cannot-read",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "T17.item17.Note",
+          "result": "pass",
+          "actual": {
+            "report": "DS1003",
+            "symbol_kind": "field",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "T7.page7.Body",
+          "result": "pass",
+          "actual": {
+            "report": "DS1003",
+            "symbol_kind": "field",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "T7.page7.tag",
+          "result": "pass",
+          "actual": {
+            "report": "DS1003",
+            "symbol_kind": "field",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         }
       ],
@@ -3331,14 +4023,10 @@
           "symbol": "line.Width",
           "result": "pass",
           "actual": {
-            "report": "DS1003",
-            "symbol_kind": "field",
-            "confidence": "certain",
-            "reachability_class": "certain"
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none",
+            "retained_by": [
+              "format-verb-contract"
+            ]
           }
         },
         {
@@ -3626,7 +4314,104 @@
           }
         },
         {
-          "symbol": "TierHigh",
+          "symbol": "TierMid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "enum-group-deleting-moves-no-named-constant",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "E20.levelHigh",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "symbol_kind": "enum-member",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "E20.levelMid",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "symbol_kind": "enum-member",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "E80.codeX",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "symbol_kind": "enum-member",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "enum-group-deletion-moves-one-step",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Alias.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "B",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Blank.Mid",
           "result": "pass",
           "actual": {
             "report": "none",
@@ -3636,13 +4421,612 @@
           }
         },
         {
-          "symbol": "TierMid",
+          "symbol": "Flag.Mid",
           "result": "pass",
           "actual": {
             "report": "none",
             "retained_by": [
               "enum-group"
             ]
+          }
+        },
+        {
+          "symbol": "Flag.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Floor.M1",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Floor.M2",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Keep.M",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Least.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Listed.X",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Power.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Power.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Ratio.Hidden",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Ratio.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Share.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Shift.Hidden",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Shift.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "State.Unknown",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Times.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Tiny.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Twin.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Twin.W",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Wave.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Wave.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "enum-group-kept-by-test-evidence",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "End",
+          "result": "pass",
+          "actual": {
+            "report": "DS1102",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "LogEnd",
+          "result": "pass",
+          "actual": {
+            "report": "DS1102",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "LogSpare",
+          "result": "pass",
+          "actual": {
+            "report": "DS1102",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Rank.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "DS1102",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Spare",
+          "result": "pass",
+          "actual": {
+            "report": "DS1102",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Tone.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "DS1102",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Tone.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "enum-group-only-by-a-decoding-method",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "formatSpare",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "symbol_kind": "enum-member",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "kindEnd",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "kindSpare",
+          "result": "pass",
+          "actual": {
+            "report": "DS1102",
+            "symbol_kind": "constant",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "modeSpare",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "symbol_kind": "enum-member",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "enum-group-only-compared-or-copied",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Box.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Described.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Described.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Held.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Holder",
+          "result": "pass",
+          "actual": {
+            "report": "DS1501",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "details": {
+              "narrower_visibility": "file"
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Named",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "confidence": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Named.A",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "confidence": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Named.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "confidence": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Named.Z",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "confidence": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Piped.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Plain.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Pointed.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Spread.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "UnusedCheck",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Valued.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         }
       ],
@@ -3661,6 +5045,1888 @@
         },
         {
           "symbol": "rttUntested",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "enum-group-reached-by-arithmetic",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "levelHigh",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "levelMid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "phaseRun",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "rankMid",
+          "result": "pass",
+          "actual": {
+            "report": "DS1102",
+            "symbol_kind": "constant",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "shadeDark",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "symbol_kind": "enum-member",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "shadeMid",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "symbol_kind": "enum-member",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "spareC",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "symbol_kind": "enum-member",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "stepThree",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "symbol_kind": "enum-member",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "stepTwo",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "symbol_kind": "enum-member",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "enum-group-sentinel-of-an-exported-group",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Classify",
+          "result": "pass",
+          "actual": {
+            "report": "DS1001",
+            "confidence": "possible",
+            "reachability_class": "possible",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "LibKind.A",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "LibKind.B",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "possible",
+            "reachability_class": "possible",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "LibKind.Hidden",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "LibKind.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "possible",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "LibMood.Happy",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "possible",
+            "reachability_class": "possible",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "LibMood.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "LibMood.Sad",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "LibMood.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "possible",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Marker.Unknown",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "enum-group-value-a-constant-names",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Above.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Above.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Aliased.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Crossed.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Declared.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "EqualLast.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Halved.B",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Halved.C",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Kind.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Kind2.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "LanesA.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "LanesB.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "LanesC.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Literal.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "LocalKind.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Maxed.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Own.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Pair.M1",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Pair.M2",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Returned.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Shifted.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Spelled.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Split.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "enum-group-value-a-consumer-produces",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "priorityMid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "severityMid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "enum-group-value-an-importer-hands-in",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "hushMid",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "symbol_kind": "enum-member",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "levelMid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "moodMid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "rankMid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "shadeMid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "volumeMid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "enum-group-value-an-importer-holds",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Hush.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Hush.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Inner.Loud",
+          "result": "pass",
+          "actual": {
+            "report": "DS1101",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Kind.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Level.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "LibKind.Hidden",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "LibMood.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "LibVolume.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Mood.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "PDef.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "PLevel.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Rank.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Shade.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Shade.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Volume.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "enum-group-value-an-importer-makes",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "kindHidden",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "kindLast",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "symbol_kind": "enum-member",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "shadeMid",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "symbol_kind": "enum-member",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "enum-group-value-arriving-by-no-name",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "AnyDecoded.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "AnyDecoded.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Both.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Both.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Boxed.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Boxed.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Counter.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Counter.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Embedded.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Embedded.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Fielded.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Fielded.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "First.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "First.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Iterated.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Iterated.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Keyed.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Keyed.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Overwritten.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Overwritten.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "PtrDecoded.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "DS1102",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "PtrDecoded.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Ranged.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Ranged.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "ReadBinary.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "ReadBinary.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Received.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Received.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Reflected.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Reflected.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Scanned.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Scanned.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Second.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Second.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Sent.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Sent.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Spread.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Spread.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Stepped.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Stepped.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "TOMLLevel.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "TOMLLevel.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Through.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Through.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "ViaPointer.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "ViaPointer.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "ViaUnsafe.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "ViaUnsafe.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "YAMLLevel.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "YAMLLevel.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "enum-group-value-made-where-the-analysis-cannot-see",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "bchSpare",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "cellSpare",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "colSpare",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "dialSpare",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "dropSpare",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "flavorSour",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "flavorSweet",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "gaugeHigh",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "gaugeMid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "gradeA",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "gradeB",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "grainCoarse",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "grainMid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "gripSpare",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "hueBlue",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "hueGreen",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "knobSpare",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "mkeySpare",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "paneSpare",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "phaseGone",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "rchSpare",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "schSpare",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "slabSpare",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "statusSpare",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "stepThree",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "stepTwo",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "tagSpare",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "tierMax",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "tierPro",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "tintSpare",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "vibeSpare",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "warpSpare",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "enum-group-value-observed-by-its-number",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Count.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Indexed.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Indexed.Tail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Length.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Level.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Linked.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Member.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Mode.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Printed.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Printed.Tail",
           "result": "pass",
           "actual": {
             "report": "DS1005",
@@ -4241,6 +7507,187 @@
           "suppression": {
             "suppressed": true,
             "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "format-verb-prints-fields-and-calls-formatters",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "P1.line.Price",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "format-verb-contract"
+            ]
+          }
+        },
+        {
+          "symbol": "P1.line.Tag",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "format-verb-contract"
+            ]
+          }
+        },
+        {
+          "symbol": "P1.money.Format",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "format-verb-contract"
+            ]
+          }
+        },
+        {
+          "symbol": "P1.tag.GoString",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "format-verb-contract"
+            ]
+          }
+        },
+        {
+          "symbol": "P2.inner2.n",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "format-verb-contract"
+            ]
+          }
+        },
+        {
+          "symbol": "P2.outer2.In",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "format-verb-contract"
+            ]
+          }
+        },
+        {
+          "symbol": "P3.code3.GoString",
+          "result": "pass",
+          "actual": {
+            "report": "DS1101",
+            "symbol_kind": "method",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "P4.outer4.V",
+          "result": "pass",
+          "actual": {
+            "report": "DS1301",
+            "symbol_kind": "field",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "P4.t4.String",
+          "result": "pass",
+          "actual": {
+            "report": "DS1101",
+            "symbol_kind": "method",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "P4.t4.n",
+          "result": "pass",
+          "actual": {
+            "report": "DS1301",
+            "symbol_kind": "field",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "P5.count5.L",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "format-verb-contract"
+            ]
+          }
+        },
+        {
+          "symbol": "P5.label5.String",
+          "result": "pass",
+          "actual": {
+            "report": "DS1101",
+            "symbol_kind": "method",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "P6.flags6.GoString",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "format-verb-contract"
+            ]
+          }
+        },
+        {
+          "symbol": "P7.hex7.GoString",
+          "result": "pass",
+          "actual": {
+            "report": "DS1101",
+            "symbol_kind": "method",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "P8.row8.Note",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
           }
         }
       ],
@@ -5700,6 +9147,77 @@
       "unexpected": []
     },
     {
+      "fixture": "iota-constant-deletion-renumbers",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "B",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "LocalMid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "LocalTail",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Q",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "TickMid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "Y",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
       "fixture": "local-constant-and-type",
       "result": "pass",
       "expectations": [
@@ -5851,7 +9369,8 @@
           "actual": {
             "report": "none",
             "retained_by": [
-              "encoding-reflection"
+              "encoding-reflection",
+              "format-verb-contract"
             ]
           }
         },
@@ -7208,6 +10727,240 @@
       "unexpected": []
     },
     {
+      "fixture": "non-go-source-retains-the-package",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "A.Probe",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "linkname-cgo-asm-plugin"
+            ]
+          }
+        },
+        {
+          "symbol": "A.probe",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "linkname-cgo-asm-plugin"
+            ]
+          }
+        },
+        {
+          "symbol": "A2.probe2",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "linkname-cgo-asm-plugin"
+            ]
+          }
+        },
+        {
+          "symbol": "Arch.helper",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "linkname-cgo-asm-plugin"
+            ]
+          }
+        },
+        {
+          "symbol": "Asm.bump",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "linkname-cgo-asm-plugin"
+            ]
+          }
+        },
+        {
+          "symbol": "Asm.c18Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "linkname-cgo-asm-plugin"
+            ]
+          }
+        },
+        {
+          "symbol": "Asm.ctx.a",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "linkname-cgo-asm-plugin"
+            ]
+          }
+        },
+        {
+          "symbol": "Asm.ctx.b",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "linkname-cgo-asm-plugin"
+            ]
+          }
+        },
+        {
+          "symbol": "Asm.cur",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "linkname-cgo-asm-plugin"
+            ]
+          }
+        },
+        {
+          "symbol": "Asm.fastPath",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "linkname-cgo-asm-plugin"
+            ]
+          }
+        },
+        {
+          "symbol": "Asm.gearMid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "linkname-cgo-asm-plugin"
+            ]
+          }
+        },
+        {
+          "symbol": "Asm.mode",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "linkname-cgo-asm-plugin"
+            ]
+          }
+        },
+        {
+          "symbol": "Asm.modeLast",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "linkname-cgo-asm-plugin"
+            ]
+          }
+        },
+        {
+          "symbol": "Asm.modeMid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "linkname-cgo-asm-plugin"
+            ]
+          }
+        },
+        {
+          "symbol": "Asm.modeOff",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "linkname-cgo-asm-plugin"
+            ]
+          }
+        },
+        {
+          "symbol": "Asm.powerMid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "linkname-cgo-asm-plugin"
+            ]
+          }
+        },
+        {
+          "symbol": "Asm.toneMid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "linkname-cgo-asm-plugin"
+            ]
+          }
+        },
+        {
+          "symbol": "Asm.toneZ",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "linkname-cgo-asm-plugin"
+            ]
+          }
+        },
+        {
+          "symbol": "C.lanesMid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "linkname-cgo-asm-plugin"
+            ]
+          }
+        },
+        {
+          "symbol": "C.lanesTwo",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "linkname-cgo-asm-plugin"
+            ]
+          }
+        },
+        {
+          "symbol": "C.wide",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Syso.levelHigh",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "linkname-cgo-asm-plugin"
+            ]
+          }
+        },
+        {
+          "symbol": "Syso.levelMid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "linkname-cgo-asm-plugin"
+            ]
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
       "fixture": "outside-destinations-callee-unexported-interfaces",
       "result": "pass",
       "expectations": [
@@ -7983,63 +11736,30 @@
           "symbol": "Low",
           "result": "pass",
           "actual": {
-            "report": "DS1001",
-            "symbol_kind": "constant",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reference-counting",
-            "fixability": "manual",
-            "component": {
-              "root": true,
-              "symbol_count": 1,
-              "deletable_lines": 0
-            }
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
           }
         },
         {
           "symbol": "Quiet",
           "result": "pass",
           "actual": {
-            "report": "DS1101",
-            "symbol_kind": "constant",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reference-counting",
-            "fixability": "manual",
-            "component": {
-              "root": true,
-              "symbol_count": 1,
-              "deletable_lines": 0
-            }
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
           }
         },
         {
           "symbol": "colorOld",
           "result": "pass",
           "actual": {
-            "report": "DS1104",
-            "symbol_kind": "constant",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reference-counting",
-            "fixability": "manual",
-            "component": {
-              "root": true,
-              "symbol_count": 1,
-              "deletable_lines": 0
-            }
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
           }
         },
         {
@@ -8088,21 +11808,10 @@
           "symbol": "probeA",
           "result": "pass",
           "actual": {
-            "report": "DS1102",
-            "symbol_kind": "constant",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reference-counting",
-            "fixability": "manual",
-            "component": {
-              "root": true,
-              "symbol_count": 1,
-              "deletable_lines": 0
-            }
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
           }
         },
         {
@@ -8137,17 +11846,16 @@
           "symbol": "sizer",
           "result": "pass",
           "actual": {
-            "report": "DS1201",
-            "symbol_kind": "interface",
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "sizer.size",
+          "result": "pass",
+          "actual": {
+            "report": "DS1202",
             "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reachability",
-            "fixability": "manual",
-            "component": {
-              "root": false,
-              "symbol_count": 3,
-              "deletable_lines": 0
-            }
+            "reachability_class": "certain"
           },
           "suppression": {
             "suppressed": true,
@@ -8158,21 +11866,10 @@
           "symbol": "sizerSlots",
           "result": "pass",
           "actual": {
-            "report": "DS1002",
-            "symbol_kind": "constant",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reference-counting",
-            "fixability": "manual",
-            "component": {
-              "root": true,
-              "symbol_count": 3,
-              "deletable_lines": 0
-            }
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
           }
         },
         {
@@ -8193,63 +11890,27 @@
           "symbol": "base",
           "result": "pass",
           "actual": {
-            "report": "DS1002",
-            "symbol_kind": "constant",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reference-counting",
-            "fixability": "manual",
-            "component": {
-              "root": true,
-              "symbol_count": 1,
-              "deletable_lines": 0
-            }
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
           }
         },
         {
           "symbol": "ceiling",
           "result": "pass",
           "actual": {
-            "report": "DS1002",
-            "symbol_kind": "constant",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reachability",
-            "fixability": "manual",
-            "component": {
-              "root": false,
-              "symbol_count": 2,
-              "deletable_lines": 0
-            }
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none"
           }
         },
         {
           "symbol": "deadPair",
           "result": "pass",
           "actual": {
-            "report": "DS1002",
-            "symbol_kind": "constant",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reference-counting",
-            "fixability": "manual",
-            "component": {
-              "root": true,
-              "symbol_count": 1,
-              "deletable_lines": 0
-            }
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
           }
         },
         {
@@ -8284,21 +11945,10 @@
           "symbol": "floor",
           "result": "pass",
           "actual": {
-            "report": "DS1002",
-            "symbol_kind": "constant",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reference-counting",
-            "fixability": "manual",
-            "component": {
-              "root": true,
-              "symbol_count": 1,
-              "deletable_lines": 0
-            }
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
           }
         },
         {
@@ -8319,42 +11969,20 @@
           "symbol": "levelLow",
           "result": "pass",
           "actual": {
-            "report": "DS1002",
-            "symbol_kind": "constant",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reference-counting",
-            "fixability": "manual",
-            "component": {
-              "root": true,
-              "symbol_count": 1,
-              "deletable_lines": 0
-            }
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
           }
         },
         {
           "symbol": "limit",
           "result": "pass",
           "actual": {
-            "report": "DS1002",
-            "symbol_kind": "constant",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reference-counting",
-            "fixability": "manual",
-            "component": {
-              "root": true,
-              "symbol_count": 1,
-              "deletable_lines": 0
-            }
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
           }
         },
         {
@@ -8368,84 +11996,37 @@
           "symbol": "loScaled",
           "result": "pass",
           "actual": {
-            "report": "DS1002",
-            "symbol_kind": "constant",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reference-counting",
-            "fixability": "manual",
-            "component": {
-              "root": true,
-              "symbol_count": 1,
-              "deletable_lines": 0
-            }
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
           }
         },
         {
           "symbol": "margin",
           "result": "pass",
           "actual": {
-            "report": "DS1002",
-            "symbol_kind": "constant",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reference-counting",
-            "fixability": "manual",
-            "component": {
-              "root": true,
-              "symbol_count": 2,
-              "deletable_lines": 0
-            }
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
           }
         },
         {
           "symbol": "mode",
           "result": "pass",
           "actual": {
-            "report": "DS1002",
-            "symbol_kind": "type",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reachability",
-            "fixability": "deletable",
-            "component": {
-              "root": false,
-              "symbol_count": 4,
-              "deletable_lines": 4
-            }
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none"
           }
         },
         {
           "symbol": "modeA",
           "result": "pass",
           "actual": {
-            "report": "DS1005",
-            "symbol_kind": "enum-member",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reference-counting",
-            "fixability": "deletable",
-            "component": {
-              "root": true,
-              "symbol_count": 4,
-              "deletable_lines": 4
-            }
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
           }
         },
         {
@@ -8460,8 +12041,8 @@
             "fixability": "deletable",
             "component": {
               "root": true,
-              "symbol_count": 4,
-              "deletable_lines": 4
+              "symbol_count": 2,
+              "deletable_lines": 2
             }
           },
           "suppression": {
@@ -8481,8 +12062,8 @@
             "fixability": "deletable",
             "component": {
               "root": true,
-              "symbol_count": 4,
-              "deletable_lines": 4
+              "symbol_count": 2,
+              "deletable_lines": 2
             }
           },
           "suppression": {
@@ -8494,42 +12075,20 @@
           "symbol": "pairA",
           "result": "pass",
           "actual": {
-            "report": "DS1002",
-            "symbol_kind": "constant",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reference-counting",
-            "fixability": "manual",
-            "component": {
-              "root": true,
-              "symbol_count": 1,
-              "deletable_lines": 0
-            }
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
           }
         },
         {
           "symbol": "pairB",
           "result": "pass",
           "actual": {
-            "report": "DS1002",
-            "symbol_kind": "constant",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reference-counting",
-            "fixability": "manual",
-            "component": {
-              "root": true,
-              "symbol_count": 1,
-              "deletable_lines": 0
-            }
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
           }
         },
         {
@@ -8564,21 +12123,10 @@
           "symbol": "phaseIdle",
           "result": "pass",
           "actual": {
-            "report": "DS1005",
-            "symbol_kind": "enum-member",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reference-counting",
-            "fixability": "manual",
-            "component": {
-              "root": true,
-              "symbol_count": 1,
-              "deletable_lines": 0
-            }
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
           }
         },
         {
@@ -8613,105 +12161,47 @@
           "symbol": "qa",
           "result": "pass",
           "actual": {
-            "report": "DS1002",
-            "symbol_kind": "constant",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reference-counting",
-            "fixability": "deletable",
-            "component": {
-              "root": true,
-              "symbol_count": 4,
-              "deletable_lines": 4
-            }
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
           }
         },
         {
           "symbol": "qb",
           "result": "pass",
           "actual": {
-            "report": "DS1002",
-            "symbol_kind": "constant",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reference-counting",
-            "fixability": "deletable",
-            "component": {
-              "root": true,
-              "symbol_count": 4,
-              "deletable_lines": 4
-            }
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
           }
         },
         {
           "symbol": "qc",
           "result": "pass",
           "actual": {
-            "report": "DS1002",
-            "symbol_kind": "constant",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reference-counting",
-            "fixability": "deletable",
-            "component": {
-              "root": true,
-              "symbol_count": 4,
-              "deletable_lines": 4
-            }
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
           }
         },
         {
           "symbol": "qd",
           "result": "pass",
           "actual": {
-            "report": "DS1002",
-            "symbol_kind": "constant",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reference-counting",
-            "fixability": "deletable",
-            "component": {
-              "root": true,
-              "symbol_count": 4,
-              "deletable_lines": 4
-            }
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
           }
         },
         {
           "symbol": "scale",
           "result": "pass",
           "actual": {
-            "report": "DS1002",
-            "symbol_kind": "constant",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reachability",
-            "fixability": "manual",
-            "component": {
-              "root": false,
-              "symbol_count": 2,
-              "deletable_lines": 0
-            }
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none"
           }
         },
         {
@@ -8725,21 +12215,10 @@
           "symbol": "spacer",
           "result": "pass",
           "actual": {
-            "report": "DS1002",
-            "symbol_kind": "constant",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reference-counting",
-            "fixability": "manual",
-            "component": {
-              "root": true,
-              "symbol_count": 1,
-              "deletable_lines": 0
-            }
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
           }
         },
         {
@@ -8753,21 +12232,10 @@
           "symbol": "spareA",
           "result": "pass",
           "actual": {
-            "report": "DS1002",
-            "symbol_kind": "constant",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reference-counting",
-            "fixability": "deletable",
-            "component": {
-              "root": true,
-              "symbol_count": 2,
-              "deletable_lines": 2
-            }
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
           }
         },
         {
@@ -8782,8 +12250,8 @@
             "fixability": "deletable",
             "component": {
               "root": true,
-              "symbol_count": 2,
-              "deletable_lines": 2
+              "symbol_count": 1,
+              "deletable_lines": 1
             }
           },
           "suppression": {
@@ -8816,21 +12284,10 @@
           "symbol": "stepA",
           "result": "pass",
           "actual": {
-            "report": "DS1002",
-            "symbol_kind": "constant",
-            "confidence": "certain",
-            "reachability_class": "certain",
-            "liveness_relation": "reference-counting",
-            "fixability": "manual",
-            "component": {
-              "root": true,
-              "symbol_count": 2,
-              "deletable_lines": 0
-            }
-          },
-          "suppression": {
-            "suppressed": true,
-            "stale": false
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
           }
         },
         {
@@ -8857,11 +12314,16 @@
       "unexpected": []
     },
     {
-      "fixture": "proto-facts-leave-report-unchanged-go",
-      "result": "pending",
+      "fixture": "proto-facts-leave-report-unchanged",
+      "result": "pass",
       "expectations": [],
-      "unexpected": [],
-      "message": "want the generated entry gen/v1/service_grpc.pb.go:1 header \"// Code generated by protoc-gen-go-grpc. DO NOT EDIT.\" by protoc-gen-go-grpc-unsupported  from []; the generated entry gen/v1/service_grpc.pb.go:1 header \"// Code generated by protoc-gen-go-grpc. DO NOT EDIT.\" by protoc-gen-go-grpc-1-fallback  from [], which no entry names"
+      "unexpected": []
+    },
+    {
+      "fixture": "proto-facts-leave-report-unchanged-go",
+      "result": "pass",
+      "expectations": [],
+      "unexpected": []
     },
     {
       "fixture": "proto-field-read-by-getter",
@@ -9439,12 +12901,76 @@
           }
         },
         {
+          "symbol": "fieldLevel.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "fieldLevel.Top",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
           "symbol": "label.String",
           "result": "pass",
           "actual": {
             "report": "none",
             "retained_by": [
               "format-verb-contract"
+            ]
+          }
+        },
+        {
+          "symbol": "literalLevel.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "mapLevel.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "methodLevel.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
+            ]
+          }
+        },
+        {
+          "symbol": "paramLevel.Mid",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "enum-group"
             ]
           }
         },
