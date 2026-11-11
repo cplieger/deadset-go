@@ -1,7 +1,7 @@
 github.com/cplieger/deadset-spec/v8 v8.0.0-dev.57 h1:9Om3RkGCJCPi/89yf1NThKHC3aEfRazvnn9nPTXnZwM=
 github.com/cplieger/deadset-spec/v8 v8.0.0-dev.57/go.mod h1:gsjxe/X/LMrvvg2+a05Whp4pO9p/MfDbSDFa3HLiOR4=
-github.com/cplieger/go/filesafe v1.1.0-dev.1 h1:Bq3CWSGT0LgHqQhqYwdkFBpLruQmIFk5+nWbgvuGoy8=
-github.com/cplieger/go/filesafe v1.1.0-dev.1/go.mod h1:ji4TnJD8S8kgKelJlCQxlHyX0UXQGTW1ylSBqH5xqhI=
+github.com/cplieger/go/filesafe v1.1.0 h1:zCInOHIkszZQKNxIQvPgaFg592E5J27+/2hfbPmzEfA=
+github.com/cplieger/go/filesafe v1.1.0/go.mod h1:ji4TnJD8S8kgKelJlCQxlHyX0UXQGTW1ylSBqH5xqhI=
 github.com/dlclark/regexp2 v1.11.0 h1:G/nrcoOa7ZXlpoa/91N3X7mM3r8eIlMBBJZvsz/mxKI=
 github.com/dlclark/regexp2 v1.11.0/go.mod h1:DHkYz0B9wPfa6wondMfaivmHpzrQ3v9q8cnmRbL6yW8=
 github.com/google/go-cmp v0.6.0 h1:ofyhxvXcZhMsU5ulbFiLKl/XBFqE1GSq7atu8tAmTRI=
