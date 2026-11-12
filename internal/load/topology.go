@@ -20,8 +20,8 @@ import (
 // moduleFileName is the file that makes a directory the root of a module.
 const moduleFileName = "go.mod"
 
-// ErrModuleFile reports a module file that cannot be read or parsed.
-var ErrModuleFile = errors.New("load: unreadable module file")
+// errModuleFile reports a module file that cannot be read or parsed.
+var errModuleFile = errors.New("load: unreadable module file")
 
 // goRow is the Go row of the Contract's language table.
 var goRow, _ = vocab.LanguageRowOf(vocab.Go)
@@ -366,6 +366,9 @@ func irregularEnvFile(dir string) (EnvFile, bool) {
 	return file, hides(file.Path)
 }
 
+// declaredConsumers is the module at each declared consumer's directory, in the
+// scope's order, with the module file the toolchain run there reads, its error
+// named relative to root. A module file that is no regular file ends discovery.
 func declaredConsumers(ctx context.Context, root scope.Root, declared []scope.Module) ([]discoveredModule, error) {
 	var consumers []discoveredModule
 	for _, d := range declared {
@@ -629,7 +632,8 @@ func (top *Topology) readers(ctx context.Context, declared []scope.Module) ([]di
 
 // replacedUnits is the module path of every unit m's module file requires and
 // replaces with that unit's own directory, which is how a module below the target
-// builds against the target's tree rather than a published version of it.
+// builds against the target's tree rather than a published version of it. An
+// absolute replace through a link to that directory is that directory.
 func (top *Topology) replacedUnits(m *discoveredModule) []string {
 	if m.File == nil {
 		return nil
@@ -668,7 +672,8 @@ func (top *Topology) isUnit(dir string) bool {
 	return slices.ContainsFunc(top.Units, func(u discoveredModule) bool { return sameDir(u.Dir, dir) })
 }
 
-// declares reports whether a scope declares the module at dir as a consumer.
+// declares reports whether a scope declares the module at dir as a consumer,
+// whichever way the scope and dir spell it.
 func declares(declared []scope.Module, dir string) bool {
 	return slices.ContainsFunc(declared, func(m scope.Module) bool { return sameDir(m.Path, dir) })
 }
@@ -694,14 +699,14 @@ func readModuleFile(root scope.Root, dir string) (*ModuleFile, error) {
 func parseModuleFile(root scope.Root, path string) (*ModuleFile, error) {
 	text, err := scope.ReadRegularFile(root, path)
 	if errors.Is(err, scope.ErrIrregular) {
-		return nil, failure.WrapFix(vocab.SetupUnreadableConfiguration, fmt.Errorf("%w: %w", ErrModuleFile, err), scope.IrregularFix)
+		return nil, failure.WrapFix(vocab.SetupUnreadableConfiguration, fmt.Errorf("%w: %w", errModuleFile, err), scope.IrregularFix)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrModuleFile, err)
+		return nil, fmt.Errorf("%w: %w", errModuleFile, err)
 	}
 	syntax, err := modfile.Parse(root.Rel(path), text, nil)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrModuleFile, err)
+		return nil, fmt.Errorf("%w: %w", errModuleFile, err)
 	}
 	return &ModuleFile{Path: path, Text: text, Syntax: syntax}, nil
 }
@@ -864,7 +869,8 @@ func irregularKind(path string) string {
 
 // Rel is path relative to the root, as every path a setup failure line or a note
 // names is ([program.10]), placed where both resolve ([scope.Root.Rel]): with `..`
-// segments where it is outside the root.
+// segments where it is outside the root. Only [Discover] sets the root; a
+// Topology made otherwise has the zero [scope.Root] and names nothing relative.
 func (top *Topology) Rel(path string) string { return top.root.Rel(path) }
 
 // openable reports whether the run can open the regular file at path.

@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/cplieger/deadset-go/v2/internal/memory"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -71,6 +72,10 @@ type Result struct {
 	// directory declaring it, and to nothing where two do.
 	declared map[string]string
 
+	// root is the target root the load names the files it checks whole by
+	// ([Result.Respell]).
+	root scope.Root
+
 	Configuration Configuration
 }
 
@@ -98,19 +103,24 @@ type Dropped struct {
 	Err error
 	Dir string
 
-	requires  []string // the modules its module file requires
-	readable  bool     // whether that file, and the workspace file governing Dir, could be read
-	irregular bool     // whether a file no toolchain may run under dropped it
-	offline   bool     // whether its scripts' toolchain would read such a file
+	requires []string // the modules its module file requires
+
+	// Unreadable reports that its module file, or the workspace file governing
+	// Dir, could not be read, so it may require any unit and every export of the
+	// target is possible ([Result.markUnanalysedConsumers]).
+	Unreadable bool
+
+	irregular bool // whether a file no toolchain may run under dropped it
+	offline   bool // whether its scripts' toolchain would read such a file
 }
 
 // droppedOf is m dropped with err.
 func droppedOf(m *discoveredModule, err error) Dropped {
 	d := Dropped{
-		Dir: m.Dir, Err: err, readable: m.File != nil && m.FileErr == nil && m.WorkspaceErr == nil,
+		Dir: m.Dir, Err: err, Unreadable: m.File == nil || m.FileErr != nil || m.WorkspaceErr != nil,
 		irregular: irregular(m.Refused), offline: m.scriptsBlock,
 	}
-	if d.readable {
+	if !d.Unreadable {
 		d.requires = m.File.required()
 	}
 	return d
@@ -126,7 +136,7 @@ func (r *Result) markUnanalysedConsumers(unread bool) {
 	}
 	for _, dropped := range r.Dropped {
 		for i := range r.Units {
-			if !dropped.readable || slices.Contains(dropped.requires, r.Units[i].Path) {
+			if dropped.Unreadable || slices.Contains(dropped.requires, r.Units[i].Path) {
 				r.Units[i].UnanalysedConsumer = true
 			}
 		}
@@ -138,6 +148,11 @@ func (r *Result) markUnanalysedConsumers(unread bool) {
 func (r *Result) Referencing() []Consumer {
 	return slices.Concat(r.Consumers, r.Nested)
 }
+
+// Respell is path as the target root spells it where the root holds it, and path
+// itself elsewhere: the name the load gives every file it checks whole, so a
+// consumer's directory the root holds through a link still holds its files.
+func (r *Result) Respell(path string) string { return r.root.Respell(path) }
 
 // Unit returns r narrowed to the unit rooted at dir: its packages alone, so an
 // answer about one module's build list or imports reads that module's load. It

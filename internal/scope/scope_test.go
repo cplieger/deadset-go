@@ -438,6 +438,40 @@ func TestRootRelNamesAPathWhereBothResolve(t *testing.T) {
 	}
 }
 
+// A path the root holds is named as the root spells it, however the path reaches
+// it; a path the root does not hold, and any path of the zero Root, keeps its name.
+func TestRootRespellNamesAPathTheRootHoldsAsTheRootSpellsIt(t *testing.T) {
+	base := sandbox.Dir(t)
+	real := filepath.Join(base, "real")
+	for _, dir := range []string{filepath.Join(real, "app", "sub"), filepath.Join(real, "other")} {
+		if err := sandbox.MkdirAll(dir, 0o750); err != nil {
+			t.Fatalf("Setup: %v", err)
+		}
+	}
+	alias := filepath.Join(sandbox.Dir(t), "alias")
+	if err := sandbox.Symlink(real, alias); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	app, linkedApp := filepath.Join(real, "app"), filepath.Join(alias, "app")
+	for _, tc := range []struct {
+		name       string
+		root       Root
+		path, want string
+	}{
+		{"a path below by its names", RootOf(app), filepath.Join(app, "sub", "x.go"), filepath.Join(app, "sub", "x.go")},
+		{"a path below spelled through a link", RootOf(app), filepath.Join(linkedApp, "sub", "x.go"), filepath.Join(app, "sub", "x.go")},
+		{"a root spelled through a link", RootOf(linkedApp), filepath.Join(app, "sub"), filepath.Join(linkedApp, "sub")},
+		{"a path outside the root", RootOf(app), filepath.Join(alias, "other", "x.go"), filepath.Join(alias, "other", "x.go")},
+		{"the zero Root", Root{}, filepath.Join(linkedApp, "sub"), filepath.Join(linkedApp, "sub")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.root.Respell(tc.path); got != tc.want {
+				t.Errorf("Respell(%s) = %q, want %q", tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestAnInputTheInvocationNamesThatCannotBeReadIsErrNamed(t *testing.T) {
 	_, refused := writeDocument(t, `{"target": {"path": "."}, "unknown": true}`)
 	file := filepath.Join(sandbox.Dir(t), "file")

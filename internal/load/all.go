@@ -32,7 +32,7 @@ type Matrix struct {
 
 // NewMatrix starts the loads of top.
 func NewMatrix(top *Topology) *Matrix {
-	return &Matrix{top: top, trees: newSyntaxCache()}
+	return &Matrix{top: top, trees: newSyntaxCache(top.root)}
 }
 
 // Load loads one configuration of the matrix, as [Load] does.

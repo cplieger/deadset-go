@@ -1,7 +1,6 @@
 package run
 
 import (
-	"errors"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -60,7 +59,8 @@ func (l *Loaded) notes() ([]report.Note, error) {
 // naming the first failure that dropped it. A module below the target root, where
 // both resolve ([load.Topology.Rel]), is named by its directory; a workspace
 // reader outside it is named at the root, and only where its module file cannot be
-// read, which makes every export of the target possible.
+// read. A module whose module or workspace file cannot be read makes every export
+// of the target possible, and any other an export of a module it requires.
 func (l *Loaded) droppedNotes() []report.Note {
 	var notes []report.Note
 	seen := make(map[string]bool)
@@ -68,15 +68,19 @@ func (l *Loaded) droppedNotes() []report.Note {
 		for _, dropped := range l.loads.outlines[i].dropped {
 			directory := l.Topology.Rel(dropped.Dir)
 			below := filepath.IsLocal(filepath.FromSlash(directory))
-			if seen[directory] || !below && !errors.Is(dropped.Err, load.ErrModuleFile) {
+			if seen[directory] || !below && !dropped.Unreadable {
 				continue
 			}
 			seen[directory] = true
+			possible := "an export of a module it requires is possible"
+			if dropped.Unreadable {
+				possible = "every export of the target is possible"
+			}
 			note := report.Note{
 				Kind: report.NoteKindModuleNotLoaded,
 				Path: directory,
 				Message: "module " + directory + " is below the target and does not load, so the run does not analyze it, " +
-					"and an export of a module it requires is possible: " + firstLine(dropped.Err.Error()),
+					"and " + possible + ": " + firstLine(dropped.Err.Error()),
 			}
 			if !below {
 				note.Path = "."

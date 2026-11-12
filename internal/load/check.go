@@ -11,6 +11,7 @@ import (
 	"go/types"
 	"maps"
 	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/buildconstraint"
 	"github.com/cplieger/deadset-go/v2/internal/memory"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -37,13 +39,17 @@ const (
 // configurations check it (each records its own type information over it), and
 // lists, each module listing the matrix ran ([syntaxCache.list]). decls is the store
 // of the packages checked for their declarations alone, nil where each is checked
-// afresh, and fset its file set.
+// afresh, and fset its file set. A file checked whole is named as root spells it
+// where root holds it ([syntaxCache.named]), and spelled the directory of each
+// file named so far.
 type syntaxCache struct {
-	fset  *token.FileSet
-	decls *declarationStore
-	files map[syntaxKey]*parsedFile
-	lists map[string]*listing
-	mu    sync.Mutex
+	fset    *token.FileSet
+	decls   *declarationStore
+	files   map[syntaxKey]*parsedFile
+	lists   map[string]*listing
+	spelled map[string]string
+	root    scope.Root
+	mu      sync.Mutex
 }
 
 // declarationStore holds each package checked for its declarations alone, shared by
@@ -84,13 +90,34 @@ type syntaxKey struct {
 	name    string
 }
 
-func newSyntaxCache() *syntaxCache {
+// newSyntaxCache is the cache of one matrix over the target at root.
+func newSyntaxCache(root scope.Root) *syntaxCache {
 	return &syntaxCache{
-		fset:  processDeclarations.fset,
-		decls: processDeclarations,
-		files: make(map[syntaxKey]*parsedFile),
-		lists: make(map[string]*listing),
+		fset:    processDeclarations.fset,
+		decls:   processDeclarations,
+		files:   make(map[syntaxKey]*parsedFile),
+		lists:   make(map[string]*listing),
+		root:    root,
+		spelled: make(map[string]string),
 	}
+}
+
+// named is the name a file checked whole is parsed under: as the root spells it
+// where the root holds it, so a consumer's load that reaches a file of the target
+// through a link writes its declarations at the file the target's own load names,
+// and the name the toolchain reported otherwise.
+func (t *syntaxCache) named(name string) string {
+	dir := filepath.Dir(name)
+	t.mu.Lock()
+	spelled, held := t.spelled[dir]
+	t.mu.Unlock()
+	if !held {
+		spelled = t.root.Respell(dir)
+		t.mu.Lock()
+		t.spelled[dir] = spelled
+		t.mu.Unlock()
+	}
+	return filepath.Join(spelled, filepath.Base(name))
 }
 
 // typeCheck type-checks every package reachable from roots, each after its imports,
@@ -411,6 +438,7 @@ func (c *checker) parse(name string, whole bool) (*ast.File, error) {
 	if !whole {
 		return c.parseOnce(name, signatureParse)
 	}
+	name = c.trees.named(name)
 	key := syntaxKey{reading: c.reading, name: name}
 	c.trees.mu.Lock()
 	v, held := c.trees.files[key]

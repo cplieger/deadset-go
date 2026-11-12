@@ -111,7 +111,7 @@ func HostConfiguration() Configuration {
 // load is dropped into [Result.Dropped] instead while a unit is left. Load makes no
 // network request, runs no compiler and pins the settings that decide what loads.
 func Load(ctx context.Context, top *Topology, c *Configuration) (Result, error) {
-	return load(ctx, top, c, newSyntaxCache())
+	return load(ctx, top, c, newSyntaxCache(top.root))
 }
 
 // load is [Load] over trees, which a [Matrix] shares across its configurations.
@@ -131,7 +131,7 @@ func load(ctx context.Context, top *Topology, c *Configuration, trees *syntaxCac
 	}
 	defer remove()
 	l := &loader{ctx: ctx, top: top, c: c, trees: trees, toolchain: toolchain{overlay: overlay, noEnvFile: top.noEnvFile}}
-	r := Result{Configuration: *c, Fset: trees.fset}
+	r := Result{Configuration: *c, Fset: trees.fset, root: trees.root}
 	if failed := l.units(&r); failed != nil {
 		return Result{}, failed
 	}

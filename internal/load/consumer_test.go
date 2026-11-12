@@ -170,13 +170,16 @@ func TestLoadRefusesAConsumerItCannotCount(t *testing.T) {
 
 func TestLoadRefusesAnAbsentConsumerAsAMissingConsumer(t *testing.T) {
 	stableToolchain(t)
-	absent := filepath.Join(sandbox.Dir(t), "missing")
+	absent, err := filepath.Abs(filepath.Join("testdata", "consumed", "missing"))
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
 	doc := consumedScope(t)
 	doc.Consumers = append(doc.Consumers, scope.Module{Path: absent})
 
 	got, err := loadScope(t.Context(), doc, HostConfiguration())
 
-	assertMissingConsumer(t, "a scope naming an absent consumer", err, doc.Target.Path, absent)
+	assertMissingConsumer(t, "a scope naming an absent consumer", err, absent, "../missing")
 	if !reflect.DeepEqual(got, Result{}) {
 		t.Errorf("Load(a scope naming an absent consumer) = %+v, want the zero Result", got)
 	}
@@ -186,27 +189,24 @@ func TestLoadRefusesAnAbsentConsumerAsAMissingConsumer(t *testing.T) {
 // installed, which is the second arm of the missing-consumer class.
 func TestLoadRefusesAConsumerWhoseDependenciesAreNotInstalledAsAMissingConsumer(t *testing.T) {
 	stableToolchain(t)
-	consumer := sandbox.Dir(t)
-	for name, body := range map[string]string{
-		"go.mod":  "module example.com/uninstalled\n\ngo 1.27.1\n\nrequire example.com/nowhere v1.0.0\n",
-		"main.go": "package main\n\nimport \"example.com/nowhere\"\n\nfunc main() { nowhere.Run() }\n",
-	} {
-		if err := sandbox.WriteFile(filepath.Join(consumer, name), []byte(body), 0o600); err != nil {
-			t.Fatalf("Setup: write %s: %v", name, err)
-		}
-	}
-	doc := consumedScope(t)
-	doc.Consumers = append(doc.Consumers, scope.Module{Path: consumer})
+	root := writeTree(t, map[string]string{
+		"target/go.mod":       "module example.com/consumed\n\ngo 1.27.1\n",
+		"target/lib.go":       "// Package consumed exports one declaration.\npackage consumed\n\n// Used is what nothing references.\nfunc Used() {}\n",
+		"uninstalled/go.mod":  "module example.com/uninstalled\n\ngo 1.27.1\n\nrequire example.com/nowhere v1.0.0\n",
+		"uninstalled/main.go": "package main\n\nimport \"example.com/nowhere\"\n\nfunc main() { nowhere.Run() }\n",
+	})
+	consumer := filepath.Join(root, "uninstalled")
+	doc := scope.Document{Target: scope.Module{Path: filepath.Join(root, "target")}, Consumers: []scope.Module{{Path: consumer}}}
 
 	_, err := loadScope(t.Context(), doc, HostConfiguration())
 
-	assertMissingConsumer(t, "a scope naming a consumer whose import nothing provides", err, doc.Target.Path, consumer, "example.com/nowhere")
+	assertMissingConsumer(t, "a scope naming a consumer whose import nothing provides", err, consumer, "../uninstalled", "example.com/nowhere")
 }
 
 // assertMissingConsumer checks that a load ended with one missing-consumer setup
-// failure whose line names the consumer at dir relative to the target root, never
-// by its absolute path, and every string of want.
-func assertMissingConsumer(t *testing.T, what string, err error, root, dir string, want ...string) {
+// failure whose line names the consumer at dir by relative, its path from the
+// target root, never by its absolute path, and every string of want.
+func assertMissingConsumer(t *testing.T, what string, err error, dir, relative string, want ...string) {
 	t.Helper()
 	setup, ok := errors.AsType[*failure.Error](err)
 	if !ok || len(setup.Failures) == 0 {
@@ -216,14 +216,12 @@ func assertMissingConsumer(t *testing.T, what string, err error, root, dir strin
 		if one.Class != vocab.SetupMissingConsumer {
 			t.Errorf("Load(%s) failed with the class %q, want %q", what, one.Class, vocab.SetupMissingConsumer)
 		}
-		relative := scope.RootOf(root).Rel(dir)
-		for _, text := range append(want, "consumer "+relative) {
+		for _, text := range append(want, "consumer "+relative+" ") {
 			if !strings.Contains(one.Class+": "+one.Detail, text) {
 				t.Errorf("Load(%s) line = %q, want it to name %q", what, one.Class+": "+one.Detail, text)
 			}
 		}
-		// Where root and dir share only /, the relative spelling ends with dir itself.
-		if strings.Contains(strings.ReplaceAll(one.Detail, relative, ""), dir) {
+		if strings.Contains(one.Detail, dir) {
 			t.Errorf("Load(%s) line = %q, want no absolute path in it", what, one.Class+": "+one.Detail)
 		}
 	}
@@ -239,7 +237,7 @@ func TestLoadRefusesAConsumerThatDoesNotTypeCheck(t *testing.T) {
 	if !errors.As(err, &failure) {
 		t.Fatalf("Load(a scope naming a consumer that does not type-check) = _, %v, want a *Error", err)
 	}
-	if want := scope.RootOf(doc.Target.Path).Rel(doc.Consumers[0].Path); failure.Module != want || filepath.Base(want) != "broken" {
+	if want := "../broken"; failure.Module != want {
 		t.Errorf("(*Error).Module = %q, want the broken consumer relative to the target root, %q", failure.Module, want)
 	}
 	if len(failure.Diagnostics) == 0 {
@@ -299,6 +297,28 @@ func TestSameDir(t *testing.T) {
 				t.Errorf("sameDir(%q, %q) = %t, want %t", a, b, got, test.want)
 			}
 		})
+	}
+}
+
+// A directory and a link to it are one directory, and a directory beside it is
+// another, whatever the names say.
+func TestSameDirResolvesBothPaths(t *testing.T) {
+	base := sandbox.Dir(t)
+	dir, other := filepath.Join(base, "dir"), filepath.Join(base, "other")
+	for _, made := range []string{dir, other} {
+		if err := sandbox.MkdirAll(made, 0o750); err != nil {
+			t.Fatalf("Setup: %v", err)
+		}
+	}
+	link := filepath.Join(sandbox.Dir(t), "link")
+	if err := sandbox.Symlink(dir, link); err != nil {
+		t.Skipf("Setup: this host makes no such symbolic link: %v", err)
+	}
+	if !sameDir(link, dir) || !sameDir(dir, link) {
+		t.Errorf("sameDir(%s, %s) = false, want true: the link leads to the directory", link, dir)
+	}
+	if sameDir(link, other) {
+		t.Errorf("sameDir(%s, %s) = true, want false", link, other)
 	}
 }
 

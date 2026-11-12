@@ -442,8 +442,8 @@ func TestLoadDropsAWorkspaceReaderWhoseModuleFileOnlyTheToolchainReads(t *testin
 	if err != nil {
 		t.Fatalf("Load(a workspace whose reader's module file cannot be read) = _, %v, want no error", err)
 	}
-	if len(got.Dropped) != 1 || got.Dropped[0].Dir != filepath.Join(root, "app") || !errors.Is(got.Dropped[0].Err, ErrModuleFile) {
-		t.Fatalf("Load() dropped %+v, want the app reader alone, with %v", got.Dropped, ErrModuleFile)
+	if len(got.Dropped) != 1 || got.Dropped[0].Dir != filepath.Join(root, "app") || !errors.Is(got.Dropped[0].Err, errModuleFile) {
+		t.Fatalf("Load() dropped %+v, want the app reader alone, with %v", got.Dropped, errModuleFile)
 	}
 	if len(got.Nested) != 0 || !got.Units[0].UnanalysedConsumer {
 		t.Errorf("Load() read the nested consumers %v and flagged the unit %t, want none and true", got.Nested, got.Units[0].UnanalysedConsumer)
@@ -520,8 +520,8 @@ func TestDiscoverReadsAReaderModuleFileInItsOwnDirectoryAlone(t *testing.T) {
 		"outer/reader/main.go": "package main\n\nfunc main() {}\n",
 	})
 	top := discovered(t, scope.Document{Target: scope.Module{Path: filepath.Join(root, "lib")}})
-	if len(top.Readers) != 1 || top.Readers[0].Dir != filepath.Join(root, "outer", "reader") || !errors.Is(top.Readers[0].FileErr, ErrModuleFile) {
-		t.Errorf("Discover() read the readers %+v, want outer/reader alone, with %v", top.Readers, ErrModuleFile)
+	if len(top.Readers) != 1 || top.Readers[0].Dir != filepath.Join(root, "outer", "reader") || !errors.Is(top.Readers[0].FileErr, errModuleFile) {
+		t.Errorf("Discover() read the readers %+v, want outer/reader alone, with %v", top.Readers, errModuleFile)
 	}
 }
 

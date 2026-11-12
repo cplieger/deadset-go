@@ -148,7 +148,9 @@ func (top *Topology) consumerModuleOf(pkgs []*packages.Package, declared *discov
 // resolvesTarget refuses a consumer whose module graph holds the target module at
 // a directory other than the one being analyzed: its references would count
 // against a copy, and the symbols it uses would be reported. A consumer that
-// imports nothing of the target holds the module nowhere and contributes no
+// reaches the analyzed directory through a link, as a consumer the scope spells
+// through one does by its relative replace, holds the target itself. A consumer
+// that imports nothing of the target holds the module nowhere and contributes no
 // reference, which is an answer.
 func (top *Topology) resolvesTarget(pkgs []*packages.Package, path string, main *packages.Module) error {
 	if main == nil || main.Path == "" || main.Dir == "" {
@@ -167,12 +169,19 @@ func (top *Topology) resolvesTarget(pkgs []*packages.Package, path string, main 
 		errConsumer, top.Rel(path), main.Path, top.Rel(resolved), top.Rel(main.Dir))
 }
 
-// sameDir reports whether two paths name one directory, comparing them lexically
-// the way every other path of a run is compared: a root spelled through a
-// symbolic link is a different spelling of the same directory, and the analysis
-// reads the spelling the toolchain reported.
+// sameDir reports whether two paths name one directory where both resolve: by
+// their names, or as one file on disk, as a link to a directory and that
+// directory are. A path that cannot be read is one directory only by its names.
 func sameDir(a, b string) bool {
-	return filepath.Clean(a) == filepath.Clean(b)
+	if filepath.Clean(a) == filepath.Clean(b) {
+		return true
+	}
+	first, err := os.Stat(a)
+	if err != nil {
+		return false
+	}
+	second, err := os.Stat(b)
+	return err == nil && os.SameFile(first, second)
 }
 
 // mainModule returns the module the given root packages belong to, and nil when

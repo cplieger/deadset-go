@@ -176,7 +176,8 @@ func Within(dir, path string) (string, bool) { return RootOf(dir).Within(path) }
 
 // Root is a directory paths are named relative to, as the run spells it and as
 // it resolves, resolved once: one directory spelled two ways, as macOS spells
-// /private/var through its /var link, is one root.
+// /private/var through its /var link, is one root. The zero Root is no root, and
+// its methods place nothing below it: make one with [RootOf].
 type Root struct {
 	path, resolved string
 }
@@ -236,6 +237,16 @@ func (r Root) Rel(path string) string {
 		return filepath.ToSlash(path)
 	}
 	return filepath.ToSlash(relative)
+}
+
+// Respell is path in the root's own spelling where the root holds it
+// ([Root.Within]), so two spellings of one file below the root are one name, and
+// path itself elsewhere.
+func (r Root) Respell(path string) string {
+	if relative, inside := r.Within(path); inside {
+		return filepath.Join(r.path, filepath.FromSlash(relative))
+	}
+	return path
 }
 
 // Resolved is path, made absolute, with its nearest directory that exists

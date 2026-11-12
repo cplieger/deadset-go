@@ -2,7 +2,6 @@ package run
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -36,7 +35,7 @@ func TestDroppedNotesNameAReaderWhoseModuleFileCannotBeReadAtTheRoot(t *testing.
 	top, base := discoveredTarget(t)
 	l := &Loaded{Root: top.Root, Topology: top, loads: &loads{outlines: []outline{{dropped: []load.Dropped{
 		{Dir: filepath.Join(base, "app", "tool"), Err: errors.New("tool does not load")},
-		{Dir: filepath.Join(base, "reader"), Err: fmt.Errorf("load: %w", load.ErrModuleFile)},
+		{Dir: filepath.Join(base, "reader"), Err: errors.New("load: unreadable module file"), Unreadable: true},
 		{Dir: filepath.Join(base, "broken"), Err: errors.New("broken does not load")},
 	}}}}}
 
@@ -103,8 +102,8 @@ func TestNotesNameAPathSpelledThroughALinkWhereItResolves(t *testing.T) {
 	top.EnvFiles = []load.EnvFile{{Path: filepath.Join(alias, "app", "env"), Named: true}, {Path: filepath.Join(alias, "env"), Named: true}}
 	p := &Prepared{Loaded: &Loaded{Root: top.Root, Topology: top, loads: &loads{outlines: []outline{{
 		dropped: []load.Dropped{
-			{Dir: filepath.Join(alias, "app", "tool"), Err: errors.New("tool does not load")},
-			{Dir: filepath.Join(alias, "reader"), Err: fmt.Errorf("load: %w", load.ErrModuleFile)},
+			{Dir: filepath.Join(alias, "app", "tool"), Err: errors.New("load: unreadable module file"), Unreadable: true},
+			{Dir: filepath.Join(alias, "reader"), Err: errors.New("load: unreadable module file"), Unreadable: true},
 		},
 		hidden: []string{filepath.Join(app, "p", "x.go"), filepath.Join(alias, "app", "p", "x.go"), filepath.Join(alias, "b", "q", "x.go")},
 	}}}}}
@@ -121,7 +120,7 @@ func TestNotesNameAPathSpelledThroughALinkWhereItResolves(t *testing.T) {
 		". the go env file GOENV names, env, is no regular file",
 		"data data cannot be read",
 		"p/x.go p/x.go is a pipe",
-		"tool module tool is below the target",
+		"tool module tool is below the target and does not load, so the run does not analyze it, and every export of the target is possible",
 	}
 	matched := len(got) == len(want)
 	for i := range want {
