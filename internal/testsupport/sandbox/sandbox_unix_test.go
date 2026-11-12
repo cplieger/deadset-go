@@ -57,7 +57,11 @@ func TestRefusesEveryPathOutsideItsRoots(t *testing.T) {
 			})
 		}
 		t.Run(tc.name+"_inside_the_root", func(t *testing.T) {
-			if err := tc.make(filepath.Join(root, tc.name)); err != nil {
+			err := tc.make(filepath.Join(root, tc.name))
+			if err != nil && tc.name == "a_socket" && !errors.Is(err, sandbox.ErrOutside) {
+				t.Skipf("Setup: this host makes no Unix socket at %s: %v", filepath.Join(root, tc.name), err)
+			}
+			if err != nil {
 				t.Errorf("making %s inside the root = %v, want no error", tc.name, err)
 			}
 		})

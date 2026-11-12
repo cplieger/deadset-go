@@ -216,12 +216,14 @@ func assertMissingConsumer(t *testing.T, what string, err error, root, dir strin
 		if one.Class != vocab.SetupMissingConsumer {
 			t.Errorf("Load(%s) failed with the class %q, want %q", what, one.Class, vocab.SetupMissingConsumer)
 		}
-		for _, text := range append(want, "consumer "+scope.RelativeSlash(root, dir)) {
+		relative := scope.RelativeSlash(root, dir)
+		for _, text := range append(want, "consumer "+relative) {
 			if !strings.Contains(one.Class+": "+one.Detail, text) {
 				t.Errorf("Load(%s) line = %q, want it to name %q", what, one.Class+": "+one.Detail, text)
 			}
 		}
-		if strings.Contains(one.Detail, dir) {
+		// Where root and dir share only /, the relative spelling ends with dir itself.
+		if strings.Contains(strings.ReplaceAll(one.Detail, relative, ""), dir) {
 			t.Errorf("Load(%s) line = %q, want no absolute path in it", what, one.Class+": "+one.Detail)
 		}
 	}
