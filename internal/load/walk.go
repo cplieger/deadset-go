@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"slices"
 	"syscall"
-
-	"github.com/cplieger/deadset-go/v2/internal/scope"
 )
 
 // Kind is what one entry of a tree is to every walk of it, decided before anything
@@ -119,7 +117,7 @@ func (top *Topology) record(path string, kind Kind) {
 	case Unread:
 		top.AddUnread(path)
 	case leftOut:
-		if top.holds(path) && !slices.Contains(top.LeftOut, path) {
+		if top.Holds(path) && !slices.Contains(top.LeftOut, path) {
 			top.LeftOut = append(top.LeftOut, path)
 		}
 	}
@@ -128,12 +126,14 @@ func (top *Topology) record(path string, kind Kind) {
 // AddUnread records one more path at or below the target root the analysis cannot
 // read.
 func (top *Topology) AddUnread(path string) {
-	if top.holds(path) && !slices.Contains(top.Unread, path) {
+	if top.Holds(path) && !slices.Contains(top.Unread, path) {
 		top.Unread = append(top.Unread, path)
 	}
 }
 
-// holds reports whether path is the target root or lies below it.
-func (top *Topology) holds(path string) bool {
-	return sameDir(top.Root, path) || scope.Below(top.Root, path)
+// Holds reports whether the entry at path is the target root or lies below it,
+// where both directories resolve ([scope.Root.PlaceEntry]).
+func (top *Topology) Holds(path string) bool {
+	_, inside := top.root.PlaceEntry(path)
+	return inside
 }

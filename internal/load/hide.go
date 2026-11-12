@@ -442,7 +442,7 @@ func (top *Topology) obscured(r *Result) (hidden, dirs []string) {
 // r's units ([program.4]).
 func (r *Result) inUnitTree(dir string) bool {
 	return slices.ContainsFunc(r.Units, func(u Unit) bool {
-		return (sameDir(u.Dir, dir) || scope.Below(u.Dir, dir)) && treeAt(u.Dir).within(u.Dir, dir)
+		return treeAt(u.Dir).within(scope.RootOf(u.Dir), dir)
 	})
 }
 
@@ -568,7 +568,7 @@ func (top *Topology) dirsOf(importPath string) []string {
 	}
 	var dirs []string
 	for _, m := range top.local {
-		if rest, found := strings.CutPrefix(importPath, m.Module); found && (rest == "" || rest[0] == '/') {
+		if rest, found := scope.UnderName(m.Module, importPath); found {
 			dirs = append(dirs, filepath.Join(m.Dir, filepath.FromSlash(rest)))
 		}
 	}

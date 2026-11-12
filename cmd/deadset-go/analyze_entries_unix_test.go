@@ -462,7 +462,9 @@ func TestAnalyzeMeetsAFileTheToolchainWouldBlockOn(t *testing.T) {
 		{
 			name: "a_package_holding_a_pipe_imported_through_a_link_to_an_ancestor", entry: "p/r/x.go", tree: ancestor,
 			links: map[string]string{"p/q/up": ".."}, make: sandbox.Fifo, code: "findings",
-			hidden:   []string{"p/q/up/r/x.go p/q/up/r/x.go", "p/r/x.go p/r/x.go"},
+			// The scan hides the pipe at both spellings, and the note names it once,
+			// where its directory resolves.
+			hidden:   []string{"p/r/x.go p/r/x.go"},
 			findings: map[string]vocab.Class{"unused": vocab.Certain, "q.go": vocab.Certain, "r.go": vocab.Certain},
 		},
 		{

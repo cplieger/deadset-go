@@ -4,9 +4,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/cplieger/deadset-go/v2/internal/failure"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
@@ -162,26 +162,11 @@ func (top *Topology) resolvesTarget(pkgs []*packages.Package, path string, main 
 			resolved = p.Module.Dir
 		}
 	})
-	if resolved == "" || sameDir(resolved, main.Dir) {
+	if resolved == "" || scope.Same(resolved, main.Dir) {
 		return nil
 	}
 	return fmt.Errorf("%w: %s: it resolves %s at %s rather than at %s. A consumer reaches the target through a replace directive in its own module file or through a workspace the scope declares",
 		errConsumer, top.Rel(path), main.Path, top.Rel(resolved), top.Rel(main.Dir))
-}
-
-// sameDir reports whether two paths name one directory where both resolve: by
-// their names, or as one file on disk, as a link to a directory and that
-// directory are. A path that cannot be read is one directory only by its names.
-func sameDir(a, b string) bool {
-	if filepath.Clean(a) == filepath.Clean(b) {
-		return true
-	}
-	first, err := os.Stat(a)
-	if err != nil {
-		return false
-	}
-	second, err := os.Stat(b)
-	return err == nil && os.SameFile(first, second)
 }
 
 // mainModule returns the module the given root packages belong to, and nil when

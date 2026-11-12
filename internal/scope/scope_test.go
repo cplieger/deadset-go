@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -367,64 +368,79 @@ func TestReadRefusesEveryPublishedScopeNegative(t *testing.T) {
 	}
 }
 
-func TestWithinPlacesAPathByItsNamesThenWhereBothResolve(t *testing.T) {
-	base := sandbox.Dir(t)
-	real := filepath.Join(base, "real")
-	if err := sandbox.MkdirAll(filepath.Join(real, "app", "sub"), 0o750); err != nil {
-		t.Fatalf("Setup: %v", err)
-	}
-	alias := filepath.Join(base, "alias")
-	if err := sandbox.Symlink(real, alias); err != nil {
-		t.Fatalf("Setup: %v", err)
-	}
-	outside := filepath.Join(base, "outside")
-	if err := sandbox.Symlink(filepath.Join(real, "app"), filepath.Join(real, "inner")); err != nil {
-		t.Fatalf("Setup: %v", err)
-	}
-	for _, tc := range []struct {
-		name, dir, path, want string
-		inside                bool
-	}{
-		{"the directory itself", real, real, ".", true},
-		{"a path below by its names", real, filepath.Join(real, "app", "sub"), "app/sub", true},
-		{"a link inside the directory keeps its name", base, filepath.Join(real, "inner"), "real/inner", true},
-		{"the directory spelled through a link", alias, filepath.Join(real, "app"), "app", true},
-		{"the path spelled through a link", real, filepath.Join(alias, "app", "sub"), "app/sub", true},
-		{"a link below a path spelled through a link keeps its name", real, filepath.Join(alias, "inner", "sub"), "inner/sub", true},
-		{"a sibling", filepath.Join(real, "app"), base, "", false},
-		{"a path that resolves nowhere", real, outside, "", false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got, inside := Within(tc.dir, tc.path)
-			if got != tc.want || inside != tc.inside {
-				t.Errorf("Within(%s, %s) = %q, %v, want %q, %v", tc.dir, tc.path, got, inside, tc.want, tc.inside)
-			}
-		})
-	}
-}
-
-// A path is named relative to a root where both resolve: by Within where the root
-// holds it, and otherwise from the resolved root to where the path's directory
-// resolves, with `..` segments, whichever spelling either side has.
-func TestRootRelNamesAPathWhereBothResolve(t *testing.T) {
-	base := sandbox.Dir(t)
-	real := filepath.Join(base, "real")
+// linkedTree is a directory real holding app/sub and other, a link alias to real
+// in another directory, and a link real/inner to real/app inside it.
+func linkedTree(t *testing.T) (base, real, alias string) {
+	t.Helper()
+	base = sandbox.Dir(t)
+	real = filepath.Join(base, "real")
 	for _, dir := range []string{filepath.Join(real, "app", "sub"), filepath.Join(real, "other")} {
 		if err := sandbox.MkdirAll(dir, 0o750); err != nil {
 			t.Fatalf("Setup: %v", err)
 		}
 	}
-	alias := filepath.Join(sandbox.Dir(t), "alias")
+	alias = filepath.Join(sandbox.Dir(t), "alias")
 	if err := sandbox.Symlink(real, alias); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	if err := sandbox.Symlink(filepath.Join(real, "app"), filepath.Join(real, "inner")); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
+	return base, real, alias
+}
+
+// A directory is placed where it resolves, a link on its path or the directory
+// itself, and an entry where its directory resolves, keeping its own name.
+func TestPlaceComparesAPathAndTheRootWhereBothResolve(t *testing.T) {
+	base, real, alias := linkedTree(t)
+	for _, tc := range []struct {
+		name, root, path, want string
+		entry, inside          bool
+	}{
+		{"the root itself", real, real, ".", false, true},
+		{"the root itself as an entry", real, real, ".", true, true},
+		{"the root spelled through a link, as an entry", real, alias, ".", true, true},
+		{"a link from outside the root to it, as an entry", filepath.Join(real, "app"), filepath.Join(real, "inner"), ".", true, true},
+		{"an entry spelled through a link outside and one inside", filepath.Join(real, "app"), filepath.Join(alias, "inner", "sub"), "sub", true, true},
+		{"a directory below by its names", real, filepath.Join(real, "app", "sub"), "app/sub", false, true},
+		{"a link inside the root, as a directory", base, filepath.Join(real, "inner"), "real/app", false, true},
+		{"a link inside the root, as an entry", base, filepath.Join(real, "inner"), "real/inner", true, true},
+		{"a directory below an in-tree link", real, filepath.Join(real, "inner", "sub"), "app/sub", false, true},
+		{"an entry below an in-tree link", real, filepath.Join(real, "inner", "sub", "x.go"), "app/sub/x.go", true, true},
+		{"the root spelled through a link", alias, filepath.Join(real, "app"), "app", false, true},
+		{"a path spelled through a link", real, filepath.Join(alias, "app", "sub"), "app/sub", false, true},
+		{"a path through a link outside and one inside", real, filepath.Join(alias, "inner", "sub"), "app/sub", false, true},
+		{"a sibling", filepath.Join(real, "app"), base, "", false, false},
+		{"a path that does not exist", real, filepath.Join(alias, "none", "y.go"), "none/y.go", true, true},
+		{"a path that resolves nowhere", real, filepath.Join(base, "outside"), "", false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			place := RootOf(tc.root).Place
+			if tc.entry {
+				place = RootOf(tc.root).PlaceEntry
+			}
+			got, inside := place(tc.path)
+			if got != tc.want || inside != tc.inside {
+				t.Errorf("RootOf(%s) placing %s (entry %v) = %q, %v, want %q, %v", tc.root, tc.path, tc.entry, got, inside, tc.want, tc.inside)
+			}
+		})
+	}
+	if got, inside := (Root{}).Place(real); inside {
+		t.Errorf("the zero Root places %s at %q, want nowhere", real, got)
+	}
+}
+
+// A path is named relative to a root where both resolve: as PlaceEntry places it
+// where the root holds it, and otherwise from the resolved root to where the
+// path's directory resolves, with `..` segments, whichever spelling either side
+// has.
+func TestRootRelNamesAPathWhereBothResolve(t *testing.T) {
+	base, real, alias := linkedTree(t)
 	for _, tc := range []struct{ name, root, path, want string }{
 		{"the root itself", filepath.Join(real, "app"), filepath.Join(real, "app"), "."},
 		{"a path below by its names", real, filepath.Join(real, "app", "sub"), "app/sub"},
 		{"a link inside the root keeps its name", base, filepath.Join(real, "inner"), "real/inner"},
+		{"a path below an in-tree link", real, filepath.Join(real, "inner", "sub", "x.go"), "app/sub/x.go"},
 		{"a path below spelled through a link", filepath.Join(real, "app"), filepath.Join(alias, "app", "sub", "x.go"), "sub/x.go"},
 		{"a path outside spelled through a link", filepath.Join(real, "app"), filepath.Join(alias, "other", "x.go"), "../other/x.go"},
 		{"a path outside the root spelled through a link", filepath.Join(alias, "app"), filepath.Join(real, "other", "x.go"), "../other/x.go"},
@@ -438,30 +454,23 @@ func TestRootRelNamesAPathWhereBothResolve(t *testing.T) {
 	}
 }
 
-// A path the root holds is named as the root spells it, however the path reaches
-// it; a path the root does not hold, and any path of the zero Root, keeps its name.
-func TestRootRespellNamesAPathTheRootHoldsAsTheRootSpellsIt(t *testing.T) {
-	base := sandbox.Dir(t)
-	real := filepath.Join(base, "real")
-	for _, dir := range []string{filepath.Join(real, "app", "sub"), filepath.Join(real, "other")} {
-		if err := sandbox.MkdirAll(dir, 0o750); err != nil {
-			t.Fatalf("Setup: %v", err)
-		}
-	}
-	alias := filepath.Join(sandbox.Dir(t), "alias")
-	if err := sandbox.Symlink(real, alias); err != nil {
-		t.Fatalf("Setup: %v", err)
-	}
+// A directory the root holds is named as the root spells it, however the path
+// reaches it, through a link outside the root or one inside it; a directory the
+// root does not hold, and any path of the zero Root, keeps its name.
+func TestRootRespellNamesADirectoryTheRootHoldsAsTheRootSpellsIt(t *testing.T) {
+	_, real, alias := linkedTree(t)
 	app, linkedApp := filepath.Join(real, "app"), filepath.Join(alias, "app")
 	for _, tc := range []struct {
 		name       string
 		root       Root
 		path, want string
 	}{
-		{"a path below by its names", RootOf(app), filepath.Join(app, "sub", "x.go"), filepath.Join(app, "sub", "x.go")},
-		{"a path below spelled through a link", RootOf(app), filepath.Join(linkedApp, "sub", "x.go"), filepath.Join(app, "sub", "x.go")},
+		{"a directory below by its names", RootOf(app), filepath.Join(app, "sub"), filepath.Join(app, "sub")},
+		{"a directory below spelled through a link", RootOf(app), filepath.Join(linkedApp, "sub"), filepath.Join(app, "sub")},
+		{"a directory below an in-tree link", RootOf(real), filepath.Join(real, "inner", "sub"), filepath.Join(real, "app", "sub")},
+		{"the root through an in-tree link", RootOf(app), filepath.Join(real, "inner"), app},
 		{"a root spelled through a link", RootOf(linkedApp), filepath.Join(app, "sub"), filepath.Join(linkedApp, "sub")},
-		{"a path outside the root", RootOf(app), filepath.Join(alias, "other", "x.go"), filepath.Join(alias, "other", "x.go")},
+		{"a directory outside the root", RootOf(app), filepath.Join(alias, "other"), filepath.Join(alias, "other")},
 		{"the zero Root", Root{}, filepath.Join(linkedApp, "sub"), filepath.Join(linkedApp, "sub")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -469,6 +478,114 @@ func TestRootRespellNamesAPathTheRootHoldsAsTheRootSpellsIt(t *testing.T) {
 				t.Errorf("Respell(%s) = %q, want %q", tc.path, got, tc.want)
 			}
 		})
+	}
+	// A file is respelled at its module's directory and keeps the names below it, so
+	// a package reached through a link inside its module keeps its own name.
+	for _, tc := range []struct{ name, module, path, want string }{
+		{"a file of a module spelled through a link", linkedApp, filepath.Join(linkedApp, "sub", "x.go"), filepath.Join(app, "sub", "x.go")},
+		{"a file of a module reached through an in-tree link", filepath.Join(real, "inner"), filepath.Join(real, "inner", "x.go"), filepath.Join(app, "x.go")},
+		{"a file below an in-tree link of its module", real, filepath.Join(real, "inner", "x.go"), filepath.Join(real, "inner", "x.go")},
+		{"a file outside its module's directory", app, filepath.Join(real, "other", "x.go"), filepath.Join(real, "other", "x.go")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := RootOf(real).RespellIn(tc.module, tc.path); got != tc.want {
+				t.Errorf("RespellIn(%s, %s) = %q, want %q", tc.module, tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
+// Two paths are one directory exactly where both resolve to one, and an entry is
+// one entry where its directories do and its names agree.
+func TestSameIsOneDirectoryWhereBothResolve(t *testing.T) {
+	base, real, alias := linkedTree(t)
+	for _, tc := range []struct {
+		name, a, b string
+		want       bool
+	}{
+		{"identical", real, real, true},
+		{"a trailing separator", real + string(filepath.Separator), real, true},
+		{"an unnormalized parent", filepath.Join(real, "other", "..", "app"), filepath.Join(real, "app"), true},
+		{"a link outside and its directory", alias, real, true},
+		{"its directory and a link outside", real, alias, true},
+		{"an in-tree link and its directory", filepath.Join(real, "inner"), filepath.Join(real, "app"), true},
+		{"a different directory", filepath.Join(real, "app"), filepath.Join(real, "other"), false},
+		{"one below the other", filepath.Join(real, "app", "sub"), filepath.Join(real, "app"), false},
+		{"a link and a sibling of its directory", alias, base, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Same(tc.a, tc.b); got != tc.want {
+				t.Errorf("Same(%s, %s) = %v, want %v", tc.a, tc.b, got, tc.want)
+			}
+		})
+	}
+	if !SameEntry(filepath.Join(alias, "app", "x.go"), filepath.Join(real, "app", "x.go")) {
+		t.Errorf("SameEntry of x.go spelled through %s and in %s = false, want true", alias, real)
+	}
+	if SameEntry(filepath.Join(real, "inner"), filepath.Join(real, "app")) {
+		t.Errorf("SameEntry(%s, %s) = true, want false: the link is an entry of its own", filepath.Join(real, "inner"), filepath.Join(real, "app"))
+	}
+}
+
+// The directory a run accepts as the target's is the directory it renames the
+// target's files into: where Same holds two spellings one directory, Respell gives
+// both one name, through a link outside the root, a link inside it to the root, and
+// a case variant on a volume that folds case. The bind-mount case follows by
+// construction: Same and Respell place a path through the one resolver.
+func TestSameDirectoriesAreRespelledAlike(t *testing.T) {
+	base := sandbox.Dir(t)
+	app := filepath.Join(base, "real", "app")
+	if err := sandbox.MkdirAll(filepath.Join(app, "sub"), 0o750); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	alias := filepath.Join(sandbox.Dir(t), "alias")
+	if err := sandbox.Symlink(filepath.Join(base, "real"), alias); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	if err := sandbox.Symlink(".", filepath.Join(app, "link")); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	spellings := []string{filepath.Join(alias, "app"), filepath.Join(app, "link"), filepath.Join(alias, "app", "link", "sub", "..")}
+	if folded := filepath.Join(base, "REAL", "APP"); foldsCase(base) {
+		spellings = append(spellings, folded)
+	} else {
+		t.Logf("%s keeps the case of a name, so no case variant of %s names it", base, app)
+	}
+	root := RootOf(app)
+	for _, a := range spellings {
+		if Same(a, app) && root.Respell(a) != root.Respell(app) {
+			t.Errorf("Same(%s, %s) holds, but Respell names them %q and %q", a, app, root.Respell(a), root.Respell(app))
+		}
+		if !Same(a, app) && root.Respell(a) == root.Respell(app) {
+			t.Errorf("Same(%s, %s) fails, but Respell names both %q", a, app, root.Respell(app))
+		}
+	}
+}
+
+// foldsCase reports whether the volume holding dir finds an entry by a name that
+// differs from it only in case.
+func foldsCase(dir string) bool {
+	_, err := os.Stat(strings.ToUpper(dir))
+	return err == nil && strings.ToUpper(dir) != dir
+}
+
+// A slash name is below another by whole elements, and names nothing to resolve.
+func TestUnderNamePlacesASlashNameByWholeElements(t *testing.T) {
+	for _, tc := range []struct {
+		prefix, name, rest string
+		under              bool
+	}{
+		{"example.com/m", "example.com/m", "", true},
+		{"example.com/m", "example.com/m/sub/pkg", "sub/pkg", true},
+		{"example.com/m", "example.com/mod", "", false},
+		{"example.com/m", "example.com", "", false},
+		{"", "example.com", "", false},
+		{".", "./x", "x", true},
+	} {
+		rest, under := UnderName(tc.prefix, tc.name)
+		if under != tc.under || rest != tc.rest {
+			t.Errorf("UnderName(%q, %q) = %q, %v, want %q, %v", tc.prefix, tc.name, rest, under, tc.rest, tc.under)
+		}
 	}
 }
 

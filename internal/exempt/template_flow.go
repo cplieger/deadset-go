@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 )
 
 // valueFlow follows a value of the program back to the expressions that may have
@@ -524,12 +526,13 @@ type fsRoot struct {
 // match is the files of the root one fs.Glob pattern matches.
 func (r fsRoot) match(pattern string) []string {
 	var held []string
+	root := scope.RootOf(r.dir)
 	for _, file := range r.files {
-		rel, err := filepath.Rel(r.dir, file)
-		if err != nil {
+		rel, inside := root.PlaceEntry(file)
+		if !inside {
 			continue
 		}
-		if matched, err := path.Match(pattern, filepath.ToSlash(rel)); err == nil && matched {
+		if matched, err := path.Match(pattern, rel); err == nil && matched {
 			held = append(held, file)
 		}
 	}

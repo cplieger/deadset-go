@@ -153,7 +153,7 @@ func pathedFiles(t *testing.T, root string) []pathed {
 	unit := top.Units[0]
 	var found []pathed
 	err := collect(top, unit.Dir, unit.Path, unit.File, func(path string, expression constraint.Expr) {
-		found = append(found, pathed{path: scope.RelativeSlash(root, path), file: expression})
+		found = append(found, pathed{path: scope.RootOf(root).Rel(path), file: expression})
 	})
 	if err != nil {
 		t.Fatalf("Setup: read the constraints under %s: %v", root, err)

@@ -101,10 +101,10 @@ func neverBuilt(in *pass) ([]ignoredFile, error) {
 	if len(ignored) == 0 {
 		return nil, nil
 	}
-	cgo := in.artifacts.cgo
+	cgo, root := in.artifacts.cgo, scope.RootOf(in.Root)
 	files := make([]ignoredFile, 0, len(ignored))
 	for _, path := range slices.Sorted(maps.Keys(ignored)) {
-		relative := scope.RelativeSlash(in.Root, path)
+		relative := root.Rel(path)
 		if cgo[relative] {
 			continue
 		}
@@ -461,7 +461,7 @@ func moduleFragment(module, fragment string) string {
 // relative to the target root, which spans the one line it is written on.
 func (in *pass) directivePosition(m *ModuleFile, site token.Position) Position {
 	return Position{
-		Path:    scope.RelativeSlash(in.Root, filepath.Join(m.Dir, site.Filename)),
+		Path:    scope.RootOf(in.Root).Rel(filepath.Join(m.Dir, site.Filename)),
 		Line:    site.Line,
 		Column:  site.Column,
 		EndLine: site.Line,

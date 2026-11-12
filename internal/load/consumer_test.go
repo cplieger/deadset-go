@@ -10,7 +10,6 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/failure"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
-	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
@@ -276,49 +275,6 @@ func TestLoadWithNoConsumerCarriesNone(t *testing.T) {
 
 	if got.Consumers != nil {
 		t.Errorf("Load(a scope declaring no consumer).Consumers = %+v, want nil", got.Consumers)
-	}
-}
-
-func TestSameDir(t *testing.T) {
-	cases := map[string]struct {
-		a, b string
-		want bool
-	}{
-		"identical":              {a: "/src/app", b: "/src/app", want: true},
-		"a trailing separator":   {a: "/src/app/", b: "/src/app", want: true},
-		"an unnormalized parent": {a: "/src/lib/../app", b: "/src/app", want: true},
-		"a different directory":  {a: "/src/app", b: "/src/other", want: false},
-		"one below the other":    {a: "/src/app/inner", b: "/src/app", want: false},
-	}
-	for name, test := range cases {
-		t.Run(name, func(t *testing.T) {
-			a, b := filepath.FromSlash(test.a), filepath.FromSlash(test.b)
-			if got := sameDir(a, b); got != test.want {
-				t.Errorf("sameDir(%q, %q) = %t, want %t", a, b, got, test.want)
-			}
-		})
-	}
-}
-
-// A directory and a link to it are one directory, and a directory beside it is
-// another, whatever the names say.
-func TestSameDirResolvesBothPaths(t *testing.T) {
-	base := sandbox.Dir(t)
-	dir, other := filepath.Join(base, "dir"), filepath.Join(base, "other")
-	for _, made := range []string{dir, other} {
-		if err := sandbox.MkdirAll(made, 0o750); err != nil {
-			t.Fatalf("Setup: %v", err)
-		}
-	}
-	link := filepath.Join(sandbox.Dir(t), "link")
-	if err := sandbox.Symlink(dir, link); err != nil {
-		t.Skipf("Setup: this host makes no such symbolic link: %v", err)
-	}
-	if !sameDir(link, dir) || !sameDir(dir, link) {
-		t.Errorf("sameDir(%s, %s) = false, want true: the link leads to the directory", link, dir)
-	}
-	if sameDir(link, other) {
-		t.Errorf("sameDir(%s, %s) = true, want false", link, other)
 	}
 }
 

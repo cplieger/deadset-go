@@ -35,7 +35,7 @@ func (l *Loaded) notes() ([]report.Note, error) {
 		for _, p := range result.Packages {
 			if p.Module != nil && p.Module.Main {
 				imported.add(p)
-				addPublishable(directories, l.Root, result, p, &l.Merged.Tests)
+				addPublishable(directories, l.Topology, result, p, &l.Merged.Tests)
 			}
 		}
 		imported.addReaders(result)
@@ -57,7 +57,7 @@ func (l *Loaded) notes() ([]report.Note, error) {
 
 // droppedNotes is one note per module directory some configuration dropped,
 // naming the first failure that dropped it. A module below the target root, where
-// both resolve ([load.Topology.Rel]), is named by its directory; a workspace
+// both resolve ([load.Topology.Holds]), is named by its directory; a workspace
 // reader outside it is named at the root, and only where its module file cannot be
 // read. A module whose module or workspace file cannot be read makes every export
 // of the target possible, and any other an export of a module it requires.
@@ -67,7 +67,7 @@ func (l *Loaded) droppedNotes() []report.Note {
 	for i := range l.loads.outlines {
 		for _, dropped := range l.loads.outlines[i].dropped {
 			directory := l.Topology.Rel(dropped.Dir)
-			below := filepath.IsLocal(filepath.FromSlash(directory))
+			below := l.Topology.Holds(dropped.Dir)
 			if seen[directory] || !below && !dropped.Unreadable {
 				continue
 			}
@@ -125,8 +125,9 @@ func (p *Prepared) unreadNotes() []report.Note {
 // hiddenNotes is one unread-entry note per entry some configuration's toolchain
 // read as absent where code may hide ([load.Result.Hidden]), named at the root
 // where it lies outside it, and one per go env file the toolchain runs without.
-// Two spellings of one entry, the root's and one through a link a replace
-// directive or a consumer names, make one note.
+// Each entry is named where its directory resolves ([load.Topology.Rel]), so two
+// spellings of one entry, the root's and one through a link inside the root or
+// one a replace directive or a consumer names, make one note.
 func (p *Prepared) hiddenNotes() []report.Note {
 	var hidden []string
 	for i := range p.loads.outlines {
@@ -169,11 +170,11 @@ func (p *Prepared) hiddenNotes() []report.Note {
 }
 
 // notedAt is path relative to the root where both resolve ([load.Topology.Rel]),
-// and the path a note about it names: that one, else the root where path lies
-// outside it.
+// and the path a note about it names: that one where the root holds path
+// ([load.Topology.Holds]), else the root.
 func (p *Prepared) notedAt(path string) (entry, at string) {
 	entry = p.Topology.Rel(path)
-	if !filepath.IsLocal(filepath.FromSlash(entry)) {
+	if !p.Topology.Holds(path) {
 		return entry, "."
 	}
 	return entry, entry
@@ -225,13 +226,13 @@ func (in *imports) addReaders(result *load.Result) {
 }
 
 // addPublishable records the target-relative directory of one published package
-// with source files that is neither a test variant nor test support.
-func addPublishable(directories map[load.PackageID]string, root string, result *load.Result, p *packages.Package, tests *roots.TestClasses) {
+// with source files that is neither a test variant nor test support, below the
+// root where both resolve.
+func addPublishable(directories map[load.PackageID]string, top *load.Topology, result *load.Result, p *packages.Package, tests *roots.TestClasses) {
 	if p.ForTest != "" || len(p.GoFiles) == 0 || tests.Support[result.ID(p)] || !load.Published(p.PkgPath, p.Name == "main") {
 		return
 	}
-	relative, err := filepath.Rel(root, filepath.Dir(p.GoFiles[0]))
-	if err == nil && filepath.IsLocal(relative) {
-		directories[result.ID(p)] = filepath.ToSlash(relative)
+	if relative, inside := top.Place(filepath.Dir(p.GoFiles[0])); inside {
+		directories[result.ID(p)] = relative
 	}
 }

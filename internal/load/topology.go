@@ -34,7 +34,7 @@ func leavesOut(name string) bool { return goRow.Skips(name) }
 // ModuleTree is the Go of one module ([program.4]): every directory below where a
 // walk of it starts but one [leavesOut] names and one the module ignores.
 type ModuleTree struct {
-	root             string
+	placed           scope.Root
 	rooted, anywhere []string
 }
 
@@ -44,9 +44,10 @@ func TreeOf(f *ModuleFile) ModuleTree {
 	if f == nil {
 		return ModuleTree{}
 	}
-	t := ModuleTree{root: filepath.Dir(f.Path)}
+	t := ModuleTree{placed: scope.RootOf(filepath.Dir(f.Path))}
 	for _, ignore := range f.Syntax.Ignore {
-		if rel, rooted := strings.CutPrefix(ignore.Path, "./"); rooted {
+		// The go command roots an ignore path "./" starts at the module root.
+		if rel, rooted := scope.UnderName(".", ignore.Path); rooted && ignore.Path != "." {
 			t.rooted = append(t.rooted, enclosed(rel))
 		} else {
 			t.anywhere = append(t.anywhere, enclosed(ignore.Path))
@@ -61,15 +62,17 @@ func (t ModuleTree) Skips(path string) bool {
 	return leavesOut(filepath.Base(path)) || t.ignores(path)
 }
 
-// outside reports whether dir, strictly below the directory unit loads from, holds
-// a package of t's module that is none of unit's packages ([program.4]): a
-// directory between them, dir included, is one t skips, and none roots a module.
-func (t ModuleTree) outside(unit, dir string) bool {
-	if !scope.Below(unit, dir) {
+// outside reports whether dir, strictly below the directory unit loads from where
+// both resolve, holds a package of t's module that is none of unit's packages
+// ([program.4]): a directory between them, dir included, is one t skips, and none
+// roots a module.
+func (t ModuleTree) outside(unit scope.Root, dir string) bool {
+	rel, inside := unit.PlaceEntry(dir)
+	if !inside || rel == "." {
 		return false
 	}
 	skipped := false
-	for at := dir; at != unit && filepath.Dir(at) != at; at = filepath.Dir(at) {
+	for at := filepath.Join(unit.Dir(), filepath.FromSlash(rel)); at != unit.Dir() && filepath.Dir(at) != at; at = filepath.Dir(at) {
 		if IsModuleRoot(at) {
 			return false
 		}
@@ -78,11 +81,15 @@ func (t ModuleTree) outside(unit, dir string) bool {
 	return skipped
 }
 
-// within reports whether dir, at or below the directory unit loads from, is one of
-// unit's package directories: no directory between them, dir included, is one t
-// skips or roots a module.
-func (t ModuleTree) within(unit, dir string) bool {
-	for at := dir; at != unit && filepath.Dir(at) != at; at = filepath.Dir(at) {
+// within reports whether dir, at or below the directory unit loads from where both
+// resolve, is one of unit's package directories: no directory between them, dir
+// included, is one t skips or roots a module.
+func (t ModuleTree) within(unit scope.Root, dir string) bool {
+	rel, inside := unit.PlaceEntry(dir)
+	if !inside {
+		return false
+	}
+	for at := filepath.Join(unit.Dir(), filepath.FromSlash(rel)); at != unit.Dir() && filepath.Dir(at) != at; at = filepath.Dir(at) {
 		if IsModuleRoot(at) || t.Skips(at) {
 			return false
 		}
@@ -96,13 +103,14 @@ func (t ModuleTree) within(unit, dir string) bool {
 // ([program.4]), and false for any other path. A path through a vendor directory,
 // other than as its last element, is none: the go command refuses it, as a
 // vendored package is imported by its own module's path (cmd/go FindVendor).
-func (t ModuleTree) OutsideDir(module, unit, importPath string) (string, bool) {
-	rest, found := strings.CutPrefix(importPath, module)
-	vendored := strings.Contains(importPath, "/vendor/") || strings.HasPrefix(importPath, "vendor/")
-	if module == "" || !found || (rest != "" && rest[0] != '/') || vendored {
+func (t ModuleTree) OutsideDir(module string, unit scope.Root, importPath string) (string, bool) {
+	rest, found := scope.UnderName(module, importPath)
+	below, underVendor := scope.UnderName("vendor", importPath)
+	vendored := strings.Contains(importPath, "/vendor/") || underVendor && below != ""
+	if module == "" || !found || vendored {
 		return "", false
 	}
-	dir := filepath.Join(t.root, filepath.FromSlash(rest))
+	dir := filepath.Join(t.placed.Dir(), filepath.FromSlash(rest))
 	return dir, t.outside(unit, dir)
 }
 
@@ -110,10 +118,14 @@ func (t ModuleTree) OutsideDir(module, unit, importPath string) (string, bool) {
 // path, as the go command matches it: a ./ path is a prefix of path's elements below
 // the module root, any other path a run of them.
 func (t ModuleTree) ignores(path string) bool {
-	if t.root == "" || !scope.Below(t.root, path) {
+	if len(t.rooted) == 0 && len(t.anywhere) == 0 {
 		return false
 	}
-	dir := enclosed(unitPrefix(t.root, path))
+	prefix := unitPrefix(t.placed, path)
+	if prefix == "" {
+		return false
+	}
+	dir := enclosed(prefix)
 	return slices.ContainsFunc(t.rooted, func(p string) bool { return strings.HasPrefix(dir, p) }) ||
 		slices.ContainsFunc(t.anywhere, func(p string) bool { return strings.Contains(dir, p) })
 }
@@ -121,14 +133,11 @@ func (t ModuleTree) ignores(path string) bool {
 // enclosed is the path p in forward slashes between a leading and a trailing slash,
 // so a prefix or a substring of one enclosed path in another ends at whole elements.
 func enclosed(p string) string {
-	p = filepath.ToSlash(p)
-	if !strings.HasPrefix(p, "/") {
-		p = "/" + p
+	p = strings.Trim(filepath.ToSlash(p), "/")
+	if p == "" {
+		return "/"
 	}
-	if !strings.HasSuffix(p, "/") {
-		p += "/"
-	}
-	return p
+	return "/" + p + "/"
 }
 
 // treeAt is the tree of the module the toolchain run in dir reads, the one whose
@@ -146,9 +155,9 @@ func treeAt(dir string) ModuleTree {
 	}
 }
 
-// leftOutBelow reports whether path lies strictly below dir inside a directory
-// [leavesOut] names, path's own last element included.
-func leftOutBelow(dir, path string) bool {
+// leftOutBelow reports whether path lies strictly below dir, where both resolve,
+// inside a directory [leavesOut] names, path's own last element included.
+func leftOutBelow(dir scope.Root, path string) bool {
 	return slices.ContainsFunc(strings.Split(unitPrefix(dir, path), "/"), leavesOut)
 }
 
@@ -488,13 +497,14 @@ func (top *Topology) holdsGoFile(ctx context.Context, dir string, tree ModuleTre
 		return false, nil
 	}
 	found := false
+	below := scope.RootOf(dir)
 	enters := func(dir string) bool { return !underscoredSkips(tree, dir) }
 	err := top.Walk(dir, enters, func(path string, kind Kind) error {
 		switch {
 		case ctx.Err() != nil:
 			return ctx.Err()
 		case kind == Unread, kind == File && goRow.Sources(filepath.Base(path)),
-			kind == leftOut && goRow.Sources(filepath.Base(path)) && tree.within(dir, filepath.Dir(path)) && hides(path):
+			kind == leftOut && goRow.Sources(filepath.Base(path)) && tree.within(below, filepath.Dir(path)) && hides(path):
 			found = true
 			return fs.SkipAll
 		}
@@ -506,7 +516,8 @@ func (top *Topology) holdsGoFile(ctx context.Context, dir string, tree ModuleTre
 // withMembers is the module rooted at target, then every other module below it the
 // workspace listing target lists, in directory order.
 func withMembers(ctx context.Context, target string) ([]string, error) {
-	workspace, err := scope.WorkspaceOf(ctx, scope.RootOf(target), target)
+	root := scope.RootOf(target)
+	workspace, err := scope.WorkspaceOf(ctx, root, target)
 	if err != nil {
 		return nil, err
 	}
@@ -521,7 +532,7 @@ func withMembers(ctx context.Context, target string) ([]string, error) {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if scope.Below(target, member) {
+		if rel, inside := root.Place(member); inside && rel != "." {
 			dirs = append(dirs, member)
 		}
 	}
@@ -533,7 +544,7 @@ func withMembers(ctx context.Context, target string) ([]string, error) {
 // target names.
 func walkedUnits(target string, dirs []string) bool {
 	return !IsModuleRoot(target) && !governedFromAbove(target) && !slices.ContainsFunc(dirs, func(dir string) bool {
-		return sameDir(dir, target)
+		return scope.Same(dir, target)
 	})
 }
 
@@ -609,7 +620,7 @@ func (top *Topology) readers(ctx context.Context, declared []scope.Module) ([]di
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("load: %w", err)
 		}
-		if sameDir(member, top.Root) || scope.Below(top.Root, member) || declares(declared, member) {
+		if _, inside := top.root.Place(member); inside || declares(declared, member) {
 			continue
 		}
 		m := discoveredModule{Dir: member, Workspace: workspace.File}
@@ -647,7 +658,7 @@ func (top *Topology) replacedUnits(m *discoveredModule) []string {
 			if !filepath.IsAbs(replacement) {
 				replacement = filepath.Join(m.Dir, replacement)
 			}
-			return r.Old.Path == unit.Path && r.New.Version == "" && sameDir(replacement, unit.Dir)
+			return r.Old.Path == unit.Path && r.New.Version == "" && scope.Same(replacement, unit.Dir)
 		})
 		if unit.Path != "" && required && replaced {
 			held = append(held, unit.Path)
@@ -669,13 +680,15 @@ func (top *Topology) unitPaths() []string {
 
 // isUnit reports whether dir is the directory of a unit.
 func (top *Topology) isUnit(dir string) bool {
-	return slices.ContainsFunc(top.Units, func(u discoveredModule) bool { return sameDir(u.Dir, dir) })
+	at := scope.RootOf(dir)
+	return slices.ContainsFunc(top.Units, func(u discoveredModule) bool { return at.Is(u.Dir) })
 }
 
 // declares reports whether a scope declares the module at dir as a consumer,
 // whichever way the scope and dir spell it.
 func declares(declared []scope.Module, dir string) bool {
-	return slices.ContainsFunc(declared, func(m scope.Module) bool { return sameDir(m.Path, dir) })
+	at := scope.RootOf(dir)
+	return slices.ContainsFunc(declared, func(m scope.Module) bool { return at.Is(m.Path) })
 }
 
 // readModuleFile reads the module file the toolchain run in dir reads: the nearest
@@ -873,6 +886,10 @@ func irregularKind(path string) string {
 // Topology made otherwise has the zero [scope.Root] and names nothing relative.
 func (top *Topology) Rel(path string) string { return top.root.Rel(path) }
 
+// Place is the directory at path relative to the root, and whether the root holds
+// it, where both resolve ([scope.Root.Place]).
+func (top *Topology) Place(path string) (string, bool) { return top.root.Place(path) }
+
 // openable reports whether the run can open the regular file at path.
 func openable(path string) bool {
 	f, err := os.Open(path)
@@ -890,14 +907,15 @@ func IsModuleRoot(dir string) bool {
 	return err == nil && !info.IsDir()
 }
 
-// unitPrefix is dir relative to target with forward slashes, empty for the target
-// itself.
-func unitPrefix(target, dir string) string {
-	if !scope.Below(target, dir) {
+// unitPrefix is dir relative to the directory target places against, where both
+// resolve ([scope.Root.PlaceEntry]), with forward slashes: empty for that
+// directory itself and for a path outside it.
+func unitPrefix(target scope.Root, dir string) string {
+	rel, inside := target.PlaceEntry(dir)
+	if !inside || rel == "." {
 		return ""
 	}
-	rel, _ := filepath.Rel(target, dir)
-	return filepath.ToSlash(rel)
+	return rel
 }
 
 // underscoredPackages is the pattern of every directory of the module rooted at dir
@@ -907,17 +925,23 @@ func unitPrefix(target, dir string) string {
 // directory as its root, so each is named by its own path.
 func (top *Topology) underscoredPackages(ctx context.Context, dir string, tree ModuleTree) ([]string, error) {
 	var patterns []string
+	// The walk joins each entry onto the directory it lists, so the path of each
+	// below dir is its directory's and its own name.
+	relative := map[string]string{dir: "."}
 	enters := func(dir string) bool { return !underscoredSkips(tree, dir) }
 	err := top.Walk(dir, enters, func(path string, kind Kind) error {
-		switch {
-		case ctx.Err() != nil:
+		if ctx.Err() != nil {
 			return ctx.Err()
-		case kind != File:
-			return nil
 		}
-		rel, err := filepath.Rel(dir, path)
-		if err != nil || !underscoredSource(rel) {
-			return err
+		rel := relative[path]
+		if path != dir {
+			rel = filepath.Join(relative[filepath.Dir(path)], filepath.Base(path))
+		}
+		if kind == directory {
+			relative[path] = rel
+		}
+		if kind != File || !underscoredSource(rel) {
+			return nil
 		}
 		if pattern := "./" + filepath.ToSlash(filepath.Dir(rel)); !slices.Contains(patterns, pattern) {
 			patterns = append(patterns, pattern)

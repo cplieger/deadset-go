@@ -50,19 +50,6 @@ func ReadRegularFile(root Root, path string) ([]byte, error) {
 	return text, nil
 }
 
-// RelativeSlash renders path relative to base by their names, with forward
-// slashes, a path outside base with `..` segments, falling back to path itself
-// where no relative form exists. It suits a path spelled from base, as the
-// toolchain spells a file of the target below the root; [Root.Rel] places any
-// other where it resolves.
-func RelativeSlash(base, path string) string {
-	rel, err := filepath.Rel(base, path)
-	if err != nil {
-		return filepath.ToSlash(path)
-	}
-	return filepath.ToSlash(rel)
-}
-
 // Resolve is the scope of one run, from the first source that names one: the
 // scope document at document, when the invocation names one; otherwise the
 // workspace that governs dir, when its file lists dir as a module; otherwise
@@ -88,8 +75,9 @@ func Resolve(ctx context.Context, dir, document string) (Document, error) {
 	// it is a module of the target the load reads beside it, and every other
 	// listed module is a consumer.
 	doc := Document{Workspace: workspace.File, Target: Module{Path: target}}
+	root := RootOf(target)
 	for _, path := range workspace.Modules {
-		if path != target && !Below(target, path) {
+		if _, inside := root.PlaceEntry(path); !inside {
 			doc.Consumers = append(doc.Consumers, Module{Path: path})
 		}
 	}
@@ -107,7 +95,9 @@ type Workspace struct {
 }
 
 // Lists reports whether the workspace lists dir as one of its modules, which is
-// when the toolchain run in dir builds through it.
+// when the toolchain run in dir builds through it. The go command matches a member
+// by its names, refusing a run in dir under a workspace that lists dir through a
+// link, so the names decide here as they do there.
 func (w *Workspace) Lists(dir string) bool {
 	return slices.Contains(w.Modules, filepath.Clean(dir))
 }
@@ -204,11 +194,4 @@ func Replacements(base string, replaces []*modfile.Replace) []Replacement {
 		held = append(held, Replacement{Module: r.Old.Path, Dir: filepath.Clean(dir)})
 	}
 	return held
-}
-
-// Below reports whether path is strictly under dir by its names, the way the
-// toolchain places a workspace member or a package directory under a module.
-func Below(dir, path string) bool {
-	relative, inside := lexicallyWithin(dir, path)
-	return inside && relative != "."
 }

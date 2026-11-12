@@ -126,7 +126,7 @@ func (l *Loaded) rootsDocument() string {
 	if label == "" {
 		return ""
 	}
-	relative, inside := scope.Within(l.Root, label)
+	relative, inside := scope.RootOf(l.Root).PlaceEntry(label)
 	if !inside {
 		return ""
 	}

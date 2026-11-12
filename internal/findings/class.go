@@ -3,10 +3,10 @@ package findings
 import (
 	"path"
 	"slices"
-	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -117,7 +117,7 @@ func (in *pass) unanalysedConsumer(symbol *inventory.Symbol) bool {
 		length := len(unit)
 		if unit == "." {
 			length = 0
-		} else if !strings.HasPrefix(symbol.File, unit+"/") {
+		} else if _, below := scope.UnderName(unit, symbol.File); !below || symbol.File == unit {
 			continue
 		}
 		if length > depth {

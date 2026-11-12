@@ -21,7 +21,7 @@ func TestWalkFollowsARootThatIsALinkAndKeepsItsSpelling(t *testing.T) {
 		t.Fatalf("Setup: %v", err)
 	}
 	var walked []string
-	top := &Topology{Root: link}
+	top := &Topology{Root: link, root: scope.RootOf(link)}
 	err := top.Walk(link, func(string) bool { return true }, func(path string, kind Kind) error {
 		if kind != directory {
 			t.Errorf("Walk(%s) handed %s as kind %d, want a directory", link, path, kind)
@@ -38,10 +38,10 @@ func TestWalkFollowsARootThatIsALinkAndKeepsItsSpelling(t *testing.T) {
 // so one the run cannot list is recorded only where a walk enters it.
 func TestWalkListsOnlyTheDirectoriesItEnters(t *testing.T) {
 	root := writeTree(t, map[string]string{"skipped/a.go": "package a\n", "kept/b.go": "package b\n"})
-	top := &Topology{Root: root}
+	top := &Topology{Root: root, root: scope.RootOf(root)}
 	var walked []string
 	err := top.Walk(root, func(dir string) bool { return filepath.Base(dir) != "skipped" }, func(path string, _ Kind) error {
-		walked = append(walked, unitPrefix(root, path))
+		walked = append(walked, unitPrefix(top.root, path))
 		return nil
 	})
 	if want := []string{"", "kept", "kept/b.go"}; err != nil || !slices.Equal(walked, want) {
@@ -76,11 +76,11 @@ func TestTreePatternsNamesEachPackageDirectoryWhereADirectoryIsUnread(t *testing
 			t.Fatalf("Setup: %v", err)
 		}
 	}
-	plain := &loadSpec{dir: root, workspace: workspaceOff, top: &Topology{Root: root}}
+	plain := &loadSpec{dir: root, workspace: workspaceOff, top: &Topology{Root: root, root: scope.RootOf(root)}}
 	if got, byDir, err := listPatterns(t.Context(), plain); err != nil || byDir || !slices.Equal(got, []string{loadPattern}) {
 		t.Errorf("listPatterns(no unread directory) = %q, %t, %v, want %q", got, byDir, err, loadPattern)
 	}
-	unread := &loadSpec{dir: root, workspace: workspaceOff, top: &Topology{Root: root, Unread: []string{filepath.Join(root, "data"), filepath.Join(root, "a", "a.go")}}}
+	unread := &loadSpec{dir: root, workspace: workspaceOff, top: &Topology{Root: root, root: scope.RootOf(root), Unread: []string{filepath.Join(root, "data"), filepath.Join(root, "a", "a.go")}}}
 	got, byDir, err := listPatterns(t.Context(), unread)
 	if want := []string{"./a", "./a/b", ".", "./z/y"}; err != nil || !byDir || !slices.Equal(got, want) {
 		t.Errorf("listPatterns(an unread directory) = %q, %t, %v, want %q", got, byDir, err, want)
@@ -95,7 +95,7 @@ func TestDropUnreadErrorsClearsOnlyWhatOpensAnUnreadPath(t *testing.T) {
 	root := filepath.Join(sandbox.Dir(t), "m")
 	secret := filepath.Join(root, "p", "secret.go")
 	broken := filepath.Join(root, "p", "broken.go")
-	spec := &loadSpec{dir: root, top: &Topology{Root: root, Unread: []string{filepath.Join(root, "data"), secret}, LeftOut: []string{broken}}}
+	spec := &loadSpec{dir: root, top: &Topology{Root: root, root: scope.RootOf(root), Unread: []string{filepath.Join(root, "data"), secret}, LeftOut: []string{broken}}}
 	pattern := &packages.Package{ID: "./...", Errors: []packages.Error{{Kind: packages.ListError, Msg: "pattern ./...: open " + filepath.Join("data") + ": permission denied"}}}
 	p := &packages.Package{ID: "example.com/m/p", GoFiles: []string{filepath.Join(root, "p", "p.go")}, Errors: []packages.Error{
 		{Kind: packages.ListError, Pos: "main.go:3:8", Msg: "open " + secret + ": permission denied"},

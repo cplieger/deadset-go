@@ -6,6 +6,7 @@ package conventions
 
 import (
 	"go/ast"
+	"go/build"
 	"go/build/constraint"
 	"go/types"
 	"slices"
@@ -141,7 +142,7 @@ func (r *PackageGenerator) Packages(words []string) []string {
 	}
 	var held []string
 	for _, arg := range positionalArgs(args[1:], nil) {
-		if strings.HasPrefix(arg, "./") || strings.HasPrefix(arg, "../") {
+		if build.IsLocalImport(arg) && arg != "." && arg != ".." {
 			held = append(held, arg)
 		}
 	}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -117,7 +118,8 @@ var testLibraries = [...]string{
 func carriesTestEvidence(p *packages.Package) bool {
 	for imported := range p.Imports {
 		if imported == testingPath || slices.ContainsFunc(testLibraries[:], func(library string) bool {
-			return imported == library || strings.HasPrefix(imported, library+"/")
+			_, below := scope.UnderName(library, imported)
+			return below
 		}) {
 			return true
 		}

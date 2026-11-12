@@ -35,9 +35,10 @@ func rebased(position string, root scope.Root, dir string, module *packages.Modu
 		file = filepath.Join(dir, file)
 	}
 	if cached := cachedModule(module); cached != nil {
-		rel, err := filepath.Rel(cached.Dir, file)
-		if _, held := root.Within(file); !held && err == nil && inside(cached.Dir, file) {
-			return path.Join(cached.Path, filepath.ToSlash(rel)) + at
+		if _, held := root.PlaceEntry(file); !held {
+			if rel, inside := scope.RootOf(cached.Dir).PlaceEntry(file); inside {
+				return path.Join(cached.Path, rel) + at
+			}
 		}
 	}
 	return root.Rel(file) + at
@@ -66,12 +67,6 @@ func cachedModule(m *packages.Module) *packages.Module {
 		return nil
 	}
 	return m
-}
-
-// inside reports whether file is dir or below it by its names.
-func inside(dir, file string) bool {
-	rel, err := filepath.Rel(dir, file)
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // Error reports every diagnostic one configuration's load produced. A load that
@@ -233,6 +228,7 @@ func packageNamed(message string) string {
 // within reports whether pkg is one of modules or a package below one.
 func within(pkg string, modules []string) bool {
 	return slices.ContainsFunc(modules, func(module string) bool {
-		return pkg == module || strings.HasPrefix(pkg, module+"/")
+		_, below := scope.UnderName(module, pkg)
+		return below
 	})
 }

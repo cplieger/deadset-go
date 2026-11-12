@@ -11,6 +11,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
@@ -288,15 +289,15 @@ func (in *pass) readPackages(one *Configured, held *packageFacts) {
 // readUnits reads which of r's units have an unanalysed consumer and which
 // directories hold code r does not see, each by its target-relative path.
 func (in *pass) readUnits(r *load.Result) {
+	root := scope.RootOf(in.Root)
 	for _, unit := range r.Units {
-		if rel, err := filepath.Rel(in.Root, unit.Dir); err == nil {
-			dir := filepath.ToSlash(rel)
+		if dir, inside := root.Place(unit.Dir); inside {
 			in.unanalysed[dir] = in.unanalysed[dir] || unit.UnanalysedConsumer
 		}
 	}
 	for _, dir := range r.Obscured {
-		if rel, err := filepath.Rel(in.Root, dir); err == nil {
-			in.obscured[filepath.ToSlash(rel)] = true
+		if rel, inside := root.Place(dir); inside {
+			in.obscured[rel] = true
 		}
 	}
 }
@@ -304,9 +305,9 @@ func (in *pass) readUnits(r *load.Result) {
 // readPackageDirs reads where each package of one configuration's load is
 // declared, whether it is a main package, and whether some build links it.
 func (in *pass) readPackageDirs(r *load.Result, held *packageFacts) {
-	none := roots.UnlinkedPackages(r)
+	none, root := roots.UnlinkedPackages(r), scope.RootOf(in.Root)
 	for _, p := range r.Packages {
-		at := packageAt{path: p.PkgPath, dir: packageDir(p, in.Root)}
+		at := packageAt{path: p.PkgPath, dir: packageDir(p, root)}
 		if at.dir != "" && !slices.Contains(in.dirs[at.path], at.dir) {
 			in.dirs[at.path] = append(in.dirs[at.path], at.dir)
 		}
@@ -337,17 +338,18 @@ func (in *pass) keyPackages(held *packageFacts) {
 	}
 }
 
-// packageDir is the directory of p's first file relative to root, with forward
-// slashes, as a symbol's File names its file.
-func packageDir(p *packages.Package, root string) string {
+// packageDir is the directory of p's first file relative to root where both
+// resolve, with forward slashes, as a symbol's File names its file, and empty
+// where p has no file or the root does not hold it.
+func packageDir(p *packages.Package, root scope.Root) string {
 	if len(p.GoFiles) == 0 {
 		return ""
 	}
-	rel, err := filepath.Rel(root, filepath.Dir(p.GoFiles[0]))
-	if err != nil {
+	rel, inside := root.Place(filepath.Dir(p.GoFiles[0]))
+	if !inside {
 		return ""
 	}
-	return filepath.ToSlash(rel)
+	return rel
 }
 
 // packageKey names one package of the target: its import path, and where two

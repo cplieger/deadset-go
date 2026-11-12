@@ -105,7 +105,7 @@ func TestDropUnreadErrorsClearsALeftOutEntryAConsumerSpelledThroughALinkOpens(t 
 	t.Parallel()
 	base, alias := linkedTree(t, map[string]string{"app/p/p.go": "package p\n", "c/main.go": "package main\n"})
 	broken := filepath.Join(base, "app", "p", "broken.go")
-	spec := &loadSpec{dir: filepath.Join(alias, "c"), top: &Topology{Root: filepath.Join(base, "app"), LeftOut: []string{broken}}}
+	spec := &loadSpec{dir: filepath.Join(alias, "c"), top: &Topology{Root: filepath.Join(base, "app"), root: scope.RootOf(filepath.Join(base, "app")), LeftOut: []string{broken}}}
 	p := &packages.Package{ID: "example.com/app/p", GoFiles: []string{filepath.Join(alias, "app", "p", "p.go")}, Errors: []packages.Error{
 		{Kind: packages.ListError, Msg: "open " + filepath.Join(alias, "app", "p", "broken.go") + ": no such file or directory"},
 		{Kind: packages.ListError, Msg: "open " + filepath.Join(alias, "app", "p", "other.go") + ": no such file or directory"},
@@ -275,5 +275,29 @@ func TestDiscoverReadsAConsumerSpelledThroughALinkOnceAsDeclared(t *testing.T) {
 				}
 			})
 		})
+	}
+}
+
+// A declared consumer below the target that the scope spells through a link holds
+// the entries the walk of the root recorded as the root spells them, so an entry
+// below it the run cannot read is below it where both resolve: its load names each
+// package directory rather than ending the toolchain's walk at that entry.
+func TestUnreadBelowPlacesAConsumerSpelledThroughALinkWhereItResolves(t *testing.T) {
+	t.Parallel()
+	base, alias := linkedTree(t, map[string]string{"app/c/main.go": "package main\n", "app/d/d.go": "package d\n"})
+	app := filepath.Join(base, "app")
+	top := &Topology{Root: app, root: scope.RootOf(app), Unread: []string{filepath.Join(app, "c", "m")}}
+	for _, tc := range []struct {
+		dir  string
+		want bool
+	}{
+		{filepath.Join(app, "c"), true},
+		{filepath.Join(alias, "app", "c"), true},
+		{filepath.Join(alias, "app", "d"), false},
+		{filepath.Join(alias, "app", "c", "m"), false},
+	} {
+		if got := top.unreadBelow(tc.dir); got != tc.want {
+			t.Errorf("unreadBelow(%s) over the unread %s = %v, want %v", tc.dir, top.Unread[0], got, tc.want)
+		}
 	}
 }

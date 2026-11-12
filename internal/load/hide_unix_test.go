@@ -333,11 +333,11 @@ func TestLoadHidesAPipeInEveryDirectoryTheToolchainLists(t *testing.T) {
 				unused, store := l.unusedModules(root), filepath.Join(root, ".git", "objects")
 				for _, pipe := range pipes {
 					dir := filepath.Dir(pipe)
-					if slices.ContainsFunc(unused, func(m string) bool { return dir == m || scope.Below(m, dir) }) {
+					if slices.ContainsFunc(unused, func(m string) bool { return dir == m || strictlyBelow(m, dir) }) {
 						continue
 					}
 					hidden := slices.ContainsFunc(top.hidden, func(h hiddenEntry) bool { return h.path == pipe })
-					if want := dir != store && !scope.Below(store, dir); hidden != want {
+					if want := dir != store && !strictlyBelow(store, dir); hidden != want {
 						t.Errorf("Discover(%+v with a pipe in every directory) hid %v, want %s among them: %t", l, top.hidden, pipe, want)
 					}
 				}
@@ -490,4 +490,11 @@ func TestDiscoverHidesAnEntryThroughOneLinkInTheTreesAndNoFurther(t *testing.T) 
 			t.Errorf("Discover(a module holding links) hid %q, want %q: none two links deep (m/a/c/x.go) or through a link out of every tree (m/up/m/d/x.go, m/shared/x.go)", got, want)
 		}
 	})
+}
+
+// strictlyBelow reports whether the entry at path is strictly below the directory
+// dir, where both resolve.
+func strictlyBelow(dir, path string) bool {
+	rel, inside := scope.RootOf(dir).PlaceEntry(path)
+	return inside && rel != "."
 }

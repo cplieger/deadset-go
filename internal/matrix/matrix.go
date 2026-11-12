@@ -27,6 +27,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/buildconstraint"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 )
 
 // idSeparator joins the parts of a configuration identifier.
@@ -72,12 +73,13 @@ func derive(top *load.Topology, host *load.Configuration) ([]load.Configuration,
 
 // collector reads the Go files of one unit's module tree.
 type collector struct {
-	top          *load.Topology
-	tree         load.ModuleTree
-	visit        func(path string, expression constraint.Expr)
-	queued       map[string]bool
-	unit, module string
-	queue        []string
+	top    *load.Topology
+	visit  func(path string, expression constraint.Expr)
+	queued map[string]bool
+	unit   scope.Root
+	tree   load.ModuleTree
+	module string
+	queue  []string
 }
 
 // collect hands visit the path and build constraint, nil where none decides it, of
@@ -90,7 +92,7 @@ type collector struct {
 // nothing.
 func collect(top *load.Topology, unit, module string, f *load.ModuleFile, visit func(path string, expression constraint.Expr)) error {
 	tree := load.TreeOf(f)
-	c := &collector{top: top, unit: unit, module: module, tree: tree, visit: visit, queued: make(map[string]bool)}
+	c := &collector{top: top, unit: scope.RootOf(unit), module: module, tree: tree, visit: visit, queued: make(map[string]bool)}
 	enters := func(dir string) bool { return !tree.Skips(dir) && !load.IsModuleRoot(dir) }
 	walk := func(path string, kind load.Kind) error {
 		if kind != load.File || !buildconstraint.IsGoFile(filepath.Base(path)) {

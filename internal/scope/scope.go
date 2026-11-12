@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
+	"strings"
 	"sync"
 
 	"github.com/cplieger/deadset-go/v2/internal/jsondoc"
@@ -170,100 +170,189 @@ func resolveModule(w wireModule, base string) (Module, error) {
 	return Module{ID: w.ID, Path: abs}, nil
 }
 
-// Within is path relative to dir with forward slashes, and whether path is dir
-// or below it ([Root.Within]).
-func Within(dir, path string) (string, bool) { return RootOf(dir).Within(path) }
+// Root is a directory paths are placed against, as the run spells it and as it
+// resolves, resolved once, as macOS spells /private/var through /var. It is the
+// run's one placement: every path compared with a directory, named relative to
+// one or tested for being one is resolved by [resolvePath] and compared with the
+// resolved directory by its names ([Root.Place], [Root.PlaceEntry]). A path whose
+// resolved names are not the root's, a bind mount or a case variant, is outside
+// it. The zero Root is no root, and its methods place nothing below it: make one
+// with [RootOf].
+type Root struct{ at *placed }
 
-// Root is a directory paths are named relative to, as the run spells it and as
-// it resolves, resolved once: one directory spelled two ways, as macOS spells
-// /private/var through its /var link, is one root. The zero Root is no root, and
-// its methods place nothing below it: make one with [RootOf].
-type Root struct {
+// placed is one root: its directory as the run spells it and as it resolves, and
+// each path it resolved, as a walk or a file set names one directory many times.
+type placed struct {
+	held           map[string]string
 	path, resolved string
+	mu             sync.Mutex
 }
 
-// RootOf is the root at dir, made absolute, resolved where every link on it
-// resolves and as spelled otherwise.
+// RootOf is the root at dir, made absolute and resolved ([resolvePath]).
 func RootOf(dir string) Root {
 	path, err := filepath.Abs(dir)
 	if err != nil {
 		path = filepath.Clean(dir)
 	}
-	resolved, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		resolved = path
-	}
-	return Root{path: path, resolved: resolved}
+	return Root{at: &placed{path: path, resolved: resolvePath(path), held: make(map[string]string)}}
 }
 
-// Within is path relative to the root with forward slashes, and whether path is
-// the root or below it. The names decide first, so a link inside the root keeps
-// its name. Where they place path outside, the shortest leading part of path that
-// resolves to the root or below it places it and the rest keeps its names, so
-// path sits where it resolves, and a link below that part keeps its name.
-func (r Root) Within(path string) (string, bool) {
-	path, err := filepath.Abs(path)
+// Dir is the root's directory as the run spells it, made absolute, and empty for
+// the zero Root.
+func (r Root) Dir() string {
+	if r.at == nil {
+		return ""
+	}
+	return r.at.path
+}
+
+// resolvePath is the absolute path with every link on it resolved, by
+// filepath.EvalSymlinks: where path does not exist, its deepest existing ancestor
+// resolved and the names below that ancestor kept.
+func resolvePath(path string) string {
+	for _, at := range ancestors(path) {
+		if resolved, err := filepath.EvalSymlinks(at); err == nil {
+			rest, _ := filepath.Rel(at, path)
+			return filepath.Join(resolved, rest)
+		}
+	}
+	return path
+}
+
+// resolvedPath is the absolute path resolved ([resolvePath]), once per Root.
+func (r Root) resolvedPath(path string) string {
+	r.at.mu.Lock()
+	held, found := r.at.held[path]
+	r.at.mu.Unlock()
+	if found {
+		return held
+	}
+	held = resolvePath(path)
+	r.at.mu.Lock()
+	r.at.held[path] = held
+	r.at.mu.Unlock()
+	return held
+}
+
+// Place is the directory at path relative to the root with forward slashes, and
+// whether it is the root or below it: path is resolved ([resolvePath]), every link on
+// it the directory itself included, and compared with the resolved root by its
+// names.
+func (r Root) Place(path string) (string, bool) {
+	if r.at == nil {
+		return "", false
+	}
+	abs, err := filepath.Abs(path)
 	if err != nil {
 		return "", false
 	}
-	if relative, inside := lexicallyWithin(r.path, path); inside {
+	return lexicallyWithin(r.at.resolved, r.resolvedPath(abs))
+}
+
+// PlaceEntry is [Root.Place] for an entry of a directory, a file or a directory a
+// listing names: its directory is placed and its own name kept, so an entry inside
+// the root that is a link is named as the link rather than where it leads. An entry
+// its directory places outside the root is placed where it leads, so a link from
+// outside to the root, or into it, is the directory it leads to.
+func (r Root) PlaceEntry(path string) (string, bool) {
+	if r.at == nil {
+		return "", false
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", false
+	}
+	if relative, inside := lexicallyWithin(r.at.resolved, r.entryPath(abs)); inside {
 		return relative, true
 	}
-	for _, lead := range slices.Backward(ancestors(path)) {
-		resolved, err := filepath.EvalSymlinks(lead)
-		if err != nil {
-			return "", false
-		}
-		if _, inside := lexicallyWithin(r.resolved, resolved); inside {
-			rest, _ := filepath.Rel(lead, path)
-			return lexicallyWithin(r.resolved, filepath.Join(resolved, rest))
-		}
+	return r.Place(abs)
+}
+
+// entryPath is the absolute path with its directory resolved and its own name
+// kept.
+func (r Root) entryPath(abs string) string {
+	parent := filepath.Dir(abs)
+	if parent == abs {
+		return r.resolvedPath(abs)
 	}
-	return "", false
+	return filepath.Join(r.resolvedPath(parent), filepath.Base(abs))
 }
 
 // Rel is path relative to the root with forward slashes, as every path a setup
-// failure line or a note names is ([program.10]): [Root.Within] where the root
+// failure line or a note names is ([program.10]): [Root.PlaceEntry] where the root
 // holds path, and otherwise from the resolved root to where path's directory
 // resolves, with `..` segments, which leave the directory a link resolves to
-// rather than the one it sits in. A path with no relative form, on another
-// volume, is itself.
+// rather than the one it sits in. A path with no relative form, on another volume
+// or against the zero Root, is itself.
 func (r Root) Rel(path string) string {
-	if relative, inside := r.Within(path); inside {
+	if relative, inside := r.PlaceEntry(path); inside {
 		return relative
 	}
-	relative, err := filepath.Rel(r.resolved, Resolved(path))
+	abs, err := filepath.Abs(path)
+	if r.at == nil || err != nil {
+		return filepath.ToSlash(path)
+	}
+	relative, err := filepath.Rel(r.at.resolved, r.entryPath(abs))
 	if err != nil {
 		return filepath.ToSlash(path)
 	}
 	return filepath.ToSlash(relative)
 }
 
-// Respell is path in the root's own spelling where the root holds it
-// ([Root.Within]), so two spellings of one file below the root are one name, and
-// path itself elsewhere.
+// Respell is the directory at path in the root's own spelling where the root holds
+// it ([Root.Place]), so every spelling of one directory below the root, through a
+// link outside the root or inside it, is one name, and path itself elsewhere.
 func (r Root) Respell(path string) string {
-	if relative, inside := r.Within(path); inside {
-		return filepath.Join(r.path, filepath.FromSlash(relative))
+	if relative, inside := r.Place(path); inside {
+		return filepath.Join(r.at.path, filepath.FromSlash(relative))
 	}
 	return path
 }
 
-// Resolved is path, made absolute, with its nearest directory that exists
-// resolved and the names below that directory kept, so a path that names a link
-// still names the link.
-func Resolved(path string) string {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return filepath.Clean(path)
+// RespellIn is path, which the toolchain names below the directory dir, with dir
+// respelled ([Root.Respell]) and the names below it kept, and path itself where its
+// names do not place it below dir. The go command names a file of a module by the
+// module's directory and the package's path below it, so two packages that reach
+// one directory through a link below the module keep two names, as they are two
+// packages.
+func (r Root) RespellIn(dir, path string) string {
+	rest, below := lexicallyWithin(dir, path)
+	if !below {
+		return path
 	}
-	for _, dir := range ancestors(filepath.Dir(abs)) {
-		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
-			rest, _ := filepath.Rel(dir, abs)
-			return filepath.Join(resolved, rest)
-		}
+	return filepath.Join(r.Respell(dir), filepath.FromSlash(rest))
+}
+
+// Is reports whether the directory at path is the root where both resolve
+// ([Root.Place]).
+func (r Root) Is(path string) bool {
+	relative, inside := r.Place(path)
+	return inside && relative == "."
+}
+
+// Same reports whether two paths name one directory where both resolve
+// ([Root.Is]).
+func Same(a, b string) bool { return RootOf(b).Is(a) }
+
+// SameEntry reports whether two paths name one entry: one name in one directory
+// where both directories resolve ([Root.PlaceEntry]).
+func SameEntry(a, b string) bool {
+	relative, inside := RootOf(filepath.Dir(b)).PlaceEntry(a)
+	return inside && relative == filepath.Base(b)
+}
+
+// UnderName is name relative to prefix, empty for prefix itself, and whether name
+// is prefix or below it by whole slash-separated elements: an import path below a
+// module path, a cgroup below another, or one root-relative path below another.
+// Such a name names no file to resolve, so its elements alone decide.
+func UnderName(prefix, name string) (string, bool) {
+	if name == prefix {
+		return "", true
 	}
-	return abs
+	if rest, below := strings.CutPrefix(name, prefix+"/"); below {
+		return rest, true
+	}
+	return "", false
 }
 
 // ancestors is path and each directory above it, path first.
@@ -275,7 +364,9 @@ func ancestors(path string) []string {
 	return held
 }
 
-// lexicallyWithin is [Within] by the names alone.
+// lexicallyWithin is path relative to dir with forward slashes, and whether path is
+// dir or below it, by the names alone: [Root.Place] compares two resolved paths
+// with it.
 func lexicallyWithin(dir, path string) (string, bool) {
 	relative, err := filepath.Rel(dir, path)
 	if err != nil || (relative != "." && !filepath.IsLocal(relative)) {

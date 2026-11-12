@@ -839,7 +839,7 @@ func TestUnitsOfADirectoryAModuleAboveGovernsIsTheDirectory(t *testing.T) {
 	})
 	target := filepath.Join(root, "sub")
 
-	got, err := (&Topology{Root: target}).unitDirs(t.Context())
+	got, err := (&Topology{Root: target, root: scope.RootOf(target)}).unitDirs(t.Context())
 	if err != nil {
 		t.Fatalf("unitDirs(a directory of an enclosing module) = _, %v, want no error", err)
 	}

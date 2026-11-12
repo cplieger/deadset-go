@@ -14,6 +14,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -286,10 +287,11 @@ func holdsModule(entries []fs.DirEntry) bool {
 	return slices.ContainsFunc(entries, func(e fs.DirEntry) bool { return e.Name() == "go.mod" && !e.IsDir() })
 }
 
-// underDir reports whether path is dir or lies under it.
+// underDir reports whether the directory at path is dir or lies under it, where
+// both resolve ([scope.Root.Place]).
 func underDir(path, dir string) bool {
-	rel, err := filepath.Rel(dir, path)
-	return err == nil && filepath.IsLocal(rel) || path == dir
+	_, inside := scope.RootOf(dir).Place(path)
+	return inside
 }
 
 // identifierRuns adds every maximal run of letters, digits and underscores src

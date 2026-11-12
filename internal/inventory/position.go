@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"unicode/utf16"
+
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 )
 
 // ErrSource reports a file the load compiled that cannot be read, or whose bytes
@@ -20,25 +22,32 @@ var ErrSource = errors.New("inventory: source unavailable")
 // relative to the target root with the solidus as separator on every platform,
 // and a column counting UTF-16 code units.
 //
-// The path is made relative lexically, so a root spelled through a symbolic link
-// does not match the paths the toolchain reported and nothing under it renders.
+// The path is placed where both the file's directory and the root resolve
+// ([scope.Root.PlaceEntry]), so a root spelled through a symbolic link renders the
+// files the toolchain names through the directory it leads to. Positions with no
+// root render no path.
 type Positions struct {
-	Fset *token.FileSet
-	read ReadFile
-	rel  map[string]string
-	src  map[string][]byte
-	Root string
+	Fset   *token.FileSet
+	read   ReadFile
+	rel    map[string]string
+	src    map[string][]byte
+	placed scope.Root
+	Root   string
 }
 
 // NewPositions renders against root, reading source through read.
 func NewPositions(fset *token.FileSet, root string, read ReadFile) *Positions {
-	return &Positions{
+	p := &Positions{
 		Fset: fset,
 		Root: filepath.Clean(root),
 		read: read,
 		rel:  make(map[string]string),
 		src:  make(map[string][]byte),
 	}
+	if root != "" {
+		p.placed = scope.RootOf(root)
+	}
+	return p
 }
 
 // Under renders against another root with the same file set and reader, which is
@@ -208,8 +217,8 @@ func (p *Positions) Relative(name string) string {
 		return rel
 	}
 	rel := ""
-	if r, err := filepath.Rel(p.Root, filepath.Clean(name)); err == nil && filepath.IsLocal(r) {
-		rel = filepath.ToSlash(r)
+	if r, inside := p.placed.PlaceEntry(name); inside {
+		rel = r
 	}
 	p.rel[name] = rel
 	return rel

@@ -374,7 +374,7 @@ func importedOutside(unit *Unit) (production, test []*packages.Package) {
 	if unit.Path == "" {
 		return nil, nil
 	}
-	tree := treeAt(unit.Dir)
+	tree, root := treeAt(unit.Dir), scope.RootOf(unit.Dir)
 	var built, tested []*packages.Package
 	for _, p := range unit.Packages {
 		if p.ForTest == "" {
@@ -387,7 +387,7 @@ func importedOutside(unit *Unit) (production, test []*packages.Package) {
 	produced := make(map[string]bool) // the import paths production holds
 	outside := func(testing bool) func(*packages.Package) {
 		return func(p *packages.Package) {
-			if held[p.ID] || p.Module == nil || p.Module.Path != unit.Path || !tree.outside(unit.Dir, p.Dir) {
+			if held[p.ID] || p.Module == nil || p.Module.Path != unit.Path || !tree.outside(root, p.Dir) {
 				return
 			}
 			held[p.ID] = true
@@ -522,7 +522,8 @@ func listFailure(spec *loadSpec, listed *listError) error {
 // package demoted to a dependency ([demoteOtherMembers]).
 func listedOf(pkgs []*packages.Package, spec *loadSpec, byDir bool) []*packages.Package {
 	if len(spec.patterns) == 0 {
-		pkgs = slices.DeleteFunc(pkgs, func(p *packages.Package) bool { return leftOutBelow(spec.dir, p.Dir) })
+		below := scope.RootOf(spec.dir)
+		pkgs = slices.DeleteFunc(pkgs, func(p *packages.Package) bool { return leftOutBelow(below, p.Dir) })
 	}
 	if byDir {
 		pkgs = slices.DeleteFunc(pkgs, unbuilt)
@@ -645,8 +646,9 @@ func expectedModules(file *ModuleFile, pkgs []*packages.Package) []string {
 // workspace load. Every other member is a dependency of that unit, as a module a
 // replace directive names is, so no stage reads it as the unit's own code.
 func demoteOtherMembers(pkgs []*packages.Package, dir string) {
+	unit := scope.RootOf(dir)
 	packages.Visit(pkgs, nil, func(p *packages.Package) {
-		if p.Module == nil || !p.Module.Main || sameDir(p.Module.Dir, dir) {
+		if p.Module == nil || !p.Module.Main || unit.Is(p.Module.Dir) {
 			return
 		}
 		dependency := *p.Module
@@ -676,9 +678,18 @@ func listPatterns(ctx context.Context, spec *loadSpec) (patterns []string, byDir
 	return patterns, true, err
 }
 
-// unreadBelow reports whether an entry strictly below dir is [Unread].
+// unreadBelow reports whether an entry strictly below dir, where both resolve, is
+// [Unread]: a consumer the scope spells through a link holds the entries the walk
+// of the root spelled as the root is.
 func (top *Topology) unreadBelow(dir string) bool {
-	return top != nil && slices.ContainsFunc(top.Unread, func(path string) bool { return scope.Below(dir, path) })
+	if top == nil {
+		return false
+	}
+	below := scope.RootOf(dir)
+	return slices.ContainsFunc(top.Unread, func(path string) bool {
+		rel, inside := below.PlaceEntry(path)
+		return inside && rel != "."
+	})
 }
 
 // treePatterns names by its own path each directory holding a Go file of the
@@ -702,7 +713,7 @@ func treePatterns(ctx context.Context, spec *loadSpec) ([]string, error) {
 // dirPatterns is the pattern of each directory of the tree at spec's directory
 // that holds a Go file, entering a member module of the workspace and no other.
 func dirPatterns(ctx context.Context, spec *loadSpec, members *scope.Workspace) ([]string, error) {
-	tree := TreeOf(spec.file)
+	tree, below := TreeOf(spec.file), scope.RootOf(spec.dir)
 	var patterns []string
 	enters := func(dir string) bool { return !tree.Skips(dir) && (!IsModuleRoot(dir) || members.Lists(dir)) }
 	err := spec.top.Walk(spec.dir, enters, func(path string, kind Kind) error {
@@ -712,7 +723,7 @@ func dirPatterns(ctx context.Context, spec *loadSpec, members *scope.Workspace) 
 		case kind != File || !buildconstraint.IsGoFile(filepath.Base(path)):
 			return nil
 		}
-		pattern := "./" + unitPrefix(spec.dir, filepath.Dir(path))
+		pattern := "./" + unitPrefix(below, filepath.Dir(path))
 		if pattern == "./" {
 			pattern = "."
 		}
@@ -753,17 +764,13 @@ func dropUnreadErrors(pkgs []*packages.Package, spec *loadSpec) []*packages.Pack
 
 // opens reports whether a toolchain message reports that opening path failed, the
 // toolchain naming it relative to the directory it ran in or in full, through any
-// spelling of its directory: a load run from a consumer spelled through a link
-// reaches an entry of the target through that link, where the walk of the root
-// spelled it as the root is.
+// spelling of its directory ([scope.SameEntry]): a load run from a consumer spelled
+// through a link reaches an entry of the target through that link, where the walk
+// of the root spelled it as the root is.
 func opens(msg, from, path string) bool {
 	if strings.Contains(msg, "open "+path+": ") {
 		return true
 	}
-	if rel, err := filepath.Rel(from, path); err == nil && filepath.IsLocal(rel) && strings.Contains(msg, "open "+rel+": ") {
-		return true
-	}
-	resolved := scope.Resolved(path)
 	for rest := msg; ; {
 		_, after, found := strings.Cut(rest, "open ")
 		if !found {
@@ -773,7 +780,7 @@ func opens(msg, from, path string) bool {
 			if !filepath.IsAbs(named) {
 				named = filepath.Join(from, named)
 			}
-			if scope.Resolved(named) == resolved {
+			if scope.SameEntry(named, path) {
 				return true
 			}
 		}

@@ -149,17 +149,19 @@ func (r *Result) Referencing() []Consumer {
 	return slices.Concat(r.Consumers, r.Nested)
 }
 
-// Respell is path as the target root spells it where the root holds it, and path
-// itself elsewhere: the name the load gives every file it checks whole, so a
-// consumer's directory the root holds through a link still holds its files.
+// Respell is the directory at path as the target root spells it where the root
+// holds it ([scope.Root.Respell]), and path itself elsewhere: the directory the
+// load names the files of a module it checks whole below, so a consumer's
+// directory the root holds through a link still holds its files.
 func (r *Result) Respell(path string) string { return r.root.Respell(path) }
 
 // Unit returns r narrowed to the unit rooted at dir: its packages alone, so an
 // answer about one module's build list or imports reads that module's load. It
 // returns nil where r holds no such unit.
 func (r *Result) Unit(dir string) *Result {
+	unit := scope.RootOf(dir)
 	for i := range r.Units {
-		if !sameDir(r.Units[i].Dir, dir) {
+		if !unit.Is(r.Units[i].Dir) {
 			continue
 		}
 		narrowed := *r
@@ -214,7 +216,7 @@ func declaredDirs(pkgs []*packages.Package) map[string]string {
 		}
 		if held, seen := dirs[p.PkgPath]; !seen {
 			dirs[p.PkgPath] = dir
-		} else if held != "" && !sameDir(held, dir) {
+		} else if held != "" && !scope.Same(held, dir) {
 			dirs[p.PkgPath] = ""
 		}
 	}

@@ -93,11 +93,18 @@ func linkedTarget(t *testing.T) (top *load.Topology, base, alias string) {
 // Every path a note names that some input spells through a link to the tree is
 // named where it resolves, relative to the target root ([program.10]): a dropped
 // module, a workspace reader, an unread entry, a hidden entry and the go env file
-// GOENV names, whose name a note omits only where it lies outside the root. Two
-// spellings of one hidden entry make one note.
+// GOENV names, whose name a note omits only where it lies outside the root. Three
+// spellings of one hidden entry, the root's, one through a link to the tree and
+// one through a link inside the root to its directory, make one note.
 func TestNotesNameAPathSpelledThroughALinkWhereItResolves(t *testing.T) {
 	top, base, alias := linkedTarget(t)
 	app := filepath.Join(base, "app")
+	if err := sandbox.MkdirAll(filepath.Join(app, "p"), 0o750); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	if err := sandbox.Symlink("p", filepath.Join(app, "lp")); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
 	top.Unread = append(top.Unread, filepath.Join(alias, "app", "data"))
 	top.EnvFiles = []load.EnvFile{{Path: filepath.Join(alias, "app", "env"), Named: true}, {Path: filepath.Join(alias, "env"), Named: true}}
 	p := &Prepared{Loaded: &Loaded{Root: top.Root, Topology: top, loads: &loads{outlines: []outline{{
@@ -105,7 +112,7 @@ func TestNotesNameAPathSpelledThroughALinkWhereItResolves(t *testing.T) {
 			{Dir: filepath.Join(alias, "app", "tool"), Err: errors.New("load: unreadable module file"), Unreadable: true},
 			{Dir: filepath.Join(alias, "reader"), Err: errors.New("load: unreadable module file"), Unreadable: true},
 		},
-		hidden: []string{filepath.Join(app, "p", "x.go"), filepath.Join(alias, "app", "p", "x.go"), filepath.Join(alias, "b", "q", "x.go")},
+		hidden: []string{filepath.Join(app, "p", "x.go"), filepath.Join(alias, "app", "p", "x.go"), filepath.Join(app, "lp", "x.go"), filepath.Join(alias, "b", "q", "x.go")},
 	}}}}}
 
 	var got []string
