@@ -1,21 +1,22 @@
 package memory
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 )
 
 // machine writes files under a fresh root, each path relative to it.
 func machine(t *testing.T, files map[string]string) string {
 	t.Helper()
-	root := t.TempDir()
+	root := sandbox.Dir(t)
 	for name, body := range files {
 		path := filepath.Join(root, filepath.FromSlash(name))
-		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		if err := sandbox.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			t.Fatalf("Setup: create %s: %v", filepath.Dir(path), err)
 		}
-		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		if err := sandbox.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatalf("Setup: write %s: %v", path, err)
 		}
 	}

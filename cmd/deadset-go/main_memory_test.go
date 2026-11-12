@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/memory"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -64,7 +65,7 @@ func TestARunThatCannotFitExitsWithTheMemoryLine(t *testing.T) {
 	line := memoryExhaustionLine(t)
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
 	t.Chdir(dir)
-	reportPath := filepath.Join(t.TempDir(), "report.json")
+	reportPath := filepath.Join(sandbox.Dir(t), "report.json")
 
 	// A machine whose limit is a live heap of half a gigabyte, with no memory left
 	// beyond what the process holds, is a run the governor cannot fit. The limit
@@ -133,7 +134,7 @@ func TestAStageTheGovernorCancelledEndsWithTheMemoryLine(t *testing.T) {
 func TestARunWhoseMemoryCannotBeReadIsUngoverned(t *testing.T) {
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
 	t.Chdir(dir)
-	reportPath := filepath.Join(t.TempDir(), "report.json")
+	reportPath := filepath.Join(sandbox.Dir(t), "report.json")
 
 	var stdout, stderr bytes.Buffer
 	code := governed([]string{"analyze", "--target=.", "--report=" + reportPath}, &stdout, &stderr, memory.Machine{})

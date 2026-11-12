@@ -3,11 +3,11 @@ package jsondoc
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"github.com/cplieger/deadset-spec/v8/document"
 	"github.com/cplieger/go/filesafe"
 )
@@ -41,8 +41,8 @@ func TestEncodeWritesTheCharactersAPageEscapesAsThemselves(t *testing.T) {
 func TestReadHoldsADocumentToItsBound(t *testing.T) {
 	t.Parallel()
 
-	path := filepath.Join(t.TempDir(), "document.json")
-	if err := os.WriteFile(path, []byte(strings.Repeat(" ", 8)), 0o600); err != nil {
+	path := filepath.Join(sandbox.Dir(t), "document.json")
+	if err := sandbox.WriteFile(path, []byte(strings.Repeat(" ", 8)), 0o600); err != nil {
 		t.Fatalf("Setup: write %s: %v", path, err)
 	}
 	cancelled, cancel := context.WithCancel(t.Context())
@@ -77,8 +77,8 @@ func TestReadHoldsADocumentToItsBound(t *testing.T) {
 func TestReadNamesTheDocumentAndTheBoundItExceeds(t *testing.T) {
 	t.Parallel()
 
-	path := filepath.Join(t.TempDir(), "document.json")
-	if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+	path := filepath.Join(sandbox.Dir(t), "document.json")
+	if err := sandbox.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
 		t.Fatalf("Setup: write %s: %v", path, err)
 	}
 	_, err := Read(t.Context(), path, 2)

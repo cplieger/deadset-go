@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/document"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -22,9 +22,9 @@ import (
 // resolves.
 func writeDocument(t *testing.T, body string) (dir, path string) {
 	t.Helper()
-	dir = t.TempDir()
+	dir = sandbox.Dir(t)
 	path = filepath.Join(dir, "scope.json")
-	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+	if err := sandbox.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
 	return dir, path
@@ -108,7 +108,7 @@ func TestReadResolvesTheWorkspaceTheDocumentNames(t *testing.T) {
 }
 
 func TestReadKeepsAnAbsolutePathAsWritten(t *testing.T) {
-	absolute := filepath.Join(t.TempDir(), "elsewhere")
+	absolute := filepath.Join(sandbox.Dir(t), "elsewhere")
 	_, path := writeDocument(t, `{"target": {"path": `+strconv.Quote(absolute)+`}}`)
 
 	got, err := read(t.Context(), path)
@@ -190,7 +190,7 @@ func TestReadRefusals(t *testing.T) {
 }
 
 func TestReadRefusesAnAbsentDocument(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "missing.json")
+	path := filepath.Join(sandbox.Dir(t), "missing.json")
 
 	_, err := read(t.Context(), path)
 
@@ -231,7 +231,7 @@ func TestReadAcceptsADocumentAtTheSizeBound(t *testing.T) {
 }
 
 func TestForDirIsTheTargetAndNothingElse(t *testing.T) {
-	dir := t.TempDir()
+	dir := sandbox.Dir(t)
 
 	got, err := ForDir(dir)
 	if err != nil {
@@ -245,7 +245,7 @@ func TestForDirIsTheTargetAndNothingElse(t *testing.T) {
 }
 
 func TestForDirResolvesARelativeDirectory(t *testing.T) {
-	t.Chdir(t.TempDir())
+	t.Chdir(sandbox.Dir(t))
 
 	got, err := ForDir(".")
 	if err != nil {
@@ -257,8 +257,8 @@ func TestForDirResolvesARelativeDirectory(t *testing.T) {
 }
 
 func TestForDirRefusals(t *testing.T) {
-	file := filepath.Join(t.TempDir(), "go.mod")
-	if err := os.WriteFile(file, []byte("module example.com/app\n"), 0o600); err != nil {
+	file := filepath.Join(sandbox.Dir(t), "go.mod")
+	if err := sandbox.WriteFile(file, []byte("module example.com/app\n"), 0o600); err != nil {
 		t.Fatalf("write %s: %v", file, err)
 	}
 
@@ -266,7 +266,7 @@ func TestForDirRefusals(t *testing.T) {
 		dir     string
 		wantErr error
 	}{
-		"absent directory": {dir: filepath.Join(t.TempDir(), "missing"), wantErr: fs.ErrNotExist},
+		"absent directory": {dir: filepath.Join(sandbox.Dir(t), "missing"), wantErr: fs.ErrNotExist},
 		"a file":           {dir: file, wantErr: errNotDirectory},
 	}
 	for name, test := range cases {
@@ -368,17 +368,17 @@ func TestReadRefusesEveryPublishedScopeNegative(t *testing.T) {
 }
 
 func TestWithinPlacesAPathByItsNamesThenWhereBothResolve(t *testing.T) {
-	base := t.TempDir()
+	base := sandbox.Dir(t)
 	real := filepath.Join(base, "real")
-	if err := os.MkdirAll(filepath.Join(real, "app", "sub"), 0o750); err != nil {
+	if err := sandbox.MkdirAll(filepath.Join(real, "app", "sub"), 0o750); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	alias := filepath.Join(base, "alias")
-	if err := os.Symlink(real, alias); err != nil {
+	if err := sandbox.Symlink(real, alias); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	outside := filepath.Join(base, "outside")
-	if err := os.Symlink(filepath.Join(real, "app"), filepath.Join(real, "inner")); err != nil {
+	if err := sandbox.Symlink(filepath.Join(real, "app"), filepath.Join(real, "inner")); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	for _, tc := range []struct {
@@ -405,16 +405,16 @@ func TestWithinPlacesAPathByItsNamesThenWhereBothResolve(t *testing.T) {
 
 func TestAnInputTheInvocationNamesThatCannotBeReadIsErrNamed(t *testing.T) {
 	_, refused := writeDocument(t, `{"target": {"path": "."}, "unknown": true}`)
-	file := filepath.Join(t.TempDir(), "file")
-	if err := os.WriteFile(file, nil, 0o600); err != nil {
+	file := filepath.Join(sandbox.Dir(t), "file")
+	if err := sandbox.WriteFile(file, nil, 0o600); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	for _, tc := range []struct {
 		name, dir, document string
 	}{
-		{"an absent target", filepath.Join(t.TempDir(), "absent"), ""},
+		{"an absent target", filepath.Join(sandbox.Dir(t), "absent"), ""},
 		{"a target that is a file", file, ""},
-		{"an absent scope document", ".", filepath.Join(t.TempDir(), "missing.json")},
+		{"an absent scope document", ".", filepath.Join(sandbox.Dir(t), "missing.json")},
 		{"a scope document the schema refuses", ".", refused},
 	} {
 		if _, err := Resolve(t.Context(), tc.dir, tc.document); !errors.Is(err, ErrNamed) {

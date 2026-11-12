@@ -2,11 +2,11 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"pgregory.net/rapid"
 )
 
@@ -170,11 +170,11 @@ func writeFiles(dir string, files map[string]string) error {
 	for base, body := range files {
 		path := filepath.Join(dir, base)
 		if parent := filepath.Dir(path); parent != dir {
-			if err := os.MkdirAll(parent, 0o750); err != nil {
+			if err := sandbox.MkdirAll(parent, 0o750); err != nil {
 				return fmt.Errorf("create %s: %w", parent, err)
 			}
 		}
-		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		if err := sandbox.WriteFile(path, []byte(body), 0o600); err != nil {
 			return fmt.Errorf("write %s: %w", path, err)
 		}
 	}

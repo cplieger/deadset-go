@@ -31,11 +31,22 @@ func (in *pass) dial(found []Finding) *dialed {
 	return d
 }
 
-// withholds reports whether the dials withhold one finding: by its code's severity,
-// by its own confidence, or with its dead component.
+// withholds reports whether the dials withhold one finding ([dialed.withholding]).
 func (d *dialed) withholds(found *Finding, least vocab.Class) bool {
-	return found.Severity == vocab.Allow || d.allowed[found.Component.ID] ||
-		rank(found.Confidence) < rank(least) || d.components[found.Component.ID]
+	return d.withholding(found, least) != ""
+}
+
+// withholding is which dial withholds one finding, empty where neither does: the
+// severity dial by its code's severity or with its dead component, else the minimum
+// by its own confidence or with its dead component.
+func (d *dialed) withholding(found *Finding, least vocab.Class) core.Withholding {
+	switch {
+	case found.Severity == vocab.Allow || d.allowed[found.Component.ID]:
+		return core.WithheldBySeverity
+	case rank(found.Confidence) < rank(least) || d.components[found.Component.ID]:
+		return core.WithheldByMinConfidence
+	}
+	return ""
 }
 
 // withholdRoot records the component of one withheld finding when the finding is a

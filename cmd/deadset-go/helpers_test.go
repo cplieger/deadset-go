@@ -19,6 +19,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/run"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -89,7 +90,7 @@ func fixtureFor(files map[string]string) *fixture {
 // declaration of it, and answers the same directory to every later one.
 func (f *fixture) directory() (string, error) {
 	f.written.Do(func() {
-		dir, err := os.MkdirTemp(fixtureBase, "module")
+		dir, err := sandbox.MkdirTemp(fixtureBase, "module")
 		if err != nil {
 			f.writeErr = err
 			return
@@ -237,13 +238,7 @@ type invoked struct {
 // same analysis under it, and the signal test re-executes this binary ([reexecuted]).
 func invokedIn(t *testing.T, dir string, args ...string) invoked {
 	t.Helper()
-	return invokedUnder(t.Context(), t, dir, args...)
-}
-
-// invokedUnder is [invokedIn] under ctx, which kills the command when it ends.
-func invokedUnder(ctx context.Context, t *testing.T, dir string, args ...string) invoked {
-	t.Helper()
-	cmd := exec.CommandContext(ctx, commandBinary(t), args...)
+	cmd := exec.CommandContext(t.Context(), commandBinary(t), args...)
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

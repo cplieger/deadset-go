@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -33,7 +34,7 @@ type analyzed struct {
 func runAnalyze(t *testing.T, dir string, args ...string) analyzed {
 	t.Helper()
 
-	reportPath := filepath.Join(t.TempDir(), "report.json")
+	reportPath := filepath.Join(sandbox.Dir(t), "report.json")
 	got := invokedIn(t, dir, append([]string{"analyze", "--target=.", "--report=" + reportPath}, args...)...)
 	// The verb writes nothing to stdout: the report is a file and the verdict is
 	// the code, so a stream carries neither.
@@ -420,7 +421,7 @@ func TestAnalyzeExitsWithFailureWhenTheTemplateFailsToRender(t *testing.T) {
 func TestAnalyzeWritesTheBaselineOfEveryFindingOfTheRun(t *testing.T) {
 	t.Parallel()
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
-	baseline := filepath.Join(t.TempDir(), "deadset-baseline.json")
+	baseline := filepath.Join(sandbox.Dir(t), "deadset-baseline.json")
 	got := runAnalyze(t, dir, "--baseline-write="+baseline, "--max-findings=1")
 
 	body, err := os.ReadFile(baseline)
@@ -467,8 +468,8 @@ func TestAnalyzeWritesNoPartialDocumentWhereThePublishCannotHappen(t *testing.T)
 	// The report path names a file under a path that is a regular file, so the
 	// temporary file the write goes through cannot be created and the rename that
 	// publishes the document never happens.
-	held := filepath.Join(t.TempDir(), "occupied")
-	if err := os.WriteFile(held, []byte("not a directory\n"), 0o600); err != nil {
+	held := filepath.Join(sandbox.Dir(t), "occupied")
+	if err := sandbox.WriteFile(held, []byte("not a directory\n"), 0o600); err != nil {
 		t.Fatalf("Setup: write %s: %v", held, err)
 	}
 	reportPath := filepath.Join(held, "report.json")
@@ -504,8 +505,8 @@ func TestAnalyzeWritesNoPartialDocumentWhereTheRenameIsRefused(t *testing.T) {
 	// The report path names a directory that is not empty, so the temporary file is
 	// created and written and the rename that would publish it is the step the
 	// filesystem refuses.
-	reportPath := filepath.Join(t.TempDir(), "report.json")
-	if err := os.MkdirAll(filepath.Join(reportPath, "occupied"), 0o750); err != nil {
+	reportPath := filepath.Join(sandbox.Dir(t), "report.json")
+	if err := sandbox.MkdirAll(filepath.Join(reportPath, "occupied"), 0o750); err != nil {
 		t.Fatalf("Setup: create %s: %v", reportPath, err)
 	}
 
@@ -536,7 +537,7 @@ func TestAnalyzeWritesNoPartialDocumentWhereTheRenameIsRefused(t *testing.T) {
 func TestPublishLeavesNoTemporaryFileBehind(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
+	dir := sandbox.Dir(t)
 	path := filepath.Join(dir, "document.json")
 	if err := publish(t.Context(), path, func(w io.Writer) error {
 		_, err := w.Write([]byte("{}\n"))
@@ -754,7 +755,7 @@ func consumedTree(t *testing.T) string {
 func TestAnalyzeRendersSARIFAgainstTheTargetTheScopeDocumentNames(t *testing.T) {
 	dir := consumedTree(t)
 	t.Chdir(dir)
-	reportPath := filepath.Join(t.TempDir(), "report.json")
+	reportPath := filepath.Join(sandbox.Dir(t), "report.json")
 
 	// The invocation names no target, so the target directory is the scope
 	// document's, and the SARIF rendering reads the lines it fingerprints there.
@@ -778,7 +779,7 @@ func TestAnalyzeRendersSARIFAgainstTheTargetTheScopeDocumentNames(t *testing.T) 
 func TestAnalyzeReadsTheScopeDocumentTheInvocationNames(t *testing.T) {
 	dir := consumedTree(t)
 	t.Chdir(dir)
-	reportPath := filepath.Join(t.TempDir(), "report.json")
+	reportPath := filepath.Join(sandbox.Dir(t), "report.json")
 
 	var stdout, stderr bytes.Buffer
 	code := invoke(t.Context(), []string{

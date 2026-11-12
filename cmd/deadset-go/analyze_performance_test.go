@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -192,8 +193,8 @@ func analyzeSynthesized(ctx context.Context, sink failureSink, base, name string
 func writeSynthesized(t *testing.T, recorded *benchmarkRun) moduleSize {
 	t.Helper()
 
-	dir := filepath.Join(t.TempDir(), recorded.Name)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	dir := filepath.Join(sandbox.Dir(t), recorded.Name)
+	if err := sandbox.MkdirAll(dir, 0o750); err != nil {
 		t.Fatalf("Setup: create %s: %v", dir, err)
 	}
 	return synthesizeModule(t, dir,

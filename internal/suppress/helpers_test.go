@@ -11,6 +11,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	spec "github.com/cplieger/deadset-spec/v8"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
 	"golang.org/x/tools/txtar"
@@ -75,13 +76,13 @@ func extract(t *testing.T, archive string) string {
 	if err != nil {
 		t.Fatalf("Setup: parse testdata/%s: %v", archive, err)
 	}
-	dir := t.TempDir()
+	dir := sandbox.Dir(t)
 	for _, f := range parsed.Files {
 		path := filepath.Join(dir, filepath.FromSlash(f.Name))
-		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		if err := sandbox.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			t.Fatalf("Setup: create %s: %v", filepath.Dir(path), err)
 		}
-		if err := os.WriteFile(path, f.Data, 0o600); err != nil {
+		if err := sandbox.WriteFile(path, f.Data, 0o600); err != nil {
 			t.Fatalf("Setup: write %s: %v", path, err)
 		}
 	}
@@ -125,8 +126,8 @@ func loaded(t *testing.T, archive string) (*load.Result, string, []inventory.Sym
 // returns its path.
 func writeIgnoreFile(t *testing.T, document string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), core.IgnoreFileName)
-	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
+	path := filepath.Join(sandbox.Dir(t), core.IgnoreFileName)
+	if err := sandbox.WriteFile(path, []byte(document), 0o600); err != nil {
 		t.Fatalf("Setup: write %s: %v", path, err)
 	}
 	return path
@@ -154,8 +155,8 @@ func resolverOf(t *testing.T, result *load.Result, root string, _ []inventory.Sy
 func writeDocument(t *testing.T, name, document string) string {
 	t.Helper()
 
-	path := filepath.Join(t.TempDir(), name)
-	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
+	path := filepath.Join(sandbox.Dir(t), name)
+	if err := sandbox.WriteFile(path, []byte(document), 0o600); err != nil {
 		t.Fatalf("Setup: write %s: %v", path, err)
 	}
 	return path

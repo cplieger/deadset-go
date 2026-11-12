@@ -1,23 +1,23 @@
 package load
 
 import (
-	"os"
 	"path/filepath"
 	"slices"
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/scope"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"golang.org/x/tools/go/packages"
 )
 
 func TestWalkFollowsARootThatIsALinkAndKeepsItsSpelling(t *testing.T) {
-	base := t.TempDir()
+	base := sandbox.Dir(t)
 	real := filepath.Join(base, "real")
-	if err := os.MkdirAll(filepath.Join(real, "sub"), 0o750); err != nil {
+	if err := sandbox.MkdirAll(filepath.Join(real, "sub"), 0o750); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	link := filepath.Join(base, "link")
-	if err := os.Symlink(real, link); err != nil {
+	if err := sandbox.Symlink(real, link); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	var walked []string
@@ -54,7 +54,7 @@ func TestWalkListsOnlyTheDirectoriesItEnters(t *testing.T) {
 // that directory; the tree's own skips and a nested module are left out.
 func TestTreePatternsNamesEachPackageDirectoryWhereADirectoryIsUnread(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := sandbox.Dir(t)
 	for path, body := range map[string]string{
 		"go.mod":         "module example.com/m\n\ngo 1.27.1\n",
 		"main.go":        "package main\n",
@@ -69,10 +69,10 @@ func TestTreePatternsNamesEachPackageDirectoryWhereADirectoryIsUnread(t *testing
 		"z/y/y.go":       "package y\n",
 	} {
 		full := filepath.Join(root, filepath.FromSlash(path))
-		if err := os.MkdirAll(filepath.Dir(full), 0o750); err != nil {
+		if err := sandbox.MkdirAll(filepath.Dir(full), 0o750); err != nil {
 			t.Fatalf("Setup: %v", err)
 		}
-		if err := os.WriteFile(full, []byte(body), 0o600); err != nil {
+		if err := sandbox.WriteFile(full, []byte(body), 0o600); err != nil {
 			t.Fatalf("Setup: %v", err)
 		}
 	}
@@ -92,7 +92,7 @@ func TestTreePatternsNamesEachPackageDirectoryWhereADirectoryIsUnread(t *testing
 // walk ended in, is dropped; every other error stays.
 func TestDropUnreadErrorsClearsOnlyWhatOpensAnUnreadPath(t *testing.T) {
 	t.Parallel()
-	root := filepath.Join(t.TempDir(), "m")
+	root := filepath.Join(sandbox.Dir(t), "m")
 	secret := filepath.Join(root, "p", "secret.go")
 	broken := filepath.Join(root, "p", "broken.go")
 	spec := &loadSpec{dir: root, top: &Topology{Root: root, Unread: []string{filepath.Join(root, "data"), secret}, LeftOut: []string{broken}}}

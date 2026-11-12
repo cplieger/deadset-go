@@ -4,10 +4,11 @@ import (
 	"go/build"
 	"go/build/constraint"
 	"maps"
-	"os"
 	"path/filepath"
 	"slices"
 	"testing"
+
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 )
 
 func TestNameConstraintReadsThePlatformSuffixConvention(t *testing.T) {
@@ -250,13 +251,13 @@ func TestHoldsWithAnswersSomeSettingOfTheOtherTags(t *testing.T) {
 func TestOfAgreesWithTheToolchainOnAByteOrderMark(t *testing.T) {
 	ctxt := build.Default
 	ctxt.GOOS, ctxt.GOARCH, ctxt.CgoEnabled = "linux", "amd64", false
-	dir := t.TempDir()
+	dir := sandbox.Dir(t)
 	for name, content := range map[string]string{
 		"windows.go": byteOrderMark + "//go:build windows\n\npackage app\n",
 		"linux.go":   byteOrderMark + "//go:build linux\n\npackage app\n",
 		"legacy.go":  byteOrderMark + "// +build windows\n\npackage app\n",
 	} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+		if err := sandbox.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
 		matched, err := ctxt.MatchFile(dir, name)

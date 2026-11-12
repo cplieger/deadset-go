@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 )
 
 // pendingBase writes the target one pending assertion is measured over, under a
@@ -21,9 +23,9 @@ import (
 func pendingBase(t *testing.T) string {
 	t.Helper()
 
-	base := t.TempDir()
+	base := sandbox.Dir(t)
 	dir := filepath.Join(base, "app")
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	if err := sandbox.MkdirAll(dir, 0o750); err != nil {
 		t.Fatalf("Setup: create %s: %v", dir, err)
 	}
 	files := map[string]string{

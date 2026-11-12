@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -84,7 +85,7 @@ func relativeSorted(base string, paths map[string]bool) []string {
 	}
 	rendered := make([]string, 0, len(paths))
 	for path := range paths {
-		rendered = append(rendered, RelativeSlash(base, path))
+		rendered = append(rendered, scope.RelativeSlash(base, path))
 	}
 	slices.Sort(rendered)
 	return slices.Compact(rendered)

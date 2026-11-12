@@ -42,12 +42,12 @@ func checkPrograms(ctx context.Context, fset *token.FileSet, from unitDir, pkgs 
 }
 
 // checkScripts checks, each alone against the packages pkgs loaded, every script of
-// the dropped module rooted at dir: a file run with go run on its own, which no build
-// of its package compiles because a sibling file declares main as well. A package a
-// script imports that pkgs do not hold is loaded from dir, so the script's own module
-// file decides it.
-func checkScripts(ctx context.Context, top *Topology, fset *token.FileSet, dir string, pkgs []*packages.Package, c *Configuration) []programFile {
-	return checkProgramFiles(ctx, fset, unitDir{dir: dir, workspace: workspaceOff}, pkgs, c, top.scriptPaths(dir, treeAt(dir), c))
+// the dropped module rooted at from's directory: a file run with go run on its own,
+// which no build of its package compiles because a sibling file declares main as
+// well. A package a script imports that pkgs do not hold is loaded from there, so the
+// script's own module file decides it, unless from is offline.
+func checkScripts(ctx context.Context, top *Topology, fset *token.FileSet, from unitDir, pkgs []*packages.Package, c *Configuration) []programFile {
+	return checkProgramFiles(ctx, fset, from, pkgs, c, top.scriptPaths(from.dir, treeAt(from.dir), c))
 }
 
 // scriptPaths lists, sorted, every Go file below the module root dir, in no nested

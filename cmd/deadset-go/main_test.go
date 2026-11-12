@@ -20,6 +20,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/memory"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -45,7 +46,7 @@ func runTests(m *testing.M) int {
 		}
 		return governed(args, os.Stdout, os.Stderr, memory.Platform())
 	}
-	base, err := os.MkdirTemp("", "deadset-fixtures")
+	base, err := sandbox.MkdirTemp("", "deadset-fixtures")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "create the fixture directory: %v\n", err)
 		return 1
@@ -435,7 +436,7 @@ func writeDocument(t *testing.T, dir, base, body string) string {
 	t.Helper()
 
 	file := filepath.Join(dir, base)
-	if err := os.WriteFile(file, []byte(body), 0o600); err != nil {
+	if err := sandbox.WriteFile(file, []byte(body), 0o600); err != nil {
 		t.Fatalf("Setup: write %s: %v", file, err)
 	}
 	return file
@@ -476,7 +477,7 @@ func decodePrinted(t *testing.T, printed []byte) printedConfiguration {
 func TestPrintConfigNamesTheSourceOfEverySetting(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
+	dir := sandbox.Dir(t)
 	repository := writeDocument(t, dir, "deadset.json", `{"target": {"kind": "library"}, "reporters": {"sort": "size"}}`)
 	central := writeDocument(t, dir, "central.json", `{"reporters": {"sort": "position", "max_findings": 20}}`)
 
@@ -520,7 +521,7 @@ func TestPrintConfigNamesTheSourceOfEverySetting(t *testing.T) {
 func TestPrintConfigOutputReadBackResolvesToTheSameConfiguration(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
+	dir := sandbox.Dir(t)
 	writeDocument(t, dir, "deadset.json", `{"target": {"kind": "application"}, "severity": {"DS1501": "warn"}, "roots": {"patterns": ["go://example.com/app#Catalog"]}}`)
 
 	var stdout, stderr bytes.Buffer
@@ -532,7 +533,7 @@ func TestPrintConfigOutputReadBackResolvesToTheSameConfiguration(t *testing.T) {
 
 	// The printed configuration is valid input: reading it back as the repository
 	// configuration resolves to an equivalent configuration.
-	readBack := writeDocument(t, t.TempDir(), "deadset.json", stdout.String())
+	readBack := writeDocument(t, sandbox.Dir(t), "deadset.json", stdout.String())
 	var again, stderrAgain bytes.Buffer
 	argsAgain := []string{"print-config", "--target=" + filepath.Dir(readBack)}
 	if got := invoke(t.Context(), argsAgain, &again, &stderrAgain); got != vocab.ExitClean {
@@ -602,7 +603,7 @@ func TestPrintConfigRefusals(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			dir := t.TempDir()
+			dir := sandbox.Dir(t)
 			if tc.writeIt {
 				writeDocument(t, dir, "deadset.json", tc.document)
 			}
@@ -632,7 +633,7 @@ func TestPrintConfigRefusesADocumentOverTheSizeBound(t *testing.T) {
 
 	// One mebibyte of padding, written as the number rather than read from the
 	// bound the command declares, so the test states the bound itself.
-	dir := t.TempDir()
+	dir := sandbox.Dir(t)
 	writeDocument(t, dir, "deadset.json", `{"target": {"kind": "library"}}`+strings.Repeat(" ", 1048576))
 
 	var stdout, stderr bytes.Buffer
@@ -654,7 +655,7 @@ func TestPrintConfigReadsADocumentAtTheSizeBound(t *testing.T) {
 	t.Parallel()
 
 	const body = `{"target": {"kind": "library"}}`
-	dir := t.TempDir()
+	dir := sandbox.Dir(t)
 	writeDocument(t, dir, "deadset.json", body+strings.Repeat(" ", 1048576-len(body)))
 
 	var stdout, stderr bytes.Buffer
@@ -667,7 +668,7 @@ func TestPrintConfigReadsADocumentAtTheSizeBound(t *testing.T) {
 func TestPrintConfigReadsTheDocumentTheInvocationNames(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
+	dir := sandbox.Dir(t)
 	named := writeDocument(t, dir, "named.json", `{"target": {"kind": "library"}}`)
 	writeDocument(t, dir, "deadset.json", `{"target": {"kind": "application"}}`)
 
@@ -725,7 +726,7 @@ func TestSourceEditFlag(t *testing.T) {
 func TestEveryVerbTakesExactlyTheOptionsCLIJSONListsForIt(t *testing.T) {
 	t.Parallel()
 
-	target := t.TempDir()
+	target := sandbox.Dir(t)
 	for _, verb := range vocab.AnalyzerVerbs(vocab.Go) {
 		for _, option := range vocab.Options() {
 			t.Run(verb.Name+"/"+option.Name, func(t *testing.T) {
@@ -787,10 +788,10 @@ func TestUnmatchedRootNamesTheKindTheContractPublishes(t *testing.T) {
 func writeModule(t *testing.T, files map[string]string) string {
 	t.Helper()
 
-	dir := t.TempDir()
+	dir := sandbox.Dir(t)
 	for base, body := range files {
 		if parent := filepath.Dir(base); parent != "." {
-			if err := os.MkdirAll(filepath.Join(dir, parent), 0o750); err != nil {
+			if err := sandbox.MkdirAll(filepath.Join(dir, parent), 0o750); err != nil {
 				t.Fatalf("Setup: create %s: %v", filepath.Join(dir, parent), err)
 			}
 		}
@@ -847,7 +848,7 @@ func TestPrintRootsRootsThePublishedAPIOfALibraryTarget(t *testing.T) {
 		"app.go": "package app\n\n// Helper is exported, so a library publishes it.\n" +
 			"func Helper() string { return helper() }\n\nfunc helper() string { return \"\" }\n",
 	})
-	documents := t.TempDir()
+	documents := sandbox.Dir(t)
 
 	tests := []struct {
 		name string

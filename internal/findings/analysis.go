@@ -38,6 +38,10 @@ type pass struct {
 	unanalysed map[string]bool
 	exposed    map[inventory.SymbolID]bool
 
+	// obscured is every target-relative package directory holding code the
+	// analysis does not see ([load.Result.Obscured]).
+	obscured map[string]bool
+
 	deprecated map[inventory.SymbolID]bool
 	enumerated map[inventory.SymbolID]string
 	literals   map[string][]literalSite
@@ -91,6 +95,7 @@ func classesOf(in *Input) (*pass, error) {
 		unlinked:   make(map[string]bool),
 		unanalysed: make(map[string]bool),
 		exposed:    make(map[inventory.SymbolID]bool),
+		obscured:   make(map[string]bool),
 	}
 	a.holdInventory(in.Merged)
 	a.holdSweep(in.Sweep)
@@ -264,22 +269,34 @@ type packageFacts struct {
 // readPackages reads one configuration's packages: the directories of each import
 // path, its main packages, which nothing outside the module can import, which of
 // its packages no build links, its units, flagged where it gives one an
-// unanalysed consumer, and the types its published API reaches ([facts.Published]).
+// unanalysed consumer, the directories holding code it does not see, and the types
+// its published API reaches ([facts.Published]).
 func (in *pass) readPackages(one *Configured, held *packageFacts) {
 	if one.Result != nil {
 		in.readPackageDirs(one.Result, held)
-		for _, unit := range one.Result.Units {
-			if rel, err := filepath.Rel(in.Root, unit.Dir); err == nil {
-				dir := filepath.ToSlash(rel)
-				in.unanalysed[dir] = in.unanalysed[dir] || unit.UnanalysedConsumer
-			}
-		}
+		in.readUnits(one.Result)
 	}
 	if one.Facts != nil {
 		for _, name := range one.Facts.Published().Names() {
 			if id, inInventory := one.Resolve.Object(name); inInventory {
 				in.exposed[id] = true
 			}
+		}
+	}
+}
+
+// readUnits reads which of r's units have an unanalysed consumer and which
+// directories hold code r does not see, each by its target-relative path.
+func (in *pass) readUnits(r *load.Result) {
+	for _, unit := range r.Units {
+		if rel, err := filepath.Rel(in.Root, unit.Dir); err == nil {
+			dir := filepath.ToSlash(rel)
+			in.unanalysed[dir] = in.unanalysed[dir] || unit.UnanalysedConsumer
+		}
+	}
+	for _, dir := range r.Obscured {
+		if rel, err := filepath.Rel(in.Root, dir); err == nil {
+			in.obscured[filepath.ToSlash(rel)] = true
 		}
 	}
 }

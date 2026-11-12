@@ -1,9 +1,10 @@
 package main
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 )
 
 // recordTolerance is how far a measurement may sit above the recorded time before the
@@ -32,9 +33,9 @@ func BenchmarkAnalyzeTheRecordedModules(b *testing.B) {
 	for i := range record.Runs {
 		recorded := &record.Runs[i]
 		b.Run(recorded.Name, func(b *testing.B) {
-			base := b.TempDir()
+			base := sandbox.Dir(b)
 			dir := filepath.Join(base, recorded.Name)
-			if err := os.MkdirAll(dir, 0o750); err != nil {
+			if err := sandbox.MkdirAll(dir, 0o750); err != nil {
 				b.Fatalf("Setup: create %s: %v", dir, err)
 			}
 			size := synthesizeModule(b, dir,

@@ -3,7 +3,6 @@ package run
 import (
 	"go/ast"
 	"go/token"
-	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/findings"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -21,11 +21,11 @@ import (
 // findings pass reads.
 func platformTree(t *testing.T) string {
 	t.Helper()
-	t.Setenv("GOFLAGS", "")
+	t.Setenv("GOFLAGS", "-modcacherw=false")
 	t.Setenv("GOWORK", "off")
 	t.Setenv("GOOS", "linux")
 	t.Setenv("GOARCH", "amd64")
-	root := t.TempDir()
+	root := sandbox.Dir(t)
 	for name, body := range map[string]string{
 		"go.mod": "module example.com/p\n\ngo 1.27.1\n",
 		"main.go": `package main
@@ -64,7 +64,7 @@ func main() { println(describe(0, &Store{}), Fast, platform()) }
 		"os_linux.go":   "package main\n\nfunc platform() string { return \"linux\" }\n",
 		"os_windows.go": "package main\n\nfunc platform() string { return \"windows\" }\n",
 	} {
-		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o600); err != nil {
+		if err := sandbox.WriteFile(filepath.Join(root, name), []byte(body), 0o600); err != nil {
 			t.Fatalf("Setup: write %s: %v", name, err)
 		}
 	}
@@ -181,10 +181,10 @@ func TestLoadsLoadAgainWhatTheFirstLoadRead(t *testing.T) {
 		"go.mod":      "module example.com/p\n\ngo 1.27.1\n\nrequire example.com/dep v0.0.0\n\nreplace example.com/dep => ./dep1\n",
 		"dep_use.go":  "package main\n\nimport \"example.com/dep\"\n\nvar _ = dep.Name()\n",
 	} {
-		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, name)), 0o700); err != nil {
+		if err := sandbox.MkdirAll(filepath.Dir(filepath.Join(root, name)), 0o700); err != nil {
 			t.Fatalf("Setup: mkdir for %s: %v", name, err)
 		}
-		if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0o600); err != nil {
+		if err := sandbox.WriteFile(filepath.Join(root, name), []byte(body), 0o600); err != nil {
 			t.Fatalf("Setup: write %s: %v", name, err)
 		}
 	}
@@ -192,7 +192,7 @@ func TestLoadsLoadAgainWhatTheFirstLoadRead(t *testing.T) {
 	l.pressed = func() bool { return true }
 	l.drop()
 	moved := "module example.com/p\n\ngo 1.27.1\n\nrequire example.com/dep v0.0.0\n\nreplace example.com/dep => ./dep2\n"
-	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte(moved), 0o600); err != nil {
+	if err := sandbox.WriteFile(filepath.Join(root, "go.mod"), []byte(moved), 0o600); err != nil {
 		t.Fatalf("Setup: write go.mod: %v", err)
 	}
 	again, err := l.At(0)

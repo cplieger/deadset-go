@@ -463,12 +463,21 @@ func (im *cgoImporter) resolve(path string) (*packages.Package, error) {
 		im.refused[path] = true
 		return nil, fmt.Errorf("%s is a package pattern rather than an import path", path)
 	}
+	if im.from.offline {
+		im.refused[path] = true
+		return nil, fmt.Errorf("no package provides %s", path)
+	}
 
+	env, err := loadEnv(im.c, im.from.dir, im.from.workspace, im.from.toolchain)
+	if err != nil {
+		im.refused[path] = true
+		return nil, err
+	}
 	cfg := &packages.Config{
 		Mode:       metadataMode,
 		Context:    im.ctx,
 		Dir:        im.from.dir,
-		Env:        loadEnv(im.c, im.from.workspace),
+		Env:        env,
 		BuildFlags: buildFlags(im.c.Tags),
 	}
 	pkgs, err := packages.Load(cfg, path)
@@ -476,7 +485,7 @@ func (im *cgoImporter) resolve(path string) (*packages.Package, error) {
 		im.refused[path] = true
 		return nil, err
 	}
-	if len(collect(pkgs, "")) == 0 {
+	if !reportsErrors(pkgs) {
 		if err := typeCheckDeclarations(im.ctx, im.fset, pkgs, im.c.Arch); err != nil {
 			im.refused[path] = true
 			return nil, err

@@ -21,6 +21,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -91,13 +92,13 @@ func extract(t *testing.T, archive string) string {
 	if err != nil {
 		t.Fatalf("Setup: parse testdata/%s: %v", archive, err)
 	}
-	dir := t.TempDir()
+	dir := sandbox.Dir(t)
 	for _, f := range parsed.Files {
 		path := filepath.Join(dir, filepath.FromSlash(f.Name))
-		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		if err := sandbox.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			t.Fatalf("Setup: create %s: %v", filepath.Dir(path), err)
 		}
-		if err := os.WriteFile(path, f.Data, 0o600); err != nil {
+		if err := sandbox.WriteFile(path, f.Data, 0o600); err != nil {
 			t.Fatalf("Setup: write %s: %v", path, err)
 		}
 	}
@@ -668,14 +669,14 @@ func corpusInput(t *testing.T, fixture string, resolved config.Config) *Input {
 func sectionsInput(t *testing.T, fixture string, data []byte, resolved config.Config) *Input {
 	t.Helper()
 
-	dir := t.TempDir()
+	dir := sandbox.Dir(t)
 	sections := make(map[string]bool)
 	for _, f := range txtar.Parse(data).Files {
 		path := filepath.Join(dir, filepath.FromSlash(f.Name))
-		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		if err := sandbox.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			t.Fatalf("Setup: create %s: %v", filepath.Dir(path), err)
 		}
-		if err := os.WriteFile(path, f.Data, 0o600); err != nil {
+		if err := sandbox.WriteFile(path, f.Data, 0o600); err != nil {
 			t.Fatalf("Setup: write %s: %v", path, err)
 		}
 		if section, _, nested := strings.Cut(f.Name, "/"); nested {

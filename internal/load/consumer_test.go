@@ -2,7 +2,6 @@ package load
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/failure"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
@@ -170,13 +170,13 @@ func TestLoadRefusesAConsumerItCannotCount(t *testing.T) {
 
 func TestLoadRefusesAnAbsentConsumerAsAMissingConsumer(t *testing.T) {
 	stableToolchain(t)
-	absent := filepath.Join(t.TempDir(), "missing")
+	absent := filepath.Join(sandbox.Dir(t), "missing")
 	doc := consumedScope(t)
 	doc.Consumers = append(doc.Consumers, scope.Module{Path: absent})
 
 	got, err := loadScope(t.Context(), doc, HostConfiguration())
 
-	assertMissingConsumer(t, "a scope naming an absent consumer", err, absent)
+	assertMissingConsumer(t, "a scope naming an absent consumer", err, doc.Target.Path, absent)
 	if !reflect.DeepEqual(got, Result{}) {
 		t.Errorf("Load(a scope naming an absent consumer) = %+v, want the zero Result", got)
 	}
@@ -186,12 +186,12 @@ func TestLoadRefusesAnAbsentConsumerAsAMissingConsumer(t *testing.T) {
 // installed, which is the second arm of the missing-consumer class.
 func TestLoadRefusesAConsumerWhoseDependenciesAreNotInstalledAsAMissingConsumer(t *testing.T) {
 	stableToolchain(t)
-	consumer := t.TempDir()
+	consumer := sandbox.Dir(t)
 	for name, body := range map[string]string{
 		"go.mod":  "module example.com/uninstalled\n\ngo 1.27.1\n\nrequire example.com/nowhere v1.0.0\n",
 		"main.go": "package main\n\nimport \"example.com/nowhere\"\n\nfunc main() { nowhere.Run() }\n",
 	} {
-		if err := os.WriteFile(filepath.Join(consumer, name), []byte(body), 0o600); err != nil {
+		if err := sandbox.WriteFile(filepath.Join(consumer, name), []byte(body), 0o600); err != nil {
 			t.Fatalf("Setup: write %s: %v", name, err)
 		}
 	}
@@ -200,12 +200,13 @@ func TestLoadRefusesAConsumerWhoseDependenciesAreNotInstalledAsAMissingConsumer(
 
 	_, err := loadScope(t.Context(), doc, HostConfiguration())
 
-	assertMissingConsumer(t, "a scope naming a consumer whose import nothing provides", err, consumer, "example.com/nowhere")
+	assertMissingConsumer(t, "a scope naming a consumer whose import nothing provides", err, doc.Target.Path, consumer, "example.com/nowhere")
 }
 
 // assertMissingConsumer checks that a load ended with one missing-consumer setup
-// failure whose line names every string of want.
-func assertMissingConsumer(t *testing.T, what string, err error, want ...string) {
+// failure whose line names the consumer at dir relative to the target root, never
+// by its absolute path, and every string of want.
+func assertMissingConsumer(t *testing.T, what string, err error, root, dir string, want ...string) {
 	t.Helper()
 	setup, ok := errors.AsType[*failure.Error](err)
 	if !ok || len(setup.Failures) == 0 {
@@ -215,10 +216,13 @@ func assertMissingConsumer(t *testing.T, what string, err error, want ...string)
 		if one.Class != vocab.SetupMissingConsumer {
 			t.Errorf("Load(%s) failed with the class %q, want %q", what, one.Class, vocab.SetupMissingConsumer)
 		}
-		for _, text := range want {
+		for _, text := range append(want, "consumer "+scope.RelativeSlash(root, dir)) {
 			if !strings.Contains(one.Class+": "+one.Detail, text) {
 				t.Errorf("Load(%s) line = %q, want it to name %q", what, one.Class+": "+one.Detail, text)
 			}
+		}
+		if strings.Contains(one.Detail, dir) {
+			t.Errorf("Load(%s) line = %q, want no absolute path in it", what, one.Class+": "+one.Detail)
 		}
 	}
 }
@@ -233,8 +237,8 @@ func TestLoadRefusesAConsumerThatDoesNotTypeCheck(t *testing.T) {
 	if !errors.As(err, &failure) {
 		t.Fatalf("Load(a scope naming a consumer that does not type-check) = _, %v, want a *Error", err)
 	}
-	if !strings.Contains(failure.Module, filepath.Join("consumed", "broken")) {
-		t.Errorf("(*Error).Module = %q, want it to name the broken consumer", failure.Module)
+	if want := scope.RelativeSlash(doc.Target.Path, doc.Consumers[0].Path); failure.Module != want || filepath.Base(want) != "broken" {
+		t.Errorf("(*Error).Module = %q, want the broken consumer relative to the target root, %q", failure.Module, want)
 	}
 	if len(failure.Diagnostics) == 0 {
 		t.Error("(*Error).Diagnostics is empty, want the toolchain's own diagnostics")

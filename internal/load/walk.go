@@ -25,7 +25,7 @@ const (
 	// pattern.
 	directory
 
-	// leftOut is an entry no build reads: a pipe, a device, a socket, a symbolic
+	// leftOut is an entry no walk opens: a pipe, a device, a socket, a symbolic
 	// link to a directory, or one to nothing, through a file or that loops.
 	leftOut
 
@@ -73,14 +73,12 @@ func kindOfType(mode fs.FileMode) Kind {
 }
 
 // Walk walks the tree at root as the go command walks a module's tree, handing
-// visit each entry once with its [Kind], a directory before what it holds. A
-// directory below root that enters rejects is neither visited nor entered. It
-// follows root where root is a symbolic link to a directory (go.dev/issue/50807);
-// visit sees root as written and every path below joined onto it, the spelling the
-// toolchain reports.
-// An Unread or leftOut entry at or below top's root is recorded in
-// [Topology.Unread] or [Topology.LeftOut]. visit's fs.SkipAll ends the walk, and
-// any other error ends it with that error.
+// visit each entry once with its [Kind], a directory before what it holds, and
+// entering no directory below root that enters rejects. It follows root where it
+// is a link to a directory (go.dev/issue/50807), joining every path onto root as
+// written, the spelling the toolchain reports. An Unread or leftOut entry at or
+// below top's root is recorded in [Topology.Unread] or [Topology.LeftOut].
+// visit's fs.SkipAll ends the walk, and any other error ends it with that error.
 func (top *Topology) Walk(root string, enters func(dir string) bool, visit func(path string, kind Kind) error) error {
 	err := top.walk(root, statKind(os.Stat(root)), enters, visit)
 	if errors.Is(err, fs.SkipAll) {

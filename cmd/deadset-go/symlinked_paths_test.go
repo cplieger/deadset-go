@@ -1,10 +1,10 @@
 package main
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -13,7 +13,7 @@ import (
 func symlink(t *testing.T, target, link string) {
 	t.Helper()
 
-	if err := os.Symlink(target, link); err != nil {
+	if err := sandbox.Symlink(target, link); err != nil {
 		t.Fatalf("Setup: link %s to %s: %v", link, target, err)
 	}
 }
@@ -23,7 +23,7 @@ func symlink(t *testing.T, target, link string) {
 func analyzedFrom(t *testing.T, run string, args ...string) string {
 	t.Helper()
 
-	reportPath := filepath.Join(t.TempDir(), "report.json")
+	reportPath := filepath.Join(sandbox.Dir(t), "report.json")
 	ran := invokedIn(t, run, append([]string{"analyze", "--report=" + reportPath}, args...)...)
 	if ran.code != vocab.ExitClean && ran.code != vocab.ExitFindings {
 		t.Fatalf("analyze %q from %s = %d, want a verdict\nstderr:\n%s", args, run, ran.code, ran.stderr)
@@ -38,12 +38,12 @@ func analyzedFrom(t *testing.T, run string, args ...string) string {
 // resolving both decides that one holds the other.
 func TestAReportNamesATargetSpelledThroughASymbolicLinkWhereItResolves(t *testing.T) {
 	t.Parallel()
-	base := t.TempDir()
+	base := sandbox.Dir(t)
 	parent, name := filepath.Join(base, "real"), "app"
 	dir := filepath.Join(parent, name)
 	links := filepath.Join(base, "links")
 	for _, made := range []string{dir, links} {
-		if err := os.MkdirAll(made, 0o750); err != nil {
+		if err := sandbox.MkdirAll(made, 0o750); err != nil {
 			t.Fatalf("Setup: %v", err)
 		}
 	}
@@ -79,7 +79,7 @@ func TestAReportNamesATargetSpelledThroughASymbolicLinkWhereItResolves(t *testin
 func TestAReportNamesAConsumerSpelledThroughASymbolicLinkWhereItResolves(t *testing.T) {
 	t.Parallel()
 	dir := archiveModule(t, "findings-ledger/layout-through-a-consumers-generic.txtar")
-	alias := filepath.ToSlash(filepath.Join(t.TempDir(), "alias"))
+	alias := filepath.ToSlash(filepath.Join(sandbox.Dir(t), "alias"))
 	symlink(t, dir, alias)
 	writeDocument(t, dir, "linked-scope.json", `{"target": {"id": "example.com/app", "role": "target", "path": "`+alias+`/target"},`+
 		` "consumers": [{"id": "example.com/consumer", "role": "consumer", "path": "`+alias+`/consumer"}]}`)
@@ -107,7 +107,7 @@ func TestAConfiguredRootsDocumentSpelledThroughASymbolicLinkIsSitedWhereItResolv
 			"// used is what the entry point calls.\nfunc used() {}\n",
 		document: `{"target": {"kind": "application"}, "roots": {"patterns": ["go://example.com/app#Absent"]}}`,
 	})
-	alias := filepath.Join(t.TempDir(), "alias")
+	alias := filepath.Join(sandbox.Dir(t), "alias")
 	symlink(t, dir, alias)
 
 	for name, spelling := range map[string]struct{ target, config string }{

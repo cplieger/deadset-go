@@ -50,6 +50,7 @@ type outline struct {
 	consumers     []string    // the declared consumers' identifiers, in scope order
 	dropped       []load.Dropped
 	excludedByCgo []string
+	hidden        []string // [load.Result.Hidden]
 }
 
 func newLoads(ctx context.Context, matrix *load.Matrix, root string) *loads {
@@ -102,7 +103,7 @@ func (l *loads) add(one *findings.Configured) {
 		consumers[i] = r.Consumers[i].ID
 	}
 	l.configurations = append(l.configurations, r.Configuration)
-	l.outlines = append(l.outlines, outline{units: units, consumers: consumers, dropped: r.Dropped, excludedByCgo: r.ExcludedByCgo})
+	l.outlines = append(l.outlines, outline{units: units, consumers: consumers, dropped: r.Dropped, excludedByCgo: r.ExcludedByCgo, hidden: r.Hidden})
 	l.digests = append(l.digests, digestOf(one))
 	l.held = append(l.held, nil)
 	l.keep(len(l.held)-1, one)

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -124,16 +125,16 @@ func TestAnalysisLeavesTheTreeByteIdentical(t *testing.T) {
 	// and can name no path outside it, so each run is invoked from the directory the
 	// trees are written under. The documents go in a sibling of those trees, which is
 	// inside the run directory and outside every target.
-	base := t.TempDir()
+	base := sandbox.Dir(t)
 	documents := filepath.Join(base, "documents")
-	if err := os.MkdirAll(documents, 0o750); err != nil {
+	if err := sandbox.MkdirAll(documents, 0o750); err != nil {
 		t.Fatalf("Setup: create %s: %v", documents, err)
 	}
 
 	for i, shape := range treeShapes() {
 		t.Run(fmt.Sprintf("%+v", shape), func(t *testing.T) {
 			t.Parallel()
-			dir, err := os.MkdirTemp(base, "module")
+			dir, err := sandbox.MkdirTemp(base, "module")
 			if err != nil {
 				t.Fatalf("create a directory for the module: %v", err)
 			}

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -54,7 +55,7 @@ func determinismModule(t *testing.T, base string) {
 		repositoryDocument: `{"target": {"kind": "application"}}`,
 	}
 	dir := filepath.Join(base, "app")
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	if err := sandbox.MkdirAll(dir, 0o750); err != nil {
 		t.Fatalf("Setup: create %s: %v", dir, err)
 	}
 	if err := writeFiles(dir, files); err != nil {
@@ -77,9 +78,9 @@ const (
 func determinismBase(t *testing.T) string {
 	t.Helper()
 
-	base := t.TempDir()
+	base := sandbox.Dir(t)
 	determinismModule(t, base)
-	if err := os.WriteFile(filepath.Join(base, templateName), []byte(templateDocument), 0o600); err != nil {
+	if err := sandbox.WriteFile(filepath.Join(base, templateName), []byte(templateDocument), 0o600); err != nil {
 		t.Fatalf("Setup: write the template: %v", err)
 	}
 	t.Chdir(base)
@@ -228,7 +229,7 @@ func TestAnalyzeIsIndependentOfTheBuildCache(t *testing.T) {
 // not removed would be. The toolchain's build cache lives outside both and is the one
 // thing a run populates, which the assertion above is about.
 func TestAnalyzeWritesOnlyTheDocumentsTheInvocationNames(t *testing.T) {
-	temporary := t.TempDir()
+	temporary := sandbox.Dir(t)
 	base := determinismBase(t)
 	t.Setenv("TMPDIR", temporary)
 

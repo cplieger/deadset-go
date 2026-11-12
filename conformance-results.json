@@ -1,5 +1,5 @@
 {
-  "corpus_version": "6.2.0",
+  "corpus_version": "6.3.0",
   "product": {
     "name": "deadset-go",
     "version": "0.0.0-devel",
@@ -7,8 +7,8 @@
   },
   "result": "pass",
   "totals": {
-    "fixtures": 255,
-    "pass": 248,
+    "fixtures": 256,
+    "pass": 249,
     "gap": 0,
     "fail": 0,
     "pending": 7
@@ -13883,6 +13883,192 @@
           "result": "pass",
           "actual": {
             "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "stale-suppression-names-each-confidence-beside",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "BrokenDirective",
+          "result": "pass",
+          "actual": {
+            "report": "DS9003",
+            "confidence": "certain",
+            "details": {
+              "mechanism": "inline"
+            },
+            "beside": [
+              {
+                "code": "DS1003",
+                "confidence": "certain",
+                "withheld": "a type error"
+              }
+            ]
+          }
+        },
+        {
+          "symbol": "BrokenField",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "Claimed",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "ClaimedDirective",
+          "result": "pass",
+          "actual": {
+            "report": "DS9003",
+            "confidence": "certain",
+            "details": {
+              "mechanism": "inline"
+            },
+            "beside": [
+              {
+                "code": "DS1002",
+                "confidence": "certain",
+                "withheld": "an inline directive"
+              }
+            ]
+          }
+        },
+        {
+          "symbol": "Entered",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "EnteredDirective",
+          "result": "pass",
+          "actual": {
+            "report": "DS9003",
+            "confidence": "certain",
+            "details": {
+              "mechanism": "inline"
+            },
+            "beside": [
+              {
+                "code": "DS1002",
+                "confidence": "certain",
+                "withheld": "an ignore entry"
+              }
+            ]
+          }
+        },
+        {
+          "symbol": "Recorded",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "RecordedDirective",
+          "result": "pass",
+          "actual": {
+            "report": "DS9003",
+            "confidence": "certain",
+            "details": {
+              "mechanism": "inline"
+            },
+            "beside": [
+              {
+                "code": "DS1002",
+                "confidence": "certain",
+                "withheld": "a baseline row"
+              }
+            ]
+          }
+        },
+        {
+          "symbol": "Retired",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "RetiredDirective",
+          "result": "pass",
+          "actual": {
+            "report": "DS9003",
+            "confidence": "certain",
+            "details": {
+              "mechanism": "inline"
+            },
+            "beside": [
+              {
+                "code": "DS1104",
+                "confidence": "certain",
+                "withheld": "severity allow"
+              }
+            ]
+          }
+        },
+        {
+          "symbol": "TestOnly",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "TestOnlyDirective",
+          "result": "pass",
+          "actual": {
+            "report": "DS9003",
+            "confidence": "certain",
+            "details": {
+              "mechanism": "inline"
+            },
+            "beside": [
+              {
+                "code": "DS1102",
+                "confidence": "possible",
+                "withheld": "analysis.min_confidence"
+              }
+            ]
+          }
+        },
+        {
+          "symbol": "Unreached",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "confidence": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "UnreachedDirective",
+          "result": "pass",
+          "actual": {
+            "report": "DS9003",
+            "confidence": "certain",
+            "details": {
+              "mechanism": "inline"
+            },
+            "beside": [
+              {
+                "code": "DS1002",
+                "confidence": "certain"
+              }
+            ]
           }
         }
       ],

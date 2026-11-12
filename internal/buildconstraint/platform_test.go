@@ -3,12 +3,13 @@ package buildconstraint
 import (
 	"go/build"
 	"maps"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 )
 
 // TestPlatformsAreTheToolchainsOwnList pins the platform table against the
@@ -80,7 +81,7 @@ func TestEveryReservedNameConstrainsAFileByItsName(t *testing.T) {
 				t.Errorf("IsOS(%q) || IsArch(%q) = %t, want %t", tc.name, tc.name, got, tc.named)
 			}
 
-			dir := t.TempDir()
+			dir := sandbox.Dir(t)
 			write(t, filepath.Join(dir, "probe_"+tc.name+".go"), []byte("package probe\n"))
 			matching := selectsProbe(t, dir, "probe_"+tc.name+".go", tc.axis, tc.name)
 			other := selectsProbe(t, dir, "probe_"+tc.name+".go", tc.axis, "other")
@@ -102,7 +103,7 @@ func TestEveryReservedNameConstrainsAFileByItsName(t *testing.T) {
 func TestTheUnixTagStandsForTheToolchainsOwnSet(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
+	dir := sandbox.Dir(t)
 	write(t, filepath.Join(dir, "unix.go"), []byte("//go:build unix\n\npackage probe\n"))
 
 	systems := append(slices.Sorted(maps.Keys(platforms())), retiredOS...)
@@ -189,7 +190,7 @@ var unixOS = []string{
 func write(t *testing.T, path string, data []byte) {
 	t.Helper()
 
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	if err := sandbox.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("Setup: write %s: %v", path, err)
 	}
 }

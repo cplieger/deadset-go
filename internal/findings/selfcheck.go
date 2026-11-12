@@ -100,10 +100,10 @@ func refusalMessage(refused *core.Refusal, ref string) (string, error) {
 
 // codesAt is every code the records at one site name, in ascending order and each
 // once.
-func codesAt(records []*core.Record) []vocab.Code {
+func codesAt(records []core.Record) []vocab.Code {
 	codes := make([]vocab.Code, 0, len(records))
-	for _, mark := range records {
-		codes = append(codes, mark.Code)
+	for i := range records {
+		codes = append(codes, records[i].Code)
 	}
 	slices.Sort(codes)
 	return slices.Compact(codes)

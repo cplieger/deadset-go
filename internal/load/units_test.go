@@ -16,6 +16,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/failure"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
@@ -213,7 +214,7 @@ func TestLoadReadsANestedModuleAsAConsumerOfTheUnitItReplaces(t *testing.T) {
 		"absolute/main.go":      "package main\n\nimport \"example.com/b\"\n\nfunc main() { b.Used() }\n",
 	})
 	absolute := "module example.com/b/absolute\n\ngo 1.27.1\n\nrequire example.com/b v0.0.0\n\nreplace example.com/b => " + root + "\n"
-	if err := os.WriteFile(filepath.Join(root, "absolute", "go.mod"), []byte(absolute), 0o600); err != nil {
+	if err := sandbox.WriteFile(filepath.Join(root, "absolute", "go.mod"), []byte(absolute), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -353,16 +354,29 @@ func TestUnreadableConfigurationClassesOnlyAFileTheToolchainCannotParse(t *testi
 	}
 }
 
-func TestRebasedJoinsARelativePositionToThePrefix(t *testing.T) {
-	abs := filepath.Join(t.TempDir(), "main.go") + ":4:2"
-	for _, test := range []struct{ position, prefix, want string }{
-		{position: "main.go:4:2", prefix: "tool", want: "tool/main.go:4:2"},
-		{position: "main.go:4:2", prefix: "", want: "main.go:4:2"},
-		{position: abs, prefix: "tool", want: abs},
-		{position: "", prefix: "tool", want: ""},
+func TestRebasedNamesEveryPositionFromTheTargetRoot(t *testing.T) {
+	base := sandbox.Dir(t)
+	root := filepath.Join(base, "target")
+	cache := filepath.Join(base, "cache", "example.com", "dep@v1.2.0")
+	dep := &packages.Module{Path: "example.com/dep", Version: "v1.2.0", Dir: cache}
+	local := &packages.Module{Path: "example.com/lib", Dir: filepath.Join(base, "lib")}
+	for _, test := range []struct {
+		name, position, dir string
+		module              *packages.Module
+		want                string
+	}{
+		{name: "relative_in_a_module_below_the_root", position: "main.go:4:2", dir: filepath.Join(root, "tool"), want: "tool/main.go:4:2"},
+		{name: "relative_at_the_root", position: "main.go:4", dir: root, want: "main.go:4"},
+		{name: "absolute_below_the_root", position: filepath.Join(root, "p", "p.go") + ":4:2", dir: filepath.Join(root, "tool"), want: "p/p.go:4:2"},
+		{name: "absolute_in_a_local_module_outside", position: filepath.Join(base, "lib", "l.go") + ":7:1", dir: root, module: local, want: "../lib/l.go:7:1"},
+		{name: "relative_in_a_consumer_outside", position: "main.go:3:1", dir: filepath.Join(base, "app"), want: "../app/main.go:3:1"},
+		{name: "absolute_in_the_module_cache", position: filepath.Join(cache, "x", "x.go") + ":9:3", dir: root, module: dep, want: "example.com/dep/x/x.go:9:3"},
+		{name: "a_file_alone", position: filepath.Join(root, "go.mod"), dir: root, want: "go.mod"},
+		{name: "none", position: "", dir: root, want: ""},
+		{name: "no_file", position: "-", dir: root, want: "-"},
 	} {
-		if got := rebased(test.position, test.prefix); got != test.want {
-			t.Errorf("rebased(%q, %q) = %q, want %q", test.position, test.prefix, got, test.want)
+		if got := rebased(test.position, root, test.dir, test.module); got != test.want {
+			t.Errorf("rebased(%s) = %q, want %q", test.name, got, test.want)
 		}
 	}
 }
@@ -400,11 +414,11 @@ func TestLoadDropsAWorkspaceReaderWhoseModuleFileOnlyTheToolchainReads(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(reader, append(slices.Clone(readable), "unknowndirective x\n"...), 0o600); err != nil {
+	if err := sandbox.WriteFile(reader, append(slices.Clone(readable), "unknowndirective x\n"...), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	top := discovered(t, scope.Document{Target: scope.Module{Path: filepath.Join(root, "lib")}})
-	if err := os.WriteFile(reader, readable, 0o600); err != nil {
+	if err := sandbox.WriteFile(reader, readable, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -582,7 +596,7 @@ func TestDiscoveryStopsWhenCancelledAfterItBegins(t *testing.T) {
 			return err
 		},
 		"readers":           func(ctx context.Context) error { _, err := top.readers(ctx, nil); return err },
-		"declaredConsumers": func(ctx context.Context) error { _, err := declaredConsumers(ctx, consumers); return err },
+		"declaredConsumers": func(ctx context.Context) error { _, err := declaredConsumers(ctx, module, consumers); return err },
 	} {
 		counted := &stagedContext{Context: t.Context(), live: math.MaxInt}
 		if err := search(counted); err != nil {
@@ -635,7 +649,7 @@ func TestSourcesReadEveryUnitsPackage(t *testing.T) {
 func TestALoadWithNoGoCommandOnPathEndsTheRunAsMissingToolchain(t *testing.T) {
 	stableToolchain(t)
 	top := discovered(t, fixtureScope(t, "clean"))
-	searched := t.TempDir()
+	searched := sandbox.Dir(t)
 	t.Setenv("PATH", searched)
 	_, err := Load(t.Context(), top, new(HostConfiguration()))
 	held, ok := errors.AsType[*failure.Error](err)

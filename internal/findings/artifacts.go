@@ -13,6 +13,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/deps"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -103,7 +104,7 @@ func neverBuilt(in *pass) ([]ignoredFile, error) {
 	cgo := in.artifacts.cgo
 	files := make([]ignoredFile, 0, len(ignored))
 	for _, path := range slices.Sorted(maps.Keys(ignored)) {
-		relative := load.RelativeSlash(in.Root, path)
+		relative := scope.RelativeSlash(in.Root, path)
 		if cgo[relative] {
 			continue
 		}
@@ -460,7 +461,7 @@ func moduleFragment(module, fragment string) string {
 // relative to the target root, which spans the one line it is written on.
 func (in *pass) directivePosition(m *ModuleFile, site token.Position) Position {
 	return Position{
-		Path:    load.RelativeSlash(in.Root, filepath.Join(m.Dir, site.Filename)),
+		Path:    scope.RelativeSlash(in.Root, filepath.Join(m.Dir, site.Filename)),
 		Line:    site.Line,
 		Column:  site.Column,
 		EndLine: site.Line,

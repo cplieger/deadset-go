@@ -49,9 +49,17 @@ type Result struct {
 	Consumers []Consumer
 
 	// Programs holds the target's files run on their own under the ignore tag, and
-	// the scripts of every dropped module below the target, which no package of the
-	// target compiles and every stage but the root detection leaves alone.
+	// the scripts of every dropped module below the target and of every reader a
+	// file no toolchain may run under dropped, which no package of the target
+	// compiles and every stage but the root detection leaves alone.
 	Programs []programFile
+
+	// Hidden holds every entry with a source file's name that every toolchain read
+	// as absent in a directory holding a listed package or in a package directory of
+	// a unit, and Obscured the directory of each, and of each Go file there the run
+	// cannot open, whose packages hold code the analysis does not see ([program.6]).
+	Hidden   []string
+	Obscured []string
 
 	// ExcludedByCgo holds the target-relative paths, forward slashes, of the
 	// files the toolchain ignored for importing "C" that the opaque-C check could
@@ -79,7 +87,8 @@ type Unit struct {
 
 	// UnanalysedConsumer reports a unit whose module a [Dropped] module's module
 	// file requires, or any unit of a tree with a path the run cannot read
-	// ([Topology.Unread]), so code the run did not analyze may import its exports.
+	// ([Topology.Unread]) or an entry it hid ([Result.Hidden]), so code the run did
+	// not analyze may import its exports.
 	UnanalysedConsumer bool
 }
 
@@ -89,13 +98,18 @@ type Dropped struct {
 	Err error
 	Dir string
 
-	requires []string // the modules its module file requires
-	readable bool     // whether that file could be read
+	requires  []string // the modules its module file requires
+	readable  bool     // whether that file, and the workspace file governing Dir, could be read
+	irregular bool     // whether a file no toolchain may run under dropped it
+	offline   bool     // whether its scripts' toolchain would read such a file
 }
 
 // droppedOf is m dropped with err.
 func droppedOf(m *discoveredModule, err error) Dropped {
-	d := Dropped{Dir: m.Dir, Err: err, readable: m.File != nil && m.FileErr == nil}
+	d := Dropped{
+		Dir: m.Dir, Err: err, readable: m.File != nil && m.FileErr == nil && m.WorkspaceErr == nil,
+		irregular: irregular(m.Refused), offline: m.scriptsBlock,
+	}
 	if d.readable {
 		d.requires = m.File.required()
 	}
@@ -190,16 +204,6 @@ func declaredDirs(pkgs []*packages.Package) map[string]string {
 		}
 	}
 	return dirs
-}
-
-// RelativeSlash renders path relative to base with forward slashes, falling back
-// to path itself where no relative form exists.
-func RelativeSlash(base, path string) string {
-	rel, err := filepath.Rel(base, path)
-	if err != nil {
-		return filepath.ToSlash(path)
-	}
-	return filepath.ToSlash(rel)
 }
 
 // Source is one package outside the program read from its source: the files the

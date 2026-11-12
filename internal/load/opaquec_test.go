@@ -6,11 +6,11 @@ import (
 	"go/parser"
 	"go/token"
 	"maps"
-	"os"
 	"path/filepath"
 	"slices"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -49,8 +49,8 @@ func TestLoadReadsTheFilesCgoAloneExcludesAndLeavesTheRestIgnored(t *testing.T) 
 	// is reached at any point: the check runs in this process and the load it
 	// spawns disables cgo, so a C compiler that does not exist changes nothing.
 	t.Setenv("CGO_ENABLED", "1")
-	t.Setenv("CC", filepath.Join(t.TempDir(), "no-such-c-compiler"))
-	t.Setenv("CXX", filepath.Join(t.TempDir(), "no-such-cxx-compiler"))
+	t.Setenv("CC", filepath.Join(sandbox.Dir(t), "no-such-c-compiler"))
+	t.Setenv("CXX", filepath.Join(sandbox.Dir(t), "no-such-cxx-compiler"))
 
 	got := loadFixture(t, "cgo")
 
@@ -208,11 +208,11 @@ func TestCgoOnlyDecidesWhichIgnoredFilesTheCheckReads(t *testing.T) {
 func parseFiles(t *testing.T, sources map[string]string) (*token.FileSet, map[string]*ast.File) {
 	t.Helper()
 	fset := token.NewFileSet()
-	dir := t.TempDir()
+	dir := sandbox.Dir(t)
 	parsed := make(map[string]*ast.File, len(sources))
 	for _, name := range slices.Sorted(maps.Keys(sources)) {
 		path := filepath.Join(dir, name)
-		if err := os.WriteFile(path, []byte(sources[name]), 0o600); err != nil {
+		if err := sandbox.WriteFile(path, []byte(sources[name]), 0o600); err != nil {
 			t.Fatalf("Setup: write %s: %v", path, err)
 		}
 		f, err := parser.ParseFile(fset, path, nil, parser.AllErrors|parser.ParseComments)
@@ -272,11 +272,11 @@ func TestAtOpaqueImportReadsThePositionAndNotTheText(t *testing.T) {
 }
 
 func TestParseReportsTheFilesThatDoNotParse(t *testing.T) {
-	dir := t.TempDir()
+	dir := sandbox.Dir(t)
 	write := func(name, body string) string {
 		t.Helper()
 		path := filepath.Join(dir, name)
-		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		if err := sandbox.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatalf("Setup: write %s: %v", path, err)
 		}
 		return path

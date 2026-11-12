@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -66,19 +67,19 @@ func TestTwoMissingModulesPrintOneClassLine(t *testing.T) {
 
 func TestAnUnreadableTargetDocumentEndsTheRunWithItsSetupClass(t *testing.T) {
 	t.Parallel()
-	outside := t.TempDir()
-	if err := os.WriteFile(filepath.Join(outside, "ignore.json"), []byte(`{"ignore": []}`), 0o600); err != nil {
+	outside := sandbox.Dir(t)
+	if err := sandbox.WriteFile(filepath.Join(outside, "ignore.json"), []byte(`{"ignore": []}`), 0o600); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	tests := []struct {
 		name, document string
 		make           func(path string) error
 	}{
-		{"ignore-file-a-directory", "deadset-ignore.json", func(p string) error { return os.Mkdir(p, 0o750) }},
-		{"baseline-a-directory", "deadset-baseline.json", func(p string) error { return os.Mkdir(p, 0o750) }},
-		{"edges-document-a-directory", vocab.EdgesFileName, func(p string) error { return os.Mkdir(p, 0o750) }},
+		{"ignore-file-a-directory", "deadset-ignore.json", func(p string) error { return sandbox.Mkdir(p, 0o750) }},
+		{"baseline-a-directory", "deadset-baseline.json", func(p string) error { return sandbox.Mkdir(p, 0o750) }},
+		{"edges-document-a-directory", vocab.EdgesFileName, func(p string) error { return sandbox.Mkdir(p, 0o750) }},
 		{"ignore-file-a-link-outside-the-target", "deadset-ignore.json", func(p string) error {
-			return os.Symlink(filepath.Join(outside, "ignore.json"), p)
+			return sandbox.Symlink(filepath.Join(outside, "ignore.json"), p)
 		}},
 	}
 	for _, tc := range tests {
@@ -115,7 +116,7 @@ func TestAnUnwrittenOutputEndsTheRunWithItsRunClass(t *testing.T) {
 		"main.go":          "package main\n\nfunc main() {}\n",
 		repositoryDocument: `{"target": {"kind": "application"}}`,
 	})
-	absent := filepath.Join(t.TempDir(), "absent")
+	absent := filepath.Join(sandbox.Dir(t), "absent")
 	prefix := vocab.RunFailurePrefix + vocab.RunUnwrittenOutput + ": "
 
 	t.Run("the-report", func(t *testing.T) {
@@ -135,7 +136,7 @@ func TestAnUnwrittenOutputEndsTheRunWithItsRunClass(t *testing.T) {
 		t.Chdir(dir)
 		var stdout, stderr bytes.Buffer
 		code := invoke(t.Context(), []string{
-			"analyze", "--target=.", "--report=" + filepath.Join(t.TempDir(), "report.json"),
+			"analyze", "--target=.", "--report=" + filepath.Join(sandbox.Dir(t), "report.json"),
 			"--baseline-write=" + filepath.Join(absent, "baseline.json"),
 		}, &stdout, &stderr)
 		if code != vocab.ExitFailure {
@@ -145,10 +146,10 @@ func TestAnUnwrittenOutputEndsTheRunWithItsRunClass(t *testing.T) {
 	})
 	t.Run("a-baseline-path-that-is-a-directory", func(t *testing.T) {
 		t.Chdir(dir)
-		directory := t.TempDir()
+		directory := sandbox.Dir(t)
 		var stdout, stderr bytes.Buffer
 		code := invoke(t.Context(), []string{
-			"analyze", "--target=.", "--report=" + filepath.Join(t.TempDir(), "report.json"), "--baseline-write=" + directory,
+			"analyze", "--target=.", "--report=" + filepath.Join(sandbox.Dir(t), "report.json"), "--baseline-write=" + directory,
 		}, &stdout, &stderr)
 		if code != vocab.ExitFailure {
 			t.Fatalf("analyze writing a baseline over a directory = %d, want %d\nstderr:\n%s", code, vocab.ExitFailure, stderr.String())
@@ -184,9 +185,9 @@ func TestATargetOutsideTheRunDirectoryEndsTheRunWithItsRunClass(t *testing.T) {
 		"main.go":          "package main\n\nfunc main() {}\n",
 		repositoryDocument: `{"target": {"kind": "application"}}`,
 	})
-	t.Chdir(t.TempDir())
+	t.Chdir(sandbox.Dir(t))
 	var stdout, stderr bytes.Buffer
-	code := invoke(t.Context(), []string{"analyze", "--target=" + dir, "--report=" + filepath.Join(t.TempDir(), "report.json")}, &stdout, &stderr)
+	code := invoke(t.Context(), []string{"analyze", "--target=" + dir, "--report=" + filepath.Join(sandbox.Dir(t), "report.json")}, &stdout, &stderr)
 	if code != vocab.ExitFailure {
 		t.Fatalf("analyze of a target outside the run directory = %d, want %d\nstderr:\n%s", code, vocab.ExitFailure, stderr.String())
 	}
@@ -204,7 +205,7 @@ func TestAnImportNamingAFileBelowNodeModulesIsAMissingModule(t *testing.T) {
 	})
 	t.Chdir(dir)
 	var stdout, stderr bytes.Buffer
-	code := invoke(t.Context(), []string{"analyze", "--target=.", "--report=" + filepath.Join(t.TempDir(), "report.json")}, &stdout, &stderr)
+	code := invoke(t.Context(), []string{"analyze", "--target=.", "--report=" + filepath.Join(sandbox.Dir(t), "report.json")}, &stdout, &stderr)
 	if code != vocab.ExitFailure {
 		t.Fatalf("analyze of an import naming a file = %d, want %d\nstderr:\n%s", code, vocab.ExitFailure, stderr.String())
 	}
@@ -222,7 +223,7 @@ func TestATargetItsModuleIgnoresHoldsNoProgram(t *testing.T) {
 	})
 	t.Chdir(filepath.Join(dir, "tools"))
 	var stdout, stderr bytes.Buffer
-	code := invoke(t.Context(), []string{"analyze", "--target=.", "--report=" + filepath.Join(t.TempDir(), "report.json")}, &stdout, &stderr)
+	code := invoke(t.Context(), []string{"analyze", "--target=.", "--report=" + filepath.Join(sandbox.Dir(t), "report.json")}, &stdout, &stderr)
 	if code != vocab.ExitFailure {
 		t.Fatalf("analyze of an ignored directory = %d, want %d\nstderr:\n%s", code, vocab.ExitFailure, stderr.String())
 	}
@@ -273,13 +274,13 @@ func TestASignalledRunEndsWithTheInterruptedRunClass(t *testing.T) {
 				"main.go":          "package main\n\nfunc main() {}\n",
 				repositoryDocument: `{"target": {"kind": "application"}}`,
 			})
-			bin := t.TempDir()
+			bin := sandbox.Dir(t)
 			started := filepath.Join(dir, "started")
 			stub := "#!/bin/sh\ntouch '" + started + "'\nexec sleep 60\n"
-			if err := os.WriteFile(filepath.Join(bin, "go"), []byte(stub), 0o700); err != nil {
+			if err := sandbox.WriteFile(filepath.Join(bin, "go"), []byte(stub), 0o700); err != nil {
 				t.Fatalf("Setup: %v", err)
 			}
-			reportPath := filepath.Join(t.TempDir(), "report.json")
+			reportPath := filepath.Join(sandbox.Dir(t), "report.json")
 			cmd := reexecuted(t, dir, []string{"PATH=" + bin + ":/usr/bin:/bin"}, "analyze", "--target=.", "--report="+reportPath)
 			var stderr bytes.Buffer
 			cmd.Stderr = &stderr
@@ -316,16 +317,16 @@ func TestASignalledRunEndsWithTheInterruptedRunClass(t *testing.T) {
 // system: it creates started and then waits to be killed.
 func toolchainStub(t *testing.T, started string) (dir string) {
 	t.Helper()
-	src := t.TempDir()
+	src := sandbox.Dir(t)
 	for name, body := range map[string]string{
 		"go.mod":  "module example.com/stub\n\ngo 1.27.1\n",
 		"main.go": "package main\n\nimport (\n\t\"os\"\n\t\"time\"\n)\n\nfunc main() {\n\t_ = os.WriteFile(" + strconv.Quote(started) + ", nil, 0o600)\n\ttime.Sleep(time.Minute)\n}\n",
 	} {
-		if err := os.WriteFile(filepath.Join(src, name), []byte(body), 0o600); err != nil {
+		if err := sandbox.WriteFile(filepath.Join(src, name), []byte(body), 0o600); err != nil {
 			t.Fatalf("Setup: %v", err)
 		}
 	}
-	dir = t.TempDir()
+	dir = sandbox.Dir(t)
 	stub := filepath.Join(dir, "go")
 	if runtime.GOOS == "windows" {
 		stub += ".exe"
@@ -348,10 +349,10 @@ func TestARunCancelledWhileTheToolchainRunsEndsWithTheInterruptedRunClass(t *tes
 		"main.go":          "package main\n\nfunc main() {}\n",
 		repositoryDocument: `{"target": {"kind": "application"}}`,
 	})
-	started := filepath.Join(t.TempDir(), "started")
+	started := filepath.Join(sandbox.Dir(t), "started")
 	t.Setenv("PATH", toolchainStub(t, started))
 	t.Chdir(dir)
-	reportPath := filepath.Join(t.TempDir(), "report.json")
+	reportPath := filepath.Join(sandbox.Dir(t), "report.json")
 
 	ctx, cancel := context.WithCancelCause(t.Context())
 	go func() {

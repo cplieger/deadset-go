@@ -11,6 +11,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"pgregory.net/rapid"
 )
 
@@ -154,21 +155,21 @@ func renderDeclaration(shape, name string) string {
 func writeModule(t failureSink, base string, generated []generatedPackage) string {
 	t.Helper()
 
-	dir, err := os.MkdirTemp(base, "module")
+	dir, err := sandbox.MkdirTemp(base, "module")
 	if err != nil {
 		t.Fatalf("Setup: create a module directory: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"),
+	if err := sandbox.WriteFile(filepath.Join(dir, "go.mod"),
 		[]byte("module example.test/generated\n\ngo 1.27.1\n"), 0o600); err != nil {
 		t.Fatalf("Setup: write go.mod: %v", err)
 	}
 	for _, p := range generated {
 		for _, name := range slices.Sorted(maps.Keys(p.files)) {
 			path := filepath.Join(dir, name)
-			if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			if err := sandbox.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 				t.Fatalf("Setup: create %s: %v", filepath.Dir(path), err)
 			}
-			if err := os.WriteFile(path, []byte(p.files[name]), 0o600); err != nil {
+			if err := sandbox.WriteFile(path, []byte(p.files[name]), 0o600); err != nil {
 				t.Fatalf("Setup: write %s: %v", path, err)
 			}
 		}
@@ -241,7 +242,7 @@ type loadedModule struct {
 func loadedGeneratedModules(t *testing.T) []*loadedModule {
 	t.Helper()
 
-	base := t.TempDir()
+	base := sandbox.Dir(t)
 	built := configurations()
 	held := make([]*loadedModule, loadedModules)
 	for seed := range held {

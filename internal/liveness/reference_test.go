@@ -13,6 +13,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 )
 
 // analysis is one fixture's symbol inventory and the references over it.
@@ -88,7 +89,7 @@ func (a analysis) positions(to string, kind facts.RefKind) []string {
 func goldenTable(name, got string) (string, error) {
 	path := filepath.Join("testdata", name)
 	if os.Getenv("UPDATE_GOLDEN") == "1" {
-		if err := os.WriteFile(path, []byte(got), 0o600); err != nil {
+		if err := sandbox.WriteGolden(path, []byte(got), 0o600); err != nil {
 			return "", err
 		}
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/txtar"
 )
@@ -36,19 +37,19 @@ func extract(t *testing.T, archive string) string {
 	if err != nil {
 		t.Fatalf("Setup: parse testdata/%s: %v", archive, err)
 	}
-	dir := t.TempDir()
+	dir := sandbox.Dir(t)
 	for _, f := range parsed.Files {
 		path := filepath.Join(dir, filepath.FromSlash(f.Name))
-		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		if err := sandbox.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			t.Fatalf("Setup: create %s: %v", filepath.Dir(path), err)
 		}
 		if link, isLink := strings.CutSuffix(path, linkSuffix); isLink {
-			if err := os.Symlink(filepath.FromSlash(strings.TrimSpace(string(f.Data))), link); err != nil {
+			if err := sandbox.Symlink(filepath.FromSlash(strings.TrimSpace(string(f.Data))), link); err != nil {
 				t.Skipf("Setup: this host makes no symbolic link %s: %v", link, err)
 			}
 			continue
 		}
-		if err := os.WriteFile(path, f.Data, 0o600); err != nil {
+		if err := sandbox.WriteFile(path, f.Data, 0o600); err != nil {
 			t.Fatalf("Setup: write %s: %v", path, err)
 		}
 	}

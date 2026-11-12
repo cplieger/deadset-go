@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -14,6 +13,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/failure"
 	"github.com/cplieger/deadset-go/v2/internal/findings"
 	"github.com/cplieger/deadset-go/v2/internal/run"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/render"
 	"github.com/cplieger/deadset-spec/v8/report"
@@ -307,9 +307,9 @@ func TestReportOfSitesAConfiguredRootAtTheConventionalDocumentWhereNoDocumentOfT
 		"app.go": "package main\n\nfunc main() { used() }\n\n" +
 			"// used is what the entry point calls.\nfunc used() {}\n",
 	})
-	central := filepath.Join(t.TempDir(), "central.json")
+	central := filepath.Join(sandbox.Dir(t), "central.json")
 	body := `{"target": {"kind": "application"}, "roots": {"patterns": ["go://example.com/app#Absent"]}}`
-	if err := os.WriteFile(central, []byte(body), 0o600); err != nil {
+	if err := sandbox.WriteFile(central, []byte(body), 0o600); err != nil {
 		t.Fatalf("Setup: write %s: %v", central, err)
 	}
 
@@ -529,7 +529,7 @@ func TestReportOfRefusesATargetTheRunDirectoryDoesNotContain(t *testing.T) {
 	// The run is invoked from a directory of its own, which does not contain the
 	// target: the report format admits no path that climbs out of the run
 	// directory, so the run fails rather than writing a document no reader admits.
-	resolved.RunDir = t.TempDir()
+	resolved.RunDir = sandbox.Dir(t)
 
 	_, err := reportOf(t.Context(), resolved, corpusAnswered())
 	if failures := failure.Of(err); failures[0].Class != vocab.RunUnreportablePath {

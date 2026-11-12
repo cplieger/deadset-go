@@ -10,6 +10,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 )
 
 // A workspace member under the run directory is a consumer the report names, and one
@@ -20,7 +21,7 @@ func TestNameableKeepsTheWorkspaceMembersTheReportCanName(t *testing.T) {
 		t.Fatalf("Setup: os.Getwd = _, %v", err)
 	}
 	inside := scope.Module{Path: filepath.Join(invoked, "member")}
-	outside := scope.Module{Path: t.TempDir()}
+	outside := scope.Module{Path: sandbox.Dir(t)}
 
 	if named := nameable(invoked, []scope.Module{inside, outside}); !slices.Equal(named, []scope.Module{inside}) {
 		t.Errorf("nameable() = %v, want [%v]", named, inside)
@@ -31,7 +32,7 @@ func TestNameableKeepsTheWorkspaceMembersTheReportCanName(t *testing.T) {
 // reader outside it is named at the root, and only where its module file cannot be
 // read, which makes every export of the target possible.
 func TestDroppedNotesNameAReaderWhoseModuleFileCannotBeReadAtTheRoot(t *testing.T) {
-	base := t.TempDir()
+	base := sandbox.Dir(t)
 	l := &Loaded{Root: filepath.Join(base, "app"), loads: &loads{outlines: []outline{{dropped: []load.Dropped{
 		{Dir: filepath.Join(base, "app", "tool"), Err: errors.New("tool does not load")},
 		{Dir: filepath.Join(base, "reader"), Err: fmt.Errorf("load: %w", load.ErrModuleFile)},

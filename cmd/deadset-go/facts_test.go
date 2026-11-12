@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -29,7 +30,7 @@ func generatedModule(t *testing.T) string {
 // document decoded as plain JSON values and the report's bytes.
 func analyzeWithFacts(t *testing.T, dir string) (map[string]any, []byte) {
 	t.Helper()
-	factsPath := filepath.Join(t.TempDir(), "facts.json")
+	factsPath := filepath.Join(sandbox.Dir(t), "facts.json")
 	got := runAnalyze(t, dir, "--facts="+factsPath)
 	if got.code == vocab.ExitUsage || got.code == vocab.ExitFailure {
 		t.Fatalf("analyze --facts = %d, want a verdict\nstderr:\n%s", got.code, got.stderr)

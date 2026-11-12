@@ -12,6 +12,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	spec "github.com/cplieger/deadset-spec/v8"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -77,9 +78,9 @@ func runBaselineVector(t *testing.T, dir string) {
 			"want exactly one of the last two, and existing.json beside expected-error.json",
 			dir, existing != nil, expected != nil, refused != nil)
 	}
-	target := filepath.Join(t.TempDir(), core.BaselineFileName)
+	target := filepath.Join(sandbox.Dir(t), core.BaselineFileName)
 	if existing != nil {
-		if err := os.WriteFile(target, existing, 0o600); err != nil {
+		if err := sandbox.WriteFile(target, existing, 0o600); err != nil {
 			t.Fatalf("Setup: write %s: %v", target, err)
 		}
 	}
@@ -255,7 +256,7 @@ func TestAnalyzeWritesItsOwnRowsAndKeepsTheOtherSchemesRows(t *testing.T) {
 	dir := baselineFixpointModule(t)
 	baseline := filepath.Join(dir, core.BaselineFileName)
 	const other = `{"code": "DS1301", "symbol": "ts://@example/app/src/a.ts#A.b", "path": "src/a.ts", "reason": "recorded by deadset-ts 7.0.0"}`
-	if err := os.WriteFile(baseline, []byte(`{"baseline": [`+other+`]}`), 0o600); err != nil {
+	if err := sandbox.WriteFile(baseline, []byte(`{"baseline": [`+other+`]}`), 0o600); err != nil {
 		t.Fatalf("Setup: write %s: %v", baseline, err)
 	}
 	runAnalyze(t, dir, "--baseline-write="+baseline)
@@ -287,7 +288,7 @@ func TestAnalyzeKeepsAThirdSchemesRowInBytewiseSchemeOrder(t *testing.T) {
 	baseline := filepath.Join(dir, core.BaselineFileName)
 	const rows = `{"code": "DS1301", "symbol": "ts://@example/app/src/a.ts#A.b", "path": "src/a.ts", "reason": "recorded by deadset-ts 7.0.0"},
   {"code": "DS1001", "symbol": "js://example/app/a.js#A", "path": "a.js", "reason": "recorded by a third analyzer"}`
-	if err := os.WriteFile(baseline, []byte(`{"baseline": [`+rows+`]}`), 0o600); err != nil {
+	if err := sandbox.WriteFile(baseline, []byte(`{"baseline": [`+rows+`]}`), 0o600); err != nil {
 		t.Fatalf("Setup: write %s: %v", baseline, err)
 	}
 	runAnalyze(t, dir, "--baseline-write="+baseline)
@@ -317,7 +318,7 @@ func TestAMalformedBaselineIsAUsageErrorAndAWriteOverOneAFailure(t *testing.T) {
 	t.Parallel()
 	const malformed = `{"baseline": [{"symbol": "go://example.com/app#spare"}]}`
 	dir := baselineFixpointModule(t)
-	if err := os.WriteFile(filepath.Join(dir, core.BaselineFileName), []byte(malformed), 0o600); err != nil {
+	if err := sandbox.WriteFile(filepath.Join(dir, core.BaselineFileName), []byte(malformed), 0o600); err != nil {
 		t.Fatalf("Setup: write the target's baseline: %v", err)
 	}
 	if got := runAnalyze(t, dir); got.code != vocab.ExitUsage {
@@ -325,8 +326,8 @@ func TestAMalformedBaselineIsAUsageErrorAndAWriteOverOneAFailure(t *testing.T) {
 	}
 
 	dir = baselineFixpointModule(t)
-	baseline := filepath.Join(t.TempDir(), core.BaselineFileName)
-	if err := os.WriteFile(baseline, []byte(malformed), 0o600); err != nil {
+	baseline := filepath.Join(sandbox.Dir(t), core.BaselineFileName)
+	if err := sandbox.WriteFile(baseline, []byte(malformed), 0o600); err != nil {
 		t.Fatalf("Setup: write %s: %v", baseline, err)
 	}
 	if got := runAnalyze(t, dir, "--baseline-write="+baseline); got.code != vocab.ExitFailure {
