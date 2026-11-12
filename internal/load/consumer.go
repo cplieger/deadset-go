@@ -74,7 +74,7 @@ func (l *loader) consumers(units []Unit) ([]Consumer, error) {
 			return nil, err
 		}
 		if held[one.ID] {
-			return nil, fmt.Errorf("%w: %s: the scope declares module %s twice", errConsumer, l.top.rel(declared.Dir), one.ID)
+			return nil, fmt.Errorf("%w: %s: the scope declares module %s twice", errConsumer, l.top.Rel(declared.Dir), one.ID)
 		}
 		held[one.ID] = true
 		loaded = append(loaded, one)
@@ -88,14 +88,14 @@ func (l *loader) consumer(declared *discoveredModule, mains []*packages.Module) 
 	if _, err := os.Stat(declared.Dir); err != nil {
 		return Consumer{}, &failure.Error{Failures: []failure.Failure{{Class: vocab.SetupMissingConsumer, Detail: fmt.Sprintf(
 			"the declared consumer %s does not exist; check it out at that path and install its dependencies",
-			l.top.rel(declared.Dir),
+			l.top.Rel(declared.Dir),
 		)}}}
 	}
 	spec := loadSpec{dir: declared.Dir, workspace: l.top.ConsumerWorkspace, file: declared.File}
 	for _, main := range mains {
 		spec.modules = append(spec.modules, main.Path)
 	}
-	name := l.top.rel(declared.Dir)
+	name := l.top.Rel(declared.Dir)
 	pkgs, err := l.module(&spec, name)
 	if setup, failed := errors.AsType[*failure.Error](err); failed && failure.Setup(err) {
 		consumer := &failure.Error{}
@@ -127,16 +127,16 @@ func (l *loader) consumer(declared *discoveredModule, mains []*packages.Module) 
 func (top *Topology) consumerModuleOf(pkgs []*packages.Package, declared *discoveredModule, mains []*packages.Module) (string, error) {
 	module := mainModule(pkgs)
 	if module == nil || module.Path == "" {
-		return "", fmt.Errorf("%w: %s: the load reports no module for it", errConsumer, top.rel(declared.Dir))
+		return "", fmt.Errorf("%w: %s: the load reports no module for it", errConsumer, top.Rel(declared.Dir))
 	}
 	if declared.ID != "" && declared.ID != module.Path {
 		return "", fmt.Errorf("%w: %s: the scope declares module %s and the directory holds %s",
-			errConsumer, top.rel(declared.Dir), declared.ID, module.Path)
+			errConsumer, top.Rel(declared.Dir), declared.ID, module.Path)
 	}
 	for _, main := range mains {
 		if module.Path == main.Path {
 			return "", fmt.Errorf("%w: %s: it is the target module %s",
-				errConsumer, top.rel(declared.Dir), main.Path)
+				errConsumer, top.Rel(declared.Dir), main.Path)
 		}
 		if err := top.resolvesTarget(pkgs, declared.Dir, main); err != nil {
 			return "", err
@@ -164,7 +164,7 @@ func (top *Topology) resolvesTarget(pkgs []*packages.Package, path string, main 
 		return nil
 	}
 	return fmt.Errorf("%w: %s: it resolves %s at %s rather than at %s. A consumer reaches the target through a replace directive in its own module file or through a workspace the scope declares",
-		errConsumer, top.rel(path), main.Path, top.rel(resolved), top.rel(main.Dir))
+		errConsumer, top.Rel(path), main.Path, top.Rel(resolved), top.Rel(main.Dir))
 }
 
 // sameDir reports whether two paths name one directory, comparing them lexically

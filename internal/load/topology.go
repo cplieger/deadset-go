@@ -137,7 +137,7 @@ func enclosed(p string) string {
 func treeAt(dir string) ModuleTree {
 	for at := dir; ; at = filepath.Dir(at) {
 		if IsModuleRoot(at) {
-			f, _ := readModuleFile(at, at)
+			f, _ := readModuleFile(scope.RootOf(at), at)
 			return TreeOf(f)
 		}
 		if filepath.Dir(at) == at {
@@ -172,6 +172,10 @@ type Topology struct {
 	// envOff holds each directory a toolchain of the run starts in whose go env
 	// file is in EnvFiles.
 	envOff map[string]bool
+
+	// root is Root resolved once, which every path a setup failure or a note names
+	// is relative to ([Topology.Rel]).
+	root scope.Root
 
 	// Root is the target root every position of the run is relative to, and
 	// ConsumerWorkspace the GOWORK setting every declared consumer loads under.
@@ -280,7 +284,7 @@ func Discover(ctx context.Context, doc scope.Document) (*Topology, error) {
 	if _, err := os.Stat(target); err != nil {
 		return nil, fmt.Errorf("load: target %s: %w", target, err)
 	}
-	top := &Topology{Root: target, ConsumerWorkspace: workspaceOff}
+	top := &Topology{Root: target, root: scope.RootOf(target), ConsumerWorkspace: workspaceOff}
 	dirs, err := top.unitDirs(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load: find the modules under the target: %w", err)
@@ -304,7 +308,7 @@ func Discover(ctx context.Context, doc scope.Document) (*Topology, error) {
 	if doc.Workspace != "" {
 		top.ConsumerWorkspace = doc.Workspace
 	}
-	if top.Consumers, err = declaredConsumers(ctx, target, doc.Consumers); err != nil {
+	if top.Consumers, err = declaredConsumers(ctx, top.root, doc.Consumers); err != nil {
 		return nil, err
 	}
 	if err := top.meetBlocking(); err != nil {
@@ -362,7 +366,7 @@ func irregularEnvFile(dir string) (EnvFile, bool) {
 	return file, hides(file.Path)
 }
 
-func declaredConsumers(ctx context.Context, root string, declared []scope.Module) ([]discoveredModule, error) {
+func declaredConsumers(ctx context.Context, root scope.Root, declared []scope.Module) ([]discoveredModule, error) {
 	var consumers []discoveredModule
 	for _, d := range declared {
 		if err := ctx.Err(); err != nil {
@@ -385,7 +389,7 @@ func declaredConsumers(ctx context.Context, root string, declared []scope.Module
 func (top *Topology) discoverUnits(ctx context.Context, dirs []string) ([]discoveredModule, error) {
 	units := make([]discoveredModule, 0, len(dirs))
 	for _, dir := range dirs {
-		unit, err := discoverModule(ctx, top.Root, dir)
+		unit, err := discoverModule(ctx, top.root, dir)
 		switch {
 		case err == nil:
 		case top.Walked && failure.Setup(err):
@@ -395,7 +399,7 @@ func (top *Topology) discoverUnits(ctx context.Context, dirs []string) ([]discov
 		}
 		if unit.Path != "" && unit.Refused == nil {
 			if unit.Underscored, err = top.underscoredPackages(ctx, dir, TreeOf(unit.File)); err != nil {
-				return nil, fmt.Errorf("load: find the packages under %s: %w", top.rel(dir), err)
+				return nil, fmt.Errorf("load: find the packages under %s: %w", top.Rel(dir), err)
 			}
 		}
 		units = append(units, unit)
@@ -442,7 +446,7 @@ func (top *Topology) holdsProgram(ctx context.Context, dirs []string) error {
 	for _, dir := range dirs {
 		found, err := top.holdsGoFile(ctx, dir, treeAt(dir))
 		if err != nil {
-			return fmt.Errorf("load: find the Go files under %s: %w", top.rel(dir), err)
+			return fmt.Errorf("load: find the Go files under %s: %w", top.Rel(dir), err)
 		}
 		if found {
 			return nil
@@ -452,7 +456,7 @@ func (top *Topology) holdsProgram(ctx context.Context, dirs []string) error {
 	case len(dirs) == 0 && len(top.Unread) > 0:
 		unread := make([]string, len(top.Unread))
 		for i, path := range top.Unread {
-			unread[i] = scope.RelativeSlash(top.Root, path)
+			unread[i] = top.Rel(path)
 		}
 		return failure.New(vocab.SetupNoProgram, fmt.Sprintf(
 			"the target root holds no go.mod file the run can read and none above it governs it, and the run cannot read %s; give the run read access to it, run from the directory that holds a module's go.mod file, or name the languages to analyze",
@@ -499,7 +503,7 @@ func (top *Topology) holdsGoFile(ctx context.Context, dir string, tree ModuleTre
 // withMembers is the module rooted at target, then every other module below it the
 // workspace listing target lists, in directory order.
 func withMembers(ctx context.Context, target string) ([]string, error) {
-	workspace, err := scope.WorkspaceOf(ctx, target, target)
+	workspace, err := scope.WorkspaceOf(ctx, scope.RootOf(target), target)
 	if err != nil {
 		return nil, err
 	}
@@ -535,7 +539,7 @@ func walkedUnits(target string, dirs []string) bool {
 // in dir reads, and under no workspace otherwise. Where the toolchain cannot read
 // its module file or that workspace file, the module comes with the error, which
 // names the file relative to root.
-func discoverModule(ctx context.Context, root, dir string) (discoveredModule, error) {
+func discoverModule(ctx context.Context, root scope.Root, dir string) (discoveredModule, error) {
 	m := discoveredModule{Dir: dir, Workspace: workspaceOff}
 	m.File, m.FileErr = readModuleFile(root, dir)
 	if m.File != nil && m.File.Syntax.Module != nil {
@@ -570,7 +574,7 @@ func (top *Topology) nestedModules(ctx context.Context, declared []scope.Module)
 			return nil
 		}
 		m := discoveredModule{Dir: path, Workspace: workspaceOff}
-		m.File, m.FileErr = readModuleFile(top.Root, path)
+		m.File, m.FileErr = readModuleFile(top.root, path)
 		if m.Consumes = top.replacedUnits(&m); len(m.Consumes) > 0 {
 			nested = append(nested, m)
 		}
@@ -590,7 +594,7 @@ func (top *Topology) nestedModules(ctx context.Context, declared []scope.Module)
 // cannot read, so such a reader reaches a load only where the toolchain reads a
 // file this parser refuses.
 func (top *Topology) readers(ctx context.Context, declared []scope.Module) ([]discoveredModule, error) {
-	workspace, err := scope.WorkspaceOf(ctx, top.Root, top.Root)
+	workspace, err := scope.WorkspaceOf(ctx, top.root, top.Root)
 	if err != nil {
 		return nil, fmt.Errorf("load: %w", err)
 	}
@@ -608,7 +612,7 @@ func (top *Topology) readers(ctx context.Context, declared []scope.Module) ([]di
 		m := discoveredModule{Dir: member, Workspace: workspace.File}
 		// A workspace member is a module root of its own: the toolchain reads the module
 		// file in its directory and none above it.
-		m.File, m.FileErr = parseModuleFile(top.Root, filepath.Join(member, moduleFileName))
+		m.File, m.FileErr = parseModuleFile(top.root, filepath.Join(member, moduleFileName))
 		if irregular(m.FileErr) {
 			return nil, m.FileErr
 		}
@@ -672,7 +676,7 @@ func declares(declared []scope.Module, dir string) bool {
 // readModuleFile reads the module file the toolchain run in dir reads: the nearest
 // one at or above dir, its error naming it relative to root. It returns nil and no
 // error where none governs dir.
-func readModuleFile(root, dir string) (*ModuleFile, error) {
+func readModuleFile(root scope.Root, dir string) (*ModuleFile, error) {
 	at := dir
 	for !IsModuleRoot(at) {
 		if filepath.Dir(at) == at {
@@ -687,7 +691,7 @@ func readModuleFile(root, dir string) (*ModuleFile, error) {
 // relative to root ([program.10]). One that is no regular file is never opened, and
 // its error is the setup failure unreadable-configuration: the toolchain run where
 // it governs may block on it.
-func parseModuleFile(root, path string) (*ModuleFile, error) {
+func parseModuleFile(root scope.Root, path string) (*ModuleFile, error) {
 	text, err := scope.ReadRegularFile(root, path)
 	if errors.Is(err, scope.ErrIrregular) {
 		return nil, failure.WrapFix(vocab.SetupUnreadableConfiguration, fmt.Errorf("%w: %w", ErrModuleFile, err), scope.IrregularFix)
@@ -695,7 +699,7 @@ func parseModuleFile(root, path string) (*ModuleFile, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrModuleFile, err)
 	}
-	syntax, err := modfile.Parse(scope.RelativeSlash(root, path), text, nil)
+	syntax, err := modfile.Parse(root.Rel(path), text, nil)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrModuleFile, err)
 	}
@@ -815,7 +819,7 @@ func (top *Topology) irregularRead(file *ModuleFile, dir, workspace string) stri
 // its members, where it is no regular file, and empty otherwise. A workspace file
 // that does not parse reads as none: the load reports it.
 func (top *Topology) workspaceRead(workspace string) string {
-	work, err := scope.ReadWorkspace(top.Root, workspace)
+	work, err := scope.ReadWorkspace(top.root, workspace)
 	switch {
 	case irregular(err):
 		return workspace
@@ -836,7 +840,7 @@ func (top *Topology) workspaceRead(workspace string) string {
 func (top *Topology) blockingFailure(path string) error {
 	return failure.WrapFix(vocab.SetupUnreadableConfiguration, fmt.Errorf(
 		"load: %s: %w, but %s; the go command reads it outside its overlay, as a module file, a workspace file or a vendor list",
-		top.rel(path), scope.ErrIrregular, irregularKind(path),
+		top.Rel(path), scope.ErrIrregular, irregularKind(path),
 	), scope.IrregularFix)
 }
 
@@ -858,9 +862,10 @@ func irregularKind(path string) string {
 	return "an entry that is no regular file"
 }
 
-// rel is path relative to the root, as every path a setup failure line or a note
-// names is ([program.10]): with `..` segments where it is outside the root.
-func (top *Topology) rel(path string) string { return scope.RelativeSlash(top.Root, path) }
+// Rel is path relative to the root, as every path a setup failure line or a note
+// names is ([program.10]), placed where both resolve ([scope.Root.Rel]): with `..`
+// segments where it is outside the root.
+func (top *Topology) Rel(path string) string { return top.root.Rel(path) }
 
 // openable reports whether the run can open the regular file at path.
 func openable(path string) bool {

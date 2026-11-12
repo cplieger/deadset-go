@@ -23,10 +23,10 @@ type Diagnostic struct {
 
 // rebased is one position the toolchain rendered, relative to root as every
 // position of a run is ([program.10]): one it wrote relative to dir, the directory it
-// ran in, is joined to dir, and a file outside root is named with `..` segments,
-// but one of a module the build reads from the module cache, which is named by
-// that module's path and the file's path inside it.
-func rebased(position, root, dir string, module *packages.Module) string {
+// ran in, is joined to dir, and a file outside root, where both resolve, is named
+// with `..` segments, but one of a module the build reads from the module cache,
+// which is named by that module's path and the file's path inside it.
+func rebased(position string, root scope.Root, dir string, module *packages.Module) string {
 	file, at := splitPosition(position)
 	if file == "" || file == "-" {
 		return position
@@ -34,12 +34,13 @@ func rebased(position, root, dir string, module *packages.Module) string {
 	if !filepath.IsAbs(file) {
 		file = filepath.Join(dir, file)
 	}
-	if cached := cachedModule(module); cached != nil && !inside(root, file) {
-		if rel, err := filepath.Rel(cached.Dir, file); err == nil && inside(cached.Dir, file) {
+	if cached := cachedModule(module); cached != nil {
+		rel, err := filepath.Rel(cached.Dir, file)
+		if _, held := root.Within(file); !held && err == nil && inside(cached.Dir, file) {
 			return path.Join(cached.Path, filepath.ToSlash(rel)) + at
 		}
 	}
-	return scope.RelativeSlash(root, file) + at
+	return root.Rel(file) + at
 }
 
 // splitPosition is position's file and the ":line" or ":line:col" that follows it.

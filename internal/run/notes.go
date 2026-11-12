@@ -9,7 +9,6 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
-	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"golang.org/x/tools/go/packages"
 )
@@ -58,16 +57,16 @@ func (l *Loaded) notes() ([]report.Note, error) {
 }
 
 // droppedNotes is one note per module directory some configuration dropped,
-// naming the first failure that dropped it. A module below the target root is named
-// by its directory; a workspace reader outside it is named at the root, and only
-// where its module file cannot be read, which makes every export of the target
-// possible.
+// naming the first failure that dropped it. A module below the target root, where
+// both resolve ([load.Topology.Rel]), is named by its directory; a workspace
+// reader outside it is named at the root, and only where its module file cannot be
+// read, which makes every export of the target possible.
 func (l *Loaded) droppedNotes() []report.Note {
 	var notes []report.Note
 	seen := make(map[string]bool)
 	for i := range l.loads.outlines {
 		for _, dropped := range l.loads.outlines[i].dropped {
-			directory := scope.RelativeSlash(l.Root, dropped.Dir)
+			directory := l.Topology.Rel(dropped.Dir)
 			below := filepath.IsLocal(filepath.FromSlash(directory))
 			if seen[directory] || !below && !errors.Is(dropped.Err, load.ErrModuleFile) {
 				continue
@@ -109,7 +108,7 @@ func (p *Prepared) unreadNotes() []report.Note {
 		if slices.Contains(p.unread, path) {
 			effects = append(effects, "it may be a source in another language than Go naming any function or variable of the target, so every one is kept")
 		}
-		entry := scope.RelativeSlash(p.Root, path)
+		entry := p.Topology.Rel(path)
 		notes = append(notes, report.Note{
 			Kind:    report.NoteKindUnreadEntry,
 			Path:    entry,
@@ -122,6 +121,8 @@ func (p *Prepared) unreadNotes() []report.Note {
 // hiddenNotes is one unread-entry note per entry some configuration's toolchain
 // read as absent where code may hide ([load.Result.Hidden]), named at the root
 // where it lies outside it, and one per go env file the toolchain runs without.
+// Two spellings of one entry, the root's and one through a link a replace
+// directive or a consumer names, make one note.
 func (p *Prepared) hiddenNotes() []report.Note {
 	var hidden []string
 	for i := range p.loads.outlines {
@@ -131,13 +132,16 @@ func (p *Prepared) hiddenNotes() []report.Note {
 	var notes []report.Note
 	for _, path := range slices.Compact(hidden) {
 		entry, at := p.notedAt(path)
-		notes = append(notes, report.Note{
+		note := report.Note{
 			Kind: report.NoteKindUnreadEntry,
 			Path: at,
 			Message: entry + " is a pipe, a device or a socket, which the go command may block on, so the run hides it from the go command " +
 				"and does not analyze code there, which may use any export of the target and any declaration of its package, so every one is possible, " +
 				"until it is a regular file or gone",
-		})
+		}
+		if !slices.Contains(notes, note) {
+			notes = append(notes, note)
+		}
 	}
 	for _, file := range p.Topology.EnvFiles {
 		which := "the go env file in the user's configuration directory"
@@ -160,10 +164,11 @@ func (p *Prepared) hiddenNotes() []report.Note {
 	return notes
 }
 
-// notedAt is path relative to the root, and the path a note about it names: that
-// one, else the root where path lies outside it.
+// notedAt is path relative to the root where both resolve ([load.Topology.Rel]),
+// and the path a note about it names: that one, else the root where path lies
+// outside it.
 func (p *Prepared) notedAt(path string) (entry, at string) {
-	entry = scope.RelativeSlash(p.Root, path)
+	entry = p.Topology.Rel(path)
 	if !filepath.IsLocal(filepath.FromSlash(entry)) {
 		return entry, "."
 	}

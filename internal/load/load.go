@@ -311,14 +311,14 @@ func (l *loader) unit(r *Result, unit *discoveredModule) error {
 		if setup || diagnosed {
 			return err
 		}
-		return fmt.Errorf("load %s: %s: %w", l.c.ID, l.top.rel(unit.Dir), err)
+		return fmt.Errorf("load %s: %s: %w", l.c.ID, l.top.Rel(unit.Dir), err)
 	}
 	cgo, err := cgoOnly(pkgs, l.c)
 	if err != nil {
 		return fmt.Errorf("load %s: %w", l.c.ID, err)
 	}
 	from := unitDir{dir: unit.Dir, workspace: unit.Workspace, toolchain: l.toolchain}
-	r.ExcludedByCgo = append(r.ExcludedByCgo, checkOpaqueC(l.ctx, r.Fset, l.top.Root, from, pkgs, cgo, l.c)...)
+	r.ExcludedByCgo = append(r.ExcludedByCgo, checkOpaqueC(l.ctx, r.Fset, l.top.root, from, pkgs, cgo, l.c)...)
 	r.Programs = append(r.Programs, checkPrograms(l.ctx, r.Fset, from, pkgs, l.c)...)
 	r.Packages = append(r.Packages, pkgs...)
 	r.Units = append(r.Units, Unit{Dir: unit.Dir, Path: unit.Path, Packages: pkgs})
@@ -329,7 +329,7 @@ func (l *loader) unit(r *Result, unit *discoveredModule) error {
 // directory as a [Result.Nested] consumer, dropping it where it does not load. The
 // module is named by its directory relative to the root, which a note may carry.
 func (l *loader) nested(r *Result, m *discoveredModule) error {
-	name := l.top.rel(m.Dir)
+	name := l.top.Rel(m.Dir)
 	if m.Refused != nil {
 		r.Dropped = append(r.Dropped, droppedOf(m, fmt.Errorf("load %s: %s: %w", l.c.ID, name, m.Refused)))
 		return nil
@@ -357,7 +357,7 @@ func (l *loader) nested(r *Result, m *discoveredModule) error {
 // workspace read that file too, and end the run.
 func (l *loader) reader(r *Result, m *discoveredModule) error {
 	if m.FileErr != nil {
-		r.Dropped = append(r.Dropped, droppedOf(m, fmt.Errorf("load %s: %s: %w", l.c.ID, l.top.rel(m.Dir), m.FileErr)))
+		r.Dropped = append(r.Dropped, droppedOf(m, fmt.Errorf("load %s: %s: %w", l.c.ID, l.top.Rel(m.Dir), m.FileErr)))
 		return nil
 	}
 	return l.nested(r, m)
@@ -435,7 +435,7 @@ func (l *loader) underscored(r *Result, unit *discoveredModule) error {
 		case droppable(err) && l.ctx.Err() == nil:
 			return false, nil
 		default:
-			return false, fmt.Errorf("load %s: %s: %w", l.c.ID, l.top.rel(unit.Dir), err)
+			return false, fmt.Errorf("load %s: %s: %w", l.c.ID, l.top.Rel(unit.Dir), err)
 		}
 	}
 	if loaded, err := try(patterns); loaded || err != nil || len(patterns) == 1 {
@@ -482,7 +482,7 @@ func loadPackages(ctx context.Context, trees *syntaxCache, c *Configuration, spe
 		return nil, nil, err
 	}
 	pkgs = dropUnreadErrors(pkgs, spec)
-	if diagnostics := collect(pkgs, spec.top.Root, spec.dir); len(diagnostics) > 0 {
+	if diagnostics := collect(pkgs, spec.top.root, spec.dir); len(diagnostics) > 0 {
 		if refused := spec.top.hiddenCause(spec, "", pkgs); refused != nil {
 			return nil, nil, refused
 		}
@@ -494,7 +494,7 @@ func loadPackages(ctx context.Context, trees *syntaxCache, c *Configuration, spe
 	if err := typeCheck(ctx, trees, spec.dir+"\x00"+strings.Join(spec.modules, "\x00"), pkgs, c.Arch, spec.modules); err != nil {
 		return nil, nil, err
 	}
-	if diagnostics := collect(pkgs, spec.top.Root, spec.dir); len(diagnostics) > 0 {
+	if diagnostics := collect(pkgs, spec.top.root, spec.dir); len(diagnostics) > 0 {
 		if refused := spec.top.hiddenCause(spec, "", pkgs); refused != nil {
 			return nil, nil, refused
 		}
@@ -510,7 +510,7 @@ func listFailure(spec *loadSpec, listed *listError) error {
 	if refused := spec.top.hiddenCause(spec, listed.Error(), nil); refused != nil {
 		return refused
 	}
-	if refused := unreadableConfiguration(listed, spec.top.rel(spec.dir)); refused != nil {
+	if refused := unreadableConfiguration(listed, spec.top.Rel(spec.dir)); refused != nil {
 		return refused
 	}
 	return listed
@@ -692,8 +692,8 @@ func treePatterns(ctx context.Context, spec *loadSpec) ([]string, error) {
 	members := scope.Workspace{}
 	if spec.workspace != workspaceOff {
 		var err error
-		if members, err = scope.WorkspaceOf(ctx, spec.top.Root, spec.dir); err != nil {
-			return nil, fmt.Errorf("load: %s: %w", spec.top.rel(spec.dir), err)
+		if members, err = scope.WorkspaceOf(ctx, spec.top.root, spec.dir); err != nil {
+			return nil, fmt.Errorf("load: %s: %w", spec.top.Rel(spec.dir), err)
 		}
 	}
 	return dirPatterns(ctx, spec, &members)
@@ -722,7 +722,7 @@ func dirPatterns(ctx context.Context, spec *loadSpec, members *scope.Workspace) 
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("load: find the packages under %s: %w", spec.top.rel(spec.dir), err)
+		return nil, fmt.Errorf("load: find the packages under %s: %w", spec.top.Rel(spec.dir), err)
 	}
 	return patterns, nil
 }
@@ -752,13 +752,33 @@ func dropUnreadErrors(pkgs []*packages.Package, spec *loadSpec) []*packages.Pack
 }
 
 // opens reports whether a toolchain message reports that opening path failed, the
-// toolchain naming it relative to the directory it ran in or in full.
+// toolchain naming it relative to the directory it ran in or in full, through any
+// spelling of its directory: a load run from a consumer spelled through a link
+// reaches an entry of the target through that link, where the walk of the root
+// spelled it as the root is.
 func opens(msg, from, path string) bool {
 	if strings.Contains(msg, "open "+path+": ") {
 		return true
 	}
-	rel, err := filepath.Rel(from, path)
-	return err == nil && filepath.IsLocal(rel) && strings.Contains(msg, "open "+rel+": ")
+	if rel, err := filepath.Rel(from, path); err == nil && filepath.IsLocal(rel) && strings.Contains(msg, "open "+rel+": ") {
+		return true
+	}
+	resolved := scope.Resolved(path)
+	for rest := msg; ; {
+		_, after, found := strings.Cut(rest, "open ")
+		if !found {
+			return false
+		}
+		if named, _, closed := strings.Cut(after, ": "); closed {
+			if !filepath.IsAbs(named) {
+				named = filepath.Join(from, named)
+			}
+			if scope.Resolved(named) == resolved {
+				return true
+			}
+		}
+		rest = after
+	}
 }
 
 // unbuilt reports whether one package of the main module is a directory whose
@@ -881,7 +901,7 @@ func reportsErrors(roots []*packages.Package) bool {
 // variants included, and returns every error any of them reported in a
 // deterministic order, each position rebased to root from dir, the directory the
 // toolchain ran in ([rebased]).
-func collect(roots []*packages.Package, root, dir string) []Diagnostic {
+func collect(roots []*packages.Package, root scope.Root, dir string) []Diagnostic {
 	var diagnostics []Diagnostic
 	packages.Visit(roots, nil, func(p *packages.Package) {
 		for _, e := range p.Errors {

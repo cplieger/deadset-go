@@ -24,6 +24,10 @@ import (
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
+// aliasMark stands, in a tree a row of the entry-kind table writes, for the path of
+// a link to the tree, which the row makes once the tree is written.
+const aliasMark = "@ALIAS@"
+
 // entryModule is the module every row of the entry-kind table adds its entry to:
 // an ignored directory, an underscore directory, a testdata directory and a
 // package beside the program. Unread, unused is dead in package main and Limit an
@@ -255,7 +259,7 @@ func asNonRootUser(t *testing.T) {
 // and drops a searched module; a go env file is read by no toolchain; and on a tree
 // with no special file the go command reads, links to an ancestor, out of every
 // tree, into /proc, multiplying paths or into a directory a dot starts end as on
-// dev.50, byte for byte where a row says so. Every path is relative ([program.10]).
+// dev.50, byte for byte where a row says so. Each path is relative where it resolves.
 func TestAnalyzeMeetsAFileTheToolchainWouldBlockOn(t *testing.T) {
 	t.Parallel()
 	siblings := map[string]string{
@@ -281,6 +285,8 @@ func TestAnalyzeMeetsAFileTheToolchainWouldBlockOn(t *testing.T) {
 	replacing["a/main.go"] = "package main\n\nimport _ \"example.com/b/q\"\n\nfunc main() {}\n"
 	fromA := maps.Clone(replacing)
 	fromA["a/"+repositoryDocument] = replacing[repositoryDocument]
+	throughLink := maps.Clone(fromA)
+	throughLink["a/go.mod"] = "module example.com/a\n\ngo 1.27.1\n\nrequire example.com/b v0.0.0\n\nreplace example.com/b => " + aliasMark + "/b\n"
 	workspace := map[string]string{
 		"go.work":          "go 1.21\n\nuse ./a\n",
 		"a/go.mod":         "module example.com/a\n\ngo 1.21\n",
@@ -383,6 +389,7 @@ func TestAnalyzeMeetsAFileTheToolchainWouldBlockOn(t *testing.T) {
 		target      string            // the directory the run starts from below the tree, the tree's root where empty
 		goenv       bool              // whether GOENV names the entry
 		relative    bool              // whether that GOENV is relative to the target, the run starting from its parent
+		alias       bool              // whether GOENV, and aliasMark in the tree, spell the tree through a link to it
 		links       map[string]string // the symbolic links below the tree, to their targets
 		make        func(t *testing.T, path string)
 		code        string
@@ -443,6 +450,14 @@ func TestAnalyzeMeetsAFileTheToolchainWouldBlockOn(t *testing.T) {
 		{
 			name: "a_go_env_file_that_is_a_pipe_named_relative_to_the_target", entry: "env", tree: nested, goenv: true, relative: true,
 			make: sandbox.Fifo, code: "findings", hidden: []string{". the go env file GOENV names, env,"}, findings: unused,
+		},
+		{
+			name: "a_go_env_file_that_is_a_pipe_named_through_a_link_to_the_target", entry: "env", tree: nested, goenv: true, alias: true,
+			make: sandbox.Fifo, code: "findings", hidden: []string{". the go env file GOENV names, env,"}, findings: unused,
+		},
+		{
+			name: "a_target_importing_a_package_of_a_module_replaced_through_a_link_holding_a_pipe", entry: "b/q/x.go", tree: throughLink, target: "a",
+			alias: true, make: sandbox.Fifo, code: "clean", hidden: []string{". ../b/q/x.go"},
 		},
 		{
 			name: "a_package_holding_a_pipe_imported_through_a_link_to_an_ancestor", entry: "p/r/x.go", tree: ancestor,
@@ -540,7 +555,18 @@ func TestAnalyzeMeetsAFileTheToolchainWouldBlockOn(t *testing.T) {
 			if tree == nil {
 				tree = entryModule
 			}
+			var alias string
+			if tc.alias {
+				alias = filepath.Join(sandbox.Dir(t), "alias")
+				tree = maps.Clone(tree)
+				for name, body := range tree {
+					tree[name] = strings.ReplaceAll(body, aliasMark, filepath.ToSlash(alias))
+				}
+			}
 			dir := writeModule(t, tree)
+			if tc.alias {
+				symlinkTo(dir)(t, alias)
+			}
 			for _, link := range slices.Sorted(maps.Keys(tc.links)) {
 				path := filepath.Join(dir, filepath.FromSlash(link))
 				if err := sandbox.MkdirAll(filepath.Dir(path), 0o750); err != nil {
@@ -556,6 +582,8 @@ func TestAnalyzeMeetsAFileTheToolchainWouldBlockOn(t *testing.T) {
 			case tc.relative:
 				from, target = filepath.Dir(from), filepath.Base(from)
 				env = []string{"GOENV=" + filepath.FromSlash(tc.entry)}
+			case tc.goenv && tc.alias:
+				env = []string{"GOENV=" + filepath.Join(alias, filepath.FromSlash(tc.entry))}
 			case tc.goenv:
 				env = []string{"GOENV=" + entry}
 			}

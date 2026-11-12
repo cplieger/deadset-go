@@ -32,7 +32,7 @@ const IrregularFix = "replace it with a regular file"
 // a regular file, opening nothing else: a pipe would block the read, and a device
 // never end it. Its error names path relative to root, as every path a setup
 // failure names is ([program.10]).
-func ReadRegularFile(root, path string) ([]byte, error) {
+func ReadRegularFile(root Root, path string) ([]byte, error) {
 	info, err := os.Stat(path)
 	if err == nil && !info.Mode().IsRegular() {
 		err = ErrIrregular
@@ -45,14 +45,16 @@ func ReadRegularFile(root, path string) ([]byte, error) {
 		if pathErr, ok := errors.AsType[*fs.PathError](err); ok {
 			err = pathErr.Err
 		}
-		return nil, fmt.Errorf("%s: %w", RelativeSlash(root, path), err)
+		return nil, fmt.Errorf("%s: %w", root.Rel(path), err)
 	}
 	return text, nil
 }
 
-// RelativeSlash renders path relative to base with forward slashes, a path outside
-// base with `..` segments, falling back to path itself where no relative form
-// exists.
+// RelativeSlash renders path relative to base by their names, with forward
+// slashes, a path outside base with `..` segments, falling back to path itself
+// where no relative form exists. It suits a path spelled from base, as the
+// toolchain spells a file of the target below the root; [Root.Rel] places any
+// other where it resolves.
 func RelativeSlash(base, path string) string {
 	rel, err := filepath.Rel(base, path)
 	if err != nil {
@@ -75,7 +77,7 @@ func Resolve(ctx context.Context, dir, document string) (Document, error) {
 	if err != nil {
 		return Document{}, err
 	}
-	workspace, err := WorkspaceOf(ctx, target, target)
+	workspace, err := WorkspaceOf(ctx, RootOf(target), target)
 	if err != nil {
 		return Document{}, err
 	}
@@ -115,7 +117,7 @@ func (w *Workspace) Lists(dir string) bool {
 // read from the filesystem so an ambient workspace setting cannot decide which
 // file one target's run reads, its error naming that file relative to root. A
 // cancelled ctx ends the read before it starts.
-func WorkspaceOf(ctx context.Context, root, dir string) (Workspace, error) {
+func WorkspaceOf(ctx context.Context, root Root, dir string) (Workspace, error) {
 	if err := ctx.Err(); err != nil {
 		return Workspace{}, err
 	}
@@ -147,7 +149,7 @@ func workspaceFile(dir string) (string, bool) {
 // entry resolves against the file's own directory, as the toolchain resolves it. A
 // file it cannot read or parse is the project's unreadable configuration, named
 // relative to root.
-func ReadWorkspace(root, file string) (Workspace, error) {
+func ReadWorkspace(root Root, file string) (Workspace, error) {
 	content, err := ReadRegularFile(root, file)
 	switch {
 	case errors.Is(err, ErrIrregular):
@@ -155,7 +157,7 @@ func ReadWorkspace(root, file string) (Workspace, error) {
 	case err != nil:
 		return Workspace{}, failure.Wrap(vocab.SetupUnreadableConfiguration, fmt.Errorf("%w: %w", errWorkspace, err))
 	}
-	work, err := modfile.ParseWork(RelativeSlash(root, file), content, nil)
+	work, err := modfile.ParseWork(root.Rel(file), content, nil)
 	if err != nil {
 		return Workspace{}, failure.Wrap(vocab.SetupUnreadableConfiguration, fmt.Errorf("%w: %w", errWorkspace, err))
 	}

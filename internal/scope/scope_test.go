@@ -403,6 +403,41 @@ func TestWithinPlacesAPathByItsNamesThenWhereBothResolve(t *testing.T) {
 	}
 }
 
+// A path is named relative to a root where both resolve: by Within where the root
+// holds it, and otherwise from the resolved root to where the path's directory
+// resolves, with `..` segments, whichever spelling either side has.
+func TestRootRelNamesAPathWhereBothResolve(t *testing.T) {
+	base := sandbox.Dir(t)
+	real := filepath.Join(base, "real")
+	for _, dir := range []string{filepath.Join(real, "app", "sub"), filepath.Join(real, "other")} {
+		if err := sandbox.MkdirAll(dir, 0o750); err != nil {
+			t.Fatalf("Setup: %v", err)
+		}
+	}
+	alias := filepath.Join(sandbox.Dir(t), "alias")
+	if err := sandbox.Symlink(real, alias); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	if err := sandbox.Symlink(filepath.Join(real, "app"), filepath.Join(real, "inner")); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	for _, tc := range []struct{ name, root, path, want string }{
+		{"the root itself", filepath.Join(real, "app"), filepath.Join(real, "app"), "."},
+		{"a path below by its names", real, filepath.Join(real, "app", "sub"), "app/sub"},
+		{"a link inside the root keeps its name", base, filepath.Join(real, "inner"), "real/inner"},
+		{"a path below spelled through a link", filepath.Join(real, "app"), filepath.Join(alias, "app", "sub", "x.go"), "sub/x.go"},
+		{"a path outside spelled through a link", filepath.Join(real, "app"), filepath.Join(alias, "other", "x.go"), "../other/x.go"},
+		{"a path outside the root spelled through a link", filepath.Join(alias, "app"), filepath.Join(real, "other", "x.go"), "../other/x.go"},
+		{"a path outside below a directory that does not exist", filepath.Join(real, "app"), filepath.Join(alias, "none", "y.go"), "../none/y.go"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := RootOf(tc.root).Rel(tc.path); got != tc.want {
+				t.Errorf("RootOf(%s).Rel(%s) = %q, want %q", tc.root, tc.path, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestAnInputTheInvocationNamesThatCannotBeReadIsErrNamed(t *testing.T) {
 	_, refused := writeDocument(t, `{"target": {"path": "."}, "unknown": true}`)
 	file := filepath.Join(sandbox.Dir(t), "file")

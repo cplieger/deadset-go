@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/buildconstraint"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -39,7 +40,7 @@ const (
 // because the load's packages hold one another in their import maps: its syntax,
 // types, type information, imports and file lists change, and its identity does
 // not. No C declaration becomes a symbol; only the Go half is analyzed.
-func checkOpaqueC(ctx context.Context, fset *token.FileSet, target string, from unitDir, pkgs []*packages.Package, cgo map[string]bool, c *Configuration) []string {
+func checkOpaqueC(ctx context.Context, fset *token.FileSet, target scope.Root, from unitDir, pkgs []*packages.Package, cgo map[string]bool, c *Configuration) []string {
 	if len(cgo) == 0 {
 		return nil
 	}

@@ -360,6 +360,19 @@ func TestRebasedNamesEveryPositionFromTheTargetRoot(t *testing.T) {
 	cache := filepath.Join(base, "cache", "example.com", "dep@v1.2.0")
 	dep := &packages.Module{Path: "example.com/dep", Version: "v1.2.0", Dir: cache}
 	local := &packages.Module{Path: "example.com/lib", Dir: filepath.Join(base, "lib")}
+	// Two spellings of the tree, as macOS spells /private/var through /var: a link
+	// to the base and one to the root, and a module cache below the root.
+	aliasBase, aliasRoot := filepath.Join(sandbox.Dir(t), "base"), filepath.Join(sandbox.Dir(t), "target")
+	if err := sandbox.MkdirAll(root, 0o750); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	for link, to := range map[string]string{aliasBase: base, aliasRoot: root} {
+		if err := sandbox.Symlink(to, link); err != nil {
+			t.Fatalf("Setup: %v", err)
+		}
+	}
+	inner := filepath.Join("cache", "example.com", "dep@v1.2.0")
+	held := &packages.Module{Path: "example.com/dep", Version: "v1.2.0", Dir: filepath.Join(aliasRoot, inner)}
 	for _, test := range []struct {
 		name, position, dir string
 		module              *packages.Module
@@ -371,11 +384,14 @@ func TestRebasedNamesEveryPositionFromTheTargetRoot(t *testing.T) {
 		{name: "absolute_in_a_local_module_outside", position: filepath.Join(base, "lib", "l.go") + ":7:1", dir: root, module: local, want: "../lib/l.go:7:1"},
 		{name: "relative_in_a_consumer_outside", position: "main.go:3:1", dir: filepath.Join(base, "app"), want: "../app/main.go:3:1"},
 		{name: "absolute_in_the_module_cache", position: filepath.Join(cache, "x", "x.go") + ":9:3", dir: root, module: dep, want: "example.com/dep/x/x.go:9:3"},
+		{name: "absolute_below_the_root_spelled_through_a_link", position: filepath.Join(aliasRoot, "p", "p.go") + ":4:2", dir: root, want: "p/p.go:4:2"},
+		{name: "relative_in_a_consumer_spelled_through_a_link", position: "main.go:3:1", dir: filepath.Join(aliasBase, "app"), want: "../app/main.go:3:1"},
+		{name: "absolute_in_a_module_cache_below_the_root_spelled_through_a_link", position: filepath.Join(aliasRoot, inner, "x", "x.go") + ":9:3", dir: root, module: held, want: "cache/example.com/dep@v1.2.0/x/x.go:9:3"},
 		{name: "a_file_alone", position: filepath.Join(root, "go.mod"), dir: root, want: "go.mod"},
 		{name: "none", position: "", dir: root, want: ""},
 		{name: "no_file", position: "-", dir: root, want: "-"},
 	} {
-		if got := rebased(test.position, root, test.dir, test.module); got != test.want {
+		if got := rebased(test.position, scope.RootOf(root), test.dir, test.module); got != test.want {
 			t.Errorf("rebased(%s) = %q, want %q", test.name, got, test.want)
 		}
 	}
@@ -595,8 +611,11 @@ func TestDiscoveryStopsWhenCancelledAfterItBegins(t *testing.T) {
 			_, err := (&Topology{Root: module}).underscoredPackages(ctx, module, treeAt(module))
 			return err
 		},
-		"readers":           func(ctx context.Context) error { _, err := top.readers(ctx, nil); return err },
-		"declaredConsumers": func(ctx context.Context) error { _, err := declaredConsumers(ctx, module, consumers); return err },
+		"readers": func(ctx context.Context) error { _, err := top.readers(ctx, nil); return err },
+		"declaredConsumers": func(ctx context.Context) error {
+			_, err := declaredConsumers(ctx, scope.RootOf(module), consumers)
+			return err
+		},
 	} {
 		counted := &stagedContext{Context: t.Context(), live: math.MaxInt}
 		if err := search(counted); err != nil {

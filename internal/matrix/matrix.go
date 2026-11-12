@@ -27,7 +27,6 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/buildconstraint"
 	"github.com/cplieger/deadset-go/v2/internal/load"
-	"github.com/cplieger/deadset-go/v2/internal/scope"
 )
 
 // idSeparator joins the parts of a configuration identifier.
@@ -136,7 +135,7 @@ func (c *collector) read(path string) error {
 	}
 	expression, err := buildconstraint.Of(filepath.Base(path), content)
 	if err != nil {
-		return fmt.Errorf("%s: %w", scope.RelativeSlash(c.top.Root, path), err)
+		return fmt.Errorf("%s: %w", c.top.Rel(path), err)
 	}
 	c.visit(path, expression)
 	if isTestFile(path) || buildconstraint.OnlyUnderIgnore(expression) {

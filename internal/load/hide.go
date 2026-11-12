@@ -164,7 +164,7 @@ func (s *hideScan) module(dir string) {
 	s.read[dir] = true
 	s.enqueue(dir)
 	path := filepath.Join(dir, moduleFileName)
-	text, err := scope.ReadRegularFile(s.top.Root, path)
+	text, err := scope.ReadRegularFile(s.top.root, path)
 	if err != nil {
 		return
 	}
@@ -196,7 +196,7 @@ func (s *hideScan) workspace(path string) {
 		return
 	}
 	s.read[path] = true
-	work, err := scope.ReadWorkspace(s.top.Root, path)
+	work, err := scope.ReadWorkspace(s.top.root, path)
 	if err != nil {
 		return
 	}
@@ -581,7 +581,7 @@ func (top *Topology) dirsOf(importPath string) []string {
 func (top *Topology) sumFiles(spec *loadSpec) []string {
 	if spec.workspace != workspaceOff {
 		files := []string{spec.workspace + ".sum"}
-		if work, err := scope.ReadWorkspace(top.Root, spec.workspace); err == nil {
+		if work, err := scope.ReadWorkspace(top.root, spec.workspace); err == nil {
 			for _, member := range work.Modules {
 				files = append(files, filepath.Join(member, "go.sum"))
 			}
@@ -599,6 +599,6 @@ func (top *Topology) sumFiles(spec *loadSpec) []string {
 func (top *Topology) hiddenFailure(h hiddenEntry) error {
 	return failure.WrapFix(vocab.SetupUnreadableConfiguration, fmt.Errorf(
 		"load: %s: %w, so the run hides it from the go command, and the load needs it",
-		top.rel(h.path), scope.ErrIrregular,
+		top.Rel(h.path), scope.ErrIrregular,
 	), scope.IrregularFix)
 }

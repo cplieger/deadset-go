@@ -216,7 +216,7 @@ func assertMissingConsumer(t *testing.T, what string, err error, root, dir strin
 		if one.Class != vocab.SetupMissingConsumer {
 			t.Errorf("Load(%s) failed with the class %q, want %q", what, one.Class, vocab.SetupMissingConsumer)
 		}
-		relative := scope.RelativeSlash(root, dir)
+		relative := scope.RootOf(root).Rel(dir)
 		for _, text := range append(want, "consumer "+relative) {
 			if !strings.Contains(one.Class+": "+one.Detail, text) {
 				t.Errorf("Load(%s) line = %q, want it to name %q", what, one.Class+": "+one.Detail, text)
@@ -239,7 +239,7 @@ func TestLoadRefusesAConsumerThatDoesNotTypeCheck(t *testing.T) {
 	if !errors.As(err, &failure) {
 		t.Fatalf("Load(a scope naming a consumer that does not type-check) = _, %v, want a *Error", err)
 	}
-	if want := scope.RelativeSlash(doc.Target.Path, doc.Consumers[0].Path); failure.Module != want || filepath.Base(want) != "broken" {
+	if want := scope.RootOf(doc.Target.Path).Rel(doc.Consumers[0].Path); failure.Module != want || filepath.Base(want) != "broken" {
 		t.Errorf("(*Error).Module = %q, want the broken consumer relative to the target root, %q", failure.Module, want)
 	}
 	if len(failure.Diagnostics) == 0 {

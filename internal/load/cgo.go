@@ -79,13 +79,13 @@ func excludedByCgoAlone(ctxt *build.Context, path string) (bool, error) {
 
 // relativeSorted renders one set of absolute paths relative to base, with forward
 // slashes, in order, and nothing at all for an empty set.
-func relativeSorted(base string, paths map[string]bool) []string {
+func relativeSorted(base scope.Root, paths map[string]bool) []string {
 	if len(paths) == 0 {
 		return nil
 	}
 	rendered := make([]string, 0, len(paths))
 	for path := range paths {
-		rendered = append(rendered, scope.RelativeSlash(base, path))
+		rendered = append(rendered, base.Rel(path))
 	}
 	slices.Sort(rendered)
 	return slices.Compact(rendered)

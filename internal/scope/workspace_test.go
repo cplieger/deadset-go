@@ -230,7 +230,7 @@ func TestResolveRefusesAnAbsentTarget(t *testing.T) {
 func TestReadWorkspaceKeepsTheOrderTheFileLists(t *testing.T) {
 	dir := workspaceTree(t, "./c", "./a", "./b")
 
-	got, err := ReadWorkspace(dir, filepath.Join(dir, workspaceFileName))
+	got, err := ReadWorkspace(RootOf(dir), filepath.Join(dir, workspaceFileName))
 	if err != nil {
 		t.Fatalf("ReadWorkspace(%s) = _, %v, want no error", dir, err)
 	}
@@ -276,7 +276,7 @@ func TestWorkspaceFileIgnoresADirectoryOfThatName(t *testing.T) {
 
 func TestWorkspaceListsOnlyTheModulesItNames(t *testing.T) {
 	dir := workspaceTree(t, "./library")
-	workspace, err := WorkspaceOf(t.Context(), dir, filepath.Join(dir, "library", "sub"))
+	workspace, err := WorkspaceOf(t.Context(), RootOf(dir), filepath.Join(dir, "library", "sub"))
 	if err != nil {
 		t.Fatalf("WorkspaceOf = %v", err)
 	}
@@ -294,7 +294,7 @@ func TestWorkspaceOfReadsTheFileWithNoToolchain(t *testing.T) {
 	dir := workspaceTree(t, "./library", "./consumer")
 	library := filepath.Join(dir, "library")
 	t.Setenv("PATH", "")
-	got, err := WorkspaceOf(t.Context(), library, library)
+	got, err := WorkspaceOf(t.Context(), RootOf(library), library)
 	if want := []string{library, filepath.Join(dir, "consumer")}; err != nil || !reflect.DeepEqual(got.Modules, want) {
 		t.Errorf("WorkspaceOf(%s) with no toolchain on PATH = %+v, %v, want the modules %v", library, got, err, want)
 	}
@@ -303,7 +303,7 @@ func TestWorkspaceOfReadsTheFileWithNoToolchain(t *testing.T) {
 // An entry naming no path lists no module, as the toolchain reads it.
 func TestReadWorkspaceListsNoModuleForAnEmptyEntry(t *testing.T) {
 	dir := workspaceTree(t, "./library", `""`)
-	got, err := ReadWorkspace(dir, filepath.Join(dir, workspaceFileName))
+	got, err := ReadWorkspace(RootOf(dir), filepath.Join(dir, workspaceFileName))
 	if want := []string{filepath.Join(dir, "library")}; err != nil || !reflect.DeepEqual(got.Modules, want) {
 		t.Errorf("ReadWorkspace(a file listing an empty entry) = %v, %v, want %v", got.Modules, err, want)
 	}
@@ -313,7 +313,7 @@ func TestWorkspaceOfStopsWhenTheRunIsCancelled(t *testing.T) {
 	dir := workspaceTree(t, "./library")
 	cancelled, cancel := context.WithCancel(t.Context())
 	cancel()
-	if _, err := WorkspaceOf(cancelled, dir, filepath.Join(dir, "library")); !errors.Is(err, context.Canceled) {
+	if _, err := WorkspaceOf(cancelled, RootOf(dir), filepath.Join(dir, "library")); !errors.Is(err, context.Canceled) {
 		t.Errorf("WorkspaceOf(a cancelled run) = %v, want an error matching context.Canceled", err)
 	}
 }
