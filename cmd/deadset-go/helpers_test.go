@@ -202,7 +202,9 @@ var packageDir string
 
 // commandBinary builds the command on first use and answers the path of the binary.
 // It stamps no version control state, so the version it states is the development
-// version at every commit.
+// version at every commit, and it checks the names it parses files under, as a test
+// binary does (the deadset_names tag): a file parsed by a name the run did not give
+// it, or under two names, fails the run.
 func commandBinary(t *testing.T) string {
 	t.Helper()
 	if packageDir == "" {
@@ -214,7 +216,7 @@ func commandBinary(t *testing.T) string {
 			name += ".exe"
 		}
 		built.path = filepath.Join(fixtureBase, "bin", name)
-		build := exec.Command("go", "build", "-buildvcs=false", "-trimpath", "-o", built.path, ".")
+		build := exec.Command("go", "build", "-buildvcs=false", "-trimpath", "-tags=deadset_names", "-o", built.path, ".")
 		build.Dir = packageDir
 		build.Env = append(os.Environ(), "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH)
 		built.out, built.err = build.CombinedOutput()

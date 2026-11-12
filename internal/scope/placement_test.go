@@ -32,8 +32,10 @@ var commentMarkers = []string{`"//"`, `"/*"`, `"*/"`}
 // filepath.Separator, os.PathSeparator or a string literal holding a slash or a
 // backslash other than a comment marker. Each such call compares a path by its
 // names alone, which places a path spelled through a link outside the directory it
-// resolves into: [Root.Place] and [UnderName] are the placements. A failure names
-// each site.
+// resolves into: [Root.Place] and [UnderName] are the placements. Nor does one name
+// a file it parses: it calls no go/parser ParseFile or ParseDir and adds no file to
+// a file set itself, as [Root.Parse] parses a file by the one name the run gives it
+// ([Root.Name]) and [ParseText] parses one under no name. A failure names each site.
 func TestNoPackageButScopePlacesAPath(t *testing.T) {
 	fset := token.NewFileSet()
 	var sites []string
@@ -63,7 +65,7 @@ func TestNoPackageButScopePlacesAPath(t *testing.T) {
 		t.Fatalf("read the module's Go files: %v", err)
 	}
 	for _, site := range sites {
-		t.Errorf("%s places a path by its names; place it through scope (Root.Place, Root.PlaceEntry, UnderName)", site)
+		t.Error(site)
 	}
 	if fset.Base() == 1 {
 		t.Fatal("the walk read no Go file, so this test pins nothing")
@@ -71,7 +73,8 @@ func TestNoPackageButScopePlacesAPath(t *testing.T) {
 }
 
 // placementsIn is each call in the Go file at path, named rel, that places a path
-// by its names ([TestNoPackageButScopePlacesAPath]).
+// by its names or names a file it parses ([TestNoPackageButScopePlacesAPath]), with
+// what to call instead.
 func placementsIn(fset *token.FileSet, path, rel string) ([]string, error) {
 	src, err := os.ReadFile(path)
 	if err != nil {
@@ -100,30 +103,43 @@ func placementsIn(fset *token.FileSet, path, rel string) ([]string, error) {
 			return true
 		}
 		pkg, fn := calledFunc(call, imported)
+		var instead string
 		switch {
 		case pkg == "path/filepath" && fn == "Rel", pkg == "os" && fn == "SameFile":
+			instead = placeInstead
 		case pkg == "strings" && (fn == "HasPrefix" || fn == "TrimPrefix" || fn == "CutPrefix") && holdsSeparator(call.Args, imported):
+			instead = placeInstead
+		case pkg == "go/parser" && (fn == "ParseFile" || fn == "ParseDir"):
+			instead = parseInstead
+		case pkg == "" && fn == "AddFile":
+			pkg, instead = "token.FileSet", parseInstead
 		default:
 			return true
 		}
-		sites = append(sites, fmt.Sprintf("%s:%d: %s.%s", rel, fset.Position(call.Pos()).Line, pkg, fn))
+		sites = append(sites, fmt.Sprintf("%s:%d: %s.%s: %s", rel, fset.Position(call.Pos()).Line, pkg, fn, instead))
 		return true
 	})
 	return sites, nil
 }
 
-// calledFunc is the import path and the name of the package-level function call
-// calls through an import, empty where it calls none.
+// What a site [placementsIn] names calls instead.
+const (
+	placeInstead = "it places a path by its names; place it through scope (Root.Place, Root.PlaceEntry, UnderName)"
+	parseInstead = "it names a file it parses; parse it through scope (Root.Parse by its Root.Name, or ParseText)"
+)
+
+// calledFunc is the import path and the name of the function or method call calls
+// through a selector: the import path empty where the selector names no import, a
+// method of a value.
 func calledFunc(call *ast.CallExpr, imported map[string]string) (pkg, fn string) {
 	sel, isSel := call.Fun.(*ast.SelectorExpr)
 	if !isSel {
 		return "", ""
 	}
-	x, isIdent := sel.X.(*ast.Ident)
-	if !isIdent {
-		return "", ""
+	if x, isIdent := sel.X.(*ast.Ident); isIdent {
+		return imported[x.Name], sel.Sel.Name
 	}
-	return imported[x.Name], sel.Sel.Name
+	return "", sel.Sel.Name
 }
 
 // holdsSeparator reports whether any of args mentions a path separator:

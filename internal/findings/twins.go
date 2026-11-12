@@ -3,9 +3,11 @@ package findings
 import (
 	"go/ast"
 	"go/parser"
-	"go/token"
+	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 )
 
 // twins keys every function and method of the target by its package, receiver
@@ -40,12 +42,25 @@ func (t *twins) read(one *Configured, files []typedFile) {
 				continue
 			}
 			t.parsed[path] = true
-			f, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
-			if err == nil && f.Name.Name == p.Name {
+			if f := twinFile(path); f != nil && f.Name.Name == p.Name {
 				holdFuncs(t.keys, p.PkgPath, path, f)
 			}
 		}
 	}
+}
+
+// twinFile is the declarations of the ignored Go file at path, nil where it
+// cannot be read or parsed. No position of it is kept: twins key a file by its path.
+func twinFile(path string) *ast.File {
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	f, err := scope.ParseText(src, parser.SkipObjectResolution)
+	if err != nil {
+		return nil
+	}
+	return f
 }
 
 // holdFuncs adds the file to the entry of every function and method it declares.

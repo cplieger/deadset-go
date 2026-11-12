@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"go/build/constraint"
 	"go/parser"
-	"go/token"
 	"os"
 	"path/filepath"
 	"slices"
@@ -143,7 +142,7 @@ func (c *collector) read(path string) error {
 	if isTestFile(path) || buildconstraint.OnlyUnderIgnore(expression) {
 		return nil
 	}
-	parsed, _ := parser.ParseFile(token.NewFileSet(), path, content, parser.ImportsOnly)
+	parsed, _ := scope.ParseText(content, parser.ImportsOnly)
 	if parsed == nil {
 		return nil
 	}

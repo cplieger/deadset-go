@@ -184,11 +184,17 @@ func TestAnalyzeReportsAroundAHiddenEntryAsWithoutIt(t *testing.T) {
 // packages of its module and of out beside it. The links are a link to an
 // ancestor, two directories linking to each other, a graph of links two wide, and
 // a link out of the module to out, to the file system's root or into /proc, and
-// an import may name a package below a link that is not there.
+// an import may name a package below a link that is not there. The module may
+// also list a workspace member, and name a replace target, through a link inside
+// it, which main calls: plain is then the files of the tree spelling them with no
+// link, and unlinked the links that tree leaves out.
 type linkDraw struct {
-	files   map[string]string
-	links   map[string]string // below the tree, to their targets
-	imports []string          // below example.com/m
+	files    map[string]string
+	links    map[string]string // below the tree, to their targets
+	plain    map[string]string
+	calls    map[string]string // import path to the call main makes through it
+	imports  []string          // below example.com/m
+	unlinked []string
 }
 
 // drawLinks is the tree seed draws.
@@ -204,6 +210,8 @@ func drawLinks(seed uint64) linkDraw {
 			"out/k/k.go":              "package k\n\n// K is what nothing calls.\nfunc K() {}\n",
 		},
 		links: make(map[string]string),
+		plain: make(map[string]string),
+		calls: make(map[string]string),
 	}
 	through := func(path string) {
 		if r.IntN(2) == 0 {
@@ -243,8 +251,71 @@ func drawLinks(seed uint64) linkDraw {
 	if links := slices.Sorted(maps.Keys(d.links)); len(links) > 0 && r.IntN(4) == 0 {
 		d.imports = append(d.imports, strings.TrimPrefix(links[r.IntN(len(links))], "m/")+"/nope")
 	}
-	d.files["m/main.go"] = "package main\n" + blankImports(d.imports) + "\nfunc main() {}\n\nfunc unused() {}\n"
+	if r.IntN(2) == 0 {
+		d.files["m/go.work"] = "go 1.22\n\nuse (\n\t.\n\t./l/u\n)\n"
+		d.plain["m/go.work"] = "go 1.22\n\nuse (\n\t.\n\t./w/u\n)\n"
+		d.files["m/w/u/go.mod"] = "module example.com/u\n\ngo 1.22\n"
+		d.files["m/w/u/u.go"] = runAndAdd
+		d.links["m/l"], d.calls["example.com/u"] = "w", "u.Run()"
+		d.unlinked = append(d.unlinked, "m/l")
+	}
+	if r.IntN(2) == 0 {
+		module := d.files["m/go.mod"] + "\nrequire example.com/v v0.0.0\n\n"
+		d.files["m/go.mod"] = module + "replace example.com/v => ./k/v\n"
+		d.plain["m/go.mod"] = module + "replace example.com/v => ./y/v\n"
+		d.files["m/y/v/go.mod"] = "module example.com/v\n\ngo 1.22\n"
+		d.files["m/y/v/v.go"] = "// Package v is a replace target.\npackage v\n\n// V is what main calls.\nfunc V() { println(half(4, 0)) }\n\nfunc half(n, unused int) int { return n / 2 }\n"
+		d.links["m/k"], d.calls["example.com/v"] = "y", "v.V()"
+		d.unlinked = append(d.unlinked, "m/k")
+	}
+	d.files["m/main.go"] = mainCalling(d.imports, d.calls)
 	return d
+}
+
+// written is the directory of the draw's tree, through every drawn link where
+// linked, and otherwise spelled as plain spells it, with no link plain leaves out.
+func (d linkDraw) written(t *testing.T, linked bool) string {
+	t.Helper()
+	files := maps.Clone(d.files)
+	if !linked {
+		maps.Copy(files, d.plain)
+	}
+	dir := writeModule(t, files)
+	for _, link := range slices.Sorted(maps.Keys(d.links)) {
+		if !linked && slices.Contains(d.unlinked, link) {
+			continue
+		}
+		path := filepath.Join(dir, filepath.FromSlash(link))
+		if err := sandbox.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			t.Fatalf("Setup: %v", err)
+		}
+		symlinkTo(d.links[link])(t, path)
+	}
+	return dir
+}
+
+// mainCalling is the main package of the link property: a blank import of each
+// package of paths below example.com/m, and an import of each package calls names
+// with the call main makes through it.
+func mainCalling(paths []string, calls map[string]string) string {
+	if len(calls) == 0 {
+		return "package main\n" + blankImports(paths) + "\nfunc main() {}\n\nfunc unused() {}\n"
+	}
+	var b strings.Builder
+	b.WriteString("package main\n\nimport (\n")
+	for _, p := range paths {
+		fmt.Fprintf(&b, "\t_ %q\n", "example.com/m/"+p)
+	}
+	called := slices.Sorted(maps.Keys(calls))
+	for _, p := range called {
+		fmt.Fprintf(&b, "\t%q\n", p)
+	}
+	b.WriteString(")\n\nfunc main() {\n")
+	for _, p := range called {
+		b.WriteString("\t" + calls[p] + "\n")
+	}
+	b.WriteString("}\n\nfunc unused() {}\n")
+	return b.String()
 }
 
 // blankImports is a Go import declaration of each package of paths below
@@ -303,10 +374,13 @@ const referenceBinary = "DEADSET_GO_REFERENCE"
 
 // TestAnalyzeReportsATreeOfLinksWithNoSpecialFileAsTheReference draws trees of
 // symbolic links in and out of the module, cycles and graphs of links among them,
-// with no special file, and pins, within two minutes a run, that the scan changes
-// nothing there ([program.6]): no entry is hidden, so no note names one, and where
-// [referenceBinary] names a binary of v2.0.0-dev.50, the run ends with its exit
-// code and writes its standard error and its findings byte for byte.
+// workspace members and replace targets reached through links inside it, with no
+// special file, and pins, within two minutes a run, that the scan changes nothing
+// there ([program.6]): no entry is hidden, so no note names one; a tree listing a
+// member or a replace target through a link reports as the tree spelling it with no
+// link, as one file has one name in every reading; and where [referenceBinary]
+// names a binary of v2.0.0-dev.50, the run ends with its exit code over the tree
+// with no such link and writes its standard error and its findings byte for byte.
 func TestAnalyzeReportsATreeOfLinksWithNoSpecialFileAsTheReference(t *testing.T) {
 	t.Parallel()
 	reference := os.Getenv(referenceBinary)
@@ -314,22 +388,24 @@ func TestAnalyzeReportsATreeOfLinksWithNoSpecialFileAsTheReference(t *testing.T)
 		d := drawLinks(seed)
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
 			t.Parallel()
-			dir := writeModule(t, d.files)
-			for _, link := range slices.Sorted(maps.Keys(d.links)) {
-				path := filepath.Join(dir, filepath.FromSlash(link))
-				if err := sandbox.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-					t.Fatalf("Setup: %v", err)
-				}
-				symlinkTo(d.links[link])(t, path)
-			}
+			dir := d.written(t, true)
 			code, stderr, findings, notes := analyzedBy(t, commandBinary(t), dir)
 			if len(notes) > 0 {
 				t.Errorf("analyze over %v wrote unread-entry notes for %q, want none: the tree holds no special file", d, notes)
 			}
+			plain := dir
+			if len(d.unlinked) > 0 {
+				plain = d.written(t, false)
+				plainCode, plainStderr, plainFindings, _ := analyzedBy(t, commandBinary(t), plain)
+				if code != plainCode || stderr != plainStderr || findings != plainFindings {
+					t.Errorf("analyze over %v = %d writing %q and the findings %s, want what it reports with no link to a member or a replace target, %d writing %q and %s",
+						d, code, stderr, findings, plainCode, plainStderr, plainFindings)
+				}
+			}
 			if reference == "" {
 				return
 			}
-			wantCode, wantStderr, wantFindings, _ := analyzedBy(t, reference, dir)
+			wantCode, wantStderr, wantFindings, _ := analyzedBy(t, reference, plain)
 			if code != wantCode || stderr != wantStderr || findings != wantFindings {
 				t.Errorf("analyze over %v = %d writing %q and the findings %s, want the reference's %d writing %q and %s",
 					d, code, stderr, findings, wantCode, wantStderr, wantFindings)

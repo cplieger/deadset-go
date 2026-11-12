@@ -127,7 +127,7 @@ func (n *nonGoSources) importsC(path string) bool {
 	if err != nil {
 		return true
 	}
-	f, err := parser.ParseFile(token.NewFileSet(), path, src, parser.ImportsOnly|parser.SkipObjectResolution)
+	f, err := scope.ParseText(src, parser.ImportsOnly|parser.SkipObjectResolution)
 	if err != nil {
 		return true
 	}

@@ -313,13 +313,13 @@ func (l *loader) unit(r *Result, unit *discoveredModule) error {
 		}
 		return fmt.Errorf("load %s: %s: %w", l.c.ID, l.top.Rel(unit.Dir), err)
 	}
-	cgo, err := cgoOnly(pkgs, l.c)
+	cgo, err := cgoOnly(l.top.root, pkgs, l.c)
 	if err != nil {
 		return fmt.Errorf("load %s: %w", l.c.ID, err)
 	}
 	from := unitDir{dir: unit.Dir, workspace: unit.Workspace, toolchain: l.toolchain}
 	r.ExcludedByCgo = append(r.ExcludedByCgo, checkOpaqueC(l.ctx, r.Fset, l.top.root, from, pkgs, cgo, l.c)...)
-	r.Programs = append(r.Programs, checkPrograms(l.ctx, r.Fset, from, pkgs, l.c)...)
+	r.Programs = append(r.Programs, checkPrograms(l.ctx, r.Fset, l.top.root, from, pkgs, l.c)...)
 	r.Packages = append(r.Packages, pkgs...)
 	r.Units = append(r.Units, Unit{Dir: unit.Dir, Path: unit.Path, Packages: pkgs})
 	return nil
@@ -478,7 +478,7 @@ func loadPackages(ctx context.Context, trees *syntaxCache, c *Configuration, spe
 		return nil, nil, listFailure(spec, &listError{err: err})
 	}
 	pkgs = listedOf(pkgs, spec, byDir)
-	if err := dropUnbuiltErrors(pkgs, c); err != nil {
+	if err := dropUnbuiltErrors(spec.top.root, pkgs, c); err != nil {
 		return nil, nil, err
 	}
 	pkgs = dropUnreadErrors(pkgs, spec)
@@ -560,7 +560,8 @@ type listing struct {
 // list is the toolchain's listing of patterns under cfg, listed once per matrix: a
 // configuration loaded again reads a copy of its first listing, so it loads the
 // packages and files its first load did whatever changed on disk or in the module
-// cache since, and every answer the run kept from the first load still holds.
+// cache since, and every answer the run kept from the first load still holds. Each
+// file it lists is named as the run names it ([nameFiles]).
 func (t *syntaxCache) list(cfg *packages.Config, patterns []string) ([]*packages.Package, error) {
 	// The overlay file is written again for each load, and what it holds is the
 	// topology's, which every configuration of a matrix shares.
@@ -573,6 +574,7 @@ func (t *syntaxCache) list(cfg *packages.Config, patterns []string) ([]*packages
 		return copyGraph(held.pkgs), held.err
 	}
 	pkgs, err := packages.Load(cfg, patterns...)
+	nameFiles(t.root, pkgs)
 	if cfg.Context.Err() != nil {
 		return pkgs, err
 	}
@@ -799,15 +801,15 @@ func unbuilt(p *packages.Package) bool {
 
 // dropUnbuiltErrors clears the errors of every package reachable from pkgs that
 // [unbuilt] or [unbuiltForCgo] reports, and returns the first error reading a
-// file's imports met.
-func dropUnbuiltErrors(pkgs []*packages.Package, c *Configuration) error {
+// file's imports met, each file read by the name names gave it.
+func dropUnbuiltErrors(names scope.Root, pkgs []*packages.Package, c *Configuration) error {
 	var failed error
 	packages.Visit(pkgs, nil, func(p *packages.Package) {
 		if unbuilt(p) {
 			p.Errors = nil
 			return
 		}
-		cgo, err := unbuiltForCgo(p, c)
+		cgo, err := unbuiltForCgo(names, p, c)
 		if err != nil && failed == nil {
 			failed = err
 		}
@@ -824,7 +826,7 @@ func dropUnbuiltErrors(pkgs []*packages.Package, c *Configuration) error {
 // package, so its positionless error is the analysis's own setting and no error
 // of the program. Its declarations are absent from the load, so a reference to
 // one is a type error [typeCheck] handles as it handles any other.
-func unbuiltForCgo(p *packages.Package, c *Configuration) (bool, error) {
+func unbuiltForCgo(names scope.Root, p *packages.Package, c *Configuration) (bool, error) {
 	if !positionlessOnly(p) {
 		return false, nil
 	}
@@ -834,7 +836,7 @@ func unbuiltForCgo(p *packages.Package, c *Configuration) (bool, error) {
 		if filepath.Ext(file) != goFileExt {
 			continue
 		}
-		alone, err := excludedByCgoAlone(&ctxt, file)
+		alone, err := excludedByCgoAlone(names, &ctxt, file)
 		if err != nil || !alone {
 			return false, err
 		}

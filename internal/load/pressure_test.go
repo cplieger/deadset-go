@@ -11,6 +11,7 @@ import (
 	"testing"
 	"weak"
 
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"golang.org/x/tools/go/packages"
 )
@@ -56,11 +57,13 @@ func TestCheckerRunsOneTaskAtATimeUnderPressure(t *testing.T) {
 // A parse waiting for the process's slot under pressure has not read its file yet,
 // so the bytes of every file on the ready frontier are not live at once.
 func TestParseReadsItsFileOnlyOnceItHoldsTheSlot(t *testing.T) {
-	name := filepath.Join(sandbox.Dir(t), "a.go")
+	dir := sandbox.Dir(t)
+	names := scope.RootOf(dir)
+	name := names.Name(filepath.Join(dir, "a.go"))
 	if err := sandbox.WriteFile(name, []byte("package before\n"), 0o600); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
-	c := &checker{fset: token.NewFileSet(), cpu: make(chan struct{}, 1), pressed: func() bool { return true }}
+	c := &checker{fset: token.NewFileSet(), trees: &syntaxCache{root: names}, cpu: make(chan struct{}, 1), pressed: func() bool { return true }}
 	pressedSlot.Lock()
 	parsed := make(chan *ast.File, 1)
 	go func() {

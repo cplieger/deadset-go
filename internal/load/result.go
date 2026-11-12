@@ -235,11 +235,13 @@ type Source struct {
 // Sources reads the [Source] of packages of one load, each once outside memory
 // pressure. Its reads are the largest allocation of a run, so it lives with its
 // caller, never with the [Result]: dropping it frees every tree and type record it
-// read, and pressure drops the reads it holds ([memory.OnPressureOf]).
+// read, and pressure drops the reads it holds ([memory.OnPressureOf]). names is the
+// root whose names the load gave its files ([scope.Root.Name]).
 type Sources struct {
 	byTypes map[*types.Package]*packages.Package
 	read    map[*types.Package]*sourceRead
 	pressed func() bool
+	names   scope.Root
 	mu      sync.Mutex
 }
 
@@ -254,6 +256,7 @@ type sourceRead struct {
 // dependency's included, by its types.
 func (r *Result) Sources() *Sources {
 	c := &Sources{
+		names:   r.root,
 		byTypes: make(map[*types.Package]*packages.Package),
 		read:    make(map[*types.Package]*sourceRead),
 		pressed: memory.Pressed,
@@ -288,7 +291,7 @@ func (c *Sources) Read(pkg *types.Package) (*Source, bool) {
 	p := c.byTypes[pkg]
 	c.mu.Unlock()
 	if p != nil {
-		held.source = readSource(p)
+		held.source = readSource(c.names, p)
 	}
 	close(held.ready)
 	return held.source, held.source != nil
@@ -301,10 +304,10 @@ func (c *Sources) drop() {
 	clear(c.read)
 }
 
-// readSource parses and type-checks one package's compiled files into a file set of
-// its own, so the line tables go with the Source; its imports resolve to the
-// packages the load holds.
-func readSource(p *packages.Package) *Source {
+// readSource parses and type-checks one package's compiled files, each by the name
+// names gave it, into a file set of its own, so the line tables go with the Source;
+// its imports resolve to the packages the load holds.
+func readSource(names scope.Root, p *packages.Package) *Source {
 	fset := token.NewFileSet()
 	var files []*ast.File
 	for _, name := range p.CompiledGoFiles {
@@ -312,7 +315,7 @@ func readSource(p *packages.Package) *Source {
 		if err != nil {
 			continue
 		}
-		if f, err := parser.ParseFile(fset, name, src, parser.SkipObjectResolution); err == nil && f.Name.Name == p.Name {
+		if f, err := names.Parse(fset, name, src, parser.SkipObjectResolution); err == nil && f.Name.Name == p.Name {
 			files = append(files, f)
 		}
 	}

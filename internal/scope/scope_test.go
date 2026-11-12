@@ -3,6 +3,9 @@ package scope
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"go/parser"
+	"go/token"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -479,19 +482,81 @@ func TestRootRespellNamesADirectoryTheRootHoldsAsTheRootSpellsIt(t *testing.T) {
 			}
 		})
 	}
-	// A file is respelled at its module's directory and keeps the names below it, so
-	// a package reached through a link inside its module keeps its own name.
-	for _, tc := range []struct{ name, module, path, want string }{
-		{"a file of a module spelled through a link", linkedApp, filepath.Join(linkedApp, "sub", "x.go"), filepath.Join(app, "sub", "x.go")},
-		{"a file of a module reached through an in-tree link", filepath.Join(real, "inner"), filepath.Join(real, "inner", "x.go"), filepath.Join(app, "x.go")},
-		{"a file below an in-tree link of its module", real, filepath.Join(real, "inner", "x.go"), filepath.Join(real, "inner", "x.go")},
-		{"a file outside its module's directory", app, filepath.Join(real, "other", "x.go"), filepath.Join(real, "other", "x.go")},
+}
+
+// Every spelling of one file, through a link outside the root or inside it, is one
+// name ([Root.Name]): the root's own spelling where the root holds the file's
+// resolved directory, and the resolved path elsewhere. A name is its own name.
+func TestRootNameGivesEverySpellingOfAFileOneName(t *testing.T) {
+	_, real, alias := linkedTree(t)
+	app, linkedApp := filepath.Join(real, "app"), filepath.Join(alias, "app")
+	// The temporary directory may itself be spelled through a link.
+	resolved, err := filepath.EvalSymlinks(real)
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	for _, tc := range []struct {
+		name       string
+		root       Root
+		path, want string
+	}{
+		{"a file below by its names", RootOf(app), filepath.Join(app, "sub", "x.go"), filepath.Join(app, "sub", "x.go")},
+		{"a file below spelled through a link outside the root", RootOf(app), filepath.Join(linkedApp, "sub", "x.go"), filepath.Join(app, "sub", "x.go")},
+		{"a file below an in-tree link", RootOf(real), filepath.Join(real, "inner", "x.go"), filepath.Join(real, "app", "x.go")},
+		{"a file below an in-tree link, the root spelled through a link", RootOf(alias), filepath.Join(real, "inner", "sub", "x.go"), filepath.Join(alias, "app", "sub", "x.go")},
+		{"a file of a root spelled through a link", RootOf(linkedApp), filepath.Join(app, "x.go"), filepath.Join(linkedApp, "x.go")},
+		{"a file outside the root, spelled through a link", RootOf(app), filepath.Join(alias, "other", "x.go"), filepath.Join(resolved, "other", "x.go")},
+		{"a file of the zero Root", Root{}, filepath.Join(linkedApp, "x.go"), filepath.Join(resolved, "app", "x.go")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := RootOf(real).RespellIn(tc.module, tc.path); got != tc.want {
-				t.Errorf("RespellIn(%s, %s) = %q, want %q", tc.module, tc.path, got, tc.want)
+			got := tc.root.Name(tc.path)
+			if got != tc.want {
+				t.Errorf("Name(%s) = %q, want %q", tc.path, got, tc.want)
+			}
+			if again := tc.root.Name(got); again != got {
+				t.Errorf("Name(%s) = %q, want the name itself", got, again)
 			}
 		})
+	}
+}
+
+// Where names are checked, as in every test binary, a parse by a path that is not
+// the file's name, or of one file under two names, panics naming the file, and a
+// parse by the file's name reads it.
+func TestRootParseRefusesAFileByAnyNameButItsOwn(t *testing.T) {
+	_, real, alias := linkedTree(t)
+	file := filepath.Join(real, "app", "x.go")
+	if err := sandbox.WriteFile(file, []byte("package app\n"), 0o600); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	panics := func(root Root, path string) (message string) {
+		defer func() {
+			if r := recover(); r != nil {
+				message = fmt.Sprint(r)
+			}
+		}()
+		if _, err := root.Parse(token.NewFileSet(), path, nil, parser.PackageClauseOnly); err != nil {
+			t.Fatalf("Parse(%s): %v", path, err)
+		}
+		return ""
+	}
+	root := RootOf(real)
+	if message := panics(root, filepath.Join(real, "app", "x.go")); message != "" {
+		t.Errorf("Parse by the file's name panicked: %s", message)
+	}
+	for _, path := range []string{filepath.Join(real, "inner", "x.go"), filepath.Join(alias, "app", "x.go")} {
+		if message := panics(root, path); !strings.Contains(message, "a name the run did not give it") {
+			t.Errorf("Parse(%s) panicked with %q, want the refusal of a name the run did not give", path, message)
+		}
+	}
+	if message := panics(root, root.Name(file)); message != "" {
+		t.Errorf("a second parse by the file's name panicked: %s", message)
+	}
+	// A name recorded otherwise, as a parse that named the file through the link
+	// would have left, makes the next parse refuse.
+	root.at.names[root.entryPath(file)] = filepath.Join(real, "inner", "x.go")
+	if message := panics(root, file); !strings.Contains(message, "is parsed as") {
+		t.Errorf("Parse(%s) after another name panicked with %q, want the refusal of a second name", file, message)
 	}
 }
 

@@ -77,7 +77,7 @@ func Resolve(ctx context.Context, dir, document string) (Document, error) {
 	doc := Document{Workspace: workspace.File, Target: Module{Path: target}}
 	root := RootOf(target)
 	for _, path := range workspace.Modules {
-		if _, inside := root.PlaceEntry(path); !inside {
+		if _, inside := root.Place(path); !inside {
 			doc.Consumers = append(doc.Consumers, Module{Path: path})
 		}
 	}

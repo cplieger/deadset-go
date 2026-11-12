@@ -46,7 +46,8 @@ func checkOpaqueC(ctx context.Context, fset *token.FileSet, target scope.Root, f
 	}
 	o := &opaqueCheck{
 		fset:     fset,
-		imports:  newCgoImporter(ctx, fset, from, c, pkgs),
+		target:   target,
+		imports:  newCgoImporter(ctx, fset, target, from, c, pkgs),
 		parsed:   make(map[string]*ast.File),
 		excluded: make(map[string]bool, len(cgo)),
 		sizes:    types.SizesFor(buildconstraint.Compiler, c.Arch),
@@ -62,6 +63,7 @@ func checkOpaqueC(ctx context.Context, fset *token.FileSet, target scope.Root, f
 // one position, and the files that stayed excluded.
 type opaqueCheck struct {
 	fset     *token.FileSet
+	target   scope.Root
 	imports  *cgoImporter
 	parsed   map[string]*ast.File
 	excluded map[string]bool
@@ -273,7 +275,7 @@ func (o *opaqueCheck) parse(paths []string) (files []*ast.File, unparsed map[str
 			files = append(files, f)
 			continue
 		}
-		f, err := parser.ParseFile(o.fset, path, nil, parser.AllErrors|parser.ParseComments)
+		f, err := o.target.Parse(o.fset, path, nil, parser.AllErrors|parser.ParseComments)
 		if err != nil {
 			unparsed[path] = true
 			continue
@@ -400,6 +402,7 @@ func goVersionOf(p *packages.Package) string {
 type cgoImporter struct {
 	ctx     context.Context
 	fset    *token.FileSet
+	names   scope.Root
 	known   map[string]*packages.Package
 	refused map[string]bool
 	c       *Configuration
@@ -407,14 +410,16 @@ type cgoImporter struct {
 }
 
 // newCgoImporter indexes every package the load type-checked, by import path, and
-// answers anything else from the unit's own directory.
+// answers anything else from the unit's own directory, naming each file a package
+// it loads holds as names does ([scope.Root.Name]).
 //
 // A package and its test variants share one import path and an import of that path
 // names the package itself, so a variant is never indexed.
-func newCgoImporter(ctx context.Context, fset *token.FileSet, from unitDir, c *Configuration, pkgs []*packages.Package) *cgoImporter {
+func newCgoImporter(ctx context.Context, fset *token.FileSet, names scope.Root, from unitDir, c *Configuration, pkgs []*packages.Package) *cgoImporter {
 	im := &cgoImporter{
 		ctx:     ctx,
 		fset:    fset,
+		names:   names,
 		known:   make(map[string]*packages.Package),
 		refused: make(map[string]bool),
 		from:    from,
@@ -486,8 +491,9 @@ func (im *cgoImporter) resolve(path string) (*packages.Package, error) {
 		im.refused[path] = true
 		return nil, err
 	}
+	nameFiles(im.names, pkgs)
 	if !reportsErrors(pkgs) {
-		if err := typeCheckDeclarations(im.ctx, im.fset, pkgs, im.c.Arch); err != nil {
+		if err := typeCheckDeclarations(im.ctx, im.names, im.fset, pkgs, im.c.Arch); err != nil {
 			im.refused[path] = true
 			return nil, err
 		}

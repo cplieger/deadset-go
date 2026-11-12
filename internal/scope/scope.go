@@ -180,10 +180,13 @@ func resolveModule(w wireModule, base string) (Module, error) {
 // with [RootOf].
 type Root struct{ at *placed }
 
-// placed is one root: its directory as the run spells it and as it resolves, and
-// each path it resolved, as a walk or a file set names one directory many times.
+// placed is one root: its directory as the run spells it and as it resolves, each
+// path it resolved, as a walk or a file set names one directory many times, and,
+// where names are checked, the name each file it parsed was given, by the file's
+// own name in its resolved directory ([Root.Parse]).
 type placed struct {
 	held           map[string]string
+	names          map[string]string
 	path, resolved string
 	mu             sync.Mutex
 }
@@ -194,7 +197,7 @@ func RootOf(dir string) Root {
 	if err != nil {
 		path = filepath.Clean(dir)
 	}
-	return Root{at: &placed{path: path, resolved: resolvePath(path), held: make(map[string]string)}}
+	return Root{at: &placed{path: path, resolved: resolvePath(path), held: make(map[string]string), names: make(map[string]string)}}
 }
 
 // Dir is the root's directory as the run spells it, made absolute, and empty for
@@ -309,20 +312,6 @@ func (r Root) Respell(path string) string {
 	return path
 }
 
-// RespellIn is path, which the toolchain names below the directory dir, with dir
-// respelled ([Root.Respell]) and the names below it kept, and path itself where its
-// names do not place it below dir. The go command names a file of a module by the
-// module's directory and the package's path below it, so two packages that reach
-// one directory through a link below the module keep two names, as they are two
-// packages.
-func (r Root) RespellIn(dir, path string) string {
-	rest, below := lexicallyWithin(dir, path)
-	if !below {
-		return path
-	}
-	return filepath.Join(r.Respell(dir), filepath.FromSlash(rest))
-}
-
 // Is reports whether the directory at path is the root where both resolve
 // ([Root.Place]).
 func (r Root) Is(path string) bool {
@@ -334,8 +323,12 @@ func (r Root) Is(path string) bool {
 // ([Root.Is]).
 func Same(a, b string) bool { return RootOf(b).Is(a) }
 
-// SameEntry reports whether two paths name one entry: one name in one directory
-// where both directories resolve ([Root.PlaceEntry]).
+// SameEntry reports whether a, the toolchain's name of an entry, is the entry b
+// ([Root.PlaceEntry]): where a's directory resolves to b's directory or below it,
+// whether it is b's directory and a's own name is b's base name; where a's
+// directory resolves outside b's, whether a itself resolves to b. The order
+// matters: a link and the file it leads to, under two base names, are one entry
+// only with the link first.
 func SameEntry(a, b string) bool {
 	relative, inside := RootOf(filepath.Dir(b)).PlaceEntry(a)
 	return inside && relative == filepath.Base(b)

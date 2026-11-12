@@ -10,6 +10,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"golang.org/x/tools/go/packages"
 )
@@ -192,7 +193,8 @@ func TestCgoOnlyDecidesWhichIgnoredFilesTheCheckReads(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Setup: absolute path of %s: %v", name, err)
 			}
-			got, err := excludedByCgoAlone(&ctxt, path)
+			names := scope.RootOf("testdata")
+			got, err := excludedByCgoAlone(names, &ctxt, names.Name(path))
 			if err != nil {
 				t.Fatalf("excludedByCgoAlone(%s) = _, %v, want no error", name, err)
 			}
@@ -273,21 +275,22 @@ func TestAtOpaqueImportReadsThePositionAndNotTheText(t *testing.T) {
 
 func TestParseReportsTheFilesThatDoNotParse(t *testing.T) {
 	dir := sandbox.Dir(t)
+	names := scope.RootOf(dir)
 	write := func(name, body string) string {
 		t.Helper()
 		path := filepath.Join(dir, name)
 		if err := sandbox.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatalf("Setup: write %s: %v", path, err)
 		}
-		return path
+		return names.Name(path)
 	}
 	// A file whose imports read and whose body does not is the one the load's own
 	// classification cannot refuse, because that reads the imports alone.
 	good := write("bridge.go", "package app\n\nimport \"C\"\n\nfunc viaC() int { return 1 }\n")
 	bad := write("broken.go", "package app\n\nimport \"C\"\n\nfunc viaC() int { return \n")
-	absent := filepath.Join(dir, "absent.go")
+	absent := names.Name(filepath.Join(dir, "absent.go"))
 
-	o := &opaqueCheck{fset: token.NewFileSet(), parsed: make(map[string]*ast.File)}
+	o := &opaqueCheck{fset: token.NewFileSet(), target: names, parsed: make(map[string]*ast.File)}
 	files, unparsed := o.parse([]string{absent, bad, good})
 
 	if len(files) != 1 || o.fset.Position(files[0].FileStart).Filename != good {

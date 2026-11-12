@@ -18,8 +18,9 @@ import (
 const cgoImportPath = `"C"`
 
 // cgoOnly returns the absolute paths of the Go files the toolchain ignored solely
-// because they import "C", which are the files the opaque-C check reads.
-func cgoOnly(roots []*packages.Package, c *Configuration) (map[string]bool, error) {
+// because they import "C", which are the files the opaque-C check reads, each read
+// by the name names gave it.
+func cgoOnly(names scope.Root, roots []*packages.Package, c *Configuration) (map[string]bool, error) {
 	ctxt := cgoEnabledContext(c)
 	decided := make(map[string]bool)
 	for _, p := range roots {
@@ -27,7 +28,7 @@ func cgoOnly(roots []*packages.Package, c *Configuration) (map[string]bool, erro
 			if _, done := decided[file]; done {
 				continue
 			}
-			alone, err := excludedByCgoAlone(&ctxt, file)
+			alone, err := excludedByCgoAlone(names, &ctxt, file)
 			if err != nil {
 				return nil, err
 			}
@@ -57,13 +58,13 @@ func cgoEnabledContext(c *Configuration) build.Context {
 // file another rule or the cgo tag also excludes stays with the configurations.
 // A Go file whose imports cannot be read is an error, never a file importing
 // nothing.
-func excludedByCgoAlone(ctxt *build.Context, path string) (bool, error) {
+func excludedByCgoAlone(names scope.Root, ctxt *build.Context, path string) (bool, error) {
 	// IgnoredFiles carries every ignored file, assembly and C sources included;
 	// only a Go file can import "C".
 	if filepath.Ext(path) != goFileExt {
 		return false, nil
 	}
-	imports, err := importsCgo(path)
+	imports, err := importsCgo(names, path)
 	if err != nil {
 		return false, err
 	}
@@ -91,9 +92,10 @@ func relativeSorted(base scope.Root, paths map[string]bool) []string {
 	return slices.Compact(rendered)
 }
 
-// importsCgo reports whether the Go file at path imports "C".
-func importsCgo(path string) (bool, error) {
-	f, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly|parser.SkipObjectResolution)
+// importsCgo reports whether the Go file at path, its name ([scope.Root.Name]),
+// imports "C".
+func importsCgo(names scope.Root, path string) (bool, error) {
+	f, err := names.Parse(token.NewFileSet(), path, nil, parser.ImportsOnly|parser.SkipObjectResolution)
 	if err != nil {
 		return false, fmt.Errorf("read imports of %s: %w", path, err)
 	}
