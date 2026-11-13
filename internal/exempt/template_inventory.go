@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strconv"
 	"text/template/parse"
+
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 )
 
 // sealedTemplateMethods are the methods a variable holding a template may be the
@@ -496,9 +498,11 @@ func globWithin(root, pattern string) []string {
 	return held
 }
 
+// within reports whether the entry at path is root or below it, where both resolve
+// ([scope.Root.PlaceEntry]).
 func within(root, path string) bool {
-	rel, err := filepath.Rel(root, path)
-	return err == nil && filepath.IsLocal(rel)
+	_, inside := scope.RootOf(root).PlaceEntry(path)
+	return inside
 }
 
 // isTemplate reports whether t is a template of either engine, or a pointer to one.

@@ -7,6 +7,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/buildconstraint"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 )
 
 // TestAliasAnswersTheNameAnOperatingSystemGrewOutOf pins the alias table both
@@ -37,7 +38,7 @@ func TestAliasAnswersTheNameAnOperatingSystemGrewOutOf(t *testing.T) {
 				t.Errorf("a %s configuration satisfies %q = %t, want %t", tc.system, tc.tag, got, tc.want)
 			}
 
-			dir := t.TempDir()
+			dir := sandbox.Dir(t)
 			write(t, filepath.Join(dir, "probe.go"), []byte("//go:build "+tc.tag+"\n\npackage probe\n"))
 			if got := selectsProbe(t, dir, "probe.go", "os", tc.system); got != tc.want {
 				t.Errorf("the toolchain selects a %q file under %s = %t, want %t", tc.tag, tc.system, got, tc.want)

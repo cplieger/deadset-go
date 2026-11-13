@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 )
 
 // modeAsks are the filesafe calls that restrict a file's readers. Each one returns
@@ -92,7 +94,7 @@ func modeAsksIn(file *ast.File) []*ast.SelectorExpr {
 // written with no mode option carries.
 func createdMode(t *testing.T, dir string) fs.FileMode {
 	t.Helper()
-	probe, err := os.OpenFile(filepath.Join(dir, "mode-probe"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o666)
+	probe, err := sandbox.OpenFile(filepath.Join(dir, "mode-probe"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o666)
 	if err != nil {
 		t.Fatalf("create a probe file in %s: %v", dir, err)
 	}

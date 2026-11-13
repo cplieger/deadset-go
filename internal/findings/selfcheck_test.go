@@ -62,9 +62,9 @@ func suppressed(t *testing.T, archive string, resolved config.Config) *Input {
 const (
 	staleInline          = "inline directive for DS1002 on <symbol> matches no current finding"
 	staleIgnore          = "ignore entry for DS1001 on <symbol> matches no current finding"
-	staleIgnoreReports   = staleIgnore + ", and its declaration reports DS1501"
+	staleIgnoreReports   = staleIgnore + ", and its declaration reports DS1501 at certain"
 	staleBaseline        = "baseline row for DS1001 on <symbol> matches no current finding"
-	staleBaselineReports = staleBaseline + ", and its declaration reports DS1501"
+	staleBaselineReports = staleBaseline + ", and its declaration reports DS1501 at certain"
 )
 
 // staleAt is one stale-suppression finding as a test names it: where it is, which
@@ -807,8 +807,12 @@ func TestUnmatchedRootsIsPositionedInTheDocumentThatDeclaredTheRoot(t *testing.T
 func TestStaleSuppressionsReadsDormancyFromTheFindingsARecordMatches(t *testing.T) {
 	t.Parallel()
 	bothStale := []string{
-		"inline directive for DS1001 on <symbol> matches no current finding, and its declaration reports DS1002",
-		"inline directive for DS1401 on <symbol> matches no current finding, and its declaration reports DS1002",
+		"inline directive for DS1001 on <symbol> matches no current finding, and its declaration reports DS1002 at certain",
+		"inline directive for DS1401 on <symbol> matches no current finding, and its declaration reports DS1002 at certain",
+	}
+	bothAllowed := []string{
+		bothStale[0] + ", withheld by severity allow",
+		bothStale[1] + ", withheld by severity allow",
 	}
 	cases := map[string]struct {
 		severity map[string]vocab.Severity
@@ -816,12 +820,12 @@ func TestStaleSuppressionsReadsDormancyFromTheFindingsARecordMatches(t *testing.
 		inEffect int
 	}{
 		"every code at its default": {
-			stale:    []string{bothStale[0], bothStale[1], bothStale[1]},
+			stale:    []string{bothStale[0], bothStale[1], bothStale[1] + ", withheld by an inline directive"},
 			inEffect: 3,
 		},
 		"the dead caller's code set to allow, which withholds the helper's component": {
 			severity: map[string]vocab.Severity{"DS1002": vocab.Allow},
-			stale:    []string{bothStale[0], bothStale[1], bothStale[1]},
+			stale:    []string{bothAllowed[0], bothAllowed[1], bothAllowed[1]},
 			inEffect: 2,
 		},
 		"the helper record's own code set to allow": {

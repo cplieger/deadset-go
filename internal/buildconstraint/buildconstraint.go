@@ -130,6 +130,25 @@ func IsGoFile(name string) bool {
 	return ok && stem != "" && stem[0] != '_' && stem[0] != '.'
 }
 
+// readSuffixes are the name endings, beside the Go one, of the files go/build opens
+// for their build constraints in a package directory it lists (go/build matchFile;
+// a system object is never opened).
+var readSuffixes = [...]string{
+	".c", ".cc", ".cxx", ".cpp", ".m", ".h", ".hh", ".hpp", ".hxx",
+	".f", ".F", ".for", ".f90", ".s", ".S", ".sx", ".swig", ".swigcxx",
+}
+
+// IsSourceFile reports whether the go command opens a file of that name in a
+// package directory it lists, under some build configuration: a Go file, or a
+// source in another language go/build reads the build constraints of.
+func IsSourceFile(name string) bool {
+	if IsGoFile(name) {
+		return true
+	}
+	i := strings.LastIndex(name, ".")
+	return i > 0 && name[0] != '_' && name[0] != '.' && slices.Contains(readSuffixes[:], name[i:])
+}
+
 // nameConstraint is the constraint a file's name implies, and nil for a name that
 // implies none.
 //

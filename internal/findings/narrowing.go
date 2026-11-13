@@ -9,6 +9,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -148,7 +149,7 @@ func (n *narrowing) scopeOf(to *inventory.Symbol, r *facts.Reference) narrowScop
 		return scopeOutside
 	case from.PkgPath != to.PkgPath:
 		return scopeModule
-	case from.File != to.File:
+	case !scope.SameName(from.File, to.File):
 		return scopePackage
 	default:
 		return scopeFile
@@ -286,9 +287,9 @@ func readCarriers(one *Configured, held map[inventory.SymbolID][]carrier) {
 	}
 	for p := range one.Facts.Typed() {
 		k := carrierKeys{held: held, one: one, path: p.Types.Path()}
-		scope := p.Types.Scope()
-		for _, name := range scope.Names() {
-			switch object := scope.Lookup(name).(type) {
+		declared := p.Types.Scope()
+		for _, name := range declared.Names() {
+			switch object := declared.Lookup(name).(type) {
 			case *types.TypeName:
 				k.typeName(object)
 			case *types.Func, *types.Var, *types.Const:

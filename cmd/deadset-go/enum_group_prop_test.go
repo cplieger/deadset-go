@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
 )
@@ -585,7 +586,7 @@ func TestEnumGroupReportsOnlyAMemberWhoseDeletionNoProgramObserves(t *testing.T)
 	if raised, err := strconv.Atoi(os.Getenv("DEADSET_ENUM_PROPERTY_ROUNDS")); err == nil && raised > 0 {
 		rounds = raised
 	}
-	scratch := t.TempDir()
+	scratch := sandbox.Dir(t)
 	ctx := t.Context()
 	draw := 0
 	for range rounds {
@@ -696,18 +697,18 @@ func checkDifferential(ctx context.Context, t *rapid.T, p *enumProgram, variants
 				continue
 			}
 			path := filepath.Join(dir, sub, name)
-			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			if err := sandbox.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 				t.Fatalf("Setup: %v", err)
 			}
-			if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+			if err := sandbox.WriteFile(path, []byte(src), 0o644); err != nil {
 				t.Fatalf("Setup: %v", err)
 			}
 		}
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := sandbox.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/variants\n\ngo 1.27.0\n"), 0o644); err != nil {
+	if err := sandbox.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/variants\n\ngo 1.27.0\n"), 0o644); err != nil {
 		t.Fatalf("Setup: %v", err)
 	}
 	write("original", p.source(nil))

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 )
 
 // unlimitedV1 is the smallest value cgroup v1 reports for a memory limit nobody
@@ -84,12 +86,9 @@ func cgroupPaths(document []byte) (v2, v1 string) {
 // cgroup sees.
 func directoryOf(at *mount, cgroup string) string {
 	root, group := path.Clean(at.root), path.Clean(cgroup)
-	below := ""
-	switch {
-	case root == "/":
-		below = group
-	case group == root || strings.HasPrefix(group, root+"/"):
-		below = strings.TrimPrefix(group, root)
+	below := group
+	if root != "/" {
+		below, _ = scope.UnderName(root, group)
 	}
 	return filepath.Join(at.point, filepath.FromSlash(below))
 }
@@ -124,12 +123,14 @@ func limitV2(point, leaf string) (uint64, bool) {
 	return least, found
 }
 
-// ancestry is leaf and each directory above it up to the mount point.
+// ancestry is leaf and each directory above it up to the mount point, where both
+// resolve.
 func ancestry(point, leaf string) []string {
+	mount := scope.RootOf(point)
 	var dirs []string
 	for dir := leaf; ; dir = filepath.Dir(dir) {
 		dirs = append(dirs, dir)
-		if dir == point || !strings.HasPrefix(dir, point) || dir == filepath.Dir(dir) {
+		if rel, inside := mount.Place(dir); !inside || rel == "." || scope.SameName(dir, filepath.Dir(dir)) {
 			return dirs
 		}
 	}

@@ -1,11 +1,12 @@
 package findings
 
 import (
+	"path"
 	"slices"
-	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -39,19 +40,21 @@ func lower(c, other vocab.Class) vocab.Class {
 	return other
 }
 
-// classOf is the reachability class of one declaration under this run: possible for
-// a declaration of an importable package of an application that no build links, in a
-// run that declares no consumer, and for an importable export of a module a dropped
-// module requires. Otherwise it is certain for every application subject, an
-// unexported, test-file or non-importable declaration, a function's type parameter
-// and a member [pass.hiddenMember] reports; a library's other export is certain where
-// every declared consumer loaded, probable where some did not, and possible with no
-// consumer information.
+// classOf is the reachability class of one declaration under this run: possible in
+// a package beside code the analysis does not see, in an importable package of an
+// application no build links in a run declaring no consumer, and for an importable
+// export of a module a dropped module requires. Otherwise it is certain for every
+// application subject, an unexported, test-file or non-importable declaration, a
+// type parameter and a member [pass.hiddenMember] reports; a library's other export
+// is certain where every declared consumer loaded, probable where some did not, and
+// possible with no consumer information.
 func (in *pass) classOf(id inventory.SymbolID) vocab.Class {
 	symbol := in.symbol(id)
 	switch {
 	case symbol == nil:
 		return vocab.Certain
+	case in.obscured[path.Dir(symbol.File)]:
+		return vocab.Possible
 	case in.unlinkedApplicationPackage(symbol):
 		return vocab.Possible
 	case !symbol.Exported:
@@ -114,7 +117,7 @@ func (in *pass) unanalysedConsumer(symbol *inventory.Symbol) bool {
 		length := len(unit)
 		if unit == "." {
 			length = 0
-		} else if !strings.HasPrefix(symbol.File, unit+"/") {
+		} else if _, below := scope.UnderName(unit, symbol.File); !below || symbol.File == unit {
 			continue
 		}
 		if length > depth {

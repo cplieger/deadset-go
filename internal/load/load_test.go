@@ -14,14 +14,16 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/scope"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"golang.org/x/tools/go/packages"
 )
 
 // stableToolchain removes the ambient toolchain settings that would otherwise
-// decide what the load sees, so a fixture stages the same packages on every host.
+// decide what the load sees, so a fixture stages the same packages on every host,
+// and keeps the module cache read-only to every go command a test runs.
 func stableToolchain(t *testing.T) {
 	t.Helper()
-	t.Setenv("GOFLAGS", "")
+	t.Setenv("GOFLAGS", "-modcacherw=false")
 	t.Setenv("GOWORK", "off")
 }
 
@@ -309,7 +311,7 @@ const unparsedSuffix = ".unparsed"
 // scope of the copy.
 func unparsedScope(t *testing.T, dir string) scope.Document {
 	t.Helper()
-	dst := t.TempDir()
+	dst := sandbox.Dir(t)
 	copyFixture(t, dir, dst)
 	entries, err := os.ReadDir(dst)
 	if err != nil {
@@ -317,7 +319,7 @@ func unparsedScope(t *testing.T, dir string) scope.Document {
 	}
 	for _, e := range entries {
 		if named, ok := strings.CutSuffix(e.Name(), unparsedSuffix); ok {
-			if err := os.Rename(filepath.Join(dst, e.Name()), filepath.Join(dst, named)); err != nil {
+			if err := sandbox.Rename(filepath.Join(dst, e.Name()), filepath.Join(dst, named)); err != nil {
 				t.Fatalf("Setup: rename %s: %v", e.Name(), err)
 			}
 		}
@@ -332,7 +334,7 @@ func unparsedScope(t *testing.T, dir string) scope.Document {
 // copyFixture copies the testdata module named by dir into dst.
 func copyFixture(t *testing.T, dir, dst string) {
 	t.Helper()
-	if err := os.MkdirAll(dst, 0o750); err != nil {
+	if err := sandbox.MkdirAll(dst, 0o750); err != nil {
 		t.Fatalf("Setup: create %s: %v", dst, err)
 	}
 	entries, err := os.ReadDir(filepath.Join("testdata", dir))
@@ -344,7 +346,7 @@ func copyFixture(t *testing.T, dir, dst string) {
 		if err != nil {
 			t.Fatalf("Setup: read testdata/%s/%s: %v", dir, e.Name(), err)
 		}
-		if err := os.WriteFile(filepath.Join(dst, e.Name()), body, 0o600); err != nil {
+		if err := sandbox.WriteFile(filepath.Join(dst, e.Name()), body, 0o600); err != nil {
 			t.Fatalf("Setup: write %s: %v", filepath.Join(dst, e.Name()), err)
 		}
 	}
@@ -355,11 +357,11 @@ func TestLoadPinsGoworkOffAgainstAnAmbientWorkspace(t *testing.T) {
 	// tests in the package that do not neutralise them first.
 	t.Setenv("GOWORK", "")
 
-	root := t.TempDir()
+	root := sandbox.Dir(t)
 	module := filepath.Join(root, "module")
 	copyFixture(t, "constraint", module)
 	workspace := filepath.Join(root, "go.work")
-	if err := os.WriteFile(workspace, []byte("go 1.27.1\n\nuse ./absent\n"), 0o600); err != nil {
+	if err := sandbox.WriteFile(workspace, []byte("go 1.27.1\n\nuse ./absent\n"), 0o600); err != nil {
 		t.Fatalf("Setup: write %s: %v", workspace, err)
 	}
 	doc, err := scope.ForDir(module)
@@ -444,7 +446,7 @@ func TestLoadIsRepeatable(t *testing.T) {
 
 func TestLoadRefusals(t *testing.T) {
 	stableToolchain(t)
-	absent := filepath.Join(t.TempDir(), "no-such-target")
+	absent := filepath.Join(sandbox.Dir(t), "no-such-target")
 
 	cases := map[string]struct {
 		doc     func(t *testing.T) scope.Document
@@ -572,7 +574,7 @@ func TestSameDiagnosticKeysAPositionedProblemOnItsSourceSite(t *testing.T) {
 // the load answers the same on a cold cache as on a warm one.
 func TestLoadReadsAPackageTheConfigurationBuildsNoFileOfTheSameOnAColdBuildCache(t *testing.T) {
 	stableToolchain(t)
-	t.Setenv("GOCACHE", t.TempDir())
+	t.Setenv("GOCACHE", sandbox.Dir(t))
 
 	got, err := loadScope(t.Context(), fixtureScope(t, "unbuilt"), Configuration{ID: "linux-amd64", OS: "linux", Arch: "amd64"})
 	if err != nil {
@@ -588,7 +590,7 @@ func TestLoadReadsAPackageTheConfigurationBuildsNoFileOfTheSameOnAColdBuildCache
 // heads, and returns the target's scope.
 func cgoDependencyScope(t *testing.T, header string) scope.Document {
 	t.Helper()
-	root := t.TempDir()
+	root := sandbox.Dir(t)
 	files := map[string]string{
 		"app/go.mod": "module example.com/app\n\ngo 1.27.1\n\n" +
 			"require example.com/dep v0.0.0\n\nreplace example.com/dep => ../dep\n",
@@ -600,10 +602,10 @@ func cgoDependencyScope(t *testing.T, header string) scope.Document {
 	}
 	for name, body := range files {
 		path := filepath.Join(root, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		if err := sandbox.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			t.Fatalf("Setup: create %s: %v", filepath.Dir(path), err)
 		}
-		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		if err := sandbox.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatalf("Setup: write %s: %v", path, err)
 		}
 	}
@@ -619,7 +621,7 @@ func cgoDependencyScope(t *testing.T, header string) scope.Document {
 // to a declaration it lost is a type error of the target.
 func TestLoadReadsADependencyCgoAloneExcludes(t *testing.T) {
 	stableToolchain(t)
-	t.Setenv("GOCACHE", t.TempDir())
+	t.Setenv("GOCACHE", sandbox.Dir(t))
 
 	got, err := loadScope(t.Context(), cgoDependencyScope(t, ""), HostConfiguration())
 	if err != nil {
@@ -638,7 +640,7 @@ func TestLoadReadsADependencyCgoAloneExcludes(t *testing.T) {
 // builds, so the load still fails on it.
 func TestLoadFailsOnADependencyAnotherConstraintExcludes(t *testing.T) {
 	stableToolchain(t)
-	t.Setenv("GOCACHE", t.TempDir())
+	t.Setenv("GOCACHE", sandbox.Dir(t))
 
 	_, err := loadScope(t.Context(), cgoDependencyScope(t, "//go:build never\n\n"), HostConfiguration())
 	if failure, ok := errors.AsType[*Error](err); !ok || len(failure.Diagnostics) == 0 {
@@ -649,13 +651,13 @@ func TestLoadFailsOnADependencyAnotherConstraintExcludes(t *testing.T) {
 // writeTree writes files under a fresh temporary directory and returns it.
 func writeTree(t *testing.T, files map[string]string) string {
 	t.Helper()
-	root := t.TempDir()
+	root := sandbox.Dir(t)
 	for name, body := range files {
 		path := filepath.Join(root, name)
-		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		if err := sandbox.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			t.Fatalf("Setup: create %s: %v", filepath.Dir(path), err)
 		}
-		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		if err := sandbox.WriteFile(path, []byte(body), 0o600); err != nil {
 			t.Fatalf("Setup: write %s: %v", path, err)
 		}
 	}
@@ -837,7 +839,7 @@ func TestUnitsOfADirectoryAModuleAboveGovernsIsTheDirectory(t *testing.T) {
 	})
 	target := filepath.Join(root, "sub")
 
-	got, err := (&Topology{Root: target}).unitDirs(t.Context())
+	got, err := (&Topology{Root: target, root: scope.RootOf(target)}).unitDirs(t.Context())
 	if err != nil {
 		t.Fatalf("unitDirs(a directory of an enclosing module) = _, %v, want no error", err)
 	}

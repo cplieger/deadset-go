@@ -14,6 +14,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -27,7 +28,7 @@ var nonGoExtensions = [...]string{
 }
 
 // The directories the tree search of non-Go sources does not enter.
-var nonGoSkippedDirs = [...]string{".git", "node_modules", "vendor"}
+var nonGoSkippedNames = [...]string{".git", "node_modules", "vendor"}
 
 // nonGoSources is the linkname-cgo-asm-plugin class's rule N over one
 // configuration: which package directories of the target hold a source in another
@@ -126,7 +127,7 @@ func (n *nonGoSources) importsC(path string) bool {
 	if err != nil {
 		return true
 	}
-	f, err := parser.ParseFile(token.NewFileSet(), path, src, parser.ImportsOnly|parser.SkipObjectResolution)
+	f, err := scope.ParseText(src, parser.ImportsOnly|parser.SkipObjectResolution)
 	if err != nil {
 		return true
 	}
@@ -220,7 +221,7 @@ func (n *nonGoSources) scan() {
 	for len(queue) > 0 {
 		dir := queue[0]
 		queue = queue[1:]
-		queue = append(queue, n.scanDir(dir, dir == root, dirs)...)
+		queue = append(queue, n.scanDir(dir, scope.SameName(dir, root), dirs)...)
 	}
 }
 
@@ -242,7 +243,7 @@ func (n *nonGoSources) scanDir(dir string, root bool, packageDirs []string) []st
 		path := filepath.Join(dir, entry.Name())
 		switch {
 		case entry.IsDir():
-			if !slices.Contains(nonGoSkippedDirs[:], entry.Name()) {
+			if !slices.Contains(nonGoSkippedNames[:], entry.Name()) {
 				below = append(below, path)
 			}
 		case nonGoName(entry.Name()):
@@ -274,7 +275,7 @@ func (n *nonGoSources) scanFile(path string, kind load.Kind) {
 func (n *nonGoSources) packageDirs() []string {
 	var dirs []string
 	for _, p := range n.in.Facts.Packages() {
-		if dir := packageDir(p); dir != "" && !slices.Contains(dirs, dir) {
+		if dir := packageDir(p); dir != "" && !scope.Listed(dirs, dir) {
 			dirs = append(dirs, dir)
 		}
 	}
@@ -286,10 +287,11 @@ func holdsModule(entries []fs.DirEntry) bool {
 	return slices.ContainsFunc(entries, func(e fs.DirEntry) bool { return e.Name() == "go.mod" && !e.IsDir() })
 }
 
-// underDir reports whether path is dir or lies under it.
+// underDir reports whether the directory at path is dir or lies under it, where
+// both resolve ([scope.Root.Place]).
 func underDir(path, dir string) bool {
-	rel, err := filepath.Rel(dir, path)
-	return err == nil && filepath.IsLocal(rel) || path == dir
+	_, inside := scope.RootOf(dir).Place(path)
+	return inside
 }
 
 // identifierRuns adds every maximal run of letters, digits and underscores src

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -60,7 +61,7 @@ func Groups(pkgs []*packages.Package, fset *token.FileSet) []Variants {
 		groups = append(groups, *g)
 	}
 	slices.SortFunc(groups, func(a, b Variants) int {
-		return cmp.Or(strings.Compare(a.PkgPath, b.PkgPath), strings.Compare(a.Dir, b.Dir))
+		return cmp.Or(strings.Compare(a.PkgPath, b.PkgPath), scope.Order(a.Dir, b.Dir))
 	})
 	return groups
 }

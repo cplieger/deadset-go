@@ -42,7 +42,8 @@ type extent struct {
 }
 
 // consumerPositions renders the files of one loaded consumer against its own root,
-// the directory of its module, or against no root where its packages name none. A
+// the directory of its module as the load names its files ([load.Result.Respell]),
+// or against no root where its packages name none. A
 // consumer reading a unit's own module holds no file a site falls in, since its
 // root holds the unit's files too.
 type consumerPositions struct {
@@ -72,9 +73,9 @@ func New(r *load.Result, inv *inventory.Inventory) (*Resolver, error) {
 		held := consumerPositions{id: consumer.ID, pos: rs.pos.Under("")}
 		switch module := consumerModule(&consumer); {
 		case module != nil && units[module.Path]:
-			held.pos = rs.pos.Under(module.Dir)
+			held.pos = rs.pos.Under(r.Respell(module.Dir))
 		case module != nil:
-			held = consumerPositions{id: consumer.ID, pos: rs.pos.Under(module.Dir), rooted: true}
+			held = consumerPositions{id: consumer.ID, pos: rs.pos.Under(r.Respell(module.Dir)), rooted: true}
 		}
 		rs.consumers = append(rs.consumers, held)
 		rs.holdBuild(r.Fset, &consumer)
@@ -442,7 +443,10 @@ func (rs *Resolver) File(pos token.Pos) string {
 }
 
 // owner is the loaded consumer whose file writes pos, empty for the target's, and
-// the renderer of that file.
+// the renderer of that file: of the target and the rooted consumers whose roots
+// hold the file, the one whose root is below every other's where they resolve, so
+// a consumer at a directory above the target never holds a target file however
+// either is spelled.
 func (rs *Resolver) owner(pos token.Pos) (string, *inventory.Positions) {
 	name := rs.pos.Offset(pos).File
 	held, owner := rs.pos, ""
@@ -450,7 +454,7 @@ func (rs *Resolver) owner(pos token.Pos) (string, *inventory.Positions) {
 		held = nil
 	}
 	for _, c := range rs.consumers {
-		if c.rooted && c.pos.Relative(name) != "" && (held == nil || len(c.pos.Root) > len(held.Root)) {
+		if c.rooted && c.pos.Relative(name) != "" && (held == nil || held.Holds(c.pos.Root)) {
 			held, owner = c.pos, c.id
 		}
 	}

@@ -15,6 +15,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -45,7 +46,7 @@ var ErrTemplateDir = errors.New("exempt: template directory")
 // a template the project renders, and a run that refused it would fail on a
 // fixture or a partial that is not the analyzer's business.
 func TemplateFieldDetector(in *Program) ([]Exemption, error) {
-	dirs := templateDirs(in.Options.TemplateDirs)
+	dirs := templateDirs(in.Root, in.Options.TemplateDirs)
 	if len(dirs) == 0 {
 		return nil, nil
 	}
@@ -91,14 +92,22 @@ func templateReaches(k inventory.SymbolKind) bool {
 }
 
 // templateDirs cleans the configured directories into target-relative paths with
-// forward slashes, dropping repetitions so one directory is scanned once.
-func templateDirs(configured []string) []string {
+// forward slashes, dropping one that names the directory an earlier one names where
+// both resolve below root, so one directory is scanned once.
+func templateDirs(root string, configured []string) []string {
+	at := scope.RootOf(root)
 	dirs := make([]string, 0, len(configured))
+	seen := make(map[string]bool, len(configured))
 	for _, dir := range configured {
 		clean := filepath.ToSlash(filepath.Clean(dir))
-		if clean == "" || slices.Contains(dirs, clean) {
+		key := clean
+		if placed, inside := at.Place(filepath.Join(root, filepath.FromSlash(clean))); inside && filepath.IsLocal(filepath.FromSlash(clean)) {
+			key = placed
+		}
+		if clean == "" || seen[key] {
 			continue
 		}
+		seen[key] = true
 		dirs = append(dirs, clean)
 	}
 	return dirs

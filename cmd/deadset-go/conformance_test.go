@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/corpus"
 	"github.com/cplieger/deadset-spec/v8/report"
@@ -119,9 +120,9 @@ func TestTheBinaryReportsTheConformanceRecordItCommitted(t *testing.T) {
 		t.Fatalf("Setup: decode %s: %v", conformanceResultsFile, err)
 	}
 
-	base := t.TempDir()
+	base := sandbox.Dir(t)
 	dir := filepath.Join(base, "app")
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	if err := sandbox.MkdirAll(dir, 0o750); err != nil {
 		t.Fatalf("Setup: create %s: %v", dir, err)
 	}
 	if err := writeFiles(dir, map[string]string{

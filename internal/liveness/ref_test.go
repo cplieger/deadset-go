@@ -12,6 +12,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	spec "github.com/cplieger/deadset-spec/v8"
 )
 
@@ -330,7 +331,7 @@ func TestRefSurvivesAnEditAboveTheDeclarationAndAFileRename(t *testing.T) {
 	if edited == string(body) {
 		t.Fatal("Setup: the fixture no longer starts with its package clause, so no edit above the declarations was made")
 	}
-	if err := os.WriteFile(filepath.Join(dir, "renamed.go"), []byte(edited), 0o600); err != nil {
+	if err := sandbox.WriteFile(filepath.Join(dir, "renamed.go"), []byte(edited), 0o600); err != nil {
 		t.Fatalf("Setup: write renamed.go: %v", err)
 	}
 	if err := os.Remove(catalog); err != nil {

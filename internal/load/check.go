@@ -20,6 +20,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/buildconstraint"
 	"github.com/cplieger/deadset-go/v2/internal/memory"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -37,12 +38,14 @@ const (
 // configurations check it (each records its own type information over it), and
 // lists, each module listing the matrix ran ([syntaxCache.list]). decls is the store
 // of the packages checked for their declarations alone, nil where each is checked
-// afresh, and fset its file set.
+// afresh, and fset its file set. root names every file a listing holds
+// ([nameFiles]), and every parse reads a file by that name.
 type syntaxCache struct {
 	fset  *token.FileSet
 	decls *declarationStore
 	files map[syntaxKey]*parsedFile
 	lists map[string]*listing
+	root  scope.Root
 	mu    sync.Mutex
 }
 
@@ -84,13 +87,29 @@ type syntaxKey struct {
 	name    string
 }
 
-func newSyntaxCache() *syntaxCache {
+// newSyntaxCache is the cache of one matrix over the target at root.
+func newSyntaxCache(root scope.Root) *syntaxCache {
 	return &syntaxCache{
 		fset:  processDeclarations.fset,
 		decls: processDeclarations,
 		files: make(map[syntaxKey]*parsedFile),
 		lists: make(map[string]*listing),
+		root:  root,
 	}
+}
+
+// nameFiles renames every file each package reachable from pkgs holds by the one
+// name the run gives it ([scope.Root.Name]), as the listing that discovered it is
+// read: every parse, position and file list of the run names one file one way,
+// however the toolchain reached it.
+func nameFiles(root scope.Root, pkgs []*packages.Package) {
+	packages.Visit(pkgs, nil, func(p *packages.Package) {
+		for _, files := range [][]string{p.GoFiles, p.CompiledGoFiles, p.OtherFiles, p.EmbedFiles, p.IgnoredFiles} {
+			for i, file := range files {
+				files[i] = root.Name(file)
+			}
+		}
+	})
 }
 
 // typeCheck type-checks every package reachable from roots, each after its imports,
@@ -107,9 +126,10 @@ func typeCheck(ctx context.Context, trees *syntaxCache, reading string, roots []
 }
 
 // typeCheckDeclarations type-checks every package reachable from roots for its
-// declarations alone, none of them whole, as typeCheck checks a dependency.
-func typeCheckDeclarations(ctx context.Context, fset *token.FileSet, roots []*packages.Package, arch string) error {
-	trees := &syntaxCache{fset: fset}
+// declarations alone, none of them whole, as typeCheck checks a dependency, each
+// file parsed by the name root gave it.
+func typeCheckDeclarations(ctx context.Context, root scope.Root, fset *token.FileSet, roots []*packages.Package, arch string) error {
+	trees := &syntaxCache{fset: fset, root: root}
 	return check(ctx, trees, "", roots, arch, func(*packages.Package) bool { return false }, false)
 }
 
@@ -376,7 +396,7 @@ func typeErrorSink(p *packages.Package, whole, program bool) func(error) {
 	}
 }
 
-// parseFiles parses one package's files, and returns the trees of the files that
+// parseFiles parses one package's files and returns the trees of the files that
 // parsed at least in part together with every error.
 func (c *checker) parseFiles(names []string, whole bool) ([]*ast.File, []error) {
 	files := make([]*ast.File, len(names))
@@ -406,7 +426,8 @@ func (c *checker) parseFiles(names []string, whole bool) ([]*ast.File, []error) 
 // ([syntaxCache]) and shared by every variant and every configuration that compiles
 // it, so one source site is one position. A file of a package checked for its
 // declarations is parsed afresh and its tree dropped with the check: only such a
-// package compiles it.
+// package compiles it. Either is parsed under the name its listing gave it
+// ([nameFiles]), so a declaration both parses read is at one position.
 func (c *checker) parse(name string, whole bool) (*ast.File, error) {
 	if !whole {
 		return c.parseOnce(name, signatureParse)
@@ -428,8 +449,8 @@ func (c *checker) parse(name string, whole bool) (*ast.File, error) {
 	return v.file, v.err
 }
 
-// parseOnce reads and parses one file under mode. The read is inside the slot, so a
-// file waiting for one holds none of its bytes.
+// parseOnce reads and parses one file under mode, by its name ([scope.Root.Parse]).
+// The read is inside the slot, so a file waiting for one holds none of its bytes.
 func (c *checker) parseOnce(name string, mode parser.Mode) (*ast.File, error) {
 	defer c.acquire()()
 	src, err := os.ReadFile(name)
@@ -439,7 +460,7 @@ func (c *checker) parseOnce(name string, mode parser.Mode) (*ast.File, error) {
 	if mode == signatureParse {
 		src = withoutBodies(src)
 	}
-	return parser.ParseFile(c.fset, name, src, mode)
+	return c.trees.root.Parse(c.fset, name, src, mode)
 }
 
 // withoutBodies is src with the inside of each body blanked whose declaration's func

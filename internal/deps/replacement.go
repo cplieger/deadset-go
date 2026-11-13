@@ -1,9 +1,8 @@
 package deps
 
 import (
-	"strings"
-
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -85,5 +84,6 @@ func toolModules(f File) map[string]bool {
 
 // within reports whether the package path pkg lies inside the module at path.
 func within(pkg, path string) bool {
-	return pkg == path || strings.HasPrefix(pkg, path+"/")
+	_, below := scope.UnderName(path, pkg)
+	return below
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -324,7 +325,7 @@ func TestIgnoreFileNamesThePositionOfTheBraceThatOpensEachEntry(t *testing.T) {
 }
 
 func TestIgnoreFileAbsentIsAnEmptyOne(t *testing.T) {
-	records, refusals, err := IgnoreFile(filepath.Join(t.TempDir(), core.IgnoreFileName), nil)
+	records, refusals, err := IgnoreFile(filepath.Join(sandbox.Dir(t), core.IgnoreFileName), nil)
 	if err != nil {
 		t.Fatalf("IgnoreFile over an absent document error = %v, want none", err)
 	}
@@ -371,7 +372,7 @@ func TestIgnoreFileRefusesTheDocumentsTheGrammarRefuses(t *testing.T) {
 }
 
 func TestIgnoreFileReportsADocumentItCannotRead(t *testing.T) {
-	_, _, err := IgnoreFile(t.TempDir(), nil)
+	_, _, err := IgnoreFile(sandbox.Dir(t), nil)
 	if err == nil {
 		t.Fatal("IgnoreFile over a directory error = nil, want one naming the path")
 	}

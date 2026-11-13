@@ -18,6 +18,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
@@ -276,7 +277,7 @@ func (d *rootDetection) classOf(s *inventory.Symbol) packageClass {
 		return classes[0]
 	}
 	for _, class := range classes {
-		if class.dir == path.Dir(s.File) {
+		if scope.SameName(class.dir, path.Dir(s.File)) {
 			return class
 		}
 	}
@@ -412,9 +413,9 @@ func (d *rootDetection) promoted() {
 }
 
 // promotedIn is [rootDetection.promoted] over one package's scope.
-func (d *rootDetection) promotedIn(scope *types.Scope) {
-	for _, name := range scope.Names() {
-		typeName, isType := scope.Lookup(name).(*types.TypeName)
+func (d *rootDetection) promotedIn(declared *types.Scope) {
+	for _, name := range declared.Names() {
+		typeName, isType := declared.Lookup(name).(*types.TypeName)
 		if isType && typeName.Exported() && !types.IsInterface(typeName.Type()) {
 			d.promotedBy(typeName.Type())
 		}

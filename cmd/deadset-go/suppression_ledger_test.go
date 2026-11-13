@@ -59,17 +59,43 @@ func TestARecordNamingACodeAboutNoDeclarationMarksNothing(t *testing.T) {
 		t.Errorf("stale suppressions = %q, want %q: no finding about a function carries a record, file or import code", got.stale, want)
 	}
 	want = []string{
-		"inline directive for DS9003 on go://example.com/app#record matches no current finding, and its declaration reports DS1002",
-		"inline directive for DS9004 on go://example.com/app#root matches no current finding, and its declaration reports DS1002",
-		"inline directive for DS1601 on go://example.com/app#built matches no current finding, and its declaration reports DS1002",
-		"inline directive for DS1602 on go://example.com/app#imported matches no current finding, and its declaration reports DS1002",
-		"inline directive for DS1004 on go://example.com/app#binding matches no current finding, and its declaration reports DS1002",
+		"inline directive for DS9003 on go://example.com/app#record matches no current finding, and its declaration reports DS1002 at certain",
+		"inline directive for DS9004 on go://example.com/app#root matches no current finding, and its declaration reports DS1002 at certain",
+		"inline directive for DS1601 on go://example.com/app#built matches no current finding, and its declaration reports DS1002 at certain",
+		"inline directive for DS1602 on go://example.com/app#imported matches no current finding, and its declaration reports DS1002 at certain",
+		"inline directive for DS1004 on go://example.com/app#binding matches no current finding, and its declaration reports DS1002 at certain",
 	}
 	if !slices.Equal(got.messages, want) {
 		t.Errorf("stale messages = %q, want %q: each names the code its function reports", got.messages, want)
 	}
 	if got.totals.SuppressionsInEffect != 0 {
 		t.Errorf("suppressions in effect = %d, want 0", got.totals.SuppressionsInEffect)
+	}
+}
+
+// A stale message names each code beside its own with that finding's confidence
+// and what withholds it, so the record's own certain is never read as theirs.
+func TestAStaleMessageNamesEachCodeBesideWithItsConfidenceAndWhatWithholdsIt(t *testing.T) {
+	t.Parallel()
+	got := ruledOf(t, "stale-message-confidences.txtar")
+
+	if want := []string{"DS1002 app.go:7"}; !slices.Equal(got.findings, want) {
+		t.Errorf("findings = %q, want %q: only the finding nothing withholds is reported", got.findings, want)
+	}
+	want := []string{
+		"inline directive for DS1002 on go://example.com/app#TestOnly matches no current finding, and its declaration reports DS1102 at possible, withheld by analysis.min_confidence",
+		"inline directive for DS1401 on go://example.com/app#unreached matches no current finding, and its declaration reports DS1002 at certain",
+		"inline directive for DS1401 on go://example.com/app#retired matches no current finding, and its declaration reports DS1104 at certain, withheld by severity allow",
+		"inline directive for DS1002 on go://example.com/app#broken.y matches no current finding, and its declaration reports DS1003 at certain, withheld by a type error",
+		"inline directive for DS1401 on go://example.com/app#claimed matches no current finding, and its declaration reports DS1002 at certain, withheld by an inline directive",
+		"inline directive for DS1401 on go://example.com/app#entered matches no current finding, and its declaration reports DS1002 at certain, withheld by an ignore entry",
+		"inline directive for DS1401 on go://example.com/app#recorded matches no current finding, and its declaration reports DS1002 at certain, withheld by a baseline row",
+	}
+	if !slices.Equal(got.messages, want) {
+		t.Errorf("stale messages = %q, want %q", got.messages, want)
+	}
+	if got.totals.SuppressionsInEffect != 3 {
+		t.Errorf("suppressions in effect = %d, want 3: the other code of claimed's directive, entered's entry and recorded's row", got.totals.SuppressionsInEffect)
 	}
 }
 
@@ -89,7 +115,7 @@ func TestALivenessRecordIsInEffectOnlyUnderTheCodeItsDeclarationWouldCarry(t *te
 	}
 	reports := []string{"DS1001", "DS1002", "DS1104", "DS1002", "DS1002", "DS1002", "DS1101", "DS1002", "DS1002", "DS1002"}
 	for i, message := range got.messages {
-		if i < len(reports) && !strings.HasSuffix(message, " matches no current finding, and its declaration reports "+reports[i]) {
+		if i < len(reports) && !strings.Contains(message, " matches no current finding, and its declaration reports "+reports[i]+" at ") {
 			t.Errorf("stale message at %s = %q, want it to name %s, the code its declaration reports", got.stale[i], message, reports[i])
 		}
 	}

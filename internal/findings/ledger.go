@@ -2,7 +2,6 @@ package findings
 
 import (
 	"cmp"
-	"slices"
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/liveness"
@@ -34,15 +33,20 @@ func (in *pass) decide(found, skipped []Finding, emitters map[vocab.Code]Emitter
 	}
 
 	var findings []core.Finding
-	withheld := make(map[string]bool)
 	add := func(p *pass, all []Finding, liveness, skip bool) {
 		least := p.Config.Analysis.MinConfidence
 		for i := range all {
-			if one := &all[i]; carriesLiveness(one) == liveness {
-				read := p.ledgerFinding(one)
-				withheld[string(read.Code)+"\x00"+read.ID] = skip || p.dialed.withholds(one, least)
-				findings = append(findings, *read)
+			one := &all[i]
+			if carriesLiveness(one) != liveness {
+				continue
 			}
+			read := p.ledgerFinding(one)
+			read.Confidence = one.Confidence
+			read.Withheld = core.WithheldByTypeError
+			if !skip {
+				read.Withheld = p.dialed.withholding(one, least)
+			}
+			findings = append(findings, *read)
 		}
 	}
 	add(in, found, false, false)
@@ -54,7 +58,6 @@ func (in *pass) decide(found, skipped []Finding, emitters map[vocab.Code]Emitter
 		Allows: func(code vocab.Code) bool {
 			return code.Live() && in.Config.EffectiveSeverity(code) == vocab.Allow
 		},
-		Withholds: func(one *core.Finding) bool { return withheld[string(one.Code)+"\x00"+one.ID] },
 	}), findings, nil
 }
 
@@ -125,32 +128,28 @@ func (in *pass) ledgerFinding(found *Finding) *core.Finding {
 
 // stale is one record per site whose every record the ledger found stale, in
 // reading order, naming every stale code of the site, because a maintainer edits
-// one line, and every other code would reports about a declaration the site bound
-// (suppression.md "Staleness").
+// one line, then [core.Beside] over would as the ledger decided it.
 func (in *pass) stale(ledger *core.Ledger, would []core.Finding) []report.StaleSuppression {
 	type site struct {
 		mechanism core.Mechanism
 		at        core.Site
 	}
 	records := core.StaleRecords(in.Marks, ledger)
-	by := make(map[site][]*core.Record, len(records))
+	by := make(map[site][]core.Record, len(records))
 	var order []site
 	for i := range records {
 		at := site{records[i].Mechanism, records[i].Site}
 		if _, held := by[at]; !held {
 			order = append(order, at)
 		}
-		by[at] = append(by[at], &records[i])
+		by[at] = append(by[at], records[i])
 	}
 	stale := make([]report.StaleSuppression, 0, len(order))
 	for _, at := range order {
-		first := by[at][0]
-		named := codesAt(by[at])
+		first := &by[at][0]
 		ref := in.suppressionRef(first.Symbol, first.Path)
-		message := written(first.Mechanism) + " for " + spellCodes(named) + " on " + ref + " matches no current finding"
-		if reports := reportedBeside(by[at], named, would); len(reports) > 0 {
-			message += ", and its declaration reports " + spellCodes(reports)
-		}
+		message := written(first.Mechanism) + " for " + spellCodes(codesAt(by[at])) + " on " + ref + " matches no current finding" +
+			core.Beside(by[at], would, ledger)
 		stale = append(stale, report.StaleSuppression{
 			Code:      vocab.StaleSuppression,
 			Mechanism: string(first.Mechanism),
@@ -161,21 +160,4 @@ func (in *pass) stale(ledger *core.Ledger, would []core.Finding) []report.StaleS
 		})
 	}
 	return stale
-}
-
-// reportedBeside is every code, in ascending order and each once, of a finding
-// in would about a declaration one of the records bound, named excepted.
-func reportedBeside(records []*core.Record, named []vocab.Code, would []core.Finding) []vocab.Code {
-	var codes []vocab.Code
-	for i := range would {
-		found := &would[i]
-		if found.Decl == "" || slices.Contains(named, found.Code) {
-			continue
-		}
-		if slices.ContainsFunc(records, func(record *core.Record) bool { return record.Bound == found.Decl }) {
-			codes = append(codes, found.Code)
-		}
-	}
-	slices.Sort(codes)
-	return slices.Compact(codes)
 }

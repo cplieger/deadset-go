@@ -9,24 +9,64 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/failure"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/vocab"
+	"golang.org/x/tools/go/packages"
 )
 
 // Diagnostic is one error a load reported, at the position the toolchain named.
 type Diagnostic struct {
 	Package  string // the package the error was reported against, empty when none
-	Position string // file:line:col, relative to the target root where the toolchain wrote a relative one, empty when none
+	Position string // file:line:col as [rebased] renders it, empty when none
 	Message  string
 }
 
-// rebased is one position the toolchain rendered, below prefix where the toolchain
-// wrote it relative to the directory it ran in, which for a module below the target
-// root is not the root every position of a run is relative to.
-func rebased(position, prefix string) string {
-	if position == "" || prefix == "" || filepath.IsAbs(position) {
+// rebased is one position the toolchain rendered, relative to root as every
+// position of a run is ([program.10]): one it wrote relative to dir, the directory it
+// ran in, is joined to dir, and a file outside root, where both resolve, is named
+// with `..` segments, but one of a module the build reads from the module cache,
+// which is named by that module's path and the file's path inside it.
+func rebased(position string, root scope.Root, dir string, module *packages.Module) string {
+	file, at := splitPosition(position)
+	if file == "" || file == "-" {
 		return position
 	}
-	return path.Join(prefix, filepath.ToSlash(position))
+	if !filepath.IsAbs(file) {
+		file = filepath.Join(dir, file)
+	}
+	if cached := cachedModule(module); cached != nil {
+		if _, held := root.PlaceEntry(file); !held {
+			if rel, inside := scope.RootOf(cached.Dir).PlaceEntry(file); inside {
+				return path.Join(cached.Path, rel) + at
+			}
+		}
+	}
+	return root.Rel(file) + at
+}
+
+// splitPosition is position's file and the ":line" or ":line:col" that follows it.
+func splitPosition(position string) (file, at string) {
+	file = position
+	for range 2 {
+		i := strings.LastIndexByte(file, ':')
+		if i < 0 || i == len(file)-1 || strings.Trim(file[i+1:], "0123456789") != "" {
+			break
+		}
+		file = file[:i]
+	}
+	return file, position[len(file):]
+}
+
+// cachedModule is the module m reads from the module cache, nil where its files are
+// a local directory: a main module, a workspace member or a local replace.
+func cachedModule(m *packages.Module) *packages.Module {
+	if m != nil && m.Replace != nil {
+		m = m.Replace
+	}
+	if m == nil || m.Main || m.Version == "" || m.Dir == "" {
+		return nil
+	}
+	return m
 }
 
 // Error reports every diagnostic one configuration's load produced. A load that
@@ -121,14 +161,15 @@ func (e *listError) Unwrap() error { return e.err }
 const parseRefusal = "errors parsing "
 
 // unreadableConfiguration is the setup failure of a listing the toolchain refused
-// because a module or workspace file does not parse, named from the directory the
-// listing ran in, rebased below prefix; it is nil for any other refusal.
-func unreadableConfiguration(listed *listError, prefix string) *failure.Error {
+// because a module or workspace file does not parse: the toolchain's message after
+// dir, the directory the listing ran in relative to the root, which the paths of
+// that message are relative to. It is nil for any other refusal.
+func unreadableConfiguration(listed *listError, dir string) *failure.Error {
 	_, stderr, found := strings.Cut(listed.Error(), "stderr: ")
 	if !found || !strings.Contains(stderr, parseRefusal) {
 		return nil
 	}
-	return failure.Wrap(vocab.SetupUnreadableConfiguration, fmt.Errorf("%s: %s", rebased(".", prefix), strings.TrimSpace(stderr)))
+	return failure.Wrap(vocab.SetupUnreadableConfiguration, fmt.Errorf("%s: %s", dir, strings.TrimSpace(stderr)))
 }
 
 // The toolchain's messages that name a package nothing provides and a module sum
@@ -187,6 +228,7 @@ func packageNamed(message string) string {
 // within reports whether pkg is one of modules or a package below one.
 func within(pkg string, modules []string) bool {
 	return slices.ContainsFunc(modules, func(module string) bool {
-		return pkg == module || strings.HasPrefix(pkg, module+"/")
+		_, below := scope.UnderName(module, pkg)
+		return below
 	})
 }

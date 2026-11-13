@@ -3,7 +3,6 @@ package matrix
 import (
 	"go/build"
 	"go/build/constraint"
-	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"golang.org/x/tools/txtar"
 )
 
@@ -36,7 +36,7 @@ func extract(t *testing.T, archive string) string {
 	if err != nil {
 		t.Fatalf("Setup: parse testdata/%s: %v", archive, err)
 	}
-	dir := t.TempDir()
+	dir := sandbox.Dir(t)
 	for _, f := range parsed.Files {
 		write(t, filepath.Join(dir, filepath.FromSlash(f.Name)), f.Data)
 	}
@@ -47,10 +47,10 @@ func extract(t *testing.T, archive string) string {
 func write(t *testing.T, path string, data []byte) {
 	t.Helper()
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+	if err := sandbox.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		t.Fatalf("Setup: create %s: %v", filepath.Dir(path), err)
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	if err := sandbox.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("Setup: write %s: %v", path, err)
 	}
 }
@@ -153,7 +153,7 @@ func pathedFiles(t *testing.T, root string) []pathed {
 	unit := top.Units[0]
 	var found []pathed
 	err := collect(top, unit.Dir, unit.Path, unit.File, func(path string, expression constraint.Expr) {
-		found = append(found, pathed{path: load.RelativeSlash(root, path), file: expression})
+		found = append(found, pathed{path: scope.RootOf(root).Rel(path), file: expression})
 	})
 	if err != nil {
 		t.Fatalf("Setup: read the constraints under %s: %v", root, err)

@@ -3,12 +3,13 @@ package scope
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 )
 
 // workspaceTree writes a workspace file listing the named module directories,
@@ -17,7 +18,7 @@ import (
 // relative one, or one the workspace does not hold.
 func workspaceTree(t *testing.T, entries ...string) string {
 	t.Helper()
-	return writeWorkspace(t, t.TempDir(), entries...)
+	return writeWorkspace(t, sandbox.Dir(t), entries...)
 }
 
 // writeWorkspace writes a workspace file in dir listing the named module
@@ -33,12 +34,12 @@ func writeWorkspace(t *testing.T, dir string, entries ...string) string {
 		if entry == "" || filepath.IsAbs(entry) {
 			continue
 		}
-		if err := os.MkdirAll(filepath.Join(dir, entry), 0o750); err != nil {
+		if err := sandbox.MkdirAll(filepath.Join(dir, entry), 0o750); err != nil {
 			t.Fatalf("Setup: create %s: %v", entry, err)
 		}
 	}
 	body += ")\n"
-	if err := os.WriteFile(filepath.Join(dir, workspaceFileName), []byte(body), 0o600); err != nil {
+	if err := sandbox.WriteFile(filepath.Join(dir, workspaceFileName), []byte(body), 0o600); err != nil {
 		t.Fatalf("Setup: write the workspace file: %v", err)
 	}
 	return dir
@@ -68,7 +69,7 @@ func TestResolveReadsTheWorkspaceTheTargetIsAMemberOf(t *testing.T) {
 func TestResolveReadsTheWorkspaceOfAnAncestorDirectory(t *testing.T) {
 	dir := workspaceTree(t, "./library", "./consumer")
 	nested := filepath.Join(dir, "nest")
-	if err := os.MkdirAll(filepath.Join(nested, "library"), 0o750); err != nil {
+	if err := sandbox.MkdirAll(filepath.Join(nested, "library"), 0o750); err != nil {
 		t.Fatalf("Setup: create the nested tree: %v", err)
 	}
 	// The workspace one directory up lists ./library relative to itself, so the
@@ -91,7 +92,7 @@ func TestResolvePrecedence(t *testing.T) {
 	target := filepath.Join(dir, "library")
 	document := filepath.Join(dir, "scope.json")
 	body := `{"target": {"path": "library"}, "consumers": [{"path": "other"}]}`
-	if err := os.WriteFile(document, []byte(body), 0o600); err != nil {
+	if err := sandbox.WriteFile(document, []byte(body), 0o600); err != nil {
 		t.Fatalf("Setup: write %s: %v", document, err)
 	}
 
@@ -137,7 +138,7 @@ func TestResolvePrecedence(t *testing.T) {
 func TestResolveFallsBackToTheTargetAlone(t *testing.T) {
 	// A directory with no workspace file at or above it: a temporary directory
 	// under the system's own, which holds none.
-	target := t.TempDir()
+	target := sandbox.Dir(t)
 
 	got, err := Resolve(t.Context(), target, "")
 	if err != nil {
@@ -153,7 +154,7 @@ func TestResolveFallsBackToTheTargetAlone(t *testing.T) {
 func TestResolveFallsBackWhenTheWorkspaceDoesNotListTheTarget(t *testing.T) {
 	dir := workspaceTree(t, "./consumer")
 	target := filepath.Join(dir, "elsewhere")
-	if err := os.MkdirAll(target, 0o750); err != nil {
+	if err := sandbox.MkdirAll(target, 0o750); err != nil {
 		t.Fatalf("Setup: create %s: %v", target, err)
 	}
 
@@ -169,9 +170,9 @@ func TestResolveFallsBackWhenTheWorkspaceDoesNotListTheTarget(t *testing.T) {
 }
 
 func TestResolveResolvesAnAbsoluteWorkspaceEntry(t *testing.T) {
-	dir := t.TempDir()
+	dir := sandbox.Dir(t)
 	target := filepath.Join(dir, "library")
-	if err := os.MkdirAll(target, 0o750); err != nil {
+	if err := sandbox.MkdirAll(target, 0o750); err != nil {
 		t.Fatalf("Setup: create %s: %v", target, err)
 	}
 	writeWorkspace(t, dir, target, "./consumer")
@@ -189,16 +190,16 @@ func TestResolveResolvesAnAbsoluteWorkspaceEntry(t *testing.T) {
 }
 
 func TestResolveRefusesAMalformedWorkspace(t *testing.T) {
-	dir := t.TempDir()
+	dir := sandbox.Dir(t)
 	target := filepath.Join(dir, "library")
-	if err := os.MkdirAll(target, 0o750); err != nil {
+	if err := sandbox.MkdirAll(target, 0o750); err != nil {
 		t.Fatalf("Setup: create %s: %v", target, err)
 	}
 	file := filepath.Join(dir, workspaceFileName)
 	// A use block the file never closes: the toolchain refuses to read it, and
 	// the refusal is what a run has to end on, because a workspace it cannot read
 	// is a consumer set it cannot know.
-	if err := os.WriteFile(file, []byte("go 1.27.1\n\nuse (\n\t./library\n"), 0o600); err != nil {
+	if err := sandbox.WriteFile(file, []byte("go 1.27.1\n\nuse (\n\t./library\n"), 0o600); err != nil {
 		t.Fatalf("Setup: write %s: %v", file, err)
 	}
 
@@ -207,8 +208,9 @@ func TestResolveRefusesAMalformedWorkspace(t *testing.T) {
 	if !errors.Is(err, errWorkspace) {
 		t.Fatalf("Resolve(%s, no document) = _, %v, want an error matching errWorkspace", target, err)
 	}
-	if !strings.Contains(err.Error(), file) {
-		t.Errorf("Resolve(%s, no document) error = %q, want it to name %s", target, err, file)
+	// The file is above the target root, so it is named from the root with a ".." segment.
+	if !strings.Contains(err.Error(), "../go.work:") || strings.Contains(err.Error(), dir) {
+		t.Errorf("Resolve(%s, no document) error = %q, want it to name ../go.work from the target root, and no absolute path", target, err)
 	}
 	if !reflect.DeepEqual(got, Document{}) {
 		t.Errorf("Resolve(%s, no document) = %+v, want the zero Document", target, got)
@@ -216,7 +218,7 @@ func TestResolveRefusesAMalformedWorkspace(t *testing.T) {
 }
 
 func TestResolveRefusesAnAbsentTarget(t *testing.T) {
-	target := filepath.Join(t.TempDir(), "missing")
+	target := filepath.Join(sandbox.Dir(t), "missing")
 
 	_, err := Resolve(t.Context(), target, "")
 
@@ -228,26 +230,26 @@ func TestResolveRefusesAnAbsentTarget(t *testing.T) {
 func TestReadWorkspaceKeepsTheOrderTheFileLists(t *testing.T) {
 	dir := workspaceTree(t, "./c", "./a", "./b")
 
-	got, err := readWorkspace(filepath.Join(dir, workspaceFileName))
+	got, err := ReadWorkspace(RootOf(dir), filepath.Join(dir, workspaceFileName))
 	if err != nil {
-		t.Fatalf("readWorkspace(%s) = _, %v, want no error", dir, err)
+		t.Fatalf("ReadWorkspace(%s) = _, %v, want no error", dir, err)
 	}
 
 	want := []string{filepath.Join(dir, "c"), filepath.Join(dir, "a"), filepath.Join(dir, "b")}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("readWorkspace(%s) = %v, want %v", dir, got, want)
+	if !reflect.DeepEqual(got.Modules, want) {
+		t.Errorf("ReadWorkspace(%s) = %v, want %v", dir, got.Modules, want)
 	}
 }
 
 func TestWorkspaceFileFindsTheNearestFile(t *testing.T) {
-	outer := t.TempDir()
+	outer := sandbox.Dir(t)
 	inner := filepath.Join(outer, "inner")
 	deeper := filepath.Join(inner, "deeper")
-	if err := os.MkdirAll(deeper, 0o750); err != nil {
+	if err := sandbox.MkdirAll(deeper, 0o750); err != nil {
 		t.Fatalf("Setup: create %s: %v", deeper, err)
 	}
 	for _, dir := range []string{outer, inner} {
-		if err := os.WriteFile(filepath.Join(dir, workspaceFileName), []byte("go 1.27.1\n"), 0o600); err != nil {
+		if err := sandbox.WriteFile(filepath.Join(dir, workspaceFileName), []byte("go 1.27.1\n"), 0o600); err != nil {
 			t.Fatalf("Setup: write the workspace file in %s: %v", dir, err)
 		}
 	}
@@ -260,8 +262,8 @@ func TestWorkspaceFileFindsTheNearestFile(t *testing.T) {
 }
 
 func TestWorkspaceFileIgnoresADirectoryOfThatName(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, workspaceFileName), 0o750); err != nil {
+	dir := sandbox.Dir(t)
+	if err := sandbox.MkdirAll(filepath.Join(dir, workspaceFileName), 0o750); err != nil {
 		t.Fatalf("Setup: create the directory: %v", err)
 	}
 
@@ -274,7 +276,7 @@ func TestWorkspaceFileIgnoresADirectoryOfThatName(t *testing.T) {
 
 func TestWorkspaceListsOnlyTheModulesItNames(t *testing.T) {
 	dir := workspaceTree(t, "./library")
-	workspace, err := WorkspaceOf(t.Context(), filepath.Join(dir, "library", "sub"))
+	workspace, err := WorkspaceOf(t.Context(), RootOf(dir), filepath.Join(dir, "library", "sub"))
 	if err != nil {
 		t.Fatalf("WorkspaceOf = %v", err)
 	}
@@ -292,7 +294,7 @@ func TestWorkspaceOfReadsTheFileWithNoToolchain(t *testing.T) {
 	dir := workspaceTree(t, "./library", "./consumer")
 	library := filepath.Join(dir, "library")
 	t.Setenv("PATH", "")
-	got, err := WorkspaceOf(t.Context(), library)
+	got, err := WorkspaceOf(t.Context(), RootOf(library), library)
 	if want := []string{library, filepath.Join(dir, "consumer")}; err != nil || !reflect.DeepEqual(got.Modules, want) {
 		t.Errorf("WorkspaceOf(%s) with no toolchain on PATH = %+v, %v, want the modules %v", library, got, err, want)
 	}
@@ -301,9 +303,9 @@ func TestWorkspaceOfReadsTheFileWithNoToolchain(t *testing.T) {
 // An entry naming no path lists no module, as the toolchain reads it.
 func TestReadWorkspaceListsNoModuleForAnEmptyEntry(t *testing.T) {
 	dir := workspaceTree(t, "./library", `""`)
-	got, err := readWorkspace(filepath.Join(dir, workspaceFileName))
-	if want := []string{filepath.Join(dir, "library")}; err != nil || !reflect.DeepEqual(got, want) {
-		t.Errorf("readWorkspace(a file listing an empty entry) = %v, %v, want %v", got, err, want)
+	got, err := ReadWorkspace(RootOf(dir), filepath.Join(dir, workspaceFileName))
+	if want := []string{filepath.Join(dir, "library")}; err != nil || !reflect.DeepEqual(got.Modules, want) {
+		t.Errorf("ReadWorkspace(a file listing an empty entry) = %v, %v, want %v", got.Modules, err, want)
 	}
 }
 
@@ -311,7 +313,7 @@ func TestWorkspaceOfStopsWhenTheRunIsCancelled(t *testing.T) {
 	dir := workspaceTree(t, "./library")
 	cancelled, cancel := context.WithCancel(t.Context())
 	cancel()
-	if _, err := WorkspaceOf(cancelled, filepath.Join(dir, "library")); !errors.Is(err, context.Canceled) {
+	if _, err := WorkspaceOf(cancelled, RootOf(dir), filepath.Join(dir, "library")); !errors.Is(err, context.Canceled) {
 		t.Errorf("WorkspaceOf(a cancelled run) = %v, want an error matching context.Canceled", err)
 	}
 }

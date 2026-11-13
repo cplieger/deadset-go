@@ -13,6 +13,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"golang.org/x/tools/txtar"
 )
 
@@ -63,7 +64,7 @@ func compareGolden(t *testing.T, name, subject, got string) {
 	regenerate := "UPDATE_GOLDEN=1 go test ./internal/exempt/"
 
 	if os.Getenv("UPDATE_GOLDEN") == "1" {
-		if err := os.WriteFile(golden, []byte(got), 0o600); err != nil {
+		if err := sandbox.WriteGolden(golden, []byte(got), 0o600); err != nil {
 			t.Fatalf("Setup: write %s: %v", golden, err)
 		}
 	}
@@ -176,17 +177,17 @@ func lineNumberOf(t *testing.T, rendered string) int {
 // module of a multi-module rendering is loaded on its own.
 func writeUnder(t *testing.T, files []txtar.File, prefix string) string {
 	t.Helper()
-	dir := t.TempDir()
+	dir := sandbox.Dir(t)
 	for _, f := range files {
 		name, inside := relativeTo(f.Name, prefix)
 		if !inside {
 			continue
 		}
 		path := filepath.Join(dir, filepath.FromSlash(name))
-		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		if err := sandbox.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			t.Fatalf("Setup: create %s: %v", filepath.Dir(path), err)
 		}
-		if err := os.WriteFile(path, f.Data, 0o600); err != nil {
+		if err := sandbox.WriteFile(path, f.Data, 0o600); err != nil {
 			t.Fatalf("Setup: write %s: %v", path, err)
 		}
 	}

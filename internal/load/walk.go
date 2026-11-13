@@ -7,8 +7,6 @@ import (
 	"path/filepath"
 	"slices"
 	"syscall"
-
-	"github.com/cplieger/deadset-go/v2/internal/scope"
 )
 
 // Kind is what one entry of a tree is to every walk of it, decided before anything
@@ -25,7 +23,7 @@ const (
 	// pattern.
 	directory
 
-	// leftOut is an entry no build reads: a pipe, a device, a socket, a symbolic
+	// leftOut is an entry no walk opens: a pipe, a device, a socket, a symbolic
 	// link to a directory, or one to nothing, through a file or that loops.
 	leftOut
 
@@ -73,14 +71,12 @@ func kindOfType(mode fs.FileMode) Kind {
 }
 
 // Walk walks the tree at root as the go command walks a module's tree, handing
-// visit each entry once with its [Kind], a directory before what it holds. A
-// directory below root that enters rejects is neither visited nor entered. It
-// follows root where root is a symbolic link to a directory (go.dev/issue/50807);
-// visit sees root as written and every path below joined onto it, the spelling the
-// toolchain reports.
-// An Unread or leftOut entry at or below top's root is recorded in
-// [Topology.Unread] or [Topology.LeftOut]. visit's fs.SkipAll ends the walk, and
-// any other error ends it with that error.
+// visit each entry once with its [Kind], a directory before what it holds, and
+// entering no directory below root that enters rejects. It follows root where it
+// is a link to a directory (go.dev/issue/50807), joining every path onto root as
+// written, the spelling the toolchain reports. An Unread or leftOut entry at or
+// below top's root is recorded in [Topology.Unread] or [Topology.LeftOut].
+// visit's fs.SkipAll ends the walk, and any other error ends it with that error.
 func (top *Topology) Walk(root string, enters func(dir string) bool, visit func(path string, kind Kind) error) error {
 	err := top.walk(root, statKind(os.Stat(root)), enters, visit)
 	if errors.Is(err, fs.SkipAll) {
@@ -121,7 +117,7 @@ func (top *Topology) record(path string, kind Kind) {
 	case Unread:
 		top.AddUnread(path)
 	case leftOut:
-		if top.holds(path) && !slices.Contains(top.LeftOut, path) {
+		if top.Holds(path) && !top.recorded(top.LeftOut, path) {
 			top.LeftOut = append(top.LeftOut, path)
 		}
 	}
@@ -130,12 +126,22 @@ func (top *Topology) record(path string, kind Kind) {
 // AddUnread records one more path at or below the target root the analysis cannot
 // read.
 func (top *Topology) AddUnread(path string) {
-	if top.holds(path) && !slices.Contains(top.Unread, path) {
+	if top.Holds(path) && !top.recorded(top.Unread, path) {
 		top.Unread = append(top.Unread, path)
 	}
 }
 
-// holds reports whether path is the target root or lies below it.
-func (top *Topology) holds(path string) bool {
-	return sameDir(top.Root, path) || scope.Below(top.Root, path)
+// recorded reports whether held names the entry at path where both resolve
+// ([Topology.Rel]): the matrix's walk of a directory the toolchain names reaches an
+// entry the target's walk recorded, under the toolchain's spelling.
+func (top *Topology) recorded(held []string, path string) bool {
+	entry := top.Rel(path)
+	return slices.ContainsFunc(held, func(recorded string) bool { return top.Rel(recorded) == entry })
+}
+
+// Holds reports whether the entry at path is the target root or lies below it,
+// where both directories resolve ([scope.Root.PlaceEntry]).
+func (top *Topology) Holds(path string) bool {
+	_, inside := top.root.PlaceEntry(path)
+	return inside
 }

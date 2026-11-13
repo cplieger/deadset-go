@@ -24,18 +24,30 @@ var errWorkspace = errors.New("scope: unreadable workspace")
 // ErrIrregular reports a module or workspace file that is no regular file.
 var ErrIrregular = errors.New("no regular file")
 
+// IrregularFix is the fix of a file the toolchain reads that is a pipe or a
+// device, which it may block on or read without end.
+const IrregularFix = "replace it with a regular file"
+
 // ReadRegularFile reads the file at path where Stat, following links, says it is
 // a regular file, opening nothing else: a pipe would block the read, and a device
-// never end it.
-func ReadRegularFile(path string) ([]byte, error) {
+// never end it. Its error names path relative to root, as every path a setup
+// failure names is ([program.10]).
+func ReadRegularFile(root Root, path string) ([]byte, error) {
 	info, err := os.Stat(path)
+	if err == nil && !info.Mode().IsRegular() {
+		err = ErrIrregular
+	}
+	var text []byte
+	if err == nil {
+		text, err = os.ReadFile(path)
+	}
 	if err != nil {
-		return nil, err
+		if pathErr, ok := errors.AsType[*fs.PathError](err); ok {
+			err = pathErr.Err
+		}
+		return nil, fmt.Errorf("%s: %w", root.Rel(path), err)
 	}
-	if !info.Mode().IsRegular() {
-		return nil, &fs.PathError{Op: "read", Path: path, Err: ErrIrregular}
-	}
-	return os.ReadFile(path)
+	return text, nil
 }
 
 // Resolve is the scope of one run, from the first source that names one: the
@@ -52,7 +64,7 @@ func Resolve(ctx context.Context, dir, document string) (Document, error) {
 	if err != nil {
 		return Document{}, err
 	}
-	workspace, err := WorkspaceOf(ctx, target)
+	workspace, err := WorkspaceOf(ctx, RootOf(target), target)
 	if err != nil {
 		return Document{}, err
 	}
@@ -63,8 +75,9 @@ func Resolve(ctx context.Context, dir, document string) (Document, error) {
 	// it is a module of the target the load reads beside it, and every other
 	// listed module is a consumer.
 	doc := Document{Workspace: workspace.File, Target: Module{Path: target}}
+	root := RootOf(target)
 	for _, path := range workspace.Modules {
-		if path != target && !Below(target, path) {
+		if _, inside := root.Place(path); !inside {
 			doc.Consumers = append(doc.Consumers, Module{Path: path})
 		}
 	}
@@ -73,14 +86,18 @@ func Resolve(ctx context.Context, dir, document string) (Document, error) {
 
 // Workspace is the workspace file that governs a directory and the absolute
 // path of every module it lists, in its order; File is empty where no file
-// governs the directory.
+// governs the directory. Replacements holds each of its replace directives that
+// names a directory ([Replacements]).
 type Workspace struct {
-	File    string
-	Modules []string
+	File         string
+	Modules      []string
+	Replacements []Replacement
 }
 
 // Lists reports whether the workspace lists dir as one of its modules, which is
-// when the toolchain run in dir builds through it.
+// when the toolchain run in dir builds through it. The go command matches a member
+// by its names, refusing a run in dir under a workspace that lists dir through a
+// link, so the names decide here as they do there.
 func (w *Workspace) Lists(dir string) bool {
 	return slices.Contains(w.Modules, filepath.Clean(dir))
 }
@@ -88,8 +105,9 @@ func (w *Workspace) Lists(dir string) bool {
 // WorkspaceOf returns the workspace that governs dir: the file in the nearest
 // directory at or above dir that holds one, the rule the toolchain applies,
 // read from the filesystem so an ambient workspace setting cannot decide which
-// file one target's run reads. A cancelled ctx ends the read before it starts.
-func WorkspaceOf(ctx context.Context, dir string) (Workspace, error) {
+// file one target's run reads, its error naming that file relative to root. A
+// cancelled ctx ends the read before it starts.
+func WorkspaceOf(ctx context.Context, root Root, dir string) (Workspace, error) {
 	if err := ctx.Err(); err != nil {
 		return Workspace{}, err
 	}
@@ -97,11 +115,7 @@ func WorkspaceOf(ctx context.Context, dir string) (Workspace, error) {
 	if !found {
 		return Workspace{}, nil
 	}
-	modules, err := readWorkspace(file)
-	if err != nil {
-		return Workspace{}, err
-	}
-	return Workspace{File: file, Modules: modules}, nil
+	return ReadWorkspace(root, file)
 }
 
 // workspaceFile returns the workspace file that governs dir and reports
@@ -120,21 +134,25 @@ func workspaceFile(dir string) (string, bool) {
 	}
 }
 
-// readWorkspace returns the absolute path of every module the workspace file
-// lists, in its order, parsed from one reading of its bytes by the toolchain's
-// own parser. A relative entry resolves against the file's own directory, as
-// the toolchain resolves it. A file it cannot read or parse is the project's
-// unreadable configuration.
-func readWorkspace(file string) ([]string, error) {
-	content, err := ReadRegularFile(file)
-	if err != nil {
-		return nil, failure.Wrap(vocab.SetupUnreadableConfiguration, fmt.Errorf("%w: %s: %w", errWorkspace, file, err))
+// ReadWorkspace is the workspace file at file, every module it lists in its order,
+// parsed from one reading of its bytes by the toolchain's own parser. A relative
+// entry resolves against the file's own directory, as the toolchain resolves it. A
+// file it cannot read or parse is the project's unreadable configuration, named
+// relative to root.
+func ReadWorkspace(root Root, file string) (Workspace, error) {
+	content, err := ReadRegularFile(root, file)
+	switch {
+	case errors.Is(err, ErrIrregular):
+		return Workspace{}, failure.WrapFix(vocab.SetupUnreadableConfiguration, fmt.Errorf("%w: %w", errWorkspace, err), IrregularFix)
+	case err != nil:
+		return Workspace{}, failure.Wrap(vocab.SetupUnreadableConfiguration, fmt.Errorf("%w: %w", errWorkspace, err))
 	}
-	work, err := modfile.ParseWork(file, content, nil)
+	work, err := modfile.ParseWork(root.Rel(file), content, nil)
 	if err != nil {
-		return nil, failure.Wrap(vocab.SetupUnreadableConfiguration, fmt.Errorf("%w: %s: %w", errWorkspace, file, err))
+		return Workspace{}, failure.Wrap(vocab.SetupUnreadableConfiguration, fmt.Errorf("%w: %w", errWorkspace, err))
 	}
 	base := filepath.Dir(file)
+	w := Workspace{File: file, Replacements: Replacements(base, work.Replace)}
 	used := make([]string, 0, len(work.Use))
 	for _, use := range work.Use {
 		// The toolchain lists no module for an entry naming no path.
@@ -149,12 +167,31 @@ func readWorkspace(file string) ([]string, error) {
 		}
 		used = append(used, filepath.Clean(dir))
 	}
-	return used, nil
+	w.Modules = used
+	return w, nil
 }
 
-// Below reports whether path is strictly under dir by its names, the way the
-// toolchain places a workspace member or a package directory under a module.
-func Below(dir, path string) bool {
-	relative, inside := lexicallyWithin(dir, path)
-	return inside && relative != "."
+// Replacement is one replace directive that names a directory: the module path it
+// replaces, whatever version, and that directory, absolute.
+type Replacement struct {
+	Module string
+	Dir    string
+}
+
+// Replacements is each of replaces that names a directory, whatever version it
+// replaces, a relative one resolved against base as the toolchain resolves it, in
+// their order.
+func Replacements(base string, replaces []*modfile.Replace) []Replacement {
+	var held []Replacement
+	for _, r := range replaces {
+		if !modfile.IsDirectoryPath(r.New.Path) {
+			continue
+		}
+		dir := filepath.FromSlash(r.New.Path)
+		if !filepath.IsAbs(dir) {
+			dir = filepath.Join(base, dir)
+		}
+		held = append(held, Replacement{Module: r.Old.Path, Dir: filepath.Clean(dir)})
+	}
+	return held
 }

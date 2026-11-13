@@ -14,6 +14,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"golang.org/x/tools/txtar"
 )
@@ -34,13 +35,13 @@ const (
 func extractArchive(t *testing.T, name string, body []byte) string {
 	t.Helper()
 	parsed := txtar.Parse(body)
-	dir := t.TempDir()
+	dir := sandbox.Dir(t)
 	for _, f := range parsed.Files {
 		at := filepath.Join(dir, filepath.FromSlash(f.Name))
-		if err := os.MkdirAll(filepath.Dir(at), 0o750); err != nil {
+		if err := sandbox.MkdirAll(filepath.Dir(at), 0o750); err != nil {
 			t.Fatalf("Setup: create %s of %s: %v", filepath.Dir(at), name, err)
 		}
-		if err := os.WriteFile(at, f.Data, 0o600); err != nil {
+		if err := sandbox.WriteFile(at, f.Data, 0o600); err != nil {
 			t.Fatalf("Setup: write %s of %s: %v", at, name, err)
 		}
 	}
@@ -407,7 +408,7 @@ func TestReferencesAndSweepOverATargetOnlyDocumentAreUnchanged(t *testing.T) {
 	golden := filepath.Join("testdata", "target-only.golden")
 
 	if os.Getenv("UPDATE_GOLDEN") == "1" {
-		if err := os.WriteFile(golden, []byte(got), 0o600); err != nil {
+		if err := sandbox.WriteGolden(golden, []byte(got), 0o600); err != nil {
 			t.Fatalf("Setup: write %s: %v", golden, err)
 		}
 	}

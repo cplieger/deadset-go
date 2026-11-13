@@ -3,7 +3,6 @@ package findings
 import (
 	"bytes"
 	"go/token"
-	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -15,6 +14,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"github.com/cplieger/deadset-spec/v8/report"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -166,7 +166,7 @@ func inputOfRecords(records []core.Record, symbols []inventory.Symbol) *Input {
 // answer, pinned by this unit's fixture tests.
 func TestASuppressionDocumentRoundTrips(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
+	dir := sandbox.Dir(t)
 	rapid.Check(t, func(t *rapid.T) {
 		found := drawnFindings(t)
 		symbols := inventoryOf(found)
@@ -267,7 +267,7 @@ func recordsOf(t *rapid.T, dir string, mechanism core.Mechanism, found []drawnFi
 // is read as soon as it is written.
 func writeTemp(t *rapid.T, dir, name, document string) string {
 	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
+	if err := sandbox.WriteFile(path, []byte(document), 0o600); err != nil {
 		t.Fatalf("Setup: write %s: %v", path, err)
 	}
 	return path

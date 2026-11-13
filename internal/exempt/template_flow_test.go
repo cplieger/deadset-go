@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -85,15 +86,15 @@ func TestEncodingReflectionReadsEveryMemberWhereAFileSystemTemplateIsUnread(t *t
 
 func TestEmbeddedFilesRefusesASetOverTheFileBound(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
+	root := sandbox.Dir(t)
 	for _, sub := range []string{"one", "two"} {
-		if err := os.Mkdir(filepath.Join(root, sub), 0o750); err != nil {
+		if err := sandbox.Mkdir(filepath.Join(root, sub), 0o750); err != nil {
 			t.Fatal(err)
 		}
 	}
 	write := func(sub string, count int) {
 		for i := range count {
-			if err := os.WriteFile(filepath.Join(root, sub, strconv.Itoa(i)+".html"), nil, 0o600); err != nil {
+			if err := sandbox.WriteFile(filepath.Join(root, sub, strconv.Itoa(i)+".html"), nil, 0o600); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -110,12 +111,12 @@ func TestEmbeddedFilesRefusesASetOverTheFileBound(t *testing.T) {
 
 func TestFileSystemRootsMatchFilesInTheOrderFSGlobDoes(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
+	dir := sandbox.Dir(t)
 	for _, file := range []string{"a/x.html", "a.b/y.html", "b/z.html"} {
-		if err := os.MkdirAll(filepath.Join(dir, filepath.Dir(file)), 0o750); err != nil {
+		if err := sandbox.MkdirAll(filepath.Join(dir, filepath.Dir(file)), 0o750); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, file), nil, 0o600); err != nil {
+		if err := sandbox.WriteFile(filepath.Join(dir, file), nil, 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}

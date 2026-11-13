@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/corpus"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -43,7 +44,7 @@ func TestMain(m *testing.M) {
 // run is TestMain's body, written so that the removal of the binary runs before
 // the exit.
 func run(m *testing.M) int {
-	dir, err := os.MkdirTemp("", "deadset-go-conformance")
+	dir, err := sandbox.MkdirTemp("", "deadset-go-conformance")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "create the binary directory: %v\n", err)
 		return 1
@@ -71,7 +72,7 @@ func TestConformanceCorpus(t *testing.T) {
 	}
 	results, err := corpus.Run(t.Context(), spec.Corpus,
 		corpus.Analyzer{Command: []string{binary}, Language: string(vocab.Go)},
-		corpus.Options{Gaps: gaps.Gaps, Jobs: corpusJobs, Scratch: t.TempDir()})
+		corpus.Options{Gaps: gaps.Gaps, Jobs: corpusJobs, Scratch: sandbox.Dir(t)})
 	if err != nil {
 		t.Fatalf("corpus.Run = %v, want the results document", err)
 	}
@@ -80,7 +81,7 @@ func TestConformanceCorpus(t *testing.T) {
 		t.Fatalf("corpus.Encode: %v", err)
 	}
 	if os.Getenv(goldenVariable) == "1" {
-		if err := os.WriteFile(resultsFile, got, 0o600); err != nil {
+		if err := sandbox.WriteGolden(resultsFile, got, 0o600); err != nil {
 			t.Fatalf("write %s: %v", resultsFile, err)
 		}
 	}

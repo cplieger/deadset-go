@@ -1,0 +1,81 @@
+A library with four directives naming a code their declaration does not report:
+on an exported function only a test calls, whose test-only finding is possible
+and so withheld by the default minimum; on a function nothing calls, whose
+finding is reported; on a deprecated one nothing calls, whose code the
+configuration allows; on the unused field of a struct a type error skips; and on
+three functions nothing calls whose finding another record matches: the same
+directive's other code, an ignore entry and a baseline row. Each message names
+the code beside with that finding's confidence and what withholds it.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "library"}, "severity": {"DS1104": "allow"}}
+-- app.go --
+package app
+
+//deadset:ignore DS1002 -- Named under the wrong code.
+func TestOnly() {}
+
+//deadset:ignore DS1401 -- Named under a part code.
+func unreached() {}
+
+// retired is kept for older callers.
+//
+// Deprecated: nothing calls it.
+//
+//deadset:ignore DS1401 -- Named under a part code.
+func retired() {}
+
+// Use holds a value of the broken type.
+func Use() {
+	var b broken
+	_ = b
+}
+
+type broken struct {
+	x undefinedType
+	//deadset:ignore DS1002 -- Named under the wrong code.
+	y int
+}
+
+//deadset:ignore DS1002,DS1401 -- Kept for a later caller.
+func claimed() {}
+
+//deadset:ignore DS1401 -- Named under a part code.
+func entered() {}
+
+//deadset:ignore DS1401 -- Named under a part code.
+func recorded() {}
+-- deadset-ignore.json --
+{
+  "description": "The entry in effect for entered.",
+  "ignore": [
+    {
+      "code": "DS1002",
+      "symbol": "go://example.com/app#entered",
+      "path": "app.go",
+      "reason": "Kept for a later caller."
+    }
+  ]
+}
+-- deadset-baseline.json --
+{
+  "description": "The row in effect for recorded.",
+  "baseline": [
+    {
+      "code": "DS1002",
+      "symbol": "go://example.com/app#recorded",
+      "path": "app.go",
+      "reason": "recorded by deadset-go 2.0.0"
+    }
+  ]
+}
+-- app_test.go --
+package app
+
+import "testing"
+
+func TestTestOnly(t *testing.T) { TestOnly() }

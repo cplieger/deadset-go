@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -201,7 +202,7 @@ func platformProtobufModule(t *testing.T, configurations string) string {
 	}
 	for _, goos := range []string{"linux", "windows"} {
 		tagged := strings.Replace(string(body), "\n\npackage v1", "\n\n//go:build "+goos+"\n\npackage v1", 1)
-		if err := os.WriteFile(filepath.Join(dir, "gen/v1/ping_"+goos+".pb.go"), []byte(tagged), 0o600); err != nil {
+		if err := sandbox.WriteFile(filepath.Join(dir, "gen/v1/ping_"+goos+".pb.go"), []byte(tagged), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -216,7 +217,7 @@ func TestFactsBindAPlatformAlternativeOnceThroughItsLowestGeneratedFile(t *testi
 	for order, configurations := range map[string]string{"linux-first": linux + "," + windows, "windows-first": windows + "," + linux} {
 		dir := platformProtobufModule(t, configurations)
 		var err error
-		factsPath := filepath.Join(t.TempDir(), "facts.json")
+		factsPath := filepath.Join(sandbox.Dir(t), "facts.json")
 		if got := runAnalyze(t, dir, "--facts="+factsPath); got.code == vocab.ExitUsage || got.code == vocab.ExitFailure {
 			t.Fatalf("%s: analyze --facts = %d, want a verdict\nstderr:\n%s", order, got.code, got.stderr)
 		}

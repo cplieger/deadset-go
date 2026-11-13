@@ -2,12 +2,12 @@ package edges
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"github.com/cplieger/go/filesafe"
@@ -39,9 +39,9 @@ const declared = `{
 func target(t *testing.T, document string) string {
 	t.Helper()
 
-	dir := t.TempDir()
+	dir := sandbox.Dir(t)
 	path := filepath.Join(dir, vocab.EdgesFileName)
-	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
+	if err := sandbox.WriteFile(path, []byte(document), 0o600); err != nil {
 		t.Fatalf("Setup: write %s: %v", path, err)
 	}
 	return dir
@@ -98,7 +98,7 @@ func TestOwnOfANilDocumentIsNoSide(t *testing.T) {
 }
 
 func TestReadOfAnAbsentDocumentIsAnEmptyOne(t *testing.T) {
-	held, err := Read(t.Context(), t.TempDir())
+	held, err := Read(t.Context(), sandbox.Dir(t))
 	if err != nil {
 		t.Fatalf("Read(a target with no edges document) = _, %v, want an empty document and no error", err)
 	}
@@ -199,16 +199,16 @@ func TestReadRefusesADocumentOverTheBound(t *testing.T) {
 // A document name resolving outside the target, or to anything but a regular
 // file, is refused without being read, and not as a malformed document.
 func TestReadRefusesADocumentNameThatLeavesTheTargetOrIsNoFile(t *testing.T) {
-	outside := filepath.Join(t.TempDir(), "elsewhere.json")
-	if err := os.WriteFile(outside, []byte(declared), 0o600); err != nil {
+	outside := filepath.Join(sandbox.Dir(t), "elsewhere.json")
+	if err := sandbox.WriteFile(outside, []byte(declared), 0o600); err != nil {
 		t.Fatalf("Setup: write %s: %v", outside, err)
 	}
-	escaping := t.TempDir()
-	if err := os.Symlink(outside, filepath.Join(escaping, vocab.EdgesFileName)); err != nil {
+	escaping := sandbox.Dir(t)
+	if err := sandbox.Symlink(outside, filepath.Join(escaping, vocab.EdgesFileName)); err != nil {
 		t.Fatalf("Setup: symlink: %v", err)
 	}
-	directory := t.TempDir()
-	if err := os.Mkdir(filepath.Join(directory, vocab.EdgesFileName), 0o750); err != nil {
+	directory := sandbox.Dir(t)
+	if err := sandbox.Mkdir(filepath.Join(directory, vocab.EdgesFileName), 0o750); err != nil {
 		t.Fatalf("Setup: mkdir: %v", err)
 	}
 	for _, tc := range []struct {

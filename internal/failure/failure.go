@@ -65,8 +65,12 @@ func New(class, detail string) *Error {
 }
 
 // Wrap is err as a failure of class, followed by the class's fix.
-func Wrap(class string, err error) *Error {
-	e := New(class, err.Error()+"; "+fixes[class])
+func Wrap(class string, err error) *Error { return WrapFix(class, err, fixes[class]) }
+
+// WrapFix is err as a failure of class, followed by fix, for a cause whose fix is
+// not its class's.
+func WrapFix(class string, err error, fix string) *Error {
+	e := New(class, err.Error()+"; "+fix)
 	e.err = err
 	return e
 }

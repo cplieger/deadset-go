@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -476,7 +477,7 @@ func TestALineDirectiveRendersAPositionAndMovesNothingElse(t *testing.T) {
 func scopedReport(t *testing.T, fixture string) []string {
 	t.Helper()
 
-	reportPath := filepath.Join(t.TempDir(), "report.json")
+	reportPath := filepath.Join(sandbox.Dir(t), "report.json")
 	ran := invokedIn(t, archiveModule(t, fixture),
 		"analyze", "--scope=scope.json", "--config=target/"+repositoryDocument, "--report="+reportPath)
 	if ran.code != vocab.ExitClean && ran.code != vocab.ExitFindings {

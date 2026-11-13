@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
@@ -107,14 +108,14 @@ func (d drawnInventory) describeDrawn() string {
 func writeDrawnDocument(t *rapid.T, document string) string {
 	t.Helper()
 
-	dir, err := os.MkdirTemp("", "deadset-property")
+	dir, err := sandbox.MkdirTemp("", "deadset-property")
 	if err != nil {
 		t.Fatalf("Setup: create a document directory: %v", err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(dir) })
 
 	path := filepath.Join(dir, core.IgnoreFileName)
-	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
+	if err := sandbox.WriteFile(path, []byte(document), 0o600); err != nil {
 		t.Fatalf("Setup: write %s: %v", path, err)
 	}
 	return path

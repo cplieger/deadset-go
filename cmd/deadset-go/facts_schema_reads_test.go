@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -92,10 +93,10 @@ func TestFactsReadWhatALoadedConsumerSerializes(t *testing.T) {
 // facts document decoded as plain JSON values.
 func analyzeScopeWithFacts(t *testing.T, files map[string]string) map[string]any {
 	t.Helper()
-	factsPath := filepath.Join(t.TempDir(), "facts.json")
+	factsPath := filepath.Join(sandbox.Dir(t), "facts.json")
 	ran := invokedIn(t, writeModule(t, files),
 		"analyze", "--scope=scope.json", "--config=target/"+repositoryDocument,
-		"--report="+filepath.Join(t.TempDir(), "report.json"), "--facts="+factsPath)
+		"--report="+filepath.Join(sandbox.Dir(t), "report.json"), "--facts="+factsPath)
 	if ran.code == vocab.ExitUsage || ran.code == vocab.ExitFailure {
 		t.Fatalf("analyze --scope=scope.json --facts = %d, want a verdict\nstderr:\n%s", ran.code, ran.stderr)
 	}

@@ -6,11 +6,11 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
-	"path/filepath"
 	"slices"
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
@@ -95,7 +95,7 @@ func (d *linkname) exemptions() []Exemption {
 	slices.SortFunc(found, func(a, b Exemption) int {
 		return cmp.Or(
 			inventory.ByPosition(a.Site, b.Site),
-			strings.Compare(a.File, b.File),
+			scope.Order(a.File, b.File),
 			cmp.Compare(a.ID, b.ID),
 			strings.Compare(a.Detail, b.Detail),
 		)
@@ -153,9 +153,9 @@ func (d *linkname) nonGo(p *packages.Package) error {
 	if file := rules.evidence(p); file != "" {
 		return d.nonGoPackage(p, file)
 	}
-	scope := p.Types.Scope()
-	for _, name := range scope.Names() {
-		if err := d.nonGoName(rules, scope.Lookup(name)); err != nil {
+	declared := p.Types.Scope()
+	for _, name := range declared.Names() {
+		if err := d.nonGoName(rules, declared.Lookup(name)); err != nil {
 			return err
 		}
 	}
@@ -226,12 +226,12 @@ func declared(in *Program, obj types.Object) (inventory.SymbolID, bool) {
 // plugin retains every exported function and variable of a main package that
 // declares no main function.
 func (d *linkname) plugin(p *packages.Package) error {
-	scope := p.Types.Scope()
-	if p.Types.Name() != mainPackage || scope.Lookup(mainFunction) != nil {
+	declared := p.Types.Scope()
+	if p.Types.Name() != mainPackage || declared.Lookup(mainFunction) != nil {
 		return nil
 	}
-	for _, name := range scope.Names() {
-		obj := scope.Lookup(name)
+	for _, name := range declared.Names() {
+		obj := declared.Lookup(name)
 		if !obj.Exported() {
 			continue
 		}
@@ -252,16 +252,17 @@ func (d *linkname) plugin(p *packages.Package) error {
 // targetRelative renders the path of one file the load reported whose positions
 // the file set does not hold, which is what an assembly file is: the class names a
 // directive in it, so the site needs the target-relative spelling every position
-// carries, the solidus as separator whatever the platform, decided lexically.
+// carries, the solidus as separator whatever the platform, placed where both
+// resolve ([scope.Root.PlaceEntry]).
 //
 // A file the load compiled from outside the target root is a failure of the run,
 // the answer the resolver gives for a position it cannot render.
 func targetRelative(root, path string) (string, error) {
-	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(path))
-	if err != nil || !filepath.IsLocal(rel) {
+	rel, inside := scope.RootOf(root).PlaceEntry(path)
+	if !inside {
 		return "", fmt.Errorf("%w: %s is outside %s", inventory.ErrSource, path, root)
 	}
-	return filepath.ToSlash(rel), nil
+	return rel, nil
 }
 
 // declaringFile returns the syntax of the file pos is written in, and nil when

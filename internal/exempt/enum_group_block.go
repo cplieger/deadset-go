@@ -9,10 +9,10 @@ import (
 	"math"
 	"path/filepath"
 	"slices"
-	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/buildconstraint"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -76,7 +76,7 @@ func (s *enumGroupScan) readBlocks() {
 // byPosition orders two constants by the file and byte they are declared at.
 func (s *enumGroupScan) byPosition(a, b *egConst) int {
 	x, y := s.in.offsetOf(a.pos()), s.in.offsetOf(b.pos())
-	return cmp.Or(strings.Compare(x.File, y.File), cmp.Compare(x.At, y.At))
+	return cmp.Or(scope.Order(x.File, y.File), cmp.Compare(x.At, y.At))
 }
 
 // pos is where a constant is declared.

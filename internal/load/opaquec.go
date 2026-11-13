@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/buildconstraint"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -39,13 +40,14 @@ const (
 // because the load's packages hold one another in their import maps: its syntax,
 // types, type information, imports and file lists change, and its identity does
 // not. No C declaration becomes a symbol; only the Go half is analyzed.
-func checkOpaqueC(ctx context.Context, fset *token.FileSet, target string, from unitDir, pkgs []*packages.Package, cgo map[string]bool, c *Configuration) []string {
+func checkOpaqueC(ctx context.Context, fset *token.FileSet, target scope.Root, from unitDir, pkgs []*packages.Package, cgo map[string]bool, c *Configuration) []string {
 	if len(cgo) == 0 {
 		return nil
 	}
 	o := &opaqueCheck{
 		fset:     fset,
-		imports:  newCgoImporter(ctx, fset, from, c, pkgs),
+		target:   target,
+		imports:  newCgoImporter(ctx, fset, target, from, c, pkgs),
 		parsed:   make(map[string]*ast.File),
 		excluded: make(map[string]bool, len(cgo)),
 		sizes:    types.SizesFor(buildconstraint.Compiler, c.Arch),
@@ -61,6 +63,7 @@ func checkOpaqueC(ctx context.Context, fset *token.FileSet, target string, from 
 // one position, and the files that stayed excluded.
 type opaqueCheck struct {
 	fset     *token.FileSet
+	target   scope.Root
 	imports  *cgoImporter
 	parsed   map[string]*ast.File
 	excluded map[string]bool
@@ -272,7 +275,7 @@ func (o *opaqueCheck) parse(paths []string) (files []*ast.File, unparsed map[str
 			files = append(files, f)
 			continue
 		}
-		f, err := parser.ParseFile(o.fset, path, nil, parser.AllErrors|parser.ParseComments)
+		f, err := o.target.Parse(o.fset, path, nil, parser.AllErrors|parser.ParseComments)
 		if err != nil {
 			unparsed[path] = true
 			continue
@@ -373,7 +376,7 @@ func merged(held, added []string) []string {
 func withoutPaths(held, added []string) []string {
 	kept := make([]string, 0, len(held))
 	for _, path := range held {
-		if !slices.Contains(added, path) {
+		if !scope.Listed(added, path) {
 			kept = append(kept, path)
 		}
 	}
@@ -399,6 +402,7 @@ func goVersionOf(p *packages.Package) string {
 type cgoImporter struct {
 	ctx     context.Context
 	fset    *token.FileSet
+	names   scope.Root
 	known   map[string]*packages.Package
 	refused map[string]bool
 	c       *Configuration
@@ -406,14 +410,16 @@ type cgoImporter struct {
 }
 
 // newCgoImporter indexes every package the load type-checked, by import path, and
-// answers anything else from the unit's own directory.
+// answers anything else from the unit's own directory, naming each file a package
+// it loads holds as names does ([scope.Root.Name]).
 //
 // A package and its test variants share one import path and an import of that path
 // names the package itself, so a variant is never indexed.
-func newCgoImporter(ctx context.Context, fset *token.FileSet, from unitDir, c *Configuration, pkgs []*packages.Package) *cgoImporter {
+func newCgoImporter(ctx context.Context, fset *token.FileSet, names scope.Root, from unitDir, c *Configuration, pkgs []*packages.Package) *cgoImporter {
 	im := &cgoImporter{
 		ctx:     ctx,
 		fset:    fset,
+		names:   names,
 		known:   make(map[string]*packages.Package),
 		refused: make(map[string]bool),
 		from:    from,
@@ -463,12 +469,21 @@ func (im *cgoImporter) resolve(path string) (*packages.Package, error) {
 		im.refused[path] = true
 		return nil, fmt.Errorf("%s is a package pattern rather than an import path", path)
 	}
+	if im.from.offline {
+		im.refused[path] = true
+		return nil, fmt.Errorf("no package provides %s", path)
+	}
 
+	env, err := loadEnv(im.c, im.from.dir, im.from.workspace, im.from.toolchain)
+	if err != nil {
+		im.refused[path] = true
+		return nil, err
+	}
 	cfg := &packages.Config{
 		Mode:       metadataMode,
 		Context:    im.ctx,
 		Dir:        im.from.dir,
-		Env:        loadEnv(im.c, im.from.workspace),
+		Env:        env,
 		BuildFlags: buildFlags(im.c.Tags),
 	}
 	pkgs, err := packages.Load(cfg, path)
@@ -476,8 +491,9 @@ func (im *cgoImporter) resolve(path string) (*packages.Package, error) {
 		im.refused[path] = true
 		return nil, err
 	}
-	if len(collect(pkgs, "")) == 0 {
-		if err := typeCheckDeclarations(im.ctx, im.fset, pkgs, im.c.Arch); err != nil {
+	nameFiles(im.names, pkgs)
+	if !reportsErrors(pkgs) {
+		if err := typeCheckDeclarations(im.ctx, im.names, im.fset, pkgs, im.c.Arch); err != nil {
 			im.refused[path] = true
 			return nil, err
 		}

@@ -7,12 +7,14 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/buildconstraint"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -37,23 +39,24 @@ type programFile struct {
 
 // checkPrograms finds and checks every program of one unit's packages under
 // configuration c, in the order of their paths.
-func checkPrograms(ctx context.Context, fset *token.FileSet, from unitDir, pkgs []*packages.Package, c *Configuration) []programFile {
-	return checkProgramFiles(ctx, fset, from, pkgs, c, programPaths(pkgs, c))
+func checkPrograms(ctx context.Context, fset *token.FileSet, names scope.Root, from unitDir, pkgs []*packages.Package, c *Configuration) []programFile {
+	return checkProgramFiles(ctx, fset, names, from, pkgs, c, programPaths(pkgs, c))
 }
 
 // checkScripts checks, each alone against the packages pkgs loaded, every script of
-// the dropped module rooted at dir: a file run with go run on its own, which no build
-// of its package compiles because a sibling file declares main as well. A package a
-// script imports that pkgs do not hold is loaded from dir, so the script's own module
-// file decides it.
-func checkScripts(ctx context.Context, top *Topology, fset *token.FileSet, dir string, pkgs []*packages.Package, c *Configuration) []programFile {
-	return checkProgramFiles(ctx, fset, unitDir{dir: dir, workspace: workspaceOff}, pkgs, c, top.scriptPaths(dir, treeAt(dir), c))
+// the dropped module rooted at from's directory: a file run with go run on its own,
+// which no build of its package compiles because a sibling file declares main as
+// well. A package a script imports that pkgs do not hold is loaded from there, so the
+// script's own module file decides it, unless from is offline.
+func checkScripts(ctx context.Context, top *Topology, fset *token.FileSet, from unitDir, pkgs []*packages.Package, c *Configuration) []programFile {
+	return checkProgramFiles(ctx, fset, top.root, from, pkgs, c, top.scriptPaths(from.dir, treeAt(from.dir), c))
 }
 
 // scriptPaths lists, sorted, every Go file below the module root dir, in no nested
 // module and no directory tree skips, other than a test file, that configuration c
 // builds with or without the ignore tag and that declares a function main with no
-// receiver in package main, where another such file shares its directory.
+// receiver in package main, where another such file shares its directory, each by
+// the name the run gives it ([scope.Root.Name]).
 func (top *Topology) scriptPaths(dir string, tree ModuleTree, c *Configuration) []string {
 	without := cgoEnabledContext(c)
 	with := cgoEnabledContext(c)
@@ -64,7 +67,7 @@ func (top *Topology) scriptPaths(dir string, tree ModuleTree, c *Configuration) 
 	_ = top.Walk(dir, enters, func(path string, kind Kind) error {
 		if kind == File && isScript(&without, &with, path) {
 			parent := filepath.Dir(path)
-			byDir[parent] = append(byDir[parent], path)
+			byDir[parent] = append(byDir[parent], top.root.Name(path))
 		}
 		return nil
 	})
@@ -74,7 +77,7 @@ func (top *Topology) scriptPaths(dir string, tree ModuleTree, c *Configuration) 
 			paths = append(paths, held...)
 		}
 	}
-	slices.Sort(paths)
+	slices.SortFunc(paths, scope.Order)
 	return paths
 }
 
@@ -95,7 +98,11 @@ func isScript(without, with *build.Context, path string) bool {
 // declaresMain reports whether the file at path declares package main and a function
 // main with no receiver.
 func declaresMain(path string) bool {
-	f, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	f, err := scope.ParseText(src, parser.SkipObjectResolution)
 	if err != nil || f.Name.Name != mainPackageName {
 		return false
 	}
@@ -105,18 +112,19 @@ func declaresMain(path string) bool {
 	})
 }
 
-// checkProgramFiles checks each file of paths that declares package main alone under
-// configuration c, against pkgs and what loads from from.
-func checkProgramFiles(ctx context.Context, fset *token.FileSet, from unitDir, pkgs []*packages.Package, c *Configuration, paths []string) []programFile {
+// checkProgramFiles checks each file of paths, each named as names names it, that
+// declares package main alone under configuration c, against pkgs and what loads
+// from from.
+func checkProgramFiles(ctx context.Context, fset *token.FileSet, names scope.Root, from unitDir, pkgs []*packages.Package, c *Configuration, paths []string) []programFile {
 	if len(paths) == 0 {
 		return nil
 	}
-	imports := newCgoImporter(ctx, fset, from, c, pkgs)
+	imports := newCgoImporter(ctx, fset, names, from, c, pkgs)
 	sizes := types.SizesFor(buildconstraint.Compiler, c.Arch)
 	version := mainModuleVersion(pkgs)
 	held := make([]programFile, 0, len(paths))
 	for _, path := range paths {
-		f, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		f, err := names.Parse(fset, path, nil, parser.SkipObjectResolution)
 		if err != nil || f.Name.Name != mainPackageName {
 			continue
 		}
@@ -164,7 +172,7 @@ func programPaths(pkgs []*packages.Package, c *Configuration) []string {
 			}
 		}
 	}
-	slices.Sort(paths)
+	slices.SortFunc(paths, scope.Order)
 	return paths
 }
 

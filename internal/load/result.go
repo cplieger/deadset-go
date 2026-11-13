@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/cplieger/deadset-go/v2/internal/memory"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -49,9 +50,17 @@ type Result struct {
 	Consumers []Consumer
 
 	// Programs holds the target's files run on their own under the ignore tag, and
-	// the scripts of every dropped module below the target, which no package of the
-	// target compiles and every stage but the root detection leaves alone.
+	// the scripts of every dropped module below the target and of every reader a
+	// file no toolchain may run under dropped, which no package of the target
+	// compiles and every stage but the root detection leaves alone.
 	Programs []programFile
+
+	// Hidden holds every entry with a source file's name that every toolchain read
+	// as absent in a directory holding a listed package or in a package directory of
+	// a unit, and Obscured the directory of each, and of each Go file there the run
+	// cannot open, whose packages hold code the analysis does not see ([program.6]).
+	Hidden   []string
+	Obscured []string
 
 	// ExcludedByCgo holds the target-relative paths, forward slashes, of the
 	// files the toolchain ignored for importing "C" that the opaque-C check could
@@ -62,6 +71,10 @@ type Result struct {
 	// declared maps the import path of every package of Packages to the one
 	// directory declaring it, and to nothing where two do.
 	declared map[string]string
+
+	// root is the target root the load names the files it checks whole by
+	// ([Result.Respell]).
+	root scope.Root
 
 	Configuration Configuration
 }
@@ -79,7 +92,8 @@ type Unit struct {
 
 	// UnanalysedConsumer reports a unit whose module a [Dropped] module's module
 	// file requires, or any unit of a tree with a path the run cannot read
-	// ([Topology.Unread]), so code the run did not analyze may import its exports.
+	// ([Topology.Unread]) or an entry it hid ([Result.Hidden]), so code the run did
+	// not analyze may import its exports.
 	UnanalysedConsumer bool
 }
 
@@ -90,13 +104,23 @@ type Dropped struct {
 	Dir string
 
 	requires []string // the modules its module file requires
-	readable bool     // whether that file could be read
+
+	// Unreadable reports that its module file, or the workspace file governing
+	// Dir, could not be read, so it may require any unit and every export of the
+	// target is possible ([Result.markUnanalysedConsumers]).
+	Unreadable bool
+
+	irregular bool // whether a file no toolchain may run under dropped it
+	offline   bool // whether its scripts' toolchain would read such a file
 }
 
 // droppedOf is m dropped with err.
 func droppedOf(m *discoveredModule, err error) Dropped {
-	d := Dropped{Dir: m.Dir, Err: err, readable: m.File != nil && m.FileErr == nil}
-	if d.readable {
+	d := Dropped{
+		Dir: m.Dir, Err: err, Unreadable: m.File == nil || m.FileErr != nil || m.WorkspaceErr != nil,
+		irregular: irregular(m.Refused), offline: m.scriptsBlock,
+	}
+	if !d.Unreadable {
 		d.requires = m.File.required()
 	}
 	return d
@@ -112,7 +136,7 @@ func (r *Result) markUnanalysedConsumers(unread bool) {
 	}
 	for _, dropped := range r.Dropped {
 		for i := range r.Units {
-			if !dropped.readable || slices.Contains(dropped.requires, r.Units[i].Path) {
+			if dropped.Unreadable || slices.Contains(dropped.requires, r.Units[i].Path) {
 				r.Units[i].UnanalysedConsumer = true
 			}
 		}
@@ -125,12 +149,19 @@ func (r *Result) Referencing() []Consumer {
 	return slices.Concat(r.Consumers, r.Nested)
 }
 
+// Respell is the directory at path as the target root spells it where the root
+// holds it ([scope.Root.Respell]), and path itself elsewhere: the directory the
+// load names the files of a module it checks whole below, so a consumer's
+// directory the root holds through a link still holds its files.
+func (r *Result) Respell(path string) string { return r.root.Respell(path) }
+
 // Unit returns r narrowed to the unit rooted at dir: its packages alone, so an
 // answer about one module's build list or imports reads that module's load. It
 // returns nil where r holds no such unit.
 func (r *Result) Unit(dir string) *Result {
+	unit := scope.RootOf(dir)
 	for i := range r.Units {
-		if !sameDir(r.Units[i].Dir, dir) {
+		if !unit.Is(r.Units[i].Dir) {
 			continue
 		}
 		narrowed := *r
@@ -185,21 +216,11 @@ func declaredDirs(pkgs []*packages.Package) map[string]string {
 		}
 		if held, seen := dirs[p.PkgPath]; !seen {
 			dirs[p.PkgPath] = dir
-		} else if held != "" && !sameDir(held, dir) {
+		} else if held != "" && !scope.Same(held, dir) {
 			dirs[p.PkgPath] = ""
 		}
 	}
 	return dirs
-}
-
-// RelativeSlash renders path relative to base with forward slashes, falling back
-// to path itself where no relative form exists.
-func RelativeSlash(base, path string) string {
-	rel, err := filepath.Rel(base, path)
-	if err != nil {
-		return filepath.ToSlash(path)
-	}
-	return filepath.ToSlash(rel)
 }
 
 // Source is one package outside the program read from its source: the files the
@@ -214,11 +235,13 @@ type Source struct {
 // Sources reads the [Source] of packages of one load, each once outside memory
 // pressure. Its reads are the largest allocation of a run, so it lives with its
 // caller, never with the [Result]: dropping it frees every tree and type record it
-// read, and pressure drops the reads it holds ([memory.OnPressureOf]).
+// read, and pressure drops the reads it holds ([memory.OnPressureOf]). names is the
+// root whose names the load gave its files ([scope.Root.Name]).
 type Sources struct {
 	byTypes map[*types.Package]*packages.Package
 	read    map[*types.Package]*sourceRead
 	pressed func() bool
+	names   scope.Root
 	mu      sync.Mutex
 }
 
@@ -233,6 +256,7 @@ type sourceRead struct {
 // dependency's included, by its types.
 func (r *Result) Sources() *Sources {
 	c := &Sources{
+		names:   r.root,
 		byTypes: make(map[*types.Package]*packages.Package),
 		read:    make(map[*types.Package]*sourceRead),
 		pressed: memory.Pressed,
@@ -267,7 +291,7 @@ func (c *Sources) Read(pkg *types.Package) (*Source, bool) {
 	p := c.byTypes[pkg]
 	c.mu.Unlock()
 	if p != nil {
-		held.source = readSource(p)
+		held.source = readSource(c.names, p)
 	}
 	close(held.ready)
 	return held.source, held.source != nil
@@ -280,10 +304,10 @@ func (c *Sources) drop() {
 	clear(c.read)
 }
 
-// readSource parses and type-checks one package's compiled files into a file set of
-// its own, so the line tables go with the Source; its imports resolve to the
-// packages the load holds.
-func readSource(p *packages.Package) *Source {
+// readSource parses and type-checks one package's compiled files, each by the name
+// names gave it, into a file set of its own, so the line tables go with the Source;
+// its imports resolve to the packages the load holds.
+func readSource(names scope.Root, p *packages.Package) *Source {
 	fset := token.NewFileSet()
 	var files []*ast.File
 	for _, name := range p.CompiledGoFiles {
@@ -291,7 +315,7 @@ func readSource(p *packages.Package) *Source {
 		if err != nil {
 			continue
 		}
-		if f, err := parser.ParseFile(fset, name, src, parser.SkipObjectResolution); err == nil && f.Name.Name == p.Name {
+		if f, err := names.Parse(fset, name, src, parser.SkipObjectResolution); err == nil && f.Name.Name == p.Name {
 			files = append(files, f)
 		}
 	}

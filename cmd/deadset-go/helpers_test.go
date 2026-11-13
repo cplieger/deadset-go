@@ -19,6 +19,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/run"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -89,7 +90,7 @@ func fixtureFor(files map[string]string) *fixture {
 // declaration of it, and answers the same directory to every later one.
 func (f *fixture) directory() (string, error) {
 	f.written.Do(func() {
-		dir, err := os.MkdirTemp(fixtureBase, "module")
+		dir, err := sandbox.MkdirTemp(fixtureBase, "module")
 		if err != nil {
 			f.writeErr = err
 			return
@@ -201,7 +202,9 @@ var packageDir string
 
 // commandBinary builds the command on first use and answers the path of the binary.
 // It stamps no version control state, so the version it states is the development
-// version at every commit.
+// version at every commit, and it checks the names it parses files under, as a test
+// binary does (the deadset_names tag): a file parsed by a name the run did not give
+// it, or under two names, fails the run.
 func commandBinary(t *testing.T) string {
 	t.Helper()
 	if packageDir == "" {
@@ -213,7 +216,7 @@ func commandBinary(t *testing.T) string {
 			name += ".exe"
 		}
 		built.path = filepath.Join(fixtureBase, "bin", name)
-		build := exec.Command("go", "build", "-buildvcs=false", "-trimpath", "-o", built.path, ".")
+		build := exec.Command("go", "build", "-buildvcs=false", "-trimpath", "-tags=deadset_names", "-o", built.path, ".")
 		build.Dir = packageDir
 		build.Env = append(os.Environ(), "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH)
 		built.out, built.err = build.CombinedOutput()
@@ -237,13 +240,7 @@ type invoked struct {
 // same analysis under it, and the signal test re-executes this binary ([reexecuted]).
 func invokedIn(t *testing.T, dir string, args ...string) invoked {
 	t.Helper()
-	return invokedUnder(t.Context(), t, dir, args...)
-}
-
-// invokedUnder is [invokedIn] under ctx, which kills the command when it ends.
-func invokedUnder(ctx context.Context, t *testing.T, dir string, args ...string) invoked {
-	t.Helper()
-	cmd := exec.CommandContext(ctx, commandBinary(t), args...)
+	cmd := exec.CommandContext(t.Context(), commandBinary(t), args...)
 	cmd.Dir = dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

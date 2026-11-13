@@ -16,6 +16,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/failure"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
@@ -127,7 +128,7 @@ func TestLoadReadsTheUnderscoredPackagesOfTheModuleAsANestedConsumer(t *testing.
 		"_examples/own/main.go":        "package main\n\nfunc main() {}\n",
 		"testdata/_input/in.go":        "package in\n",
 	})
-	patterns, err := (&Topology{Root: root}).underscoredPackages(t.Context(), root, treeAt(root))
+	patterns, err := (&Topology{Root: root, root: scope.RootOf(root)}).underscoredPackages(t.Context(), root, treeAt(root))
 	if want := []string{"./_examples/_nested/x", "./_examples/absent", "./_examples/limits", "./_examples/stale"}; err != nil || !slices.Equal(patterns, want) {
 		t.Errorf("underscoredPackages() = %v, %v, want %v, nil", patterns, err, want)
 	}
@@ -213,7 +214,7 @@ func TestLoadReadsANestedModuleAsAConsumerOfTheUnitItReplaces(t *testing.T) {
 		"absolute/main.go":      "package main\n\nimport \"example.com/b\"\n\nfunc main() { b.Used() }\n",
 	})
 	absolute := "module example.com/b/absolute\n\ngo 1.27.1\n\nrequire example.com/b v0.0.0\n\nreplace example.com/b => " + root + "\n"
-	if err := os.WriteFile(filepath.Join(root, "absolute", "go.mod"), []byte(absolute), 0o600); err != nil {
+	if err := sandbox.WriteFile(filepath.Join(root, "absolute", "go.mod"), []byte(absolute), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -353,16 +354,45 @@ func TestUnreadableConfigurationClassesOnlyAFileTheToolchainCannotParse(t *testi
 	}
 }
 
-func TestRebasedJoinsARelativePositionToThePrefix(t *testing.T) {
-	abs := filepath.Join(t.TempDir(), "main.go") + ":4:2"
-	for _, test := range []struct{ position, prefix, want string }{
-		{position: "main.go:4:2", prefix: "tool", want: "tool/main.go:4:2"},
-		{position: "main.go:4:2", prefix: "", want: "main.go:4:2"},
-		{position: abs, prefix: "tool", want: abs},
-		{position: "", prefix: "tool", want: ""},
+func TestRebasedNamesEveryPositionFromTheTargetRoot(t *testing.T) {
+	base := sandbox.Dir(t)
+	root := filepath.Join(base, "target")
+	cache := filepath.Join(base, "cache", "example.com", "dep@v1.2.0")
+	dep := &packages.Module{Path: "example.com/dep", Version: "v1.2.0", Dir: cache}
+	local := &packages.Module{Path: "example.com/lib", Dir: filepath.Join(base, "lib")}
+	// Two spellings of the tree, as macOS spells /private/var through /var: a link
+	// to the base and one to the root, and a module cache below the root.
+	aliasBase, aliasRoot := filepath.Join(sandbox.Dir(t), "base"), filepath.Join(sandbox.Dir(t), "target")
+	if err := sandbox.MkdirAll(root, 0o750); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	for link, to := range map[string]string{aliasBase: base, aliasRoot: root} {
+		if err := sandbox.Symlink(to, link); err != nil {
+			t.Fatalf("Setup: %v", err)
+		}
+	}
+	inner := filepath.Join("cache", "example.com", "dep@v1.2.0")
+	held := &packages.Module{Path: "example.com/dep", Version: "v1.2.0", Dir: filepath.Join(aliasRoot, inner)}
+	for _, test := range []struct {
+		name, position, dir string
+		module              *packages.Module
+		want                string
+	}{
+		{name: "relative_in_a_module_below_the_root", position: "main.go:4:2", dir: filepath.Join(root, "tool"), want: "tool/main.go:4:2"},
+		{name: "relative_at_the_root", position: "main.go:4", dir: root, want: "main.go:4"},
+		{name: "absolute_below_the_root", position: filepath.Join(root, "p", "p.go") + ":4:2", dir: filepath.Join(root, "tool"), want: "p/p.go:4:2"},
+		{name: "absolute_in_a_local_module_outside", position: filepath.Join(base, "lib", "l.go") + ":7:1", dir: root, module: local, want: "../lib/l.go:7:1"},
+		{name: "relative_in_a_consumer_outside", position: "main.go:3:1", dir: filepath.Join(base, "app"), want: "../app/main.go:3:1"},
+		{name: "absolute_in_the_module_cache", position: filepath.Join(cache, "x", "x.go") + ":9:3", dir: root, module: dep, want: "example.com/dep/x/x.go:9:3"},
+		{name: "absolute_below_the_root_spelled_through_a_link", position: filepath.Join(aliasRoot, "p", "p.go") + ":4:2", dir: root, want: "p/p.go:4:2"},
+		{name: "relative_in_a_consumer_spelled_through_a_link", position: "main.go:3:1", dir: filepath.Join(aliasBase, "app"), want: "../app/main.go:3:1"},
+		{name: "absolute_in_a_module_cache_below_the_root_spelled_through_a_link", position: filepath.Join(aliasRoot, inner, "x", "x.go") + ":9:3", dir: root, module: held, want: "cache/example.com/dep@v1.2.0/x/x.go:9:3"},
+		{name: "a_file_alone", position: filepath.Join(root, "go.mod"), dir: root, want: "go.mod"},
+		{name: "none", position: "", dir: root, want: ""},
+		{name: "no_file", position: "-", dir: root, want: "-"},
 	} {
-		if got := rebased(test.position, test.prefix); got != test.want {
-			t.Errorf("rebased(%q, %q) = %q, want %q", test.position, test.prefix, got, test.want)
+		if got := rebased(test.position, scope.RootOf(root), test.dir, test.module); got != test.want {
+			t.Errorf("rebased(%s) = %q, want %q", test.name, got, test.want)
 		}
 	}
 }
@@ -400,11 +430,11 @@ func TestLoadDropsAWorkspaceReaderWhoseModuleFileOnlyTheToolchainReads(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(reader, append(slices.Clone(readable), "unknowndirective x\n"...), 0o600); err != nil {
+	if err := sandbox.WriteFile(reader, append(slices.Clone(readable), "unknowndirective x\n"...), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	top := discovered(t, scope.Document{Target: scope.Module{Path: filepath.Join(root, "lib")}})
-	if err := os.WriteFile(reader, readable, 0o600); err != nil {
+	if err := sandbox.WriteFile(reader, readable, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -412,8 +442,8 @@ func TestLoadDropsAWorkspaceReaderWhoseModuleFileOnlyTheToolchainReads(t *testin
 	if err != nil {
 		t.Fatalf("Load(a workspace whose reader's module file cannot be read) = _, %v, want no error", err)
 	}
-	if len(got.Dropped) != 1 || got.Dropped[0].Dir != filepath.Join(root, "app") || !errors.Is(got.Dropped[0].Err, ErrModuleFile) {
-		t.Fatalf("Load() dropped %+v, want the app reader alone, with %v", got.Dropped, ErrModuleFile)
+	if len(got.Dropped) != 1 || got.Dropped[0].Dir != filepath.Join(root, "app") || !errors.Is(got.Dropped[0].Err, errModuleFile) {
+		t.Fatalf("Load() dropped %+v, want the app reader alone, with %v", got.Dropped, errModuleFile)
 	}
 	if len(got.Nested) != 0 || !got.Units[0].UnanalysedConsumer {
 		t.Errorf("Load() read the nested consumers %v and flagged the unit %t, want none and true", got.Nested, got.Units[0].UnanalysedConsumer)
@@ -445,7 +475,7 @@ func TestDiscoveryLeavesEveryDirectoryTheGoRowSkipsUnsearched(t *testing.T) {
 		files[name+"/m/go.mod"] = "module example.com/" + strings.Trim(name, "._") + "\n\ngo 1.27.1\n"
 	}
 	root := writeTree(t, files)
-	got, err := (&Topology{Root: root}).unitDirs(t.Context())
+	got, err := (&Topology{Root: root, root: scope.RootOf(root)}).unitDirs(t.Context())
 	if want := []string{filepath.Join(root, "kept")}; err != nil || !slices.Equal(got, want) {
 		t.Errorf("unitDirs(a tree with a module below each skipped directory of %v) = %v, %v, want %v", goRow.SkippedDirectories, got, err, want)
 	}
@@ -490,8 +520,8 @@ func TestDiscoverReadsAReaderModuleFileInItsOwnDirectoryAlone(t *testing.T) {
 		"outer/reader/main.go": "package main\n\nfunc main() {}\n",
 	})
 	top := discovered(t, scope.Document{Target: scope.Module{Path: filepath.Join(root, "lib")}})
-	if len(top.Readers) != 1 || top.Readers[0].Dir != filepath.Join(root, "outer", "reader") || !errors.Is(top.Readers[0].FileErr, ErrModuleFile) {
-		t.Errorf("Discover() read the readers %+v, want outer/reader alone, with %v", top.Readers, ErrModuleFile)
+	if len(top.Readers) != 1 || top.Readers[0].Dir != filepath.Join(root, "outer", "reader") || !errors.Is(top.Readers[0].FileErr, errModuleFile) {
+		t.Errorf("Discover() read the readers %+v, want outer/reader alone, with %v", top.Readers, errModuleFile)
 	}
 }
 
@@ -563,26 +593,32 @@ func TestDiscoveryStopsWhenCancelledAfterItBegins(t *testing.T) {
 		"target/go.mod":  "module example.com/t\n\ngo 1.27.1\n",
 	})
 	unit := filepath.Join(module, "member")
-	top := &Topology{Root: unit, Units: []discoveredModule{{Dir: unit, Path: "example.com/m"}}}
+	top := &Topology{Root: unit, root: scope.RootOf(unit), Units: []discoveredModule{{Dir: unit, Path: "example.com/m"}}}
 	consumers := []scope.Module{{Path: filepath.Join(module, "other")}, {Path: walked}}
 	checks := map[string]int{}
 	for name, search := range map[string]func(context.Context) error{
-		"unitDirs":    func(ctx context.Context) error { _, err := (&Topology{Root: walked}).unitDirs(ctx); return err },
+		"unitDirs": func(ctx context.Context) error {
+			_, err := (&Topology{Root: walked, root: scope.RootOf(walked)}).unitDirs(ctx)
+			return err
+		},
 		"withMembers": func(ctx context.Context) error { _, err := withMembers(ctx, module); return err },
 		"withMembers under a workspace that does not list it": func(ctx context.Context) error {
 			_, err := withMembers(ctx, filepath.Join(unlisted, "target"))
 			return err
 		},
 		"nestedModules": func(ctx context.Context) error {
-			_, err := (&Topology{Root: module}).nestedModules(ctx, nil)
+			_, err := (&Topology{Root: module, root: scope.RootOf(module)}).nestedModules(ctx, nil)
 			return err
 		},
 		"underscoredPackages": func(ctx context.Context) error {
-			_, err := (&Topology{Root: module}).underscoredPackages(ctx, module, treeAt(module))
+			_, err := (&Topology{Root: module, root: scope.RootOf(module)}).underscoredPackages(ctx, module, treeAt(module))
 			return err
 		},
-		"readers":           func(ctx context.Context) error { _, err := top.readers(ctx, nil); return err },
-		"declaredConsumers": func(ctx context.Context) error { _, err := declaredConsumers(ctx, consumers); return err },
+		"readers": func(ctx context.Context) error { _, err := top.readers(ctx, nil); return err },
+		"declaredConsumers": func(ctx context.Context) error {
+			_, err := declaredConsumers(ctx, scope.RootOf(module), consumers)
+			return err
+		},
 	} {
 		counted := &stagedContext{Context: t.Context(), live: math.MaxInt}
 		if err := search(counted); err != nil {
@@ -635,7 +671,7 @@ func TestSourcesReadEveryUnitsPackage(t *testing.T) {
 func TestALoadWithNoGoCommandOnPathEndsTheRunAsMissingToolchain(t *testing.T) {
 	stableToolchain(t)
 	top := discovered(t, fixtureScope(t, "clean"))
-	searched := t.TempDir()
+	searched := sandbox.Dir(t)
 	t.Setenv("PATH", searched)
 	_, err := Load(t.Context(), top, new(HostConfiguration()))
 	held, ok := errors.AsType[*failure.Error](err)

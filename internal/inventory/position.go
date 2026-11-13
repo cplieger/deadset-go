@@ -8,8 +8,9 @@ import (
 	"go/ast"
 	"go/token"
 	"path/filepath"
-	"strings"
 	"unicode/utf16"
+
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 )
 
 // ErrSource reports a file the load compiled that cannot be read, or whose bytes
@@ -20,25 +21,32 @@ var ErrSource = errors.New("inventory: source unavailable")
 // relative to the target root with the solidus as separator on every platform,
 // and a column counting UTF-16 code units.
 //
-// The path is made relative lexically, so a root spelled through a symbolic link
-// does not match the paths the toolchain reported and nothing under it renders.
+// The path is placed where both the file's directory and the root resolve
+// ([scope.Root.PlaceEntry]), so a root spelled through a symbolic link renders the
+// files the toolchain names through the directory it leads to. Positions with no
+// root render no path.
 type Positions struct {
-	Fset *token.FileSet
-	read ReadFile
-	rel  map[string]string
-	src  map[string][]byte
-	Root string
+	Fset   *token.FileSet
+	read   ReadFile
+	rel    map[string]string
+	src    map[string][]byte
+	placed scope.Root
+	Root   string
 }
 
 // NewPositions renders against root, reading source through read.
 func NewPositions(fset *token.FileSet, root string, read ReadFile) *Positions {
-	return &Positions{
+	p := &Positions{
 		Fset: fset,
 		Root: filepath.Clean(root),
 		read: read,
 		rel:  make(map[string]string),
 		src:  make(map[string][]byte),
 	}
+	if root != "" {
+		p.placed = scope.RootOf(root)
+	}
+	return p
 }
 
 // Under renders against another root with the same file set and reader, which is
@@ -85,7 +93,7 @@ func (p *Positions) Range(node ast.Node) SourceRange {
 
 // Holds reports whether the byte at is inside the range.
 func (s *SourceRange) Holds(at Offset) bool {
-	return at.File == s.File && at.At >= s.From && at.At < s.To
+	return scope.SameName(at.File, s.File) && at.At >= s.From && at.At < s.To
 }
 
 // Render converts pos into the position a report carries: [Positions.Place], with
@@ -149,7 +157,7 @@ func (p *Positions) counted(pos token.Pos, line []byte) int {
 	from := len(line)
 	for from > 0 {
 		q := p.Fset.Position(pos - token.Pos(len(line)-from+1))
-		if q.Filename != at.Filename || q.Line != at.Line || q.Column != at.Column-(len(line)-from+1) {
+		if !scope.SameName(q.Filename, at.Filename) || q.Line != at.Line || q.Column != at.Column-(len(line)-from+1) {
 			break
 		}
 		from--
@@ -201,6 +209,22 @@ func (p *Positions) InTestFile(pos token.Pos) bool {
 	return test
 }
 
+// Holds reports whether the directory at dir is strictly below the root where both
+// resolve ([scope.Root.Below]), so of two renderers holding one file the one this
+// one holds is the nearer. Positions with no root hold nothing.
+func (p *Positions) Holds(dir string) bool { return p.placed.Below(dir) }
+
+// Directory returns the directory dir relative to the root with forward slashes,
+// placed whole where both resolve ([scope.Root.Place]), so a link to a directory is
+// the directory it leads to, where its files render; empty where the root does not
+// hold it.
+func (p *Positions) Directory(dir string) string {
+	if relative, inside := p.placed.Place(dir); inside {
+		return relative
+	}
+	return ""
+}
+
 // Relative returns name relative to the target root with forward slashes, and an
 // empty string when name is not under the root.
 func (p *Positions) Relative(name string) string {
@@ -208,8 +232,8 @@ func (p *Positions) Relative(name string) string {
 		return rel
 	}
 	rel := ""
-	if r, err := filepath.Rel(p.Root, filepath.Clean(name)); err == nil && filepath.IsLocal(r) {
-		rel = filepath.ToSlash(r)
+	if r, inside := p.placed.PlaceEntry(name); inside {
+		rel = r
 	}
 	p.rel[name] = rel
 	return rel
@@ -264,7 +288,7 @@ func Column(line []byte, offset int) int {
 // is the whole of the analysis' position order: a comparator that ranks records
 // carrying a position calls this rather than comparing the three fields again.
 func ByPosition(a, b token.Position) int {
-	if c := strings.Compare(a.Filename, b.Filename); c != 0 {
+	if c := scope.Order(a.Filename, b.Filename); c != 0 {
 		return c
 	}
 	if c := cmp.Compare(a.Line, b.Line); c != 0 {

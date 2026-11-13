@@ -239,7 +239,7 @@ func nameable(runDir string, consumers []scope.Module) []scope.Module {
 // runDir, with forward slashes, so two runs over one tree on two machines write the
 // same bytes; a path outside that directory has no spelling a report carries.
 func relativeTo(runDir, path string) (string, error) {
-	relative, inside := scope.Within(runDir, path)
+	relative, inside := scope.RootOf(runDir).PlaceEntry(path)
 	if !inside {
 		return "", failure.Wrap(vocab.RunUnreportablePath, fmt.Errorf("a report names %s relative to the directory the run was invoked from, and %s does not contain it",
 			path, runDir))

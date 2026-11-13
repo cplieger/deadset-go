@@ -9,6 +9,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/conventions"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -229,7 +230,7 @@ func lookup(scopes []*types.Package, names []string) []types.Object {
 func (d *rootDetection) interfacesOf(p *packages.Package, file string) []types.Object {
 	var held []types.Object
 	for _, f := range p.Syntax {
-		if filepath.Clean(d.pos.Fset.Position(f.FileStart).Filename) != filepath.Clean(file) {
+		if !scope.SameEntry(d.pos.Fset.Position(f.FileStart).Filename, file) {
 			continue
 		}
 		ast.Inspect(f, func(n ast.Node) bool {
@@ -248,11 +249,12 @@ func (d *rootDetection) interfacesOf(p *packages.Package, file string) []types.O
 
 // packageArguments records the directory of every package below the target that
 // one directive of the file at file passes by a relative path, the directive's own
-// directory excepted.
+// directory excepted, each where it resolves ([inventory.Positions.Directory]).
 func (d *rootDetection) packageArguments(file string, relative []string) {
+	own := d.pos.Directory(filepath.Dir(file))
 	for _, arg := range relative {
 		dir := filepath.Join(filepath.Dir(file), filepath.FromSlash(arg))
-		if below := d.pos.Relative(dir); below != "" && dir != filepath.Dir(file) {
+		if below := d.pos.Directory(dir); below != "" && !scope.SameName(below, own) {
 			d.inputDirs[below] = true
 		}
 	}

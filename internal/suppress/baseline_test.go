@@ -3,13 +3,13 @@ package suppress
 import (
 	"bytes"
 	"errors"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
 )
 
@@ -121,8 +121,8 @@ func TestBaselineAndTheIgnoreFileRefuseEachOtherMember(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "document.json")
-			if err := os.WriteFile(path, []byte(held.document), 0o600); err != nil {
+			path := filepath.Join(sandbox.Dir(t), "document.json")
+			if err := sandbox.WriteFile(path, []byte(held.document), 0o600); err != nil {
 				t.Fatalf("Setup: write %s: %v", path, err)
 			}
 			if err := held.read(path); !errors.Is(err, core.ErrMalformed) {
@@ -134,7 +134,7 @@ func TestBaselineAndTheIgnoreFileRefuseEachOtherMember(t *testing.T) {
 }
 
 func TestBaselineOfAnAbsentDocumentIsAnEmptyOne(t *testing.T) {
-	records, refusals, err := Baseline(filepath.Join(t.TempDir(), core.BaselineFileName), nil)
+	records, refusals, err := Baseline(filepath.Join(sandbox.Dir(t), core.BaselineFileName), nil)
 	if err != nil {
 		t.Fatalf("Baseline(an absent document) = _, _, %v, want no error", err)
 	}

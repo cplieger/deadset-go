@@ -59,16 +59,16 @@ func (s *schemaScan) capEvidence(call *ast.CallExpr) {
 	if fn == nil {
 		return
 	}
-	switch path := fn.Pkg().Path(); {
-	case path == protojsonPath && textSerializers[name] == serializerWrites &&
+	switch pkgPath := fn.Pkg().Path(); {
+	case pkgPath == protojsonPath && textSerializers[name] == serializerWrites &&
 		(fn.Signature().Recv() == nil || !s.discardsUnknown(sel.X)):
 		for _, arg := range call.Args {
 			c := closureOf(s.info.TypeOf(arg))
 			s.evidence.persisted = append(append(s.evidence.persisted, c.held...), c.messages...)
 		}
-	case reflectionServers[path][name]:
+	case reflectionServers[pkgPath][name]:
 		s.evidence.serving = append(s.evidence.serving, s.pkg)
-	case path == protodescPath && name == "ToFileDescriptorProto":
+	case pkgPath == protodescPath && name == "ToFileDescriptorProto":
 		s.converts(call.Args)
 	}
 }

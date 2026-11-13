@@ -268,7 +268,7 @@ Every suppression that matched no current finding, at either mechanism and in th
 
 A record bound to a symbol whose code the configuration silences is dormant instead. It is neither in effect nor stale, and nothing reports it. Both ways of silencing count, the severity set to `allow` and a confidence the configured minimum excludes. So does either of them withholding a root of the component the record's finding falls in. As a result, turning a kind off never fails the run over the adjudications turning it back on would need.
 
-Several stale records at one site are one finding naming every code, because one directive above a line that declares several symbols is one record per symbol and a maintainer edits one line.
+Several stale records at one site are one finding naming every code, because one directive above a line that declares several symbols is one record per symbol and a maintainer edits one line. Where the declaration the record bound reports another code, the message names it with that finding's own confidence and, where the run withholds it, why: `its declaration reports DS1102 at possible, withheld by analysis.min_confidence`. The `certain` the line ends with is the stale record's own, never that finding's. The other reasons are `withheld by severity allow` and `withheld by a type error`, and, where another record matches that finding, `withheld by an inline directive`, `withheld by an ignore entry` or `withheld by a baseline row`.
 
 ### DS9004 unmatched-root
 

@@ -15,6 +15,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"pgregory.net/rapid"
 )
 
@@ -141,7 +142,7 @@ func (p drawnProgram) declaredMethods() map[string]bool {
 func writeProgram(t *rapid.T, source string) string {
 	t.Helper()
 
-	dir, err := os.MkdirTemp("", "deadset-exempt-property")
+	dir, err := sandbox.MkdirTemp("", "deadset-exempt-property")
 	if err != nil {
 		t.Fatalf("Setup: create a module directory: %v", err)
 	}
@@ -151,7 +152,7 @@ func writeProgram(t *rapid.T, source string) string {
 		"go.mod":    "module example.test/target\n\ngo 1.27.1\n",
 		"target.go": source,
 	} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(data), 0o600); err != nil {
+		if err := sandbox.WriteFile(filepath.Join(dir, name), []byte(data), 0o600); err != nil {
 			t.Fatalf("Setup: write %s: %v", name, err)
 		}
 	}

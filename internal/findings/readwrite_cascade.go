@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -128,7 +129,7 @@ func fieldAt(spec *ast.TypeSpec, one *Configured, at token.Position) *ast.Field 
 // renderedAt reports whether one position renders to a symbol's position.
 func renderedAt(one *Configured, pos token.Pos, at token.Position) bool {
 	site, err := one.Resolve.Render(pos)
-	return err == nil && site.Filename == at.Filename && site.Line == at.Line && site.Column == at.Column
+	return err == nil && scope.SameName(site.Filename, at.Filename) && site.Line == at.Line && site.Column == at.Column
 }
 
 // paramsUsedOnlyIn names every type parameter of a declaration that some

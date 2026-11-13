@@ -3,7 +3,7 @@ module github.com/cplieger/deadset-go/v2
 go 1.27.4
 
 require (
-	github.com/cplieger/deadset-spec/v8 v8.0.0-dev.57
+	github.com/cplieger/deadset-spec/v8 v8.0.0-dev.59
 	github.com/cplieger/go/filesafe v1.1.0
 	golang.org/x/mod v0.43.0
 	golang.org/x/tools v0.52.0

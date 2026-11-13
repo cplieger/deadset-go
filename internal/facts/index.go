@@ -10,6 +10,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -89,8 +90,8 @@ func NewIndex(r *load.Result, rs *resolve.Resolver) (*Index, error) {
 		}
 		x.generated = append(x.generated, g)
 	}
-	slices.SortFunc(x.generated, func(a, b Generated) int { return strings.Compare(a.Path, b.Path) })
-	x.generated = slices.CompactFunc(x.generated, func(a, b Generated) bool { return a.Path == b.Path })
+	slices.SortFunc(x.generated, func(a, b Generated) int { return scope.Order(a.Path, b.Path) })
+	x.generated = slices.CompactFunc(x.generated, func(a, b Generated) bool { return scope.SameName(a.Path, b.Path) })
 	x.interfaces = interfacesOf(x, rs)
 	x.outside = outsideOf(x)
 	x.instances = instantiationsOf(x.Program(), rs.Positions())

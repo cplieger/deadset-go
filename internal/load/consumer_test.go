@@ -2,7 +2,6 @@ package load
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -170,13 +169,16 @@ func TestLoadRefusesAConsumerItCannotCount(t *testing.T) {
 
 func TestLoadRefusesAnAbsentConsumerAsAMissingConsumer(t *testing.T) {
 	stableToolchain(t)
-	absent := filepath.Join(t.TempDir(), "missing")
+	absent, err := filepath.Abs(filepath.Join("testdata", "consumed", "missing"))
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
 	doc := consumedScope(t)
 	doc.Consumers = append(doc.Consumers, scope.Module{Path: absent})
 
 	got, err := loadScope(t.Context(), doc, HostConfiguration())
 
-	assertMissingConsumer(t, "a scope naming an absent consumer", err, absent)
+	assertMissingConsumer(t, "a scope naming an absent consumer", err, absent, "../missing")
 	if !reflect.DeepEqual(got, Result{}) {
 		t.Errorf("Load(a scope naming an absent consumer) = %+v, want the zero Result", got)
 	}
@@ -186,26 +188,24 @@ func TestLoadRefusesAnAbsentConsumerAsAMissingConsumer(t *testing.T) {
 // installed, which is the second arm of the missing-consumer class.
 func TestLoadRefusesAConsumerWhoseDependenciesAreNotInstalledAsAMissingConsumer(t *testing.T) {
 	stableToolchain(t)
-	consumer := t.TempDir()
-	for name, body := range map[string]string{
-		"go.mod":  "module example.com/uninstalled\n\ngo 1.27.1\n\nrequire example.com/nowhere v1.0.0\n",
-		"main.go": "package main\n\nimport \"example.com/nowhere\"\n\nfunc main() { nowhere.Run() }\n",
-	} {
-		if err := os.WriteFile(filepath.Join(consumer, name), []byte(body), 0o600); err != nil {
-			t.Fatalf("Setup: write %s: %v", name, err)
-		}
-	}
-	doc := consumedScope(t)
-	doc.Consumers = append(doc.Consumers, scope.Module{Path: consumer})
+	root := writeTree(t, map[string]string{
+		"target/go.mod":       "module example.com/consumed\n\ngo 1.27.1\n",
+		"target/lib.go":       "// Package consumed exports one declaration.\npackage consumed\n\n// Used is what nothing references.\nfunc Used() {}\n",
+		"uninstalled/go.mod":  "module example.com/uninstalled\n\ngo 1.27.1\n\nrequire example.com/nowhere v1.0.0\n",
+		"uninstalled/main.go": "package main\n\nimport \"example.com/nowhere\"\n\nfunc main() { nowhere.Run() }\n",
+	})
+	consumer := filepath.Join(root, "uninstalled")
+	doc := scope.Document{Target: scope.Module{Path: filepath.Join(root, "target")}, Consumers: []scope.Module{{Path: consumer}}}
 
 	_, err := loadScope(t.Context(), doc, HostConfiguration())
 
-	assertMissingConsumer(t, "a scope naming a consumer whose import nothing provides", err, consumer, "example.com/nowhere")
+	assertMissingConsumer(t, "a scope naming a consumer whose import nothing provides", err, consumer, "../uninstalled", "example.com/nowhere")
 }
 
 // assertMissingConsumer checks that a load ended with one missing-consumer setup
-// failure whose line names every string of want.
-func assertMissingConsumer(t *testing.T, what string, err error, want ...string) {
+// failure whose line names the consumer at dir by relative, its path from the
+// target root, never by its absolute path, and every string of want.
+func assertMissingConsumer(t *testing.T, what string, err error, dir, relative string, want ...string) {
 	t.Helper()
 	setup, ok := errors.AsType[*failure.Error](err)
 	if !ok || len(setup.Failures) == 0 {
@@ -215,10 +215,13 @@ func assertMissingConsumer(t *testing.T, what string, err error, want ...string)
 		if one.Class != vocab.SetupMissingConsumer {
 			t.Errorf("Load(%s) failed with the class %q, want %q", what, one.Class, vocab.SetupMissingConsumer)
 		}
-		for _, text := range want {
+		for _, text := range append(want, "consumer "+relative+" ") {
 			if !strings.Contains(one.Class+": "+one.Detail, text) {
 				t.Errorf("Load(%s) line = %q, want it to name %q", what, one.Class+": "+one.Detail, text)
 			}
+		}
+		if strings.Contains(one.Detail, dir) {
+			t.Errorf("Load(%s) line = %q, want no absolute path in it", what, one.Class+": "+one.Detail)
 		}
 	}
 }
@@ -233,8 +236,8 @@ func TestLoadRefusesAConsumerThatDoesNotTypeCheck(t *testing.T) {
 	if !errors.As(err, &failure) {
 		t.Fatalf("Load(a scope naming a consumer that does not type-check) = _, %v, want a *Error", err)
 	}
-	if !strings.Contains(failure.Module, filepath.Join("consumed", "broken")) {
-		t.Errorf("(*Error).Module = %q, want it to name the broken consumer", failure.Module)
+	if want := "../broken"; failure.Module != want {
+		t.Errorf("(*Error).Module = %q, want the broken consumer relative to the target root, %q", failure.Module, want)
 	}
 	if len(failure.Diagnostics) == 0 {
 		t.Error("(*Error).Diagnostics is empty, want the toolchain's own diagnostics")
@@ -272,27 +275,6 @@ func TestLoadWithNoConsumerCarriesNone(t *testing.T) {
 
 	if got.Consumers != nil {
 		t.Errorf("Load(a scope declaring no consumer).Consumers = %+v, want nil", got.Consumers)
-	}
-}
-
-func TestSameDir(t *testing.T) {
-	cases := map[string]struct {
-		a, b string
-		want bool
-	}{
-		"identical":              {a: "/src/app", b: "/src/app", want: true},
-		"a trailing separator":   {a: "/src/app/", b: "/src/app", want: true},
-		"an unnormalized parent": {a: "/src/lib/../app", b: "/src/app", want: true},
-		"a different directory":  {a: "/src/app", b: "/src/other", want: false},
-		"one below the other":    {a: "/src/app/inner", b: "/src/app", want: false},
-	}
-	for name, test := range cases {
-		t.Run(name, func(t *testing.T) {
-			a, b := filepath.FromSlash(test.a), filepath.FromSlash(test.b)
-			if got := sameDir(a, b); got != test.want {
-				t.Errorf("sameDir(%q, %q) = %t, want %t", a, b, got, test.want)
-			}
-		})
 	}
 }
 
