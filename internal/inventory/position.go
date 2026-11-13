@@ -8,7 +8,6 @@ import (
 	"go/ast"
 	"go/token"
 	"path/filepath"
-	"strings"
 	"unicode/utf16"
 
 	"github.com/cplieger/deadset-go/v2/internal/scope"
@@ -94,7 +93,7 @@ func (p *Positions) Range(node ast.Node) SourceRange {
 
 // Holds reports whether the byte at is inside the range.
 func (s *SourceRange) Holds(at Offset) bool {
-	return at.File == s.File && at.At >= s.From && at.At < s.To
+	return scope.SameName(at.File, s.File) && at.At >= s.From && at.At < s.To
 }
 
 // Render converts pos into the position a report carries: [Positions.Place], with
@@ -158,7 +157,7 @@ func (p *Positions) counted(pos token.Pos, line []byte) int {
 	from := len(line)
 	for from > 0 {
 		q := p.Fset.Position(pos - token.Pos(len(line)-from+1))
-		if q.Filename != at.Filename || q.Line != at.Line || q.Column != at.Column-(len(line)-from+1) {
+		if !scope.SameName(q.Filename, at.Filename) || q.Line != at.Line || q.Column != at.Column-(len(line)-from+1) {
 			break
 		}
 		from--
@@ -208,6 +207,22 @@ func (p *Positions) Line(pos token.Pos) int { return p.Fset.PositionFor(pos, fal
 func (p *Positions) InTestFile(pos token.Pos) bool {
 	_, test := IsTestFile(p.Offset(pos).File)
 	return test
+}
+
+// Holds reports whether the directory at dir is strictly below the root where both
+// resolve ([scope.Root.Below]), so of two renderers holding one file the one this
+// one holds is the nearer. Positions with no root hold nothing.
+func (p *Positions) Holds(dir string) bool { return p.placed.Below(dir) }
+
+// Directory returns the directory dir relative to the root with forward slashes,
+// placed whole where both resolve ([scope.Root.Place]), so a link to a directory is
+// the directory it leads to, where its files render; empty where the root does not
+// hold it.
+func (p *Positions) Directory(dir string) string {
+	if relative, inside := p.placed.Place(dir); inside {
+		return relative
+	}
+	return ""
 }
 
 // Relative returns name relative to the target root with forward slashes, and an
@@ -273,7 +288,7 @@ func Column(line []byte, offset int) int {
 // is the whole of the analysis' position order: a comparator that ranks records
 // carrying a position calls this rather than comparing the three fields again.
 func ByPosition(a, b token.Position) int {
-	if c := strings.Compare(a.Filename, b.Filename); c != 0 {
+	if c := scope.Order(a.Filename, b.Filename); c != 0 {
 		return c
 	}
 	if c := cmp.Compare(a.Line, b.Line); c != 0 {

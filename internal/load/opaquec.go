@@ -376,7 +376,7 @@ func merged(held, added []string) []string {
 func withoutPaths(held, added []string) []string {
 	kept := make([]string, 0, len(held))
 	for _, path := range held {
-		if !slices.Contains(added, path) {
+		if !scope.Listed(added, path) {
 			kept = append(kept, path)
 		}
 	}

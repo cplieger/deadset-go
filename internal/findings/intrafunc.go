@@ -8,11 +8,11 @@ import (
 	"maps"
 	"slices"
 	"strconv"
-	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/analysis"
@@ -327,8 +327,8 @@ func newPart(code vocab.Code, ref, kind, name string, at token.Position, message
 // comparePositions orders two rendered positions by path, line and column, which
 // is the order a report carries findings in.
 func comparePositions(a, b Position) int {
-	if a.Path != b.Path {
-		return strings.Compare(a.Path, b.Path)
+	if c := scope.Order(a.Path, b.Path); c != 0 {
+		return c
 	}
 	if a.Line != b.Line {
 		return a.Line - b.Line
@@ -346,7 +346,7 @@ func comparePositions(a, b Position) int {
 func (g *intrafunc) findings(held *parts) []draft {
 	slices.SortFunc(held.order, func(a, b partKey) int {
 		return cmp.Or(comparePositions(held.keyed[a].draft.Position, held.keyed[b].draft.Position),
-			strings.Compare(held.keyed[a].file, held.keyed[b].file), cmp.Compare(a.written, b.written))
+			scope.Order(held.keyed[a].file, held.keyed[b].file), cmp.Compare(a.written, b.written))
 	})
 	found := make([]draft, 0, len(held.order))
 	for _, at := range held.order {

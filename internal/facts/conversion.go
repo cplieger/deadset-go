@@ -9,6 +9,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/gotypes"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -105,7 +106,7 @@ type assertion struct {
 //nolint:gocritic // slices.SortFunc fixes a comparator's parameters to values.
 func (s *conversionScan) bySite(a, b Conversion) int {
 	p, q := s.at.Offset(a.Site), s.at.Offset(b.Site)
-	if c := strings.Compare(p.File, q.File); c != 0 {
+	if c := scope.Order(p.File, q.File); c != 0 {
 		return c
 	}
 	if c := p.At - q.At; c != 0 {

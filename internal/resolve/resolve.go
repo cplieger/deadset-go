@@ -443,7 +443,10 @@ func (rs *Resolver) File(pos token.Pos) string {
 }
 
 // owner is the loaded consumer whose file writes pos, empty for the target's, and
-// the renderer of that file.
+// the renderer of that file: of the target and the rooted consumers whose roots
+// hold the file, the one whose root is below every other's where they resolve, so
+// a consumer at a directory above the target never holds a target file however
+// either is spelled.
 func (rs *Resolver) owner(pos token.Pos) (string, *inventory.Positions) {
 	name := rs.pos.Offset(pos).File
 	held, owner := rs.pos, ""
@@ -451,7 +454,7 @@ func (rs *Resolver) owner(pos token.Pos) (string, *inventory.Positions) {
 		held = nil
 	}
 	for _, c := range rs.consumers {
-		if c.rooted && c.pos.Relative(name) != "" && (held == nil || len(c.pos.Root) > len(held.Root)) {
+		if c.rooted && c.pos.Relative(name) != "" && (held == nil || held.Holds(c.pos.Root)) {
 			held, owner = c.pos, c.id
 		}
 	}

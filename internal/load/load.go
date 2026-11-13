@@ -622,9 +622,9 @@ func copyGraph(roots []*packages.Package) []*packages.Package {
 // that cannot be read contributes nothing, so the main modules alone decide.
 func expectedModules(file *ModuleFile, pkgs []*packages.Package) []string {
 	var modules []string
-	add := func(path string) {
-		if path != "" && !slices.Contains(modules, path) {
-			modules = append(modules, path)
+	add := func(module string) {
+		if module != "" && !slices.Contains(modules, module) {
+			modules = append(modules, module)
 		}
 	}
 	for _, p := range pkgs {

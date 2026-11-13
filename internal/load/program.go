@@ -77,7 +77,7 @@ func (top *Topology) scriptPaths(dir string, tree ModuleTree, c *Configuration) 
 			paths = append(paths, held...)
 		}
 	}
-	slices.Sort(paths)
+	slices.SortFunc(paths, scope.Order)
 	return paths
 }
 
@@ -172,7 +172,7 @@ func programPaths(pkgs []*packages.Package, c *Configuration) []string {
 			}
 		}
 	}
-	slices.Sort(paths)
+	slices.SortFunc(paths, scope.Order)
 	return paths
 }
 

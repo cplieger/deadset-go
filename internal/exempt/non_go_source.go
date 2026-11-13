@@ -28,7 +28,7 @@ var nonGoExtensions = [...]string{
 }
 
 // The directories the tree search of non-Go sources does not enter.
-var nonGoSkippedDirs = [...]string{".git", "node_modules", "vendor"}
+var nonGoSkippedNames = [...]string{".git", "node_modules", "vendor"}
 
 // nonGoSources is the linkname-cgo-asm-plugin class's rule N over one
 // configuration: which package directories of the target hold a source in another
@@ -221,7 +221,7 @@ func (n *nonGoSources) scan() {
 	for len(queue) > 0 {
 		dir := queue[0]
 		queue = queue[1:]
-		queue = append(queue, n.scanDir(dir, dir == root, dirs)...)
+		queue = append(queue, n.scanDir(dir, scope.SameName(dir, root), dirs)...)
 	}
 }
 
@@ -243,7 +243,7 @@ func (n *nonGoSources) scanDir(dir string, root bool, packageDirs []string) []st
 		path := filepath.Join(dir, entry.Name())
 		switch {
 		case entry.IsDir():
-			if !slices.Contains(nonGoSkippedDirs[:], entry.Name()) {
+			if !slices.Contains(nonGoSkippedNames[:], entry.Name()) {
 				below = append(below, path)
 			}
 		case nonGoName(entry.Name()):
@@ -275,7 +275,7 @@ func (n *nonGoSources) scanFile(path string, kind load.Kind) {
 func (n *nonGoSources) packageDirs() []string {
 	var dirs []string
 	for _, p := range n.in.Facts.Packages() {
-		if dir := packageDir(p); dir != "" && !slices.Contains(dirs, dir) {
+		if dir := packageDir(p); dir != "" && !scope.Listed(dirs, dir) {
 			dirs = append(dirs, dir)
 		}
 	}

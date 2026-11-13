@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 )
 
 // Readings answers the questions that compare a type of one reading of a package
@@ -224,7 +225,7 @@ func (r *readings) of(p *types.Package) string {
 	}
 	name := fmt.Sprintf("%p", p)
 	if len(files) > 0 {
-		slices.Sort(files)
+		slices.SortFunc(files, scope.Order)
 		name = p.Path() + "\x00" + strings.Join(files, "\x00")
 	}
 	r.names[p] = name

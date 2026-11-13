@@ -100,13 +100,13 @@ func (l *Loaded) moduleFiles() ([]findings.ModuleFile, error) {
 	var files []findings.ModuleFile
 	for i := range l.Topology.Units {
 		unit := &l.Topology.Units[i]
-		if !slices.ContainsFunc(l.loads.outlines[0].units, func(u load.Unit) bool { return u.Dir == unit.Dir }) {
+		if !slices.ContainsFunc(l.loads.outlines[0].units, func(u load.Unit) bool { return scope.SameName(u.Dir, unit.Dir) }) {
 			continue
 		}
 		if unit.FileErr != nil {
 			return nil, unit.FileErr
 		}
-		if unit.File == nil || filepath.Dir(unit.File.Path) != filepath.Clean(unit.Dir) {
+		if unit.File == nil || !scope.SameName(filepath.Dir(unit.File.Path), filepath.Clean(unit.Dir)) {
 			continue
 		}
 		files = append(files, findings.ModuleFile{Dir: unit.Dir, Path: unit.Path, File: deps.Directives(unit.File)})

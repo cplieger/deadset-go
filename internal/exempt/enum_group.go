@@ -6,12 +6,12 @@ import (
 	"go/token"
 	"go/types"
 	"slices"
-	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"golang.org/x/tools/go/packages"
 )
@@ -211,7 +211,7 @@ type egSite struct {
 
 // before orders two sites by the file and byte they are written at.
 func (a *egSite) before(b *egSite) bool {
-	return cmp.Or(strings.Compare(a.at.File, b.at.File), cmp.Compare(a.at.At, b.at.At)) < 0
+	return cmp.Or(scope.Order(a.at.File, b.at.File), cmp.Compare(a.at.At, b.at.At)) < 0
 }
 
 // earliest is the earliest of the sites given, preferring a test file's where

@@ -4,7 +4,6 @@ import (
 	"maps"
 	"path"
 	"path/filepath"
-	"slices"
 
 	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
@@ -308,7 +307,7 @@ func (in *pass) readPackageDirs(r *load.Result, held *packageFacts) {
 	none, root := roots.UnlinkedPackages(r), scope.RootOf(in.Root)
 	for _, p := range r.Packages {
 		at := packageAt{path: p.PkgPath, dir: packageDir(p, root)}
-		if at.dir != "" && !slices.Contains(in.dirs[at.path], at.dir) {
+		if at.dir != "" && !scope.Listed(in.dirs[at.path], at.dir) {
 			in.dirs[at.path] = append(in.dirs[at.path], at.dir)
 		}
 		if p.Name == mainPackageName {

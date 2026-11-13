@@ -9,6 +9,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/findings"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/liveness"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	specfacts "github.com/cplieger/deadset-spec/v8/facts"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -145,7 +146,7 @@ func (l *Loaded) bindingRecords(held []specfacts.Binding, bindings []facts.Bindi
 		}
 		tuple := [4]string{string(record.Role), record.Symbol, b.SchemaFile, b.Schema}
 		if at, ok := seen[tuple]; ok {
-			if b.GeneratedFile < held[at].GeneratedFile {
+			if scope.Order(b.GeneratedFile, held[at].GeneratedFile) < 0 {
 				held[at].GeneratedFile = b.GeneratedFile
 			}
 			continue

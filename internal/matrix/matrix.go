@@ -117,7 +117,7 @@ func collect(top *load.Topology, unit, module string, f *load.ModuleFile, visit 
 func (c *collector) readPackage(dir string) error {
 	return c.top.Walk(dir, func(string) bool { return false }, func(path string, kind load.Kind) error {
 		name := filepath.Base(path)
-		if path == dir || kind != load.File || !buildconstraint.IsGoFile(name) || isTestFile(name) {
+		if scope.SameName(path, dir) || kind != load.File || !buildconstraint.IsGoFile(name) || isTestFile(name) {
 			return nil
 		}
 		return c.read(path)

@@ -180,14 +180,12 @@ func TestAnalyzeReportsAroundAHiddenEntryAsWithoutIt(t *testing.T) {
 }
 
 // linkDraw is one tree of the link property, with no special file: below m, an
-// application whose main package imports, through drawn symbolic links or not,
-// packages of its module and of out beside it. The links are a link to an
-// ancestor, two directories linking to each other, a graph of links two wide, and
-// a link out of the module to out, to the file system's root or into /proc, and
-// an import may name a package below a link that is not there. The module may
-// also list a workspace member, and name a replace target, through a link inside
-// it, which main calls: plain is then the files of the tree spelling them with no
-// link, and unlinked the links that tree leaves out.
+// application whose main package imports, through drawn links or not, packages of
+// its module and of out beside it, through a link to an ancestor, a link cycle, a
+// graph of links, a link out of the module, to / or into /proc, or a missing one.
+// A workspace member or a replace target may be listed through a link inside m
+// (plain then spells the tree with no such link, and unlinked names those links),
+// and a consumer above m may be declared through a link longer than m's directory.
 type linkDraw struct {
 	files    map[string]string
 	links    map[string]string // below the tree, to their targets
@@ -195,6 +193,7 @@ type linkDraw struct {
 	calls    map[string]string // import path to the call main makes through it
 	imports  []string          // below example.com/m
 	unlinked []string
+	ancestor bool // a consumer at the tree's directory, m's parent
 }
 
 // drawLinks is the tree seed draws.
@@ -205,7 +204,7 @@ func drawLinks(seed uint64) linkDraw {
 			"m/go.mod":                "module example.com/m\n\ngo 1.22\n",
 			"m/" + repositoryDocument: `{"target": {"kind": "application"}}`,
 			"m/a/d/d.go":              "package d\n\n// F is what nothing calls.\nfunc F() {}\n",
-			"m/c/c.go":                "package c\n",
+			"m/c/c.go":                "package c\n\n// Label spells what e declares.\nvar Label = \"E\"\n",
 			"m/e/e.go":                "package e\n\n// E is what nothing calls.\nfunc E() {}\n",
 			"out/k/k.go":              "package k\n\n// K is what nothing calls.\nfunc K() {}\n",
 		},
@@ -268,12 +267,31 @@ func drawLinks(seed uint64) linkDraw {
 		d.links["m/k"], d.calls["example.com/v"] = "y", "v.V()"
 		d.unlinked = append(d.unlinked, "m/k")
 	}
+	if r.IntN(2) == 0 {
+		d.files["go.mod"] = "module example.com/top\n\ngo 1.22\n\nrequire example.com/m v0.0.0\n\nreplace example.com/m => ./m\n"
+		d.files["top.go"] = "package main\n\nimport _ \"example.com/m/c\"\n\nfunc main() {}\n"
+		d.ancestor = true
+	}
 	d.files["m/main.go"] = mainCalling(d.imports, d.calls)
 	return d
 }
 
+// ancestorScope is the scope document a draw with a consumer above m writes beside m.
+const ancestorScope = "ancestor-scope.json"
+
+// invocation is where analyze runs over the draw's tree at dir and with what: in m
+// on m, and where a consumer above m is declared, in its directory, which holds
+// both, through the scope document.
+func (d linkDraw) invocation(dir string) (from string, args []string) {
+	if !d.ancestor {
+		return filepath.Join(dir, "m"), []string{"--target=."}
+	}
+	return dir, []string{"--scope=" + ancestorScope, "--config=m/" + repositoryDocument}
+}
+
 // written is the directory of the draw's tree, through every drawn link where
 // linked, and otherwise spelled as plain spells it, with no link plain leaves out.
+// A consumer above m is declared through a link where linked, else by its directory.
 func (d linkDraw) written(t *testing.T, linked bool) string {
 	t.Helper()
 	files := maps.Clone(d.files)
@@ -290,6 +308,15 @@ func (d linkDraw) written(t *testing.T, linked bool) string {
 			t.Fatalf("Setup: %v", err)
 		}
 		symlinkTo(d.links[link])(t, path)
+	}
+	if d.ancestor {
+		consumer := dir
+		if linked {
+			consumer = filepath.Join(sandbox.Dir(t), strings.Repeat("l", 96))
+			symlink(t, dir, consumer)
+		}
+		writeDocument(t, dir, ancestorScope, `{"target": {"id": "example.com/m", "role": "target", "path": "m"},`+
+			` "consumers": [{"id": "example.com/top", "role": "consumer", "path": "`+consumer+`"}]}`)
 	}
 	return dir
 }
@@ -334,12 +361,13 @@ func blankImports(paths []string) string {
 }
 
 // analyzedBy is the exit code, the standard error, the findings exactly as the
-// report writes them, and the unread-entry notes of an analysis of the module m
-// below dir by binary.
-func analyzedBy(t *testing.T, binary, dir string) (code int, stderr, findings string, notes []string) {
+// report writes them, and the unread-entry notes of an analysis of the draw's
+// module m below dir by binary ([linkDraw.invocation]).
+func (d linkDraw) analyzedBy(t *testing.T, binary, dir string) (code int, stderr, findings string, notes []string) {
 	t.Helper()
 	reportPath := filepath.Join(sandbox.Dir(t), "report.json")
-	got, stalled := invokedBinaryWithin(t, binary, 2*time.Minute, filepath.Join(dir, "m"), "analyze", "--target=.", "--report="+reportPath)
+	from, args := d.invocation(dir)
+	got, stalled := invokedBinaryWithin(t, binary, 2*time.Minute, from, append([]string{"analyze", "--report=" + reportPath}, args...)...)
 	if stalled {
 		t.Fatalf("%s analyze did not return within two minutes", binary)
 	}
@@ -373,14 +401,12 @@ func analyzedBy(t *testing.T, binary, dir string) (code int, stderr, findings st
 const referenceBinary = "DEADSET_GO_REFERENCE"
 
 // TestAnalyzeReportsATreeOfLinksWithNoSpecialFileAsTheReference draws trees of
-// symbolic links in and out of the module, cycles and graphs of links among them,
-// workspace members and replace targets reached through links inside it, with no
-// special file, and pins, within two minutes a run, that the scan changes nothing
-// there ([program.6]): no entry is hidden, so no note names one; a tree listing a
-// member or a replace target through a link reports as the tree spelling it with no
-// link, as one file has one name in every reading; and where [referenceBinary]
-// names a binary of v2.0.0-dev.50, the run ends with its exit code over the tree
-// with no such link and writes its standard error and its findings byte for byte.
+// links in and out of the module ([linkDraw]) with no special file, and pins,
+// within two minutes a run, that the scan changes nothing there ([program.6]): no
+// note names a hidden entry; a member, a replace target or a consumer above the
+// module spelled through a link reports as the tree spelling it with no link; and
+// where [referenceBinary] names a binary of v2.0.0-dev.50, the run over the tree
+// with no such link ends with its exit code, standard error and findings.
 func TestAnalyzeReportsATreeOfLinksWithNoSpecialFileAsTheReference(t *testing.T) {
 	t.Parallel()
 	reference := os.Getenv(referenceBinary)
@@ -389,14 +415,14 @@ func TestAnalyzeReportsATreeOfLinksWithNoSpecialFileAsTheReference(t *testing.T)
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
 			t.Parallel()
 			dir := d.written(t, true)
-			code, stderr, findings, notes := analyzedBy(t, commandBinary(t), dir)
+			code, stderr, findings, notes := d.analyzedBy(t, commandBinary(t), dir)
 			if len(notes) > 0 {
 				t.Errorf("analyze over %v wrote unread-entry notes for %q, want none: the tree holds no special file", d, notes)
 			}
 			plain := dir
-			if len(d.unlinked) > 0 {
+			if len(d.unlinked) > 0 || d.ancestor {
 				plain = d.written(t, false)
-				plainCode, plainStderr, plainFindings, _ := analyzedBy(t, commandBinary(t), plain)
+				plainCode, plainStderr, plainFindings, _ := d.analyzedBy(t, commandBinary(t), plain)
 				if code != plainCode || stderr != plainStderr || findings != plainFindings {
 					t.Errorf("analyze over %v = %d writing %q and the findings %s, want what it reports with no link to a member or a replace target, %d writing %q and %s",
 						d, code, stderr, findings, plainCode, plainStderr, plainFindings)
@@ -405,7 +431,7 @@ func TestAnalyzeReportsATreeOfLinksWithNoSpecialFileAsTheReference(t *testing.T)
 			if reference == "" {
 				return
 			}
-			wantCode, wantStderr, wantFindings, _ := analyzedBy(t, reference, plain)
+			wantCode, wantStderr, wantFindings, _ := d.analyzedBy(t, reference, plain)
 			if code != wantCode || stderr != wantStderr || findings != wantFindings {
 				t.Errorf("analyze over %v = %d writing %q and the findings %s, want the reference's %d writing %q and %s",
 					d, code, stderr, findings, wantCode, wantStderr, wantFindings)

@@ -294,8 +294,8 @@ func (top *Topology) spell() []hiddenEntry {
 	for _, root := range top.roots {
 		hidden = append(hidden, under(root.path, e.of(spelling{id: root.id, links: 1}), false)...)
 	}
-	slices.SortFunc(hidden, func(a, b hiddenEntry) int { return strings.Compare(a.path, b.path) })
-	return slices.CompactFunc(hidden, func(a, b hiddenEntry) bool { return a.path == b.path })
+	slices.SortFunc(hidden, func(a, b hiddenEntry) int { return scope.Order(a.path, b.path) })
+	return slices.CompactFunc(hidden, func(a, b hiddenEntry) bool { return scope.SameName(a.path, b.path) })
 }
 
 // spelling is a walked directory and the number of symbolic links a path below it
@@ -434,8 +434,8 @@ func (top *Topology) obscured(r *Result) (hidden, dirs []string) {
 			dirs = append(dirs, filepath.Dir(path))
 		}
 	}
-	slices.Sort(dirs)
-	return hidden, slices.Compact(dirs)
+	slices.SortFunc(dirs, scope.Order)
+	return hidden, slices.CompactFunc(dirs, scope.SameName)
 }
 
 // inUnitTree reports whether dir is a package directory of the Go tree of one of
@@ -542,7 +542,7 @@ func (top *Topology) hiddenSource(own, imported []string) (hiddenEntry, bool) {
 	for i, dir := range slices.Concat(own, imported) {
 		for _, h := range top.hidden {
 			name := filepath.Base(h.path)
-			if h.kind == absent && filepath.Dir(h.path) == dir && buildconstraint.IsSourceFile(name) &&
+			if h.kind == absent && scope.Same(filepath.Dir(h.path), dir) && buildconstraint.IsSourceFile(name) &&
 				(i < len(own) || !strings.HasSuffix(name, "_test.go")) {
 				return h, true
 			}

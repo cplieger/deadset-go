@@ -93,26 +93,34 @@ func (l *Loaded) droppedNotes() []report.Note {
 	return notes
 }
 
-// unreadNotes is one unread-entry note per path of the tree the run could not
-// read, saying what follows: code the load could not read may use any export of
-// the target, and an entry rule N could not read keeps every function and variable.
+// unreadNotes is one unread-entry note per entry of the tree the run could not
+// read, named where its directory resolves ([load.Topology.Rel]), saying what
+// follows: code the load could not read may use any export of the target, and an
+// entry rule N could not read keeps every function and variable.
 func (p *Prepared) unreadNotes() []report.Note {
-	paths := slices.Clone(p.Topology.Unread)
-	for _, path := range p.unread {
-		if !slices.Contains(paths, path) {
-			paths = append(paths, path)
+	var entries []string
+	unloaded, unscanned := make(map[string]bool), make(map[string]bool)
+	for _, held := range []struct {
+		by    map[string]bool
+		paths []string
+	}{{unloaded, p.Topology.Unread}, {unscanned, p.unread}} {
+		for _, path := range held.paths {
+			entry := p.Topology.Rel(path)
+			if !unloaded[entry] && !unscanned[entry] {
+				entries = append(entries, entry)
+			}
+			held.by[entry] = true
 		}
 	}
-	notes := make([]report.Note, 0, len(paths))
-	for _, path := range paths {
+	notes := make([]report.Note, 0, len(entries))
+	for _, entry := range entries {
 		var effects []string
-		if slices.Contains(p.Topology.Unread, path) {
+		if unloaded[entry] {
 			effects = append(effects, "the run does not analyze code there, which may use any export of the target, so every export is possible")
 		}
-		if slices.Contains(p.unread, path) {
+		if unscanned[entry] {
 			effects = append(effects, "it may be a source in another language than Go naming any function or variable of the target, so every one is kept")
 		}
-		entry := p.Topology.Rel(path)
 		notes = append(notes, report.Note{
 			Kind:    report.NoteKindUnreadEntry,
 			Path:    entry,

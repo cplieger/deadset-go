@@ -11,6 +11,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -46,7 +47,7 @@ func Inline(count int, at func(config int) (*Configuration, error)) ([]core.Reco
 		directives = append(directives, d)
 	}
 	slices.SortFunc(directives, func(a, b *directive) int {
-		return cmp.Or(inventory.ByPosition(a.at, b.at), strings.Compare(a.written.file, b.written.file), cmp.Compare(a.written.offset, b.written.offset))
+		return cmp.Or(inventory.ByPosition(a.at, b.at), scope.Order(a.written.file, b.written.file), cmp.Compare(a.written.offset, b.written.offset))
 	})
 	var records []core.Record
 	var refusals []core.Refusal

@@ -117,7 +117,7 @@ func (top *Topology) record(path string, kind Kind) {
 	case Unread:
 		top.AddUnread(path)
 	case leftOut:
-		if top.Holds(path) && !slices.Contains(top.LeftOut, path) {
+		if top.Holds(path) && !top.recorded(top.LeftOut, path) {
 			top.LeftOut = append(top.LeftOut, path)
 		}
 	}
@@ -126,9 +126,17 @@ func (top *Topology) record(path string, kind Kind) {
 // AddUnread records one more path at or below the target root the analysis cannot
 // read.
 func (top *Topology) AddUnread(path string) {
-	if top.Holds(path) && !slices.Contains(top.Unread, path) {
+	if top.Holds(path) && !top.recorded(top.Unread, path) {
 		top.Unread = append(top.Unread, path)
 	}
+}
+
+// recorded reports whether held names the entry at path where both resolve
+// ([Topology.Rel]): the matrix's walk of a directory the toolchain names reaches an
+// entry the target's walk recorded, under the toolchain's spelling.
+func (top *Topology) recorded(held []string, path string) bool {
+	entry := top.Rel(path)
+	return slices.ContainsFunc(held, func(recorded string) bool { return top.Rel(recorded) == entry })
 }
 
 // Holds reports whether the entry at path is the target root or lies below it,

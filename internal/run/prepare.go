@@ -2,13 +2,13 @@ package run
 
 import (
 	"os"
-	"slices"
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/findings"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/report"
 )
 
@@ -112,7 +112,7 @@ func (p *Prepared) add(computed *exempt.Computed) {
 		p.arriving[id] = true
 	}
 	for _, path := range computed.Unread {
-		if !slices.Contains(p.unread, path) {
+		if !scope.Listed(p.unread, path) {
 			p.unread = append(p.unread, path)
 		}
 	}

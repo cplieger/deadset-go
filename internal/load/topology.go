@@ -342,11 +342,11 @@ func (top *Topology) meetEnvFiles() {
 			continue
 		}
 		top.envOff[loads[i].Dir] = true
-		if !slices.Contains(top.EnvFiles, file) {
+		if !slices.ContainsFunc(top.EnvFiles, func(held EnvFile) bool { return held.Named == file.Named && scope.SameEntry(held.Path, file.Path) }) {
 			top.EnvFiles = append(top.EnvFiles, file)
 		}
 	}
-	slices.SortFunc(top.EnvFiles, func(a, b EnvFile) int { return strings.Compare(a.Path, b.Path) })
+	slices.SortFunc(top.EnvFiles, func(a, b EnvFile) int { return scope.Order(top.Rel(a.Path), top.Rel(b.Path)) })
 }
 
 // noEnvFile reports whether a toolchain started in dir runs with GOENV=off.
@@ -584,7 +584,7 @@ func (top *Topology) nestedModules(ctx context.Context, declared []scope.Module)
 		switch {
 		case ctx.Err() != nil:
 			return ctx.Err()
-		case kind != directory || path == top.Root || !IsModuleRoot(path) || top.isUnit(path) || declares(declared, path):
+		case kind != directory || scope.SameName(path, top.Root) || !IsModuleRoot(path) || top.isUnit(path) || declares(declared, path):
 			return nil
 		}
 		m := discoveredModule{Dir: path, Workspace: workspaceOff}
@@ -632,7 +632,7 @@ func (top *Topology) readers(ctx context.Context, declared []scope.Module) ([]di
 		}
 		if m.File != nil {
 			required := m.File.required()
-			m.Consumes = slices.DeleteFunc(top.unitPaths(), func(path string) bool { return !slices.Contains(required, path) })
+			m.Consumes = slices.DeleteFunc(top.unitPaths(), func(module string) bool { return !slices.Contains(required, module) })
 		}
 		if m.FileErr != nil || len(m.Consumes) > 0 {
 			readers = append(readers, m)
@@ -934,7 +934,7 @@ func (top *Topology) underscoredPackages(ctx context.Context, dir string, tree M
 			return ctx.Err()
 		}
 		rel := relative[path]
-		if path != dir {
+		if !scope.SameName(path, dir) {
 			rel = filepath.Join(relative[filepath.Dir(path)], filepath.Base(path))
 		}
 		if kind == directory {

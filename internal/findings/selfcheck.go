@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -181,7 +182,7 @@ func (in *pass) fileRef(path string) string {
 	}
 	for i := range in.Merged.Symbols {
 		symbol := &in.Merged.Symbols[i]
-		if symbol.Kind == inventory.KindFile && symbol.Pos.Filename == path {
+		if symbol.Kind == inventory.KindFile && scope.SameName(symbol.Pos.Filename, path) {
 			return symbol.Ref
 		}
 	}

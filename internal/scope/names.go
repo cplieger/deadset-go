@@ -16,13 +16,12 @@ var namesChecked = testing.Testing()
 
 // Name is the one name the run gives the file at path, whatever spelling reached
 // it: its directory resolved ([resolvePath]) and its own name kept, which inside
-// the root is the root's own spelling joined with that path relative to the
-// resolved root, and elsewhere the resolved path itself. Two spellings of one file
-// through directory links, inside the root or outside it, are one name, so every
-// reading of the file writes each declaration at one position. A file that is
-// itself a link keeps its own name, as the toolchain compiles it as a file of its
-// directory and dev.50 renders it there. Name gives a name its own name back. The
-// zero Root names every file by its resolved directory.
+// the root is the root's spelling joined with the path relative to the resolved
+// root, and elsewhere the resolved path. Two spellings of one file through
+// directory links are one name, so each declaration has one position. A file that
+// is itself a link keeps its own name, as the toolchain compiles it as a file of
+// its directory. Name gives a name back unchanged. The zero Root names every file
+// by its resolved directory.
 func (r Root) Name(path string) string {
 	abs, err := filepath.Abs(path)
 	if err != nil {

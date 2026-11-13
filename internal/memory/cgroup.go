@@ -130,7 +130,7 @@ func ancestry(point, leaf string) []string {
 	var dirs []string
 	for dir := leaf; ; dir = filepath.Dir(dir) {
 		dirs = append(dirs, dir)
-		if rel, inside := mount.Place(dir); !inside || rel == "." || dir == filepath.Dir(dir) {
+		if rel, inside := mount.Place(dir); !inside || rel == "." || scope.SameName(dir, filepath.Dir(dir)) {
 			return dirs
 		}
 	}

@@ -3,11 +3,11 @@ package run
 import (
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/findings"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/report"
 )
 
@@ -98,7 +98,7 @@ func (l *Loaded) identity() (string, error) {
 		units = l.loads.outlines[0].units
 	}
 	for i := range units {
-		if filepath.Clean(units[i].Dir) == filepath.Clean(l.Root) && units[i].Path != "" {
+		if scope.Same(units[i].Dir, l.Root) && units[i].Path != "" {
 			return units[i].Path, nil
 		}
 	}

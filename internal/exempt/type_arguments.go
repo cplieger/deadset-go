@@ -160,12 +160,12 @@ func sourceImports(pkgs []*packages.Package) map[string][]string {
 		if _, seen := held[p.PkgPath]; seen {
 			return
 		}
-		paths := make([]string, 0, len(p.Imports))
+		imports := make([]string, 0, len(p.Imports))
 		for _, imported := range p.Imports {
-			paths = append(paths, imported.PkgPath)
+			imports = append(imports, imported.PkgPath)
 		}
-		slices.Sort(paths)
-		held[p.PkgPath] = paths
+		slices.Sort(imports)
+		held[p.PkgPath] = imports
 	})
 	return held
 }

@@ -173,8 +173,8 @@ func (r reach) joinReaders(other reach) (tagKeys, methodReach) {
 func joinPackages(held, other []*types.Package) []*types.Package {
 	joined := slices.Clone(held)
 	for _, pkg := range other {
-		at, found := slices.BinarySearchFunc(joined, pkg.Path(), func(p *types.Package, path string) int {
-			return strings.Compare(p.Path(), path)
+		at, found := slices.BinarySearchFunc(joined, pkg.Path(), func(p *types.Package, pkgPath string) int {
+			return strings.Compare(p.Path(), pkgPath)
 		})
 		if !found {
 			joined = slices.Insert(joined, at, pkg)

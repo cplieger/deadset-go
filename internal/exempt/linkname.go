@@ -95,7 +95,7 @@ func (d *linkname) exemptions() []Exemption {
 	slices.SortFunc(found, func(a, b Exemption) int {
 		return cmp.Or(
 			inventory.ByPosition(a.Site, b.Site),
-			strings.Compare(a.File, b.File),
+			scope.Order(a.File, b.File),
 			cmp.Compare(a.ID, b.ID),
 			strings.Compare(a.Detail, b.Detail),
 		)

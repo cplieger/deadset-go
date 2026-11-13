@@ -16,6 +16,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"golang.org/x/tools/go/packages"
 )
 
@@ -235,7 +236,7 @@ func byUse(a, b Reference) int {
 	if c := inventory.ByPosition(a.Pos, b.Pos); c != 0 {
 		return c
 	}
-	if c := cmp.Or(strings.Compare(a.Site.File, b.Site.File), cmp.Compare(a.Site.At, b.Site.At)); c != 0 {
+	if c := cmp.Or(scope.Order(a.Site.File, b.Site.File), cmp.Compare(a.Site.At, b.Site.At)); c != 0 {
 		return c
 	}
 	if c := strings.Compare(string(a.To), string(b.To)); c != 0 {
@@ -389,7 +390,7 @@ func carryWrites(refs []Reference) {
 		r := &refs[i]
 		for ; next < len(writes); next++ {
 			span := refs[writes[next]].Span
-			if c := strings.Compare(span.File, r.Site.File); c > 0 || (c == 0 && span.From > r.Site.At) {
+			if c := scope.Order(span.File, r.Site.File); c > 0 || (c == 0 && span.From > r.Site.At) {
 				break
 			}
 			open = append(open, writes[next])
@@ -414,7 +415,7 @@ func writesBySpan(refs []Reference) []int {
 	}
 	slices.SortFunc(writes, func(a, b int) int {
 		x, y := refs[a].Span, refs[b].Span
-		return cmp.Or(strings.Compare(x.File, y.File), cmp.Compare(x.From, y.From), cmp.Compare(y.To, x.To))
+		return cmp.Or(scope.Order(x.File, y.File), cmp.Compare(x.From, y.From), cmp.Compare(y.To, x.To))
 	})
 	return writes
 }
@@ -428,7 +429,7 @@ func bySite(refs []Reference) []int {
 	}
 	slices.SortStableFunc(sites, func(a, b int) int {
 		x, y := refs[a].Site, refs[b].Site
-		return cmp.Or(strings.Compare(x.File, y.File), cmp.Compare(x.At, y.At))
+		return cmp.Or(scope.Order(x.File, y.File), cmp.Compare(x.At, y.At))
 	})
 	return sites
 }

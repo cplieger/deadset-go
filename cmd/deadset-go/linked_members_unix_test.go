@@ -101,15 +101,12 @@ var memberPlain = map[string]string{"go.work": "go 1.27.1\n\nuse (\n\t.\n\t./x/u
 // parameter nothing reads.
 const runAndAdd = "// Package u runs.\npackage u\n\n// Run runs.\nfunc Run() { println(add(1, 2)) }\n\nfunc add(a, unused int) int { return a }\n"
 
-// A module, a replace target, a workspace member or a consumer spelled through a
-// link inside the target is the directory the link leads to, so the run reports
-// over the tree what it reports over the same tree spelled with no link, byte for
-// byte, its exit code and standard error included, and every position names the
-// file where it resolves. One file is one name in every reading: the whole check of
-// a workspace member and the check of its declarations that another member's load
-// runs write each declaration at one position, so the member's live code is not
-// reported dead. Where [referenceBinary] names a binary of v2.0.0-dev.50, the tree
-// spelled with no link reports as that binary reports it.
+// A module, a replace target, a workspace member, a consumer or a generator's
+// input spelled through a link inside the target is the directory the
+// link leads to: the run reports over the tree what it reports over the tree
+// spelled with no link, byte for byte, exit code and standard error included, and
+// every position names the file where it resolves. Where [referenceBinary] names a
+// binary of v2.0.0-dev.50, the tree spelled with no link reports as it reports.
 func TestAnalyzeReportsATreeSpelledThroughALinkInsideItAsSpelledWithout(t *testing.T) {
 	t.Parallel()
 	library := libraryFiles("")
@@ -181,6 +178,32 @@ func TestAnalyzeReportsATreeSpelledThroughALinkInsideItAsSpelledWithout(t *testi
 				}}
 			}(),
 			want: []string{"DS1001 lib.go Forgotten"},
+			exit: "findings",
+		},
+		{
+			name: "a generator's package argument through a link",
+			tree: func() linkedTree {
+				files := maps.Clone(library)
+				files["gen.go"] = "package app\n\n//go:generate go run entgo.io/ent/cmd/ent generate ./l\n"
+				files["schema/user.go"] = "// Package schema is what the generator reads.\npackage schema\n\n// User is a schema the generator reads.\ntype User struct{}\n"
+				return linkedTree{files: files, links: map[string]string{"l": "schema"}, plain: map[string]string{
+					"gen.go": "package app\n\n//go:generate go run entgo.io/ent/cmd/ent generate ./schema\n",
+				}}
+			}(),
+			want: []string{"DS1001 lib.go Used", "DS1001 lib.go Forgotten"},
+			exit: "findings",
+		},
+		{
+			name: "a mockgen source named through a link",
+			tree: func() linkedTree {
+				files := maps.Clone(library)
+				files["gen.go"] = "package app\n\n//go:generate mockgen -source=l/store.go -destination=mock.go\n"
+				files["store.go"] = "package app\n\n// Store is what the generator mocks.\ntype Store interface {\n\t// Get gets.\n\tGet() string\n}\n"
+				return linkedTree{files: files, links: map[string]string{"l": "."}, plain: map[string]string{
+					"gen.go": "package app\n\n//go:generate mockgen -source=store.go -destination=mock.go\n",
+				}}
+			}(),
+			want: []string{"DS1001 lib.go Used", "DS1001 lib.go Forgotten"},
 			exit: "findings",
 		},
 		{

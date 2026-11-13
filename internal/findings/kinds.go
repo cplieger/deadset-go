@@ -31,6 +31,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
+	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/report"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -1115,12 +1116,12 @@ func DeletableLines(c *liveness.Component) int {
 	}
 	ordered := slices.Clone(c.Spans)
 	slices.SortFunc(ordered, func(a, b liveness.Span) int {
-		return cmp.Or(strings.Compare(a.Path, b.Path), cmp.Compare(a.First, b.First))
+		return cmp.Or(scope.Order(a.Path, b.Path), cmp.Compare(a.First, b.First))
 	})
 	total := 0
 	var covered liveness.Span
 	for i, s := range ordered {
-		if i == 0 || s.Path != covered.Path || s.First > covered.Last {
+		if i == 0 || !scope.SameName(s.Path, covered.Path) || s.First > covered.Last {
 			total += s.Last - s.First + 1
 			covered = s
 			continue
