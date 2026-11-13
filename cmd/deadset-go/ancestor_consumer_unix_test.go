@@ -72,12 +72,14 @@ func TestAnalyzeKeepsTheTargetsFilesFromAConsumerAboveIt(t *testing.T) {
 			},
 		},
 		{
-			name: "the target below the temporary directory as spelled, the consumer where it resolves",
+			name: "the target below a short link as run, the consumer where it resolves",
 			tree: func(t *testing.T) (string, string, string) {
-				spelled := writeModule(t, ancestorFiles(""))
-				parent, err := filepath.EvalSymlinks(spelled)
-				if err != nil {
-					t.Fatalf("Setup: %v", err)
+				deep := strings.Repeat("r", 96)
+				parent := filepath.Join(resolvedModule(t, ancestorFiles(deep+"/")), deep)
+				spelled := filepath.Join(sandbox.Dir(t), "v")
+				symlink(t, parent, spelled)
+				if resolved, err := filepath.EvalSymlinks(spelled); err != nil || resolved == spelled {
+					t.Fatalf("Setup: %s resolves to %q (%v), want the longer directory it links to", spelled, resolved, err)
 				}
 				return spelled, "t", parent
 			},

@@ -20,8 +20,8 @@ var namesChecked = testing.Testing()
 // root, and elsewhere the resolved path. Two spellings of one file through
 // directory links are one name, so each declaration has one position. A file that
 // is itself a link keeps its own name, as the toolchain compiles it as a file of
-// its directory. Name gives a name back unchanged. The zero Root names every file
-// by its resolved directory.
+// its directory. Name gives a name it produced back unchanged. The zero Root
+// names every file by its resolved directory.
 func (r Root) Name(path string) string {
 	abs, err := filepath.Abs(path)
 	if err != nil {
