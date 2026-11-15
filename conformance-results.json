@@ -8,10 +8,10 @@
   "result": "pass",
   "totals": {
     "fixtures": 256,
-    "pass": 249,
+    "pass": 254,
     "gap": 0,
     "fail": 0,
-    "pending": 7
+    "pending": 2
   },
   "fixtures": [
     {
@@ -4492,10 +4492,120 @@
           "symbol": "Listed.X",
           "result": "pass",
           "actual": {
-            "report": "none",
-            "retained_by": [
-              "enum-group"
-            ]
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "fixability": "manual"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Local.First",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "fixability": "manual"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Mid.B",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "fixability": "manual"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Mode.Auto",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "fixability": "deletable"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Mode.Off",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "fixability": "deletable"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Mode.On",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "fixability": "deletable"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Pace.B",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "fixability": "deletable"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "Pace.C",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "fixability": "deletable"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         },
         {
@@ -4584,10 +4694,15 @@
           "symbol": "State.Unknown",
           "result": "pass",
           "actual": {
-            "report": "none",
-            "retained_by": [
-              "enum-group"
-            ]
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "fixability": "manual"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         },
         {
@@ -4628,6 +4743,21 @@
             "retained_by": [
               "enum-group"
             ]
+          }
+        },
+        {
+          "symbol": "Unit.B",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "fixability": "manual"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         },
         {
@@ -5209,10 +5339,15 @@
           "symbol": "LibKind.A",
           "result": "pass",
           "actual": {
-            "report": "none",
-            "retained_by": [
-              "enum-group"
-            ]
+            "report": "DS1005",
+            "confidence": "possible",
+            "reachability_class": "possible",
+            "liveness_relation": "reference-counting",
+            "fixability": "manual"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         },
         {
@@ -5281,10 +5416,15 @@
           "symbol": "LibMood.Sad",
           "result": "pass",
           "actual": {
-            "report": "none",
-            "retained_by": [
-              "enum-group"
-            ]
+            "report": "DS1005",
+            "confidence": "possible",
+            "reachability_class": "possible",
+            "liveness_relation": "reference-counting",
+            "fixability": "manual"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         },
         {
@@ -5305,10 +5445,15 @@
           "symbol": "Marker.Unknown",
           "result": "pass",
           "actual": {
-            "report": "none",
-            "retained_by": [
-              "enum-group"
-            ]
+            "report": "DS1102",
+            "confidence": "possible",
+            "reachability_class": "possible",
+            "liveness_relation": "reference-counting",
+            "fixability": "manual"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         }
       ],
@@ -5354,6 +5499,21 @@
             "retained_by": [
               "enum-group"
             ]
+          }
+        },
+        {
+          "symbol": "Crossed.A",
+          "result": "pass",
+          "actual": {
+            "report": "DS1005",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "fixability": "manual"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         },
         {
@@ -11736,30 +11896,63 @@
           "symbol": "Low",
           "result": "pass",
           "actual": {
-            "report": "none",
-            "retained_by": [
-              "enum-group"
-            ]
+            "report": "DS1001",
+            "symbol_kind": "constant",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "fixability": "manual",
+            "component": {
+              "root": true,
+              "symbol_count": 1,
+              "deletable_lines": 0
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         },
         {
           "symbol": "Quiet",
           "result": "pass",
           "actual": {
-            "report": "none",
-            "retained_by": [
-              "enum-group"
-            ]
+            "report": "DS1101",
+            "symbol_kind": "constant",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "fixability": "manual",
+            "component": {
+              "root": true,
+              "symbol_count": 1,
+              "deletable_lines": 0
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         },
         {
           "symbol": "colorOld",
           "result": "pass",
           "actual": {
-            "report": "none",
-            "retained_by": [
-              "enum-group"
-            ]
+            "report": "DS1104",
+            "symbol_kind": "constant",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "fixability": "manual",
+            "component": {
+              "root": true,
+              "symbol_count": 1,
+              "deletable_lines": 0
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         },
         {
@@ -11808,10 +12001,21 @@
           "symbol": "probeA",
           "result": "pass",
           "actual": {
-            "report": "none",
-            "retained_by": [
-              "enum-group"
-            ]
+            "report": "DS1102",
+            "symbol_kind": "constant",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "fixability": "manual",
+            "component": {
+              "root": true,
+              "symbol_count": 1,
+              "deletable_lines": 0
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         },
         {
@@ -11945,10 +12149,21 @@
           "symbol": "floor",
           "result": "pass",
           "actual": {
-            "report": "none",
-            "retained_by": [
-              "enum-group"
-            ]
+            "report": "DS1002",
+            "symbol_kind": "constant",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "fixability": "manual",
+            "component": {
+              "root": true,
+              "symbol_count": 1,
+              "deletable_lines": 0
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         },
         {
@@ -11969,20 +12184,42 @@
           "symbol": "levelLow",
           "result": "pass",
           "actual": {
-            "report": "none",
-            "retained_by": [
-              "enum-group"
-            ]
+            "report": "DS1002",
+            "symbol_kind": "constant",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "fixability": "manual",
+            "component": {
+              "root": true,
+              "symbol_count": 1,
+              "deletable_lines": 0
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         },
         {
           "symbol": "limit",
           "result": "pass",
           "actual": {
-            "report": "none",
-            "retained_by": [
-              "enum-group"
-            ]
+            "report": "DS1002",
+            "symbol_kind": "constant",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "fixability": "manual",
+            "component": {
+              "root": true,
+              "symbol_count": 1,
+              "deletable_lines": 0
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         },
         {
@@ -12016,17 +12253,42 @@
           "symbol": "mode",
           "result": "pass",
           "actual": {
-            "report": "none"
+            "report": "DS1002",
+            "symbol_kind": "type",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reachability",
+            "fixability": "deletable",
+            "component": {
+              "root": false,
+              "symbol_count": 4,
+              "deletable_lines": 4
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         },
         {
           "symbol": "modeA",
           "result": "pass",
           "actual": {
-            "report": "none",
-            "retained_by": [
-              "enum-group"
-            ]
+            "report": "DS1005",
+            "symbol_kind": "enum-member",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "fixability": "deletable",
+            "component": {
+              "root": true,
+              "symbol_count": 4,
+              "deletable_lines": 4
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         },
         {
@@ -12041,8 +12303,8 @@
             "fixability": "deletable",
             "component": {
               "root": true,
-              "symbol_count": 2,
-              "deletable_lines": 2
+              "symbol_count": 4,
+              "deletable_lines": 4
             }
           },
           "suppression": {
@@ -12062,8 +12324,8 @@
             "fixability": "deletable",
             "component": {
               "root": true,
-              "symbol_count": 2,
-              "deletable_lines": 2
+              "symbol_count": 4,
+              "deletable_lines": 4
             }
           },
           "suppression": {
@@ -12123,10 +12385,21 @@
           "symbol": "phaseIdle",
           "result": "pass",
           "actual": {
-            "report": "none",
-            "retained_by": [
-              "enum-group"
-            ]
+            "report": "DS1005",
+            "symbol_kind": "enum-member",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "fixability": "manual",
+            "component": {
+              "root": true,
+              "symbol_count": 1,
+              "deletable_lines": 0
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         },
         {
@@ -12232,10 +12505,21 @@
           "symbol": "spareA",
           "result": "pass",
           "actual": {
-            "report": "none",
-            "retained_by": [
-              "enum-group"
-            ]
+            "report": "DS1002",
+            "symbol_kind": "constant",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting",
+            "fixability": "deletable",
+            "component": {
+              "root": true,
+              "symbol_count": 2,
+              "deletable_lines": 2
+            }
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
           }
         },
         {
@@ -12250,8 +12534,8 @@
             "fixability": "deletable",
             "component": {
               "root": true,
-              "symbol_count": 1,
-              "deletable_lines": 1
+              "symbol_count": 2,
+              "deletable_lines": 2
             }
           },
           "suppression": {
@@ -12333,13 +12617,13 @@
     },
     {
       "fixture": "proto-field-read-in-one-language",
-      "result": "pending",
+      "result": "pass",
       "expectations": [],
       "unexpected": []
     },
     {
       "fixture": "proto-field-written-only",
-      "result": "pending",
+      "result": "pass",
       "expectations": [],
       "unexpected": []
     },
@@ -12381,7 +12665,7 @@
     },
     {
       "fixture": "proto-hand-serializer-reads",
-      "result": "pending",
+      "result": "pass",
       "expectations": [],
       "unexpected": []
     },
@@ -12411,7 +12695,7 @@
     },
     {
       "fixture": "proto-protojson-unmarshal-caps",
-      "result": "pending",
+      "result": "pass",
       "expectations": [],
       "unexpected": []
     },
@@ -12444,7 +12728,7 @@
     },
     {
       "fixture": "proto-transport-reads-nothing",
-      "result": "pending",
+      "result": "pass",
       "expectations": [],
       "unexpected": []
     },

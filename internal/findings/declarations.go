@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/token"
 	"go/types"
+	"slices"
 	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
@@ -371,11 +372,25 @@ func deprecatedDoc(doc *ast.CommentGroup) bool {
 
 // localDeclaration is one constant or type a function body declares, with the
 // specification that declares it and whether the body references it outside it.
+// A constant also carries the constants of its block whose value deleting its
+// specification changes ([inventory.Dependents]), and whether deleting it
+// replaces its name with `_` ([inventory.BlankedNames]).
 type localDeclaration struct {
-	name *ast.Ident
-	spec ast.Spec
-	kind string
-	used bool
+	name       *ast.Ident
+	spec       ast.Spec
+	kind       string
+	dependents []*ast.Ident
+	used       bool
+	blanked    bool
+}
+
+// positional reports whether a local constant has a dependent the body
+// references, which makes it a positional member.
+func (local *localDeclaration) positional(byObject map[types.Object]*localDeclaration, info *types.Info) bool {
+	return slices.ContainsFunc(local.dependents, func(n *ast.Ident) bool {
+		dependent := byObject[info.Defs[n]]
+		return dependent != nil && dependent.used
+	})
 }
 
 // unusedLocals is the unused-unexported kind's answer about the constants and types
@@ -398,7 +413,8 @@ func (in *pass) localsOf(c int, w *walk, fn *walked, held *parts) error {
 	if symbol == nil {
 		return nil
 	}
-	for _, local := range localDeclarations(fn.info, fn.root()) {
+	declared, byObject := localDeclarations(fn.info, fn.root())
+	for _, local := range declared {
 		if local.used || in.RetainedLocals[w.one.Resolve.Positions().Offset(local.name.Pos())] {
 			continue
 		}
@@ -406,20 +422,23 @@ func (in *pass) localsOf(c int, w *walk, fn *walked, held *parts) error {
 		if err != nil {
 			return err
 		}
-		held.hold(c, w.one, local.name.Pos(), fn.id, newPart(vocab.UnusedUnexported, symbol.Ref, local.kind, local.name.Name, at,
-			local.kind+" "+local.name.Name+" of "+namedSymbol(symbol)+" is never referenced in the body that declares it"))
+		found := newPart(vocab.UnusedUnexported, symbol.Ref, local.kind, local.name.Name, at,
+			local.kind+" "+local.name.Name+" of "+namedSymbol(symbol)+" is never referenced in the body that declares it")
+		found.blanked, found.positional = local.blanked, local.positional(byObject, fn.info)
+		held.hold(c, w.one, local.name.Pos(), fn.id, found)
 	}
 	return nil
 }
 
 // localDeclarations is every named constant and type one body declares, in source
-// order, each marked used where an identifier outside its specification denotes it.
-func localDeclarations(info *types.Info, root ast.Node) []*localDeclaration {
-	declared := declaredLocals(info, root)
+// order, each marked used where an identifier outside its specification denotes it,
+// and each by the object it defines.
+func localDeclarations(info *types.Info, root ast.Node) (declared []*localDeclaration, byObject map[types.Object]*localDeclaration) {
+	declared = declaredLocals(info, root)
 	if len(declared) == 0 {
-		return nil
+		return nil, nil
 	}
-	byObject := make(map[types.Object]*localDeclaration, len(declared))
+	byObject = make(map[types.Object]*localDeclaration, len(declared))
 	for _, local := range declared {
 		byObject[info.Defs[local.name]] = local
 	}
@@ -434,7 +453,7 @@ func localDeclarations(info *types.Info, root ast.Node) []*localDeclaration {
 		}
 		return true
 	})
-	return declared
+	return declared, byObject
 }
 
 // declaredLocals is every named constant and type the declaration statements of
@@ -443,12 +462,37 @@ func declaredLocals(info *types.Info, root ast.Node) []*localDeclaration {
 	var declared []*localDeclaration
 	ast.Inspect(root, func(n ast.Node) bool {
 		if group := localGroup(n); group != nil {
-			for _, spec := range group.Specs {
-				declared = append(declared, specLocals(info, spec)...)
-			}
+			declared = append(declared, groupLocals(info, group)...)
 		}
 		return true
 	})
+	return declared
+}
+
+// groupLocals is every named declaration one constant or type declaration of a
+// body makes, a constant carrying its dependents and whether deleting it leaves
+// a blank name.
+func groupLocals(info *types.Info, group *ast.GenDecl) []*localDeclaration {
+	var dependents [][]*ast.Ident
+	if group.Tok == token.CONST {
+		dependents = inventory.Dependents(info, group)
+	}
+	blanked := inventory.BlankedNames(group)
+	var declared []*localDeclaration
+	at := 0
+	for _, spec := range group.Specs {
+		held := specLocals(info, spec)
+		for _, local := range held {
+			local.blanked = at < len(blanked) && local.name == blanked[at]
+			if at < len(dependents) {
+				local.dependents = dependents[at]
+			}
+		}
+		declared = append(declared, held...)
+		if _, isValue := spec.(*ast.ValueSpec); isValue {
+			at++
+		}
+	}
 	return declared
 }
 

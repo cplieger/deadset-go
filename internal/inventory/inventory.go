@@ -107,7 +107,7 @@ type Symbol struct {
 	// Dependents are, for a constant of a parenthesized constant declaration, the
 	// other constants of the group whose value its specification's deletion
 	// changes or leaves undefined, as grammar/analysis/fixability.md "Positional members"
-	// states, blank names left out ([enumeration.constantDependents]).
+	// states, blank names left out ([Dependents]).
 	Dependents []SymbolID
 
 	// Package is the identity in the load of the package declaring the symbol.
@@ -129,6 +129,10 @@ type Symbol struct {
 	Kind     SymbolKind
 	Exported bool
 	Blank    bool // declared with the blank identifier
+
+	// Blanked reports a constant deleting which replaces its name with `_`
+	// rather than removing its specification ([BlankedNames]).
+	Blanked bool
 
 	// InTestFile reports a declaration of a file the Go test-file rule classifies
 	// ([Positions.InTestFile]).
@@ -177,6 +181,7 @@ func Of(r *load.Result, targetRoot string, read ReadFile) (*Inventory, error) {
 		typeIDs: make(map[string]SymbolID),
 
 		dependents: make(map[SymbolID][]SymbolID),
+		blanked:    make(map[SymbolID]bool),
 	}
 	for _, g := range Groups(r.Packages, r.Fset) {
 		if err := e.walkPackage(g, r.ID(g.Packages[0])); err != nil {
@@ -190,6 +195,7 @@ func Of(r *load.Result, targetRoot string, read ReadFile) (*Inventory, error) {
 	e.resolveReceivers()
 	for i := range e.symbols {
 		e.symbols[i].Dependents = e.dependents[e.symbols[i].ID]
+		e.symbols[i].Blanked = e.blanked[e.symbols[i].ID]
 	}
 	slices.SortFunc(e.symbols, BySite)
 	return &Inventory{Symbols: e.symbols, pos: e.pos, at: e.seen}, nil
@@ -232,69 +238,113 @@ type enumeration struct {
 	refs       map[SymbolID]string     // a symbol's reference, for a container to lend
 	typeIDs    map[string]SymbolID     // [typeKey] to that type's symbol
 	dependents map[SymbolID][]SymbolID // a constant's dependents, applied once the walk ends
+	blanked    map[SymbolID]bool       // [Symbol.Blanked], applied once the walk ends
 	pkg        load.PackageID          // the package being walked
 	pending    []receiverOwner
 	symbols    []Symbol
 }
 
 // constantDependents records the dependents of every constant one parenthesized
-// constant declaration holds: a specification's dependents are each later
-// specification repeating the list it writes, each later one whose list, written
-// or repeated, uses iota, and itself where it repeats a list and declares several
-// names. A constant has its specification's, so the group is decided per
-// specification.
+// constant declaration holds ([Dependents]) and the constant whose deletion
+// replaces its name with `_` ([BlankedNames]).
 func (e *enumeration) constantDependents(p *packages.Package, d *ast.GenDecl) {
-	specs := e.constantSpecs(p, d)
-	for i, s := range specs {
-		var dependents []SymbolID
-		repeating := s.writes
-		for j := i + 1; j < len(specs); j++ {
-			repeating = repeating && !specs[j].writes
-			if repeating || specs[j].iota {
-				dependents = append(dependents, specs[j].names...)
-			}
+	specs := valueSpecs(d)
+	for i, dependents := range Dependents(p.TypesInfo, d) {
+		ids := e.named(dependents)
+		for _, id := range e.named(specs[i].Names) {
+			e.depend(id, ids)
 		}
-		if !s.writes && s.declared > 1 {
-			dependents = append(dependents, s.names...)
-		}
-		for _, id := range s.names {
-			e.depend(id, dependents)
-		}
+	}
+	for _, id := range e.named(slices.DeleteFunc(BlankedNames(d), func(n *ast.Ident) bool { return n == nil })) {
+		e.blanked[id] = true
 	}
 }
 
-// constantSpec is one specification of a constant declaration as its dependents
-// read it: the constants it declares by name, how many names it declares, whether
-// it writes an expression list, and whether the list it writes or repeats uses iota.
-type constantSpec struct {
-	names    []SymbolID
-	declared int
-	writes   bool
-	iota     bool
+// named is the symbols the non-blank names of a list declare.
+func (e *enumeration) named(names []*ast.Ident) []SymbolID {
+	var ids []SymbolID
+	for _, n := range names {
+		if id, seen := e.seen[n.Pos()]; seen && n.Name != "_" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }
 
-// constantSpecs reads the specifications of one constant declaration.
-func (e *enumeration) constantSpecs(p *packages.Package, d *ast.GenDecl) []constantSpec {
-	specs := make([]constantSpec, 0, len(d.Specs))
-	usesIota := false
-	for _, one := range d.Specs {
-		v, ok := one.(*ast.ValueSpec)
-		if !ok {
-			continue
+// Dependents is, for each specification of a parenthesized constant declaration
+// in order, the names of its dependents as grammar/analysis/fixability.md
+// "Positional members" states, blank names left out: each later specification
+// repeating the list it writes, each later one whose list, written or repeated,
+// uses iota, and its own names where it repeats a list and declares several. A
+// constant has its specification's, so the group is decided per specification.
+func Dependents(info *types.Info, d *ast.GenDecl) [][]*ast.Ident {
+	specs := valueSpecs(d)
+	writes := make([]bool, len(specs))
+	usesIota := make([]bool, len(specs))
+	lastIota := false
+	for i, s := range specs {
+		writes[i] = len(s.Values) > 0
+		if writes[i] {
+			lastIota = slices.ContainsFunc(s.Values, func(x ast.Expr) bool { return mentionsIota(info, x) })
 		}
-		held := constantSpec{writes: len(v.Values) > 0, declared: len(v.Names)}
-		if held.writes {
-			usesIota = slices.ContainsFunc(v.Values, func(x ast.Expr) bool { return mentionsIota(p.TypesInfo, x) })
-		}
-		held.iota = usesIota
-		for _, n := range v.Names {
-			if id, seen := e.seen[n.Pos()]; seen && n.Name != "_" {
-				held.names = append(held.names, id)
+		usesIota[i] = lastIota
+	}
+	found := make([][]*ast.Ident, len(specs))
+	for i, s := range specs {
+		repeating := writes[i]
+		for j := i + 1; j < len(specs); j++ {
+			repeating = repeating && !writes[j]
+			if repeating || usesIota[j] {
+				found[i] = append(found[i], nonBlank(specs[j].Names)...)
 			}
 		}
-		specs = append(specs, held)
+		if !writes[i] && len(s.Names) > 1 {
+			found[i] = append(found[i], nonBlank(s.Names)...)
+		}
+	}
+	return found
+}
+
+// BlankedNames holds, for each value specification of a constant declaration in
+// order, the name deleting which replaces it with `_` rather than removing its
+// specification, and nil where there is none: the only name of a specification
+// that states its own list, which the next specification repeats, since removing
+// it would leave the next one an earlier list to repeat, or none (the Contract's
+// enum-group class).
+func BlankedNames(d *ast.GenDecl) []*ast.Ident {
+	if d.Tok != token.CONST {
+		return nil
+	}
+	specs := valueSpecs(d)
+	found := make([]*ast.Ident, len(specs))
+	for i := range len(specs) - 1 {
+		if len(specs[i].Names) == 1 && len(specs[i].Values) > 0 && len(specs[i+1].Values) == 0 {
+			found[i] = specs[i].Names[0]
+		}
+	}
+	return found
+}
+
+// valueSpecs is the value specifications of one declaration, in order.
+func valueSpecs(d *ast.GenDecl) []*ast.ValueSpec {
+	specs := make([]*ast.ValueSpec, 0, len(d.Specs))
+	for _, one := range d.Specs {
+		if v, ok := one.(*ast.ValueSpec); ok {
+			specs = append(specs, v)
+		}
 	}
 	return specs
+}
+
+// nonBlank is the names of a list that are not blank.
+func nonBlank(names []*ast.Ident) []*ast.Ident {
+	var found []*ast.Ident
+	for _, n := range names {
+		if n.Name != "_" {
+			found = append(found, n)
+		}
+	}
+	return found
 }
 
 // depend records the dependents of one constant, itself left out.

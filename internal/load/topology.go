@@ -105,9 +105,7 @@ func (t ModuleTree) within(unit scope.Root, dir string) bool {
 // vendored package is imported by its own module's path (cmd/go FindVendor).
 func (t ModuleTree) OutsideDir(module string, unit scope.Root, importPath string) (string, bool) {
 	rest, found := scope.UnderName(module, importPath)
-	below, underVendor := scope.UnderName("vendor", importPath)
-	vendored := strings.Contains(importPath, "/vendor/") || underVendor && below != ""
-	if module == "" || !found || vendored {
+	if module == "" || !found || throughVendor(importPath) {
 		return "", false
 	}
 	dir := filepath.Join(t.placed.Dir(), filepath.FromSlash(rest))
@@ -200,14 +198,23 @@ type Topology struct {
 	// order.
 	Units []discoveredModule
 
-	// Nested holds each module below the target, in directory order, that requires
-	// a unit and replaces it with that unit's directory and that no scope declares.
+	// Nested holds each module below the target, in directory order, that no scope
+	// declares and whose build resolves a unit under its own path or whose module
+	// graph does not answer ([consumptionRule]).
 	Nested []discoveredModule
 
 	// Readers holds each module the workspace listing the target lists outside it
-	// that no scope declares and whose module file requires a unit or cannot be
-	// read, in the workspace's order, whatever named the scope.
+	// that no scope declares and whose build resolves a unit under its own path or
+	// whose module graph does not answer ([consumptionRule]), in the workspace's
+	// order, whatever named the scope.
 	Readers []discoveredModule
+
+	// probes holds, until [Topology.decideConsumption] asks, each other module
+	// root a walk of a module's tree meets that the run loads nothing of, and unloaded each
+	// module whose references the run does not count for what [consumptionRule]
+	// answers ([LeftOutConsumer], [LeftOutRenamed], [LeftOutUnanswered]).
+	probes   []discoveredModule
+	unloaded []LeftOutPackage
 
 	// Consumers holds the declared consumers, in the order the scope declares them.
 	Consumers []discoveredModule
@@ -261,10 +268,25 @@ type discoveredModule struct {
 	Workspace string
 
 	// Consumes is the module path of every unit a nested module or a reader builds
-	// against, and Underscored the package pattern of every directory of a unit's
-	// own module below an underscore directory.
+	// against under that unit's path, and Underscored the package pattern of every
+	// directory of a unit's own module below an underscore directory
+	// ([Topology.underscoredPackages]).
 	Consumes    []string
 	Underscored []string
+
+	// tree is the Go below Dir a build of the module can name, which the loads
+	// subtract what they listed from ([loader.missed]).
+	tree goTree
+
+	// linkedAt is where a module root a walk met is named: its path through the
+	// links that reach it ([Topology.treeRoots]).
+	linkedAt string
+
+	// builds is what its build resolves of the units ([Topology.consumes]), which a
+	// dropped module counts; buildsUnknown says its module graph did not answer
+	// ([asker.ask]), so it may resolve any unit.
+	builds        consumption
+	buildsUnknown bool
 
 	// scriptsBlock reports that the toolchain run in Dir with no workspace, as a
 	// dropped module's scripts resolve, may block on what it reads.
@@ -325,6 +347,9 @@ func Discover(ctx context.Context, doc scope.Document) (*Topology, error) {
 	}
 	top.meetEnvFiles()
 	if err := top.hide(ctx); err != nil {
+		return nil, err
+	}
+	if err := top.decideConsumption(ctx); err != nil {
 		return nil, err
 	}
 	return top, nil
@@ -575,9 +600,10 @@ func discoverModule(ctx context.Context, root scope.Root, dir string) (discovere
 
 // nestedModules is every module rooted below the target, under the directories
 // discovery searches and those an underscore starts, that is no unit and no
-// declared consumer and that builds against a unit's directory, in directory order.
-// One whose module file is no regular file is passed over, as one that does not
-// parse is: no load of the target reads it.
+// declared consumer, in directory order, loading under the workspace file that
+// governs it where that lists it, as `go build` there does; [Topology.consumes]
+// keeps those that build against a unit. One whose module file is no regular file
+// is passed over, as one that does not parse is: no load of the target reads it.
 func (top *Topology) nestedModules(ctx context.Context, declared []scope.Module) ([]discoveredModule, error) {
 	var nested []discoveredModule
 	err := top.Walk(top.Root, searchedDir, func(path string, kind Kind) error {
@@ -589,7 +615,10 @@ func (top *Topology) nestedModules(ctx context.Context, declared []scope.Module)
 		}
 		m := discoveredModule{Dir: path, Workspace: workspaceOff}
 		m.File, m.FileErr = readModuleFile(top.root, path)
-		if m.Consumes = top.replacedUnits(&m); len(m.Consumes) > 0 {
+		if workspace, err := scope.WorkspaceOf(ctx, top.root, path); err == nil && workspace.Lists(path) {
+			m.Workspace = workspace.File
+		}
+		if m.File != nil {
 			nested = append(nested, m)
 		}
 		return nil
@@ -601,9 +630,10 @@ func (top *Topology) nestedModules(ctx context.Context, declared []scope.Module)
 }
 
 // readers is every module the workspace listing the target lists outside it that
-// no scope declares and whose module file requires a unit, in the workspace's
-// order, loaded through that workspace ([program.8]). A reader whose module file
-// cannot be read is kept with its error: it may require any unit. The toolchain
+// no scope declares, in the workspace's order, loaded through that workspace
+// ([program.8]); [Topology.consumes] keeps those that build against a unit. A
+// reader whose module file cannot be read is kept with its error: it may build
+// against any unit. The toolchain
 // refuses every load through a workspace one of whose members' module files it
 // cannot read, so such a reader reaches a load only where the toolchain reads a
 // file this parser refuses.
@@ -630,52 +660,9 @@ func (top *Topology) readers(ctx context.Context, declared []scope.Module) ([]di
 		if irregular(m.FileErr) {
 			return nil, m.FileErr
 		}
-		if m.File != nil {
-			required := m.File.required()
-			m.Consumes = slices.DeleteFunc(top.unitPaths(), func(module string) bool { return !slices.Contains(required, module) })
-		}
-		if m.FileErr != nil || len(m.Consumes) > 0 {
-			readers = append(readers, m)
-		}
+		readers = append(readers, m)
 	}
 	return readers, nil
-}
-
-// replacedUnits is the module path of every unit m's module file requires and
-// replaces with that unit's own directory, which is how a module below the target
-// builds against the target's tree rather than a published version of it. An
-// absolute replace through a link to that directory is that directory.
-func (top *Topology) replacedUnits(m *discoveredModule) []string {
-	if m.File == nil {
-		return nil
-	}
-	var held []string
-	for i := range top.Units {
-		unit := &top.Units[i]
-		required := slices.ContainsFunc(m.File.Syntax.Require, func(r *modfile.Require) bool { return r.Mod.Path == unit.Path })
-		replaced := slices.ContainsFunc(m.File.Syntax.Replace, func(r *modfile.Replace) bool {
-			replacement := r.New.Path
-			if !filepath.IsAbs(replacement) {
-				replacement = filepath.Join(m.Dir, replacement)
-			}
-			return r.Old.Path == unit.Path && r.New.Version == "" && scope.Same(replacement, unit.Dir)
-		})
-		if unit.Path != "" && required && replaced {
-			held = append(held, unit.Path)
-		}
-	}
-	return held
-}
-
-// unitPaths is the module path of every unit that has one, in unit order.
-func (top *Topology) unitPaths() []string {
-	paths := make([]string, 0, len(top.Units))
-	for i := range top.Units {
-		if top.Units[i].Path != "" {
-			paths = append(paths, top.Units[i].Path)
-		}
-	}
-	return paths
 }
 
 // isUnit reports whether dir is the directory of a unit.
@@ -727,15 +714,6 @@ func parseModuleFile(root scope.Root, path string) (*ModuleFile, error) {
 // irregular reports whether err is a module file, a workspace file or a vendor list
 // that is no regular file, which no toolchain may run under.
 func irregular(err error) bool { return errors.Is(err, scope.ErrIrregular) }
-
-// required is the path of every module the file requires.
-func (f *ModuleFile) required() []string {
-	paths := make([]string, 0, len(f.Syntax.Require))
-	for _, r := range f.Syntax.Require {
-		paths = append(paths, r.Mod.Path)
-	}
-	return paths
-}
 
 // governedFromAbove reports whether a directory above dir holds a module file,
 // which makes dir a directory of that module.
@@ -921,34 +899,53 @@ func unitPrefix(target scope.Root, dir string) string {
 // underscoredPackages is the pattern of every directory of the module rooted at dir
 // that holds a non-test Go file below a directory an underscore starts, outside
 // every module below dir and every directory the module tree ignores, in directory
-// order. The go tool's wildcard matches none of them, even with the underscore
-// directory as its root, so each is named by its own path.
+// order: the go tool's wildcard matches none of them, so each is named by its own
+// path.
 func (top *Topology) underscoredPackages(ctx context.Context, dir string, tree ModuleTree) ([]string, error) {
-	var patterns []string
-	// The walk joins each entry onto the directory it lists, so the path of each
-	// below dir is its directory's and its own name.
-	relative := map[string]string{dir: "."}
+	w := &underscoredWalk{ctx: ctx, dir: dir, relative: map[string]string{dir: "."}}
 	enters := func(dir string) bool { return !underscoredSkips(tree, dir) }
-	err := top.Walk(dir, enters, func(path string, kind Kind) error {
-		if ctx.Err() != nil {
-			return ctx.Err()
+	if err := top.Walk(dir, enters, w.visit); err != nil {
+		return nil, err
+	}
+	return w.patterns, nil
+}
+
+// appendNew is held with s added where it holds none.
+func appendNew(held []string, s string) []string {
+	if slices.Contains(held, s) {
+		return held
+	}
+	return append(held, s)
+}
+
+// underscoredWalk is what [Topology.underscoredPackages] gathers over its walk: the
+// path of each entry below dir relative to it, joined onto the directory listing it,
+// and the underscored patterns.
+type underscoredWalk struct {
+	ctx      context.Context
+	dir      string
+	relative map[string]string
+	patterns []string
+}
+
+// visit records one entry of a walk.
+func (w *underscoredWalk) visit(path string, kind Kind) error {
+	if w.ctx.Err() != nil {
+		return w.ctx.Err()
+	}
+	rel := w.relative[path]
+	if !scope.SameName(path, w.dir) {
+		rel = filepath.Join(w.relative[filepath.Dir(path)], filepath.Base(path))
+	}
+	switch {
+	case kind == directory:
+		w.relative[path] = rel
+	case kind == File && underscoredSource(rel):
+		if pattern := "./" + filepath.ToSlash(filepath.Dir(rel)); !slices.Contains(w.patterns, pattern) {
+			w.patterns = append(w.patterns, pattern)
 		}
-		rel := relative[path]
-		if !scope.SameName(path, dir) {
-			rel = filepath.Join(relative[filepath.Dir(path)], filepath.Base(path))
-		}
-		if kind == directory {
-			relative[path] = rel
-		}
-		if kind != File || !underscoredSource(rel) {
-			return nil
-		}
-		if pattern := "./" + filepath.ToSlash(filepath.Dir(rel)); !slices.Contains(patterns, pattern) {
-			patterns = append(patterns, pattern)
-		}
-		return nil
-	})
-	return patterns, err
+	}
+	return nil
 }
 
 // searchedBelowUnderscore reports whether the nested-module and underscored-package
@@ -974,10 +971,13 @@ func underscoredSkips(tree ModuleTree, path string) bool {
 // underscoredSource reports whether the relative path rel names a non-test Go file
 // some directory of which an underscore starts.
 func underscoredSource(rel string) bool {
-	if filepath.Ext(rel) != goFileExt || strings.HasSuffix(rel, "_test.go") {
-		return false
-	}
-	return slices.ContainsFunc(strings.Split(filepath.ToSlash(filepath.Dir(rel)), "/"), func(element string) bool {
+	return filepath.Ext(rel) == goFileExt && !strings.HasSuffix(rel, "_test.go") && underUnderscore(filepath.Dir(rel))
+}
+
+// underUnderscore reports whether an underscore starts some element of the relative
+// path rel.
+func underUnderscore(rel string) bool {
+	return slices.ContainsFunc(strings.Split(filepath.ToSlash(rel), "/"), func(element string) bool {
 		return strings.HasPrefix(element, "_")
 	})
 }

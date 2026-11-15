@@ -12,8 +12,10 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/draws"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
@@ -164,7 +166,7 @@ func (e *egType) values(deleted map[string]bool) (map[string]int, bool) {
 	for _, block := range e.blocks {
 		var last []egExpr
 		iota := 0
-		for _, spec := range block {
+		for si, spec := range block {
 			names, exprs := spec.names, spec.exprs
 			kept, keptExprs := []string{}, []egExpr{}
 			for i, name := range names {
@@ -176,7 +178,12 @@ func (e *egType) values(deleted map[string]bool) (map[string]int, bool) {
 					keptExprs = append(keptExprs, exprs[i])
 				}
 			}
-			if len(kept) == 0 {
+			switch {
+			case len(kept) > 0:
+			case blankedAt(block, si):
+				// Deleting the name leaves _ in its place, with its list and its iota.
+				kept, keptExprs = []string{"_"}, exprs
+			default:
 				// The whole specification is gone, and with it its place.
 				continue
 			}
@@ -191,7 +198,7 @@ func (e *egType) values(deleted map[string]bool) (map[string]int, bool) {
 				if !ok || !spec.blank && (v < low || v > high) {
 					return nil, false
 				}
-				if !spec.blank {
+				if !spec.blank && name != "_" {
 					found[name] = v
 				}
 			}
@@ -204,21 +211,35 @@ func (e *egType) values(deleted map[string]bool) (map[string]int, bool) {
 // tails is every unnamed member whose removal moves nothing whatever else is
 // deleted: one of the last specification of its block, when that specification
 // states its own list or has a single name (rule D retains a name of a
-// specification of several that repeats a list).
+// specification of several that repeats a list), and the one name of a
+// specification whose deletion leaves _ in its place ([blankedAt]).
 func (e *egType) tails() []string {
 	var found []string
 	for _, block := range e.blocks {
-		last := block[len(block)-1]
-		if last.blank || last.exprs == nil && len(last.names) > 1 {
-			continue
+		var names []string
+		for si := range block {
+			if blankedAt(block, si) {
+				names = append(names, block[si].names...)
+			}
 		}
-		for _, name := range last.names {
-			if !slices.Contains(e.named, name) {
+		if last := block[len(block)-1]; !last.blank && (last.exprs != nil || len(last.names) == 1) {
+			names = append(names, last.names...)
+		}
+		for _, name := range names {
+			if !slices.Contains(e.named, name) && !slices.Contains(found, name) {
 				found = append(found, name)
 			}
 		}
 	}
 	return found
+}
+
+// blankedAt reports whether the specification at si of a block states its own
+// list, declares one name and has that list repeated by the next one, so that
+// deleting the name replaces it with _ (rule D).
+func blankedAt(block []egSpec, si int) bool {
+	return si+1 < len(block) && len(block[si].names) == 1 && !block[si].blank &&
+		block[si].exprs != nil && block[si+1].exprs == nil
 }
 
 // moves reports whether deleting the members in deleted changes the value of a
@@ -455,7 +476,7 @@ func writeEnumType(b *strings.Builder, e *egType, deleted map[string]bool) {
 	fmt.Fprintf(b, "\ntype %s %s\n", e.name, e.base)
 	for _, block := range e.blocks {
 		var specs []string
-		for _, spec := range block {
+		for si, spec := range block {
 			var names, exprs []string
 			for i, name := range spec.names {
 				if deleted[name] {
@@ -467,6 +488,8 @@ func writeEnumType(b *strings.Builder, e *egType, deleted map[string]bool) {
 				}
 			}
 			switch {
+			case len(names) == 0 && blankedAt(block, si):
+				specs = append(specs, fmt.Sprintf("\t_ %s = %s", e.name, spec.exprs[0].source()))
 			case len(names) == 0:
 			case spec.blank:
 				specs = append(specs, "\t_ = "+exprs[0])
@@ -571,9 +594,9 @@ var enumInputs = []string{"0", "1", "2", "3"}
 // Each draw is analysed once and held to the rule's oracle (checkRuleOracle),
 // computed from the grammar alone, and to the differential oracle
 // (checkDifferential): the program with the reported members deleted builds and
-// prints the same on every input. Cost: one analysis and one go build of up to a
-// dozen small main packages per draw, about 90 s for rapid's default 100 draws on
-// four cores; DEADSET_ENUM_PROPERTY_ROUNDS repeats the run under fresh seeds.
+// prints the same on every input. Each draw runs one analysis and one go build, so
+// a pull request makes a quarter of the full count ([draws.Check]), which
+// DEADSET_ENUM_PROPERTY_ROUNDS multiplies.
 func TestEnumGroupReportsOnlyAMemberWhoseDeletionNoProgramObserves(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS != hostOS || runtime.GOARCH != hostArch {
@@ -582,27 +605,21 @@ func TestEnumGroupReportsOnlyAMemberWhoseDeletionNoProgramObserves(t *testing.T)
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("the differential oracle builds each program with the go command, which is not on PATH")
 	}
-	rounds := 1
+	full := 100
 	if raised, err := strconv.Atoi(os.Getenv("DEADSET_ENUM_PROPERTY_ROUNDS")); err == nil && raised > 0 {
-		rounds = raised
+		full *= raised
 	}
 	scratch := sandbox.Dir(t)
 	ctx := t.Context()
-	draw := 0
-	for range rounds {
-		// Each round is one rapid run under a seed of its own.
-		rapid.Check(t, func(rt *rapid.T) {
-			draw++
-			p := drawEnumProgram(rt)
-			if !p.valid() {
-				rt.Skip("the drawn program does not compile as drawn")
-			}
-			checkEnumProgram(ctx, rt, p, filepath.Join(scratch, strconv.Itoa(draw)))
-		})
-		if t.Failed() {
-			return
+	var draw atomic.Int64
+	draws.Check(t, full, draws.Loading, func(rt *rapid.T) {
+		dir := filepath.Join(scratch, strconv.FormatInt(draw.Add(1), 10))
+		p := drawEnumProgram(rt)
+		if !p.valid() {
+			rt.Skip("the drawn program does not compile as drawn")
 		}
-	}
+		checkEnumProgram(ctx, rt, p, dir)
+	})
 }
 
 // checkEnumProgram analyses one drawn program and applies both oracles.
@@ -721,7 +738,7 @@ func checkDifferential(ctx context.Context, t *rapid.T, p *enumProgram, variants
 	build.Dir = dir
 	// runTests pins GOOS and GOARCH to linux/amd64 for the analysis; the variants
 	// run here, so they build for the host.
-	build.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod", "CGO_ENABLED=0", "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH)
+	build.Env = append(build.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod", "CGO_ENABLED=0", "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH)
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("deleting the reported members leaves a program that does not build: %v\n%s\noriginal:\n%s", err, out, program)
 	}

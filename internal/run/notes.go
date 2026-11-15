@@ -15,8 +15,8 @@ import (
 // notes is every hint the run has about its setup: one module-not-loaded note per
 // module some configuration dropped, and, for an application that declares no
 // consumers, one published-package note per published package that no other
-// package of the target, program or [load.Result.Nested] consumer imports under any
-// configuration. A library's packages are its published API already, and a run
+// package of the target, program, [load.Result.Nested] consumer or left-out package
+// imports under any configuration. A library's packages are its published API already, and a run
 // that declares consumers has named the outside programs.
 func (l *Loaded) notes() ([]report.Note, error) {
 	notes := l.droppedNotes()
@@ -60,7 +60,7 @@ func (l *Loaded) notes() ([]report.Note, error) {
 // both resolve ([load.Topology.Holds]), is named by its directory; a workspace
 // reader outside it is named at the root, and only where its module file cannot be
 // read. A module whose module or workspace file cannot be read makes every export
-// of the target possible, and any other an export of a module it requires.
+// of the target possible, and any other an export of a module it builds against.
 func (l *Loaded) droppedNotes() []report.Note {
 	var notes []report.Note
 	seen := make(map[string]bool)
@@ -72,7 +72,7 @@ func (l *Loaded) droppedNotes() []report.Note {
 				continue
 			}
 			seen[directory] = true
-			possible := "an export of a module it requires is possible"
+			possible := "an export of a module it builds against is possible"
 			if dropped.Unreadable {
 				possible = "every export of the target is possible"
 			}
@@ -127,7 +127,56 @@ func (p *Prepared) unreadNotes() []report.Note {
 			Message: entry + " cannot be read: " + strings.Join(effects, ", and ") + ", until the run can read it",
 		})
 	}
-	return append(notes, p.hiddenNotes()...)
+	return slices.Concat(notes, p.hiddenNotes(), p.leftOutNotes())
+}
+
+// leftOutNotes is one unread-entry note per package directory some configuration
+// left out ([load.Result.LeftOut]), named where its directory resolves
+// ([load.Topology.Rel]) and at the root where that lies outside it, its message
+// naming the package's import path, or saying its packages did not load, and the
+// directory ([leftOutMessage]).
+func (p *Prepared) leftOutNotes() []report.Note {
+	var notes []report.Note
+	for i := range p.loads.outlines {
+		for j := range p.loads.outlines[i].leftOut {
+			left := &p.loads.outlines[i].leftOut[j]
+			entry, at := p.notedAt(left.Dir)
+			note := report.Note{Kind: report.NoteKindUnreadEntry, Path: at, Message: leftOutMessage(left, entry)}
+			if !slices.Contains(notes, note) {
+				notes = append(notes, note)
+			}
+		}
+	}
+	return notes
+}
+
+// leftOutMessage is the message of the note on left, whose directory is entry,
+// saying why the run does not load it where it did not ([load.LeftOutReason]).
+func leftOutMessage(left *load.LeftOutPackage, entry string) string {
+	switch left.Reason {
+	case load.LeftOutLoaded:
+	case load.LeftOutConsumer, load.LeftOutRenamed, load.LeftOutUnanswered:
+		why := map[load.LeftOutReason]string{
+			load.LeftOutConsumer:   "builds against the target and the run does not load it",
+			load.LeftOutRenamed:    "builds the target under another module path, which names none of its declarations",
+			load.LeftOutUnanswered: "may build against the target, under its own path or another, since the run cannot list its module graph",
+		}[left.Reason]
+		return "the module at " + entry + " " + why + ", so it may use any export of the target, and every export is possible"
+	default:
+		why := map[load.LeftOutReason]string{
+			load.LeftOutUnbounded:  "the run does not walk the link, whose tree has no bound",
+			load.LeftOutUnlistable: "the run cannot list the directory",
+			load.LeftOutUnloadable: "the run does not count the Go files there that no load of the run compiles",
+		}[left.Reason]
+		return "the packages below " + entry + " are compiled by a build that names them and " + why +
+			", so they may use any export of the target and any module the module file requires, and every export is possible"
+	}
+	message := "package " + left.Path + " in " + entry + " is compiled by a build, and the run does not count its files that no build whose references it counts compiles, " +
+		"which may use any export of each package of the target it imports, so every one is possible"
+	if len(left.Modules) > 0 {
+		message += ", and each module it imports a package of stays required"
+	}
+	return message
 }
 
 // hiddenNotes is one unread-entry note per entry some configuration's toolchain
@@ -218,9 +267,14 @@ func (in *imports) add(p *packages.Package) {
 	}
 }
 
-// addReaders records every package a nested consumer or a program of result
-// imports.
+// addReaders records every package a nested consumer, a program or a left-out
+// package of result imports.
 func (in *imports) addReaders(result *load.Result) {
+	for i := range result.LeftOut {
+		for _, id := range result.LeftOut[i].Imports {
+			in.ids[id] = true
+		}
+	}
 	for _, consumer := range result.Nested {
 		for _, p := range consumer.Packages {
 			in.add(p)

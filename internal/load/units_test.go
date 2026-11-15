@@ -101,6 +101,7 @@ func TestLoadEndsOnTheFailureOfAModuleItCannotDrop(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			_, err := loadTree(t, writeTree(t, test.files), ".")
 			setup, ok := errors.AsType[*failure.Error](err)
 			if !ok || !slices.ContainsFunc(setup.Failures, func(f failure.Failure) bool { return strings.HasPrefix(f.Detail, test.at+":") }) {
@@ -294,6 +295,7 @@ func TestLoadDropsAModuleTheGoCommandRefusesToList(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			root := writeTree(t, test.files)
 			got, err := loadTree(t, root, ".")
 			if err != nil {
@@ -398,9 +400,9 @@ func TestRebasedNamesEveryPositionFromTheTargetRoot(t *testing.T) {
 }
 
 // A workspace member the scope does not declare is a reader whatever named the
-// scope: it is loaded through the workspace as a nested consumer when its module
-// file requires a unit, and passed over when it does not.
-func TestLoadReadsAWorkspaceReaderThatRequiresAUnit(t *testing.T) {
+// scope: its build through the workspace resolves the unit, which it may import
+// without requiring it, so it is loaded through the workspace as a nested consumer.
+func TestLoadReadsEveryWorkspaceMemberAsAReader(t *testing.T) {
 	stableToolchain(t)
 	root := writeTree(t, readerTree)
 	got, err := loadScope(t.Context(), scope.Document{Target: scope.Module{Path: filepath.Join(root, "lib")}}, HostConfiguration())
@@ -411,7 +413,7 @@ func TestLoadReadsAWorkspaceReaderThatRequiresAUnit(t *testing.T) {
 	for _, c := range got.Nested {
 		nested = append(nested, c.ID)
 	}
-	if want := []string{"example.com/app"}; !slices.Equal(nested, want) || len(got.Consumers) != 0 || len(got.Dropped) != 0 {
+	if want := []string{"example.com/app", "example.com/other"}; !slices.Equal(nested, want) || len(got.Consumers) != 0 || len(got.Dropped) != 0 {
 		t.Errorf("Load() read the nested consumers %v, the consumers %v and dropped %v, want %v and neither", nested, got.Consumers, got.Dropped, want)
 	}
 }
@@ -419,9 +421,11 @@ func TestLoadReadsAWorkspaceReaderThatRequiresAUnit(t *testing.T) {
 // A reader whose module file the toolchain reads and this analyzer's parser
 // refuses, as a directive newer than the parser leaves it, may require any unit, so
 // it fails closed: it is dropped with the module file's error and every unit's
-// exports are possible. The test stands in for that disagreement by refusing the
-// file when the topology reads it and restoring it before the toolchain lists the
-// workspace.
+// exports are possible. The workspace's module graph does not answer while the go
+// command refuses that file, so the other reader may build against the target
+// too: it is read, and left out as unanswered. The test stands in for that
+// disagreement by refusing the file when the topology reads it and restoring it
+// before the toolchain lists the workspace.
 func TestLoadDropsAWorkspaceReaderWhoseModuleFileOnlyTheToolchainReads(t *testing.T) {
 	stableToolchain(t)
 	root := writeTree(t, readerTree)
@@ -445,8 +449,13 @@ func TestLoadDropsAWorkspaceReaderWhoseModuleFileOnlyTheToolchainReads(t *testin
 	if len(got.Dropped) != 1 || got.Dropped[0].Dir != filepath.Join(root, "app") || !errors.Is(got.Dropped[0].Err, errModuleFile) {
 		t.Fatalf("Load() dropped %+v, want the app reader alone, with %v", got.Dropped, errModuleFile)
 	}
-	if len(got.Nested) != 0 || !got.Units[0].UnanalysedConsumer {
-		t.Errorf("Load() read the nested consumers %v and flagged the unit %t, want none and true", got.Nested, got.Units[0].UnanalysedConsumer)
+	if len(got.Nested) != 1 || got.Nested[0].ID != "example.com/other" || !got.Units[0].UnanalysedConsumer {
+		t.Errorf("Load() read the nested consumers %v and flagged the unit %t, want example.com/other and true", got.Nested, got.Units[0].UnanalysedConsumer)
+	}
+	if !slices.ContainsFunc(got.LeftOut, func(p LeftOutPackage) bool {
+		return p.Reason == LeftOutUnanswered && p.Dir == filepath.Join(root, "other")
+	}) {
+		t.Errorf("Load().LeftOut = %+v, want the other reader left out as unanswered", got.LeftOut)
 	}
 }
 
@@ -612,6 +621,10 @@ func TestDiscoveryStopsWhenCancelledAfterItBegins(t *testing.T) {
 		},
 		"underscoredPackages": func(ctx context.Context) error {
 			_, err := (&Topology{Root: module, root: scope.RootOf(module)}).underscoredPackages(ctx, module, treeAt(module))
+			return err
+		},
+		"goTreeOf": func(ctx context.Context) error {
+			_, err := (&Topology{Root: module, root: scope.RootOf(module)}).goTreeOf(ctx, module, module)
 			return err
 		},
 		"readers": func(ctx context.Context) error { _, err := top.readers(ctx, nil); return err },

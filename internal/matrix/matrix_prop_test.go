@@ -6,6 +6,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/buildconstraint"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/draws"
 	"pgregory.net/rapid"
 )
 
@@ -38,7 +39,7 @@ func TestDerivationNeverEnumeratesCombinations(t *testing.T) {
 	t.Parallel()
 
 	host := fixtureHost()
-	rapid.Check(t, func(t *rapid.T) {
+	draws.Check(t, 100, draws.InMemory, func(t *rapid.T) {
 		atoms := drawnAtoms(t)
 		configurations := configurationsOf(&host, atoms)
 

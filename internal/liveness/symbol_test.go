@@ -168,6 +168,22 @@ func TestSymbolsNamesTheDependentsOfEveryConstantOfAGroup(t *testing.T) {
 	}
 }
 
+// Only the one name of a block's first specification whose list the next
+// specification repeats is a constant deleting which leaves a blank name.
+func TestSymbolsMarksTheConstantsDeletingWhichLeavesABlankName(t *testing.T) {
+	t.Parallel()
+	var got []string
+	for _, s := range symbolsOf(t, "constant-groups.txtar") {
+		if s.Blanked {
+			got = append(got, s.Name)
+		}
+	}
+	slices.Sort(got)
+	if want := []string{"idle", "limit"}; !slices.Equal(got, want) {
+		t.Errorf("Symbols(constant-groups.txtar) blanked = %q, want %q", got, want)
+	}
+}
+
 func TestSymbolsGoldenTableOverEveryKind(t *testing.T) {
 	t.Parallel()
 	got := render(symbolsOf(t, "every-kind.txtar"))

@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
@@ -371,23 +372,28 @@ func TestComputeRefusesAFindingAboutADeclarationAnEmitterNamesByItsReferenceAlon
 func TestTheKeyOfEveryFindingAboutADeclarationIsThatDeclarationsIdentifier(t *testing.T) {
 	t.Parallel()
 
-	measured := 0
-	for _, archive := range fixtures(t) {
-		result := analysisOf(t, archive, asApplication, Consumers{}).findings(t, everyKind)
+	var measured atomic.Int64
+	t.Run("fixtures", func(t *testing.T) {
+		for _, archive := range fixtures(t) {
+			t.Run(archive, func(t *testing.T) {
+				t.Parallel()
+				result := analysisOf(t, archive, asApplication, Consumers{}).findings(t, everyKind)
 
-		for i := range result.Findings {
-			found := &result.Findings[i]
-			if found.shape() != shapeDeclaration {
-				continue
-			}
-			measured++
-			if got, want := key(found), string(found.id); got != want {
-				t.Errorf("the key of %s about %s is %q, want %q, the identifier the analysis enumerated the declaration under",
-					found.Code, found.Symbol.Ref, got, want)
-			}
+				for i := range result.Findings {
+					found := &result.Findings[i]
+					if found.shape() != shapeDeclaration {
+						continue
+					}
+					measured.Add(1)
+					if got, want := key(found), string(found.id); got != want {
+						t.Errorf("the key of %s about %s is %q, want %q, the identifier the analysis enumerated the declaration under",
+							found.Code, found.Symbol.Ref, got, want)
+					}
+				}
+			})
 		}
-	}
-	if measured == 0 {
+	})
+	if measured.Load() == 0 {
 		t.Fatal("no fixture reports a finding about a declaration, so the identity of one is measured over nothing")
 	}
 }
@@ -623,24 +629,29 @@ func TestLivenessAbsentAnswersForEveryFindingTheContractForbidsTheRelationOn(t *
 	t.Parallel()
 
 	absent := livenessAbsentKinds(t)
-	measured := 0
-	for _, archive := range fixtures(t) {
-		for _, found := range analysisOf(t, archive, asApplication, Consumers{}).findings(t, everyKind).Findings {
-			if !slices.Contains(absent, found.Symbol.Kind) {
-				continue
-			}
-			measured++
-			if !livenessAbsent(&found) {
-				t.Errorf("LivenessAbsent(%s about the %s %s) = false, want true: the Contract forbids the relation on that subject kind",
-					found.Code, found.Symbol.Kind, found.Symbol.Ref)
-			}
-			if !found.Live {
-				t.Errorf("%s about the %s %s carries the relation %s, want none",
-					found.Code, found.Symbol.Kind, found.Symbol.Ref, found.Relation)
-			}
+	var measured atomic.Int64
+	t.Run("fixtures", func(t *testing.T) {
+		for _, archive := range fixtures(t) {
+			t.Run(archive, func(t *testing.T) {
+				t.Parallel()
+				for _, found := range analysisOf(t, archive, asApplication, Consumers{}).findings(t, everyKind).Findings {
+					if !slices.Contains(absent, found.Symbol.Kind) {
+						continue
+					}
+					measured.Add(1)
+					if !livenessAbsent(&found) {
+						t.Errorf("LivenessAbsent(%s about the %s %s) = false, want true: the Contract forbids the relation on that subject kind",
+							found.Code, found.Symbol.Kind, found.Symbol.Ref)
+					}
+					if !found.Live {
+						t.Errorf("%s about the %s %s carries the relation %s, want none",
+							found.Code, found.Symbol.Kind, found.Symbol.Ref, found.Relation)
+					}
+				}
+			})
 		}
-	}
-	if measured == 0 {
+	})
+	if measured.Load() == 0 {
 		t.Fatal("no fixture reports a finding about a part or a row, so the rule is measured over nothing")
 	}
 }

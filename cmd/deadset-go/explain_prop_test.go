@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -12,8 +13,8 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-go/v2/internal/run"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/draws"
 	"github.com/cplieger/deadset-spec/v8/vocab"
-	"pgregory.net/rapid"
 )
 
 // explainedState is the state one symbol is in as the analysis answers it, computed
@@ -48,73 +49,65 @@ func (s *explainedState) token() state {
 	}
 }
 
-// explainedModules is the number of generated modules the property is stated over.
-//
-// The property is about agreement per symbol over ONE analysis, so an iteration needs
-// no analysis of its own: what it reads is a symbol of an inventory and the two
-// answers the analysis holds about it. An analysis of a generated module costs about a
-// second under the race detector, because the module carries a test file and the
-// toolchain's synthesized test main pulls in the testing package's whole dependency
-// graph, so the number of analyses is what the property's cost is, and it is this
-// number rather than the iteration count.
+// explainedModules is the full count of generated modules the property is stated
+// over, of which a pull request analyzes a quarter ([draws.Seeds]). The property
+// reads each symbol of ONE analysis and its two answers about it, so the number of
+// analyses, each loading a test file's whole test main, is its cost.
 const explainedModules = 10
 
 // analyzedModules generates the modules the property draws from and analyzes each of
-// them once. The draws are the fixed examples of the module generator, one per seed,
-// so the set is the same on every run and a failure names a module a re-run produces.
-//
-// The four reference sites and the interface-satisfying method are why these modules
-// are the generated ones rather than a hand-written fixture: between them they put
-// symbols in all four states the explanation answers, which no reference structure
-// alone produces.
+// them once, side by side: the generator's fixed example per seed, so a failure
+// names a module a re-run produces. Their four reference sites and the
+// interface-satisfying method put symbols in all four states the explanation
+// answers, which a hand-written fixture's reference structure alone does not.
 func analyzedModules(t *testing.T) []*run.Findings {
 	t.Helper()
 
 	generator := drawnModules(`{"target": {"kind": "application"}}`, false)
-	held := make([]*run.Findings, explainedModules)
-	for seed := range held {
-		set := cachedFindings(t.Context(), t, generator.Example(seed).files)
-		held[seed] = set
+	held := make([]*run.Findings, draws.Seeds(explainedModules, draws.Loading))
+	t.Run("analyze", func(t *testing.T) {
+		for seed := range draws.Seeds(explainedModules, draws.Loading) {
+			t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
+				t.Parallel()
+				held[seed] = cachedFindings(t.Context(), t, generator.Example(int(seed)).files)
+			})
+		}
+	})
+	if t.Failed() {
+		t.FailNow()
 	}
 	return held
 }
 
 // TestAnExplanationAgreesWithTheReport is property dead-code-suite/P30: exactly one
-// explanation applies to a symbol, and it is consistent with the report.
-//
-// The four states are disjoint by the analysis rather than by the explanation's own
-// ordering, which is what the first half asserts: no symbol is both reported and
-// retained, a retained symbol is never a candidate, and a symbol no finding names and
-// no exemption held back is a candidate or is live under both relations, never
-// neither and never both. The second half reads the printed answer back: the one
-// answer line carries the state, a reported symbol's answer carries the finding's own
-// code, class, configurations and consumers, a retained symbol's answer names every
-// class the sweep recorded, and a live symbol's path is a path of references the graph
-// holds, from a symbol the root set names.
-//
-// An iteration draws one analyzed module and reads every symbol of its inventory,
-// which is the same assertion set the property has always made over one module and
-// costs nothing beyond rendering an explanation per symbol.
+// explanation applies to a symbol, and it is consistent with the report. First the
+// four states are disjoint by the analysis: none both reported and retained, a
+// retained symbol never a candidate, any other a candidate or live under both
+// relations. Then the printed answer carries the state, a finding's code, class,
+// configurations and consumers, every class the sweep recorded for a retained
+// symbol, and for a live one a path of the graph from a root. Each module is
+// checked once, as its own parallel subtest, over every symbol of its inventory.
 func TestAnExplanationAgreesWithTheReport(t *testing.T) {
 	t.Parallel()
 	analyzed := analyzedModules(t)
 
-	rapid.Check(t, func(t *rapid.T) {
-		set := analyzed[rapid.IntRange(0, explainedModules-1).Draw(t, "the generated module's seed")]
-
-		for i := range set.Merged.Symbols {
-			subject := &set.Merged.Symbols[i]
-			held := stateOf(set, subject)
-			checkDisjoint(t, subject, &held)
-			checkExplanation(t, set, subject, &held)
-		}
-		checkOneFindingPerSymbol(t, set)
-	})
+	for drawn, set := range analyzed {
+		t.Run(fmt.Sprintf("seed_%d", drawn), func(t *testing.T) {
+			t.Parallel()
+			for i := range set.Merged.Symbols {
+				subject := &set.Merged.Symbols[i]
+				held := stateOf(set, subject)
+				checkDisjoint(t, subject, &held)
+				checkExplanation(t, set, subject, &held)
+			}
+			checkOneFindingPerSymbol(t, set)
+		})
+	}
 }
 
 // checkDisjoint asserts that the four states the analysis answers are disjoint, so
 // exactly one explanation applies to the symbol.
-func checkDisjoint(t *rapid.T, subject *inventory.Symbol, held *explainedState) {
+func checkDisjoint(t *testing.T, subject *inventory.Symbol, held *explainedState) {
 	if held.found != nil && len(held.retained) > 0 {
 		t.Fatalf("%s is reported under %s and held back by %d exemption classes",
 			subject.Ref, held.found.Code, len(held.retained))
@@ -141,7 +134,7 @@ func checkDisjoint(t *rapid.T, subject *inventory.Symbol, held *explainedState) 
 
 // checkOneFindingPerSymbol asserts that no declaration of the inventory is reported
 // twice, which is what makes the reported answer one finding's.
-func checkOneFindingPerSymbol(t *rapid.T, set *run.Findings) {
+func checkOneFindingPerSymbol(t *testing.T, set *run.Findings) {
 	seen := make(map[string]vocab.Code, len(set.Result.Findings))
 	for i := range set.Result.Findings {
 		found := &set.Result.Findings[i]
@@ -155,7 +148,7 @@ func checkOneFindingPerSymbol(t *rapid.T, set *run.Findings) {
 
 // checkExplanation reads the printed explanation back and asserts it says what the
 // analysis holds.
-func checkExplanation(t *rapid.T, set *run.Findings, subject *inventory.Symbol, held *explainedState) {
+func checkExplanation(t *testing.T, set *run.Findings, subject *inventory.Symbol, held *explainedState) {
 	var printed strings.Builder
 	if err := writeExplanation(&printed, set, false, subject); err != nil {
 		t.Fatalf("writeExplanation(%s) = %v, want the explanation", subject.Ref, err)
@@ -190,7 +183,7 @@ func checkExplanation(t *rapid.T, set *run.Findings, subject *inventory.Symbol, 
 }
 
 // checkReported asserts the reported answer carries what the finding carries.
-func checkReported(t *rapid.T, subject *inventory.Symbol, found *findings.Finding, text string) {
+func checkReported(t *testing.T, subject *inventory.Symbol, found *findings.Finding, text string) {
 	for _, want := range []string{
 		"code: " + string(found.Code) + " " + found.Kind,
 		"message: " + found.Message,
@@ -207,7 +200,7 @@ func checkReported(t *rapid.T, subject *inventory.Symbol, found *findings.Findin
 
 // checkRetained asserts the retained answer names every class the sweep recorded, and
 // no other.
-func checkRetained(t *rapid.T, subject *inventory.Symbol, retained []exempt.Exemption, text string) {
+func checkRetained(t *testing.T, subject *inventory.Symbol, retained []exempt.Exemption, text string) {
 	named := 0
 	for line := range strings.SplitSeq(text, "\n") {
 		if strings.HasPrefix(line, "  class: ") {
@@ -230,7 +223,7 @@ func checkRetained(t *rapid.T, subject *inventory.Symbol, retained []exempt.Exem
 // root set names, a loaded consumer's reference, an exemption or a mark, each with
 // its seed line; and every hop: a reference the graph holds at its position, and a
 // use line for every hop that is no reference.
-func checkPath(t *rapid.T, set *run.Findings, subject *inventory.Symbol, text string) {
+func checkPath(t *testing.T, set *run.Findings, subject *inventory.Symbol, text string) {
 	path, reached := set.Liveness.Path(subject.ID)
 	if !reached {
 		if !strings.Contains(text, "  unreachable: ") {
@@ -276,7 +269,7 @@ func checkPath(t *rapid.T, set *run.Findings, subject *inventory.Symbol, text st
 
 // checkHop asserts one hop of a path is printed: a reference of the target as the
 // reference the graph holds at its position, a use as its use line.
-func checkHop(t *rapid.T, set *run.Findings, subject *inventory.Symbol, hop *liveness.Hop, text string) {
+func checkHop(t *testing.T, set *run.Findings, subject *inventory.Symbol, hop *liveness.Hop, text string) {
 	r := hop.Reference
 	if r == nil {
 		if !strings.Contains(text, "  use: ") || !strings.Contains(text, "\t"+string(hop.From)+" -> "+string(hop.To)+"\n") {

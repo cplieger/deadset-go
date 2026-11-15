@@ -19,6 +19,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport/deadline"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/draws"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 )
 
@@ -219,7 +220,7 @@ func tryGo(t *testing.T, dir string, args ...string) bool {
 	t.Helper()
 	cmd := deadline.Command(deadline.Context(t), "go", args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod -modcacherw")
+	cmd.Env = append(cmd.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod -modcacherw")
 	err := cmd.Run()
 	deadline.Reap(cmd)
 	return err == nil
@@ -243,11 +244,11 @@ func listedDirs(t *testing.T, top *Topology) []string {
 	for _, unit := range top.Units {
 		cmd := deadline.Command(deadline.Context(t), "go", "list", "-e", "-deps", "-test", "-json", "./...")
 		cmd.Dir = unit.Dir
-		env, err := loadEnv(&c, unit.Dir, unit.Workspace, toolchain{})
+		settings, err := loadSettings(&c, unit.Dir, unit.Workspace, toolchain{})
 		if err != nil {
 			t.Fatalf("Setup: %v", err)
 		}
-		cmd.Env = env
+		cmd.Env = append(cmd.Environ(), settings...)
 		var out bytes.Buffer
 		cmd.Stdout = &out
 		_ = cmd.Run() // a listing that fails still names the directories it read
@@ -290,12 +291,14 @@ func treeDirs(t *testing.T, root string) []string {
 // Within two minutes a draw, every pipe in the tree is hidden but in the modules no
 // load uses ([layout.unusedModules]), and none in .git/objects or behind the link;
 // the load ends as it does without them, and where it loads, every pipe in a
-// directory the toolchain lists is named where code may hide ([program.6]).
+// directory the toolchain lists is named where code may hide ([program.6]). Its
+// full count is 24 layouts ([draws.Seeds]).
 func TestLoadHidesAPipeInEveryDirectoryTheToolchainLists(t *testing.T) {
 	stableToolchain(t)
-	for seed := range uint64(24) {
+	for seed := range draws.Seeds(24, draws.Loading) {
 		l := drawLayout(seed)
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
+			deadline.Parallel(t)
 			deadline.Row(t, 2*time.Minute, "the toolchain read a pipe the run did not hide", func(t *testing.T) {
 				root := writeTree(t, l.tree())
 				outside := l.prepare(t, root)

@@ -1,0 +1,36 @@
+name: Weekly properties
+
+# A pull request's run makes a quarter of each loading property's draws
+# (internal/testsupport/draws); this job makes every property's full count.
+on:
+  schedule:
+    - cron: "0 3 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: weekly-properties-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  full:
+    name: Every property at its full count
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Test with every draw
+        env:
+          DEADSET_PROPERTY_DRAWS: full
+        run: go test -count=1 -race -timeout=50m ./...

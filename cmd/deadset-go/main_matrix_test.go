@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -337,6 +338,8 @@ func TestAnalyzeReadsTheReferencesOfAPackageOneConfigurationImportsFromProductio
 	}
 	for name, order := range map[string]string{"linux first": linux + ", " + windows, "windows first": windows + ", " + linux} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			files := maps.Clone(files)
 			files[repositoryDocument] = `{"target": {"kind": "application"}, "analysis": {"configurations": [` + order + `]}}`
 			run := runAnalyze(t, writeModule(t, files))
 			if run.code != vocab.ExitFindings {

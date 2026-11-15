@@ -30,7 +30,20 @@ const (
 	// Unread is an entry Stat fails on otherwise, or a directory whose listing
 	// fails: one that may hold code the analysis does not see.
 	Unread
+
+	// unnamed is a symbolic link to a name too long for any caller to look up:
+	// no build reaches a directory through it, and a walk of the tree records it
+	// as [Unread] ([Kind.recorded]).
+	unnamed
 )
+
+// recorded is the kind a walk of the tree records k as: [unnamed] is [Unread].
+func (k Kind) recorded() Kind {
+	if k == unnamed {
+		return Unread
+	}
+	return k
+}
 
 // KindOf is the kind of the entry at path whose type a directory listing gave as
 // mode, running stat on it only where it is a symbolic link.
@@ -38,7 +51,7 @@ func KindOf(path string, mode fs.FileMode, stat func(string) (fs.FileInfo, error
 	if mode&fs.ModeSymlink == 0 {
 		return kindOfType(mode)
 	}
-	kind := statKind(stat(path))
+	kind := statKind(stat(path)).recorded()
 	if kind == directory {
 		return leftOut
 	}
@@ -46,11 +59,15 @@ func KindOf(path string, mode fs.FileMode, stat func(string) (fs.FileInfo, error
 }
 
 // statKind is the kind of an entry whose Stat, following links, answered info and
-// err.
+// err: a path to nothing, through a file or that loops is no entry, one whose name
+// is too long for any caller to look up is [unnamed], and any other error is an
+// entry the run cannot read ([program.4]).
 func statKind(info fs.FileInfo, err error) Kind {
 	switch {
 	case err == nil:
 		return kindOfType(info.Mode().Type())
+	case errors.Is(err, syscall.ENAMETOOLONG):
+		return unnamed
 	case errors.Is(err, fs.ErrNotExist), errors.Is(err, syscall.ENOTDIR), errors.Is(err, errLinkLoop):
 		return leftOut
 	default:
@@ -78,7 +95,7 @@ func kindOfType(mode fs.FileMode) Kind {
 // below top's root is recorded in [Topology.Unread] or [Topology.LeftOut].
 // visit's fs.SkipAll ends the walk, and any other error ends it with that error.
 func (top *Topology) Walk(root string, enters func(dir string) bool, visit func(path string, kind Kind) error) error {
-	err := top.walk(root, statKind(os.Stat(root)), enters, visit)
+	err := top.walk(root, statKind(os.Stat(root)).recorded(), enters, visit)
 	if errors.Is(err, fs.SkipAll) {
 		return nil
 	}
@@ -130,6 +147,9 @@ func (top *Topology) AddUnread(path string) {
 		top.Unread = append(top.Unread, path)
 	}
 }
+
+// recordedUnread reports whether [Topology.Unread] names the entry at path.
+func (top *Topology) recordedUnread(path string) bool { return top.recorded(top.Unread, path) }
 
 // recorded reports whether held names the entry at path where both resolve
 // ([Topology.Rel]): the matrix's walk of a directory the toolchain names reaches an

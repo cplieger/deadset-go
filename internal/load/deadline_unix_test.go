@@ -49,7 +49,7 @@ func TestALoadRowAtItsDeadlineLeavesNoProcessBehind(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 	cmd := deadline.Command(ctx, os.Args[0], "-test.run=^"+t.Name()+"$", "-test.count=1", "-test.v")
-	cmd.Env = append(os.Environ(), probeVariable+"="+probe)
+	cmd.Env = append(cmd.Environ(), probeVariable+"="+probe)
 	cmd.Stdout, cmd.Stderr = out, out
 	runErr := cmd.Run()
 	_ = out.Close()

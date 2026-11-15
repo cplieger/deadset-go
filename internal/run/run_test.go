@@ -44,7 +44,7 @@ func TestDroppedNotesNameAReaderWhoseModuleFileCannotBeReadAtTheRoot(t *testing.
 		got = append(got, note.Path+" "+note.Message)
 	}
 	want := []string{
-		"tool module tool is below the target and does not load, so the run does not analyze it, and an export of a module it requires is possible: tool does not load",
+		"tool module tool is below the target and does not load, so the run does not analyze it, and an export of a module it builds against is possible: tool does not load",
 		". module ../reader the workspace lists has a module file the run cannot read, so the run does not count its references, and every export of the target is possible",
 	}
 	if !slices.Equal(got, want) {

@@ -17,12 +17,13 @@ func Mkfifo(path string, mode uint32) error {
 	return syscall.Mkfifo(path, mode)
 }
 
-// Mknod is [syscall.Mknod] inside a root.
-func Mknod(path string, mode uint32, dev int) error {
+// Mknod is [syscall.Mknod] inside a root, of device number 0. The device number is
+// an int on Linux and macOS and a uint64 on FreeBSD, and only the untyped 0 is both.
+func Mknod(path string, mode uint32) error {
 	if err := inside(path, false); err != nil {
 		return err
 	}
-	return syscall.Mknod(path, mode, dev)
+	return syscall.Mknod(path, mode, 0)
 }
 
 // ListenUnix is a Unix socket listener at path inside a root.

@@ -159,12 +159,13 @@ func (n *narrowing) scopeOf(to *inventory.Symbol, r *facts.Reference) narrowScop
 // closed reports whether every reference to one declaration that can exist is one
 // this run loaded.
 //
-// A package nothing outside can import is closed whatever the run knows about
+// An export a left-out package may name is never closed ([pass.leftOutReaches]).
+// Any other declaration of a package nothing outside can import is closed whatever the run knows about
 // consumers. An importable one is closed only where the configuration declares the
 // consumer set complete and every declared consumer loaded, because the callers of a
 // published package are otherwise unknown.
 func (in *pass) closed(symbol *inventory.Symbol) bool {
-	return !in.importable(symbol) || in.consumersLoaded()
+	return !in.leftOutReaches(symbol) && (!in.importable(symbol) || in.consumersLoaded())
 }
 
 // narrowable reports whether one declaration is a subject of the two narrowing

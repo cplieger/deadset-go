@@ -111,10 +111,16 @@ func HostConfiguration() Configuration {
 // load is dropped into [Result.Dropped] instead while a unit is left. Load makes no
 // network request, runs no compiler and pins the settings that decide what loads.
 func Load(ctx context.Context, top *Topology, c *Configuration) (Result, error) {
-	return load(ctx, top, c, newSyntaxCache(top.root))
+	r, err := load(ctx, top, c, newSyntaxCache(top.root))
+	if err == nil {
+		r.settleAlone()
+	}
+	return r, err
 }
 
-// load is [Load] over trees, which a [Matrix] shares across its configurations.
+// load is [Load] over trees, which a [Matrix] shares across its configurations,
+// with no [Result.LeftOut]: the run's read set and counted set decide it
+// ([settlement]).
 func load(ctx context.Context, top *Topology, c *Configuration, trees *syntaxCache) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, fmt.Errorf("load %s: %w", c.ID, err)
@@ -145,7 +151,13 @@ func load(ctx context.Context, top *Topology, c *Configuration, trees *syntaxCac
 	if r.Consumers, err = l.consumers(r.Units); err != nil {
 		return Result{}, err
 	}
+	if err := l.missed(&r); err != nil {
+		return Result{}, err
+	}
 	r.Hidden, r.Obscured = top.obscured(&r)
+	left, files := r.leftOutPackages(l.loaded, l.unloaded)
+	compiled, counted := compiledFiles(&r, l.loaded)
+	r.settlement = settlement{left: left, files: files, candidates: l.candidates, targets: r.targetIDs(), compiled: compiled, counted: counted}
 	r.markUnanalysedConsumers(len(top.Unread) > 0 || len(r.Hidden) > 0)
 	return r, nil
 }
@@ -157,6 +169,15 @@ type loader struct {
 	c         *Configuration
 	trees     *syntaxCache
 	toolchain toolchain
+
+	// loaded holds the packages a program's or an opaque-C check's importer loaded
+	// on demand and those of every directory no other load listed
+	// ([loader.missed]), which [Result.leftOutPackages] reads, unloaded each
+	// directory or module the run leaves out whatever it reads, and candidates
+	// each directory the run's read set judges.
+	loaded     []*packages.Package
+	unloaded   []LeftOutPackage
+	candidates []fileCandidate
 }
 
 // toolchain is what every toolchain one load starts runs with besides the
@@ -215,10 +236,8 @@ func (l *loader) readers(r *Result) error {
 			r.Nested = append(r.Nested, Consumer{ID: r.Units[i].Path, Packages: test, Build: TestBuild})
 		}
 	}
-	for i := range l.top.Units {
-		if err := l.underscored(r, &l.top.Units[i]); err != nil {
-			return err
-		}
+	if err := l.unitTrees(r); err != nil {
+		return err
 	}
 	below := len(r.Dropped)
 	for i := range l.top.Readers {
@@ -227,6 +246,19 @@ func (l *loader) readers(r *Result) error {
 		}
 	}
 	l.droppedScripts(r, below)
+	return nil
+}
+
+// unitTrees loads each unit's underscored packages ([loader.underscored]), and
+// leaves out unloaded each module whose build the run does not load or counts no
+// reference of ([Topology.decideConsumption]).
+func (l *loader) unitTrees(r *Result) error {
+	for i := range l.top.Units {
+		if err := l.underscored(r, &l.top.Units[i]); err != nil {
+			return err
+		}
+	}
+	l.unloaded = append(l.unloaded, l.top.unloaded...)
 	return nil
 }
 
@@ -239,7 +271,9 @@ func (l *loader) droppedScripts(r *Result, below int) {
 			continue
 		}
 		from := unitDir{dir: dropped.Dir, workspace: workspaceOff, offline: dropped.offline, toolchain: l.toolchain}
-		r.Programs = append(r.Programs, checkScripts(l.ctx, l.top, r.Fset, from, r.Packages, l.c)...)
+		programs, loaded := checkScripts(l.ctx, l.top, r.Fset, from, r.Packages, l.c)
+		r.Programs = append(r.Programs, programs...)
+		l.loaded = append(l.loaded, loaded...)
 	}
 }
 
@@ -318,8 +352,11 @@ func (l *loader) unit(r *Result, unit *discoveredModule) error {
 		return fmt.Errorf("load %s: %w", l.c.ID, err)
 	}
 	from := unitDir{dir: unit.Dir, workspace: unit.Workspace, toolchain: l.toolchain}
-	r.ExcludedByCgo = append(r.ExcludedByCgo, checkOpaqueC(l.ctx, r.Fset, l.top.root, from, pkgs, cgo, l.c)...)
-	r.Programs = append(r.Programs, checkPrograms(l.ctx, r.Fset, l.top.root, from, pkgs, l.c)...)
+	excluded, loaded := checkOpaqueC(l.ctx, r.Fset, l.top.root, from, pkgs, cgo, l.c)
+	r.ExcludedByCgo = append(r.ExcludedByCgo, excluded...)
+	programs, programLoaded := checkPrograms(l.ctx, r.Fset, l.top.root, from, pkgs, l.c)
+	r.Programs = append(r.Programs, programs...)
+	l.loaded = append(l.loaded, slices.Concat(loaded, programLoaded)...)
 	r.Packages = append(r.Packages, pkgs...)
 	r.Units = append(r.Units, Unit{Dir: unit.Dir, Path: unit.Path, Packages: pkgs})
 	return nil
@@ -795,6 +832,9 @@ func opens(msg, from, path string) bool {
 // names and the configuration does not build. The toolchain reports such a
 // package with a positionless error only while its build cache holds no entry for
 // it, so the error is dropped and the package is read the same way on every run.
+// Only for a package a unit's pattern names does a configuration of the derived
+// matrix read the excluded files; one of a directory ./... does not name is left
+// out where no load of the run compiles them ([fileCandidate.unreadBy]).
 func unbuilt(p *packages.Package) bool {
 	return p.Module != nil && p.Module.Main && len(p.IgnoredFiles) > 0 && positionlessOnly(p)
 }
@@ -825,7 +865,9 @@ func dropUnbuiltErrors(names scope.Root, pkgs []*packages.Package, c *Configurat
 // configuration selects it with cgo enabled. The configuration builds such a
 // package, so its positionless error is the analysis's own setting and no error
 // of the program. Its declarations are absent from the load, so a reference to
-// one is a type error [typeCheck] handles as it handles any other.
+// one is a type error [typeCheck] handles as it handles any other. A directory
+// ./... does not name holding one is left out where no load of the run compiles
+// it ([fileCandidate.unreadBy]).
 func unbuiltForCgo(names scope.Root, p *packages.Package, c *Configuration) (bool, error) {
 	if !positionlessOnly(p) {
 		return false, nil
@@ -846,24 +888,38 @@ func unbuiltForCgo(names scope.Root, p *packages.Package, c *Configuration) (boo
 }
 
 // loadEnv is the environment every load of configuration c runs the toolchain
-// under in dir, with workspace as the child toolchain's GOWORK setting and tc's GOFLAGS
-// ([toolchain.goflags]), without the go env file where tc says so for dir. os/exec keeps
-// the last value of a repeated key, so these settings win over the inherited ones:
-// an ambient go.work or GOFLAGS would make a module's result depend on where the
-// run started, and GOPROXY=off makes the no-network rule the toolchain's, a module
-// the cache does not hold ending the load instead of being fetched.
+// under in dir: the inherited one with [loadSettings] after it. The loader names
+// dir in PWD after these ([packages.Config.Dir]), so the toolchain reads dir as
+// the run spells it.
 func loadEnv(c *Configuration, dir, workspace string, tc toolchain) ([]string, error) {
+	settings, err := loadSettings(c, dir, workspace, tc)
+	if err != nil {
+		return nil, err
+	}
+	return append(os.Environ(), settings...), nil
+}
+
+// loadSettings is what every load of configuration c sets in the toolchain's
+// environment in dir: workspace as the child toolchain's GOWORK setting and tc's
+// GOFLAGS ([toolchain.goflags]), and GOENV=off where tc says the go env file is not
+// read for dir. os/exec keeps the last value of a repeated key, so these settings
+// win over the inherited ones: an ambient go.work or GOFLAGS would make a module's
+// result depend on where the run started, and GOPROXY=off makes the no-network rule
+// the toolchain's, a module the cache does not hold ending the load instead of
+// being fetched.
+func loadSettings(c *Configuration, dir, workspace string, tc toolchain) ([]string, error) {
 	goflags, err := tc.goflags()
 	if err != nil {
 		return nil, err
 	}
-	env := append(os.Environ(),
-		"CGO_ENABLED=0", "GOOS="+c.OS, "GOARCH="+c.Arch,
-		"GOWORK="+workspace, goflags, "GOPROXY=off")
-	if tc.noEnvFile != nil && tc.noEnvFile(dir) {
-		env = append(env, "GOENV=off")
+	settings := []string{
+		"CGO_ENABLED=0", "GOOS=" + c.OS, "GOARCH=" + c.Arch,
+		"GOWORK=" + workspace, goflags, "GOPROXY=off",
 	}
-	return env, nil
+	if tc.noEnvFile != nil && tc.noEnvFile(dir) {
+		settings = append(settings, "GOENV=off")
+	}
+	return settings, nil
 }
 
 // withoutTestBinaries returns every package of a test load except the test

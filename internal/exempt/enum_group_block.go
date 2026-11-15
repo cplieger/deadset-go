@@ -43,8 +43,12 @@ type egSpec struct {
 	index  int
 
 	// unsplittable is rule D: removing one of its names alone breaks a list a
-	// specification repeats or leaves a later one with nothing to repeat.
+	// specification repeats.
 	unsplittable bool
+
+	// blanked marks a specification whose name deleting replaces with `_`
+	// ([inventory.BlankedNames]), which is so never removable.
+	blanked bool
 }
 
 // readBlocks reads every constant block of the target, at package level and in
@@ -105,11 +109,12 @@ func (s *enumGroupScan) readBlock(p *packages.Package, block *ast.GenDecl, nonGo
 		}
 		specs = append(specs, spec)
 	}
+	blanked := inventory.BlankedNames(block)
 	for i, spec := range specs {
 		spec.block = specs
 		repeated := i+1 < len(specs) && specs[i+1].source == spec
-		several := len(spec.consts) > 1
-		spec.unsplittable = several && (repeated || spec.source != spec) || i == 0 && repeated
+		spec.unsplittable = len(spec.consts) > 1 && (repeated || spec.source != spec)
+		spec.blanked = blanked[i] != nil
 		s.specs = append(s.specs, spec)
 	}
 }
@@ -197,7 +202,7 @@ func (x *egIndex) members(b egBits) []*egSpec {
 func (s *enumGroupScan) movers(candidate map[*egConst]bool) *egMovers {
 	m := &egMovers{removable: egIndex{at: make(map[*egSpec]int)}, r: make(map[*egConst]egBits), scan: s}
 	for _, spec := range s.specs {
-		removable := len(spec.consts) > 0
+		removable := len(spec.consts) > 0 && !spec.blanked
 		for _, c := range spec.consts {
 			removable = removable && candidate[c]
 		}

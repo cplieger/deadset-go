@@ -74,6 +74,17 @@ func Row(t *testing.T, limit time.Duration, why string, row func(t *testing.T)) 
 	}
 }
 
+// Parallel marks t, a test whose body is one [Row], to run beside its siblings,
+// each row's child process waiting on its go command starts at once. Inside that
+// child it does nothing, so the row, run in place, may set its environment
+// ([testing.T.Setenv]), which a parallel test may not.
+func Parallel(t *testing.T) {
+	t.Helper()
+	if os.Getenv(rowVariable) != t.Name() {
+		t.Parallel()
+	}
+}
+
 // run re-executes the test binary for the row t alone, within limit, with its
 // temporary directory below one of t's, and reports the child's output and how it
 // ended; the error is a failure to run it at all.
@@ -91,7 +102,7 @@ func run(t *testing.T, limit time.Duration) (string, outcome, error) {
 	// at once: its own context ended a quarter of limit earlier ([Context]).
 	cmd := Command(ctx, os.Args[0], args...)
 	cmd.Cancel = func() error { return killTree(cmd.Process.Pid) }
-	cmd.Env = append(os.Environ(), rowVariable+"="+t.Name(), "TMPDIR="+temp)
+	cmd.Env = append(cmd.Environ(), rowVariable+"="+t.Name(), "TMPDIR="+temp)
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err := cmd.Run()

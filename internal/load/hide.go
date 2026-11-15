@@ -99,10 +99,10 @@ type hideScan struct {
 // fixture's among them, and keeps each load's own vendor list, which the go
 // command reads outside the overlay.
 func (top *Topology) hide(ctx context.Context) error {
-	top.nodes, top.kept = make(map[dirID]*dirNode), make(map[string]bool)
+	top.nodes, top.kept, top.roots = make(map[dirID]*dirNode), make(map[string]bool), nil
 	s := &hideScan{ctx: ctx, top: top, queued: make(map[string]bool), read: make(map[string]bool)}
 	s.enqueue(top.Root)
-	loads := top.loads()
+	loads := slices.Concat(top.loads(), top.probes)
 	for i := range loads {
 		m := &loads[i]
 		s.enqueue(m.Dir)

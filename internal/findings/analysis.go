@@ -42,6 +42,11 @@ type pass struct {
 	// analysis does not see ([load.Result.Obscured]).
 	obscured map[string]bool
 
+	// leftOutReached is every package of the target, by [pass.packageKey], that a
+	// package no stage reads imports directly or through other packages, and
+	// leftOutImported every one it imports directly ([load.Result.LeftOut]).
+	leftOutReached, leftOutImported map[string]bool
+
 	deprecated map[inventory.SymbolID]bool
 	enumerated map[inventory.SymbolID]string
 	literals   map[string][]literalSite
@@ -96,6 +101,9 @@ func classesOf(in *Input) (*pass, error) {
 		unanalysed: make(map[string]bool),
 		exposed:    make(map[inventory.SymbolID]bool),
 		obscured:   make(map[string]bool),
+
+		leftOutReached:  make(map[string]bool),
+		leftOutImported: make(map[string]bool),
 	}
 	a.holdInventory(in.Merged)
 	a.holdSweep(in.Sweep)
@@ -260,10 +268,12 @@ type packageAt struct {
 }
 
 // packageFacts is what [pass.readPackages] reads of the configurations' packages
-// before their keys exist: the main packages, the packages some build links, and
-// the packages a configuration loads and links in no build.
+// before their keys exist: the main packages, the packages some build links, the
+// packages a configuration loads and links in no build, and the packages a left-out
+// package reaches and imports.
 type packageFacts struct {
 	mains, linked, unlinked []packageAt
+	reached, imported       []packageAt
 }
 
 // readPackages reads one configuration's packages: the directories of each import
@@ -275,6 +285,7 @@ func (in *pass) readPackages(one *Configured, held *packageFacts) {
 	if one.Result != nil {
 		in.readPackageDirs(one.Result, held)
 		in.readUnits(one.Result)
+		readLeftOut(one.Result, scope.RootOf(in.Root), held)
 	}
 	if one.Facts != nil {
 		for _, name := range one.Facts.Published().Names() {
@@ -335,6 +346,32 @@ func (in *pass) keyPackages(held *packageFacts) {
 	for _, at := range held.linked {
 		delete(in.unlinked, in.packageKey(at.path, at.dir))
 	}
+	for _, at := range held.reached {
+		in.leftOutReached[in.packageKey(at.path, at.dir)] = true
+	}
+	for _, at := range held.imported {
+		in.leftOutImported[in.packageKey(at.path, at.dir)] = true
+	}
+}
+
+// readLeftOut reads the packages of the target each package r leaves out reaches
+// and imports, by their directories relative to root.
+func readLeftOut(r *load.Result, root scope.Root, held *packageFacts) {
+	for i := range r.LeftOut {
+		held.reached = appendPlaced(held.reached, root, r.LeftOut[i].Reaches)
+		held.imported = appendPlaced(held.imported, root, r.LeftOut[i].Imports)
+	}
+}
+
+// appendPlaced is to with each package of ids that root holds added, by its
+// directory relative to root.
+func appendPlaced(to []packageAt, root scope.Root, ids []load.PackageID) []packageAt {
+	for _, id := range ids {
+		if dir, inside := root.Place(id.Dir); inside {
+			to = append(to, packageAt{path: id.Path, dir: dir})
+		}
+	}
+	return to
 }
 
 // packageDir is the directory of p's first file relative to root where both

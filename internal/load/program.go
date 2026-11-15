@@ -38,8 +38,9 @@ type programFile struct {
 }
 
 // checkPrograms finds and checks every program of one unit's packages under
-// configuration c, in the order of their paths.
-func checkPrograms(ctx context.Context, fset *token.FileSet, names scope.Root, from unitDir, pkgs []*packages.Package, c *Configuration) []programFile {
+// configuration c, in the order of their paths, and returns the packages it loaded
+// on demand too.
+func checkPrograms(ctx context.Context, fset *token.FileSet, names scope.Root, from unitDir, pkgs []*packages.Package, c *Configuration) ([]programFile, []*packages.Package) {
 	return checkProgramFiles(ctx, fset, names, from, pkgs, c, programPaths(pkgs, c))
 }
 
@@ -48,7 +49,7 @@ func checkPrograms(ctx context.Context, fset *token.FileSet, names scope.Root, f
 // which no build of its package compiles because a sibling file declares main as
 // well. A package a script imports that pkgs do not hold is loaded from there, so the
 // script's own module file decides it, unless from is offline.
-func checkScripts(ctx context.Context, top *Topology, fset *token.FileSet, from unitDir, pkgs []*packages.Package, c *Configuration) []programFile {
+func checkScripts(ctx context.Context, top *Topology, fset *token.FileSet, from unitDir, pkgs []*packages.Package, c *Configuration) ([]programFile, []*packages.Package) {
 	return checkProgramFiles(ctx, fset, top.root, from, pkgs, c, top.scriptPaths(from.dir, treeAt(from.dir), c))
 }
 
@@ -115,9 +116,9 @@ func declaresMain(path string) bool {
 // checkProgramFiles checks each file of paths, each named as names names it, that
 // declares package main alone under configuration c, against pkgs and what loads
 // from from.
-func checkProgramFiles(ctx context.Context, fset *token.FileSet, names scope.Root, from unitDir, pkgs []*packages.Package, c *Configuration, paths []string) []programFile {
+func checkProgramFiles(ctx context.Context, fset *token.FileSet, names scope.Root, from unitDir, pkgs []*packages.Package, c *Configuration, paths []string) ([]programFile, []*packages.Package) {
 	if len(paths) == 0 {
-		return nil
+		return nil, nil
 	}
 	imports := newCgoImporter(ctx, fset, names, from, c, pkgs)
 	sizes := types.SizesFor(buildconstraint.Compiler, c.Arch)
@@ -145,7 +146,7 @@ func checkProgramFiles(ctx context.Context, fset *token.FileSet, names scope.Roo
 		}
 		held = append(held, programFile{Info: info, Imports: imported})
 	}
-	return held
+	return held, imports.loaded
 }
 
 // programPaths lists, sorted, every Go file a main-module package ignores that

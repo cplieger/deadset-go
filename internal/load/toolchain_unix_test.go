@@ -352,7 +352,7 @@ func TestLoadMeetsAFileTheToolchainWouldBlockOnBeforeItRuns(t *testing.T) {
 			},
 			target:  "lib",
 			entries: map[string]func(*testing.T, string){"other/q/x.go": sandbox.Fifo},
-			units:   []string{"lib"}, hidden: []string{"other/q/x.go"},
+			units:   []string{"lib"}, nested: []string{"example.com/other"}, hidden: []string{"other/q/x.go"},
 		},
 		{
 			name: "a_nested_module_importing_a_package_of_a_unit_holding_a_pipe",
@@ -626,6 +626,7 @@ func TestLoadMeetsAFileTheToolchainWouldBlockOnBeforeItRuns(t *testing.T) {
 	tests = append(tests, linkRows()...)
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			deadline.Parallel(t)
 			deadline.Row(t, time.Minute, "the toolchain or a walk opened a file that blocks", tc.meets)
 		})
 	}
@@ -976,7 +977,7 @@ func runGo(t *testing.T, dir string, env []string, args ...string) {
 	t.Helper()
 	cmd := deadline.Command(deadline.Context(t), "go", args...)
 	cmd.Dir = dir
-	cmd.Env = slices.Concat(os.Environ(), []string{"GOWORK=off", "GOFLAGS=-mod=mod -modcacherw"}, env)
+	cmd.Env = slices.Concat(cmd.Environ(), []string{"GOWORK=off", "GOFLAGS=-mod=mod -modcacherw"}, env)
 	out, err := cmd.CombinedOutput()
 	deadline.Reap(cmd)
 	if err != nil {
@@ -1050,6 +1051,7 @@ func TestLoadRunsWithoutAGoEnvFileThatIsAPipe(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			deadline.Parallel(t)
 			deadline.Row(t, time.Minute, "the toolchain read a go env file that blocks", func(t *testing.T) {
 				root := writeTree(t, moduleTree)
 				path := tc.place(t, root)

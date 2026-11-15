@@ -252,7 +252,7 @@ func reexecuted(t *testing.T, dir string, env []string, args ...string) *exec.Cm
 	}
 	cmd := exec.CommandContext(t.Context(), os.Args[0])
 	cmd.Dir = dir
-	cmd.Env = append(append(os.Environ(), env...), execArgsVariable+"="+string(encoded))
+	cmd.Env = append(append(cmd.Environ(), env...), execArgsVariable+"="+string(encoded))
 	return cmd
 }
 
@@ -333,7 +333,7 @@ func toolchainStub(t *testing.T, started string) (dir string) {
 	}
 	build := exec.Command("go", "build", "-o", stub, ".")
 	build.Dir = src
-	build.Env = append(os.Environ(), "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH, "GOWORK=off", "GOFLAGS=")
+	build.Env = append(build.Environ(), "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH, "GOWORK=off", "GOFLAGS=")
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("Setup: build the toolchain stub: %v\n%s", err, out)
 	}
