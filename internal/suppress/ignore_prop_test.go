@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/draws"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -121,21 +122,14 @@ func writeDrawnDocument(t *rapid.T, document string) string {
 	return path
 }
 
-// Property dead-code-suite/P16: a suppression matches only what it names.
-//
-// For any inventory of same-named declarations spread over files and packages, an
-// entry naming one code, one symbol and one path binds the declarations at that
-// reference in that file and nothing else, and an entry naming a symbol and no
-// path is refused rather than matched.
-//
-// The inventory is built by hand and the entry is read through the production
-// reader, so the property measures the matching rule rather than any fixture's
-// layout.
-//
-// This runs at rapid's default of 100 checks; -rapid.checks raises it for a deeper
-// local run.
+// Property dead-code-suite/P16: a suppression matches only what it names. Over
+// same-named declarations spread over files and packages, an entry naming a code,
+// a symbol and a path binds the declarations at that reference in that file alone,
+// and one naming a symbol and no path is refused. The inventory is built by hand
+// and the entry read by the production reader, so the matching rule is measured.
+// It makes 100 draws ([draws.Check]); -rapid.checks sets another count.
 func TestProperty16ASuppressionMatchesOnlyWhatItNames(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
+	draws.Check(t, 100, draws.InMemory, func(t *rapid.T) {
 		drawn := drawnInventories().Draw(t, "the inventory")
 		symbols := drawn.symbols()
 		named := rapid.SampledFrom(symbols).Draw(t, "the declaration the entry names")

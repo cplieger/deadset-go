@@ -253,6 +253,7 @@ func TestExplainNamesTheMarkOrExemptionWhereAHeldSymbolsPathBegins(t *testing.T)
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			kind := "application"
 			if tc.library {
 				kind = "library"

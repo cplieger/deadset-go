@@ -192,6 +192,7 @@ func TestReferencesRendersAUnitsOwnConsumerAgainstItsModuleRoot(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			doc := scope.Document{Target: scope.Module{Path: filepath.Join(dir, filepath.FromSlash(tc.target))}}
 			result, err := load.Load(t.Context(), testsupport.Topology(t.Context(), t, doc), &load.Configuration{ID: "linux-amd64", OS: "linux", Arch: "amd64"})
 			if err != nil {

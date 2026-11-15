@@ -11,6 +11,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/draws"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
 )
@@ -270,7 +271,7 @@ func owedFor(reach drawnReach, complete bool, sites []drawnSite) (string, bool) 
 // the spread the rules fold.
 func TestNarrowingNamesTheNarrowestScopeContainingEveryReference(t *testing.T) {
 	t.Parallel()
-	rapid.Check(t, func(t *rapid.T) {
+	draws.Check(t, 100, draws.InMemory, func(t *rapid.T) {
 		m := drawnModules().Draw(t, "the module")
 		inventory := m.render()
 		consumers := Consumers{}

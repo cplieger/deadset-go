@@ -59,12 +59,12 @@ var withHelperUnexempted = func() map[string]string {
 
 // TestAnalyzeSortsEveryEntryKindOfTheTree pins what each kind of entry does to a
 // run within two minutes: a special file or link no build reads changes nothing;
-// a directory or Go file the run cannot read where the load reads makes every
-// export possible, and one rule N cannot read keeps every function and variable;
-// a special file with a source file's name in a package directory is hidden and
-// makes its package's declarations possible; and a Go file the run cannot open
-// there may import "C", so linkname-cgo-asm-plugin retains its package's
-// declarations, or, with that class disabled, makes them possible.
+// a directory or Go file the run cannot read where a build reads, testdata
+// included, or a link there Stat fails on otherwise than for nothing at its end,
+// makes every export possible, and one rule N cannot read keeps every function
+// and variable; a special file with a source file's name in a package directory
+// is hidden and makes its package possible; and a Go file the run cannot open
+// there may import "C" (linkname-cgo-asm-plugin retains, or, disabled, possible).
 func TestAnalyzeSortsEveryEntryKindOfTheTree(t *testing.T) {
 	t.Parallel()
 	certain := map[string]vocab.Class{"unused": vocab.Certain, "Limit": vocab.Certain}
@@ -100,9 +100,9 @@ func TestAnalyzeSortsEveryEntryKindOfTheTree(t *testing.T) {
 			notes: []string{"data/pg"}, findings: map[string]vocab.Class{"Limit": vocab.Possible},
 		},
 		{
-			name: "a_directory_only_rule_n_reads_and_the_user_cannot_list", entry: "testdata/pg",
+			name: "a_testdata_directory_the_user_cannot_list", entry: "testdata/pg",
 			make: unlistable, code: "findings",
-			notes: []string{"testdata/pg"}, findings: map[string]vocab.Class{"Limit": vocab.Certain},
+			notes: []string{"testdata/pg"}, findings: map[string]vocab.Class{"Limit": vocab.Possible},
 		},
 		{
 			name: "a_go_file_the_user_cannot_open", entry: "data/secret.go",
@@ -200,7 +200,7 @@ func makeDir(t *testing.T, path string) {
 // listener holds until the test ends.
 func makeSocket(t *testing.T, path string) {
 	t.Helper()
-	if err := sandbox.Mknod(path, syscall.S_IFSOCK|0o600, 0); err == nil {
+	if err := sandbox.Mknod(path, syscall.S_IFSOCK|0o600); err == nil {
 		return
 	}
 	listener, err := sandbox.ListenUnix(path)
@@ -398,7 +398,7 @@ func TestAnalyzeMeetsAFileTheToolchainWouldBlockOn(t *testing.T) {
 		detail      string   // what the failure says of it, "no regular file, but a pipe" where empty
 		fix         string   // the fix the failure ends with, "replace it with a regular file" where empty
 		notes       []string // the directories the module-not-loaded notes name
-		hidden      []string // what the unread-entry notes name, with the path the message starts with
+		hidden      []string // what the unread-entry notes name, with the path the message starts with, or "link" and the link whose packages the run does not load
 		findings    map[string]vocab.Class
 	}{
 		{
@@ -484,15 +484,15 @@ func TestAnalyzeMeetsAFileTheToolchainWouldBlockOn(t *testing.T) {
 		},
 		{
 			name: "a_link_into_proc_nothing_imports_through", entry: "m/p/sys", tree: linked, target: "m",
-			make: symlinkTo("/proc"), code: "findings", findings: unused,
+			make: symlinkTo("/proc"), code: "findings", findings: unused, hidden: []string{"p/sys link p/sys"},
 		},
 		{
 			name: "a_link_to_the_file_system_root_nothing_imports_through", entry: "m/up", tree: linked, target: "m",
-			make: symlinkTo("/"), code: "findings", findings: unused,
+			make: symlinkTo("/"), code: "findings", findings: unused, hidden: []string{"up link up"},
 		},
 		{
 			name: "an_import_through_a_link_to_the_parent_of_the_target", entry: "repo/go/up", tree: parent, target: "repo/go",
-			make: symlinkTo(".."), code: "findings", findings: unused,
+			make: symlinkTo(".."), code: "findings", findings: unused, hidden: []string{"up link up"},
 		},
 		{
 			name: "an_import_through_a_link_out_of_the_target", entry: "m/shared", tree: outside, target: "m",
@@ -502,12 +502,12 @@ func TestAnalyzeMeetsAFileTheToolchainWouldBlockOn(t *testing.T) {
 		{
 			name: "an_import_through_a_link_to_an_ancestor_beside_a_link_to_the_file_system_root", entry: "m/a/c/ext", tree: cycle, target: "m",
 			links: map[string]string{"m/a/b/up": ".."}, make: inNewDir(symlinkTo("/")), code: "findings",
-			findings: map[string]vocab.Class{"unused": vocab.Certain, "d.go": vocab.Certain},
+			hidden: []string{"a/c/ext link a/c/ext"}, findings: unused,
 		},
 		{
 			name: "an_import_through_a_link_to_an_ancestor_beside_a_link_to_a_pipe_nothing_imports_through", entry: "ext/z/x.go", tree: cycle, target: "m",
 			links: map[string]string{"m/a/b/up": "..", "m/a/c/ext": "../../../ext"}, make: sandbox.Fifo, code: "findings",
-			findings: map[string]vocab.Class{"unused": vocab.Certain, "d.go": vocab.Certain},
+			hidden: []string{". link ../ext/z"}, findings: map[string]vocab.Class{"unused": vocab.Certain},
 		},
 		{
 			name: "an_import_of_a_missing_package_through_a_link_to_an_ancestor_beside_a_pipe_in_testdata", entry: "m/a/testdata/x.go", tree: missingThroughCycle, target: "m",
@@ -621,6 +621,10 @@ func TestAnalyzeMeetsAFileTheToolchainWouldBlockOn(t *testing.T) {
 					notes = append(notes, note.Path)
 				case report.NoteKindUnreadEntry:
 					first, _, _ := strings.Cut(note.Message, " is ")
+					if below, unloaded := strings.CutPrefix(note.Message, "the packages below "); unloaded {
+						first, _, _ = strings.Cut(below, " ")
+						first = "link " + first
+					}
 					hidden = append(hidden, note.Path+" "+first)
 				}
 				if strings.Contains(note.Message, dir) {
@@ -693,7 +697,7 @@ func invokedBinaryWithinEnv(t *testing.T, binary string, limit time.Duration, di
 	cmd := deadline.Command(ctx, binary, args...)
 	cmd.Dir = dir
 	if env != nil {
-		cmd.Env = append(os.Environ(), env...)
+		cmd.Env = append(cmd.Environ(), env...)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr

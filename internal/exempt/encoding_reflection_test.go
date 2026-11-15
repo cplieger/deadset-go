@@ -704,6 +704,7 @@ func TestEncodingReflectionReadsADependencyUnderTheConfigurationsTags(t *testing
 		{desc: "the body that only decodes", tags: []string{"wrapped"}},
 	} {
 		t.Run(test.desc, func(t *testing.T) {
+			t.Parallel()
 			in := inputOf(t, "encoding-reflection-tagged.txtar", Options{}, test.tags...)
 			found, err := EncodingReflectionDetector(in)
 			if err != nil {
@@ -1257,6 +1258,7 @@ func TestEncodingReflectionReadsTheFieldsADecoderFills(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			in := inputOf(t, tt.archive, Options{})
 			in.Mode = facts.Mode{Production: true}
 			found, err := EncodingReflectionDetector(in)
@@ -1311,6 +1313,7 @@ func TestEncodingReflectionReadsOnlyTheFieldsTheProgramWrites(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			in := inputOf(t, "encoding-reflection-written-fields.txtar", Options{})
 			in.Mode = tt.mode
 			found, err := EncodingReflectionDetector(in)

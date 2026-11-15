@@ -44,7 +44,7 @@ func TestASignalledAnalysisLeavesNoChildRunning(t *testing.T) {
 			defer cancel()
 			cmd := deadline.Command(ctx, commandBinary(t), "analyze", "--target=.", "--report="+filepath.Join(probes, "report.json"))
 			cmd.Dir = dir
-			cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "DEADSET_GO_PROBE="+probe)
+			cmd.Env = append(cmd.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "DEADSET_GO_PROBE="+probe)
 			if err := cmd.Start(); err != nil {
 				t.Fatalf("Setup: %v", err)
 			}

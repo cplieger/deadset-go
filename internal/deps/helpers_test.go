@@ -1,7 +1,6 @@
 package deps
 
 import (
-	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -110,7 +109,7 @@ func tidyRemoved(t *testing.T, archive string) []string {
 	// The module file is the one thing tidying must be allowed to write, and
 	// every module of every fixture is a directory of the fixture, so nothing is
 	// fetched.
-	tidy.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod", "GOPROXY=off")
+	tidy.Env = append(tidy.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod", "GOPROXY=off")
 	if out, err := tidy.CombinedOutput(); err != nil {
 		t.Fatalf("Setup: go mod tidy in %s: %v: %s", dir, err, out)
 	}

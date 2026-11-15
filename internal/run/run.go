@@ -114,6 +114,7 @@ func Load(ctx context.Context, req *Request) (*Loaded, error) {
 	if err != nil {
 		return nil, err
 	}
+	l.loads.settle()
 	var checked []map[load.PackageID]bool
 	if derived {
 		checked = elsewhere.Of()

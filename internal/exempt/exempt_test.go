@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
@@ -393,24 +394,27 @@ const templateFixtureDir = "templates"
 
 func TestEveryClauseIsOneRelationThenTheThingItRelatesTo(t *testing.T) {
 	t.Parallel()
-	seen := make(map[vocab.Exemption]bool, len(goClasses()))
-	for _, archive := range fixtureArchives(t) {
-		t.Run(archive, func(t *testing.T) {
-			found, err := analysisOf(t, archive, fixtureOptions(t, archive)).compute(t, false)
-			if err != nil {
-				t.Fatalf("Compute(%s) error: %v", archive, err)
-			}
-			for _, e := range found {
-				seen[vocab.Exemption(e.Class)] = true
-				checkClause(t, archive, e)
-			}
-		})
-	}
+	var seen sync.Map
+	t.Run("fixtures", func(t *testing.T) {
+		for _, archive := range fixtureArchives(t) {
+			t.Run(archive, func(t *testing.T) {
+				t.Parallel()
+				found, err := analysisOf(t, archive, fixtureOptions(t, archive)).compute(t, false)
+				if err != nil {
+					t.Fatalf("Compute(%s) error: %v", archive, err)
+				}
+				for _, e := range found {
+					seen.Store(vocab.Exemption(e.Class), true)
+					checkClause(t, archive, e)
+				}
+			})
+		}
+	})
 
 	// The grammar above is only worth pinning over a corpus that reaches every
 	// class, so the fixtures are also what proves each of the nine states one.
 	for _, class := range goClasses() {
-		if !seen[class] {
+		if _, held := seen.Load(class); !held {
 			t.Errorf("no fixture of testdata made %s state a clause, want each class covered", class)
 		}
 	}

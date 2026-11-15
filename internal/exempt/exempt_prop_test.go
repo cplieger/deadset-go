@@ -13,6 +13,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/draws"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
 )
@@ -240,25 +241,16 @@ func sweptWith(t *rapid.T, g *liveness.Graph, table map[vocab.Exemption]exempt.D
 	return union, g.Sweep(&liveness.SweepPolicy{Exempt: union, Mode: mode})
 }
 
-// Property dead-code-suite/P4: the reported set and the retained set are
-// disjoint.
-//
-// For any drawn symbol set with exemptions planted across the vocabulary and any
-// drawn subset of the vocabulary disabled, no symbol the sweep reported carries an
-// exemption, every exemption the union holds over a symbol the same sweep without
-// the union would have reported is in the retained record with its class, and
-// disabling a class only grows the reported set.
-//
-// The graph is built by hand and swept through the production passes, so the
-// property measures the framework and the sweep rather than any class's own rule:
-// the table of detections is what a class contributes and the draw is what it
-// found.
-//
-// This runs at rapid's default of 100 checks; -rapid.checks raises it for a deeper
-// local run.
+// Property dead-code-suite/P4: the reported set and the retained set are disjoint.
+// For any drawn symbols with exemptions planted across the vocabulary and any
+// subset of it disabled, no reported symbol carries an exemption, every exemption
+// over a symbol the sweep without it would report is retained with its class, and
+// disabling a class only grows the reported set. The graph is built by hand and
+// swept through the production passes, so it measures the framework, not a
+// class's rule. It makes 100 draws ([draws.Check]); -rapid.checks sets another.
 func TestProperty04TheReportedSetAndTheRetainedSetAreDisjoint(t *testing.T) {
 	t.Parallel()
-	rapid.Check(t, func(t *rapid.T) {
+	draws.Check(t, 100, draws.InMemory, func(t *rapid.T) {
 		d := drawnSets().Draw(t, "the symbol set")
 		g, ids := d.graphOf()
 		table := d.detectors(ids)

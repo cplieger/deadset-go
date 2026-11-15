@@ -23,7 +23,7 @@ import (
 // caller intersects the configurations it ran. A module in the graph that provides
 // no package at all is absent too, and a directive over one is reported.
 func NoopReplacements(f File, r *load.Result) []Replacement {
-	if r == nil {
+	if r == nil || unloadedLeftOut(r) {
 		return nil
 	}
 	built := buildList(r)
@@ -38,14 +38,12 @@ func NoopReplacements(f File, r *load.Result) []Replacement {
 	return noop
 }
 
-// buildList is the set of modules providing a package the load reached, the
-// target's own module and every dependency at every depth alike.
-//
-// A module a directive replaced is in the list under the identity the directive
-// replaced, with what replaced it recorded beside it, so a directive is answered by
-// looking up the module it names. Each module is in the set twice, once with the
-// version the build selected and once with no version at all, because a directive
-// that names no version replaces the module at every version.
+// buildList is the set of modules providing a package the load reached at any
+// depth, the target's own included, a unit's left-out package's among them
+// ([load.LeftOutPackage]). A replaced module is held under the identity the
+// directive replaced, so a directive is answered by the module it names, and each
+// module twice, with the selected version and with none, because a directive
+// naming no version replaces every version.
 func buildList(r *load.Result) map[Module]bool {
 	built := make(map[Module]bool)
 	packages.Visit(r.Packages, nil, func(p *packages.Package) {
@@ -55,6 +53,14 @@ func buildList(r *load.Result) map[Module]bool {
 		built[Module{Path: p.Module.Path, Version: p.Module.Version}] = true
 		built[Module{Path: p.Module.Path}] = true
 	})
+	for i := range r.LeftOut {
+		if left := &r.LeftOut[i]; unitModule(r, left.Module) {
+			for _, m := range left.Built {
+				built[Module{Path: m.Path, Version: m.Version}] = true
+				built[Module{Path: m.Path}] = true
+			}
+		}
+	}
 	return built
 }
 

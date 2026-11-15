@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/draws"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
@@ -112,7 +113,7 @@ func (d hiddenDraw) analyzedWith(t *testing.T, piped bool) (findings map[string]
 	if d.vend {
 		vendor := exec.CommandContext(t.Context(), "go", "mod", "vendor")
 		vendor.Dir = dir
-		vendor.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod", "GOPROXY=off")
+		vendor.Env = append(vendor.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod", "GOPROXY=off")
 		if out, err := vendor.CombinedOutput(); err != nil {
 			t.Fatalf("Setup: go mod vendor: %v\n%s", err, out)
 		}
@@ -154,10 +155,10 @@ func (d hiddenDraw) analyzedWith(t *testing.T, piped bool) (findings map[string]
 // findings as over the tree without the pipe; where a note names the pipe, a
 // finding about a declaration of its directory's package may be possible instead,
 // and one about any other exported declaration of the target too; and where none
-// does, every class is the same.
+// does, every class is the same. Its full count is 12 trees ([draws.Seeds]).
 func TestAnalyzeReportsAroundAHiddenEntryAsWithoutIt(t *testing.T) {
 	t.Parallel()
-	for seed := range uint64(12) {
+	for seed := range draws.Seeds(12, draws.Loading) {
 		d := drawHidden(seed)
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
 			t.Parallel()
@@ -194,6 +195,10 @@ type linkDraw struct {
 	imports  []string          // below example.com/m
 	unlinked []string
 	ancestor bool // a consumer at the tree's directory, m's parent
+
+	// unbounded is the link to / or into /proc below m, empty where the draw holds
+	// none: the run walks neither tree, so it leaves the link's packages out unloaded.
+	unbounded string
 }
 
 // drawLinks is the tree seed draws.
@@ -243,9 +248,9 @@ func drawLinks(seed uint64) linkDraw {
 		d.links["m/a/c/o"] = "../../../out"
 		through("a/c/o/k")
 	case 2:
-		d.links["m/a/c/o"] = "/"
+		d.links["m/a/c/o"], d.unbounded = "/", "m/a/c/o"
 	case 3:
-		d.links["m/a/c/o"] = "/proc"
+		d.links["m/a/c/o"], d.unbounded = "/proc", "m/a/c/o"
 	}
 	if links := slices.Sorted(maps.Keys(d.links)); len(links) > 0 && r.IntN(4) == 0 {
 		d.imports = append(d.imports, strings.TrimPrefix(links[r.IntN(len(links))], "m/")+"/nope")
@@ -401,44 +406,96 @@ func (d linkDraw) analyzedBy(t *testing.T, binary, dir string) (code int, stderr
 const referenceBinary = "DEADSET_GO_REFERENCE"
 
 // TestAnalyzeReportsATreeOfLinksWithNoSpecialFileAsTheReference draws trees of
-// links in and out of the module ([linkDraw]) with no special file, and pins,
-// within two minutes a run, that the scan changes nothing there ([program.6]): no
-// note names a hidden entry; a member, a replace target or a consumer above the
-// module spelled through a link reports as the tree spelling it with no link; and
-// where [referenceBinary] names a binary of v2.0.0-dev.50, the run over the tree
-// with no such link ends with its exit code, standard error and findings.
+// links with no special file ([linkDraw]) and pins, within two minutes a run, that
+// the scan changes nothing there ([program.6]): no note names a hidden entry, a
+// tree spelled through links reports as the tree without them, and so does the
+// reference ([referenceBinary]); a link to / or into /proc, which the run does not
+// walk, is noted once and only lowers or withholds the findings of the tree
+// without it ([program.4]). Its full count is 32 trees ([draws.Seeds]).
 func TestAnalyzeReportsATreeOfLinksWithNoSpecialFileAsTheReference(t *testing.T) {
 	t.Parallel()
 	reference := os.Getenv(referenceBinary)
-	for seed := range uint64(32) {
+	for seed := range draws.Seeds(32, draws.Loading) {
 		d := drawLinks(seed)
 		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
 			t.Parallel()
-			dir := d.written(t, true)
-			code, stderr, findings, notes := d.analyzedBy(t, commandBinary(t), dir)
-			if len(notes) > 0 {
-				t.Errorf("analyze over %v wrote unread-entry notes for %q, want none: the tree holds no special file", d, notes)
-			}
-			plain := dir
-			if len(d.unlinked) > 0 || d.ancestor {
-				plain = d.written(t, false)
-				plainCode, plainStderr, plainFindings, _ := d.analyzedBy(t, commandBinary(t), plain)
-				if code != plainCode || stderr != plainStderr || findings != plainFindings {
-					t.Errorf("analyze over %v = %d writing %q and the findings %s, want what it reports with no link to a member or a replace target, %d writing %q and %s",
-						d, code, stderr, findings, plainCode, plainStderr, plainFindings)
-				}
-			}
-			if reference == "" {
+			if d.unbounded == "" {
+				d.checked(t, reference)
 				return
 			}
-			wantCode, wantStderr, wantFindings, _ := d.analyzedBy(t, reference, plain)
-			if code != wantCode || stderr != wantStderr || findings != wantFindings {
-				t.Errorf("analyze over %v = %d writing %q and the findings %s, want the reference's %d writing %q and %s",
-					d, code, stderr, findings, wantCode, wantStderr, wantFindings)
+			bounded := d
+			bounded.links = maps.Clone(d.links)
+			delete(bounded.links, d.unbounded)
+			bounded.unbounded = ""
+			wantCode, wantStderr, wantFindings := bounded.checked(t, reference)
+			code, stderr, findings, notes := d.analyzedBy(t, commandBinary(t), d.written(t, true))
+			if code != wantCode || stderr != wantStderr {
+				t.Fatalf("analyze over %v = %d writing %q, want what it reports with no link %s, %d writing %q", d, code, stderr, d.unbounded, wantCode, wantStderr)
 			}
+			if at := strings.TrimPrefix(d.unbounded, "m/"); findings != "" && !slices.Equal(notes, []string{at}) {
+				t.Errorf("analyze over %v wrote unread-entry notes for %q, want one for the link %s, whose packages the run does not load", d, notes, at)
+			}
+			lowered(t, findings, wantFindings)
 		})
 	}
 	if reference == "" {
 		t.Logf("%s names no binary, so the draws are compared with no reference", referenceBinary)
+	}
+}
+
+// checked runs the link property's checks over the draw's tree, which holds no
+// link the run leaves unloaded, and returns its exit code, standard error and
+// findings: no unread-entry note, the report of the tree spelled with no link to a
+// member, a replace target or a consumer, and the reference's where one is named.
+func (d linkDraw) checked(t *testing.T, reference string) (code int, stderr, findings string) {
+	t.Helper()
+	dir := d.written(t, true)
+	code, stderr, findings, notes := d.analyzedBy(t, commandBinary(t), dir)
+	if len(notes) > 0 {
+		t.Errorf("analyze over %v wrote unread-entry notes for %q, want none: the tree holds no special file", d, notes)
+	}
+	plain := dir
+	if len(d.unlinked) > 0 || d.ancestor {
+		plain = d.written(t, false)
+		plainCode, plainStderr, plainFindings, _ := d.analyzedBy(t, commandBinary(t), plain)
+		if code != plainCode || stderr != plainStderr || findings != plainFindings {
+			t.Errorf("analyze over %v = %d writing %q and the findings %s, want what it reports with no link to a member or a replace target, %d writing %q and %s",
+				d, code, stderr, findings, plainCode, plainStderr, plainFindings)
+		}
+	}
+	if reference == "" {
+		return code, stderr, findings
+	}
+	wantCode, wantStderr, wantFindings, _ := d.analyzedBy(t, reference, plain)
+	if code != wantCode || stderr != wantStderr || findings != wantFindings {
+		t.Errorf("analyze over %v = %d writing %q and the findings %s, want the reference's %d writing %q and %s",
+			d, code, stderr, findings, wantCode, wantStderr, wantFindings)
+	}
+	return code, stderr, findings
+}
+
+// lowered checks that each of the findings got, as a report writes them, is one of
+// want's at its class or at possible: code the run does not load may use any
+// export, so it lowers or withholds a finding, and never adds one.
+func lowered(t *testing.T, got, want string) {
+	t.Helper()
+	classes := func(text string) map[string]vocab.Class {
+		var findings []report.Finding
+		if text != "" {
+			if err := json.Unmarshal([]byte(text), &findings); err != nil {
+				t.Fatalf("Setup: read the findings %s: %v", text, err)
+			}
+		}
+		held := make(map[string]vocab.Class, len(findings))
+		for i := range findings {
+			held[string(findings[i].Code)+" "+findings[i].Position.Path+" "+findings[i].Symbol.Name] = findings[i].ReachabilityClass
+		}
+		return held
+	}
+	before := classes(want)
+	for key, class := range classes(got) {
+		if was, found := before[key]; !found || class != was && class != vocab.Possible {
+			t.Errorf("analyze reported %s %s, want it among %v at its class or at possible", key, class, before)
+		}
 	}
 }

@@ -1,6 +1,7 @@
 An iota enum a decoder fills keeps a member whose deletion renumbers a member
 code names when a line directive renders its type in a file outside the tree:
-the file that writes the type is the target's.
+the file that writes the type is the target's. The first member is reported, since
+deleting its name replaces it with _ and keeps every value.
 
 -- go.mod --
 module example.com/app

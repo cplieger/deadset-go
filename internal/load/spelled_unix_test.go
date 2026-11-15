@@ -68,6 +68,7 @@ func TestDiscoverNamesAConsumersFileSpelledThroughALinkWhereItResolves(t *testin
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			deadline.Parallel(t)
 			deadline.Row(t, time.Minute, "discovery opened a file that blocks", func(t *testing.T) {
 				base, alias := linkedTree(t, consumer)
 				tc.make(t, filepath.Join(base, filepath.FromSlash(tc.entry)))
@@ -252,6 +253,7 @@ func TestDiscoverReadsAConsumerSpelledThroughALinkOnceAsDeclared(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			deadline.Parallel(t)
 			deadline.Row(t, time.Minute, "discovery did not return", func(t *testing.T) {
 				files := map[string]string{
 					"app/go.mod": "module example.com/app\n\ngo 1.27.1\n",

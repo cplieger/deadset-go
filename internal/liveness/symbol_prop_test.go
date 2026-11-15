@@ -11,6 +11,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/draws"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"pgregory.net/rapid"
 )
@@ -205,18 +206,11 @@ func rowName(seed int, drawn []drawnPackage) string {
 	return fmt.Sprintf("seed%02d-%s-%s", seed, strings.Join(slices.Sorted(maps.Keys(shapes)), "-"), variants)
 }
 
-// loadedModules is the number of module-and-configuration pairs the table is
-// stated over.
-//
-// One load of a generated module costs about a second under the race detector: a
-// module carrying any test file makes the toolchain synthesize a test main, and the
-// load takes the syntax and the types of that main's whole dependency graph, which is
-// the testing package's. A test file is the property's premise, so the cost cannot be
-// drawn away, and the number of loads is therefore what the property costs. It is this
-// number and not the iteration count: an iteration draws one pair and reads the
-// enumeration of it, which is where every assertion of the property is.
-//
-// Four modules per build configuration is what the number buys.
+// loadedModules is the full count of module-and-configuration pairs the table is
+// stated over, four per build configuration, of which a pull request loads a
+// quarter ([draws.Seeds]). A test file is the property's premise and each load
+// takes its synthesized test main's whole dependency graph, so the number of loads
+// is what the property costs.
 const loadedModules = 16
 
 // loadedModule is one pair the property draws: the packages as they were generated,
@@ -229,57 +223,47 @@ type loadedModule struct {
 	config    load.Configuration
 }
 
-// loadedGeneratedModules generates the modules the property is stated over and
-// loads each of them once, under one configuration each so that every
-// configuration is loaded.
-//
-// The modules are the fixed examples of the package generator, one per seed, so
-// the set is the same on every run and a failure names a row a re-run reproduces.
-// The generator's own space is not enumerable, being every arrangement of one to
-// three packages of one to three files of one to four declarations at six shapes
-// and two visibilities, with two kinds of test file present or absent; the pool
-// drawn from it is, and the pool is what the table holds.
-func loadedGeneratedModules(t *testing.T) []*loadedModule {
+// loadGenerated writes the packages drawn as the generator's fixed example of seed
+// under base and loads them under the seed's configuration, so the rows of the
+// table are the same on every run, a failure names a row a re-run reproduces, and
+// consecutive seeds load every configuration. The generator's own space is not
+// enumerable, being every arrangement of one to three packages of one to three files
+// of one to four declarations at six shapes and two visibilities, with two kinds of
+// test file present or absent; the pool drawn from it is, and the pool is what the
+// table holds.
+func loadGenerated(t *testing.T, base string, seed int, drawn []drawnPackage) *loadedModule {
 	t.Helper()
 
-	base := sandbox.Dir(t)
-	built := configurations()
-	held := make([]*loadedModule, loadedModules)
-	for seed := range held {
-		drawn := drawnPackages().Example(seed)
-		generated := make([]generatedPackage, 0, len(drawn))
-		for index, p := range drawn {
-			generated = append(generated, renderPackage(p, fmt.Sprintf("p%02d", index)))
-		}
-		c := built[seed%len(built)]
-		result, root := loadDirUnder(t.Context(), t, writeModule(t, base, generated), c)
-		held[seed] = &loadedModule{
-			result:    result,
-			root:      root,
-			name:      rowName(seed, drawn),
-			generated: generated,
-			config:    c,
-		}
+	generated := make([]generatedPackage, 0, len(drawn))
+	for index, p := range drawn {
+		generated = append(generated, renderPackage(p, fmt.Sprintf("p%02d", index)))
 	}
-	return held
+	built := configurations()
+	c := built[seed%len(built)]
+	result, root := loadDirUnder(t.Context(), t, writeModule(t, base, generated), c)
+	return &loadedModule{
+		result:    result,
+		root:      root,
+		name:      rowName(seed, drawn),
+		generated: generated,
+		config:    c,
+	}
 }
 
 // Property dead-code-suite/P1: for any target tree, any build configuration and
 // any number of package variants of one source file, each declaration appears
-// exactly once in the symbol graph.
-//
-// The property is a table rather than a sampled check. The enumeration takes one
-// configuration's load, so an iteration cannot draw anything cheaper than a load;
-// what the generator's space is sampled for is therefore the pool of modules,
-// which is fixed and small, and a sampled draw over a fixed pool asserts the same
-// rows a table does while loading nothing more. Each row is one module of the pool
-// under one configuration, named for the declaration shapes and the variant
-// arrangement it carries, and every row of the pool is asserted.
+// exactly once in the symbol graph. It is a table rather than a sampled check: an
+// iteration costs a load, so the space sampled is a fixed, small pool of modules,
+// and each row is one of them under one configuration, named for its declaration
+// shapes and variant arrangement, loaded and asserted in a subtest of its own.
 func TestProperty01OneDeclarationPerSourceSite(t *testing.T) {
 	t.Parallel()
-	for _, one := range loadedGeneratedModules(t) {
-		t.Run(one.name, func(t *testing.T) {
-			checkOneDeclarationPerSourceSite(t, one)
+	base := sandbox.Dir(t)
+	for seed := range draws.Seeds(loadedModules, draws.Loading) {
+		drawn := drawnPackages().Example(int(seed))
+		t.Run(rowName(int(seed), drawn), func(t *testing.T) {
+			t.Parallel()
+			checkOneDeclarationPerSourceSite(t, loadGenerated(t, base, int(seed), drawn))
 		})
 	}
 }

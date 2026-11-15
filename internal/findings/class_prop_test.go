@@ -8,6 +8,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/liveness"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/draws"
 	"github.com/cplieger/deadset-spec/v8/report"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
@@ -145,7 +146,7 @@ func dials(t *rapid.T, in *Input) (map[string]vocab.Class, map[string]vocab.Seve
 func TestTheClassAndTheSeverityAreIndependentDials(t *testing.T) {
 	t.Parallel()
 
-	rapid.Check(t, func(t *rapid.T) {
+	draws.Check(t, 100, draws.InMemory, func(t *rapid.T) {
 		symbols := drawnInventory(t)
 		consumers := drawnConsumers(t, "the first run")
 		kind := report.TargetKind(rapid.SampledFrom([]string{

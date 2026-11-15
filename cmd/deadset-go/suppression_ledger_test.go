@@ -363,6 +363,7 @@ func TestADirectiveOnOnePlatformAlternativeWithholdsThatDeclarationAlone(t *test
 		{"directive-on-one-platform-alternative-windows.txtar", "linux"},
 	} {
 		t.Run(tc.fixture, func(t *testing.T) {
+			t.Parallel()
 			got := runAnalyze(t, archiveModule(t, "suppression-ledger/"+tc.fixture))
 			envelope := envelopeAt(t, got.reportPath)
 
@@ -401,6 +402,7 @@ func TestAnAssertionOfAnInterfaceDeclaredPerPlatformIsOneFinding(t *testing.T) {
 		{"entry-on-a-folded-assertion-of-an-interface-declared-per-platform.txtar", nil, 1},
 	} {
 		t.Run(tc.fixture, func(t *testing.T) {
+			t.Parallel()
 			got := runAnalyze(t, archiveModule(t, "suppression-ledger/"+tc.fixture))
 			if got.code != vocab.ExitClean && got.code != vocab.ExitFindings {
 				t.Fatalf("analyze = %d, want a verdict\nstderr: %s", got.code, got.stderr)

@@ -1,6 +1,10 @@
 package deps
 
-import "github.com/cplieger/deadset-go/v2/internal/load"
+import (
+	"slices"
+
+	"github.com/cplieger/deadset-go/v2/internal/load"
+)
 
 // UnusedRequirements returns the require directives of f whose module provides no
 // package this configuration's load imports, in the order the module file
@@ -19,6 +23,9 @@ func UnusedRequirements(f File, r *load.Result) []Requirement {
 	if r == nil {
 		return nil
 	}
+	if unloadedLeftOut(r) {
+		return nil
+	}
 	imported := importedModules(r)
 	unused := make([]Requirement, 0, len(f.Requires))
 	for _, require := range f.Requires {
@@ -30,26 +37,40 @@ func UnusedRequirements(f File, r *load.Result) []Requirement {
 	return unused
 }
 
+// unloadedLeftOut reports whether a package of a unit of r that the run leaves out
+// did not load, so it may import a package of any module and need every
+// directive of its module file ([load.LeftOutPackage]).
+func unloadedLeftOut(r *load.Result) bool {
+	return slices.ContainsFunc(r.LeftOut, func(left load.LeftOutPackage) bool {
+		return left.Path == "" && unitModule(r, left.Module)
+	})
+}
+
+// unitModule reports whether module is the module path of a unit of r.
+func unitModule(r *load.Result, module string) bool {
+	return module != "" && slices.ContainsFunc(r.Units, func(u load.Unit) bool { return u.Path == module })
+}
+
 // importedModules is the set of module paths providing a package a package of the
-// target imports.
-//
-// Every package of the target is in the load, test variants included, so one level
-// out of each of them is every import edge the target's own source writes. A
-// dependency's own imports are deliberately not followed: a module reached only
-// that way provides no package the target imports, which is what the population
-// asks.
-//
-// Two edges are outside what this can see, and both are the load's limit rather
-// than this rule's. An import written in a file no configuration of the matrix
-// selects is invisible until a configuration that selects it runs, which is why a
-// caller intersects configurations. An import written in a file excluded for
-// reaching C is invisible in every configuration.
+// target imports, one level out of each, test variants included, or one a unit's
+// left-out package imports ([load.LeftOutPackage]). A dependency's own imports are
+// not followed: a module only they reach provides no package the target imports.
+// An import in a file no configuration selects is invisible until one selects it,
+// so a caller intersects configurations, and one in a file excluded for reaching C
+// is invisible in every configuration.
 func importedModules(r *load.Result) map[string]bool {
 	imported := make(map[string]bool)
 	for _, p := range r.Packages {
 		for _, dependency := range p.Imports {
 			if dependency.Module != nil {
 				imported[dependency.Module.Path] = true
+			}
+		}
+	}
+	for i := range r.LeftOut {
+		if left := &r.LeftOut[i]; unitModule(r, left.Module) {
+			for _, module := range left.Modules {
+				imported[module] = true
 			}
 		}
 	}

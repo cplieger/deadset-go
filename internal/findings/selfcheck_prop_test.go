@@ -3,6 +3,7 @@ package findings
 import (
 	"bytes"
 	"go/token"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -14,6 +15,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/liveness"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-go/v2/internal/suppress"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/draws"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"github.com/cplieger/deadset-spec/v8/report"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
@@ -166,10 +168,10 @@ func inputOfRecords(records []core.Record, symbols []inventory.Symbol) *Input {
 // answer, pinned by this unit's fixture tests.
 func TestASuppressionDocumentRoundTrips(t *testing.T) {
 	t.Parallel()
-	dir := sandbox.Dir(t)
-	rapid.Check(t, func(t *rapid.T) {
+	draws.Check(t, 100, draws.InMemory, func(t *rapid.T) {
 		found := drawnFindings(t)
 		symbols := inventoryOf(found)
+		dir := drawDir(t)
 
 		for _, mechanism := range []core.Mechanism{
 			core.Inline, core.Ignore, core.Baseline,
@@ -262,9 +264,18 @@ func recordsOf(t *rapid.T, dir string, mechanism core.Mechanism, found []drawnFi
 	}
 }
 
-// writeTemp writes one document into dir under name and returns its path. The
-// directory is the test's own and is reused across iterations, because each document
-// is read as soon as it is written.
+// drawDir is a directory of one draw's own, removed when the draw ends, since the
+// draws of [draws.Check]'s shards run at once and write the same file names.
+func drawDir(t *rapid.T) string {
+	dir, err := sandbox.MkdirTemp("", "deadset-suppression-documents")
+	if err != nil {
+		t.Fatalf("Setup: create the document directory: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
+// writeTemp writes one document into dir under name and returns its path.
 func writeTemp(t *rapid.T, dir, name, document string) string {
 	path := filepath.Join(dir, name)
 	if err := sandbox.WriteFile(path, []byte(document), 0o600); err != nil {
@@ -283,7 +294,7 @@ func writeTemp(t *rapid.T, dir, name, document string) string {
 // the collapse by site does not fold two of them together and the count is exact.
 func TestAnythingTheConfigurationNamesThatMatchesNothingIsReported(t *testing.T) {
 	t.Parallel()
-	rapid.Check(t, func(t *rapid.T) {
+	draws.Check(t, 100, draws.InMemory, func(t *rapid.T) {
 		found := drawnFindings(t)
 		configured := rapid.SliceOfN(rapid.SampledFrom([]string{
 			"go://" + drawnModulePath + "#Gone",

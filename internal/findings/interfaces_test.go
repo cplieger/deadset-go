@@ -66,6 +66,7 @@ func TestInterfaceKinds_reportEachShapeOnceUnderItsOwnCode(t *testing.T) {
 	}
 	for description, tc := range cases {
 		t.Run(description, func(t *testing.T) {
+			t.Parallel()
 			result := analysisOf(t, tc.archive, asApplication, Consumers{}).findings(t, interfaceKinds)
 
 			if got := summary(result.Findings); !slices.Equal(got, tc.want) {
@@ -232,6 +233,7 @@ func TestUnusedSatisfactionAssertion_aPublishedInterfaceOfALibraryIsPossibleWhat
 	}
 	for description, tc := range cases {
 		t.Run(description, func(t *testing.T) {
+			t.Parallel()
 			in := inputOf(t, "interfaces-assertion-published.txtar", tc.resolved, tc.consumers)
 
 			result := computed(t, in, interfaceEmitters())
@@ -284,6 +286,7 @@ func TestUnusedSatisfactionAssertion_anAssertionBetweenPublishedTypesOfALibraryI
 	}
 	for description, tc := range cases {
 		t.Run(description, func(t *testing.T) {
+			t.Parallel()
 			in := inputOf(t, "interfaces-assertion-between-published.txtar", tc.resolved, Consumers{})
 
 			result := computed(t, in, map[vocab.Code]Emitter{vocab.UnusedSatisfactionAssertion: unusedSatisfactionAssertion})

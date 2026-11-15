@@ -27,6 +27,7 @@ func TestAPackageIsOneContainerWhateverFileAConfigurationAnchorsItAt(t *testing.
 		{"const-type-of-a-package-anchored-at-a-per-platform-file", "go://example.com/app#counter", vocab.WriteOnlySymbol, vocab.Certain},
 	} {
 		t.Run(tc.fixture+"/"+tc.ref, func(t *testing.T) {
+			t.Parallel()
 			wantFinding(t, findingsAbout(t, archiveModule(t, "findings-ledger/"+tc.fixture+".txtar")), tc.ref, tc.code, tc.want)
 		})
 	}

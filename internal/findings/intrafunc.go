@@ -213,9 +213,10 @@ func (g *intrafunc) twinned(id inventory.SymbolID, decl *ast.FuncDecl) bool {
 	return symbol != nil && decl != nil && len(g.in.twins.keys[twinKey(symbol.PkgPath, decl)]) > 1
 }
 
-// callersUnknown reports whether a program names one declaration, or it is part of a
-// library's importable surface, and so its callers are not all in the loaded graph,
-// the unused-result kind's precondition. It reads the narrowing kinds' completeness
+// callersUnknown reports whether a program names one declaration, a left-out
+// package may call it ([pass.leftOutReaches]), or it is part of a library's
+// importable surface, and so its callers are not all in the loaded graph, the
+// unused-result kind's precondition. It reads the narrowing kinds' completeness
 // declaration, because a consumer set loaded whole is every caller only where the
 // configuration says so.
 func (g *intrafunc) callersUnknown(id inventory.SymbolID) bool {
@@ -223,10 +224,14 @@ func (g *intrafunc) callersUnknown(id inventory.SymbolID) bool {
 		return true
 	}
 	symbol := g.in.symbol(id)
-	if symbol == nil || !symbol.Exported || !g.in.importable(symbol) {
+	switch {
+	case symbol == nil:
 		return false
-	}
-	if g.in.Config == nil || g.in.Config.Target.Kind != report.TargetKindLibrary {
+	case g.in.leftOutReaches(symbol):
+		return true
+	case !symbol.Exported || !g.in.importable(symbol):
+		return false
+	case g.in.Config == nil || g.in.Config.Target.Kind != report.TargetKindLibrary:
 		return false
 	}
 	return !g.in.consumersLoaded()

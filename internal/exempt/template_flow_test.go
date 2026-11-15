@@ -76,6 +76,7 @@ func TestEncodingReflectionReadsEveryMemberWhereAFileSystemTemplateIsUnread(t *t
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			refs := retainedRefs(t, analysisOf(t, tt.archive, Options{}), vocab.EncodingReflection)
 			if got := membersNamed(refs, "Page", "Card", "Article"); !slices.Equal(got, tt.want) {
 				t.Errorf("EncodingReflectionDetector(%s) retained %v, want %v", tt.archive, got, tt.want)

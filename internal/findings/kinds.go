@@ -148,6 +148,15 @@ type draft struct {
 	// testRead marks a write-only subject only test files read ([pass.capTestUsed]).
 	testRead bool
 
+	// blanked marks a constant deleting which replaces its name with `_`
+	// ([inventory.BlankedNames]), which the message says.
+	blanked bool
+
+	// positional marks a local constant with a live dependent, a positional
+	// member whose finding carries the manual fixability where its kind lists it.
+	// A declaration of the inventory reads its component's instead.
+	positional bool
+
 	local bool // [Finding]'s
 }
 
@@ -823,8 +832,9 @@ func (in *pass) subjectOf(d *draft) Subject {
 // carries the relation that decided it (none where the sweep judged it live or the
 // kind holds its subject live) and its dead component; a part or a document row
 // carries no relation and a component of its own. A finding in a generated file
-// carries no fixability. A finding about a declaration of a held component carries
-// the manual one where its kind lists it.
+// carries no fixability. One about a declaration of a held component, or about a
+// local constant with a live dependent, carries the manual one where its kind
+// lists it, and one deleting a constant that leaves `_` says so.
 func (in *pass) complete(d *draft, row *vocab.Kind) Finding {
 	found := Finding{
 		Code:     d.Code,
@@ -846,6 +856,7 @@ func (in *pass) complete(d *draft, row *vocab.Kind) Finding {
 	case found.local:
 		found.Live, found.Relation = false, liveness.ReferenceCounting
 		found.Component = in.componentOf("")
+		held = d.positional
 	case shapeOf(found.Symbol.Kind) == shapeDeclaration:
 		if row.HoldsLive {
 			found.relation(nil)
@@ -859,6 +870,9 @@ func (in *pass) complete(d *draft, row *vocab.Kind) Finding {
 	default:
 		found.relation(nil)
 		found.Component = in.componentOf("")
+	}
+	if d.blanked && !row.HoldsLive {
+		found.Message += blankedHint
 	}
 	in.classify(&found, d, row)
 	found.Severity = in.Config.EffectiveSeverity(row.Code)
@@ -981,8 +995,14 @@ func (in *pass) finding(id inventory.SymbolID, code vocab.Code, message string) 
 		},
 		Message: message,
 		id:      id,
+		blanked: symbol.Blanked,
 	}, true
 }
+
+// blankedHint is what a message about a constant deleting which replaces its
+// name with `_` adds: the edit that keeps every later constant's value. A
+// group deleted whole needs no blank name, so the edit is the one alone.
+const blankedHint = "; to delete it alone, replace the name with _, since the next specification repeats its list"
 
 // findingAt starts a finding about something the inventory holds no declaration for:
 // a part of a declaration, whose subject names that declaration by reference, and a

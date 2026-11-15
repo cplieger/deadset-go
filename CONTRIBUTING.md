@@ -4,10 +4,14 @@ The [shared rules](https://github.com/cplieger/.github/blob/main/CONTRIBUTING.md
 
 ## Checks
 
-CI builds, vets and tests on Linux only, so it never compiles `sources_darwin.go`, `sources_windows.go` or `sources_other.go` in `internal/memory`. A compile error in one of them passes CI and breaks `go install` on that system. After a change to `internal/memory`, run:
+Every property test runs through `internal/testsupport/draws`. A property whose draws start the go command makes a quarter of its full count on a pull request, so the Windows and macOS legs stay under Go's package timeout. The weekly `Weekly properties` workflow sets `DEADSET_PROPERTY_DRAWS=full`, which makes every property's full count. Set it yourself for a run that should do the same:
 
 ```sh
-GOOS=darwin go vet ./...
-GOOS=windows go vet ./...
+DEADSET_PROPERTY_DRAWS=full go test -count=1 ./...
+```
+
+CI builds, vets and tests on Linux, Windows and macOS, so it never compiles `sources_other.go` in `internal/memory`. A compile error in it passes CI and breaks `go install` on every other system. After a change to `internal/memory`, run:
+
+```sh
 GOOS=freebsd go vet ./...
 ```

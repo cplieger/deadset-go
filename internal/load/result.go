@@ -39,7 +39,8 @@ type Result struct {
 	Nested []Consumer
 
 	// Dropped holds every walked unit, nested module and reader that did not load.
-	// A unit one of them requires has it as a consumer the run did not analyze.
+	// A unit one of them builds against has it as a consumer the run did not
+	// analyze.
 	Dropped []Dropped
 
 	// Consumers holds one entry per declared consumer, in the order the scope
@@ -62,6 +63,12 @@ type Result struct {
 	Hidden   []string
 	Obscured []string
 
+	// LeftOut holds every package a load compiled that no stage reads and that
+	// reaches a package of the target or is a unit's package importing another
+	// module's, and each directory a build may compile whose packages did not load,
+	// with no import path ([program.4]), in import path order.
+	LeftOut []LeftOutPackage
+
 	// ExcludedByCgo holds the target-relative paths, forward slashes, of the
 	// files the toolchain ignored for importing "C" that the opaque-C check could
 	// not read either. A file the check did read is a file of its package like any
@@ -71,6 +78,9 @@ type Result struct {
 	// declared maps the import path of every package of Packages to the one
 	// directory declaring it, and to nothing where two do.
 	declared map[string]string
+
+	// settlement is what the run's read set decides of LeftOut ([Matrix.All]).
+	settlement settlement
 
 	// root is the target root the load names the files it checks whole by
 	// ([Result.Respell]).
@@ -90,8 +100,8 @@ type Unit struct {
 	// [Result.Packages] in the same order.
 	Packages []*packages.Package
 
-	// UnanalysedConsumer reports a unit whose module a [Dropped] module's module
-	// file requires, or any unit of a tree with a path the run cannot read
+	// UnanalysedConsumer reports a unit whose module a [Dropped] module's build
+	// resolves ([Topology.consumes]), or any unit of a tree with a path the run cannot read
 	// ([Topology.Unread]) or an entry it hid ([Result.Hidden]), so code the run did
 	// not analyze may import its exports.
 	UnanalysedConsumer bool
@@ -103,11 +113,12 @@ type Dropped struct {
 	Err error
 	Dir string
 
-	requires []string // the modules its module file requires
+	consumes []string // the module path of every unit its build resolves ([Topology.consumes])
 
 	// Unreadable reports that its module file, or the workspace file governing
-	// Dir, could not be read, so it may require any unit and every export of the
-	// target is possible ([Result.markUnanalysedConsumers]).
+	// Dir, could not be read, or its module graph did not answer what its build
+	// resolves ([asker.ask]), so it may build against any unit and every export of
+	// the target is possible ([Result.markUnanalysedConsumers]).
 	Unreadable bool
 
 	irregular bool // whether a file no toolchain may run under dropped it
@@ -117,18 +128,15 @@ type Dropped struct {
 // droppedOf is m dropped with err.
 func droppedOf(m *discoveredModule, err error) Dropped {
 	d := Dropped{
-		Dir: m.Dir, Err: err, Unreadable: m.File == nil || m.FileErr != nil || m.WorkspaceErr != nil,
-		irregular: irregular(m.Refused), offline: m.scriptsBlock,
-	}
-	if !d.Unreadable {
-		d.requires = m.File.required()
+		Dir: m.Dir, Err: err, Unreadable: m.File == nil || m.FileErr != nil || m.WorkspaceErr != nil || m.buildsUnknown,
+		irregular: irregular(m.Refused), offline: m.scriptsBlock, consumes: m.builds.all(),
 	}
 	return d
 }
 
-// markUnanalysedConsumers flags every unit whose module the module file of a
-// dropped module requires, and every unit where that file cannot be read, because
-// then it may require any of them, or where unread holds, because code the tree
+// markUnanalysedConsumers flags every unit the build of a dropped module resolves,
+// and every unit where the run could not ask, because then it may resolve any of
+// them, or where unread holds, because code the tree
 // holds where the run cannot read it may import any of them.
 func (r *Result) markUnanalysedConsumers(unread bool) {
 	for i := range r.Units {
@@ -136,7 +144,7 @@ func (r *Result) markUnanalysedConsumers(unread bool) {
 	}
 	for _, dropped := range r.Dropped {
 		for i := range r.Units {
-			if dropped.Unreadable || slices.Contains(dropped.requires, r.Units[i].Path) {
+			if dropped.Unreadable || slices.Contains(dropped.consumes, r.Units[i].Path) {
 				r.Units[i].UnanalysedConsumer = true
 			}
 		}

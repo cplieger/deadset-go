@@ -299,7 +299,7 @@ func fileNeverImported(in *pass) ([]draft, error) {
 }
 
 // unreachedPackages is every package of the target, by [pass.packageKey], that no
-// import reaches, no root names, and whose every declaration is a candidate of the
+// import reaches, a left-out package's included, no root names, and whose every declaration is a candidate of the
 // sweep, a package whose files declare nothing among them. A declaration the sweep
 // did not judge dead keeps the package's files out of the set whatever held it
 // live, which for a package nothing imports is an exemption: a use no reference
@@ -323,7 +323,7 @@ func unreachedPackages(in *pass) map[string]bool {
 
 	unreached := make(map[string]bool, len(files))
 	for pkg := range files {
-		if imported[pkg] || rooted[pkg] || in.mains[pkg] {
+		if imported[pkg] || in.leftOutImported[pkg] || rooted[pkg] || in.mains[pkg] {
 			continue
 		}
 		unreached[pkg] = live[pkg] == 0

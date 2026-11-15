@@ -8,6 +8,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/draws"
 	"pgregory.net/rapid"
 )
 
@@ -104,27 +105,17 @@ func verdictLines(b *graphBuilder, candidates []Candidate) []string {
 	return found
 }
 
-// Property dead-code-suite/P11: over a matrix of any size and any per-configuration
-// reference set, a declaration is reported when and only when every configuration
-// it exists in reports it and no configuration compiles a reference to it from a
-// declaration the matrix keeps, a declaration one configuration alone holds is analyzed
-// under that configuration rather than skipped, a reference under any configuration
-// keeps the declaration from the stronger claim, and each report names exactly the
-// configurations the declaration exists in.
-//
-// The oracle is one sweep per configuration over the graph of that configuration
-// alone, which is the sweep the rest of the suite measures, combined by the rule
-// above over the names a draw produced. Neither the restriction the matrix applies
-// nor the combination it makes is used to compute it.
-//
-// The graph is built by hand rather than loaded, so a draw costs no package load
-// and shrinks to the one declaration that carries a failure.
-//
-// This runs at rapid's default of 100 checks; -rapid.checks raises it for a
-// deeper local run.
+// Property dead-code-suite/P11: over any matrix and per-configuration references, a
+// declaration is reported exactly when every configuration it exists in reports it
+// and none compiles a reference to it from a kept declaration, one configuration
+// alone holding it analyzes it there, and each report names exactly the
+// configurations it exists in. The oracle is one sweep per configuration over its
+// own graph, combined by that rule, using neither the matrix's restriction nor its
+// combination. The graph is built by hand, so a draw loads nothing and shrinks to
+// one declaration. It makes 100 draws ([draws.Check]); -rapid.checks sets another.
 func TestProperty11MatrixIntersectionReportsOnlyWhatIsDeadEverywhere(t *testing.T) {
 	t.Parallel()
-	rapid.Check(t, func(t *rapid.T) {
+	draws.Check(t, 100, draws.InMemory, func(t *rapid.T) {
 		d := drawnMatrices().Draw(t, "the matrix")
 		b := d.build(t)
 		in := d.graph.input(b)

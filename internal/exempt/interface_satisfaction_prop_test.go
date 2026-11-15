@@ -15,6 +15,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/resolve"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/draws"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"pgregory.net/rapid"
 )
@@ -208,24 +209,16 @@ func retainedMethods(in *Program, held []Exemption) map[string]bool {
 	return retained
 }
 
-// Property dead-code-suite/P5: for any set of concrete types, interfaces and
-// conversion sites, a method is retained by the interface-satisfaction class if and
-// only if a value of its receiver's type reaches an interface the method helps
-// satisfy.
-//
-// The subject is what the type checker answers about one real program, so each
-// iteration writes the drawn program to a module of its own and loads it. What the
-// draw renders is what keeps that affordable: one file, no import and no test file,
-// so the toolchain type-checks the drawn declarations and nothing else rather than
-// synthesizing a test binary whose closure it checks on every load. The drawn
-// shapes are small for the same reason: at most three interfaces, three types and
-// the conversions between them.
-//
-// This runs at rapid's default of 100 checks; -rapid.checks raises it for a deeper
-// local run.
+// Property dead-code-suite/P5: for any concrete types, interfaces and conversion
+// sites, the interface-satisfaction class retains a method if and only if a value
+// of its receiver's type reaches an interface the method helps satisfy. Each draw
+// loads its program as a module of its own: one file, no import and no test file,
+// at most three interfaces and three types, so the toolchain checks the drawn
+// declarations alone. Its full count is 100 draws, a quarter per pull request
+// ([draws.Check]); -rapid.checks sets another count.
 func TestProperty05InterfaceSatisfactionRetainsExactlyTheSatisfyingMethods(t *testing.T) {
 	t.Parallel()
-	rapid.Check(t, func(t *rapid.T) {
+	draws.Check(t, 100, draws.Loading, func(t *rapid.T) {
 		p := drawnPrograms().Draw(t, "the program")
 		source := p.render()
 		in := inputUnder(t, writeProgram(t, source))

@@ -395,6 +395,7 @@ func TestATestSupportClassOneConfigurationVetoesHoldsUnderEveryMatrixOrder(t *te
 		"windows first": {windows, linux},
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			in := inputOf(t, "declarations-test-support-evidence-platform.txtar", applicationConfig(), Consumers{}, order...)
 			result := computed(t, in, declarationEmitters())
 

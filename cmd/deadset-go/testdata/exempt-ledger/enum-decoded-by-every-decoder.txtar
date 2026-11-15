@@ -1,7 +1,9 @@
 An iota enum that only a decoder's target carries keeps each member whose
 deletion renumbers a member code names, whichever decoding entry point fills
 it: encoding/xml's DecodeElement and encoding/gob's Decode fill a value from a
-document as json.Unmarshal does, so a value no name gives can arrive.
+document as json.Unmarshal does, so a value no name gives can arrive. The
+first member of each block is reported all the same: the next specification
+repeats its list, so deleting its name replaces it with _ and keeps every value.
 
 -- go.mod --
 module example.com/app

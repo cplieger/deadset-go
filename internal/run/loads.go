@@ -50,7 +50,8 @@ type outline struct {
 	consumers     []string    // the declared consumers' identifiers, in scope order
 	dropped       []load.Dropped
 	excludedByCgo []string
-	hidden        []string // [load.Result.Hidden]
+	hidden        []string              // [load.Result.Hidden]
+	leftOut       []load.LeftOutPackage // [loads.settle]
 }
 
 func newLoads(ctx context.Context, matrix *load.Matrix, root string) *loads {
@@ -107,6 +108,20 @@ func (l *loads) add(one *findings.Configured) {
 	l.digests = append(l.digests, digestOf(one))
 	l.held = append(l.held, nil)
 	l.keep(len(l.held)-1, one)
+}
+
+// settle gives every configuration its LeftOut once the matrix has loaded them
+// all ([load.Matrix.LeftOut]): its outline's, and its load's where it is held.
+func (l *loads) settle() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i := range l.configurations {
+		left := l.matrix.LeftOut(l.configurations[i].ID)
+		l.outlines[i].leftOut = left
+		if one := l.held[i]; one != nil {
+			one.Result.LeftOut = left
+		}
+	}
 }
 
 // keep holds one configuration, and under pressure it alone.

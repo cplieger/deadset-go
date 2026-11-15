@@ -149,8 +149,18 @@ func TestUnusedEnumMemberReportsTheGroupNoConversionRetainsAtTheDerivedClass(t *
 	in := inputOf(t, "readwrite-enum.txtar", libraryConfig(), Consumers{})
 
 	found := computed(t, in, map[vocab.Code]Emitter{vocab.UnusedEnumMember: unusedEnumMember}).Findings
-	if names := namesUnder(found, vocab.UnusedEnumMember); !slices.Equal(names, []string{"levelHigh", "modeWrite"}) {
-		t.Fatalf("UnusedEnumMember over readwrite-enum.txtar reports %v, want [levelHigh modeWrite]: a String method retains no member", names)
+	if names := namesUnder(found, vocab.UnusedEnumMember); !slices.Equal(names, []string{"levelHigh", "modeWrite", "stateIdle"}) {
+		t.Fatalf("UnusedEnumMember over readwrite-enum.txtar reports %v, want [levelHigh modeWrite stateIdle]: a String method retains no member, "+
+			"and deleting stateIdle replaces its name with _", names)
+	}
+
+	// Deleting stateIdle replaces its name with _, which keeps every value a
+	// conversion may produce, and stateBusy, which the class retains, repeats its list.
+	first := findingOf(t, found, vocab.UnusedEnumMember, "stateIdle")
+	want := "enumerated member stateIdle of state is named nowhere; its value may still arrive from a decoder or outside code, " +
+		"and deleting the name changes no behaviour" + blankedHint
+	if first.Message != want || first.Fixability != vocab.Manual {
+		t.Errorf("UnusedEnumMember reports stateIdle with message %q and fixability %q, want %q and manual", first.Message, first.Fixability, want)
 	}
 
 	member := findingOf(t, found, vocab.UnusedEnumMember, "modeWrite")
@@ -183,12 +193,12 @@ func TestUnusedEnumMemberReportsNoMemberTheEnumGroupClassRetains(t *testing.T) {
 			retained[symbol.Name] = true
 		}
 	}
-	for _, name := range []string{"stateIdle", "stateBusy"} {
+	for _, name := range []string{"stateBusy"} {
 		if !retained[name] {
 			t.Errorf("the sweep over readwrite-enum.txtar does not retain %s under enum-group, want it held back", name)
 		}
 	}
-	for _, name := range []string{"modeWrite", "levelHigh"} {
+	for _, name := range []string{"modeWrite", "levelHigh", "stateIdle"} {
 		if retained[name] {
 			t.Errorf("the sweep over readwrite-enum.txtar retains %s under enum-group, want it reported instead", name)
 		}

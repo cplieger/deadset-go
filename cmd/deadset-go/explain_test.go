@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"maps"
 	"strings"
 	"testing"
 
@@ -307,6 +308,8 @@ func TestExplainListsTheDeadComponentAtTheConfiguredCascade(t *testing.T) {
 		{cascade: "full", wantList: true},
 	} {
 		t.Run(tc.cascade, func(t *testing.T) {
+			t.Parallel()
+			files := maps.Clone(files)
 			files[repositoryDocument] = `{"target": {"kind": "application"}, ` +
 				`"severity": {"DS1002": "allow"}, "reporters": {"cascade": "` + tc.cascade + `"}}`
 			got := runExplain(t, writeModule(t, files), "go://example.com/app#fallen")

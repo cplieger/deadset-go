@@ -12,6 +12,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/roots"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/draws"
 	"pgregory.net/rapid"
 )
 
@@ -178,20 +179,16 @@ func (d drawnGraph) liveness(added []drawnRoot) (referenced, counted, reached ma
 	return referenced, counted, reached
 }
 
-// Property dead-code-suite/P7: every candidate records the liveness relation that
-// found it, reference counting where the references made to the symbol are none
-// and reachability otherwise; an exemption seeds the closure, so no symbol an
-// exempt declaration reaches is reported under reachability; and a root changes no
-// reference-counting verdict except on the symbol it names.
-//
-// The graph is built by hand rather than loaded, so a draw costs no package load
-// and shrinks to the one declaration that carries a failure.
-//
-// This runs at rapid's default of 100 checks; -rapid.checks raises it for a
-// deeper local run.
+// Property dead-code-suite/P7: every candidate records the relation that found it,
+// reference counting where nothing references the symbol and reachability
+// otherwise; an exemption seeds the closure, so nothing an exempt declaration
+// reaches is reported under reachability; and a root changes no reference-counting
+// verdict but its own symbol's. The graph is built by hand, so a draw loads nothing
+// and shrinks to one declaration. It makes 100 draws ([draws.Check]);
+// -rapid.checks sets another count.
 func TestProperty07TheRelationRecordedIsTheOneThatFoundTheCandidate(t *testing.T) {
 	t.Parallel()
-	rapid.Check(t, func(t *rapid.T) {
+	draws.Check(t, 100, draws.InMemory, func(t *rapid.T) {
 		d := drawnGraphs().Draw(t, "the graph")
 		b := d.build(t, nil)
 		r := b.graph().Sweep(d.input(b))
@@ -381,17 +378,13 @@ func plant(b *graphBuilder, at int, shape drawnShape) string {
 
 // Property dead-code-suite/P6: every dead symbol lands in exactly one component,
 // each component is reported at its roots, and a component holds every dead
-// symbol a chain of references joins to it.
-//
-// The oracle is written over the names a draw produced and answers mutual
-// reachability by a transitive closure rather than by Tarjan's algorithm, so an
-// agreement between the two is not one implementation checking itself.
-//
-// This runs at rapid's default of 100 checks; -rapid.checks raises it for a
-// deeper local run.
+// symbol a chain of references joins to it. The oracle answers mutual reachability
+// by a transitive closure rather than by Tarjan's algorithm, so the two agreeing is
+// no implementation checking itself. It makes 100 draws ([draws.Check]);
+// -rapid.checks sets another count.
 func TestProperty06EveryDeadSymbolLandsInOneComponentReportedAtItsRoots(t *testing.T) {
 	t.Parallel()
-	rapid.Check(t, func(t *rapid.T) {
+	draws.Check(t, 100, draws.InMemory, func(t *rapid.T) {
 		shapes := drawnShapes().Draw(t, "the shapes")
 		b := newGraphBuilder(t)
 		admitted := map[string]bool{}
@@ -738,20 +731,15 @@ func describeLoad(d drawnLoad) string {
 }
 
 // Property dead-code-suite/P3: a reference from any loaded module prevents the
-// finding. A declaration the mode counts one reference to is live under reference
-// counting whichever module made it, a declaration a loaded consumer calls is live
-// under both relations and keeps what it references live, a declaration no counted
-// reference names is a candidate, and the consumers a declaration's references come
-// from are exactly the ones that referenced it.
-//
-// The graph is built by hand rather than loaded, so a draw costs no package load
-// and shrinks to the one declaration that carries a failure.
-//
-// This runs at rapid's default of 100 checks; -rapid.checks raises it for a
-// deeper local run.
+// finding. One counted reference keeps a declaration live under reference counting
+// whichever module made it, a loaded consumer's call keeps it and what it
+// references live under both relations, one no counted reference names is a
+// candidate, and its references' consumers are exactly those that referenced it.
+// The graph is built by hand, so a draw loads nothing and shrinks to one
+// declaration. It makes 100 draws ([draws.Check]); -rapid.checks sets another.
 func TestProperty03AReferenceFromAnyLoadedModulePreventsTheFinding(t *testing.T) {
 	t.Parallel()
-	rapid.Check(t, func(t *rapid.T) {
+	draws.Check(t, 100, draws.InMemory, func(t *rapid.T) {
 		d := drawnLoads().Draw(t, "the run")
 		b := d.build(t)
 		g := b.graph()

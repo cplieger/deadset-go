@@ -40,14 +40,14 @@ func lower(c, other vocab.Class) vocab.Class {
 	return other
 }
 
-// classOf is the reachability class of one declaration under this run: possible in
-// a package beside code the analysis does not see, in an importable package of an
-// application no build links in a run declaring no consumer, and for an importable
-// export of a module a dropped module requires. Otherwise it is certain for every
+// classOf is the reachability class of one declaration under this run: possible
+// beside code the analysis does not see, in an importable package of an
+// application no build links in a run declaring no consumer, for an importable
+// export of a module a dropped module requires, and for an export a left-out
+// package may name ([pass.leftOutReaches]). Otherwise it is certain for an
 // application subject, an unexported, test-file or non-importable declaration, a
-// type parameter and a member [pass.hiddenMember] reports; a library's other export
-// is certain where every declared consumer loaded, probable where some did not, and
-// possible with no consumer information.
+// type parameter and a [pass.hiddenMember]; a library's other export is certain,
+// probable or possible as every, some or no declared consumer loaded.
 func (in *pass) classOf(id inventory.SymbolID) vocab.Class {
 	symbol := in.symbol(id)
 	switch {
@@ -63,6 +63,8 @@ func (in *pass) classOf(id inventory.SymbolID) vocab.Class {
 		return vocab.Certain
 	case symbol.InTestFile:
 		return vocab.Certain
+	case in.leftOutReaches(symbol):
+		return vocab.Possible
 	case !in.importable(symbol):
 		return vocab.Certain
 	case in.hiddenMember(symbol):
@@ -78,6 +80,16 @@ func (in *pass) classOf(id inventory.SymbolID) vocab.Class {
 	default:
 		return vocab.Possible
 	}
+}
+
+// leftOutReaches reports whether a package the run leaves out may name one
+// declaration: an export of a target package it reaches ([load.Result.LeftOut]).
+// Every kind that decides from the references or callers it sees reads it,
+// through the class, the narrowing kinds' closed world or the unused-result kind's
+// unknown callers; TestEveryKindAnswersForTheCallersOfALeftOutPackage holds each
+// kind to one.
+func (in *pass) leftOutReaches(symbol *inventory.Symbol) bool {
+	return symbol.Exported && !symbol.InTestFile && in.leftOutReached[in.packageOf(symbol)]
 }
 
 // Unseen is every production declaration of the inventory whose reachability class

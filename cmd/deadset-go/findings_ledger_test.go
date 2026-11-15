@@ -498,6 +498,7 @@ func TestAConsumersInstantiationReachesTheTypeParameterItInstantiates(t *testing
 		"struct-conversion-through-a-target-generic-a-consumer-instantiates": "Wire converts the S the consumer gives it",
 	} {
 		t.Run(fixture, func(t *testing.T) {
+			t.Parallel()
 			if got := scopedReport(t, "findings-ledger/"+fixture+".txtar"); len(got) != 0 {
 				t.Errorf("findings = %q, want none: %s", got, why)
 			}
@@ -561,6 +562,7 @@ func TestAMethodOfATypeDeclaredPerPlatformIsJudgedUnderTheTypeOfEachPlatform(t *
 	} {
 		for _, order := range [][2]string{{linux, windows}, {windows, linux}} {
 			t.Run(tc.fixture+"/"+order[0][8:13], func(t *testing.T) {
+				t.Parallel()
 				files := archiveFiles(t, "findings-ledger/"+tc.fixture+".txtar")
 				files["deadset.json"] = `{"target": {"kind": "application"}, "analysis": {"configurations": [` +
 					order[0] + ", " + order[1] + `]}}`
@@ -683,6 +685,7 @@ func TestALeftOutOrNestedConsumersEncoderReadsTheFieldsOfTheTypeItEncodes(t *tes
 		"encoded-by-a-nested-module":    "go://example.com/app/internal/lib#S.X",
 	} {
 		t.Run(fixture, func(t *testing.T) {
+			t.Parallel()
 			wantNoFinding(t, findingsAbout(t, archiveModule(t, "findings-ledger/"+fixture+".txtar")),
 				"the consumer's json.Marshal reads it", ref)
 		})

@@ -209,7 +209,10 @@ func TestAnEnumFilledByAnyDecodingEntryPointKeepsAMemberThatRenumbersANamedOne(t
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/enum-decoded-by-every-decoder.txtar"))
 
 	wantNoFinding(t, about, "a decoder fills the enum from a document, so a value no name gives can arrive and deleting the member renumbers a named one",
-		"go://example.com/app#Low", "go://example.com/app#Mid", "go://example.com/app#Off", "go://example.com/app#On")
+		"go://example.com/app#Mid", "go://example.com/app#On")
+	for _, first := range []string{"go://example.com/app#Low", "go://example.com/app#Off"} {
+		wantFinding(t, about, first, vocab.UnusedEnumMember, vocab.Certain)
+	}
 }
 
 func TestAnEnumALineDirectiveRendersOutsideTheTreeIsTheTargetsOwn(t *testing.T) {
@@ -217,7 +220,8 @@ func TestAnEnumALineDirectiveRendersOutsideTheTreeIsTheTargetsOwn(t *testing.T) 
 	about := findingsAbout(t, archiveModule(t, "exempt-ledger/enum-under-a-line-directive-outside-the-tree.txtar"))
 
 	wantNoFinding(t, about, "the target writes the enum, so a decoder can fill a value deleting the member renumbers",
-		"go://example.com/app#Low", "go://example.com/app#Mid")
+		"go://example.com/app#Mid")
+	wantFinding(t, about, "go://example.com/app#Low", vocab.UnusedEnumMember, vocab.Certain)
 }
 
 func TestAGoFlagsCommandFieldIsRead(t *testing.T) {
@@ -298,12 +302,14 @@ func TestTwoTypesOneNameSpellsInTwoFunctionsAreTwoTypes(t *testing.T) {
 	}
 	for _, c := range kept {
 		t.Run(c.archive, func(t *testing.T) {
+			t.Parallel()
 			about := findingsAbout(t, archiveModule(t, "exempt-ledger/"+c.archive+".txtar"))
 			wantNoFinding(t, about, c.why, c.refs...)
 		})
 	}
 	for _, archive := range []string{"local-type-converted-like-an-enum", "local-type-decoded-like-an-enum"} {
 		t.Run(archive, func(t *testing.T) {
+			t.Parallel()
 			about := findingsAbout(t, archiveModule(t, "exempt-ledger/"+archive+".txtar"))
 			wantFinding(t, about, "go://example.com/app#slow", vocab.UnusedEnumMember, vocab.Certain)
 		})
@@ -338,6 +344,7 @@ func TestAMethodATypeHasByPromotionIsCalledThroughTheEmbeddedField(t *testing.T)
 		{"promoted-on-a-field-type", "selfish.MarshalJSON", "json.Marshal walks outer.W and calls wrap's promoted MarshalJSON"},
 	} {
 		t.Run(c.archive, func(t *testing.T) {
+			t.Parallel()
 			about := findingsAbout(t, archiveModule(t, "exempt-ledger/"+c.archive+".txtar"))
 			wantNoFinding(t, about, c.why, "go://example.com/app#"+c.method)
 			if c.archive != "promoted-text-marshaler-map-key" {

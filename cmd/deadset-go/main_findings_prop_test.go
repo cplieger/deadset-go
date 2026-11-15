@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/findings"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/draws"
 	"pgregory.net/rapid"
 )
 
@@ -77,7 +78,7 @@ func drawLibrary(t *rapid.T, document string) map[string]string {
 // is analyzed once.
 func TestTheDeclaredTargetKindIsTheOnlyThingThatChangesTheTargetsTreatment(t *testing.T) {
 	t.Parallel()
-	rapid.Check(t, func(t *rapid.T) {
+	draws.Check(t, 100, draws.Loading, func(t *rapid.T) {
 		const library = `{"target": {"kind": "library"}}`
 		files := drawLibrary(t, library)
 

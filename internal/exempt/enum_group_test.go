@@ -47,9 +47,9 @@ func TestEnumGroupRetainsAConstantWhoseDeletionItCannotProveSafe(t *testing.T) {
 			want:    []string{},
 		},
 		{
-			name:    "a_first_specification_the_next_one_repeats_cannot_be_removed_alone",
+			name:    "a_first_specification_the_next_one_repeats_keeps_its_place_under_a_blank_name",
 			archive: "enum-group-wire.txtar",
-			want:    []string{"KindUnknown\tdeleting it alone leaves its block unable to compile"},
+			want:    []string{},
 		},
 		{
 			name:    "every_rule_of_the_class",
@@ -77,7 +77,6 @@ func TestEnumGroupRetainsAConstantWhoseDeletionItCannotProveSafe(t *testing.T) {
 				"cMid\tdeleting it moves cZ, which may then not compile",
 				"dMid\tdeleting it moves dHidden, which may then not compile",
 				"tickMid\tdeleting it moves tickLast, which may then not compile",
-				"lanesNone\tdeleting it alone leaves its block unable to compile",
 				"lanesMid\tdeleting it renumbers lanesTwo, and a value of lanes is passed to fmt.Println",
 			},
 		},

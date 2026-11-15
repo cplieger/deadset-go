@@ -67,6 +67,7 @@ func TestReferencesReportsTheRuleThatClassifiedEachTestFile(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.archive, func(t *testing.T) {
+			t.Parallel()
 			if got := analyze(t, tc.archive).rules; !slices.Equal(got, tc.want) {
 				t.Errorf("References(%s) reported test-file rules %v, want %v", tc.archive, got, tc.want)
 			}

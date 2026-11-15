@@ -444,12 +444,19 @@ type passKey struct {
 // read by every test that asks the same question of it: the result of each pass, the
 // findings each emitter of the package returns, and the reachability class of every
 // declaration by its reference. No part of the input it was computed from is held.
+// An application's with no consumer also holds every kind's pass beside a left-out
+// package importing every package of the target ([leaveOutEveryPackage]), and the
+// exports of the inventory.
 type sharedAnalysis struct {
 	computed map[passKey]Result
 	refused  map[passKey]error
 	emitted  map[vocab.Code][]draft
 	failed   map[vocab.Code]error
 	classes  map[string]vocab.Class
+
+	leftOut        Result
+	leftOutRefused error
+	exports        map[inventory.SymbolID]bool
 }
 
 // analysisKey is one shared analysis: the archive, the setup and the consumer set as
@@ -471,7 +478,13 @@ func analysisOf(t *testing.T, archive string, s setup, consumers Consumers) *sha
 
 	key := analysisKey{archive: archive, setup: s, consumers: fmt.Sprintf("%#v", consumers)}
 	return analyses.Of(t, key, func(t *testing.T) *sharedAnalysis {
-		return analyzeShared(t, inputOf(t, archive, s.resolved(), consumers))
+		in := inputOf(t, archive, s.resolved(), consumers)
+		held := analyzeShared(t, in)
+		if s == asApplication && reflect.DeepEqual(consumers, Consumers{}) {
+			held.exports = exportsOf(in)
+			held.leftOut, held.leftOutRefused = Compute(leaveOutEveryPackage(in), packageEmitters())
+		}
+		return held
 	})
 }
 

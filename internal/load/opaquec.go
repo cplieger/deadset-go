@@ -35,14 +35,14 @@ const (
 // checkOpaqueC type-checks again, from its original sources with the C
 // pseudo-package opaque, every loaded package that ignored a file solely for
 // importing "C", and returns the target-relative slash paths of the files that
-// stayed excluded; a package it loads on demand resolves from the unit's directory
-// under the unit's workspace setting. An accepted package is updated in place,
+// stayed excluded, and the packages it loaded on demand, which resolve from the
+// unit's directory under the unit's workspace setting. An accepted package is updated in place,
 // because the load's packages hold one another in their import maps: its syntax,
 // types, type information, imports and file lists change, and its identity does
 // not. No C declaration becomes a symbol; only the Go half is analyzed.
-func checkOpaqueC(ctx context.Context, fset *token.FileSet, target scope.Root, from unitDir, pkgs []*packages.Package, cgo map[string]bool, c *Configuration) []string {
+func checkOpaqueC(ctx context.Context, fset *token.FileSet, target scope.Root, from unitDir, pkgs []*packages.Package, cgo map[string]bool, c *Configuration) (excluded []string, loaded []*packages.Package) {
 	if len(cgo) == 0 {
-		return nil
+		return nil, nil
 	}
 	o := &opaqueCheck{
 		fset:     fset,
@@ -55,7 +55,7 @@ func checkOpaqueC(ctx context.Context, fset *token.FileSet, target scope.Root, f
 	for _, g := range cgoGroups(pkgs, cgo) {
 		o.recheck(g)
 	}
-	return relativeSorted(target, o.excluded)
+	return relativeSorted(target, o.excluded), o.imports.loaded
 }
 
 // opaqueCheck accumulates the second check of one configuration: the files it
@@ -407,6 +407,10 @@ type cgoImporter struct {
 	refused map[string]bool
 	c       *Configuration
 	from    unitDir
+
+	// loaded holds the packages each on-demand load listed, whose graphs the run
+	// reads for the packages it leaves out ([Result.leftOutPackages]).
+	loaded []*packages.Package
 }
 
 // newCgoImporter indexes every package the load type-checked, by import path, and
@@ -492,6 +496,7 @@ func (im *cgoImporter) resolve(path string) (*packages.Package, error) {
 		return nil, err
 	}
 	nameFiles(im.names, pkgs)
+	im.loaded = append(im.loaded, pkgs...)
 	if !reportsErrors(pkgs) {
 		if err := typeCheckDeclarations(im.ctx, im.names, im.fset, pkgs, im.c.Arch); err != nil {
 			im.refused[path] = true

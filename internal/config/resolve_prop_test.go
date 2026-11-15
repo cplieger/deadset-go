@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/draws"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 	"pgregory.net/rapid"
 )
@@ -21,7 +22,7 @@ func TestPropertyEverySettingComesFromTheHighestRankedSourceSupplyingIt(t *testi
 			settings = append(settings, row)
 		}
 	}
-	rapid.Check(t, func(t *rapid.T) {
+	draws.Check(t, 100, draws.InMemory, func(t *rapid.T) {
 		in := &config.Inputs{Flags: map[vocab.Key][]byte{}}
 		repository := map[string]any{"target": map[string]any{"kind": "library"}}
 		central := map[string]any{}

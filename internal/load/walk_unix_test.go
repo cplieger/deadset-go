@@ -248,7 +248,7 @@ func inRepository(make func(*testing.T, string)) func(*testing.T, string) {
 // listener holds until the test ends.
 func socket(t *testing.T, path string) {
 	t.Helper()
-	if err := sandbox.Mknod(path, syscall.S_IFSOCK|0o600, 0); err == nil {
+	if err := sandbox.Mknod(path, syscall.S_IFSOCK|0o600); err == nil {
 		return
 	}
 	listener, err := sandbox.ListenUnix(path)
