@@ -383,6 +383,13 @@ func TestAnalyzeMeetsAFileTheToolchainWouldBlockOn(t *testing.T) {
 	outside := maps.Clone(linked)
 	outside["m/main.go"] = "package main\n\nimport _ \"example.com/m/shared/q\"\n\nfunc main() {}\n\nfunc unused() {}\n"
 	outside["ext/q/q.go"] = "package q\n"
+	// A link into /proc leaves the device, so the packages below it are noted as not
+	// loaded; where the system has no /proc, as on macOS, the link names nothing and
+	// changes nothing.
+	var procLink []string
+	if info, err := os.Stat("/proc"); err == nil && info.IsDir() {
+		procLink = []string{"p/sys link p/sys"}
+	}
 	tests := []struct {
 		name, entry string
 		tree        map[string]string
@@ -484,7 +491,7 @@ func TestAnalyzeMeetsAFileTheToolchainWouldBlockOn(t *testing.T) {
 		},
 		{
 			name: "a_link_into_proc_nothing_imports_through", entry: "m/p/sys", tree: linked, target: "m",
-			make: symlinkTo("/proc"), code: "findings", findings: unused, hidden: []string{"p/sys link p/sys"},
+			make: symlinkTo("/proc"), code: "findings", findings: unused, hidden: procLink,
 		},
 		{
 			name: "a_link_to_the_file_system_root_nothing_imports_through", entry: "m/up", tree: linked, target: "m",
