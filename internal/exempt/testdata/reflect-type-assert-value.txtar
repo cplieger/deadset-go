@@ -1,0 +1,31 @@
+reflect.TypeAssert taken as a value: the walk cannot follow what it is later
+called on, so it is the assertion on a receiver the walk cannot follow, which
+retains every method of every type reachable from what the program hands to
+reflect.ValueOf.
+
+-- go.mod --
+module example.com/rtv
+
+go 1.27.1
+-- main.go --
+package main
+
+import (
+	"fmt"
+	"reflect"
+)
+
+type ranged interface{ Range() int }
+
+type width int
+
+func (width) Range() int { return 2 }
+
+func (width) extra() {}
+
+func main() {
+	assert := reflect.TypeAssert[ranged]
+	if r, ok := assert(reflect.ValueOf(width(0))); ok {
+		fmt.Println(r.Range())
+	}
+}

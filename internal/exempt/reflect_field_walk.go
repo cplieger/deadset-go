@@ -17,6 +17,10 @@ const (
 	reflectIndirect  = "Indirect"
 	reflectElem      = "Elem"
 	reflectInterface = "Interface"
+	// reflectTypeAssert is reflect.TypeAssert[T](v), which asserts T on what
+	// v.Interface() returns exactly as v.Interface().(T) does (go1.27.4
+	// src/reflect/value.go, TypeAssert).
+	reflectTypeAssert = "TypeAssert"
 )
 
 // fieldAssertion is one assertion to interface types of what Interface returns
@@ -88,18 +92,66 @@ func assertedValue(walk *reflectWalk, x ast.Expr, asserted []assertedInterface, 
 		}
 		reads = true
 		recv, inBody := walk.receiver(call, callee)
-		if !inBody {
-			a.followed = false
-			continue
-		}
-		held, followed := walk.held(recv, 0)
-		a.held = append(a.held, held...)
-		a.followed = a.followed && followed
+		a.follow(walk, recv, inBody)
 	}
 	if dynamic && returnsInterfaceValue(walk.info.TypeOf(call.Fun)) {
 		reads, a.unseen = true, true
 	}
 	return a, reads
+}
+
+// follow adds to a what the reflect.Value recv may hold, where the walk can read
+// it in its body.
+func (a *fieldAssertion) follow(walk *reflectWalk, recv ast.Expr, inBody bool) {
+	if !inBody {
+		a.followed = false
+		return
+	}
+	held, followed := walk.held(recv, 0)
+	a.held = append(a.held, held...)
+	a.followed = a.followed && followed
+}
+
+// typeAssertCalled is the assertion a call of reflect.TypeAssert[T](v) makes, T
+// an interface, read as v.Interface().(T) ([assertedValue]).
+func typeAssertCalled(walk *reflectWalk, call *ast.CallExpr) (fieldAssertion, bool) {
+	asserted, is := typeAssertOf(walk.info, call.Fun)
+	if !is || len(asserted) == 0 || len(call.Args) != 1 {
+		return fieldAssertion{}, false
+	}
+	a := fieldAssertion{asserted: asserted, at: call, followed: true}
+	a.follow(walk, call.Args[0], true)
+	return a, true
+}
+
+// typeAssertOf reports whether expr names an instantiation of reflect.TypeAssert,
+// and the interface its type argument is, if it is one.
+func typeAssertOf(info *types.Info, expr ast.Expr) ([]assertedInterface, bool) {
+	var name *ast.Ident
+	switch e := ast.Unparen(expr).(type) {
+	case *ast.IndexExpr:
+		expr = e.X
+	case *ast.IndexListExpr:
+		expr = e.X
+	}
+	switch e := ast.Unparen(expr).(type) {
+	case *ast.SelectorExpr:
+		name = e.Sel
+	case *ast.Ident:
+		name = e
+	default:
+		return nil, false
+	}
+	fn, isFunc := info.Uses[name].(*types.Func)
+	instance, instantiated := info.Instances[name]
+	if !isFunc || !instantiated || !isReflectFunction(fn, reflectTypeAssert) || instance.TypeArgs.Len() != 1 {
+		return nil, false
+	}
+	t := instance.TypeArgs.At(0)
+	if iface, isInterface := types.Unalias(t).Underlying().(*types.Interface); isInterface {
+		return []assertedInterface{{iface: iface, name: types.TypeString(t, nil)}}, true
+	}
+	return nil, true
 }
 
 // returnsInterfaceValue reports whether t is a function type of Interface's

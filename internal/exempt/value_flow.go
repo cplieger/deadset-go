@@ -154,6 +154,7 @@ func (r *declarationReader) visit(n ast.Node, stack []ast.Node) bool {
 	case *ast.CallExpr:
 		f.readCall(r.info, r.decl, r.enclosing, r.dir, n)
 		r.reflectedOperand(n)
+		r.typeAssertion(n)
 	case *ast.ReturnStmt:
 		if r.answered && !inLiteral {
 			f.returnedValues(r.info, r.enclosing, n, &r.returns)
@@ -168,8 +169,40 @@ func (r *declarationReader) visit(n ast.Node, stack []ast.Node) bool {
 		}
 	case *ast.SelectorExpr:
 		r.interfaceValue(n, stack)
+	case *ast.IndexExpr:
+		r.typeAssertValue(n, stack)
+	case *ast.IndexListExpr:
+		r.typeAssertValue(n, stack)
 	}
 	return true
+}
+
+// typeAssertion reads a call of reflect.TypeAssert in a function's body as the
+// assertion on what Interface returns it is ([typeAssertCalled]).
+func (r *declarationReader) typeAssertion(call *ast.CallExpr) {
+	fd, declares := r.decl.(*ast.FuncDecl)
+	if r.enclosing == nil || !declares || fd.Body == nil {
+		return
+	}
+	if a, asserts := typeAssertCalled(r.flow.reflectWalkOf(r.info, fd), call); asserts {
+		r.flow.graph.assertions = append(r.flow.graph.assertions, a)
+	}
+}
+
+// typeAssertValue reads an instantiation of reflect.TypeAssert taken as a value
+// rather than called as the assertion of its interface on a receiver the walk
+// cannot follow: whatever calls it, the analysis does not follow.
+func (r *declarationReader) typeAssertValue(n ast.Expr, stack []ast.Node) {
+	asserted, is := typeAssertOf(r.info, n)
+	if !is || len(asserted) == 0 {
+		return
+	}
+	if len(stack) > 0 {
+		if call, isCall := stack[len(stack)-1].(*ast.CallExpr); isCall && ast.Unparen(call.Fun) == n {
+			return
+		}
+	}
+	r.flow.graph.assertions = append(r.flow.graph.assertions, fieldAssertion{asserted: asserted, at: n})
 }
 
 // assertion reads one assertion of a function's body on x to each type of named
