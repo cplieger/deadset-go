@@ -24,3 +24,36 @@ func TestTheReflectWalkRetainsWhatEachAssertionOnInterfaceConverts(t *testing.T)
 		t.Errorf("EncodingReflectionDetector(reflect-walk.txtar) retained %v, want %v: t1b is a field no constant index selects, t4 a field Interface panics on, t5.extra a method the asserted interface does not require", got, want)
 	}
 }
+
+// A generic bind filling a struct by reflection reaches a field's method only
+// through reflect.TypeAssert[I](fv), which is the assertion fv.Interface().(I),
+// so the method I requires is retained.
+func TestReflectTypeAssertInAGenericBindRetainsWhatItsInterfaceRequires(t *testing.T) {
+	t.Parallel()
+	got := retainedRefs(t, analysisOf(t, "reflect-type-assert-bind.txtar", Options{}), vocab.EncodingReflection)
+	if !slices.Contains(got, "go://example.com/rtab#limit.Range") {
+		t.Errorf("EncodingReflectionDetector(reflect-type-assert-bind.txtar) retained %v, want limit.Range among them", got)
+	}
+}
+
+// The control of the reflect.TypeAssert case: the same bind spelling the
+// assertion fv.Interface().(I) retains the method I requires.
+func TestAnInterfaceAssertionInAGenericBindRetainsWhatItsInterfaceRequires(t *testing.T) {
+	t.Parallel()
+	got := retainedRefs(t, analysisOf(t, "reflect-interface-assert-bind.txtar", Options{}), vocab.EncodingReflection)
+	if !slices.Contains(got, "go://example.com/riab#limit.Range") {
+		t.Errorf("EncodingReflectionDetector(reflect-interface-assert-bind.txtar) retained %v, want limit.Range among them", got)
+	}
+}
+
+// reflect.TypeAssert[I] taken as a value is the assertion of I on a receiver the
+// walk cannot follow, which retains every method of every type it reaches.
+func TestReflectTypeAssertTakenAsAValueRetainsAsAWalkThatCannotFollow(t *testing.T) {
+	t.Parallel()
+	got := retainedRefs(t, analysisOf(t, "reflect-type-assert-value.txtar", Options{}), vocab.EncodingReflection)
+	for _, want := range []string{"go://example.com/rtv#width.Range", "go://example.com/rtv#width.extra"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("EncodingReflectionDetector(reflect-type-assert-value.txtar) retained %v, want %s among them", got, want)
+		}
+	}
+}

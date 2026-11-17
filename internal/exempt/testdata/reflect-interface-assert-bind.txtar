@@ -1,0 +1,67 @@
+The control of reflect-type-assert-bind.txtar: the same generic bind spells
+the assertion on the field's value v.Interface().(I), which retains the method
+the interface requires.
+
+-- go.mod --
+module example.com/riab
+
+go 1.27.1
+-- main.go --
+package main
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"reflect"
+	"strconv"
+)
+
+type ranged interface{ Range() (lo, hi int64) }
+
+type limit int64
+
+func (limit) Range() (lo, hi int64) { return 1, 100 }
+
+type query struct {
+	Limit limit  `json:"limit"`
+	Name  string `json:"name"`
+}
+
+func bind[T any](get func(string) string) (T, error) {
+	var out T
+	err := bindFields(reflect.ValueOf(&out).Elem(), get)
+	return out, err
+}
+
+func bindFields(v reflect.Value, get func(string) string) error {
+	for f, fv := range v.Fields() {
+		s := get(f.Tag.Get("json"))
+		if s == "" {
+			continue
+		}
+		if err := setField(fv, s); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func setField(fv reflect.Value, s string) error {
+	if rg, ok := fv.Interface().(ranged); ok {
+		lo, hi := rg.Range()
+		n, err := strconv.ParseInt(s, 10, 64)
+		if err != nil || n < lo || n > hi {
+			return errors.New("out of range")
+		}
+		fv.SetInt(n)
+		return nil
+	}
+	fv.SetString(s)
+	return nil
+}
+
+func main() {
+	q, err := bind[query](os.Getenv)
+	fmt.Println(q.Name, err)
+}
