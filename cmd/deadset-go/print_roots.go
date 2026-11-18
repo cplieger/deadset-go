@@ -18,8 +18,8 @@ const printRootsUsage = "usage: deadset-go print-roots [--target=DIR] [--config=
 // symbol's reference, why it is a root, and the configured string that named it,
 // separated by tabs, plus the configurations that detected it where the matrix holds
 // more than one, so sort and cut read it.
-func printRoots(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	req, code := resolve(ctx, "print-roots", printRootsUsage, args, stderr)
+func printRoots(ctx context.Context, dir string, args []string, stdout, stderr io.Writer) int {
+	req, code := resolve(ctx, "print-roots", printRootsUsage, dir, args, stderr)
 	if code != vocab.ExitClean {
 		return code
 	}

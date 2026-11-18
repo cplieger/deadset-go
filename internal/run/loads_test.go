@@ -144,7 +144,7 @@ func TestFindingsUnderPressureAreTheFindingsWithout(t *testing.T) {
 			loaded.loads.pressed = func() bool { return true }
 			loaded.loads.drop()
 		}
-		prepared, err := loaded.Prepare(true)
+		prepared, err := loaded.Prepare(t.Context(), true)
 		if err != nil {
 			t.Fatalf("Prepare = %v", err)
 		}

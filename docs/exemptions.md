@@ -116,7 +116,9 @@ A retained candidate makes its specification not removable, so the class applies
 
 ### generated-file
 
-Retains every declaration written in a generated file, which is a file carrying the standard Go generated-code header. The generator owns the file, so a deletion there is undone the next time it runs and the declaration to remove is in the generator's input.
+Retains every declaration written in a generated file, which is a file carrying the standard Go generated-code header, except one that a Go side of a declared cross-language edge names. The generator owns the file, so a deletion there is undone the next time it runs and the declaration to remove is in the generator's input.
+
+A declaration an edge side names is judged by its references like a declaration of any other file, because the edge stands for a use only the other language decides. Its side is live where something references it, and dead where nothing does, holding the pending finding the declaration would carry, which is marked `generated: true` and `fixability: none`. A finding about a part of that declaration, such as a parameter its body never reads, is reported with the same marks.
 
 Under `analysis.generated_files` set to `include` the class retains nothing and every declaration of a generated file is judged like any other. The site is the package clause of the generated file.
 

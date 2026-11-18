@@ -313,8 +313,8 @@ type enumProgram struct {
 	nonGo bool
 }
 
-// drawEnumProgram draws one program from the enum-group case grammar of the
-// design's section 7.2.
+// drawEnumProgram draws one program from the grammar of enum-group cases: one to
+// three enumerated types, and at times a source in another language beside them.
 func drawEnumProgram(t *rapid.T) *enumProgram {
 	p := &enumProgram{nonGo: rapid.IntRange(0, 9).Draw(t, "a non-Go source beside the package") == 0}
 	for ti := range rapid.IntRange(1, 3).Draw(t, "types") {
@@ -734,7 +734,9 @@ func checkDifferential(ctx context.Context, t *rapid.T, p *enumProgram, variants
 		write(name, p.source(variants[name]))
 	}
 	bin := filepath.Join(dir, "bin")
-	build := exec.CommandContext(ctx, "go", "build", "-o", bin+string(filepath.Separator), "./...")
+	// The symbol table and DWARF are what most of each link writes, and nothing the
+	// programs print reads them: a panic's trace reads pclntab, which -s -w keeps.
+	build := exec.CommandContext(ctx, "go", "build", "-ldflags=-s -w", "-o", bin+string(filepath.Separator), "./...")
 	build.Dir = dir
 	// runTests pins GOOS and GOARCH to linux/amd64 for the analysis; the variants
 	// run here, so they build for the host.

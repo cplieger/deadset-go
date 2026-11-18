@@ -71,10 +71,9 @@ const (
 	templateDocument = "{{ range .findings }}{{ .code }} {{ .symbol.ref }}\n{{ end }}"
 )
 
-// determinismBase writes the target and the template, makes their directory the
-// working directory and answers it. A report names the target relative to the
-// directory the run was invoked from, so every document of every run below lands
-// inside this one.
+// determinismBase writes the target and the template and answers their directory,
+// which every run below is invoked from. A report names the target relative to
+// that directory, so every document of every run lands inside it.
 func determinismBase(t *testing.T) string {
 	t.Helper()
 
@@ -83,7 +82,6 @@ func determinismBase(t *testing.T) string {
 	if err := sandbox.WriteFile(filepath.Join(base, templateName), []byte(templateDocument), 0o600); err != nil {
 		t.Fatalf("Setup: write the template: %v", err)
 	}
-	t.Chdir(base)
 	return base
 }
 
@@ -98,12 +96,13 @@ func documentSuffixes() []string {
 	return suffixes
 }
 
-// documentsOf runs analyze over the target of the working directory, writing its
-// report at name.json, and answers the bytes of every document the run wrote, keyed by
-// the suffix the invocation named it with. Two runs under different names are
-// therefore compared key by key, and a report path that reached a document is a
-// difference the comparison reads.
-func documentsOf(t *testing.T, name string) map[string][]byte {
+// documentsOf runs analyze from base over its target, writing its report at
+// name.json, and answers the bytes of every document the run wrote, keyed by the
+// suffix the invocation named it with. Two runs under different names are therefore
+// compared key by key, and a report path that reached a document is a difference
+// the comparison reads. The run is in process where env is empty, and otherwise
+// the built command with env added to its environment.
+func documentsOf(t *testing.T, base, name string, env ...string) map[string][]byte {
 	t.Helper()
 
 	reportPath := name + ".json"
@@ -116,15 +115,22 @@ func documentsOf(t *testing.T, name string) map[string][]byte {
 		args = append(args, "--format="+string(format))
 	}
 
-	var stderr strings.Builder
-	if code := invoke(t.Context(), args, io.Discard, &stderr); code != vocab.ExitClean {
-		t.Fatalf("invoke(%q) = %d, want %d with the exit code configured off\nstderr: %s",
-			args, code, vocab.ExitClean, stderr.String())
+	ran := invoked{}
+	if len(env) == 0 {
+		var stderr strings.Builder
+		ran.code = invoke(t.Context(), base, args, io.Discard, &stderr)
+		ran.stderr = stderr.String()
+	} else {
+		ran = processIn(t, base, env, args...)
+	}
+	if ran.code != vocab.ExitClean {
+		t.Fatalf("analyze %q from %s = %d, want %d with the exit code configured off\nstderr: %s",
+			args, base, ran.code, vocab.ExitClean, ran.stderr)
 	}
 
 	written := make(map[string][]byte, len(documentSuffixes()))
 	for _, suffix := range documentSuffixes() {
-		body, err := os.ReadFile(name + suffix)
+		body, err := os.ReadFile(filepath.Join(base, name+suffix))
 		if err != nil {
 			t.Fatalf("read the document %s the run wrote: %v", name+suffix, err)
 		}
@@ -179,10 +185,11 @@ func documentDifference(first, second []byte) string {
 // assertion that says so: a time, a duration, a worker count or a path of the
 // invocation reaching any document would differ between the two runs.
 func TestAnalyzeIsByteIdenticalToItsOwnRepetition(t *testing.T) {
-	determinismBase(t)
+	t.Parallel()
+	base := determinismBase(t)
 
-	first := documentsOf(t, "first")
-	second := documentsOf(t, "second")
+	first := documentsOf(t, base, "first")
+	second := documentsOf(t, base, "second")
 
 	if len(first) != len(renderings)+2 {
 		t.Fatalf("one run wrote %d documents, want the report, the baseline and one per rendering, which is %d",
@@ -200,11 +207,11 @@ func TestAnalyzeIsByteIdenticalToItsOwnRepetition(t *testing.T) {
 // directory, now populated. The directory is read between the two runs, because a
 // comparison of two runs over two empty caches would pass while asserting nothing.
 func TestAnalyzeIsIndependentOfTheBuildCache(t *testing.T) {
+	t.Parallel()
 	base := determinismBase(t)
 	cache := filepath.Join(base, "cache")
 
-	t.Setenv("GOCACHE", cache)
-	empty := documentsOf(t, "empty-cache")
+	empty := documentsOf(t, base, "empty-cache", "GOCACHE="+cache)
 
 	entries, err := os.ReadDir(cache)
 	if err != nil {
@@ -214,7 +221,7 @@ func TestAnalyzeIsIndependentOfTheBuildCache(t *testing.T) {
 		t.Fatal("the cache directory is empty after the first run, so the second run reads no populated cache and this test asserts nothing")
 	}
 
-	populated := documentsOf(t, "populated-cache")
+	populated := documentsOf(t, base, "populated-cache", "GOCACHE="+cache)
 	compareDocuments(t, empty, populated, "empty-cache", "populated-cache")
 }
 
@@ -229,12 +236,12 @@ func TestAnalyzeIsIndependentOfTheBuildCache(t *testing.T) {
 // not removed would be. The toolchain's build cache lives outside both and is the one
 // thing a run populates, which the assertion above is about.
 func TestAnalyzeWritesOnlyTheDocumentsTheInvocationNames(t *testing.T) {
+	t.Parallel()
 	temporary := sandbox.Dir(t)
 	base := determinismBase(t)
-	t.Setenv("TMPDIR", temporary)
 
 	before := hashDirectory(t, base)
-	written := documentsOf(t, "documents")
+	written := documentsOf(t, base, "documents", "TMPDIR="+temporary)
 	after := hashDirectory(t, base)
 
 	for suffix := range written {

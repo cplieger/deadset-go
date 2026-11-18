@@ -11,8 +11,8 @@ const printConfigUsage = "usage: deadset-go print-config [--target=DIR] [--confi
 
 // printConfig writes the resolved configuration, with the provenance of every
 // setting, to stdout.
-func printConfig(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	flags, code := parsed("print-config", printConfigUsage, args, stderr)
+func printConfig(ctx context.Context, dir string, args []string, stdout, stderr io.Writer) int {
+	flags, code := parsed("print-config", printConfigUsage, dir, args, stderr)
 	if code != vocab.ExitClean {
 		return code
 	}

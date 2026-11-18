@@ -67,7 +67,7 @@ func reportOfArchive(t *testing.T, files map[string]string) *report.Report {
 func reportOfDir(t *testing.T, dir string) *report.Report {
 	t.Helper()
 
-	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
+	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, "", []string{"--target=" + dir}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
@@ -168,6 +168,7 @@ func TestReportOfCarriesTheStaleEntryAsItsOwnRecord(t *testing.T) {
 }
 
 func TestReportOfPublishesTheFindingADeclaredEdgeNamesInsideItsEvaluation(t *testing.T) {
+	t.Parallel()
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
 	writeDocument(t, dir, "deadset-edges.json", `{
   "description": "One edge pairing a dead Go declaration with the TypeScript generated from it.",
@@ -253,6 +254,7 @@ func TestReportOfReportsAConfiguredRootThatNamesNothing(t *testing.T) {
 }
 
 func TestReportOfSitesAConfiguredRootInTheDocumentThatDeclaredIt(t *testing.T) {
+	t.Parallel()
 	// The configuration the invocation names rather than the one at the conventional
 	// path, so the document that declares the root is the only thing that can decide
 	// the path the finding carries. The invocation spells the target and the document
@@ -275,8 +277,8 @@ func TestReportOfSitesAConfiguredRootInTheDocumentThatDeclaredIt(t *testing.T) {
 		"a target named through a dot": {target: filepath.Join(dir, "sub", ".."), config: document},
 	} {
 		t.Run(name, func(t *testing.T) {
-			t.Chdir(dir)
-			resolved, code := resolve(t.Context(), "print-roots", printRootsUsage,
+			t.Parallel()
+			resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, dir,
 				[]string{"--target=" + spelling.target, "--config=" + spelling.config}, &strings.Builder{})
 			if code != vocab.ExitClean {
 				t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
@@ -313,7 +315,7 @@ func TestReportOfSitesAConfiguredRootAtTheConventionalDocumentWhereNoDocumentOfT
 		t.Fatalf("Setup: write %s: %v", central, err)
 	}
 
-	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage,
+	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, "",
 		[]string{"--target=" + dir, "--central=" + central}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
@@ -498,7 +500,7 @@ func publishedFindingLine(t *testing.T) *regexp.Regexp {
 func TestReportOfRefusesAnEnvelopeNamingNoConformanceResult(t *testing.T) {
 	t.Parallel()
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
-	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
+	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, "", []string{"--target=" + dir}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
@@ -522,7 +524,7 @@ func TestReportOfRefusesAnEnvelopeNamingNoConformanceResult(t *testing.T) {
 func TestReportOfRefusesATargetTheRunDirectoryDoesNotContain(t *testing.T) {
 	t.Parallel()
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
-	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
+	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, "", []string{"--target=" + dir}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}

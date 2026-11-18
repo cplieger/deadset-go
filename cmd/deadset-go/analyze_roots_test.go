@@ -38,7 +38,7 @@ func TestPrintRootsReadsOnlyTheConfiguredRootsOfItsOwnLanguage(t *testing.T) {
 	dir := applicationModule(t, otherLanguageRoots)
 
 	var stdout, stderr bytes.Buffer
-	if got := invoke(t.Context(), []string{"print-roots", "--target=" + dir}, &stdout, &stderr); got != vocab.ExitFindings {
+	if got := invoke(t.Context(), "", []string{"print-roots", "--target=" + dir}, &stdout, &stderr); got != vocab.ExitFindings {
 		t.Fatalf("print-roots with other languages' roots = %d, want %d\nstderr: %q", got, vocab.ExitFindings, stderr.String())
 	}
 	want := string(vocab.UnmatchedRoot) + ": roots.patterns names nothing: go://example.com/app#Absent\n"
@@ -58,7 +58,7 @@ func TestPrintRootsNamesEveryReasonOfAGoFuzzEntryExportedToC(t *testing.T) {
 	})
 
 	var stdout, stderr bytes.Buffer
-	if got := invoke(t.Context(), []string{"print-roots", "--target=" + dir}, &stdout, &stderr); got != vocab.ExitClean {
+	if got := invoke(t.Context(), "", []string{"print-roots", "--target=" + dir}, &stdout, &stderr); got != vocab.ExitClean {
 		t.Fatalf("print-roots = %d, want %d\nstderr: %q", got, vocab.ExitClean, stderr.String())
 	}
 	const both = "go://example.com/app/fuzz#FuzzBoth"

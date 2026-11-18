@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/rerun"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -111,6 +112,7 @@ type failingWriter struct{}
 func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("no space left on device") }
 
 func TestAnUnwrittenOutputEndsTheRunWithItsRunClass(t *testing.T) {
+	t.Parallel()
 	dir := writeModule(t, map[string]string{
 		"go.mod":           "module example.com/app\n\ngo 1.27.1\n",
 		"main.go":          "package main\n\nfunc main() {}\n",
@@ -120,10 +122,9 @@ func TestAnUnwrittenOutputEndsTheRunWithItsRunClass(t *testing.T) {
 	prefix := vocab.RunFailurePrefix + vocab.RunUnwrittenOutput + ": "
 
 	t.Run("the-report", func(t *testing.T) {
-		t.Chdir(dir)
 		var stdout, stderr bytes.Buffer
 		report := filepath.Join(absent, "report.json")
-		code := invoke(t.Context(), []string{"analyze", "--target=.", "--report=" + report}, &stdout, &stderr)
+		code := invoke(t.Context(), dir, []string{"analyze", "--target=.", "--report=" + report}, &stdout, &stderr)
 		if code != vocab.ExitFailure {
 			t.Fatalf("analyze to a missing directory = %d, want %d\nstderr:\n%s", code, vocab.ExitFailure, stderr.String())
 		}
@@ -133,9 +134,8 @@ func TestAnUnwrittenOutputEndsTheRunWithItsRunClass(t *testing.T) {
 		}
 	})
 	t.Run("the-baseline", func(t *testing.T) {
-		t.Chdir(dir)
 		var stdout, stderr bytes.Buffer
-		code := invoke(t.Context(), []string{
+		code := invoke(t.Context(), dir, []string{
 			"analyze", "--target=.", "--report=" + filepath.Join(sandbox.Dir(t), "report.json"),
 			"--baseline-write=" + filepath.Join(absent, "baseline.json"),
 		}, &stdout, &stderr)
@@ -145,10 +145,9 @@ func TestAnUnwrittenOutputEndsTheRunWithItsRunClass(t *testing.T) {
 		wantOneClassLine(t, "analyze writing a baseline to a missing directory", stderr.String(), prefix)
 	})
 	t.Run("a-baseline-path-that-is-a-directory", func(t *testing.T) {
-		t.Chdir(dir)
 		directory := sandbox.Dir(t)
 		var stdout, stderr bytes.Buffer
-		code := invoke(t.Context(), []string{
+		code := invoke(t.Context(), dir, []string{
 			"analyze", "--target=.", "--report=" + filepath.Join(sandbox.Dir(t), "report.json"), "--baseline-write=" + directory,
 		}, &stdout, &stderr)
 		if code != vocab.ExitFailure {
@@ -161,7 +160,7 @@ func TestAnUnwrittenOutputEndsTheRunWithItsRunClass(t *testing.T) {
 	})
 	t.Run("the-version-verbs-standard-output", func(t *testing.T) {
 		var stderr bytes.Buffer
-		code := invoke(t.Context(), []string{"version"}, failingWriter{}, &stderr)
+		code := invoke(t.Context(), "", []string{"version"}, failingWriter{}, &stderr)
 		if code != vocab.ExitFailure {
 			t.Fatalf("version to a failing stdout = %d, want %d\nstderr:\n%s", code, vocab.ExitFailure, stderr.String())
 		}
@@ -169,7 +168,7 @@ func TestAnUnwrittenOutputEndsTheRunWithItsRunClass(t *testing.T) {
 	})
 	t.Run("a-verbs-standard-output", func(t *testing.T) {
 		var stderr bytes.Buffer
-		code := invoke(t.Context(), []string{"print-roots", "--target=" + dir}, failingWriter{}, &stderr)
+		code := invoke(t.Context(), "", []string{"print-roots", "--target=" + dir}, failingWriter{}, &stderr)
 		if code != vocab.ExitFailure {
 			t.Fatalf("print-roots to a failing stdout = %d, want %d\nstderr:\n%s", code, vocab.ExitFailure, stderr.String())
 		}
@@ -180,14 +179,14 @@ func TestAnUnwrittenOutputEndsTheRunWithItsRunClass(t *testing.T) {
 // A target outside the directory the run was invoked from has no spelling the report
 // admits.
 func TestATargetOutsideTheRunDirectoryEndsTheRunWithItsRunClass(t *testing.T) {
+	t.Parallel()
 	dir := writeModule(t, map[string]string{
 		"go.mod":           "module example.com/app\n\ngo 1.27.1\n",
 		"main.go":          "package main\n\nfunc main() {}\n",
 		repositoryDocument: `{"target": {"kind": "application"}}`,
 	})
-	t.Chdir(sandbox.Dir(t))
 	var stdout, stderr bytes.Buffer
-	code := invoke(t.Context(), []string{"analyze", "--target=" + dir, "--report=" + filepath.Join(sandbox.Dir(t), "report.json")}, &stdout, &stderr)
+	code := invoke(t.Context(), sandbox.Dir(t), []string{"analyze", "--target=" + dir, "--report=" + filepath.Join(sandbox.Dir(t), "report.json")}, &stdout, &stderr)
 	if code != vocab.ExitFailure {
 		t.Fatalf("analyze of a target outside the run directory = %d, want %d\nstderr:\n%s", code, vocab.ExitFailure, stderr.String())
 	}
@@ -197,15 +196,15 @@ func TestATargetOutsideTheRunDirectoryEndsTheRunWithItsRunClass(t *testing.T) {
 // An import below node_modules naming a regular file holds no package, which is a
 // missing module of the project's setup rather than a fault of the analyzer.
 func TestAnImportNamingAFileBelowNodeModulesIsAMissingModule(t *testing.T) {
+	t.Parallel()
 	dir := writeModule(t, map[string]string{
 		"go.mod":              "module example.com/app\n\ngo 1.27.1\n",
 		"main.go":             "package main\n\nimport \"example.com/app/node_modules/helper\"\n\nfunc main() { helper.Run() }\n",
 		"node_modules/helper": "not a directory\n",
 		repositoryDocument:    `{"target": {"kind": "application"}}`,
 	})
-	t.Chdir(dir)
 	var stdout, stderr bytes.Buffer
-	code := invoke(t.Context(), []string{"analyze", "--target=.", "--report=" + filepath.Join(sandbox.Dir(t), "report.json")}, &stdout, &stderr)
+	code := invoke(t.Context(), dir, []string{"analyze", "--target=.", "--report=" + filepath.Join(sandbox.Dir(t), "report.json")}, &stdout, &stderr)
 	if code != vocab.ExitFailure {
 		t.Fatalf("analyze of an import naming a file = %d, want %d\nstderr:\n%s", code, vocab.ExitFailure, stderr.String())
 	}
@@ -215,15 +214,15 @@ func TestAnImportNamingAFileBelowNodeModulesIsAMissingModule(t *testing.T) {
 // A target in a directory the module above it ignores holds no source file of the
 // target, which is no program to analyze rather than a clean report.
 func TestATargetItsModuleIgnoresHoldsNoProgram(t *testing.T) {
+	t.Parallel()
 	dir := writeModule(t, map[string]string{
 		"go.mod":                      "module example.com/app\n\ngo 1.27.1\n\nignore ./tools\n",
 		"app.go":                      "package app\n\n// A is the module's own package.\nfunc A() {}\n",
 		"tools/main.go":               "package main\n\nfunc main() {}\n\nfunc dead() {}\n",
 		"tools/" + repositoryDocument: `{"target": {"kind": "application"}}`,
 	})
-	t.Chdir(filepath.Join(dir, "tools"))
 	var stdout, stderr bytes.Buffer
-	code := invoke(t.Context(), []string{"analyze", "--target=.", "--report=" + filepath.Join(sandbox.Dir(t), "report.json")}, &stdout, &stderr)
+	code := invoke(t.Context(), filepath.Join(dir, "tools"), []string{"analyze", "--target=.", "--report=" + filepath.Join(sandbox.Dir(t), "report.json")}, &stdout, &stderr)
 	if code != vocab.ExitFailure {
 		t.Fatalf("analyze of an ignored directory = %d, want %d\nstderr:\n%s", code, vocab.ExitFailure, stderr.String())
 	}
@@ -252,7 +251,7 @@ func reexecuted(t *testing.T, dir string, env []string, args ...string) *exec.Cm
 	}
 	cmd := exec.CommandContext(t.Context(), os.Args[0])
 	cmd.Dir = dir
-	cmd.Env = append(append(cmd.Environ(), env...), execArgsVariable+"="+string(encoded))
+	cmd.Env = rerun.Environment(append(append(cmd.Environ(), env...), execArgsVariable+"="+string(encoded)))
 	return cmd
 }
 
@@ -351,7 +350,6 @@ func TestARunCancelledWhileTheToolchainRunsEndsWithTheInterruptedRunClass(t *tes
 	})
 	started := filepath.Join(sandbox.Dir(t), "started")
 	t.Setenv("PATH", toolchainStub(t, started))
-	t.Chdir(dir)
 	reportPath := filepath.Join(sandbox.Dir(t), "report.json")
 
 	ctx, cancel := context.WithCancelCause(t.Context())
@@ -364,7 +362,7 @@ func TestARunCancelledWhileTheToolchainRunsEndsWithTheInterruptedRunClass(t *tes
 		cancel(errors.New("interrupt"))
 	}()
 	var stdout, stderr bytes.Buffer
-	code := invoke(ctx, []string{"analyze", "--target=.", "--report=" + reportPath}, &stdout, &stderr)
+	code := invoke(ctx, dir, []string{"analyze", "--target=.", "--report=" + reportPath}, &stdout, &stderr)
 
 	if _, err := os.Stat(started); err != nil {
 		t.Fatalf("the analysis never ran the toolchain (stat: %v)\nstderr:\n%s", err, stderr.String())

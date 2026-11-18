@@ -462,8 +462,8 @@ func TestAnalyzeWritesTheBaselineOfEveryFindingOfTheRun(t *testing.T) {
 }
 
 func TestAnalyzeWritesNoPartialDocumentWhereThePublishCannotHappen(t *testing.T) {
+	t.Parallel()
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
-	t.Chdir(dir)
 
 	// The report path names a file under a path that is a regular file, so the
 	// temporary file the write goes through cannot be created and the rename that
@@ -475,7 +475,7 @@ func TestAnalyzeWritesNoPartialDocumentWhereThePublishCannotHappen(t *testing.T)
 	reportPath := filepath.Join(held, "report.json")
 
 	var stdout, stderr bytes.Buffer
-	code := invoke(t.Context(), []string{"analyze", "--target=.", "--report=" + reportPath}, &stdout, &stderr)
+	code := invoke(t.Context(), dir, []string{"analyze", "--target=.", "--report=" + reportPath}, &stdout, &stderr)
 	if want := contractExitCodes(t)["failure"]; code != want {
 		t.Errorf("analyze with a report path no write can publish = %d, want %d\nstderr: %s", code, want, stderr.String())
 	}
@@ -499,8 +499,8 @@ func TestAnalyzeWritesNoPartialDocumentWhereThePublishCannotHappen(t *testing.T)
 }
 
 func TestAnalyzeWritesNoPartialDocumentWhereTheRenameIsRefused(t *testing.T) {
+	t.Parallel()
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
-	t.Chdir(dir)
 
 	// The report path names a directory that is not empty, so the temporary file is
 	// created and written and the rename that would publish it is the step the
@@ -511,7 +511,7 @@ func TestAnalyzeWritesNoPartialDocumentWhereTheRenameIsRefused(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := invoke(t.Context(), []string{"analyze", "--target=.", "--report=" + reportPath}, &stdout, &stderr)
+	code := invoke(t.Context(), dir, []string{"analyze", "--target=.", "--report=" + reportPath}, &stdout, &stderr)
 	if want := contractExitCodes(t)["failure"]; code != want {
 		t.Errorf("analyze with a report path the rename cannot take = %d, want %d\nstderr: %s",
 			code, want, stderr.String())
@@ -632,10 +632,12 @@ func TestFormatListNamesEveryFormatTheContractDeclares(t *testing.T) {
 	}
 }
 
+// The refusal names the template as the invocation spelled it, which an in-process
+// answer spells joined to its directory, so the command runs as a process.
 func TestAnalyzeNamesATemplateItCannotRead(t *testing.T) {
 	t.Parallel()
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
-	got := runAnalyze(t, dir, "--format=template", "--template=absent.tmpl")
+	got := processIn(t, dir, nil, "analyze", "--target=.", "--report="+filepath.Join(sandbox.Dir(t), "report.json"), "--format=template", "--template=absent.tmpl")
 	if got.code != vocab.ExitUsage || !strings.Contains(got.stderr, "read the template absent.tmpl") {
 		t.Errorf("analyze --template=absent.tmpl = %d, stderr %q, want %d naming the template", got.code, got.stderr, vocab.ExitUsage)
 	}
@@ -753,14 +755,14 @@ func consumedTree(t *testing.T) string {
 }
 
 func TestAnalyzeRendersSARIFAgainstTheTargetTheScopeDocumentNames(t *testing.T) {
+	t.Parallel()
 	dir := consumedTree(t)
-	t.Chdir(dir)
 	reportPath := filepath.Join(sandbox.Dir(t), "report.json")
 
 	// The invocation names no target, so the target directory is the scope
 	// document's, and the SARIF rendering reads the lines it fingerprints there.
 	var stdout, stderr bytes.Buffer
-	code := invoke(t.Context(), []string{
+	code := invoke(t.Context(), dir, []string{
 		"analyze", "--scope=scope.json", "--config=target/" + repositoryDocument,
 		"--format=sarif", "--report=" + reportPath,
 	}, &stdout, &stderr)
@@ -777,12 +779,12 @@ func TestAnalyzeRendersSARIFAgainstTheTargetTheScopeDocumentNames(t *testing.T) 
 }
 
 func TestAnalyzeReadsTheScopeDocumentTheInvocationNames(t *testing.T) {
+	t.Parallel()
 	dir := consumedTree(t)
-	t.Chdir(dir)
 	reportPath := filepath.Join(sandbox.Dir(t), "report.json")
 
 	var stdout, stderr bytes.Buffer
-	code := invoke(t.Context(), []string{
+	code := invoke(t.Context(), dir, []string{
 		"analyze", "--target=target", "--scope=scope.json", "--report=" + reportPath,
 	}, &stdout, &stderr)
 	if want := contractExitCodes(t)["findings"]; code != want {
@@ -926,6 +928,45 @@ func TestAnalyzeRefusesAnEdgesDocumentTheContractRefuses(t *testing.T) {
 			}
 			if _, err := os.Stat(got.reportPath); !errors.Is(err, os.ErrNotExist) {
 				t.Errorf("analyze over %s left a report at %s (%v), want none", name, got.reportPath, err)
+			}
+		})
+	}
+}
+
+// Only a verb that prepares the exemptions reads the edges document, since the
+// generated-file class is the first reader of its sides: print-roots answers as
+// it does with no document, and print-retained refuses the document as analyze
+// does, with the usage code for a malformed one and the failure code for one
+// outside the target.
+func TestOnlyAVerbThatPreparesTheExemptionsReadsTheEdgesDocument(t *testing.T) {
+	t.Parallel()
+	const document = `{"target": {"kind": "application"}}`
+	absent := invokedIn(t, findingsFixture(t, document), "print-roots", "--target=.")
+	outside := filepath.Join(sandbox.Dir(t), vocab.EdgesFileName)
+	if err := sandbox.WriteFile(outside, []byte(`{"edges": {}}`), 0o600); err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	for name, tc := range map[string]struct {
+		place func(path string) error
+		code  int
+	}{
+		"malformed":                 {func(p string) error { return sandbox.WriteFile(p, []byte(`{"edges": {"x": `), 0o600) }, vocab.ExitUsage},
+		"a link outside the target": {func(p string) error { return sandbox.Symlink(outside, p) }, vocab.ExitFailure},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			dir := findingsFixture(t, document)
+			if err := tc.place(filepath.Join(dir, vocab.EdgesFileName)); err != nil {
+				t.Fatalf("Setup: %v", err)
+			}
+			if got := invokedIn(t, dir, "print-roots", "--target=."); got != absent {
+				t.Errorf("print-roots over an edges document %s = %d, stdout %q, stderr %q, want %d, %q, %q, what it answers with no document",
+					name, got.code, got.stdout, got.stderr, absent.code, absent.stdout, absent.stderr)
+			}
+			got := invokedIn(t, dir, "print-retained", "--target=.")
+			if got.code != tc.code || !strings.Contains(got.stderr, vocab.EdgesFileName) {
+				t.Errorf("print-retained over an edges document %s = %d, stderr %q, want %d naming %s",
+					name, got.code, got.stderr, tc.code, vocab.EdgesFileName)
 			}
 		})
 	}

@@ -6,7 +6,6 @@ import (
 	"slices"
 
 	"github.com/cplieger/deadset-go/v2/internal/deps"
-	"github.com/cplieger/deadset-go/v2/internal/edges"
 	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/findings"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
@@ -26,7 +25,7 @@ type Findings struct {
 // because a refusal is a defect in a kind's rule rather than something a report
 // could say.
 func (s *Swept) Findings(ctx context.Context) (*Findings, error) {
-	in, err := s.input(ctx)
+	in, err := s.input()
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +42,7 @@ func (s *Swept) Findings(ctx context.Context) (*Findings, error) {
 }
 
 // input is everything a kind reads.
-func (s *Swept) input(ctx context.Context) (*findings.Input, error) {
+func (s *Swept) input() (*findings.Input, error) {
 	generated := make(map[string]bool)
 	for i := range s.loads.Len() {
 		one, err := s.loads.At(i)
@@ -56,10 +55,6 @@ func (s *Swept) input(ctx context.Context) (*findings.Input, error) {
 		}
 	}
 	modules, err := s.moduleFiles()
-	if err != nil {
-		return nil, err
-	}
-	declared, err := edges.Read(ctx, s.Root)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +77,7 @@ func (s *Swept) input(ctx context.Context) (*findings.Input, error) {
 		Modules:        modules,
 		Unmatched:      s.Unmatched,
 		RootsDocument:  s.rootsDocument(),
-		Edges:          declared,
+		Edges:          s.Edges,
 		Matrix:         s.Identifiers(),
 		Per:            s.loads,
 		Consumers:      s.consumers(),

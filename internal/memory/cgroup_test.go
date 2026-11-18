@@ -2,6 +2,7 @@ package memory
 
 import (
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
@@ -223,5 +224,45 @@ func TestMountinfoUnescapesTheMountPoint(t *testing.T) {
 	v2, _ := mountsOf([]byte(`30 22 0:26 / /sys/fs/my\040cgroup rw - cgroup2 cgroup2 rw` + "\n"))
 	if v2 == nil || v2.point != "/sys/fs/my cgroup" {
 		t.Errorf("mountsOf(an escaped space) = %+v, want the point /sys/fs/my cgroup", v2)
+	}
+}
+
+// TestAReadingAfterTheMachineIsReadReadsNoMountOrCgroupDocument holds a reading to
+// the limit and usage files: once linux has read which cgroups bound the process,
+// emptying mountinfo and the process's cgroup document changes no answer, so a tick
+// parses neither.
+func TestAReadingAfterTheMachineIsReadReadsNoMountOrCgroupDocument(t *testing.T) {
+	v1 := "31 22 0:27 / /sys/fs/cgroup/memory rw - cgroup cgroup rw,memory\n"
+	root := machine(t, map[string]string{
+		"proc/self/mountinfo":                            v2Mountinfo("/") + v1,
+		"proc/self/cgroup":                               "0::/user.slice/job\n4:memory:/job\n",
+		"proc/meminfo":                                   meminfo,
+		"sys/fs/cgroup/user.slice/memory.max":            "4294967296\n",
+		"sys/fs/cgroup/user.slice/memory.current":        "1073741824\n",
+		"sys/fs/cgroup/user.slice/job/memory.current":    "536870912\n",
+		"sys/fs/cgroup/memory/job/memory.stat":           "hierarchical_memory_limit 2147483648\ntotal_inactive_file 0\n",
+		"sys/fs/cgroup/memory/job/memory.usage_in_bytes": "1073741824\n",
+	})
+	read := linux(root)
+	answers := func() []uint64 {
+		var got []uint64
+		for _, source := range read.Sources {
+			room, _ := source()
+			got = append(got, room)
+		}
+		limit, _ := read.Limit()
+		return append(got, limit)
+	}
+	before := answers()
+	if before[sourceV2] == 0 || before[sourceV1] == 0 {
+		t.Fatalf("Setup: the v2 and v1 sources answer %v, want both to read a bound", before)
+	}
+	for _, name := range []string{"proc/self/mountinfo", "proc/self/cgroup"} {
+		if err := sandbox.WriteFile(filepath.Join(root, filepath.FromSlash(name)), nil, 0o600); err != nil {
+			t.Fatalf("Setup: empty %s: %v", name, err)
+		}
+	}
+	if after := answers(); !slices.Equal(after, before) {
+		t.Errorf("the readings after mountinfo and the cgroup document emptied = %v, want %v, the readings before", after, before)
 	}
 }

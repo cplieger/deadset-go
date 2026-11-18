@@ -15,6 +15,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/findings"
 	spec "github.com/cplieger/deadset-spec/v8"
+	"github.com/cplieger/deadset-spec/v8/corpus"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -37,6 +38,11 @@ var (
 	docsCorpusVersion   = regexp.MustCompile(`(?is)corpus version this analyzer answers is\s+([0-9]+\.[0-9]+\.[0-9]+)`)
 	docsFixtureCount    = regexp.MustCompile(`(?is)the run answers the\s+([0-9]+) fixtures`)
 	readmeFixtureCount  = regexp.MustCompile(`(?is)answers all\s+([0-9]+) of the contract's conformance fixtures`)
+	docsPublishedCount  = regexp.MustCompile(`(?is)which publishes\s+([0-9]+) fixtures`)
+	docsPassCount       = regexp.MustCompile(`(?is)([0-9]+) of them pass,`)
+	docsPendingCount    = regexp.MustCompile(`(?is)([0-9]+) are pending, none is a gap`)
+	readmePassCount     = regexp.MustCompile(`(?is)Go rendering:\s+([0-9]+) pass and`)
+	readmePendingCount  = regexp.MustCompile(`(?is)pass and\s+([0-9]+) are pending`)
 	docsSpecLink        = regexp.MustCompile(`github\.com/cplieger/deadset-spec/(?:blob|tree)/([^/)\s]+)/`)
 )
 
@@ -269,19 +275,22 @@ func TestTheDocumentedCorpusVersionIsTheOneAnswered(t *testing.T) {
 	}
 }
 
-// TestTheDocumentedFixtureCountIsTheOneAnswered refuses a conformance page or a
-// README stating a fixture count other than the one the committed results document
-// records.
+// TestTheDocumentedCorpusCountsAreTheOnesAnswered refuses a conformance page or a
+// README stating a count other than the one it names: the fixtures the pinned
+// corpus publishes, and the fixtures, passes and pending rows the committed
+// results document records.
 //
-// The count is what a reader compares a published corpus against, and it moves every
-// time the corpus adds a fixture carrying a Go rendering, which is a release the
+// The counts are what a reader compares a published corpus against, and they move
+// with every corpus release and every rule the analyzer comes to meet, which the
 // pages and the record move in together.
-func TestTheDocumentedFixtureCountIsTheOneAnswered(t *testing.T) {
+func TestTheDocumentedCorpusCountsAreTheOnesAnswered(t *testing.T) {
 	t.Parallel()
 
 	var document struct {
 		Totals struct {
 			Fixtures int `json:"fixtures"`
+			Pass     int `json:"pass"`
+			Pending  int `json:"pending"`
 		} `json:"totals"`
 	}
 	path := filepath.Join("..", "..", conformanceResultsFile)
@@ -292,28 +301,37 @@ func TestTheDocumentedFixtureCountIsTheOneAnswered(t *testing.T) {
 	if err := json.Unmarshal(body, &document); err != nil {
 		t.Fatalf("Setup: decode %s: %v", path, err)
 	}
-	want := strconv.Itoa(document.Totals.Fixtures)
+	published, err := corpus.Names(spec.Corpus)
+	if err != nil {
+		t.Fatalf("Setup: corpus.Names: %v", err)
+	}
 	readme, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
 	if err != nil {
 		t.Fatalf("Setup: read README.md: %v", err)
 	}
-	pages := []struct {
-		name       string
-		text       string
-		expression *regexp.Regexp
+	conformance := docPage(t, "conformance.md")
+	counts := []struct {
+		page, text, count string
+		expression        *regexp.Regexp
+		want              int
 	}{
-		{"docs/conformance.md", docPage(t, "conformance.md"), docsFixtureCount},
-		{"README.md", string(readme), readmeFixtureCount},
+		{"docs/conformance.md", conformance, "published fixtures", docsPublishedCount, len(published)},
+		{"docs/conformance.md", conformance, "fixtures", docsFixtureCount, document.Totals.Fixtures},
+		{"docs/conformance.md", conformance, "passing fixtures", docsPassCount, document.Totals.Pass},
+		{"docs/conformance.md", conformance, "pending fixtures", docsPendingCount, document.Totals.Pending},
+		{"README.md", string(readme), "fixtures", readmeFixtureCount, document.Totals.Fixtures},
+		{"README.md", string(readme), "passing fixtures", readmePassCount, document.Totals.Pass},
+		{"README.md", string(readme), "pending fixtures", readmePendingCount, document.Totals.Pending},
 	}
-	for _, page := range pages {
-		stated := matched(page.expression, page.text)
+	for _, c := range counts {
+		stated := matched(c.expression, c.text)
 		if len(stated) != 1 {
-			t.Errorf("%s states the fixture count %v, want exactly one statement of it", page.name, stated)
+			t.Errorf("%s states the count of %s %v, want exactly one statement of it", c.page, c.count, stated)
 			continue
 		}
-		if stated[0] != want {
-			t.Errorf("%s states %s fixtures, want %s, which %s records",
-				page.name, stated[0], want, conformanceResultsFile)
+		if want := strconv.Itoa(c.want); stated[0] != want {
+			t.Errorf("%s states %s %s, want %s, which the pinned corpus and %s record",
+				c.page, stated[0], c.count, want, conformanceResultsFile)
 		}
 	}
 }

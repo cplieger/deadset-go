@@ -95,9 +95,11 @@ func (l *formatList) Set(value string) error {
 // invocation is what one analyze invocation asked for beyond the configuration: the
 // path the report is written to, the renderings written beside it, the template one
 // of those renderings reads, the path a baseline of the run is written to, and
-// whether the exit code carries the verdict.
+// whether the exit code carries the verdict. dir is the directory it runs from
+// ([invoke]).
 type invocation struct {
 	template      *render.Template
+	dir           string
 	report        string
 	facts         string
 	baselineWrite string
@@ -112,8 +114,8 @@ type invocation struct {
 // crash truncated is indistinguishable from a short one on a stream, so the report
 // is a file, its write is atomic, every rendering is a file beside it, every
 // diagnostic goes to stderr and the verdict is the exit code.
-func analyze(ctx context.Context, args []string, stderr io.Writer) int {
-	asked, req, code := analyzeFlags(ctx, args, stderr)
+func analyze(ctx context.Context, dir string, args []string, stderr io.Writer) int {
+	asked, req, code := analyzeFlags(ctx, dir, args, stderr)
 	if code != vocab.ExitClean {
 		return code
 	}
@@ -191,8 +193,9 @@ func committed(ctx context.Context) (context.Context, error) {
 
 // analyzeFlags parses the invocation and resolves the configuration documents it
 // names.
-func analyzeFlags(ctx context.Context, args []string, stderr io.Writer) (asked invocation, req *run.Request, code int) {
-	flags := configuredFlagSet("analyze", analyzeUsage, stderr)
+func analyzeFlags(ctx context.Context, dir string, args []string, stderr io.Writer) (asked invocation, req *run.Request, code int) {
+	flags := configuredFlagSet("analyze", analyzeUsage, dir, stderr)
+	asked.dir = dir
 	flags.set.StringVar(&asked.report, "report", "", "the path the JSON report is written to")
 	factsOption, _ := vocab.OptionOf("facts")
 	flags.set.StringVar(&asked.facts, "facts", "", factsOption.Summary)
@@ -203,7 +206,7 @@ func analyzeFlags(ctx context.Context, args []string, stderr io.Writer) (asked i
 	exitCode := flags.set.String("exit-code", exitCodeOn,
 		"whether the exit code carries the verdict of the run: "+exitCodeOn+" or "+exitCodeOff)
 
-	if err := flags.set.Parse(args); err != nil {
+	if err := flags.parse(args); err != nil {
 		return invocation{}, nil, vocab.ExitUsage
 	}
 	if flags.set.NArg() != 0 {
@@ -294,8 +297,9 @@ func (a *invocation) write(ctx context.Context, r *report.Report, reporters *con
 	}
 
 	// A position of the report is target-relative, so the SARIF rendering's
-	// reader resolves it against the root the report names.
-	targetRoot := filepath.FromSlash(r.Target.Root)
+	// reader resolves it against the root the report names, which is relative to
+	// the invocation's directory.
+	targetRoot := under(a.dir, filepath.FromSlash(r.Target.Root))
 	opts := &render.Options{
 		Read:     func(path string) ([]byte, error) { return os.ReadFile(filepath.Join(targetRoot, path)) },
 		Template: a.template,

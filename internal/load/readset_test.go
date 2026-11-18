@@ -23,8 +23,8 @@ func TestOnlyCompiledFileListsEnterTheReadSet(t *testing.T) {
 }
 
 // Every form of putting a file into the read set other than a compiled list's is
-// refused, round 8's IgnoredFiles range among them; the package's own forms are
-// not.
+// refused, a range over a package's IgnoredFiles among them; the package's own
+// forms are not.
 func TestReadSetSitesRefusesEveryOtherWayIntoTheReadSet(t *testing.T) {
 	t.Parallel()
 	const head = "package p\n\ntype readFiles struct{ compiledByDir map[string]map[string]bool }\n\n" +

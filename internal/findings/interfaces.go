@@ -290,7 +290,7 @@ func (f *interfaceFacts) addImplementation(in *pass, iface, concrete inventory.S
 	}
 	f.implementations[iface][concrete] = positioned{
 		Ref:      cmp.Or(in.Refs[concrete], symbol.Ref),
-		Name:     symbol.Name,
+		Name:     DisplayName(symbol.Name),
 		Position: positionOf(symbol),
 	}
 }

@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"go/token"
 	"maps"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -761,9 +762,13 @@ func (in *pass) admit(found *Finding) error {
 // cannot carry: an empty one, one that does not name its subject, which an
 // annotation or a SARIF result shows with no other name, one holding a line break,
 // and one ending in a full stop, which is what lets a consumer append a clause to
-// the same sentence.
+// the same sentence. It refuses a name [DisplayName] would respell too, which
+// [pass.spelled] has spelled for every kind.
 func checkMessage(found *Finding) error {
 	switch {
+	case DisplayName(found.Symbol.Name) != found.Symbol.Name:
+		return fmt.Errorf("%w: %s names %q, which holds a line break or a colon and a space",
+			errEmitter, found.Code, found.Symbol.Name)
 	case found.Message == "":
 		return fmt.Errorf("%w: %s reports %s with no message",
 			errEmitter, found.Code, found.Symbol.Ref)
@@ -778,6 +783,19 @@ func checkMessage(found *Finding) error {
 			errEmitter, found.Code, found.Message)
 	}
 	return nil
+}
+
+// lineBreak and colonSpaces are what [DisplayName] respells.
+var (
+	lineBreak   = regexp.MustCompile(`\s*[\r\n]\s*`)
+	colonSpaces = regexp.MustCompile(`: +`)
+)
+
+// DisplayName is source text as a finding's name spells it: a line break and the
+// blanks around it as one space, and no space after a colon, because a text line
+// ends the name at a colon and a space (finding.schema.json, symbol.name).
+func DisplayName(text string) string {
+	return colonSpaces.ReplaceAllString(lineBreak.ReplaceAllString(text, " "), ":")
 }
 
 // namesSubject reports whether message holds name as a subject phrase does: a whole
@@ -817,14 +835,22 @@ func afterArticle(text string) bool {
 	return false
 }
 
-// subjectOf copies the draft's subject and, where the emitter left the kind empty,
-// fills the inventory's word for the declaration.
-func (in *pass) subjectOf(d *draft) Subject {
-	subject := d.Symbol
+// spelled is the draft's subject and message as a finding carries them: the
+// inventory's word for the declaration where the emitter left the kind empty,
+// and the name, wherever the message holds it, as [DisplayName] spells it. Every
+// kind's finding passes through here, so no emitter spells a name itself and the
+// message names the subject as its name field does.
+func (in *pass) spelled(d *draft) (subject Subject, message string) {
+	subject = d.Symbol
 	if subject.Kind == "" {
 		subject.Kind = symbolKinds[in.kindOf(d.id)]
 	}
-	return subject
+	message = d.Message
+	if name := DisplayName(subject.Name); name != subject.Name {
+		message = strings.ReplaceAll(message, subject.Name, name)
+		subject.Name = name
+	}
+	return subject, message
 }
 
 // complete makes the finding of one draft, filling everything the Contract requires
@@ -841,9 +867,7 @@ func (in *pass) complete(d *draft, row *vocab.Kind) Finding {
 		Kind:     row.Name,
 		Language: language,
 		Position: d.Position,
-		Symbol:   in.subjectOf(d),
 		TestOnly: d.TestOnly,
-		Message:  d.Message,
 		Details:  d.Details,
 		id:       d.id,
 		decl:     d.decl,
@@ -851,6 +875,7 @@ func (in *pass) complete(d *draft, row *vocab.Kind) Finding {
 		record:   d.record,
 		local:    d.local,
 	}
+	found.Symbol, found.Message = in.spelled(d)
 	held := false
 	switch {
 	case found.local:
@@ -1033,7 +1058,7 @@ func namedSymbol(symbol *inventory.Symbol) string {
 	if !held {
 		word = symbol.Kind.String()
 	}
-	return word + " " + symbol.Name
+	return word + " " + DisplayName(symbol.Name)
 }
 
 // word is the reader's word for the kind of one declaration, and the vocabulary's
@@ -1098,7 +1123,7 @@ func (in *pass) listing(ids []inventory.SymbolID) []positioned {
 		if symbol == nil {
 			continue
 		}
-		members = append(members, positioned{Ref: symbol.Ref, Name: symbol.Name, Position: Position{
+		members = append(members, positioned{Ref: symbol.Ref, Name: DisplayName(symbol.Name), Position: Position{
 			Path:    symbol.Pos.Filename,
 			Line:    symbol.Pos.Line,
 			Column:  symbol.Pos.Column,

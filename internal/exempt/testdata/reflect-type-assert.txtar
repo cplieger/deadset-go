@@ -1,0 +1,46 @@
+One command reaching methods and fields by reflection only through the generic
+and iterator entry points: reflect.TypeAssert of an interface on a field Field
+selects, a range over Methods, and a range over the Fields of the type
+reflect.TypeFor names. The walk computes the field's type, so a method the
+asserted interface does not require stays unretained.
+
+-- go.mod --
+module example.com/rta
+
+go 1.27.1
+-- main.go --
+package main
+
+import (
+	"fmt"
+	"reflect"
+)
+
+type ranged interface{ Range() int }
+
+type seq int
+
+func (seq) Range() int { return 1 }
+
+func (seq) extra() {}
+
+type params struct{ S seq }
+
+type hook struct{}
+
+func (hook) Start() {}
+
+type row struct{ id, name int }
+
+func main() {
+	var p params
+	if r, ok := reflect.TypeAssert[ranged](reflect.ValueOf(&p).Elem().Field(0)); ok {
+		fmt.Println(r.Range())
+	}
+	for _, m := range reflect.ValueOf(hook{}).Methods() {
+		m.Call(nil)
+	}
+	for f := range reflect.TypeFor[row]().Fields() {
+		fmt.Println(f.Name)
+	}
+}

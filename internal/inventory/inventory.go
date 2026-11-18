@@ -377,7 +377,7 @@ type receiverOwner struct {
 
 // declaration is one symbol the walk found, before its position is rendered.
 type declaration struct {
-	name     string // the display name a text line renders
+	name     string // as the source writes it; a finding spells it through findings.DisplayName
 	pkgPath  string
 	parent   SymbolID
 	id       SymbolID // set for a package only; any other's is its written position

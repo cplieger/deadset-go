@@ -50,7 +50,7 @@ func unbuildableDerivedModule(t *testing.T, document string) string {
 func TestLoadDropsADerivedConfigurationTheTargetDoesNotBuild(t *testing.T) {
 	t.Parallel()
 	dir := unbuildableDerivedModule(t, `{"target": {"kind": "application"}}`)
-	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
+	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, "", []string{"--target=" + dir}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
@@ -88,7 +88,7 @@ func TestLoadFailsTheRunOnADeclaredConfigurationTheTargetDoesNotBuild(t *testing
 	dir := unbuildableDerivedModule(t, `{"target": {"kind": "application"}, "analysis": {"configurations": [`+
 		`{"id": "`+load.HostConfiguration().ID+`", "os": "`+hostOS+`", "arch": "`+hostArch+`"},`+
 		`{"id": "`+unbuildableOther+`", "os": "`+otherOS+`", "arch": "`+hostArch+`"}]}}`)
-	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
+	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, "", []string{"--target=" + dir}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}
@@ -172,7 +172,7 @@ const projectEntries = `{"target": {"kind": "application"}, "analysis": {` +
 func TestLoadDerivesTheMatrixWhereTheConfigurationListsProjectsAlone(t *testing.T) {
 	t.Parallel()
 	dir := unbuildableDerivedModule(t, projectEntries)
-	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, []string{"--target=" + dir}, &strings.Builder{})
+	resolved, code := resolve(t.Context(), "print-roots", printRootsUsage, "", []string{"--target=" + dir}, &strings.Builder{})
 	if code != vocab.ExitClean {
 		t.Fatalf("Setup: resolve the configuration of %s = %d, want %d", dir, code, vocab.ExitClean)
 	}

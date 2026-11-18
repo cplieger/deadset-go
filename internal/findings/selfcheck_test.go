@@ -495,6 +495,32 @@ func TestUnmatchedRootsReportsEveryConfiguredStringAsTheConfigurationSpellsIt(t 
 	}
 }
 
+// A configured string holding a line break or a colon and a space keeps its
+// reference as written and is named as a text line can carry it.
+func TestUnmatchedRootsNamesAStringATextLineCannotCarryAsItCan(t *testing.T) {
+	t.Parallel()
+	in := suppressed(t, "selfcheck-stale.txtar", applicationConfig())
+	source := "go://example.com/selfcheck#Gone:\n  then: lost"
+	in.Unmatched = []roots.Unmatched{{Source: source}}
+
+	found := computed(t, in, map[vocab.Code]Emitter{vocab.UnmatchedRoot: unmatchedRoots}).Findings
+	const name = "go://example.com/selfcheck#Gone:then:lost"
+	if len(found) != 1 || found[0].Symbol.Ref != source || found[0].Symbol.Name != name ||
+		found[0].Message != "configured root "+name+" matches no symbol of the inventory" {
+		t.Errorf("the unmatched-root kind over %q reported %+v, want one finding with that reference, named %q", source, summary(found), name)
+	}
+}
+
+func TestCheckMessageRefusesANameATextLineCannotCarry(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"a\nb", "a\r\nb", "a: b", "1 of 1 ([len(`a\n\tb`)]int)"} {
+		found := &Finding{Code: vocab.UnusedResult, Symbol: Subject{Name: name}, Message: "result " + name + " of function f is discarded"}
+		if err := checkMessage(found); !errors.Is(err, errEmitter) {
+			t.Errorf("checkMessage(name %q) = %v, want an errEmitter refusal", name, err)
+		}
+	}
+}
+
 func TestAMarkOnADeadComponentsRootLeavesTheSymbolsOnlyThatRootReferencesUnreported(t *testing.T) {
 	t.Parallel()
 	in := suppressed(t, "selfcheck-seed.txtar", applicationConfig())

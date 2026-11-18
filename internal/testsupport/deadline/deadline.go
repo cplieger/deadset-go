@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/rerun"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 )
 
@@ -102,7 +103,7 @@ func run(t *testing.T, limit time.Duration) (string, outcome, error) {
 	// at once: its own context ended a quarter of limit earlier ([Context]).
 	cmd := Command(ctx, os.Args[0], args...)
 	cmd.Cancel = func() error { return killTree(cmd.Process.Pid) }
-	cmd.Env = append(cmd.Environ(), rowVariable+"="+t.Name(), "TMPDIR="+temp)
+	cmd.Env = rerun.Environment(append(cmd.Environ(), rowVariable+"="+t.Name(), "TMPDIR="+temp))
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	err := cmd.Run()
