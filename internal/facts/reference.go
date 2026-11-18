@@ -44,7 +44,7 @@ type via uint8
 const (
 	viaIdentifier            via = iota // an identifier names the declaration
 	viaImport                           // an import names the package
-	viaPromotedPath                     // an embedded field a selection reaches through
+	viaPromotedPath                     // an embedded field a selection or a literal key reaches through
 	viaComparison                       // a field equality, a switch or a map key compares
 	viaContainerKey                     // a field a standard container compares as a key
 	viaStructIdentity                   // a field a conversion between struct types requires
@@ -710,7 +710,7 @@ func (p *referencePass) inspectExcept(node ast.Node, encl inventory.SymbolID, sk
 		case *ast.AssignStmt:
 			p.markAssign(n)
 		case *ast.CompositeLit:
-			p.markFieldKeys(n)
+			p.markFieldKeys(n, encl)
 		case *ast.IncDecStmt, *ast.ExprStmt:
 			p.markStatement(n)
 		case *ast.RangeStmt:
@@ -980,6 +980,14 @@ func (p *referencePass) reachThrough(e *ast.SelectorExpr, encl inventory.SymbolI
 // passes through from recv, the last step being the member selected. A field in
 // seen is not read twice, and seen gains every field read; a nil seen keeps none.
 func (p *referencePass) readPath(recv types.Type, index []int, encl inventory.SymbolID, pos token.Pos, seen map[inventory.SymbolID]bool, rule via) {
+	p.reachPath(recv, index, encl, pos, seen, RefRead, rule)
+}
+
+// reachPath records a reference of one kind at pos to every embedded field one
+// index path passes through from recv, the last step being the member the path
+// names. A field in seen is not referenced twice, and seen gains every field
+// referenced; a nil seen keeps none.
+func (p *referencePass) reachPath(recv types.Type, index []int, encl inventory.SymbolID, pos token.Pos, seen map[inventory.SymbolID]bool, kind RefKind, rule via) {
 	if len(index) < 2 {
 		return
 	}
@@ -994,7 +1002,7 @@ func (p *referencePass) readPath(recv types.Type, index []int, encl inventory.Sy
 			if seen != nil {
 				seen[to] = true
 			}
-			p.add(encl, to, pos, RefRead, rule)
+			p.add(encl, to, pos, kind, rule)
 		}
 		held = field.Type()
 	}
@@ -1304,9 +1312,13 @@ func holdsArray(field *types.Var) bool {
 
 // markFieldKeys records the fields one composite literal writes. A keyed field
 // of a struct literal is an initialising store, and a field a package only ever
-// sets in a literal holds nothing anything reads. A key of a map, an array or a
-// slice literal names no field and keeps the kind what it names decides.
-func (p *referencePass) markFieldKeys(lit *ast.CompositeLit) {
+// sets in a literal holds nothing anything reads. A key naming a promoted field
+// also stores into every embedded field it is promoted through, which carry no
+// identifier at the key, as the literal keying each embedded field in turn
+// would. Each such write has the key's element as its span. A key of a map, an
+// array or a slice literal names no field and keeps the kind what it names
+// decides.
+func (p *referencePass) markFieldKeys(lit *ast.CompositeLit, encl inventory.SymbolID) {
 	held := p.info.Types[lit].Type
 	if held == nil {
 		return
@@ -1321,8 +1333,24 @@ func (p *referencePass) markFieldKeys(lit *ast.CompositeLit) {
 		}
 		if key, ok := ast.Unparen(keyed.Key).(*ast.Ident); ok {
 			p.write(key, keyed)
+			p.writePromotedPath(held, key, encl)
 		}
 	}
+}
+
+// writePromotedPath records a write at one struct literal key of every embedded
+// field the key's field is promoted through from the literal's type. A key
+// naming a field the struct declares itself passes through none.
+func (p *referencePass) writePromotedPath(held types.Type, key *ast.Ident, encl inventory.SymbolID) {
+	field, ok := p.info.Uses[key].(*types.Var)
+	if !ok || !field.IsField() {
+		return
+	}
+	found, index, _ := types.LookupFieldOrMethod(held, false, field.Pkg(), key.Name)
+	if found != field {
+		return
+	}
+	p.reachPath(held, index, encl, key.Pos(), nil, RefWrite, viaPromotedPath)
 }
 
 // markDelete records the collection one delete stores into. Removing an entry
