@@ -428,3 +428,38 @@ func TestWriteOnlyRetainedNamesTheExemptionThatHoldsAWriteOnlyFindingBack(t *tes
 		t.Errorf("WriteOnlySymbol over readwrite-encoded.txtar reports %v, want [answer.note]", names)
 	}
 }
+
+// A struct literal keyed by a promoted field writes every embedded field the key is
+// promoted through, so the embedded field is written and read only from tests, the
+// same answer the literal spelling the embedded field's own key gets, and the
+// embedded type keeps the declaration that embeds it.
+func TestWriteOnlySymbolCountsAPromotedLiteralKeyAsAWriteOfEveryEmbeddedFieldOnItsPath(t *testing.T) {
+	t.Parallel()
+	found := analysisOf(t, "readwrite-promoted-key.txtar", asApplication, Consumers{}).
+		findings(t, everyKind).Findings
+
+	want := []string{
+		"DS1301 inner.x", "DS1301 leaf.z", "DS1301 middle.leaf", "DS1301 nested.spelled",
+		"DS1301 outer.inner", "DS1301 spelled.y", "DS1301 top.middle",
+	}
+	got := summary(found)
+	slices.Sort(got)
+	if !slices.Equal(got, want) {
+		t.Fatalf("every kind over readwrite-promoted-key.txtar reports %v, want %v", got, want)
+	}
+	for subject, line := range map[string]string{
+		"outer.inner": "main.go:43:22", "inner.x": "main.go:43:22",
+		"nested.spelled": "main.go:49:23", "spelled.y": "main.go:49:40",
+		"top.middle": "main.go:55:20", "middle.leaf": "main.go:55:20", "leaf.z": "main.go:55:20",
+	} {
+		written := findingOf(t, found, vocab.WriteOnlySymbol, subject)
+		if want := "field " + subject + " is written once and read only from test files"; written.Message != want {
+			t.Errorf("WriteOnlySymbol over readwrite-promoted-key.txtar reports %s with message %q, want %q",
+				subject, written.Message, want)
+		}
+		if got := writePositions(written); !slices.Equal(got, []string{line}) {
+			t.Errorf("WriteOnlySymbol over readwrite-promoted-key.txtar names write positions %v for %s, want [%s]",
+				got, subject, line)
+		}
+	}
+}

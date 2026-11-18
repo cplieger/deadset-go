@@ -1,0 +1,84 @@
+Three struct literals that production code writes and the package's own test
+alone reads: one keyed by a promoted field, one keyed by the embedded field it is
+promoted through, and one keyed by a field promoted through two embedded fields.
+The promoted key writes every embedded field on its path, the way the explicit
+nested form does.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.1
+-- main.go --
+package main
+
+// inner is embedded in outer and written through a promoted key.
+type inner struct {
+	x int
+}
+
+// outer embeds inner.
+type outer struct {
+	code int
+	inner
+}
+
+// spelled is embedded in nested and written through its own key.
+type spelled struct {
+	y int
+}
+
+// nested embeds spelled.
+type nested struct {
+	code int
+	spelled
+}
+
+// leaf is embedded two levels below top.
+type leaf struct {
+	z int
+}
+
+// middle embeds leaf.
+type middle struct {
+	leaf
+}
+
+// top embeds middle, so leaf.z is promoted through two embedded fields.
+type top struct {
+	code int
+	middle
+}
+
+// promoted writes inner.x through outer's promoted key.
+func promoted(c int) int {
+	o := outer{code: c, x: 1}
+	return o.code
+}
+
+// explicit writes spelled.y through the embedded field's own key.
+func explicit(c int) int {
+	o := nested{code: c, spelled: spelled{y: 1}}
+	return o.code
+}
+
+// twoDeep writes leaf.z through top's promoted key.
+func twoDeep(c int) int {
+	o := top{code: c, z: 1}
+	return o.code
+}
+
+func main() {
+	println(promoted(1), explicit(1), twoDeep(1))
+}
+-- main_test.go --
+package main
+
+import "testing"
+
+// TestFields reads the fields production code only writes.
+func TestFields(t *testing.T) {
+	o, n, d := outer{code: 1}, nested{code: 1}, top{code: 1}
+	if o.x != 0 || n.y != 0 || d.z != 0 {
+		t.Fatal("a zero field reads non-zero")
+	}
+}
