@@ -412,6 +412,7 @@ func TestExplainListsTheUnusedParametersOfTheSymbol(t *testing.T) {
 }
 
 func TestExplainNamesTheConsumerTestThatHoldsASymbolLiveUnderConsumerTestsProduction(t *testing.T) {
+	t.Parallel()
 	// Only the consumer's test calls Used, and the configuration classifies a loaded
 	// consumer's test reference as production, so the sweep holds Used live through
 	// that reference and the path the answer prints starts there.
@@ -432,10 +433,9 @@ func TestExplainNamesTheConsumerTestThatHoldsASymbolLiveUnderConsumerTestsProduc
 }
 `,
 	})
-	t.Chdir(dir)
 	var stdout, stderr bytes.Buffer
 	args := []string{"explain", "--scope=scope.json", "--config=target/" + repositoryDocument, "go://example.com/app/lib#Used"}
-	if code := invoke(t.Context(), args, &stdout, &stderr); code != vocab.ExitClean {
+	if code := invoke(t.Context(), dir, args, &stdout, &stderr); code != vocab.ExitClean {
 		t.Fatalf("invoke(%q) = %d, want %d\nstderr: %s", args, code, vocab.ExitClean, stderr.String())
 	}
 	got := stdout.String()

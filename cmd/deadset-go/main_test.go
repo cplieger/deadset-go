@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
@@ -26,8 +27,9 @@ import (
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
-// TestMain creates the directory the shared fixture modules are written under, runs
-// the package's tests, [testsupport.WaitOnTheToolchain] many at once, and removes it.
+// TestMain creates the directory the shared fixture modules are written under,
+// builds the command and its host form there, runs the package's tests,
+// [testsupport.WaitOnTheToolchain] many at once, and removes it.
 //
 // The directory cannot belong to a test: a fixture module is declared by several of
 // them and written once, so it outlives whichever one declared it first.
@@ -44,7 +46,7 @@ func runTests(m *testing.M) int {
 			fmt.Fprintf(os.Stderr, "decode %s: %v\n", execArgsVariable, err)
 			return 1
 		}
-		return governed(args, os.Stdout, os.Stderr, memory.Platform())
+		return governed("", args, os.Stdout, os.Stderr, memory.Platform())
 	}
 	base, err := sandbox.MkdirTemp("", "deadset-fixtures")
 	if err != nil {
@@ -68,7 +70,16 @@ func runTests(m *testing.M) int {
 		fmt.Fprintf(os.Stderr, "set the test parallelism: %v\n", err)
 		return 1
 	}
-	return m.Run()
+	var builds sync.WaitGroup
+	builds.Go(buildCommand)
+	builds.Go(buildHost)
+	builds.Wait()
+	code := m.Run()
+	if err := closeHost(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return code
 }
 
 // hostOS and hostArch are the host every run of this package's tests derives for,
@@ -337,7 +348,7 @@ func TestRun(t *testing.T) {
 			t.Parallel()
 
 			var stdout, stderr bytes.Buffer
-			if got := invoke(t.Context(), tc.args, &stdout, &stderr); got != tc.wantCode {
+			if got := invoke(t.Context(), "", tc.args, &stdout, &stderr); got != tc.wantCode {
 				t.Errorf("invoke(%q) = %d, want %d\nstdout: %q\nstderr: %q", tc.args, got, tc.wantCode, stdout.String(), stderr.String())
 			}
 			for _, want := range tc.wantStdout {
@@ -366,7 +377,7 @@ func TestDescribeNamesTheContractItImplements(t *testing.T) {
 	contractVersion, schemaVersions := contractVersions(t)
 
 	var stdout, stderr bytes.Buffer
-	if got := invoke(t.Context(), []string{"describe"}, &stdout, &stderr); got != vocab.ExitClean {
+	if got := invoke(t.Context(), "", []string{"describe"}, &stdout, &stderr); got != vocab.ExitClean {
 		t.Fatalf("invoke(describe) = %d, want %d\nstderr: %q", got, vocab.ExitClean, stderr.String())
 	}
 	if stderr.Len() != 0 {
@@ -483,7 +494,7 @@ func TestPrintConfigNamesTheSourceOfEverySetting(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-config", "--target=" + dir, "--central=" + central, "--min-confidence=certain"}
-	if got := invoke(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+	if got := invoke(t.Context(), "", args, &stdout, &stderr); got != vocab.ExitClean {
 		t.Fatalf("invoke(%q) = %d, want %d\nstderr: %q", args, got, vocab.ExitClean, stderr.String())
 	}
 	if stderr.Len() != 0 {
@@ -526,7 +537,7 @@ func TestPrintConfigOutputReadBackResolvesToTheSameConfiguration(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-config", "--target=" + dir}
-	if got := invoke(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+	if got := invoke(t.Context(), "", args, &stdout, &stderr); got != vocab.ExitClean {
 		t.Fatalf("invoke(%q) = %d, want %d\nstderr: %q", args, got, vocab.ExitClean, stderr.String())
 	}
 	first := decodePrinted(t, stdout.Bytes())
@@ -536,7 +547,7 @@ func TestPrintConfigOutputReadBackResolvesToTheSameConfiguration(t *testing.T) {
 	readBack := writeDocument(t, sandbox.Dir(t), "deadset.json", stdout.String())
 	var again, stderrAgain bytes.Buffer
 	argsAgain := []string{"print-config", "--target=" + filepath.Dir(readBack)}
-	if got := invoke(t.Context(), argsAgain, &again, &stderrAgain); got != vocab.ExitClean {
+	if got := invoke(t.Context(), "", argsAgain, &again, &stderrAgain); got != vocab.ExitClean {
 		t.Fatalf("invoke(%q) = %d, want %d\nstderr: %q", argsAgain, got, vocab.ExitClean, stderrAgain.String())
 	}
 	second := decodePrinted(t, again.Bytes())
@@ -613,7 +624,7 @@ func TestPrintConfigRefusals(t *testing.T) {
 			}
 
 			var stdout, stderr bytes.Buffer
-			if got := invoke(t.Context(), args, &stdout, &stderr); got != tc.wantCode {
+			if got := invoke(t.Context(), "", args, &stdout, &stderr); got != tc.wantCode {
 				t.Errorf("invoke(%q) = %d, want %d\nstderr: %q", args, got, tc.wantCode, stderr.String())
 			}
 			if stdout.Len() != 0 {
@@ -638,7 +649,7 @@ func TestPrintConfigRefusesADocumentOverTheSizeBound(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-config", "--target=" + dir}
-	if got := invoke(t.Context(), args, &stdout, &stderr); got != vocab.ExitUsage {
+	if got := invoke(t.Context(), "", args, &stdout, &stderr); got != vocab.ExitUsage {
 		t.Errorf("invoke(%q) = %d, want %d for a document over the size bound", args, got, vocab.ExitUsage)
 	}
 	if stdout.Len() != 0 {
@@ -660,7 +671,7 @@ func TestPrintConfigReadsADocumentAtTheSizeBound(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-config", "--target=" + dir}
-	if got := invoke(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+	if got := invoke(t.Context(), "", args, &stdout, &stderr); got != vocab.ExitClean {
 		t.Errorf("invoke(%q) = %d, want %d for a document of exactly the size bound: stderr %q", args, got, vocab.ExitClean, stderr.String())
 	}
 }
@@ -674,7 +685,7 @@ func TestPrintConfigReadsTheDocumentTheInvocationNames(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-config", "--target=" + dir, "--config=" + named}
-	if got := invoke(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+	if got := invoke(t.Context(), "", args, &stdout, &stderr); got != vocab.ExitClean {
 		t.Fatalf("invoke(%q) = %d, want %d\nstderr: %q", args, got, vocab.ExitClean, stderr.String())
 	}
 
@@ -734,7 +745,7 @@ func TestEveryVerbTakesExactlyTheOptionsCLIJSONListsForIt(t *testing.T) {
 
 				var stderr strings.Builder
 				args := []string{verb.Name, "--" + option.Name + "=planted", "--target=" + target}
-				code := invoke(t.Context(), args, &strings.Builder{}, &stderr)
+				code := invoke(t.Context(), "", args, &strings.Builder{}, &stderr)
 				refused := code == vocab.ExitUsage &&
 					(strings.Contains(stderr.String(), "not defined: -"+option.Name+"\n") || strings.Contains(stderr.String(), "--"+option.Name+"=planted"))
 				if listed := slices.Contains(verb.Options, option.Name); refused == listed {
@@ -824,7 +835,7 @@ func TestPrintRootsNamesEveryRootAndWhyItIsOne(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-roots", "--target=" + dir}
-	if got := invoke(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+	if got := invoke(t.Context(), "", args, &stdout, &stderr); got != vocab.ExitClean {
 		t.Fatalf("invoke(%q) = %d, want %d\nstderr: %q", args, got, vocab.ExitClean, stderr.String())
 	}
 	if stderr.Len() != 0 {
@@ -874,7 +885,7 @@ func TestPrintRootsRootsThePublishedAPIOfALibraryTarget(t *testing.T) {
 			document := writeDocument(t, documents, string(tc.kind)+".json", `{"target": {"kind": "`+string(tc.kind)+`"}}`)
 			var stdout, stderr bytes.Buffer
 			args := []string{"print-roots", "--target=" + dir, "--config=" + document}
-			if got := invoke(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+			if got := invoke(t.Context(), "", args, &stdout, &stderr); got != vocab.ExitClean {
 				t.Fatalf("invoke(%q) = %d, want %d\nstderr: %q", args, got, vocab.ExitClean, stderr.String())
 			}
 			if got := stdout.String(); got != tc.want {
@@ -891,7 +902,7 @@ func TestPrintRootsReportsEveryConfiguredStringThatNamesNothing(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-roots", "--target=" + dir}
-	if got := invoke(t.Context(), args, &stdout, &stderr); got != vocab.ExitFindings {
+	if got := invoke(t.Context(), "", args, &stdout, &stderr); got != vocab.ExitFindings {
 		t.Fatalf("invoke(%q) = %d, want %d for a configured string that names nothing\nstderr: %q", args, got, vocab.ExitFindings, stderr.String())
 	}
 
@@ -953,7 +964,7 @@ func TestPrintRootsFailures(t *testing.T) {
 
 			var stdout, stderr bytes.Buffer
 			args := []string{"print-roots", "--target=" + target, "--config=" + filepath.Join(dir, repositoryDocument)}
-			if got := invoke(t.Context(), args, &stdout, &stderr); got != codes[tc.code] {
+			if got := invoke(t.Context(), "", args, &stdout, &stderr); got != codes[tc.code] {
 				t.Errorf("invoke(%q) = %d, want %d\nstderr: %q", args, got, codes[tc.code], stderr.String())
 			}
 			if stdout.Len() != 0 {
@@ -977,7 +988,7 @@ func TestPrintRootsStopsWhenTheRunIsCancelled(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-roots", "--target=" + dir}
-	if got := invoke(ctx, args, &stdout, &stderr); got != vocab.ExitFailure {
+	if got := invoke(ctx, "", args, &stdout, &stderr); got != vocab.ExitFailure {
 		t.Errorf("invoke(a cancelled run, %q) = %d, want %d\nstderr: %q", args, got, vocab.ExitFailure, stderr.String())
 	}
 	if stdout.Len() != 0 {
@@ -1018,7 +1029,7 @@ func TestPrintRetainedNamesEverySymbolAnExemptionHeldBackAndTheClassThatHeldIt(t
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-retained", "--target=" + dir}
-	if got := invoke(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+	if got := invoke(t.Context(), "", args, &stdout, &stderr); got != vocab.ExitClean {
 		t.Fatalf("invoke(%q) = %d, want %d\nstderr: %q", args, got, vocab.ExitClean, stderr.String())
 	}
 	if stderr.Len() != 0 {
@@ -1039,7 +1050,7 @@ func TestPrintRetainedDropsTheClassTheConfigurationDisables(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-retained", "--target=" + dir}
-	if got := invoke(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+	if got := invoke(t.Context(), "", args, &stdout, &stderr); got != vocab.ExitClean {
 		t.Fatalf("invoke(%q) = %d, want %d\nstderr: %q", args, got, vocab.ExitClean, stderr.String())
 	}
 
@@ -1062,7 +1073,7 @@ func TestEveryVerbRefusesAClassNameOutsideTheVocabulary(t *testing.T) {
 	for _, verb := range []string{"print-config", "print-roots", "print-retained"} {
 		var stdout, stderr bytes.Buffer
 		args := []string{verb, "--target=" + dir}
-		if got := invoke(t.Context(), args, &stdout, &stderr); got != vocab.ExitUsage {
+		if got := invoke(t.Context(), "", args, &stdout, &stderr); got != vocab.ExitUsage {
 			t.Fatalf("invoke(%q) = %d, want %d\nstderr: %q", args, got, vocab.ExitUsage, stderr.String())
 		}
 		if stdout.Len() != 0 {
@@ -1091,7 +1102,7 @@ func TestEveryVerbAcceptsAKeyOnlyAnotherProductReadsUnread(t *testing.T) {
 	for _, verb := range []string{"print-config", "print-roots", "print-retained"} {
 		var stdout, stderr bytes.Buffer
 		args := []string{verb, "--target=" + dir}
-		if got := invoke(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+		if got := invoke(t.Context(), "", args, &stdout, &stderr); got != vocab.ExitClean {
 			t.Fatalf("invoke(%q) = %d, want %d\nstderr: %q", args, got, vocab.ExitClean, stderr.String())
 		}
 		if verb != "print-config" {
@@ -1120,7 +1131,7 @@ func TestPrintRetainedAcceptsAClassAnotherLanguageComputesAndRetainsAsBefore(t *
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-retained", "--target=" + dir}
-	if got := invoke(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+	if got := invoke(t.Context(), "", args, &stdout, &stderr); got != vocab.ExitClean {
 		t.Fatalf("invoke(%q) = %d, want %d\nstderr: %q", args, got, vocab.ExitClean, stderr.String())
 	}
 	if stderr.Len() != 0 {
@@ -1144,7 +1155,7 @@ func TestPrintRetainedReportsEveryConfiguredStringThatNamesNothing(t *testing.T)
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-retained", "--target=" + dir}
-	if got := invoke(t.Context(), args, &stdout, &stderr); got != vocab.ExitFindings {
+	if got := invoke(t.Context(), "", args, &stdout, &stderr); got != vocab.ExitFindings {
 		t.Fatalf("invoke(%q) = %d, want %d for a configured root that names nothing\nstderr: %q", args, got, vocab.ExitFindings, stderr.String())
 	}
 
@@ -1231,7 +1242,7 @@ func TestPrintRetainedOverAModuleThatHasTestFiles(t *testing.T) {
 
 			var stdout, stderr bytes.Buffer
 			args := append([]string{"print-retained", "--target=" + dir}, tc.mode...)
-			if got := invoke(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+			if got := invoke(t.Context(), "", args, &stdout, &stderr); got != vocab.ExitClean {
 				t.Fatalf("invoke(%q) over a module with test files = %d, want %d\nstderr: %q", args, got, vocab.ExitClean, stderr.String())
 			}
 			if stderr.Len() != 0 {
@@ -1251,7 +1262,7 @@ func TestPrintRetainedRefusesAModeOutsideTheTwoItAnswers(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-retained", "--target=" + dir, "--mode=report"}
-	if got := invoke(t.Context(), args, &stdout, &stderr); got != vocab.ExitUsage {
+	if got := invoke(t.Context(), "", args, &stdout, &stderr); got != vocab.ExitUsage {
 		t.Fatalf("invoke(%q) = %d, want %d\nstderr: %q", args, got, vocab.ExitUsage, stderr.String())
 	}
 	if stdout.Len() != 0 {
@@ -1329,7 +1340,7 @@ func TestPrintRootsOverAMatrixLoadsEveryConfigurationAndNamesThemPerRoot(t *test
 
 			var stdout, stderr bytes.Buffer
 			args := []string{"print-roots", "--target=" + dir}
-			if got := invoke(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+			if got := invoke(t.Context(), "", args, &stdout, &stderr); got != vocab.ExitClean {
 				t.Fatalf("invoke(%q) = %d, want %d\nstderr: %q", args, got, vocab.ExitClean, stderr.String())
 			}
 			if stderr.Len() != 0 {
@@ -1351,7 +1362,7 @@ func TestPrintRootsFailsWhenOneConfigurationOfTheMatrixDoesNotLoad(t *testing.T)
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-roots", "--target=" + dir}
-	if got := invoke(t.Context(), args, &stdout, &stderr); got != vocab.ExitFailure {
+	if got := invoke(t.Context(), "", args, &stdout, &stderr); got != vocab.ExitFailure {
 		t.Fatalf("invoke(%q) over a matrix whose second configuration does not load = %d, want %d\nstderr: %q",
 			args, got, vocab.ExitFailure, stderr.String())
 	}
@@ -1387,7 +1398,7 @@ func TestPrintRetainedReadsTheDelimitersTheConfigurationSets(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-retained", "--target=" + dir}
-	if got := invoke(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+	if got := invoke(t.Context(), "", args, &stdout, &stderr); got != vocab.ExitClean {
 		t.Fatalf("invoke(%q) = %d, want %d\nstderr: %q", args, got, vocab.ExitClean, stderr.String())
 	}
 	if stderr.Len() != 0 {
@@ -1412,7 +1423,7 @@ func TestPrintRootsReportsNoConfiguredStringOneConfigurationOfTheMatrixMatched(t
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-roots", "--target=" + dir}
-	if got := invoke(t.Context(), args, &stdout, &stderr); got != vocab.ExitFindings {
+	if got := invoke(t.Context(), "", args, &stdout, &stderr); got != vocab.ExitFindings {
 		t.Fatalf("invoke(%q) = %d, want %d for the one configured string no configuration matched\nstderr: %q",
 			args, got, vocab.ExitFindings, stderr.String())
 	}
@@ -1455,7 +1466,7 @@ func TestPrintRetainedOverAMatrixNamesWhatAnyConfigurationRetained(t *testing.T)
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-retained", "--target=" + dir}
-	if got := invoke(t.Context(), args, &stdout, &stderr); got != vocab.ExitClean {
+	if got := invoke(t.Context(), "", args, &stdout, &stderr); got != vocab.ExitClean {
 		t.Fatalf("invoke(%q) over a matrix of two configurations = %d, want %d\nstderr: %q", args, got, vocab.ExitClean, stderr.String())
 	}
 	if stderr.Len() != 0 {

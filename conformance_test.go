@@ -2,13 +2,16 @@ package deadsetgo
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"testing"
 
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/host"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/corpus"
@@ -28,14 +31,24 @@ const (
 )
 
 // corpusJobs is how many fixtures the corpus run answers at once. A fixture's
-// analyses are processes that mostly wait on the go command they start, whose
-// start-up and reads of the toolchain's files cost several times more on Windows
-// than elsewhere, so four per processor keeps them busy.
+// analyses mostly wait on the go command each starts, whose start-up and reads of
+// the toolchain's files cost several times more on Windows than elsewhere, so four
+// per processor keeps the host busy.
 var corpusJobs = 4 * runtime.GOMAXPROCS(0)
 
+// processVariable set to 1 has the corpus run answer through the built command,
+// one process per invocation, rather than through its host, against the same
+// committed document, so the binary a release ships answers the corpus too. The
+// weekly properties job sets it.
+const processVariable = "DEADSET_CORPUS_PROCESS"
+
 // binary is the command, built once by TestMain with no version control state
-// stamped, so the version it states is the development version at every commit.
-var binary string
+// stamped, so the version it states is the development version at every commit,
+// and analyzer its host form, which answers the corpus in one process.
+var (
+	binary   string
+	analyzer *host.Host
+)
 
 func TestMain(m *testing.M) {
 	os.Exit(run(m))
@@ -59,11 +72,42 @@ func run(m *testing.M) int {
 		fmt.Fprintf(os.Stderr, "build the command: %v\n%s", err, out)
 		return 1
 	}
-	return m.Run()
+	if os.Getenv(processVariable) == "1" {
+		return m.Run()
+	}
+	hostBinary := filepath.Join(dir, product+"-host"+filepath.Ext(binary))
+	if err := host.Build(context.Background(), filepath.Join("cmd", "deadset-go"), hostBinary); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	hostDir, err := sandbox.MkdirTemp(dir, "host")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "create the host's directory: %v\n", err)
+		return 1
+	}
+	if analyzer, err = host.Start(hostBinary, hostDir, corpus.HostEnvironment); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	code := m.Run()
+	if err := analyzer.Close(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return code
 }
 
-// TestConformanceCorpus answers the pinned corpus through the built command as
-// a process, and holds the run to the committed results document.
+// corpusAnalyzer is what the corpus run answers through: the command's host, or
+// the built command where processVariable is 1.
+func corpusAnalyzer() corpus.Analyzer {
+	if os.Getenv(processVariable) == "1" {
+		return corpus.Analyzer{Command: []string{binary}, Language: string(vocab.Go)}
+	}
+	return corpus.Analyzer{InProcess: analyzer.Invoke, Language: string(vocab.Go)}
+}
+
+// TestConformanceCorpus answers the pinned corpus through [corpusAnalyzer], and
+// holds the run to the committed results document.
 func TestConformanceCorpus(t *testing.T) {
 	t.Parallel()
 	var gaps corpus.Gaps
@@ -71,7 +115,7 @@ func TestConformanceCorpus(t *testing.T) {
 		t.Fatalf("Setup: decode conformance.json: %v", err)
 	}
 	results, err := corpus.Run(t.Context(), spec.Corpus,
-		corpus.Analyzer{Command: []string{binary}, Language: string(vocab.Go)},
+		corpusAnalyzer(),
 		corpus.Options{Gaps: gaps.Gaps, Jobs: corpusJobs, Scratch: sandbox.Dir(t)})
 	if err != nil {
 		t.Fatalf("corpus.Run = %v, want the results document", err)
@@ -117,6 +161,29 @@ func TestConformanceCorpus(t *testing.T) {
 	}
 	if !bytes.Equal(Results, got) {
 		t.Errorf("%s differs from this run (regenerate with %s)", resultsFile, goldenCommand)
+	}
+}
+
+// TestTheCorpusRunAnswersThroughTheBuiltCommandWhereProcessIsSet pins what
+// processVariable selects, and that the weekly properties job sets it, so one CI
+// leg answers the corpus through the binary a release ships.
+func TestTheCorpusRunAnswersThroughTheBuiltCommandWhereProcessIsSet(t *testing.T) {
+	t.Setenv(processVariable, "1")
+	if got := corpusAnalyzer(); !slices.Equal(got.Command, []string{binary}) || got.InProcess != nil {
+		t.Errorf("corpusAnalyzer() under %s=1 = %v (in process: %t), want the built command %s alone",
+			processVariable, got.Command, got.InProcess != nil, binary)
+	}
+	t.Setenv(processVariable, "")
+	if got := corpusAnalyzer(); got.Command != nil || got.InProcess == nil {
+		t.Errorf("corpusAnalyzer() with %s unset = %v (in process: %t), want the host alone", processVariable, got.Command, got.InProcess != nil)
+	}
+	const workflow = ".github/workflows/weekly-properties.yaml"
+	body, err := os.ReadFile(workflow)
+	if err != nil {
+		t.Fatalf("Setup: read %s: %v", workflow, err)
+	}
+	if !bytes.Contains(body, []byte(processVariable+`: "1"`)) {
+		t.Errorf("%s does not set %s: \"1\", so no CI leg answers the corpus through the built command", workflow, processVariable)
 	}
 }
 

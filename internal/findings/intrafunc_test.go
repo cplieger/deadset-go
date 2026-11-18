@@ -150,6 +150,33 @@ func TestUnusedResultReportsEveryResultEveryCallDiscards(t *testing.T) {
 	}
 }
 
+// A finding's name holds no line break and no colon followed by a space
+// (finding.schema.json, symbol.name), so a result's type the signature spells
+// with such a string literal is named with the break and its blanks as one space
+// and no space after the colon.
+func TestUnusedResultNamesATypeAsATextLineCanCarryIt(t *testing.T) {
+	t.Parallel()
+
+	result := analysisOf(t, "intrafunc-result-spelling.txtar", asApplication, Consumers{}).findings(t, intraFunctionKinds)
+
+	var names, messages []string
+	for i := range result.Findings {
+		if result.Findings[i].Code == vocab.UnusedResult {
+			names = append(names, result.Findings[i].Symbol.Name)
+			messages = append(messages, result.Findings[i].Message)
+		}
+	}
+	wantNames := []string{"1 of 1 ([len(\"a:b\")]int)", "1 of 1 ([len(`a b`)]int)"}
+	wantMessages := []string{
+		"result 1 of 1 ([len(\"a:b\")]int) of function colon is discarded at every call site",
+		"result 1 of 1 ([len(`a b`)]int) of function broken is discarded at every call site",
+	}
+	if !slices.Equal(names, wantNames) || !slices.Equal(messages, wantMessages) {
+		t.Errorf("the pass over intrafunc-result-spelling.txtar names %q saying %q under %s, want %q saying %q",
+			names, messages, vocab.UnusedResult, wantNames, wantMessages)
+	}
+}
+
 // A program run on its own calls what it names from outside the reference set, so no
 // result of a function it names is discarded at every call site.
 func TestUnusedResultSparesAFunctionAProgramNames(t *testing.T) {

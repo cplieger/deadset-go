@@ -46,6 +46,25 @@ func TestAnInterfaceAssertionInAGenericBindRetainsWhatItsInterfaceRequires(t *te
 	}
 }
 
+// reflect.TypeAssert[I](v) is the assertion v.Interface().(I), and Methods and
+// Fields reach what Method and Field reach.
+func TestTheGenericAndIteratorEntryPointsOfReflectRetainWhatTheirCallsReach(t *testing.T) {
+	t.Parallel()
+	refs := retainedRefs(t, analysisOf(t, "reflect-type-assert.txtar", Options{}), vocab.EncodingReflection)
+	var got []string
+	for _, ref := range refs {
+		got = append(got, strings.TrimPrefix(ref, "go://example.com/rta#"))
+	}
+	for _, want := range []string{"seq.Range", "hook.Start", "row.id", "row.name"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("EncodingReflectionDetector(reflect-type-assert.txtar) retained %v, want %s among them", got, want)
+		}
+	}
+	if slices.Contains(got, "seq.extra") {
+		t.Errorf("EncodingReflectionDetector(reflect-type-assert.txtar) retained seq.extra, which ranged does not require")
+	}
+}
+
 // reflect.TypeAssert[I] taken as a value is the assertion of I on a receiver the
 // walk cannot follow, which retains every method of every type it reaches.
 func TestReflectTypeAssertTakenAsAValueRetainsAsAWalkThatCannotFollow(t *testing.T) {

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
 	"github.com/cplieger/deadset-go/v2/internal/jsondoc"
@@ -24,24 +25,26 @@ const repositoryDocument = "deadset.json"
 
 // configuredFlags are the flags every verb that reads a configuration registers,
 // and the values they parsed into. scope is nil for a verb that registers no flag
-// for a scope document.
+// for a scope document. dir is the directory the invocation runs from ([invoke]).
 type configuredFlags struct {
 	set        *flag.FlagSet
 	target     *string
 	repository *string
 	central    *string
 	scope      *string
+	dir        string
 }
 
 // configuredFlagSet registers the target root and the two configuration
 // documents, and of the options cli.json lists for the verb, the scope document
 // and each option supplying a setting. The verb registers the rest of its list.
-func configuredFlagSet(verb, verbUsage string, stderr io.Writer) configuredFlags {
+func configuredFlagSet(verb, verbUsage, dir string, stderr io.Writer) configuredFlags {
 	set := flag.NewFlagSet("deadset-go "+verb, flag.ContinueOnError)
 	set.SetOutput(stderr)
 	set.Usage = func() { fmt.Fprintln(stderr, verbUsage) }
 	held := configuredFlags{
 		set:        set,
+		dir:        dir,
 		target:     set.String("target", ".", "the target root, which holds the repository configuration"),
 		repository: set.String("config", "", "the repository configuration, in place of "+repositoryDocument+" at the target root"),
 		central:    set.String("central", "", "the central configuration"),
@@ -123,18 +126,65 @@ func (f *configuredFlags) request(ctx context.Context, stderr io.Writer) (req *r
 	if code != vocab.ExitClean {
 		return nil, code
 	}
-	invoked, err := os.Getwd()
+	invoked, err := workingDir(f.dir)
 	if err != nil {
 		return nil, failed(ctx, stderr, fmt.Errorf("resolve the directory the run was invoked from: %w", err))
 	}
 	return &run.Request{Config: resolved.Config, Provenance: resolved.Provenance, Scope: resolvedScope, ScopeNamed: document != "", RunDir: invoked}, vocab.ExitClean
 }
 
+// parse parses args into the verb's flags, and reads the value of every option
+// cli.json gives a path from the invocation's directory where it names one. Every
+// verb that reads a configuration parses through it, so no path option is read
+// from the process's working directory in place of the invocation's.
+func (f *configuredFlags) parse(args []string) error {
+	if err := f.set.Parse(args); err != nil {
+		return err
+	}
+	if f.dir == "" {
+		return nil
+	}
+	var refused error
+	f.set.VisitAll(func(held *flag.Flag) {
+		option, named := vocab.OptionOf(held.Name)
+		if !named || option.Value != vocab.OptionValuePath {
+			return
+		}
+		refused = errors.Join(refused, held.Value.Set(under(f.dir, held.Value.String())))
+	})
+	return refused
+}
+
+// under is path read from dir, as a process running in dir opens it: unchanged
+// where empty or absolute, on dir's volume where rooted (\name), and appended to
+// dir where relative, one relative to the working directory of dir's own drive
+// (C:name with dir on C:) among them, since a process in dir has dir as that
+// drive's. One relative to another drive's working directory is unchanged: the
+// host and a process in dir inherit the same one. The append is not cleaned,
+// because a process resolves a/.. past a symbolic link a, not lexically.
+func under(dir, path string) string {
+	if volume := filepath.VolumeName(path); volume != "" && !filepath.IsAbs(path) && strings.EqualFold(volume, filepath.VolumeName(dir)) {
+		if rest := path[len(volume):]; rest != "" {
+			return under(dir, rest)
+		}
+		return dir
+	}
+	switch {
+	case dir == "", path == "", filepath.IsAbs(path), filepath.VolumeName(path) != "":
+		return path
+	case os.IsPathSeparator(path[0]):
+		return filepath.VolumeName(dir) + path
+	case os.IsPathSeparator(dir[len(dir)-1]):
+		return dir + path
+	}
+	return dir + string(filepath.Separator) + path
+}
+
 // parsed parses the flags of a verb that reads a configuration and takes no
 // argument.
-func parsed(verb, verbUsage string, args []string, stderr io.Writer) (flags *configuredFlags, code int) {
-	held := configuredFlagSet(verb, verbUsage, stderr)
-	if err := held.set.Parse(args); err != nil {
+func parsed(verb, verbUsage, dir string, args []string, stderr io.Writer) (flags *configuredFlags, code int) {
+	held := configuredFlagSet(verb, verbUsage, dir, stderr)
+	if err := held.parse(args); err != nil {
 		return nil, vocab.ExitUsage
 	}
 	if held.set.NArg() != 0 {
@@ -147,8 +197,8 @@ func parsed(verb, verbUsage string, args []string, stderr io.Writer) (flags *con
 
 // resolve parses the flags of a verb that reads a configuration and takes no
 // argument, and resolves the documents they name.
-func resolve(ctx context.Context, verb, verbUsage string, args []string, stderr io.Writer) (req *run.Request, code int) {
-	flags, code := parsed(verb, verbUsage, args, stderr)
+func resolve(ctx context.Context, verb, verbUsage, dir string, args []string, stderr io.Writer) (req *run.Request, code int) {
+	flags, code := parsed(verb, verbUsage, dir, args, stderr)
 	if code != vocab.ExitClean {
 		return nil, code
 	}

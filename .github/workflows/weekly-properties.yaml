@@ -1,7 +1,9 @@
 name: Weekly properties
 
 # A pull request's run makes a quarter of each loading property's draws
-# (internal/testsupport/draws); this job makes every property's full count.
+# (internal/testsupport/draws); this job makes every property's full count, and
+# answers the conformance corpus through the built command rather than its host
+# (conformance_test.go, processVariable).
 on:
   schedule:
     - cron: "0 3 * * 2"
@@ -33,4 +35,5 @@ jobs:
       - name: Test with every draw
         env:
           DEADSET_PROPERTY_DRAWS: full
+          DEADSET_CORPUS_PROCESS: "1"
         run: go test -count=1 -race -timeout=50m ./...

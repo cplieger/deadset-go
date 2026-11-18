@@ -56,9 +56,13 @@ func goClasses() []vocab.Exemption {
 }
 
 // Options is the configured half of an exemption run: what the maintainer turned
-// off, and the settings the two classes that read files need. Nothing else about
-// the configuration reaches a class.
+// off, the settings the two classes that read files need, and the declared edges'
+// Go sides. Nothing else about the configuration reaches a class.
 type Options struct {
+	// EdgeSides is the reference every Go side of a declared cross-language edge
+	// names, which the generated class does not retain.
+	EdgeSides map[string]bool
+
 	// Disabled are the classes that do not run, so that an exemption suspected
 	// of hiding a defect can be tested. A class named twice is disabled once,
 	// and a name Compute does not run disables nothing, a class the vocabulary

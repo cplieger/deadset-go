@@ -16,6 +16,10 @@ const detailGenerated = "declared in a generated file"
 // the generator owns the file, so a deletion there is undone the next time it
 // runs. Under Options.IncludeGenerated it retains nothing.
 //
+// A declaration a Go edge side names (Options.EdgeSides) is not retained: the edge
+// stands for a use only the other language decides, so its references judge it
+// (exemptions.json, generated-file).
+//
 // A package and a file are not declarations in a file: the package clause of one
 // generated file would otherwise retain every declaration of the package. The site
 // is the file's package clause.
@@ -32,7 +36,7 @@ func GeneratedFileDetector(in *Program) ([]Exemption, error) {
 	var found []Exemption
 	for i := range in.Symbols {
 		s := &in.Symbols[i]
-		if s.Kind == inventory.KindPackage || s.Kind == inventory.KindFile {
+		if s.Kind == inventory.KindPackage || s.Kind == inventory.KindFile || in.Options.EdgeSides[s.Ref] {
 			continue
 		}
 		site, generated := sites[s.File]

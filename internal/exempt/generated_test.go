@@ -49,6 +49,26 @@ func TestGeneratedFileDetectorRetainsEveryDeclarationOfAGeneratedFile(t *testing
 	}
 }
 
+func TestGeneratedFileDetectorJudgesADeclarationAGoEdgeSideNamesByItsReferences(t *testing.T) {
+	t.Parallel()
+	in := inputOf(t, "generated.txtar", Options{})
+	for i := range in.Symbols {
+		if in.Symbols[i].Name == "size" {
+			in.Options.EdgeSides = map[string]bool{in.Symbols[i].Ref: true}
+		}
+	}
+
+	got, err := GeneratedFileDetector(in)
+	if err != nil {
+		t.Fatalf("GeneratedFileDetector(generated.txtar, edge side size) error: %v", err)
+	}
+
+	want := []string{"Table\tgenerated-file\tgen.go:3:1\tdeclared in a generated file"}
+	if lines := rendered(in.Symbols, got); !slices.Equal(lines, want) {
+		t.Errorf("GeneratedFileDetector(generated.txtar, edge side size) = %q, want %q", lines, want)
+	}
+}
+
 func TestGeneratedFileDetectorRetainsNothingWhenGeneratedFilesAreIncluded(t *testing.T) {
 	t.Parallel()
 	in := inputOf(t, "generated.txtar", Options{IncludeGenerated: true})

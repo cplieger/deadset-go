@@ -17,6 +17,7 @@ import (
 
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport/deadline"
+	"github.com/cplieger/deadset-go/v2/internal/testsupport/rerun"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 )
 
@@ -49,7 +50,7 @@ func TestALoadRowAtItsDeadlineLeavesNoProcessBehind(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Minute)
 	defer cancel()
 	cmd := deadline.Command(ctx, os.Args[0], "-test.run=^"+t.Name()+"$", "-test.count=1", "-test.v")
-	cmd.Env = append(cmd.Environ(), probeVariable+"="+probe)
+	cmd.Env = rerun.Environment(append(cmd.Environ(), probeVariable+"="+probe))
 	cmd.Stdout, cmd.Stderr = out, out
 	runErr := cmd.Run()
 	_ = out.Close()

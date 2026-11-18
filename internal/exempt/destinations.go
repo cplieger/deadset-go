@@ -101,9 +101,11 @@ var destinations = map[string]destinationRow{
 	htmlTemplate:       {methods: reachExportedMethods, executions: templateExecutions},
 	"text/template":    {methods: reachExportedMethods, executions: templateExecutions},
 	reflectPackage: {
-		methods:    reachExportedMethods,
-		finders:    map[string]bool{"Method": true, "MethodByName": true, "NumMethod": true},
-		walkers:    map[string]bool{"Field": true, "FieldByIndex": true, "NumField": true, "VisibleFields": true},
+		methods: reachExportedMethods,
+		// Methods and Fields are the iterators of reflect.Value and reflect.Type
+		// (go1.26, #66631), which reach what Method and Field reach.
+		finders:    map[string]bool{"Method": true, "MethodByName": true, "Methods": true, "NumMethod": true},
+		walkers:    map[string]bool{"Field": true, "FieldByIndex": true, "Fields": true, "NumField": true, "VisibleFields": true},
 		fieldsOnly: "DeepEqual",
 	},
 	"database/sql": {scanners: map[string]bool{"Rows": true, "Row": true}},

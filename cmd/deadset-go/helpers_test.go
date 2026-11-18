@@ -108,7 +108,7 @@ func (f *fixture) findings(ctx context.Context) (*run.Findings, error) {
 	}
 	f.analyzed.Do(func() {
 		var refused strings.Builder
-		req, code := resolve(ctx, "print-roots", printRootsUsage, []string{"--target=" + dir}, &refused)
+		req, code := resolve(ctx, "print-roots", printRootsUsage, "", []string{"--target=" + dir}, &refused)
 		if code != vocab.ExitClean {
 			f.analyzeErr = fmt.Errorf("resolve the configuration of %s = %d: %s", dir, code, refused.String())
 			return
@@ -127,7 +127,7 @@ func (f *fixture) report(ctx context.Context) (*report.Report, error) {
 	}
 	f.reported.Do(func() {
 		var refused strings.Builder
-		req, code := resolve(ctx, "print-roots", printRootsUsage, []string{"--target=" + dir}, &refused)
+		req, code := resolve(ctx, "print-roots", printRootsUsage, "", []string{"--target=" + dir}, &refused)
 		if code != vocab.ExitClean {
 			f.reportErr = fmt.Errorf("resolve the configuration of %s = %d: %s", dir, code, refused.String())
 			return
@@ -189,38 +189,37 @@ func mustDecode(t failureSink, what string, data []byte) *report.Report {
 // built is the command built once for every test of the package that runs it as a
 // process, under the fixture directory, which outlives each of them.
 var built struct {
-	once sync.Once
 	path string
 	out  []byte
 	err  error
 }
 
-// packageDir is the directory of this package, read before any test runs: a test that
-// changes the working directory may be the first to ask for the command.
+// packageDir is the directory of this package, read before any test runs, which
+// the builds of [runTests] compile.
 var packageDir string
 
-// commandBinary builds the command on first use and answers the path of the binary.
-// It stamps no version control state, so the version it states is the development
-// version at every commit, and it checks the names it parses files under, as a test
-// binary does (the deadset_names tag): a file parsed by a name the run did not give
-// it, or under two names, fails the run.
+// buildCommand builds the command for [commandBinary]. It stamps no version
+// control state, so the version it states is the development version at every
+// commit, and it checks the names it parses files under, as a test binary does
+// (the deadset_names tag): a file parsed by a name the run did not give it, or
+// under two names, fails the run.
+func buildCommand() {
+	name := "deadset-go"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	built.path = filepath.Join(fixtureBase, "bin", name)
+	build := exec.Command("go", "build", "-buildvcs=false", "-trimpath", "-tags=deadset_names", "-o", built.path, ".")
+	build.Dir = packageDir
+	build.Env = append(build.Environ(), "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH)
+	built.out, built.err = build.CombinedOutput()
+}
+
+// commandBinary is the command [runTests] built before any test ran, so no test's
+// deadline counts a build, which a coverage or toolexec build can take minutes over.
 func commandBinary(t *testing.T) string {
 	t.Helper()
-	if packageDir == "" {
-		t.Fatal("Setup: packageDir is unset, so the build would compile the working directory's package")
-	}
-	built.once.Do(func() {
-		name := "deadset-go"
-		if runtime.GOOS == "windows" {
-			name += ".exe"
-		}
-		built.path = filepath.Join(fixtureBase, "bin", name)
-		build := exec.Command("go", "build", "-buildvcs=false", "-trimpath", "-tags=deadset_names", "-o", built.path, ".")
-		build.Dir = packageDir
-		build.Env = append(build.Environ(), "GOOS="+runtime.GOOS, "GOARCH="+runtime.GOARCH)
-		built.out, built.err = build.CombinedOutput()
-	})
-	if built.err != nil {
+	if built.err != nil || built.path == "" {
 		t.Fatalf("Setup: build the command: %v\n%s", built.err, built.out)
 	}
 	return built.path
@@ -232,15 +231,31 @@ type invoked struct {
 	code           int
 }
 
-// invokedIn runs one invocation of the built command as a process from dir, so the
-// directory the run is invoked from is that process's and the calling test can run
-// in parallel with others. The command is built without the race detector, which
-// multiplies an analysis's CPU time several times over: the in-process tests run the
-// same analysis under it, and the signal test re-executes this binary ([reexecuted]).
+// invokedIn runs one invocation of the command from dir, an absolute directory,
+// through the package's host ([commandHost]): it answers as a process run from dir,
+// except that a relative path the invocation names is spelled joined to dir
+// wherever the answer names it (package host), so the calling test runs in
+// parallel with others and its analysis shares the host's declaration checks.
+// The host is built without the race detector, which multiplies an analysis's
+// CPU time several times over: the in-process tests run the same analysis under
+// it. A test whose subject is the process itself, its signals, environment, exit
+// or working directory, runs [processIn].
 func invokedIn(t *testing.T, dir string, args ...string) invoked {
+	t.Helper()
+	stdout, stderr, code, err := commandHost(t).Run(t.Context(), dir, args)
+	if err != nil {
+		t.Fatalf("Setup: run %q from %s through the host: %v", args, dir, err)
+	}
+	return invoked{stdout: string(stdout), stderr: stderr, code: code}
+}
+
+// processIn runs one invocation of the built command as a process from dir, with
+// env added to the environment the test's own children take.
+func processIn(t *testing.T, dir string, env []string, args ...string) invoked {
 	t.Helper()
 	cmd := exec.CommandContext(t.Context(), commandBinary(t), args...)
 	cmd.Dir = dir
+	cmd.Env = append(cmd.Environ(), env...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {

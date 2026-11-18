@@ -28,11 +28,11 @@ const (
 // per class the class, the evidence site and the clause, separated by tabs. The set
 // is the report's unless --mode names the plain mode, so this verb and explain
 // answer about one analysis.
-func printRetained(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	flags := configuredFlagSet("print-retained", printRetainedUsage, stderr)
+func printRetained(ctx context.Context, dir string, args []string, stdout, stderr io.Writer) int {
+	flags := configuredFlagSet("print-retained", printRetainedUsage, dir, stderr)
 	named := flags.set.String("mode", modeProduction,
 		"which analysis the retained set is read from: "+modeProduction+" or "+modePlain)
-	if err := flags.set.Parse(args); err != nil {
+	if err := flags.parse(args); err != nil {
 		return vocab.ExitUsage
 	}
 	if flags.set.NArg() != 0 {
@@ -92,7 +92,7 @@ func sweptOf(ctx context.Context, req *run.Request, production bool) (*run.Swept
 	if err != nil {
 		return nil, err
 	}
-	prepared, err := loaded.Prepare(production)
+	prepared, err := loaded.Prepare(ctx, production)
 	if err != nil {
 		return nil, err
 	}

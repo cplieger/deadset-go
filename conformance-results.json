@@ -1,5 +1,5 @@
 {
-  "corpus_version": "6.3.0",
+  "corpus_version": "6.4.0",
   "product": {
     "name": "deadset-go",
     "version": "0.0.0-devel",
@@ -7,8 +7,8 @@
   },
   "result": "pass",
   "totals": {
-    "fixtures": 256,
-    "pass": 254,
+    "fixtures": 260,
+    "pass": 258,
     "gap": 0,
     "fail": 0,
     "pending": 2
@@ -2237,6 +2237,23 @@
       "unexpected": []
     },
     {
+      "fixture": "encoding-reflection-interface-assertion-on-a-ranged-field",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "seq.Range",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
       "fixture": "encoding-reflection-interface-conversion-set",
       "result": "pass",
       "expectations": [
@@ -3586,6 +3603,43 @@
       "unexpected": []
     },
     {
+      "fixture": "encoding-reflection-through-the-reflect-iterators",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "hook.Start",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "row.id",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        },
+        {
+          "symbol": "row.name",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
       "fixture": "encoding-reflection-type-argument-decode",
       "result": "pass",
       "expectations": [
@@ -3655,6 +3709,23 @@
           "suppression": {
             "suppressed": true,
             "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "encoding-reflection-type-assert-on-a-field",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "seq.Range",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
           }
         }
       ],
@@ -12730,6 +12801,37 @@
       "fixture": "proto-transport-reads-nothing",
       "result": "pass",
       "expectations": [],
+      "unexpected": []
+    },
+    {
+      "fixture": "provides-side-in-a-generated-file",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "checksum",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "generated-file"
+            ]
+          }
+        },
+        {
+          "symbol": "decode",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "encode",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        }
+      ],
       "unexpected": []
     },
     {

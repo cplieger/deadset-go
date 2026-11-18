@@ -72,8 +72,8 @@ const (
 // The answer comes from the same analysis the report comes from, so an explanation
 // cannot disagree with a finding: the findings pass runs, and which of its answers
 // names the symbol is what decides the explanation.
-func explain(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	named, req, code := explainFlags(ctx, args, stderr)
+func explain(ctx context.Context, dir string, args []string, stdout, stderr io.Writer) int {
+	named, req, code := explainFlags(ctx, dir, args, stderr)
 	if code != vocab.ExitClean {
 		return code
 	}
@@ -102,13 +102,13 @@ func explain(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 
 // explainFlags parses the invocation and resolves the configuration documents it
 // names.
-func explainFlags(ctx context.Context, args []string, stderr io.Writer) (named string, req *run.Request, code int) {
-	flags := configuredFlagSet("explain", explainUsage, stderr)
+func explainFlags(ctx context.Context, dir string, args []string, stderr io.Writer) (named string, req *run.Request, code int) {
+	flags := configuredFlagSet("explain", explainUsage, dir, stderr)
 	asked := make(map[string]*string, len(whyFlags))
 	for _, flagName := range whyFlags {
 		asked[flagName] = flags.set.String(flagName, "", "the symbol to explain, as the argument names it")
 	}
-	if err := flags.set.Parse(args); err != nil {
+	if err := flags.parse(args); err != nil {
 		return "", nil, vocab.ExitUsage
 	}
 
@@ -160,16 +160,16 @@ func namedSymbol(set *flag.FlagSet, asked map[string]*string) (string, error) {
 // subjectOf is the one declaration a request names, and the partial matches where it
 // names none or names several.
 //
-// Three keys are tried in order, each an exact match: the stable symbol reference,
-// the fragment of it a maintainer types (the Type.Member form or a bare name), and
-// the display name the inventory carries. A key several declarations answer is no
-// answer, because a run cannot know which was meant, and the candidates are returned
-// so the maintainer names one by its reference.
+// Four keys are tried in order, each an exact match: the stable symbol reference,
+// the fragment of it a maintainer types, the inventory's name, and that name as the
+// report spells it ([findings.DisplayName]). A key several declarations answer is no
+// answer, since a run cannot know which was meant: the candidates are returned.
 func subjectOf(merged *liveness.Merged, named string) (subject *inventory.Symbol, partial []string) {
 	keys := []func(s *inventory.Symbol) string{
 		func(s *inventory.Symbol) string { return s.Ref },
 		fragmentOf,
 		func(s *inventory.Symbol) string { return s.Name },
+		func(s *inventory.Symbol) string { return findings.DisplayName(s.Name) },
 	}
 	for _, key := range keys {
 		var matched []int
@@ -209,14 +209,17 @@ func refsOf(merged *liveness.Merged, at []int) []string {
 	return held
 }
 
-// partialMatches is every declaration whose reference or display name holds the
-// string asked for, ignoring letter case, ordered by reference and bounded.
+// partialMatches is every declaration whose reference, name or name as a finding
+// spells it holds the string asked for, ignoring letter case, ordered by reference
+// and bounded.
 func partialMatches(merged *liveness.Merged, named string) []string {
 	folded := strings.ToLower(named)
 	var held []string
 	for i := range merged.Symbols {
 		one := &merged.Symbols[i]
-		if !strings.Contains(strings.ToLower(one.Ref), folded) && !strings.Contains(strings.ToLower(one.Name), folded) {
+		if !slices.ContainsFunc([]string{one.Ref, one.Name, findings.DisplayName(one.Name)}, func(key string) bool {
+			return strings.Contains(strings.ToLower(key), folded)
+		}) {
 			continue
 		}
 		held = append(held, one.Ref+"\t"+one.Pos.String())
@@ -235,7 +238,7 @@ func partialMatches(merged *liveness.Merged, named string) []string {
 func writeExplanation(w io.Writer, set *run.Findings, full bool, subject *inventory.Symbol) error {
 	var held strings.Builder
 	fmt.Fprintf(&held, "symbol: %s\n", subject.Ref)
-	fmt.Fprintf(&held, "declaration: %s %s\n", subject.Kind, subject.Name)
+	fmt.Fprintf(&held, "declaration: %s %s\n", subject.Kind, findings.DisplayName(subject.Name))
 	fmt.Fprintf(&held, "position: %s\n", subject.Pos)
 	fmt.Fprintf(&held, "configurations: %s\n", configurationNames(set.Identifiers(), subject.Configs))
 

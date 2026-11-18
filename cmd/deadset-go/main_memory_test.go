@@ -64,7 +64,6 @@ var held []byte
 func TestARunThatCannotFitExitsWithTheMemoryLine(t *testing.T) {
 	line := memoryExhaustionLine(t)
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
-	t.Chdir(dir)
 	reportPath := filepath.Join(sandbox.Dir(t), "report.json")
 
 	// A machine whose limit is a live heap of half a gigabyte, with no memory left
@@ -83,7 +82,7 @@ func TestARunThatCannotFitExitsWithTheMemoryLine(t *testing.T) {
 	limit := func() (uint64, bool) { return uint64(len(held)), true }
 
 	var stdout, stderr bytes.Buffer
-	code := governed([]string{"analyze", "--target=.", "--report=" + reportPath}, &stdout, &stderr,
+	code := governed(dir, []string{"analyze", "--target=.", "--report=" + reportPath}, &stdout, &stderr,
 		memory.Machine{Limit: limit, Sources: []memory.Source{noHeadroom}})
 
 	if want := contractExitCodes(t)["failure"]; code != want {
@@ -132,12 +131,12 @@ func TestAStageTheGovernorCancelledEndsWithTheMemoryLine(t *testing.T) {
 }
 
 func TestARunWhoseMemoryCannotBeReadIsUngoverned(t *testing.T) {
+	t.Parallel()
 	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
-	t.Chdir(dir)
 	reportPath := filepath.Join(sandbox.Dir(t), "report.json")
 
 	var stdout, stderr bytes.Buffer
-	code := governed([]string{"analyze", "--target=.", "--report=" + reportPath}, &stdout, &stderr, memory.Machine{})
+	code := governed(dir, []string{"analyze", "--target=.", "--report=" + reportPath}, &stdout, &stderr, memory.Machine{})
 	if want := contractExitCodes(t)["failure"]; code == want {
 		t.Errorf("analyze with no memory reader = %d, want a verdict\nstderr: %s", code, stderr.String())
 	}

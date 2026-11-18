@@ -772,9 +772,10 @@ func (g *intrafunc) resultsOf(c int, w *walk, fn *walked, held *parts) error {
 // resultName is the name a finding gives one result of count, and how its message
 // describes it: the position, the count and the type as the signature spells them,
 // after the result's own name where the signature gives one. A text line renders
-// the kind before the name, so an unnamed one reads "result 1 of 2 (Info)".
+// the kind before the name, so an unnamed one reads "result 1 of 2 (Info)". The
+// type is spelled as [DisplayName] spells source text.
 func resultName(field *ast.Field, offset, index, count int) (name, described string) {
-	place := strconv.Itoa(index+1) + " of " + strconv.Itoa(count) + " (" + types.ExprString(field.Type) + ")"
+	place := strconv.Itoa(index+1) + " of " + strconv.Itoa(count) + " (" + DisplayName(types.ExprString(field.Type)) + ")"
 	if offset < len(field.Names) && field.Names[offset].Name != blankName {
 		return field.Names[offset].Name, field.Names[offset].Name + ", " + place + ","
 	}

@@ -24,7 +24,7 @@ func analyzedFrom(t *testing.T, run string, args ...string) string {
 	t.Helper()
 
 	reportPath := filepath.Join(sandbox.Dir(t), "report.json")
-	ran := invokedIn(t, run, append([]string{"analyze", "--report=" + reportPath}, args...)...)
+	ran := processIn(t, run, nil, append([]string{"analyze", "--report=" + reportPath}, args...)...)
 	if ran.code != vocab.ExitClean && ran.code != vocab.ExitFindings {
 		t.Fatalf("analyze %q from %s = %d, want a verdict\nstderr:\n%s", args, run, ran.code, ran.stderr)
 	}

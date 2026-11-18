@@ -55,11 +55,11 @@ func hasOption(options, name string) bool {
 	return false
 }
 
-// unescape decodes the octal escapes mountinfo writes for a space, a tab, a line
-// feed and a backslash in a path.
-func unescape(field string) string {
-	return strings.NewReplacer(`\040`, " ", `\011`, "\t", `\012`, "\n", `\134`, `\`).Replace(field)
-}
+// mountinfoEscapes decodes the octal escapes mountinfo writes for a space, a tab,
+// a line feed and a backslash in a path.
+var mountinfoEscapes = strings.NewReplacer(`\040`, " ", `\011`, "\t", `\012`, "\n", `\134`, `\`)
+
+func unescape(field string) string { return mountinfoEscapes.Replace(field) }
 
 // cgroupPaths reads the process's cgroup v2 path and its cgroup v1 memory path
 // from a /proc/self/cgroup document.
@@ -93,14 +93,13 @@ func directoryOf(at *mount, cgroup string) string {
 	return filepath.Join(at.point, filepath.FromSlash(below))
 }
 
-// headroomV2 is the least headroom any cgroup v2 directory from leaf up to the
-// mount point leaves: its tightest limit, memory.max or memory.high, minus its
-// working set, memory.current less the inactive file cache the kernel reclaims
-// before it kills.
-func headroomV2(point, leaf string) (uint64, bool) {
+// headroomV2 is the least headroom any cgroup v2 directory of dirs leaves: its
+// tightest limit, memory.max or memory.high, minus its working set, memory.current
+// less the inactive file cache the kernel reclaims before it kills.
+func headroomV2(dirs []string) (uint64, bool) {
 	var least uint64
 	found := false
-	for _, dir := range ancestry(point, leaf) {
+	for _, dir := range dirs {
 		if limit, limited := tightestV2(dir); limited {
 			if room, read := roomUnder(limit, filepath.Join(dir, "memory.current"), filepath.Join(dir, "memory.stat"), "inactive_file"); read && (!found || room < least) {
 				least, found = room, true
@@ -110,12 +109,12 @@ func headroomV2(point, leaf string) (uint64, bool) {
 	return least, found
 }
 
-// limitV2 is the lowest memory.max of any cgroup v2 directory from leaf up to the
-// mount point, and false where none sets one.
-func limitV2(point, leaf string) (uint64, bool) {
+// limitV2 is the lowest memory.max of any cgroup v2 directory of dirs, and false
+// where none sets one.
+func limitV2(dirs []string) (uint64, bool) {
 	var least uint64
 	found := false
-	for _, dir := range ancestry(point, leaf) {
+	for _, dir := range dirs {
 		if limit, set := readUint(filepath.Join(dir, "memory.max")); set && (!found || limit < least) {
 			least, found = limit, true
 		}
@@ -241,74 +240,66 @@ func meminfoField(meminfo []byte, field string) (uint64, bool) {
 
 // linux is the Linux machine over a filesystem rooted at root: its readers are
 // cgroup v2, cgroup v1 and MemAvailable, each answering where its files say a bound
-// applies.
+// applies. Which cgroup directories bound the process is read here, once: a tick
+// reads their limit and usage files alone, so a process moved to another cgroup
+// mid-run is still read in the first.
 func linux(root string) Machine {
-	fs := procfs{root: root}
-	return Machine{Sources: []Source{fs.headroomV2, fs.headroomV1, fs.memAvailable}, Limit: fs.limit}
+	at := layoutOf(root)
+	return Machine{Sources: []Source{at.headroomV2, at.headroomV1, at.memAvailable}, Limit: at.limit}
 }
 
-// procfs reads the files of a Linux filesystem rooted at root.
-type procfs struct{ root string }
+// layout is the cgroup directories bounding the process in a filesystem rooted at
+// root: v2 each cgroup v2 directory from the process's up to the mount point, empty
+// where none reads, and v1 the process's cgroup v1 memory directory, empty where
+// none reads.
+type layout struct {
+	root string
+	v1   string
+	v2   []string
+}
+
+func layoutOf(root string) layout {
+	at := layout{root: root}
+	v2, v1 := mountsOf(at.read("proc/self/mountinfo"))
+	v2Group, v1Group := cgroupPaths(at.read("proc/self/cgroup"))
+	if v2 != nil && v2Group != "" {
+		point := filepath.Join(root, v2.point)
+		at.v2 = ancestry(point, directoryOf(&mount{root: v2.root, point: point}, v2Group))
+	}
+	if v1 != nil && v1Group != "" {
+		at.v1 = directoryOf(&mount{root: v1.root, point: filepath.Join(root, v1.point)}, v1Group)
+	}
+	return at
+}
 
 // read is one file's body, nil where it does not read.
-func (p procfs) read(name string) []byte {
-	body, err := os.ReadFile(filepath.Join(p.root, name))
+func (l layout) read(name string) []byte {
+	body, err := os.ReadFile(filepath.Join(l.root, name))
 	if err != nil {
 		return nil
 	}
 	return body
 }
 
-// v2Dir is the cgroup v2 mount point and the process's directory below it.
-func (p procfs) v2Dir() (point, leaf string, ok bool) {
-	v2, _ := mountsOf(p.read("proc/self/mountinfo"))
-	group, _ := cgroupPaths(p.read("proc/self/cgroup"))
-	if v2 == nil || group == "" {
-		return "", "", false
-	}
-	point = filepath.Join(p.root, v2.point)
-	return point, directoryOf(&mount{root: v2.root, point: point}, group), true
-}
+func (l layout) headroomV2() (uint64, bool) { return headroomV2(l.v2) }
 
-// v1Dir is the process's cgroup v1 memory directory.
-func (p procfs) v1Dir() (string, bool) {
-	_, v1 := mountsOf(p.read("proc/self/mountinfo"))
-	_, group := cgroupPaths(p.read("proc/self/cgroup"))
-	if v1 == nil || group == "" {
-		return "", false
-	}
-	return directoryOf(&mount{root: v1.root, point: filepath.Join(p.root, v1.point)}, group), true
-}
-
-func (p procfs) headroomV2() (uint64, bool) {
-	point, leaf, ok := p.v2Dir()
-	if !ok {
+func (l layout) headroomV1() (uint64, bool) {
+	if l.v1 == "" {
 		return 0, false
 	}
-	return headroomV2(point, leaf)
+	return headroomV1(l.v1)
 }
 
-func (p procfs) headroomV1() (uint64, bool) {
-	dir, ok := p.v1Dir()
-	if !ok {
-		return 0, false
-	}
-	return headroomV1(dir)
-}
-
-func (p procfs) memAvailable() (uint64, bool) { return memAvailable(p.read("proc/meminfo")) }
+func (l layout) memAvailable() (uint64, bool) { return memAvailable(l.read("proc/meminfo")) }
 
 // limit is the tightest cgroup memory limit, v2 first, capped by MemTotal, else
 // MemTotal.
-func (p procfs) limit() (uint64, bool) {
-	cgroup, limited := uint64(0), false
-	if point, leaf, ok := p.v2Dir(); ok {
-		cgroup, limited = limitV2(point, leaf)
+func (l layout) limit() (uint64, bool) {
+	cgroup, limited := limitV2(l.v2)
+	if l.v1 != "" && !limited {
+		cgroup, limited = limitV1(l.v1)
 	}
-	if dir, ok := p.v1Dir(); ok && !limited {
-		cgroup, limited = limitV1(dir)
-	}
-	physical, known := meminfoField(p.read("proc/meminfo"), "MemTotal:")
+	physical, known := meminfoField(l.read("proc/meminfo"), "MemTotal:")
 	return tighter(cgroup, limited, physical, known)
 }
 

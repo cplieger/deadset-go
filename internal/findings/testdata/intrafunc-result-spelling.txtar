@@ -1,0 +1,22 @@
+Two results whose types the signatures spell with string literals: one holding a
+colon followed by a space, one a raw string literal holding a line break. Every
+call site discards both.
+
+-- go.mod --
+module example.com/app
+
+go 1.27.0
+-- main.go --
+package main
+
+func colon() [len("a: b")]int { return [4]int{} }
+
+func broken() [len(`a
+	b`)]int {
+	return [4]int{}
+}
+
+func main() {
+	colon()
+	broken()
+}

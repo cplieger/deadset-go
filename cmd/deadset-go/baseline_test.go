@@ -311,6 +311,43 @@ func TestAnalyzeKeepsAThirdSchemesRowInBytewiseSchemeOrder(t *testing.T) {
 	}
 }
 
+// A record of another scheme is checked only for the form every record shares, a
+// scheme name, "://" and a reference holding no line break: one of that form binds
+// nothing here, whatever its own language's grammar says of it, and one outside it
+// ends the run with the usage code (grammar/suppression.md).
+func TestAnotherSchemesIgnoreEntryIsCheckedOnlyForTheFormEveryRecordShares(t *testing.T) {
+	t.Parallel()
+	for symbol, want := range map[string]int{
+		"py://example/app#thing":                   contractExitCodes(t)["findings"],
+		"ts://@example/app/src/Panel.vue#Row.dead": contractExitCodes(t)["findings"],
+		"ts://not a reference":                     contractExitCodes(t)["findings"],
+		"py://example/app#th\ning":                 vocab.ExitUsage,
+		"py:/example/app#thing":                    vocab.ExitUsage,
+	} {
+		t.Run(symbol, func(t *testing.T) {
+			t.Parallel()
+			dir := baselineFixpointModule(t)
+			quoted, err := json.Marshal(symbol)
+			if err != nil {
+				t.Fatalf("Setup: quote %q: %v", symbol, err)
+			}
+			entry := `{"ignore": [{"code": "DS1002", "symbol": ` + string(quoted) + `, "path": "app.go", "reason": "recorded by hand"}]}`
+			if err := sandbox.WriteFile(filepath.Join(dir, core.IgnoreFileName), []byte(entry), 0o600); err != nil {
+				t.Fatalf("Setup: write the ignore file: %v", err)
+			}
+			got := runAnalyze(t, dir)
+			if got.code != want {
+				t.Fatalf("analyze with an ignore entry naming %q = %d, want %d\nstderr: %s", symbol, got.code, want, got.stderr)
+			}
+			if want != vocab.ExitUsage {
+				if totals := envelopeAt(t, got.reportPath).Totals; totals.SuppressionsInEffect != 0 || totals.ReasonsRecorded != 0 || totals.StaleSuppressions != 0 {
+					t.Errorf("analyze with an ignore entry naming %q totals %+v, want it in no total and under no code", symbol, totals)
+				}
+			}
+		})
+	}
+}
+
 // A baseline the run reads and cannot is a refused document, the usage code,
 // while a write over a document it cannot read is refused with the failure code
 // and leaves it as it was.

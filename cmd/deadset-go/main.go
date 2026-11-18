@@ -27,28 +27,33 @@ const language = vocab.Go
 const usage = "usage: deadset-go <analyze|explain|print-config|print-roots|print-retained|describe|version> [flags]"
 
 func main() {
-	os.Exit(governed(os.Args[1:], os.Stdout, os.Stderr, memory.Platform()))
+	os.Exit(governed("", os.Args[1:], os.Stdout, os.Stderr, memory.Platform()))
 }
 
-// governed runs one invocation under the memory governor reading machine. An
-// interrupt or a termination signal reaches the toolchain a load spawns through the context, so a cancelled
-// run stops rather than waiting for the packages it asked for, and the governor ends
-// a run that cannot fit by cancelling the same context.
-func governed(args []string, stdout, stderr io.Writer, machine memory.Machine) int {
+// governed runs one invocation from dir ([invoke]) under the memory governor
+// reading machine. An interrupt or a termination signal reaches the toolchain a
+// load spawns through the context, so a cancelled run stops rather than waiting
+// for the packages it asked for, and the governor ends a run that cannot fit by
+// cancelling the same context.
+func governed(dir string, args []string, stdout, stderr io.Writer, machine memory.Machine) int {
 	signalled, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	ctx, cancel := context.WithCancelCause(signalled)
 	defer cancel(nil)
 	govern := memory.Start(ctx, cancel, machine)
 	defer govern()
-	return invoke(ctx, args, stdout, stderr)
+	return invoke(ctx, dir, args, stdout, stderr)
 }
 
 // invoke executes one invocation and returns its exit code: 0 for a served verb that
 // found nothing to report, 1 for a finding, 2 for a usage error, a requested
 // source edit or a configuration this analyzer refuses, 3 for a failure that
 // produced no answer.
-func invoke(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+//
+// dir is the directory the invocation runs from: a relative path it names is read
+// from there, and it is the run's directory. Empty, both are the process's working
+// directory, which nothing else reads ([workingDir]).
+func invoke(ctx context.Context, dir string, args []string, stdout, stderr io.Writer) int {
 	if flagName, ok := sourceEditFlag(args); ok {
 		fmt.Fprintf(stderr, "deadset-go: %s is not supported: deadset-go reports and never edits a source file\n", flagName)
 		fmt.Fprintln(stderr, usage)
@@ -76,15 +81,15 @@ func invoke(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	case "describe":
 		return describe(set.Args()[1:], stdout, stderr)
 	case "print-config":
-		return printConfig(ctx, set.Args()[1:], stdout, stderr)
+		return printConfig(ctx, dir, set.Args()[1:], stdout, stderr)
 	case "print-roots":
-		return printRoots(ctx, set.Args()[1:], stdout, stderr)
+		return printRoots(ctx, dir, set.Args()[1:], stdout, stderr)
 	case "print-retained":
-		return printRetained(ctx, set.Args()[1:], stdout, stderr)
+		return printRetained(ctx, dir, set.Args()[1:], stdout, stderr)
 	case "analyze":
-		return analyze(ctx, set.Args()[1:], stderr)
+		return analyze(ctx, dir, set.Args()[1:], stderr)
 	case "explain":
-		return explain(ctx, set.Args()[1:], stdout, stderr)
+		return explain(ctx, dir, set.Args()[1:], stdout, stderr)
 	case "":
 		set.Usage()
 		return vocab.ExitUsage
@@ -117,4 +122,13 @@ func sourceEditFlag(args []string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// workingDir is the directory an invocation runs from: dir where it names one, and
+// the process's working directory otherwise, the one read of it in the program.
+func workingDir(dir string) (string, error) {
+	if dir != "" {
+		return dir, nil
+	}
+	return os.Getwd()
 }

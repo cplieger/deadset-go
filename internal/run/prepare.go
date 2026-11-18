@@ -1,15 +1,18 @@
 package run
 
 import (
+	"context"
 	"os"
 
 	"github.com/cplieger/deadset-go/v2/internal/config"
+	"github.com/cplieger/deadset-go/v2/internal/edges"
 	"github.com/cplieger/deadset-go/v2/internal/exempt"
 	"github.com/cplieger/deadset-go/v2/internal/facts"
 	"github.com/cplieger/deadset-go/v2/internal/findings"
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/report"
+	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
 // Prepared is the exemption stage under one mode: one exemption set per
@@ -29,6 +32,11 @@ type Prepared struct {
 	// arriving is every enumerated member whose type's values may arise other
 	// than by a member's name ([exempt.Computed.Arriving]).
 	arriving map[inventory.SymbolID]bool
+
+	// Edges is the target's declared cross-language edges, which the
+	// generated-file class and the findings pass read and a verb that stops at
+	// the load stage never reads.
+	Edges *edges.Document
 
 	// Locals is every constant a function body declares that a class retains
 	// ([exempt.Computed.Locals]).
@@ -51,9 +59,15 @@ type Prepared struct {
 // Prepare runs the exemption classes of every configuration under the production
 // mode where production is set and the plain mode otherwise. The classes compute
 // under the mode the sweep runs in: a test that marshals a value is evidence of a use
-// that test makes, which a production sweep does not count.
-func (l *Loaded) Prepare(production bool) (*Prepared, error) {
+// that test makes, which a production sweep does not count. It reads the target's
+// edges document first, and a refused one ends it ([edges.Read]).
+func (l *Loaded) Prepare(ctx context.Context, production bool) (*Prepared, error) {
+	declared, refused := edges.Read(ctx, l.Root)
+	if refused != nil {
+		return nil, refused
+	}
 	p := &Prepared{
+		Edges:  declared,
 		Loaded: l,
 		Mode: facts.Mode{
 			Production:              production,
@@ -63,6 +77,10 @@ func (l *Loaded) Prepare(production bool) (*Prepared, error) {
 		arriving: make(map[inventory.SymbolID]bool),
 	}
 	options := exemptOptions(&l.req.Config)
+	options.EdgeSides = make(map[string]bool)
+	for _, side := range declared.Own(string(vocab.Go)) {
+		options.EdgeSides[side.Symbol] = true
+	}
 	for i := range l.loads.Len() {
 		one, err := l.loads.At(i)
 		if err != nil {
