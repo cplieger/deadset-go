@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -23,7 +24,7 @@ import (
 // directory: from an empty working directory, every verb that reads a target, its
 // paths relative to the target's directory, answers and writes as the built command
 // run there, byte for byte; print-config's paths, spelled joined to the directory in
-// process, are compared with that prefix removed. It owns the working directory, so
+// process, are compared as the paths they name. It owns the working directory, so
 // it does not run in parallel.
 func TestAnInvocationReadsItsPathsFromItsDirectoryAsAProcessThere(t *testing.T) {
 	base := sandbox.Dir(t)
@@ -63,11 +64,12 @@ func TestAnInvocationReadsItsPathsFromItsDirectoryAsAProcessThere(t *testing.T) 
 		var stdout, stderr bytes.Buffer
 		code := invoke(t.Context(), base, args, &stdout, &stderr)
 		inProcessWrote := writtenSince(t, base, before)
-		printed := stdout.String()
+		printed, want := stdout.String(), processes[i]
+		same := printed == want.stdout
 		if args[0] == "print-config" {
-			printed = strings.ReplaceAll(printed, base+string(filepath.Separator), "")
+			same = samePrintedConfiguration(t, base, printed, want.stdout)
 		}
-		if want := processes[i]; code != want.code || printed != want.stdout || stderr.String() != want.stderr {
+		if code != want.code || !same || stderr.String() != want.stderr {
 			t.Errorf("invoke(%s, %q) = %d writing %q and %q, want the process's %d writing %q and %q",
 				base, args, code, printed, stderr.String(), want.code, want.stdout, want.stderr)
 		}
@@ -82,6 +84,112 @@ func TestAnInvocationReadsItsPathsFromItsDirectoryAsAProcessThere(t *testing.T) 
 	}
 	if left := filesUnder(t, "."); len(left) > 0 {
 		t.Errorf("invoke wrote %v in the process's working directory, want nothing there", slices.Sorted(maps.Keys(left)))
+	}
+}
+
+// samePrintedConfiguration reports whether print-config's document printed in
+// process names the configuration the process run in base printed: the same
+// once both are decoded, the paths in process joined to base.
+func samePrintedConfiguration(t *testing.T, base, inProcess, process string) bool {
+	t.Helper()
+
+	var got, want any
+	if err := json.Unmarshal([]byte(inProcess), &got); err != nil {
+		t.Errorf("print-config in process printed %q, not a JSON document: %v", inProcess, err)
+		return false
+	}
+	if err := json.Unmarshal([]byte(process), &want); err != nil {
+		t.Errorf("print-config as a process printed %q, not a JSON document: %v", process, err)
+		return false
+	}
+	return sameDecoded(base, got, want)
+}
+
+// sameDecoded reports whether got, decoded from the document printed in process,
+// equals want, decoded from the process's, where a string may differ only by
+// naming, joined to base, the path want names relative to it, after the same
+// "source: " prefix.
+func sameDecoded(base string, got, want any) bool {
+	switch want := want.(type) {
+	case map[string]any:
+		got, held := got.(map[string]any)
+		if !held || len(got) != len(want) {
+			return false
+		}
+		for key, value := range want {
+			if inProcess, held := got[key]; !held || !sameDecoded(base, inProcess, value) {
+				return false
+			}
+		}
+		return true
+	case []any:
+		got, held := got.([]any)
+		if !held || len(got) != len(want) {
+			return false
+		}
+		for i := range want {
+			if !sameDecoded(base, got[i], want[i]) {
+				return false
+			}
+		}
+		return true
+	case string:
+		got, held := got.(string)
+		return held && (got == want || sameJoinedPath(base, got, want))
+	default:
+		return got == want
+	}
+}
+
+// sameJoinedPath reports whether got names, joined to base, the relative path
+// want names, both after the same "source: " prefix.
+func sameJoinedPath(base, got, want string) bool {
+	gotSource, gotPath, gotSourced := strings.Cut(got, ": ")
+	wantSource, wantPath, wantSourced := strings.Cut(want, ": ")
+	if gotSourced != wantSourced || gotSource != wantSource {
+		return false
+	}
+	if !gotSourced {
+		gotPath, wantPath = got, want
+	}
+	if filepath.IsAbs(wantPath) || !filepath.IsAbs(gotPath) {
+		return false
+	}
+	rel, err := filepath.Rel(base, gotPath)
+	return err == nil && rel == filepath.Clean(filepath.FromSlash(wantPath))
+}
+
+// A path JSON escapes, as every Windows path is, still compares as the path it names.
+func TestPrintConfigsDocumentsCompareByThePathsTheyName(t *testing.T) {
+	t.Parallel()
+
+	base := filepath.Join(t.TempDir(), `run\001`)
+	document := func(central, repository string) string {
+		body, err := json.Marshal(map[string]any{"provenance": map[string]string{
+			"reporters.sort": "central: " + central, "target.kind": "repository: " + repository, "severity": "default",
+		}})
+		if err != nil {
+			t.Fatalf("Setup: encode the document: %v", err)
+		}
+		return string(body)
+	}
+	joined := func(name string) string { return base + string(filepath.Separator) + name }
+	process := document("central.json", "app/deadset.json")
+	tests := []struct {
+		name, inProcess string
+		want            bool
+	}{
+		{"joined to the directory", document(joined("central.json"), joined("app/deadset.json")), true},
+		{"another file", document(joined("other.json"), joined("app/deadset.json")), false},
+		{"another source", strings.Replace(document(joined("central.json"), joined("app/deadset.json")), "central: ", "flag: ", 1), false},
+		{"outside the directory", document(filepath.Join(filepath.Dir(base), "central.json"), joined("app/deadset.json")), false},
+		{"the relative path unjoined", document("central.json", "app/deadset.json"), true},
+		{"another setting", strings.Replace(document(joined("central.json"), joined("app/deadset.json")), `"default"`, `"deny"`, 1), false},
+	}
+	for _, tt := range tests {
+		if got := samePrintedConfiguration(t, base, tt.inProcess, process); got != tt.want {
+			t.Errorf("%s: samePrintedConfiguration(%s, %s, %s) = %t, want %t", tt.name, base, tt.inProcess, process, got, tt.want)
+		}
 	}
 }
 
