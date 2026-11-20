@@ -1,5 +1,5 @@
 {
-  "corpus_version": "6.4.0",
+  "corpus_version": "6.5.0",
   "product": {
     "name": "deadset-go",
     "version": "0.0.0-devel",
@@ -7,8 +7,8 @@
   },
   "result": "pass",
   "totals": {
-    "fixtures": 260,
-    "pass": 258,
+    "fixtures": 266,
+    "pass": 264,
     "gap": 0,
     "fail": 0,
     "pending": 2
@@ -1324,6 +1324,41 @@
           "suppression": {
             "suppressed": true,
             "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "edge-other-side-quoted-member-with-space",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "contentType",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "edge-side-with-an-encoded-go-scope",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Run",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "unused",
+          "result": "pass",
+          "actual": {
+            "report": "none"
           }
         }
       ],
@@ -8167,6 +8202,46 @@
       "unexpected": []
     },
     {
+      "fixture": "go-file-name-with-a-percent-sign",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Handwritten",
+          "result": "pass",
+          "actual": {
+            "report": "DS1601",
+            "symbol_kind": "file",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "details": {
+              "excluded_by": "handwritten"
+            }
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "go-file-name-with-a-space",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Handwritten",
+          "result": "pass",
+          "actual": {
+            "report": "DS1601",
+            "symbol_kind": "file",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "details": {
+              "excluded_by": "handwritten"
+            }
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
       "fixture": "go-flags-command-fields",
       "result": "pass",
       "expectations": [
@@ -8432,6 +8507,35 @@
       "fixture": "go-only-in-left-out-directories",
       "result": "pass",
       "expectations": [],
+      "unexpected": []
+    },
+    {
+      "fixture": "go-package-path-with-a-plus",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "Run",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "unused",
+          "result": "pass",
+          "actual": {
+            "report": "DS1002",
+            "symbol_kind": "function",
+            "confidence": "certain",
+            "reachability_class": "certain",
+            "liveness_relation": "reference-counting"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
       "unexpected": []
     },
     {
@@ -18369,6 +18473,139 @@
           "result": "pass",
           "actual": {
             "report": "DS1301",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "write-only-promoted-literal-key",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "inner",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "inner.x",
+          "result": "pass",
+          "actual": {
+            "report": "DS1301",
+            "symbol_kind": "field",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "leaf",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "leaf.z",
+          "result": "pass",
+          "actual": {
+            "report": "DS1301",
+            "symbol_kind": "field",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "middle",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "middle.leaf",
+          "result": "pass",
+          "actual": {
+            "report": "DS1301",
+            "symbol_kind": "field",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "nested.spelled",
+          "result": "pass",
+          "actual": {
+            "report": "DS1301",
+            "symbol_kind": "field",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "outer.inner",
+          "result": "pass",
+          "actual": {
+            "report": "DS1301",
+            "symbol_kind": "field",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "spelled",
+          "result": "pass",
+          "actual": {
+            "report": "none"
+          }
+        },
+        {
+          "symbol": "spelled.y",
+          "result": "pass",
+          "actual": {
+            "report": "DS1301",
+            "symbol_kind": "field",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "top.middle",
+          "result": "pass",
+          "actual": {
+            "report": "DS1301",
+            "symbol_kind": "field",
             "confidence": "certain",
             "reachability_class": "certain"
           },
