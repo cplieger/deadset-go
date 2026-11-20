@@ -311,17 +311,18 @@ func TestAnalyzeKeepsAThirdSchemesRowInBytewiseSchemeOrder(t *testing.T) {
 	}
 }
 
-// A record of another scheme is checked only for the form every record shares, a
-// scheme name, "://" and a reference holding no line break: one of that form binds
-// nothing here, whatever its own language's grammar says of it, and one outside it
-// ends the run with the usage code (grammar/suppression.md).
+// A record of another scheme is checked only for the form every record shares,
+// the reference shape every document checks (symbol-ref.md): one of that form
+// binds nothing here, whatever its own language's grammar says of it, and one
+// outside it, a space in its scope or no fragment among them, ends the run with the
+// usage code (grammar/suppression.md).
 func TestAnotherSchemesIgnoreEntryIsCheckedOnlyForTheFormEveryRecordShares(t *testing.T) {
 	t.Parallel()
 	for symbol, want := range map[string]int{
 		"py://example/app#thing":                   contractExitCodes(t)["findings"],
 		"ts://@example/app/src/Panel.vue#Row.dead": contractExitCodes(t)["findings"],
-		"ts://not a reference":                     contractExitCodes(t)["findings"],
 		"py://example/app#th\ning":                 vocab.ExitUsage,
+		"ts://not a reference":                     vocab.ExitUsage,
 		"py:/example/app#thing":                    vocab.ExitUsage,
 	} {
 		t.Run(symbol, func(t *testing.T) {
