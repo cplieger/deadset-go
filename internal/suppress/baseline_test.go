@@ -11,6 +11,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
+	"github.com/cplieger/go/filesafe"
 )
 
 // The analyzer identity every written row of these tests carries.
@@ -128,6 +129,34 @@ func TestBaselineAndTheIgnoreFileRefuseEachOtherMember(t *testing.T) {
 			if err := held.read(path); !errors.Is(err, core.ErrMalformed) {
 				t.Errorf("reading %s = %v, want an error satisfying errors.Is(err, core.ErrMalformed): "+
 					"each document has its own closed key list", name, err)
+			}
+		})
+	}
+}
+
+// documentCap is the Contract's one bound on a document (config.schema.json
+// x-max-bytes), written as the number rather than read from the constant the
+// reader reads, so a test states the bound itself.
+const documentCap = 16 << 20
+
+func TestBaselineAndTheIgnoreFileHoldTheDocumentBound(t *testing.T) {
+	for _, held := range []struct {
+		read     func(path string, symbols []inventory.Symbol) ([]core.Record, []core.Refusal, error)
+		name     string
+		document string
+	}{
+		{IgnoreFile, core.IgnoreFileName, `{"ignore": []}`},
+		{Baseline, core.BaselineFileName, `{"baseline": []}`},
+	} {
+		t.Run(held.name, func(t *testing.T) {
+			at := writeDocument(t, held.name, held.document+strings.Repeat(" ", documentCap-len(held.document)))
+			if _, _, err := held.read(at, nil); err != nil {
+				t.Errorf("reading a %s of %d bytes = %v, want it read", held.name, documentCap, err)
+			}
+			over := writeDocument(t, held.name, held.document+strings.Repeat(" ", documentCap+1-len(held.document)))
+			_, _, err := held.read(over, nil)
+			if !errors.Is(err, core.ErrMalformed) || !errors.Is(err, filesafe.ErrFileTooLarge) {
+				t.Errorf("reading a %s of %d bytes = %v, want it refused as malformed and too large", held.name, documentCap+1, err)
 			}
 		})
 	}

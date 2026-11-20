@@ -311,17 +311,18 @@ func TestAnalyzeKeepsAThirdSchemesRowInBytewiseSchemeOrder(t *testing.T) {
 	}
 }
 
-// A record of another scheme is checked only for the form every record shares, a
-// scheme name, "://" and a reference holding no line break: one of that form binds
-// nothing here, whatever its own language's grammar says of it, and one outside it
-// ends the run with the usage code (grammar/suppression.md).
+// A record of another scheme is checked only for the form every record shares,
+// the reference shape every document checks (symbol-ref.md): one of that form
+// binds nothing here, whatever its own language's grammar says of it, and one
+// outside it, a space in its scope or no fragment among them, ends the run with the
+// usage code (grammar/suppression.md).
 func TestAnotherSchemesIgnoreEntryIsCheckedOnlyForTheFormEveryRecordShares(t *testing.T) {
 	t.Parallel()
 	for symbol, want := range map[string]int{
 		"py://example/app#thing":                   contractExitCodes(t)["findings"],
 		"ts://@example/app/src/Panel.vue#Row.dead": contractExitCodes(t)["findings"],
-		"ts://not a reference":                     contractExitCodes(t)["findings"],
 		"py://example/app#th\ning":                 vocab.ExitUsage,
+		"ts://not a reference":                     vocab.ExitUsage,
 		"py:/example/app#thing":                    vocab.ExitUsage,
 	} {
 		t.Run(symbol, func(t *testing.T) {
@@ -372,5 +373,38 @@ func TestAMalformedBaselineIsAUsageErrorAndAWriteOverOneAFailure(t *testing.T) {
 	}
 	if body, err := os.ReadFile(baseline); err != nil || string(body) != malformed {
 		t.Errorf("the refused write left %q, %v, want the document as it was", body, err)
+	}
+}
+
+// A baseline write over a document past the Contract's bound refuses it with the
+// usage code before reading it whole, wherever it is, and leaves it as it was.
+func TestABaselineWriteOverADocumentPastTheBoundLeavesItUnread(t *testing.T) {
+	t.Parallel()
+	over := paddedTo(`{"baseline": []}`, documentCap+1)
+	for _, c := range []struct {
+		name     string
+		inTarget bool
+	}{
+		{name: "at the target root", inTarget: true},
+		{name: "outside the target", inTarget: false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			dir := baselineFixpointModule(t)
+			baseline := filepath.Join(sandbox.Dir(t), core.BaselineFileName)
+			if c.inTarget {
+				baseline = filepath.Join(dir, core.BaselineFileName)
+			}
+			if err := sandbox.WriteFile(baseline, []byte(over), 0o600); err != nil {
+				t.Fatalf("Setup: write %s: %v", baseline, err)
+			}
+			got := runAnalyze(t, dir, "--baseline-write="+baseline)
+			if got.code != vocab.ExitUsage || !bytes.Contains([]byte(got.stderr), []byte("16777216")) {
+				t.Errorf("analyze --baseline-write over a baseline of %d bytes = %d, stderr %q, want %d naming the bound", len(over), got.code, got.stderr, vocab.ExitUsage)
+			}
+			if body, err := os.ReadFile(baseline); err != nil || string(body) != over {
+				t.Errorf("the refused write left %d bytes, %v, want the document as it was", len(body), err)
+			}
+		})
 	}
 }

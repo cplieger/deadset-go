@@ -160,21 +160,23 @@ func namedSymbol(set *flag.FlagSet, asked map[string]*string) (string, error) {
 // subjectOf is the one declaration a request names, and the partial matches where it
 // names none or names several.
 //
-// Four keys are tried in order, each an exact match: the stable symbol reference,
-// the fragment of it a maintainer types, the inventory's name, and that name as the
-// report spells it ([findings.DisplayName]). A key several declarations answer is no
-// answer, since a run cannot know which was meant: the candidates are returned.
+// Three keys are tried in order, each an exact match: the stable symbol reference,
+// the fragment of it a maintainer types, and the name, which a declaration answers
+// both as the inventory holds it and as the report spells it
+// ([findings.DisplayName]). A key several declarations answer is no answer, since a
+// run cannot know which was meant: the candidates are returned.
 func subjectOf(merged *liveness.Merged, named string) (subject *inventory.Symbol, partial []string) {
-	keys := []func(s *inventory.Symbol) string{
-		func(s *inventory.Symbol) string { return s.Ref },
-		fragmentOf,
-		func(s *inventory.Symbol) string { return s.Name },
-		func(s *inventory.Symbol) string { return findings.DisplayName(s.Name) },
+	keys := []func(s *inventory.Symbol) bool{
+		func(s *inventory.Symbol) bool { return s.Ref == named },
+		func(s *inventory.Symbol) bool { return fragmentOf(s) == named },
+		func(s *inventory.Symbol) bool {
+			return s.Name == named || findings.DisplayName(s.Kind, s.Name) == named
+		},
 	}
 	for _, key := range keys {
 		var matched []int
 		for i := range merged.Symbols {
-			if key(&merged.Symbols[i]) == named {
+			if key(&merged.Symbols[i]) {
 				matched = append(matched, i)
 			}
 		}
@@ -217,7 +219,7 @@ func partialMatches(merged *liveness.Merged, named string) []string {
 	var held []string
 	for i := range merged.Symbols {
 		one := &merged.Symbols[i]
-		if !slices.ContainsFunc([]string{one.Ref, one.Name, findings.DisplayName(one.Name)}, func(key string) bool {
+		if !slices.ContainsFunc([]string{one.Ref, one.Name, findings.DisplayName(one.Kind, one.Name)}, func(key string) bool {
 			return strings.Contains(strings.ToLower(key), folded)
 		}) {
 			continue
@@ -238,7 +240,7 @@ func partialMatches(merged *liveness.Merged, named string) []string {
 func writeExplanation(w io.Writer, set *run.Findings, full bool, subject *inventory.Symbol) error {
 	var held strings.Builder
 	fmt.Fprintf(&held, "symbol: %s\n", subject.Ref)
-	fmt.Fprintf(&held, "declaration: %s %s\n", subject.Kind, findings.DisplayName(subject.Name))
+	fmt.Fprintf(&held, "declaration: %s %s\n", subject.Kind, findings.DisplayName(subject.Kind, subject.Name))
 	fmt.Fprintf(&held, "position: %s\n", subject.Pos)
 	fmt.Fprintf(&held, "configurations: %s\n", configurationNames(set.Identifiers(), subject.Configs))
 

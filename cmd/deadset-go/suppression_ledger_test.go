@@ -202,6 +202,15 @@ func TestAnEntryOfAnotherSchemeIsAcceptedUnread(t *testing.T) {
 	}
 }
 
+func TestAnEntryOfAnotherSchemeOutsideTheShapeIsAUsageError(t *testing.T) {
+	t.Parallel()
+	got := runAnalyze(t, archiveModule(t, "suppression-ledger/other-scheme-out-of-shape.txtar"))
+
+	if got.code != vocab.ExitUsage || !strings.Contains(got.stderr, "deadset-ignore.json:2:3") {
+		t.Errorf("analyze = %d, stderr %q, want %d naming deadset-ignore.json:2:3", got.code, got.stderr, vocab.ExitUsage)
+	}
+}
+
 func TestAMalformedDirectiveIsAUsageError(t *testing.T) {
 	t.Parallel()
 	got := runAnalyze(t, archiveModule(t, "suppression-ledger/malformed-directive.txtar"))

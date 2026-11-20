@@ -639,13 +639,22 @@ func TestPrintConfigRefusals(t *testing.T) {
 	}
 }
 
+// documentCap is the Contract's one bound on a document (config.schema.json
+// x-max-bytes), written as the number rather than read from the constant the
+// command reads, so a test states the bound itself.
+const documentCap = 16 << 20
+
+// paddedTo is body followed by spaces to exactly size bytes, which strict JSON
+// and a template both read as nothing.
+func paddedTo(body string, size int) string {
+	return body + strings.Repeat(" ", size-len(body))
+}
+
 func TestPrintConfigRefusesADocumentOverTheSizeBound(t *testing.T) {
 	t.Parallel()
 
-	// One mebibyte of padding, written as the number rather than read from the
-	// bound the command declares, so the test states the bound itself.
 	dir := sandbox.Dir(t)
-	writeDocument(t, dir, "deadset.json", `{"target": {"kind": "library"}}`+strings.Repeat(" ", 1048576))
+	writeDocument(t, dir, "deadset.json", paddedTo(`{"target": {"kind": "library"}}`, documentCap+1))
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-config", "--target=" + dir}
@@ -655,7 +664,7 @@ func TestPrintConfigRefusesADocumentOverTheSizeBound(t *testing.T) {
 	if stdout.Len() != 0 {
 		t.Errorf("invoke(%q) stdout = %q, want empty", args, stdout.String())
 	}
-	for _, want := range []string{"is larger than", "1048576 bytes"} {
+	for _, want := range []string{"is larger than", "16777216 bytes"} {
 		if !strings.Contains(stderr.String(), want) {
 			t.Errorf("invoke(%q) stderr = %q, want it to contain %q", args, stderr.String(), want)
 		}
@@ -665,9 +674,8 @@ func TestPrintConfigRefusesADocumentOverTheSizeBound(t *testing.T) {
 func TestPrintConfigReadsADocumentAtTheSizeBound(t *testing.T) {
 	t.Parallel()
 
-	const body = `{"target": {"kind": "library"}}`
 	dir := sandbox.Dir(t)
-	writeDocument(t, dir, "deadset.json", body+strings.Repeat(" ", 1048576-len(body)))
+	writeDocument(t, dir, "deadset.json", paddedTo(`{"target": {"kind": "library"}}`, documentCap))
 
 	var stdout, stderr bytes.Buffer
 	args := []string{"print-config", "--target=" + dir}

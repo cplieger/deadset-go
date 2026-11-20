@@ -14,6 +14,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/inventory"
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
+	"github.com/cplieger/deadset-spec/v8/segment"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -36,8 +37,8 @@ const replaceSelector = ":replace"
 // goSuffix is the extension of the files a build configuration decides.
 const goSuffix = ".go"
 
-// versionSeparator joins a module path to its version in a symbol reference, which
-// is the one spelling that writes the two as one word.
+// versionSeparator joins a module path to its version in a symbol reference and in a
+// finding's name, which is the one spelling that writes the two as one word.
 const versionSeparator = "@"
 
 // versionGap joins a module path to its version the way a module file writes the
@@ -380,7 +381,7 @@ func unusedDependency(in *pass) ([]draft, error) {
 		m := &in.Modules[i]
 		for _, require := range in.artifacts.requires[i].kept {
 			one := findingAt(vocab.UnusedDependency, Subject{
-				Ref:       moduleFragment(m.Path, require.Path+":"+requireSection),
+				Ref:       moduleFragment(m.Path, modulePathOperand(require.Path)+":"+requireSection),
 				Kind:      dependencySubject,
 				Name:      require.Path,
 				SizeLines: 1,
@@ -404,9 +405,9 @@ func unusedReplace(in *pass) ([]draft, error) {
 	for i := range in.Modules {
 		m := &in.Modules[i]
 		for _, replace := range in.artifacts.replaces[i].kept {
-			named := referenceSpelling(replace.Old)
+			named := versionedName(replace.Old)
 			one := findingAt(vocab.UnusedModuleDirective, Subject{
-				Ref:       moduleFragment(m.Path, named+replaceSelector),
+				Ref:       moduleFragment(m.Path, replacedOperand(replace.Old)+replaceSelector),
 				Kind:      directiveSubject,
 				Name:      named,
 				SizeLines: 1,
@@ -428,15 +429,30 @@ func unitOf(r *load.Result, dir string) *load.Result {
 	return r.Unit(dir)
 }
 
-// referenceSpelling renders one module the way a symbol reference names it: the
-// path, and the version after an at sign where the directive gives one. It is the
-// form the reference grammar fixes for a directive's subject, so two directives over
-// one module at two versions are two references.
-func referenceSpelling(m deps.Module) string {
+// versionedName names one module the way a finding's name and message do: the path,
+// and the version after an at sign where the directive gives one.
+func versionedName(m deps.Module) string {
 	if m.Version == "" {
 		return m.Path
 	}
 	return m.Path + versionSeparator + m.Version
+}
+
+// replacedOperand is the operand a replace directive's reference carries: the
+// replaced module's path spelled as an operand, and the version after an at sign
+// where the directive gives one, so two directives over one module at two versions
+// are two references.
+func replacedOperand(m deps.Module) string {
+	if m.Version == "" {
+		return modulePathOperand(m.Path)
+	}
+	return modulePathOperand(m.Path) + versionSeparator + m.Version
+}
+
+// modulePathOperand spells a module path as a directive's operand, each element as
+// the grammar's Path segments section states.
+func modulePathOperand(path string) string {
+	return segment.SpellPath(segment.GoElement, path)
 }
 
 // moduleFileSpelling renders one module the way the module file writes it: the path,

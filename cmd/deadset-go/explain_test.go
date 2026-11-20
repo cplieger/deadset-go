@@ -199,6 +199,33 @@ func TestExplainResolvesASymbolByItsFragmentAndByItsDisplayName(t *testing.T) {
 	}
 }
 
+// A maintainer names a symbol of an encoded path by the spelling the report prints,
+// the whole reference or its fragment.
+func TestExplainResolvesASymbolByTheEncodedSpellingOfItsPath(t *testing.T) {
+	t.Parallel()
+	dir := writeModule(t, map[string]string{
+		"go.mod": "module example.com/app\n\ngo 1.27.1\n",
+		"app.go": "package main\n\nimport cpp \"example.com/app/c++\"\n\nfunc main() { cpp.Run() }\n",
+		"c++/c.go": "// Package cpp declares what the entry point calls.\npackage cpp\n\n" +
+			"// Run is what the entry point calls.\nfunc Run() {}\n",
+		"my file.go":       "package main\n\nfunc helper() {}\n",
+		repositoryDocument: `{"target": {"kind": "application"}}`,
+	})
+	for named, want := range map[string]string{
+		"go://example.com/app/c%2B%2B#Run": "symbol: go://example.com/app/c%2B%2B#Run",
+		"my%20file.go:file":                "symbol: go://example.com/app#my%20file.go:file",
+		"go://example.com/app#helper":      "symbol: go://example.com/app#helper",
+	} {
+		got := runExplain(t, dir, named)
+		if code := contractExitCodes(t)["clean"]; got.code != code {
+			t.Errorf("explain %q = %d, want %d\nstderr: %s", named, got.code, code, got.stderr)
+		}
+		if !strings.Contains(got.stdout, want) {
+			t.Errorf("explain %q answered about\n%s\nwant %q", named, got.stdout, want)
+		}
+	}
+}
+
 func TestExplainRefusesASymbolTheTargetDoesNotHoldAndPrintsThePartialMatches(t *testing.T) {
 	t.Parallel()
 	got := runExplain(t, findingsFixture(t, `{"target": {"kind": "application"}}`), "forgot")

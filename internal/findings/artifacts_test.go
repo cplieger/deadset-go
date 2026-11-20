@@ -15,6 +15,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/load"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-go/v2/internal/testsupport"
+	core "github.com/cplieger/deadset-spec/v8/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
@@ -570,5 +571,27 @@ func TestAnnotateNamesNoModuleOnAFindingNoDeletionFixes(t *testing.T) {
 			t.Errorf("Annotate(%s, a finding no deletion fixes) names %v, want nothing: narrowing a declaration removes no use of anything",
 				result.Findings[i].Symbol.Name, named)
 		}
+	}
+}
+
+// A directive's reference spells the scope and the operand's module path element by
+// element, while the finding's name keeps the path as the module file writes it.
+func TestADirectiveReferenceSpellsItsModulePathsAsOperands(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct{ got, want string }{
+		{moduleFragment("example.com/app", modulePathOperand("example.com/left")+":"+requireSection), "go://example.com/app#example.com/left:require"},
+		{moduleFragment("example.com/app", modulePathOperand("example.com/c++")+":"+requireSection), "go://example.com/app#example.com/c%2B%2B:require"},
+		{moduleFragment("example.com/a+b", replacedOperand(deps.Module{Path: "example.com/c++", Version: "v1.2.3"})+replaceSelector), "go://example.com/a%2Bb#example.com/c%2B%2B@v1.2.3:replace"},
+		{moduleFragment("example.com/app", replacedOperand(deps.Module{Path: "example.com/old"})+replaceSelector), "go://example.com/app#example.com/old:replace"},
+	} {
+		if c.got != c.want {
+			t.Errorf("the directive reference = %q, want %q", c.got, c.want)
+		}
+		if !core.ValidReference(c.got) {
+			t.Errorf("the directive reference %q is one the published grammar refuses", c.got)
+		}
+	}
+	if got := versionedName(deps.Module{Path: "example.com/c++", Version: "v1.2.3"}); got != "example.com/c++@v1.2.3" {
+		t.Errorf("versionedName = %q, want the path as the module file writes it, example.com/c++@v1.2.3", got)
 	}
 }
