@@ -7,8 +7,8 @@
   },
   "result": "pass",
   "totals": {
-    "fixtures": 266,
-    "pass": 264,
+    "fixtures": 267,
+    "pass": 265,
     "gap": 0,
     "fail": 0,
     "pending": 2
@@ -4376,6 +4376,37 @@
         },
         {
           "symbol": "item.XMLName",
+          "result": "pass",
+          "actual": {
+            "report": "none",
+            "retained_by": [
+              "encoding-reflection"
+            ]
+          }
+        }
+      ],
+      "unexpected": []
+    },
+    {
+      "fixture": "encoding-reflection-zero-value-of-a-walked-field-type",
+      "result": "pass",
+      "expectations": [
+        {
+          "symbol": "stray.Range",
+          "result": "pass",
+          "actual": {
+            "report": "DS1101",
+            "symbol_kind": "method",
+            "confidence": "certain",
+            "reachability_class": "certain"
+          },
+          "suppression": {
+            "suppressed": true,
+            "stale": false
+          }
+        },
+        {
+          "symbol": "waitMS.Range",
           "result": "pass",
           "actual": {
             "report": "none",
