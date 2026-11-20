@@ -5,6 +5,13 @@ import (
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
 
+// ReportedPath is path as a report, a facts document or a baseline row carries it,
+// every character as the file name holds it. Every path those documents carry is
+// built through it, so their spelling is decided in one place.
+func ReportedPath(path string) string {
+	return path
+}
+
 // Document is f as the report's finding: the liveness relation absent where
 // [livenessAbsent] says no relation decided it, and the component without the
 // spans and members a report carries elsewhere.
@@ -66,7 +73,7 @@ func WithheldOf(findings []Finding) report.Withheld {
 }
 
 func (p *Position) document() report.Position {
-	return report.Position{Path: p.Path, Line: p.Line, Column: p.Column, EndLine: p.EndLine}
+	return report.Position{Path: ReportedPath(p.Path), Line: p.Line, Column: p.Column, EndLine: p.EndLine}
 }
 
 func (d *Details) document() report.Details {
@@ -80,7 +87,7 @@ func (d *Details) document() report.Details {
 		RemovesLastUseOf:   omitted(d.RemovesLastUseOf),
 	}
 	if d.Entry != nil {
-		written.Entry = &report.Entry{Code: d.Entry.Code, Symbol: d.Entry.Symbol, Path: d.Entry.Path, Reason: d.Entry.Reason}
+		written.Entry = &report.Entry{Code: d.Entry.Code, Symbol: d.Entry.Symbol, Path: ReportedPath(d.Entry.Path), Reason: d.Entry.Reason}
 	}
 	if d.Implementations != nil {
 		written.Implementations = make([]report.Positioned, len(d.Implementations))

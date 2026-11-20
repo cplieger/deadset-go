@@ -111,10 +111,13 @@ func generatedEntries(held []specfacts.Generated, generated []facts.Generated, s
 			continue
 		}
 		seen[g.Path] = true
-		entry := specfacts.Generated{Path: g.Path, Line: g.Line, Evidence: specfacts.EvidenceHeader, Detail: g.Detail}
+		entry := specfacts.Generated{Path: findings.ReportedPath(g.Path), Line: g.Line, Evidence: specfacts.EvidenceHeader, Detail: g.Detail}
 		if g.Generator != "" {
 			entry.Generator = &specfacts.Generator{Row: g.Generator, Version: g.Version}
-			entry.SchemaFiles = slices.Clone(g.SchemaFiles)
+			entry.SchemaFiles = make([]string, len(g.SchemaFiles))
+			for i, file := range g.SchemaFiles {
+				entry.SchemaFiles[i] = findings.ReportedPath(file)
+			}
 		}
 		held = append(held, entry)
 	}
@@ -131,8 +134,8 @@ func generatedEntries(held []specfacts.Generated, generated []facts.Generated, s
 func (l *Loaded) bindingRecords(held []specfacts.Binding, bindings []facts.Binding, files map[string]inventory.SymbolID, seen map[[4]string]int) []specfacts.Binding {
 	for _, b := range bindings {
 		record := specfacts.Binding{
-			Role: specfacts.RoleConsumer, SchemaFile: b.SchemaFile, Schema: b.Schema,
-			GeneratedFile: b.GeneratedFile, Symbol: l.Refs[b.Symbol],
+			Role: specfacts.RoleConsumer, SchemaFile: findings.ReportedPath(b.SchemaFile), Schema: b.Schema,
+			GeneratedFile: findings.ReportedPath(b.GeneratedFile), Symbol: l.Refs[b.Symbol],
 		}
 		switch b.Role {
 		case facts.Served, facts.Registration:
@@ -147,7 +150,7 @@ func (l *Loaded) bindingRecords(held []specfacts.Binding, bindings []facts.Bindi
 		tuple := [4]string{string(record.Role), record.Symbol, b.SchemaFile, b.Schema}
 		if at, ok := seen[tuple]; ok {
 			if scope.Order(b.GeneratedFile, held[at].GeneratedFile) < 0 {
-				held[at].GeneratedFile = b.GeneratedFile
+				held[at].GeneratedFile = findings.ReportedPath(b.GeneratedFile)
 			}
 			continue
 		}
@@ -199,7 +202,7 @@ func (p *Prepared) implementerRecords(held []specfacts.Binding, implementers map
 			}
 			seen[tuple] = len(held)
 			held = append(held, specfacts.Binding{
-				Role: specfacts.RoleImplementer, Symbol: p.Refs[e.ID], SchemaFile: rpc.SchemaFile, Schema: rpc.Schema,
+				Role: specfacts.RoleImplementer, Symbol: p.Refs[e.ID], SchemaFile: findings.ReportedPath(rpc.SchemaFile), Schema: rpc.Schema,
 			})
 		}
 	}

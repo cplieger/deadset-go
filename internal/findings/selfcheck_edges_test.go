@@ -186,6 +186,24 @@ func TestEvaluateReadsOnlyItsOwnSideOfEveryEdge(t *testing.T) {
 	}
 }
 
+func TestEvaluateFindsASideInTheEncodedSpellingAndCarriesItsBytes(t *testing.T) {
+	t.Parallel()
+	in := edged(t, "selfcheck-edges-encoded.txtar", applicationConfig())
+	result := computed(t, in, map[vocab.Code]Emitter{vocab.UnusedUnexported: unusedUnexported})
+
+	const declaring = "go://example.com/encodededges/c%2B%2B#"
+	want := []evaluated{
+		{edge: "wire/run", side: "provides", symbol: declaring + "Run", state: "live"},
+		{edge: "wire/unused", side: "provides", symbol: declaring + "unused", state: "dead", finding: vocab.UnusedUnexported},
+	}
+	if got := asNamed(result.Evaluations); !slices.Equal(got, want) {
+		t.Fatalf("Evaluate() published %+v, want %+v", got, want)
+	}
+	if pending := result.Evaluations[1].Finding; pending == nil || pending.Symbol.Ref != declaring+"unused" {
+		t.Errorf("the pending finding of wire/unused is %+v, want it about %s", pending, declaring+"unused")
+	}
+}
+
 func TestEvaluateWithNoDeclaredEdgeChangesNothing(t *testing.T) {
 	t.Parallel()
 	in := edged(t, "selfcheck-edges.txtar", applicationConfig())

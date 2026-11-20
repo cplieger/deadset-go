@@ -63,23 +63,32 @@ func readCorpus(t *testing.T) []corpusCase {
 
 // goForms are the expressions the published grammar page fixes for Go, one per
 // row of its own table, each anchored and each the whole reference. They are
-// transcribed rather than parsed out of the page, and
-// TestPublishedGrammarCarriesEveryExpression asserts the transcription is
-// byte-identical to what the page carries.
-var goForms = map[string]string{
-	"package":       `^go://[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*#$`,
-	"package-level": `^go://[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*#(?:[A-Za-z_]|[^\x00-\x7F])(?:[A-Za-z0-9_]|[^\x00-\x7F])*$`,
-	"member":        `^go://[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*#(?:[A-Za-z_]|[^\x00-\x7F])(?:[A-Za-z0-9_]|[^\x00-\x7F])*(?:\.(?:[A-Za-z_]|[^\x00-\x7F])(?:[A-Za-z0-9_]|[^\x00-\x7F])*)+$`,
-	"type-parameter": `^go://[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*#(?:[A-Za-z_]|[^\x00-\x7F])(?:[A-Za-z0-9_]|[^\x00-\x7F])*` +
-		`(?:\.(?:[A-Za-z_]|[^\x00-\x7F])(?:[A-Za-z0-9_]|[^\x00-\x7F])*)?` +
-		`\[(?:[A-Za-z_]|[^\x00-\x7F])(?:[A-Za-z0-9_]|[^\x00-\x7F])*\]$`,
-	"file":    `^go://[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*#[^/\\:#\r\n]+\.go:file$`,
-	"require": `^go://[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*#[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*(?:@[A-Za-z0-9.+-]+)?:require$`,
-	"replace": `^go://[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*#[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*(?:@[A-Za-z0-9.+-]+)?:replace$`,
-	"parameter": `^go://[A-Za-z0-9._~-]+(?:/[A-Za-z0-9._~-]+)*#(?:(?:[A-Za-z_]|[^\x00-\x7F])(?:[A-Za-z0-9_]|[^\x00-\x7F])*` +
-		`(?:\.(?:[A-Za-z_]|[^\x00-\x7F])(?:[A-Za-z0-9_]|[^\x00-\x7F])*)?)?` +
-		`\((?:[A-Za-z_]|[^\x00-\x7F])(?:[A-Za-z0-9_]|[^\x00-\x7F])*\)$`,
-}
+// written out here from the page's blocks rather than parsed out of the page,
+// and TestPublishedGrammarCarriesEveryExpression asserts each is byte-identical
+// to what the page carries.
+var goForms = func() map[string]string {
+	// The class holds the whitespace past U+00FF and the Bidi_Control characters as
+	// the characters themselves, which a raw string literal cannot carry for U+FEFF.
+	const wide = "\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF" +
+		"\u061C\u200E\u200F\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069"
+	const (
+		scope     = `^go://(?:[A-Za-z0-9._~-]|%[0-9A-F]{2})+(?:/(?:[A-Za-z0-9._~-]|%[0-9A-F]{2})+)*#`
+		goPath    = `(?:[A-Za-z0-9._~-]|%[0-9A-F]{2})+(?:/(?:[A-Za-z0-9._~-]|%[0-9A-F]{2})+)*(?:@[A-Za-z0-9.+-]+)?`
+		identRune = `[^\x00-\xA0` + wide + `]`
+		ident     = `(?:[A-Za-z_]|` + identRune + `)(?:[A-Za-z0-9_]|` + identRune + `)*`
+		opSeg     = `(?:[^\x00-\x20\x7F-\xA0` + wide + `/#%*?'\[\]\\:]|%[0-9A-F]{2})+`
+	)
+	return map[string]string{
+		"package":        scope + `$`,
+		"package-level":  scope + ident + `$`,
+		"member":         scope + ident + `(?:\.` + ident + `)+$`,
+		"type-parameter": scope + ident + `(?:\.` + ident + `)?\[` + ident + `\]$`,
+		"file":           scope + opSeg + `\.go:file$`,
+		"require":        scope + goPath + `:require$`,
+		"replace":        scope + goPath + `:replace$`,
+		"parameter":      scope + `(?:` + ident + `(?:\.` + ident + `)?)?\(` + ident + `\)$`,
+	}
+}()
 
 // corpusForms maps a corpus form to the expression that accepts it; several
 // forms share one expression because they differ in what the symbol is rather
@@ -128,6 +137,11 @@ var emitted = map[string]emitterInput{
 	"go://example.com/app#Catalog.Decode[T]":                      {inventory.KindTypeParam, "example.com/app", []string{"Catalog", "Decode", "T"}},
 	"go://example.com/app/internal/queue#List.Map[T]":             {inventory.KindTypeParam, "example.com/app/internal/queue", []string{"List", "Map", "T"}},
 	"go://example.com/app/internal/legacy#render_windows.go:file": {inventory.KindFile, "example.com/app/internal/legacy", []string{"render_windows.go"}},
+	"go://example.com/app/c%2B%2B#Run":                            {inventory.KindFunc, "example.com/app/c++", []string{"Run"}},
+	"go://example.com/app#never%20built.go:file":                  {inventory.KindFile, "example.com/app", []string{"never built.go"}},
+	"go://example.com/app#100%25_x.go:file":                       {inventory.KindFile, "example.com/app", []string{"100%_x.go"}},
+	"go://example.com/app#a%23b%3Ac.go:file":                      {inventory.KindFile, "example.com/app", []string{"a#b:c.go"}},
+	"go://example.com/app#a%C2%A0b.go:file":                       {inventory.KindFile, "example.com/app", []string{"a\u00a0b.go"}},
 }
 
 // emittedParameters gives, for each accepted Go parameter case, the holder's

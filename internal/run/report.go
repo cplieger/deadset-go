@@ -35,6 +35,9 @@ func (f *Findings) Report(self *Self) (*report.Report, error) {
 		return nil, err
 	}
 	notes = append(notes, f.unreadNotes()...)
+	for i := range notes {
+		notes[i].Path = findings.ReportedPath(notes[i].Path)
+	}
 	reported := make([]report.Finding, len(f.Result.Findings))
 	for i := range f.Result.Findings {
 		reported[i] = f.Result.Findings[i].Document()
@@ -45,7 +48,9 @@ func (f *Findings) Report(self *Self) (*report.Report, error) {
 	}
 	var excluded []string
 	for i := range f.loads.outlines {
-		excluded = append(excluded, f.loads.outlines[i].excludedByCgo...)
+		for _, path := range f.loads.outlines[i].excludedByCgo {
+			excluded = append(excluded, findings.ReportedPath(path))
+		}
 	}
 	rules := make([]report.TestFileRule, len(f.TestFileRules))
 	for i, rule := range f.TestFileRules {
@@ -53,7 +58,7 @@ func (f *Findings) Report(self *Self) (*report.Report, error) {
 	}
 	skips := make([]report.TypeErrorSkip, len(f.TypeErrorSkips))
 	for i, skip := range f.TypeErrorSkips {
-		skips[i] = report.TypeErrorSkip{Path: skip.Path, Line: skip.Line, Message: skip.Message}
+		skips[i] = report.TypeErrorSkip{Path: findings.ReportedPath(skip.Path), Line: skip.Line, Message: skip.Message}
 	}
 	return report.Build(&report.Input{
 		Members:                f.Result.Members,

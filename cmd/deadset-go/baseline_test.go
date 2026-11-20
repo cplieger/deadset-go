@@ -374,3 +374,36 @@ func TestAMalformedBaselineIsAUsageErrorAndAWriteOverOneAFailure(t *testing.T) {
 		t.Errorf("the refused write left %q, %v, want the document as it was", body, err)
 	}
 }
+
+// A baseline write over a document past the Contract's bound refuses it with the
+// usage code before reading it whole, wherever it is, and leaves it as it was.
+func TestABaselineWriteOverADocumentPastTheBoundLeavesItUnread(t *testing.T) {
+	t.Parallel()
+	over := paddedTo(`{"baseline": []}`, documentCap+1)
+	for _, c := range []struct {
+		name     string
+		inTarget bool
+	}{
+		{name: "at the target root", inTarget: true},
+		{name: "outside the target", inTarget: false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			dir := baselineFixpointModule(t)
+			baseline := filepath.Join(sandbox.Dir(t), core.BaselineFileName)
+			if c.inTarget {
+				baseline = filepath.Join(dir, core.BaselineFileName)
+			}
+			if err := sandbox.WriteFile(baseline, []byte(over), 0o600); err != nil {
+				t.Fatalf("Setup: write %s: %v", baseline, err)
+			}
+			got := runAnalyze(t, dir, "--baseline-write="+baseline)
+			if got.code != vocab.ExitUsage || !bytes.Contains([]byte(got.stderr), []byte("16777216")) {
+				t.Errorf("analyze --baseline-write over a baseline of %d bytes = %d, stderr %q, want %d naming the bound", len(over), got.code, got.stderr, vocab.ExitUsage)
+			}
+			if body, err := os.ReadFile(baseline); err != nil || string(body) != over {
+				t.Errorf("the refused write left %d bytes, %v, want the document as it was", len(body), err)
+			}
+		})
+	}
+}

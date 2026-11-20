@@ -643,6 +643,31 @@ func TestAnalyzeNamesATemplateItCannotRead(t *testing.T) {
 	}
 }
 
+func TestAnalyzeHoldsATemplateToTheDocumentBound(t *testing.T) {
+	t.Parallel()
+	const template = "{{range .findings}}{{.code}} {{.symbol.ref}}\n{{end}}"
+	dir := findingsFixture(t, `{"target": {"kind": "application"}}`)
+
+	atBound := writeDocument(t, dir, "at.tmpl", paddedTo(template, documentCap))
+	got := runAnalyze(t, dir, "--format=template", "--template="+atBound)
+	body, err := os.ReadFile(got.reportPath + ".tmpl")
+	if err != nil {
+		t.Fatalf("analyze --template=<%d bytes> = %d, stderr %q, wrote no template rendering: %v", documentCap, got.code, got.stderr, err)
+	}
+	if want := "DS1002 go://example.com/app#forgotten\n"; !strings.Contains(string(body), want) {
+		t.Errorf("the rendering of a template of %d bytes does not contain %q", documentCap, want)
+	}
+
+	overBound := writeDocument(t, dir, "over.tmpl", paddedTo(template, documentCap+1))
+	got = runAnalyze(t, dir, "--format=template", "--template="+overBound)
+	if got.code != vocab.ExitUsage || !strings.Contains(got.stderr, "is larger than 16777216 bytes") {
+		t.Errorf("analyze --template=<%d bytes> = %d, stderr %q, want %d naming the bound", documentCap+1, got.code, got.stderr, vocab.ExitUsage)
+	}
+	if _, err := os.Stat(got.reportPath); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("analyze wrote a report before refusing the template, want the refusal to cost no analysis: %v", err)
+	}
+}
+
 func TestSettingValueRendersEachSettingAsItsDeclaredType(t *testing.T) {
 	t.Parallel()
 

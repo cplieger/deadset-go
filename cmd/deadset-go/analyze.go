@@ -330,10 +330,15 @@ func (a *invocation) write(ctx context.Context, r *report.Report, reporters *con
 // writeBaseline writes the baseline document at path: the rows this write recorded
 // and every row of another scheme the document there holds. A document it cannot
 // read, a row of either scheme included, is refused before anything is written, so
-// the document stays as it was.
+// the document stays as it was: one past the Contract's bound with the usage code,
+// as suppression.md's refusal table gives a baseline past it, and any other with the
+// failure code.
 func writeBaseline(ctx context.Context, path string, recorded []core.Recorded, p core.Provenance) error {
 	held, err := suppress.BaselineRows(path)
-	if err != nil {
+	switch {
+	case errors.Is(err, filesafe.ErrFileTooLarge):
+		return fmt.Errorf("read back the rows %s holds: %w", path, err)
+	case err != nil:
 		return failure.Wrap(vocab.RunUnwrittenOutput, fmt.Errorf("read back the rows %s holds: %w", path, err))
 	}
 	return publish(ctx, path, func(w io.Writer) error {

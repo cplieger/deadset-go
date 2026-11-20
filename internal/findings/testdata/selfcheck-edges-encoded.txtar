@@ -1,0 +1,39 @@
+A main package calling a package whose directory is c++, and an edges document
+whose Go sides name that package's two functions by the encoded reference, so an
+evaluation's symbol is measured against the bytes the document carries.
+
+-- go.mod --
+module example.com/encodededges
+
+go 1.27.1
+-- main.go --
+package main
+
+import cpp "example.com/encodededges/c++"
+
+func main() { cpp.Run() }
+-- c++/c.go --
+// Package cpp declares one function the main package calls and one nothing calls.
+package cpp
+
+// Run is called from the main package.
+func Run() {}
+
+// unused is called by nothing.
+func unused() int { return 1 }
+-- deadset-edges.json --
+{
+  "description": "Two edges whose Go sides name declarations of a package whose import path holds a plus sign.",
+  "edges": {
+    "wire/run": {
+      "because": "generated",
+      "provides": "go://example.com/encodededges/c%2B%2B#Run",
+      "used_by": "ts://@example/web/src/wire.ts#run"
+    },
+    "wire/unused": {
+      "because": "generated",
+      "provides": "go://example.com/encodededges/c%2B%2B#unused",
+      "used_by": "ts://@example/web/src/wire.ts#unused"
+    }
+  }
+}

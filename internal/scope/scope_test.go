@@ -17,7 +17,6 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/testsupport/sandbox"
 	spec "github.com/cplieger/deadset-spec/v8"
 	"github.com/cplieger/deadset-spec/v8/document"
-	"github.com/cplieger/deadset-spec/v8/vocab"
 	"github.com/cplieger/go/filesafe"
 )
 
@@ -206,28 +205,37 @@ func TestReadRefusesAnAbsentDocument(t *testing.T) {
 	}
 }
 
+// documentCap is the Contract's one bound on a document (config.schema.json
+// x-max-bytes), written as the number rather than read from the constant the
+// reader reads, so a test states the bound itself.
+const documentCap = 16 << 20
+
+// sizedDocument is a valid scope document of exactly size bytes, its target id
+// the padding, so the size bound is the only thing that can refuse it.
+func sizedDocument(size int) (document, padding string) {
+	const prefix, suffix = `{"target": {"id": "`, `", "path": "app"}}`
+	padding = strings.Repeat("p", size-len(prefix)-len(suffix))
+	return prefix + padding + suffix, padding
+}
+
 func TestReadRefusesADocumentAboveTheSizeBound(t *testing.T) {
-	// Padding inside a declared string keeps the document valid JSON, so the
-	// size bound is the only thing that can refuse it.
-	padding := strings.Repeat("p", vocab.DocumentMaxBytes)
-	_, path := writeDocument(t, `{"target": {"id": "`+padding+`", "path": "app"}}`)
+	document, _ := sizedDocument(documentCap + 1)
+	_, path := writeDocument(t, document)
 
 	_, err := read(t.Context(), path)
 
 	if !errors.Is(err, filesafe.ErrFileTooLarge) {
-		t.Errorf("read(oversize document) = _, %v, want an error matching filesafe.ErrFileTooLarge", err)
+		t.Errorf("read(document of %d bytes) = _, %v, want an error matching filesafe.ErrFileTooLarge", documentCap+1, err)
 	}
 }
 
 func TestReadAcceptsADocumentAtTheSizeBound(t *testing.T) {
-	prefix := `{"target": {"id": "`
-	suffix := `", "path": "app"}}`
-	padding := strings.Repeat("p", vocab.DocumentMaxBytes-len(prefix)-len(suffix))
-	_, path := writeDocument(t, prefix+padding+suffix)
+	document, padding := sizedDocument(documentCap)
+	_, path := writeDocument(t, document)
 
 	got, err := read(t.Context(), path)
 	if err != nil {
-		t.Fatalf("read(document of exactly %d bytes) = _, %v, want no error", vocab.DocumentMaxBytes, err)
+		t.Fatalf("read(document of exactly %d bytes) = _, %v, want no error", documentCap, err)
 	}
 	if got.Target.ID != padding {
 		t.Errorf("Target.ID has %d characters, want %d", len(got.Target.ID), len(padding))

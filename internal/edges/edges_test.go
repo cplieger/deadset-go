@@ -132,6 +132,11 @@ func TestReadRefusesTheDocumentsTheContractRefuses(t *testing.T) {
 		{name: "a bare name", document: `{"edges": {"wire/A": {"provides": "A", "used_by": "ts://x#A"}}}`, names: "edges.wire/A.provides"},
 		{name: "a scope holding whitespace", document: `{"edges": {"wire/A": {"provides": "go://example.com/a pp#A", "used_by": "ts://x#A"}}}`, names: "edges.wire/A.provides"},
 		{name: "a fragment holding whitespace", document: `{"edges": {"wire/A": {"provides": "go://example.com/app#A B", "used_by": "ts://x#A"}}}`, names: "edges.wire/A.provides"},
+		{name: "a scope holding a control character", document: `{"edges": {"wire/A": {"provides": "go://example.com/a\fpp#A", "used_by": "ts://x#A"}}}`, names: "edges.wire/A.provides"},
+		{name: "a scope holding a percent sign that opens no escape", document: `{"edges": {"wire/A": {"provides": "go://example.com/100%#A", "used_by": "ts://x#A"}}}`, names: "edges.wire/A.provides"},
+		{name: "a scope holding an escape with lowercase digits", document: `{"edges": {"wire/A": {"provides": "go://example.com/c%2b%2b#A", "used_by": "ts://x#A"}}}`, names: "edges.wire/A.provides"},
+		{name: "a fragment holding a space outside quotes", document: `{"edges": {"wire/A": {"provides": "ts://./src/h.ts#Headers.content type", "used_by": "ts://x#A"}}}`, names: "edges.wire/A.provides"},
+		{name: "a fragment holding a control character", document: `{"edges": {"wire/A": {"provides": "go://example.com/app#A\fB", "used_by": "ts://x#A"}}}`, names: "edges.wire/A.provides"},
 		{name: "content after the document", document: `{"edges": {}} {}`, names: vocab.EdgesFileName},
 		{name: "not JSON", document: `{`, names: vocab.EdgesFileName},
 	} {
@@ -154,8 +159,6 @@ func TestReadAcceptsAReferenceOutsideTheGrammarThatStillNamesOneSymbol(t *testin
 		"go://example.com/app#Not.A.Real..Path",
 		"go://example.com/app#'quoted*star'",
 		"go://example.com/app#Type[computed*]",
-		"go://example.com/app#A\fB",
-		"go://example.com/a\fpp#A",
 	} {
 		document := `{"edges": {"wire/A": {"provides": ` + quote(ref) + `, "used_by": "ts://x#A"}}}`
 		if held := read(t, document); len(held.Edges) != 1 || held.Edges[0].Provides != ref {
@@ -164,8 +167,24 @@ func TestReadAcceptsAReferenceOutsideTheGrammarThatStillNamesOneSymbol(t *testin
 	}
 }
 
+// A side in the encoded spelling, and a TypeScript side whose quoted member holds a
+// space, read as the bytes the document carries.
+func TestReadKeepsAnEncodedSideAndAQuotedMemberWithASpaceAsWritten(t *testing.T) {
+	for _, ref := range []string{
+		"ts://./src/h.ts#Headers.'content type'",
+		"go://example.com/app/c%2B%2B#Run",
+		"go://example.com/app#never%20built.go:file",
+		"ts://./src/a%23b.ts#X",
+	} {
+		document := `{"edges": {"wire/A": {"provides": ` + quote(ref) + `, "used_by": "ts://x#A"}}}`
+		if held := read(t, document); len(held.Edges) != 1 || held.Edges[0].Provides != ref {
+			t.Errorf("Read(a side %q) = %+v, want the one edge carrying it byte for byte", ref, held.Edges)
+		}
+	}
+}
+
 func quote(s string) string {
-	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\f", `\f`).Replace(s) + `"`
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(s) + `"`
 }
 
 // Every published edges example reads, and every published negative of the
@@ -189,10 +208,22 @@ func TestReadHoldsThePublishedExamples(t *testing.T) {
 	}
 }
 
+// documentCap is the Contract's one bound on a document (config.schema.json
+// x-max-bytes), written as the number rather than read from the constant the
+// reader reads, so a test states the bound itself.
+const documentCap = 16 << 20
+
 func TestReadRefusesADocumentOverTheBound(t *testing.T) {
-	_, err := Read(t.Context(), target(t, `{"edges": {}}`+strings.Repeat(" ", vocab.DocumentMaxBytes)))
+	_, err := Read(t.Context(), target(t, declared+strings.Repeat(" ", documentCap+1-len(declared))))
 	if !errors.Is(err, ErrMalformed) || !errors.Is(err, filesafe.ErrFileTooLarge) {
-		t.Errorf("Read(a document over the bound) = %v, want it refused as malformed and too large", err)
+		t.Errorf("Read(a document of %d bytes) = %v, want it refused as malformed and too large", documentCap+1, err)
+	}
+}
+
+func TestReadTakesADocumentAtTheBound(t *testing.T) {
+	held := read(t, declared+strings.Repeat(" ", documentCap-len(declared)))
+	if len(held.Edges) != 2 {
+		t.Errorf("Read(a document of %d bytes).Edges = %+v, want the two it declares", documentCap, held.Edges)
 	}
 }
 

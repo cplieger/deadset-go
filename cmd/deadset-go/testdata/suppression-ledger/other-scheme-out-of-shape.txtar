@@ -1,0 +1,18 @@
+A command whose ignore file holds an entry of another language's scheme whose
+reference holds a space outside a quoted component, which the shape every
+document checks refuses whatever the scheme.
+
+-- go.mod --
+module example.com/app
+
+go 1.27
+-- deadset.json --
+{"target": {"kind": "application"}}
+-- deadset-ignore.json --
+{"ignore": [
+  {"code": "DS1002", "symbol": "ts://app/src/index.ts#not a reference", "path": "src/index.ts", "reason": "the TypeScript analyzer's"}
+]}
+-- main.go --
+package main
+
+func main() {}

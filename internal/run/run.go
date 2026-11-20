@@ -245,5 +245,5 @@ func relativeTo(runDir, path string) (string, error) {
 		return "", failure.Wrap(vocab.RunUnreportablePath, fmt.Errorf("a report names %s relative to the directory the run was invoked from, and %s does not contain it",
 			path, runDir))
 	}
-	return relative, nil
+	return findings.ReportedPath(relative), nil
 }

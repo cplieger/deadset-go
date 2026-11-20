@@ -153,8 +153,8 @@ func (in *pass) stale(ledger *core.Ledger, would []core.Finding) []report.StaleS
 		stale = append(stale, report.StaleSuppression{
 			Code:      vocab.StaleSuppression,
 			Mechanism: string(first.Mechanism),
-			Entry:     report.SuppressionEntry{Code: first.Code, Symbol: first.Symbol, Path: first.Path, Reason: first.Reason},
-			Position:  report.SuppressionPosition{Path: first.Site.Path, Line: first.Site.Line, Column: first.Site.Column},
+			Entry:     report.SuppressionEntry{Code: first.Code, Symbol: first.Symbol, Path: ReportedPath(first.Path), Reason: first.Reason},
+			Position:  report.SuppressionPosition{Path: ReportedPath(first.Site.Path), Line: first.Site.Line, Column: first.Site.Column},
 			Symbol:    ref,
 			Message:   message,
 		})
