@@ -11,11 +11,13 @@ import (
 )
 
 // spelledFile is a file base name holding a colon and a space, which only a
-// Unix file system can carry, and the name a finding spells it as
-// (finding.schema.json, symbol.name).
+// Unix file system can carry; spelledName is the name a finding spells it as, a
+// source-path segment (symbol-ref.md, Path segments), and spelledOperand the
+// file operand its reference spells it as.
 const (
-	spelledFile = "tool: gen.go"
-	spelledName = "tool:gen.go"
+	spelledFile    = "tool: gen.go"
+	spelledName    = "tool:%20gen.go"
+	spelledOperand = "tool%3A%20gen.go"
 )
 
 // writeTree writes files into a directory of the calling test's own.
@@ -34,8 +36,8 @@ func writeTree(t *testing.T, files map[string]string) string {
 	return dir
 }
 
-// wantSpelled checks the one finding about the file: its reference keeps the
-// file's name, and its name and message spell it as a text line can carry it.
+// wantSpelled checks the one finding about the file: its reference spells the
+// file's name as a file operand, and its name and message as a source-path segment.
 func wantSpelled(t *testing.T, found []Finding, ref, message string) {
 	t.Helper()
 	if len(found) != 1 || found[0].Symbol.Ref != ref || found[0].Symbol.Name != spelledName || found[0].Message != message {
@@ -53,7 +55,7 @@ func TestAFileNoConfigurationBuildsIsNamedAsATextLineCanCarryIt(t *testing.T) {
 	in := inputOfDir(t, dir, completeMatrixConfig(), Consumers{}, twoConfigurations()...)
 
 	found := emitted(t, "FileNeverBuilt", vocab.FileNeverBuilt, fileNeverBuilt, in)
-	wantSpelled(t, found, "go://example.com/app#"+spelledFile+":file",
+	wantSpelled(t, found, "go://example.com/app#"+spelledOperand+":file",
 		"no configuration of the build matrix compiles file "+spelledName)
 }
 
@@ -71,7 +73,7 @@ func TestAFilePackageNoImportReachesIsNamedAsATextLineCanCarryIt(t *testing.T) {
 	in := inputOfDir(t, dir, resolved, Consumers{})
 
 	result := computed(t, in, map[vocab.Code]Emitter{vocab.FileNeverImported: fileNeverImported})
-	wantSpelled(t, result.Findings, "go://example.com/app/tool#"+spelledFile+":file",
+	wantSpelled(t, result.Findings, "go://example.com/app/tool#"+spelledOperand+":file",
 		"no import reaches the package file "+spelledName+" declares and no root names a declaration in it")
 	for id, members := range result.Members {
 		for _, member := range members {

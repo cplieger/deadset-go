@@ -34,6 +34,7 @@ import (
 	"github.com/cplieger/deadset-go/v2/internal/roots"
 	"github.com/cplieger/deadset-go/v2/internal/scope"
 	"github.com/cplieger/deadset-spec/v8/report"
+	"github.com/cplieger/deadset-spec/v8/segment"
 	core "github.com/cplieger/deadset-spec/v8/suppress"
 	"github.com/cplieger/deadset-spec/v8/vocab"
 )
@@ -762,11 +763,11 @@ func (in *pass) admit(found *Finding) error {
 // cannot carry: an empty one, one that does not name its subject, which an
 // annotation or a SARIF result shows with no other name, one holding a line break,
 // and one ending in a full stop, which is what lets a consumer append a clause to
-// the same sentence. It refuses a name [DisplayName] would respell too, which
-// [pass.spelled] has spelled for every kind.
+// the same sentence. It refuses a name holding a line break or a colon and a space
+// too, which [pass.spelled] has spelled away for every kind.
 func checkMessage(found *Finding) error {
 	switch {
-	case DisplayName(found.Symbol.Name) != found.Symbol.Name:
+	case displayText(found.Symbol.Name) != found.Symbol.Name:
 		return fmt.Errorf("%w: %s names %q, which holds a line break or a colon and a space",
 			errEmitter, found.Code, found.Symbol.Name)
 	case found.Message == "":
@@ -785,16 +786,28 @@ func checkMessage(found *Finding) error {
 	return nil
 }
 
-// lineBreak and colonSpaces are what [DisplayName] respells.
+// lineBreak and colonSpaces are what [displayText] respells.
 var (
 	lineBreak   = regexp.MustCompile(`\s*[\r\n]\s*`)
 	colonSpaces = regexp.MustCompile(`: +`)
 )
 
-// DisplayName is source text as a finding's name spells it: a line break and the
+// DisplayName is a declaration's name as a finding spells it. A file's name is
+// spelled as a source-path segment (symbol-ref.md, Path segments): every byte the
+// segment does not keep, `%` and whitespace among them, is `%` and two hexadecimal
+// digits, so two files never share a spelling and none holds a line break or a
+// colon and a space. Any other name is source text, spelled by [displayText].
+func DisplayName(kind inventory.SymbolKind, name string) string {
+	if kind == inventory.KindFile {
+		return segment.Spell(segment.SourcePath, name)
+	}
+	return displayText(name)
+}
+
+// displayText is source text as a text line can carry it: a line break and the
 // blanks around it as one space, and no space after a colon, because a text line
 // ends the name at a colon and a space (finding.schema.json, symbol.name).
-func DisplayName(text string) string {
+func displayText(text string) string {
 	return colonSpaces.ReplaceAllString(lineBreak.ReplaceAllString(text, " "), ":")
 }
 
@@ -846,7 +859,11 @@ func (in *pass) spelled(d *draft) (subject Subject, message string) {
 		subject.Kind = symbolKinds[in.kindOf(d.id)]
 	}
 	message = d.Message
-	if name := DisplayName(subject.Name); name != subject.Name {
+	kind := in.kindOf(d.id)
+	if subject.Kind == fileSubject {
+		kind = inventory.KindFile // a file no configuration builds is in no inventory
+	}
+	if name := DisplayName(kind, subject.Name); name != subject.Name {
 		message = strings.ReplaceAll(message, subject.Name, name)
 		subject.Name = name
 	}
@@ -1058,7 +1075,7 @@ func namedSymbol(symbol *inventory.Symbol) string {
 	if !held {
 		word = symbol.Kind.String()
 	}
-	return word + " " + DisplayName(symbol.Name)
+	return word + " " + DisplayName(symbol.Kind, symbol.Name)
 }
 
 // word is the reader's word for the kind of one declaration, and the vocabulary's
@@ -1123,7 +1140,7 @@ func (in *pass) listing(ids []inventory.SymbolID) []positioned {
 		if symbol == nil {
 			continue
 		}
-		members = append(members, positioned{Ref: symbol.Ref, Name: DisplayName(symbol.Name), Position: Position{
+		members = append(members, positioned{Ref: symbol.Ref, Name: DisplayName(symbol.Kind, symbol.Name), Position: Position{
 			Path:    symbol.Pos.Filename,
 			Line:    symbol.Pos.Line,
 			Column:  symbol.Pos.Column,
