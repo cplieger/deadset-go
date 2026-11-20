@@ -21,12 +21,32 @@ const (
 	// v.Interface() returns exactly as v.Interface().(T) does (go1.27.4
 	// src/reflect/value.go, TypeAssert).
 	reflectTypeAssert = "TypeAssert"
+	// reflectTypeType is reflect.Type, whose Elem, Key, Field, FieldByIndex, In
+	// and Out the walk reads the type a value is built from through, and
+	// reflectStructField the StructField whose Type field it reads.
+	reflectTypeType     = "Type"
+	reflectStructField  = "StructField"
+	reflectTypeOf       = "TypeOf"
+	reflectTypeFor      = "TypeFor"
+	reflectField        = "Field"
+	reflectFieldByIndex = "FieldByIndex"
+	reflectNew          = "New"
 )
+
+// reflectValueConstructors are the functions of reflect that build a value of
+// the reflect.Type their first argument is (Zero, MakeSlice, MakeMap,
+// MakeMapWithSize, MakeChan, MakeFunc), true where the value is a pointer to one
+// (New, NewAt).
+var reflectValueConstructors = map[string]bool{
+	"Zero": false, "MakeSlice": false, "MakeMap": false, "MakeMapWithSize": false,
+	"MakeChan": false, "MakeFunc": false, reflectNew: true, "NewAt": true,
+}
 
 // fieldAssertion is one assertion to interface types of what Interface returns
 // for a reflect.Value: what the walk followed the receiver back to, and where the
 // assertion is written. followed is false where the walk could not follow the
-// receiver to the operands handed to reflect.ValueOf or reflect.Indirect.
+// receiver to the operands handed to reflect.ValueOf, reflect.TypeOf or
+// reflect.TypeFor.
 type fieldAssertion struct {
 	at       ast.Node
 	asserted []assertedInterface
@@ -41,12 +61,14 @@ type assertedInterface struct {
 	name  string
 }
 
-// reflectHeld is one value a reflect.Value expression may hold: the operand handed
-// to reflect.ValueOf it was followed back to, and the static type of the value at
-// the expression where every step between them is enumerated, nil where one is not.
+// reflectHeld is one value a reflect.Value expression may hold, or one type a
+// reflect.Type or reflect.StructField expression may describe: the operand it was
+// followed back to, and the static type of the value, or the type described, at
+// the expression where every step between them is enumerated, nil where one is
+// not. A value reflect.Zero or reflect.New builds is one of the type described.
 type reflectHeld struct {
-	origin reflectOrigin
 	at     types.Type
+	origin reflectOrigin
 	ro     readOnly
 }
 
@@ -62,14 +84,17 @@ const (
 	readSticky            // read from, or through, a field that is neither
 )
 
-// reflectOrigin is one operand the program hands to reflect.ValueOf, with the
-// body it is written in, so the types an interface-typed operand carries can be read
-// once every store is.
+// reflectOrigin is one operand the program hands to reflect.ValueOf or
+// reflect.TypeOf, with the body it is written in, so the types an interface-typed
+// operand carries can be read once every store is, or one type argument of
+// reflect.TypeFor, which is exact: the type itself, an interface one describing no
+// value behind it.
 type reflectOrigin struct {
-	t    types.Type
-	expr ast.Expr
-	info *types.Info
-	fn   *types.Func
+	t     types.Type
+	expr  ast.Expr
+	info  *types.Info
+	fn    *types.Func
+	exact bool
 }
 
 // assertedValue reads one assertion of interface types on what Interface returns,
@@ -127,7 +152,20 @@ func typeAssertCalled(walk *reflectWalk, call *ast.CallExpr) (fieldAssertion, bo
 // typeAssertOf reports whether expr names an instantiation of reflect.TypeAssert,
 // and the interface its type argument is, if it is one.
 func typeAssertOf(info *types.Info, expr ast.Expr) ([]assertedInterface, bool) {
-	var name *ast.Ident
+	t, is := reflectInstance(info, expr, reflectTypeAssert)
+	if !is {
+		return nil, false
+	}
+	if iface, isInterface := types.Unalias(t).Underlying().(*types.Interface); isInterface {
+		return []assertedInterface{{iface: iface, name: types.TypeString(t, nil)}}, true
+	}
+	return nil, true
+}
+
+// reflectInstance is the one type argument of the instantiation of the generic
+// function of reflect named name that expr names, if it names one.
+func reflectInstance(info *types.Info, expr ast.Expr, name string) (types.Type, bool) {
+	var id *ast.Ident
 	switch e := ast.Unparen(expr).(type) {
 	case *ast.IndexExpr:
 		expr = e.X
@@ -136,22 +174,18 @@ func typeAssertOf(info *types.Info, expr ast.Expr) ([]assertedInterface, bool) {
 	}
 	switch e := ast.Unparen(expr).(type) {
 	case *ast.SelectorExpr:
-		name = e.Sel
+		id = e.Sel
 	case *ast.Ident:
-		name = e
+		id = e
 	default:
 		return nil, false
 	}
-	fn, isFunc := info.Uses[name].(*types.Func)
-	instance, instantiated := info.Instances[name]
-	if !isFunc || !instantiated || !isReflectFunction(fn, reflectTypeAssert) || instance.TypeArgs.Len() != 1 {
+	fn, isFunc := info.Uses[id].(*types.Func)
+	instance, instantiated := info.Instances[id]
+	if !isFunc || !instantiated || !isReflectFunction(fn, name) || instance.TypeArgs.Len() != 1 {
 		return nil, false
 	}
-	t := instance.TypeArgs.At(0)
-	if iface, isInterface := types.Unalias(t).Underlying().(*types.Interface); isInterface {
-		return []assertedInterface{{iface: iface, name: types.TypeString(t, nil)}}, true
-	}
-	return nil, true
+	return instance.TypeArgs.At(0), true
 }
 
 // returnsInterfaceValue reports whether t is a function type of Interface's
@@ -176,7 +210,8 @@ func returnsInterfaceValue(t types.Type) bool {
 // interface requires retained on that type. Any other value has every method of
 // every type reachable from the operand it was followed back to retained, and an
 // assertion whose receiver the walk did not follow retains every method of every
-// type reachable from every operand the program hands to reflect.ValueOf.
+// type reachable from every operand a reflect.Value may hold a value of
+// ([flowGraph.reflectedValues]).
 func (f *encodingFlow) fieldAssertion(a *fieldAssertion) error {
 	followed := a.followed && (!a.unseen || !f.graph.interfaceValued)
 	if followed && len(a.held) == 0 {
@@ -199,7 +234,7 @@ func (f *encodingFlow) fieldAssertion(a *fieldAssertion) error {
 			f.keepEveryMethod(f.reflectReach([]reflectOrigin{held.origin}), &site, detail)
 		}
 		if !followed {
-			f.keepEveryMethod(f.reflectReach(f.graph.reflected), &site, detail)
+			f.keepEveryMethod(f.reflectReach(f.graph.reflectedValues()), &site, detail)
 		}
 	}
 	return nil
@@ -231,9 +266,16 @@ func (f *encodingFlow) keepEveryMethod(reached []*types.Named, site *evidence, d
 // field or operand every type the program stores there ([storedTypes]); a type
 // parameter stands for each type argument it is instantiated with. Where the
 // stores do not cover a position, every defined type of the program is reachable.
+// An exact origin reaches its own type, and nothing where that is an interface.
 func (f *encodingFlow) reflectReach(origins []reflectOrigin) []*types.Named {
 	r := &reachWalk{f: f, seen: make(map[string]bool)}
 	for _, o := range origins {
+		if o.exact {
+			if _, isParam := types.Unalias(o.t).(*types.TypeParam); isParam || !types.IsInterface(o.t) {
+				r.queue = append(r.queue, reachItem{t: o.t})
+			}
+			continue
+		}
 		if !types.IsInterface(o.t) {
 			r.queue = append(r.queue, reachItem{t: o.t})
 			continue
@@ -400,11 +442,13 @@ func (w *reflectWalk) receiver(call *ast.CallExpr, callee facts.Callee) (ast.Exp
 	return recv, true
 }
 
-// held is every value one reflect.Value expression may hold, and whether the walk
-// followed each back to an operand handed to reflect.ValueOf: through
-// reflect.ValueOf and reflect.Indirect, each method of reflect.Value that returns
-// a value derived from its receiver, each value a local may hold, and the argument
-// of each call of a function the program only calls by name for a parameter.
+// held is every value one reflect.Value expression may hold, or every type one
+// reflect.Type or reflect.StructField expression describes, and whether the walk
+// followed each back to an operand of reflect.ValueOf or reflect.TypeOf or a type
+// argument of reflect.TypeFor: through reflect.Indirect, the methods of
+// reflect.Value and reflect.Type that derive from their receiver, a StructField's
+// Type, a constructor ([reflectValueConstructors]), each value a local may hold,
+// and the argument each call passes a parameter of a function called only by name.
 func (w *reflectWalk) held(expr ast.Expr, steps int) ([]reflectHeld, bool) {
 	if steps > maxReflectSteps {
 		return nil, false
@@ -414,9 +458,21 @@ func (w *reflectWalk) held(expr ast.Expr, steps int) ([]reflectHeld, bool) {
 		return w.called(e, steps)
 	case *ast.Ident:
 		return w.variable(e, steps)
+	case *ast.SelectorExpr:
+		return w.fieldType(e, steps)
 	default:
 		return nil, false
 	}
+}
+
+// fieldType is [reflectWalk.held] for a selector: the Type field of a
+// reflect.StructField is the type the field describes.
+func (w *reflectWalk) fieldType(sel *ast.SelectorExpr, steps int) ([]reflectHeld, bool) {
+	field, isField := w.info.Uses[sel.Sel].(*types.Var)
+	if !isField || !field.IsField() || field.Name() != reflectTypeType || !isReflectNamed(w.info.TypeOf(sel.X), reflectStructField) {
+		return nil, false
+	}
+	return w.held(sel.X, steps+1)
 }
 
 // called is [reflectWalk.held] for a call.
@@ -440,40 +496,67 @@ func (w *reflectWalk) called(call *ast.CallExpr, steps int) ([]reflectHeld, bool
 func (w *reflectWalk) calledOne(call *ast.CallExpr, callee facts.Callee, steps int) ([]reflectHeld, bool) {
 	fn := callee.Fn
 	switch {
-	case isReflectFunction(fn, reflectValueOf) && len(call.Args) == 1:
+	case (isReflectFunction(fn, reflectValueOf) || isReflectFunction(fn, reflectTypeOf)) && len(call.Args) == 1:
 		t := w.info.TypeOf(call.Args[0])
 		if t == nil {
 			return nil, false
 		}
 		origin := reflectOrigin{t: t, expr: call.Args[0], info: w.info, fn: w.fn}
 		return []reflectHeld{{origin: origin, at: enumeratedType(t)}}, true
-	case isReflectFunction(fn, reflectIndirect) && len(call.Args) == 1:
-		inner, followed := w.held(call.Args[0], steps+1)
-		if !followed {
+	case isReflectFunction(fn, reflectTypeFor):
+		t, is := reflectInstance(w.info, call.Fun, reflectTypeFor)
+		if !is {
 			return nil, false
 		}
-		found := make([]reflectHeld, 0, len(inner))
-		for _, one := range inner {
-			found = append(found, reflectHeld{origin: one.origin, at: indirected(one.at), ro: one.ro})
-		}
-		return found, true
-	case isReflectValueMethod(fn, ""):
+		origin := reflectOrigin{t: t, expr: call, info: w.info, fn: w.fn, exact: true}
+		return []reflectHeld{{origin: origin, at: enumeratedType(t)}}, true
+	case isReflectFunction(fn, reflectIndirect) && len(call.Args) == 1:
+		return w.derived(call.Args[0], steps, func(one *reflectHeld) []reflectHeld {
+			return []reflectHeld{{origin: one.origin, at: indirected(one.at), ro: one.ro}}
+		})
+	case isReflectValueConstructor(fn) && len(call.Args) > 0:
+		pointer := reflectValueConstructors[fn.Name()]
+		return w.derived(call.Args[0], steps, func(one *reflectHeld) []reflectHeld {
+			if pointer && one.at != nil {
+				return []reflectHeld{{origin: one.origin, at: types.NewPointer(one.at)}}
+			}
+			return []reflectHeld{{origin: one.origin, at: one.at}}
+		})
+	case isReflectValueMethod(fn, ""), isReflectTypeMethod(fn):
 		recv, inBody := w.receiver(call, callee)
 		if !inBody {
 			return nil, false
 		}
-		inner, followed := w.held(recv, steps+1)
-		if !followed {
-			return nil, false
-		}
-		args := call.Args[callee.Shift:]
-		var found []reflectHeld
-		for _, one := range inner {
-			found = append(found, w.step(fn.Name(), one, args)...)
-		}
-		return found, true
+		return w.derived(recv, steps, w.methodStep(fn, call.Args[callee.Shift:]))
 	default:
 		return nil, false
+	}
+}
+
+// derived is what one step returns for each value or type from that it reads.
+func (w *reflectWalk) derived(from ast.Expr, steps int, step func(*reflectHeld) []reflectHeld) ([]reflectHeld, bool) {
+	inner, followed := w.held(from, steps+1)
+	if !followed {
+		return nil, false
+	}
+	var found []reflectHeld
+	for i := range inner {
+		found = append(found, step(&inner[i])...)
+	}
+	return found, true
+}
+
+// methodStep is the step one method of reflect.Value or reflect.Type takes from
+// its receiver: a value's Type describes the value's own type, writable whatever
+// field the value was read from.
+func (w *reflectWalk) methodStep(fn *types.Func, args []ast.Expr) func(*reflectHeld) []reflectHeld {
+	switch {
+	case isReflectTypeMethod(fn):
+		return func(one *reflectHeld) []reflectHeld { return w.typeStep(fn.Name(), one, args) }
+	case fn.Name() == reflectTypeType:
+		return func(one *reflectHeld) []reflectHeld { return []reflectHeld{{origin: one.origin, at: one.at}} }
+	default:
+		return func(one *reflectHeld) []reflectHeld { return w.step(fn.Name(), one, args) }
 	}
 }
 
@@ -573,7 +656,7 @@ func (f *encodingFlow) valueFlow() *valueFlow {
 // FieldByName with a constant name; MapIndex over a map; and Elem on a pointer. A
 // value of an interface type among them is not enumerated, nor is any other method,
 // argument or value: its static type is nil.
-func (w *reflectWalk) step(method string, held reflectHeld, args []ast.Expr) []reflectHeld {
+func (w *reflectWalk) step(method string, held *reflectHeld, args []ast.Expr) []reflectHeld {
 	unknown := []reflectHeld{{origin: held.origin}}
 	if held.at == nil {
 		return unknown
@@ -619,15 +702,90 @@ func (w *reflectWalk) step(method string, held reflectHeld, args []ast.Expr) []r
 	return next
 }
 
+// typeStep is every type one method of reflect.Type returns, called on one held
+// type, where the step is enumerated: Elem of a pointer, slice, array, map or
+// channel, Key of a map, Field and FieldByIndex of a struct as [structStep]
+// selects them (a StructField, whose Type the walk reads), and In and Out of a
+// function with a constant index, or every parameter or result where it is no
+// constant. A type built from no value carries no read-only mark. A type of an
+// interface among them is not enumerated, nor is any other method, argument or
+// type: its type is nil.
+func (w *reflectWalk) typeStep(method string, held *reflectHeld, args []ast.Expr) []reflectHeld {
+	if held.at == nil {
+		return []reflectHeld{{origin: held.origin}}
+	}
+	next, known := w.typeSelected(method, types.Unalias(held.at), args)
+	if !known {
+		return []reflectHeld{{origin: held.origin}}
+	}
+	found := make([]reflectHeld, 0, len(next))
+	for _, one := range next {
+		found = append(found, reflectHeld{origin: held.origin, at: enumeratedType(one)})
+	}
+	return found
+}
+
+// typeSelected is the types one method of reflect.Type returns called on t, and
+// false where [reflectWalk.typeStep] does not enumerate them.
+func (w *reflectWalk) typeSelected(method string, t types.Type, args []ast.Expr) ([]types.Type, bool) {
+	switch u := t.Underlying().(type) {
+	case *types.Struct:
+		if method != reflectField && method != reflectFieldByIndex {
+			return nil, false
+		}
+		fields, known := w.structStep(method, t, u, args)
+		next := make([]types.Type, 0, len(fields))
+		for _, f := range fields {
+			next = append(next, f.t)
+		}
+		return next, known
+	case *types.Map:
+		switch method {
+		case reflectElem:
+			return []types.Type{u.Elem()}, true
+		case "Key":
+			return []types.Type{u.Key()}, true
+		}
+	case *types.Signature:
+		switch method {
+		case "In":
+			return w.tupleSteps(u.Params(), args), true
+		case "Out":
+			return w.tupleSteps(u.Results(), args), true
+		}
+	case interface{ Elem() types.Type }: // a pointer, slice, array or channel
+		if method == reflectElem {
+			return []types.Type{u.Elem()}, true
+		}
+	}
+	return nil, false
+}
+
+// tupleSteps is the type of each parameter or result In or Out may return: the
+// one a constant index selects, or every one where the index is no constant.
+func (w *reflectWalk) tupleSteps(tuple *types.Tuple, args []ast.Expr) []types.Type {
+	if i, known := w.constantIndex(args); known {
+		if i >= tuple.Len() {
+			return nil
+		}
+		return []types.Type{tuple.At(i).Type()}
+	}
+	found := make([]types.Type, 0, tuple.Len())
+	for v := range tuple.Variables() {
+		found = append(found, v.Type())
+	}
+	return found
+}
+
 // structStep is the fields one method of reflect.Value selects of a struct value
 // of type t, and false where the walk does not enumerate them: Field with any
 // argument, FieldByIndex with a constant path and FieldByName with a constant
 // name.
 func (w *reflectWalk) structStep(method string, t types.Type, st *types.Struct, args []ast.Expr) ([]fieldStep, bool) {
 	switch method {
-	case "Field":
+	case reflectField:
 		return w.fieldSteps(st, args), true
-	case "FieldByIndex":
+	case reflectFieldByIndex:
 		path, known := w.constantPath(args)
 		if !known {
 			return nil, false
@@ -811,13 +969,32 @@ func isReflectValueMethod(fn *types.Func, name string) bool {
 
 // isReflectValue reports whether t is reflect.Value.
 func isReflectValue(t types.Type) bool {
-	return receiverName(t) == reflectValueType && isReflectPackage(t)
+	return isReflectNamed(t, reflectValueType)
 }
 
-// reflectValueAssignments is, for every local of type reflect.Value one body declares
-// or assigns one value to at a time, the values it is given, and every local of that
-// type a write the walk does not read reaches: a multi-value assignment, a range
-// clause, or its address taken.
+// isReflectTypeMethod reports whether fn is a method of reflect.Type.
+func isReflectTypeMethod(fn *types.Func) bool {
+	recv := fn.Signature().Recv()
+	return recv != nil && isReflectNamed(recv.Type(), reflectTypeType)
+}
+
+// isReflectValueConstructor reports whether fn is one of the functions of reflect
+// that build a value of a reflect.Type ([reflectValueConstructors]).
+func isReflectValueConstructor(fn *types.Func) bool {
+	_, constructs := reflectValueConstructors[fn.Name()]
+	return constructs && isReflectFunction(fn, fn.Name())
+}
+
+// isReflectNamed reports whether t is the type of the reflect package named name.
+func isReflectNamed(t types.Type, name string) bool {
+	named, isNamed := types.Unalias(t).(*types.Named)
+	return isNamed && named.Obj().Name() == name && isReflectPackage(named)
+}
+
+// reflectValueAssignments is, for every local of type reflect.Value, reflect.Type
+// or reflect.StructField one body declares or assigns one value to at a time, the
+// values it is given, and every local of those types a write the walk does not
+// read reaches: a multi-value assignment, a range clause, or its address taken.
 func reflectValueAssignments(info *types.Info, body *ast.BlockStmt) (held map[*types.Var][]ast.Expr, opaque map[*types.Var]bool) {
 	a := &reflectAssignments{info: info, held: make(map[*types.Var][]ast.Expr), opaque: make(map[*types.Var]bool)}
 	ast.Inspect(body, a.visit)
@@ -855,12 +1032,12 @@ func (a *reflectAssignments) visit(n ast.Node) bool {
 	return true
 }
 
-// keep records the values one assignment or declaration gives each local of type
-// reflect.Value it names, one value to a name, and hides one a multi-value form
-// gives a value.
+// keep records the values one assignment or declaration gives each local the walk
+// reads it names ([reflectWalkedVar]), one value to a name, and hides one a
+// multi-value form gives a value.
 func (a *reflectAssignments) keep(names, values []ast.Expr) {
 	for i, name := range names {
-		v, isValue := reflectValueVar(a.info, name)
+		v, isValue := reflectWalkedVar(a.info, name)
 		switch {
 		case !isValue:
 		case len(names) != len(values):
@@ -871,22 +1048,26 @@ func (a *reflectAssignments) keep(names, values []ast.Expr) {
 	}
 }
 
-// hide marks a local of type reflect.Value that a write the walk does not read
-// reaches.
+// hide marks a local the walk reads that a write the walk does not read reaches.
 func (a *reflectAssignments) hide(name ast.Expr) {
-	if v, isValue := reflectValueVar(a.info, name); isValue {
+	if v, isValue := reflectWalkedVar(a.info, name); isValue {
 		a.opaque[v] = true
 	}
 }
 
-// reflectValueVar is the variable of type reflect.Value one name declares or assigns.
-func reflectValueVar(info *types.Info, name ast.Expr) (*types.Var, bool) {
+// reflectWalkedVar is the variable of type reflect.Value, reflect.Type or
+// reflect.StructField one name declares or assigns.
+func reflectWalkedVar(info *types.Info, name ast.Expr) (*types.Var, bool) {
 	ident, isIdent := name.(*ast.Ident)
 	if !isIdent {
 		return nil, false
 	}
 	v, isVar := info.ObjectOf(ident).(*types.Var)
-	return v, isVar && isReflectValue(v.Type())
+	if !isVar {
+		return nil, false
+	}
+	t := v.Type()
+	return v, isReflectValue(t) || isReflectNamed(t, reflectTypeType) || isReflectNamed(t, reflectStructField)
 }
 
 func isReflectPackage(t types.Type) bool {

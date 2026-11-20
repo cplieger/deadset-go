@@ -29,8 +29,24 @@ type flowGraph struct {
 
 	// reflected is every operand the program hands to reflect.ValueOf, and
 	// interfaceValued whether it takes reflect.Value's Interface as a value.
+	// described is every operand it hands to reflect.TypeOf and every type
+	// argument of reflect.TypeFor, and constructs whether it calls a function of
+	// reflect that builds a value of a reflect.Type ([reflectValueConstructors]).
 	reflected       []reflectOrigin
+	described       []reflectOrigin
 	interfaceValued bool
+	constructs      bool
+}
+
+// reflectedValues is every operand a reflect.Value the walk cannot follow may
+// hold a value of: each operand handed to reflect.ValueOf, and where the program
+// builds a value of a reflect.Type, each type reflect.TypeOf and reflect.TypeFor
+// give, from which any type it builds a value of derives.
+func (g *flowGraph) reflectedValues() []reflectOrigin {
+	if !g.constructs {
+		return g.reflected
+	}
+	return slices.Concat(g.reflected, g.described)
 }
 
 // arrival is one value that reaches a destination: where, what reads it there, and
@@ -228,14 +244,34 @@ func (r *declarationReader) assertion(x ast.Expr, named []ast.Expr, at ast.Node)
 	}
 }
 
-// reflectedOperand records the operand one call hands to reflect.ValueOf.
+// reflectedOperand records the operand one call hands to reflect.ValueOf or
+// reflect.TypeOf, the type argument of a call of reflect.TypeFor, and a call of a
+// function of reflect that builds a value of a reflect.Type.
 func (r *declarationReader) reflectedOperand(call *ast.CallExpr) {
+	g := &r.flow.graph
 	callees, _ := r.flow.kept.in.callees(r.info, call)
 	for _, callee := range callees {
-		if isReflectFunction(callee.Fn, reflectValueOf) && len(call.Args) == 1 {
-			if t := r.info.TypeOf(call.Args[0]); t != nil {
-				r.flow.graph.reflected = append(r.flow.graph.reflected, reflectOrigin{t: t, expr: call.Args[0], info: r.info, fn: r.enclosing})
+		fn := callee.Fn
+		switch {
+		case (isReflectFunction(fn, reflectValueOf) || isReflectFunction(fn, reflectTypeOf)) && len(call.Args) == 1:
+			t := r.info.TypeOf(call.Args[0])
+			if t == nil {
+				return
 			}
+			origin := reflectOrigin{t: t, expr: call.Args[0], info: r.info, fn: r.enclosing}
+			if fn.Name() == reflectValueOf {
+				g.reflected = append(g.reflected, origin)
+			} else {
+				g.described = append(g.described, origin)
+			}
+			return
+		case isReflectFunction(fn, reflectTypeFor):
+			if t, is := reflectInstance(r.info, call.Fun, reflectTypeFor); is {
+				g.described = append(g.described, reflectOrigin{t: t, expr: call, info: r.info, fn: r.enclosing, exact: true})
+			}
+			return
+		case isReflectValueConstructor(fn):
+			g.constructs = true
 			return
 		}
 	}

@@ -1,0 +1,96 @@
+A decoder that walks the field types of the struct a request body is decoded
+into, reflect.TypeOf(v).Elem(), keeps each in a member it caches, and asserts an
+interface on the zero value of each member's type, reflect.Zero(deref(t)). The
+walk cannot follow the type back through the member, so the assertion retains
+every method of every type reachable from what the program hands to
+reflect.TypeOf; a type nothing hands reflection keeps no method.
+
+-- go.mod --
+module example.com/rzd
+
+go 1.27.1
+-- main.go --
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"reflect"
+	"sync"
+)
+
+type ranged interface{ Range() (lo, hi int64) }
+
+type waitMS int64
+
+func (waitMS) Range() (lo, hi int64) { return 1, 55000 }
+
+type waitRequest struct {
+	WaitMS waitMS `json:"wait_ms"`
+}
+
+type stray int64
+
+func (stray) Range() (lo, hi int64) { return 1, 10 }
+
+type member struct {
+	typ  reflect.Type
+	name string
+}
+
+var members sync.Map
+
+func membersOf(t reflect.Type) []member {
+	if cached, hit := members.Load(t); hit {
+		if out, isList := cached.([]member); isList {
+			return out
+		}
+	}
+	var out []member
+	for f := range t.Fields() {
+		out = append(out, member{typ: f.Type, name: f.Tag.Get("json")})
+	}
+	members.Store(t, out)
+	return out
+}
+
+func deref(t reflect.Type) reflect.Type {
+	if t.Kind() == reflect.Pointer {
+		return t.Elem()
+	}
+	return t
+}
+
+func rangedOf(t reflect.Type) (ranged, bool) {
+	return reflect.TypeAssert[ranged](reflect.Zero(deref(t)))
+}
+
+func present(m member, v json.RawMessage) error {
+	if rg, ok := rangedOf(m.typ); ok {
+		lo, hi := rg.Range()
+		var n int64
+		if err := json.Unmarshal(v, &n); err != nil || n < lo || n > hi {
+			return fmt.Errorf("%s is out of range", m.name)
+		}
+	}
+	return nil
+}
+
+func decode(raw []byte, v any) error {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return err
+	}
+	for _, m := range membersOf(reflect.TypeOf(v).Elem()) {
+		if err := present(m, obj[m.name]); err != nil {
+			return err
+		}
+	}
+	return json.Unmarshal(raw, v)
+}
+
+func main() {
+	var req waitRequest
+	fmt.Println(decode([]byte(os.Args[1]), &req), req.WaitMS)
+}

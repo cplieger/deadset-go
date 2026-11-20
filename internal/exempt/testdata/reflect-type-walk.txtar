@@ -1,0 +1,113 @@
+One command asserting an interface on values reflection builds from a type: a
+reflect.Type taken from reflect.TypeOf, reflect.TypeFor or a value's Type, walked
+through Elem, Field(i).Type, Key, In and Out, and handed to reflect.Zero,
+reflect.New or reflect.MakeSlice. Each value is one of the type the walk reaches,
+so the walk computes it and retains only the method the asserted interface
+requires: extra stays unretained, as does the Range of the field a constant
+index does not select and of a type no reflect call reaches.
+
+-- go.mod --
+module example.com/rtw
+
+go 1.27.1
+-- main.go --
+package main
+
+import (
+	"fmt"
+	"reflect"
+)
+
+type ranged interface{ Range() (lo, hi int64) }
+
+type zeroField int64
+
+func (zeroField) Range() (lo, hi int64) { return 1, 10 }
+
+func (zeroField) extra() {}
+
+type skipped int64
+
+func (skipped) Range() (lo, hi int64) { return 1, 20 }
+
+type wait struct {
+	MS   zeroField
+	Skip skipped
+}
+
+type viaInterface int64
+
+func (viaInterface) Range() (lo, hi int64) { return 1, 30 }
+
+func (viaInterface) extra() {}
+
+type list struct{ Items []viaInterface }
+
+type newed int64
+
+func (*newed) Range() (lo, hi int64) { return 1, 40 }
+
+func (newed) extra() {}
+
+type forElem int64
+
+func (forElem) Range() (lo, hi int64) { return 1, 50 }
+
+func (forElem) extra() {}
+
+type forKey int64
+
+func (forKey) Range() (lo, hi int64) { return 1, 60 }
+
+type forIn int64
+
+func (forIn) Range() (lo, hi int64) { return 1, 70 }
+
+type forOut int64
+
+func (forOut) Range() (lo, hi int64) { return 1, 80 }
+
+type sliced []int64
+
+func (sliced) Range() (lo, hi int64) { return 1, 90 }
+
+type valued struct{ V forValue }
+
+type forValue int64
+
+func (forValue) Range() (lo, hi int64) { return 1, 100 }
+
+type stray int64
+
+func (stray) Range() (lo, hi int64) { return 1, 110 }
+
+func handler(forIn) forOut { return 0 }
+
+func show(rg ranged, ok bool) {
+	if ok {
+		fmt.Println(rg.Range())
+	}
+}
+
+func main() {
+	var w wait
+	show(reflect.TypeAssert[ranged](reflect.Zero(reflect.TypeOf(&w).Elem().Field(0).Type)))
+
+	rg, ok := reflect.Zero(reflect.TypeOf(list{}).Field(0).Type.Elem()).Interface().(ranged)
+	show(rg, ok)
+
+	t := reflect.TypeFor[[]newed]().Elem()
+	show(reflect.TypeAssert[ranged](reflect.New(t)))
+
+	show(reflect.TypeAssert[ranged](reflect.Zero(reflect.TypeFor[map[forKey]forElem]().Elem())))
+	show(reflect.TypeAssert[ranged](reflect.Zero(reflect.TypeFor[map[forKey]forElem]().Key())))
+
+	fn := reflect.TypeOf(handler)
+	show(reflect.TypeAssert[ranged](reflect.Zero(fn.In(0))))
+	show(reflect.TypeAssert[ranged](reflect.Zero(fn.Out(0))))
+
+	show(reflect.TypeAssert[ranged](reflect.MakeSlice(reflect.TypeFor[sliced](), 0, 1)))
+
+	f := reflect.ValueOf(valued{}).Field(0).Type()
+	show(reflect.TypeAssert[ranged](reflect.Zero(f)))
+}
